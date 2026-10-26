@@ -12,7 +12,7 @@ No app, test suite, dev stack, or observability tooling lives here. Do not cite 
 or run commands that are not in this repo.
 
 The current implementation and its conventions are in the sibling checkout at
-`../voluma` — start with its `AGENTS.md`, `DESIGN.md`, `DEVELOPMENT.md`, and
+`../voluma-legacy` — start with its `AGENTS.md`, `DESIGN.md`, `DEVELOPMENT.md`, and
 `.context/`. Port what this repo's design needs; do not copy the tree.
 
 ## Mission
@@ -118,7 +118,7 @@ primary checkout, create another branch under the sibling worktree root, then pa
 path to spawns with `--task-dir`:
 
 ```bash
-git worktree add ../voluma-plat.worktrees/<name> -b <branch> <base>
+git worktree add ../voluma.worktrees/<name> -b <branch> <base>
 ```
 
 ## Links

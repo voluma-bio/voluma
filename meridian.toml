@@ -86,7 +86,7 @@ agent = "tech-lead"
 # sync = "project"
 
 # -- Context -----------------------------------------------------------------
-# Copied verbatim from ../voluma: work items, the durable KB, and strategy all
+# Copied verbatim from ../voluma-legacy: work items, the durable KB, and strategy all
 # live in the shared voluma-bio/docs repo. Paths are repo-relative there.
 [context.work]
 source = "git"
