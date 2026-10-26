@@ -1,0 +1,120 @@
+# Meridian configuration.
+# All values shown are built-in defaults. Uncomment to override.
+# Environment variables (MERIDIAN_*) take precedence over file values.
+
+# -- Execution defaults -----------------------------------------------------
+[defaults]
+# Maximum agent nesting depth (int).
+# max_depth = 3
+# -- Timeout behavior -------------------------------------------------------
+[timeouts]
+# Grace period before force-killing processes (float minutes).
+# kill_grace_minutes = 0.03333333333333333
+# Max minutes to wait for guardrail checks.
+# guardrail_minutes = 0.5
+# Max minutes to wait on run completion operations.
+# wait_minutes = 30.0
+# Max minutes for backend boot, connection, and session handshake.
+# startup_minutes = 5.0
+
+# -- Spawn behavior ---------------------------------------------------------
+[spawn]
+# Per-spawn overrides for wait yield (also accepted under [timeouts]).
+# default_wait_yield_seconds = 3000.0
+# min_wait_yield_seconds = 30.0
+# Harnesses blocked from headless `meridian spawn`. Empty allows every harness.
+# deny_headless_harnesses = ["claude"]
+
+# -- Harness default models -------------------------------------------------
+[harness]
+# Default model for Claude harness (empty = harness picks its own).
+# claude = ""
+# Default model for Codex harness (empty = harness picks its own).
+# codex = ""
+# Default model for OpenCode harness.
+# opencode = "opencode-go/kimi-k2.6"
+
+# -- Primary agent defaults -------------------------------------------------
+[primary]
+# Default agent profile launched when running `meridian` without `-a`.
+# Without this, meridian launches with no profile.
+agent = "tech-lead"
+# Model override for the primary agent.
+# model = ""
+# Harness override for the primary agent.
+# harness = ""
+# Context compaction threshold for the primary agent (int 1-100).
+# autocompact = 65
+# Effort level for the primary agent.
+# effort = ""
+# Sandbox policy for the primary agent.
+# sandbox = ""
+# Approval mode for the primary agent.
+# approval = ""
+# Timeout for the primary agent (minutes).
+# timeout = 30.0
+
+# -- Output streaming -------------------------------------------------------
+[output]
+# Event categories shown while streaming output (array[str]).
+# show = ["lifecycle", "sub-run", "error", "system"]
+# Output verbosity preset (str; valid: quiet, normal, verbose, debug).
+# verbosity = "normal"  # example override; default is unset
+# Output format (text, json).
+# format = "text"
+
+# -- State retention --------------------------------------------------------
+[state]
+# Days to retain spawn artifacts and session data (-1 = keep forever).
+# retention_days = 30
+
+# -- Hook examples -----------------------------------------------------------
+# Hooks are dynamic arrays of tables. Keep examples commented until needed.
+
+# [[hooks]]
+# name = "notify-on-failure"
+# event = "spawn.started"
+# command = "echo spawn-hook"
+# timeout_secs = 30
+
+# -- Work behavior -----------------------------------------------------------
+# [work]
+# default_worktree = false
+# worktree_base = "../my-worktrees"
+
+# [work.artifacts]
+# sync = "project"
+
+# -- Context -----------------------------------------------------------------
+# Copied verbatim from ../voluma: work items, the durable KB, and strategy all
+# live in the shared voluma-bio/docs repo. Paths are repo-relative there.
+[context.work]
+source = "git"
+remote = "git@github.com:voluma-bio/docs.git"
+path = "work"
+
+[context.kb]
+source = "git"
+remote = "git@github.com:voluma-bio/docs.git"
+path = "archive/voluma/kb"
+
+[context.strategy]
+source = "git"
+remote = "git@github.com:voluma-bio/docs.git"
+path = "strategy"
+
+# -- Hooks -------------------------------------------------------------------
+# Autosync keeps work items / KB edits pushed to the shared docs repo.
+[[hooks]]
+builtin = "git-autosync"
+remote = "git@github.com:voluma-bio/docs.git"
+
+# -- Workspace root examples -------------------------------------------------
+# Named workspace entries live in meridian.toml / meridian.local.toml.
+
+[workspace.siblings]
+path = "../"
+
+# managed by meridian — do not edit
+[project]
+id = "even-kettle-circuit"
