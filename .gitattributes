@@ -1,0 +1,2 @@
+# Append-only log: keep both sides when two branches add lines.
+.context/decisions.md merge=union
