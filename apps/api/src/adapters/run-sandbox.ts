@@ -65,6 +65,9 @@ export class RunSandbox extends DurableObject<RunSandboxEnv> {
   }
 
   async #exec(request: ExecRequest, signal: AbortSignal): Promise<Response> {
+    // Event-log seam: once the EventLog adapter lands, record `sandbox` events under
+    // request.threadId here (container started, mounted, exec started, exec exited), each
+    // with an id from crypto.randomUUID().
     await this.#ensureRunning(request.mounts);
     // `timeout` puts the command in its own process group, so SIGTERM to it (below) reaches
     // the command's children; -k follows with SIGKILL.

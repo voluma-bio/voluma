@@ -17,6 +17,8 @@ export interface SandboxMounts {
 }
 
 export interface ExecRequest {
+  /** The thread whose tool call this is; the sandbox's lifecycle events belong to it. */
+  threadId: string;
   command: string;
   /** Kills the command with SIGTERM, then SIGKILL after 5 s, when this many seconds pass. */
   timeoutSeconds: number;

@@ -13,3 +13,6 @@ Later:
 - `/dev/ui` repeats the token list from `tokens.css` (`THEME_TOKENS`, `VIEWER_TOKENS`); read the custom properties at runtime instead.
 - `pnpm data:pull`: fetch the OA6-1RK scan and reference run from R2 into `.data/`. Both lanes need it from day one; blocked on the bucket existing.
 - Nx 24 and TypeScript 7 are released; the workspace is on Nx 23 and TypeScript 6. Upgrade in their own PR and check `pnpm check` timings.
+- Sandbox: a client disconnect is only seen on the next write, so a silent command (`sleep 600`) outlives it until `timeoutSeconds`. The route that streams exec output to the runner should write a periodic keep-alive so the abort reaches the Durable Object (which then kills the whole process tree; verified).
+- Sandbox image: PID 1 is `sleep infinity`, which does not reap, so killed commands leave zombies until the container is destroyed. Use an init (`tini`) as the entrypoint.
+- Sandbox local mounts: not working on a Linux host (see "Running the sandbox locally" in CONTEXT.md). Verify on a deployed Worker with R2 and measure the `S3Gateway` hop there.
