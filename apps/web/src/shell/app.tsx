@@ -3,7 +3,8 @@
  * collects them, so the run and review lanes never edit this file to add a
  * screen. Navigation goes Workflows → Runs → one run's review.
  */
-import { createBrowserRouter, Link, RouterProvider } from "react-router";
+import { createBrowserRouter, Link } from "react-router";
+import { RouterProvider } from "react-router/dom";
 import { DevUiPage } from "../dev-ui/dev-ui-page";
 import { reviewRoutes } from "../features/review";
 import { runRoutes } from "../features/run";
