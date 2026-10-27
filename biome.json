@@ -111,6 +111,60 @@
       }
     },
     {
+      "includes": ["apps/api/src/domains/run/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "**/domains/review",
+                      "**/domains/review/**",
+                      "../review",
+                      "../review/**",
+                      "../../review",
+                      "../../review/**"
+                    ],
+                    "message": "domains/run never imports domains/review. Share code through apps/api/src/ports or a package."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["apps/api/src/domains/review/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "**/domains/run",
+                      "**/domains/run/**",
+                      "../run",
+                      "../run/**",
+                      "../../run",
+                      "../../run/**"
+                    ],
+                    "message": "domains/review never imports domains/run. Share code through apps/api/src/ports or a package."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["apps/web/src/features/**"],
       "linter": {
         "rules": {
@@ -119,7 +173,10 @@
               "level": "error",
               "options": {
                 "deniedGlobals": {
-                  "fetch": "Web features reach the API only through @voluma/api-client."
+                  "fetch": "Web features reach the API only through @voluma/api-client.",
+                  "EventSource": "Web features reach the API only through @voluma/api-client.",
+                  "WebSocket": "Web features reach the API only through @voluma/api-client.",
+                  "XMLHttpRequest": "Web features reach the API only through @voluma/api-client."
                 }
               }
             }
