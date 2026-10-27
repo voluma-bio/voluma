@@ -15,5 +15,6 @@ Product decisions live in the [requirements].
 - 2026-10-27: The API has one domain per lane, mounted by path prefix (`/run/`, `/review/`); each is built from a factory taking ports, and only `apps/api/src/index.ts` reads env and builds adapters. ([#2](https://github.com/voluma-bio/voluma/pull/2))
 - 2026-10-27: `packages/api-client` changes only in contract PRs; the contracts PR makes it a generic client over a command map. ([#2](https://github.com/voluma-bio/voluma/pull/2))
 - 2026-10-27: This log merges with git's union driver, so append a line rather than edit one. ([#2](https://github.com/voluma-bio/voluma/pull/2))
+- 2026-10-27: No fixtures or mock transports: lanes test against real OA6-1RK data and the real API. Lint is Biome's recommended rules only; boundaries are written rules. (user)
 
 [requirements]: https://github.com/voluma-bio/docs/blob/main/work/microct-workflow-mvp/requirements.md

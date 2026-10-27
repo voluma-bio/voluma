@@ -37,11 +37,8 @@ Pre-commit runs Biome on staged files. Nothing runs on push. Use pnpm, never npm
   lane's code, open a GitHub issue for its owner.
 - `features/run` and `features/review` never import each other, and neither
   do `domains/run` and `domains/review` in the API. Lanes share code only
-  through `packages/` (and `apps/api/src/ports` on the server); Biome fails
-  the lint on any import between them.
-- Web features reach the API only through `@voluma/api-client`. Biome blocks
-  bare `fetch`, `EventSource`, `WebSocket` and `XMLHttpRequest` in features;
-  don't route around it with `window.fetch` or `globalThis`.
+  through `packages/` (and `apps/api/src/ports` on the server).
+- Web features reach the API only through `@voluma/api-client`.
 - Each web feature owns its routes and theme; the shell only mounts them.
 - Each API domain owns every path under its prefix (`/run/`, `/review/`).
   A domain is built by a factory taking its own dependency type, written in
@@ -54,8 +51,8 @@ Pre-commit runs Biome on staged files. Nothing runs on push. Use pnpm, never npm
 `packages/contracts` holds the schemas both lanes build against. Never edit
 it inside a feature PR. When you need a contract change:
 1. Stop the feature work that depends on it.
-2. Open a separate PR that changes only `packages/contracts` (schema and
-   fixtures), `packages/api-client` and, for a new dependency, the
+2. Open a separate PR that changes only `packages/contracts`,
+   `packages/api-client` and, for a new dependency, the
    lockfile, and ask both owners to review it. If you can't, open an issue
    describing the change and build against the current contract.
 3. Merge `origin/main` into your branch once it lands, then continue.
@@ -114,6 +111,8 @@ they need:
 - Domain code depends on interfaces; config picks the adapter at the
   composition root. Add an interface only where a second adapter is plausible
   (a local fake counts), and give each one a local adapter from day one.
+- Lint is Biome's recommended rules. The boundaries above are rules to
+  follow, not lint checks.
 - Colours come only from `packages/design-tokens`; components use token
   utilities (`bg-surface`, `text-fg-muted`). Visual rules: [DESIGN.md](DESIGN.md).
   Check shared components at `/dev/ui` in both themes.
@@ -122,9 +121,11 @@ they need:
   and pinned to a commit; the generic micro-CT skills are
   [voluma-bio/microct-analysis]. This repo holds no Python. Analysis tools
   take and return paths, never bytes.
-- Tests: add one only where a bug would be silent and expensive (the
-  stale-task graph, unit conversions). A feature is shown to work by a browser
-  run with screenshots in the PR. When a package gets its first test, give it
+- Test against the real thing, not fakes: real OA6-1RK data, the real API,
+  the real sandbox. No fixture data and no mock transports. Add a unit test
+  only where a bug would be silent and expensive (the stale-task graph, unit
+  conversions). A feature is shown to work by a browser run on real data,
+  with screenshots in the PR. When a package gets its first test, give it
   a `"test": "vitest run"` script; `pnpm check` picks it up.
 - Comments: a file header says what the file is for. Inline comments explain
   only hidden constraints, units and workarounds.
