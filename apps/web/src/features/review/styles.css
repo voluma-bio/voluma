@@ -1,0 +1,480 @@
+/* Review-specific layout; shared colors and typography come from design-tokens. */
+
+@layer components {
+  .button {
+    @apply inline-flex items-center justify-center gap-2 rounded-md border border-line bg-surface px-3 py-2 text-sm font-medium text-fg transition-colors;
+  }
+  .button:hover {
+    @apply bg-raised;
+  }
+  .button:disabled {
+    @apply opacity-50;
+  }
+  .button.primary {
+    @apply bg-accent border-accent text-accent-fg;
+  }
+  .button.primary:hover {
+    @apply bg-accent-strong;
+  }
+  .button.compact {
+    @apply px-2.5 py-1.5 text-xs;
+  }
+  .icon-button {
+    @apply flex shrink-0 items-center justify-center rounded p-1.5 text-fg-muted;
+  }
+  .icon-button:hover {
+    @apply bg-raised text-fg;
+  }
+  .text-button {
+    @apply inline-flex items-center gap-1 font-medium text-accent-text;
+  }
+  .text-button:hover {
+    @apply underline;
+  }
+  .text-button:disabled {
+    @apply opacity-40;
+  }
+  .text-input {
+    @apply w-full rounded-md border border-line bg-surface p-3 text-sm text-fg;
+  }
+  .text-input::placeholder {
+    @apply text-fg-muted;
+  }
+  .text-input:disabled {
+    @apply bg-raised;
+  }
+  .badge {
+    @apply inline-flex items-center whitespace-nowrap rounded px-2 py-1 text-xs font-medium text-accent-text bg-raised;
+  }
+  .badge.warning {
+    @apply bg-check-tint text-check;
+  }
+  .review-shell {
+    @apply flex h-dvh flex-col overflow-hidden;
+  }
+  .app-header {
+    @apply flex shrink-0 items-center gap-5 border-b border-line bg-surface px-6 py-3;
+  }
+  .brand {
+    @apply flex items-center gap-2.5 text-xl font-semibold tracking-tight text-accent-text;
+  }
+  .header-divider {
+    @apply h-5 w-px bg-line;
+  }
+  .run-header {
+    @apply flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-line bg-surface px-6 py-4;
+  }
+  .back-link {
+    @apply flex items-center gap-1.5 text-xs text-fg-muted;
+  }
+  .back-link a:hover {
+    @apply text-accent-text underline;
+  }
+  .run-actions {
+    @apply flex flex-wrap items-center gap-3;
+  }
+  .revision-select {
+    @apply flex items-center gap-2 rounded-md border border-line px-2.5 py-2 text-xs text-fg-muted;
+  }
+  .revision-select select {
+    @apply max-w-56 bg-transparent text-fg;
+  }
+  .revision-notice {
+    @apply flex shrink-0 flex-wrap justify-between gap-2 border-b border-line bg-raised px-6 py-2 text-sm text-accent-text;
+  }
+  .review-body {
+    @apply flex min-h-0 flex-1;
+  }
+  .task-sidebar {
+    @apply flex w-56 shrink-0 flex-col border-r border-line bg-canvas;
+  }
+  .sidebar-tabs {
+    @apply grid grid-cols-2 gap-1 border-b border-line p-3;
+  }
+  .sidebar-tabs button {
+    @apply flex items-center justify-center gap-2 rounded py-2 text-xs text-fg-muted;
+  }
+  .sidebar-tabs button[aria-pressed="true"] {
+    @apply bg-surface text-accent-text shadow-sm;
+  }
+  .sidebar-tabs button:hover {
+    @apply text-accent-text bg-raised;
+  }
+  .sidebar-scroll {
+    @apply min-h-0 flex-1 overflow-y-auto py-4;
+  }
+  .sidebar-label {
+    @apply mb-4 flex justify-between px-5 text-xs text-fg-muted;
+  }
+  .task-nav {
+    @apply mx-2 mb-1 flex w-[calc(100%-1rem)] items-start gap-3 rounded-md px-3 py-3 text-left text-sm;
+  }
+  .task-nav:hover {
+    @apply bg-raised;
+  }
+  .task-nav.selected {
+    @apply bg-raised text-accent-text;
+  }
+  .task-number {
+    @apply mt-0.5 font-mono text-xs text-fg-muted;
+  }
+  .task-meta {
+    @apply mt-1 block text-xs text-fg-muted;
+  }
+  .check-dot {
+    @apply ml-auto mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-check-solid;
+  }
+  .sidebar-note {
+    @apply mx-5 mt-10 border-t border-line pt-4 text-xs leading-relaxed text-fg-muted;
+  }
+  .record-button {
+    @apply flex shrink-0 items-center gap-2 border-t border-line p-4 text-xs text-fg-muted;
+  }
+  .record-button:hover {
+    @apply bg-raised text-accent-text;
+  }
+  .review-panels {
+    @apply min-w-0 flex-1;
+  }
+  .review-panels > [data-group] {
+    height: 100%;
+  }
+  .report-scroll {
+    @apply h-full overflow-y-auto bg-surface;
+    scrollbar-gutter: stable;
+  }
+  .task-report {
+    @apply px-7 py-6;
+  }
+  .task-report > section {
+    @apply mt-7;
+  }
+  .section-heading {
+    @apply mb-3 flex items-center justify-between gap-2;
+  }
+  .section-heading h2 {
+    @apply text-sm font-semibold;
+  }
+  .measurements,
+  .references {
+    @apply w-full border-collapse text-sm;
+  }
+  .measurements th,
+  .measurements td,
+  .references th,
+  .references td {
+    @apply border-b border-line py-3 text-left;
+  }
+  .measurements thead th,
+  .references thead th {
+    @apply py-2 text-xs font-normal text-fg-muted;
+  }
+  .measurements tbody th,
+  .references tbody th {
+    @apply pr-2 font-normal;
+  }
+  .measurements th a {
+    @apply inline-flex items-center gap-1 text-accent-text;
+  }
+  .measurements th a:hover {
+    @apply underline;
+  }
+  .measurements td,
+  .references td {
+    @apply pl-3 text-right whitespace-nowrap;
+  }
+  .measurements thead th:not(:first-child),
+  .references thead th:not(:first-child) {
+    @apply text-right;
+  }
+  .measurement-source {
+    @apply mt-1 block text-xs text-fg-muted;
+  }
+  .unit {
+    @apply ml-1 text-xs text-fg-muted;
+  }
+  .check-card {
+    @apply mb-3 rounded-md border border-check-line bg-check-tint p-4 text-sm;
+  }
+  .check-card.accepted {
+    @apply border-line bg-canvas;
+  }
+  .actions-list {
+    @apply list-decimal space-y-3 pl-5 text-sm leading-relaxed text-fg-muted;
+  }
+  .evidence-grid {
+    @apply grid grid-cols-2 gap-3;
+  }
+  .evidence-card {
+    @apply flex h-full w-full flex-col gap-2 rounded border border-line p-2 text-left text-xs;
+  }
+  .evidence-card:hover {
+    @apply border-accent;
+  }
+  .evidence-card > span:last-child {
+    @apply flex items-center justify-between mt-auto;
+  }
+  .evidence-image {
+    @apply flex h-24 w-full items-center justify-center rounded-sm bg-raised text-fg-muted;
+  }
+  .evidence-image img {
+    @apply h-full w-full object-cover;
+  }
+  .file-list li {
+    @apply flex items-start gap-3 border-b border-line py-3 text-sm;
+  }
+  .file-path {
+    @apply block break-all text-xs text-fg-muted;
+  }
+  .task-assistant {
+    @apply border-t border-line pt-6 pb-4;
+  }
+  .message {
+    @apply rounded-md bg-canvas p-3 text-sm leading-relaxed;
+  }
+  .message.user {
+    @apply ml-6 bg-raised;
+  }
+  .viewer-workspace {
+    @apply flex h-full min-h-0 flex-col bg-canvas p-4;
+  }
+  .viewer-heading {
+    @apply mb-4 flex flex-wrap items-center justify-between gap-2 text-sm;
+  }
+  .viewer-grid {
+    @apply relative min-h-0 flex-1;
+  }
+  .viewer-grid [data-group] {
+    height: 100%;
+  }
+  .view-slot {
+    @apply flex h-full flex-col overflow-hidden rounded-md border border-line bg-raised;
+  }
+  .view-slot[hidden] {
+    display: none;
+  }
+  .view-slot.maximized {
+    @apply absolute inset-0 z-10;
+  }
+  .is-maximized .viewer-grid [data-panel] {
+    /* biome-ignore lint/complexity/noImportantStyles: override library inline clipping without remounting view slots. */
+    overflow: visible !important;
+  }
+  .view-slot header {
+    @apply flex items-center justify-between gap-1 border-b border-line px-3 py-2;
+  }
+  .view-slot h3 {
+    @apply flex items-center gap-2 text-xs font-medium;
+  }
+  .axis {
+    @apply font-mono text-fg-muted;
+  }
+  .axis.axial {
+    @apply text-axis-z;
+  }
+  .axis.coronal {
+    @apply text-axis-x;
+  }
+  .axis.sagittal {
+    @apply text-axis-y;
+  }
+  .view-empty {
+    @apply flex min-h-0 flex-1 flex-col items-center justify-center px-3 text-center text-sm text-fg-muted;
+  }
+  .view-slot footer {
+    @apply flex justify-between gap-2 px-3 py-2 font-mono text-[10px] text-fg-muted;
+  }
+  .viewer-selection {
+    @apply shrink-0 pt-4;
+  }
+  .structure-chip {
+    @apply flex items-center gap-2 rounded border border-line bg-surface px-2 py-1 text-xs;
+  }
+  .resize-handle {
+    @apply relative w-2 shrink-0;
+  }
+  .resize-handle.horizontal {
+    @apply h-2 w-full;
+  }
+  .resize-handle::after {
+    content: "";
+    @apply absolute inset-y-0 left-1/2 w-px bg-transparent;
+  }
+  .resize-handle.horizontal::after {
+    @apply inset-x-0 top-1/2 h-px w-full;
+  }
+  .resize-handle:hover::after,
+  .resize-handle:focus-visible::after {
+    @apply bg-accent;
+  }
+  .main-handle {
+    @apply w-1 bg-line;
+  }
+  .is-maximized .viewer-grid .resize-handle {
+    visibility: hidden;
+  }
+  .app-footer {
+    @apply flex shrink-0 justify-between gap-2 border-t border-line px-5 py-1.5 text-[10px] text-fg-muted;
+  }
+  .structures-list {
+    @apply px-3;
+  }
+  .structure-row {
+    @apply border-b border-line py-4 text-xs;
+  }
+  input[type="checkbox"],
+  input[type="range"] {
+    accent-color: var(--accent);
+  }
+  .opacity-control {
+    @apply mt-3 flex items-center gap-2 text-[10px] text-fg-muted;
+  }
+  .opacity-control input {
+    @apply min-w-0 flex-1;
+  }
+  .opacity-control output {
+    @apply w-8 text-right font-mono;
+  }
+  .dialog-overlay {
+    @apply fixed inset-0 z-40 bg-scrim;
+  }
+  .dialog-content {
+    @apply fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-line bg-surface p-7 shadow-xl;
+  }
+  .instruction {
+    @apply rounded-md border border-line bg-canvas p-4 text-sm leading-relaxed whitespace-pre-wrap;
+  }
+  .affected-tasks {
+    @apply divide-y divide-line rounded-md border border-line px-3;
+  }
+  .affected-tasks li {
+    @apply flex flex-wrap items-center justify-between gap-2 py-3 text-sm;
+  }
+  .error-message {
+    @apply rounded-md bg-danger-tint p-3 text-sm text-danger;
+  }
+  .notice {
+    @apply rounded-md bg-raised p-3 text-sm text-fg-muted;
+  }
+  .missing-evidence {
+    @apply my-6 flex min-h-48 flex-col items-center justify-center gap-4 bg-raised p-4 text-center text-fg-muted;
+  }
+  .lightbox-image {
+    @apply my-5 max-h-[60dvh] w-full object-contain;
+  }
+  .record-list {
+    @apply my-5 space-y-4;
+  }
+  .record-list li {
+    @apply border-b border-line pb-4;
+  }
+  .load-state {
+    @apply flex min-h-dvh flex-col items-center justify-center gap-5 p-8 text-center text-fg-muted;
+  }
+  .load-state h1 {
+    @apply text-xl font-semibold text-fg;
+  }
+}
+
+@media (max-width: 1000px) {
+  .task-sidebar {
+    width: 190px;
+  }
+  .task-report {
+    padding: 20px;
+  }
+  .viewer-heading span {
+    display: none;
+  }
+  .view-empty p:last-child {
+    display: none;
+  }
+}
+@media (max-width: 760px) {
+  .review-shell {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+  .app-header {
+    padding: 12px 16px;
+    gap: 12px;
+  }
+  .header-divider {
+    display: none;
+  }
+  .run-header {
+    padding: 16px;
+  }
+  .run-actions {
+    gap: 8px;
+  }
+  .revision-select select {
+    max-width: 160px;
+  }
+  .review-body {
+    flex-direction: column;
+  }
+  .task-sidebar {
+    width: 100%;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .sidebar-tabs {
+    padding: 8px;
+  }
+  .sidebar-scroll {
+    padding: 8px 0;
+    overflow: visible;
+  }
+  .sidebar-label,
+  .sidebar-note,
+  .task-number,
+  .task-meta,
+  .check-dot {
+    display: none;
+  }
+  .sidebar-scroll nav {
+    display: flex;
+    overflow-x: auto;
+    padding: 0 8px;
+  }
+  .task-nav {
+    width: auto;
+    white-space: nowrap;
+    padding: 8px 12px;
+    margin: 0;
+  }
+  .record-button {
+    padding: 10px 16px;
+  }
+  .review-panels > [data-group] {
+    /* biome-ignore lint/complexity/noImportantStyles: stack the library's inline flex group without unmounting views. */
+    display: block !important;
+  }
+  .review-panels > [data-group] > [data-panel] {
+    height: auto;
+    overflow: visible;
+  }
+  .review-panels > [data-group] > .resize-handle {
+    display: none;
+  }
+  .report-scroll {
+    overflow: visible;
+    height: auto;
+  }
+  .viewer-workspace {
+    height: 620px;
+    border-top: 1px solid var(--line);
+  }
+  .dialog-content {
+    padding: 20px;
+  }
+  .structures-list {
+    max-height: 350px;
+    overflow-y: auto;
+  }
+  .app-footer span:last-child {
+    display: none;
+  }
+}

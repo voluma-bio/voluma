@@ -1,26 +1,26 @@
 {
   "name": "voluma",
   "private": true,
-  "packageManager": "pnpm@12.0.0",
+  "type": "module",
+  "packageManager": "pnpm@10.34.3",
   "engines": {
     "node": ">=24"
   },
   "scripts": {
-    "dev": "pnpm --filter @voluma/app dev",
-    "build": "nx run-many -t build",
-    "typecheck": "nx run-many -t typecheck",
+    "dev": "pnpm --filter @voluma/web dev",
+    "check": "biome check . && nx run-many -t typecheck test --outputStyle=static",
     "lint": "biome check .",
     "format": "biome check --write .",
-    "test": "vitest run",
-    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+    "typecheck": "nx run-many -t typecheck --outputStyle=static",
+    "test": "nx run-many -t test --outputStyle=static",
+    "check:pr-body": "node tools/ci/check-pr-body.mjs",
+    "prepare": "lefthook install"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.6.3",
-    "@types/node": "^24.0.0",
-    "@types/react": "^19.2.0",
-    "@types/react-dom": "^19.2.0",
-    "nx": "24.0.2",
-    "typescript": "5.9.3",
-    "vitest": "5.0.5"
+    "@biomejs/biome": "^2.5.1",
+    "lefthook": "^2.1.9",
+    "nx": "^23.0.1",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

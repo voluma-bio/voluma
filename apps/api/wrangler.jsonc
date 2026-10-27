@@ -1,0 +1,7 @@
+// Cloudflare Worker config. R2, D1 and sandbox bindings arrive with the first domain that needs each one.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "voluma-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01"
+}

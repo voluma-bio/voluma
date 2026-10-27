@@ -1,17 +1,27 @@
-# One gate shared by local development and pull requests; no deployment side effects.
-name: Checks
-on: [push, pull_request]
+# The one CI check: the same `pnpm check` every agent runs locally.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version-file: .tool-versions
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm i
       - run: pnpm check

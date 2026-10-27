@@ -1,14 +1,18 @@
 {
   "name": "@voluma/contracts",
+  "version": "0.0.0",
   "private": true,
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "catalog:"
   },
   "dependencies": {
-    "zod": "4.6.7"
+    "zod": "catalog:"
   }
 }

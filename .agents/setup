@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
-# Install the application workspace and optional agent tooling for orb snapshots.
+# Prepare the repository for agent sessions (orb snapshots): the app stack first, then
+# the optional Meridian tooling.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 export PATH="$HOME/.local/bin:$PATH"
 SECONDS=0
 
-printf '\nInstalling application dependencies\n'
-pnpm install --frozen-lockfile
-printf 'Application dependencies ready after %ss\n' "$SECONDS"
+printf '\nInstalling the workspace with pnpm\n'
+corepack enable
+pnpm install
+printf 'Workspace ready after %ss\n' "$SECONDS"
 
 printf '\nInstalling Meridian and its Python runtime\n'
 uv tool install --python 3.12 meridian-cli==0.15.0
