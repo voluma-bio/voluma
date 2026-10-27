@@ -9,7 +9,7 @@ commands are in [AGENTS.md](../AGENTS.md).
 apps/web        React + Vite. shell/ mounts routes; features/run and features/review own screens
 apps/api        Cloudflare Worker. src/index.ts is the composition root: the only code that
                 reads env; it builds adapters/ for the ports/ and mounts domains/run at /run/
-                (agent runtime ported from voluma-legacy, supervisor, thread store, sandboxes) and domains/review at /review/
+                (agent runtime on Pi's agent layer, supervisor, thread store, sandboxes) and domains/review at /review/
                 (review data, chat threads, corrections)
 packages/
   contracts     zod schemas for the four contracts and the shared formats
