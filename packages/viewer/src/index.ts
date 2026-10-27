@@ -1,7 +1,3 @@
-/**
- * The 3D view and three slice planes with a linked crosshair, loading
- * volumes, meshes and evidence from R2. Framework-free three.js with a thin
- * React wrapper, so the views never remount. Colours come from the viewer
- * tokens in @voluma/design-tokens, read with getComputedStyle.
- */
+/** Local ZIP intake and persistent imaging slots. Acquired slices render through Cornerstone. */
+export { type DicomArchive, type DicomSeries, openDicomZip } from "./dicom";
 export { type StructureDisplay, ViewerWorkspace } from "./ViewerWorkspace";

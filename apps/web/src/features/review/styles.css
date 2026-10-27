@@ -284,6 +284,42 @@
   .view-slot footer {
     @apply flex justify-between gap-2 px-3 py-2 font-mono text-[10px] text-fg-muted;
   }
+  .dicom-intake {
+    @apply max-w-2xl;
+  }
+  .dicom-stack {
+    @apply flex min-h-0 flex-1 flex-col;
+  }
+  .dicom-canvas-wrap {
+    @apply relative min-h-20 flex-1;
+    background: var(--viewer-well);
+  }
+  .dicom-canvas {
+    @apply absolute inset-0;
+  }
+  .dicom-status {
+    @apply absolute inset-0 flex flex-col items-center justify-center overflow-auto p-3 text-center text-xs;
+    background: var(--viewer-well);
+    color: var(--viewer-chip-fg);
+  }
+  .slice-controls {
+    @apply flex shrink-0 items-center gap-2 px-2 py-1 text-xs;
+  }
+  .slice-controls input {
+    @apply min-w-0 flex-1;
+  }
+  .slice-controls output {
+    @apply whitespace-nowrap font-mono;
+  }
+  .image-controls {
+    @apply flex shrink-0 flex-wrap items-end gap-2 px-3 pb-2 text-xs;
+  }
+  .image-controls label {
+    @apply flex flex-col gap-1 text-fg-muted;
+  }
+  .image-controls input {
+    @apply w-20 rounded border border-line bg-surface px-1 py-1 font-mono text-fg;
+  }
   .viewer-selection {
     @apply shrink-0 pt-4;
   }

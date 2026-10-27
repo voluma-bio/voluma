@@ -1,7 +1,10 @@
 /** Persistent viewport slots. Maximizing changes layout, never the identity of a view. */
 import { Box, Layers, Maximize2, Minimize2 } from "lucide-react";
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
+import type { DicomSeries } from "./dicom";
+
+const DicomStack = lazy(() => import("./DicomStack"));
 
 export type StructureDisplay = Record<string, { visible: boolean; opacity: number }>;
 const views = [
@@ -13,10 +16,10 @@ const views = [
     icon: Box,
   },
   {
-    id: "axial",
-    label: "Axial",
-    axis: "Z",
-    description: "No axial slices loaded",
+    id: "acquired",
+    label: "Acquired slices",
+    axis: "",
+    description: "No scan loaded",
     icon: Layers,
   },
   {
@@ -38,9 +41,11 @@ const views = [
 export function ViewerWorkspace({
   selected,
   display,
+  series,
 }: {
   selected: { id: string; name: string }[];
   display: StructureDisplay;
+  series?: DicomSeries;
 }) {
   const [maximized, setMaximized] = useState<string | null>(null);
   return (
@@ -50,7 +55,9 @@ export function ViewerWorkspace({
     >
       <div className="viewer-heading">
         <h2 className="font-medium">Imaging workspace</h2>
-        <span className="text-xs text-fg-muted">Viewer integration pending</span>
+        <span className="text-xs text-fg-muted">
+          {series ? "Local images · not an analysis" : "Open a DICOM ZIP to view images"}
+        </span>
       </div>
       <div className="viewer-grid">
         <Group orientation="vertical" id="viewer-rows">
@@ -63,6 +70,7 @@ export function ViewerWorkspace({
                   showSeparator={i > 0}
                   maximized={maximized}
                   onMaximize={setMaximized}
+                  series={series}
                 />
               ))}
             </Group>
@@ -77,6 +85,7 @@ export function ViewerWorkspace({
                   showSeparator={i > 0}
                   maximized={maximized}
                   onMaximize={setMaximized}
+                  series={series}
                 />
               ))}
             </Group>
@@ -108,11 +117,13 @@ function ViewSlot({
   showSeparator,
   maximized,
   onMaximize,
+  series,
 }: {
   view: (typeof views)[number];
   showSeparator: boolean;
   maximized: string | null;
   onMaximize(id: string | null): void;
+  series?: DicomSeries;
 }) {
   const isMax = maximized === view.id;
   const Icon = view.icon;
@@ -125,12 +136,12 @@ function ViewSlot({
         <section
           className={`view-slot ${isMax ? "maximized" : ""}`}
           data-view={view.id}
-          aria-label={`${view.label} placeholder`}
+          aria-label={view.label}
           hidden={maximized !== null && !isMax}
         >
           <header>
             <h3>
-              <span className={`axis ${view.id}`}>{view.axis || "3D"}</span>
+              {view.axis && <span className={`axis ${view.id}`}>{view.axis}</span>}
               {view.label}
             </h3>
             <button
@@ -142,13 +153,40 @@ function ViewSlot({
               {isMax ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
             </button>
           </header>
-          <div className="view-empty">
-            <Icon size={36} strokeWidth={1} />
-            <p className="font-medium mt-4">{view.description}</p>
-            <p className="text-xs text-fg-muted mt-1">No scan has been opened.</p>
-          </div>
+          {view.id === "acquired" && series ? (
+            <Suspense
+              fallback={
+                <div className="view-empty" role="status">
+                  Loading image viewer…
+                </div>
+              }
+            >
+              <DicomStack key={series.id} series={series} />
+            </Suspense>
+          ) : (
+            <div className="view-empty">
+              <Icon size={36} strokeWidth={1} />
+              <p className="font-medium mt-4">{view.description}</p>
+              <p className="text-xs text-fg-muted mt-1">
+                {series
+                  ? "Meshes and reformatted planes are not generated yet."
+                  : "No scan has been opened."}
+              </p>
+            </div>
+          )}
           <footer>
-            No scan<span>Not loaded</span>
+            {view.id === "acquired" && series ? (
+              <>
+                <span>
+                  {series.columns} × {series.rows}
+                </span>
+                <span>{series.spacing.join(" × ")} mm / pixel</span>
+              </>
+            ) : (
+              <>
+                No image<span>Not loaded</span>
+              </>
+            )}
           </footer>
         </section>
       </Panel>

@@ -10,9 +10,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@tanstack/react-query": "catalog:",
     "@fontsource/ibm-plex-mono": "^5.2.7",
     "@fontsource/ibm-plex-sans": "^5.2.8",
+    "@tanstack/react-query": "catalog:",
     "@voluma/api-client": "workspace:*",
     "@voluma/contracts": "workspace:*",
     "@voluma/design-tokens": "workspace:*",
@@ -21,13 +21,14 @@
     "@voluma/workflow": "workspace:*",
     "lucide-react": "catalog:",
     "radix-ui": "1.8.1",
-    "react-resizable-panels": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
+    "react-resizable-panels": "catalog:",
     "react-router": "^8.5.0",
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@originjs/vite-plugin-commonjs": "^1.0.3",
     "@tailwindcss/vite": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",

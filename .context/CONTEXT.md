@@ -15,7 +15,7 @@ packages/
   contracts     zod schemas for the four contracts and the shared formats
   workflow      pure functions over a workflow package: read and validate it, task graph, stale tasks
   api-client    typed commands and event stream; the only way web features reach the API
-  viewer        three.js 3D view and slice planes with a thin React wrapper
+  viewer        local DICOM ZIP intake, Cornerstone acquired slices, persistent imaging slots
   ui            shared React components, styled from tokens
   design-tokens tokens.css (raw values, two themes) and theme.css (Tailwind mapping)
 tools/ci        PR-body check
@@ -67,6 +67,14 @@ real adapter; until it exists the workspace shows explicit empty states. Shared
 contracts and API client are unchanged from main. Report/viewer splits retain
 react-resizable-panels to preserve the verified nested maximize/restore behavior;
 the unrelated shared `SplitPanel` API and `/dev/ui` remain unchanged.
+
+Local DICOM intake and rendering work without the API. They do not populate
+analysis results or create server runs. The [Review specification][review-spec]
+describes the UI seam; the [viewer specification][viewer-spec] describes input
+support, geometry, limits, library integration and verification coverage.
+
+[review-spec]: ../apps/web/src/features/review/.context/CONTEXT.md
+[viewer-spec]: ../packages/viewer/.context/CONTEXT.md
 
 ## Parallel agents
 

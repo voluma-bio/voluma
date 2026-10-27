@@ -15,6 +15,10 @@
     "typescript": "catalog:"
   },
   "dependencies": {
+    "@cornerstonejs/core": "4.22.13",
+    "@cornerstonejs/dicom-image-loader": "4.22.13",
+    "@zip.js/zip.js": "2.24.0",
+    "dicom-parser": "1.8.21",
     "lucide-react": "catalog:",
     "react": "catalog:",
     "react-resizable-panels": "catalog:",
