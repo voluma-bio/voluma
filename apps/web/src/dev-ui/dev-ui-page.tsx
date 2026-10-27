@@ -20,6 +20,8 @@ import { type ReactNode, useState } from "react";
 
 const THEMES = ["light", "dark"] as const;
 
+const THEME_LABELS = { light: "Light theme", dark: "Dark theme" };
+
 export function DevUiPage() {
   return (
     <div className="grid min-h-dvh lg:grid-cols-2">
@@ -34,7 +36,7 @@ function ThemeColumn({ theme }: { theme: (typeof THEMES)[number] }) {
   return (
     <div id={`theme-${theme}`} data-theme={theme} className="grid content-start gap-10 p-8">
       <header>
-        <h1 className="text-2xl font-semibold capitalize">{theme} theme</h1>
+        <h1 className="text-2xl font-semibold">{THEME_LABELS[theme]}</h1>
         <p className="text-ui text-fg-muted">
           {theme === "light" ? "Workflows and runs" : "Review imaging workspace"}
         </p>
@@ -117,7 +119,11 @@ function ThemeColumn({ theme }: { theme: (typeof THEMES)[number] }) {
                 defaultSize={96}
                 minSize={40}
                 minRestSize={40}
-                first={<Pane well>3D view</Pane>}
+                first={
+                  <Pane well edge="bottom">
+                    3D view
+                  </Pane>
+                }
                 second={<Pane well>Axial slice</Pane>}
               />
             }
@@ -239,14 +245,25 @@ function LightboxDemo() {
   );
 }
 
-function Pane({ children, well = false }: { children: ReactNode; well?: boolean }) {
+function Pane({
+  children,
+  well = false,
+  edge,
+}: {
+  children: ReactNode;
+  well?: boolean;
+  /** Draws a line on that side so the split between two panes reads. */
+  edge?: "bottom";
+}) {
   return (
     <div
-      className={
+      className={[
+        "grid h-full place-items-center text-meta",
         well
-          ? "grid h-full place-items-center bg-viewer-well text-meta text-viewer-chip-fg"
-          : "grid h-full place-items-center border-r border-line bg-surface text-meta text-fg-muted"
-      }
+          ? "bg-viewer-well text-viewer-chip-fg"
+          : "border-r border-line bg-surface text-fg-muted",
+        edge === "bottom" ? "border-b border-line" : "",
+      ].join(" ")}
     >
       {children}
     </div>
@@ -302,7 +319,7 @@ const VIEWER_TOKENS = [
 
 function Swatches({ names }: { names: string[] }) {
   return (
-    <ul className="grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-2">
+    <ul className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-2">
       {names.map((name) => (
         <li key={name} className="flex items-center gap-2 text-meta text-fg-muted">
           <span
