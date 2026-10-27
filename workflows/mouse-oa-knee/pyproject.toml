@@ -1,0 +1,10 @@
+# Python analysis tools for the mouse OA knee workflow, run by the agent in the sandbox.
+[project]
+name = "mouse-oa-knee"
+version = "0.0.0"
+description = "Segmentation, morphometry and landmark tools for the mouse OA knee workflow"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.uv]
+package = false
