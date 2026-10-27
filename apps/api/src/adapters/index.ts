@@ -3,4 +3,4 @@
  * local fakes). Only index.ts constructs them. Owned by both lanes; change
  * in small PRs.
  */
-export {};
+export { durableObjectSandbox, RunSandbox, type RunSandboxEnv } from "./run-sandbox";

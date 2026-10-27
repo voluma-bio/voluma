@@ -108,9 +108,53 @@ Several agents from two people work at once, each in its own worktree.
 Nothing they run shares mutable state:
 - dev servers take free ports (Vite moves to the next free one);
 - Nx keeps its cache in the worktree's `.nx/` and runs without a daemon;
-- there is no shared database yet; when the thread store lands, each
-  worktree gets its own local store;
+- object storage and the sandbox run per worktree, as the recipe below
+  describes; when the thread store lands, each worktree gets its own local store;
 - the pnpm store is shared, but it is content-addressed and append-only.
 
 The pre-commit hook lives in the shared `.git`, so every worktree runs the
 same hook.
+
+## Running the sandbox locally
+
+`apps/api` reaches R2 only through S3 variables, so locally they point at a MinIO
+that each worktree starts for itself. Names carry the worktree so nothing collides.
+
+```bash
+docker run -d --name minio-<worktree> -p 127.0.0.1::9000 -v /tmp/minio-<worktree>:/data \
+  -e MINIO_ROOT_USER=voluma -e MINIO_ROOT_PASSWORD=voluma-secret minio/minio server /data
+docker port minio-<worktree> 9000        # the free port Docker chose, e.g. 127.0.0.1:32768
+```
+
+In `apps/api/.dev.vars` (git-ignored; names in `.dev.vars.example`) set
+`S3_ENDPOINT=http://127.0.0.1:<port>`, `S3_REGION=us-east-1`,
+`S3_BUCKET=voluma-<worktree>`, `S3_ACCESS_KEY_ID=voluma`,
+`S3_SECRET_ACCESS_KEY=voluma-secret` and any `API_TOKEN`. Then `pnpm --filter
+@voluma/api dev` (Wrangler builds the container image on first start and picks a
+free port).
+
+The scan reaches `/inputs` by being uploaded under the run's inputs prefix; the
+sandbox mounts that prefix read-only. Create the bucket with a `PUT`, then upload
+each slice (no `mc` or `aws` needed; curl signs the request):
+
+```bash
+curl -X PUT --aws-sigv4 aws:amz:us-east-1:s3 --user voluma:voluma-secret http://127.0.0.1:<port>/voluma-<worktree>
+for f in <scan-dir>/*.dcm; do curl -sT "$f" --aws-sigv4 aws:amz:us-east-1:s3 \
+  --user voluma:voluma-secret "http://127.0.0.1:<port>/voluma-<worktree>/runs/<runId>/inputs/$(basename "$f")"; done
+```
+
+Remove MinIO's data with `docker run --rm -v /tmp:/t alpine rm -rf /t/minio-<worktree>`
+(it writes as root).
+
+Known limits on a Linux host (verified on kernel 7.2, Docker 29, Wrangler 4.153):
+- The host firewall must admit containers (`sudo ufw allow in on docker0`, plus the
+  `br-*` interfaces for compose networks). Wrangler's egress sidecar connects back to
+  a random host port on the docker gateway; ufw drops that by default.
+- Even then, the sidecar's `-m socket -j DIVERT` rule in its network namespace drops
+  the replies to its own connections to the gateway, so Wrangler never creates the
+  sandbox container. Deleting that rule from the sidecar's namespace gets past it.
+- The container Wrangler creates has no `/dev/fuse` and no capabilities, so every
+  `S3Mount.mount()` fails with `fuse: device not found`. Local mounts therefore do
+  not work on Linux; commands that need no mount (exec, kill, timeout) do.
+Mounts are exercised by a deployed Worker (`wrangler deploy` with an R2 bucket) or
+on a Docker Desktop host, which has not been tried.

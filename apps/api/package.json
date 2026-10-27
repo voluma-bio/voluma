@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@cloudflare/sandbox": "1.0.3",
     "@voluma/contracts": "workspace:*",
     "@voluma/workflow": "workspace:*"
   },
