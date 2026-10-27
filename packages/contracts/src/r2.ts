@@ -83,3 +83,25 @@ export const storedKeySchema = z.string().refine(
   },
   { message: "must be an evidence key or a reference-run key" },
 );
+
+/**
+ * A stored pointer to a folder of files (a DICOM series): a prefix under the
+ * run's inputs or under the reference scan. Ends in `/`.
+ */
+export const storedPrefixSchema = z.string().refine(
+  (k) => {
+    if (!k.endsWith("/")) return false;
+    const path = k.slice(0, -1);
+    const inputs = /^runs\/([^/]+)\/inputs\/(.+)$/.exec(path);
+    if (inputs) {
+      return (
+        segmentSchema.safeParse(inputs[1]).success &&
+        relativePathSchema.safeParse(inputs[2]).success
+      );
+    }
+    const scan = referencePrefix("scan");
+    if (k === scan) return true;
+    return path.startsWith(scan) && relativePathSchema.safeParse(path.slice(scan.length)).success;
+  },
+  { message: "must be a folder under a run's inputs or the reference scan" },
+);
