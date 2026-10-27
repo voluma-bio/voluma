@@ -12,5 +12,8 @@ Product decisions live in the [requirements].
 - 2026-10-27: `packages/ui` components take a tone or variant, not a domain status; features map their statuses to tones. (scaffold PR)
 - 2026-10-27: Agents merge their own PRs on green CI without waiting for a human, after a fresh agent's review when the PR changes behaviour or structure; contract PRs need both owners; tiny changes push straight to `main` after `pnpm check` (rules in AGENTS.md). (scaffold PR)
 - 2026-10-27: Workflows are Mars schema v1 packages on GitHub, imported and pinned to a commit; this repo holds no workflows or Python. If Mars blocks the MVP, packages are bundled into the repo instead. (scaffold PR)
+- 2026-10-27: The API has one domain per lane, mounted by path prefix (`/run/`, `/review/`); each is built from a factory taking ports, and only `apps/api/src/index.ts` reads env and builds adapters. ([#2](https://github.com/voluma-bio/voluma/pull/2))
+- 2026-10-27: `packages/api-client` changes only in contract PRs; the contracts PR makes it a generic client over a command map. ([#2](https://github.com/voluma-bio/voluma/pull/2))
+- 2026-10-27: This log merges with git's union driver, so append a line rather than edit one. ([#2](https://github.com/voluma-bio/voluma/pull/2))
 
 [requirements]: https://github.com/voluma-bio/docs/blob/main/work/microct-workflow-mvp/requirements.md

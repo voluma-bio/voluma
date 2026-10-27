@@ -7,9 +7,10 @@ commands are in [AGENTS.md](../AGENTS.md).
 
 ```
 apps/web        React + Vite. shell/ mounts routes; features/run and features/review own screens
-apps/api        Cloudflare Worker. src/index.ts is the composition root: it wires adapters to
-                ports/ and mounts domains/run (supervisor, thread store, MCP server) and
-                domains/review (review data, chat threads, corrections)
+apps/api        Cloudflare Worker. src/index.ts is the composition root: the only code that
+                reads env; it builds adapters/ for the ports/ and mounts domains/run at /run/
+                (supervisor, thread store, MCP server) and domains/review at /review/
+                (review data, chat threads, corrections)
 packages/
   contracts     zod schemas for the four contracts; fixtures/ holds the fake OA6-1RK run
   workflow      pure functions over a workflow package: read and validate it, task graph, stale tasks
