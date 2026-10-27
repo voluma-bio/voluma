@@ -4,17 +4,11 @@
  * its ports. Each domain owns every path under its prefix.
  */
 
-import type { RunSandbox, RunSandboxEnv } from "./adapters";
 import type { DomainHandler } from "./domain";
 import { createReview } from "./domains/review";
 import { createRun } from "./domains/run";
 
-export { S3Gateway } from "@cloudflare/sandbox";
-// Durable Object classes and entrypoints are exported from the main module for Wrangler.
-export { RunSandbox } from "./adapters";
-
-interface Env extends RunSandboxEnv {
-  RUN_SANDBOX: DurableObjectNamespace<RunSandbox>;
+interface Env {
   DB: D1Database;
   API_TOKEN: string;
 }

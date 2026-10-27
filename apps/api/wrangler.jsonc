@@ -1,33 +1,12 @@
-// Cloudflare Worker config. The R2 bucket is reached only through the S3 vars below
-// (mounts use S3Gateway); locally .dev.vars points them at MinIO (.context/CONTEXT.md).
+// Cloudflare Worker config. Sandboxes are not here: the Node runner creates them on Modal.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "voluma-api",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
-  // nodejs_compat: the SDK needs node:os. enable_request_signal: request.signal fires on
-  // client disconnect, which is what kills a running sandbox command.
-  "compatibility_flags": ["nodejs_compat", "enable_request_signal"],
-  "vars": {
-    "S3_ENDPOINT": "https://<account-id>.r2.cloudflarestorage.com",
-    "S3_REGION": "auto",
-    "S3_BUCKET": "voluma"
-  },
+  "compatibility_flags": ["nodejs_compat"],
   "secrets": {
-    "required": ["S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "API_TOKEN"]
-  },
-  "durable_objects": {
-    "bindings": [{ "name": "RUN_SANDBOX", "class_name": "RunSandbox" }]
-  },
-  "containers": [
-    {
-      "class_name": "RunSandbox",
-      "scheduling_policy": "durable_object",
-      "images": { "sandbox": { "dockerfile": "./container/Dockerfile" } }
-    }
-  ],
-  "exports": {
-    "RunSandbox": { "type": "durable-object", "storage": "sqlite" }
+    "required": ["API_TOKEN"]
   },
   "d1_databases": [{ "binding": "DB", "database_name": "voluma", "migrations_dir": "migrations" }]
 }
