@@ -112,8 +112,6 @@ const annotationBase = {
   name: z.string(),
   /** The volume it was placed on (the one whose slices show it first). */
   volumeId: z.string(),
-  /** Measurements it illustrates; the measurement's `annotationIds` is the same link from the other side. */
-  measurementIds: z.array(z.string()),
   /** The producer's own description, e.g. how a frame axis was fitted. */
   note: z.string().optional(),
 };
@@ -170,7 +168,7 @@ export const measurementSchema = z.object({
   references: z.array(z.object({ reader: z.string(), value: z.number() })),
   /** Structures it was counted from or drawn on. */
   structureIds: z.array(z.string()),
-  /** Annotations that show it: the ruler of a distance, the region a statistic covers. */
+  /** Annotations that show it: the ruler of a distance, the region a statistic covers. The only link between the two; annotations don't point back. */
   annotationIds: z.array(z.string()),
   /** Ratios: ids of the measurements divided. */
   numeratorId: z.string().optional(),
