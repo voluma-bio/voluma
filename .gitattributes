@@ -1,0 +1,3 @@
+# Append-only logs: keep both sides when two branches add lines.
+.context/decisions.md merge=union
+**/.context/TODO.md merge=union
