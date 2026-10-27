@@ -68,8 +68,10 @@ cd ../voluma.worktrees/<name> && pnpm i
 - Open PRs with [the template](.github/PULL_REQUEST_TEMPLATE.md).
   `gh pr create --body-file` skips it: copy every `##` section into your body
   file and run `pnpm check:pr-body <file>` first.
-- Once a PR is approved and CI is green, the agent that opened it merges it.
-  Contract PRs need approval from both owners.
+- Don't wait for a human. Before merging, have a fresh agent review the PR
+  (one that didn't write it, given the diff and the PR body), fix what it
+  finds, and merge yourself once CI is green. Contract PRs are the
+  exception: both owners approve them.
 - Tiny changes skip the PR: a typo, a comment, a doc line, or a one-line fix
   or config tweak in your own lane that changes nothing a user sees and
   doesn't touch `packages/contracts`. Run `pnpm check`, then
