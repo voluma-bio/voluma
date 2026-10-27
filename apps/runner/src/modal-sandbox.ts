@@ -152,7 +152,9 @@ class ModalSandboxAdapter implements Sandbox {
         request.env,
       )) {
         finished = chunk.type === "exit";
-        yield chunk;
+        // `setsid --wait` reports a child killed by a signal as the bare signal number;
+        // the caller knows it aborted, so say so.
+        yield finished && signal?.aborted ? { type: "exit", code: 143 } : chunk;
       }
     } catch (error) {
       // Killing the sandbox as a fallback ends the streams with an error.
@@ -204,8 +206,11 @@ class ModalSandboxAdapter implements Sandbox {
   /** Kills the command's whole process group; if that fails, ends the sandbox. */
   async #killGroup(id: string): Promise<void> {
     const script =
+      // The abort may land before the command has recorded its group; give it a moment.
+      `for i in $(seq 50); do [ -s ${GROUP_DIR}/${id} ] && break; sleep 0.1; done; ` +
       `g=$(cat ${GROUP_DIR}/${id}) || exit 3; kill -TERM -- -$g; ` +
-      `sleep ${KILL_GRACE_SECONDS - 2}; kill -KILL -- -$g 2>/dev/null; exit 0`;
+      `for i in $(seq ${KILL_GRACE_SECONDS * 10}); do kill -0 -- -$g 2>/dev/null || exit 0; sleep 0.1; done; ` +
+      "kill -KILL -- -$g 2>/dev/null; exit 0";
     try {
       let code = -1;
       for await (const chunk of this.#run(["bash", "-c", script], 30)) {
