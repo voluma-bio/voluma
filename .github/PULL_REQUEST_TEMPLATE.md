@@ -24,9 +24,20 @@
 <!-- The shape of the code after this PR: which module owns what now, what
      is new, what was deleted. A reader who hasn't opened the diff should be
      able to sketch it. Name any decision with a real alternative, and what
-     it ruled out. List AGENTS.md, DESIGN.md or .context/ updates here. -->
+     it ruled out. -->
 
 - **<structural change>.** <who owns what now>
+
+## Knowledge layers, docs and deletions
+
+<!-- What the other lane's agents read differently after this PR:
+     AGENTS.md, .context/ (CONTEXT.md, TODO.md, decisions.md), DESIGN.md,
+     README and other docs, each with one line on what changed. Then what
+     this PR deleted: files, code paths, dependencies, config. "None." and
+     why, if nothing changed. -->
+
+- **Docs:** <file>: <what changed>
+- **Deleted:** <what, and what replaced it>
 
 ## Contract changes
 
