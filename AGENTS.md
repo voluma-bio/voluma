@@ -62,12 +62,19 @@ cd ../voluma.worktrees/<name> && pnpm i
 
 - Worktrees share nothing mutable: no fixed dev ports (Vite and Wrangler pick
   free ones), no shared database, Nx cache per worktree, no Nx daemon.
-- Small PRs straight to `main`. Keep your branch current with
+- Small PRs to `main`. Keep your branch current with
   `git merge origin/main`. Never rebase, force-push or commit to someone
   else's branch.
 - Open PRs with [the template](.github/PULL_REQUEST_TEMPLATE.md).
   `gh pr create --body-file` skips it: copy every `##` section into your body
-  file and run `pnpm check:pr-body <file>` first. A human merges.
+  file and run `pnpm check:pr-body <file>` first.
+- Once a PR is approved and CI is green, the agent that opened it merges it.
+  Contract PRs need approval from both owners.
+- Tiny changes skip the PR: a typo, a comment, a doc line, or a one-line fix
+  or config tweak in your own lane that changes nothing a user sees and
+  doesn't touch `packages/contracts`. Run `pnpm check`, then
+  `git push origin HEAD:main`. If the push is rejected, `git merge
+  origin/main` and push again.
 - Screenshots for a PR go in `.github/pr-assets/<branch>/`, linked at a commit.
 - When the PR merges, clean up: stop your dev servers, then
   `git worktree remove ../voluma.worktrees/<name>` and `git branch -d <branch>`.
