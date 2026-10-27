@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Snapshots preserve installed tools; no services or authentication need restoring yet.
+set -euo pipefail
+
+command -v meridian >/dev/null
