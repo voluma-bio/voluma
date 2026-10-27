@@ -1,4 +1,8 @@
 /**
+ * A read model: the review data the API assembles from the thread store (and,
+ * for the reference run, the importer builds from its manifest). It is not a
+ * stored document, so a rerun rewrites no other task's data.
+ *
  * The review data the Review lane renders for one run: the scan's grid,
  * revisions of the run, and per revision the tasks with their measurements,
  * checks and evidence, the segmented structures with mesh files, and the
@@ -12,15 +16,25 @@
  * Coordinates: `zyx` triples are voxel indices in array order; `xyz` are
  * voxel-centre indices in X,Y,Z order on the original grid; `sceneMm` is
  * millimetres relative to `grid.centerWorldMm` (the viewer's origin); `uvw` are
- * voxel indices in a bone's aligned grid (`frames`). Paths are relative to the
- * run's output root (`r2.ts`).
+ * voxel indices in a bone's aligned grid (`frames`).
+ *
+ * Files are stored as full R2 keys (`storedKeySchema`), always produced by an
+ * `r2.ts` builder: `evidenceKey(runId, sha256)` for run files, and a key under
+ * `reference/OA6-1RK/run/web-review/` for the reference run. Never a path
+ * relative to some root.
+ *
+ * Nullable fields are what a producer may not know (the reference manifest has
+ * no tasks, checker, structure status or measurement-to-evidence links); the
+ * importer leaves them null rather than guessing. Importer fills today:
+ * grid, structures, measurements, evidence, frames. Waits for the harness:
+ * `threads`, `source`, `checker`, `checks`, a second revision.
  */
 import { z } from "zod";
-import { workflowPinSchema } from "./r2";
+import { runIdSchema, sha256Schema as sha256, storedKeySchema, taskIdSchema } from "./r2";
+import { workflowPinSchema } from "./workflow";
 
 const vec3 = z.tuple([z.number(), z.number(), z.number()]);
 const pair = z.tuple([vec3, vec3]);
-const sha256 = z.string().regex(/^[0-9a-f]{64}$/);
 
 export const gridSchema = z.object({
   /** Identifies the voxel grid every `zyx`/`xyz` coordinate refers to. */
@@ -43,7 +57,7 @@ export const assetSchema = z.object({
   name: z.string(),
   /** Pipeline stage that produced it. */
   stage: z.string(),
-  path: z.string(),
+  key: storedKeySchema,
   sha256,
 });
 export type Asset = z.infer<typeof assetSchema>;
@@ -53,7 +67,7 @@ export type Asset = z.infer<typeof assetSchema>;
  * little-endian), then `indices` uint32 triangle corners (little-endian).
  */
 export const meshSchema = z.object({
-  path: z.string(),
+  key: storedKeySchema,
   vertices: z.number().int().nonnegative(),
   indices: z.number().int().nonnegative(),
   sha256,
@@ -62,11 +76,12 @@ export const meshSchema = z.object({
 export const structureSchema = z.object({
   id: z.string(),
   name: z.string(),
-  /** Whether the workflow declared this structure; false for extra masks. */
-  declared: z.boolean(),
-  status: z.enum(["done", "provisional", "missing"]),
+  /** Whether the workflow declared this structure; null when the producer doesn't say. */
+  declared: z.boolean().nullable(),
+  /** Null when the producer doesn't say. */
+  status: z.enum(["done", "provisional", "missing"]).nullable(),
   /** Why it has this status. */
-  reason: z.string(),
+  reason: z.string().nullable(),
   /** Value in the segmentation volume. */
   label: z.number().int().positive().optional(),
   definition: z.string().optional(),
@@ -85,11 +100,12 @@ export const measurementSchema = z.object({
   value: z.number().finite().nullable(),
   /** `mm`, `mm^3`, `1/mm`, or `1` for a dimensionless ratio. */
   unit: z.string(),
-  confidence: z.enum(["provisional", "candidate"]),
+  /** Null when the producer gave no status. */
+  confidence: z.enum(["provisional", "candidate"]).nullable(),
   /** The producer's own status wording, e.g. "Provisional: boundary/ROI review required". */
   note: z.string().optional(),
   definition: z.string().optional(),
-  /** `Asset.id`s in the task's `evidence` that show this number. */
+  /** `Asset.id`s in the task's `evidence` that show this number. Empty when the producer gave no link; never filled by guessing. */
   evidenceIds: z.array(z.string()),
   /** Values other readers got for the same quantity. */
   references: z.array(z.object({ reader: z.string(), value: z.number() })),
@@ -104,11 +120,14 @@ export const measurementSchema = z.object({
   distanceMethod: z.string().optional(),
   /** Method-specific extras (e.g. a plate-thickness patch and its statistics). */
   details: z.record(z.string(), z.json()).optional(),
+  /** The thread event that reported it. Null from the importer; set once `report_value` lands. */
+  source: z.object({ threadId: z.string().min(1), eventId: z.string().min(1) }).nullable(),
 });
 export type Measurement = z.infer<typeof measurementSchema>;
 
 export const taskSchema = z.object({
-  id: z.string(),
+  /** The r2 task segment (`outputKey`). */
+  id: taskIdSchema,
   title: z.string(),
   /** What the task asked of the agent. */
   ask: z.string(),
@@ -116,7 +135,14 @@ export const taskSchema = z.object({
   structureIds: z.array(z.string()),
   /** Unchanged tasks keep this id across revisions. */
   resultRevisionId: z.string(),
-  checker: z.object({ verdict: z.enum(["passed", "needs-review"]), text: z.string() }),
+  /** Null when no second agent checked it. */
+  checker: z.object({ verdict: z.enum(["passed", "needs-review"]), text: z.string() }).nullable(),
+  /** Threads in the run record: what the agent did, its check, the reviewer's chat. */
+  threads: z.object({
+    worker: z.string().min(1),
+    check: z.string().min(1).nullable(),
+    chat: z.string().min(1).nullable(),
+  }),
   measurements: z.array(measurementSchema),
   checks: z.array(
     z.object({
@@ -163,36 +189,11 @@ export const revisionSchema = z.object({
 export type Revision = z.infer<typeof revisionSchema>;
 
 export const reviewRunSchema = z.object({
-  id: z.string(),
+  id: runIdSchema,
   sample: z.string(),
-  workflow: workflowPinSchema,
+  workflows: z.array(workflowPinSchema).min(1),
   grid: gridSchema,
   /** Oldest first; the last is the latest. */
   revisions: z.array(revisionSchema).min(1),
-  /** The run's log of decisions and changes. */
-  record: z.array(
-    z.object({
-      id: z.string(),
-      revisionId: z.string(),
-      taskId: z.string().nullable(),
-      text: z.string(),
-      at: z.iso.datetime(),
-    }),
-  ),
 });
 export type ReviewRun = z.infer<typeof reviewRunSchema>;
-
-export const correctionRequestSchema = z.object({
-  runId: z.string(),
-  baseRevisionId: z.string(),
-  taskId: z.string(),
-  instruction: z.string().trim().min(1).max(2000),
-});
-export type CorrectionRequest = z.infer<typeof correctionRequestSchema>;
-
-/** What a correction would redo; the reviewer confirms before anything runs. */
-export const correctionProposalSchema = correctionRequestSchema.extend({
-  id: z.string(),
-  affectedTaskIds: z.array(z.string()),
-});
-export type CorrectionProposal = z.infer<typeof correctionProposalSchema>;

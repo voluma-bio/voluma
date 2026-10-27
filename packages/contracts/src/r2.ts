@@ -4,6 +4,7 @@
  * Prefixes end in `/` so they can be used directly as mount prefixes.
  */
 import { z } from "zod";
+import { type WorkflowPin, workflowPinSchema } from "./workflow";
 
 /** One path segment: non-empty, no `/`, not `.` or `..`. */
 export const segmentSchema = z
@@ -14,7 +15,7 @@ export const segmentSchema = z
   });
 
 export const runIdSchema = segmentSchema;
-export const taskSchema = segmentSchema;
+export const taskIdSchema = segmentSchema;
 export const toolCallIdSchema = segmentSchema;
 
 /** A relative path under a prefix; every segment is validated. */
@@ -25,16 +26,10 @@ export const relativePathSchema = z
     message: "must be a relative path of valid segments",
   });
 
-/** A workflow package pinned to a commit. */
-export const workflowPinSchema = z.object({
-  /** GitHub `owner/name`. */
-  repo: z.string().regex(/^[^/]+\/[^/]+$/),
-  commit: z.string().regex(/^[0-9a-f]{7,64}$/),
-});
-export type WorkflowPin = z.infer<typeof workflowPinSchema>;
+export const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 
 const seg = (s: string) => segmentSchema.parse(s);
-const rel = (p: string | undefined) => (p === undefined ? "" : relativePathSchema.parse(p));
+const rel = (p: string) => relativePathSchema.parse(p);
 
 /** All workflow packages; the sandbox mounts this read-only at `/workflow`. */
 export const workflowsPrefix = () => "workflows/";
@@ -61,10 +56,30 @@ export const outputKey = (runId: string, task: string, path: string) =>
 export const toolOutputKey = (runId: string, toolCallId: string) =>
   `${scratchPrefix(runId)}.tool-output/${seg(toolCallId)}`;
 
+/**
+ * Content-addressed evidence: a file that backs a stored number, copied here
+ * once and never overwritten, so a rerun of a task can't change what an
+ * earlier revision points at. Inside the run prefix, so mounts stay isolated.
+ */
+export const evidenceKey = (runId: string, sha256: string) =>
+  `${runPrefix(runId)}evidence/${sha256Schema.parse(sha256)}`;
+
 /** Reference data for the OA6-1RK sample: the raw scan and the reference run. */
-export const referencePrefix = (part: "scan" | "run") => {
-  if (part !== "scan" && part !== "run") throw new Error(`unknown reference part: ${part}`);
-  return `reference/OA6-1RK/${part}/`;
-};
+export const referencePrefix = (part: "scan" | "run") => `reference/OA6-1RK/${part}/`;
 export const referenceKey = (part: "scan" | "run", path: string) =>
   `${referencePrefix(part)}${rel(path)}`;
+
+/**
+ * A stored pointer to a file in R2: an `evidenceKey`, or a key under the
+ * reference run (whose files are already immutable). Review data stores full
+ * keys of this form, never paths relative to some root.
+ */
+export const storedKeySchema = z.string().refine(
+  (k) => {
+    const evidence = /^runs\/([^/]+)\/evidence\/([0-9a-f]{64})$/.exec(k);
+    if (evidence) return segmentSchema.safeParse(evidence[1]).success;
+    const ref = referencePrefix("run");
+    return k.startsWith(ref) && relativePathSchema.safeParse(k.slice(ref.length)).success;
+  },
+  { message: "must be an evidence key or a reference-run key" },
+);
