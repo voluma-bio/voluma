@@ -1,0 +1,66 @@
+/*
+ * Tailwind v4 theme over tokens.css: utilities such as `bg-surface`,
+ * `text-fg-muted` and `border-line` resolve to the semantic tokens.
+ *
+ * `inline` makes each utility read the token where it is used, so a
+ * `data-theme` attribute on any ancestor switches the theme for its subtree.
+ * Tailwind's default palette is removed: a class like `bg-red-500` does not
+ * exist, which keeps raw colours out of components.
+ *
+ * Import after tailwindcss and tokens.css:
+ *   @import "tailwindcss";
+ *   @import "@voluma/design-tokens/tokens.css";
+ *   @import "@voluma/design-tokens/theme.css";
+ */
+
+@theme inline {
+  --color-*: initial;
+  --color-transparent: transparent;
+  --color-current: currentColor;
+
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-line-subtle: var(--line-subtle);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-tint: var(--accent-tint);
+  --color-accent-text: var(--accent-text);
+  --color-check: var(--check);
+  --color-check-solid: var(--check-solid);
+  --color-check-solid-fg: var(--check-solid-fg);
+  --color-check-strong: var(--check-strong);
+  --color-check-tint: var(--check-tint);
+  --color-check-line: var(--check-line);
+  --color-info: var(--info);
+  --color-info-tint: var(--info-tint);
+  --color-danger: var(--danger);
+  --color-danger-tint: var(--danger-tint);
+  --color-focus: var(--focus);
+  --color-inverse: var(--inverse);
+  --color-inverse-fg: var(--inverse-fg);
+  --color-scrim: var(--scrim);
+
+  --color-viewer-well: var(--viewer-well);
+  --color-viewer-chip: var(--viewer-chip);
+  --color-viewer-chip-fg: var(--viewer-chip-fg);
+  --color-axis-x: var(--axis-x);
+  --color-axis-y: var(--axis-y);
+  --color-axis-z: var(--axis-z);
+  --color-check-outline: var(--check-outline);
+
+  --font-sans: var(--sans);
+  --font-mono: var(--mono);
+
+  /* Dense UI sizes from the mockups, between Tailwind's xs (12px) and sm (14px) */
+  --text-meta: 12.5px; /* labels, metadata, badges */
+  --text-meta--line-height: 1.4;
+  --text-ui: 13.5px; /* body text in dense panels */
+  --text-ui--line-height: 1.5;
+}

@@ -1,0 +1,41 @@
+/* Global styles: Tailwind, the design tokens, and the few base rules every screen shares. */
+@import "tailwindcss";
+@import "@voluma/design-tokens/tokens.css";
+@import "@voluma/design-tokens/theme.css";
+
+/* Let Tailwind see the classes used inside the shared packages. */
+@source "../../../../packages/ui/src";
+@source "../../../../packages/viewer/src";
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body,
+  [data-theme] {
+    background-color: var(--canvas);
+    color: var(--fg);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+}

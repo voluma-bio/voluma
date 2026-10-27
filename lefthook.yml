@@ -1,0 +1,8 @@
+# Pre-commit formats and lints staged files only, so commits stay fast.
+# Nothing runs on push; CI runs `pnpm check` on every PR.
+pre-commit:
+  commands:
+    biome:
+      glob: "*.{js,mjs,cjs,ts,tsx,json,jsonc,css}"
+      run: pnpm biome check --write --staged --no-errors-on-unmatched --files-ignore-unknown=true
+      stage_fixed: true

@@ -1,0 +1,13 @@
+{
+  "name": "@voluma/design-tokens",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./tokens.css": "./src/tokens.css",
+    "./theme.css": "./src/theme.css"
+  },
+  "sideEffects": [
+    "**/*.css"
+  ]
+}

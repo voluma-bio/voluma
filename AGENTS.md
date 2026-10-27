@@ -1,135 +1,127 @@
-# Voluma Platform — Agent Instructions
+# Voluma — Agent Instructions
 
-> **Greenfield.** This repo has no application code yet. There are no real users and no
-> production data. Build the smallest thing that proves the current idea, delete what
-> you don't need, and never add a compatibility shim. Once migrations exist, write them
-> as if production data does: no data loss, online-safe DDL, and no steps that rely on
-> empty tables.
+Voluma turns a micro-CT scan into validated measurements where every number
+traces to its evidence. The current build is the micro-CT workflow MVP: a
+researcher picks the mouse OA workflow, adds a scan, watches the run, and
+reviews the results per task in 3D. The contract is the [requirements]; the
+screens are in the [visual direction] and its mockups. There are no real users
+or data yet: change freely, delete unused code, and add no compatibility shims.
 
-## Nothing is built yet
+Two people build in parallel, each with several coding agents. Every rule
+below exists so those agents never step on each other. Architecture and the
+reasons behind the setup: [.context/CONTEXT.md](.context/CONTEXT.md).
 
-No app, test suite, dev stack, or observability tooling lives here. Do not cite files
-or run commands that are not in this repo.
+## Commands
 
-The current implementation and its conventions are in the sibling checkout at
-`../voluma-legacy` — start with its `AGENTS.md`, `DESIGN.md`, `DEVELOPMENT.md`, and
-`.context/`. Port what this repo's design needs; do not copy the tree.
+| Command | Does |
+|---|---|
+| `pnpm i` | Install; also installs the pre-commit hook |
+| `pnpm check` | Lint, typecheck and tests across the workspace. CI runs the same |
+| `pnpm dev` | Web app; Vite prints the URL (it takes a free port) |
+| `pnpm format` | Biome format and safe fixes |
+| `pnpm check:pr-body <body.md>` | Check a PR body draft against the template |
+| `pnpm --filter @voluma/<pkg> <script>` | One package's script, e.g. `pnpm --filter @voluma/api dev` |
 
-## Mission
+Pre-commit runs Biome on staged files. Nothing runs on push. Use pnpm, never npm.
 
-**Scientists should spend their time on their research, not analysis software.**
-Voluma takes everything between the raw data and the publication — and makes every
-result provable. Every architectural and product decision should survive the
-question: *does this help a researcher trust and publish their result?*
+## Ownership
 
-We want the code right so that change stays easy: this is an exploratory state, no
-backwards compatibility is required, and carrying cost is a bug.
+| Path | Owner |
+|---|---|
+| `apps/web/src/features/run`, `apps/api`, `packages/workflow`, `packages/api-client` | Run lane |
+| `apps/web/src/features/review`, `packages/viewer` | Review lane |
+| `packages/contracts` | Both; contract PRs only |
+| `packages/design-tokens`, `packages/ui`, `apps/web/src/shell`, `apps/web/src/dev-ui`, root config, `tools/ci` | Both; small PRs |
 
-## Engineering principles
+- Edit only your lane's directories. When you need a change in the other
+  lane's code, open a GitHub issue for its owner.
+- `features/run` and `features/review` never import each other. Lanes share
+  code only through `packages/`. Web features call the API only through
+  `@voluma/api-client`. Biome fails the lint on all three.
+- Each feature owns its routes and theme; the shell only mounts them.
 
-**Fix structural debt in the same change.** Do not defer parallel hierarchies, leaking
-abstractions, shallow modules, split ownership, or obvious simplification.
+## Contract changes
 
-**Library quality.** Interfaces and design patterns are what make software easy to
-change. Think as if every module were its own open source library: clean interfaces,
-well commented, simple to use from the outside.
+`packages/contracts` holds the schemas both lanes build against. Never edit
+it inside a feature PR. When you need a contract change:
+1. Stop the feature work that depends on it.
+2. Open a separate PR that changes only `packages/contracts` (schema and
+   fixtures), and ask both owners to review it. If you can't, open an issue
+   describing the change and build against the current contract.
+3. Merge `origin/main` into your branch once it lands, then continue.
 
-**Names are important.** If we rename something, rename it exhaustively — dangling
-variables, interfaces, and docs rot shared understanding. `/shared-dao` is important.
+## Working in parallel
 
-**DRY: one source of truth.** Before implementing something new, stop and search, or
-spawn `meridian -a explorer`. Two implementations of one idea confuse people and
-confuse agents more.
+One worktree and branch per agent, created from the primary checkout:
 
-**Agency.** Act on confident inferences. Do not ask permission to refactor, delete
-dead code, or simplify.
+```bash
+git fetch origin
+git worktree add ../voluma.worktrees/<name> -b <owner>/<topic> origin/main
+cd ../voluma.worktrees/<name> && pnpm i
+```
 
-**Clean up as you go.** Stop what you started, and delete throwaway branches,
-worktrees, and scratch files when they have done their job.
+- Worktrees share nothing mutable: no fixed dev ports (Vite and Wrangler pick
+  free ones), no shared database, Nx cache per worktree, no Nx daemon.
+- Small PRs to `main`. Keep your branch current with
+  `git merge origin/main`. Never rebase, force-push or commit to someone
+  else's branch.
+- Open PRs with [the template](.github/PULL_REQUEST_TEMPLATE.md).
+  `gh pr create --body-file` skips it: copy every `##` section into your body
+  file and run `pnpm check:pr-body <file>` first.
+- Don't wait for a human. Before merging, have a fresh agent review the PR
+  (one that didn't write it, given the diff and the PR body), fix what it
+  finds, and merge yourself once CI is green. Contract PRs are the
+  exception: both owners approve them.
+- Tiny changes skip the PR: a typo, a comment, a doc line, or a one-line fix
+  or config tweak in your own lane that changes nothing a user sees and
+  doesn't touch `packages/contracts`. Run `pnpm check`, then
+  `git push origin HEAD:main`. If the push is rejected, `git merge
+  origin/main` and push again.
+- Screenshots for a PR go in `.github/pr-assets/<branch>/`, linked at a commit.
+- When the PR merges, clean up: stop your dev servers, then
+  `git worktree remove ../voluma.worktrees/<name>` and `git branch -d <branch>`.
+
+## Shared memory
+
+Agents in the other lane don't share your session or tools. Write down what
+they need:
+- **Decisions**: append one dated line to
+  [.context/decisions.md](.context/decisions.md) when you settle something
+  the other lane must know, linking the PR. Read it before starting work.
+- **Deferred work** in one directory: `.context/TODO.md` in that directory.
+  Cross-lane items: a GitHub issue.
+- When a change shifts how a directory works, update its `AGENTS.md` or
+  `.context/` in the same PR.
 
 ## Conventions
 
-**Layering.** Apps are thin shells. Business logic lives in packages or service
-domains, not route handlers. Use package public exports.
+- Apps are thin shells. Logic lives in packages or in `apps/api` domains, not
+  route handlers or components.
+- Domain code depends on interfaces; config picks the adapter at the
+  composition root. Add an interface only where a second adapter is plausible
+  (a local fake counts), and give each one a local adapter from day one.
+- Colours come only from `packages/design-tokens`; components use token
+  utilities (`bg-surface`, `text-fg-muted`). Visual rules: [DESIGN.md](DESIGN.md).
+  Check shared components at `/dev/ui` in both themes.
+- Workflows and analysis code are not in this repo. A workflow is a Mars
+  schema v1 package on GitHub (`mars.toml`, skills, `workflow.md`), imported
+  and pinned to a commit; the generic micro-CT skills are
+  [voluma-bio/microct-analysis]. This repo holds no Python. Analysis tools
+  take and return paths, never bytes.
+- Tests: add one only where a bug would be silent and expensive (the
+  stale-task graph, unit conversions). A feature is shown to work by a browser
+  run with screenshots in the PR. When a package gets its first test, give it
+  a `"test": "vitest run"` script; `pnpm check` picks it up.
+- Comments: a file header says what the file is for. Inline comments explain
+  only hidden constraints, units and workarounds.
+- Writing for people (UI copy, PR bodies, docs): lead with the point, use
+  plain labels, and phrase choices as the user's decisions.
 
-**Ports and adapters.** Domain logic depends on explicit ports, never concrete
-adapters. Provider choice is configuration-driven DI at the composition root. Use
-`domain/`, `ports/`, and `adapters/` where the seam earns it; new and growing domains
-converge on that layout. Keep provider-specific types out of core logic.
+## Optional tooling
 
-**Tooling.** Use `pnpm`, Biome, and Nx. Do not use npm. Colors come from one
-design-tokens package, never raw values scattered through components.
+`meridian.toml`, `mars.toml` and `.agents/` configure Meridian agent tooling
+for whoever uses it. Nothing in this repo requires it.
 
-**Comments.** A file header says what the file is for and the key decisions in it.
-Beyond that, comment **what the code can't say for itself**:
-
-- **What a value represents** — units, what an id refers to, what a collection is keyed
-  by and why, what "partial" / sentinel / null states mean.
-- **Provider, protocol, and library quirks** — behavior you confirmed from a spec or SDK
-  that a reader would otherwise have to go dig up.
-- **Non-obvious mechanics** — ordering and sequencing constraints, buffering, why two
-  things are reconciled, edge/error/abort paths, and the *why* behind a decision that
-  looks odd at a glance.
-
-Never narrate the obvious (`// increment i`). The test: would a competent reader have
-to stop and reverse-engineer what this means or why it is here? **Comment the weird;
-skip the self-evident.**
-
-**Writing.** Load and apply `/llm-writing` before writing or revising user-facing text
-or documentation: UI copy, guides, README files, AGENTS.md, `.context/`, KB pages, work
-artifacts, PR descriptions, release notes. Apply `/information-hierarchy` to
-multi-section documents: lead with what the reader needs, then disclose depth.
-
-## Documentation
-
-Root docs stay thin and pointer-first; the three-tier model is in the
-[`.context/` convention][kb-context-convention]. Do not redefine canonical terms in
-repo-root docs, and do not duplicate KB content in `.context/CONTEXT.md` — link to the
-KB page.
-
-- KB index: [kb-index]
-- Runtime vocab: [kb-vocab]
-- Runtime overview: [kb-runtime-overview]
-- Decision records: [kb-decisions]
-
-Update the relevant `AGENTS.md`, `.context/`, or KB material when a change shifts the
-mental model, contracts, or decisions.
-
-**Keep principles apart from implementation.** Write something as a decision or
-principle only when it is meant to hold. Describe everything else as the current
-implementation, which can change when a better design turns up. The owner's remarks are
-direction and suggestions unless they say otherwise: quote them, keep their uncertainty,
-and don't record them as rulings. Measurements and incident history go beside the code
-or tool they concern, not into rules.
-
-## Git workflow
-
-Commit continuously as you develop. Frequent commits create a verifiable history trail
-where each step is independently reviewable and revertible. After each self-contained
-change that passes checks, commit it — do not accumulate uncommitted work or wait for
-approval to commit. Prefer small, logically scoped commits.
-
-A human merges product changes into `main` unless explicitly instructing the agent to
-merge. Merges between working branches need no gate. Documentation-only changes commit
-directly to `main`; never open a PR only for documentation.
-
-**Never switch the branch of a checkout you don't own** — it may be shared. From the
-primary checkout, create another branch under the sibling worktree root, then pass its
-path to spawns with `--task-dir`:
-
-```bash
-git worktree add ../voluma.worktrees/<name> -b <branch> <base>
-```
-
-## Links
-
-- Use full GitHub URLs for the [Voluma docs repository][voluma-docs].
-- Use relative links within this repository.
-- Prefer reference-style links.
-
-[voluma-docs]: https://github.com/voluma-bio/docs
-[kb-index]: https://github.com/voluma-bio/docs/blob/main/kb/index.md
-[kb-vocab]: https://github.com/voluma-bio/docs/blob/main/kb/wiki/runtime/vocab.md
-[kb-runtime-overview]: https://github.com/voluma-bio/docs/blob/main/kb/wiki/runtime/overview.md
-[kb-decisions]: https://github.com/voluma-bio/docs/blob/main/kb/decisions/README.md
-[kb-context-convention]: https://github.com/voluma-bio/docs/blob/main/kb/wiki/dev/context-files.md
+[requirements]: https://github.com/voluma-bio/docs/blob/main/work/microct-workflow-mvp/requirements.md
+[visual direction]: https://github.com/voluma-bio/docs/blob/main/work/microct-workflow-mvp/mockups/direction.md
+[voluma-bio/microct-analysis]: https://github.com/voluma-bio/microct-analysis

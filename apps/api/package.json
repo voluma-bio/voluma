@@ -1,0 +1,19 @@
+{
+  "name": "@voluma/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@voluma/contracts": "workspace:*",
+    "@voluma/workflow": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261023.1",
+    "typescript": "catalog:",
+    "wrangler": "^4.40.0"
+  }
+}

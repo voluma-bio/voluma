@@ -1,0 +1,34 @@
+{
+  "name": "@voluma/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5.2.7",
+    "@fontsource/ibm-plex-sans": "^5.2.8",
+    "@voluma/api-client": "workspace:*",
+    "@voluma/contracts": "workspace:*",
+    "@voluma/design-tokens": "workspace:*",
+    "@voluma/ui": "workspace:*",
+    "@voluma/viewer": "workspace:*",
+    "@voluma/workflow": "workspace:*",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "react-router": "^8.5.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "tailwindcss": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:"
+  }
+}
