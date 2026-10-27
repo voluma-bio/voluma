@@ -28,17 +28,21 @@ Pre-commit runs Biome on staged files. Nothing runs on push. Use pnpm, never npm
 
 | Path | Owner |
 |---|---|
-| `apps/web/src/features/run`, `apps/api`, `packages/workflow`, `packages/api-client` | Run lane |
-| `apps/web/src/features/review`, `packages/viewer` | Review lane |
-| `packages/contracts` | Both; contract PRs only |
-| `packages/design-tokens`, `packages/ui`, `apps/web/src/shell`, `apps/web/src/dev-ui`, root config, `tools/ci` | Both; small PRs |
+| `apps/web/src/features/run`, `apps/api/src/domains/run`, `packages/workflow` | Run lane |
+| `apps/web/src/features/review`, `apps/api/src/domains/review`, `packages/viewer` | Review lane |
+| `packages/contracts`, `packages/api-client` | Both; contract PRs only |
+| `packages/design-tokens`, `packages/ui`, `apps/web/src/shell`, `apps/web/src/dev-ui`, `apps/web` and `apps/api` root files, `apps/api/src/index.ts`, `apps/api/src/ports`, root config, `tools/ci` | Both; small PRs |
 
 - Edit only your lane's directories. When you need a change in the other
   lane's code, open a GitHub issue for its owner.
-- `features/run` and `features/review` never import each other. Lanes share
-  code only through `packages/`. Web features call the API only through
-  `@voluma/api-client`. Biome fails the lint on all three.
-- Each feature owns its routes and theme; the shell only mounts them.
+- `features/run` and `features/review` never import each other, and neither
+  do `domains/run` and `domains/review` in the API. Lanes share code only
+  through `packages/` (and `apps/api/src/ports` on the server). Web features
+  reach the API only through `@voluma/api-client`, never `fetch`,
+  `EventSource`, `WebSocket` or `XMLHttpRequest`. Biome fails the lint on
+  each of these.
+- Each web feature owns its routes and theme, and each API domain its
+  endpoints; the shell and `apps/api/src/index.ts` only mount them.
 
 ## Contract changes
 
@@ -46,7 +50,8 @@ Pre-commit runs Biome on staged files. Nothing runs on push. Use pnpm, never npm
 it inside a feature PR. When you need a contract change:
 1. Stop the feature work that depends on it.
 2. Open a separate PR that changes only `packages/contracts` (schema and
-   fixtures), and ask both owners to review it. If you can't, open an issue
+   fixtures), `packages/api-client` and, for a new dependency, the
+   lockfile, and ask both owners to review it. If you can't, open an issue
    describing the change and build against the current contract.
 3. Merge `origin/main` into your branch once it lands, then continue.
 
@@ -78,6 +83,9 @@ cd ../voluma.worktrees/<name> && pnpm i
   doesn't touch `packages/contracts`. Run `pnpm check`, then
   `git push origin HEAD:main`. If the push is rejected, `git merge
   origin/main` and push again.
+- On a `pnpm-lock.yaml` conflict, take either side and run `pnpm i`; it
+  re-resolves the lockfile. Shared dependency versions live in the
+  `catalog` in `pnpm-workspace.yaml`.
 - Screenshots for a PR go in `.github/pr-assets/<branch>/`, linked at a commit.
 - When the PR merges, clean up: stop your dev servers, then
   `git worktree remove ../voluma.worktrees/<name>` and `git branch -d <branch>`.
