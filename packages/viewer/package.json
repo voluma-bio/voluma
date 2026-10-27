@@ -10,6 +10,10 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
+    "@types/three": "catalog:",
     "typescript": "catalog:"
+  },
+  "dependencies": {
+    "three": "catalog:"
   }
 }
