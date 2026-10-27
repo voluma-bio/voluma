@@ -1,33 +1,35 @@
 .DS_Store
 node_modules/
 dist/
-.output/
+*.tsbuildinfo
 
 # Environment
 .env
 .env.*
 !.env.example
+.dev.vars
 
 # Temp / scratch
 logs/
 tmp/
 temp/
-.runs/
-.data/
 
-# Build artifacts
-__debug_bin*
+# Lab data (OA6-1RK and friends) never goes in git
+.data/
 
 # Package manager
 .pnpm-store
 
 # Tool caches
 .nx/
-.amp/portals/*
-.playwright-mcp/
-.playwright-cli
+.wrangler/
+.venv/
 __pycache__/
 *.py[cod]
+test-results/
+playwright-report/
+.playwright-mcp/
+.playwright-cli
 
 # Editor/IDE config (local)
 .vscode/settings.json
@@ -39,28 +41,16 @@ __pycache__/
 .codex-local/
 .opencode
 
-# Meridian / Mars
+# Meridian / Mars (optional agent tooling)
 mars.local.toml
 mars.lock
 .mars/
-
-# Stray screenshots
-/*.png
-
-# Dev scripts with secrets
-scripts/get-token.sh
-apps/app/.auth/
-apps/app/test-results/
-apps/app/playwright-report/
-
-# stale design/research docs — recorded in the docs repo
 .meridian/fs/
-
-# agent scratch / work artifacts (benches, findings); never committed
 .meridian-work/
+meridian.local.toml
+
+# Stray screenshots at the root; PR screenshots live in .github/pr-assets/
+/*.png
 
 .clipboard
 *.code-workspace
-
-# Local meridian overrides
-meridian.local.toml

@@ -1,0 +1,125 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.1/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "includes": [
+      "**",
+      "!**/node_modules",
+      "!**/dist",
+      "!**/.nx",
+      "!**/.wrangler",
+      "!.claude",
+      "!.codex",
+      "!.opencode",
+      "!.pi",
+      "!.cursor",
+      "!.meridian",
+      "!.mars"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    }
+  },
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended"
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["apps/web/src/features/run/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "**/features/review",
+                      "**/features/review/**",
+                      "../review",
+                      "../review/**",
+                      "../../review",
+                      "../../review/**",
+                      "../../../review",
+                      "../../../review/**"
+                    ],
+                    "message": "features/run never imports features/review. The lanes share code only through packages/: move the shared part into a package."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["apps/web/src/features/review/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "**/features/run",
+                      "**/features/run/**",
+                      "../run",
+                      "../run/**",
+                      "../../run",
+                      "../../run/**",
+                      "../../../run",
+                      "../../../run/**"
+                    ],
+                    "message": "features/review never imports features/run. The lanes share code only through packages/: move the shared part into a package."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["apps/web/src/features/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedGlobals": {
+              "level": "error",
+              "options": {
+                "deniedGlobals": {
+                  "fetch": "Web features reach the API only through @voluma/api-client."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
