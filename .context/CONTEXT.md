@@ -117,6 +117,13 @@ same hook.
 
 ## Running the sandbox locally
 
+`apps/api` uses `@cloudflare/sandbox` 1.0.x, which is npm `latest`. Its API is
+`ctx.container` with `S3Mount`, `S3Gateway` and `Files`. Cloudflare's
+`sandbox-next` and `sandbox-stable` agent skills predate that release: they
+describe a `getSandbox()` and `exec(argv)`-handle preview that 1.0 doesn't
+export, and npm's `@next` tag now points at an older 0.13 build. Go by the
+installed types and the 1.0 docs.
+
 `apps/api` reaches R2 only through S3 variables, so locally they point at a MinIO
 that each worktree starts for itself. Names carry the worktree so nothing collides.
 
