@@ -137,9 +137,9 @@ export const taskSchema = z.object({
   resultRevisionId: z.string(),
   /** Null when no second agent checked it. */
   checker: z.object({ verdict: z.enum(["passed", "needs-review"]), text: z.string() }).nullable(),
-  /** Threads in the run record: what the agent did, its check, the reviewer's chat. */
+  /** Threads in the run record: what the agent did, its check, the reviewer's chat. Null where the producer has none (the reference importer). */
   threads: z.object({
-    worker: z.string().min(1),
+    worker: z.string().min(1).nullable(),
     check: z.string().min(1).nullable(),
     chat: z.string().min(1).nullable(),
   }),
