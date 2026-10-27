@@ -9,7 +9,7 @@ commands are in [AGENTS.md](../AGENTS.md).
 apps/web        React + Vite. shell/ mounts routes; features/run and features/review own screens
 apps/api        Cloudflare Worker. src/index.ts is the composition root: the only code that
                 reads env; it builds adapters/ for the ports/ and mounts domains/run at /run/
-                (runs, the event log, sandboxes) and domains/review at /review/
+                (runs, the event log) and domains/review at /review/
                 (review data, chat threads, corrections)
 apps/runner     Node entry point that runs the agent harness against the API (Run lane)
 packages/
@@ -45,12 +45,12 @@ checklist, check threads, and review chat threads.
   (pinned: the JS SDK is pre-1.0). It mounts R2 prefixes that don't overlap: the
   workflow and the inputs read-only, the run's scratch and outputs read-write. Each
   mount gets its own temporary R2 credential, limited to its prefix and the sandbox's
-  lifetime, minted from `R2_*` and `CLOUDFLARE_API_TOKEN`; the credentials never enter
+  lifetime, minted from `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_BUCKET` and `CLOUDFLARE_API_TOKEN`; the credentials never enter
   the sandbox. Inputs flagged `stage` are copied to local disk at create (a cold mounted
   read of the scan is slow; see the POC in the docs repo, `research/modal-poc.md`).
   There is no internet. The image is prebuilt and named
   (`node --env-file=.env apps/runner/src/publish-image.ts <name>`). Every command runs
-  in its own process group under `timeout -k`; a timeout or an abort kills the whole
+  under `timeout -k`, which leads its own process group,; a timeout or an abort kills the whole
   group, except a descendant that calls `setsid` itself, which survives until the
   sandbox is destroyed.
 - **Where the runner lives.** For now it's a Node process (`apps/runner`)

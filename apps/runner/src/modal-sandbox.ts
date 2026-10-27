@@ -6,7 +6,8 @@
  *   R2 credential limited to its prefix and access and to the sandbox's lifetime, so there
  *   is nothing to refresh and no credential in the sandbox's env.
  * - Modal's exec timeout and the SDK offer no way to kill a command's children. Every
- *   command therefore runs as `setsid --wait timeout -k` and records its process group;
+ *   command therefore runs under `timeout -k` (which leads its own process group and
+ *   signals all of it) and records that group;
  *   an abort kills that group with a second exec, or terminates the sandbox if that fails.
  * - Read-only inputs flagged `stage` are copied to local disk at create, 32 files at a time.
  */
@@ -106,8 +107,10 @@ class ModalSandboxAdapter implements Sandbox {
     for (const mount of this.#mounts.filter((m) => m.stage)) {
       // Paths are positional arguments, never spliced into the script.
       const script =
-        'set -e; mkdir -p "$2"; cd "$1"; find . -type f -print0 | ' +
-        `xargs -0 -r -P ${STAGE_PARALLELISM} -n 16 cp --parents -t "$2"`;
+        'set -eo pipefail; mkdir -p "$2"; cd "$1"; find . -type f -print0 | ' +
+        `xargs -0 -r -P ${STAGE_PARALLELISM} -n 16 cp --parents -t "$2"; ` +
+        // A partial listing must not pass as a complete copy.
+        'test "$(find . -type f | wc -l)" = "$(cd "$2" && find . -type f | wc -l)"';
       let code = -1;
       for await (const chunk of this.#run(
         ["bash", "-c", script, "_", mount.path, this.paths[mount.path] as string],
@@ -120,6 +123,10 @@ class ModalSandboxAdapter implements Sandbox {
   }
 
   async *exec(request: ExecRequest, signal?: AbortSignal): AsyncGenerator<ExecChunk> {
+    // `timeout 0` would mean no timeout, and Modal's deadline needs whole seconds.
+    if (!Number.isInteger(request.timeoutSeconds) || request.timeoutSeconds <= 0) {
+      throw new Error(`invalid timeoutSeconds: ${request.timeoutSeconds}`);
+    }
     if (signal?.aborted) {
       yield { type: "exit", code: 143 };
       return;
@@ -128,8 +135,6 @@ class ModalSandboxAdapter implements Sandbox {
     // The inner shell records its process group, then becomes the command.
     const script = `mkdir -p ${GROUP_DIR}; awk '{print $5}' /proc/$$/stat > ${GROUP_DIR}/${id}; exec bash -c "$0"`;
     const argv = [
-      "setsid",
-      "--wait",
       "timeout",
       "-k",
       String(KILL_GRACE_SECONDS),
@@ -152,8 +157,7 @@ class ModalSandboxAdapter implements Sandbox {
         request.env,
       )) {
         finished = chunk.type === "exit";
-        // `setsid --wait` reports a child killed by a signal as the bare signal number;
-        // the caller knows it aborted, so say so.
+        // The caller knows it aborted, so say so whatever the signal made the exit code.
         yield finished && signal?.aborted ? { type: "exit", code: 143 } : chunk;
       }
     } catch (error) {
@@ -192,15 +196,22 @@ class ModalSandboxAdapter implements Sandbox {
       ["stdout", next("stdout")],
       ["stderr", next("stderr")],
     ]);
-    while (live.size > 0) {
-      const { type, result } = await Promise.race(live.values());
-      if (result.done) live.delete(type);
-      else {
-        live.set(type, next(type));
-        yield { type, data: result.value };
+    try {
+      while (live.size > 0) {
+        const { type, result } = await Promise.race(live.values());
+        if (result.done) live.delete(type);
+        else {
+          live.set(type, next(type));
+          yield { type, data: result.value };
+        }
       }
+      yield { type: "exit", code: await process.wait() };
+    } finally {
+      // A reader that stops early, or a stream that errors later, must not leave
+      // an unhandled rejection that ends the runner.
+      for (const pending of live.values()) pending.catch(() => {});
+      for (const reader of Object.values(readers)) reader.cancel().catch(() => {});
     }
-    yield { type: "exit", code: await process.wait() };
   }
 
   /** Kills the command's whole process group; if that fails, ends the sandbox. */
@@ -227,16 +238,33 @@ class ModalSandboxAdapter implements Sandbox {
 // Empty prefixes would mount the bucket root, and overlapping ones would let a read-only
 // path see a read-write one.
 function validate(spec: SandboxSpec): void {
+  for (const [name, seconds] of [
+    ["lifetimeSeconds", spec.lifetimeSeconds],
+    ["idleSeconds", spec.idleSeconds],
+  ] as const) {
+    if (seconds !== undefined && !(Number.isInteger(seconds) && seconds > 0)) {
+      throw new Error(`${name} must be a positive integer`);
+    }
+  }
   for (const { path, prefix, access, stage } of spec.mounts) {
     if (prefix === "" || prefix.startsWith("/") || !prefix.endsWith("/")) {
       throw new Error(`invalid mount prefix "${prefix}": needs a trailing slash, no leading one`);
     }
-    if (!path.startsWith("/") || path === "/") throw new Error(`invalid mount path "${path}"`);
+    if (!/^(\/[\w.-]+)+$/.test(path) || path.split("/").some((part) => part === "..")) {
+      throw new Error(`invalid mount path "${path}"`);
+    }
+    // The adapter's own files live here.
+    if ([STAGE_ROOT, "/tmp"].some((p) => path === p || path.startsWith(`${p}/`))) {
+      throw new Error(`reserved mount path "${path}"`);
+    }
     if (stage && access !== "read-only") throw new Error(`only read-only mounts stage: ${path}`);
   }
   for (const a of spec.mounts) {
     for (const b of spec.mounts) {
-      if (a !== b && (b.prefix.startsWith(a.prefix) || b.path.startsWith(`${a.path}/`))) {
+      if (
+        a !== b &&
+        (b.prefix.startsWith(a.prefix) || b.path === a.path || b.path.startsWith(`${a.path}/`))
+      ) {
         throw new Error(`overlapping mounts: ${a.path} (${a.prefix}), ${b.path} (${b.prefix})`);
       }
     }

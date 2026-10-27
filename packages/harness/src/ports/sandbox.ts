@@ -41,7 +41,7 @@ export interface SandboxSpec {
    * take (Modal enforces it loosely). The real limits are the supervisor's budget and
    * explicit `destroy()`.
    */
-  lifetimeSeconds: number;
+  lifetimeSeconds: number; // whole seconds
   /** End the sandbox after this long with no command running. */
   idleSeconds?: number;
 }
@@ -49,7 +49,7 @@ export interface SandboxSpec {
 export interface ExecRequest {
   /** Run with `bash -c`, in its own process group. */
   command: string;
-  /** SIGTERM to the whole group when this many seconds pass, SIGKILL 5 s later. */
+  /** Whole seconds, at least 1. SIGTERM to the whole group when they pass, SIGKILL 5 s later. */
   timeoutSeconds: number;
   /** Added to the sandbox's env for this command. */
   env?: Record<string, string>;
