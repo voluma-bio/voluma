@@ -19,3 +19,4 @@ Product decisions live in the [requirements].
 - 2026-10-27: Review uses the light theme and one `/runs/:runId` route; no separate demo application or synthetic results are mounted. `/runs/local` is a local workspace, not a server run. This supersedes the scaffold's dark Review default. ([Andrew's direction](https://ampcode.com/threads/T-01a17c7b-ed35-74fa-b025-670e440c66ee))
 
 [requirements]: https://github.com/voluma-bio/docs/blob/main/work/microct-workflow-mvp/requirements.md
+- 2026-10-27: Contracts are one file per contract with subpath exports (`@voluma/contracts/r2`, `/events`, `/review`); R2 keys are built only by `r2.ts`; the run event log has v0 kinds only and the review data is one `ReviewRun` shape for the UI and the reference-run importer. (contracts PR B)

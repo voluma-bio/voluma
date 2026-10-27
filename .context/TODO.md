@@ -5,10 +5,9 @@ Deferred repo-wide work. Lane-specific items go in that directory's
 
 For the contracts PR (from the structure review of the scaffold):
 - Contracts declare a command map and an event map (name → zod input and output); `api-client` becomes one generic typed `call(name, input)` and `subscribe(threadId)` over HTTP, so a new command needs no `api-client` edit.
-- One file per contract (workflow, events, run record, commands) with subpath exports.
-- An importer that turns the real OA6-1RK reference run into the run-record and review-data format, so the Review lane works on real data from day one. No hand-made fixtures.
-- Two more cross-lane formats belong in contracts: the R2 key layout (`runs/<runId>/outputs/<task>/…`, as path builders) and the format of each task's output files (values, evidence manifest).
-- Python consumers (`voluma-bio/microct-analysis`): write JSON Schema from the zod schemas into committed `packages/contracts/schema/*.json`, checked in CI, or drop the claim that Python types are generated (`packages/contracts/src/index.ts`).
+- Review lane: an importer that turns the OA6-1RK reference run's `web-review/manifest.json` into `ReviewRun` (`packages/contracts/src/review.ts`), and Review UI `report/model.ts` replaced by those schemas.
+- The format of each task's output files (values, evidence manifest). Key layout is done in `packages/contracts/src/r2.ts`.
+- Python consumers (`voluma-bio/microct-analysis`): if they need the contracts, write JSON Schema from the zod schemas into committed `packages/contracts/schema/*.json`, checked in CI. Nothing generates Python types today.
 
 Later:
 - Local dev can't connect web to API yet: run the Worker inside Vite with `@cloudflare/vite-plugin` (one port, one origin) and make `pnpm dev` start both, instead of hard-coding a Wrangler port.
