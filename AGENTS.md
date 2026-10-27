@@ -72,6 +72,10 @@ cd ../voluma.worktrees/<name> && pnpm i
 - Small PRs to `main`. Keep your branch current with
   `git merge origin/main`. Never rebase, force-push or commit to someone
   else's branch.
+- Commit and push early, so the other lane sees work in progress: push
+  after the first commit and open a draft PR (`gh pr create --draft`, with
+  the template body filled as far as you can). Push again as you go. Mark
+  it ready when it passes `pnpm check` and its review.
 - Open PRs with [the template](.github/PULL_REQUEST_TEMPLATE.md).
   `gh pr create --body-file` skips it: copy every `##` section into your body
   file and run `pnpm check:pr-body <file>` first.
