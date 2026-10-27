@@ -1,15 +1,16 @@
-/** Fixture-backed reports before enabling review mutations and correction flows. */
+/** Composition root: the app owns routing and service selection, not review logic. */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
-  createDemoService,
-  downloadCsv,
-  Group,
-  Panel,
-  Separator,
-  TaskReport,
-  ViewerWorkspace,
-} from "@voluma/review";
-import { StrictMode, useState } from "react";
+  createRootRoute,
+  createRoute,
+  createRouter,
+  Link,
+  Outlet,
+  RouterProvider,
+  redirect,
+} from "@tanstack/react-router";
+import { createDemoService, ReviewWorkspace } from "@voluma/review";
+import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "@fontsource/ibm-plex-sans/400.css";
 import "@fontsource/ibm-plex-sans/500.css";
@@ -19,81 +20,96 @@ import "./styles.css";
 
 const queryClient = new QueryClient();
 const demo = createDemoService();
-const run = await demo.service.getRun("oa6-1rk");
-const revision = run.revisions[0];
-function App() {
-  const [taskId, setTaskId] = useState("femur");
-  const task =
-    revision.tasks.find((item) => item.id === taskId) ?? revision.tasks[0];
-  return (
-    <main className="review-app">
-      <header className="app-header">voluma · Review · Demo workspace</header>
-      <div className="run-header">
-        <h1>OA6-1RK · Mouse OA knee</h1>
-        <button
-          type="button"
-          className="button"
-          onClick={() => downloadCsv(run, revision)}
-        >
-          Export CSV
-        </button>
-      </div>
-      <div className="review-body">
-        <aside className="review-sidebar">
-          <nav aria-label="Workflow tasks">
-            {revision.tasks.map((item, index) => (
-              <button
-                type="button"
-                className={`task-nav ${task.id === item.id ? "selected" : ""}`}
-                key={item.id}
-                onClick={() => setTaskId(item.id)}
-              >
-                <span className="task-number">{index + 1}</span>
-                {item.title}
-              </button>
-            ))}
-          </nav>
-        </aside>
-        <div className="review-panels">
-          <Group orientation="horizontal">
-            <Panel defaultSize="48%" minSize="32%">
-              <div className="report-scroll" key={task.id}>
-                <TaskReport
-                  task={task}
-                  taskNumber={revision.tasks.indexOf(task) + 1}
-                  runId={run.id}
-                  revisionId={revision.id}
-                  readOnly
-                  service={demo.service}
-                  onResult={() => {}}
-                  onCorrect={() => {}}
-                />
-              </div>
-            </Panel>
-            <Separator
-              className="resize-handle"
-              aria-label="Resize report and viewers"
-            />
-            <Panel>
-              <ViewerWorkspace
-                selected={revision.structures.filter((item) =>
-                  task.structureIds.includes(item.id),
-                )}
-                display={{}}
-              />
-            </Panel>
-          </Group>
-        </div>
-      </div>
+const rootRoute = createRootRoute({
+  component: Outlet,
+  notFoundComponent: () => (
+    <main className="load-state">
+      <h1>Page not found</h1>
+      <Link to="/runs" className="button">
+        Back to runs
+      </Link>
     </main>
+  ),
+});
+const indexRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/",
+  beforeLoad: () => {
+    throw redirect({
+      to: "/runs/$runId/review",
+      params: { runId: "oa6-1rk" },
+      search: { task: "femur" },
+    });
+  },
+});
+const runsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/runs",
+  component: () => (
+    <main className="mx-auto max-w-3xl p-8">
+      <h1 className="text-2xl font-semibold text-primary">Runs</h1>
+      <p className="my-4 text-muted-foreground">
+        Demo navigation only. Upload and execution belong to the Run lane.
+      </p>
+      <Link
+        to="/runs/$runId/review"
+        params={{ runId: "oa6-1rk" }}
+        search={{ task: "femur" }}
+        className="flex justify-between rounded-lg border border-border bg-card p-5"
+      >
+        <span>
+          <strong>OA6-1RK</strong>
+          <span className="block text-sm text-muted-foreground mt-1">
+            Mouse OA knee · v1.0 · Demo fixture
+          </span>
+        </span>
+        <span className="text-primary">Open review →</span>
+      </Link>
+    </main>
+  ),
+});
+const reviewRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/runs/$runId/review",
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { task?: string; revision?: string } => ({
+    task: typeof search.task === "string" ? search.task : undefined,
+    revision: typeof search.revision === "string" ? search.revision : undefined,
+  }),
+  component: ReviewRoute,
+});
+function ReviewRoute() {
+  const { runId } = reviewRoute.useParams();
+  const { task, revision } = reviewRoute.useSearch();
+  const navigate = reviewRoute.useNavigate();
+  return (
+    <ReviewWorkspace
+      runId={runId}
+      taskId={task}
+      revisionId={revision}
+      navigate={(selection) => void navigate({ search: selection })}
+      backLink={<Link to="/runs">Back to runs</Link>}
+      service={demo.service}
+      demoControls={demo.controls}
+    />
   );
 }
+const router = createRouter({
+  routeTree: rootRoute.addChildren([indexRoute, runsRoute, reviewRoute]),
+});
+declare module "@tanstack/react-router" {
+  interface Register {
+    router: typeof router;
+  }
+}
+
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing application root");
 createRoot(root).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <App />
+      <RouterProvider router={router} />
     </QueryClientProvider>
   </StrictMode>,
 );

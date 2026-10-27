@@ -1,6 +1,5 @@
-/** Public report and display primitives; review mutations are enabled in the next phase. */
-export { Group, Panel, Separator } from "react-resizable-panels";
+/** Public entry point for the Review lane. */
+
 export { createDemoService } from "./demo/service";
-export { downloadCsv } from "./export";
-export { TaskReport } from "./TaskReport";
-export { ViewerWorkspace } from "./ViewerWorkspace";
+export { ReviewWorkspace } from "./ReviewWorkspace";
+export type { ReviewService } from "./service";

@@ -1,19 +1,22 @@
 # Voluma Platform — Agent Instructions
 
-> **Greenfield.** This repo has no application code yet. There are no real users and no
+> **Greenfield.** This repo has a demo Review application. There are no real users and no
 > production data. Build the smallest thing that proves the current idea, delete what
 > you don't need, and never add a compatibility shim. Once migrations exist, write them
 > as if production data does: no data loss, online-safe DDL, and no steps that rely on
 > empty tables.
 
-## Nothing is built yet
+## Application workspace
 
-No app, test suite, dev stack, or observability tooling lives here. Do not cite files
-or run commands that are not in this repo.
+`apps/app` is the browser composition root. Run and Review have separate packages;
+shared schemas and visual tokens live in `packages/contracts` and
+`packages/design-tokens`. Review currently uses a clearly labeled simulated service.
+Keep scientific results, review decisions, and display preferences separate.
 
-The current implementation and its conventions are in the sibling checkout at
-`../voluma-legacy` — start with its `AGENTS.md`, `DESIGN.md`, `DEVELOPMENT.md`, and
-`.context/`. Port what this repo's design needs; do not copy the tree.
+Start with [README.md](README.md) for commands and
+[.context/CONTEXT.md](.context/CONTEXT.md) for boundaries and demo limitations.
+Use `pnpm check` for the shared gate. The legacy checkout is reference material,
+not a second application to maintain or copy wholesale.
 
 ## Mission
 
