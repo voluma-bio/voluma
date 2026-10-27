@@ -1,0 +1,151 @@
+/*
+ * Voluma design tokens: the only place raw colour values live.
+ *
+ * Two themes share one set of semantic names. Light (the default, and
+ * `[data-theme="light"]`) is the workflow and runs screens; dark
+ * (`[data-theme="dark"]`) is the review imaging workspace. A theme applies to
+ * the subtree under the attribute, so one page can show both (see /dev/ui).
+ *
+ * Names map from the mockups as follows:
+ *   start.html (light)            review-live.html (dark)     token
+ *   --paper                       --bg                        --canvas
+ *   --card                        --chrome                    --surface
+ *   --line-2 (as hover fill)      --raised                    --raised
+ *   --line-2 / --line / #b9cfc6   (new) / --line / --line-2   --line-subtle / --line / --line-strong
+ *   --ink / --ink-2 / --ink-3     --fg / --fg-2 / --fg-3      --fg / --fg-muted / --fg-subtle
+ *   --pine / --pine-deep          --accent                    --accent / --accent-strong
+ *   --pine-ink / --pine-tint      --accent-ink                --accent-fg / --accent-tint
+ *   --amber / -tint / -line       --check                     --check / --check-tint / --check-line
+ *   --blue / --blue-tint          --fixed                     --info / --info-tint
+ * Values marked "derived" exist in only one mockup and were filled in for the
+ * other theme.
+ *
+ * Viewer tokens (axes, bone, rulers, labels) do not change with the theme:
+ * the 3D view and slices always sit on the dark imaging well.
+ */
+
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* Surfaces, from back to front */
+  --canvas: #f7faf8;
+  --surface: #ffffff;
+  --raised: #eaf0ed; /* hovered and selected rows */
+
+  --line-subtle: #eaf0ed;
+  --line: #dce7e2;
+  --line-strong: #b9cfc6;
+
+  --fg: #10211c;
+  --fg-muted: #44594f;
+  --fg-subtle: #5c6f66;
+
+  /* Pine: primary actions, done, links */
+  --accent: #1d6b57;
+  --accent-strong: #124839; /* hover fill, and text on --accent-tint */
+  --accent-fg: #f7faf8; /* text on --accent */
+  --accent-tint: #e3efe9;
+  --accent-text: #1d6b57;
+
+  /* Amber: To check */
+  --check: #7d5408; /* text and icons on surfaces */
+  --check-solid: #c48a1c; /* dots and filled markers */
+  --check-solid-fg: #231803;
+  --check-strong: #4b3405; /* text on --check-tint */
+  --check-tint: #fff7df;
+  --check-line: #ead8a2;
+
+  /* Blue: running, corrected, saved to the task list */
+  --info: #2856a8;
+  --info-tint: #eaf1fd;
+
+  /* Red: failed (derived; neither mockup shows a failure) */
+  --danger: #a3342a;
+  --danger-tint: #fbeceb;
+
+  --focus: #1d6b57;
+  --inverse: #10211c; /* toasts and tooltips */
+  --inverse-fg: #ffffff;
+  --scrim: rgb(0 0 0 / 0.82);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --canvas: #0b0e10;
+  --surface: #13171a;
+  --raised: #1a1f23;
+
+  --line-subtle: #1d2226; /* derived */
+  --line: #242a2f;
+  --line-strong: #30373d;
+
+  --fg: #e7ebed;
+  --fg-muted: #a3adb3;
+  --fg-subtle: #808c94; /* 4.8:1 on --raised, the lightest surface it sits on */
+
+  --accent: #62c7a4;
+  --accent-strong: #7fd4b5; /* derived: actives lighten on dark ground */
+  --accent-fg: #06231a;
+  --accent-tint: #15302a; /* derived */
+  --accent-text: #62c7a4;
+
+  --check: #e9b75b;
+  --check-solid: #e9b75b;
+  --check-solid-fg: #231803;
+  --check-strong: #f0c66a;
+  --check-tint: #2a2414; /* derived */
+  --check-line: #5c4a22; /* derived */
+
+  --info: #7fb2ff;
+  --info-tint: #162338; /* derived */
+
+  --danger: #ef7a6c; /* derived */
+  --danger-tint: #33191a; /* derived */
+
+  --focus: #62c7a4;
+  --inverse: #000000;
+  --inverse-fg: #e7ebed;
+  --scrim: rgb(0 0 0 / 0.82);
+}
+
+:root {
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Viewer: the same in both themes */
+  --viewer-well: #0b0e10; /* 3D and slice background */
+  --viewer-chip: rgb(11 14 16 / 0.72); /* view labels and value chips over images */
+  --viewer-chip-fg: #ffffff;
+  --scale-bar: #cfd6da;
+
+  /* Slice planes, in the 3D view and as crosshair lines */
+  --axis-x: #ef6a5e; /* coronal plane (constant x) */
+  --axis-y: #5ccf7a; /* sagittal plane (constant y) */
+  --axis-z: #5aa6f2; /* axial plane (constant z) */
+
+  /* Bone renders ivory by default so lighting carries the shape */
+  --bone: #e6dcc8;
+  --bone-alt: #ddd3bf; /* neighbouring bones, so adjacent surfaces separate */
+  --bone-warm: #e9ddc8;
+
+  /* Rulers and landmarks */
+  --ruler: #ffd166;
+  --ruler-fg: #1b1404;
+  --ruler-edit: #7fb2ff; /* a ruler being corrected */
+  --ruler-edit-fg: #04142b;
+  --landmark-warn: #ff9f6e; /* landmark more than 0.03 mm off the surface */
+
+  /* The one exception to "status never in mesh colour": the region under check */
+  --check-outline: #e9b75b;
+
+  /* Structure label colours, shown when the label toggle is on. Chosen to
+     stay clear of the axis colours, amber and ivory. */
+  --label-1: #c792ea;
+  --label-2: #4fc1c9;
+  --label-3: #f78fb3;
+  --label-4: #a5d46a;
+  --label-5: #8c9eff;
+  --label-6: #e8a87c;
+}
