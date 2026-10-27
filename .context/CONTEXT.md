@@ -12,7 +12,7 @@ apps/api        Cloudflare Worker. src/index.ts is the composition root: the onl
                 (supervisor, thread store, MCP server) and domains/review at /review/
                 (review data, chat threads, corrections)
 packages/
-  contracts     zod schemas for the four contracts; fixtures/ holds the fake OA6-1RK run
+  contracts     zod schemas for the four contracts and the shared formats
   workflow      pure functions over a workflow package: read and validate it, task graph, stale tasks
   api-client    typed commands and event stream; the only way web features reach the API
   viewer        three.js 3D view and slice planes with a thin React wrapper

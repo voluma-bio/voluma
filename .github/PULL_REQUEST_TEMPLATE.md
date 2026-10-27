@@ -31,14 +31,14 @@
 ## Contract changes
 
 <!-- Changes to packages/contracts: the schema or command, what the other
-     lane must change, and whether fixtures were updated. Contract changes
+     lane must change. Contract changes
      ship in their own small PR. "None." when contracts are untouched. -->
 
 ## Verification
 
 <!-- What you ran and what you saw. For anything a user sees: a browser
      run with screenshots next to the matching mockup screen, against
-     fixtures or real OA6-1RK data (say which). UI files changed but nothing
+     real OA6-1RK data. UI files changed but nothing
      looks different: write "No visual change" and why. Name any test added
      and the bug it guards against. -->
 
