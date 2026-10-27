@@ -57,9 +57,7 @@ export function SplitPanel({
       const container = containerRef.current;
       if (!container) return;
       const extent = horizontal ? container.clientWidth : container.clientHeight;
-      const clamped = Math.round(
-        Math.max(minSize, Math.min(next, maxSize, extent - minRestSize)),
-      );
+      const clamped = Math.round(Math.max(minSize, Math.min(next, maxSize, extent - minRestSize)));
       setSize(clamped);
       onSizeChange?.(clamped);
     },

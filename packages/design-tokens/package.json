@@ -7,5 +7,7 @@
     "./tokens.css": "./src/tokens.css",
     "./theme.css": "./src/theme.css"
   },
-  "sideEffects": ["**/*.css"]
+  "sideEffects": [
+    "**/*.css"
+  ]
 }

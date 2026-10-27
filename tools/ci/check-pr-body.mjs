@@ -108,7 +108,9 @@ function parseArgs(args) {
   }
   if (!changedFilesPath && !bodyPath) {
     console.error("usage: pnpm check:pr-body <body.md>");
-    console.error("   or: PR_BODY=<body> node tools/ci/check-pr-body.mjs --changed-files <list.txt>");
+    console.error(
+      "   or: PR_BODY=<body> node tools/ci/check-pr-body.mjs --changed-files <list.txt>",
+    );
     process.exit(2);
   }
   if (process.env.PR_BODY === undefined && !bodyPath) {
@@ -173,7 +175,8 @@ function scanSections(markdown) {
 }
 
 function changelogProblem(lines) {
-  if (lines.length === 0) return 'write one line per change starting "- Added:" etc., or "None. <reason>"';
+  if (lines.length === 0)
+    return 'write one line per change starting "- Added:" etc., or "None. <reason>"';
   if (lines[0].startsWith("None.")) {
     if (!NONE_WITH_REASON.test(lines[0])) return '"None." needs a reason on the same line';
     if (lines.length > 1) return '"None. <reason>" must be the only line';

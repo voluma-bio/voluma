@@ -88,7 +88,13 @@ function ThemeColumn({ theme }: { theme: (typeof THEMES)[number] }) {
           rowKey={(run) => run.scan}
           onRowClick={() => {}}
         />
-        <Table label="Runs" columns={RUN_COLUMNS} rows={[]} rowKey={(run) => run.scan} empty="No runs yet." />
+        <Table
+          label="Runs"
+          columns={RUN_COLUMNS}
+          rows={[]}
+          rowKey={(run) => run.scan}
+          empty="No runs yet."
+        />
       </Section>
       <Section title="Chat thread">
         <ChatDemo />
@@ -192,7 +198,6 @@ function ChatDemo() {
         </ChatMessage>
         <ChatMessage from="user">Show me the distal endpoint on the coronal slice.</ChatMessage>
         {sent.map((text, index) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: demo messages are append-only.
           <ChatMessage key={index} from="user">
             {text}
           </ChatMessage>
