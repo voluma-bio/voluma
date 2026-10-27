@@ -1,6 +1,9 @@
 [dependencies.meridian-dev-workflow]
 url = "https://github.com/haowjy/meridian-dev-workflow"
 
+[dependencies.skills]
+url = "https://github.com/cloudflare/skills"
+
 [settings]
 targets = [
     ".opencode",
