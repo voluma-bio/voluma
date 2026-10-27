@@ -69,10 +69,10 @@ cd ../voluma.worktrees/<name> && pnpm i
   `gh pr create --body-file` skips it: copy every `##` section into your body
   file and run `pnpm check:pr-body <file>` first.
 - Don't wait for a human: merge your own PR once CI is green. When it
-  changes behaviour (product logic, the harness, analysis), first have a
-  fresh agent review it (one that didn't write it, given the diff and the
-  PR body) and fix what it finds. Setup, config and docs PRs need no
-  review. Contract PRs are the exception: both owners approve them.
+  changes behaviour (product logic, the harness, analysis) or structure
+  (packages, boundaries, interfaces, the workspace), first have a fresh
+  agent review it (one that didn't write it, given the diff and the PR
+  body) and fix what it finds. Docs and small config PRs need no review. Contract PRs are the exception: both owners approve them.
 - Tiny changes skip the PR: a typo, a comment, a doc line, or a one-line fix
   or config tweak in your own lane that changes nothing a user sees and
   doesn't touch `packages/contracts`. Run `pnpm check`, then
