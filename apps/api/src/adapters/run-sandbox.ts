@@ -44,12 +44,6 @@ export class RunSandbox extends DurableObject<RunSandboxEnv> {
     if (ctx.container === undefined) throw new Error("RunSandbox needs a container binding");
     this.#container = ctx.container;
     this.#mounts = new S3Mount(ctx.container, ctx.exports.S3Gateway);
-    // The timeout is per Durable Object instance and is lost when it restarts.
-    if (this.#container.running) {
-      void ctx.blockConcurrencyWhile(() =>
-        this.#container.setInactivityTimeout(INACTIVITY_TIMEOUT_MS),
-      );
-    }
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -65,6 +59,7 @@ export class RunSandbox extends DurableObject<RunSandboxEnv> {
   }
 
   async #exec(request: ExecRequest, signal: AbortSignal): Promise<Response> {
+    validate(request);
     // Event-log seam: once the EventLog adapter lands, record `sandbox` events under
     // request.threadId here (container started, mounted, exec started, exec exited), each
     // with an id from crypto.randomUUID().
@@ -73,11 +68,16 @@ export class RunSandbox extends DurableObject<RunSandboxEnv> {
     // the command's children; -k follows with SIGKILL.
     const process = await this.#container.exec(
       ["timeout", "-k", "5", String(request.timeoutSeconds), "bash", "-c", request.command],
-      { cwd: "/outputs", env: { ...BASE_ENV, ...request.env }, stdout: "pipe", stderr: "pipe" },
+      { cwd: "/outputs", env: { ...request.env, ...BASE_ENV }, stdout: "pipe", stderr: "pipe" },
     );
     if (!process.stdout || !process.stderr) throw new Error("exec returned no output streams");
     const { stdout, stderr } = process;
-    const kill = () => process.kill(15);
+    // The process may already have exited when the abort lands.
+    const kill = () => {
+      try {
+        process.kill(15);
+      } catch {}
+    };
     // The signal fires when the client disconnects (compatibility flag enable_request_signal).
     if (signal.aborted) kill();
     else signal.addEventListener("abort", kill);
@@ -89,11 +89,17 @@ export class RunSandbox extends DurableObject<RunSandboxEnv> {
       for await (const bytes of stream) {
         await writer.write({ type, data: decoder.decode(bytes, { stream: true }) });
       }
+      const rest = decoder.decode();
+      if (rest) await writer.write({ type, data: rest });
     };
     void Promise.all([pump("stdout", stdout), pump("stderr", stderr)])
       .then(async () => writer.write({ type: "exit", code: await process.exitCode }))
       .then(() => writer.close())
-      .catch((error) => writer.abort(error))
+      .catch((error) => {
+        // A failed pump or a consumer that stopped reading must not leave the command running.
+        kill();
+        return writer.abort(error);
+      })
       .finally(() => signal.removeEventListener("abort", kill));
 
     return new Response(readable.pipeThrough(ndjson()), {
@@ -141,6 +147,26 @@ export class RunSandbox extends DurableObject<RunSandboxEnv> {
   }
 }
 
+// The port promises non-overlapping prefixes, and an empty one would mount the bucket root;
+// a timeout of 0 makes `timeout` run unbounded.
+function validate(request: ExecRequest): void {
+  if (!Number.isInteger(request.timeoutSeconds) || request.timeoutSeconds <= 0) {
+    throw new Error(`invalid timeoutSeconds: ${request.timeoutSeconds}`);
+  }
+  const prefixes = MOUNT_TABLE.map(({ key }) => request.mounts[key]);
+  for (const prefix of prefixes) {
+    if (prefix === "" || prefix.startsWith("/") || prefix.endsWith("/")) {
+      throw new Error(`invalid mount prefix: "${prefix}"`);
+    }
+  }
+  for (const a of prefixes) {
+    for (const b of prefixes) {
+      if (a !== b && `${b}/`.startsWith(`${a}/`)) throw new Error(`overlapping mounts: ${a}, ${b}`);
+    }
+  }
+  if (new Set(prefixes).size !== prefixes.length) throw new Error("duplicate mount prefixes");
+}
+
 function ndjson(): TransformStream<ExecChunk, Uint8Array> {
   const encoder = new TextEncoder();
   return new TransformStream({
@@ -158,22 +184,39 @@ export function durableObjectSandbox(
   const stub = namespace.getByName(`${runId}/${name}`);
   return {
     async *exec(request: ExecRequest, signal?: AbortSignal) {
-      // fetch(), not RPC: only fetch carries the client's abort into the Durable Object.
-      const response = await stub.fetch("http://sandbox/exec", {
-        method: "POST",
-        body: JSON.stringify(request),
-        signal,
-      });
-      if (!response.ok || response.body === null) {
-        throw new Error(`sandbox exec failed: ${response.status} ${await response.text()}`);
-      }
-      const decoder = new TextDecoder();
-      let pending = "";
-      for await (const bytes of response.body) {
-        pending += decoder.decode(bytes, { stream: true });
-        const lines = pending.split("\n");
-        pending = lines.pop() ?? "";
-        for (const line of lines) yield JSON.parse(line) as ExecChunk;
+      // Also aborted when the caller stops iterating, so the command never outlives its reader.
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      if (signal?.aborted) abort();
+      else signal?.addEventListener("abort", abort);
+      try {
+        // fetch(), not RPC: only fetch carries the client's abort into the Durable Object.
+        const response = await stub.fetch("http://sandbox/exec", {
+          method: "POST",
+          body: JSON.stringify(request),
+          signal: controller.signal,
+        });
+        if (!response.ok || response.body === null) {
+          throw new Error(`sandbox exec failed: ${response.status} ${await response.text()}`);
+        }
+        const decoder = new TextDecoder();
+        let pending = "";
+        let exited = false;
+        for await (const bytes of response.body) {
+          pending += decoder.decode(bytes, { stream: true });
+          const lines = pending.split("\n");
+          pending = lines.pop() ?? "";
+          for (const line of lines) {
+            const chunk = JSON.parse(line) as ExecChunk;
+            exited ||= chunk.type === "exit";
+            yield chunk;
+          }
+        }
+        // A stream that ends without an exit chunk means the container stopped mid-command.
+        if (!exited) throw new Error("sandbox exec stream ended without an exit code");
+      } finally {
+        signal?.removeEventListener("abort", abort);
+        controller.abort();
       }
     },
     async destroy() {
