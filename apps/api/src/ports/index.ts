@@ -29,7 +29,7 @@ export interface ExecRequest {
 
 export type ExecChunk =
   | { type: "stdout" | "stderr"; data: string }
-  /** Last chunk. 124 means the timeout killed the command; 143 or 137 mean the caller aborted it. */
+  /** Last chunk. 124: the timeout killed the command; 143: the caller aborted it; 137: the command ignored SIGTERM and was SIGKILLed. */
   | { type: "exit"; code: number };
 
 /** One sandbox of a run: a container with the run's R2 prefixes mounted. */
