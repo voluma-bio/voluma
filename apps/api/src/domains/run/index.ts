@@ -1,6 +1,6 @@
 /**
  * Run lane's API domain, mounted at /run/: workflows and their package
- * import, runs, the agent runtime (ported from voluma-legacy), the
+ * import, runs, the agent runtime (Pi's agent layer), the
  * supervisor, the thread store and sandboxes. RunDeps lists the ports it
  * needs; index.ts supplies adapters.
  */
