@@ -15,7 +15,7 @@ packages/
   viewer        three.js 3D view and slice planes with a thin React wrapper
   ui            shared React components, styled from tokens
   design-tokens tokens.css (raw values, two themes) and theme.css (Tailwind mapping)
-workflows/mouse-oa-knee   SKILL.md, task list, catalog, and Python tools in scripts/
+workflows/mouse-oa   SKILL.md, task list, catalog, and Python tools in scripts/
 tools/ci        PR-body check
 ```
 

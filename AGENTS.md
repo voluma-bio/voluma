@@ -2,7 +2,7 @@
 
 Voluma turns a micro-CT scan into validated measurements where every number
 traces to its evidence. The current build is the micro-CT workflow MVP: a
-researcher picks the mouse OA knee workflow, adds a scan, watches the run, and
+researcher picks the mouse OA workflow, adds a scan, watches the run, and
 reviews the results per task in 3D. The contract is the [requirements]; the
 screens are in the [visual direction] and its mockups. There are no real users
 or data yet: change freely, delete unused code, and add no compatibility shims.

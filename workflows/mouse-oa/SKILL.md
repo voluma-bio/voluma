@@ -1,9 +1,9 @@
 ---
-name: mouse-oa-knee
+name: mouse-oa
 description: Measure a mouse OA knee micro-CT scan following the Tang et al. (Biology 2026) protocol, task by task, with evidence for every value.
 ---
 
-# Mouse OA knee
+# Mouse OA
 
 Stub. The protocol, the steering learned from expert runs, the task list,
 the parameter catalog and the review template arrive in later PRs.

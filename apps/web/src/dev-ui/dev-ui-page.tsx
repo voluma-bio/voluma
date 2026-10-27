@@ -163,19 +163,19 @@ type RunRow = { scan: string; workflow: string; status: [StatusTone, string]; fi
 const RUNS: RunRow[] = [
   {
     scan: "OA6-1RK",
-    workflow: "Mouse OA knee v2",
+    workflow: "Mouse OA v2",
     status: ["check", "2 to check"],
     finished: "24 Oct, 14:02",
   },
   {
     scan: "OA7-2LK",
-    workflow: "Mouse OA knee v2",
+    workflow: "Mouse OA v2",
     status: ["info", "Running"],
     finished: "",
   },
   {
     scan: "OA6-2LK",
-    workflow: "Mouse OA knee v1",
+    workflow: "Mouse OA v1",
     status: ["accent", "Reviewed"],
     finished: "21 Oct, 09:40",
   },
