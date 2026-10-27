@@ -15,7 +15,7 @@ packages/
   contracts     zod schemas for the four contracts and the shared formats
   workflow      pure functions over a workflow package: read and validate it, task graph, stale tasks
   api-client    typed commands and event stream; the only way web features reach the API
-  viewer        three.js 3D view and slice planes with a thin React wrapper
+  viewer        local DICOM ZIP intake, Cornerstone acquired slices, persistent imaging slots
   ui            shared React components, styled from tokens
   design-tokens tokens.css (raw values, two themes) and theme.css (Tailwind mapping)
 tools/ci        PR-body check
@@ -39,8 +39,7 @@ its dependencies' inputs, so an unchanged package costs nothing on the next
 run. Nx config is target defaults and caching only. A package joins
 `typecheck` or `test` by having that script in its `package.json`.
 
-Import boundaries are Biome `noRestrictedImports` and `noRestrictedGlobals`
-overrides in `biome.json`.
+Import boundaries are written rules in `AGENTS.md`; Biome uses its recommended rules.
 
 ## Theming
 
@@ -48,12 +47,34 @@ overrides in `biome.json`.
 `[data-theme="light"]`, and again under `[data-theme="dark"]`. `theme.css`
 maps them into Tailwind with `@theme inline`, so a utility reads the token
 where it is used and `data-theme` on any element themes its subtree. That is
-how `/dev/ui` shows both themes side by side, and how the review page turns
-dark inside a light app. Tailwind's default palette is removed.
+how `/dev/ui` shows both themes side by side. Review now selects light, following
+Andrew's implementation direction. Tailwind's default palette is removed.
 
 The viewer's colours (axes, bone, rulers, labels) are tokens too. Canvas and
 WebGL code reads them with `getComputedStyle` rather than copying values, so
 the CSS stays the one source.
+
+## Review integration
+
+The Review UI is in `apps/web/src/features/review`; persistent view slots are
+in `packages/viewer`. There is one Review route, `/runs/:runId`, with no demo
+route. The local workspace uses `runId=local` without creating a server run.
+No synthetic measurements or simulated services are mounted.
+
+`features/review/report/model.ts` is a presentation model, not the shared API
+contract. Reports, revision selection and command UI remain available for the
+real adapter; until it exists the workspace shows explicit empty states. Shared
+contracts and API client are unchanged from main. Report/viewer splits retain
+react-resizable-panels to preserve the verified nested maximize/restore behavior;
+the unrelated shared `SplitPanel` API and `/dev/ui` remain unchanged.
+
+Local DICOM intake and rendering work without the API. They do not populate
+analysis results or create server runs. The [Review specification][review-spec]
+describes the UI seam; the [viewer specification][viewer-spec] describes input
+support, geometry, limits, library integration and verification coverage.
+
+[review-spec]: ../apps/web/src/features/review/.context/CONTEXT.md
+[viewer-spec]: ../packages/viewer/.context/CONTEXT.md
 
 ## Parallel agents
 

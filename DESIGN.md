@@ -7,9 +7,9 @@ both in each theme.
 
 ## Two themes, one token set
 
-- **Light** (the default) is for workflows and runs: Warm Organic, pine accent.
-- **Dark** (`data-theme="dark"`) is for the review: an imaging workspace,
-  because grayscale slices read best on near-black.
+- **Light** (the default) is for workflows, runs and Review: Warm Organic, pine accent.
+- **Dark** remains available to shared components and `/dev/ui`. Actual grayscale
+  images can use the dark viewer well inside the light Review chrome.
 - Components use semantic token utilities (`bg-surface`, `text-fg-muted`,
   `border-line`), never raw colours. A colour a screen needs goes into
   `tokens.css` with a role name and a value for both themes.

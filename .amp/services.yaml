@@ -1,0 +1,10 @@
+# Supervised frontend preview. No database, credentials, or analysis service required.
+services:
+  review:
+    command: pnpm --filter @voluma/web dev --host 0.0.0.0 --port 5173 --strictPort
+    port: 5173
+    health: /
+    portal:
+      url: /runs/local
+      title: Voluma Review
+      description: Light-theme Review workspace. No analysis service is connected.
