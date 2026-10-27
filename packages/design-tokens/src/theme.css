@@ -1,0 +1,26 @@
+/* Warm Organic palette from legacy, with light review surfaces and self-hosted Plex. */
+@theme {
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --color-background: #f7faf8;
+  --color-foreground: #10211c;
+  --color-card: #ffffff;
+  --color-primary: #1d6b57;
+  --color-primary-hover: #165441;
+  --color-primary-foreground: #ffffff;
+  --color-muted: #edf3f0;
+  --color-muted-foreground: #486158;
+  --color-border: #dce7e2;
+  --color-warning: #79520a;
+  --color-warning-tint: #fff7df;
+  --color-warning-border: #ead8a2;
+  --color-destructive: #b3413a;
+  --color-destructive-tint: #fdf1f0;
+  --color-view: #eff3f1;
+  --color-overlay: #10211c66;
+  --color-axial: #366b9c;
+  --color-coronal: #ab5149;
+  --color-sagittal: #3d7550;
+  --shadow-dialog: 0 20px 80px #10211c26;
+  --radius-panel: 0.5rem;
+}

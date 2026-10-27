@@ -1,0 +1,10 @@
+# Supervised frontend preview. No database, credentials, or analysis service required.
+services:
+  review:
+    command: pnpm dev
+    port: 5173
+    health: /
+    portal:
+      url: /
+      title: Voluma Review
+      description: Light-theme review demo. Changes reset on reload; no scientific computation or private evidence.

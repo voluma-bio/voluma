@@ -1,0 +1,7 @@
+{
+  "name": "@voluma/design-tokens",
+  "private": true,
+  "exports": {
+    "./theme.css": "./src/theme.css"
+  }
+}

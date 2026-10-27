@@ -1,0 +1,56 @@
+/* Global typography and reset. Feature layout lives with the owning package. */
+@import "tailwindcss";
+@import "@voluma/design-tokens/theme.css";
+@import "@voluma/review/styles.css";
+@source "../../../packages";
+
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  margin: 0;
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  font-size: 14px;
+}
+button,
+a,
+input,
+select,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+button,
+select {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+}
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 3px;
+}
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+p {
+  text-wrap: pretty;
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    /* biome-ignore lint/complexity/noImportantStyles: user motion preference overrides component utilities. */
+    scroll-behavior: auto !important;
+    /* biome-ignore lint/complexity/noImportantStyles: user motion preference overrides component utilities. */
+    animation-duration: 0.01ms !important;
+    /* biome-ignore lint/complexity/noImportantStyles: user motion preference overrides component utilities. */
+    transition-duration: 0.01ms !important;
+  }
+}

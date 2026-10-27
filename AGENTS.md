@@ -20,7 +20,7 @@ The current implementation and its conventions are in the sibling checkout at
 **Scientists should spend their time on their research, not analysis software.**
 Voluma takes everything between the raw data and the publication — and makes every
 result provable. Every architectural and product decision should survive the
-question: *does this help a researcher trust and publish their result?*
+question: _does this help a researcher trust and publish their result?_
 
 We want the code right so that change stays easy: this is an exploratory state, no
 backwards compatibility is required, and carrying cost is a bug.
@@ -68,7 +68,7 @@ Beyond that, comment **what the code can't say for itself**:
 - **Provider, protocol, and library quirks** — behavior you confirmed from a spec or SDK
   that a reader would otherwise have to go dig up.
 - **Non-obvious mechanics** — ordering and sequencing constraints, buffering, why two
-  things are reconciled, edge/error/abort paths, and the *why* behind a decision that
+  things are reconciled, edge/error/abort paths, and the _why_ behind a decision that
   looks odd at a glance.
 
 Never narrate the obvious (`// increment i`). The test: would a competent reader have

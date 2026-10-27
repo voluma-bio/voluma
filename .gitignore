@@ -24,6 +24,7 @@ __debug_bin*
 # Tool caches
 .nx/
 .amp/portals/*
+.amp/in/
 .playwright-mcp/
 .playwright-cli
 __pycache__/
