@@ -28,7 +28,7 @@ Pre-commit runs Biome on staged files. Nothing runs on push. Use pnpm, never npm
 
 | Path | Owner |
 |---|---|
-| `apps/web/src/features/run`, `apps/api`, `packages/workflow`, `packages/api-client`, `workflows/` | Run lane |
+| `apps/web/src/features/run`, `apps/api`, `packages/workflow`, `packages/api-client` | Run lane |
 | `apps/web/src/features/review`, `packages/viewer` | Review lane |
 | `packages/contracts` | Both; contract PRs only |
 | `packages/design-tokens`, `packages/ui`, `apps/web/src/shell`, `apps/web/src/dev-ui`, root config, `tools/ci` | Both; small PRs |
@@ -101,8 +101,11 @@ they need:
 - Colours come only from `packages/design-tokens`; components use token
   utilities (`bg-surface`, `text-fg-muted`). Visual rules: [DESIGN.md](DESIGN.md).
   Check shared components at `/dev/ui` in both themes.
-- Python lives only in `workflows/*/scripts`, managed with uv. Tools take and
-  return paths, never bytes.
+- Workflows and analysis code are not in this repo. A workflow is a Mars
+  schema v1 package on GitHub (`mars.toml`, skills, `workflow.md`), imported
+  and pinned to a commit; the generic micro-CT skills are
+  [voluma-bio/microct-analysis]. This repo holds no Python. Analysis tools
+  take and return paths, never bytes.
 - Tests: add one only where a bug would be silent and expensive (the
   stale-task graph, unit conversions). A feature is shown to work by a browser
   run with screenshots in the PR. When a package gets its first test, give it
@@ -119,3 +122,4 @@ for whoever uses it. Nothing in this repo requires it.
 
 [requirements]: https://github.com/voluma-bio/docs/blob/main/work/microct-workflow-mvp/requirements.md
 [visual direction]: https://github.com/voluma-bio/docs/blob/main/work/microct-workflow-mvp/mockups/direction.md
+[voluma-bio/microct-analysis]: https://github.com/voluma-bio/microct-analysis

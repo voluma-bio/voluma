@@ -1,4 +1,5 @@
 # Decisions
+- 2026-10-27: Workflows are Mars schema v1 packages on GitHub, imported and pinned to a commit; this repo holds no workflows or Python. If Mars blocks the MVP, packages are bundled into the repo instead. (scaffold PR)
 
 One dated line per settled decision that agents in both lanes need, newest
 last, with a link to the PR. Record the decision, not its description.

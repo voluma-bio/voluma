@@ -10,12 +10,11 @@ apps/web        React + Vite. shell/ mounts routes; features/run and features/re
 apps/api        Cloudflare Worker: supervisor, thread store, MCP server, R2 (composition root)
 packages/
   contracts     zod schemas for the four contracts; fixtures/ holds the fake OA6-1RK run
-  workflow      pure functions over a workflow: validation, task graph, stale tasks
+  workflow      pure functions over a workflow package: read and validate it, task graph, stale tasks
   api-client    typed commands and event stream; the only way web features reach the API
   viewer        three.js 3D view and slice planes with a thin React wrapper
   ui            shared React components, styled from tokens
   design-tokens tokens.css (raw values, two themes) and theme.css (Tailwind mapping)
-workflows/mouse-oa   SKILL.md, task list, catalog, and Python tools in scripts/
 tools/ci        PR-body check
 ```
 
