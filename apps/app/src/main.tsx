@@ -1,5 +1,14 @@
-/** Phase-one application shell; reports and service interactions follow separately. */
-import { Group, Panel, Separator, ViewerWorkspace } from "@voluma/review";
+/** Fixture-backed reports before enabling review mutations and correction flows. */
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  createDemoService,
+  downloadCsv,
+  Group,
+  Panel,
+  Separator,
+  TaskReport,
+  ViewerWorkspace,
+} from "@voluma/review";
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "@fontsource/ibm-plex-sans/400.css";
@@ -8,33 +17,39 @@ import "@fontsource/ibm-plex-sans/600.css";
 import "@fontsource/ibm-plex-mono/400.css";
 import "./styles.css";
 
-const tasks = [
-  "Segmentation",
-  "Distal femur",
-  "Tibial IIOC",
-  "Trabecular IIOC",
-  "Plate thickness",
-];
+const queryClient = new QueryClient();
+const demo = createDemoService();
+const run = await demo.service.getRun("oa6-1rk");
+const revision = run.revisions[0];
 function App() {
-  const [task, setTask] = useState("Distal femur");
+  const [taskId, setTaskId] = useState("femur");
+  const task =
+    revision.tasks.find((item) => item.id === taskId) ?? revision.tasks[0];
   return (
     <main className="review-app">
       <header className="app-header">voluma · Review · Demo workspace</header>
       <div className="run-header">
         <h1>OA6-1RK · Mouse OA knee</h1>
+        <button
+          type="button"
+          className="button"
+          onClick={() => downloadCsv(run, revision)}
+        >
+          Export CSV
+        </button>
       </div>
       <div className="review-body">
         <aside className="review-sidebar">
           <nav aria-label="Workflow tasks">
-            {tasks.map((title, index) => (
+            {revision.tasks.map((item, index) => (
               <button
                 type="button"
-                className={`task-nav ${task === title ? "selected" : ""}`}
-                key={title}
-                onClick={() => setTask(title)}
+                className={`task-nav ${task.id === item.id ? "selected" : ""}`}
+                key={item.id}
+                onClick={() => setTaskId(item.id)}
               >
                 <span className="task-number">{index + 1}</span>
-                {title}
+                {item.title}
               </button>
             ))}
           </nav>
@@ -42,20 +57,30 @@ function App() {
         <div className="review-panels">
           <Group orientation="horizontal">
             <Panel defaultSize="48%" minSize="32%">
-              <article className="task-report">
-                <h1>{task}</h1>
-                <p>
-                  Task report integration pending. Scientific images are not
-                  included.
-                </p>
-              </article>
+              <div className="report-scroll" key={task.id}>
+                <TaskReport
+                  task={task}
+                  taskNumber={revision.tasks.indexOf(task) + 1}
+                  runId={run.id}
+                  revisionId={revision.id}
+                  readOnly
+                  service={demo.service}
+                  onResult={() => {}}
+                  onCorrect={() => {}}
+                />
+              </div>
             </Panel>
             <Separator
               className="resize-handle"
               aria-label="Resize report and viewers"
             />
             <Panel>
-              <ViewerWorkspace selected={[]} display={{}} />
+              <ViewerWorkspace
+                selected={revision.structures.filter((item) =>
+                  task.structureIds.includes(item.id),
+                )}
+                display={{}}
+              />
             </Panel>
           </Group>
         </div>
@@ -67,6 +92,8 @@ const root = document.getElementById("root");
 if (!root) throw new Error("Missing application root");
 createRoot(root).render(
   <StrictMode>
-    <App />
+    <QueryClientProvider client={queryClient}>
+      <App />
+    </QueryClientProvider>
   </StrictMode>,
 );
