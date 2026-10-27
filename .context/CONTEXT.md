@@ -9,7 +9,7 @@ commands are in [AGENTS.md](../AGENTS.md).
 apps/web        React + Vite. shell/ mounts routes; features/run and features/review own screens
 apps/api        Cloudflare Worker. src/index.ts is the composition root: the only code that
                 reads env; it builds adapters/ for the ports/ and mounts domains/run at /run/
-                (runs, the event log, sandboxes) and domains/review at /review/
+                (runs, the event log) and domains/review at /review/
                 (review data, chat threads, corrections)
 apps/runner     Node entry point that runs the agent harness against the API (Run lane)
 packages/
@@ -39,10 +39,20 @@ checklist, check threads, and review chat threads.
   before it is published, and `seq` (per run) is the stream cursor. Both the
   UI and the review read this log. Pi's own messages go in `pi_messages`,
   one row per message, so a thread can resume.
-- **Sandboxes.** One Cloudflare Sandbox Durable Object per sandbox. It
-  mounts R2 prefixes that don't overlap: the workflow and the inputs
-  read-only, the run's scratch and outputs read-write. It has no internet,
-  and R2 credentials stay in the Worker.
+- **Sandboxes.** One Modal sandbox per sandbox, CPU or GPU, created by the Node
+  runner through the `Sandbox` port (`packages/harness/src/ports/sandbox.ts`); the
+  adapter is `apps/runner/src/modal-sandbox.ts`, the only file that imports `modal`
+  (pinned: the JS SDK is pre-1.0). It mounts R2 prefixes that don't overlap: the
+  workflow and the inputs read-only, the run's scratch and outputs read-write. Each
+  mount gets its own temporary R2 credential, limited to its prefix and the sandbox's
+  lifetime, minted from `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_BUCKET` and `CLOUDFLARE_API_TOKEN`; the credentials never enter
+  the sandbox. Inputs flagged `stage` are copied to local disk at create (a cold mounted
+  read of the scan is slow; see the POC in the docs repo, `research/modal-poc.md`).
+  There is no internet. The image is prebuilt and named
+  (`node --env-file=.env apps/runner/src/publish-image.ts <name>`). Every command runs
+  under `timeout -k`, which leads its own process group,; a timeout or an abort kills the whole
+  group, except a descendant that calls `setsid` itself, which survives until the
+  sandbox is destroyed.
 - **Where the runner lives.** For now it's a Node process (`apps/runner`)
   that talks to the API. Whether it moves into a Durable Object per run is
   decided after the first real run.
@@ -108,60 +118,10 @@ Several agents from two people work at once, each in its own worktree.
 Nothing they run shares mutable state:
 - dev servers take free ports (Vite moves to the next free one);
 - Nx keeps its cache in the worktree's `.nx/` and runs without a daemon;
-- object storage and the sandbox run per worktree, as the recipe below
-  describes; when the thread store lands, each worktree gets its own local store;
+- sandboxes are named `<runId>.<name>` and tagged with the run id, so give each
+  worktree's runs their own run ids; when the thread store lands, each worktree gets
+  its own local store;
 - the pnpm store is shared, but it is content-addressed and append-only.
 
 The pre-commit hook lives in the shared `.git`, so every worktree runs the
 same hook.
-
-## Running the sandbox locally
-
-`apps/api` uses `@cloudflare/sandbox` 1.0.x, which is npm `latest`. Its API is
-`ctx.container` with `S3Mount`, `S3Gateway` and `Files`. Cloudflare's
-`sandbox-next` and `sandbox-stable` agent skills predate that release: they
-describe a `getSandbox()` and `exec(argv)`-handle preview that 1.0 doesn't
-export, and npm's `@next` tag now points at an older 0.13 build. Go by the
-installed types and the 1.0 docs.
-
-`apps/api` reaches R2 only through S3 variables, so locally they point at a MinIO
-that each worktree starts for itself. Names carry the worktree so nothing collides.
-
-```bash
-docker run -d --name minio-<worktree> -p 127.0.0.1::9000 -v /tmp/minio-<worktree>:/data \
-  -e MINIO_ROOT_USER=voluma -e MINIO_ROOT_PASSWORD=voluma-secret minio/minio server /data
-docker port minio-<worktree> 9000        # the free port Docker chose, e.g. 127.0.0.1:32768
-```
-
-In `apps/api/.dev.vars` (git-ignored; names in `.dev.vars.example`) set
-`S3_ENDPOINT=http://127.0.0.1:<port>`, `S3_REGION=us-east-1`,
-`S3_BUCKET=voluma-<worktree>`, `S3_ACCESS_KEY_ID=voluma`,
-`S3_SECRET_ACCESS_KEY=voluma-secret` and any `API_TOKEN`. Then `pnpm --filter
-@voluma/api dev` (Wrangler builds the container image on first start and picks a
-free port).
-
-The scan reaches `/inputs` by being uploaded under the run's inputs prefix; the
-sandbox mounts that prefix read-only. Create the bucket with a `PUT`, then upload
-each slice (no `mc` or `aws` needed; curl signs the request):
-
-```bash
-curl -X PUT --aws-sigv4 aws:amz:us-east-1:s3 --user voluma:voluma-secret http://127.0.0.1:<port>/voluma-<worktree>
-for f in <scan-dir>/*.dcm; do curl -sT "$f" --aws-sigv4 aws:amz:us-east-1:s3 \
-  --user voluma:voluma-secret "http://127.0.0.1:<port>/voluma-<worktree>/runs/<runId>/inputs/$(basename "$f")"; done
-```
-
-Remove MinIO's data with `docker run --rm -v /tmp:/t alpine rm -rf /t/minio-<worktree>`
-(it writes as root).
-
-Known limits on a Linux host (verified on kernel 7.2, Docker 29, Wrangler 4.153):
-- The host firewall must admit containers (`sudo ufw allow in on docker0`, plus the
-  `br-*` interfaces for compose networks). Wrangler's egress sidecar connects back to
-  a random host port on the docker gateway; ufw drops that by default.
-- Even then, the sidecar's `-m socket -j DIVERT` rule in its network namespace drops
-  the replies to its own connections to the gateway, so Wrangler never creates the
-  sandbox container. Deleting that rule from the sidecar's namespace gets past it.
-- The container Wrangler creates has no `/dev/fuse` and no capabilities, so every
-  `S3Mount.mount()` fails with `fuse: device not found`. Local mounts therefore do
-  not work on Linux; commands that need no mount (exec, kill, timeout) do.
-Mounts are exercised by a deployed Worker (`wrangler deploy` with an R2 bucket) or
-on a Docker Desktop host, which has not been tried.
