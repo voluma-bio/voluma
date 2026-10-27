@@ -3,13 +3,21 @@
  * that reads env, builds adapters from its bindings, and hands each domain
  * its ports. Each domain owns every path under its prefix.
  */
+
+import type { RunSandbox, RunSandboxEnv } from "./adapters";
 import type { DomainHandler } from "./domain";
 import { createReview } from "./domains/review";
 import { createRun } from "./domains/run";
 
-// Bindings (R2, D1, the sandbox) arrive with the first domain that needs each
-// one; generate this type with `wrangler types` once there are any.
-type Env = Record<string, never>;
+export { S3Gateway } from "@cloudflare/sandbox";
+// Durable Object classes and entrypoints are exported from the main module for Wrangler.
+export { RunSandbox } from "./adapters";
+
+interface Env extends RunSandboxEnv {
+  RUN_SANDBOX: DurableObjectNamespace<RunSandbox>;
+  DB: D1Database;
+  API_TOKEN: string;
+}
 
 export default {
   async fetch(request, _env, ctx) {
