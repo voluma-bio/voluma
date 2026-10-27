@@ -65,12 +65,8 @@
                     "group": [
                       "**/features/review",
                       "**/features/review/**",
-                      "../review",
-                      "../review/**",
-                      "../../review",
-                      "../../review/**",
-                      "../../../review",
-                      "../../../review/**"
+                      "../**/review",
+                      "../**/review/**"
                     ],
                     "message": "features/run never imports features/review. The lanes share code only through packages/: move the shared part into a package."
                   }
@@ -91,16 +87,7 @@
               "options": {
                 "patterns": [
                   {
-                    "group": [
-                      "**/features/run",
-                      "**/features/run/**",
-                      "../run",
-                      "../run/**",
-                      "../../run",
-                      "../../run/**",
-                      "../../../run",
-                      "../../../run/**"
-                    ],
+                    "group": ["**/features/run", "**/features/run/**", "../**/run", "../**/run/**"],
                     "message": "features/review never imports features/run. The lanes share code only through packages/: move the shared part into a package."
                   }
                 ]
@@ -123,10 +110,8 @@
                     "group": [
                       "**/domains/review",
                       "**/domains/review/**",
-                      "../review",
-                      "../review/**",
-                      "../../review",
-                      "../../review/**"
+                      "../**/review",
+                      "../**/review/**"
                     ],
                     "message": "domains/run never imports domains/review. Share code through apps/api/src/ports or a package."
                   }
@@ -147,14 +132,7 @@
               "options": {
                 "patterns": [
                   {
-                    "group": [
-                      "**/domains/run",
-                      "**/domains/run/**",
-                      "../run",
-                      "../run/**",
-                      "../../run",
-                      "../../run/**"
-                    ],
+                    "group": ["**/domains/run", "**/domains/run/**", "../**/run", "../**/run/**"],
                     "message": "domains/review never imports domains/run. Share code through apps/api/src/ports or a package."
                   }
                 ]
