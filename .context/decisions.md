@@ -19,5 +19,6 @@ Product decisions live in the [requirements].
 - 2026-10-27: The agent runtime is `pi-agent-core` + `pi-ai`, used as they come; `pi-durable` (experimental) is adopted only when compaction or resume needs it. There is no `Harness` port while there is one runtime. (user, tech lead)
 - 2026-10-27: The run's event log (`threads`, `events`, `pi_messages`) lives in D1 behind the run domain's API; `seq` per run is the stream cursor; both lanes read it. (tech lead)
 - 2026-10-27: One Cloudflare Sandbox Durable Object per sandbox; mounts don't overlap: workflow and inputs read-only, run scratch and outputs read-write; no internet; R2 credentials stay in the Worker. (user, tech lead)
+- 2026-10-27: Review uses the light theme and one `/runs/:runId` route; no separate demo application or synthetic results are mounted. `/runs/local` is a local workspace, not a server run. This supersedes the scaffold's dark Review default. ([Andrew's direction](https://ampcode.com/threads/T-01a17c7b-ed35-74fa-b025-670e440c66ee))
 
 [requirements]: https://github.com/voluma-bio/docs/blob/main/work/microct-workflow-mvp/requirements.md
