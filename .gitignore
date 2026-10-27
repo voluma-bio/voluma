@@ -22,6 +22,8 @@ temp/
 
 # Tool caches
 .nx/
+.amp/in/
+.amp/portals/
 .wrangler/
 .venv/
 __pycache__/

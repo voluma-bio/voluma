@@ -2,8 +2,8 @@
  * Voluma design tokens: the only place raw colour values live.
  *
  * Two themes share one set of semantic names. Light (the default, and
- * `[data-theme="light"]`) is the workflow and runs screens; dark
- * (`[data-theme="dark"]`) is the review imaging workspace. A theme applies to
+ * `[data-theme="light"]`) is used by workflows, runs and Review. Dark
+ * (`[data-theme="dark"]`) remains available to shared components. A theme applies to
  * the subtree under the attribute, so one page can show both (see /dev/ui).
  *
  * Names map from the mockups as follows:

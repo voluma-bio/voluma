@@ -9,13 +9,16 @@ commands are in [AGENTS.md](../AGENTS.md).
 apps/web        React + Vite. shell/ mounts routes; features/run and features/review own screens
 apps/api        Cloudflare Worker. src/index.ts is the composition root: the only code that
                 reads env; it builds adapters/ for the ports/ and mounts domains/run at /run/
-                (agent runtime on Pi's agent layer, supervisor, thread store, sandboxes) and domains/review at /review/
+                (runs, the event log, sandboxes) and domains/review at /review/
                 (review data, chat threads, corrections)
+apps/runner     Node entry point that runs the agent harness against the API (Run lane)
 packages/
   contracts     zod schemas for the four contracts and the shared formats
+  harness       the agent harness: our tools, the Sandbox and EventLog ports, the Pi
+                adapter; runtime-neutral (no Node or Worker types)
   workflow      pure functions over a workflow package: read and validate it, task graph, stale tasks
   api-client    typed commands and event stream; the only way web features reach the API
-  viewer        three.js 3D view and slice planes with a thin React wrapper
+  viewer        local DICOM ZIP intake, Cornerstone acquired slices, persistent imaging slots
   ui            shared React components, styled from tokens
   design-tokens tokens.css (raw values, two themes) and theme.css (Tailwind mapping)
 tools/ci        PR-body check
@@ -23,6 +26,29 @@ tools/ci        PR-body check
 
 Dependencies point down: apps → feature code → packages. `contracts` and
 `design-tokens` depend on nothing.
+
+## The agent runtime
+
+The agent loop is Pi's (`@earendil-works/pi-agent-core`), used as it comes;
+we add our own pieces only when a real run needs them. The agent runs
+outside the sandbox, so credentials never enter it. A run is a tree of
+threads: a supervisor (the root), a worker that goes through the task
+checklist, check threads, and review chat threads.
+- **Event log.** Ours, kept separately from Pi's history: the `threads` and
+  `events` tables in D1, behind the run domain's API. Each event is saved
+  before it is published, and `seq` (per run) is the stream cursor. Both the
+  UI and the review read this log. Pi's own messages go in `pi_messages`,
+  one row per message, so a thread can resume.
+- **Sandboxes.** One Cloudflare Sandbox Durable Object per sandbox. It
+  mounts R2 prefixes that don't overlap: the workflow and the inputs
+  read-only, the run's scratch and outputs read-write. It has no internet,
+  and R2 credentials stay in the Worker.
+- **Where the runner lives.** For now it's a Node process (`apps/runner`)
+  that talks to the API. Whether it moves into a Durable Object per run is
+  decided after the first real run.
+
+The design, the evidence behind it and the order of work are in the
+voluma-bio/docs work item `mvp-contracts-and-data` (`design/harness-v0.md`).
 
 ## Packages export source
 
@@ -39,8 +65,7 @@ its dependencies' inputs, so an unchanged package costs nothing on the next
 run. Nx config is target defaults and caching only. A package joins
 `typecheck` or `test` by having that script in its `package.json`.
 
-Import boundaries are Biome `noRestrictedImports` and `noRestrictedGlobals`
-overrides in `biome.json`.
+Import boundaries are written rules in `AGENTS.md`; Biome uses its recommended rules.
 
 ## Theming
 
@@ -48,12 +73,34 @@ overrides in `biome.json`.
 `[data-theme="light"]`, and again under `[data-theme="dark"]`. `theme.css`
 maps them into Tailwind with `@theme inline`, so a utility reads the token
 where it is used and `data-theme` on any element themes its subtree. That is
-how `/dev/ui` shows both themes side by side, and how the review page turns
-dark inside a light app. Tailwind's default palette is removed.
+how `/dev/ui` shows both themes side by side. Review now selects light, following
+Andrew's implementation direction. Tailwind's default palette is removed.
 
 The viewer's colours (axes, bone, rulers, labels) are tokens too. Canvas and
 WebGL code reads them with `getComputedStyle` rather than copying values, so
 the CSS stays the one source.
+
+## Review integration
+
+The Review UI is in `apps/web/src/features/review`; persistent view slots are
+in `packages/viewer`. There is one Review route, `/runs/:runId`, with no demo
+route. The local workspace uses `runId=local` without creating a server run.
+No synthetic measurements or simulated services are mounted.
+
+`features/review/report/model.ts` is a presentation model, not the shared API
+contract. Reports, revision selection and command UI remain available for the
+real adapter; until it exists the workspace shows explicit empty states. Shared
+contracts and API client are unchanged from main. Report/viewer splits retain
+react-resizable-panels to preserve the verified nested maximize/restore behavior;
+the unrelated shared `SplitPanel` API and `/dev/ui` remain unchanged.
+
+Local DICOM intake and rendering work without the API. They do not populate
+analysis results or create server runs. The [Review specification][review-spec]
+describes the UI seam; the [viewer specification][viewer-spec] describes input
+support, geometry, limits, library integration and verification coverage.
+
+[review-spec]: ../apps/web/src/features/review/.context/CONTEXT.md
+[viewer-spec]: ../packages/viewer/.context/CONTEXT.md
 
 ## Parallel agents
 
