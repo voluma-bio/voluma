@@ -23,7 +23,9 @@
  *   - When the caller's server-side scope is `self` (not in `meResponseSchema`),
  *     reads are also filtered to the caller: a run when `startedBy` is the
  *     caller's `userId` or the run is an `example`; an input when `uploadedBy`
- *     is the caller or an example run reads it. Scope `lab` sees the org.
+ *     is the caller or it is the org's reference scan (`source: "reference"`),
+ *     which every reader of the org can read, list and start on. Scope `lab`
+ *     sees the org.
  *   - Example runs are read-only to everyone. Only server-side seeding (an
  *     operator script, under a dedicated operator id) sets `example`, never
  *     `startRun` or a fork, and it never changes afterwards; to change an
@@ -99,8 +101,8 @@ import { workflowPinSchema } from "./workflow";
  * `inputPrefix(id)`; the `reference` scan is `referencePrefix("scan")`. The
  * server derives the R2 prefix; the browser never needs it. The upload call
  * that creates inputs is a later PR; its key layout (`inputKey`) is settled in
- * `r2.ts`. Under `self`, `listInputs` lists only the caller's uploads; an
- * example run's input is readable through the run, not listed.
+ * `r2.ts`. Under `self`, `listInputs` lists the caller's uploads and the
+ * org's reference scan.
  */
 export const inputSchema = z.object({
   id: inputIdSchema,
