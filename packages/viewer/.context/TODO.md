@@ -1,10 +1,10 @@
 # Viewer follow-up
 
-- Full-resolution volume inspection is a researcher requirement, not satisfied
-  by the Standard/Compact preview caps. In `volume.ts` and `DicomVolume.tsx`,
-  investigate native-grid storage/rendering, explicit memory admission and a
-  way to inspect fine structures without silently substituting a reduced grid.
-  Use the real scan and workstation measurements before choosing the approach.
+- Full resolution now builds the native grid in 16-bit stored values where
+  possible. Still open: measure it on a hardware GPU with Andrew's 604×604×412
+  scan and a real micro-CT; check whether the GPU texture is norm16, half float
+  or Float32 there; for scans past the 2 GiB / texture-size limits, bricked or
+  region-of-interest loading.
 - Performance investigation: use the real OA6-1RK ZIP and a representative large
   micro-CT acquisition. Measure import time, time to first visible slice, scrub
   latency, peak browser/GPU memory, repeated replacement and close. Use the
