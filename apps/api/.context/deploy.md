@@ -12,7 +12,7 @@ Railway project `wonderful-abundance`, environment `staging`. Services:
 |---|---|
 | `@voluma/api` | Deployed from the GitHub repo, branch `main`, root directory `/`. Railway domain, no custom domain yet (`app.voluma.bio` comes with the DNS records) |
 | `Postgres` | Railway template, image `postgres-ssl`. No public domain, no TCP proxy |
-| `@voluma/runner` | Created by the repo import, left undeployed until the runner is long-running |
+| `@voluma/runner` | Deployed: claims runs over the private network. Settings, variables and the sandbox image: [../../runner/.context/deploy.md](../../runner/.context/deploy.md) |
 
 **Settings live on the service, not in the repo.** Railway's config as code (a
 `railway.json` file) is deprecated: new services can't opt in, and existing files stop being
@@ -43,7 +43,7 @@ Variables on `@voluma/api`:
 | `GUEST_ORGANIZATION_ID`, `GUEST_SCOPE` | optional: let anyone in as a guest of this organization (`lab` or `self`, default `lab`). Staging runs open: the Demo organization (`WORKOS_DEMO_ORGANIZATION_ID`'s value) with `GUEST_SCOPE=self`; never the Yao Lab, whose data is for signed-in members only (startup throws if the guest organization is one members sign in to). Unset means the sign-in wall |
 | `WORKOS_JUDGES_ORGANIZATION_ID` | optional: the Judges organization's id; its members get scope `self`. Unset means no Judges sign-in |
 | `RUN_LIMITS_<ORG>_<LIMIT>` | what an organization may run, `<ORG>` one of `LAB`, `JUDGES`, `DEMO` (the guest organization) and `<LIMIT>` one of `PER_CALLER`, `CONCURRENT`, `PER_DAY`, `USD_PER_DAY`, `VISITOR_ACTIVE` (visitor runs queued or running, per org: a start or `/keys` past it is a 429; `awaiting-keys` runs don't count). Unset is no limit, so set them: Yao Lab `CONCURRENT=4`; Judges `CONCURRENT=2`, `PER_DAY=50`; Demo `PER_CALLER=1`, `CONCURRENT=2`, `PER_DAY=10`, `VISITOR_ACTIVE=4` while staging is open to guests (then `CONCURRENT=1`, `PER_DAY=2` for the hackathon). Read at start: a change is a restart, not a deploy of code |
-| `PORT` | set by Railway |
+| `PORT` | `8080`, set explicitly: the runner's private URL (`http://volumaapi.railway.internal:8080`) needs a known port, and Railway's injected one is not readable. The public domain follows it |
 
 The root `prepare` script skips `lefthook install` outside a git checkout, as in Railway's build.
 
@@ -144,9 +144,8 @@ before 2026-10-21 as exposed and rotate it.
 | R2 keys, `CLOUDFLARE_API_TOKEN` | `.env` (runner) | Cloudflare dashboard: roll the token, replace in `.env`. Keep the R2 token limited to the `voluma-staging` bucket |
 | Modal token | `.env` or `~/.modal.toml` | `modal token new`, revoke the old in the Modal dashboard |
 
-Nothing but the API token, the database URL and the sign-in values is in Railway today. The runner's
-keys enter Railway only when the runner is deployed; then add them to its variables and
-this table.
+The runner service holds the model key (`VOLUMA_META_API_KEY`), the Modal token and the R2 keys in
+its own Railway variables (names in [../../runner/.context/deploy.md](../../runner/.context/deploy.md)); rotate them there as well as in `.env`. The API still holds no model or storage keys.
 
 ## Least privilege
 
@@ -155,3 +154,9 @@ this table.
 - Postgres has no public domain or TCP proxy; only services in the project reach it. Don't
   create a proxy except for the drill in [TODO.md](TODO.md), and remove it after.
 - The API holds no model or storage keys.
+
+## Checked on staging (2026-10-28)
+
+- `RUN_LIMITS_*` are set as in the table above and applied: a guest's second concurrent start answers 409 (`DEMO_PER_CALLER=1`).
+- A Railway build can fail transiently (`frontend grpc server closed unexpectedly`); a redeploy fixes it, and the old deployment keeps serving meanwhile.
+- A deploy with no healthcheck sits in DEPLOYING for about 2 minutes before SUCCESS; the previous deployment is removed after that.

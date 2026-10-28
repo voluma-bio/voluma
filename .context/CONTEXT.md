@@ -57,9 +57,10 @@ checklist, check threads, and review chat threads.
   names are unique among running sandboxes, so a sandbox a dead runner left behind
   would block a resume). `packages/harness/src/layout.ts` owns which prefix is mounted
   where; prompts and tools take paths from it.
-  There is no internet. The image is prebuilt and named
-  (`pnpm --filter @voluma/runner publish-image <name>`), installing
-  `workflows/microct-analysis/requirements.txt`. Every command runs
+  There is no internet. The image is a public GHCR image pinned by digest (`SANDBOX_IMAGE` in
+  `apps/runner/src/config.ts`), built by the "Sandbox image" workflow from
+  `apps/runner/sandbox/Dockerfile`, which installs `workflows/microct-analysis/requirements.txt`,
+  so a visitor's Modal workspace pulls the same one. Every command runs
   under `timeout -k`, which leads its own process group,; a timeout or an abort kills the whole
   group, except a descendant that calls `setsid` itself, which survives until the
   sandbox is destroyed.
