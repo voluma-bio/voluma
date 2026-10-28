@@ -18,7 +18,7 @@ export const segmentSchema = z
  * Run and task ids also hold no '.', so a thread id built as
  * `<runId>.<taskId>.<role>` reads back one way: with a '.' allowed,
  * run `a.b` + task `c` and run `a` + task `b.c` would build the same id. Thread ids
- * are global keys (events, history rows) and URL segments (`/ingest/threads/:threadId/messages`),
+ * are global keys (events, history rows) and URL segments (`/ingest/runs/:runId/threads/:threadId/messages`),
  * and '.' is URL-safe. A root thread's id is `<runId>.<role>`.
  */
 const dotFreeSegmentSchema = segmentSchema.refine((s) => !s.includes("."), {

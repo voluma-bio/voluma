@@ -47,6 +47,7 @@ if (!provider || !modelId || !task) {
 }
 const runId = runIdSchema.parse(values.run ?? `run-${randomUUID().slice(0, 8)}`);
 const threadId = values.thread ?? `${runId}.main`;
+if (!threadId.startsWith(`${runId}.`)) throw new Error(`--thread must begin with "${runId}."`);
 
 const models = createModels();
 const providers = { anthropic: anthropicProvider, meta: metaProvider, openai: openaiProvider };
@@ -59,7 +60,8 @@ if (!model) throw new Error(`unknown model ${provider}/${modelId}`);
 const apiUrl = optional("VOLUMA_API_URL");
 // Every ingest write carries the lease of a claimed run (`@voluma/contracts/runner`). This CLI
 // should claim a queued run and take the token from the claim; until the API serves claims
-// (lane A) and the claimer exists (lane E), the token is passed in and nothing can write.
+// (lane A) and the claimer exists (lane E), the token is passed in. Today's API checks no token,
+// so any value works.
 const api = httpClient({
   ...(apiUrl ? { baseUrl: apiUrl, token: required("VOLUMA_API_TOKEN") } : localApi()),
   runId,

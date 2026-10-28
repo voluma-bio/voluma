@@ -28,13 +28,16 @@ import type { Tool } from "../../tools/tool";
 
 type UserSender = Extract<PayloadOf<"message">, { role: "user" }>["sender"];
 
-export interface RunThreadOptions {
+/** The `thread.started` rule on `task`, in types: a worker or check thread has a task, a supervisor none. */
+type ThreadIdentity =
+  | { kind: "worker" | "check"; taskId: string }
+  | { kind: "supervisor"; taskId?: never }
+  | { kind: "chat"; taskId?: string };
+
+export type RunThreadOptions = ThreadIdentity & {
   runId: string;
   threadId: string;
-  kind: ThreadKind;
   parentThreadId?: string;
-  /** The plan task a worker or check thread works on; absent for a supervisor. */
-  taskId?: string;
   /** The thread's first user message; also sent if a resumed thread never stored one. */
   task: string;
   /**
@@ -56,7 +59,7 @@ export interface RunThreadOptions {
   sandbox: (threadId: string) => Promise<Sandbox>;
   /** Aborting ends the thread as cancelled and kills a running command. */
   signal?: AbortSignal;
-}
+};
 
 export interface ThreadOutcome {
   /** False when nothing happened: the thread was finished and got no input, or it was refused before starting. */
@@ -189,8 +192,7 @@ export async function runThread(options: RunThreadOptions): Promise<ThreadOutcom
           if (!ok) break;
           if (message.role === "toolResult") emitToolResult(message);
           else if (message.role === "assistant") {
-            // Every reply gets a `message`, even an empty or failed one: it ends the
-            // reply's live partial (`stream.ts`).
+            // Every reply gets a `message`, even an empty or failed one.
             emit("message", { role: "assistant", text: textOf(message) });
           } else if (message.role === "user") {
             const sender = senders.get(message);

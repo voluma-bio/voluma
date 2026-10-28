@@ -55,7 +55,8 @@
  *
  * There is no tokenless write. The hand-started CLI (`apps/runner`, `run-task`) is a
  * claimer too: it claims a queued run and holds its lease like the service. Until the
- * API serves claims it cannot write.
+ * API serves claims it takes the token from the environment; today's API checks no token,
+ * so any value works.
  *
  * Cancel. The runner learns a run is over from the heartbeat: `stop` is true
  * once the server has ended it (cancelled by the user, or `failed` by the
