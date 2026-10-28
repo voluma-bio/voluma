@@ -9,7 +9,7 @@
  * holds, and rebuilds the conversation from them (a user message per wake, the recorded
  * answer as the reply), so a resumed run asks from the same context the first run had and
  * a provider's prompt cache keeps hitting the prefix. The context grows by one wake and
- * one answer per wake.
+ * one answer per wake. The `run-started` answer replays the plan it built, if it changed one.
  */
 import type {
   Api,
@@ -143,8 +143,12 @@ function conversation(model: Model<Api>, past: readonly Wake[], point: Wake["poi
   for (const w of past) {
     if (w.error !== undefined) continue;
     messages.push({ role: "user", content: wakeText(w.point), timestamp: at });
+    // `plan` is the one the run-started answer's `change` built; later wakes would not
+    // otherwise see it (the system prompt's brief is the computed plan). It comes from the
+    // log, so every later wake and a resume replay the same bytes.
     const answer = {
       ...(w.note !== undefined && { note: w.note }),
+      ...(w.plan !== undefined && { plan: w.plan }),
       decision: w.decision,
     };
     messages.push({
