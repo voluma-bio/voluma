@@ -17,8 +17,25 @@
  *                                     the caller's guest identity, made on first
  *                                     call and kept in a cookie; 404 when the
  *                                     server lets no guests in
+ *   POST /api/auth/password         body `passwordSignInRequestSchema` → 200
+ *                                     `meResponseSchema` and the session cookie,
+ *                                     for scripts (the scan upload CLI); a browser
+ *                                     signs in through `login`. 401 when the
+ *                                     identity provider refuses the sign-in (a wrong
+ *                                     email or password, or an account that must
+ *                                     sign in another way: SSO, MFA), 403 for a user
+ *                                     who belongs to no allowed organization, 429
+ *                                     after too many failed attempts for the email
+ *                                     (the server counts them, and passes the
+ *                                     caller's address and user agent to the
+ *                                     provider, which limits too); the server
+ *                                     never logs the request body. A
+ *                                     script, which sends no `Origin` by itself,
+ *                                     must send the rules below on this and every
+ *                                     later call: `Origin: <app URL>` and
+ *                                     `content-type: application/json`
  *
- * Rules for every cookie-authenticated request under `/api`:
+ * Rules for every request under `/api` that doesn't carry the runner's bearer token:
  *   - A non-GET/HEAD request must send `content-type: application/json`, or
  *     the server answers 415.
  *   - `Origin` must equal the app's origin, or the server answers 403
@@ -55,3 +72,10 @@ export type Me = z.infer<typeof meResponseSchema>;
 
 export const logoutResponseSchema = z.object({ logoutUrl: z.string() });
 export type LogoutResponse = z.infer<typeof logoutResponseSchema>;
+
+/** A member's own email and password, for a script that signs in without a browser. */
+export const passwordSignInRequestSchema = z.object({
+  email: z.string().min(1).max(320),
+  password: z.string().min(1).max(1024),
+});
+export type PasswordSignInRequest = z.infer<typeof passwordSignInRequestSchema>;
