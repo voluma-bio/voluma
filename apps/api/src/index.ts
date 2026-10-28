@@ -9,7 +9,8 @@
  * receives SIGTERM; tsx because relative imports have no extensions).
  * Env: DATABASE_URL, VOLUMA_API_TOKEN, APP_URL, PORT, optionally HOST (`pnpm dev` sets
  * them; see tools/dev.mjs), and WORKOS_CLIENT_ID, WORKOS_API_KEY, WORKOS_COOKIE_PASSWORD,
- * WORKOS_LAB_ORGANIZATION_ID, and optionally WORKOS_JUDGES_ORGANIZATION_ID (the repo .env). Fails at startup if the database is unreachable or not migrated.
+ * WORKOS_LAB_ORGANIZATION_ID, and optionally WORKOS_JUDGES_ORGANIZATION_ID, and
+ * GUEST_ORGANIZATION_ID with GUEST_SCOPE (lab|self, default lab) to let anyone in as a guest (the repo .env). Fails at startup if the database is unreachable or not migrated.
  */
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -31,6 +32,12 @@ const required = (name: string) => {
   return value;
 };
 
+function guestScope() {
+  const scope = process.env.GUEST_SCOPE ?? "lab";
+  if (scope !== "lab" && scope !== "self") throw new Error("GUEST_SCOPE must be lab or self");
+  return scope;
+}
+
 const client = postgres(required("DATABASE_URL"));
 const db = drizzle(client, { casing: "snake_case" });
 
@@ -46,6 +53,11 @@ const auth = createAuth({
       ? [{ id: process.env.WORKOS_JUDGES_ORGANIZATION_ID, scope: "self" as const }]
       : []),
   ],
+  // Guests (auth.ts): a request with no credential is a guest in this organization.
+  // Unset means the sign-in wall.
+  guest: process.env.GUEST_ORGANIZATION_ID
+    ? { organizationId: process.env.GUEST_ORGANIZATION_ID, scope: guestScope() }
+    : null,
   appUrl: required("APP_URL").replace(/\/$/, ""),
   apiToken: required("VOLUMA_API_TOKEN"),
 });
