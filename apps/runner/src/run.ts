@@ -22,14 +22,14 @@ import type { Api, Model, Models } from "@earendil-works/pi-ai";
 import { inputPrefix, referencePrefix, workflowSnapshotPrefix } from "@voluma/contracts/r2";
 import type { Claim, ReportRequest } from "@voluma/contracts/runner";
 import { runClient } from "@voluma/harness/adapters/http/run-client";
-import { llmJudgment } from "@voluma/harness/judgment";
 import { runLayout } from "@voluma/harness/layout";
+import { llmMainThread, mainSystem, runBrief } from "@voluma/harness/main-thread";
 import { type Recorder, recorder } from "@voluma/harness/recorder";
 import { type SandboxSession, sandboxSession } from "@voluma/harness/sandbox-session";
 import { type RunRole, superviseRun } from "@voluma/harness/supervise-run";
 import { loadWorkflow } from "@voluma/workflow/load";
-import { adaptPlan, computePlan } from "@voluma/workflow/plan";
-import type { Config } from "./config.ts";
+import { computePlan } from "@voluma/workflow/plan";
+import { type Config, isVisitorSafe, providerKey } from "./config.ts";
 import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
 import { metaSegmenter } from "./meta-segmenter.ts";
@@ -59,8 +59,8 @@ const MODEL_RETRIES = 3;
 export interface RunnerContext {
   config: Config;
   models: Models;
-  /** The models the config names, resolved at startup. */
-  model: Model<Api>;
+  /** The models the config names for a `voluma` run's roles, resolved at startup. */
+  roles: Record<"worker" | "check" | "main", Model<Api>>;
   visitorModel: Model<Api>;
   log(line: string): void;
 }
@@ -89,8 +89,20 @@ export async function runClaim(
   const runId = run.id;
   const claimId = randomUUID();
   const visitor = keys !== undefined;
-  const model = visitor ? ctx.visitorModel : ctx.model;
-  const apiKey = visitor ? keys.metaApiKey : config.model.apiKey;
+  // A visitor's key and scan go to Standard-mode Meta models only: the main thread keeps its
+  // configured model when that is one, else the visitor model.
+  const roleModel = (role: "worker" | "check" | "main") =>
+    !visitor
+      ? ctx.roles[role]
+      : role === "main" && isVisitorSafe(config.roles.main)
+        ? ctx.roles.main
+        : ctx.visitorModel;
+  const workerModel = roleModel("worker");
+  const checkModel = roleModel("check");
+  const mainModel = roleModel("main");
+  /** The key for a provider: a visitor's Meta key is good for Meta alone. */
+  const keyFor = (provider: string) =>
+    visitor ? (provider === "meta" ? keys.metaApiKey : undefined) : providerKey(provider);
   const modal = visitor ? keys.modal : config.modal;
   const metaKey = visitor ? keys.metaApiKey : config.metaApiKey;
   const redact: Redact = redactor([
@@ -123,7 +135,9 @@ export async function runClaim(
   let error: string | undefined;
   try {
     lease = holdLease({ client, meter, onStop: stop, log });
-    log(`claimed (${visitor ? "visitor" : "voluma"} keys, model ${model.provider}/${model.id})`);
+    log(
+      `claimed (${visitor ? "visitor" : "voluma"} keys, model ${workerModel.provider}/${workerModel.id})`,
+    );
 
     // Before any sandbox: an unreadable workflow or a bad selection fails the run here, with its
     // message. The run's pin names the workflow directory; its files are snapshotted from this
@@ -136,19 +150,9 @@ export async function runClaim(
       root: REPO_ROOT,
       commit: config.commit,
     });
-    const stored = await client.storedEvents();
-    // A resumed run keeps the plan its first event recorded. Only a new run computes one: the
-    // tasks that produce the selected outputs and what they need, adapted to the run's notes.
-    const recorded = stored.find(
-      (e) => e.type === "revision.started" && e.payload.reason === "run",
-    );
-    const plan =
-      recorded?.type === "revision.started" && recorded.payload.reason === "run"
-        ? recorded.payload.plan
-        : await adaptPlan(computePlan(definition.files, run.selectedOutputs), {
-            notes: run.notes,
-            files: definition.files,
-          });
+    // The tasks that produce the selected outputs and what they need. The main thread may adapt
+    // them to the run's notes when the run starts (`superviseRun`).
+    const computed = computePlan(definition.files, run.selectedOutputs);
     // Every role's tools come from here, not from the workflow.
     const roleTools = ["view_image", ...(metaKey ? ["segment_sam"] : [])];
 
@@ -167,6 +171,7 @@ export async function runClaim(
         cloudflareApiToken: config.r2.cloudflareApiToken,
       },
     });
+    const stored = await client.storedEvents();
     events = recorder(
       {
         async append(event) {
@@ -201,7 +206,11 @@ export async function runClaim(
     const opened = session;
 
     const callModel = retryMetaNotFound((m, context, options) =>
-      models.streamSimple(m, context, { ...options, apiKey, maxRetries: MODEL_RETRIES }),
+      models.streamSimple(m, context, {
+        ...options,
+        apiKey: keyFor(m.provider),
+        maxRetries: MODEL_RETRIES,
+      }),
     );
     const streamFn: RunRole["streamFn"] = (m, context, options) => {
       const stream = callModel(m, context, options);
@@ -211,15 +220,22 @@ export async function runClaim(
       );
       return stream;
     };
-    const judgment = llmJudgment(`llm:${model.id}`, async (context, signal) => {
-      const reply = await callModel(model, context, { signal }).result();
-      meter.addModelCost(reply.usage?.cost.total ?? 0);
-      return reply;
-    });
+    const main = llmMainThread(
+      mainModel,
+      mainSystem(runBrief(run.selectedOutputs, computed.tasks)),
+      async (context, signal) => {
+        const reply = await callModel(mainModel, context, { signal }).result();
+        meter.addModelCost(reply.usage?.cost.total ?? 0);
+        return reply;
+      },
+    );
     const files = r2Files(config.r2);
     const supervised = superviseRun({
       runId,
-      plan: plan.tasks,
+      plan: computed.tasks,
+      selectedOutputs: run.selectedOutputs,
+      notes: run.notes,
+      workflow: definition.files,
       // The commit the files came from: the snapshot's, which a resume keeps.
       workflows: run.workflows.map((pin) => ({ ...pin, commit: definition.commit })),
       layout,
@@ -231,19 +247,19 @@ export async function runClaim(
       segmenter: metaKey
         ? metaSegmenter({ apiKey: metaKey, log, addCost: meter.addModelCost })
         : undefined,
-      judgment,
-      worker: (task) => ({
-        model,
+      main,
+      worker: (task, notes) => ({
+        model: workerModel,
         streamFn,
         systemPrompt: workerSystem(definition),
-        prompt: workerPrompt(task),
+        prompt: workerPrompt(task, { user: run.notes, main: notes }),
         tools: roleTools,
       }),
-      check: (task) => ({
-        model,
+      check: (task, notes) => ({
+        model: checkModel,
         streamFn,
         systemPrompt: checkSystem(definition),
-        prompt: checkPrompt(task),
+        prompt: checkPrompt(task, { user: run.notes, main: notes }),
         tools: roleTools,
       }),
       signal: abort.signal,

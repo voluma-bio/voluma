@@ -10,12 +10,10 @@ import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { createModels } from "@earendil-works/pi-ai";
-import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
-import { metaProvider } from "@earendil-works/pi-ai/providers/meta";
-import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
 import { CLAIM_POLL_SECONDS } from "@voluma/contracts/runner";
 import { claimRun } from "@voluma/harness/adapters/http/hand-off";
 import { runnerConfig } from "./config.ts";
+import { PROVIDERS } from "./providers.ts";
 import { redactor } from "./redact.ts";
 import { type RunnerContext, runClaim } from "./run.ts";
 
@@ -35,21 +33,23 @@ const redact = redactor(config.secrets);
 const log = (line: string) => console.log(`${new Date().toISOString()} ${redact(line)}`);
 
 const models = createModels();
-models.setProvider(anthropicProvider());
-models.setProvider(metaProvider());
-models.setProvider(openaiProvider());
+for (const provider of Object.values(PROVIDERS)) models.setProvider(provider());
 const resolve = (ref: { provider: string; id: string }) => {
   const model = models.getModel(ref.provider, ref.id);
   if (!model) throw new Error(`unknown model ${ref.provider}/${ref.id}`);
   return model;
 };
-const model = resolve(config.model);
+const roles = {
+  worker: resolve(config.roles.worker),
+  check: resolve(config.roles.check),
+  main: resolve(config.roles.main),
+};
 
 const runnerId = `runner-${randomUUID().slice(0, 8)}`;
 const ctx: RunnerContext = {
   config,
   models,
-  model,
+  roles,
   visitorModel: resolve(config.visitorModel),
   log,
 };
@@ -72,7 +72,9 @@ const shuttingDown = new Promise<void>((resolve) =>
 const sleep = (ms: number) => delay(ms, undefined, { signal: shutdown.signal }).catch(() => {});
 
 log(
-  `${runnerId} up: ${config.concurrency} slot(s), model ${config.model.provider}/${config.model.id}, api ${config.api.baseUrl}`,
+  `${runnerId} up: ${config.concurrency} slot(s), models ${Object.entries(config.roles)
+    .map(([role, m]) => `${role} ${m.provider}/${m.id}`)
+    .join(", ")}, api ${config.api.baseUrl}`,
 );
 while (!shutdown.signal.aborted) {
   if (active.size >= config.concurrency) {
