@@ -14,6 +14,7 @@ cannot `serviceConnect`, but `environmentPatchCommit` (config as a patch) create
 | Setting | Value |
 |---|---|
 | Source | GitHub repo `voluma-bio/voluma`, root `/`, branch `jimyao/runner-deploy` while #59 is open. **At merge, change the branch to `main`** (`environmentPatchCommit` with `services.<id>.source.branch`), or the runner stops following pushes once the branch is deleted |
+| CI check suites | Enabled (`source.checkSuites: true`); Railway waits for GitHub check suites before deploying |
 | Build | Railpack, build command `echo runner has no build step`. `tsx` is a runtime dependency, because Railpack prunes dev dependencies |
 | Start | `cd apps/runner && exec node --import tsx src/main.ts`. `exec` makes node the container's process, so it gets SIGTERM |
 | Draining | 60 s: above the runner's `SHUTDOWN_BUDGET_MS` (30 s), which is how long it waits for runs to report `released` |
