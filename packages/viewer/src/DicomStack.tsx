@@ -1,18 +1,8 @@
 /** Acquired-slice viewport. Cornerstone owns pixel decoding, modality/VOI transforms and pixel aspect ratio. */
-import { cache, Enums, init, RenderingEngine, type Types } from "@cornerstonejs/core";
-import { init as initDicom, wadouri } from "@cornerstonejs/dicom-image-loader";
+import { Enums, RenderingEngine, type Types } from "@cornerstonejs/core";
 import { useEffect, useRef, useState } from "react";
 import type { DicomSeries } from "./dicom";
-
-let initialization: Promise<void> | undefined;
-function initialize() {
-  initialization ??= (async () => {
-    await init();
-    cache.setMaxCacheSize(256 * 1024 * 1024);
-    initDicom({ maxWebWorkers: 2 });
-  })();
-  return initialization;
-}
+import { acquireDicomSession, type DicomSession, initializeDicom } from "./dicomSession";
 
 export default function DicomStack({ series }: { series: DicomSeries }) {
   const element = useRef<HTMLDivElement>(null);
@@ -33,17 +23,18 @@ export default function DicomStack({ series }: { series: DicomSeries }) {
     let disposed = false;
     let engine: RenderingEngine | undefined;
     let observer: ResizeObserver | undefined;
-    let imageIds: string[] = [];
+    let session: DicomSession | undefined;
     let desired = 0;
     let loading = false;
     setIndex(0);
     setReady(false);
     setError(false);
     setStatus("Preparing image viewer…");
-    let pending = initialize()
+    let pending = initializeDicom()
       .then(async () => {
         if (disposed) return;
-        imageIds = series.slices.map((slice) => wadouri.fileManager.add(slice.file));
+        const activeSession = acquireDicomSession(series);
+        session = activeSession;
         engine = new RenderingEngine(`local-${crypto.randomUUID()}`);
         engine.enableElement({ viewportId: "scan", type: Enums.ViewportType.STACK, element: host });
         const viewport = engine.getViewport("scan") as Types.IStackViewport;
@@ -51,9 +42,11 @@ export default function DicomStack({ series }: { series: DicomSeries }) {
           if (host.clientWidth && host.clientHeight) engine?.resize(true, false);
         });
         observer.observe(host);
-        await decode(0);
-        if (disposed) return;
-        await viewport.setStack(imageIds);
+        await session.read(
+          0,
+          () => (disposed ? undefined : viewport.setStack(activeSession.imageIds)),
+          true,
+        );
         if (disposed) return;
         viewport.render();
         const voi = viewport.getProperties().voiRange;
@@ -76,9 +69,11 @@ export default function DicomStack({ series }: { series: DicomSeries }) {
               let loaded: number;
               do {
                 loaded = desired;
-                await decode(loaded);
-                if (disposed) return;
-                await viewport.setImageIdIndex(loaded);
+                await activeSession.read(
+                  loaded,
+                  () => (disposed ? undefined : viewport.setImageIdIndex(loaded)),
+                  true,
+                );
                 if (disposed) return;
               } while (loaded !== desired);
               viewport.render();
@@ -94,22 +89,6 @@ export default function DicomStack({ series }: { series: DicomSeries }) {
         setStatus("");
       })
       .catch(showError);
-
-    async function decode(index: number) {
-      const id = imageIds[index] as string;
-      if (cache.isLoaded(id)) return;
-      // Cornerstone's convenience loader doesn't await cache insertion, and GPU
-      // setStack resolves on decode failure. Await the load object explicitly so
-      // codec failures reach the UI without an unhandled cache rejection.
-      const load = wadouri.loadImage(id);
-      load.promise = load.promise.then((image) => {
-        // Single-frame local files have no shared volume owner. Removing this
-        // loader hint lets Cornerstone evict old slices when the cache fills.
-        image.sharedCacheKey = undefined;
-        return image;
-      });
-      await cache.putImageLoadObject(id, load);
-    }
 
     function showError() {
       if (!disposed) {
@@ -128,13 +107,7 @@ export default function DicomStack({ series }: { series: DicomSeries }) {
       // and evict again afterwards so a late result cannot repopulate a closed scan.
       void pending.finally(() => {
         engine?.destroy();
-        for (const id of imageIds) {
-          if (cache.getImageLoadObject(id)) cache.removeImageLoadObject(id);
-          const parsed = wadouri.parseImageId(id);
-          if (wadouri.dataSetCacheManager.isLoaded(parsed.url))
-            wadouri.dataSetCacheManager.unload(parsed.url);
-          wadouri.fileManager.remove(Number(parsed.url));
-        }
+        session?.release();
       });
     };
   }, [series, retry]);

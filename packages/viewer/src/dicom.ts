@@ -4,6 +4,7 @@ export type Orientation = [number, number, number, number, number, number];
 export interface DicomSlice {
   file: Blob;
   position: Point3;
+  frameOfReferenceUID?: string;
 }
 
 export interface DicomSeries {
