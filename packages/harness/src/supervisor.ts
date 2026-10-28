@@ -26,6 +26,10 @@
  * event, `<thread>:judgment`, and applies it. A resume finds these events and asks no one
  * again; a wake the model never answered before a crash is asked again.
  *
+ * A thread whose stored History cannot be resumed (`stale`: a deploy changed its prompt, tools
+ * or model) is not a failure: the supervisor records a code-made `redo` judgment for it
+ * (`restartStale`) and the task starts again on a new thread.
+ *
  * A thread that throws or is refused before it starts, or an error in a step (a store failure
  * above all), fails the run on purpose: the threads are aborted and the root ends `failed`,
  * because the supervisor must not carry on from a record the store does not hold. The root
@@ -247,11 +251,38 @@ export function supervisor(options: SupervisorOptions) {
     return "acted";
   }
 
+  /**
+   * A thread whose stored History cannot be resumed (a deploy changed its prompt, tools or
+   * model): the work is redone on a fresh thread, as after a `redo` judgment, but decided here
+   * with no model call. Recorded as the thread's judgment, so a resume applies it and a
+   * restart does not try the thread again.
+   */
+  async function restartStale(r: ThreadRecord, error: string): Promise<Next> {
+    await recorder.append(
+      root,
+      "judgment",
+      {
+        point: { kind: "thread-failed", input: { error: error.slice(0, WAKE_ERROR_MAX) } },
+        arm: "code:unresumable-thread",
+        taskId: r.taskId,
+        decision: {
+          action: "redo",
+          reason: `${r.id} could not resume after a change to its prompt, tools or model; ${r.taskId} starts again on a new thread.`,
+        },
+        applied: { action: "redo" },
+      },
+      `${r.id}${JUDGMENT_SUFFIX}`,
+    );
+    return "acted";
+  }
+
   /** A worker that is not running and did not finish its task. */
   async function stalled(d: ThreadLog, w: ThreadRecord, t: FoldedTask | undefined): Promise<Next> {
     const j = d.judgments.get(w.id);
     if (j) return apply(d, w.id, j, t);
     const { taskId } = w;
+    const unresumable = threads.stale(w.id);
+    if (unresumable) return restartStale(w, unresumable);
     if (w.end?.status === "failed") {
       const error = w.end.error ?? "failed";
       return judgmentFor(d, { kind: "thread-failed", taskId, error, report: report(taskId) }, w.id);
@@ -368,6 +399,8 @@ export function supervisor(options: SupervisorOptions) {
         const c = recordOf(d, t.threads.check, "check", taskId);
         const j = d.judgments.get(c.id);
         if (j) return apply(d, c.id, j, t);
+        const unresumable = threads.stale(c.id);
+        if (unresumable) return restartStale(c, unresumable);
         if (c.end?.status === "failed") {
           const error = c.end.error ?? "failed";
           return judgmentFor(
