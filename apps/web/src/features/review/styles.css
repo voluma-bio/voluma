@@ -194,7 +194,7 @@
     @apply border-border bg-background;
   }
   .evidence-grid {
-    @apply grid grid-cols-2 gap-3;
+    @apply grid grid-flow-row-dense grid-cols-2 gap-3;
   }
   .evidence-card {
     @apply flex h-full w-full flex-col gap-2 rounded border border-border p-2 text-left text-xs;
@@ -219,6 +219,9 @@
   }
   .evidence-grid > div:has(> .file-link) {
     @apply col-span-2 border-b border-border;
+  }
+  .dialog-content.lightbox {
+    @apply max-w-5xl;
   }
   .lightbox-image {
     @apply my-5 max-h-[60dvh] w-full object-contain;

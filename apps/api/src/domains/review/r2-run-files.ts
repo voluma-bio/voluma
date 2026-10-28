@@ -22,9 +22,19 @@ export function r2RunFiles(config: {
           new GetObjectCommand({ Bucket: config.bucket, Key: evidenceKey(runId, sha256) }),
           { abortSignal: signal },
         );
-        if (!result.Body || result.ContentLength === undefined)
-          throw new Error("Missing file body or length.");
-        return { body: result.Body.transformToWebStream(), byteLength: result.ContentLength };
+        if (!result.Body) throw new Error("Missing file body.");
+        const body = result.Body.transformToWebStream();
+        // The SDK doesn't decode a stored Content-Encoding; serving those bytes would corrupt the file.
+        const encoding = result.ContentEncoding?.toLowerCase();
+        if (
+          result.ContentLength === undefined ||
+          !Number.isSafeInteger(result.ContentLength) ||
+          (encoding && encoding !== "identity")
+        ) {
+          await body.cancel().catch(() => {});
+          throw new Error("A run file must have a length and no content encoding.");
+        }
+        return { body, byteLength: result.ContentLength };
       } catch (error) {
         const missing = error instanceof Error && ["NoSuchKey", "NotFound"].includes(error.name);
         throw new HTTPException(missing ? 404 : 502, {

@@ -63,8 +63,8 @@ export function runRoutes({ runs, files }: ReviewDeps) {
     c.header("Content-Length", String(byteLength));
     c.header("X-Content-Type-Options", "nosniff");
     if (!type) c.header("Content-Disposition", "attachment");
-    // Content-addressed: the bytes at this URL never change.
-    c.header("Cache-Control", "private, max-age=31536000, immutable");
+    // Content-addressed: the bytes never change. A day, so a revoked reader's copy doesn't linger.
+    c.header("Cache-Control", "private, max-age=86400, immutable");
     return c.body(stream);
   });
 

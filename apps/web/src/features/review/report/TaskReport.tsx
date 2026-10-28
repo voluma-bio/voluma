@@ -53,7 +53,7 @@ function Evidence({ runId, asset }: { runId: string; asset: Asset }) {
             {failed ? (
               <ImageOff size={25} strokeWidth={1.3} />
             ) : (
-              <img src={url} alt={asset.name} loading="lazy" onError={() => setFailed(true)} />
+              <img src={url} alt="" loading="lazy" onError={() => setFailed(true)} />
             )}
           </div>
           <span className="font-medium break-all">{asset.name}</span>
@@ -64,7 +64,7 @@ function Evidence({ runId, asset }: { runId: string; asset: Asset }) {
       </Dialog.Trigger>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="dialog-content">
+        <Dialog.Content className="dialog-content lightbox">
           <Dialog.Title className="text-xl font-semibold break-all">{asset.name}</Dialog.Title>
           <Dialog.Description className="mt-3 text-muted-foreground">
             {failed ? "The image could not be loaded." : `Evidence from ${asset.stage}.`}
