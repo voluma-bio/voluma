@@ -34,6 +34,7 @@ const format = (value: number) =>
 export function TaskReport({
   task,
   structureName,
+  resultLabel,
   taskNumber,
   runId,
   revisionId,
@@ -45,6 +46,8 @@ export function TaskReport({
   task: ReviewTask;
   /** A structure id to its name, for To check items that point at structures. */
   structureName(id: string): string;
+  /** The revision the task's result is from, as the revision picker names it ("R2"). */
+  resultLabel: string;
   taskNumber: number;
   runId: string;
   revisionId: string;
@@ -80,7 +83,8 @@ export function TaskReport({
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <span className="font-mono">{String(taskNumber).padStart(2, "0")}</span>
           <span>Task report</span>
-          <span className="ml-auto">
+          <span className="ml-auto">Result {resultLabel}</span>
+          <span>
             <StatusBadge tone={taskStatus[task.status].tone}>
               {taskStatus[task.status].label}
             </StatusBadge>
@@ -99,7 +103,7 @@ export function TaskReport({
       <section>
         <div className="section-heading">
           <h2>Measurements</h2>
-          {task.measurements.some((m) => m.confidence) && (
+          {[...task.measurements, ...task.scores].some((m) => m.confidence === "provisional") && (
             <span className="badge warning">Provisional</span>
           )}
         </div>
@@ -133,7 +137,9 @@ export function TaskReport({
                   </span>
                 </th>
                 <td className="font-mono">{m.value === null ? "—" : format(m.value)}</td>
-                <td className="text-muted-foreground">{m.unit || "ratio"}</td>
+                <td className="text-muted-foreground">
+                  {m.unit === "1" || !m.unit ? "ratio" : m.unit}
+                </td>
               </tr>
             ))}
             {task.scores.map((sc) => (
@@ -153,11 +159,16 @@ export function TaskReport({
                 <th scope="row">
                   {o.outputId}
                   <span className="measurement-source">
-                    Not reported{o.required ? " · required" : ""}
+                    {o.kind === "measurement"
+                      ? "Measurement"
+                      : o.kind === "score"
+                        ? "Score"
+                        : "Output"}{" "}
+                    not reported{o.required ? " · required" : ""}
                   </span>
                 </th>
                 <td className="font-mono">—</td>
-                <td className="text-muted-foreground">{o.kind}</td>
+                <td />
               </tr>
             ))}
           </tbody>

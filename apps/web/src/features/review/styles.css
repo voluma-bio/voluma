@@ -127,12 +127,6 @@
   .sidebar-note {
     @apply mx-5 mt-10 border-t border-border pt-4 text-xs leading-relaxed text-muted-foreground;
   }
-  .record-button {
-    @apply flex shrink-0 items-center gap-2 border-t border-border p-4 text-xs text-muted-foreground;
-  }
-  .record-button:hover {
-    @apply bg-accent text-primary-text;
-  }
   .review-panels {
     @apply min-w-0 flex-1;
   }
@@ -397,12 +391,6 @@
   .notice {
     @apply rounded-md bg-muted p-3 text-sm text-muted-foreground;
   }
-  .record-list {
-    @apply my-5 space-y-4;
-  }
-  .record-list li {
-    @apply border-b border-border pb-4;
-  }
   .load-state {
     @apply flex min-h-dvh flex-col items-center justify-center gap-5 p-8 text-center text-muted-foreground;
   }
@@ -479,9 +467,6 @@
     white-space: nowrap;
     padding: 8px 12px;
     margin: 0;
-  }
-  .record-button {
-    padding: 10px 16px;
   }
   .review-panels > [data-group] {
     /* biome-ignore lint/complexity/noImportantStyles: stack the library's inline flex group without unmounting views. */

@@ -160,7 +160,7 @@ export function ReviewWorkspace({
                   ))}
                 </nav>
                 {!revision?.tasks.length && (
-                  <p className="px-5 text-sm text-muted-foreground">
+                  <p className="px-5 text-sm text-muted-foreground" role="status">
                     {notice ?? "Tasks appear when an analysis result is connected."}
                   </p>
                 )}
@@ -239,6 +239,7 @@ export function ReviewWorkspace({
                     structureName={(id) =>
                       revision.structures.find((item) => item.id === id)?.name ?? id
                     }
+                    resultLabel={`R${run.revisions.findIndex((item) => item.id === task.resultRevisionId) + 1}`}
                     taskNumber={revision.tasks.indexOf(task) + 1}
                     runId={run.id}
                     revisionId={revision.id}

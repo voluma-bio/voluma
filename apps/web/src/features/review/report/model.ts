@@ -28,13 +28,13 @@ export const correctionProposalSchema = correctionRequestSchema.extend({
 export type CorrectionRequest = z.infer<typeof correctionRequestSchema>;
 export type CorrectionProposal = z.infer<typeof correctionProposalSchema>;
 
-/** A task status as its badge, in the run screen's tones. */
+/** A task status as its badge, with the run screen's labels and tones (`features/run/status.tsx`). */
 export const taskStatus: Record<TaskStatus, { label: string; tone: StatusTone }> = {
-  pending: { label: "Pending", tone: "neutral" },
+  pending: { label: "Queued", tone: "neutral" },
+  stale: { label: "Queued", tone: "neutral" },
   "in-progress": { label: "Running", tone: "info" },
   done: { label: "Done", tone: "primary" },
   failed: { label: "Failed", tone: "destructive" },
   "to-check": { label: "To check", tone: "check" },
-  "under-review": { label: "Under review", tone: "info" },
-  stale: { label: "Stale", tone: "neutral" },
+  "under-review": { label: "Checking", tone: "info" },
 };

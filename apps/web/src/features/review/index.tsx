@@ -37,20 +37,26 @@ function ScanReview({ runId }: { runId: string }) {
     queryKey: ["review-run", runId],
     queryFn: () => getReviewRun(runId),
     enabled: runId !== "local",
-    retry: (count, cause) => !(cause instanceof ApiError && cause.status < 500) && count < 2,
+    // Only a server error may pass on retry; a 404, a 409 or data the contract rejects won't.
+    retry: (count, cause) => cause instanceof ApiError && cause.status >= 500 && count < 2,
+    // A run with no plan yet gets one once the runner starts it.
+    refetchInterval: (query) => {
+      const cause = query.state.error;
+      return cause instanceof ApiError && cause.status === 409 ? 5000 : false;
+    },
   });
+  const status = review.error instanceof ApiError ? review.error.status : undefined;
+  // Loaded data stays on screen when a background refetch fails.
   const notice =
-    runId === "local"
+    runId === "local" || review.data
       ? undefined
       : review.isPending
         ? "Loading results…"
-        : review.error instanceof ApiError && review.error.status === 409
-          ? "This run has no plan yet, so it has no results to review."
-          : review.error instanceof ApiError && review.error.status === 404
+        : status === 409
+          ? "This run has no plan yet. Results appear here once it starts."
+          : status === 404
             ? "This run is unavailable or you do not have access to it."
-            : review.error
-              ? "Could not load this run's results. Reload to try again."
-              : undefined;
+            : "Could not load this run's results.";
   const [archive, setArchive] = useState<DicomArchive>();
   const [selectedSeries, setSelectedSeries] = useState("");
   const [progress, setProgress] = useState<string>();
