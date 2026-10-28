@@ -10,6 +10,7 @@ import { Button, Card } from "@voluma/ui";
 import { type FormEvent, useState } from "react";
 import { Link, useNavigate, useOutletContext } from "react-router";
 import { KeysForm, loadKeys } from "./keys";
+import { runHref } from "./runs-page";
 import { RunBadge, runStatus } from "./status";
 import { ALL_OUTPUT_IDS, OUTPUT_GROUPS, WORKFLOW, workflowName } from "./workflows";
 
@@ -47,7 +48,7 @@ export function StartPage() {
         notes: notes.trim() === "" ? undefined : notes,
         keys: needsKeys ? keys : undefined,
       }),
-    onSuccess: (run) => navigate(`/runs/${run.id}`),
+    onSuccess: (run) => navigate(`/runs/${run.id}/live`),
   });
 
   const canRun = inputId !== undefined && selected.size > 0 && (!needsKeys || keys !== undefined);
@@ -283,7 +284,7 @@ function RecentRuns() {
         {recent.map((run) => (
           <li key={run.id}>
             <Link
-              to={`/runs/${run.id}`}
+              to={runHref(run)}
               className="flex items-center gap-3 rounded-lg p-2 hover:bg-accent"
             >
               <span className="min-w-0 flex-1">

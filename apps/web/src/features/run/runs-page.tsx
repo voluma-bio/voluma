@@ -1,4 +1,4 @@
-/** The runs list (`/runs`): one row per run; a row opens the live run, or the review once the run is done. */
+/** The runs list (`/runs`): one row per run; a row opens the live run, or the review once the run is completed. */
 import { useQuery } from "@tanstack/react-query";
 import { listRuns } from "@voluma/api-client";
 import type { Run } from "@voluma/contracts/run";
@@ -7,11 +7,11 @@ import { useNavigate } from "react-router";
 import { formatTime, RunBadge, runStatus } from "./status";
 import { workflowName } from "./workflows";
 
-/** Where a row leads: the review is the review lane's route (`/review/:runId`). */
+/** Where a row leads: the review (the review lane's `/runs/:runId`) once completed, else the live page. */
 export const runHref = (run: Run) =>
   run.state.status === "ended" && run.state.outcome === "completed"
-    ? `/review/${run.id}`
-    : `/runs/${run.id}`;
+    ? `/runs/${run.id}`
+    : `/runs/${run.id}/live`;
 
 function finished(run: Run): string {
   const { state } = run;

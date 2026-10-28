@@ -14,7 +14,7 @@ export const runRoutes: RouteObject[] = [
     children: [
       { path: "/", element: <StartPage /> },
       { path: "/runs", element: <RunsPage /> },
-      { path: "/runs/:id", element: <RunPage /> },
+      { path: "/runs/:id/live", element: <RunPage /> },
     ],
   },
 ];

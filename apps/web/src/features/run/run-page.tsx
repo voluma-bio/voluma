@@ -1,5 +1,5 @@
 /**
- * The live run (`/runs/:id`): the run's status with cancel, and the plan's tasks with their
+ * The live run (`/runs/:id/live`): the run's status with cancel, and the plan's tasks with their
  * status as the event stream moves them. The task list is the fold of the run's events
  * (`@voluma/contracts/fold`), the same one the review reads.
  */
@@ -98,7 +98,7 @@ export function RunPage() {
           {runStatus(data).detail ? `, ${runStatus(data).detail}` : ""}
         </p>
 
-        <RunActions run={data} onChange={setRun} toCheck={toCheck} />
+        <RunActions run={data} onChange={setRun} />
 
         <h2 className="mt-8 mb-3 flex items-baseline gap-3 text-lg font-semibold">
           Tasks
@@ -160,15 +160,7 @@ function TaskRow({
   );
 }
 
-function RunActions({
-  run,
-  toCheck,
-  onChange,
-}: {
-  run: Run;
-  toCheck: number;
-  onChange: (run: Run) => void;
-}) {
+function RunActions({ run, onChange }: { run: Run; onChange: (run: Run) => void }) {
   const [confirming, setConfirming] = useState(false);
   const cancel = useMutation({ mutationFn: () => cancelRun(run.id), onSuccess: onChange });
   const resend = useMutation({
@@ -209,10 +201,10 @@ function RunActions({
       {state.status === "ended" && state.outcome === "completed" && (
         <div>
           <Link
-            to={`/review/${run.id}`}
+            to={`/runs/${run.id}`}
             className="inline-flex h-9 items-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary-strong"
           >
-            {toCheck > 0 ? `Review ${toCheck} to check` : "Open the review"}
+            Open review
           </Link>
         </div>
       )}
