@@ -13,7 +13,7 @@
 import { WAKE_ERROR_MAX } from "@voluma/contracts/events";
 import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
 import { adaptPlan } from "@voluma/workflow/plan";
-import type { MainThread } from "./main-thread";
+import type { MainThread, Reply } from "./main-thread";
 import { pointOf } from "./main-thread";
 import type { Recorder } from "./recorder";
 import type { PlanTask } from "./task-runtime";
@@ -68,9 +68,11 @@ export async function runStartPlan(o: RunStartOptions): Promise<readonly PlanTas
   );
   let error: string | undefined;
   let note: string | undefined;
+  let usage: Reply["usage"];
   let plan: ReturnType<typeof adaptPlan> | undefined;
   try {
     const reply = await Promise.race([o.main.ask(point, [], limit), expired]);
+    usage = reply.usage;
     note = reply.note;
     if (reply.change) plan = adaptPlan(o.workflow, o.selectedOutputs, reply.change);
   } catch (e) {
@@ -85,7 +87,11 @@ export async function runStartPlan(o: RunStartOptions): Promise<readonly PlanTas
       model: o.main.model,
       ...(error !== undefined
         ? { error: error.slice(0, WAKE_ERROR_MAX) }
-        : { ...(note !== undefined && { note }), ...(plan && { plan }) }),
+        : {
+            ...(usage && { usage }),
+            ...(note !== undefined && { note }),
+            ...(plan && { plan }),
+          }),
     },
     `${key}${WAKE_SUFFIX}`,
   );

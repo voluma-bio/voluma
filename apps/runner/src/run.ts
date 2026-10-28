@@ -24,6 +24,7 @@ import type { Claim, ReportRequest } from "@voluma/contracts/runner";
 import { runClient } from "@voluma/harness/adapters/http/run-client";
 import { runLayout } from "@voluma/harness/layout";
 import { llmMainThread, mainSystem, runBrief } from "@voluma/harness/main-thread";
+import { usageOf } from "@voluma/harness/model-usage";
 import { type Recorder, recorder } from "@voluma/harness/recorder";
 import { type SandboxSession, sandboxSession } from "@voluma/harness/sandbox-session";
 import { type RunRole, superviseRun } from "@voluma/harness/supervise-run";
@@ -40,7 +41,7 @@ import { r2Evidence } from "./r2-evidence.ts";
 import { r2Files } from "./r2-files.ts";
 import { r2Workflows } from "./r2-workflows.ts";
 import { type Redact, redactor } from "./redact.ts";
-import { usageMeter } from "./usage.ts";
+import { type ModelRole, usageMeter } from "./usage.ts";
 
 /**
  * How long closing the sandbox may take before Modal is asked to terminate the claim's by
@@ -212,20 +213,22 @@ export async function runClaim(
         maxRetries: MODEL_RETRIES,
       }),
     );
-    const streamFn: RunRole["streamFn"] = (m, context, options) => {
-      const stream = callModel(m, context, options);
-      stream.result().then(
-        (reply) => meter.addModelCost(reply.usage?.cost.total ?? 0),
-        () => {},
-      );
-      return stream;
-    };
+    const streamFor =
+      (role: ModelRole): RunRole["streamFn"] =>
+      (m, context, options) => {
+        const stream = callModel(m, context, options);
+        stream.result().then(
+          (reply) => meter.addModelCall(role, usageOf(reply)),
+          () => {},
+        );
+        return stream;
+      };
     const main = llmMainThread(
       mainModel,
       mainSystem(runBrief(run.selectedOutputs, computed.tasks)),
       async (context, signal) => {
         const reply = await callModel(mainModel, context, { signal }).result();
-        meter.addModelCost(reply.usage?.cost.total ?? 0);
+        meter.addModelCall("main", usageOf(reply));
         return reply;
       },
     );
@@ -250,14 +253,14 @@ export async function runClaim(
       main,
       worker: (task, notes) => ({
         model: workerModel,
-        streamFn,
+        streamFn: streamFor("worker"),
         systemPrompt: workerSystem(definition),
         prompt: workerPrompt(task, { user: run.notes, main: notes }),
         tools: roleTools,
       }),
       check: (task, notes) => ({
         model: checkModel,
-        streamFn,
+        streamFn: streamFor("check"),
         systemPrompt: checkSystem(definition),
         prompt: checkPrompt(task, { user: run.notes, main: notes }),
         tools: roleTools,
@@ -291,6 +294,7 @@ export async function runClaim(
         .catch((e) => log(`report failed: ${e instanceof Error ? e.message : e}`));
       log(`reported ${report.kind}${report.kind === "ended" ? ` ${report.outcome}` : ""}`);
       log(`model cost this claim: $${meter.totalModelCostUsd().toFixed(4)}`);
+      for (const line of meter.cacheSummary()) log(`model usage this claim, ${line}`);
     } else {
       log(`stopped (${stopped}); nothing more to report`);
     }
