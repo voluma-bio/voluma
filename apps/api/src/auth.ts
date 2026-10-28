@@ -16,6 +16,8 @@
  *     comma-joining).
  *  4. `userRoutes` and the domains, which see a non-null principal (domain.ts).
  */
+
+import type { Me } from "@voluma/contracts/auth";
 import {
   AuthKitCore,
   CookieSessionStorage,
@@ -386,8 +388,7 @@ export function createAuth(config: AuthConfig) {
 
   userRoutes.get("/me", (c) => {
     const { userId, email, name, labId } = c.var.user;
-    // TODO(contract): satisfies MeResponse
-    return c.json({ userId, email, name, labId });
+    return c.json({ kind: "member", userId, email, name, labId } satisfies Me);
   });
 
   return {

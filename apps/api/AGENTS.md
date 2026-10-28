@@ -33,7 +33,7 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   `new Hono<AppEnv>()` (`src/domain.ts`) and reads `c.get("principal")`; the runner's
   ingest subtree is behind `requireService`. A subtree for signed-in members is
   `new Hono<UserEnv>().use(requireUser)`, whose handlers read the narrowed
-  `c.var.user` (`userId`, `email` (nullable), `name`, `labId`, `scope`) and never check `kind`. Any
+  `c.var.user` (`userId`, `email`, `name`, `labId`, `scope`) and never check `kind`. Any
   other kind gets 403. **Reads go through the reader:** a domain passes `readerOf(c.var.user)`
   (`src/domain.ts`: `{ labId, ownerId }`, `ownerId` null for a lab member and the user's id for
   a `self` user) into its store port's read methods, and the adapter applies it once

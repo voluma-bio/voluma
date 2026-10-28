@@ -15,8 +15,7 @@ export type Principal =
   | {
       kind: "user";
       userId: string;
-      /** Null for a principal without an email (an anonymous demo visitor); WorkOS users have one. */
-      email: string | null;
+      email: string;
       name: string | null;
       /** The user's WorkOS organization: the tenant every record is filed under. */
       labId: string;
