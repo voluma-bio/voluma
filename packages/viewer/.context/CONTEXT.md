@@ -95,6 +95,17 @@ and then a local-file metadata path that returned no compressed frame data. The
 verified 4.22.13 path avoids a deprecated-provider fallback. Upgrading requires
 rerunning local-file and compressed-codec checks, not just building the bundle.
 
+The pinned loader has a pnpm patch in `patches/`: fractional rescale parameters
+require Float32 storage before scaling, and the main thread must preserve that
+buffer. Choosing an integer type from integral extrema loses fractional interior
+values. Prescaling stays enabled so GPU slice VOI and volume intensities agree.
+This patches the ESM decoder's default-buffer path used by local DICOM decoding;
+it does not change caller-specified target buffers. Fractional source slices now
+use four bytes per pixel within the same cache cap; integer transforms retain
+their existing storage. On a loader upgrade, reassess the patch and compare
+decoded slices, GPU input, native volume and downsampled samples against independent
+rescaling, including integral extrema with fractional interiors and signed pixels.
+
 Two behaviors in 4.22.13 require explicit handling: GPU `setStack` can resolve
 after an image load failure, and the convenience loader does not await cache
 insertion. The component awaits the loader/cache operation before displaying a
