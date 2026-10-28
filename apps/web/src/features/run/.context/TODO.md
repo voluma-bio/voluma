@@ -1,3 +1,5 @@
 # Run feature: deferred work
 
-- **Run debug view.** One page per run that shows everything the run log holds, in order: every thread (main, worker, checker) with its model, each message and tool call with its arguments and result, sandbox commands and their output, wakes with their notes and decisions, the plan and every revision, costs, and errors. Today a run's inner workings are visible only in the runner's log and the database. The data is already in the event stream (`subscribe` in `@voluma/api-client`), so this is a web page over the existing stream, not a new API.
+- **Token streaming in the thread view.** The stream carries durable events only, so a message or tool call appears whole when it ends. Needs the live frames in `packages/contracts/src/stream.ts` to be served.
+- **Images and full tool output in the thread view.** `view_image` results keep text only (path, size, sha256) and a truncated `tool.result` keeps its head and tail; the full output and the images are in R2 but no API call serves them to the run page.
+- **Cost.** No cost is on the page yet; per-call usage is on the message and wake events (`modelUsageSchema`).

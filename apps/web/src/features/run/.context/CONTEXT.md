@@ -13,6 +13,7 @@ Three screens under `RunLayout` (top bar and query client): `/` start (`start-pa
 - **Task titles** are `TASK_TITLES` in `workflows.ts`, a copy of the workflow's task names (neither
   `tasks.json` nor the plan carries a title); don't add another copy. The page reads the plan from the first
   `revision.started` itself because `fold` doesn't expose it.
+- **The live page** is a task rail, the orchestration feed and, when `?thread=<threadId>` is set, that thread's transcript beside the feed (full view under 1100 px). All of it is derived in `run-feed.ts` (pure over events: `threadsOf`, `feedOf`, `threadItemsOf`); components only render. The main thread has no message events: its voice is the `wake` events (note and decision); worker and checker starts, `task` events written by a rule and judgments are supervisor code and render as quiet "Supervisor" lines, never in the model's voice. Granularity is one event, not per token.
 - **Live tasks** are `fold(events)` over the run's stream (`subscribe`), published at most every
   200 ms. The task list comes from the `revision.started` plan; a task with no attempt yet is Queued.
   Queue position and run state are not events, so `getRun` is polled every 3 s until the run ends.

@@ -1,20 +1,26 @@
 /**
- * The live run (`/runs/:id/live`): the run's status with cancel, and the plan's tasks with their
- * status as the event stream moves them. The task list is the fold of the run's events
- * (`@voluma/contracts/fold`), the same one the review reads.
+ * The live run (`/runs/:id/live`): the run's status with cancel, a task rail, the orchestration
+ * feed and, beside it, the open thread (`?thread=<id>`). Everything is derived from the run's
+ * events (`run-feed.ts`, and `@voluma/contracts/fold` for task status, the same one the review reads).
+ * Live granularity is one event: a message or a tool call appears whole, not token by token.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, cancelRun, getRun, resendKeys, subscribe } from "@voluma/api-client";
 import type { Me } from "@voluma/contracts/auth";
 import type { RunEvent } from "@voluma/contracts/events";
-import { type FoldedTask, fold } from "@voluma/contracts/fold";
+import { fold } from "@voluma/contracts/fold";
 import type { Run } from "@voluma/contracts/run";
-import { Button, StatusBadge } from "@voluma/ui";
+import { Button } from "@voluma/ui";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useOutletContext, useParams } from "react-router";
+import { Link, useOutletContext, useParams, useSearchParams } from "react-router";
+import { Feed } from "./feed";
 import { KeysForm } from "./keys";
-import { RunBadge, runStatus, taskStatus } from "./status";
-import { taskTitle, workflowName } from "./workflows";
+import { feedOf, latestThreadByTask, planOf, threadsOf } from "./run-feed";
+import { RunBadge, runStatus } from "./status";
+import { useStickToBottom } from "./stick";
+import { TaskRail } from "./task-rail";
+import { ThreadView } from "./thread-view";
+import { workflowName } from "./workflows";
 
 /** Events as they arrive, published at most every 200 ms: a busy run emits many per second. */
 function useRunEvents(runId: string, onClosed: () => void): RunEvent[] {
@@ -51,14 +57,19 @@ export function RunPage() {
   const { id = "" } = useParams();
   const me = useOutletContext<Me>();
   const queryClient = useQueryClient();
+  const [params] = useSearchParams();
   const run = useQuery({
     queryKey: ["run", id],
     queryFn: () => getRun(id),
-    // Queue position and state changes aren't events; the stream is the source for tasks only.
+    // Queue position and state changes aren't events; the stream is the source for the rest.
     refetchInterval: (q) => (q.state.data?.state.status === "ended" ? false : 3000),
   });
   const events = useRunEvents(id, () => void run.refetch());
   const folded = useMemo(() => fold(events), [events]);
+  const threads = useMemo(() => threadsOf(events), [events]);
+  const threadById = useMemo(() => new Map(threads.map((t) => [t.id, t])), [threads]);
+  const entries = useMemo(() => feedOf(events), [events]);
+  const feedRef = useStickToBottom<HTMLDivElement>(entries.length, id);
 
   if (run.isPending) return <Message>Loading run…</Message>;
   if (run.isError) {
@@ -75,90 +86,74 @@ export function RunPage() {
   }
 
   const data = run.data;
-  const first = events.find((e) => e.type === "revision.started" && e.payload.reason === "run");
-  const planTasks =
-    first?.type === "revision.started" && first.payload.reason === "run"
-      ? first.payload.plan.tasks
-      : [];
-  const byId = new Map(folded.tasks.map((t) => [t.id, t]));
-  const done = planTasks.filter((t) => byId.get(t.id)?.status === "done").length;
-  const toCheck = planTasks.filter((t) => byId.get(t.id)?.status === "to-check").length;
+  const plan = planOf(events);
+  const openId = params.get("thread");
+  const open = openId ? threadById.get(openId) : undefined;
   const setRun = (next: Run) => queryClient.setQueryData(["run", id], next);
+  const ended = data.state.status === "ended";
 
   return (
-    <main className="min-h-0 flex-1 overflow-y-auto px-10 py-8 max-[1100px]:px-5">
-      <div className="mx-auto max-w-3xl">
+    <main className="flex min-h-0 flex-1 flex-col px-8 py-5 max-[1100px]:px-4">
+      <div className={openId ? "max-[1100px]:hidden" : undefined}>
         <Link to="/runs" className="text-ui text-primary-text hover:underline">
           Runs
         </Link>
-        <div className="mt-2 flex flex-wrap items-center gap-3">
+        <div className="mt-1 flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-semibold">{data.input.name}</h1>
           <RunBadge run={data} />
+          <span className="text-muted-foreground">
+            {workflowName(data.workflows[0]?.path)}
+            {runStatus(data).detail ? `, ${runStatus(data).detail}` : ""}
+          </span>
         </div>
-        <p className="mt-1 text-muted-foreground">
-          {workflowName(data.workflows[0]?.path)}
-          {runStatus(data).detail ? `, ${runStatus(data).detail}` : ""}
-        </p>
-
         <RunActions run={data} userId={me.userId} onChange={setRun} />
+      </div>
 
-        <h2 className="mt-8 mb-3 flex items-baseline gap-3 text-lg font-semibold">
-          Tasks
-          {planTasks.length > 0 && (
-            <span className="text-ui font-normal text-muted-foreground">
-              {done} of {planTasks.length} done
-              {toCheck > 0 && `, ${toCheck} to check`}
-            </span>
+      <div
+        className={`mt-4 grid min-h-0 flex-1 gap-5 max-[1100px]:block ${
+          openId
+            ? "grid-cols-[15rem_minmax(0,1fr)_minmax(26rem,38rem)]"
+            : "grid-cols-[15rem_minmax(0,1fr)]"
+        }`}
+      >
+        <div className={`min-h-0 overflow-y-auto ${openId ? "max-[1100px]:hidden" : ""}`}>
+          <TaskRail
+            plan={plan}
+            folded={folded.tasks}
+            threadByTask={latestThreadByTask(threads)}
+            openThread={openId}
+            ended={ended}
+          />
+        </div>
+        <div
+          ref={feedRef}
+          className={`min-h-0 overflow-y-auto max-[1100px]:mt-4 max-[1100px]:overflow-visible ${
+            openId ? "max-[1100px]:hidden" : ""
+          }`}
+        >
+          {entries.length === 0 ? (
+            <p className="text-ui text-muted-foreground">
+              {ended
+                ? "This run ended before it started."
+                : "The run's story appears here once it starts."}
+            </p>
+          ) : (
+            <Feed entries={entries} threads={threadById} openThread={openId} />
           )}
-        </h2>
-        {planTasks.length === 0 ? (
-          <p className="text-ui text-muted-foreground">
-            {data.state.status === "ended"
-              ? "This run ended before it made a plan."
-              : "The task list appears when the run starts."}
-          </p>
-        ) : (
-          <ol className="grid gap-2">
-            {planTasks.map((t, i) => (
-              <TaskRow
-                key={t.id}
-                index={i + 1}
-                id={t.id}
-                task={byId.get(t.id)}
-                outputs={t.outputs.length}
-              />
-            ))}
-          </ol>
-        )}
+        </div>
+        {openId &&
+          (open ? (
+            <ThreadView events={events} thread={open} closeTo="?" />
+          ) : (
+            <p className="text-ui text-muted-foreground">
+              This thread isn't in the run yet.{" "}
+              <Link to="?" className="text-primary-text hover:underline">
+                Back to the run
+              </Link>
+            </p>
+          ))}
       </div>
     </main>
-  );
-}
-
-function TaskRow({
-  index,
-  id,
-  task,
-  outputs,
-}: {
-  index: number;
-  id: string;
-  task: FoldedTask | undefined;
-  outputs: number;
-}) {
-  const { label, tone } = taskStatus(task?.status);
-  return (
-    <li className="flex items-start gap-4 rounded-xl border border-border bg-card p-4">
-      <span className="w-5 pt-px text-ui text-fg-subtle tabular-nums">{index}</span>
-      <div className="min-w-0 flex-1">
-        <p className="font-medium">{taskTitle(id)}</p>
-        <p className="text-meta text-muted-foreground">
-          {outputs} {outputs === 1 ? "output" : "outputs"}
-        </p>
-        {task?.reason && <p className="mt-1 text-ui text-muted-foreground">{task.reason}</p>}
-      </div>
-      <StatusBadge tone={tone}>{label}</StatusBadge>
-    </li>
   );
 }
 
@@ -180,7 +175,7 @@ function RunActions({
   const { state } = run;
 
   return (
-    <div className="mt-5 grid gap-3">
+    <div className="mt-3 grid gap-3">
       {state.status === "awaiting-keys" && run.startedBy === userId && (
         <section className="max-w-sm rounded-xl border border-check-line bg-check-tint p-4">
           <h2 className="font-medium text-check-strong">The run is waiting for your keys</h2>
