@@ -9,15 +9,19 @@
  *    `EventIdTaken` if the stored event belongs to another run;
  * 4. apply the `threads` projection, only if the event was new.
  *
- * So `seq` is gapless and in commit order per run. The stream hub relies on that:
- * publish after commit, and a gap means backfill from the log.
+ * So `seq` is gapless and in commit order per run: a reader that has seen `seq` n has seen
+ * every event below it. The stream (stream.ts) relies on that: the notifier fires after a
+ * commit, and the stream then reads the log from its cursor, so a missed or early wake-up
+ * costs a read, never an event.
  */
-import type { EventInput } from "@voluma/contracts/events";
-import { and, eq, sql } from "drizzle-orm";
+import type { EventInput, RunEvent } from "@voluma/contracts/events";
+import { and, asc, eq, gt, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import type { Reader } from "../../domain";
 import { assertLease } from "./lease";
-import type { Tx } from "./pg-runs";
-import { events, threads } from "./schema";
+import type { Notifier } from "./notifier";
+import { readableRuns, type Tx } from "./pg-runs";
+import { events, runs, threads } from "./schema";
 
 /** An event id already stored under another run. */
 export class EventIdTaken extends Error {
@@ -29,8 +33,67 @@ export class EventIdTaken extends Error {
 /** First key of the advisory lock pair; the second is the run. Distinguishes our locks from others'. */
 const EVENT_SEQ_LOCK = 0x76_6f_6c_75;
 
-export function pgEventLog(db: PostgresJsDatabase) {
+const toRunEvent = (row: typeof events.$inferSelect) =>
+  ({ ...row, createdAt: row.createdAt.toISOString() }) as RunEvent;
+
+export function pgEventLog(db: PostgresJsDatabase, notifier: Notifier) {
+  const readAfter = async (runId: string, after: number, limit: number, tx: Tx | typeof db) =>
+    (
+      await tx
+        .select()
+        .from(events)
+        .where(and(eq(events.runId, runId), gt(events.seq, after)))
+        .orderBy(asc(events.seq))
+        .limit(limit)
+    ).map(toRunEvent);
+
   return {
+    /**
+     * The browser's read, scoped to what `reader` can read (null when it can't): whether the
+     * run has ended, and up to `limit` events with `seq > after`, oldest first. One statement,
+     * so one snapshot: an append holds `FOR SHARE` on the run row until it commits and every
+     * end is an `UPDATE` of that row, so a snapshot that shows `ended` shows every event.
+     */
+    async stream(reader: Reader, runId: string, after: number, limit: number) {
+      const page = db
+        .select()
+        .from(events)
+        .where(and(eq(events.runId, runs.id), gt(events.seq, after)))
+        .orderBy(asc(events.seq))
+        .limit(limit)
+        .as("page");
+      const rows = await db
+        .select({
+          state: runs.state,
+          event: {
+            id: page.id,
+            runId: page.runId,
+            threadId: page.threadId,
+            seq: page.seq,
+            type: page.type,
+            payload: page.payload,
+            createdAt: page.createdAt,
+          },
+        })
+        .from(runs)
+        .leftJoinLateral(page, sql`true`)
+        .where(and(readableRuns(reader), eq(runs.id, runId)))
+        .orderBy(asc(page.seq));
+      const first = rows[0];
+      if (!first) return null;
+      return {
+        ended: first.state === "ended",
+        events: rows.flatMap((row) => (row.event ? [toRunEvent(row.event)] : [])),
+      };
+    },
+
+    /** The runner's read: events after a seq, but the lease is checked in the same transaction. */
+    readLeased: (runId: string, leaseToken: string, after: number, limit: number) =>
+      db.transaction(async (tx) => {
+        await assertLease(tx, runId, leaseToken);
+        return readAfter(runId, after, limit, tx);
+      }),
+
     /** Throws `LeaseLost`, or `EventIdTaken` for an id stored under another run. */
     async append(event: EventInput, leaseToken: string) {
       await db.transaction(async (tx) => {
@@ -62,6 +125,7 @@ export function pgEventLog(db: PostgresJsDatabase) {
         }
         await projectThread(tx, event, createdAt);
       });
+      notifier.notify(event.runId);
     },
   };
 }

@@ -19,6 +19,7 @@ import type { Reader } from "../../domain";
 import { admit, type Limits, type Refusal, refusalMessage, type Usage, usage } from "./admission";
 import type { KeyVault } from "./key-vault";
 import { LeaseLost } from "./lease";
+import type { Notifier } from "./notifier";
 import { loadRun, loadRuns, readableInputs, readableRuns, type Tx } from "./pg-runs";
 import { inputs, runs } from "./schema";
 
@@ -94,6 +95,7 @@ export function pgRunQueue(
   db: PostgresJsDatabase,
   limits: ReadonlyMap<string, Limits>,
   vault: KeyVault,
+  notifier: Notifier,
 ) {
   const locked = <T>(work: (tx: Tx) => Promise<T>) =>
     db.transaction(async (tx) => {
@@ -162,8 +164,8 @@ export function pgRunQueue(
     },
 
     /** Ends the run `cancelled` at once and forgets its keys. Example runs are read-only. */
-    cancel: (reader: Reader, runId: string) =>
-      locked(async (tx) => {
+    async cancel(reader: Reader, runId: string) {
+      const result = await locked(async (tx) => {
         const [run] = await loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId)));
         if (!run) return "not-found" as const;
         if (run.example) return "example" as const;
@@ -174,7 +176,10 @@ export function pgRunQueue(
           .set({ state: "ended", outcome: "cancelled", endedAt: sql`now()` })
           .where(eq(runs.id, runId));
         return loadRun(tx, runId);
-      }),
+      });
+      notifier.notify(runId);
+      return result;
+    },
 
     /**
      * `awaiting-keys` → `queued`, for the run's own starter, holding the new keys. The run
@@ -318,8 +323,8 @@ export function pgRunQueue(
       }),
 
     /** Throws `LeaseLost` or `RunEnded`. */
-    report: (runId: string, leaseToken: string, report: RunnerReport) =>
-      locked(async (tx) => {
+    async report(runId: string, leaseToken: string, report: RunnerReport) {
+      await locked(async (tx) => {
         const [run] = await tx
           .select({ state: runs.state })
           .from(runs)
@@ -340,7 +345,9 @@ export function pgRunQueue(
             error: report.error ?? null,
           })
           .where(eq(runs.id, runId));
-      }),
+      });
+      notifier.notify(runId);
+    },
   };
 }
 
