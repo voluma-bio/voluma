@@ -1,10 +1,18 @@
-/** The runs list (`/runs`): one row per run; a row opens the live run, or the review once the run is completed. */
+/** The runs list (`/runs`): one row per run with its status, time and cost; a row opens the live run, or the review once the run is completed. */
 import { useQuery } from "@tanstack/react-query";
 import { listRuns } from "@voluma/api-client";
 import type { Run } from "@voluma/contracts/run";
 import { Button, Table } from "@voluma/ui";
 import { useNavigate } from "react-router";
-import { formatTime, RunBadge, runHref, runStatus } from "./status";
+import {
+  formatDuration,
+  formatTime,
+  formatUsd,
+  RunBadge,
+  runHref,
+  runSeconds,
+  runStatus,
+} from "./status";
 import { workflowName } from "./workflows";
 
 function finished(run: Run): string {
@@ -59,6 +67,33 @@ export function RunsPage() {
                     <span className="text-meta text-muted-foreground">{runStatus(run).detail}</span>
                   </div>
                 ),
+              },
+              {
+                key: "time",
+                header: "Time",
+                align: "end",
+                cell: (run) => {
+                  const seconds = runSeconds(run);
+                  return seconds === null ? "" : formatDuration(seconds);
+                },
+              },
+              {
+                key: "cost",
+                header: "Cost",
+                align: "end",
+                cell: (run) =>
+                  run.usage && run.state.status !== "queued" ? (
+                    <div className="grid gap-0.5">
+                      <span>{formatUsd(run.usage.modelCostUsd)}</span>
+                      {run.usage.sandboxSeconds > 0 && (
+                        <span className="text-meta text-muted-foreground">
+                          Sandbox {formatDuration(run.usage.sandboxSeconds)}
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    ""
+                  ),
               },
               { key: "finished", header: "Finished", cell: finished },
             ]}
