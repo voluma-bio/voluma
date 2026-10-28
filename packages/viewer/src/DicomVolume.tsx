@@ -1,4 +1,4 @@
-/** On-demand raw volume display and local performance measurements. No meshes or analysis results. */
+/** On-demand raw volume display. No meshes or analysis results. */
 import {
   cache,
   Enums,
@@ -125,27 +125,6 @@ export default function DicomVolume({ series }: { series: DicomSeries }) {
   );
 }
 
-type Rotation = { frames: number; p50Ms: number; p95Ms: number; fps: number; canvas: number[] };
-type PerformanceReport = {
-  source: number[];
-  preview: number[];
-  spacingMm: number[];
-  downsampled: boolean;
-  voxelBytes: number;
-  voxelType: string;
-  firstVisibleMs?: number;
-  preparationMs?: number;
-  sampledPeakJsHeapBytes?: number;
-  peakCacheBytes: number;
-  rotation?: Rotation;
-  /** Same rotation at the coarser ray sampling used while dragging. */
-  dragRotation?: Rotation;
-  userAgent: string;
-  devicePixelRatio: number;
-  renderer: string;
-  note: string;
-};
-
 function VolumeView({
   series,
   plan,
@@ -161,7 +140,6 @@ function VolumeView({
     rotate(x: number, y: number): void;
     dragging(on: boolean): void;
     display(threshold: number, opacity: number): void;
-    measure(): Promise<void>;
     reset(): void;
   } | null>(null);
   const pointer = useRef<{ id: number; x: number; y: number; moved: boolean } | null>(null);
@@ -170,10 +148,6 @@ function VolumeView({
   const [ready, setReady] = useState(false);
   const [threshold, setThreshold] = useState(20);
   const [opacity, setOpacity] = useState(35);
-  const [measuring, setMeasuring] = useState(false);
-  const [measurementError, setMeasurementError] = useState("");
-  const report = useRef<PerformanceReport | null>(null);
-  const [metrics, setMetrics] = useState<PerformanceReport | null>(null);
 
   useEffect(() => {
     const host = element.current;
@@ -189,31 +163,6 @@ function VolumeView({
     retired = new Promise<void>((resolve) => {
       finishRetirement = resolve;
     });
-    const started = performance.now();
-    const data: PerformanceReport = {
-      source: plan.source,
-      preview: plan.dimensions,
-      spacingMm: plan.spacing,
-      downsampled: plan.downsampled,
-      voxelBytes: plan.bytes,
-      voxelType: plan.ArrayType.name,
-      peakCacheBytes: 0,
-      userAgent: navigator.userAgent,
-      devicePixelRatio,
-      renderer: "Unavailable",
-      note: "Local display benchmark; no scan identifiers. First visible starts at Build, excludes ZIP intake. Rotation is sequential render latency, not GPU timer or clinical validation. JS heap is sampled every 100 ms, not process/GPU memory; peaks may be missed.",
-    };
-    report.current = data;
-    const sampleMemory = () => {
-      const memory = (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory;
-      if (memory)
-        data.sampledPeakJsHeapBytes = Math.max(
-          data.sampledPeakJsHeapBytes ?? 0,
-          memory.usedJSHeapSize,
-        );
-      data.peakCacheBytes = Math.max(data.peakCacheBytes, cache.getCacheSize());
-    };
-    let timer = window.setInterval(sampleMemory, 100);
     const pending = (async () => {
       await previous;
       signal.throwIfAborted();
@@ -224,7 +173,6 @@ function VolumeView({
       session = acquireDicomSession(series);
       const sampled = await sampleVolume(session, plan, signal, (done) => {
         if (!signal.aborted) setStatus(`Building 3D ${done} / ${plan.dimensions[2]}…`);
-        sampleMemory();
       });
       signal.throwIfAborted();
       const { min, max, scalarData } = sampled;
@@ -293,10 +241,6 @@ function VolumeView({
         },
         { signal },
       );
-      const debug = gl.getExtension("WEBGL_debug_renderer_info");
-      data.renderer = debug
-        ? String(gl.getParameter(debug.UNMASKED_RENDERER_WEBGL))
-        : String(gl.getParameter(gl.RENDERER));
       const display = (cut: number, alpha: number) => {
         const low = min + ((max - min) * cut) / 100;
         view.setProperties({
@@ -336,68 +280,27 @@ function VolumeView({
         dragging(on) {
           view.setSampleDistanceMultiplier(on ? 2 : 1);
         },
-        async measure() {
-          const camera = view.getCamera();
-          timer = window.setInterval(sampleMemory, 100);
-          const sweep = async (): Promise<Rotation> => {
-            const times: number[] = [];
-            for (let i = 0; i < 24; i++) {
-              signal.throwIfAborted();
-              const start = performance.now();
-              await renderFrame(host, signal, () => rotate(15, 0));
-              times.push(performance.now() - start);
-              sampleMemory();
-            }
-            times.sort((a, b) => a - b);
-            return {
-              frames: times.length,
-              p50Ms: times[11] as number,
-              p95Ms: times[22] as number,
-              fps: (1000 * times.length) / times.reduce((a, b) => a + b, 0),
-              canvas: [view.canvas.width, view.canvas.height],
-            };
-          };
-          try {
-            data.rotation = await sweep();
-            view.setSampleDistanceMultiplier(2);
-            data.dragRotation = await sweep();
-            setMetrics({ ...data });
-          } finally {
-            window.clearInterval(timer);
-            if (!signal.aborted) {
-              view.setSampleDistanceMultiplier(1);
-              view.setCamera(camera);
-            }
-          }
-        },
       };
       observer = new ResizeObserver(() => {
         if (host.clientWidth && host.clientHeight) engine?.resize(true, true);
       });
       observer.observe(host);
-      data.preparationMs = performance.now() - started;
       setStatus("Rendering 3D…");
       await renderFrame(host, signal, () => view.render());
       signal.throwIfAborted();
-      data.firstVisibleMs = performance.now() - started;
-      sampleMemory();
-      setMetrics({ ...data });
       setStatus("");
       setReady(true);
-    })()
-      .catch(() => {
-        if (!signal.aborted) {
-          setError(true);
-          setStatus(
-            "3D could not be built or rendered. Release it and choose a smaller preview size, or reload the page. Acquired slices remain available. WebGL2 is required.",
-          );
-        }
-      })
-      .finally(() => window.clearInterval(timer));
+    })().catch(() => {
+      if (!signal.aborted) {
+        setError(true);
+        setStatus(
+          "3D could not be built or rendered. Release it and choose a smaller preview size, or reload the page. Acquired slices remain available. WebGL2 is required.",
+        );
+      }
+    });
     return () => {
       abort.abort();
       controls.current = null;
-      window.clearInterval(timer);
       observer?.disconnect();
       void pending.finally(() => {
         try {
@@ -431,13 +334,13 @@ function VolumeView({
           tabIndex={0}
           aria-label="Raw 3D volume. Drag or use arrow keys to rotate."
           onPointerDown={(e) => {
-            if (!ready || measuring || e.button !== 0) return;
+            if (!ready || e.button !== 0) return;
             e.currentTarget.setPointerCapture(e.pointerId);
             pointer.current = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
           }}
           onPointerMove={(e) => {
             const p = pointer.current;
-            if (!p || measuring) return;
+            if (!p) return;
             // Coarse sampling only once the pointer actually drags, not on a click.
             if (!p.moved) controls.current?.dragging(true);
             controls.current?.rotate((e.clientX - p.x) * 0.5, (e.clientY - p.y) * 0.5);
@@ -452,11 +355,7 @@ function VolumeView({
             pointer.current = null;
           }}
           onKeyDown={(e) => {
-            if (
-              !ready ||
-              measuring ||
-              !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)
-            )
+            if (!ready || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key))
               return;
             e.preventDefault();
             controls.current?.rotate(
@@ -475,7 +374,7 @@ function VolumeView({
         {plan.downsampled ? "Downsampled" : "Native grid"} · {plan.dimensions.join(" × ")} · Raw
         volume, not segmented surfaces
       </p>
-      <fieldset className="image-controls" disabled={!ready || measuring}>
+      <fieldset className="image-controls" disabled={!ready}>
         <legend className="sr-only">Volume display</legend>
         <label>
           Intensity cutoff
@@ -551,61 +450,6 @@ function VolumeView({
         <button className="text-button" type="button" onClick={onClose}>
           {ready || error ? "Release 3D" : "Cancel 3D"}
         </button>
-        <details>
-          <summary>
-            Performance
-            {metrics?.firstVisibleMs !== undefined
-              ? ` · ${(metrics.firstVisibleMs / 1000).toFixed(1)} s to 3D`
-              : ""}
-          </summary>
-          <p>{(plan.bytes / 1048576).toFixed(1)} MiB voxels. GPU/process memory not measured.</p>
-          <button
-            className="text-button"
-            type="button"
-            disabled={!ready || measuring}
-            onClick={async () => {
-              setMeasuring(true);
-              setMeasurementError("");
-              try {
-                await controls.current?.measure();
-              } catch {
-                setMeasurementError(
-                  "Rotation measurement stopped. Keep the preview visible and try again.",
-                );
-              } finally {
-                setMeasuring(false);
-              }
-            }}
-          >
-            {measuring ? "Measuring…" : "Measure rotation"}
-          </button>
-          {metrics?.rotation && (
-            <p>
-              {metrics.rotation.fps.toFixed(1)} frames/s · p95 {metrics.rotation.p95Ms.toFixed(0)}{" "}
-              ms · {metrics.rotation.canvas.join(" × ")} px
-              {metrics.dragRotation &&
-                ` · dragging ${metrics.dragRotation.fps.toFixed(1)} frames/s, p95 ${metrics.dragRotation.p95Ms.toFixed(0)} ms`}
-            </p>
-          )}
-          {measurementError && <p role="status">{measurementError}</p>}
-          <button
-            className="text-button"
-            type="button"
-            disabled={!ready || measuring}
-            onClick={() => {
-              const url = URL.createObjectURL(
-                new Blob([JSON.stringify(report.current, null, 2)], { type: "application/json" }),
-              );
-              const link = document.createElement("a");
-              link.href = url;
-              link.download = "voluma-3d-performance.json";
-              link.click();
-              setTimeout(() => URL.revokeObjectURL(url), 1000);
-            }}
-          >
-            Save timings
-          </button>
-        </details>
       </div>
     </>
   );

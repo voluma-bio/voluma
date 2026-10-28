@@ -17,5 +17,10 @@ export default defineConfig({
   },
   worker: { format: "es" },
   // Set by pnpm dev; unused by build.
-  server: { proxy: { "/api": process.env.VOLUMA_API_URL as string } },
+  server: {
+    proxy: {
+      "/api": process.env.VOLUMA_API_URL as string,
+      "/health": process.env.VOLUMA_API_URL as string,
+    },
+  },
 });

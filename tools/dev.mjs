@@ -1,12 +1,14 @@
 /**
  * `pnpm dev`: the one dev launcher. Starts the API and the web app for this worktree
  * without sharing anything with other worktrees:
- *  - two free ports, picked up front (the API's, and Vite's with --strictPort);
+ *  - two free ports (the API's, and Vite's with --strictPort), or Amp's allocated
+ *    PORT for Vite when a portal supplies PUBLIC_URL;
  *  - a database named after the worktree directory and a hash of its path
  *    (`voluma_<dir>_<hash8>`), created on the Postgres server in DATABASE_SERVER_URL
  *    (`pnpm db:up` starts one) and migrated;
  *  - a random API token per launch;
  *  - APP_URL, the Vite origin, which the API uses for the sign-in redirect and the Origin check.
+ *    PUBLIC_URL supplies the external origin in a supervised Amp portal.
  * The API also reads the repo .env (--env-file-if-exists), as it would read Railway's
  * variables. It writes { apiUrl, apiToken } to the git-ignored .dev/env.json, which
  * the runner reads when VOLUMA_API_URL is unset. Ctrl-C stops everything
@@ -51,8 +53,11 @@ if (process.argv[2] === "reset") {
 }
 await ensureDatabase();
 
-const [apiPort, webPort] = [await freePort(), await freePort()];
-const appUrl = `http://localhost:${webPort}`;
+const [apiPort, webPort] = [
+  await freePort(),
+  process.env.PUBLIC_URL ? Number(process.env.PORT) : await freePort(),
+];
+const appUrl = new URL(process.env.PUBLIC_URL ?? `http://localhost:${webPort}`).origin;
 const env = {
   apiUrl: `http://localhost:${apiPort}`,
   apiToken: randomBytes(24).toString("hex"),
@@ -94,7 +99,11 @@ const children = [
     {
       cwd: root,
       stdio: "inherit",
-      env: { ...process.env, VOLUMA_API_URL: env.apiUrl },
+      env: {
+        ...process.env,
+        VOLUMA_API_URL: env.apiUrl,
+        __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: new URL(appUrl).hostname,
+      },
     },
   ),
 ];

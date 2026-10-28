@@ -12,9 +12,9 @@
  * WORKOS_LAB_ORGANIZATION_ID, and optionally WORKOS_JUDGES_ORGANIZATION_ID, and
  * GUEST_ORGANIZATION_ID with GUEST_SCOPE (lab|self, default lab) to let anyone in as a guest (the repo .env).
  * Run limits, per organization (LAB, JUDGES, DEMO) and number: RUN_LIMITS_<ORG>_PER_CALLER, _CONCURRENT,
- * _PER_DAY, _USD_PER_DAY, _VISITOR_ACTIVE; unset is no limit. Scan uploads: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
- * R2_SECRET_ACCESS_KEY, R2_BUCKET (the API presigns PUTs; files never pass through it), and
- * UPLOAD_MAX_FILES, UPLOAD_MAX_BYTES per scan and UPLOAD_MAX_OPEN uploads in progress per member (defaults below). Fails at startup if the database is unreachable or not migrated.
+ * _PER_DAY, _USD_PER_DAY, _VISITOR_ACTIVE; unset is no limit. Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
+ * R2_SECRET_ACCESS_KEY, R2_BUCKET: Review's reference download and scan uploads (the API
+ * presigns PUTs; files never pass through it). UPLOAD_MAX_FILES, UPLOAD_MAX_BYTES per scan and UPLOAD_MAX_OPEN uploads in progress per member (defaults below). Fails at startup if the database is unreachable or not migrated.
  */
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -27,6 +27,7 @@ import { HTTPException } from "hono/http-exception";
 import postgres from "postgres";
 import { createAuth } from "./auth";
 import { createReview } from "./domains/review";
+import { r2ReferenceArchive } from "./domains/review/r2-reference-archive";
 import { createRun } from "./domains/run";
 import type { Limits } from "./domains/run/admission";
 import { catalog } from "./domains/run/catalog";
@@ -38,6 +39,7 @@ import { pgRunQueue } from "./domains/run/pg-queue";
 import { pgRunReads } from "./domains/run/pg-runs";
 import { pgUploads } from "./domains/run/pg-uploads";
 import { r2Uploads } from "./domains/run/r2-uploads";
+import type { RunRecords } from "./ports";
 
 const required = (name: string) => {
   const value = process.env[name];
@@ -125,6 +127,34 @@ const draining = new AbortController();
 const reads = pgRunReads(db);
 const notifier = createNotifier();
 const queue = pgRunQueue(db, limits, new KeyVault(), notifier);
+const eventLog = pgEventLog(db, notifier);
+
+/** The review's read of a run: the run, then its whole log in one statement. */
+const runRecords: RunRecords = {
+  async load(reader, runId) {
+    const run = await reads.get(reader, runId);
+    const log = run && (await eventLog.stream(reader, runId, 0, 2 ** 31 - 1));
+    return run && log ? { run, events: log.events } : null;
+  },
+};
+
+/** R2, optional as a group: without it the reference download and scan uploads are 503s. */
+const r2Env = {
+  accountId: process.env.R2_ACCOUNT_ID,
+  bucket: process.env.R2_BUCKET,
+  accessKeyId: process.env.R2_ACCESS_KEY_ID,
+  secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+};
+const r2 =
+  r2Env.accountId && r2Env.bucket && r2Env.accessKeyId && r2Env.secretAccessKey
+    ? {
+        accountId: r2Env.accountId,
+        bucket: r2Env.bucket,
+        accessKeyId: r2Env.accessKeyId,
+        secretAccessKey: r2Env.secretAccessKey,
+      }
+    : null;
+const referenceArchive = r2 && r2ReferenceArchive(r2);
 
 const app = new Hono();
 app.get("/health", (c) => c.text("ok"));
@@ -152,17 +182,12 @@ app.route(
   createRun({
     reads,
     queue,
-    eventLog: pgEventLog(db, notifier),
+    eventLog,
     notifier,
     history: pgHistory(db),
     catalog,
     uploadStore: pgUploads(db),
-    objects: r2Uploads({
-      accountId: required("R2_ACCOUNT_ID"),
-      accessKeyId: required("R2_ACCESS_KEY_ID"),
-      secretAccessKey: required("R2_SECRET_ACCESS_KEY"),
-      bucket: required("R2_BUCKET"),
-    }),
+    objects: r2 && r2Uploads(r2),
     // A prepared scan is a few hundred files and a few hundred MB; a raw one, a few thousand.
     uploadLimits: {
       maxFiles: countFromEnv("UPLOAD_MAX_FILES", 5000),
@@ -173,7 +198,7 @@ app.route(
     shutdown: draining.signal,
   }),
 );
-app.route("/api/review", createReview({}));
+app.route("/api/review", createReview({ runs: runRecords, inputs: reads, referenceArchive }));
 
 const isApi = (path: string) => path === "/api" || path.startsWith("/api/");
 const webDist = resolve(import.meta.dirname, "../../web/dist");

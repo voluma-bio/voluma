@@ -35,6 +35,7 @@ export function inputsRoutes({ reads, uploadStore, objects, uploadLimits }: RunD
     if (user.account !== "member") {
       return c.json({ error: "Sign in with a lab account to upload a scan." }, 403);
     }
+    if (!objects) return c.json({ error: "Scan upload is not set up on this server." }, 503);
     const { name, files } = await parseJson(c, createUploadRequestSchema);
     const bytes = files.reduce((sum, f) => sum + f.size, 0);
     if (files.length > uploadLimits.maxFiles || bytes > uploadLimits.maxBytes) {
@@ -72,6 +73,7 @@ export function inputsRoutes({ reads, uploadStore, objects, uploadLimits }: RunD
     const upload = await uploadStore.findOwn(readerOf(user), user.userId, id);
     if (!upload) return c.json({ error: "not found" }, 404);
     if (upload.status === "ready") return c.json(upload.input);
+    if (!objects) return c.json({ error: "Scan upload is not set up on this server." }, 503);
     const [staged, moved] = await Promise.all([
       objects.sizes(uploadPrefix(id)),
       objects.sizes(inputPrefix(id)),

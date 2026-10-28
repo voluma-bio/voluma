@@ -32,9 +32,9 @@ export interface RunDeps {
   /** Wakes open streams when a run's events or state change. */
   notifier: Notifier;
   catalog: Catalog;
-  /** Upload rows, and the object store their files go to (presigned, never through the API). */
+  /** Upload rows, and the object store their files go to (presigned, never through the API); null when R2 is not configured. */
   uploadStore: PgUploads;
-  objects: Uploads;
+  objects: Uploads | null;
   uploadLimits: UploadLimits;
   /** The repo whose `workflows/` a run uses. The runner adds the commit its checkout was at. */
   repo: string;
