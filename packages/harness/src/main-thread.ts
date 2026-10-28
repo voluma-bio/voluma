@@ -12,10 +12,12 @@
  * one answer per wake.
  */
 import type { Api, AssistantMessage, Context, Message, Model } from "@earendil-works/pi-ai";
-import { WAKE_NOTE_MAX } from "@voluma/contracts/events";
-import { type WorkflowPlan, workflowPlanSchema } from "@voluma/contracts/workflow";
+import { WAKE_ERROR_MAX, WAKE_NOTE_MAX } from "@voluma/contracts/events";
+import type { WorkflowPlan } from "@voluma/contracts/workflow";
+import type { PlanChange } from "@voluma/workflow/plan";
 import { z } from "zod";
 import type { PayloadOf } from "./recorder";
+import type { PlanTask } from "./task-runtime";
 
 export type WakePoint =
   | {
@@ -50,17 +52,22 @@ export type Decision = z.infer<typeof decisionSchema>;
 
 /**
  * An answer: the whole notes block (absent: leave the notes), the decision a judgment point
- * needs, and at `run-started` the adapted plan (absent: keep the computed one).
+ * needs, and at `run-started` a change to the plan (absent: keep the computed one).
  */
 export interface Reply {
   note?: string;
   decision?: Decision;
-  plan?: WorkflowPlan;
+  change?: PlanChange;
 }
 const replySchema = z.object({
   note: z.string().optional(),
   decision: decisionSchema.optional(),
-  plan: workflowPlanSchema.optional(),
+  change: z
+    .object({
+      doneWhen: z.record(z.string(), z.array(z.string().min(1))).optional(),
+      add: z.array(z.string()).optional(),
+    })
+    .optional(),
 });
 
 export type Wake = PayloadOf<"wake">;
@@ -73,23 +80,36 @@ export interface MainThread {
 }
 
 /** The role prompt, fixed for the run: a changed one would miss the cache and change what resume asks. */
-export const MAIN_SYSTEM = `You are the main thread of an analysis run. A plan of tasks runs under a supervisor that decides what runs and when; you never choose that. A worker agent does each task and a second agent checks it. The supervisor wakes you with one message at a time: the run is starting, a task was checked, a check did not pass, or a worker failed.
-Reply to every message with one JSON object and nothing else: {"note": "<notes>", "decision": {"action": "accept" | "redo" | "fail", "reason": "<one plain sentence>"}, "plan": {"tasks": [...]}}.
+const MAIN_SYSTEM = `You are the main thread of an analysis run. A plan of tasks runs under a supervisor that decides what runs and when; you never choose that. A worker agent does each task and a second agent checks it. The supervisor wakes you with one message at a time: the run is starting, a task was checked, a check did not pass, or a worker failed.
+Reply to every message with one JSON object and nothing else: {"note": "<notes>", "decision": {"action": "accept" | "redo" | "fail", "reason": "<one plain sentence>"}, "change": {"doneWhen": {"<task id>": ["<line>"]}, "add": ["<task id>"]}}.
 - note: your notes, which go into the prompt of every worker and checker that starts after this message. Rewrite the whole block each time, under ${WAKE_NOTE_MAX / 2} characters, from your last note and what you just learned: facts settled so far, disagreements already resolved and why, items open for a person, and for each task what the next worker must not redo or contradict. Cite files; do not copy numbers a file holds. Leave "note" out to keep your last one.
 - decision: only when the message asks for one, never otherwise. accept leaves the task for a person to look at (choose it when the work is plausible or the doubt is small); redo has a worker do the task again (only when the report shows a concrete mistake a second attempt can fix); fail means the task cannot be done.
-- plan: only when the run is starting. You get the user's selection, the user's notes for the run and the plan computed from them. If the notes ask for a change (a tighter done-when criterion, an added or reordered task), answer with the whole adapted plan in the same shape; keep the ids and outputs of tasks you keep, and never drop a task that produces a selected output. Leave "plan" out to run the computed plan.`;
+- change: only when the run is starting, and only if the user's notes ask for it. You get the notes and the workflow's tasks that are not in the plan. "doneWhen" appends lines to a task's done-when criteria (it never replaces or removes one); "add" names tasks of that list to add with what they depend on. You cannot change outputs, units, ranges or what is required. Leave "change" out to run the plan as computed.`;
+
+/** What every wake can see of the run: the user's selection and the computed plan. Fixed for the run, so part of the system prompt. */
+export function runBrief(selected: readonly string[] | undefined, plan: readonly PlanTask[]) {
+  const tasks = plan.map(
+    (t) =>
+      `- ${t.id}${t.dependsOn.length ? ` (after ${t.dependsOn.join(", ")})` : ""}: ${t.outputs.map((o) => o.id).join(", ")}`,
+  );
+  return `This run: selected outputs ${selected?.join(", ") ?? "all"}. Tasks and the outputs they produce:\n${tasks.join("\n")}`;
+}
+
+export const mainSystem = (brief: string) => `${MAIN_SYSTEM}\n\n${brief}`;
 
 /** The point as the `wake` event records it. */
 export function pointOf(point: WakePoint): Wake["point"] {
   if (point.kind === "run-started") return { kind: point.kind, input: point.report };
   const { kind, taskId, ...input } = point;
+  // The error text is re-sent in every later wake, so it is bounded like a wake's own.
+  if ("error" in input) input.error = input.error.slice(0, WAKE_ERROR_MAX);
   return { kind, taskId, input };
 }
 
 function wakeText(point: Wake["point"]): string {
   const what =
     point.kind === "run-started"
-      ? "The run is starting. These are the user's selection and notes and the plan computed from them."
+      ? "The run is starting. These are the user's notes and the workflow's tasks that are not in the plan."
       : point.kind === "task-checked"
         ? `Task ${point.taskId} was checked.`
         : point.kind === "check-disagreed"
@@ -108,7 +128,6 @@ function conversation(model: Model<Api>, past: readonly Wake[], point: Wake["poi
     const answer = {
       ...(w.note !== undefined && { note: w.note }),
       decision: w.decision,
-      plan: w.plan,
     };
     messages.push({
       role: "assistant",
@@ -159,7 +178,7 @@ export function llmMainThread(
       return {
         note: answer.note?.slice(0, WAKE_NOTE_MAX),
         decision: judged ? answer.decision : undefined,
-        plan: point.kind === "run-started" ? answer.plan : undefined,
+        change: point.kind === "run-started" ? answer.change : undefined,
       };
     },
   };

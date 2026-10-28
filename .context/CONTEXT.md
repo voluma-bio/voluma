@@ -120,8 +120,13 @@ checklist, check threads, and review chat threads.
   asks from the context the first run had (each wake names the model that answered; a resume
   may use another). The run's first wake, `run-started` (`run-start.ts`, from `superviseRun`
   before the task runtime exists), may adapt the computed plan to the user's notes: no notes,
-  no call; an answer that drops a selected output's task or does not parse is recorded as an
-  `error` and the computed plan runs; `revision.started.plan` stays the record of what applied.
+  no call. The model answers only a change (done-when lines to append, workflow tasks to add)
+  and code builds the plan from the workflow files (`adaptPlan`), so outputs, units, ranges and
+  required-ness cannot change; a bad answer is recorded as an `error` and the computed plan runs;
+  `revision.started.plan` stays the record of what applied. A stop during that wake leaves no
+  `revision.started` (the supervisor skips `runtime.start()`), so a resume asks again. Every
+  wake sees the selection and computed plan (in the system prompt), and every worker and
+  check thread gets the user's notes verbatim in its first message, beside the main thread's.
   Each wake is one call, asked outside the section and bounded by a deadline and the abort
   signal (a stop is no answer and records nothing). It answers with the whole notes block (at
   most `WAKE_NOTE_MAX` characters) and, at a judgment point, `accept | redo | fail`. The

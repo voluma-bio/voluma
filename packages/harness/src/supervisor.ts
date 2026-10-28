@@ -482,7 +482,8 @@ export function supervisor(options: SupervisorOptions) {
      */
     async run(): Promise<Folded> {
       try {
-        await runtime.start();
+        // A stop during the run-start wake leaves no `revision.started`, so a resume asks again.
+        if (!signal?.aborted) await runtime.start();
         // `quiet`: the last step found nothing to do with no thread running.
         let quiet = false;
         while (!signal?.aborted && !failed()) {

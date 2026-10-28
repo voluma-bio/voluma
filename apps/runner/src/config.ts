@@ -7,6 +7,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseEnv } from "node:util";
+import { PROVIDERS } from "./providers.ts";
 
 const file = process.env.VOLUMA_ENV_FILE ?? resolve(import.meta.dirname, "../../../.env");
 const values: Record<string, string | undefined> = {
@@ -104,7 +105,12 @@ export function runnerConfig() {
   // Each role's model on a `voluma` run; a role left out takes the one before it.
   const worker = modelRef("RUNNER_MODEL");
   const check = optional("RUNNER_CHECK_MODEL") ? modelRef("RUNNER_CHECK_MODEL") : worker;
-  const main = modelRef("RUNNER_MAIN_MODEL", "meta/muse-wonder-1.0");
+  // Muse Wonder when a Meta key is set, else the worker's model, so OpenAI-only dev works.
+  const main = optional("RUNNER_MAIN_MODEL")
+    ? modelRef("RUNNER_MAIN_MODEL")
+    : optional("VOLUMA_META_API_KEY")
+      ? modelRef("RUNNER_MAIN_MODEL", "meta/muse-wonder-1.0")
+      : worker;
   const roles = { worker, check, main };
   for (const { provider } of Object.values(roles))
     required(`VOLUMA_${provider.toUpperCase()}_API_KEY`);
@@ -124,7 +130,7 @@ export function runnerConfig() {
     /**
      * The model of each role of a `voluma` run: `RUNNER_MODEL` (worker), `RUNNER_CHECK_MODEL`
      * (the check threads; default the worker's) and `RUNNER_MAIN_MODEL` (the main thread;
-     * default Muse Wonder, Standard mode). Our key for each provider is
+     * default Muse Wonder, Standard mode, when a Meta key is set, else the worker's). Our key for each provider is
      * `VOLUMA_<PROVIDER>_API_KEY`.
      */
     roles,
@@ -140,7 +146,7 @@ export function runnerConfig() {
     /** Every secret of ours, to redact from anything that leaves the process. */
     secrets: [
       api.token,
-      ...["anthropic", "meta", "openai"].map(providerKey),
+      ...Object.keys(PROVIDERS).map(providerKey),
       r2.accessKeyId,
       r2.secretAccessKey,
       r2.cloudflareApiToken,

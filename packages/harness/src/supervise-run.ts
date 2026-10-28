@@ -6,6 +6,7 @@
  * first run are the same call; the recorder is built on the stored events by the host.
  */
 import type { Folded } from "@voluma/contracts/fold";
+import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
 import type { RunLayout } from "./layout";
 import type { MainThread } from "./main-thread";
 import type { Evidence } from "./ports/evidence";
@@ -34,6 +35,8 @@ export interface SuperviseRunOptions {
   runId: string;
   /** The plan computed from the user's selection; the main thread may adapt it (`run-start.ts`). */
   plan: readonly PlanTask[];
+  /** The workflow's tasks and outputs, which the run-start change is built from. */
+  workflow: WorkflowFiles;
   selectedOutputs?: readonly string[];
   /** The user's notes for the run. */
   notes?: string;
@@ -70,6 +73,7 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
     rootThreadId,
     recorder,
     main: options.main,
+    workflow: options.workflow,
     computed: options.plan,
     selectedOutputs: options.selectedOutputs,
     notes: options.notes,

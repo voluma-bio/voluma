@@ -23,7 +23,7 @@ import { inputPrefix, referencePrefix, workflowSnapshotPrefix } from "@voluma/co
 import type { Claim, ReportRequest } from "@voluma/contracts/runner";
 import { runClient } from "@voluma/harness/adapters/http/run-client";
 import { runLayout } from "@voluma/harness/layout";
-import { llmMainThread, MAIN_SYSTEM } from "@voluma/harness/main-thread";
+import { llmMainThread, mainSystem, runBrief } from "@voluma/harness/main-thread";
 import { type Recorder, recorder } from "@voluma/harness/recorder";
 import { type SandboxSession, sandboxSession } from "@voluma/harness/sandbox-session";
 import { type RunRole, superviseRun } from "@voluma/harness/supervise-run";
@@ -215,17 +215,22 @@ export async function runClaim(
       );
       return stream;
     };
-    const main = llmMainThread(mainModel, MAIN_SYSTEM, async (context, signal) => {
-      const reply = await callModel(mainModel, context, { signal }).result();
-      meter.addModelCost(reply.usage.cost.total);
-      return reply;
-    });
+    const main = llmMainThread(
+      mainModel,
+      mainSystem(runBrief(run.selectedOutputs, computed.tasks)),
+      async (context, signal) => {
+        const reply = await callModel(mainModel, context, { signal }).result();
+        meter.addModelCost(reply.usage.cost.total);
+        return reply;
+      },
+    );
     const files = r2Files(config.r2);
     const supervised = superviseRun({
       runId,
       plan: computed.tasks,
       selectedOutputs: run.selectedOutputs,
       notes: run.notes,
+      workflow: definition.files,
       workflows: run.workflows,
       layout,
       recorder: events,
@@ -241,14 +246,14 @@ export async function runClaim(
         model: workerModel,
         streamFn,
         systemPrompt: workerSystem(definition),
-        prompt: workerPrompt(definition, task, notes),
+        prompt: workerPrompt(definition, task, { user: run.notes, main: notes }),
         tools: roleTools,
       }),
       check: (task, notes) => ({
         model: checkModel,
         streamFn,
         systemPrompt: checkSystem(definition),
-        prompt: checkPrompt(definition, task, notes),
+        prompt: checkPrompt(definition, task, { user: run.notes, main: notes }),
         tools: roleTools,
       }),
       signal: abort.signal,

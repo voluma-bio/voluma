@@ -1,14 +1,18 @@
 /**
- * The run's first wake of the main thread: the plan computed from the user's selected outputs
- * may be adapted to the user's notes before anything runs. With no notes there is nothing to
- * adapt and the model is not asked. The answer is stored as the `run-started` `wake` before it
- * is used, and `revision.started.plan` (written by the task runtime from what this returns)
- * stays the record of what was applied: a run that has a `revision.started` returns its plan,
- * and one that crashed between the wake and the revision returns the plan the wake recorded.
- * An answer that drops a selected output, or does not parse, is recorded as an `error` and the
- * computed plan runs.
+ * The run's first wake of the main thread: the plan computed from the user's selection may be
+ * adapted to the user's notes before anything runs. With no notes there is nothing to adapt
+ * and the model is not asked. The model answers only a change (done-when lines to append,
+ * workflow tasks to add); code builds the plan from the workflow files (`adaptPlan`), so
+ * outputs, units, ranges and what is required can never change. The result is stored as the
+ * `run-started` `wake` (with the built plan) before it is used, and `revision.started.plan`
+ * (written by the task runtime from what this returns) stays the record of what was applied:
+ * a run that has a `revision.started` returns its plan, and one that crashed between the wake
+ * and the revision returns the plan the wake recorded. An answer that does not parse or names
+ * an unknown task is recorded as an `error` and the computed plan runs.
  */
 import { WAKE_ERROR_MAX } from "@voluma/contracts/events";
+import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
+import { adaptPlan } from "@voluma/workflow/plan";
 import type { MainThread } from "./main-thread";
 import { pointOf } from "./main-thread";
 import type { Recorder } from "./recorder";
@@ -21,6 +25,7 @@ export interface RunStartOptions {
   rootThreadId: string;
   recorder: Recorder;
   main: MainThread;
+  workflow: WorkflowFiles;
   /** The plan computed from the selection. */
   computed: readonly PlanTask[];
   /** The output ids the user selected; absent: every output. */
@@ -42,10 +47,15 @@ export async function runStartPlan(o: RunStartOptions): Promise<readonly PlanTas
   if (recorded) return recorded.plan?.tasks ?? o.computed;
   if (!o.notes) return o.computed;
 
-  const wanted = o.selectedOutputs ?? o.computed.flatMap((t) => t.outputs.map((out) => out.id));
+  const inPlan = new Set(o.computed.map((t) => t.id));
   const point = {
     kind: "run-started",
-    report: { selectedOutputs: o.selectedOutputs ?? "all", notes: o.notes, plan: o.computed },
+    report: {
+      userNotes: o.notes,
+      addableTasks: o.workflow.tasks
+        .filter((t) => !inPlan.has(t.id))
+        .map((t) => ({ id: t.id, dependsOn: t.dependsOn, outputs: t.outputs })),
+    },
   } as const;
   const limit = AbortSignal.any([
     AbortSignal.timeout(o.timeoutMs),
@@ -57,13 +67,12 @@ export async function runStartPlan(o: RunStartOptions): Promise<readonly PlanTas
     }),
   );
   let error: string | undefined;
-  let reply: Awaited<ReturnType<MainThread["ask"]>> = {};
+  let note: string | undefined;
+  let plan: ReturnType<typeof adaptPlan> | undefined;
   try {
-    reply = await Promise.race([o.main.ask(point, [], limit), expired]);
-    const kept = new Set(reply.plan?.tasks.flatMap((t) => t.outputs.map((out) => out.id)));
-    const dropped = reply.plan && wanted.filter((id) => !kept.has(id));
-    if (dropped?.length)
-      throw new Error(`the plan drops the selected output(s) ${dropped.join(", ")}`);
+    const reply = await Promise.race([o.main.ask(point, [], limit), expired]);
+    note = reply.note;
+    if (reply.change) plan = adaptPlan(o.workflow, o.selectedOutputs, reply.change);
   } catch (e) {
     error = String(e);
   }
@@ -76,12 +85,9 @@ export async function runStartPlan(o: RunStartOptions): Promise<readonly PlanTas
       model: o.main.model,
       ...(error !== undefined
         ? { error: error.slice(0, WAKE_ERROR_MAX) }
-        : {
-            ...(reply.note !== undefined && { note: reply.note }),
-            ...(reply.plan && { plan: reply.plan }),
-          }),
+        : { ...(note !== undefined && { note }), ...(plan && { plan }) }),
     },
     `${key}${WAKE_SUFFIX}`,
   );
-  return (error === undefined && reply.plan?.tasks) || o.computed;
+  return plan?.tasks ?? o.computed;
 }
