@@ -124,8 +124,9 @@ cookie that is refused is cleared and answered 401, never turned into a guest: t
 re-loads, and lands on a guest or the sign-in screen. `/me` returns `kind: "visitor"`. Unset
 means the sign-in wall, and a guest cookie is ignored. `createAuth` throws when the guest
 organization is a member organization. There is no per-visitor mint limit: every cap is per
-org. Guests belong to the Demo organization, never the Yao Lab: lab runs include scans not
-cleared for public use, so lab data is for signed-in members. They share the Demo workspace
+org. Guests belong to the Demo organization, never the Yao Lab: lab data is the lab's to
+share, run by run, so it is for signed-in members; public examples are seeded into the Demo
+organization instead. They share the Demo workspace
 but each sees only their own runs (`self`). When an `Authorization` header is present only the
 bearer counts. The root answers 401 for no principal on everything but `/api/auth/*`;
 a domain guards a subtree with `requireService` or `requireUser` (which also sets a typed
