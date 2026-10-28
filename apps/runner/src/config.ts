@@ -94,6 +94,8 @@ export function runnerConfig() {
     visitorModel: modelRef("RUNNER_VISITOR_MODEL", "meta/muse-spark-1.3"),
     modal,
     r2,
+    /** For importing workflow packages from private GitHub repos. */
+    githubToken: optional("GITHUB_TOKEN"),
     /** Every secret of ours, to redact from anything that leaves the process. */
     secrets: [
       api.token,
@@ -101,6 +103,7 @@ export function runnerConfig() {
       r2.accessKeyId,
       r2.secretAccessKey,
       r2.cloudflareApiToken,
+      optional("GITHUB_TOKEN"),
       modal?.tokenId,
       modal?.tokenSecret,
     ].filter((s): s is string => s !== undefined),

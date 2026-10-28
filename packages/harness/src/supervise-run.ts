@@ -18,9 +18,10 @@ import { threads } from "./threads";
 import { bashTool } from "./tools/bash";
 import { taskTools } from "./tools/task-tools";
 import { threadMessageTool } from "./tools/thread-message";
+import type { Tool } from "./tools/tool";
 
-/** What a worker or check thread is told and runs on; the harness adds its tools. */
-export type RunRole = Omit<RoleSpec, "tools">;
+/** What a worker or check thread is told and runs on; the harness adds its tools after `tools`, the role's extras. */
+export type RunRole = Omit<RoleSpec, "tools"> & { tools?: Tool[] };
 export type { PlanTask };
 
 export interface SuperviseRunOptions {
@@ -59,10 +60,11 @@ export function superviseRun(options: SuperviseRunOptions): Promise<Folded> {
     if (!found) throw new Error(`${id} is not a task of the plan`);
     return found;
   };
-  const tools = () => [
+  const tools = (extra: Tool[] = []) => [
     bashTool(layout),
     ...taskTools(runtime),
     threadMessageTool((from, to, text) => sup.message(from, to, text)),
+    ...extra,
   ];
   const sup = supervisor({
     runId,
@@ -71,8 +73,14 @@ export function superviseRun(options: SuperviseRunOptions): Promise<Folded> {
     recorder,
     threads: pool,
     judgment: options.judgment,
-    worker: (id) => ({ ...options.worker(task(id)), tools: tools() }),
-    check: (id) => ({ ...options.check(task(id)), tools: tools() }),
+    worker: (id) => {
+      const role = options.worker(task(id));
+      return { ...role, tools: tools(role.tools) };
+    },
+    check: (id) => {
+      const role = options.check(task(id));
+      return { ...role, tools: tools(role.tools) };
+    },
     signal,
   });
   return sup.run(options.workflows);

@@ -1,42 +1,22 @@
 /**
- * The workflow catalog: server config mapping a `workflowId` to the packages it pins and
- * the plan a claim hands the runner (`@voluma/contracts/workflow`). A request names an
- * id from here, never raw pins, so a caller can't make the server import an arbitrary
- * repo. Adding a workflow is a code change that pins a commit.
+ * The workflow catalog: server config mapping a `workflowId` to the packages a run pins.
+ * A request names an id from here, never raw pins, so a caller can't make the runner
+ * import an arbitrary repo. Adding a workflow is one entry that pins commits; the plan,
+ * prompts and skills come from the packages themselves (`@voluma/workflow`), which the
+ * runner imports when it claims the run.
  *
- * Missing: the mouse-OA entry. No Mars package in `voluma-bio/microct-analysis` has a
- * `workflow.md`, and `packages/workflow` (the parser that would produce the plan) is
- * empty, so there is no plan to pin yet. Add it with its first workflow package.
+ * `pins[0]` is the workflow package (it holds `workflow.md`); the others are the packages
+ * it draws agents and skills from, each pinned too. A package inside a repo's
+ * subdirectory pins `path`.
+ *
+ * Empty: `mouse-oa` has no `workflow.md` package yet. Add its entry with its first commit.
  */
-import type { WorkflowPin, WorkflowPlan } from "@voluma/contracts/workflow";
-import { workflowPlanSchema } from "@voluma/contracts/workflow";
+import type { WorkflowPin } from "@voluma/contracts/workflow";
 
 export interface CatalogEntry {
   pins: WorkflowPin[];
-  plan: WorkflowPlan;
 }
 
 export type Catalog = Record<string, CatalogEntry>;
 
-export const catalog: Catalog = {
-  // A small plan to exercise the run lifecycle: two tasks, the second building on the first.
-  "two-task-test": {
-    pins: [
-      { repo: "voluma-bio/microct-analysis", commit: "a96736e05c9c60b47d364f2ee86ca6b4f973b12b" },
-    ],
-    plan: workflowPlanSchema.parse({
-      tasks: [
-        {
-          id: "segment-tibia",
-          dependsOn: [],
-          outputs: [{ id: "tibia", kind: "structure", required: true, name: "Tibia" }],
-        },
-        {
-          id: "measure-tibia",
-          dependsOn: ["segment-tibia"],
-          outputs: [{ id: "tibia-volume", kind: "measurement", required: true, unit: "mm3" }],
-        },
-      ],
-    }),
-  },
-};
+export const catalog: Catalog = {};

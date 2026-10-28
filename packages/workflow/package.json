@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./load": "./src/load.ts",
+    "./definition": "./src/definition.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
@@ -13,5 +15,10 @@
   "devDependencies": {
     "typescript": "catalog:",
     "vitest": "catalog:"
+  },
+  "dependencies": {
+    "@voluma/contracts": "workspace:*",
+    "yaml": "catalog:",
+    "zod": "catalog:"
   }
 }

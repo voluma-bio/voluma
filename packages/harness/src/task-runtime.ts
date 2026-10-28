@@ -33,6 +33,7 @@ import type { PayloadOf, Recorder } from "./recorder";
 export interface PlanTask {
   id: string;
   dependsOn: readonly string[];
+  doneWhen?: readonly string[];
   outputs: DeclaredOutput[];
 }
 
@@ -250,6 +251,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
               tasks: plan.map((t) => ({
                 id: t.id,
                 dependsOn: [...t.dependsOn],
+                ...(t.doneWhen && { doneWhen: [...t.doneWhen] }),
                 outputs: t.outputs,
               })),
             },

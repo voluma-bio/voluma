@@ -26,12 +26,15 @@ import { runLayout } from "@voluma/harness/layout";
 import { type Recorder, recorder } from "@voluma/harness/recorder";
 import { type SandboxSession, sandboxSession } from "@voluma/harness/sandbox-session";
 import { type RunRole, superviseRun } from "@voluma/harness/supervise-run";
+import { resolveTools } from "@voluma/harness/tools";
+import { loadWorkflow } from "@voluma/workflow/load";
 import type { Config } from "./config.ts";
 import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
 import { createModalSandbox, RUNS_APP, terminateClaim } from "./modal-sandbox.ts";
-import { CHECK_SYSTEM, checkPrompt, WORKER_SYSTEM, workerPrompt } from "./prompts.ts";
+import { checkPrompt, checkSystem, workerPrompt, workerSystem } from "./prompts.ts";
 import { r2Evidence } from "./r2-evidence.ts";
+import { r2Workflows } from "./r2-workflows.ts";
 import { type Redact, redactor } from "./redact.ts";
 import { usageMeter } from "./usage.ts";
 
@@ -74,7 +77,7 @@ export async function runClaim(
   shutdown: AbortSignal,
 ): Promise<void> {
   const { config, models } = ctx;
-  const { run, plan, leaseToken, keys } = claim;
+  const { run, leaseToken, keys } = claim;
   const runId = run.id;
   const claimId = randomUUID();
   const visitor = keys !== undefined;
@@ -112,6 +115,17 @@ export async function runClaim(
   try {
     lease = holdLease({ client, meter, onStop: stop, log });
     log(`claimed (${visitor ? "visitor" : "voluma"} keys, model ${model.provider}/${model.id})`);
+
+    // Before any sandbox: an unreadable package or an unknown tool fails the run here, with its message.
+    const definition = await loadWorkflow(run.workflows, {
+      store: r2Workflows(config.r2),
+      githubToken: config.githubToken,
+    });
+    const { plan } = definition;
+    const workerAgent = definition.roles.worker;
+    const reviewerAgent = definition.roles.reviewer;
+    const workerTools = workerAgent ? resolveTools(workerAgent.tools, workerAgent.name) : [];
+    const checkTools = reviewerAgent ? resolveTools(reviewerAgent.tools, reviewerAgent.name) : [];
 
     const layout = runLayout(
       runId,
@@ -188,10 +202,17 @@ export async function runClaim(
       worker: (task) => ({
         model,
         streamFn,
-        systemPrompt: WORKER_SYSTEM,
-        prompt: workerPrompt(task),
+        systemPrompt: workerSystem(definition),
+        prompt: workerPrompt(definition, task),
+        tools: workerTools,
       }),
-      check: (task) => ({ model, streamFn, systemPrompt: CHECK_SYSTEM, prompt: checkPrompt(task) }),
+      check: (task) => ({
+        model,
+        streamFn,
+        systemPrompt: checkSystem(definition),
+        prompt: checkPrompt(definition, task),
+        tools: checkTools,
+      }),
       signal: abort.signal,
     });
     supervised.catch(() => {}); // an error after the race below is moot: the run is stopping

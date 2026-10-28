@@ -15,7 +15,8 @@
     "./adapters/local/evidence": "./src/adapters/local/evidence.ts",
     "./judgment": "./src/judgment.ts",
     "./adapters/http/run-client": "./src/adapters/http/run-client.ts",
-    "./supervise-run": "./src/supervise-run.ts"
+    "./supervise-run": "./src/supervise-run.ts",
+    "./tools": "./src/tools/registry.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"
