@@ -55,8 +55,8 @@ export function ReviewWorkspace({
           <span>voluma</span>
         </div>
         <span className="header-divider" />
-        <span className="text-fg-muted">Review</span>
-        <span className="ml-auto text-xs text-fg-muted">
+        <span className="text-muted-foreground">Review</span>
+        <span className="ml-auto text-xs text-muted-foreground">
           {run ? "Analysis results" : "No analysis results"}
         </span>
       </header>
@@ -70,7 +70,7 @@ export function ReviewWorkspace({
             {run?.sample ?? (runId === "local" ? "Local scan" : runId)}
           </h1>
           {run && (
-            <p className="text-sm text-fg-muted">
+            <p className="text-sm text-muted-foreground">
               {run.workflow} · v{run.workflowVersion}
             </p>
           )}
@@ -147,7 +147,7 @@ export function ReviewWorkspace({
                   ))}
                 </nav>
                 {!revision?.tasks.length && (
-                  <p className="px-5 text-sm text-fg-muted">
+                  <p className="px-5 text-sm text-muted-foreground">
                     Tasks appear when an analysis result is connected.
                   </p>
                 )}
@@ -183,7 +183,7 @@ export function ReviewWorkspace({
                           />
                           {item.name}
                         </label>
-                        <p className="mt-2 text-fg-muted">
+                        <p className="mt-2 text-muted-foreground">
                           {item.status} · {item.reason}
                         </p>
                         <label className="opacity-control">
@@ -208,7 +208,7 @@ export function ReviewWorkspace({
                     );
                   })}
                 {!revision?.structures.length && (
-                  <p className="mt-4 text-sm text-fg-muted">
+                  <p className="mt-4 text-sm text-muted-foreground">
                     No segmentation structures are available.
                   </p>
                 )}
@@ -242,28 +242,30 @@ export function ReviewWorkspace({
                   />
                 ) : (
                   <article className="task-report">
-                    <p className="text-xs text-fg-muted">Task report</p>
+                    <p className="text-xs text-muted-foreground">Task report</p>
                     <h2 className="text-xl font-semibold mt-3">
                       {run ? "Result not available" : "No analysis results yet"}
                     </h2>
-                    <p className="text-fg-muted mt-4 leading-relaxed">
+                    <p className="text-muted-foreground mt-4 leading-relaxed">
                       {run
                         ? "This task or revision does not exist."
                         : "Opening a scan displays its images. Measurements, checks and evidence appear only after an analysis has produced them."}
                     </p>
                     <section>
                       <h3 className="font-medium">Measurements</h3>
-                      <p className="text-sm text-fg-muted mt-2">No measurements supplied.</p>
+                      <p className="text-sm text-muted-foreground mt-2">
+                        No measurements supplied.
+                      </p>
                     </section>
                     <section>
                       <h3 className="font-medium">To check</h3>
-                      <p className="text-sm text-fg-muted mt-2">
+                      <p className="text-sm text-muted-foreground mt-2">
                         No review decisions are available.
                       </p>
                     </section>
                     <section>
                       <h3 className="font-medium">Evidence</h3>
-                      <p className="text-sm text-fg-muted mt-2">
+                      <p className="text-sm text-muted-foreground mt-2">
                         No analysis evidence is attached.
                       </p>
                     </section>
