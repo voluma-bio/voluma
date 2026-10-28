@@ -40,3 +40,10 @@
     text-wrap: balance;
   }
 }
+
+/* Fade-in for content that should appear only after a delay (slow loads). */
+@keyframes appear {
+  from {
+    opacity: 0;
+  }
+}
