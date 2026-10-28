@@ -91,8 +91,10 @@ process.once("SIGINT", shutdown);
 function shutdown() {
   if (stopping) return;
   stopping = true;
+  console.log("shutting down: draining connections");
   server.close(async () => {
     await client.end({ timeout: 5 }).catch(console.error);
+    console.log("shutdown complete");
     process.exit(0);
   });
   if ("closeIdleConnections" in server) server.closeIdleConnections();

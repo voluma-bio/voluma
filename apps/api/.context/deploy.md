@@ -49,8 +49,10 @@ the old one, moves traffic once `/health` answers, then sends the old one SIGTER
 (SIGKILL after the 30 s drain). No Railway dashboard access is needed; only Jimmy has a
 seat (Hobby plan, one member).
 
-To point the runner at it, export `VOLUMA_API_URL` and `VOLUMA_API_TOKEN` in the shell
-for that command. Don't write the staging token into `.env`.
+To point the runner at it: copy `.env` to a temp file, replace its `VOLUMA_API_URL` and
+`VOLUMA_API_TOKEN` lines with the staging ones, and run the one command with
+`VOLUMA_ENV_FILE=<temp file>` (the runner reads its settings only from that file, not from
+the shell). Delete the file after; the staging token never goes into `.env`.
 
 ## Rotating secrets
 
