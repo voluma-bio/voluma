@@ -1,224 +1,106 @@
 /**
- * The runner: runs one Pi agent thread on one task, with `bash` as its only tool, in a
- * Modal sandbox created on the first command. It is a claimer (claim.ts): it takes the
- * next queued run (start one in the browser first), writes under that run's lease, and ends
- * it. `--task` is the worker's task, whatever the run's plan; the thread belongs to the plan's
- * first task. Everything is recorded through the API (events and Pi messages) and printed.
- * Ctrl-C (or SIGTERM, SIGHUP) aborts the running command and ends the thread as cancelled;
- * the run is released, so running again claims it back and, with the same --thread, resumes
- * it. A thread that already finished does nothing until given a new message with --input.
- *
- *   pnpm --filter @voluma/runner run-task --provider openai --model gpt-5-mini \
- *     --task "Report the slice count of the scan in /inputs"
- *
- * Reads the repo's .env (see config.ts): model keys, R2 and Modal credentials,
- * It talks only to the API `pnpm dev` started in this worktree (.dev/env.json). None of
- * them enter the sandbox or process.env.
+ * The runner service: claims runs from the API and runs them (`pnpm --filter @voluma/runner start`).
+ * While it has a free slot (RUNNER_CONCURRENCY) it asks for a run every CLAIM_POLL_SECONDS;
+ * each claim runs in `run.ts`. On SIGTERM or SIGINT it stops every run, which reports
+ * `released` so the API recovers it at once, and exits. A second signal exits immediately;
+ * a sandbox it leaves is ended by Modal's idle timeout, or by `sandboxes:clean`.
+ * Settings: config.ts and `.env.example`.
  */
 import { randomUUID } from "node:crypto";
-import { parseArgs } from "node:util";
 import { createModels } from "@earendil-works/pi-ai";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { metaProvider } from "@earendil-works/pi-ai/providers/meta";
 import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
-import { referencePrefix } from "@voluma/contracts/r2";
-import { httpClient } from "@voluma/harness/adapters/http";
-import { startThread } from "@voluma/harness/adapters/pi";
-import { runLayout } from "@voluma/harness/layout";
-import { recorder } from "@voluma/harness/recorder";
-import { sandboxSession } from "@voluma/harness/sandbox-session";
-import { bashTool } from "@voluma/harness/tools/bash";
-import { claimNext, holdLease } from "./claim.ts";
-import { localApi, optional, required } from "./config.ts";
-import { createModalSandbox, RUNS_APP, terminateRun } from "./modal-sandbox.ts";
+import { CLAIM_POLL_SECONDS } from "@voluma/contracts/runner";
+import { handOff } from "@voluma/harness/adapters/http/hand-off";
+import { runnerConfig } from "./config.ts";
+import { redactor } from "./redact.ts";
+import { type RunnerContext, runClaim } from "./run.ts";
 
-const { values } = parseArgs({
-  options: {
-    provider: { type: "string" },
-    model: { type: "string" },
-    task: { type: "string" },
-    input: { type: "string" },
-    thread: { type: "string" },
-  },
-});
-const { provider, model: modelId, task } = values;
-if (!provider || !modelId || !task) {
-  throw new Error(
-    "usage: main.ts --provider openai|anthropic|meta --model <id> --task <text> [--thread <id>] [--input <text>]",
-  );
-}
+/** How long a shutdown waits for runs to report before it exits anyway. */
+const SHUTDOWN_BUDGET_MS = 30_000;
+
+const config = runnerConfig();
+const redact = redactor(config.secrets);
+const log = (line: string) => console.log(`${new Date().toISOString()} ${redact(line)}`);
 
 const models = createModels();
-const providers = { anthropic: anthropicProvider, meta: metaProvider, openai: openaiProvider };
-if (!(provider in providers)) throw new Error(`unknown provider ${provider}`);
-models.setProvider(providers[provider as keyof typeof providers]());
-const apiKey = required(`VOLUMA_${provider.toUpperCase()}_API_KEY`);
-const model = models.getModel(provider, modelId);
-if (!model) throw new Error(`unknown model ${provider}/${modelId}`);
+models.setProvider(anthropicProvider());
+models.setProvider(metaProvider());
+models.setProvider(openaiProvider());
+const resolve = (ref: { provider: string; id: string }) => {
+  const model = models.getModel(ref.provider, ref.id);
+  if (!model) throw new Error(`unknown model ${ref.provider}/${ref.id}`);
+  return model;
+};
+const model = resolve(config.model);
+config.modelKey(model.provider); // fail at start, not at the first claim
 
-// Local only: a claim takes whatever run is next, which on a deployed API is a visitor's.
-const apiConfig = localApi();
-// Every ingest write carries the lease of a claimed run (`@voluma/contracts/runner`).
-const claim = await claimNext(apiConfig, `run-task-${randomUUID().slice(0, 8)}`);
-const runId = claim.run.id;
-const taskId = claim.plan.tasks[0]?.id;
-if (!taskId) throw new Error(`run ${runId}'s plan has no task`);
-const threadId = values.thread ?? `${runId}.main`;
-if (!threadId.startsWith(`${runId}.`)) throw new Error(`--thread must begin with "${runId}."`);
-const abort = new AbortController();
-const endRun = holdLease(apiConfig, runId, claim.leaseToken, () => abort.abort());
-const api = httpClient({ ...apiConfig, runId, leaseToken: claim.leaseToken });
-const layout = runLayout(runId, referencePrefix("scan"));
-const systemPrompt = `You are an analysis agent with one tool, bash, which runs commands in a sandbox.
-Python 3.12 with numpy, scipy, scikit-image, pydicom, nibabel and SimpleITK is installed.
-Check what you report against the files themselves, and say which file or header each number came from.`;
-const events = recorder(
-  {
-    async append(event) {
-      await api.append(event);
-      printEvent(event);
-    },
-  },
-  runId,
-  () => abort.abort(),
-);
+const runnerId = `runner-${randomUUID().slice(0, 8)}`;
+const ctx: RunnerContext = {
+  config,
+  api: handOff(config.api, runnerId),
+  models,
+  model,
+  visitorModel: resolve(config.visitorModel),
+  log,
+};
 
-const modalTokenId = optional("MODAL_TOKEN_ID");
-const modalTokenSecret = optional("MODAL_TOKEN_SECRET");
-const modal =
-  modalTokenId && modalTokenSecret
-    ? { tokenId: modalTokenId, tokenSecret: modalTokenSecret }
-    : undefined;
-const lifetimeSeconds = Number(optional("VOLUMA_SANDBOX_LIFETIME_SECONDS") ?? 3600);
-if (!Number.isInteger(lifetimeSeconds) || lifetimeSeconds <= 0) {
-  throw new Error("VOLUMA_SANDBOX_LIFETIME_SECONDS must be a positive integer");
-}
-// The floor keeps a sandbox from idling out before its inputs finish staging.
-const idleSeconds = Number(optional("VOLUMA_SANDBOX_IDLE_SECONDS") ?? 300);
-if (!Number.isInteger(idleSeconds) || idleSeconds < 30) {
-  throw new Error("VOLUMA_SANDBOX_IDLE_SECONDS must be an integer of at least 30");
-}
-const createSandbox = createModalSandbox({
-  appName: RUNS_APP,
-  modal,
-  r2: {
-    accountId: required("R2_ACCOUNT_ID"),
-    bucket: required("R2_BUCKET"),
-    parentAccessKeyId: required("R2_ACCESS_KEY_ID"),
-    cloudflareApiToken: required("CLOUDFLARE_API_TOKEN"),
-  },
-});
-const session = sandboxSession(
-  () =>
-    createSandbox({
-      runId,
-      name: "main",
-      image: optional("VOLUMA_SANDBOX_IMAGE") ?? "voluma-microct",
-      cpu: 2,
-      memoryMiB: 4096,
-      lifetimeSeconds,
-      idleSeconds,
-      mounts: layout.mounts,
-    }),
-  (id, state, detail) => events.emit(id, "sandbox", { name: "main", state, detail }),
-  layout.restartNote,
-);
-
-// First SIGINT/SIGTERM/SIGHUP stops the running command; the `finally` below then closes the
-// sandbox. A second one closes it now, bounded, and exits. Closing the sandbox waits for any
-// creation in flight, so the second signal also terminates the run's sandboxes by tag.
-const FORCE_CLOSE_MS = 5000;
-// After a hangup the terminal is gone and any write throws EIO, which would end the process
-// before it cleans up.
-for (const stream of [process.stdout, process.stderr]) stream.on("error", () => {});
-for (const name of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+const shutdown = new AbortController();
+const active = new Set<Promise<void>>();
+let signals = 0;
+for (const name of ["SIGINT", "SIGTERM"] as const) {
   process.on(name, () => {
-    if (abort.signal.aborted) {
-      console.error(`\n${name}: closing the sandbox and quitting`);
-      void Promise.race([
-        Promise.allSettled([session.close(), terminateRun(modal, runId)]),
-        new Promise((done) => setTimeout(done, FORCE_CLOSE_MS)),
-      ])
-        .catch(() => {})
-        .finally(() => process.exit(130));
-      return;
-    }
-    console.error(`\n${name}: stopping the running command (signal again to quit now)`);
-    abort.abort();
+    if (++signals > 1) process.exit(130);
+    log(`${name}: releasing ${active.size} run(s) and exiting`);
+    shutdown.abort();
   });
 }
 
-// An exception ends the run `failed`; an interrupted thread releases it.
-let finalReport: Parameters<typeof endRun>[0] = {
-  kind: "ended",
-  outcome: "failed",
-  error: "the CLI stopped with an error",
-};
-console.log(`run ${runId}  thread ${threadId}  model ${provider}/${modelId}`);
-try {
-  const outcome = await startThread({
-    runId,
-    threadId,
-    kind: "worker",
-    taskId,
-    model,
-    // The key goes with each request; pi-ai is never left to look in process.env.
-    streamFn: (m, context, options) => models.streamSimple(m, context, { ...options, apiKey }),
-    systemPrompt,
-    prompt: task,
-    input: values.input ? { text: values.input, sender: { kind: "person" } } : undefined,
-    tools: [bashTool(layout)],
-    recorder: events,
-    history: api,
-    sandbox: (id) => session.get(id),
-    signal: abort.signal,
-  }).done;
-  const u = outcome.usage;
-  if (!outcome.ran && outcome.status === "completed") {
-    console.log("this thread already finished; pass --input <text> to continue it");
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    shutdown.signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
+  });
+
+log(
+  `${runnerId} up: ${config.concurrency} slot(s), model ${config.model.provider}/${config.model.id}, api ${config.api.baseUrl}`,
+);
+while (!shutdown.signal.aborted) {
+  if (active.size >= config.concurrency) {
+    await Promise.race(active);
+    continue;
   }
-  console.log(
-    `\n${outcome.status}${outcome.error ? `: ${outcome.error}` : ""}\n` +
-      `model usage this invocation: ${u.input} in, ${u.cacheRead} cache read, ${u.cacheWrite} cache write, ` +
-      `${u.output} out, $${u.cost.toFixed(4)}`,
-  );
-  process.exitCode = outcome.status === "completed" ? 0 : 1;
-  finalReport = abort.signal.aborted
-    ? { kind: "released" }
-    : outcome.status === "completed"
-      ? { kind: "ended", outcome: "completed" }
-      : {
-          kind: "ended",
-          outcome: "failed",
-          // The run's error is shown to its starter: never the model key a provider echoes.
-          error: (outcome.error ?? outcome.status).replaceAll(apiKey, "[redacted]"),
-        };
-} finally {
+  let claim: Awaited<ReturnType<typeof ctx.api.claim>>;
   try {
-    await session.close();
-  } finally {
-    await events.flush();
-    await endRun(finalReport);
+    claim = await ctx.api.claim();
+  } catch (error) {
+    log(`claim failed: ${error instanceof Error ? error.message : error}`);
+    await sleep(CLAIM_POLL_SECONDS * 1000);
+    continue;
   }
+  if (!claim) {
+    await sleep(CLAIM_POLL_SECONDS * 1000);
+    continue;
+  }
+  const done = runClaim(ctx, claim, shutdown.signal)
+    .catch((error) =>
+      log(`[${claim.run.id}] run crashed: ${error instanceof Error ? error.stack : error}`),
+    )
+    .finally(() => active.delete(done));
+  active.add(done);
 }
 
-function printEvent(event: Parameters<typeof api.append>[0]): void {
-  const p = event.payload as Record<string, unknown>;
-  const clip = (value: unknown) => {
-    const text = typeof value === "string" ? value : JSON.stringify(value);
-    return text.length > 400 ? `${text.slice(0, 400)}…` : text;
-  };
-  switch (event.type) {
-    case "message":
-      console.log(`[${p.role}] ${clip(p.text)}`);
-      break;
-    case "tool.call":
-      console.log(`[call ${p.toolCallId}] ${clip(p.input)}`);
-      break;
-    case "tool.result":
-      console.log(`[result ${p.toolCallId}${p.truncated ? " truncated" : ""}] ${clip(p.output)}`);
-      break;
-    default:
-      console.log(`[${event.type}] ${clip(p)}`);
-  }
-}
+await Promise.race([
+  Promise.allSettled(active),
+  new Promise((resolve) => setTimeout(resolve, SHUTDOWN_BUDGET_MS)),
+]);
+log("exited");
+process.exit(0);

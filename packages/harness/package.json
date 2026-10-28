@@ -15,6 +15,7 @@
     "./tools/tool": "./src/tools/tool.ts",
     "./adapters/pi": "./src/adapters/pi/start-thread.ts",
     "./adapters/http": "./src/adapters/http/client.ts",
+    "./adapters/http/hand-off": "./src/adapters/http/hand-off.ts",
     "./ports/evidence": "./src/ports/evidence.ts",
     "./adapters/local/evidence": "./src/adapters/local/evidence.ts",
     "./threads": "./src/threads.ts",
