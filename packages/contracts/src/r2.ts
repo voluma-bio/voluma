@@ -28,8 +28,8 @@ const rel = (p: string) => relativePathSchema.parse(p);
 export const workflowsPrefix = () => "workflows/";
 
 export const workflowPrefix = (pin: WorkflowPin) => {
-  const { repo, commit } = workflowPinSchema.parse(pin);
-  return `workflows/${repo}/${commit}/`;
+  const { repo, commit, path } = workflowPinSchema.parse(pin);
+  return `workflows/${repo}/${commit}/${path ? `${path}/` : ""}`;
 };
 
 export const inputPrefix = (inputId: string) => `inputs/${seg(inputId)}/`;

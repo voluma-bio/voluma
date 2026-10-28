@@ -27,6 +27,13 @@ export const workflowPinSchema = z.object({
       },
     ),
   commit: z.string().regex(/^[0-9a-f]{40}$/),
+  /** The package's root inside the repo when it is not the repo root (e.g. `packages/microct-skills` in `voluma-bio/voluma`). */
+  path: z
+    .string()
+    .refine((p) => p.split("/").every((s) => segmentSchema.safeParse(s).success), {
+      message: "must be a relative path of valid segments",
+    })
+    .optional(),
 });
 export type WorkflowPin = z.infer<typeof workflowPinSchema>;
 
