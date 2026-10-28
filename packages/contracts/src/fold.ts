@@ -46,7 +46,7 @@
  *   annotations of the outputs it changed (those outputs, and what a changed
  *   measurement or score cites); "Marked to check" has none.
  *   `checkResult` turns a folded task into the status `check-result` gives.
- * - Not from these events (the API adds them): `title`, `ask`, `dependsOn`,
+ * - Not from these events (the API adds them): `title`, `ask`,
  *   `structureIds`, `threads.chat`, revision labels, the scan's volume; the API
  *   also sets each asset's `stage` to the task title (here the task id).
  */
@@ -97,6 +97,7 @@ export type Milestone = {
 export type FoldedTask = Pick<
   ReviewTask,
   | "id"
+  | "dependsOn"
   | "status"
   | "resultRevisionId"
   | "checker"
@@ -182,6 +183,7 @@ export function fold(events: readonly RunEvent[]): Folded {
   let header: Pick<FoldedRevision, "id" | "createdAt" | "reason" | "taskId"> | undefined;
   // taskId → outputId → declaration, from the run's first event.
   const plan = new Map<string, Map<string, DeclaredOutput>>();
+  const dependsOn = new Map<string, string[]>();
   // The run's first event is `revision.started` (`task-tools.ts`).
   let revisionId = "";
 
@@ -408,6 +410,7 @@ export function fold(events: readonly RunEvent[]): Folded {
       }
       return {
         id: a.taskId,
+        dependsOn: dependsOn.get(a.taskId) ?? [],
         attemptId: a.id,
         status: a.status,
         reason: a.reason,
@@ -444,7 +447,10 @@ export function fold(events: readonly RunEvent[]): Folded {
         revisionId = e.id;
         const { payload: p } = e;
         if (p.reason === "run")
-          for (const t of p.plan.tasks) plan.set(t.id, new Map(t.outputs.map((o) => [o.id, o])));
+          for (const t of p.plan.tasks) {
+            plan.set(t.id, new Map(t.outputs.map((o) => [o.id, o])));
+            dependsOn.set(t.id, t.dependsOn);
+          }
         header =
           p.reason === "run"
             ? { id: e.id, createdAt: e.createdAt, reason: p.reason }
