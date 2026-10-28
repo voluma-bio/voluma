@@ -1,15 +1,15 @@
 /**
  * What a run takes from its workflow packages, for both lanes:
  *
- * - Identity: a package on GitHub pinned to a commit. A run is pinned to
- *   several (the OA workflow plus `microct-analysis`), so pins are always an
- *   array. `r2.ts` turns a pin into its key prefix.
- * - The plan: each task's declared outputs (a measurement's acceptance range),
- *   the workflow's own definition of "done", and the tasks each depends on, the
- *   graph staleness follows (`task-tools.ts`). `packages/workflow` parses
- *   `workflow.md` into it; the runtime records it in the run's first event
- *   (`revision.started`, `events.ts`), so the fold reads it from the log and
- *   never from the workflow.
+ * - Identity: a run pins this repo and the workflow's directory (`path`, e.g.
+ *   `workflows/workflow-mouse-oa`); the runner adds the commit its checkout was at to the
+ *   pins in the run's first event. `r2.ts` has the keys of a run's snapshot of it.
+ * - The plan: each task's instructions, declared outputs (a measurement's acceptance
+ *   range), the workflow's own definition of "done", and the tasks each depends on, the
+ *   graph staleness follows (`task-tools.ts`). `packages/workflow` builds it from the
+ *   workflow's `tasks.json` and `outputs.json` for the outputs the run selected; the runtime
+ *   records it in the run's first event (`revision.started`, `events.ts`), so the fold
+ *   reads it from the log and never from the workflow.
  */
 import { z } from "zod";
 import { segmentSchema, taskIdSchema } from "./ids";
@@ -18,7 +18,7 @@ import { segmentSchema, taskIdSchema } from "./ids";
 const part = z.string().regex(/^(?!\.+$)[a-z0-9._-]+$/);
 
 export const workflowPinSchema = z.object({
-  /** GitHub `owner/name`, lowercase. */
+  /** GitHub `owner/name`, lowercase: this repo. */
   repo: z
     .string()
     .refine(
@@ -27,7 +27,15 @@ export const workflowPinSchema = z.object({
         message: "must be lowercase `owner/name`",
       },
     ),
-  commit: z.string().regex(/^[0-9a-f]{40}$/),
+  /**
+   * The commit of the checkout the run's files came from. The run record pins only the
+   * path (the API does not read the files); the runner adds its commit to the pins in the
+   * run's first event.
+   */
+  commit: z
+    .string()
+    .regex(/^[0-9a-f]{40}$/)
+    .optional(),
   /** The package's root inside the repo when it is not the repo root (e.g. `workflows/mouse-oa`): lowercase segments, as in `repo`. */
   path: z
     .string()
@@ -82,6 +90,8 @@ export const workflowPlanSchema = z
         dependsOn: z.array(taskIdSchema),
         /** The workflow's done criteria in its own words, shown to the worker and the check. */
         doneWhen: z.array(nonEmpty).optional(),
+        /** What the worker is told to do for this task; may point at files in the workflow skill. */
+        instructions: nonEmpty.optional(),
         outputs: z.array(declaredOutputSchema),
       }),
     ),

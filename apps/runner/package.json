@@ -6,19 +6,18 @@
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "start": "tsx src/main.ts",
-    "sandboxes:clean": "tsx src/sandboxes-clean.ts",
-    "publish-image": "tsx src/publish-image.ts"
+    "sandboxes:clean": "tsx src/sandboxes-clean.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1158.0",
     "@earendil-works/pi-ai": "1.4.0",
     "@voluma/contracts": "workspace:*",
     "@voluma/harness": "workspace:*",
-    "modal": "0.11.1"
+    "modal": "0.11.1",
+    "tsx": "^4.23.15"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "tsx": "^4.23.15",
     "typescript": "catalog:"
   }
 }

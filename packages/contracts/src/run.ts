@@ -95,7 +95,7 @@
  */
 import { z } from "zod";
 import { userIdSchema } from "./auth";
-import { inputIdSchema, runIdSchema } from "./ids";
+import { inputIdSchema, runIdSchema, segmentSchema } from "./ids";
 import { workflowPinSchema } from "./workflow";
 
 /**
@@ -146,6 +146,12 @@ export const runStateSchema = z.discriminatedUnion("status", [
 ]);
 export type RunState = z.infer<typeof runStateSchema>;
 
+/** Output ids the user selected; at most 200, each once. */
+const selectedOutputsSchema = z
+  .array(segmentSchema)
+  .max(200)
+  .refine((ids) => new Set(ids).size === ids.length, "duplicate output id");
+
 export const runSchema = z.object({
   id: runIdSchema,
   labId: z.string(),
@@ -153,6 +159,13 @@ export const runSchema = z.object({
   /** The pins the server resolved from the request's `workflowId`, as in `r2.ts`'s `workflowPrefix`. */
   workflows: z.array(workflowPinSchema).min(1),
   input: inputSchema,
+  /**
+   * The output ids the user selected ("What do you want measured?", `outputs.json`); the run
+   * covers the tasks that produce them and the tasks those depend on. Absent: every output.
+   */
+  selectedOutputs: selectedOutputsSchema.optional(),
+  /** Free text the user added at the start; the workflow's main thread reads it. */
+  notes: z.string().max(4000).optional(),
   /** Who pays for models and sandboxes; see the header. */
   credentials: z.enum(["voluma", "visitor"]),
   /**
@@ -183,6 +196,9 @@ export type VisitorKeys = z.infer<typeof visitorKeysSchema>;
 export const startRunRequestSchema = z.object({
   workflowId: workflowIdSchema,
   inputId: inputIdSchema,
+  /** As `runSchema.selectedOutputs`; an id the workflow's `outputs.json` lacks fails the run at start, with that message. */
+  selectedOutputs: selectedOutputsSchema.min(1).optional(),
+  notes: z.string().max(4000).optional(),
   /** Present: the run uses these (`credentials: "visitor"`) and skips the org's runs-at-once count. */
   keys: visitorKeysSchema.optional(),
 });

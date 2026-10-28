@@ -155,13 +155,13 @@ importers:
       modal:
         specifier: 0.11.1
         version: 0.11.1
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
     devDependencies:
       '@types/node':
         specifier: ^24.0.0
         version: 24.19.2
-      tsx:
-        specifier: ^4.23.15
-        version: 4.23.15
       typescript:
         specifier: 'catalog:'
         version: 6.0.3

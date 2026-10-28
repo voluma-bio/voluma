@@ -57,3 +57,11 @@ may carry `images`, which the Pi adapter turns into image blocks. The `tool.resu
 only text (path, type, size, sha256). The images are in the thread's history (resume needs
 them), but `adapters/pi/elide-images.ts` keeps image blocks only for the last 2 `view_image`
 calls in each request, so request size does not grow with the thread.
+
+**Model calls retry.** `run.ts` passes `maxRetries: 3` to Pi, which retries a 408, 429 (waiting
+the server's `retry-after`), 5xx or dropped connection. `model-retry.ts` adds one case Pi treats as
+final: Meta's intermittent `404 model_not_found` (only from the `meta` provider; about one tool call
+in five on 2026-10-28 with a working key), retried up to 4 attempts in all, 1 s, 2 s, 4 s apart,
+when the call failed before streaming any content. Any other error ends the thread as before.
+Cost is Pi's per-reply price, summed per claim; the log prints it
+when a claim reports (`model cost this claim`), and the API stores it as `runs.model_cost_usd`.

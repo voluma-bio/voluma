@@ -11,5 +11,4 @@ From the round-2 review of #40 (`voluma-bio/docs` `work/mvp-contracts-and-data/r
 
 From the skillset move (`workflows/` in this repo):
 
-- **The sandbox image does not follow the pinned commit.** The image is chosen by name in config, so an old pin runs on the newest image. To tie them: publish under a tag from the hash of `workflows/microct-analysis/requirements.txt`, have the runner resolve that tag from the requirements at the run's pinned commit, and record the image in the run's first event. Needs the workflow-packages lane's pin and the `/workflow` mount to read that file.
-- **The deploy lane's `sandbox/Dockerfile`** (branch `jimyao/runner-deploy`) still has an inline pip line; when both land, `COPY` `workflows/microct-analysis/requirements.txt` and `pip install --no-deps -r` it (the file's header says why `--no-deps`).
+- **The sandbox image does not follow the pinned commit.** The image is one digest in config (`SANDBOX_IMAGE`), so an old pin runs on the newest image. To tie them: tag the image with the hash of `workflows/microct-analysis/requirements.txt`, have the runner resolve that tag from the requirements at the run's pinned commit, and record the image in the run's first event. Needs the workflow-packages lane's pin and the `/workflow` mount to read that file.

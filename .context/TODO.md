@@ -11,7 +11,6 @@ Contracts, written when something produces or consumes them (the first contracts
 Later:
 - `pnpm data:pull`: fetch the OA6-1RK scan and reference run from R2 into `.data/`. Both lanes need it from day one; blocked on the bucket existing.
 - Nx 24 and TypeScript 7 are released; the workspace is on Nx 23 and TypeScript 6. Upgrade in their own PR and check `pnpm check` timings.
-- Pin the sandbox image's base (`python:3.12-slim` in `apps/runner/src/publish-image.ts`) by digest so two builds match.
 - Harness: live tool output flushes only when the next chunk arrives, so a command that prints once and then goes quiet shows nothing live until it ends. Add a timer flush when the live stream (PR F) needs it.
 - Harness: a `bash` result stores at most 4 MB of output (`STORE_CHARS` in `tools/bash.ts`; the tail is always shown); the note says when the stored copy is cut. A tool that returns large files should write them to `/outputs` instead; revisit if a real task needs more.
 - Harness: move `EventLog`, `History` and `HistoryConflict` out of `@voluma/harness` so `apps/api` stops depending on it (it drags Pi's dependency tree into the API package). The history wire schemas are already in `@voluma/contracts/history`.
