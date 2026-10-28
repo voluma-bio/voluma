@@ -32,8 +32,13 @@ export function metaSegmenter(options: {
   log(line: string): void;
   /** Called with what Meta billed, as soon as it reports the frames (even if the call then fails). */
   addCost(usd: number): void;
+  /**
+   * Stores a response that could not be pasted, since Meta bills it and the sandbox's local
+   * disk is lost; resolves to where a person can read it.
+   */
+  keepFailed(text: string): Promise<string>;
 }): Segmenter {
-  const { apiKey, log, addCost } = options;
+  const { apiKey, log, addCost, keepFailed } = options;
   const auth = { Authorization: `Bearer ${apiKey}` };
   return {
     async segment(stack, objects, signal) {
@@ -64,7 +69,13 @@ export function metaSegmenter(options: {
         }
         signal.throwIfAborted();
         const text = await track(prompt, fileId, signal);
-        return { ...paste(text, stack, objects, width, height), prompt };
+        try {
+          return { ...paste(text, stack, objects, width, height), prompt };
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          const kept = await keepFailed(text).catch((e) => `not kept (${e})`);
+          throw new Error(`${detail}; Meta's response: ${kept}`, { cause: error });
+        }
       } finally {
         if (fileId) await deleteUpload(fileId);
         await rm(dir, { recursive: true, force: true });
@@ -251,7 +262,9 @@ function paste(
       if (!known.has(label))
         throw new Error(`the response names object ${id}, which was not prompted`);
       if (num(box, "w") !== paddedWidth || num(box, "h") !== paddedHeight) {
-        throw new Error("the response is for a frame size other than the one sent");
+        throw new Error(
+          `the response is for a frame size other than the one sent (slice ${frame}, object ${id})`,
+        );
       }
       const x1 = num(box, "x1");
       const y1 = num(box, "y1");
@@ -267,7 +280,7 @@ function paste(
         x1 + boxW > paddedWidth ||
         y1 + boxH > paddedHeight
       ) {
-        throw new Error("the response has a box outside the frame");
+        throw new Error(`the response has a box outside the frame (slice ${frame}, object ${id})`);
       }
       const [h, w, encoded] = /^(\d+),(\d+),(.*)$/s.exec(field(mask, "data") ?? "")?.slice(1) ?? [];
       if (encoded === undefined) {
@@ -279,7 +292,9 @@ function paste(
         Number(w) !== boxW ||
         Number(h) !== boxH
       ) {
-        throw new Error("the response has a mask that is not at the origin of its own box");
+        throw new Error(
+          `the response has a mask that is not at the origin of its own box (slice ${frame}, object ${id})`,
+        );
       }
       let bits: Uint8Array;
       try {

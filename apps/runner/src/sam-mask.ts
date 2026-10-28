@@ -228,11 +228,11 @@ function decodeLossless(payload: string, width: number, height: number): Uint8Ar
   let orderZeroTotal = SYMBOLS * 2;
   const orderTwo = new Map<number, Uint16Array>(); // keyed by previous residual and the one above
   let previous = 0;
+  const isZero = (i: number) => (at(residuals, i) === 0 ? 1 : 0);
 
   for (let offset = 0; offset < length; offset++) {
     const x = offset % width;
     const y = (offset - x) / width;
-    const isZero = (i: number) => (at(residuals, i) === 0 ? 1 : 0);
     const zo =
       ((x > 0 ? isZero(offset - 1) : 1) |
         ((y > 0 ? isZero(offset - width) : 1) << 1) |
