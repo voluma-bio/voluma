@@ -171,7 +171,7 @@ export function runnerConfig() {
     ].filter((s): s is string => s !== undefined),
     sandbox: {
       image: SANDBOX_IMAGE,
-      lifetimeSeconds: positiveInt("VOLUMA_SANDBOX_LIFETIME_SECONDS", 3600),
+      lifetimeSeconds: positiveInt("VOLUMA_SANDBOX_LIFETIME_SECONDS", 14400),
       // The floor keeps a sandbox from idling out before its inputs finish staging.
       idleSeconds: positiveInt("VOLUMA_SANDBOX_IDLE_SECONDS", 300, 30),
     },

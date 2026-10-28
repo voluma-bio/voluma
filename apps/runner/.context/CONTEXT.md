@@ -15,7 +15,7 @@ who ends it:
    group (Ctrl-C does); `kill <pid of pnpm>` alone leaves the runner running.
 3. **A resume.** `create` terminates live sandboxes tagged with the same `{run, name}`.
 4. **Modal ends it.** After 300 s with no command running (`VOLUMA_SANDBOX_IDLE_SECONDS` in
-   `.env`, at least 30) or at a hard lifetime of 3600 s (`VOLUMA_SANDBOX_LIFETIME_SECONDS`).
+   `.env`, at least 30) or at a hard lifetime of 14400 s (`VOLUMA_SANDBOX_LIFETIME_SECONDS`; it was 3600 until a full run's sandbox ended exactly an hour after it was ready, mid-task, and took its `/tmp` files with it).
    Before each call the session asks Modal whether a sandbox it handed out earlier still
    runs (`alive()`, 30-40 ms) and replaces a dead one (`stopped`, then `starting`, `ready`
    events). Modal also refuses commands for at least 15 s while it shuts a sandbox down,
@@ -94,6 +94,12 @@ don't cost a turn.
 
 # Runner: sandbox memory
 
-A sandbox has 8192 MiB (`run.ts`). `classic_segment` measured 2.8-3.1 GB anonymous memory and
+One sandbox serves the whole run (name `main`), so tasks that run in parallel share its memory
+and 2 CPUs. A sandbox has 8192 MiB (`run.ts`). `classic_segment` measured 2.8-3.1 GB anonymous memory and
 about 4.0-4.25 GB RSS with the memory-mapped scan, so the old 4096 MiB risked an OOM kill in a
 full run.
+Two concurrent heavy steps fit: their anonymous memory adds up (about 6 GB) and the mapped scan
+file is shared page cache, not counted twice. Whether a given restart was an out-of-memory kill
+is not known: `alive()` only says the sandbox ended (the event reads "ended by the provider"), and
+Modal's exit code is not logged. In the 2026-10-28 local run the sandbox ended at 1 h 0 min (the
+lifetime) and once more 23 min into the replacement, with no reason recorded. See TODO.md.
