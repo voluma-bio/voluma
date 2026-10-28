@@ -57,7 +57,7 @@ export function ViewerWorkspace({
       <div className="viewer-heading">
         <h2 className="font-medium">Imaging workspace</h2>
         <span className="text-xs text-muted-foreground">
-          {series ? "Local images · not an analysis" : "Open a DICOM ZIP to view images"}
+          {series ? "Acquired images · not an analysis" : "Open a scan to view images"}
         </span>
       </div>
       <div className="viewer-grid">

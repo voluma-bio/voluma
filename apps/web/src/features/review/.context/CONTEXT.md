@@ -1,8 +1,8 @@
 # Review workspace specification
 
 Review is one light-themed workspace at `/runs/:runId`. It can open a local
-DICOM ZIP, display acquired images and build a bounded raw volume preview.
-It does not yet load server runs, run
+DICOM ZIP or download an authorized input archive, display acquired images and
+build a bounded raw volume preview. It does not yet load analysis results, run
 analysis, or persist review decisions. `/runs/local` is a workspace identifier,
 not a run created in the API. There is no demo route or simulator in the app.
 
@@ -19,10 +19,16 @@ structures, evidence, messages or revisions. Those require a real analysis
 result. The empty report explains this distinction. A locally opened scan is
 not verified as the input to a server run, even when opened on that run's URL.
 
-`index.tsx` owns route selection, the file picker, import cancellation and the
-selected local series. It uses the public `@voluma/viewer` API. The package owns
-ZIP/DICOM validation, ordering, decoding and rendering; see the
-[DICOM specification][dicom]. Neither path calls the API or saves local files.
+`index.tsx` owns route selection, the file picker, download/import cancellation and the
+selected series. It uses `@voluma/api-client` to resolve a run's input and its
+download descriptor, then downloads a ZIP through the generic validated transfer.
+At `/runs/local`, **Open reference scan** resolves the workspace's reference input;
+on a real run, **Open run scan** uses that run's input, never a reference fallback.
+The API currently serves only reference archives. Upload archives remain unavailable.
+The public `@voluma/viewer` API owns ZIP/DICOM validation, ordering, decoding
+and rendering; see the
+[DICOM specification][dicom]. Local files never leave the browser. Neither intake
+path creates a run or verifies image provenance against analysis results.
 
 ## The report UI is retained for the real adapter
 
@@ -49,8 +55,11 @@ make a fake transport to fill the empty report.
 
 ## Intake remains usable through errors and replacement
 
-The picker accepts a ZIP, reports progress and offers cancellation. A successful
-single-series import opens automatically; a multi-series import requires an
+Both intake paths share ZIP validation, progress and cancellation. Downloads accept
+only ZIPs, cap compressed bytes at 2 GiB, and reject incorrect headers/signatures;
+the importer's expanded-data limit is separate, not a browser memory budget.
+Missing R2 configuration gives a setup error while local intake stays available.
+A successful single-series import opens automatically; a multi-series import requires an
 explicit choice. Opening another ZIP clears the current scan first, so an error
 cannot leave old images under a new selection. Close, replacement and route
 changes terminate the import worker and release viewer resources. Reloading
@@ -74,8 +83,8 @@ boundaries, API domain factories and real-data policy. Review replaces the
 scaffold's Review placeholder, not its Run screens or `/dev/ui`. Shared contracts
 and API client match upstream. There is no competing `apps/app` application.
 
-Server run lookup, provenance matching between images and results, mutations,
-event streaming and the OA6-1RK importer remain unconnected. The cross-lane
+Analysis result lookup, provenance matching between images and results, mutations
+and event streaming remain unconnected. The cross-lane
 dependencies are listed in the [repository TODO][todo]. Local viewing does not
 depend on those services; scientific processing does.
 

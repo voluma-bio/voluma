@@ -1,9 +1,10 @@
 /**
- * Review lane: local DICOM intake beside the result workspace. Opening images
+ * Review lane: local or authorized server DICOM intake beside the result workspace. Opening images
  * does not create an analysis run or populate reports. Light Review chrome.
  * Owns its routes; the shell mounts them.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ApiError, downloadFile, getInputDownload, getRun, listInputs } from "@voluma/api-client";
 import { type DicomArchive, openDicomZip, ViewerWorkspace } from "@voluma/viewer";
 import { useEffect, useRef, useState } from "react";
 import { Link, type RouteObject, useParams, useSearchParams } from "react-router";
@@ -37,12 +38,33 @@ function LocalReview({ runId }: { runId: string }) {
     setError(undefined);
   }
 
-  async function open(file: File) {
+  async function open(file?: File) {
     close();
     const request = new AbortController();
     controller.current = request;
-    setProgress("Reading ZIP…");
+    setProgress(file ? "Reading ZIP…" : "Looking up scan…");
     try {
+      if (!file) {
+        const inputId =
+          runId === "local"
+            ? (await listInputs()).find((item) => item.source === "reference")?.id
+            : (await getRun(runId)).input.id;
+        request.signal.throwIfAborted();
+        if (!inputId) throw new Error("No reference scan is available in this workspace.");
+        const descriptor = await getInputDownload(inputId, request.signal);
+        file = await downloadFile(descriptor, {
+          acceptedMediaTypes: ["application/zip"],
+          // Compressed transfer limit; the importer separately caps expanded DICOM data.
+          maxBytes: 2 * 1024 ** 3,
+          signal: request.signal,
+          onProgress: (received, total) =>
+            setProgress(
+              `Downloading scan ${Math.floor((received / total) * 100)}% (${(received / 1024 ** 2).toFixed(1)} / ${(total / 1024 ** 2).toFixed(1)} MiB)…`,
+            ),
+        });
+      }
+      request.signal.throwIfAborted();
+      setProgress("Reading ZIP…");
       const loaded = await openDicomZip(file, request.signal, (done, total) =>
         setProgress(`Reading files ${done} / ${total}…`),
       );
@@ -51,8 +73,19 @@ function LocalReview({ runId }: { runId: string }) {
       // Never guess which acquisition the researcher intends when there are several.
       if (loaded.series.length === 1) setSelectedSeries(loaded.series[0]?.id ?? "");
     } catch (cause) {
-      if (!request.signal.aborted)
-        setError(cause instanceof Error ? cause.message : "Could not open this ZIP.");
+      if (!request.signal.aborted) {
+        setError(
+          cause instanceof ApiError
+            ? cause.status === 503
+              ? "Reference scan storage is not configured yet. You can still open a local DICOM ZIP."
+              : cause.status === 404
+                ? "This scan is unavailable or you do not have access to it."
+                : "Could not download the scan. Try opening it again."
+            : cause instanceof Error
+              ? cause.message
+              : "Could not open this ZIP.",
+        );
+      }
     } finally {
       if (!request.signal.aborted) setProgress(undefined);
     }
@@ -88,11 +121,10 @@ function LocalReview({ runId }: { runId: string }) {
                   if (file) void open(file);
                 }}
               />
-              <button
-                type="button"
-                className="button primary"
-                onClick={() => input.current?.click()}
-              >
+              <button type="button" className="button primary" onClick={() => void open()}>
+                {runId === "local" ? "Open reference scan" : "Open run scan"}
+              </button>
+              <button type="button" className="button" onClick={() => input.current?.click()}>
                 Open DICOM ZIP
               </button>
               {archive && (
@@ -122,7 +154,8 @@ function LocalReview({ runId }: { runId: string }) {
               )}
             </div>
             <p className="text-xs text-muted-foreground mt-2">
-              Local only. Not uploaded or saved. Use de-identified scans.
+              Scans open in this browser. Local ZIPs are not uploaded or saved. Use de-identified
+              scans.
             </p>
             {progress && (
               <p className="text-sm mt-2" role="status">

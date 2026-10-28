@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Snapshots preserve installed tools; no services or authentication need restoring yet.
+# Amp supervises the declared preview; Postgres is enabled during setup.
 set -euo pipefail
 
 command -v meridian >/dev/null
