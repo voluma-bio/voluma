@@ -47,14 +47,14 @@ export function prepareCheckpoint(args: unknown): unknown {
       const root = f.path.root ?? f.root;
       return f.root !== undefined && f.path.root !== undefined && f.root !== f.path.root
         ? f
-        : { ...f.path, ...(root !== undefined && { root }) };
+        : { ...f, ...f.path, ...(root !== undefined && { root }) };
     });
   }
   const { toCheck } = out;
   if (typeof toCheck === "string") out.toCheck = { title: toCheck };
-  else if (isRecord(toCheck) && typeof toCheck.text === "string") {
+  else if (isRecord(toCheck) && toCheck.title === undefined && typeof toCheck.text === "string") {
     const { text, ...kept } = toCheck;
-    out.toCheck = { ...kept, title: kept.title ?? text };
+    out.toCheck = { ...kept, title: text };
   }
   return out;
 }

@@ -365,7 +365,7 @@ export function supervisor(options: SupervisorOptions) {
         // A check that stopped without a verdict (it wrote "Passed" in the text only) is
         // woken once, as a worker is, before its task is left with no verdict.
         if (t.checker?.verdict === undefined && c.wakes < 1) {
-          const text = `You stopped without a verdict. Write a checkpoint on ${taskId} with verdict "passed" if you agree or "needs-review" if you do not or cannot tell, and one plain line of why.`;
+          const text = `You stopped before giving a verdict. Write a checkpoint on ${taskId} with verdict "passed" if you agree or "needs-review" if you do not or cannot tell, and one plain line of why.`;
           wake(c, { text, sender: { kind: "runtime" } }, t.attemptId);
           return "acted";
         }
