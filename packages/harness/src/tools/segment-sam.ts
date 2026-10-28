@@ -15,6 +15,13 @@ import type { Tool } from "./tool";
 
 /** Objects one request can carry (Meta's limit). */
 const MAX_STRUCTURES = 16;
+/**
+ * The runner holds about 4.5 bytes per voxel at peak (the 8-bit stack, a reordered copy, the labels,
+ * a reordered copy, the written file), and runs several threads at once: 600 million voxels
+ * (OA6-1RK's oriented stack is 290 million) is about 2.7 GB. Meta takes at most 15,000 frames.
+ */
+const MAX_VOXELS = 600_000_000;
+const MAX_FRAMES = 15_000;
 
 const inputSchema = z.object({
   volume: z
@@ -63,15 +70,17 @@ const inputSchema = z.object({
     )
     .min(1)
     .max(MAX_STRUCTURES),
-  output: z.string().describe("Where to write the labels .npy, under /outputs or /scratch."),
+  output: z
+    .string()
+    .describe(
+      "Where to write the labels .npy, under /outputs or /scratch. Next to it the tool writes `<output without .npy>.json`.",
+    ),
 });
 
 export interface SegmentSamDeps {
   layout: RunLayout;
   files: Files;
   segmenter: Segmenter;
-  /** Called with what the provider billed. */
-  addCost(usd: number): void;
 }
 
 export function segmentSamTool(deps: SegmentSamDeps): Tool<typeof inputSchema> {
@@ -83,7 +92,10 @@ export function segmentSamTool(deps: SegmentSamDeps): Tool<typeof inputSchema> {
       "each through the whole volume. Returns a uint8 labels .npy of the volume's shape (0 is background, " +
       "each structure's voxels carry its label), the voxel count per label and the prompts used. The " +
       "structures of one call are tracked together and never share a voxel; a call is one paid request of " +
-      "about a minute (up to 16 structures), and results vary slightly between runs. " +
+      "about a minute (up to 16 structures), and results vary slightly between runs. A sidecar JSON next to the " +
+      "labels (`labels.npy` gives `labels.json`) holds `{axis, shape, prompt, objects: [{label, name, promptFrame, box, " +
+      'confidence: {"<slice>": 0-1}}]}`: the model\'s confidence for each object on each slice where it found a mask; ' +
+      "a slice missing from `confidence` had none. " +
       `${layout.description}`,
     input: inputSchema,
     async execute(input, ctx) {
@@ -93,8 +105,16 @@ export function segmentSamTool(deps: SegmentSamDeps): Tool<typeof inputSchema> {
         throw new Error("structure labels must be unique");
       const readKey = layout.keyOf(input.volume, "read");
       const writeKey = layout.keyOf(input.output, "write");
-      const { shape, data } = await readWindowed(files.read(readKey, ctx.signal), input.window);
+      const { shape, data } = await readWindowed(
+        files.read(readKey, ctx.signal),
+        input.window,
+        MAX_VOXELS,
+      );
       const [count, height, width] = frameShape(shape, axis);
+      if (count > MAX_FRAMES)
+        throw new Error(
+          `${count} slices along axis ${axis}; the model takes at most ${MAX_FRAMES}`,
+        );
       const objects: SegmentObject[] = input.structures.map(({ label, box, frame }) => {
         const f = frame ?? input.keyframe;
         const [r0, c0, r1, c1] = box;
@@ -109,9 +129,26 @@ export function segmentSamTool(deps: SegmentSamDeps): Tool<typeof inputSchema> {
       });
       const stack = { data: moveAxis(data, shape, axis, "to-front"), count, height, width };
       const result = await segmenter.segment(stack, objects, ctx.signal);
-      deps.addCost(result.costUsd);
       const volume = moveAxis(result.labels, shape, axis, "to-place");
       await files.write(writeKey, writeU8(volume, shape), ctx.signal);
+      const sidecar = {
+        axis,
+        shape,
+        prompt: result.prompt,
+        objects: input.structures.map(({ label, name, box, frame }) => ({
+          label,
+          name,
+          promptFrame: frame ?? input.keyframe,
+          box,
+          confidence: result.confidence[label] ?? {},
+        })),
+      };
+      const sidecarPath = input.output.replace(/(\.npy)?$/, ".json");
+      await files.write(
+        layout.keyOf(sidecarPath, "write"),
+        new TextEncoder().encode(JSON.stringify(sidecar)),
+        ctx.signal,
+      );
       const voxels = new Uint32Array(256);
       for (const v of volume) voxels[v] = (voxels[v] ?? 0) + 1;
       return {
@@ -123,8 +160,8 @@ export function segmentSamTool(deps: SegmentSamDeps): Tool<typeof inputSchema> {
             name: s.name,
             voxels: voxels[s.label] ?? 0,
           })),
+          sidecar: sidecarPath,
           prompt: result.prompt,
-          costUsd: result.costUsd,
         }),
         isError: false,
         truncated: false,

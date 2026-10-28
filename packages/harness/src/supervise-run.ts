@@ -38,9 +38,9 @@ export interface SuperviseRunOptions {
   sandbox(threadId: string): Promise<Sandbox>;
   evidence: Evidence;
   /** Offers `segment_sam` to threads when set (the host has a Segmenter and a key for it). */
-  segmentSam?: Omit<SegmentSamDeps, "layout">;
-  /** Offers `view_image` to threads when set: the run's bucket, read host-side. */
-  files?: Files;
+  segmentSam?: Pick<SegmentSamDeps, "segmenter">;
+  /** The run's bucket, read and written host-side by `view_image` and `segment_sam`. */
+  files: Files;
   judgment: Judgment;
   worker(task: PlanTask): RunRole;
   check(task: PlanTask): RunRole;
@@ -68,8 +68,10 @@ export function superviseRun(options: SuperviseRunOptions): Promise<Folded> {
   };
   const tools = () => [
     bashTool(layout),
-    ...(options.files ? [viewImageTool({ layout, files: options.files })] : []),
-    ...(options.segmentSam ? [segmentSamTool({ layout, ...options.segmentSam })] : []),
+    viewImageTool({ layout, files: options.files }),
+    ...(options.segmentSam
+      ? [segmentSamTool({ layout, files: options.files, ...options.segmentSam })]
+      : []),
     ...taskTools(runtime),
     threadMessageTool((from, to, text) => sup.message(from, to, text)),
   ];

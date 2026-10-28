@@ -190,11 +190,7 @@ export async function runClaim(
       evidence: r2Evidence(config.r2),
       files,
       segmentSam: metaKey
-        ? {
-            files,
-            segmenter: metaSegmenter({ apiKey: metaKey, log }),
-            addCost: meter.addModelCost,
-          }
+        ? { segmenter: metaSegmenter({ apiKey: metaKey, log, addCost: meter.addModelCost }) }
         : undefined,
       judgment,
       worker: (task) => ({

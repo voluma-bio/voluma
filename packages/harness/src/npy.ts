@@ -50,6 +50,8 @@ function parseHeader(bytes: Uint8Array): {
 export async function readWindowed(
   chunks: AsyncIterable<Uint8Array>,
   window: [number, number],
+  /** Refuse a larger volume, from its header, before anything is allocated. */
+  maxVoxels = Number.POSITIVE_INFINITY,
 ): Promise<{ shape: Shape3; data: Uint8Array }> {
   const [lo, hi] = window;
   let header: ReturnType<typeof parseHeader> | undefined;
@@ -62,6 +64,10 @@ export async function readWindowed(
       carry = concat(carry, bytes);
       if (carry.length < 12 || carry.length < headerEnd(carry)) continue;
       header = parseHeader(carry);
+      const voxels = header.shape[0] * header.shape[1] * header.shape[2];
+      if (voxels > maxVoxels) {
+        throw new Error(`the volume has ${voxels} voxels, over this tool's limit of ${maxVoxels}`);
+      }
       data = new Uint8Array(header.shape[0] * header.shape[1] * header.shape[2]);
       bytes = carry.subarray(header.end);
       carry = new Uint8Array(0);

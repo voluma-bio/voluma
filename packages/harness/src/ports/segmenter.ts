@@ -27,8 +27,11 @@ export interface SegmentResult {
   labels: Uint8Array;
   /** The prompt text the model was sent, for the record. */
   prompt: string;
-  /** What the provider billed, for the run's cost. */
-  costUsd: number;
+  /**
+   * The provider's confidence per object and slice, `confidence[label][slice]`; a slice with
+   * no entry had no mask for that object.
+   */
+  confidence: Record<number, Record<number, number>>;
 }
 
 export interface Segmenter {
