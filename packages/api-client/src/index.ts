@@ -5,6 +5,17 @@
  */
 import { logoutResponseSchema, type Me, meResponseSchema } from "@voluma/contracts/auth";
 
+/** A non-OK API response. Branch on `status` (403, 415, 5xx) rather than parsing the message. */
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    url: string,
+  ) {
+    super(`${url}: ${status}`);
+    this.name = "ApiError";
+  }
+}
+
 const signedOutListeners = new Set<() => void>();
 
 /** Listen for a 401 on any call but `getMe`. Returns the unsubscribe function. */
@@ -13,12 +24,16 @@ export function onSignedOut(listener: () => void): () => void {
   return () => signedOutListeners.delete(listener);
 }
 
-async function request(path: string, init: { method?: "GET" | "POST" } = {}): Promise<Response> {
-  const post = init.method === "POST";
+/** Non-GET requests always carry a JSON body: the server rejects any other content type. */
+async function request(
+  path: string,
+  { method = "GET", body }: { method?: "GET" | "POST"; body?: unknown } = {},
+): Promise<Response> {
+  const post = method !== "GET";
   return fetch(`/api${path}`, {
-    method: init.method,
+    method,
     headers: post ? { "content-type": "application/json" } : undefined,
-    body: post ? "{}" : undefined,
+    body: post ? JSON.stringify(body ?? {}) : undefined,
   });
 }
 
@@ -26,7 +41,7 @@ async function json(res: Response): Promise<unknown> {
   if (res.status === 401) {
     for (const listener of signedOutListeners) listener();
   }
-  if (!res.ok) throw new Error(`${res.url}: ${res.status}`);
+  if (!res.ok) throw new ApiError(res.status, res.url);
   return res.json();
 }
 
@@ -35,6 +50,11 @@ export async function getMe(): Promise<Me | null> {
   const res = await request("/auth/me");
   if (res.status === 401) return null;
   return meResponseSchema.parse(await json(res));
+}
+
+/** Starts sign-in: navigates to the identity provider, then back to `returnTo`. The server validates `returnTo`. */
+export function signIn(returnTo = location.pathname + location.search): void {
+  location.href = `/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`;
 }
 
 /** Ends the session, then leaves the app for the identity provider's logout page. */
