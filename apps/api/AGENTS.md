@@ -28,6 +28,9 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   byte-for-byte history.
 - Only `src/index.ts` reads env. It hands `createAuth` (`src/auth.ts`) the WorkOS values;
   AuthKit would otherwise read `WORKOS_*` from `process.env` itself.
+- **Guests are principals too.** `GUEST_ORGANIZATION_ID`/`GUEST_SCOPE` (read in `index.ts`)
+  make a request with no credential a `user` with `account: "visitor"` and `email: null`
+  (`auth.ts`); `readerOf` is still the only place scope becomes a filter. Unset: 401.
 - **Domains read the caller from the context, not the request.** The root authenticates
   once (`src/auth.ts`) and answers 401 when there is no principal. A domain app is
   `new Hono<AppEnv>()` (`src/domain.ts`) and reads `c.get("principal")`; the runner's

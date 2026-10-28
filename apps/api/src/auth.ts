@@ -5,11 +5,15 @@
  *    the header is present only the bearer counts; the cookie is never consulted.
  *  - the WorkOS AuthKit session cookie: a member of an allowed organization, principal
  *    `user` (its `labId` is that organization, its `scope` the organization's entry).
+ * With `config.guest` set, a request with neither is a guest: a `user` with account
+ * `visitor`, `labId` and `scope` from the config, identified by a server-minted id in
+ * its own sealed cookie (no WorkOS call). A member session always wins over the guest
+ * cookie; with `guest` null the guest cookie is ignored and the request is a 401.
  * `createAuth` returns the pieces index.ts mounts on `/api/*`, in this order:
  *  1. `guards`: the bearer check and the CSRF rules. No I/O, so a forged request makes no
  *     WorkOS call.
  *  2. `sessionRoutes`: login, callback and logout, the only writers of the session cookie.
- *  3. `session`, then `requirePrincipal`: the cookie becomes a user principal, and
+ *  3. `session`, then `requirePrincipal`: the cookie (else a guest) becomes a user principal, and
  *     everything else without a principal is a 401. This is the only place that
  *     validates the cookie and refreshes an expired access token with WorkOS; the
  *     refreshed `Set-Cookie`s ride on the response (each its own header: AuthKit forbids
@@ -17,7 +21,8 @@
  *  4. `userRoutes` and the domains, which see a non-null principal (domain.ts).
  */
 
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { getConnInfo } from "@hono/node-server/conninfo";
 import type { Me } from "@voluma/contracts/auth";
 import {
   AuthKitCore,
@@ -40,6 +45,7 @@ import {
   WorkOS,
 } from "@workos-inc/node";
 import { type Context, Hono } from "hono";
+import { getCookie, setCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
 import { timingSafeEqual } from "hono/utils/buffer";
 import { createRemoteJWKSet } from "jose";
@@ -55,6 +61,11 @@ export interface AuthConfig {
    * get. The first `lab` entry is the organization the sign-in page is pinned to.
    */
   organizations: { id: string; scope: Scope }[];
+  /**
+   * Who a request with no credential is, or null for a sign-in wall. Guests belong to
+   * `organizationId` and see what `scope` allows, as a member of it would.
+   */
+  guest: { organizationId: string; scope: Scope } | null;
   /** Where the browser reaches the app (no trailing slash). Never taken from `Host`. */
   appUrl: string;
   /** The runner's bearer token. */
@@ -98,6 +109,16 @@ class RequestStorage extends CookieSessionStorage<Request, string[]> {
 // Session cookie lifetime. The refresh token, not this, bounds the session; a month
 // keeps a lab member signed in across a holiday without a permanent cookie.
 const COOKIE_MAX_AGE = 30 * 24 * 60 * 60;
+
+// The guest cookie outlives any visit: a guest is a browser, and losing the cookie
+// loses their work under `scope: "self"`.
+const GUEST_MAX_AGE = 400 * 24 * 60 * 60;
+const GUEST_ID_PREFIX = "guest_";
+
+// New guest identities one client address may mint per window (see `MintLimit`).
+const GUESTS_PER_WINDOW = 20;
+const GUEST_WINDOW_MS = 60 * 60 * 1000;
+const MINT_ENTRIES = 10_000;
 
 // Every WorkOS call is on a request path (refresh, revoke, code exchange), so it is
 // bounded: one attempt, 3 s. The SDK's default is 4 attempts and 60 s each.
@@ -190,16 +211,51 @@ class RefreshMemo {
   }
 }
 
+// A fixed window of guest mints per client address. In-process, so a restart or a second
+// instance resets it; it bounds a script, not a determined attacker. A bounded LRU like
+// `RefreshMemo`.
+class MintLimit {
+  private windows = new Map<string, { start: number; count: number }>();
+
+  /** Counts a mint for `address`; false when it is over the limit. */
+  allow(address: string) {
+    const now = Date.now();
+    const found = this.windows.get(address);
+    const window = found && now - found.start < GUEST_WINDOW_MS ? found : { start: now, count: 0 };
+    this.windows.delete(address);
+    this.windows.set(address, window);
+    if (this.windows.size > MINT_ENTRIES) {
+      this.windows.delete(this.windows.keys().next().value as string);
+    }
+    if (window.count >= GUESTS_PER_WINDOW) return false;
+    window.count += 1;
+    return true;
+  }
+}
+
 type SessionRef = { id: string; refreshToken: string };
 
 function userPrincipal(user: User, labId: string, scope: Scope): Principal {
   return {
     kind: "user",
     userId: user.id,
+    account: "member",
     email: user.email,
     name: [user.firstName, user.lastName].filter(Boolean).join(" ") || null,
     labId,
     scope,
+  };
+}
+
+function guestPrincipal(userId: string, guest: NonNullable<AuthConfig["guest"]>): Principal {
+  return {
+    kind: "user",
+    userId,
+    account: "visitor",
+    email: null,
+    name: null,
+    labId: guest.organizationId,
+    scope: guest.scope,
   };
 }
 
@@ -257,6 +313,10 @@ export function createAuth(config: AuthConfig) {
   });
   (core as unknown as { getPublicKey: () => typeof jwks }).getPublicKey = () => jwks;
   const memo = new RefreshMemo();
+  const mintLimit = new MintLimit();
+  // Like the session cookie, __Host- on https. Hono enforces Secure and Path=/ for it.
+  const https = appOrigin.startsWith("https:");
+  const guestCookieName = "voluma-guest";
 
   // Clears the session cookie and every pending PKCE verifier on the request, so
   // sign-out and refusals leave no AuthKit cookie behind.
@@ -352,6 +412,51 @@ export function createAuth(config: AuthConfig) {
     return userPrincipal(result.session.user, orgId, scope);
   }
 
+  // The guest for a request, or null for no valid guest cookie (absent, garbled, forged
+  // or sealed under another password).
+  async function guestIdFromCookie(c: Context) {
+    const sealed = getCookie(c, guestCookieName, https ? "host" : undefined);
+    if (!sealed) return null;
+    try {
+      const { id } = await sessionEncryption.unsealData<{ id?: unknown }>(sealed, {
+        password: config.cookiePassword,
+      });
+      return typeof id === "string" && id.startsWith(GUEST_ID_PREFIX) ? id : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // The client address for the mint limit: X-Real-IP, which Railway's edge always
+  // overwrites (X-Forwarded-For has no documented guarantee: its first entry was
+  // spoofable in 2024); the socket address without it, as in local dev.
+  function clientAddress(c: Context) {
+    return c.req.header("x-real-ip") || getConnInfo(c).remote.address || "unknown";
+  }
+
+  // The guest principal for a request with no member session: its cookie's, else a new
+  // one (cookie set on the response), or null when the address is over the mint limit.
+  async function guestFrom(c: Context, guest: NonNullable<AuthConfig["guest"]>) {
+    const existing = await guestIdFromCookie(c);
+    if (existing) return guestPrincipal(existing, guest);
+    if (!mintLimit.allow(clientAddress(c))) return null;
+    const id = `${GUEST_ID_PREFIX}${randomUUID()}`;
+    setCookie(
+      c,
+      guestCookieName,
+      await sessionEncryption.sealData({ id }, { password: config.cookiePassword }),
+      {
+        httpOnly: true,
+        sameSite: "Lax",
+        maxAge: GUEST_MAX_AGE,
+        secure: https,
+        path: "/",
+        prefix: https ? "host" : undefined,
+      },
+    );
+    return guestPrincipal(id, guest);
+  }
+
   const bearer = createMiddleware<RootEnv>(async (c, next) => {
     const authorization = c.req.header("authorization");
     const token = authorization && /^Bearer +(.+)$/i.exec(authorization)?.[1];
@@ -383,8 +488,12 @@ export function createAuth(config: AuthConfig) {
   const session = createMiddleware<RootEnv>(async (c, next) => {
     if (c.req.header("authorization") !== undefined) return next(); // the bearer decided
     const cookies: string[] = [];
-    const principal = await userFromCookie(c.req.raw, cookies);
+    let principal = await userFromCookie(c.req.raw, cookies);
     if (principal === "unavailable") return c.json({ error: "auth unavailable" }, 503);
+    if (principal === null && config.guest) {
+      principal = await guestFrom(c, config.guest);
+      if (principal === null) return c.json({ error: "too many new guests" }, 429);
+    }
     c.set("principal", principal);
     await next();
     for (const cookie of cookies) c.res.headers.append("Set-Cookie", cookie);
@@ -476,8 +585,12 @@ export function createAuth(config: AuthConfig) {
   const userRoutes = new Hono<UserEnv>().use(requireUser);
 
   userRoutes.get("/me", (c) => {
-    const { userId, email, name, labId } = c.var.user;
-    return c.json({ kind: "member", userId, email, name, labId } satisfies Me);
+    const { userId, account, email, name, labId } = c.var.user;
+    const me: Me =
+      account === "visitor" || email === null
+        ? { kind: "visitor", userId, name, labId }
+        : { kind: "member", userId, email, name, labId };
+    return c.json(me);
   });
 
   return {

@@ -40,6 +40,7 @@ Variables on `@voluma/api`:
 | `WORKOS_CLIENT_ID`, `WORKOS_API_KEY` | WorkOS dashboard, API Keys (staging environment) |
 | `WORKOS_COOKIE_PASSWORD` | `openssl rand -base64 32`; seals the session cookie |
 | `WORKOS_LAB_ORGANIZATION_ID` | the Yao Lab organization's id (`org_...`); its members get scope `lab` |
+| `GUEST_ORGANIZATION_ID`, `GUEST_SCOPE` | optional: let anyone in as a guest of this organization (`lab` or `self`, default `lab`). Staging runs open for now: the Yao Lab organization, `lab`. Unset means the sign-in wall. The mint limit keys on `X-Real-IP`, which Railway's edge always overwrites |
 | `WORKOS_JUDGES_ORGANIZATION_ID` | optional: the Judges organization's id; its members get scope `self`. Unset means no Judges sign-in |
 | `PORT` | set by Railway |
 

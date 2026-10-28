@@ -15,7 +15,9 @@ export type Principal =
   | {
       kind: "user";
       userId: string;
-      email: string;
+      /** A `visitor` is a guest the server minted: no account, no email. */
+      account: "member" | "visitor";
+      email: string | null;
       name: string | null;
       /** The user's WorkOS organization: the tenant every record is filed under. */
       labId: string;
