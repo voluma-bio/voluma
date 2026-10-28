@@ -30,13 +30,21 @@ export type SigninOutcome = z.infer<typeof signinOutcomeSchema>;
 /** A WorkOS user id, or a server-minted id for an anonymous demo visitor ("Explore the demo"). */
 export const userIdSchema = z.string();
 
-export const meResponseSchema = z.object({
+const meFields = {
   userId: userIdSchema,
-  /** Null for an anonymous demo visitor, who has no account. */
-  email: z.string().nullable(),
   name: z.string().nullable(),
   labId: z.string(),
-});
+};
+
+/**
+ * Who is signed in. `member` is a WorkOS account (a lab member or a judge);
+ * `visitor` is an anonymous demo visitor ("Explore the demo"), who has no
+ * account and no email. Signing a visitor out throws their identity away.
+ */
+export const meResponseSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("member"), email: z.string(), ...meFields }),
+  z.object({ kind: z.literal("visitor"), ...meFields }),
+]);
 export type Me = z.infer<typeof meResponseSchema>;
 
 export const logoutResponseSchema = z.object({ logoutUrl: z.string() });
