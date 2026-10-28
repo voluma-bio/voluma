@@ -45,6 +45,23 @@ const nonEmpty = z.string().min(1);
 export const WAKE_NOTE_MAX = 6000;
 export const WAKE_ERROR_MAX = 1000;
 
+/**
+ * What one model call used, as Pi reports it: `input` is the uncached input tokens only, so
+ * the prompt was `input + cacheRead + cacheWrite` tokens and the cache hit share is
+ * `cacheRead / (input + cacheRead)`. A call with `cacheRead === 0` was cold. `costUsd` is
+ * Pi's total cost for the call. Absent on events written before this field existed.
+ */
+export const modelUsageSchema = z.object({
+  input: z.number().int().nonnegative(),
+  output: z.number().int().nonnegative(),
+  cacheRead: z.number().int().nonnegative(),
+  cacheWrite: z.number().int().nonnegative(),
+  /** Reasoning tokens, when the provider reports them (already counted in `output`). */
+  reasoning: z.number().int().nonnegative().optional(),
+  costUsd: z.number().nonnegative(),
+});
+export type ModelUsage = z.infer<typeof modelUsageSchema>;
+
 export const threadKindSchema = z.enum(["supervisor", "worker", "check", "chat"]);
 export type ThreadKind = z.infer<typeof threadKindSchema>;
 
@@ -170,7 +187,12 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
           z.object({ kind: z.literal("person") }),
         ]),
       }),
-      z.object({ role: z.literal("assistant"), text: z.string() }),
+      z.object({
+        role: z.literal("assistant"),
+        text: z.string(),
+        /** The reply's model usage; absent on a reply that never reached the model. */
+        usage: modelUsageSchema.optional(),
+      }),
       z.object({ role: z.literal("system"), text: z.string() }),
     ]),
   );
@@ -326,6 +348,8 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
       .object({
         point: wakePoint,
         model: modelRefSchema,
+        /** The call's usage; absent when the model did not answer at all, or on an older wake. */
+        usage: modelUsageSchema.optional(),
         note: z.string().max(WAKE_NOTE_MAX).optional(),
         decision: z
           .object({ action: z.enum(["accept", "redo", "fail"]), reason: nonEmpty })
