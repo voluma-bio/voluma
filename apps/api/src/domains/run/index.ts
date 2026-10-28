@@ -3,8 +3,9 @@
  * Today: the runner's ingest of the stream record and the model history of a run's
  * threads, under /ingest/ and guarded for the runner (`service` principal; other routes will take `user`).
  *   POST /ingest/runs/:runId/events          append an event (EventInput)
- *   POST /ingest/threads/:threadId/messages  append a history row {idx, message}
- *   GET  /ingest/threads/:threadId/messages  all rows in order
+ *   POST /ingest/runs/:runId/threads/:threadId/messages  append a history row {idx, message}
+ *   GET  /ingest/runs/:runId/threads/:threadId/messages  all rows in order
+ * (a thread id must begin with `<runId>.`, else 400)
  * Later: workflows and their package import, runs, the supervisor. RunDeps lists
  * what it needs; index.ts supplies adapters. The factory returns a Hono app, so
  * routes, params and (later) WebSocket upgrades use Hono; the domain does not know its mount.
@@ -42,11 +43,18 @@ export function createRun({ eventLog, history }: RunDeps) {
     return c.body(null, 204);
   });
 
-  app.get("/ingest/threads/:threadId/messages", async (c) =>
+  // The thread's run is in the path: no event names a fresh thread before its first history call.
+  app.use("/ingest/runs/:runId/threads/:threadId/*", async (c, next) => {
+    const { runId, threadId } = c.req.param();
+    if (!threadId.startsWith(`${runId}.`)) return c.text("thread id must begin with <runId>.", 400);
+    await next();
+  });
+
+  app.get("/ingest/runs/:runId/threads/:threadId/messages", async (c) =>
     c.json({ messages: await history.load(c.req.param("threadId")) } satisfies HistoryResponse),
   );
 
-  app.post("/ingest/threads/:threadId/messages", async (c) => {
+  app.post("/ingest/runs/:runId/threads/:threadId/messages", async (c) => {
     const parsed = storableRow.safeParse(await readJson(c.req));
     if (!parsed.success) return c.text(parsed.error.message, 400);
     try {
