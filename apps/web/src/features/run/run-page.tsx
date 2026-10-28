@@ -135,7 +135,15 @@ export function RunPage() {
   const ended = data.state.status === "ended";
   const plan = planOf(events);
   const states = plan
-    ? taskStates(plan, new Map(folded.tasks.map((t) => [t.id, t.status])))
+    ? taskStates(
+        plan,
+        new Map(folded.tasks.map((t) => [t.id, t.status])),
+        new Set(
+          threads.flatMap((t) =>
+            t.kind === "worker" && t.status === "running" && t.taskId ? [t.taskId] : [],
+          ),
+        ),
+      )
     : new Map<string, TaskState>();
   // To check is finished too: the work is done and a person has items to look at.
   const done = [...states.values()].filter((s) => s === "done" || s === "to-check").length;

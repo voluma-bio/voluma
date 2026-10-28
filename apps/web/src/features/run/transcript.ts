@@ -153,8 +153,8 @@ export function toolTitle(name: string, input: unknown): string {
         .map((l) => l.trim())
         .filter((l) => l && !l.startsWith("#"));
       const first = lines[0] ?? "";
-      // A heredoc's first line says only which interpreter: add its first real statement.
-      if (/<<-?\s*['"]?\w+['"]?\s*$/.test(first)) {
+      // A heredoc's or `-c "`'s first line says only which interpreter: add its first statement.
+      if (/(<<-?\s*['"]?\w+['"]?|\s-c\s+["'])\s*$/.test(first)) {
         const body = lines.slice(1).find((l) => !/^(import|from)\s/.test(l));
         if (body) return `${first} ${body}`;
       }

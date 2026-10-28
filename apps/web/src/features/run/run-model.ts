@@ -206,6 +206,8 @@ export type TaskState =
 export function taskStates(
   plan: WorkflowPlan,
   statuses: Map<string, TaskStatus | undefined>,
+  /** Tasks with a worker running: Working before the worker marks it in progress. */
+  working: Set<string>,
 ): Map<string, TaskState> {
   const states = new Map<string, TaskState>();
   for (const t of plan.tasks) {
@@ -213,7 +215,8 @@ export function taskStates(
     const blocked = t.dependsOn.some((d) => statuses.get(d) !== "done");
     states.set(
       t.id,
-      status === "in-progress"
+      status === "in-progress" ||
+        ((status === undefined || status === "pending" || status === "stale") && working.has(t.id))
         ? "running"
         : status === "under-review"
           ? "checking"
