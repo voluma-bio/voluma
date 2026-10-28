@@ -460,8 +460,8 @@ export function createAuth(config: AuthConfig) {
 
   // The origin and content-type rules for requests that authenticate by cookie.
   // SameSite=Lax is same-site, not same-origin (every *.voluma.bio host is same-site),
-  // so state-changing requests must come from the app's origin. (There are no WebSocket
-  // upgrades: run streams are server-sent events, plain GETs.)
+  // so state-changing requests must come from the app's origin. Nothing upgrades to
+  // WebSockets; a route that ever does must check `Origin` on the upgrade here too.
   // Service (bearer) requests carry no ambient credential and are exempt; a request
   // with some other Authorization header has no principal and is checked like any other.
   const csrf = createMiddleware<RootEnv>(async (c, next) => {
