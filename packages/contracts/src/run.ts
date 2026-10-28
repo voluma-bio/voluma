@@ -79,7 +79,13 @@
  *     429 when work starts and are checked again when a claim dequeues a run; a
  *     run refused at dequeue, or a running one that crosses the dollar ceiling,
  *     ends `failed` with an `error`. The daily limit counts a run once, so a
- *     recovered run isn't refused for a limit it already passed.
+ *     recovered run isn't refused for a limit it already passed;
+ *   - for `visitor` runs: at most this many `queued` or `running` in the org
+ *     (those hold the visitor's keys in the server's memory, or a runner
+ *     slot; an `awaiting-keys` run holds neither and doesn't count). Starting
+ *     one, or `/keys`, answers 429 at the cap. Only those two calls add to the
+ *     count, so the claim needn't check it again.
+ * Which org's run a claim takes: `runner.ts`.
  * Every run is created `queued`, and only a claim starts it (`runner.ts`). A
  * `visitor` run skips the org's runs-at-once count but still waits for a claim.
  */
@@ -159,13 +165,15 @@ export const runSchema = z.object({
 });
 export type Run = z.infer<typeof runSchema>;
 
+/** Real keys are well under 512 characters; the cap bounds what the server holds in memory. */
+const keyField = z.string().min(1).max(512);
 /**
  * A visitor's own credentials: a Meta Model API key and a Modal token. Sent
  * only in requests, never returned; see the header.
  */
 export const visitorKeysSchema = z.object({
-  metaApiKey: z.string().min(1),
-  modal: z.object({ tokenId: z.string().min(1), tokenSecret: z.string().min(1) }),
+  metaApiKey: keyField,
+  modal: z.object({ tokenId: keyField, tokenSecret: keyField }),
 });
 export type VisitorKeys = z.infer<typeof visitorKeysSchema>;
 
