@@ -5,12 +5,13 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, cancelRun, getRun, resendKeys, subscribe } from "@voluma/api-client";
+import type { Me } from "@voluma/contracts/auth";
 import type { RunEvent } from "@voluma/contracts/events";
 import { type FoldedTask, fold } from "@voluma/contracts/fold";
 import type { Run } from "@voluma/contracts/run";
 import { Button, StatusBadge } from "@voluma/ui";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useOutletContext, useParams } from "react-router";
 import { KeysForm } from "./keys";
 import { RunBadge, runStatus, taskStatus } from "./status";
 import { taskTitle, workflowName } from "./workflows";
@@ -48,6 +49,7 @@ function useRunEvents(runId: string, onClosed: () => void): RunEvent[] {
 
 export function RunPage() {
   const { id = "" } = useParams();
+  const me = useOutletContext<Me>();
   const queryClient = useQueryClient();
   const run = useQuery({
     queryKey: ["run", id],
@@ -98,7 +100,7 @@ export function RunPage() {
           {runStatus(data).detail ? `, ${runStatus(data).detail}` : ""}
         </p>
 
-        <RunActions run={data} onChange={setRun} />
+        <RunActions run={data} userId={me.userId} onChange={setRun} />
 
         <h2 className="mt-8 mb-3 flex items-baseline gap-3 text-lg font-semibold">
           Tasks
@@ -160,7 +162,15 @@ function TaskRow({
   );
 }
 
-function RunActions({ run, onChange }: { run: Run; onChange: (run: Run) => void }) {
+function RunActions({
+  run,
+  userId,
+  onChange,
+}: {
+  run: Run;
+  userId: string;
+  onChange: (run: Run) => void;
+}) {
   const [confirming, setConfirming] = useState(false);
   const cancel = useMutation({ mutationFn: () => cancelRun(run.id), onSuccess: onChange });
   const resend = useMutation({
@@ -171,13 +181,14 @@ function RunActions({ run, onChange }: { run: Run; onChange: (run: Run) => void 
 
   return (
     <div className="mt-5 grid gap-3">
-      {state.status === "awaiting-keys" && (
+      {state.status === "awaiting-keys" && run.startedBy === userId && (
         <section className="max-w-sm rounded-xl border border-check-line bg-check-tint p-4">
           <h2 className="font-medium text-check-strong">The run is waiting for your keys</h2>
           <p className="mt-1 mb-3 text-ui text-check-strong">
             The server restarted and no longer has them. Send them again to continue.
           </p>
           <KeysForm
+            userId={userId}
             submitLabel="Continue the run"
             busy={resend.isPending}
             onSubmit={(keys) => resend.mutate(keys)}

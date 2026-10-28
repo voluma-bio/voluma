@@ -28,7 +28,7 @@ Moving them to `.railway/railway.ts` is in [TODO.md](TODO.md).
 | Draining | 30 s, above the API's `DRAIN_MS` (10 s) in `src/index.ts` |
 | Restart | on failure, 10 retries |
 | App Sleeping | off |
-| Watch paths | `/apps/api/**`, `/apps/web/**`, `/packages/**`, `/pnpm-lock.yaml`, `/package.json`, `/.tool-versions`, `/tsconfig.base.json`, `/pnpm-workspace.yaml` (root files that change the build or Node). `/workflows/*/outputs.json` (the web build bundles it for the start screen). No other `/workflows/**`: the API never reads the workflow files; the runner snapshots them and records its own commit (`RAILWAY_GIT_COMMIT_SHA`) in each run. **Needs setting on the service** (dashboard or API); not yet applied |
+| Watch paths | `/apps/api/**`, `/apps/web/**`, `/packages/**`, `/pnpm-lock.yaml`, `/package.json`, `/.tool-versions`, `/tsconfig.base.json`, `/pnpm-workspace.yaml` (root files that change the build or Node). `/workflows/*/outputs.json` (the web build bundles it for the start screen). No other `/workflows/**`: the API never reads the workflow files; the runner snapshots them and records its own commit (`RAILWAY_GIT_COMMIT_SHA`) in each run. Set on the service |
 
 Variables on `@voluma/api`:
 

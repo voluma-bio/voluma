@@ -7,11 +7,10 @@ import { ApiError, listInputs, listRuns, startRun } from "@voluma/api-client";
 import type { Me } from "@voluma/contracts/auth";
 import type { Input, VisitorKeys } from "@voluma/contracts/run";
 import { Button, Card } from "@voluma/ui";
-import { type FormEvent, useState } from "react";
+import { useState } from "react";
 import { Link, useNavigate, useOutletContext } from "react-router";
-import { KeysForm, loadKeys } from "./keys";
-import { runHref } from "./runs-page";
-import { RunBadge, runStatus } from "./status";
+import { forgetKeys, KeysForm, loadKeys } from "./keys";
+import { RunBadge, runHref, runStatus } from "./status";
 import { ALL_OUTPUT_IDS, OUTPUT_GROUPS, WORKFLOW, workflowName } from "./workflows";
 
 const NOTES_MAX = 4000;
@@ -34,7 +33,7 @@ export function StartPage() {
   const [picked, setPicked] = useState<string>();
   const [selected, setSelected] = useState(() => new Set(ALL_OUTPUT_IDS));
   const [notes, setNotes] = useState("");
-  const [keys, setKeys] = useState<VisitorKeys | undefined>(loadKeys);
+  const [keys, setKeys] = useState<VisitorKeys | undefined>(() => loadKeys(me.userId));
   const needsKeys = me.kind === "visitor";
 
   // The newest scan unless the user picked another.
@@ -44,7 +43,11 @@ export function StartPage() {
       startRun({
         workflowId: WORKFLOW.id,
         inputId: inputId as string,
-        selectedOutputs: ALL_OUTPUT_IDS.filter((id) => selected.has(id)),
+        // Absent means every output, so a default run doesn't depend on this build's list.
+        selectedOutputs:
+          selected.size === ALL_OUTPUT_IDS.length
+            ? undefined
+            : ALL_OUTPUT_IDS.filter((id) => selected.has(id)),
         notes: notes.trim() === "" ? undefined : notes,
         keys: needsKeys ? keys : undefined,
       }),
@@ -53,16 +56,9 @@ export function StartPage() {
 
   const canRun = inputId !== undefined && selected.size > 0 && (!needsKeys || keys !== undefined);
 
-  function submit(event: FormEvent) {
-    event.preventDefault();
-    if (canRun) start.mutate();
-  }
-
   return (
-    <form
-      onSubmit={submit}
-      className="grid min-h-0 flex-1 grid-cols-[16rem_minmax(0,1fr)_22rem] max-[1100px]:block"
-    >
+    // Not a <form>: the keys form lives inside it, and forms don't nest.
+    <div className="grid min-h-0 flex-1 grid-cols-[16rem_minmax(0,1fr)_22rem] max-[1100px]:block">
       <aside className="overflow-y-auto border-r border-border p-4 max-[1100px]:border-r-0 max-[1100px]:border-b">
         <h2 className="px-1 pb-3 text-meta font-semibold text-fg-subtle">Workflows</h2>
         <Card className="border-primary p-3">
@@ -143,7 +139,7 @@ export function StartPage() {
                         />
                         <span className="min-w-0 flex-1">{o.name}</span>
                         <span className="font-mono text-meta text-fg-subtle">
-                          {o.kind === "measurement" ? o.unit : "file"}
+                          {o.kind === "measurement" ? o.unit : o.kind}
                         </span>
                       </label>
                     </li>
@@ -185,20 +181,31 @@ export function StartPage() {
                   onClick={() => setKeys(undefined)}
                 >
                   Change
+                </button>{" "}
+                <button
+                  type="button"
+                  className="text-primary-text hover:underline"
+                  onClick={() => {
+                    forgetKeys(me.userId);
+                    setKeys(undefined);
+                  }}
+                >
+                  Forget keys
                 </button>
               </p>
             ) : (
-              <KeysForm submitLabel="Save keys" onSubmit={setKeys} />
+              <KeysForm userId={me.userId} submitLabel="Save keys" onSubmit={setKeys} />
             )}
           </section>
         )}
 
         <div>
           <Button
-            type="submit"
+            type="button"
             variant="primary"
             className="w-full"
             disabled={!canRun || start.isPending}
+            onClick={() => start.mutate()}
           >
             {start.isPending ? "Starting…" : "Run"}
           </Button>
@@ -214,7 +221,7 @@ export function StartPage() {
 
         <RecentRuns />
       </aside>
-    </form>
+    </div>
   );
 }
 

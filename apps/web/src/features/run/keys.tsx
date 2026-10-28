@@ -1,42 +1,47 @@
 /**
  * A visitor's own keys (`VisitorKeys`): asked on the start screen and again when a run is
- * waiting for them. They stay in this browser's localStorage, which is where the contract
- * says a visitor's keys live; the server holds them in memory only.
+ * waiting for them. They stay in this browser's localStorage, under the user's id so another
+ * user of the browser never sees them; the server holds them in memory only.
  */
-import type { VisitorKeys } from "@voluma/contracts/run";
+import { type VisitorKeys, visitorKeysSchema } from "@voluma/contracts/run";
 import { Button } from "@voluma/ui";
 import { type FormEvent, useState } from "react";
 
-const STORAGE_KEY = "voluma.visitor-keys";
+const storageKey = (userId: string) => `voluma.visitor-keys.${userId}`;
 
-export function loadKeys(): VisitorKeys | undefined {
-  const raw = localStorage.getItem(STORAGE_KEY);
+/** The keys this user saved in this browser; stored text that doesn't parse is dropped. */
+export function loadKeys(userId: string): VisitorKeys | undefined {
+  const raw = localStorage.getItem(storageKey(userId));
   if (!raw) return undefined;
   try {
-    return JSON.parse(raw) as VisitorKeys;
-  } catch {
-    localStorage.removeItem(STORAGE_KEY);
-    return undefined;
-  }
+    const parsed = visitorKeysSchema.safeParse(JSON.parse(raw));
+    if (parsed.success) return parsed.data;
+  } catch {}
+  forgetKeys(userId);
+  return undefined;
 }
 
-export const saveKeys = (keys: VisitorKeys) =>
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(keys));
+export const saveKeys = (userId: string, keys: VisitorKeys) =>
+  localStorage.setItem(storageKey(userId), JSON.stringify(keys));
+
+export const forgetKeys = (userId: string) => localStorage.removeItem(storageKey(userId));
 
 const inputClass =
   "h-9 w-full rounded-lg border border-input bg-card px-3 text-ui outline-none focus-visible:border-ring";
 
 /** Three password fields; `onSubmit` gets complete keys, which are saved first. */
 export function KeysForm({
+  userId,
   submitLabel,
   busy,
   onSubmit,
 }: {
+  userId: string;
   submitLabel: string;
   busy?: boolean;
   onSubmit: (keys: VisitorKeys) => void;
 }) {
-  const saved = loadKeys();
+  const saved = loadKeys(userId);
   const [metaApiKey, setMeta] = useState(saved?.metaApiKey ?? "");
   const [tokenId, setTokenId] = useState(saved?.modal.tokenId ?? "");
   const [tokenSecret, setTokenSecret] = useState(saved?.modal.tokenSecret ?? "");
@@ -44,7 +49,7 @@ export function KeysForm({
   function submit(event: FormEvent) {
     event.preventDefault();
     const keys = { metaApiKey, modal: { tokenId, tokenSecret } };
-    saveKeys(keys);
+    saveKeys(userId, keys);
     onSubmit(keys);
   }
 

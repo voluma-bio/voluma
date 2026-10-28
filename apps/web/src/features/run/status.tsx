@@ -12,6 +12,12 @@ export function formatTime(iso: string): string {
   });
 }
 
+/** Where a row leads: the review (the review lane's `/runs/:runId`) once completed, else the live page. */
+export const runHref = (run: Run) =>
+  run.state.status === "ended" && run.state.outcome === "completed"
+    ? `/runs/${run.id}`
+    : `/runs/${run.id}/live`;
+
 export type RunStatus = { label: string; tone: StatusTone; detail?: string };
 
 export function runStatus({ state }: Run): RunStatus {

@@ -4,14 +4,8 @@ import { listRuns } from "@voluma/api-client";
 import type { Run } from "@voluma/contracts/run";
 import { Button, Table } from "@voluma/ui";
 import { useNavigate } from "react-router";
-import { formatTime, RunBadge, runStatus } from "./status";
+import { formatTime, RunBadge, runHref, runStatus } from "./status";
 import { workflowName } from "./workflows";
-
-/** Where a row leads: the review (the review lane's `/runs/:runId`) once completed, else the live page. */
-export const runHref = (run: Run) =>
-  run.state.status === "ended" && run.state.outcome === "completed"
-    ? `/runs/${run.id}`
-    : `/runs/${run.id}/live`;
 
 function finished(run: Run): string {
   const { state } = run;

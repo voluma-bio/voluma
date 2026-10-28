@@ -34,19 +34,11 @@ export type OutputGroup = { title: string; outputs: OutputEntry[] };
 
 const outputs = outputsFileSchema.parse(JSON.parse(outputsJson));
 
-/** One group per task that produces measurements, in file order; every other output goes last. */
+/** One group per producing task, in file order. */
 export const OUTPUT_GROUPS: OutputGroup[] = (() => {
   const byTask = new Map<string, OutputEntry[]>();
-  const other: OutputEntry[] = [];
-  for (const o of outputs) {
-    if (o.kind !== "measurement") other.push(o);
-    else byTask.set(o.task, [...(byTask.get(o.task) ?? []), o]);
-  }
-  const groups = [...byTask].map(([task, list]) => ({
-    title: taskTitle(task),
-    outputs: list,
-  }));
-  return other.length > 0 ? [...groups, { title: "Scan preparation", outputs: other }] : groups;
+  for (const o of outputs) byTask.set(o.task, [...(byTask.get(o.task) ?? []), o]);
+  return [...byTask].map(([task, list]) => ({ title: taskTitle(task), outputs: list }));
 })();
 
 export const ALL_OUTPUT_IDS = outputs.map((o) => o.id);
