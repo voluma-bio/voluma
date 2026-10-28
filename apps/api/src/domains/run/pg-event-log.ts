@@ -5,17 +5,18 @@
  *    statement's snapshot is taken when it starts, so a lock taken inside the insert's
  *    own statement would not see the previous holder's row and `seq` would collide;
  * 2. check the lease token against the run row (`LeaseLost` rolls the append back);
- * 3. insert with `seq = MAX(seq) + 1`; a repeated event `id` inserts nothing;
+ * 3. insert with `seq = MAX(seq) + 1`; a repeated event `id` inserts nothing, and is
+ *    `EventIdTaken` if the stored event belongs to another run;
  * 4. apply the `threads` projection, only if the event was new.
  *
  * So `seq` is gapless and in commit order per run. The stream hub relies on that:
  * publish after commit, and a gap means backfill from the log.
  */
 import type { EventInput } from "@voluma/contracts/events";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { assertLease } from "./run-rows";
-import type { LeasedEventLog } from "./run-store";
+import { EventIdTaken, type LeasedEventLog } from "./run-store";
 import { events, threads } from "./schema";
 
 /** First key of the advisory lock pair; the second is the run. Distinguishes our locks from others'. */
@@ -43,7 +44,14 @@ export function pgEventLog(db: PostgresJsDatabase): LeasedEventLog {
           })
           .onConflictDoNothing({ target: events.id })
           .returning({ id: events.id });
-        if (inserted.length === 0) return;
+        if (inserted.length === 0) {
+          const [stored] = await tx
+            .select({ runId: events.runId })
+            .from(events)
+            .where(eq(events.id, event.id));
+          if (stored?.runId !== event.runId) throw new EventIdTaken();
+          return;
+        }
         await projectThread(tx, event, createdAt);
       });
     },
@@ -69,13 +77,17 @@ async function projectThread(
           status: "running",
           createdAt,
         })
-        .onConflictDoUpdate({ target: threads.id, set: { status: "running", endedAt: null } });
+        .onConflictDoUpdate({
+          target: threads.id,
+          set: { status: "running", endedAt: null },
+          setWhere: eq(threads.runId, event.runId),
+        });
       return;
     case "thread.ended":
       await tx
         .update(threads)
         .set({ status: event.payload.status, endedAt: createdAt })
-        .where(eq(threads.id, event.threadId));
+        .where(and(eq(threads.id, event.threadId), eq(threads.runId, event.runId)));
       return;
   }
 }

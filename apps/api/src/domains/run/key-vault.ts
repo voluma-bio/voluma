@@ -1,31 +1,42 @@
 /**
  * Visitor keys, in this process's memory and nowhere else (`@voluma/contracts/run`,
- * "Starting work"). Held from `startRun` or `/keys` until a claim takes them, or the run
- * is cancelled. A restart empties it, which is why the API moves unclaimed visitor runs
- * to `awaiting-keys` on start. Never log, store or return a value held here.
+ * "Starting work"). Held before a start or `/keys` commits, until a claim takes them or
+ * the run is cancelled or refused. A process that doesn't hold a queued visitor run's
+ * keys can't claim it, so the claim moves it to `awaiting-keys`. An org holds at most
+ * `MAX_PER_ORG` runs' keys, which bounds the memory a client can pin. Never log, store or
+ * return a value held here.
  */
 import type { VisitorKeys } from "@voluma/contracts/run";
 
-export class KeyVault {
-  private readonly keys = new Map<string, VisitorKeys>();
+const MAX_PER_ORG = 100;
 
-  set(runId: string, keys: VisitorKeys) {
-    this.keys.set(runId, keys);
+export class KeyVault {
+  private readonly entries = new Map<string, { labId: string; keys: VisitorKeys }>();
+
+  /** Holds the run's keys (replacing its earlier ones). False when the org is at its cap. */
+  hold(runId: string, labId: string, keys: VisitorKeys): boolean {
+    if (!this.entries.has(runId)) {
+      let held = 0;
+      for (const entry of this.entries.values()) if (entry.labId === labId) held++;
+      if (held >= MAX_PER_ORG) return false;
+    }
+    this.entries.set(runId, { labId, keys });
+    return true;
   }
 
   /** Ids with keys held, for the claim to choose among. */
   ids(): string[] {
-    return [...this.keys.keys()];
+    return [...this.entries.keys()];
   }
 
   /** Hands the keys out once: the vault forgets them as it answers. */
   take(runId: string): VisitorKeys | undefined {
-    const keys = this.keys.get(runId);
-    this.keys.delete(runId);
-    return keys;
+    const entry = this.entries.get(runId);
+    this.entries.delete(runId);
+    return entry?.keys;
   }
 
   drop(runId: string) {
-    this.keys.delete(runId);
+    this.entries.delete(runId);
   }
 }

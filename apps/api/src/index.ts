@@ -12,7 +12,7 @@
  * WORKOS_LAB_ORGANIZATION_ID, and optionally WORKOS_JUDGES_ORGANIZATION_ID, and
  * GUEST_ORGANIZATION_ID with GUEST_SCOPE (lab|self, default lab) to let anyone in as a guest (the repo .env).
  * Run limits, per organization (LAB, JUDGES, DEMO) and number: RUN_LIMITS_<ORG>_PER_CALLER, _CONCURRENT,
- * _PER_DAY, _USD_PER_DAY; unset is no limit. Fails at startup if the database is unreachable or not migrated.
+ * _PER_DAY, _USD_PER_DAY, _VISITOR_ACTIVE; unset is no limit. Fails at startup if the database is unreachable or not migrated.
  */
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -20,6 +20,7 @@ import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { type Context, Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
 import postgres from "postgres";
 import { createAuth } from "./auth";
@@ -31,7 +32,7 @@ import { pgEventLog } from "./domains/run/pg-event-log";
 import { pgHistory } from "./domains/run/pg-history";
 import { pgRunQueue } from "./domains/run/pg-queue";
 import { pgRunStore } from "./domains/run/pg-run-store";
-import type { Limits } from "./domains/run/run-store";
+import type { Limits, LimitsOf } from "./domains/run/run-store";
 
 const required = (name: string) => {
   const value = process.env[name];
@@ -60,6 +61,7 @@ const limitsFromEnv = (org: "LAB" | "JUDGES" | "DEMO"): Limits => ({
   concurrent: limitNumber(`RUN_LIMITS_${org}_CONCURRENT`),
   perDay: limitNumber(`RUN_LIMITS_${org}_PER_DAY`),
   usdPerDay: limitNumber(`RUN_LIMITS_${org}_USD_PER_DAY`),
+  visitorActive: limitNumber(`RUN_LIMITS_${org}_VISITOR_ACTIVE`),
 });
 
 const client = postgres(required("DATABASE_URL"));
@@ -95,17 +97,17 @@ if (process.env.WORKOS_JUDGES_ORGANIZATION_ID) {
 if (process.env.GUEST_ORGANIZATION_ID) {
   limitsByOrg.set(process.env.GUEST_ORGANIZATION_ID, limitsFromEnv("DEMO"));
 }
-const limits = (org: string) => {
-  const found = limitsByOrg.get(org);
-  if (!found) throw new Error(`no run limits for organization ${org}`);
-  return found;
-};
+// An org that is no longer configured has no limits: its queued runs fail and its running ones stop.
+const limits: LimitsOf = (org) => limitsByOrg.get(org) ?? null;
 const runStore = pgRunStore(db, limits);
 const runQueue = pgRunQueue(db, limits);
 const keyVault = new KeyVault();
 
 const app = new Hono();
 app.get("/health", (c) => c.text("ok"));
+// A request body over 256 KB is a 413 before anything reads it (the key vault and the
+// event log keep what clients send).
+app.use("/api/*", bodyLimit({ maxSize: 256 * 1024 }));
 // Every /api request is authenticated here, in this order (auth.ts): the bearer and
 // CSRF checks, which do no I/O; the routes that write the session cookie; the session
 // cookie and the 401 for no principal; then the routes that need a user.
@@ -159,8 +161,6 @@ app.onError((error, c) => {
 
 // Fail fast on a bad URL, bad credentials or a missing migration; /health stays liveness-only.
 await client`select 1 from threads limit 0`;
-// The vault is empty after a start, so no unclaimed visitor run has its keys any more.
-await runQueue.holdUnkeyedVisitorRuns();
 await runStore.ensureReferenceInputs([...limitsByOrg.keys()]);
 
 const server = serve(

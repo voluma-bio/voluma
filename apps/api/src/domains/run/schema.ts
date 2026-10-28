@@ -108,6 +108,8 @@ export const runs = pgTable(
     state: text({ enum: ["queued", "running", "awaiting-keys", "ended"] }).notNull(),
     startedAt: timestamptz(),
     awaitingSince: timestamptz(),
+    /** The last claim, for the claim's round-robin across orgs. */
+    claimedAt: timestamptz(),
     endedAt: timestamptz(),
     outcome: text({ enum: ["completed", "failed", "cancelled"] }),
     error: text(),

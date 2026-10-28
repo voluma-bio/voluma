@@ -7,11 +7,11 @@
  */
 import { randomBytes } from "node:crypto";
 import { LEASE_SECONDS } from "@voluma/contracts/runner";
-import { and, asc, eq, type SQL, sql } from "drizzle-orm";
+import { and, asc, eq, notInArray, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { runningCount, spentToday, startedToday } from "./pg-limits";
+import { runningCount, spentToday, startedToday, visitorRunningCount } from "./pg-limits";
 import { loadRun, QUEUE_LOCK, type Tx } from "./run-rows";
-import { type Claimed, LeaseLost, type Limits, RunEnded, type RunQueue } from "./run-store";
+import { type Claimed, LeaseLost, type LimitsOf, RunEnded, type RunQueue } from "./run-store";
 import { runs } from "./schema";
 
 /** Lease expiries with no `released` before a run ends `failed` (so a run that crashes the runner doesn't loop). */
@@ -54,23 +54,57 @@ const fail = (tx: Tx, runId: string, error: string) =>
     .set({ state: "ended", outcome: "failed", endedAt: sql`now()`, error })
     .where(eq(runs.id, runId));
 
-export function pgRunQueue(db: PostgresJsDatabase, limitsOf: (labId: string) => Limits): RunQueue {
+export function pgRunQueue(db: PostgresJsDatabase, limitsOf: LimitsOf): RunQueue {
   return {
     claim: (runnerId, keyedRunIds) =>
       db.transaction(async (tx): Promise<Claimed | null> => {
         await tx.execute(sql`SELECT pg_advisory_xact_lock(${QUEUE_LOCK})`);
         await sweep(tx);
-        const keyed = new Set(keyedRunIds);
+        // The keys live in this process's memory. A queued visitor run whose keys it
+        // doesn't hold (another process took the start, or it restarted) can't be claimed.
+        await tx
+          .update(runs)
+          .set({ state: "awaiting-keys", awaitingSince: sql`now()` })
+          .where(
+            and(
+              eq(runs.state, "queued"),
+              eq(runs.credentials, "visitor"),
+              notInArray(runs.id, keyedRunIds),
+            ),
+          );
+        // Round-robin by org: the org claimed longest ago goes first (never claimed: first),
+        // and within an org the oldest run, so one org's backlog can't starve another.
         const queued = await tx
           .select()
           .from(runs)
           .where(eq(runs.state, "queued"))
-          .orderBy(asc(runs.createdAt), asc(runs.id));
+          .orderBy(
+            sql`(SELECT max(o.claimed_at) FROM runs o WHERE o.lab_id = ${runs.labId}) ASC NULLS FIRST`,
+            asc(runs.createdAt),
+            asc(runs.id),
+          );
         for (const run of queued) {
+          const limits = limitsOf(run.labId);
+          if (!limits) {
+            await fail(tx, run.id, "This organization can no longer run work.");
+            continue;
+          }
           if (run.credentials === "visitor") {
-            if (!keyed.has(run.id)) continue;
+            // A visitor run skips the runs-at-once count; this cap keeps one org's
+            // visitors from holding every runner.
+            if (
+              limits.visitorActive !== null &&
+              (await visitorRunningCount(tx, run.labId)) >= limits.visitorActive
+            ) {
+              continue;
+            }
           } else {
-            const limits = limitsOf(run.labId);
+            if (
+              limits.concurrent !== null &&
+              (await runningCount(tx, run.labId)) >= limits.concurrent
+            ) {
+              continue;
+            }
             // The daily limit counts a run once, at its first claim; a recovery has passed it.
             if (
               run.startedAt === null &&
@@ -87,12 +121,6 @@ export function pgRunQueue(db: PostgresJsDatabase, limitsOf: (labId: string) => 
               await fail(tx, run.id, "The organization's daily spending limit was reached.");
               continue;
             }
-            if (
-              limits.concurrent !== null &&
-              (await runningCount(tx, run.labId)) >= limits.concurrent
-            ) {
-              continue;
-            }
           }
           const leaseToken = randomBytes(24).toString("hex");
           await tx
@@ -100,6 +128,7 @@ export function pgRunQueue(db: PostgresJsDatabase, limitsOf: (labId: string) => 
             .set({
               state: "running",
               startedAt: sql`coalesce(${runs.startedAt}, now())`,
+              claimedAt: sql`now()`,
               leaseHolder: runnerId,
               leaseToken,
               leaseExpiresAt: leaseUntil,
@@ -120,6 +149,11 @@ export function pgRunQueue(db: PostgresJsDatabase, limitsOf: (labId: string) => 
           .for("update");
         if (!run) throw new LeaseLost();
         if (run.state !== "running") return { stop: true };
+        const limits = limitsOf(run.labId);
+        if (!limits) {
+          await fail(tx, runId, "This organization can no longer run work.");
+          return { stop: true };
+        }
         await tx
           .update(runs)
           .set({
@@ -128,7 +162,7 @@ export function pgRunQueue(db: PostgresJsDatabase, limitsOf: (labId: string) => 
             sandboxSeconds: sql`${runs.sandboxSeconds} + ${usage.sandboxSeconds}`,
           })
           .where(eq(runs.id, runId));
-        const ceiling = limitsOf(run.labId).usdPerDay;
+        const ceiling = limits.usdPerDay;
         if (
           run.credentials === "voluma" &&
           ceiling !== null &&
@@ -164,11 +198,5 @@ export function pgRunQueue(db: PostgresJsDatabase, limitsOf: (labId: string) => 
           })
           .where(eq(runs.id, runId));
       }),
-
-    async holdUnkeyedVisitorRuns() {
-      await db.execute(sql`
-        UPDATE runs SET state = 'awaiting-keys', awaiting_since = now()
-        WHERE state = 'queued' AND credentials = 'visitor'`);
-    },
   };
 }

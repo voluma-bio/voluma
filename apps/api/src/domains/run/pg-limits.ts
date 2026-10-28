@@ -1,17 +1,28 @@
 /**
- * The counts behind an org's limits (`run.ts`, Limits), for `voluma` runs only. A day is
- * the last 24 hours by the database's clock. A run counts toward the day once, from its
- * first claim (`started_at`), so a recovered run isn't refused for a limit it passed.
+ * The counts behind an org's limits (`run.ts`, Limits), by credentials kind. Examples are
+ * seeded, not work, so no count includes them. A day is the last 24 hours by the
+ * database's clock. A `voluma` run counts toward the day once, from its first claim
+ * (`started_at`), so a recovered run isn't refused for a limit it passed.
  */
 import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { countRuns, type Tx } from "./run-rows";
 import { runs } from "./schema";
 
-const voluma = (labId: string) => and(eq(runs.labId, labId), eq(runs.credentials, "voluma"));
+const kind = (labId: string, credentials: "voluma" | "visitor") =>
+  and(eq(runs.labId, labId), eq(runs.credentials, credentials), eq(runs.example, false));
+const voluma = (labId: string) => kind(labId, "voluma");
 const inLastDay = gt(runs.startedAt, sql`now() - interval '1 day'`);
 
 export const runningCount = (tx: Tx, labId: string) =>
   countRuns(tx, and(voluma(labId), eq(runs.state, "running")));
+
+/** The org's visitor runs that haven't ended (`limits.visitorActive` caps these at start). */
+export const visitorActiveCount = (tx: Tx, labId: string) =>
+  countRuns(tx, and(kind(labId, "visitor"), sql`${runs.state} <> 'ended'`));
+
+/** The org's visitor runs now running (`limits.visitorActive` caps these at the claim). */
+export const visitorRunningCount = (tx: Tx, labId: string) =>
+  countRuns(tx, and(kind(labId, "visitor"), eq(runs.state, "running")));
 
 export const startedToday = (tx: Tx, labId: string) => countRuns(tx, and(voluma(labId), inLastDay));
 

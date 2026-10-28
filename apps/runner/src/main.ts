@@ -1,9 +1,12 @@
 /**
  * The runner: runs one Pi agent thread on one task, with `bash` as its only tool, in a
- * Modal sandbox created on the first command. Everything is recorded through the API
- * (events and Pi messages) and printed. Ctrl-C (or SIGTERM, SIGHUP) aborts the running command and ends the
- * thread as cancelled; running again with the same --run and --thread resumes it. A
- * thread that already finished does nothing until given a new message with --input.
+ * Modal sandbox created on the first command. It is a claimer (claim.ts): it takes the
+ * next queued run (start one in the browser first), writes under that run's lease, and ends
+ * it. `--task` is the worker's task, whatever the run's plan; the thread belongs to the plan's
+ * first task. Everything is recorded through the API (events and Pi messages) and printed.
+ * Ctrl-C (or SIGTERM, SIGHUP) aborts the running command and ends the thread as cancelled;
+ * the run is released, so running again claims it back and, with the same --thread, resumes
+ * it. A thread that already finished does nothing until given a new message with --input.
  *
  *   pnpm --filter @voluma/runner run-task --provider openai --model gpt-5-mini \
  *     --task "Report the slice count of the scan in /inputs"
@@ -18,7 +21,6 @@ import { createModels } from "@earendil-works/pi-ai";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { metaProvider } from "@earendil-works/pi-ai/providers/meta";
 import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
-import { runIdSchema } from "@voluma/contracts/ids";
 import { referencePrefix } from "@voluma/contracts/r2";
 import { httpClient } from "@voluma/harness/adapters/http";
 import { runThread } from "@voluma/harness/adapters/pi";
@@ -26,6 +28,7 @@ import { runLayout } from "@voluma/harness/layout";
 import { recorder } from "@voluma/harness/recorder";
 import { sandboxSession } from "@voluma/harness/sandbox-session";
 import { bashTool } from "@voluma/harness/tools/bash";
+import { claimNext, holdLease } from "./claim.ts";
 import { localApi, optional, required } from "./config.ts";
 import { createModalSandbox, RUNS_APP, terminateRun } from "./modal-sandbox.ts";
 
@@ -35,19 +38,15 @@ const { values } = parseArgs({
     model: { type: "string" },
     task: { type: "string" },
     input: { type: "string" },
-    run: { type: "string" },
     thread: { type: "string" },
   },
 });
 const { provider, model: modelId, task } = values;
 if (!provider || !modelId || !task) {
   throw new Error(
-    "usage: main.ts --provider openai|anthropic|meta --model <id> --task <text> [--run <id>] [--thread <id>] [--input <text>]",
+    "usage: main.ts --provider openai|anthropic|meta --model <id> --task <text> [--thread <id>] [--input <text>]",
   );
 }
-const runId = runIdSchema.parse(values.run ?? `run-${randomUUID().slice(0, 8)}`);
-const threadId = values.thread ?? `${runId}.main`;
-if (!threadId.startsWith(`${runId}.`)) throw new Error(`--thread must begin with "${runId}."`);
 
 const models = createModels();
 const providers = { anthropic: anthropicProvider, meta: metaProvider, openai: openaiProvider };
@@ -58,20 +57,21 @@ const model = models.getModel(provider, modelId);
 if (!model) throw new Error(`unknown model ${provider}/${modelId}`);
 
 const apiUrl = optional("VOLUMA_API_URL");
-// Every ingest write carries the lease of a claimed run (`@voluma/contracts/runner`). This CLI
-// should claim a queued run and take the token from the claim; until the API serves claims
-// (lane A) and the claimer exists (lane E), the token is passed in. Today's API checks no token,
-// so any value works.
-const api = httpClient({
-  ...(apiUrl ? { baseUrl: apiUrl, token: required("VOLUMA_API_TOKEN") } : localApi()),
-  runId,
-  leaseToken: required("VOLUMA_LEASE_TOKEN"),
-});
+const apiConfig = apiUrl ? { baseUrl: apiUrl, token: required("VOLUMA_API_TOKEN") } : localApi();
+// Every ingest write carries the lease of a claimed run (`@voluma/contracts/runner`).
+const claim = await claimNext(apiConfig, `run-task-${randomUUID().slice(0, 8)}`);
+const runId = claim.run.id;
+const taskId = claim.plan.tasks[0]?.id;
+if (!taskId) throw new Error(`run ${runId}'s plan has no task`);
+const threadId = values.thread ?? `${runId}.main`;
+if (!threadId.startsWith(`${runId}.`)) throw new Error(`--thread must begin with "${runId}."`);
+const abort = new AbortController();
+const endRun = holdLease(apiConfig, runId, claim.leaseToken, () => abort.abort());
+const api = httpClient({ ...apiConfig, runId, leaseToken: claim.leaseToken });
 const layout = runLayout(runId, referencePrefix("scan"));
 const systemPrompt = `You are an analysis agent with one tool, bash, which runs commands in a sandbox.
 Python 3.12 with numpy, scipy, scikit-image, pydicom, nibabel and SimpleITK is installed.
 Check what you report against the files themselves, and say which file or header each number came from.`;
-const abort = new AbortController();
 const events = recorder(
   {
     async append(event) {
@@ -148,13 +148,19 @@ for (const name of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
   });
 }
 
+// An exception ends the run `failed`; an interrupted thread releases it.
+let finalReport: Parameters<typeof endRun>[0] = {
+  kind: "ended",
+  outcome: "failed",
+  error: "the CLI stopped with an error",
+};
 console.log(`run ${runId}  thread ${threadId}  model ${provider}/${modelId}`);
 try {
   const outcome = await runThread({
     runId,
     threadId,
     kind: "worker",
-    taskId: "cli",
+    taskId,
     model,
     // The key goes with each request; pi-ai is never left to look in process.env.
     streamFn: (m, context, options) => models.streamSimple(m, context, { ...options, apiKey }),
@@ -178,11 +184,22 @@ try {
       `${u.output} out, $${u.cost.toFixed(4)}`,
   );
   process.exitCode = outcome.status === "completed" ? 0 : 1;
+  finalReport = abort.signal.aborted
+    ? { kind: "released" }
+    : outcome.status === "completed"
+      ? { kind: "ended", outcome: "completed" }
+      : {
+          kind: "ended",
+          outcome: "failed",
+          // The run's error is shown to its starter: never the model key a provider echoes.
+          error: (outcome.error ?? outcome.status).replaceAll(apiKey, "[redacted]"),
+        };
 } finally {
   try {
     await session.close();
   } finally {
     await events.flush();
+    await endRun(finalReport);
   }
 }
 

@@ -73,11 +73,11 @@ checklist, check threads, and review chat threads.
   and fails if the stored system message differs from the current prompt and tools. `apps/runner/src/main.ts` wires it to the HTTP client
   (`packages/harness/src/adapters/http`), the Modal sandbox and a model:
   `pnpm --filter @voluma/runner run-task --provider openai --model <id> --task "<text>"`
-  (needs `pnpm dev` running, which writes the API's URL and token to `.dev/env.json` for the runner unless `.env` sets `VOLUMA_API_URL`. Until the CLI can claim a run (lanes A and E) it also needs a lease token in `VOLUMA_LEASE_TOKEN`; today's API checks no token, so any value works. Keys are in `.env`, which the runner reads
+  (needs `pnpm dev` running, which writes the API's URL and token to `.dev/env.json` for the runner unless `.env` sets `VOLUMA_API_URL`. It is a claimer: it takes the next queued run, so start one in the browser first. It holds the lease with heartbeats (sending no usage) and ends the run. Keys are in `.env`, which the runner reads
   into a config object rather than `process.env`; model keys are `VOLUMA_<PROVIDER>_API_KEY`). The sandbox is
   created on the first `bash` call and destroyed at the end (every exit path, and what a crash
   leaves: `apps/runner/.context/CONTEXT.md`); Ctrl-C kills the running
-  command and ends the thread as cancelled; the same `--run` and `--thread` resume it.
+  command and ends the thread as cancelled and releases the run; running again claims it back and, with the same `--thread`, resumes it.
   A Claude `refusal` ends the thread as failed with that reason. The `bash` tool lives
   in `packages/harness/src/tools`; it caps what the model sees (head and tail) and
   writes the full text to `toolOutputKey` with `Sandbox.writeFile`, which exists

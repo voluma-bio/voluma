@@ -2,8 +2,10 @@
  * The browser's run routes (`@voluma/contracts/run`), for signed-in users and guests:
  * start, list, get, cancel, resend keys, and list inputs. Every read goes through the
  * caller's `readerOf(user)`; the store applies it, so another org's run is a 404.
- * Visitor keys go to the in-memory vault and nowhere else; no handler logs a body.
+ * Visitor keys go to the in-memory vault, before the write that makes the run claimable
+ * commits, and nowhere else; no handler logs a body.
  */
+import { randomUUID } from "node:crypto";
 import { type Run, resendKeysRequestSchema, startRunRequestSchema } from "@voluma/contracts/run";
 import { Hono } from "hono";
 import { readerOf, requireUser, type UserEnv } from "../../domain";
@@ -16,6 +18,8 @@ export interface RunsDeps {
   catalog: Catalog;
   vault: KeyVault;
 }
+
+const tooManyKeys = { error: "Too many runs are waiting with keys; try again shortly." };
 
 export function runsRoutes({ store, catalog, vault }: RunsDeps) {
   const app = new Hono<UserEnv>();
@@ -30,30 +34,39 @@ export function runsRoutes({ store, catalog, vault }: RunsDeps) {
     const entry = Object.hasOwn(catalog, workflowId) ? catalog[workflowId] : undefined;
     if (!entry) return c.json({ error: "unknown workflow" }, 404);
     const user = c.var.user;
-    const result = await store.start(
-      readerOf(user),
-      { userId: user.userId },
-      {
-        workflowId,
-        pins: entry.pins,
-        inputId,
-        credentials: keys ? "visitor" : "voluma",
-      },
-    );
-    if ("refused" in result) {
-      switch (result.refused) {
-        case "no-input":
-          return c.json({ error: "unknown input" }, 404);
-        case "per-caller":
-          return c.json({ error: "You already have a run in progress." }, 409);
-        case "daily":
-          return c.json({ error: "The daily run limit is reached." }, 429);
-        case "dollar":
-          return c.json({ error: "The daily spending limit is reached." }, 429);
+    const reader = readerOf(user);
+    const id = randomUUID();
+    // The keys are in the vault before the run can be claimed: a claim holds back a
+    // queued visitor run whose keys it can't find.
+    if (keys && !vault.hold(id, reader.labId, keys)) return c.json(tooManyKeys, 429);
+    try {
+      const result = await store.start(
+        reader,
+        { userId: user.userId },
+        { id, workflowId, pins: entry.pins, inputId, credentials: keys ? "visitor" : "voluma" },
+      );
+      if ("refused" in result) {
+        vault.drop(id);
+        switch (result.refused) {
+          case "no-input":
+            return c.json({ error: "unknown input" }, 404);
+          case "unknown-org":
+            return c.json({ error: "This organization cannot run work." }, 403);
+          case "per-caller":
+            return c.json({ error: "You already have a run in progress." }, 409);
+          case "visitor-active":
+            return c.json({ error: "Too many runs with your own keys are active." }, 429);
+          case "daily":
+            return c.json({ error: "The daily run limit is reached." }, 429);
+          case "dollar":
+            return c.json({ error: "The daily spending limit is reached." }, 429);
+        }
       }
+      return c.json(result.run satisfies Run);
+    } catch (error) {
+      vault.drop(id);
+      throw error;
     }
-    if (keys) vault.set(result.run.id, keys);
-    return c.json(result.run satisfies Run);
   });
 
   app.get("/runs", async (c) => c.json({ runs: await store.list(readerOf(c.var.user)) }));
@@ -75,13 +88,26 @@ export function runsRoutes({ store, catalog, vault }: RunsDeps) {
     const parsed = resendKeysRequestSchema.safeParse(await c.req.json().catch(() => undefined));
     if (!parsed.success) return c.text(parsed.error.message, 400);
     const user = c.var.user;
-    const result = await store.resume(readerOf(user), user.userId, c.req.param("id"));
-    if (result === "not-found") return c.json({ error: "not found" }, 404);
-    if (result === "forbidden")
-      return c.json({ error: "Only the run's starter can resend keys." }, 403);
-    if (result === "conflict") return c.json({ error: "The run is not waiting for keys." }, 409);
-    vault.set(result.id, parsed.data.keys);
-    return c.json(result);
+    const reader = readerOf(user);
+    const runId = c.req.param("id");
+    const { keys } = parsed.data;
+    // The store calls this once the run is the starter's and awaiting keys, before it is queued.
+    let full = false;
+    try {
+      const result = await store.resume(reader, user.userId, runId, () => {
+        full = !vault.hold(runId, reader.labId, keys);
+        return !full;
+      });
+      if (full) return c.json(tooManyKeys, 429);
+      if (result === "not-found") return c.json({ error: "not found" }, 404);
+      if (result === "forbidden")
+        return c.json({ error: "Only the run's starter can resend keys." }, 403);
+      if (result === "conflict") return c.json({ error: "The run is not waiting for keys." }, 409);
+      return c.json(result);
+    } catch (error) {
+      vault.drop(runId);
+      throw error;
+    }
   });
 
   app.get("/inputs", async (c) => c.json({ inputs: await store.listInputs(readerOf(c.var.user)) }));

@@ -62,8 +62,10 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   checks the run's lease token inside its own transaction (`assertLease`, `FOR SHARE`); a
   late write can't land after a takeover.
 - **Visitor keys live only in `key-vault.ts`**, in memory. Never store, log or return them,
-  and log no body on a route that takes them. `index.ts` calls `holdUnkeyedVisitorRuns` on
-  start.
+  and log no body on a route that takes them. A route puts the keys there before the write
+  that makes the run claimable commits and drops them if it is refused; the claim moves
+  any queued visitor run whose keys its process doesn't hold to `awaiting-keys`. The vault
+  holds at most 100 runs per org (429), and `index.ts` caps every `/api` body at 256 KB.
 - **Limits come from env** (`RUN_LIMITS_<ORG>_*`, read in `index.ts`); the workflow catalog
   (`catalog.ts`) is code. `seed:example --from <runId>` makes an example run
   (`src/seed-example.ts`). Outage and restart behaviour: [.context/deploy.md](.context/deploy.md).

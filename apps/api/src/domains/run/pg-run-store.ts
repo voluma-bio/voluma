@@ -3,10 +3,9 @@
  * `Reader` (run-rows.ts); a write reads through it first, so another org's run is
  * `not-found`. Start takes the queue lock so the limit counts can't race a claim.
  */
-import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { spentToday, startedToday, waitingCount } from "./pg-limits";
+import { spentToday, startedToday, visitorActiveCount, waitingCount } from "./pg-limits";
 import {
   countRuns,
   loadRun,
@@ -16,14 +15,14 @@ import {
   readableRuns,
   toInput,
 } from "./run-rows";
-import type { Limits, RunStore } from "./run-store";
+import type { LimitsOf, RunStore } from "./run-store";
 import { inputs, runs } from "./schema";
 
 /** The scan every org may start from: one row per org, uploaded by the examples operator. */
 export const EXAMPLES_OPERATOR = "voluma-examples";
 export const referenceInputId = (labId: string) => `reference-${labId}`;
 
-export function pgRunStore(db: PostgresJsDatabase, limitsOf: (labId: string) => Limits): RunStore {
+export function pgRunStore(db: PostgresJsDatabase, limitsOf: LimitsOf): RunStore {
   return {
     list: (reader) => db.transaction((tx) => loadRuns(tx, readableRuns(reader))),
 
@@ -55,6 +54,7 @@ export function pgRunStore(db: PostgresJsDatabase, limitsOf: (labId: string) => 
           .where(and(readableInputs(reader), eq(inputs.id, request.inputId)));
         if (!input) return { refused: "no-input" as const };
         const limits = limitsOf(reader.labId);
+        if (!limits) return { refused: "unknown-org" as const };
         const unfinished = await countRuns(
           tx,
           and(
@@ -65,6 +65,13 @@ export function pgRunStore(db: PostgresJsDatabase, limitsOf: (labId: string) => 
         );
         if (limits.perCaller !== null && unfinished >= limits.perCaller) {
           return { refused: "per-caller" as const };
+        }
+        if (
+          request.credentials === "visitor" &&
+          limits.visitorActive !== null &&
+          (await visitorActiveCount(tx, reader.labId)) >= limits.visitorActive
+        ) {
+          return { refused: "visitor-active" as const };
         }
         if (request.credentials === "voluma") {
           if (limits.perDay !== null) {
@@ -79,9 +86,8 @@ export function pgRunStore(db: PostgresJsDatabase, limitsOf: (labId: string) => 
             return { refused: "dollar" as const };
           }
         }
-        const id = randomUUID();
         await tx.insert(runs).values({
-          id,
+          id: request.id,
           labId: reader.labId,
           startedBy: userId,
           workflowId: request.workflowId,
@@ -90,7 +96,7 @@ export function pgRunStore(db: PostgresJsDatabase, limitsOf: (labId: string) => 
           credentials: request.credentials,
           state: "queued",
         });
-        return { run: await loadRun(tx, id) };
+        return { run: await loadRun(tx, request.id) };
       }),
 
     cancel: (reader, runId) =>
@@ -107,13 +113,14 @@ export function pgRunStore(db: PostgresJsDatabase, limitsOf: (labId: string) => 
         return loadRun(tx, runId);
       }),
 
-    resume: (reader, userId, runId) =>
+    resume: (reader, userId, runId, holdKeys) =>
       db.transaction(async (tx) => {
         await tx.execute(sql`SELECT pg_advisory_xact_lock(${QUEUE_LOCK})`);
         const [run] = await loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId)));
         if (!run) return "not-found";
         if (run.startedBy !== userId) return "forbidden";
         if (run.state.status !== "awaiting-keys") return "conflict";
+        if (!holdKeys()) return "full";
         await tx
           .update(runs)
           .set({ state: "queued", awaitingSince: null })

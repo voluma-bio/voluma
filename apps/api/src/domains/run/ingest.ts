@@ -8,7 +8,8 @@
  *   GET  /ingest/runs/:runId/threads/:threadId/messages  all rows in order
  * Every route on a run carries the lease token (400 when missing); a stale one is a 409
  * `lease-lost`, checked in the write's own transaction. A thread id must begin with
- * `<runId>.`, else 400. A claim's visitor keys leave the vault with the response.
+ * `<runId>.`, else 400: the path's thread, and the event's `threadId` and `parentThreadId`.
+ * An event id stored under another run is a 409. A claim's visitor keys leave the vault with the response.
  */
 import { eventInputSchema } from "@voluma/contracts/events";
 import { type HistoryResponse, historyRowSchema } from "@voluma/contracts/history";
@@ -28,6 +29,7 @@ import { type AppEnv, requireService } from "../../domain";
 import type { Catalog } from "./catalog";
 import type { KeyVault } from "./key-vault";
 import {
+  EventIdTaken,
   type LeasedEventLog,
   type LeasedHistory,
   LeaseLost,
@@ -59,7 +61,9 @@ async function leased(c: Context, work: () => Promise<Response>): Promise<Respon
     if (error instanceof LeaseLost) {
       return c.json({ code: "lease-lost" } satisfies z.infer<typeof leaseLostSchema>, 409);
     }
-    if (error instanceof RunEnded) return c.json({ error: error.message }, 409);
+    if (error instanceof RunEnded || error instanceof EventIdTaken) {
+      return c.json({ error: error.message }, 409);
+    }
     throw error;
   }
 }
@@ -120,6 +124,13 @@ export function ingestRoutes({ queue, eventLog, history, catalog, vault }: Inges
     if (!parsed.success) return c.text(parsed.error.message, 400);
     if (parsed.data.runId !== c.req.param("runId")) {
       return c.text("event runId does not match the path", 400);
+    }
+    const threads = [parsed.data.threadId];
+    if (parsed.data.type === "thread.started" && parsed.data.payload.parentThreadId) {
+      threads.push(parsed.data.payload.parentThreadId);
+    }
+    if (!threads.every((thread) => thread.startsWith(`${parsed.data.runId}.`))) {
+      return c.text("thread id must begin with <runId>.", 400);
     }
     return leased(c, async () => {
       await eventLog.append(parsed.data, c.var.leaseToken);

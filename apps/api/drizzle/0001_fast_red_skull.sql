@@ -21,6 +21,7 @@ CREATE TABLE "runs" (
 	"state" text NOT NULL,
 	"started_at" timestamp with time zone,
 	"awaiting_since" timestamp with time zone,
+	"claimed_at" timestamp with time zone,
 	"ended_at" timestamp with time zone,
 	"outcome" text,
 	"error" text,

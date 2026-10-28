@@ -16,7 +16,19 @@ export type Limits = {
   concurrent: number | null;
   perDay: number | null;
   usdPerDay: number | null;
+  /** Visitor runs that haven't ended, per org: the cap at start; running at once, at the claim. */
+  visitorActive: number | null;
 };
+
+/** An event id already stored under another run. */
+export class EventIdTaken extends Error {
+  constructor() {
+    super("event id belongs to another run");
+  }
+}
+
+/** An org's limits, or null for one that is no longer configured (its runs are refused or stopped). */
+export type LimitsOf = (labId: string) => Limits | null;
 
 /** The write's lease token is stale, or the run is not running. The runner stops. */
 export class LeaseLost extends Error {
@@ -32,7 +44,13 @@ export class RunEnded extends Error {
   }
 }
 
-export type StartRefusal = "no-input" | "per-caller" | "daily" | "dollar";
+export type StartRefusal =
+  | "no-input"
+  | "unknown-org"
+  | "per-caller"
+  | "visitor-active"
+  | "daily"
+  | "dollar";
 
 export interface RunStore {
   list(reader: Reader): Promise<Run[]>;
@@ -43,6 +61,8 @@ export interface RunStore {
     reader: Reader,
     caller: { userId: string },
     request: {
+      /** Chosen by the route, so the visitor keys are in the vault before this commits. */
+      id: string;
       workflowId: string;
       pins: WorkflowPin[];
       inputId: string;
@@ -51,12 +71,17 @@ export interface RunStore {
   ): Promise<{ run: Run } | { refused: StartRefusal }>;
   /** Ends the run `cancelled` at once. Example runs are read-only. */
   cancel(reader: Reader, runId: string): Promise<Run | "not-found" | "example">;
-  /** `awaiting-keys` → `queued`, for the run's own starter. */
+  /**
+   * `awaiting-keys` → `queued`, for the run's own starter. Once the run qualifies, and
+   * before it is queued, calls `holdKeys`; if that returns false the run stays as it was
+   * and the answer is "full".
+   */
   resume(
     reader: Reader,
     userId: string,
     runId: string,
-  ): Promise<Run | "not-found" | "forbidden" | "conflict">;
+    holdKeys: () => boolean,
+  ): Promise<Run | "not-found" | "forbidden" | "conflict" | "full">;
   /** One reference-scan input per org, so a lab member can start a run on it. */
   ensureReferenceInputs(labIds: string[]): Promise<void>;
 }
@@ -69,20 +94,20 @@ export type RunnerReport =
 
 export interface RunQueue {
   /**
-   * One transaction: sweep expired leases, then take the oldest queued run the limits
-   * allow. A visitor run is eligible only while `keyedRunIds` holds it.
+   * One transaction: sweep expired leases, send the queued visitor runs not in
+   * `keyedRunIds` to `awaiting-keys` (this process doesn't hold their keys), then take
+   * the oldest queued run of the org served longest ago that the limits allow.
    */
   claim(runnerId: string, keyedRunIds: string[]): Promise<Claimed | null>;
   /** Extends the lease and adds the usage; `stop` once the run has ended. Throws `LeaseLost`. */
   heartbeat(runId: string, leaseToken: string, usage: Usage): Promise<{ stop: boolean }>;
   /** Throws `LeaseLost` or `RunEnded`. */
   report(runId: string, leaseToken: string, report: RunnerReport): Promise<void>;
-  /** On API start: the keys are gone, so every unclaimed visitor run waits for them. */
-  holdUnkeyedVisitorRuns(): Promise<void>;
 }
 
 /** The event log the ingest route writes: the lease is checked in the append's transaction. */
 export interface LeasedEventLog {
+  /** Throws `LeaseLost`, or `EventIdTaken` for an id stored under another run. */
   append(event: EventInput, leaseToken: string): Promise<void>;
 }
 

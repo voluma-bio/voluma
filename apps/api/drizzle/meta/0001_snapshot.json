@@ -1,5 +1,5 @@
 {
-  "id": "c28b75c5-3b30-493a-be24-92ff446456e3",
+  "id": "ad519f74-7b6c-43e2-8280-96a01a2a6692",
   "prevId": "ffa993f0-43ad-484d-8a94-489aa1780127",
   "version": "7",
   "dialect": "postgresql",
@@ -253,6 +253,12 @@
         },
         "awaiting_since": {
           "name": "awaiting_since",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "claimed_at": {
+          "name": "claimed_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
