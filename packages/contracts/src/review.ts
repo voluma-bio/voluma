@@ -2,6 +2,8 @@
  * A read model: the review data the API assembles from the thread store (and,
  * for the reference run, the importer builds from its manifest). It is not a
  * stored document, so a rerun rewrites no other task's data.
+ * Served by `GET /api/review/runs/:runId` (`getReviewRun`): 404 when the caller
+ * can't read the run, 409 before the run's first `revision.started`.
  *
  * Two layers, so a different workflow (vascular, materials) gets its own final
  * review with no new Review-lane code:
