@@ -72,3 +72,13 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
 - **Limits come from env** (`RUN_LIMITS_<ORG>_*`, read in `index.ts`); the workflow catalog
   (`catalog.ts`) is code. `seed:example --from <runId>` makes an example run
   (`src/domains/run/seed-example.ts`). Outage and restart behaviour: [.context/deploy.md](.context/deploy.md).
+
+## Review domain (`src/domains/review`)
+
+- `index.ts` is a mount list, like the run domain's. `runs.ts` serves `GET /runs/:runId`: the
+  run's `ReviewRun` (`@voluma/contracts/review`), built on each read by `review-run.ts` from
+  `fold` over the run's whole event log, plus what `fold` leaves to the API. It parses the
+  result with `reviewRunSchema`, so a bad build is a 500, never invalid data.
+- It reads runs only through `RunRecords` (`src/ports`), which `src/index.ts` wires to the run
+  domain's reads and event log, with the caller's `readerOf`. Deferred work:
+  [.context/TODO.md](src/domains/review/.context/TODO.md).
