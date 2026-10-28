@@ -141,8 +141,9 @@ remembers refresh outcomes in a 10k-entry LRU keyed by a hash of the refresh tok
 refreshed session until its access token expires, a dead one until the cookie's max age. A
 client replaying one cookie therefore costs one WorkOS call per access-token lifetime, or
 none once the session is dead; the allow-list is still checked on every request. A failure
-that is 408, 429, 5xx or a network error leaves the cookie and is not remembered, so an
-outage does not sign people out; any other failure (revoked or expired session,
+that is 408, 429, 5xx or a network error leaves the cookie, is not remembered, and answers
+503 `{ "error": "auth unavailable" }` (not 401, which signs the web client out), so an
+outage shows the gate's can't-be-reached screen and keeps the session; any other failure (revoked or expired session,
 `sso_required`) clears it, and an unreadable cookie is cleared without a call.
 
 Sign-out revokes the session at WorkOS on the server (`userManagement.revokeSession`), as

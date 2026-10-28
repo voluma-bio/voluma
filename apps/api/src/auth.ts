@@ -301,11 +301,12 @@ export function createAuth(config: AuthConfig) {
     }
   }
 
-  // The principal for a request's session cookie, or null; cookies to set go to `sink`.
+  // The principal for a request's session cookie, or null; "unavailable" when a refresh
+  // failed transiently. Cookies to set go to `sink`.
   // A dead cookie is cleared and remembered as dead, so a replay of it costs no WorkOS
   // call; a refreshed session is remembered until its access token expires. Any other
-  // WorkOS failure keeps the cookie and is not remembered, so an outage does not sign
-  // people out.
+  // WorkOS failure keeps the cookie and is not remembered, and the caller answers 503, so
+  // an outage does not sign people out.
   async function userFromCookie(request: Request, sink: string[]) {
     let session: Awaited<ReturnType<typeof authkit.getSession>>;
     try {
@@ -330,8 +331,10 @@ export function createAuth(config: AuthConfig) {
         if (isTerminalRefreshError(error)) {
           memo.dead(session.refreshToken);
           await clearSessionCookies(request, sink);
-        } else console.error("session refresh failed; cookie kept", error);
-        return null;
+          return null;
+        }
+        console.error("session refresh failed; cookie kept", error);
+        return "unavailable" as const;
       }
       if (result.refreshed) {
         memo.set(session.refreshToken, result, (result.claims.exp ?? 0) * 1000);
@@ -380,7 +383,9 @@ export function createAuth(config: AuthConfig) {
   const session = createMiddleware<RootEnv>(async (c, next) => {
     if (c.req.header("authorization") !== undefined) return next(); // the bearer decided
     const cookies: string[] = [];
-    c.set("principal", await userFromCookie(c.req.raw, cookies));
+    const principal = await userFromCookie(c.req.raw, cookies);
+    if (principal === "unavailable") return c.json({ error: "auth unavailable" }, 503);
+    c.set("principal", principal);
     await next();
     for (const cookie of cookies) c.res.headers.append("Set-Cookie", cookie);
   });
