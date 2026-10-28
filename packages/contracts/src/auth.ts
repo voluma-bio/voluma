@@ -17,6 +17,12 @@
  *                                     the caller's guest identity, made on first
  *                                     call and kept in a cookie; 404 when the
  *                                     server lets no guests in
+ *   POST /api/auth/password         body `passwordSignInRequestSchema` → 200
+ *                                     `meResponseSchema` and the session cookie,
+ *                                     for scripts (the scan upload CLI); a browser
+ *                                     signs in through `login`. 401 for a wrong
+ *                                     email or password, 403 for a user who belongs
+ *                                     to no lab
  *
  * Rules for every cookie-authenticated request under `/api`:
  *   - A non-GET/HEAD request must send `content-type: application/json`, or
@@ -55,3 +61,10 @@ export type Me = z.infer<typeof meResponseSchema>;
 
 export const logoutResponseSchema = z.object({ logoutUrl: z.string() });
 export type LogoutResponse = z.infer<typeof logoutResponseSchema>;
+
+/** A member's own email and password, for a script that signs in without a browser. */
+export const passwordSignInRequestSchema = z.object({
+  email: z.string().min(1).max(320),
+  password: z.string().min(1).max(1024),
+});
+export type PasswordSignInRequest = z.infer<typeof passwordSignInRequestSchema>;

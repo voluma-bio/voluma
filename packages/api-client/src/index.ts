@@ -6,7 +6,11 @@
 import { logoutResponseSchema, type Me, meResponseSchema } from "@voluma/contracts/auth";
 import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
 import {
+  type CreateUploadRequest,
+  type CreateUploadResponse,
+  createUploadResponseSchema,
   type Input,
+  inputSchema,
   listInputsResponseSchema,
   listRunsResponseSchema,
   type ResendKeysRequest,
@@ -115,6 +119,51 @@ export async function resendKeys(id: string, keys: VisitorKeys): Promise<Run> {
 /** Inputs the caller may start a run on, newest first. */
 export async function listInputs(): Promise<Input[]> {
   return listInputsResponseSchema.parse(await json(await request("/run/inputs"))).inputs;
+}
+
+/**
+ * Creates an upload: a new input and a presigned URL per file (`@voluma/contracts/run`,
+ * Uploads). PUT each file with `putUploadFile`, then call `completeUpload`. 403 for a
+ * guest, 413 over the server's limits.
+ */
+export async function createUpload(req: CreateUploadRequest): Promise<CreateUploadResponse> {
+  return createUploadResponseSchema.parse(
+    await json(await request("/run/inputs", { method: "POST", body: req })),
+  );
+}
+
+/** Makes an upload usable once every file is stored. 409: some aren't; PUT them again. */
+export async function completeUpload(inputId: string): Promise<Input> {
+  return inputSchema.parse(
+    await json(
+      await request(`/run/inputs/${encodeURIComponent(inputId)}/complete`, { method: "POST" }),
+    ),
+  );
+}
+
+/**
+ * PUTs one file's bytes to its presigned URL (straight to object storage, not the API),
+ * reporting bytes sent. XHR, not fetch: fetch can't report upload progress. Rejects with
+ * `ApiError` (status 0 for a network failure) or an `AbortError` when `signal` aborts.
+ */
+export function putUploadFile(
+  url: string,
+  file: Blob,
+  { onProgress, signal }: { onProgress?: (sent: number) => void; signal?: AbortSignal } = {},
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", url);
+    xhr.upload.onprogress = (e) => onProgress?.(e.loaded);
+    xhr.onload = () =>
+      xhr.status >= 200 && xhr.status < 300
+        ? resolve()
+        : reject(new ApiError(xhr.status, "upload"));
+    xhr.onerror = () => reject(new ApiError(0, "upload"));
+    xhr.onabort = () => reject(new DOMException("Upload aborted", "AbortError"));
+    signal?.addEventListener("abort", () => xhr.abort(), { once: true });
+    xhr.send(file);
+  });
 }
 
 /**
