@@ -9,7 +9,7 @@
  *
  * What a step does for a task, by its status (the first applicable):
  * - a thread of the task is running: nothing, wait for it;
- * - `pending` or `stale`, every dependency done: start a worker, named by how many the log
+ * - `pending` or `stale`, every dependency done (or to check with its outputs in): start a worker, named by how many the log
  *   has started for the task (a redo gets a fresh thread, never the old one);
  * - `in-progress`, or `pending` with a worker that ended: a failed worker is a judgment point;
  *   otherwise wake it with a message (it counts as a wake) up to `stuckLimit` wakes, then the
@@ -371,8 +371,7 @@ export function supervisor(options: SupervisorOptions) {
   async function step(): Promise<Next> {
     const f = runtime.view();
     const d = derive();
-    const status = (id: string) => f.tasks.find((t) => t.id === id)?.status ?? "pending";
-    const ready = new Set(readyTasks(plan, status));
+    const ready = new Set(readyTasks(plan, (id) => f.tasks.find((t) => t.id === id)));
     for (const { id } of plan) {
       const next = await stepTask(f, d, id, ready);
       if (next !== "idle") return next;

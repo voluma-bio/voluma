@@ -21,7 +21,7 @@ function refusal(c: Context, refused: Refusal | "no-input" | "full") {
   return c.json({ error: refusalMessage[refused] }, refused === "per-caller" ? 409 : 429);
 }
 
-export function runsRoutes({ reads, queue, catalog, source }: RunDeps) {
+export function runsRoutes({ reads, queue, catalog, repo }: RunDeps) {
   const app = new Hono<UserEnv>();
   app.use("/runs", requireUser);
   app.use("/runs/*", requireUser);
@@ -41,7 +41,7 @@ export function runsRoutes({ reads, queue, catalog, source }: RunDeps) {
       {
         id: randomUUID(),
         workflowId,
-        pins: [{ ...source, path: entry.workflow }],
+        pins: [{ repo, path: entry.workflow }],
         inputId,
         selectedOutputs,
         notes,

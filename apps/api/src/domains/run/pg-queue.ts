@@ -46,7 +46,6 @@ export type RunnerReport =
 
 export type Claimed = {
   run: Run;
-  workflowId: string;
   leaseToken: string;
   /** The visitor run's keys, handed out once. */
   keys?: VisitorKeys;
@@ -285,7 +284,6 @@ export function pgRunQueue(
           const keys = run.credentials === "visitor" ? vault.take(run.id) : undefined;
           return {
             run: await loadRun(tx, run.id),
-            workflowId: run.workflowId,
             leaseToken,
             ...(keys && { keys }),
           };

@@ -1,4 +1,4 @@
-/** The R2 adapter of `WorkflowStore` (`@voluma/workflow/load`): where imported packages live. */
+/** The R2 adapter of `WorkflowStore` (`@voluma/workflow/load`): where a run's workflow snapshot lives. */
 import {
   GetObjectCommand,
   HeadObjectCommand,

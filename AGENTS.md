@@ -136,7 +136,8 @@ they need:
 - Workflows and analysis code live in `workflows/`. A workflow is one skill
   directory there, `workflows/workflow-<name>/`: `SKILL.md` (its `uses:` lists
   other skill directories), `outputs.json` (every output a run can produce),
-  `tasks.json` (the task list), `references/` and `resources/`. A run
+  `tasks.json` (the task list), `references/` and `resources/`; role prompts are
+  built into the harness and models come from runner config. A run
   snapshots it: `workflows/microct-analysis` holds the generic micro-CT
   skills, `workflows/workflow-mouse-oa` the mouse knee workflow. Python lives only in
   `workflows/`, as skill resources: CLI scripts that take and return paths,

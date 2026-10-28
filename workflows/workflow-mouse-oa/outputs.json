@@ -1,5 +1,21 @@
 [
   {
+    "id": "header",
+    "name": "Scan header",
+    "kind": "file",
+    "mediaType": "application/json",
+    "region": "hu.json from scan-intake: voxel spacing (z, y, x, mm), shape, calibration evidence and the grid id every later step uses",
+    "task": "intake"
+  },
+  {
+    "id": "frame",
+    "name": "Orientation frame",
+    "kind": "file",
+    "mediaType": "application/json",
+    "region": "frame.json from orient-joint: the shaft axes, the bending plane and the keyframe the oriented stack is cut on",
+    "task": "orientation"
+  },
+  {
     "id": "patella-volume",
     "name": "Patella volume",
     "kind": "measurement",
@@ -13,7 +29,7 @@
     "name": "Lateral meniscus/osteophyte volume",
     "kind": "measurement",
     "unit": "mm³",
-    "region": "lateral joint mineralization label (open question for the lab: which structure the lab means)",
+    "region": "lateral meniscus and its spurs together, one volume per side (the lab cannot separate them); on OA6-1RK label 6. Open: whether label 9's pieces and tibial margin fragments 10 and 11 count",
     "task": "segmentation",
     "sourceRef": "deck #2"
   },
@@ -22,7 +38,7 @@
     "name": "Medial meniscus/osteophyte volume",
     "kind": "measurement",
     "unit": "mm³",
-    "region": "medial joint mineralization label (open question for the lab: which structure the lab means)",
+    "region": "medial meniscus and its spurs together, one volume per side (the lab cannot separate them); on OA6-1RK label 5. Open: whether label 9's pieces and tibial margin fragments 10 and 11 count",
     "task": "segmentation",
     "sourceRef": "deck #3"
   },
@@ -135,7 +151,7 @@
     "sourceRef": "deck #15"
   },
   {
-    "id": "tv-proximal-tibial-trabeculae",
+    "id": "metaphyseal-tv",
     "name": "TV, proximal tibial trabeculae",
     "kind": "measurement",
     "unit": "mm³",
@@ -192,8 +208,8 @@
     "id": "metaphyseal-tb-nd",
     "name": "Tb.Nd, trabecular nodes",
     "kind": "measurement",
-    "unit": "count",
-    "region": "ROI-3, 3D skeleton junctions of ≥3 struts (open question for the lab: report as a count or per tissue volume)",
+    "unit": "1/mm³",
+    "region": "ROI-3, 3D skeleton junctions of ≥3 struts (the lab reports a count per tissue volume)",
     "task": "metaphyseal-roi",
     "sourceRef": "deck #22"
   },
@@ -201,8 +217,8 @@
     "id": "metaphyseal-tb-tm",
     "name": "Tb.Tm, trabecular ends",
     "kind": "measurement",
-    "unit": "count",
-    "region": "ROI-3, skeleton free ends (open question for the lab: report as a count or per tissue volume)",
+    "unit": "1/mm³",
+    "region": "ROI-3, skeleton free ends (the lab reports a count per tissue volume)",
     "task": "metaphyseal-roi",
     "sourceRef": "deck #23"
   },

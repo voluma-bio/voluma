@@ -31,6 +31,8 @@ export interface LoadOptions {
   prefix: string;
   /** The checkout the workflows are read from: the repo root. */
   root: string;
+  /** The commit that checkout is at, written into the snapshot's marker. */
+  commit: string;
 }
 
 /** A directory of the repo under `workflows/`: lowercase segments, no `.` or `..`. */
@@ -49,7 +51,7 @@ const frontmatterSchema = z.strictObject({
   ...Object.fromEntries(SKILL_KEYS.map((k) => [k, z.unknown().optional()])),
 });
 
-/** Written last, so a snapshot cut short is redone, not trusted. */
+/** Written last, so a snapshot cut short is redone, not trusted; its body is the commit. */
 const DONE = ".snapshot-done";
 const FILES = ["SKILL.md", "outputs.json", "tasks.json"];
 const TREES = ["references", "resources", "skills"];
@@ -74,9 +76,12 @@ function frontmatter(file: string, text: string) {
   return r.data;
 }
 
+/** Files under `rel`, minus dot-entries and `__pycache__` (git ignores them; a symlink is refused). */
 async function* walk(root: string, rel: string): AsyncGenerator<string> {
   for (const entry of await readdir(join(root, rel), { withFileTypes: true })) {
+    if (entry.name.startsWith(".") || entry.name === "__pycache__") continue;
     const path = `${rel}/${entry.name}`;
+    if (entry.isSymbolicLink()) throw new WorkflowParseError(path, "symlinks are not supported");
     if (entry.isDirectory()) yield* walk(root, path);
     else if (entry.isFile()) yield path;
   }
@@ -91,7 +96,7 @@ async function usedDirs(root: string, dir: string): Promise<string[]> {
   return frontmatter(file, text).uses;
 }
 
-async function snapshot(dir: string, { store, prefix, root }: LoadOptions) {
+async function snapshot(dir: string, { store, prefix, root, commit }: LoadOptions) {
   if (await store.has(`${prefix}${DONE}`)) return;
   const dirs = [dir, ...(await usedDirs(root, dir))];
   for (const d of dirs) {
@@ -105,7 +110,7 @@ async function snapshot(dir: string, { store, prefix, root }: LoadOptions) {
     }
     for (const path of paths) await store.put(`${prefix}${path}`, await readFile(join(root, path)));
   }
-  await store.put(`${prefix}${DONE}`, new Uint8Array());
+  await store.put(`${prefix}${DONE}`, new TextEncoder().encode(commit));
 }
 
 /** Snapshots `dir` (`workflows/workflow-<name>`) unless the run already has one, then reads the snapshot. */
@@ -171,5 +176,5 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
       `${issue?.path.slice(1).join(".")}: ${issue?.message}`,
     );
   }
-  return { dir, files: files.data, skills };
+  return { dir, commit: await store.get(`${prefix}${DONE}`), files: files.data, skills };
 }

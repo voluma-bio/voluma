@@ -24,7 +24,7 @@ import type {
   TaskToolResult,
 } from "@voluma/contracts/task-tools";
 import type { DeclaredOutput, WorkflowPlan } from "@voluma/contracts/workflow";
-import { transitiveDependents } from "@voluma/workflow";
+import { isSatisfied, transitiveDependents } from "@voluma/workflow";
 import { declarationProblem, referenceProblem } from "./output-checks";
 import type { Evidence } from "./ports/evidence";
 import type { PayloadOf, Recorder } from "./recorder";
@@ -131,7 +131,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
   /**
    * Who a call writes as and where. A worker writes only to its own task, and its target
    * opens a new attempt when the task has none (or is `stale` or `failed` and `redo`),
-   * only once every task this one builds on is done (the rule `readyTasks` uses), so a
+   * only once every task this one builds on is satisfied (the rule `readyTasks` uses), so a
    * refusal later in the call leaves no `attempt.opened` behind. A check thread writes to the
    * attempt under review; only it sets a verdict.
    */
@@ -172,9 +172,11 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     if (t && status !== "stale" && status !== "failed") {
       return { kind: "worker", attempt: async () => t.attemptId };
     }
-    const waiting = known(taskId).dependsOn.filter((d) => taskOf(d)?.status !== "done");
+    const waiting = known(taskId).dependsOn.filter((d) => !isSatisfied(taskOf(d)));
     if (waiting.length > 0) {
-      throw new Refusal(`${taskId} builds on ${waiting.join(", ")}, which is not done yet.`);
+      throw new Refusal(
+        `${taskId} builds on ${waiting.join(", ")}, which has no usable result yet.`,
+      );
     }
     return { kind: "worker", attempt: () => openAttempt(c, taskId) };
   }

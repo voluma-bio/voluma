@@ -33,8 +33,8 @@ function skillList(def: WorkflowDefinition): string {
 export const workerSystem = (def: WorkflowDefinition) => `${WORKER}\n\n${skillList(def)}`;
 export const checkSystem = (def: WorkflowDefinition) => `${CHECK}\n\n${skillList(def)}`;
 
-function taskBrief(def: WorkflowDefinition, task: PlanTask): string {
-  const instructions = def.files.tasks.find((t) => t.id === task.id)?.instructions;
+function taskBrief(task: PlanTask): string {
+  const { instructions } = task;
   const done = task.doneWhen?.length
     ? `Done when:\n${task.doneWhen.map((d) => `- ${d}`).join("\n")}`
     : "";
@@ -65,15 +65,15 @@ function notesBlock({ user, main }: Notes, role: "worker" | "check"): string {
   return parts.length ? `\n${PRECEDENCE}\n${parts.join("\n")}` : "";
 }
 
-export function workerPrompt(def: WorkflowDefinition, task: PlanTask, notes: Notes): string {
+export function workerPrompt(task: PlanTask, notes: Notes): string {
   const needs = task.dependsOn.length
     ? `It builds on ${task.dependsOn.join(", ")}; their files are in /outputs/<task id>/.`
     : "It builds on no other task.";
-  return `Your task is "${task.id}". ${needs}\n${taskBrief(def, task)}\n${outputList(task)}${notesBlock(notes, "worker")}`;
+  return `Your task is "${task.id}". ${needs}\n${taskBrief(task)}\n${outputList(task)}${notesBlock(notes, "worker")}`;
 }
 
-export function checkPrompt(def: WorkflowDefinition, task: PlanTask, notes: Notes): string {
-  return `Check task "${task.id}". The worker's files are in /outputs/${task.id}/.\n${taskBrief(def, task)}\n${outputList(task)}${notesBlock(notes, "check")}`;
+export function checkPrompt(task: PlanTask, notes: Notes): string {
+  return `Check task "${task.id}". The worker's files are in /outputs/${task.id}/.\n${taskBrief(task)}\n${outputList(task)}${notesBlock(notes, "check")}`;
 }
 
 function outputList(task: PlanTask): string {

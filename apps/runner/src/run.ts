@@ -27,7 +27,6 @@ import { llmMainThread, mainSystem, runBrief } from "@voluma/harness/main-thread
 import { type Recorder, recorder } from "@voluma/harness/recorder";
 import { type SandboxSession, sandboxSession } from "@voluma/harness/sandbox-session";
 import { type RunRole, superviseRun } from "@voluma/harness/supervise-run";
-import { checkToolNames } from "@voluma/harness/tools";
 import { loadWorkflow } from "@voluma/workflow/load";
 import { computePlan } from "@voluma/workflow/plan";
 import { type Config, isVisitorSafe, providerKey } from "./config.ts";
@@ -35,7 +34,7 @@ import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
 import { metaSegmenter } from "./meta-segmenter.ts";
 import { createModalSandbox, RUNS_APP, terminateClaim } from "./modal-sandbox.ts";
-import { withModelRetry } from "./model-retry.ts";
+import { retryMetaNotFound } from "./model-retry.ts";
 import { checkPrompt, checkSystem, workerPrompt, workerSystem } from "./prompts.ts";
 import { r2Evidence } from "./r2-evidence.ts";
 import { r2Files } from "./r2-files.ts";
@@ -54,6 +53,8 @@ const REPO_ROOT = resolve(import.meta.dirname, "../../..");
 const CLOSE_BUDGET_MS = { ended: 60_000, stopped: 15_000 };
 /** How long threads get to end after a stop before the run is reported anyway. */
 const WIND_DOWN_MS = 5_000;
+/** Pi's own retries of a model call (429 honours retry-after, 5xx, dropped connections). */
+const MODEL_RETRIES = 3;
 
 export interface RunnerContext {
   config: Config;
@@ -138,22 +139,22 @@ export async function runClaim(
       `claimed (${visitor ? "visitor" : "voluma"} keys, model ${workerModel.provider}/${workerModel.id})`,
     );
 
-    // Before any sandbox: an unreadable workflow or an unknown tool fails the run here, with its message.
-    // The run's pin names the workflow directory; its files are snapshotted from this
-    // runner's checkout once, so a resume reads what the run began with.
+    // Before any sandbox: an unreadable workflow or a bad selection fails the run here, with its
+    // message. The run's pin names the workflow directory; its files are snapshotted from this
+    // runner's checkout once (at `config.commit`), so a resume reads what the run began with.
     const workflowDir = run.workflows[0]?.path;
     if (!workflowDir) throw new Error("the run pins no workflow directory");
     const definition = await loadWorkflow(workflowDir, {
       store: r2Workflows(config.r2),
       prefix: workflowSnapshotPrefix(runId),
       root: REPO_ROOT,
+      commit: config.commit,
     });
     // The tasks that produce the selected outputs and what they need. The main thread may adapt
     // them to the run's notes when the run starts (`superviseRun`).
     const computed = computePlan(definition.files, run.selectedOutputs);
     // Every role's tools come from here, not from the workflow.
     const roleTools = ["view_image", ...(metaKey ? ["segment_sam"] : [])];
-    checkToolNames(roleTools, "runner");
 
     const layout = runLayout(
       runId,
@@ -204,13 +205,17 @@ export async function runClaim(
     );
     const opened = session;
 
-    const callModel = withModelRetry((m, context, options) =>
-      models.streamSimple(m, context, { ...options, apiKey: keyFor(m.provider) }),
+    const callModel = retryMetaNotFound((m, context, options) =>
+      models.streamSimple(m, context, {
+        ...options,
+        apiKey: keyFor(m.provider),
+        maxRetries: MODEL_RETRIES,
+      }),
     );
     const streamFn: RunRole["streamFn"] = (m, context, options) => {
       const stream = callModel(m, context, options);
       stream.result().then(
-        (reply) => meter.addModelCost(reply.usage.cost.total),
+        (reply) => meter.addModelCost(reply.usage?.cost.total ?? 0),
         () => {},
       );
       return stream;
@@ -220,7 +225,7 @@ export async function runClaim(
       mainSystem(runBrief(run.selectedOutputs, computed.tasks)),
       async (context, signal) => {
         const reply = await callModel(mainModel, context, { signal }).result();
-        meter.addModelCost(reply.usage.cost.total);
+        meter.addModelCost(reply.usage?.cost.total ?? 0);
         return reply;
       },
     );
@@ -231,7 +236,8 @@ export async function runClaim(
       selectedOutputs: run.selectedOutputs,
       notes: run.notes,
       workflow: definition.files,
-      workflows: run.workflows,
+      // The commit the files came from: the snapshot's, which a resume keeps.
+      workflows: run.workflows.map((pin) => ({ ...pin, commit: definition.commit })),
       layout,
       recorder: events,
       history: client,
@@ -246,14 +252,14 @@ export async function runClaim(
         model: workerModel,
         streamFn,
         systemPrompt: workerSystem(definition),
-        prompt: workerPrompt(definition, task, { user: run.notes, main: notes }),
+        prompt: workerPrompt(task, { user: run.notes, main: notes }),
         tools: roleTools,
       }),
       check: (task, notes) => ({
         model: checkModel,
         streamFn,
         systemPrompt: checkSystem(definition),
-        prompt: checkPrompt(definition, task, { user: run.notes, main: notes }),
+        prompt: checkPrompt(task, { user: run.notes, main: notes }),
         tools: roleTools,
       }),
       signal: abort.signal,

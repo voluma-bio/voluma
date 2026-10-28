@@ -4,6 +4,7 @@
  * into a plain object, never written to `process.env`, so keys are not inherited by child
  * processes or picked up by other libraries; callers pass each one on explicitly.
  */
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseEnv } from "node:util";
@@ -98,6 +99,19 @@ export function modalToken(): { tokenId: string; tokenSecret: string } | undefin
 const SANDBOX_IMAGE =
   "ghcr.io/voluma-bio/voluma-sandbox@sha256:e6f41b0386216d31c44f39c42a8406785186d53f4c29e95bf6c28abb99d929fe";
 
+/**
+ * The commit this runner's checkout is at, which a run records as the source of its workflow
+ * files: Railway's (the build has no `.git`), else the checkout's (`pnpm dev`; uncommitted edits
+ * to `workflows/` are not in it).
+ */
+function checkoutCommit(): string {
+  const sha =
+    optional("RAILWAY_GIT_COMMIT_SHA") ??
+    execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error(`the checkout's commit is not a SHA: ${sha}`);
+  return sha;
+}
+
 export type Config = ReturnType<typeof runnerConfig>;
 
 export function runnerConfig() {
@@ -143,6 +157,7 @@ export function runnerConfig() {
     /** Meta's key for SAM (`segment_sam`) on a `voluma` run; absent: the tool is not offered. A visitor's run uses the visitor's own key. */
     metaApiKey,
     r2,
+    commit: checkoutCommit(),
     /** Every secret of ours, to redact from anything that leaves the process. */
     secrets: [
       api.token,
