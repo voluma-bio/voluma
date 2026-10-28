@@ -95,6 +95,7 @@ export function runnerConfig() {
   const ref = modelRef("RUNNER_MODEL");
   const model = { ...ref, apiKey: required(`VOLUMA_${ref.provider.toUpperCase()}_API_KEY`) };
   const api = apiEndpoint();
+  const metaApiKey = optional("VOLUMA_META_API_KEY");
   const r2 = {
     accountId: required("R2_ACCOUNT_ID"),
     bucket: required("R2_BUCKET"),
@@ -114,6 +115,8 @@ export function runnerConfig() {
      */
     visitorModel: visitorModel(),
     modal,
+    /** Meta's key for SAM (`segment_sam`) on a `voluma` run; absent: the tool is not offered. A visitor's run uses the visitor's own key. */
+    metaApiKey,
     r2,
     /** Every secret of ours, to redact from anything that leaves the process. */
     secrets: [
@@ -122,6 +125,7 @@ export function runnerConfig() {
       r2.accessKeyId,
       r2.secretAccessKey,
       r2.cloudflareApiToken,
+      metaApiKey,
       modal?.tokenId,
       modal?.tokenSecret,
     ].filter((s): s is string => s !== undefined),

@@ -24,6 +24,7 @@ packages/
   viewer        local DICOM ZIP intake, Cornerstone acquired slices, persistent imaging slots
   ui            shared React components, styled from tokens
   design-tokens tokens.css (raw values, two themes) and theme.css (Tailwind mapping)
+workflows/      Workflow directories (`workflow.md`, `agents/`, `skills/`) and their Python skill resources (microct-analysis; mouse-oa arrives with #57)
 tools/ci        PR-body check
 tools/dev.mjs   the `pnpm dev` launcher (below)
 ```
@@ -56,9 +57,10 @@ checklist, check threads, and review chat threads.
   names are unique among running sandboxes, so a sandbox a dead runner left behind
   would block a resume). `packages/harness/src/layout.ts` owns which prefix is mounted
   where; prompts and tools take paths from it.
-  There is no internet. The image is a public GHCR image pinned by digest
-  (`sandbox/Dockerfile`, built by the "Sandbox image" workflow; `SANDBOX_IMAGE` in
-  `config.ts`), so a visitor's Modal workspace pulls the same one. Every command runs
+  There is no internet. The image is a public GHCR image pinned by digest (`SANDBOX_IMAGE` in
+  `apps/runner/src/config.ts`), built by the "Sandbox image" workflow from
+  `apps/runner/sandbox/Dockerfile`, which installs `workflows/microct-analysis/requirements.txt`,
+  so a visitor's Modal workspace pulls the same one. Every command runs
   under `timeout -k`, which leads its own process group,; a timeout or an abort kills the whole
   group, except a descendant that calls `setsid` itself, which survives until the
   sandbox is destroyed.

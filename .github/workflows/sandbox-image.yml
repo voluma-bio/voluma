@@ -1,11 +1,14 @@
-# Builds the sandbox image (apps/runner/sandbox/Dockerfile) for linux/amd64 and pushes it
+# Builds the sandbox image (apps/runner/sandbox/Dockerfile, with workflows/microct-analysis/requirements.txt) for linux/amd64 and pushes it
 # to ghcr.io/voluma-bio/voluma-sandbox. The digest it prints goes into SANDBOX_IMAGE in
 # apps/runner/src/config.ts. The package must be public so a visitor's Modal workspace can pull it.
 name: Sandbox image
 
 on:
   push:
-    paths: [apps/runner/sandbox/Dockerfile, .github/workflows/sandbox-image.yml]
+    paths:
+      - apps/runner/sandbox/Dockerfile
+      - workflows/microct-analysis/requirements.txt
+      - .github/workflows/sandbox-image.yml
   workflow_dispatch:
 
 permissions:
@@ -27,6 +30,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: apps/runner/sandbox
+          build-contexts: reqs=workflows/microct-analysis
           platforms: linux/amd64
           push: true
           provenance: false

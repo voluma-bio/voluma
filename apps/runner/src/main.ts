@@ -6,6 +6,7 @@
  * a sandbox it leaves is ended by Modal's idle timeout, or by `sandboxes:clean`.
  * Settings: config.ts and `.env.example`.
  */
+import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { createModels } from "@earendil-works/pi-ai";
@@ -22,6 +23,14 @@ import { type RunnerContext, runClaim } from "./run.ts";
 const SHUTDOWN_BUDGET_MS = 30_000;
 
 const config = runnerConfig();
+// `segment_sam` encodes with ffmpeg: a host without it should fail here, not in a run.
+if (config.metaApiKey) {
+  const probe = spawnSync("ffmpeg", ["-version"], { stdio: "ignore" });
+  if (probe.status !== 0)
+    throw new Error(
+      "VOLUMA_META_API_KEY is set, but `ffmpeg -version` failed: install ffmpeg on this host",
+    );
+}
 const redact = redactor(config.secrets);
 const log = (line: string) => console.log(`${new Date().toISOString()} ${redact(line)}`);
 
