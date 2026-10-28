@@ -16,6 +16,7 @@ import { WAKE_ERROR_MAX, WAKE_NOTE_MAX } from "@voluma/contracts/events";
 import type { WorkflowPlan } from "@voluma/contracts/workflow";
 import type { PlanChange } from "@voluma/workflow/plan";
 import { z } from "zod";
+import { usageOf } from "./model-usage";
 import type { PayloadOf } from "./recorder";
 import type { PlanTask } from "./task-runtime";
 
@@ -55,6 +56,8 @@ export type Decision = z.infer<typeof decisionSchema>;
  * needs, and at `run-started` a change to the plan (absent: keep the computed one).
  */
 export interface Reply {
+  /** The model call's usage, recorded on the `wake`. */
+  usage?: Wake["usage"];
   note?: string;
   decision?: Decision;
   change?: PlanChange;
@@ -176,6 +179,7 @@ export function llmMainThread(
         throw new Error("the main thread gave no decision at a judgment point");
       }
       return {
+        usage: usageOf(reply),
         note: answer.note?.slice(0, WAKE_NOTE_MAX),
         decision: judged ? answer.decision : undefined,
         change: point.kind === "run-started" ? answer.change : undefined,

@@ -27,6 +27,7 @@ import {
 } from "@earendil-works/pi-ai";
 import type { EventType } from "@voluma/contracts/events";
 import { z } from "zod";
+import { usageOf } from "../../model-usage";
 import type { History } from "../../ports/history";
 import type { Sandbox } from "../../ports/sandbox";
 import type { PayloadOf, Recorder } from "../../recorder";
@@ -231,7 +232,12 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
             else if (message.role === "assistant") {
               // Every reply gets a `message`, even an empty or failed one: it ends the
               // reply's live partial (`stream.ts`).
-              emit("message", { role: "assistant", text: textOf(message) });
+              const used = usageOf(message);
+              emit("message", {
+                role: "assistant",
+                text: textOf(message),
+                ...(used && { usage: used }),
+              });
             } else if (message.role === "user") {
               const sender = senders.get(message);
               if (!sender) throw new Error("a user message reached message_end without a sender");
