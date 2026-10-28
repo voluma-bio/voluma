@@ -4,7 +4,9 @@
  * stored document, so a rerun rewrites no other task's data.
  * Served by `GET /api/review/runs/:runId` (`getReviewRun`): 404 when the caller
  * can't read the run, 409 when it has no plan (no `revision.started`: not started,
- * or ended before one).
+ * or ended before one). A run's files (every `evidenceKey`, not the reference
+ * run's keys) are read through `GET /api/review/runs/:runId/files/:sha256`
+ * (`reviewFileUrl`).
  *
  * Two layers, so a different workflow (vascular, materials) gets its own final
  * review with no new Review-lane code:

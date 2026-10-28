@@ -238,6 +238,15 @@ export async function getReviewRun(runId: string): Promise<ReviewRun> {
   );
 }
 
+/**
+ * Where the browser reads one of a run's files: evidence, a data file, a volume or a mesh,
+ * by the `sha256` its `Asset` (or `npy` volume, or mesh) carries. JPEG and PNG come back as
+ * images; anything else is an attachment. 404: unreadable run or no such file; 503: no file
+ * storage configured. Only files under the run's own prefix, not the reference run's keys.
+ */
+export const reviewFileUrl = (runId: string, sha256: string) =>
+  `/api/review/runs/${encodeURIComponent(runId)}/files/${encodeURIComponent(sha256)}`;
+
 /** Inputs the caller may start a run on, newest first. */
 export async function listInputs(): Promise<Input[]> {
   return listInputsResponseSchema.parse(await json(await request("/run/inputs"))).inputs;

@@ -1,3 +1,12 @@
 # Run feature: deferred work
 
-- **Run debug view.** One page per run that shows everything the run log holds, in order: every thread (main, worker, checker) with its model, each message and tool call with its arguments and result, sandbox commands and their output, wakes with their notes and decisions, the plan and every revision, costs, and errors. Today a run's inner workings are visible only in the runner's log and the database. The data is already in the event stream (`subscribe` in `@voluma/api-client`), so this is a web page over the existing stream, not a new API.
+- **Move `chat/` to `packages/ui`** when the review chat wants the same transcript pieces.
+- **Images and full tool output in the thread view.** `view_image` results keep text only (path, size, sha256) and a truncated `tool.result` keeps its head and tail; the full output and the images are in R2 but no API call serves them to the run page.
+- **Say which runtime message is the brief.** `threadRows` labels a thread's first `runtime`
+  message "Task brief", and `packages/harness/src/thread-log.ts` skips it when counting wakes: the
+  same positional rule on both sides of the contract. Give the runtime sender a purpose (e.g.
+  `{ kind: "runtime", purpose: "brief" | "nudge" }`) in a contracts PR, stamp it in
+  `start-thread.ts`, and have both readers switch on it.
+- **Rebuild only the live tail of the transcript per frame**, if a long run janks. `rows` reruns
+  `threadRows`/`mainRows` over every event on each frame (about 1 ms today). Split each into a
+  durable part memoized on `events` and a live tail on `live`, then `memo(RowView)`.

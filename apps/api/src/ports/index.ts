@@ -27,4 +27,16 @@ export type ReferenceArchive = {
 export type RunRecords = {
   /** The run and every stored event, in `seq` order; null when `reader` can't read the run. */
   load(reader: Reader, runId: string): Promise<{ run: Run; events: RunEvent[] } | null>;
+  /** Whether `reader` can read the run, without reading its log. */
+  readable(reader: Reader, runId: string): Promise<boolean>;
+};
+
+/** A run's content-addressed files (`evidenceKey`): evidence, data files, volumes, meshes. */
+export type RunFiles = {
+  /** Rejects with a 404 `HTTPException` when there is no such file, a 502 when storage fails. */
+  open(
+    runId: string,
+    sha256: string,
+    signal: AbortSignal,
+  ): Promise<{ body: ReadableStream<Uint8Array>; byteLength: number }>;
 };
