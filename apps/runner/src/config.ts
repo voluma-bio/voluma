@@ -87,8 +87,11 @@ export function runnerConfig() {
     concurrency: positiveInt("RUNNER_CONCURRENCY", 2),
     /** The model of a `voluma` run, with our key for its provider (`VOLUMA_<PROVIDER>_API_KEY`). */
     model,
-    /** The model of a `visitor` run, which uses the visitor's Meta key. */
-    visitorModel: modelRef("RUNNER_VISITOR_MODEL", "meta/muse-spark-1.3-contributor"),
+    /**
+     * The model of a `visitor` run, which uses the visitor's Meta key. Standard mode: a
+     * `-contributor` model lets Meta train on what it is sent, the visitor's scan included.
+     */
+    visitorModel: modelRef("RUNNER_VISITOR_MODEL", "meta/muse-spark-1.3"),
     modal,
     r2,
     /** Every secret of ours, to redact from anything that leaves the process. */
