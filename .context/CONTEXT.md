@@ -116,8 +116,20 @@ the WorkOS user id.
 Routes: `GET /api/auth/login?returnTo=`, `GET /api/auth/callback`,
 `POST /api/auth/logout` (returns `{ logoutUrl }` for the browser to navigate to),
 `GET /api/auth/me`. A non-member is sent to `/?signin=not-a-member`, a failed callback to
-`/?signin=failed`; both leave no session cookie. A refreshed session comes back as
-`Set-Cookie` on the response that triggered the refresh.
+`/?signin=failed`; both leave no session cookie. `login` and `callback` are mounted
+before the authentication middleware (they authenticate through PKCE and state, not the
+session), and the middleware never adds its refreshed or clearing session cookie to a
+response that sets that cookie itself, so one writer owns the cookie per response.
+Otherwise a refreshed session comes back as `Set-Cookie` on the response that triggered
+the refresh.
+
+Sign-out revokes the session at WorkOS on the server (`userManagement.revokeSession`);
+refresh tokens are not rotated on use, so a copied cookie would otherwise stay a session.
+The access token already issued stays valid until it expires. A request that carried a
+session cookie and got no user clears the cookie only when the cookie cannot be unsealed
+or WorkOS answers `invalid_grant` for its refresh token; a transient WorkOS error leaves
+it, so an outage does not sign people out. `returnTo` is dropped past 512 characters, and
+`/login` evicts stale PKCE verifier cookies.
 
 ## Deployment
 

@@ -55,6 +55,16 @@ unrelated users, and AuthKit lets any of them through sign-in; the API refuses n
 after the fact (callback and every request), but invitation-only keeps them out of the
 organization to begin with.
 
+**Accepted risks.**
+- Refresh tokens: on staging WorkOS did not rotate them (three refreshes with one cookie
+  returned the same token). A copy of a sealed cookie therefore stays a session until the
+  WorkOS session ends, which is why sign-out revokes it server-side. Unknown for
+  production; check with one `curl` when production keys exist.
+- The PKCE verifier cookies (`wos-auth-verifier-<hash>`) are named by the library and
+  carry no `__Host-` prefix. A taken-over `*.voluma.bio` host could plant one together
+  with its `state` (login CSRF into the attacker's own account, who must be a lab member).
+  Not mitigated here.
+
 ## Deploying
 
 Merge to `main`: Railway builds, runs the migration, starts the new deployment alongside

@@ -46,6 +46,7 @@ const auth = createAuth({
 const app = new Hono();
 app.get("/health", (c) => c.text("ok"));
 // Every /api request is authenticated here; past the auth routes, no principal is a 401.
+app.route("/api/auth", auth.signIn); // PKCE-authenticated; needs no principal
 app.use("/api/*", ...auth.middleware);
 app.route("/api/auth", auth.routes);
 app.use("/api/*", auth.requirePrincipal);
