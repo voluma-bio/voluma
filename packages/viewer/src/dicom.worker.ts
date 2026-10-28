@@ -4,7 +4,8 @@ import dicomParser from "dicom-parser";
 import type { DicomArchive, DicomSeries, IntakeMessage, Orientation, Point3 } from "./dicom";
 
 const MiB = 1024 * 1024;
-const maxExpanded = 512 * MiB;
+// Expanded slices are held as Blobs for the session; this, not the ZIP size, bounds memory.
+const maxExpanded = 2048 * MiB;
 const maxEntry = 64 * MiB;
 const maxEntries = 4096;
 const syntaxes = new Set([
@@ -61,7 +62,7 @@ async function readArchive(file: File): Promise<DicomArchive> {
       if (entries.length >= maxEntries) fail("This ZIP exceeds the current 4,096-entry limit.");
       declaredSize += entry.uncompressedSize;
       if (entry.uncompressedSize > maxEntry || declaredSize > maxExpanded) {
-        fail("This ZIP exceeds the current limits: 64 MiB per file and 512 MiB expanded.");
+        fail("This ZIP exceeds the current limits: 64 MiB per file and 2 GiB expanded.");
       }
       if (entry.encrypted)
         fail("Encrypted ZIP files are not supported. Export an unencrypted ZIP.");

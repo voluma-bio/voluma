@@ -41,10 +41,6 @@ export function openDicomZip(
       reject(new Error("Choose a ZIP of DICOM files. Single DCM files are not supported yet."));
       return;
     }
-    if (file.size > 256 * 1024 * 1024) {
-      reject(new Error("This ZIP exceeds the current 256 MiB compressed limit."));
-      return;
-    }
     const worker = new Worker(new URL("./dicom.worker.ts", import.meta.url), { type: "module" });
     const stop = () => {
       worker.terminate();

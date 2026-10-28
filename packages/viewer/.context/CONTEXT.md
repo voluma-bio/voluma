@@ -62,10 +62,10 @@ requested one.
 
 | Resource | Current limit |
 |---|---:|
-| Compressed ZIP | 256 MiB |
+| Compressed ZIP | none (a disk-backed `File`) |
 | Entries, including directories | 4,096 |
 | Expanded entry | 64 MiB |
-| Total expanded content | 512 MiB |
+| Total expanded content | 2 GiB |
 | Pixels in one slice | 16,777,216 |
 | Decoded image cache | 256 MiB |
 | DICOM decode workers | 2 |
