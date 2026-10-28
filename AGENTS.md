@@ -141,7 +141,8 @@ they need:
   `workflows/`, as skill resources: CLI scripts that take and return paths,
   never bytes. Their dependencies are
   `workflows/microct-analysis/requirements.txt`, compiled from `requirements.in`;
-  changing it republishes the sandbox image. `pnpm check` runs ruff and pytest
+  changing it means running the "Sandbox image" workflow and updating `SANDBOX_IMAGE` in `apps/runner/src/config.ts`.
+  `pnpm check` runs ruff and pytest
   there through `uv`; the sandbox image is linux/x86_64, so on macOS or ARM the
   Python tests run in a `linux/amd64` Docker container.
 - Test against the real thing, not fakes: real OA6-1RK data, the real API,

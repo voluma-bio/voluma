@@ -31,6 +31,7 @@ import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
 import { metaSegmenter } from "./meta-segmenter.ts";
 import { createModalSandbox, RUNS_APP, terminateClaim } from "./modal-sandbox.ts";
+import { withModelRetry } from "./model-retry.ts";
 import { CHECK_SYSTEM, checkPrompt, WORKER_SYSTEM, workerPrompt } from "./prompts.ts";
 import { r2Evidence } from "./r2-evidence.ts";
 import { r2Files } from "./r2-files.ts";
@@ -165,8 +166,11 @@ export async function runClaim(
     );
     const opened = session;
 
+    const callModel = withModelRetry((m, context, options) =>
+      models.streamSimple(m, context, { ...options, apiKey }),
+    );
     const streamFn: RunRole["streamFn"] = (m, context, options) => {
-      const stream = models.streamSimple(m, context, { ...options, apiKey });
+      const stream = callModel(m, context, options);
       stream.result().then(
         (reply) => meter.addModelCost(reply.usage.cost.total),
         () => {},
@@ -174,7 +178,7 @@ export async function runClaim(
       return stream;
     };
     const judgment = llmJudgment(`llm:${model.id}`, async (context, signal) => {
-      const reply = await models.completeSimple(model, context, { apiKey, signal });
+      const reply = await callModel(model, context, { signal }).result();
       meter.addModelCost(reply.usage.cost.total);
       return reply;
     });
@@ -228,6 +232,7 @@ export async function runClaim(
         .report(report)
         .catch((e) => log(`report failed: ${e instanceof Error ? e.message : e}`));
       log(`reported ${report.kind}${report.kind === "ended" ? ` ${report.outcome}` : ""}`);
+      log(`model cost this claim: $${meter.totalModelCostUsd().toFixed(4)}`);
     } else {
       log(`stopped (${stopped}); nothing more to report`);
     }
