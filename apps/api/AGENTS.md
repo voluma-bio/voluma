@@ -50,3 +50,20 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   (`src/domains/<domain>/pg-*.ts`), constructed only by `index.ts`. `src/adapters/` is for
   adapters of the shared `src/ports/`.
 - `pnpm dev` is the only launcher, and it starts the API with the repo `.env`.
+
+## Run domain (`src/domains/run`)
+
+- `index.ts` is a mount list: `runs.ts` (browser routes, `requireUser`), `ingest.ts` (runner
+  routes, `requireService`), and a file per later route group. Ports are in `run-store.ts`;
+  the Postgres adapters are `pg-run-store.ts` (reads, start, cancel, resume), `pg-queue.ts`
+  (claim, lease, recovery) and the lease-checked `pg-event-log.ts`/`pg-history.ts`.
+- **Admission and the claim hold one lock** (`QUEUE_LOCK`, a transaction advisory lock), so
+  limit counts can't race. The lease is judged by the database's `now()`. An ingest write
+  checks the run's lease token inside its own transaction (`assertLease`, `FOR SHARE`); a
+  late write can't land after a takeover.
+- **Visitor keys live only in `key-vault.ts`**, in memory. Never store, log or return them,
+  and log no body on a route that takes them. `index.ts` calls `holdUnkeyedVisitorRuns` on
+  start.
+- **Limits come from env** (`RUN_LIMITS_<ORG>_*`, read in `index.ts`); the workflow catalog
+  (`catalog.ts`) is code. `seed:example --from <runId>` makes an example run
+  (`src/seed-example.ts`). Outage and restart behaviour: [.context/deploy.md](.context/deploy.md).

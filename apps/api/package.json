@@ -6,6 +6,7 @@
   "scripts": {
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node --import tsx src/migrate.ts",
+    "seed:example": "node --env-file-if-exists ../../.env --import tsx src/seed-example.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {

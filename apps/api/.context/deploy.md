@@ -42,6 +42,7 @@ Variables on `@voluma/api`:
 | `WORKOS_LAB_ORGANIZATION_ID` | the Yao Lab organization's id (`org_...`); its members get scope `lab` |
 | `GUEST_ORGANIZATION_ID`, `GUEST_SCOPE` | optional: let anyone in as a guest of this organization (`lab` or `self`, default `lab`). Staging runs open: the Demo organization (`WORKOS_DEMO_ORGANIZATION_ID`'s value) with `GUEST_SCOPE=self`; never the Yao Lab, whose data is for signed-in members only (startup throws if the guest organization is one members sign in to). Unset means the sign-in wall |
 | `WORKOS_JUDGES_ORGANIZATION_ID` | optional: the Judges organization's id; its members get scope `self`. Unset means no Judges sign-in |
+| `RUN_LIMITS_<ORG>_<LIMIT>` | what an organization may run, `<ORG>` one of `LAB`, `JUDGES`, `DEMO` (the guest organization) and `<LIMIT>` one of `PER_CALLER`, `CONCURRENT`, `PER_DAY`, `USD_PER_DAY`. Unset is no limit, so set them: Yao Lab `CONCURRENT=4`; Judges `CONCURRENT=2`, `PER_DAY=50`; Demo `PER_CALLER=1`, `CONCURRENT=2`, `PER_DAY=10` while staging is open to guests (then `CONCURRENT=1`, `PER_DAY=2` for the hackathon). Read at start: a change is a restart, not a deploy of code |
 | `PORT` | set by Railway |
 
 The root `prepare` script skips `lefthook install` outside a git checkout, as in Railway's build.
@@ -77,6 +78,13 @@ the old one, moves traffic once `/health` answers, then sends the old one SIGTER
 deployment then fails its healthcheck. So every migration must work with the code that is
 deployed now: expand first, contract in a later PR. The rule is in
 [../AGENTS.md](../AGENTS.md).
+
+## What a restart or outage does to runs
+
+- **One API replica.** The visitor-key vault and (soon) the live hub are in this process's memory, which is correct only while there is one replica. Do not scale the API out.
+- **A deploy or restart** empties the vault: on start the API moves every unclaimed `visitor` run to `awaiting-keys`, and the browser resends the keys (`/keys`). Running `voluma` runs are unaffected; their leases are in Postgres.
+- **An API outage of more than 45 s** (the runner's self-stop margin, `LEASE_SECONDS - HEARTBEAT_SECONDS`) stops every running run: the runner can't heartbeat. A `released` run is recovered at once when the API returns; a run whose lease the database expired counts one of its three recoveries. A `visitor` run goes to `awaiting-keys` either way, because its keys are gone.
+- **A migration** takes no queue lock; the claim and the runs table follow the expand-first rule like any other.
 
 ## Operating staging
 
