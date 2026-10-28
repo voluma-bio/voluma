@@ -10,24 +10,60 @@ import {
 } from "@cornerstonejs/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DicomSeries } from "./dicom";
-import { acquireDicomSession, type DicomSession, initializeDicom } from "./dicomSession";
-import { planVolume, sampleVolume, type VolumePlan } from "./volume";
+import {
+  acquireDicomSession,
+  type DicomSession,
+  initializeDicom,
+  sliceCacheBytes,
+} from "./dicomSession";
+import { planVolume, sampleVolume, type VolumePlan, type VolumeSize } from "./volume";
 
 // One preview slot. Serialize replacement so two preview buffers/textures never
 // coexist. Reuse IDs: 4.22's local-image metadata provider has no per-ID removal.
 const volumeId = "voluma-local-preview";
 let retired: Promise<void> = Promise.resolve();
+// Admission ceiling for one volume's estimated GPU texture.
+const maxTextureBytes = 2 * 1024 * 1024 * 1024;
+
+let textureLimit: number | undefined;
+/** Largest 3D texture edge this browser's WebGL2 allows, or 0 without WebGL2. */
+function maxTextureSize() {
+  if (textureLimit === undefined) {
+    const gl = document.createElement("canvas").getContext("webgl2");
+    textureLimit = gl ? (gl.getParameter(gl.MAX_3D_TEXTURE_SIZE) as number) : 0;
+    gl?.getExtension("WEBGL_lose_context")?.loseContext();
+  }
+  return textureLimit;
+}
+
+/**
+ * GPU texture bytes. Cornerstone 4.22 disables half float, so 16-bit voxels
+ * become R32F unless norm16 is usable, which core doesn't expose: assume 4 bytes.
+ */
+function textureBytes(plan: VolumePlan) {
+  return (plan.bytes / plan.ArrayType.BYTES_PER_ELEMENT) * (plan.ArrayType === Uint8Array ? 1 : 4);
+}
+
+function admission(plan: VolumePlan) {
+  const limit = maxTextureSize();
+  if (!limit) return "3D needs WebGL2, which this browser doesn't provide.";
+  if (plan.dimensions.some((n) => n > limit))
+    return `This browser's graphics limit is ${limit} voxels per axis. Choose a preview size.`;
+  if (textureBytes(plan) > maxTextureBytes)
+    return "This volume needs more than 2 GiB of graphics memory. Choose a preview size.";
+}
 
 export default function DicomVolume({ series }: { series: DicomSeries }) {
-  const [limit, setLimit] = useState<128 | 256>(256);
+  const [size, setSize] = useState<VolumeSize>("full");
   const [open, setOpen] = useState(false);
   const plan = useMemo(() => {
     try {
-      return planVolume(series, limit);
+      return planVolume(series, size);
     } catch (error) {
       return (error as Error).message;
     }
-  }, [series, limit]);
+  }, [series, size]);
+  const refused = typeof plan === "string" ? undefined : admission(plan);
   return (
     <section className="dicom-stack" aria-label="Raw volume preview">
       {typeof plan === "string" ? (
@@ -41,26 +77,47 @@ export default function DicomVolume({ series }: { series: DicomSeries }) {
           <div className="view-empty">
             <p>Raw intensities, not segmented anatomy.</p>
             <label className="volume-quality">
-              Preview size
+              3D resolution
               <select
-                aria-label="Preview size"
-                value={limit}
-                onChange={(e) => setLimit(Number(e.target.value) as 128 | 256)}
+                aria-label="3D resolution"
+                value={size}
+                onChange={(e) =>
+                  setSize(
+                    e.target.value === "full" ? "full" : (Number(e.target.value) as 128 | 256),
+                  )
+                }
               >
-                <option value={256}>Standard · up to 256 per axis</option>
-                <option value={128}>Compact · up to 128 per axis</option>
+                <option value="full">Full resolution · every acquired voxel</option>
+                <option value={256}>Standard preview · up to 256 per axis</option>
+                <option value={128}>Compact preview · up to 128 per axis</option>
               </select>
             </label>
             <p className="text-xs">
               {plan.downsampled ? "Downsampled" : "Native grid"} · {plan.dimensions.join(" × ")} ·{" "}
               {(plan.bytes / 1048576).toFixed(1)} MiB voxels
+              {plan.stored ? ` · ${plan.ArrayType.BYTES_PER_ELEMENT * 8}-bit stored values` : ""}
+              {textureBytes(plan) > plan.bytes
+                ? ` · up to ${(textureBytes(plan) / 1048576).toFixed(0)} MiB on the graphics card`
+                : ""}
             </p>
-            <button className="button mt-3" type="button" onClick={() => setOpen(true)}>
-              Build 3D preview
+            {refused && (
+              <p className="text-xs" role="alert">
+                {refused}
+              </p>
+            )}
+            <button
+              className="button mt-3"
+              type="button"
+              disabled={!!refused}
+              onClick={() => setOpen(true)}
+            >
+              Build 3D
             </button>
           </div>
           <p className="volume-note">
-            3D is display only. Small structures may disappear at preview resolution.
+            {plan.downsampled
+              ? "3D is display only. Small structures may disappear at preview resolution."
+              : "3D is display only. Every acquired voxel is kept."}
           </p>
         </>
       )}
@@ -68,17 +125,21 @@ export default function DicomVolume({ series }: { series: DicomSeries }) {
   );
 }
 
+type Rotation = { frames: number; p50Ms: number; p95Ms: number; fps: number; canvas: number[] };
 type PerformanceReport = {
   source: number[];
   preview: number[];
   spacingMm: number[];
   downsampled: boolean;
   voxelBytes: number;
+  voxelType: string;
   firstVisibleMs?: number;
   preparationMs?: number;
   sampledPeakJsHeapBytes?: number;
   peakCacheBytes: number;
-  rotation?: { frames: number; p50Ms: number; p95Ms: number; fps: number; canvas: number[] };
+  rotation?: Rotation;
+  /** Same rotation at the coarser ray sampling used while dragging. */
+  dragRotation?: Rotation;
   userAgent: string;
   devicePixelRatio: number;
   renderer: string;
@@ -98,11 +159,12 @@ function VolumeView({
   const controls = useRef<{
     view: VolumeViewport3D;
     rotate(x: number, y: number): void;
+    dragging(on: boolean): void;
     display(threshold: number, opacity: number): void;
     measure(): Promise<void>;
     reset(): void;
   } | null>(null);
-  const pointer = useRef<{ id: number; x: number; y: number } | null>(null);
+  const pointer = useRef<{ id: number; x: number; y: number; moved: boolean } | null>(null);
   const [status, setStatus] = useState("Preparing 3D…");
   const [error, setError] = useState(false);
   const [ready, setReady] = useState(false);
@@ -134,6 +196,7 @@ function VolumeView({
       spacingMm: plan.spacing,
       downsampled: plan.downsampled,
       voxelBytes: plan.bytes,
+      voxelType: plan.ArrayType.name,
       peakCacheBytes: 0,
       userAgent: navigator.userAgent,
       devicePixelRatio,
@@ -165,6 +228,8 @@ function VolumeView({
       });
       signal.throwIfAborted();
       const { min, max, scalarData } = sampled;
+      // Admit this volume's bytes explicitly; slices keep their own budget.
+      cache.setMaxCacheSize(sliceCacheBytes + plan.bytes);
       volume = volumeLoader.createLocalVolume(volumeId, {
         dimensions: plan.dimensions,
         spacing: plan.spacing,
@@ -172,12 +237,13 @@ function VolumeView({
         direction: plan.direction,
         scalarData,
         metadata: {
-          BitsAllocated: 32,
-          BitsStored: 32,
-          HighBit: 31,
+          BitsAllocated: plan.ArrayType.BYTES_PER_ELEMENT * 8,
+          BitsStored: plan.ArrayType.BYTES_PER_ELEMENT * 8,
+          HighBit: plan.ArrayType.BYTES_PER_ELEMENT * 8 - 1,
           SamplesPerPixel: 1,
           PhotometricInterpretation: "MONOCHROME2",
-          PixelRepresentation: 1,
+          PixelRepresentation:
+            plan.ArrayType === Uint8Array || plan.ArrayType === Uint16Array ? 0 : 1,
           Modality: series.modality,
           ImageOrientationPatient: series.orientation,
           PixelSpacing: [plan.spacing[1], plan.spacing[0]],
@@ -265,11 +331,16 @@ function VolumeView({
           view.setCamera(home);
           display(20, 35);
         },
+        // Native grids take more ray samples per pixel; halve them while dragging
+        // and restore full sampling when the pointer is released.
+        dragging(on) {
+          view.setSampleDistanceMultiplier(on ? 2 : 1);
+        },
         async measure() {
           const camera = view.getCamera();
-          const times: number[] = [];
           timer = window.setInterval(sampleMemory, 100);
-          try {
+          const sweep = async (): Promise<Rotation> => {
+            const times: number[] = [];
             for (let i = 0; i < 24; i++) {
               signal.throwIfAborted();
               const start = performance.now();
@@ -278,17 +349,25 @@ function VolumeView({
               sampleMemory();
             }
             times.sort((a, b) => a - b);
-            data.rotation = {
+            return {
               frames: times.length,
               p50Ms: times[11] as number,
               p95Ms: times[22] as number,
               fps: (1000 * times.length) / times.reduce((a, b) => a + b, 0),
               canvas: [view.canvas.width, view.canvas.height],
             };
+          };
+          try {
+            data.rotation = await sweep();
+            view.setSampleDistanceMultiplier(2);
+            data.dragRotation = await sweep();
             setMetrics({ ...data });
           } finally {
             window.clearInterval(timer);
-            if (!signal.aborted) view.setCamera(camera);
+            if (!signal.aborted) {
+              view.setSampleDistanceMultiplier(1);
+              view.setCamera(camera);
+            }
           }
         },
       };
@@ -310,7 +389,7 @@ function VolumeView({
         if (!signal.aborted) {
           setError(true);
           setStatus(
-            "3D could not be built or rendered. Release it and try Compact, or reload the page. Acquired slices remain available. WebGL2 is required.",
+            "3D could not be built or rendered. Release it and choose a smaller preview size, or reload the page. Acquired slices remain available. WebGL2 is required.",
           );
         }
       })
@@ -334,6 +413,7 @@ function VolumeView({
           }
           session?.release();
         } finally {
+          if (!cache.getVolume(volumeId)) cache.setMaxCacheSize(sliceCacheBytes);
           finishRetirement();
         }
       });
@@ -353,18 +433,22 @@ function VolumeView({
           onPointerDown={(e) => {
             if (!ready || measuring || e.button !== 0) return;
             e.currentTarget.setPointerCapture(e.pointerId);
-            pointer.current = { id: e.pointerId, x: e.clientX, y: e.clientY };
+            pointer.current = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
           }}
           onPointerMove={(e) => {
             const p = pointer.current;
             if (!p || measuring) return;
+            // Coarse sampling only once the pointer actually drags, not on a click.
+            if (!p.moved) controls.current?.dragging(true);
             controls.current?.rotate((e.clientX - p.x) * 0.5, (e.clientY - p.y) * 0.5);
-            pointer.current = { id: e.pointerId, x: e.clientX, y: e.clientY };
+            pointer.current = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: true };
           }}
           onPointerUp={() => {
+            if (pointer.current?.moved) controls.current?.dragging(false);
             pointer.current = null;
           }}
           onLostPointerCapture={() => {
+            if (pointer.current?.moved) controls.current?.dragging(false);
             pointer.current = null;
           }}
           onKeyDown={(e) => {
@@ -499,6 +583,8 @@ function VolumeView({
             <p>
               {metrics.rotation.fps.toFixed(1)} frames/s · p95 {metrics.rotation.p95Ms.toFixed(0)}{" "}
               ms · {metrics.rotation.canvas.join(" × ")} px
+              {metrics.dragRotation &&
+                ` · dragging ${metrics.dragRotation.fps.toFixed(1)} frames/s, p95 ${metrics.dragRotation.p95Ms.toFixed(0)} ms`}
             </p>
           )}
           {measurementError && <p role="status">{measurementError}</p>}
