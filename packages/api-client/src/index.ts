@@ -4,6 +4,7 @@
  * emits "signed out" so the shell can show the sign-in screen.
  */
 import { logoutResponseSchema, type Me, meResponseSchema } from "@voluma/contracts/auth";
+import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
 import {
   type Input,
   listInputsResponseSchema,
@@ -14,7 +15,6 @@ import {
   type StartRunRequest,
   type VisitorKeys,
 } from "@voluma/contracts/run";
-import { type StreamMessage, streamMessageSchema } from "@voluma/contracts/stream";
 
 /** A non-OK API response. Branch on `status` (403, 415, 5xx) rather than parsing the message. */
 export class ApiError extends Error {
@@ -110,16 +110,15 @@ export async function listInputs(): Promise<Input[]> {
 }
 
 /**
- * Opens a run's live stream (`@voluma/contracts/stream`): `onMessage` gets each message
- * in order. `EventSource` reconnects by itself and resumes from the last event's `id`; the
- * new snapshot replaces live state. `after` is the highest `seq` the caller already holds,
- * for the first connect only. `onError` is told of a message that fails to parse; a dropped
- * connection is not an error, and neither is a 401, which `EventSource` cannot report.
- * Returns the function that closes the stream.
+ * Opens a run's event stream (`@voluma/contracts/stream`): `onEvent` gets each durable event
+ * in order, once. `EventSource` reconnects by itself and resumes from the last event's `id`.
+ * `after` is the highest `seq` the caller already holds, for the first connect only. `onError`
+ * is told of a message that fails to parse; a dropped connection is not an error, and neither
+ * is a 401, which `EventSource` cannot report. Returns the function that closes the stream.
  */
 export function subscribe(
   runId: string,
-  handlers: { onMessage: (message: StreamMessage) => void; onError?: (error: unknown) => void },
+  handlers: { onEvent: (event: RunEvent) => void; onError?: (error: unknown) => void },
   after = 0,
 ): () => void {
   const source = new EventSource(
@@ -127,7 +126,7 @@ export function subscribe(
   );
   source.onmessage = (e) => {
     try {
-      handlers.onMessage(streamMessageSchema.parse(JSON.parse(e.data)));
+      handlers.onEvent(runEventSchema.parse(JSON.parse(e.data)));
     } catch (error) {
       handlers.onError?.(error);
     }

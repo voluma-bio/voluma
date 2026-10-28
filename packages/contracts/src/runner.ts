@@ -7,7 +7,6 @@
  *   POST /api/run/ingest/claim                 body `claimRequestSchema` → 200 `claimResponseSchema`
  *   POST /api/run/ingest/runs/:id/heartbeat    body `heartbeatRequestSchema` → 200 `heartbeatResponseSchema`
  *   POST /api/run/ingest/runs/:id/report       body `reportRequestSchema` → 204
- *   POST /api/run/ingest/runs/:id/live         body `liveBatchSchema` → 204 (`stream.ts`)
  *
  * Claim. The runner polls `claim` every `CLAIM_POLL_SECONDS` while it has a
  * free slot. Polling over long-polling because the API must look at the clock
@@ -32,7 +31,7 @@
  * expired leases are swept, so no API process's clock or memory decides it.
  * Every claim issues a new lease token (`leaseToken`). Every ingest write on
  * the run carries it in the `LEASE_TOKEN_HEADER` header: events, history,
- * heartbeat, report and live frames. The server checks it inside the write's
+ * heartbeat and report. The server checks it inside the write's
  * own transaction (for events, under the same per-run lock that assigns `seq`)
  * and answers a stale or missing token with 409 and `leaseLostSchema`, so a
  * runner that lost its run can write nothing, however late its request lands.
@@ -78,7 +77,6 @@
  */
 import { z } from "zod";
 import { runSchema, visitorKeysSchema } from "./run";
-import { liveFrameSchema } from "./stream";
 import { workflowPlanSchema } from "./workflow";
 
 /** How long a run stays leased after the server's last heartbeat for it. */
@@ -152,12 +150,3 @@ export const reportRequestSchema = z.object({
   ]),
 });
 export type ReportRequest = z.infer<typeof reportRequestSchema>;
-
-/**
- * A batch of live frames from the runner (`stream.ts`). Fire and forget: the
- * runner keeps one batch in flight, so frames of a thread reach the hub in the
- * order sent, and drops a batch rather than block or retry for long. Every
- * frame's `runId` must be the route's.
- */
-export const liveBatchSchema = z.object({ frames: z.array(liveFrameSchema).min(1) });
-export type LiveBatch = z.infer<typeof liveBatchSchema>;
