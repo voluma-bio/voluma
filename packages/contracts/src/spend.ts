@@ -17,8 +17,9 @@
  *   starting again means the runner restarted, so every open span ends there, each at its
  *   own latest event.
  * - Sandbox time is the time from a `bash` call to its result, `bash` being the one tool
- *   that runs in the sandbox; a call cut off by a restart counts nothing. The sandbox's bill is its uptime (`Run.usage.sandboxSeconds`),
- *   which is longer: one sandbox serves every thread and idles between calls.
+ *   that runs in the sandbox; a call cut off by a restart counts nothing. The sandbox's
+ *   bill is its uptime (`Run.usage.sandboxSeconds`), which is longer: one sandbox serves
+ *   every thread and idles between calls.
  *
  * The runner's end-of-run log line sums the same model and tool costs over the run's
  * threads, so `total.costUsd` matches it for a run that didn't lose events (a review chat
@@ -104,7 +105,7 @@ export function spend(events: readonly RunEvent[]): RunSpend {
     switch (e.type) {
       case "thread.started": {
         const { kind, task, parentThreadId } = e.payload;
-        if (parentThreadId === null) {
+        if (parentThreadId === null && kind === "supervisor") {
           // The root starts again only after the runner restarted, which cut off every thread.
           root = e.threadId;
           for (const threadId of [...open.keys()]) close(threadId);
