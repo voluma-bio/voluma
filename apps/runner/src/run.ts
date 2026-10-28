@@ -174,14 +174,14 @@ export async function runClaim(
     const streamFn: RunRole["streamFn"] = (m, context, options) => {
       const stream = callModel(m, context, options);
       stream.result().then(
-        (reply) => meter.addModelCost(reply.usage.cost.total),
+        (reply) => meter.addModelCost(reply.usage?.cost.total ?? 0),
         () => {},
       );
       return stream;
     };
     const judgment = llmJudgment(`llm:${model.id}`, async (context, signal) => {
       const reply = await callModel(model, context, { signal }).result();
-      meter.addModelCost(reply.usage.cost.total);
+      meter.addModelCost(reply.usage?.cost.total ?? 0);
       return reply;
     });
     const files = r2Files(config.r2);
