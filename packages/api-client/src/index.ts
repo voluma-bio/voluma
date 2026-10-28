@@ -132,7 +132,7 @@ export async function createUpload(req: CreateUploadRequest): Promise<CreateUplo
   );
 }
 
-/** Makes an upload usable once every file is stored. 409: some aren't; PUT them again. */
+/** Makes an upload usable once every file is stored. 409: some aren't; PUT again the files whose PUT failed. */
 export async function completeUpload(inputId: string): Promise<Input> {
   return inputSchema.parse(
     await json(
@@ -152,16 +152,23 @@ export function putUploadFile(
   { onProgress, signal }: { onProgress?: (sent: number) => void; signal?: AbortSignal } = {},
 ): Promise<void> {
   return new Promise((resolve, reject) => {
+    const aborted = () => new DOMException("Upload aborted", "AbortError");
+    if (signal?.aborted) return reject(aborted());
     const xhr = new XMLHttpRequest();
+    const abort = () => xhr.abort();
+    const settle = (error?: Error) => {
+      signal?.removeEventListener("abort", abort);
+      error ? reject(error) : resolve();
+    };
     xhr.open("PUT", url);
     xhr.upload.onprogress = (e) => onProgress?.(e.loaded);
     xhr.onload = () =>
-      xhr.status >= 200 && xhr.status < 300
-        ? resolve()
-        : reject(new ApiError(xhr.status, "upload"));
-    xhr.onerror = () => reject(new ApiError(0, "upload"));
-    xhr.onabort = () => reject(new DOMException("Upload aborted", "AbortError"));
-    signal?.addEventListener("abort", () => xhr.abort(), { once: true });
+      settle(
+        xhr.status >= 200 && xhr.status < 300 ? undefined : new ApiError(xhr.status, "upload"),
+      );
+    xhr.onerror = () => settle(new ApiError(0, "upload"));
+    xhr.onabort = () => settle(aborted());
+    signal?.addEventListener("abort", abort, { once: true });
     xhr.send(file);
   });
 }
