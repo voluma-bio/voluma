@@ -191,7 +191,7 @@ export async function runClaim(
           name: "main",
           image: config.sandbox.image,
           cpu: 2,
-          memoryMiB: 4096,
+          memoryMiB: 8192,
           lifetimeSeconds: config.sandbox.lifetimeSeconds,
           idleSeconds: config.sandbox.idleSeconds,
           mounts: layout.mounts,

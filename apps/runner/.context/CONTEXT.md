@@ -91,3 +91,9 @@ worker's outputs, so the runtime refuses its `report_output` and never opens a `
 `checkpoint`'s arguments go through `prepareCheckpoint` before validation, so the habits of
 models (a top-level `title`, `toCheck` as a string or with `text`, a nested `{root, path}`)
 don't cost a turn.
+
+# Runner: sandbox memory
+
+A sandbox has 8192 MiB (`run.ts`). `classic_segment` measured 2.8-3.1 GB anonymous memory and
+about 4.0-4.25 GB RSS with the memory-mapped scan, so the old 4096 MiB risked an OOM kill in a
+full run.
