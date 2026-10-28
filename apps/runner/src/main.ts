@@ -7,29 +7,24 @@
  *   pnpm --filter @voluma/runner run-task --provider openai --model gpt-5-mini \
  *     --task "Report the slice count of the scan in /inputs"
  *
- * Reads ~/gitrepos/voluma/.env through `--env-file`: model keys, R2 and Modal
- * credentials, VOLUMA_API_URL and VOLUMA_API_TOKEN. None of them enter the sandbox.
+ * Reads the repo's .env (see config.ts): model keys, R2 and Modal credentials,
+ * VOLUMA_API_URL and VOLUMA_API_TOKEN. None of them enter the sandbox or process.env.
  */
 import { randomUUID } from "node:crypto";
 import { parseArgs } from "node:util";
 import { createModels } from "@earendil-works/pi-ai";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
+import { metaProvider } from "@earendil-works/pi-ai/providers/meta";
 import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
-import { outputsPrefix, referencePrefix, scratchPrefix } from "@voluma/contracts/r2";
+import { referencePrefix } from "@voluma/contracts/r2";
 import { httpClient } from "@voluma/harness/adapters/http";
 import { runThread } from "@voluma/harness/adapters/pi";
+import { runLayout } from "@voluma/harness/layout";
+import { recorder } from "@voluma/harness/recorder";
 import { sandboxSession } from "@voluma/harness/sandbox-session";
 import { bashTool } from "@voluma/harness/tools/bash";
+import { optional, required } from "./config.ts";
 import { createModalSandbox } from "./modal-sandbox.ts";
-
-const SYSTEM_PROMPT = `You are an analysis agent with one tool, bash, which runs commands in a sandbox.
-Python 3.12 with numpy, scipy, scikit-image, pydicom, nibabel and SimpleITK is installed. There is no network.
-- /inputs is read-only: the input data.
-- /outputs is for files you produce; they are kept.
-- /scratch is for temporary files.
-Check what you report against the files themselves, and say which file or header each number came from.`;
-
-const RESUME_PROMPT = "The run was interrupted. Continue the task from where you stopped.";
 
 const { values } = parseArgs({
   options: {
@@ -43,38 +38,52 @@ const { values } = parseArgs({
 const { provider, model: modelId, task } = values;
 if (!provider || !modelId || !task) {
   throw new Error(
-    "usage: main.ts --provider openai|anthropic --model <id> --task <text> [--run <id>] [--thread <id>]",
+    "usage: main.ts --provider openai|anthropic|meta --model <id> --task <text> [--run <id>] [--thread <id>]",
   );
 }
 const runId = values.run ?? `run-${randomUUID().slice(0, 8)}`;
 const threadId = values.thread ?? `${runId}.main`;
 
-const env = (name: string) => {
-  const value = process.env[name];
-  if (!value) throw new Error(`${name} is not set`);
-  return value;
-};
-
 const models = createModels();
-models.setProvider(provider === "anthropic" ? anthropicProvider() : openaiProvider());
+const providers = { anthropic: anthropicProvider, meta: metaProvider, openai: openaiProvider };
+if (!(provider in providers)) throw new Error(`unknown provider ${provider}`);
+models.setProvider(providers[provider as keyof typeof providers]());
+const apiKey = required(`VOLUMA_${provider.toUpperCase()}_API_KEY`);
 const model = models.getModel(provider, modelId);
 if (!model) throw new Error(`unknown model ${provider}/${modelId}`);
 
-const api = httpClient({ baseUrl: env("VOLUMA_API_URL"), token: env("VOLUMA_API_TOKEN") });
-const eventLog = {
-  async append(event: Parameters<typeof api.append>[0]) {
-    await api.append(event);
-    printEvent(event);
+const api = httpClient({
+  baseUrl: required("VOLUMA_API_URL"),
+  token: required("VOLUMA_API_TOKEN"),
+});
+const layout = runLayout(runId, referencePrefix("scan"));
+const systemPrompt = `You are an analysis agent with one tool, bash, which runs commands in a sandbox.
+Python 3.12 with numpy, scipy, scikit-image, pydicom, nibabel and SimpleITK is installed. There is no network.
+${layout.describe()}
+Check what you report against the files themselves, and say which file or header each number came from.`;
+const events = recorder(
+  {
+    async append(event) {
+      await api.append(event);
+      printEvent(event);
+    },
   },
-};
+  runId,
+);
 
+const modalTokenId = optional("MODAL_TOKEN_ID");
+const modalTokenSecret = optional("MODAL_TOKEN_SECRET");
 const createSandbox = createModalSandbox({
   appName: "voluma-runs",
+  modal:
+    modalTokenId && modalTokenSecret
+      ? { tokenId: modalTokenId, tokenSecret: modalTokenSecret }
+      : undefined,
   r2: {
-    accountId: env("R2_ACCOUNT_ID"),
-    bucket: env("R2_BUCKET"),
-    parentAccessKeyId: env("R2_ACCESS_KEY_ID"),
-    cloudflareApiToken: env("CLOUDFLARE_API_TOKEN"),
+    accountId: required("R2_ACCOUNT_ID"),
+    bucket: required("R2_BUCKET"),
+    parentAccessKeyId: required("R2_ACCESS_KEY_ID"),
+    cloudflareApiToken: required("CLOUDFLARE_API_TOKEN"),
   },
 });
 const sandbox = sandboxSession(
@@ -82,26 +91,14 @@ const sandbox = sandboxSession(
     createSandbox({
       runId,
       name: "main",
-      image: process.env.VOLUMA_SANDBOX_IMAGE ?? "voluma-microct",
+      image: optional("VOLUMA_SANDBOX_IMAGE") ?? "voluma-microct",
       cpu: 2,
       memoryMiB: 4096,
       lifetimeSeconds: 3600,
       idleSeconds: 900,
-      mounts: [
-        { path: "/inputs", prefix: referencePrefix("scan"), access: "read-only", stage: true },
-        { path: "/scratch", prefix: scratchPrefix(runId), access: "read-write" },
-        { path: "/outputs", prefix: outputsPrefix(runId), access: "read-write" },
-      ],
+      mounts: layout.mounts,
     }),
-  (state, detail) =>
-    eventLog.append({
-      id: randomUUID(),
-      runId,
-      threadId,
-      createdAt: new Date().toISOString(),
-      type: "sandbox",
-      payload: { name: "main", state, detail },
-    }),
+  (id, state, detail) => events.emit(id, "sandbox", { name: "main", state, detail }),
 );
 
 const abort = new AbortController();
@@ -113,19 +110,20 @@ process.on("SIGINT", () => {
 
 console.log(`run ${runId}  thread ${threadId}  model ${provider}/${modelId}`);
 try {
-  const resuming = (await api.load(threadId)).length > 0;
   const outcome = await runThread({
     runId,
     threadId,
     kind: "worker",
     model,
-    streamFn: models.streamSimple.bind(models),
-    systemPrompt: SYSTEM_PROMPT,
-    prompt: resuming ? RESUME_PROMPT : task,
-    tools: [bashTool],
-    eventLog,
+    // The key goes with each request; pi-ai is never left to look in process.env.
+    streamFn: (m, context, options) => models.streamSimple(m, context, { ...options, apiKey }),
+    systemPrompt,
+    task,
+    input: layout.restartNote(),
+    tools: [bashTool(layout)],
+    recorder: events,
     history: api,
-    sandbox: () => sandbox.get(),
+    sandbox: (id) => sandbox.get(id),
     signal: abort.signal,
   });
   const u = outcome.usage;
@@ -137,6 +135,7 @@ try {
   process.exitCode = outcome.status === "completed" ? 0 : 1;
 } finally {
   await sandbox.close();
+  await events.flush();
 }
 
 function printEvent(event: Parameters<typeof api.append>[0]): void {

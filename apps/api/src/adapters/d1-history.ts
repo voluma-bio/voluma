@@ -18,7 +18,9 @@ export function d1History(db: D1Database): History {
       const inserted = await db
         .prepare(
           `INSERT INTO pi_messages (thread_id, idx, message)
-           SELECT ?1, ?2, ?3 WHERE ?2 = (SELECT COUNT(*) FROM pi_messages WHERE thread_id = ?1)`,
+           SELECT ?1, ?2, ?3
+           WHERE NOT EXISTS (SELECT 1 FROM pi_messages WHERE thread_id = ?1 AND idx = ?2)
+             AND (?2 = 0 OR EXISTS (SELECT 1 FROM pi_messages WHERE thread_id = ?1 AND idx = ?2 - 1))`,
         )
         .bind(threadId, idx, message)
         .run();

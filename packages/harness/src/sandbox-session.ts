@@ -1,43 +1,54 @@
 /**
  * A run's sandbox, created on the first tool call that needs it and destroyed at the
- * end. Concurrent first calls share one creation. State changes go to `onState`
- * (the runner writes them as `sandbox` events).
+ * end. Concurrent first calls share one creation; a failed creation is forgotten, so
+ * the next call tries again. State changes go to `onState` with the thread whose call
+ * caused them (the runner writes them as `sandbox` events).
  */
 import type { Sandbox } from "./ports/sandbox";
 
 export type SandboxState = "starting" | "ready" | "stopped" | "failed";
 
 export interface SandboxSession {
-  get(): Promise<Sandbox>;
+  /** `threadId` is the calling thread. */
+  get(threadId: string): Promise<Sandbox>;
   /** Destroys the sandbox if one was created. */
   close(): Promise<void>;
 }
 
 export function sandboxSession(
   create: () => Promise<Sandbox>,
-  onState: (state: SandboxState, detail?: string) => Promise<void>,
+  onState: (threadId: string, state: SandboxState, detail?: string) => void,
 ): SandboxSession {
-  let started: Promise<Sandbox> | undefined;
+  let started: { threadId: string; sandbox: Promise<Sandbox> } | undefined;
   return {
-    get() {
-      started ??= (async () => {
-        await onState("starting");
-        try {
-          const sandbox = await create();
-          await onState("ready");
-          return sandbox;
-        } catch (error) {
-          await onState("failed", String(error));
-          throw error;
-        }
-      })();
-      return started;
+    get(threadId) {
+      if (!started) {
+        const current = {
+          threadId,
+          sandbox: (async () => {
+            onState(threadId, "starting");
+            try {
+              const sandbox = await create();
+              onState(threadId, "ready");
+              return sandbox;
+            } catch (error) {
+              started = undefined;
+              onState(threadId, "failed", String(error));
+              throw error;
+            }
+          })(),
+        };
+        started = current;
+      }
+      return started.sandbox;
     },
     async close() {
-      const sandbox = await started?.catch(() => undefined);
-      if (!sandbox) return;
+      const current = started;
+      const sandbox = await current?.sandbox.catch(() => undefined);
+      if (!current || !sandbox) return;
+      started = undefined;
       await sandbox.destroy();
-      await onState("stopped");
+      onState(current.threadId, "stopped");
     },
   };
 }

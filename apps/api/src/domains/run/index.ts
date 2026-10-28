@@ -1,9 +1,10 @@
 /**
- * Run lane's API domain, mounted at /run/. Today: the stream record and the
- * model history of a run's threads, behind a bearer token.
- *   POST /run/runs/:runId/events          append an event (EventInput)
- *   POST /run/threads/:threadId/messages  append a history row {idx, message}
- *   GET  /run/threads/:threadId/messages  all rows in order
+ * Run lane's API domain, mounted at /run/. Today: the runner's ingest of the
+ * stream record and the model history of a run's threads, under /run/ingest/ and
+ * behind a bearer token (other /run/ routes will use user auth).
+ *   POST /run/ingest/runs/:runId/events          append an event (EventInput)
+ *   POST /run/ingest/threads/:threadId/messages  append a history row {idx, message}
+ *   GET  /run/ingest/threads/:threadId/messages  all rows in order
  * Later: workflows and their package import, runs, the supervisor. RunDeps lists
  * what it needs; index.ts supplies adapters.
  */
@@ -24,23 +25,28 @@ const historyRowSchema = z.object({ idx: z.number().int().nonnegative(), message
 
 export function createRun({ eventLog, history, apiToken }: RunDeps): DomainHandler {
   return async (request) => {
-    if (request.headers.get("authorization") !== `Bearer ${apiToken}`) {
+    const { pathname } = new URL(request.url);
+    if (!pathname.startsWith(INGEST)) return null;
+    if (!apiToken) return new Response("API_TOKEN is not configured", { status: 500 });
+    if (!bearerMatches(request.headers.get("authorization"), apiToken)) {
       return new Response("Unauthorized", { status: 401 });
     }
-    const { pathname } = new URL(request.url);
-    const events = /^\/run\/runs\/([^/]+)\/events$/.exec(pathname);
+    const events = /^\/run\/ingest\/runs\/([^/]+)\/events$/.exec(pathname);
     if (events && request.method === "POST") {
+      const runId = decode(events[1] as string);
+      if (runId === undefined) return badRequest("malformed path");
       const parsed = eventInputSchema.safeParse(await readJson(request));
       if (!parsed.success) return badRequest(parsed.error.message);
-      if (parsed.data.runId !== decodeURIComponent(events[1] as string)) {
+      if (parsed.data.runId !== runId) {
         return badRequest("event runId does not match the path");
       }
       await eventLog.append(parsed.data);
       return new Response(null, { status: 204 });
     }
-    const messages = /^\/run\/threads\/([^/]+)\/messages$/.exec(pathname);
+    const messages = /^\/run\/ingest\/threads\/([^/]+)\/messages$/.exec(pathname);
     if (messages) {
-      const threadId = decodeURIComponent(messages[1] as string);
+      const threadId = decode(messages[1] as string);
+      if (threadId === undefined) return badRequest("malformed path");
       if (request.method === "GET")
         return Response.json({ messages: await history.load(threadId) });
       if (request.method === "POST") {
@@ -57,6 +63,24 @@ export function createRun({ eventLog, history, apiToken }: RunDeps): DomainHandl
     }
     return null;
   };
+}
+
+const INGEST = "/run/ingest/";
+
+const decode = (segment: string) => {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return undefined;
+  }
+};
+
+const encoder = new TextEncoder();
+// Constant time for equal lengths; the length of the expected header is not secret.
+function bearerMatches(header: string | null, token: string): boolean {
+  const given = encoder.encode(header ?? "");
+  const expected = encoder.encode(`Bearer ${token}`);
+  return given.byteLength === expected.byteLength && crypto.subtle.timingSafeEqual(given, expected);
 }
 
 const readJson = (request: Request) => request.json().catch(() => undefined);

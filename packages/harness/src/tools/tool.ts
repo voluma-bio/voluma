@@ -13,15 +13,15 @@ export interface ToolContext {
   signal: AbortSignal;
   /** The run's sandbox, created on first use. */
   sandbox(): Promise<Sandbox>;
-  /** Live output for people watching: best effort, may be dropped. */
-  output(stream: "stdout" | "stderr", text: string): Promise<void>;
+  /** Live output for people watching: queued, best effort, may be dropped. */
+  output(stream: "stdout" | "stderr", text: string): void;
 }
 
 export interface ToolResult {
   /** What the model sees. */
   output: string;
   isError: boolean;
-  /** The full output is at `toolOutputKey(runId, toolCallId)`. */
+  /** The model saw a cut, and the full output is stored at `toolOutputKey(runId, toolCallId)`. */
   truncated: boolean;
 }
 

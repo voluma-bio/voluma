@@ -16,16 +16,19 @@ export interface SandboxMount {
   prefix: string;
   access: "read-only" | "read-write";
   /**
-   * Read-only only: copy the files to local disk when the sandbox is created and read
-   * them from there. Mounted reads cost a round trip per file; analysis code wants a
-   * local path. `Sandbox.paths` says where to read.
+   * Read-only only: copy the files to local disk at `path` when the sandbox is created,
+   * so commands read `path` as a local directory. Mounted reads cost a round trip per
+   * file; analysis code wants local reads.
    */
   stage?: boolean;
 }
 
 export interface SandboxSpec {
   runId: string;
-  /** Unique within the run. The sandbox is named `<runId>.<name>`. */
+  /**
+   * Unique within the run. The sandbox is named `<runId>.<name>.<random>`: each creation
+   * gets its own name, so a sandbox a dead process left behind never blocks a resume.
+   */
   name: string;
   /** A published image name; sandbox start never builds an image. */
   image: string;
@@ -62,15 +65,15 @@ export type ExecChunk =
 
 export interface Sandbox {
   /**
-   * Where a command reads each mount: the local copy of a staged mount, else the mount
-   * path itself. Keyed by `SandboxMount.path`.
-   */
-  readonly paths: Readonly<Record<string, string>>;
-  /**
    * Runs the command and streams its output. Aborting `signal` kills the command and
    * everything it started; the stream then ends with an exit chunk.
    */
   exec(request: ExecRequest, signal?: AbortSignal): AsyncIterable<ExecChunk>;
+  /**
+   * Writes `bytes` to `path` in one go, creating parent directories. Works on a
+   * read-write mount, which cannot append. Aborting `signal` rejects.
+   */
+  writeFile(path: string, bytes: Uint8Array, signal?: AbortSignal): Promise<void>;
   destroy(): Promise<void>;
 }
 

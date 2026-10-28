@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "run-task": "tsx --env-file=../../.env src/main.ts"
+    "run-task": "tsx src/main.ts",
+    "publish-image": "tsx src/publish-image.ts"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "1.4.0",
