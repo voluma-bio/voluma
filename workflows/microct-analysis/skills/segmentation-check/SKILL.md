@@ -26,6 +26,10 @@ With `--ranges` it flags a volume outside the range and a piece count that diffe
 `--min-piece-mm3` (0.01) are counted as `specks`, not pieces: a clipped SAM label carries hundreds, and counting them would
 flag every label. Look at the specks total if it is large. Then:
 
+- **Read the flags literally.** With the workflow's `anatomy.json`, `label_stats.py` also flags a label that touches none of the
+  neighbours the anatomy requires, within a small reach (`must_touch` and `touch_mm`: a fibula that is nowhere near the tibia is on
+  the wrong bone, however good its volume). Treat it as a wrong seed or box and fix it (section 4); raise it as a To check item
+  only if the CT leaves it open. The table's `piece_touches_edge` says which pieces reach the scan edge: data to read, not a flag.
 - **One bone, one main piece.** A second large piece means the label is on two bones, or a bone has broken. Look at
   the 3D sheet. (Clipping can split a thin bone: check the pieces after `clip_to_bone.py` too.)
 - **Volume inside the anatomy reference's range.** Unclipped SAM masks include soft tissue (`sam-segmentation`): clip first,
@@ -130,7 +134,7 @@ say what and where, and let the main thread decide on a rerun.
    `unlabelled.py` on the worker's labels, a distance or volume recomputed with `measure.py`, a value against the plan's range.
 3. Look yourself (`visual-check`): the 3D sheet, the overlay on the keyframe, the crop of anything `unlabelled.py` found, and
    every image the worker cited. Do not trust a description of an image you have not opened.
-4. Answer `ok` or `needs-review`. For `needs-review` name the cause (a wrong box, a missing neighbour, a merged fragment, a
+4. Write the checkpoint verdict `passed` or `needs-review`. For `needs-review` name the cause (a wrong box, a missing neighbour, a merged fragment, a
    label on two bones, a number out of range with no explanation, a result that cannot be traced to a file), cite the image
    or number, and give the region (slice, coordinates, label) so a To check item can point at it.
 

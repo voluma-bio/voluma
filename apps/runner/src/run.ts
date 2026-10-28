@@ -257,7 +257,20 @@ export async function runClaim(
       evidence: r2Evidence(config.r2),
       files,
       segmenter: metaKey
-        ? metaSegmenter({ apiKey: metaKey, log, addCost: meter.addModelCost })
+        ? metaSegmenter({
+            apiKey: metaKey,
+            log,
+            addCost: meter.addModelCost,
+            keepFailed: async (text) => {
+              const path = `/scratch/failed-sam-response-${new Date().toISOString().replaceAll(":", "-")}.txt`;
+              await files.write(
+                layout.keyOf(path, "write"),
+                new TextEncoder().encode(text),
+                AbortSignal.timeout(60_000),
+              );
+              return `kept at ${path}`;
+            },
+          })
         : undefined,
       main,
       worker: (task, notes) => ({

@@ -42,6 +42,7 @@ Variables on `@voluma/api`:
 | `WORKOS_LAB_ORGANIZATION_ID` | the Yao Lab organization's id (`org_...`); its members get scope `lab` |
 | `GUEST_ORGANIZATION_ID`, `GUEST_SCOPE` | optional: let anyone in as a guest of this organization (`lab` or `self`, default `lab`). Staging runs open: the Demo organization (`WORKOS_DEMO_ORGANIZATION_ID`'s value) with `GUEST_SCOPE=self`; never the Yao Lab, whose data is for signed-in members only (startup throws if the guest organization is one members sign in to). Unset means the sign-in wall |
 | `WORKOS_JUDGES_ORGANIZATION_ID` | optional: the Judges organization's id; its members get scope `self`. Unset means no Judges sign-in |
+| `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | Optional as a group: enables Review's reference scan download. Use a read-only token scoped to `voluma-staging`; only the server receives it. Missing or partial configuration leaves the API running and returns 503 for a readable reference scan. `R2_BUCKET=voluma-staging`; object `reference/OA6-1RK/scan.zip` must be a plain ZIP with no `Content-Encoding` metadata. The descriptor's version pins the GET with `If-Match`; the API streams without buffering or redirecting to R2 |
 | `RUN_LIMITS_<ORG>_<LIMIT>` | what an organization may run, `<ORG>` one of `LAB`, `JUDGES`, `DEMO` (the guest organization) and `<LIMIT>` one of `PER_CALLER`, `CONCURRENT`, `PER_DAY`, `USD_PER_DAY`, `VISITOR_ACTIVE` (visitor runs queued or running, per org: a start or `/keys` past it is a 429; `awaiting-keys` runs don't count). Unset is no limit, so set them: Yao Lab `CONCURRENT=4`; Judges `CONCURRENT=2`, `PER_DAY=50`; Demo `PER_CALLER=1`, `CONCURRENT=2`, `PER_DAY=10`, `VISITOR_ACTIVE=4` while staging is open to guests (then `CONCURRENT=1`, `PER_DAY=2` for the hackathon). Read at start: a change is a restart, not a deploy of code |
 | `PORT` | `8080`, set explicitly: the runner's private URL (`http://volumaapi.railway.internal:8080`) needs a known port, and Railway's injected one is not readable. The public domain follows it |
 
@@ -145,7 +146,7 @@ before 2026-10-21 as exposed and rotate it.
 | Modal token | `.env` or `~/.modal.toml` | `modal token new`, revoke the old in the Modal dashboard |
 
 The runner service holds the model key (`VOLUMA_META_API_KEY`), the Modal token and the R2 keys in
-its own Railway variables (names in [../../runner/.context/deploy.md](../../runner/.context/deploy.md)); rotate them there as well as in `.env`. The API still holds no model or storage keys.
+its own Railway variables (names in [../../runner/.context/deploy.md](../../runner/.context/deploy.md)); rotate them there as well as in `.env`. Review's reference download also needs a read-only R2 key in the API variables; rotate that separately. The API holds no model keys.
 
 ## Least privilege
 
@@ -153,7 +154,7 @@ its own Railway variables (names in [../../runner/.context/deploy.md](../../runn
   and deployments there, nothing else in the account.
 - Postgres has no public domain or TCP proxy; only services in the project reach it. Don't
   create a proxy except for the drill in [TODO.md](TODO.md), and remove it after.
-- The API holds no model or storage keys.
+- The API holds no model keys. Its R2 key needs only object-read access to the reference bucket; never reuse the runner's write-capable key in the browser.
 
 ## Checked on staging (2026-10-28)
 

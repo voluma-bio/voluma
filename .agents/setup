@@ -7,9 +7,21 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 export PATH="$HOME/.local/bin:$PATH"
 SECONDS=0
 
+printf '\nPreparing local Postgres for the preview\n'
+if ! command -v pg_lsclusters >/dev/null; then
+  sudo apt-get update
+  sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends postgresql
+fi
+sudo systemctl enable --now postgresql
+if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname = 'voluma'" | grep -q 1; then
+  sudo -u postgres psql -c "CREATE ROLE voluma WITH LOGIN CREATEDB PASSWORD 'voluma'"
+fi
+printf 'Postgres ready after %ss\n' "$SECONDS"
+
 printf '\nInstalling the workspace with pnpm\n'
 corepack enable
-pnpm install
+# Amp owns the global hooks path; do not replace its hooks with Lefthook's.
+LEFTHOOK=0 pnpm install --frozen-lockfile
 printf 'Workspace ready after %ss\n' "$SECONDS"
 
 printf '\nInstalling Meridian and its Python runtime\n'

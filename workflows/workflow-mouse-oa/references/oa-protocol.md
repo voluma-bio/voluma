@@ -28,15 +28,15 @@ is the resampling effect, known and left in; state which grid a number was count
 
 | # | Do | Script | Look at |
 |---|---|---|---|
-| 1 | Align the tibia: shaft axis, +W from joint toward shaft, crop around the joint end | `tibia_frame.py --hu hu.npy --hu-json hu.json --labels labels.npy --label 2 --out frame` | `frame/tibia-frame-qc.jpg`: coronal sections, joint at top, tibia outline following the bone. If the crop cuts bone or the bone looks tilted, set `--shaft-z`, `--epiphysis-z` or the crop flags |
+| 1 | Align the tibia (in the `iioc` task; later tasks read `/outputs/iioc/frame/`): shaft axis, +W from joint toward shaft, crop around the joint end | `tibia_frame.py --hu hu.npy --hu-json hu.json --labels labels.npy --label 2 --out frame` | `frame/tibia-frame-qc.jpg`: coronal sections, joint at top, tibia outline following the bone. If the crop cuts bone or the bone looks tilted, set `--shaft-z`, `--epiphysis-z` or the crop flags |
 | 2 | Trace the growth-plate proximal face on coronal sections (annotations, section A) | none: you write `annotations.json` | coronal sections of `tibia-hu.npy` with a pixel grid, every 20 V indices over the epiphysis |
-| 3 | ROI-1 (IIOC), heights, width, plate columns | `iioc.py --hu-aligned frame/tibia-hu.npy --mask frame/tibia-mask.npy --frame frame/tibia-frame.json --hu-json hu.json --annotations annotations.json --out iioc` | `iioc/qc-coronal.jpg` (green ROI-1 must stop at the orange face, include marrow, exclude femur and growth-plate band) and `qc-heights.jpg` (rulers along W, endpoints at the face and the articular top) |
+| 3 | ROI-1 (IIOC), heights, width, plate columns | `iioc.py --hu-aligned /outputs/iioc/frame/tibia-hu.npy --mask /outputs/iioc/frame/tibia-mask.npy --frame /outputs/iioc/frame/tibia-frame.json --hu-json hu.json --annotations annotations.json --out iioc` | `iioc/qc-coronal.jpg` (four sections framed from ROI-1's top to just below the face, at the scale its title states; green ROI-1 must stop at the orange face, include marrow, exclude femur and growth-plate band) and `qc-heights.jpg` (rulers along W, endpoints at the face and the articular top) |
 | 4 | Trace the boundary under the subchondral plate (section B) | none | coronal sections with the ROI-1 outline |
-| 5 | ROI-2 (IIOC trabecular) | `tibial_trabecular.py --iioc-tissue iioc/iioc-tissue.npy --growth-plate-face iioc/growth-plate-proximal-face.npy --hu-aligned frame/tibia-hu.npy --annotations annotations.json --out trab` | `trab/qc-coronal.jpg`: cyan sits under the plate and inside the cortex |
-| 6 | Trace the growth-plate distal face (section C), then ROI-3 and the cortex under the plate | `metaphysis_roi.py --hu-aligned frame/tibia-hu.npy --mask frame/tibia-mask.npy --hu-json hu.json --annotations annotations.json --out meta` | `meta/qc-roi3.jpg`: ROI-3 sits in marrow below the plate and clear of the cortex outline |
+| 5 | ROI-2 (IIOC trabecular) | `tibial_trabecular.py --iioc-tissue /outputs/iioc/iioc/iioc-tissue.npy --growth-plate-face /outputs/iioc/iioc/growth-plate-proximal-face.npy --hu-aligned /outputs/iioc/frame/tibia-hu.npy --annotations annotations.json --out trab` | `trab/qc-coronal.jpg`: cyan sits under the plate and inside the cortex |
+| 6 | Trace the growth-plate distal face (section C), then ROI-3 and the cortex under the plate | `metaphysis_roi.py --hu-aligned /outputs/iioc/frame/tibia-hu.npy --mask /outputs/iioc/frame/tibia-mask.npy --hu-json hu.json --annotations annotations.json --proximal-face /outputs/iioc/iioc/growth-plate-proximal-face.npy --proximal-valid /outputs/iioc/iioc/growth-plate-proximal-valid.npy --out meta` | `meta/qc-roi3.jpg`: ROI-3 sits in marrow below the plate and clear of the cortex outline |
 | 7 | TV, BV, BV/TV of ROI-1 and ROI-2 (deck #4-6, #13-15); TV, BV, BV/TV, Tb.N, Tb.Th, Tb.Sp, nodes and ends of ROI-3 (deck #16-23) | `morphometry.py` (commands below), one per region | the QC image `trabecular` writes |
 | 8 | Ct.Th at 100 and 1000 um; plate thickness | `morphometry.py cortical` (commands below) | its QC image |
-| 9 | Femoral landmarks: place four points on a 3D render of the femur (`regions-and-landmarks`, `pick.py` with picks named `a`, `b`, `c`, `d`), then compute | `femoral_frame.py --landmarks points.json --hu-json hu.json --labels labels.npy --out femoral` | `pick-check.jpg` of each point, and `femoral.json`: `off_bone_mm` and the `warnings` the script prints. There is no image with the four points and the two lines drawn |
+| 9 | Femoral landmarks: place four points on a 3D render of the femur (`regions-and-landmarks`, `pick.py` with picks named `a`, `b`, `c`, `d`), then compute | `femoral_frame.py --landmarks points.json --hu-json hu.json --labels labels.npy --out femoral` | `pick-check.jpg` of each point, and `femoral.json` (the script fails on a bad landmark, see D). There is no image with the four points and the two lines drawn |
 | 10 | Volumes of labels 3, 5 and 6 (deck #1 to #3) | `measure.py --spec <this workflow>/resources/deck_volumes_spec.json --grid hu.json --out volumes.json` (the spec names `labels.npy` relative to where you run it) | the 3D sheet (`visual-check`) |
 | 11 | Hand the points to the lab (below) | `amira_landmarks.py` | the lab opens it in Amira |
 
@@ -44,23 +44,24 @@ Commands for step 7 (`--id KEY=output-id` names each value; `--region` only labe
 
 ```
 M=<bone-morphometry>/resources/morphometry.py
-python $M volumes --roi iioc/iioc-tissue.npy --hu frame/tibia-hu.npy --hu-json hu.json --region ROI-1 \
+python $M volumes --roi /outputs/iioc/iioc/iioc-tissue.npy --hu /outputs/iioc/frame/tibia-hu.npy --hu-json hu.json --region ROI-1 \
   --id TV=tv-tibial-iioc --id BV=bv-tibial-iioc --id BV/TV=bv-tv-tibial-iioc --out vol-roi1
-python $M volumes --roi trab/iioc-trab-tissue.npy --hu frame/tibia-hu.npy --hu-json hu.json --region ROI-2 \
+python $M volumes --roi /outputs/trabecular-roi/trab/iioc-trab-tissue.npy --hu /outputs/iioc/frame/tibia-hu.npy --hu-json hu.json --region ROI-2 \
   --id TV=tv-iioc-trab --id BV=bv-iioc-trab --id BV/TV=bv-tv-iioc-trab --out vol-roi2
-python $M trabecular --roi meta/roi3-tissue.npy --hu frame/tibia-hu.npy --hu-json hu.json --region ROI-3 --skeleton \
+python $M trabecular --roi /outputs/metaphyseal-roi/meta/roi3-tissue.npy --hu /outputs/iioc/frame/tibia-hu.npy --hu-json hu.json --region ROI-3 --skeleton \
   --id TV=metaphyseal-tv --id BV=metaphyseal-bv --id BV/TV=metaphyseal-bv-tv --id Tb.N=metaphyseal-tb-n \
   --id Tb.Th=metaphyseal-tb-th --id Tb.Sp=metaphyseal-tb-sp --id Tb.Nd=metaphyseal-tb-nd --id Tb.Tm=metaphyseal-tb-tm --out vol-roi3
 ```
 
-Commands for step 8 (axis 0 is W, depth grows with W):
+Commands for step 8 (axis 0 is W, depth grows with W). The `cortical` task depends on `metaphyseal-roi` and reads its files in `/outputs/metaphyseal-roi/meta/`: the
+distal face is traced once, in step 6, and `metaphysis_roi.py` is not run again for the cortex:
 
 ```
-morphometry.py cortical --cortex meta/cortex.npy --surface meta/growth-plate-distal-face.npy --axis 0 --direction 1 \
-  --depth-um 100 --slab-um 50 --name cortical-thickness-100-um-below-the-growth-plate --grid meta/cortex.json --out meta/ct
+morphometry.py cortical --cortex /outputs/metaphyseal-roi/meta/cortex.npy --surface /outputs/metaphyseal-roi/meta/growth-plate-distal-face.npy --axis 0 --direction 1 \
+  --depth-um 100 --slab-um 50 --name cortical-thickness-100-um-below-the-growth-plate --grid /outputs/metaphyseal-roi/meta/cortex.json --out ct
       # then --depth-um 1000 --name cortical-thickness-1000-um-below-the-growth-plate
-morphometry.py cortical --cortex iioc/medial-plate-run.npy --surface iioc/articular-top-surface.npy --axis 0 --direction 1 \
-  --depth-um 175 --slab-um 350 --name subchondral-bone-plate-thickness-medial --grid iioc/medial-plate-run.json --out plate
+morphometry.py cortical --cortex /outputs/iioc/iioc/medial-plate-run.npy --surface /outputs/iioc/iioc/articular-top-surface.npy --axis 0 --direction 1 \
+  --depth-um 175 --slab-um 350 --name subchondral-bone-plate-thickness-medial --grid /outputs/iioc/iioc/medial-plate-run.json --out plate
       # and lateral-plate-run.npy with --name subchondral-bone-plate-thickness-lateral
 ```
 
@@ -130,13 +131,16 @@ first and last point of each curve limit ROI-2 laterally (where the curves reach
 the proximal one on the coronal sections of `tibia-hu.npy`. There is no thickness fallback: ROI-3 starts 50 um below this face, so
 a guessed band thickness inside the 100 to 200 um range seen on OA6-1RK moves ROI-3 BV/TV from 23% to 15% and is not a
 measurement. OA6-1RK has a thin perforated mineralized band, not a clean cartilage plate: trace the face you can see, and look
-at it drawn on the sections before you run.
+at it drawn on the sections before you run. Trace it over at least the V range of the proximal face (section A); the script
+refuses a shorter trace, and a face at or above the proximal one inside that range, and says which V range to fix.
 
 **D, `landmarks.json`** (scan grid, `[z, y, x]`): `a` midpoint of the upper line of the intercondylar groove, `b`
 intercondylar notch, `c` midpoint of the ridge on the lateral condyle, `d` vertex of the medial condyle (deck figure,
 slide 7). `femoral_frame.py` takes either this file or the `points.json` `pick.py` writes for picks named `a` to `d`, so
-nothing needs converting by hand. Check `off_bone_mm` in `femoral.json`: a landmark more than 0.05 mm from femur bone is in
-the joint space or floating, and the script warns.
+nothing needs converting by hand. Place `a` and `b` on a long view of the femur that shows the shaft and the groove side-on;
+`c` and `d` can go on the joint-face view. The script fails (exit 2, nothing written) when a landmark is more than 0.05 mm from
+femur bone, when DFL is under 0.4 of DFW (the sign of `a` and `b` placed end-on, as on the first full run: 0.824 mm against
+2.42), or when SI points away from the femur: re-place the points; the failure is not a warning to explain.
 
 ## What the deck says, and what replaces the old run
 
@@ -221,7 +225,7 @@ clearance by 0.021 mm each (`--shell-clearance-mm`, `--growth-clearance-mm`), a 
 The lab checks the width points (#10) and the femoral landmarks (#26, #27) in Amira. Write them as a landmark set:
 
 ```
-python <regions-and-landmarks>/resources/amira_landmarks.py --points iioc/width-points-scan.json --header hu.json --out width.landmarkAscii
+python <regions-and-landmarks>/resources/amira_landmarks.py --points /outputs/iioc/iioc/width-points-scan.json --header hu.json --out width.landmarkAscii
 python <regions-and-landmarks>/resources/amira_landmarks.py --points landmarks.json --header hu.json --out femoral.landmarkAscii
 ```
 

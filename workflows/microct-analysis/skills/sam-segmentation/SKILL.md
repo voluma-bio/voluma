@@ -68,6 +68,8 @@ the workflow's anatomy reference gives, not the measurement threshold.
      its main piece; with the tibia seed alone, 0.42 mm³ of tibia stayed in it. Do not discard the whole request because one or
      two labels are off: femur and tibia were right.
    - **Below its range:** it lost bone to a neighbour that is above: fix the pair together.
+   - **Not near any neighbour the anatomy requires:** the label is on the wrong bone (for the fibula, bone that is not the tibia's
+     neighbour). Do not accept it for being in range: re-box or re-seed it on the right bone.
    Then run `label_stats.py` again, and repeat until every label is in range with one piece, or what is left is something you can
    explain (a To check item). Run as written on the OA6-1RK run's clipped SAM labels, this flagged femur (3 pieces), patella (2.53 mm³,
    14 pieces) and fibula (2.00 mm³, 4 pieces). After clearing the femur's 2 extra pieces and the patella's 13, relabelling the

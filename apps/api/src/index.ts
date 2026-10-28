@@ -25,6 +25,7 @@ import { HTTPException } from "hono/http-exception";
 import postgres from "postgres";
 import { createAuth } from "./auth";
 import { createReview } from "./domains/review";
+import { r2ReferenceArchive } from "./domains/review/r2-reference-archive";
 import { createRun } from "./domains/run";
 import type { Limits } from "./domains/run/admission";
 import { catalog } from "./domains/run/catalog";
@@ -34,6 +35,7 @@ import { pgEventLog } from "./domains/run/pg-event-log";
 import { pgHistory } from "./domains/run/pg-history";
 import { pgRunQueue } from "./domains/run/pg-queue";
 import { pgRunReads } from "./domains/run/pg-runs";
+import type { RunRecords } from "./ports";
 
 const required = (name: string) => {
   const value = process.env[name];
@@ -112,6 +114,16 @@ const draining = new AbortController();
 const reads = pgRunReads(db);
 const notifier = createNotifier();
 const queue = pgRunQueue(db, limits, new KeyVault(), notifier);
+const eventLog = pgEventLog(db, notifier);
+
+/** The review's read of a run: the run, then its whole log in one statement. */
+const runRecords: RunRecords = {
+  async load(reader, runId) {
+    const run = await reads.get(reader, runId);
+    const log = run && (await eventLog.stream(reader, runId, 0, 2 ** 31 - 1));
+    return run && log ? { run, events: log.events } : null;
+  },
+};
 
 const app = new Hono();
 app.get("/health", (c) => c.text("ok"));
@@ -135,7 +147,7 @@ app.route(
   createRun({
     reads,
     queue,
-    eventLog: pgEventLog(db, notifier),
+    eventLog,
     notifier,
     history: pgHistory(db),
     catalog,
@@ -143,7 +155,22 @@ app.route(
     shutdown: draining.signal,
   }),
 );
-app.route("/api/review", createReview({}));
+const r2 = {
+  accountId: process.env.R2_ACCOUNT_ID,
+  bucket: process.env.R2_BUCKET,
+  accessKeyId: process.env.R2_ACCESS_KEY_ID,
+  secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+};
+const referenceArchive =
+  r2.accountId && r2.bucket && r2.accessKeyId && r2.secretAccessKey
+    ? r2ReferenceArchive({
+        accountId: r2.accountId,
+        bucket: r2.bucket,
+        accessKeyId: r2.accessKeyId,
+        secretAccessKey: r2.secretAccessKey,
+      })
+    : null;
+app.route("/api/review", createReview({ runs: runRecords, inputs: reads, referenceArchive }));
 
 const isApi = (path: string) => path === "/api" || path.startsWith("/api/");
 const webDist = resolve(import.meta.dirname, "../../web/dist");
