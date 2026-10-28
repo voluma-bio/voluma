@@ -115,6 +115,7 @@ export type FoldedTask = Pick<
   /** The latest `task` event's reason; null while the attempt has none. */
   reason: string | null;
   threads: Pick<ReviewTask["threads"], "worker" | "check">;
+  models: Pick<ReviewTask["models"], "worker" | "check">;
   milestones: Milestone[];
 };
 
@@ -177,6 +178,7 @@ type Attempt = {
 
 export function fold(events: readonly RunEvent[]): Folded {
   const threadKind = new Map<string, ThreadKind>();
+  const threadModel = new Map<string, string>();
   const attempts = new Map<string, Attempt>();
   const current = new Map<string, Attempt>();
   const revisions: FoldedRevision[] = [];
@@ -418,6 +420,10 @@ export function fold(events: readonly RunEvent[]): Folded {
         resultRevisionId: a.resultRevisionId,
         checker: a.checker && { ...a.checker },
         threads: { worker: a.workerThread, check: a.checkThread },
+        models: {
+          worker: threadModel.get(a.workerThread) ?? null,
+          check: a.checkThread ? (threadModel.get(a.checkThread) ?? null) : null,
+        },
         milestones: a.milestones.map((m) => ({ ...m, evidenceIds: [...m.evidenceIds] })),
         measurements,
         scores,
@@ -436,6 +442,7 @@ export function fold(events: readonly RunEvent[]): Folded {
     switch (e.type) {
       case "thread.started": {
         threadKind.set(e.threadId, e.payload.kind);
+        if (e.payload.model) threadModel.set(e.threadId, e.payload.model);
         const checked = e.payload.attemptId && attempts.get(e.payload.attemptId);
         // A wake re-emits `thread.started` for the same thread: only a new check thread resets the verdict.
         if (e.payload.kind === "check" && checked && checked.checkThread !== e.threadId) {

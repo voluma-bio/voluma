@@ -28,12 +28,20 @@ const rel = (p: string) => relativePathSchema.parse(p);
 export const workflowsPrefix = () => "workflows/";
 
 export const workflowPrefix = (pin: WorkflowPin) => {
-  const { repo, commit } = workflowPinSchema.parse(pin);
-  return `workflows/${repo}/${commit}/`;
+  const { repo, commit, path } = workflowPinSchema.parse(pin);
+  // `root/` and `sub/<path>/` never nest, so a subpackage's files can't land in the root package's.
+  return `workflows/${repo}/${commit}/${path ? `sub/${path}` : "root"}/`;
 };
 
 export const inputPrefix = (inputId: string) => `inputs/${seg(inputId)}/`;
 export const runPrefix = (runId: string) => `runs/${seg(runId)}/`;
+/**
+ * The run's snapshot of the workflow directories it uses (`workflows/<name>/` and the
+ * directories it lists), copied from the runner's checkout when the run starts and keeping
+ * their repo paths. The sandbox mounts it read-only at `/workflow`, so a resume after a
+ * redeploy sees the files the run began with.
+ */
+export const workflowSnapshotPrefix = (runId: string) => `${runPrefix(runId)}workflow/`;
 export const scratchPrefix = (runId: string) => `${runPrefix(runId)}scratch/`;
 /** All tasks' outputs; the sandbox mounts this read-write at `/outputs`. */
 export const outputsPrefix = (runId: string) => `${runPrefix(runId)}outputs/`;

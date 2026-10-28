@@ -23,5 +23,6 @@ jobs:
         with:
           node-version-file: .tool-versions
           cache: pnpm
+      - uses: astral-sh/setup-uv@v7
       - run: pnpm i
       - run: pnpm check
