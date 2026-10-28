@@ -44,7 +44,7 @@
   --popover: #ffffff;
   --popover-foreground: #10211c;
 
-  /* Quiet fills: muted is a resting fill (inputs off, selected rows), accent
+  /* Quiet fills: muted is a resting fill (inputs off, badges), accent
      the hover fill, secondary a secondary button's fill */
   --muted: #eaf0ed;
   --muted-foreground: #44594f;

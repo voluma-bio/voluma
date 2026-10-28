@@ -278,11 +278,21 @@ function tokenNames(match: (selector: string) => boolean): string[] {
   const visit = (rules: CSSRuleList) => {
     for (const rule of rules) {
       if (rule instanceof CSSStyleRule && match(rule.selectorText)) {
-        for (const name of rule.style) if (name.startsWith("--")) names.add(name.slice(2));
+        for (const name of rule.style) {
+          // Lightning CSS (production build) emits --lightningcss-* helpers for color-scheme.
+          if (name.startsWith("--") && !name.startsWith("--lightningcss-"))
+            names.add(name.slice(2));
+        }
       } else if (rule instanceof CSSGroupingRule) visit(rule.cssRules);
     }
   };
-  for (const sheet of document.styleSheets) visit(sheet.cssRules);
+  for (const sheet of document.styleSheets) {
+    try {
+      visit(sheet.cssRules);
+    } catch {
+      // A cross-origin stylesheet (CDN font link, extension) throws SecurityError; it holds none of our tokens.
+    }
+  }
   return [...names];
 }
 

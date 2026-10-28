@@ -113,7 +113,7 @@
     @apply bg-accent;
   }
   .task-nav.selected {
-    @apply bg-muted text-primary-text;
+    @apply bg-accent text-primary-text;
   }
   .task-number {
     @apply mt-0.5 font-mono text-xs text-muted-foreground;
