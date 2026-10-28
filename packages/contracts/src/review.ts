@@ -7,7 +7,7 @@
  * review with no new Review-lane code:
  *
  * - A generic core: the run, its revisions, and per revision the tasks with
- *   their measurements, checks and evidence files.
+ *   their measurements, scores, checks and evidence files.
  * - Building blocks on each revision, a closed set the shell knows how to
  *   render: `volumes`, `structures` and `annotations`. A workflow fills them
  *   with what it has; it cannot invent a new kind. A kind the shell cannot
@@ -32,13 +32,8 @@
  * derives it.
  */
 import { z } from "zod";
-import {
-  runIdSchema,
-  sha256Schema as sha256,
-  storedKeySchema,
-  storedPrefixSchema,
-  taskIdSchema,
-} from "./r2";
+import { outputKindSchema, runIdSchema, taskIdSchema, taskStatusSchema } from "./ids";
+import { sha256Schema as sha256, storedKeySchema, storedPrefixSchema } from "./r2";
 import { workflowPinSchema } from "./workflow";
 
 /** A position or direction in world mm. */
@@ -51,6 +46,9 @@ type R4 = z.infer<typeof row4>;
 /** Voxel types the viewer loads: intensities for `image` volumes, label values for `labels` volumes. */
 const imageDtype = z.enum(["int16", "uint16", "float32"]);
 const labelDtype = z.enum(["uint8", "uint16"]);
+
+/** Every voxel type an `.npy` volume may hold. */
+export const npyDtypeSchema = z.enum([...imageDtype.options, ...labelDtype.options]);
 
 /** Where a volume's voxels are stored, in a format the viewer loads. */
 export const volumeDataSchema = z.discriminatedUnion("format", [
@@ -69,7 +67,7 @@ export const volumeDataSchema = z.discriminatedUnion("format", [
     format: z.literal("npy"),
     key: storedKeySchema,
     sha256,
-    dtype: z.enum([...imageDtype.options, ...labelDtype.options]),
+    dtype: npyDtypeSchema,
   }),
 ]);
 
@@ -152,7 +150,12 @@ export const structureSchema = z.object({
   voxels: z
     .object({ volumeId: z.string(), label: z.number().int().positive().optional() })
     .nullable(),
-  /** Whether the workflow declared this structure; null when the producer doesn't say. */
+  /**
+   * Whether the workflow declared this structure; null when the producer
+   * doesn't say. A declared structure the run didn't report is listed here with
+   * status `missing`. Structures are not listed in `ReviewTask.undeclared` or
+   * `ReviewTask.missing`; this field is the one place.
+   */
   declared: z.boolean().nullable(),
   /** Null when the producer doesn't say. */
   status: z.enum(["done", "provisional", "missing"]).nullable(),
@@ -174,6 +177,20 @@ const annotationBase = {
   note: z.string().optional(),
 };
 
+/** A landmark. */
+export const pointAnnotationSchema = z.object({
+  ...annotationBase,
+  kind: z.literal("point"),
+  position: vec3,
+});
+/** A ruler between two endpoints, or an axis. */
+export const lineAnnotationSchema = z.object({
+  ...annotationBase,
+  kind: z.literal("line"),
+  a: vec3,
+  b: vec3,
+});
+
 /**
  * Something drawn in the views. Positions are world mm. The shell renders
  * every kind; a workflow chooses which to supply. A region of interest is a
@@ -181,10 +198,8 @@ const annotationBase = {
  * `.context/TODO.md`.
  */
 export const annotationSchema = z.discriminatedUnion("kind", [
-  /** A landmark. */
-  z.object({ ...annotationBase, kind: z.literal("point"), position: vec3 }),
-  /** A ruler between two endpoints, or an axis. */
-  z.object({ ...annotationBase, kind: z.literal("line"), a: vec3, b: vec3 }),
+  pointAnnotationSchema,
+  lineAnnotationSchema,
 ]);
 export type Annotation = z.infer<typeof annotationSchema>;
 
@@ -196,6 +211,8 @@ export const assetSchema = z.object({
   stage: z.string(),
   key: storedKeySchema,
   sha256,
+  /** Set for a file the workflow declared a media type for; absent for evidence. */
+  mediaType: z.string().optional(),
 });
 export type Asset = z.infer<typeof assetSchema>;
 
@@ -224,10 +241,56 @@ export const measurementSchema = z.object({
   /** Ratios: ids of the measurements divided. */
   numeratorId: z.string().optional(),
   denominatorId: z.string().optional(),
-  /** The thread event that reported it. Null from the importer; set once `report_value` lands. */
+  /** The thread event that reported it. Null from the importer. */
   source: z.object({ threadId: z.string().min(1), eventId: z.string().min(1) }).nullable(),
 });
 export type Measurement = z.infer<typeof measurementSchema>;
+
+/** A level on a scale: an OARSI grade, a yes/no, a QC pass. Same producer-given fields as a measurement. */
+export const scoreSchema = z.object({
+  id: z.string(),
+  title: z.string().optional(),
+  level: z.string().min(1),
+  /** The levels the workflow declared, lowest first; null when it declared none. */
+  scale: z.array(z.string().min(1)).nullable(),
+  confidence: measurementSchema.shape.confidence,
+  note: z.string().optional(),
+  definition: z.string().optional(),
+  evidenceIds: z.array(z.string()),
+  /** What was graded: the medial plateau, the lesion a QC fail is about. */
+  structureIds: measurementSchema.shape.structureIds,
+  annotationIds: measurementSchema.shape.annotationIds,
+  source: measurementSchema.shape.source,
+});
+export type Score = z.infer<typeof scoreSchema>;
+
+const voxel = z.tuple([z.int().min(0), z.int().min(0), z.int().min(0)]);
+
+/**
+ * What a To check item points at, so the review can outline it. Absent on an
+ * item means the whole task. All coordinates are voxel indices on the scan's
+ * grid, in [z, y, x] order, never world mm. `volumeId` is a labels volume (a
+ * disagreement mask); `label` picks one region in it, so it needs `volumeId`.
+ * `box` is inclusive; `point` is where the crosshair centres.
+ */
+export const focusSchema = z
+  .object({
+    structureIds: z.array(z.string()),
+    annotationIds: z.array(z.string()),
+    volumeId: z.string().optional(),
+    label: z.int().min(1).optional(),
+    box: z.object({ min: voxel, max: voxel }).optional(),
+    point: voxel.optional(),
+  })
+  .refine((f) => f.label === undefined || f.volumeId !== undefined, {
+    path: ["label"],
+    message: "label needs volumeId",
+  })
+  .refine((f) => !f.box || f.box.min.every((lo, i) => lo <= (f.box?.max[i] ?? lo)), {
+    path: ["box"],
+    message: "box.min must not exceed box.max on any axis",
+  });
+export type Focus = z.infer<typeof focusSchema>;
 
 export const taskSchema = z.object({
   /** The r2 task segment (`outputKey`). */
@@ -238,7 +301,9 @@ export const taskSchema = z.object({
   dependsOn: z.array(z.string()),
   /** Structures the task uses; the Structures panel lists these. */
   structureIds: z.array(z.string()),
-  /** Unchanged tasks keep this id across revisions. */
+  /** The task's status in this revision: its status at that point in the log (`fold.ts`); the importer sets `done`. */
+  status: taskStatusSchema,
+  /** The revision in which the task last changed; unchanged tasks keep this id across revisions. */
   resultRevisionId: z.string(),
   /** Null when no second agent checked it. */
   checker: z.object({ verdict: z.enum(["passed", "needs-review"]), text: z.string() }).nullable(),
@@ -249,12 +314,28 @@ export const taskSchema = z.object({
     chat: z.string().min(1).nullable(),
   }),
   measurements: z.array(measurementSchema),
+  scores: z.array(scoreSchema),
+  /**
+   * Outputs the workflow declared for this task and the attempt hasn't reported,
+   * except structures: a missing structure is a `Structure` with status
+   * `missing`, so each fact has one place. Required ones keep the task from `done`.
+   */
+  missing: z.array(
+    z.object({
+      outputId: z.string(),
+      kind: outputKindSchema.exclude(["structure"]),
+      required: z.boolean(),
+    }),
+  ),
+  /** Ids (`taskId/outputId`, as in the blocks) of the outputs the workflow didn't declare. Structures say it on their own block (`Structure.declared`). */
+  undeclared: z.array(z.string()),
   checks: z.array(
     z.object({
       id: z.string(),
       title: z.string(),
       detail: z.string(),
       status: z.enum(["open", "accepted"]),
+      focus: focusSchema.optional(),
     }),
   ),
   evidence: z.array(assetSchema),
@@ -291,6 +372,10 @@ export const revisionSchema = z
     const tasks = idsOf(rev.tasks, "tasks");
     const measurements = idsOf(
       rev.tasks.flatMap((t) => t.measurements),
+      "tasks",
+    );
+    idsOf(
+      rev.tasks.flatMap((t) => t.scores),
       "tasks",
     );
     const kindOf = new Map(rev.volumes.map((v) => [v.id, v.kind]));
@@ -334,6 +419,26 @@ export const revisionSchema = z
       needAll(tasks, t.dependsOn, [...task, "dependsOn"], "task");
       needAll(structures, t.structureIds, [...task, "structureIds"], "structure");
       const own = new Set(t.evidence.map((e) => e.id));
+      t.scores.forEach((sc, si) => {
+        const at = [...task, "scores", si];
+        needAll(structures, sc.structureIds, [...at, "structureIds"], "structure");
+        needAll(annotations, sc.annotationIds, [...at, "annotationIds"], "annotation");
+        needAll(own, sc.evidenceIds, [...at, "evidenceIds"], "evidence in this task");
+      });
+      t.checks.forEach((c, ci) => {
+        const f = c.focus;
+        if (!f) return;
+        const at = [...task, "checks", ci, "focus"];
+        needAll(structures, f.structureIds, [...at, "structureIds"], "structure");
+        needAll(annotations, f.annotationIds, [...at, "annotationIds"], "annotation");
+        needAll(volumes, [f.volumeId], [...at, "volumeId"], "volume");
+        if (
+          f.volumeId !== undefined &&
+          kindOf.has(f.volumeId) &&
+          kindOf.get(f.volumeId) !== "labels"
+        )
+          bad([...at, "volumeId"], `volume "${f.volumeId}" is not a labels volume`);
+      });
       t.measurements.forEach((m, mi) => {
         const at = [...task, "measurements", mi];
         needAll(structures, m.structureIds, [...at, "structureIds"], "structure");

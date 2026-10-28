@@ -5,21 +5,27 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./ids": "./src/ids.ts",
     "./r2": "./src/r2.ts",
     "./events": "./src/events.ts",
     "./stream": "./src/stream.ts",
     "./thread-message": "./src/thread-message.ts",
+    "./task-tools": "./src/task-tools.ts",
     "./auth": "./src/auth.ts",
     "./history": "./src/history.ts",
     "./review": "./src/review.ts",
     "./workflow": "./src/workflow.ts",
+    "./fold": "./src/fold.ts",
+    "./output": "./src/output.ts",
     "./run": "./src/run.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
   },
   "devDependencies": {
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   },
   "dependencies": {
     "zod": "catalog:"

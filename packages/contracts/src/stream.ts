@@ -15,7 +15,7 @@
  */
 import { z } from "zod";
 import { runEventSchema } from "./events";
-import { runIdSchema, toolCallIdSchema } from "./r2";
+import { runIdSchema, toolCallIdSchema } from "./ids";
 
 const nonEmpty = z.string().min(1);
 const nonNegInt = z.number().int().nonnegative();

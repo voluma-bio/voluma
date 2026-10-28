@@ -26,7 +26,7 @@
  */
 import { z } from "zod";
 import { userIdSchema } from "./auth";
-import { inputIdSchema, runIdSchema, storedPrefixSchema } from "./r2";
+import { inputIdSchema, runIdSchema } from "./ids";
 import { workflowPinSchema } from "./workflow";
 
 /**
