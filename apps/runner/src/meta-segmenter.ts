@@ -4,7 +4,7 @@
  * H.264 video (default quality moves the masks; the slices are the frames, so frame `n` is
  * slice `n`), uploaded through the Files API, tracked both ways from the box prompts, and
  * the upload deleted afterwards. Needs `ffmpeg` on the runner's PATH. Meta's mask format,
- * and that masks come back cropped to their box, are in `one-bit-mask.ts` and the pasting
+ * and that masks come back cropped to their box, are in `sam-mask.ts` and the pasting
  * below.
  */
 import { spawn } from "node:child_process";
@@ -19,7 +19,7 @@ import type {
   SegmentResult,
   SliceStack,
 } from "@voluma/harness/ports/segmenter";
-import { decodeOneBit } from "./one-bit-mask.ts";
+import { decodeMask } from "./sam-mask.ts";
 
 const BASE = "https://api.meta.ai/v1";
 /** Meta bills $0.20 per 1,000 video frames, at least 50 per request. */
@@ -258,9 +258,7 @@ function paste(
       const boxW = num(box, "x2") - x1 + 1;
       const boxH = num(box, "y2") - y1 + 1;
       const [h, w, encoded] = /^(\d+),(\d+),(.*)$/s.exec(field(mask, "data") ?? "")?.slice(1) ?? [];
-      if (encoded === undefined || !encoded.startsWith("!")) {
-        throw new Error("the response has a mask that is not one_bit");
-      }
+      if (encoded === undefined) throw new Error("the response has a mask without a payload");
       if (
         num(mask, "x") !== 0 ||
         num(mask, "y") !== 0 ||
@@ -269,7 +267,7 @@ function paste(
       ) {
         throw new Error("the response has a mask that is not at the origin of its own box");
       }
-      const bits = decodeOneBit(encoded.slice(1), boxW, boxH);
+      const bits = decodeMask(encoded, boxW, boxH);
       for (let i = 0; i < boxH; i++) {
         const y = y1 + i;
         if (y < 0 || y >= height) continue;
