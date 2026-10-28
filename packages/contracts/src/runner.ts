@@ -127,7 +127,7 @@ export type ClaimResponse = z.infer<typeof claimResponseSchema>;
 
 /** Spend since the previous acknowledged heartbeat. */
 export const usageSchema = z.object({
-  /** Model calls, in US dollars. */
+  /** Model calls and paid tool calls (`tool.result.costUsd`), in US dollars. */
   modelCostUsd: z.number().nonnegative(),
   sandboxSeconds: z.number().nonnegative(),
 });

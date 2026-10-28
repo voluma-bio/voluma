@@ -7,10 +7,12 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node --import tsx src/migrate.ts",
     "seed:example": "node --env-file-if-exists ../../.env --import tsx src/domains/run/seed-example.ts",
+    "upload:scan": "node --env-file-if-exists ../../.env --import tsx src/domains/run/upload-scan.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1158.0",
+    "@aws-sdk/s3-request-presigner": "^3.1158.0",
     "@hono/node-server": "^2.1.5",
     "@voluma/contracts": "workspace:*",
     "@voluma/harness": "workspace:*",

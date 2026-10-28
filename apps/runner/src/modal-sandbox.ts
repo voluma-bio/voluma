@@ -17,8 +17,9 @@
  *   ms; the SDK exposes no creation time, and `sandboxes:clean` reports age from it). Creating one first
  *   terminates any live sandbox with the same tags: one a dead process left behind would
  *   otherwise keep running its command, with write access to /outputs, beside the resumed thread.
- *   That sweep is by `{run, name}` and runs only once this runner holds the run's lease, so
- *   it ends only a previous holder's. Ending one's own sandboxes after a slow close is by
+ *   That sweep is by `{run, name}`; it ends only a previous holder's, because the creation is
+ *   aborted (checked before the sweep, between terminations and before `create`) once the run's
+ *   lease is released or lost (a process frozen past its lease can still act late). Ending one's own sandboxes after a slow close is by
  *   claim (`terminateClaim`), never by run.
  */
 
@@ -81,8 +82,9 @@ export async function terminateClaim(
 
 export function createModalSandbox(config: ModalSandboxConfig): CreateSandbox {
   const client = new ModalClient(config.modal);
-  return async (spec) => {
+  return async (spec, signal) => {
     validate(spec);
+    signal?.throwIfAborted();
     const [app, image] = await Promise.all([
       client.apps.fromName(config.appName, { createIfMissing: true }),
       client.images.fromRegistry(spec.image),
@@ -101,8 +103,14 @@ export function createModalSandbox(config: ModalSandboxConfig): CreateSandbox {
       });
     }
     const tags = { run: spec.runId, name: spec.name };
-    for await (const old of client.sandboxes.list({ appId: app.appId, tags }))
+    // A run released or stopped while this creation was in flight may have been reclaimed by
+    // another runner, whose sandbox the sweep below would end.
+    signal?.throwIfAborted();
+    for await (const old of client.sandboxes.list({ appId: app.appId, tags })) {
+      signal?.throwIfAborted();
       await old.terminate({ wait: true });
+    }
+    signal?.throwIfAborted();
     const modal = await client.sandboxes.create(app, image, {
       name: `${spec.runId}.${spec.name}.${randomUUID().slice(0, 8)}`,
       tags: { ...tags, claim: config.claim, startedAt: String(Date.now()) },
@@ -118,6 +126,7 @@ export function createModalSandbox(config: ModalSandboxConfig): CreateSandbox {
     });
     const sandbox = new ModalSandboxAdapter(modal, spec);
     try {
+      signal?.throwIfAborted();
       await sandbox.stage();
     } catch (error) {
       await sandbox.destroy();
@@ -226,9 +235,8 @@ class ModalSandboxAdapter implements Sandbox {
     if (code !== 0) throw new Error(`writing ${path} failed (exit ${code}): ${stderr.trim()}`);
   }
 
-  async alive(): Promise<boolean> {
-    // `poll` is null while the sandbox runs and its exit code once it has ended.
-    return (await this.#modal.poll()) === null;
+  exitCode(): Promise<number | null> {
+    return this.#modal.poll(); // null while the sandbox runs
   }
 
   async destroy(): Promise<void> {

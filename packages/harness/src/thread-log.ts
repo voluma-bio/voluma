@@ -20,6 +20,8 @@ export interface ThreadRecord {
   wakes: number;
   /** How many times the log shows it started: the first run and each resume. */
   starts: number;
+  /** The model it started on (`provider/id`); a resume keeps it. Absent: not recorded. */
+  model: string | undefined;
 }
 
 export interface ThreadLog {
@@ -64,6 +66,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
             end: undefined,
             wakes: record?.wakes ?? 0,
             starts: (record?.starts ?? 0) + 1,
+            model: record?.model ?? e.payload.model,
           });
         }
         break;

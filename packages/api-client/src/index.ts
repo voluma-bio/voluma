@@ -8,7 +8,12 @@ import { type DownloadDescriptor, downloadDescriptorSchema } from "@voluma/contr
 import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
 import { type ReviewRun, reviewRunSchema } from "@voluma/contracts/review";
 import {
+  type CreateUploadRequest,
+  type CreateUploadResponse,
+  completeUploadConflictSchema,
+  createUploadResponseSchema,
   type Input,
+  inputSchema,
   listInputsResponseSchema,
   listRunsResponseSchema,
   type ResendKeysRequest,
@@ -236,6 +241,82 @@ export async function getReviewRun(runId: string): Promise<ReviewRun> {
 /** Inputs the caller may start a run on, newest first. */
 export async function listInputs(): Promise<Input[]> {
   return listInputsResponseSchema.parse(await json(await request("/run/inputs"))).inputs;
+}
+
+/**
+ * Creates an upload: a new input and a presigned URL per file (`@voluma/contracts/run`,
+ * Uploads). PUT each file with `putUploadFile`, then call `completeUpload`. 403 for a
+ * guest, 413 over the server's limits, 429 when the caller has too many uploads open.
+ */
+export async function createUpload(req: CreateUploadRequest): Promise<CreateUploadResponse> {
+  return createUploadResponseSchema.parse(
+    await json(await request("/run/inputs", { method: "POST", body: req })),
+  );
+}
+
+/** Complete's 409: these declared files are not stored at their declared size. */
+export class UploadIncompleteError extends ApiError {
+  constructor(
+    readonly missing: string[],
+    url: string,
+  ) {
+    super(409, url);
+    this.name = "UploadIncompleteError";
+  }
+}
+
+/**
+ * Makes an upload usable once every file is stored. Throws `UploadIncompleteError` naming
+ * the files that aren't: PUT them again, then complete again.
+ */
+export async function completeUpload(inputId: string): Promise<Input> {
+  const res = await request(`/run/inputs/${encodeURIComponent(inputId)}/complete`, {
+    method: "POST",
+  });
+  if (res.status === 409) {
+    const { missing } = completeUploadConflictSchema.parse(await res.json());
+    throw new UploadIncompleteError(missing, res.url);
+  }
+  return inputSchema.parse(await json(res));
+}
+
+/** Drops an uncompleted upload and its stored files. 409 once it is completed. */
+export async function cancelUpload(inputId: string): Promise<void> {
+  checkResponse(
+    await request(`/run/inputs/${encodeURIComponent(inputId)}/cancel`, { method: "POST" }),
+  );
+}
+
+/**
+ * PUTs one file's bytes to its presigned URL (straight to object storage, not the API),
+ * reporting bytes sent. XHR, not fetch: fetch can't report upload progress. Rejects with
+ * `ApiError` (status 0 for a network failure) or an `AbortError` when `signal` aborts.
+ */
+export function putUploadFile(
+  url: string,
+  file: Blob,
+  { onProgress, signal }: { onProgress?: (sent: number) => void; signal?: AbortSignal } = {},
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const aborted = () => new DOMException("Upload aborted", "AbortError");
+    if (signal?.aborted) return reject(aborted());
+    const xhr = new XMLHttpRequest();
+    const abort = () => xhr.abort();
+    const settle = (error?: Error) => {
+      signal?.removeEventListener("abort", abort);
+      error ? reject(error) : resolve();
+    };
+    xhr.open("PUT", url);
+    xhr.upload.onprogress = (e) => onProgress?.(e.loaded);
+    xhr.onload = () =>
+      settle(
+        xhr.status >= 200 && xhr.status < 300 ? undefined : new ApiError(xhr.status, "upload"),
+      );
+    xhr.onerror = () => settle(new ApiError(0, "upload"));
+    xhr.onabort = () => settle(aborted());
+    signal?.addEventListener("abort", abort, { once: true });
+    xhr.send(file);
+  });
 }
 
 /**
