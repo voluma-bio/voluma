@@ -67,7 +67,7 @@
     "id": "metaphyseal-roi",
     "dependsOn": ["iioc"],
     "outputs": [
-      "tv-proximal-tibial-trabeculae",
+      "metaphyseal-tv",
       "metaphyseal-bv",
       "metaphyseal-bv-tv",
       "metaphyseal-tb-n",
