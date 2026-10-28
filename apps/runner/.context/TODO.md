@@ -12,4 +12,3 @@ From the skillset move (`workflows/` in this repo):
 
 - **Models per role** are config (`RUNNER_MODEL` worker, `RUNNER_CHECK_MODEL`, `RUNNER_MAIN_MODEL`), not an alias table in `apps/api` as the format doc says, because the runner holds the keys. The per-workflow or per-org override is not built.
 - **The main thread has no tools or sandbox.** At run start it sees the plan, the selection and the user's notes, not the workflow skill's text; the skillset's `microct-lead` names `view_image` and skills it would read, which needs the thread to have a sandbox. The `review` role is not started.
-- **Later wakes don't see the adapted plan.** After a run-start change, the main thread's wakes after a task show the task report but not the plan the run-start change built (`run-started` wake `plan`); only its own note and the system-prompt brief carry it. Feed the recorded plan into the later wakes' context (`packages/harness/src/main-thread.ts`).
