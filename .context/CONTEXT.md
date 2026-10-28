@@ -85,38 +85,48 @@ checklist, check threads, and review chat threads.
 - **Many threads, one run.** `startThread` returns `{send, done}` at once: `send` steers a
   message into the thread (Pi's steering queue; one sent before the loop starts is queued
   for it) and answers false once it ended.
-  `threads.ts` is the run's thread registry: it starts and resumes threads (another
-  `startThread` on the same id, from History) and implements `thread_message`
-  (`tools/thread-message.ts`): steer a running target, wake an idle one, `wait` only toward the
-  caller's own children. A wake from a message goes through the supervisor (`onWake`): it
-  admits a worker whose task is in progress or a check whose task is under review (the fold
-  keeps a check's verdict across a second `thread.started`), and watches the thread. Thread
-  ids are unique across runs (History is keyed by the thread id alone) and follow
-  `@voluma/contracts/ids`: the root is `<runId>.supervisor`, the others
-  `<runId>.<taskId>.<role>` (plus `.<n>` for a restart); run and task ids hold no `.`.
-  `thread.started` carries the task id for a worker or check thread.
-- **The checklist is a fold.** `task-runtime.ts` is the only writer of `task`, `checkpoint`,
-  `output`, `attempt.opened` and `revision.started` events, under `@voluma/contracts/task-tools`.
-  Its only view of the run is `fold(recorder.events())` (folded once per change of the log),
-  inside one per-run critical section. It writes through `recorder.append`, which makes one
-  attempt and puts the event in the view only once the store has acknowledged it, so the
-  runtime never decides from an event the store lacks; a store failure fails the tool call,
-  and the supervisor fails the run. Hashing and copying evidence happen outside the section.
-  A thread writes only to its own task, and a worker opens an attempt only when every task
-  it builds on is done. A resume passes the recorder the stored events (see TODO). `tools/task-tools.ts` wraps it as the model's
-  `checklist`, `checkpoint` and `report_output`. `output-checks.ts` holds the declared-output
-  and reference checks. Files named as evidence go through the `Evidence` port.
-- **The supervisor** (`supervisor.ts`) is code, not a thread with a model: it starts workers for
-  ready tasks (`@voluma/workflow`: `readyTasks`, `transitiveDependents`), wakes a stopped worker
-  up to `stuckLimit` times, then the stuck guard marks the task, starts a check thread on a
-  done or to-check task, and writes the check result. A check that did not pass, or a failed
-  thread, is a judgment point: `judgment.ts` is the one seam (`decide(point) → accept | redo |
-  fail`, bounded by a deadline and an abort signal), its decisions record `by: judgment(arm)`,
-  and every point also writes a `judgment` event (point, arm, raw decision, applied action,
-  and the fallback when the arm errored or a redo was capped). `llmJudgment` is
-  the first arm (one fresh structured call per decision). An error while handling a thread's
-  end fails the run: threads aborted, the root ends `failed`. The supervisor never imports Pi; it gets threads, the
-  runtime and the judgment from its caller.
+  `threads.ts` is the run's registry of what is running in this process (start or resume a
+  thread, `send`, `abort`, wait for one to go idle) and holds no run state. `thread_message`
+  (`tools/thread-message.ts`) calls the supervisor's `message`: steer a running thread, or
+  wake an idle one whose task is waiting on it. `wait` is refused until a thread can start
+  children. Thread ids are unique across runs (History is keyed by the thread id alone) and
+  follow `@voluma/contracts/ids`: the root is `<runId>.supervisor`, the others
+  `<runId>.<taskId>.<role>` (plus `.<n>` for the n-th), where n is how many the log has started
+  for that task and role, so a redo never reuses a thread. `thread.started` carries the task id
+  for a worker or check thread.
+- **The log is the run.** `recorder.ts` has one ordered delivery queue for `emit` and
+  `append`, and an event joins the view (`events()`) only once the store has acknowledged it, in
+  delivery order. The view is always a prefix of the store, so `recorder(..., stored)` on a
+  resume holds exactly the view the run had. A retrying `emit` holds back every later event,
+  because nothing should be decided past a gap in the record.
+- **The checklist is a fold.** `task-runtime.ts` writes the `task`, `checkpoint`, `output`,
+  `attempt.opened` and `revision.started` events a thread's tool call causes, under
+  `@voluma/contracts/task-tools`. Its only view of the run is `fold(recorder.events())` (folded
+  once per change of the log), inside one per-run critical section (`section`). A thread's
+  kind and task come from its tool context, not the log. It writes through `recorder.append`,
+  which makes one attempt, so the runtime never decides from an event the store lacks; a
+  store failure fails the tool call, and the supervisor fails the run. Hashing and copying
+  evidence happen outside the section. A thread writes only to its own task, and a worker
+  opens an attempt only when every task it builds on is done. `tools/task-tools.ts` wraps it
+  as the model's `checklist`, `checkpoint` and `report_output`. `output-checks.ts` holds the
+  declared-output and reference checks. Files named as evidence go through the `Evidence` port.
+- **The supervisor** (`supervisor.ts`) is code, not a thread with a model, and keeps no state
+  of its own. Each step, inside the runtime's `section`, is a function of `fold` of the log, the
+  thread records read from the same log (started, ended, wakes, judgments) and which threads
+  run in this process; the header lists the rule per task status. Resume is the same code as a
+  first run: a new process given the stored events and History starts nothing twice, wakes a
+  thread the dead process left running, and names a redo's worker from the log's count. A
+  check that did not pass, or a failed thread, is a judgment point: `judgment.ts` is the one
+  seam (`decide(point) → accept | redo | fail`, bounded by a deadline and an abort signal). The
+  point is asked outside the section, then written as a `judgment` event with the id
+  `<thread>:judgment` (the point, arm, raw decision, applied action, and the fallback when the
+  arm errored or a redo was capped) before its action is applied; a replay applies the stored
+  action and does not ask the arm again. Its decisions record `by: judgment(arm)`. `llmJudgment`
+  is the first arm. A thread that throws or is refused before it starts (`ran` false), or an
+  error in a step, fails the run: threads aborted, the root ends `failed`. The supervisor never
+  imports Pi; it gets threads, the runtime and the judgment from its caller. Nothing in the
+  repo calls `supervisor`, `taskRuntime` or `threads` yet; lane E's first PR wires them
+  (`apps/runner` still calls `startThread` alone), before anything else builds on them.
 - **`seq` and the database.** `seq` per run is gapless and in commit order: each
   append takes a per-run advisory lock as its own statement before the insert (a lock
   inside the insert's statement races under READ COMMITTED), so the stream hub can

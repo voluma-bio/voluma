@@ -1,18 +1,15 @@
 /**
- * The run's threads in one process: who is running, who is idle, and how one thread
- * reaches another. `start` launches a thread (or resumes an idle one); `message` is what
- * the `thread_message` tool calls (`@voluma/contracts/thread-message`): a running target is
- * steered, an idle one is woken with the message as its input, and `wait` is allowed only
- * toward the sender's own children so two threads can never wait on each other. A wake from
- * a message goes through the supervisor's `onWake`, which may refuse it and watches the
- * thread it starts; the supervisor's own `resume` does not.
+ * The run's threads in one process: which are running and how to stop or steer them. It
+ * keeps no run state beyond that. `start` launches a thread, or resumes one of the same id
+ * from its History when given an `input`; the supervisor decides what to start and when,
+ * from the stored log plus `running` (`supervisor.ts`). A thread that throws, or is refused
+ * before it starts (`ran` false), is a failure of the run: `failure()` holds the first.
  */
-import type { ThreadMessageResult } from "@voluma/contracts/thread-message";
 import {
   type StartThreadOptions,
   startThread,
   type ThreadHandle,
-  type ThreadOutcome,
+  type UserSender,
 } from "./adapters/pi/start-thread";
 
 /** What differs per thread; the run-wide dependencies come from `Threads`' `shared`. */
@@ -26,33 +23,36 @@ export type ThreadSpec = StartThreadOptions extends infer O
 type Shared = Pick<StartThreadOptions, "runId" | "recorder" | "history" | "sandbox">;
 
 export interface Threads {
-  /** Starts a thread, or resumes an idle one of the same id from its History. */
+  /** Starts a thread, or resumes one of the same id from its History (give it an `input`). */
   start(spec: ThreadSpec): ThreadHandle;
-  /** Wakes the idle thread `threadId`: another invocation from its History, with `input` as the new message. */
-  resume(threadId: string, input: NonNullable<ThreadSpec["input"]>): ThreadHandle;
-  /** `thread_message` (see the header). */
-  message(from: string, to: string, text: string, wait: boolean): Promise<ThreadMessageResult>;
+  running(threadId: string): boolean;
+  /** Whether any thread is running. */
+  active(): boolean;
+  /** Steers a message into a running thread; false if it is not running or has ended. */
+  send(threadId: string, text: string, sender: UserSender): boolean;
   /** Stops a running thread as cancelled. */
   abort(threadId: string): void;
   /** Stops every running thread. */
   abortAll(): void;
-  /**
-   * Sets who admits and watches a wake from `thread_message`. `wake` throws to refuse, or
-   * calls `start` and returns its handle. Without one, a wake just starts the thread.
-   */
-  onWake(wake: (spec: ThreadSpec, start: () => ThreadHandle) => ThreadHandle): void;
+  /** Resolves once `threadId` is not running (at once if it is not). */
+  idle(threadId: string): Promise<void>;
+  /** Resolves once any running thread has ended (at once if none runs). */
+  anyIdle(): Promise<void>;
+  /** The first error a thread threw or was refused with. */
+  failure(): unknown;
 }
 
 interface Entry {
-  spec: ThreadSpec;
   abort: AbortController;
   handle: ThreadHandle;
   running: boolean;
+  /** Settles once `running` is false. */
+  settled: Promise<void>;
 }
 
 export function threads(shared: Shared, signal?: AbortSignal): Threads {
   const entries = new Map<string, Entry>();
-  let wake: Parameters<Threads["onWake"]>[0] = (_, start) => start();
+  let failure: unknown;
 
   function launch(spec: ThreadSpec): Entry {
     const abort = new AbortController();
@@ -60,18 +60,30 @@ export function threads(shared: Shared, signal?: AbortSignal): Threads {
     signal?.addEventListener("abort", stop);
     if (signal?.aborted) stop();
     const handle = startThread({ ...shared, ...spec, signal: abort.signal });
-    const entry: Entry = { spec, abort, handle, running: true };
-    entries.set(spec.threadId, entry);
-    // `entry.running` is read right after the thread's steering window closes, so it
-    // clears in the same tick `done` resolves.
-    void handle.done
+    const entry: Entry = { abort, handle, running: true, settled: Promise.resolve() };
+    // `running` clears in the same tick `done` resolves: `send` refuses a moment before.
+    entry.settled = handle.done
+      .then(
+        (outcome) => {
+          if (!outcome.ran) {
+            failure ??= new Error(
+              `thread ${spec.threadId} did not run: ${outcome.error ?? "it had nothing to do"}`,
+            );
+          }
+        },
+        (error) => {
+          failure ??= error;
+        },
+      )
       .finally(() => {
         entry.running = false;
         signal?.removeEventListener("abort", stop);
-      })
-      .catch(() => {});
+      });
+    entries.set(spec.threadId, entry);
     return entry;
   }
+
+  const live = () => [...entries.values()].filter((e) => e.running);
 
   return {
     start(spec) {
@@ -80,39 +92,21 @@ export function threads(shared: Shared, signal?: AbortSignal): Threads {
       }
       return launch(spec).handle;
     },
-    resume(threadId, input) {
+    running: (threadId) => entries.get(threadId)?.running === true,
+    active: () => live().length > 0,
+    send: (threadId, text, sender) => {
       const entry = entries.get(threadId);
-      if (!entry) throw new Error(`no thread ${threadId} in this run`);
-      if (entry.running) throw new Error(`thread ${threadId} is already running`);
-      return launch({ ...entry.spec, input }).handle;
+      return entry?.running === true && entry.handle.send(text, sender);
     },
     abort: (threadId) => entries.get(threadId)?.abort.abort(),
     abortAll: () => {
       for (const entry of entries.values()) entry.abort.abort();
     },
-    onWake: (fn) => {
-      wake = fn;
+    idle: (threadId) => entries.get(threadId)?.settled ?? Promise.resolve(),
+    anyIdle: async () => {
+      const running = live();
+      if (running.length > 0) await Promise.race(running.map((e) => e.settled));
     },
-    async message(from, to, text, wait) {
-      const target = entries.get(to);
-      if (!target) throw new Error(`no thread ${to} in this run`);
-      if (to === from) throw new Error("a thread cannot message itself");
-      if (wait && target.spec.parentThreadId !== from) {
-        throw new Error(`wait is allowed only toward threads you started; ${to} is not yours`);
-      }
-      const sender = { kind: "thread", threadId: from } as const;
-      let delivery: ThreadMessageResult["delivery"] = "steered";
-      let handle = target.handle;
-      if (!(target.running && handle.send(text, sender))) {
-        delivery = "queued";
-        // `send` refuses once the thread has ended, a moment before `running` clears.
-        await handle.done.catch(() => {});
-        const input = { text, sender };
-        handle = wake({ ...target.spec, input }, () => this.resume(to, input));
-      }
-      if (!wait) return { delivery };
-      const outcome: ThreadOutcome = await handle.done;
-      return { delivery, reply: outcome.reply };
-    },
+    failure: () => failure,
   };
 }

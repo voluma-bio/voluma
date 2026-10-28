@@ -25,7 +25,7 @@ import {
   type ToolResultMessage,
   Type,
 } from "@earendil-works/pi-ai";
-import type { EventType, ThreadKind } from "@voluma/contracts/events";
+import type { EventType } from "@voluma/contracts/events";
 import { z } from "zod";
 import type { History } from "../../ports/history";
 import type { Sandbox } from "../../ports/sandbox";
@@ -34,10 +34,12 @@ import type { Tool } from "../../tools/tool";
 
 export type UserSender = Extract<PayloadOf<"message">, { role: "user" }>["sender"];
 
-/** The `thread.started` rule on `task`, in types: a worker or check thread has a task, a supervisor none. */
+/**
+ * The `thread.started` rule on `task`, in types: a worker or check thread has a task. The
+ * supervisor is the root and runs no agent loop, so it is not started here.
+ */
 type ThreadIdentity =
   | { kind: "worker" | "check"; taskId: string }
-  | { kind: "supervisor"; taskId?: never }
   | { kind: "chat"; taskId?: string };
 
 export type StartThreadOptions = ThreadIdentity & {
@@ -305,7 +307,10 @@ const historyFailure = (error: unknown): Omit<ThreadOutcome, "usage" | "ran" | "
 });
 
 /** Wraps our tool as a Pi tool: JSON Schema for the model, zod for validation and defaults. */
-function toAgentTool(tool: Tool, { runId, threadId, sandbox }: StartThreadOptions): AgentTool {
+function toAgentTool(
+  tool: Tool,
+  { runId, threadId, kind, taskId, sandbox }: StartThreadOptions,
+): AgentTool {
   const { $schema: _, ...jsonSchema } = z.toJSONSchema(tool.input, { io: "input" });
   return {
     name: tool.name,
@@ -317,6 +322,8 @@ function toAgentTool(tool: Tool, { runId, threadId, sandbox }: StartThreadOption
       const result = await tool.execute(tool.input.parse(params), {
         runId,
         threadId,
+        kind,
+        ...(taskId && { taskId }),
         toolCallId,
         signal: signal ?? new AbortController().signal,
         sandbox: () => sandbox(threadId),

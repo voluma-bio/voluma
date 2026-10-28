@@ -22,7 +22,12 @@ async function result(run: () => Promise<unknown>): Promise<ToolResult> {
 }
 
 export function taskTools(runtime: TaskRuntime): Tool[] {
-  const caller = (ctx: ToolContext) => ({ threadId: ctx.threadId, toolCallId: ctx.toolCallId });
+  const caller = (ctx: ToolContext) => ({
+    threadId: ctx.threadId,
+    toolCallId: ctx.toolCallId,
+    kind: ctx.kind,
+    ...(ctx.taskId && { taskId: ctx.taskId }),
+  });
   const checklist: Tool<typeof checklistInputSchema> = {
     name: "checklist",
     description:
