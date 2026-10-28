@@ -85,6 +85,11 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   `requireUser` only under `/inputs/:inputId/*`. Both authorize through `ReviewInputs`
   and `readerOf` before using `ReferenceArchive`. Reject HEAD before opening R2; keep
   the descriptor's ETag pin and stream the file without buffering.
-- `r2-reference-archive.ts` serves only the published reference scan. Evidence and run
-  file delivery still need scoped routes that reuse this download pattern. Deferred work:
+- `runs.ts` also serves `GET /runs/:runId/files/:sha256`: one of the run's content-addressed
+  files (`evidenceKey`) through `RunFiles` (`r2-run-files.ts`), after `RunRecords.readable`.
+  No descriptor or ETag pin: the key is the content hash, so the bytes never change (`immutable`
+  cache). The leading bytes pick the type: JPEG and PNG inline, anything else an attachment,
+  always `nosniff`, since the stored content type is whatever the sandbox mount wrote. HEAD is
+  a 405 before storage is opened.
+- `r2-reference-archive.ts` serves only the published reference scan. Deferred work:
   [.context/TODO.md](src/domains/review/.context/TODO.md).
