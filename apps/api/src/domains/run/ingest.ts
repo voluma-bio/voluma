@@ -4,6 +4,7 @@
  *   POST /ingest/claim                                   take the oldest run the limits allow
  *   POST /ingest/runs/:runId/heartbeat | /report         extend the lease; end or release the run
  *   POST /ingest/runs/:runId/events                      append an event (EventInput)
+ *   GET  /ingest/runs/:runId/events?after=               stored events after a seq, one page of 1000 (RunEventsResponse)
  *   POST /ingest/runs/:runId/threads/:threadId/messages  append a history row {idx, message}
  *   GET  /ingest/runs/:runId/threads/:threadId/messages  all rows in order
  * Every route on a run carries the lease token (400 when missing); a stale one is a 409
@@ -11,7 +12,7 @@
  * `<runId>.`, else 400: the path's thread, and the event's `threadId` and `parentThreadId`.
  * An event id stored under another run is a 409. A claim returns a visitor run's keys once (pg-queue.ts).
  */
-import { eventInputSchema } from "@voluma/contracts/events";
+import { eventInputSchema, type RunEventsResponse } from "@voluma/contracts/events";
 import { type HistoryResponse, historyRowSchema } from "@voluma/contracts/history";
 import {
   type ClaimResponse,
@@ -28,6 +29,7 @@ import { HTTPException } from "hono/http-exception";
 import type { z } from "zod";
 import { type AppEnv, parseJson, requireService } from "../../domain";
 import type { RunDeps } from ".";
+import { afterParam, EVENTS_PAGE } from "./cursor";
 import { LeaseLost } from "./lease";
 import { EventIdTaken } from "./pg-event-log";
 import { RunEnded } from "./pg-queue";
@@ -112,6 +114,20 @@ export function ingestRoutes({ queue, eventLog, history, catalog }: RunDeps) {
     }
     await eventLog.append(event, c.var.leaseToken);
     return c.body(null, 204);
+  });
+
+  app.get("/ingest/runs/:runId/events", async (c) => {
+    const after = afterParam(c.req.query("after"));
+    const page = await eventLog.readLeased(
+      c.req.param("runId"),
+      c.var.leaseToken,
+      after,
+      EVENTS_PAGE + 1,
+    );
+    return c.json({
+      events: page.slice(0, EVENTS_PAGE),
+      more: page.length > EVENTS_PAGE,
+    } satisfies RunEventsResponse);
   });
 
   app.use("/ingest/runs/:runId/threads/:threadId/*", async (c, next) => {

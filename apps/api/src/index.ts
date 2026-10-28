@@ -29,6 +29,7 @@ import { createRun } from "./domains/run";
 import type { Limits } from "./domains/run/admission";
 import { catalog } from "./domains/run/catalog";
 import { KeyVault } from "./domains/run/key-vault";
+import { createNotifier } from "./domains/run/notifier";
 import { pgEventLog } from "./domains/run/pg-event-log";
 import { pgHistory } from "./domains/run/pg-history";
 import { pgRunQueue } from "./domains/run/pg-queue";
@@ -106,8 +107,11 @@ const auth = createAuth({
   apiToken: required("VOLUMA_API_TOKEN"),
 });
 
+/** Aborts at SIGTERM so open event streams end and the drain isn't held. */
+const draining = new AbortController();
 const reads = pgRunReads(db);
-const queue = pgRunQueue(db, limits, new KeyVault());
+const notifier = createNotifier();
+const queue = pgRunQueue(db, limits, new KeyVault(), notifier);
 
 const app = new Hono();
 app.get("/health", (c) => c.text("ok"));
@@ -131,9 +135,11 @@ app.route(
   createRun({
     reads,
     queue,
-    eventLog: pgEventLog(db),
+    eventLog: pgEventLog(db, notifier),
+    notifier,
     history: pgHistory(db),
     catalog,
+    shutdown: draining.signal,
   }),
 );
 app.route("/api/review", createReview({}));
@@ -187,6 +193,7 @@ process.once("SIGINT", shutdown);
 function shutdown() {
   if (stopping) return;
   stopping = true;
+  draining.abort();
   console.log("shutting down: draining connections");
   server.close(async () => {
     await client.end({ timeout: 5 }).catch(console.error);
