@@ -69,9 +69,10 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
       text: z.string(),
       /**
        * Who sent it: another thread's `thread_message` (`thread-message.ts`),
-       * or null for a person or the system. An assistant reply has null.
-       * This event replaces the live partial reply whose `messageId` equals
-       * this event's `id` (`stream.ts`).
+       * or null for a person or the system. An assistant reply has null. A
+       * `thread_message` arrives as `role: "user"` on the target.
+       * This event replaces the live partial text whose `messageId` equals this
+       * event's `id` (`stream.ts`).
        */
       sender: z.object({ threadId: nonEmpty }).nullable(),
     }),

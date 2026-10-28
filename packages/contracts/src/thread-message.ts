@@ -6,17 +6,25 @@
  * other. The message can't change the target's model, tools or prompt. The
  * runtime enforces all three; these schemas only shape the call.
  *
+ * It lives in contracts because the sender's tool and `message.sender` in
+ * `events.ts` must agree, and both lanes read that event.
+ *
  * Delivery: a running target receives it as a follow-up in its current turn;
  * an idle target queues it and wakes. It is stored as a new `message` event
  * on the target, with `sender` set, and never edited into history.
  */
 import { z } from "zod";
 
+const nonEmpty = z.string().min(1);
+
 export const threadMessageInputSchema = z.object({
-  threadId: z.string().min(1).describe("The thread to message, in this run."),
-  text: z.string().min(1),
+  threadId: nonEmpty.describe("The thread to message, in this run."),
+  text: nonEmpty.describe("The message for the target thread."),
   /** Block until the target finishes its next reply; only for the sender's own children. */
-  wait: z.boolean().optional(),
+  wait: z
+    .boolean()
+    .optional()
+    .describe("Wait for the target's next reply. Allowed only for threads you started."),
 });
 export type ThreadMessageInput = z.infer<typeof threadMessageInputSchema>;
 
