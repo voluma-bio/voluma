@@ -1,13 +1,23 @@
 /**
- * Review lane's API domain, mounted at /api/review/: serving a run's review data
- * from R2, the per-task chat threads, and turning a correction into a rerun
- * proposal. It reaches the supervisor through a port in ReviewDeps that
- * index.ts wires to the run domain, never by importing domains/run.
+ * Review lane's API domain, mounted at /api/review/: a mount list for run review data
+ * and authorized scan downloads, with run chat and correction proposals still to come.
+ * The composition root supplies ports; Review never imports the Run domain.
  */
 import { Hono } from "hono";
+import type { AppEnv } from "../../domain";
+import type { ReferenceArchive, ReviewInputs, RunRecords } from "../../ports";
+import { inputRoutes } from "./inputs";
+import { runRoutes } from "./runs";
 
-export type ReviewDeps = Record<string, never>;
+export type ReviewDeps = {
+  runs: RunRecords;
+  inputs: ReviewInputs;
+  referenceArchive: ReferenceArchive | null;
+};
 
-export function createReview(_deps: ReviewDeps) {
-  return new Hono();
+export function createReview(deps: ReviewDeps) {
+  const app = new Hono<AppEnv>();
+  app.route("/", runRoutes(deps));
+  app.route("/", inputRoutes(deps));
+  return app;
 }

@@ -92,6 +92,8 @@ export const workflowPlanSchema = z
     tasks: z.array(
       z.object({
         id: taskIdSchema,
+        /** Short plain-language name from the workflow's `tasks.json`; shown instead of the id when present. */
+        title: nonEmpty.optional(),
         /** Tasks this one builds on; a redo of one of them makes this one stale. */
         dependsOn: z.array(taskIdSchema),
         /** The workflow's done criteria in its own words, shown to the worker and the check. */

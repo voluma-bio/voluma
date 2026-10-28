@@ -1,10 +1,17 @@
-# Supervised frontend preview. No database, credentials, or analysis service required.
+# Guest-only full-stack preview. Setup installs Postgres; R2 keys come from project secrets.
 services:
   review:
-    command: pnpm --filter @voluma/web dev --host 0.0.0.0 --port 5173 --strictPort
-    port: 5173
-    health: /
+    platforms: [linux]
+    command: WORKOS_COOKIE_PASSWORD="$(openssl rand -hex 32)" pnpm dev
+    env:
+      DATABASE_SERVER_URL: postgres://voluma:voluma@localhost:5432/postgres
+      WORKOS_CLIENT_ID: client_local
+      WORKOS_API_KEY: sk_test_local
+      WORKOS_LAB_ORGANIZATION_ID: org_local
+      GUEST_ORGANIZATION_ID: org_demo
+      GUEST_SCOPE: self
+    health: /health
     portal:
       url: /runs/local
-      title: Voluma Review
-      description: Light-theme Review workspace. No analysis service is connected.
+      title: Voluma R2 reference scan
+      description: Open reference scan to download OA6-1RK, then Build 3D. No analysis runner is started.

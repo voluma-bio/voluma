@@ -1,12 +1,13 @@
 /** Review layout consumes real result snapshots; opening images never invents analysis results. */
 
+import { StatusBadge } from "@voluma/ui";
 import type { StructureDisplay } from "@voluma/viewer";
 import { ArrowLeft, Download, History, Layers, ListChecks } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { CorrectionDialog } from "./CorrectionDialog";
 import { downloadCsv } from "./export";
-import type { ReviewRun, ReviewTask } from "./model";
+import { type ReviewRun, type ReviewTask, taskStatus } from "./model";
 import type { ReviewService } from "./service";
 import { TaskReport } from "./TaskReport";
 
@@ -20,6 +21,7 @@ export function ReviewWorkspace({
   backLink,
   viewer,
   intake,
+  notice,
   onResult,
 }: {
   runId: string;
@@ -31,6 +33,8 @@ export function ReviewWorkspace({
   backLink: ReactNode;
   viewer: (selected: { id: string; name: string }[], display: StructureDisplay) => ReactNode;
   intake?: ReactNode;
+  /** Why there are no results, when `run` is absent: loading, no plan yet, unavailable. */
+  notice?: string;
   onResult(run: ReviewRun): void;
 }) {
   const [tab, setTab] = useState<"tasks" | "structures">("tasks");
@@ -67,11 +71,17 @@ export function ReviewWorkspace({
             {backLink}
           </div>
           <h1 className="text-xl font-semibold mt-2">
-            {run?.sample ?? (runId === "local" ? "Local scan" : runId)}
+            {run?.sample ?? (runId === "local" ? "Scan viewer" : runId)}
           </h1>
           {run && (
             <p className="text-sm text-muted-foreground">
-              {run.workflow} · v{run.workflowVersion}
+              {run.workflows
+                .map((w) =>
+                  [w.path?.split("/").at(-1) ?? w.repo, w.commit?.slice(0, 7)]
+                    .filter(Boolean)
+                    .join(" · "),
+                )
+                .join(", ")}
             </p>
           )}
         </div>
@@ -87,9 +97,9 @@ export function ReviewWorkspace({
                   value={revision.id}
                   onChange={(event) => navigate({ task: task?.id, revision: event.target.value })}
                 >
-                  {run.revisions.map((item) => (
+                  {run.revisions.map((item, i) => (
                     <option key={item.id} value={item.id}>
-                      {item.id.toUpperCase()} · {item.label}
+                      R{i + 1} · {item.label}
                     </option>
                   ))}
                 </select>
@@ -140,6 +150,9 @@ export function ReviewWorkspace({
                       <span>
                         {item.title}
                         <span className="task-meta">
+                          <StatusBadge tone={taskStatus[item.status].tone}>
+                            {taskStatus[item.status].label}
+                          </StatusBadge>{" "}
                           {item.checks.filter((check) => check.status === "open").length} to check
                         </span>
                       </span>
@@ -147,8 +160,8 @@ export function ReviewWorkspace({
                   ))}
                 </nav>
                 {!revision?.tasks.length && (
-                  <p className="px-5 text-sm text-muted-foreground">
-                    Tasks appear when an analysis result is connected.
+                  <p className="px-5 text-sm text-muted-foreground" role="status">
+                    {notice ?? "Tasks appear when an analysis result is connected."}
                   </p>
                 )}
               </>
@@ -184,7 +197,7 @@ export function ReviewWorkspace({
                           {item.name}
                         </label>
                         <p className="mt-2 text-muted-foreground">
-                          {item.status} · {item.reason}
+                          {[item.status ?? "No status", item.reason].filter(Boolean).join(" · ")}
                         </p>
                         <label className="opacity-control">
                           Opacity
@@ -223,6 +236,10 @@ export function ReviewWorkspace({
                 {task && revision && run ? (
                   <TaskReport
                     task={task}
+                    structureName={(id) =>
+                      revision.structures.find((item) => item.id === id)?.name ?? id
+                    }
+                    resultLabel={`R${run.revisions.findIndex((item) => item.id === task.resultRevisionId) + 1}`}
                     taskNumber={revision.tasks.indexOf(task) + 1}
                     runId={run.id}
                     revisionId={revision.id}
@@ -249,7 +266,9 @@ export function ReviewWorkspace({
                     <p className="text-muted-foreground mt-4 leading-relaxed">
                       {run
                         ? "This task or revision does not exist."
-                        : "Opening a scan displays its images. Measurements, checks and evidence appear only after an analysis has produced them."}
+                        : notice
+                          ? notice
+                          : "Opening a scan displays its images. Measurements, checks and evidence appear only after an analysis has produced them."}
                     </p>
                     <section>
                       <h3 className="font-medium">Measurements</h3>

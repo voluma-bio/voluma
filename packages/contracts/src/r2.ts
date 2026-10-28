@@ -66,6 +66,9 @@ export const referencePrefix = (part: "scan" | "run") => `reference/OA6-1RK/${pa
 export const referenceKey = (part: "scan" | "run", path: string) =>
   `${referencePrefix(part)}${rel(path)}`;
 
+/** The existing ZIP is beside scan/, not inside the sandbox's DICOM mount. */
+export const referenceScanArchiveKey = () => "reference/OA6-1RK/scan.zip";
+
 /**
  * A stored pointer to a file in R2: an `evidenceKey`, or a key under the
  * reference run (whose files are already immutable). Review data stores full
