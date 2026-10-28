@@ -3,14 +3,13 @@
 Sandboxes cost money while up (a GPU one a lot), so every one must end. In order of
 who ends it:
 
-1. **The runner, normally.** `main.ts` closes the sandbox in a `finally` when the thread
-   ends, then flushes events (the flush runs even if the close throws).
-2. **A signal.** SIGINT, SIGTERM and SIGHUP abort the running command; the `finally`
-   above then closes the sandbox (Modal's terminate takes ~20-30 s to finish while a
-   command was running). A second signal also terminates the run's sandboxes by their
-   `{run}` tag (closing waits for a sandbox still being created, which can take minutes
-   while inputs stage), waits at most 5 s, and exits 130. Signal the process group (Ctrl-C
-   does); `kill <pid of pnpm>` alone leaves the runner running.
+1. **The runner, normally.** `run.ts` closes the run's sandbox in a `finally` when the
+   supervisor ends, then flushes events and reports. If the close takes over 15 s it asks
+   Modal to terminate the run's sandboxes by their `{run}` tag.
+2. **A signal.** SIGINT and SIGTERM stop every run (the running command is killed), each
+   closes its sandbox and reports `released`; the service waits up to 30 s. A second signal
+   exits 130 at once and leaves the sandboxes (use `sandboxes:clean`). Signal the process
+   group (Ctrl-C does); `kill <pid of pnpm>` alone leaves the runner running.
 3. **A resume.** `create` terminates live sandboxes tagged with the same `{run, name}`.
 4. **Modal ends it.** After 300 s with no command running (`VOLUMA_SANDBOX_IDLE_SECONDS` in
    `.env`, at least 30) or at a hard lifetime of 3600 s (`VOLUMA_SANDBOX_LIFETIME_SECONDS`).

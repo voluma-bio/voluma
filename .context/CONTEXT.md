@@ -14,7 +14,7 @@ apps/api        Node server on Postgres (Drizzle), each domain a Hono app. src/i
                 domain's tables and Postgres adapters live in the domain; adapters/ is for
                 shared ports
                 Sign-in: see Authentication
-apps/runner     Node entry point that runs the agent harness against the API (Run lane)
+apps/runner     The runner service: claims runs from the API and runs the supervisor on each (Run lane)
 packages/
   contracts     zod schemas for the four contracts and the shared formats
   harness       the agent harness: our tools, the Sandbox and EventLog ports, the Pi
@@ -70,15 +70,9 @@ checklist, check threads, and review chat threads.
   (`ToolContext.output`) goes nowhere until the stream hub (PR F). `startThread({prompt, input?})`: a new thread sends
   the prompt; a thread with history sends `input`, or continues if there is none. On
   resume it answers every tool call without a result (appended, never editing history)
-  and fails if the stored system message differs from the current prompt and tools. `apps/runner/src/main.ts` wires it to the HTTP client
-  (`packages/harness/src/adapters/http`), the Modal sandbox and a model:
-  `pnpm --filter @voluma/runner run-task --provider openai --model <id> --task "<text>"`
-  (needs `pnpm dev` running, which writes the API's URL and token to `.dev/env.json` for the runner, the only API it talks to. It is a claimer: it takes the next queued run, so start one in the browser first. It holds the lease with heartbeats (sending no usage) and ends the run. Keys are in `.env`, which the runner reads
-  into a config object rather than `process.env`; model keys are `VOLUMA_<PROVIDER>_API_KEY`). The sandbox is
-  created on the first `bash` call and destroyed at the end (every exit path, and what a crash
-  leaves: `apps/runner/.context/CONTEXT.md`); Ctrl-C kills the running
-  command and ends the thread as cancelled and releases the run; running again claims it back and, with the same `--thread`, resumes it.
-  A Claude `refusal` ends the thread as failed with that reason. The `bash` tool lives
+  and fails if the stored system message differs from the current prompt and tools. `apps/runner` wires it (see "The runner service" below).
+  The sandbox is created on the first `bash` call and destroyed at the end (every exit path, and what a crash
+  leaves: `apps/runner/.context/CONTEXT.md`). A Claude `refusal` ends the thread as failed with that reason. The `bash` tool lives
   in `packages/harness/src/tools`; it caps what the model sees (head and tail) and
   writes the full text to `toolOutputKey` with `Sandbox.writeFile`, which exists
   because an R2 mount cannot append: the adapter writes locally and copies in one go.
@@ -124,9 +118,20 @@ checklist, check threads, and review chat threads.
   action and does not ask the arm again. Its decisions record `by: judgment(arm)`. `llmJudgment`
   is the first arm. A thread that throws or is refused before it starts (`ran` false), or an
   error in a step, fails the run: threads aborted, the root ends `failed`. The supervisor never
-  imports Pi; it gets threads, the runtime and the judgment from its caller. Nothing in the
-  repo calls `supervisor`, `taskRuntime` or `threads` yet; lane E's first PR wires them
-  (`apps/runner` still calls `startThread` alone), before anything else builds on them.
+  imports Pi; it gets threads, the runtime and the judgment from its caller (`apps/runner/src/run.ts`).
+- **The runner service** (`apps/runner`, `pnpm --filter @voluma/runner start`). It polls
+  `claim` while it has a free slot (`RUNNER_CONCURRENCY`); `run.ts` runs each claim the same
+  way whether the run is fresh or recovered: read the run's stored events (paged) and every
+  thread's history over HTTP, build the recorder from them, then the task runtime, threads,
+  judgment and supervisor, and `supervisor.run()`. `lease.ts` heartbeats every 15 s with the
+  usage since the last acknowledged one (model dollars from Pi's per-reply cost, sandbox
+  seconds from the session's ready/stopped states) and stops the run on `stop`, on a
+  `LeaseLost` from events, history or heartbeat, or 45 s after the last acknowledged
+  heartbeat was sent. SIGTERM stops every run, each reports `released`, and the process
+  exits. A `voluma` run uses our keys; a `visitor` run uses the claim's, in that run's scope
+  only. `redact.ts` masks every literal key in stored events and history rows, console lines
+  and the report's `error`. Worker and check prompts come from the plan's ids and declared
+  outputs (`prompts.ts`) because the plan has no task text until `workflow.md` is parsed.
 - **`seq` and the database.** `seq` per run is gapless and in commit order: each
   append takes a per-run advisory lock as its own statement before the insert (a lock
   inside the insert's statement races under READ COMMITTED), so the stream hub can

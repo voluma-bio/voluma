@@ -123,8 +123,9 @@ A rollback restores the old code, not the old schema: migrations have already ru
 aren't reversed. It is safe only if the migrations since that deployment followed the
 expand-then-contract rule. Otherwise fix forward.
 
-`run-task` talks only to the local dev API: it claims the next queued run, which on staging
-is a visitor's, and would take their keys. The deployed claimer is the runner service.
+The runner service (`pnpm --filter @voluma/runner start`) claims whatever is queued, so
+pointing a local one at staging (`VOLUMA_API_URL`) takes a visitor's run and their keys. Run
+it locally only against `pnpm dev`.
 
 ## Rotating secrets
 
