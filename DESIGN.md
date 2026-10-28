@@ -7,11 +7,12 @@ both in each theme.
 
 ## Two themes, one token set
 
-- **Light** (the default) is for workflows, runs and Review: Warm Organic, pine accent.
+- **Light** (the default) is for workflows, runs and Review: Warm Organic, pine primary.
 - **Dark** remains available to shared components and `/dev/ui`. Actual grayscale
   images can use the dark viewer well inside the light Review chrome.
-- Components use semantic token utilities (`bg-surface`, `text-fg-muted`,
-  `border-line`), never raw colours. A colour a screen needs goes into
+- Components use semantic token utilities (`bg-card`, `text-muted-foreground`,
+  `border-border`), never raw colours. The names are shadcn/ui's, with our palette as the values;
+  `accent` is shadcn's hover fill and the brand green is `primary`. A colour a screen needs goes into
   `tokens.css` with a role name and a value for both themes.
 - Type is IBM Plex Sans, with IBM Plex Mono for values, units and ids.
   Numbers in columns use tabular figures.

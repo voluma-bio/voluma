@@ -24,14 +24,14 @@ export type ChatMessageProps = {
 export function ChatMessage({ from, author, children }: ChatMessageProps) {
   if (from === "user") {
     return (
-      <div className="max-w-[88%] justify-self-end rounded-xl rounded-br-sm border border-line-strong bg-raised px-3 py-2 text-ui text-fg">
+      <div className="max-w-[88%] justify-self-end rounded-xl rounded-br-sm border border-line-strong bg-muted px-3 py-2 text-ui text-foreground">
         {children}
       </div>
     );
   }
   return (
-    <div className="grid gap-1.5 text-ui text-fg-muted">
-      {author && <div className="text-xs font-semibold text-accent-text">{author}</div>}
+    <div className="grid gap-1.5 text-ui text-muted-foreground">
+      {author && <div className="text-xs font-semibold text-primary-text">{author}</div>}
       <div>{children}</div>
     </div>
   );
@@ -77,14 +77,14 @@ export function ChatComposer({
               key={suggestion}
               type="button"
               onClick={() => onChange(suggestion)}
-              className="cursor-pointer rounded-full border border-line-strong px-2.5 py-1 text-left text-meta text-fg-muted hover:border-fg-subtle hover:text-fg"
+              className="cursor-pointer rounded-full border border-line-strong px-2.5 py-1 text-left text-meta text-muted-foreground hover:border-fg-subtle hover:text-foreground"
             >
               {suggestion}
             </button>
           ))}
         </div>
       )}
-      <div className="flex items-end gap-1.5 rounded-xl border border-line-strong bg-canvas py-1.5 pr-1.5 pl-3 focus-within:border-fg-subtle">
+      <div className="flex items-end gap-1.5 rounded-xl border border-line-strong bg-background py-1.5 pr-1.5 pl-3 focus-within:border-fg-subtle">
         <label htmlFor={inputId} className="sr-only">
           {placeholder}
         </label>
@@ -95,13 +95,13 @@ export function ChatComposer({
           onKeyDown={onKeyDown}
           placeholder={placeholder}
           rows={1}
-          className="field-sizing-content max-h-30 min-w-0 flex-1 resize-none bg-transparent py-1 text-ui text-fg outline-none placeholder:text-fg-subtle"
+          className="field-sizing-content max-h-30 min-w-0 flex-1 resize-none bg-transparent py-1 text-ui text-foreground outline-none placeholder:text-fg-subtle"
         />
         <button
           type="submit"
           disabled={disabled || !value.trim()}
           aria-label="Send"
-          className="grid size-7.5 cursor-pointer place-items-center rounded-lg bg-accent text-accent-fg disabled:cursor-default disabled:opacity-50"
+          className="grid size-7.5 cursor-pointer place-items-center rounded-lg bg-primary text-primary-foreground disabled:cursor-default disabled:opacity-50"
         >
           <svg viewBox="0 0 16 16" className="size-3.5" aria-hidden="true">
             <path

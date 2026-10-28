@@ -11,6 +11,7 @@
     "./stream": "./src/stream.ts",
     "./thread-message": "./src/thread-message.ts",
     "./task-tools": "./src/task-tools.ts",
+    "./auth": "./src/auth.ts",
     "./history": "./src/history.ts",
     "./review": "./src/review.ts",
     "./workflow": "./src/workflow.ts",

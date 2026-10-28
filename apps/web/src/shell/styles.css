@@ -25,12 +25,12 @@
 
   body,
   [data-theme] {
-    background-color: var(--canvas);
-    color: var(--fg);
+    background-color: var(--background);
+    color: var(--foreground);
   }
 
   :focus-visible {
-    outline: 2px solid var(--focus);
+    outline: 2px solid var(--ring);
     outline-offset: 2px;
   }
 
