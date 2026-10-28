@@ -121,7 +121,6 @@ export async function runClaim(
       store: r2Workflows(config.r2),
       githubToken: config.githubToken,
     });
-    const { plan } = definition;
     const workerAgent = definition.roles.worker;
     const checkerAgent = definition.roles.checker;
     const workerTools = workerAgent ? resolveTools(workerAgent.tools, workerAgent.name) : [];
@@ -143,6 +142,14 @@ export async function runClaim(
       },
     });
     const stored = await client.storedEvents();
+    // A resumed run keeps the plan its first event recorded; only a new run takes the parsed one.
+    const recorded = stored.find(
+      (e) => e.type === "revision.started" && e.payload.reason === "run",
+    );
+    const plan =
+      recorded?.type === "revision.started" && recorded.payload.reason === "run"
+        ? recorded.payload.plan
+        : definition.plan;
     events = recorder(
       {
         async append(event) {

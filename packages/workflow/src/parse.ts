@@ -90,14 +90,14 @@ function splitBlock(lines: string[]): { yaml?: string; prose: string[] } {
 }
 
 /** `### Done when` bullets split off a task's prose. */
-function splitDone(prose: string[]): { text: string; doneWhen: string[] } {
+function splitDone(prose: string[]): { text: string; doneWhen: string[]; headed: boolean } {
   const i = prose.findIndex((l) => /^### Done when\s*$/.test(l));
   const head = i < 0 ? prose : prose.slice(0, i);
   const done = i < 0 ? [] : prose.slice(i + 1);
   const doneWhen = done
     .map((l) => /^\s*[-*]\s+(.*\S)\s*$/.exec(l)?.[1])
     .filter((l): l is string => l !== undefined);
-  return { text: head.join("\n").trim(), doneWhen };
+  return { text: head.join("\n").trim(), doneWhen, headed: i >= 0 };
 }
 
 const FILE = "workflow.md";
@@ -252,7 +252,10 @@ export function parseWorkflow(packages: readonly PackageFiles[]): WorkflowDefini
       if (yaml === undefined)
         throw new WorkflowParseError(FILE, where, "missing the ```yaml block (depends, outputs)");
       const block = check(FILE, where, taskBlock, yamlBlock(FILE, where, yaml) ?? {});
-      const { text: prosetext, doneWhen } = splitDone(prose);
+      const { text: prosetext, doneWhen, headed } = splitDone(prose);
+      if (headed && doneWhen.length === 0) {
+        throw new WorkflowParseError(FILE, where, "### Done when has no bullets (- criterion)");
+      }
       tasks.push({
         id,
         dependsOn: block.depends,
