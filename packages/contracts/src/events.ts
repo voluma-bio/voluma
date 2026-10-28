@@ -18,7 +18,7 @@
  * decides anything, so its view is the stored log.
  *
  * These are the durable events. Live output (text and tool deltas, tool output
- * chunks) is not stored, has no `seq` and is not served yet: see `stream.ts`.
+ * chunks) is not stored and has no `seq`; the run stream carries it as live frames: see `stream.ts`.
  *
  * Ids that become R2 key segments (`runId`, `taskId`, `toolCallId`, evidence paths) are checked
  * with the `r2.ts` schemas here, so an accepted event can't fail later when a
@@ -192,7 +192,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         text: z.string(),
         /**
          * The reply's reasoning (thinking), its blocks joined with a blank line; absent when
-         * the model showed none. The same string the reply's `reasoning.delta` frames add up to.
+         * the model showed none. It replaces the partial the reply's `reasoning.delta` frames built.
          */
         reasoning: z.string().optional(),
         /** The reply's model usage; absent on a reply that never reached the model. */
