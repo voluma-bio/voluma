@@ -34,7 +34,7 @@ export function Lightbox({ open, onClose, children, caption, className }: Lightb
         if (event.target === event.currentTarget) onClose();
       }}
       className={cx(
-        "m-0 h-dvh max-h-none w-dvw max-w-none bg-scrim p-6 text-fg backdrop:bg-transparent",
+        "m-0 h-dvh max-h-none w-dvw max-w-none bg-scrim p-6 text-foreground backdrop:bg-transparent",
         "open:grid open:place-items-center",
         className,
       )}
@@ -43,12 +43,12 @@ export function Lightbox({ open, onClose, children, caption, className }: Lightb
         <div className="overflow-hidden rounded-lg [&_img]:max-h-[calc(100dvh-120px)] [&_img]:max-w-full [&_img]:object-contain">
           {children}
         </div>
-        <figcaption className="flex items-center justify-between gap-3 text-ui text-fg-muted">
+        <figcaption className="flex items-center justify-between gap-3 text-ui text-muted-foreground">
           <span>{caption}</span>
           <button
             type="button"
             onClick={onClose}
-            className="cursor-pointer rounded-md px-2 py-1 text-fg-muted hover:bg-raised hover:text-fg"
+            className="cursor-pointer rounded-md px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground"
           >
             Close
           </button>

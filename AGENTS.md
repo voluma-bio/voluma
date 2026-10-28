@@ -125,7 +125,7 @@ they need:
 - Lint is Biome's recommended rules. The boundaries above are rules to
   follow, not lint checks.
 - Colours come only from `packages/design-tokens`; components use token
-  utilities (`bg-surface`, `text-fg-muted`). Visual rules: [DESIGN.md](DESIGN.md).
+  utilities (`bg-card`, `text-muted-foreground`). Visual rules: [DESIGN.md](DESIGN.md).
   Check shared components at `/dev/ui` in both themes.
 - Workflows and analysis code are not in this repo. A workflow is a Mars
   schema v1 package on GitHub (`mars.toml`, skills, `workflow.md`), imported

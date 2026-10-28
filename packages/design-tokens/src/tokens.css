@@ -1,20 +1,28 @@
 /*
  * Voluma design tokens: the only place raw colour values live.
  *
- * Two themes share one set of semantic names. Light (the default, and
+ * Names are shadcn/ui's semantic set, used with shadcn's meanings, so shadcn
+ * components copied into the repo work unchanged; the values are our palette.
+ * A token shadcn has no name for keeps ours (`check-*`, `info*`, `inverse*`,
+ * `scrim`, `fg-subtle`, `line-subtle`, `line-strong`, the viewer and axis
+ * tokens). Where shadcn names two roles that our palette fills with one
+ * colour (card/popover, muted/secondary/accent, border/input), both are
+ * declared with the same value so either can change alone.
+ *
+ * Two themes share one set of names. Light (the default, and
  * `[data-theme="light"]`) is used by workflows, runs and Review. Dark
  * (`[data-theme="dark"]`) remains available to shared components. A theme applies to
  * the subtree under the attribute, so one page can show both (see /dev/ui).
  *
  * Names map from the mockups as follows:
  *   start.html (light)            review-live.html (dark)     token
- *   --paper                       --bg                        --canvas
- *   --card                        --chrome                    --surface
- *   --line-2 (as hover fill)      --raised                    --raised
- *   --line-2 / --line / #b9cfc6   (new) / --line / --line-2   --line-subtle / --line / --line-strong
- *   --ink / --ink-2 / --ink-3     --fg / --fg-2 / --fg-3      --fg / --fg-muted / --fg-subtle
- *   --pine / --pine-deep          --accent                    --accent / --accent-strong
- *   --pine-ink / --pine-tint      --accent-ink                --accent-fg / --accent-tint
+ *   --paper                       --bg                        --background
+ *   --card                        --chrome                    --card
+ *   --line-2 (as hover fill)      --raised                    --muted / --accent
+ *   --line-2 / --line / #b9cfc6   (new) / --line / --line-2   --line-subtle / --border / --line-strong
+ *   --ink / --ink-2 / --ink-3     --fg / --fg-2 / --fg-3      --foreground / --muted-foreground / --fg-subtle
+ *   --pine / --pine-deep          --accent                    --primary / --primary-strong
+ *   --pine-ink / --pine-tint      --accent-ink                --primary-foreground / --primary-tint
  *   --amber / -tint / -line       --check                     --check / --check-tint / --check-line
  *   --blue / --blue-tint          --fixed                     --info / --info-tint
  * Values marked "derived" exist in only one mockup and were filled in for the
@@ -29,24 +37,35 @@
   color-scheme: light;
 
   /* Surfaces, from back to front */
-  --canvas: #f7faf8;
-  --surface: #ffffff;
-  --raised: #eaf0ed; /* hovered and selected rows */
+  --background: #f7faf8;
+  --foreground: #10211c;
+  --card: #ffffff;
+  --card-foreground: #10211c;
+  --popover: #ffffff;
+  --popover-foreground: #10211c;
 
+  /* Quiet fills: muted is a resting fill (inputs off, badges), accent
+     the hover fill, secondary a secondary button's fill */
+  --muted: #eaf0ed;
+  --muted-foreground: #44594f;
+  --accent: #eaf0ed;
+  --accent-foreground: #10211c;
+  --secondary: #eaf0ed;
+  --secondary-foreground: #10211c;
+
+  --border: #dce7e2;
+  --input: #dce7e2;
+  --ring: #1d6b57;
   --line-subtle: #eaf0ed;
-  --line: #dce7e2;
   --line-strong: #b9cfc6;
-
-  --fg: #10211c;
-  --fg-muted: #44594f;
   --fg-subtle: #5c6f66;
 
   /* Pine: primary actions, done, links */
-  --accent: #1d6b57;
-  --accent-strong: #124839; /* hover fill, and text on --accent-tint */
-  --accent-fg: #f7faf8; /* text on --accent */
-  --accent-tint: #e3efe9;
-  --accent-text: #1d6b57;
+  --primary: #1d6b57;
+  --primary-foreground: #f7faf8; /* text on --primary */
+  --primary-strong: #124839; /* hover fill, and text on --primary-tint */
+  --primary-tint: #e3efe9;
+  --primary-text: #1d6b57;
 
   /* Amber: To check */
   --check: #7d5408; /* text and icons on surfaces */
@@ -61,35 +80,60 @@
   --info-tint: #eaf1fd;
 
   /* Red: failed (derived; neither mockup shows a failure) */
-  --danger: #a3342a;
-  --danger-tint: #fbeceb;
+  --destructive: #a3342a;
+  --destructive-tint: #fbeceb;
 
-  --focus: #1d6b57;
   --inverse: #10211c; /* toasts and tooltips */
   --inverse-fg: #ffffff;
   --scrim: rgb(0 0 0 / 0.82);
+
+  /* Charts: the status hues, then neutral */
+  --chart-1: #1d6b57;
+  --chart-2: #2856a8;
+  --chart-3: #c48a1c;
+  --chart-4: #a3342a;
+  --chart-5: #44594f;
+
+  /* Sidebar: the review's task list sits on the canvas */
+  --sidebar: #f7faf8;
+  --sidebar-foreground: #10211c;
+  --sidebar-primary: #1d6b57;
+  --sidebar-primary-foreground: #f7faf8;
+  --sidebar-accent: #eaf0ed;
+  --sidebar-accent-foreground: #10211c;
+  --sidebar-border: #dce7e2;
+  --sidebar-ring: #1d6b57;
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --canvas: #0b0e10;
-  --surface: #13171a;
-  --raised: #1a1f23;
+  --background: #0b0e10;
+  --foreground: #e7ebed;
+  --card: #13171a;
+  --card-foreground: #e7ebed;
+  --popover: #13171a;
+  --popover-foreground: #e7ebed;
 
+  --muted: #1a1f23;
+  --muted-foreground: #a3adb3;
+  --accent: #1a1f23;
+  --accent-foreground: #e7ebed;
+  --secondary: #1a1f23;
+  --secondary-foreground: #e7ebed;
+
+  --border: #242a2f;
+  --input: #242a2f;
+  --ring: #62c7a4;
   --line-subtle: #1d2226; /* derived */
-  --line: #242a2f;
   --line-strong: #30373d;
+  --fg-subtle: #808c94; /* 4.8:1 on --muted, the lightest surface it sits on */
 
-  --fg: #e7ebed;
-  --fg-muted: #a3adb3;
-  --fg-subtle: #808c94; /* 4.8:1 on --raised, the lightest surface it sits on */
-
-  --accent: #62c7a4;
-  --accent-strong: #7fd4b5; /* derived: actives lighten on dark ground */
-  --accent-fg: #06231a;
-  --accent-tint: #15302a; /* derived */
-  --accent-text: #62c7a4;
+  --primary: #62c7a4;
+  --primary-foreground: #06231a;
+  --primary-strong: #7fd4b5; /* derived: actives lighten on dark ground */
+  --primary-tint: #15302a; /* derived */
+  --primary-text: #62c7a4;
 
   --check: #e9b75b;
   --check-solid: #e9b75b;
@@ -101,13 +145,27 @@
   --info: #7fb2ff;
   --info-tint: #162338; /* derived */
 
-  --danger: #ef7a6c; /* derived */
-  --danger-tint: #33191a; /* derived */
+  --destructive: #ef7a6c; /* derived */
+  --destructive-tint: #33191a; /* derived */
 
-  --focus: #62c7a4;
   --inverse: #000000;
   --inverse-fg: #e7ebed;
   --scrim: rgb(0 0 0 / 0.82);
+
+  --chart-1: #62c7a4;
+  --chart-2: #7fb2ff;
+  --chart-3: #e9b75b;
+  --chart-4: #ef7a6c;
+  --chart-5: #a3adb3;
+
+  --sidebar: #0b0e10;
+  --sidebar-foreground: #e7ebed;
+  --sidebar-primary: #62c7a4;
+  --sidebar-primary-foreground: #06231a;
+  --sidebar-accent: #1a1f23;
+  --sidebar-accent-foreground: #e7ebed;
+  --sidebar-border: #242a2f;
+  --sidebar-ring: #62c7a4;
 }
 
 :root {
