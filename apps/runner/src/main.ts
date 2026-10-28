@@ -57,6 +57,9 @@ for (const name of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
+const shuttingDown = new Promise<void>((resolve) =>
+  shutdown.signal.addEventListener("abort", () => resolve(), { once: true }),
+);
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => {
     const timer = setTimeout(resolve, ms);
@@ -75,7 +78,7 @@ log(
 );
 while (!shutdown.signal.aborted) {
   if (active.size >= config.concurrency) {
-    await Promise.race(active);
+    await Promise.race([...active, shuttingDown]);
     continue;
   }
   let claim: Awaited<ReturnType<typeof ctx.api.claim>>;

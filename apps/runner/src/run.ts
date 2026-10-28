@@ -36,6 +36,8 @@ import { usageMeter } from "./usage.ts";
 
 /** How long closing the sandbox may take before Modal is asked to terminate the run's by tag. */
 const CLOSE_BUDGET_MS = 15_000;
+/** How long threads get to end after a stop before the run is reported anyway. */
+const WIND_DOWN_MS = 5_000;
 
 export interface RunnerContext {
   config: Config;
@@ -201,13 +203,23 @@ export async function runClaim(
       }),
       signal: abort.signal,
     });
-    await sup.run(run.workflows);
+    const supervised = sup.run(run.workflows);
+    supervised.catch(() => {}); // an error after the race below is moot: the run is stopping
+    // A stop does not wait for a thread stuck in a slow call (creating a sandbox takes a
+    // minute): after a grace period the run is reported and the sandbox closed regardless.
+    const windDown = new Promise<void>((resolve) =>
+      abort.signal.addEventListener("abort", () => setTimeout(resolve, WIND_DOWN_MS), {
+        once: true,
+      }),
+    );
+    await Promise.race([supervised, windDown]);
   } catch (e) {
     error = redact(e instanceof Error ? e.message : String(e));
     log(`failed: ${error}`);
   } finally {
     abort.abort();
-    await closeSandbox();
+    // Report before the slow sandbox close, so a shutdown releases the run within the
+    // platform's grace period; the next claimer ends any sandbox this one leaves.
     await events?.flush();
     await lease.end(why.stopped !== "stop" && why.stopped !== "lease-lost");
     const report = reportFor(why.stopped, { error });
@@ -219,6 +231,7 @@ export async function runClaim(
     } else {
       log(`stopped (${why.stopped}); nothing more to report`);
     }
+    await closeSandbox();
   }
 
   async function closeSandbox() {
