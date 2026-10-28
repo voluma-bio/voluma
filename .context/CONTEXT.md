@@ -13,6 +13,7 @@ apps/api        Node server on Postgres (Drizzle), each domain a Hono app. src/i
                 /api/review/ (review data, chat threads, corrections) with app.route. A
                 domain's tables and Postgres adapters live in the domain; adapters/ is for
                 shared ports
+                Sign-in: see Authentication
 apps/runner     Node entry point that runs the agent harness against the API (Run lane)
 packages/
   contracts     zod schemas for the four contracts and the shared formats
@@ -95,6 +96,28 @@ checklist, check threads, and review chat threads.
 
 The design, the evidence behind it and the order of work are in the
 voluma-bio/docs work item `mvp-contracts-and-data` (`design/harness-v0.md`).
+
+## Authentication
+
+`apps/api/src/auth.ts` authenticates every `/api/*` request once, at the root, and sets
+`principal` (`apps/api/src/domain.ts`): `service` for the runner's bearer token
+(`VOLUMA_API_TOKEN`), `user` for a WorkOS AuthKit session cookie of a member of the Yao
+Lab organization (`org_id` equals `WORKOS_LAB_ORGANIZATION_ID`, checked on every request
+and again in the sign-in callback). When an `Authorization` header is present only the
+bearer counts. The root answers 401 for no principal on everything but `/api/auth/*`;
+a domain guards a subtree with `requireService` or `requireUser` and gets 403 for the
+other kind. A cookie-authenticated non-GET request, or WebSocket upgrade, must carry an
+`Origin` equal to `APP_URL`'s origin (`SameSite=Lax` is same-site, not same-origin), and
+a JSON content type; bearer requests are exempt. `APP_URL` (the Vite origin in
+`pnpm dev`, the public URL in production) is config, never the `Host` header: it builds
+the redirect `${APP_URL}/api/auth/callback`. There is no `users` table: records store
+the WorkOS user id.
+
+Routes: `GET /api/auth/login?returnTo=`, `GET /api/auth/callback`,
+`POST /api/auth/logout` (returns `{ logoutUrl }` for the browser to navigate to),
+`GET /api/auth/me`. A non-member is sent to `/?signin=not-a-member`, a failed callback to
+`/?signin=failed`; both leave no session cookie. A refreshed session comes back as
+`Set-Cookie` on the response that triggered the refresh.
 
 ## Deployment
 

@@ -1,7 +1,7 @@
 /**
  * Run lane's API domain, mounted at /api/run/ (paths below are relative to the mount).
  * Today: the runner's ingest of the stream record and the model history of a run's
- * threads, under /ingest/ and behind a bearer token (other routes will use user auth).
+ * threads, under /ingest/ and guarded for the runner (`service` principal; other routes will take `user`).
  *   POST /ingest/runs/:runId/events          append an event (EventInput)
  *   POST /ingest/threads/:threadId/messages  append a history row {idx, message}
  *   GET  /ingest/threads/:threadId/messages  all rows in order
@@ -15,13 +15,11 @@ import { type HistoryResponse, historyRowSchema } from "@voluma/contracts/histor
 import type { EventLog } from "@voluma/harness/ports/event-log";
 import { type History, HistoryConflict } from "@voluma/harness/ports/history";
 import { Hono } from "hono";
-import { bearerAuth } from "hono/bearer-auth";
+import { type AppEnv, requireService } from "../../domain";
 
 export interface RunDeps {
   eventLog: EventLog;
   history: History;
-  /** Callers present this as `Authorization: Bearer <token>`. */
-  apiToken: string;
 }
 
 // Postgres text cannot hold a raw NUL; the harness's JSON.stringify output escapes it.
@@ -30,9 +28,9 @@ const storableRow = historyRowSchema.refine(
   "message contains a NUL byte",
 );
 
-export function createRun({ eventLog, history, apiToken }: RunDeps) {
-  const app = new Hono();
-  app.use("/ingest/*", bearerAuth({ token: apiToken }));
+export function createRun({ eventLog, history }: RunDeps) {
+  const app = new Hono<AppEnv>();
+  app.use("/ingest/*", requireService);
 
   app.post("/ingest/runs/:runId/events", async (c) => {
     const parsed = eventInputSchema.safeParse(await readJson(c.req));

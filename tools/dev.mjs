@@ -5,7 +5,8 @@
  *  - a database named after the worktree directory and a hash of its path
  *    (`voluma_<dir>_<hash8>`), created on the Postgres server in DATABASE_SERVER_URL
  *    (`pnpm db:up` starts one) and migrated;
- *  - a random API token per launch.
+ *  - a random API token per launch;
+ *  - APP_URL, the Vite origin, which the API uses for the sign-in redirect and the Origin check.
  * The API also reads the repo .env (--env-file-if-exists), as it would read Railway's
  * variables. It writes { apiUrl, apiToken } to the git-ignored .dev/env.json, which
  * the runner reads when VOLUMA_API_URL is unset. Ctrl-C stops everything
@@ -82,6 +83,7 @@ const children = [
       ...process.env,
       DATABASE_URL: databaseUrl.href,
       VOLUMA_API_TOKEN: env.apiToken,
+      APP_URL: appUrl,
       PORT: String(apiPort),
       HOST: "127.0.0.1",
     },
