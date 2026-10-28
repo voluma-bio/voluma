@@ -9,11 +9,13 @@
  *    `EventIdTaken` if the stored event belongs to another run;
  * 4. apply the `threads` projection, only if the event was new.
  *
- * So `seq` is gapless and in commit order per run. The stream hub relies on that:
- * publish after commit, and a gap means backfill from the log.
+ * So `seq` is gapless and in commit order per run: a reader that has seen `seq` n has seen
+ * every event below it. The stream (stream.ts) relies on that: `onAppend` fires after a
+ * commit, and the stream then reads the log from its cursor, so a missed or early wake-up
+ * costs a read, never an event.
  */
-import type { EventInput } from "@voluma/contracts/events";
-import { and, eq, sql } from "drizzle-orm";
+import type { EventInput, RunEvent } from "@voluma/contracts/events";
+import { and, asc, eq, gt, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { assertLease } from "./lease";
 import type { Tx } from "./pg-runs";
@@ -29,8 +31,45 @@ export class EventIdTaken extends Error {
 /** First key of the advisory lock pair; the second is the run. Distinguishes our locks from others'. */
 const EVENT_SEQ_LOCK = 0x76_6f_6c_75;
 
+const toRunEvent = (row: typeof events.$inferSelect) =>
+  ({ ...row, createdAt: row.createdAt.toISOString() }) as RunEvent;
+
 export function pgEventLog(db: PostgresJsDatabase) {
+  // In-process wake-ups: correct for one API replica; stream.ts also polls as a backstop.
+  const listeners = new Map<string, Set<() => void>>();
+
+  const readAfter = async (runId: string, after: number, limit: number, tx: Tx | typeof db) =>
+    (
+      await tx
+        .select()
+        .from(events)
+        .where(and(eq(events.runId, runId), gt(events.seq, after)))
+        .orderBy(asc(events.seq))
+        .limit(limit)
+    ).map(toRunEvent);
+
   return {
+    /** Call `wake` after each event of the run commits. Returns the unsubscribe. */
+    onAppend(runId: string, wake: () => void) {
+      const set = listeners.get(runId) ?? new Set();
+      set.add(wake);
+      listeners.set(runId, set);
+      return () => {
+        set.delete(wake);
+        if (set.size === 0 && listeners.get(runId) === set) listeners.delete(runId);
+      };
+    },
+
+    /** Up to `limit` events with `seq > after`, oldest first. Unchecked: the caller scopes the run. */
+    after: (runId: string, after: number, limit: number) => readAfter(runId, after, limit, db),
+
+    /** The runner's read: like `after`, but the lease is checked in the same transaction. */
+    readLeased: (runId: string, leaseToken: string, after: number, limit: number) =>
+      db.transaction(async (tx) => {
+        await assertLease(tx, runId, leaseToken);
+        return readAfter(runId, after, limit, tx);
+      }),
+
     /** Throws `LeaseLost`, or `EventIdTaken` for an id stored under another run. */
     async append(event: EventInput, leaseToken: string) {
       await db.transaction(async (tx) => {
@@ -62,6 +101,7 @@ export function pgEventLog(db: PostgresJsDatabase) {
         }
         await projectThread(tx, event, createdAt);
       });
+      for (const wake of listeners.get(event.runId) ?? []) wake();
     },
   };
 }

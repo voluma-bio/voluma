@@ -106,6 +106,8 @@ const auth = createAuth({
   apiToken: required("VOLUMA_API_TOKEN"),
 });
 
+/** Aborts at SIGTERM so open event streams end and the drain isn't held. */
+const draining = new AbortController();
 const reads = pgRunReads(db);
 const queue = pgRunQueue(db, limits, new KeyVault());
 
@@ -134,6 +136,7 @@ app.route(
     eventLog: pgEventLog(db),
     history: pgHistory(db),
     catalog,
+    shutdown: draining.signal,
   }),
 );
 app.route("/api/review", createReview({}));
@@ -187,6 +190,7 @@ process.once("SIGINT", shutdown);
 function shutdown() {
   if (stopping) return;
   stopping = true;
+  draining.abort();
   console.log("shutting down: draining connections");
   server.close(async () => {
     await client.end({ timeout: 5 }).catch(console.error);

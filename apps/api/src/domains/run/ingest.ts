@@ -4,6 +4,7 @@
  *   POST /ingest/claim                                   take the oldest run the limits allow
  *   POST /ingest/runs/:runId/heartbeat | /report         extend the lease; end or release the run
  *   POST /ingest/runs/:runId/events                      append an event (EventInput)
+ *   GET  /ingest/runs/:runId/events?after=&limit=        stored events after a seq, paged (RunEventsResponse)
  *   POST /ingest/runs/:runId/threads/:threadId/messages  append a history row {idx, message}
  *   GET  /ingest/runs/:runId/threads/:threadId/messages  all rows in order
  * Every route on a run carries the lease token (400 when missing); a stale one is a 409
@@ -11,7 +12,7 @@
  * `<runId>.`, else 400: the path's thread, and the event's `threadId` and `parentThreadId`.
  * An event id stored under another run is a 409. A claim returns a visitor run's keys once (pg-queue.ts).
  */
-import { eventInputSchema } from "@voluma/contracts/events";
+import { eventInputSchema, type RunEventsResponse } from "@voluma/contracts/events";
 import { type HistoryResponse, historyRowSchema } from "@voluma/contracts/history";
 import {
   type ClaimResponse,
@@ -43,6 +44,15 @@ const storableRow = historyRowSchema.refine(
 /** A thread id carries its run's id, so one run can't write another's threads. */
 const inRun = (runId: string, threadId: string) => threadId.startsWith(`${runId}.`);
 const NOT_IN_RUN = "thread id must begin with <runId>.";
+
+const MAX_PAGE = 1000;
+
+function intParam(raw: string | undefined, fallback: number, name: string): number {
+  if (raw === undefined) return fallback;
+  if (!/^\d{1,9}$/.test(raw))
+    throw new HTTPException(400, { message: `${name} must be a non-negative integer` });
+  return Number(raw);
+}
 
 export function ingestRoutes({ queue, eventLog, history, catalog }: RunDeps) {
   const app = new Hono<IngestEnv>();
@@ -112,6 +122,22 @@ export function ingestRoutes({ queue, eventLog, history, catalog }: RunDeps) {
     }
     await eventLog.append(event, c.var.leaseToken);
     return c.body(null, 204);
+  });
+
+  app.get("/ingest/runs/:runId/events", async (c) => {
+    const after = intParam(c.req.query("after"), 0, "after");
+    const limit = Math.min(intParam(c.req.query("limit"), MAX_PAGE, "limit"), MAX_PAGE);
+    if (limit < 1) throw new HTTPException(400, { message: "limit must be at least 1" });
+    const page = await eventLog.readLeased(
+      c.req.param("runId"),
+      c.var.leaseToken,
+      after,
+      limit + 1,
+    );
+    return c.json({
+      events: page.slice(0, limit),
+      more: page.length > limit,
+    } satisfies RunEventsResponse);
   });
 
   app.use("/ingest/runs/:runId/threads/:threadId/*", async (c, next) => {
