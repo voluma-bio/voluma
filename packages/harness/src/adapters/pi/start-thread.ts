@@ -242,10 +242,16 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
               // Every reply gets a `message`, even an empty or failed one: it ends the
               // reply's live partial (`stream.ts`).
               const used = usageOf(message);
+              const reasoning = reasoningOf(message);
               recorder.emit(
                 threadId,
                 "message",
-                { role: "assistant", text: textOf(message), ...(used && { usage: used }) },
+                {
+                  role: "assistant",
+                  text: textOf(message),
+                  ...(reasoning && { reasoning }),
+                  ...(used && { usage: used }),
+                },
                 replyId,
               );
               replyId = frames = undefined;
@@ -473,4 +479,15 @@ function textOf(message: { content: unknown }): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   return content.flatMap((part) => (part?.type === "text" ? [part.text as string] : [])).join("");
+}
+
+/** The reply's thinking blocks, joined with a blank line (`message.reasoning`). */
+function reasoningOf(message: { content: unknown }): string {
+  const { content } = message;
+  if (!Array.isArray(content)) return "";
+  return content
+    .flatMap((part) =>
+      part?.type === "thinking" && part.thinking ? [part.thinking as string] : [],
+    )
+    .join("\n\n");
 }
