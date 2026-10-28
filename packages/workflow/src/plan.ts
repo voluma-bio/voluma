@@ -86,13 +86,49 @@ export function computePlan(files: WorkflowFiles, selected?: readonly string[]):
   return plan.data;
 }
 
+/** What the main thread may change at run start: more done-when lines, and workflow tasks to add. */
+export interface PlanChange {
+  /** Lines appended to a task's done-when, by task id. */
+  doneWhen?: Record<string, string[]>;
+  /** Tasks of `tasks.json` to add (with what they depend on); their outputs become selected. */
+  add?: string[];
+}
+
 /**
- * The seam where the main thread adapts the computed plan to the user's notes (add, drop or
- * reorder tasks, tighten criteria) before the run starts. Today it returns the plan as computed.
+ * The run's plan with a change applied. Code builds it from the workflow files, so a change
+ * can never alter an output, its unit, range or whether it is required, and cannot drop a
+ * task that produces a selected output. It throws on a change it cannot apply: a task that is
+ * not in `tasks.json`, already in the plan, or without outputs to select it by, and done-when
+ * lines for a task not in the plan.
  */
-export async function adaptPlan(
-  plan: WorkflowPlan,
-  _context: { notes?: string; files: WorkflowFiles },
-): Promise<WorkflowPlan> {
-  return plan;
+export function adaptPlan(
+  files: WorkflowFiles,
+  selected: readonly string[] | undefined,
+  change: PlanChange,
+): WorkflowPlan {
+  const byTask = new Map(files.tasks.map((t) => [t.id, t]));
+  const inPlan = new Set(computePlan(files, selected).tasks.map((t) => t.id));
+  const added = (change.add ?? []).flatMap((id) => {
+    const task = byTask.get(id);
+    if (!task) throw new WorkflowParseError("tasks.json", `the change adds "${id}", not a task`);
+    if (inPlan.has(id)) {
+      throw new WorkflowParseError("tasks.json", `the change adds "${id}", already in the plan`);
+    }
+    if (!task.outputs.length) {
+      throw new WorkflowParseError("tasks.json", `the change adds "${id}", which has no outputs`);
+    }
+    return task.outputs;
+  });
+  const base = computePlan(files, selected && [...selected, ...added]);
+  const known = new Set(base.tasks.map((t) => t.id));
+  for (const id of Object.keys(change.doneWhen ?? {})) {
+    if (!known.has(id)) throw new WorkflowParseError("tasks.json", `"${id}" is not in the plan`);
+  }
+  return workflowPlanSchema.parse({
+    tasks: base.tasks.map((t) => {
+      const doneWhen = [...(t.doneWhen ?? []), ...(change.doneWhen?.[t.id] ?? [])];
+      const { doneWhen: _, ...rest } = t;
+      return { ...rest, ...(doneWhen.length && { doneWhen }) };
+    }),
+  });
 }

@@ -41,15 +41,39 @@ function taskBrief(task: PlanTask): string {
   return [instructions, done].filter(Boolean).join("\n\n");
 }
 
-export function workerPrompt(task: PlanTask): string {
+/** What a thread's first message carries besides its task: the run's notes, then the main thread's. */
+export interface Notes {
+  /** The user's notes for the run, verbatim. */
+  user?: string;
+  /** The main thread's notes in force when the thread starts. */
+  main?: string;
+}
+
+const PRECEDENCE =
+  "The task's done-when criteria and required outputs come first; notes never outrank them.";
+
+function notesBlock({ user, main }: Notes, role: "worker" | "check"): string {
+  const parts = [];
+  if (user) parts.push(`The user's notes for this run:\n${user}`);
+  if (main) {
+    parts.push(
+      role === "worker"
+        ? `Notes from the main thread, from the tasks before this one. Build on what they settle; if you find one is wrong, say so.\n${main}`
+        : `Context from the main thread, from the tasks before this one. Your verdict rests on your own re-derivation of the result, not on these notes.\n${main}`,
+    );
+  }
+  return parts.length ? `\n${PRECEDENCE}\n${parts.join("\n")}` : "";
+}
+
+export function workerPrompt(task: PlanTask, notes: Notes): string {
   const needs = task.dependsOn.length
     ? `It builds on ${task.dependsOn.join(", ")}; their files are in /outputs/<task id>/.`
     : "It builds on no other task.";
-  return `Your task is "${task.id}". ${needs}\n${taskBrief(task)}\n${outputList(task)}`;
+  return `Your task is "${task.id}". ${needs}\n${taskBrief(task)}\n${outputList(task)}${notesBlock(notes, "worker")}`;
 }
 
-export function checkPrompt(task: PlanTask): string {
-  return `Check task "${task.id}". The worker's files are in /outputs/${task.id}/.\n${taskBrief(task)}\n${outputList(task)}`;
+export function checkPrompt(task: PlanTask, notes: Notes): string {
+  return `Check task "${task.id}". The worker's files are in /outputs/${task.id}/.\n${taskBrief(task)}\n${outputList(task)}${notesBlock(notes, "check")}`;
 }
 
 function outputList(task: PlanTask): string {

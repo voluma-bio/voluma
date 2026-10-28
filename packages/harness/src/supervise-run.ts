@@ -6,14 +6,16 @@
  * first run are the same call; the recorder is built on the stored events by the host.
  */
 import type { Folded } from "@voluma/contracts/fold";
-import type { Judgment } from "./judgment";
+import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
 import type { RunLayout } from "./layout";
+import type { MainThread } from "./main-thread";
 import type { Evidence } from "./ports/evidence";
 import type { Files } from "./ports/files";
 import type { History } from "./ports/history";
 import type { Sandbox } from "./ports/sandbox";
 import type { Segmenter } from "./ports/segmenter";
 import type { PayloadOf, Recorder } from "./recorder";
+import { runStartPlan } from "./run-start";
 import { type RoleSpec, supervisor, supervisorThreadId } from "./supervisor";
 import { type PlanTask, taskRuntime } from "./task-runtime";
 import { threads } from "./threads";
@@ -31,7 +33,13 @@ export type { PlanTask };
 
 export interface SuperviseRunOptions {
   runId: string;
+  /** The plan computed from the user's selection; the main thread may adapt it (`run-start.ts`). */
   plan: readonly PlanTask[];
+  /** The workflow's tasks and outputs, which the run-start change is built from. */
+  workflow: WorkflowFiles;
+  selectedOutputs?: readonly string[];
+  /** The user's notes for the run. */
+  notes?: string;
   /** The workflow packages the run starts from, as recorded on the root's first event. */
   workflows?: PayloadOf<"thread.started">["workflows"];
   layout: RunLayout;
@@ -44,14 +52,34 @@ export interface SuperviseRunOptions {
   segmenter?: Segmenter;
   /** The run's bucket, read and written host-side by `view_image` and `segment_sam`. */
   files: Files;
-  judgment: Judgment;
-  worker(task: PlanTask): RunRole;
-  check(task: PlanTask): RunRole;
+  main: MainThread;
+  /** `notes`: the main thread's notes in force when the thread starts. */
+  worker(task: PlanTask, notes: string | undefined): RunRole;
+  check(task: PlanTask, notes: string | undefined): RunRole;
   signal: AbortSignal;
 }
 
-export function superviseRun(options: SuperviseRunOptions): Promise<Folded> {
-  const { runId, plan, layout, recorder, signal } = options;
+export async function superviseRun(options: SuperviseRunOptions): Promise<Folded> {
+  const { runId, layout, recorder, signal } = options;
+  const rootThreadId = supervisorThreadId(runId);
+  // Not a derived id: each invocation of the root is a thread start of its own.
+  recorder.emit(rootThreadId, "thread.started", {
+    parentThreadId: null,
+    kind: "supervisor",
+    ...(options.workflows && { workflows: options.workflows }),
+  });
+  const plan = await runStartPlan({
+    runId,
+    rootThreadId,
+    recorder,
+    main: options.main,
+    workflow: options.workflow,
+    computed: options.plan,
+    selectedOutputs: options.selectedOutputs,
+    notes: options.notes,
+    timeoutMs: 120_000,
+    signal,
+  });
   const pool = threads(
     { runId, recorder, history: options.history, sandbox: options.sandbox },
     signal,
@@ -60,7 +88,7 @@ export function superviseRun(options: SuperviseRunOptions): Promise<Folded> {
     recorder,
     evidence: options.evidence,
     runId,
-    rootThreadId: supervisorThreadId(runId),
+    rootThreadId,
     plan,
     stopThread: (id) => pool.abort(id),
   });
@@ -81,16 +109,16 @@ export function superviseRun(options: SuperviseRunOptions): Promise<Folded> {
     runtime,
     recorder,
     threads: pool,
-    judgment: options.judgment,
-    worker: (id) => {
-      const role = options.worker(task(id));
+    main: options.main,
+    worker: (id, notes) => {
+      const role = options.worker(task(id), notes);
       return { ...role, tools: tools(role.tools) };
     },
-    check: (id) => {
-      const role = options.check(task(id));
+    check: (id, notes) => {
+      const role = options.check(task(id), notes);
       return { ...role, tools: tools(role.tools) };
     },
     signal,
   });
-  return sup.run(options.workflows);
+  return sup.run();
 }

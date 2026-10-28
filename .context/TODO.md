@@ -21,5 +21,5 @@ Later:
 - Harness: the R2 `Evidence` adapter (copy from the run's mounts to `evidenceKey(runId, sha256)`); only a local one (`adapters/local/evidence.ts`, a directory as the bucket) exists. Lane E wires it.
 - Harness: the supervisor's step derives its thread records from the whole log on each change of the log; fine for hundreds of events, revisit with the first long run.
 - Harness: a check thread that ends without a verdict (or was interrupted by a crash) is a judgment point after its result; the supervisor does not wake it the way it wakes a stopped worker. Add that if real checks forget the verdict.
-- Harness: a judgment point is asked one at a time, outside the section but inside the supervisor's loop, so other threads' ends wait while an arm decides (up to `judgmentTimeoutMs`).
+- Harness: a wake is asked one at a time, outside the section but inside the supervisor's loop, so other threads' ends wait while the main thread answers (up to `wakeTimeoutMs`).
 - Harness: `/inputs` is a writable local copy. Commands run as root, and the sandbox grants no capability to remount or `chattr` it; a non-root user cannot write the FUSE mounts. Revisit if a model edits inputs: mount the staged copy read-only through the image or a mount option.
