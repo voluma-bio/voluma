@@ -295,6 +295,7 @@ export async function runClaim(
     const report = reportFor(stopped, error);
     abort.abort();
     if (stopped === undefined) await closeSandbox(CLOSE_BUDGET_MS.ended);
+    await live?.flush();
     await events?.flush();
     await lease?.end(report !== undefined);
     if (report) {

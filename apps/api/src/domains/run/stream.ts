@@ -39,7 +39,9 @@ function latch() {
 
 const POLL_MS = 5_000;
 const KEEPALIVE_MS = 15_000;
+// A stream that can't keep up drops its oldest frames past either bound.
 const LIVE_QUEUE_MAX = 2_000;
+const LIVE_QUEUE_MAX_CHARS = 1024 * 1024;
 
 export function streamRoutes({ eventLog, notifier, shutdown }: RunDeps) {
   const app = new Hono<UserEnv>();
@@ -65,9 +67,14 @@ export function streamRoutes({ eventLog, notifier, shutdown }: RunDeps) {
       // Live frames wait here for the loop, so only the loop writes to the response. A
       // stream that can't keep up loses the oldest; the browser's offset guard copes.
       let live: LiveFrame[] = [];
+      let liveChars = 0;
+      const sizeOf = (f: LiveFrame) => f.text.length;
       const onLive = (frame: LiveFrame) => {
-        if (live.length >= LIVE_QUEUE_MAX) live.shift();
         live.push(frame);
+        liveChars += sizeOf(frame);
+        while (live.length > LIVE_QUEUE_MAX || liveChars > LIVE_QUEUE_MAX_CHARS) {
+          liveChars -= sizeOf(live.shift() as LiveFrame);
+        }
         wake.resolve();
       };
       const nap = async () => {
@@ -112,6 +119,7 @@ export function streamRoutes({ eventLog, notifier, shutdown }: RunDeps) {
           // No `id:`: a live frame must not move the browser's `Last-Event-ID` off the durable `seq`.
           const frames = live;
           live = [];
+          liveChars = 0;
           for (const frame of frames) {
             await stream.writeSSE({ event: LIVE_EVENT, data: JSON.stringify(frame) });
           }
