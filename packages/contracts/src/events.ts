@@ -267,6 +267,32 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     }),
   );
 
+  /**
+   * One wake of the run's main thread: what it was told (`point`, of `taskId`), what it
+   * answered, and which model. Written before the runtime applies the answer, so a resumed
+   * run applies this and does not ask again. `note` is the whole notes block in force from
+   * here on (absent: unchanged); the supervisor passes it into later workers' and checkers'
+   * prompts. `decision` is present at a judgment point (`check-disagreed`, `thread-failed`),
+   * and a `judgment` event records what was applied. `error`: the model did not answer.
+   * `fold` ignores it.
+   */
+  const wake = event(
+    "wake",
+    z.object({
+      point: z.object({
+        kind: z.enum(["task-checked", "check-disagreed", "thread-failed"]),
+        taskId: taskIdSchema,
+        input: z.unknown(),
+      }),
+      model: nonEmpty,
+      note: z.string().optional(),
+      decision: z
+        .object({ action: z.enum(["accept", "redo", "fail"]), reason: nonEmpty })
+        .optional(),
+      error: z.string().optional(),
+    }),
+  );
+
   return z.discriminatedUnion("type", [
     threadStarted,
     threadEnded,
@@ -280,6 +306,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     checkpoint,
     output,
     judgment,
+    wake,
   ]);
 };
 
