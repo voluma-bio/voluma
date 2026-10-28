@@ -58,7 +58,6 @@ const AGENT: By = { kind: "agent" };
 
 /** Who a call writes as, and the attempt it writes to. */
 interface Target {
-  kind: "worker" | "check";
   attempt(): Promise<string>;
 }
 
@@ -152,7 +151,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
       if (t?.status !== "under-review" || (t.threads.check && t.threads.check !== c.threadId)) {
         throw new Refusal(`${taskId} is no longer under review; stop here.`);
       }
-      return { kind: "check", attempt: async () => t.attemptId };
+      return { attempt: async () => t.attemptId };
     }
     if (c.kind !== "worker") throw new Refusal(`Only a worker or a check thread ${what}.`);
     if (verdict) throw new Refusal("Only a check thread sets a verdict.");
@@ -170,7 +169,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
       );
     }
     if (t && status !== "stale" && status !== "failed") {
-      return { kind: "worker", attempt: async () => t.attemptId };
+      return { attempt: async () => t.attemptId };
     }
     const waiting = known(taskId).dependsOn.filter((d) => !isSatisfied(taskOf(d)));
     if (waiting.length > 0) {
@@ -178,7 +177,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
         `${taskId} builds on ${waiting.join(", ")}, which has no usable result yet.`,
       );
     }
-    return { kind: "worker", attempt: () => openAttempt(c, taskId) };
+    return { attempt: () => openAttempt(c, taskId) };
   }
 
   /**
@@ -323,6 +322,11 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     reportOutput: (c: Caller, input: ReportOutputInput) => {
       const { taskId, outputId, title, output } = input;
       const target = () => {
+        if (c.kind === "check") {
+          throw new Refusal(
+            "A check thread does not report outputs: put the values you re-derived in your checkpoint's text.",
+          );
+        }
         const t = writeTarget(c, taskId, { redo: false, verdict: false, what: "reports outputs" });
         const declared = known(taskId).outputs.find((o) => o.id === outputId);
         const problem =
@@ -340,23 +344,6 @@ export function taskRuntime(options: TaskRuntimeOptions) {
       return write(target, prepare, async (t, prepared) => {
         const attemptId = await t.attempt();
         const id = `${c.threadId}:${c.toolCallId}`;
-        const first =
-          t.kind === "check" &&
-          !recorder.events().some((e) => e.type === "output" && e.threadId === c.threadId);
-        if (first) {
-          await recorder.append(
-            c.threadId,
-            "revision.started",
-            { reason: "fix", taskId },
-            `${id}:revision`,
-          );
-          await staleDependents(
-            c.threadId,
-            id,
-            taskId,
-            `${taskId} was changed by the second agent, so this result may no longer hold.`,
-          );
-        }
         await recorder.append(
           c.threadId,
           "output",

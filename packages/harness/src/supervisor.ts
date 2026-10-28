@@ -16,7 +16,8 @@
  *   stuck guard marks the task `to-check` (or, with no attempt at all, a judgment point);
  * - `done` or `to-check` without a check thread yet (and not left by a judgment): check-start,
  *   then start the check thread; once its check passed, the task has a boundary wake;
- * - `under-review`: a check that failed is a judgment point; otherwise its result is written,
+ * - `under-review`: a check that failed is a judgment point; one that ended without a verdict is
+ *   woken once; otherwise its result is written,
  *   and a verdict that is not `passed` is a judgment point (`check-disagreed`).
  * A wake (a boundary or a judgment point) is asked of the main thread outside the section,
  * then recorded as a `wake` event with the id `<thread>@<starts>:wake` (the notes it wrote, and at a
@@ -360,6 +361,13 @@ export function supervisor(options: SupervisorOptions) {
             { kind: "thread-failed", taskId, error, report: report(taskId) },
             c.id,
           );
+        }
+        // A check that stopped without a verdict (it wrote "Passed" in the text only) is
+        // woken once, as a worker is, before its task is left with no verdict.
+        if (t.checker?.verdict === undefined && c.wakes < 1) {
+          const text = `You stopped before giving a verdict. Write a checkpoint on ${taskId} with verdict "passed" if you agree or "needs-review" if you do not or cannot tell, and one plain line of why.`;
+          wake(c, { text, sender: { kind: "runtime" } }, t.attemptId);
+          return "acted";
         }
         return finishCheck(t, c);
       }

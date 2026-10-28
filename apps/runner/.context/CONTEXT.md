@@ -15,7 +15,7 @@ who ends it:
    group (Ctrl-C does); `kill <pid of pnpm>` alone leaves the runner running.
 3. **A resume.** `create` terminates live sandboxes tagged with the same `{run, name}`.
 4. **Modal ends it.** After 300 s with no command running (`VOLUMA_SANDBOX_IDLE_SECONDS` in
-   `.env`, at least 30) or at a hard lifetime of 3600 s (`VOLUMA_SANDBOX_LIFETIME_SECONDS`).
+   `.env`, at least 30) or at a hard lifetime of 14400 s (`VOLUMA_SANDBOX_LIFETIME_SECONDS`).
    Before each call the session asks Modal whether a sandbox it handed out earlier still
    runs (`alive()`, 30-40 ms) and replaces a dead one (`stopped`, then `starting`, `ready`
    events). Modal also refuses commands for at least 15 s while it shuts a sandbox down,
@@ -65,3 +65,41 @@ in five on 2026-10-28 with a working key), retried up to 4 attempts in all, 1 s,
 when the call failed before streaming any content. Any other error ends the thread as before.
 Cost is Pi's per-reply price, summed per claim; the log prints it
 when a claim reports (`model cost this claim`), and the API stores it as `runs.model_cost_usd`.
+
+# Runner: what `/outputs` and `/scratch` support
+
+Both are R2 bucket mounts (`modal-sandbox.ts`), so a file is written whole, once. Rename
+(`sed -i`, editors), append, in-place edits and memory-mapped writes
+(`np.lib.format.open_memmap(mode="w+")`) fail there: the model builds a file under `/tmp`
+(local disk, lost on a sandbox restart) and `cp`s it in. The worker and check prompts
+(`prompts.ts`) and the bash tool description (`layout.ts`) say so.
+
+**`/scratch` stays an R2 mount**, though it is only intermediate files. Three things read it
+from the host, not from the sandbox: `segment_sam` reads its volume and writes its labels
+there (`RunLayout.keyOf`), a long bash output is stored there for the model to open
+(`toolOutputPath`), and a checkpoint's evidence may be a `scratch` file, which the host copies
+into the run's evidence (`r2-evidence.ts`). The restart note also promises it survives a restart.
+A local `/scratch` would break all three.
+
+# Runner: who gets which task tools
+
+A worker has `checklist`, `checkpoint` and `report_output`; a check thread only `checkpoint`
+(`supervise-run.ts`). A check re-derives values to compare and gives them in its checkpoint's
+text with its verdict (the review shows the checker's verdict and text); it never replaces the
+worker's outputs, so the runtime refuses its `report_output` and never opens a `fix` revision.
+`fix` stays in the event schema and `fold` for now (removing it is a contract change).
+`checkpoint`'s arguments go through `prepareCheckpoint` before validation, so the habits of
+models (a top-level `title`, `toCheck` as a string or with `text`, a nested `{root, path}`)
+don't cost a turn.
+
+# Runner: sandbox memory
+
+One sandbox serves the whole run (name `main`), so tasks that run in parallel share its memory
+and 2 CPUs. A sandbox has 8192 MiB (`run.ts`). `classic_segment` measured 2.8-3.1 GB anonymous memory and
+about 4.0-4.25 GB RSS with the memory-mapped scan, so 4096 MiB risked an OOM kill in a
+full run.
+Two concurrent heavy steps fit: their anonymous memory adds up (about 6 GB) and the mapped scan
+file is shared page cache, not counted twice. Whether a given restart was an out-of-memory kill
+is not known: `alive()` only says the sandbox ended (the event reads "ended by the provider"), and
+Modal's exit code is not logged. In the 2026-10-28 local run the sandbox ended at 1 h 0 min (the
+lifetime) and once more 23 min into the replacement, with no reason recorded. See TODO.md.

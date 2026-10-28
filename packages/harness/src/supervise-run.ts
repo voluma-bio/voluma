@@ -98,9 +98,9 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
     if (!found) throw new Error(`${id} is not a task of the plan`);
     return found;
   };
-  const tools = (granted: readonly string[] = []) => [
+  const tools = (kind: "worker" | "check", granted: readonly string[] = []) => [
     bashTool(layout),
-    ...taskTools(runtime),
+    ...taskTools(runtime, kind),
     threadMessageTool((from, to, text) => sup.message(from, to, text)),
     ...buildTools(granted, { layout, files: options.files, segmenter: options.segmenter }),
   ];
@@ -113,11 +113,11 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
     main: options.main,
     worker: (id, notes) => {
       const role = options.worker(task(id), notes);
-      return { ...role, tools: tools(role.tools) };
+      return { ...role, tools: tools("worker", role.tools) };
     },
     check: (id, notes) => {
       const role = options.check(task(id), notes);
-      return { ...role, tools: tools(role.tools) };
+      return { ...role, tools: tools("check", role.tools) };
     },
     signal,
   });
