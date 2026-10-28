@@ -2,24 +2,26 @@
  * A run's sandbox, created on the first tool call that needs it and destroyed at the
  * end. Concurrent first calls share one creation; a failed creation is forgotten, so
  * the next call tries again. A sandbox the provider ended (idle timeout, lifetime) is
- * replaced on the next call: `get` checks `alive()`, then emits `stopped` and creates a
- * new one. A sandbox is trusted until the provider's idle timeout could have passed since
- * the session last handed it out, so a busy run pays no `alive()` round trip. State
- * changes go to `onState` with the thread whose call caused them (the runner writes them
- * as `sandbox` events).
+ * replaced on the next call: `get` asks `alive()` about every sandbox it has handed out
+ * before (a round trip of 30-40 ms), emits `stopped` and creates a new one. A sandbox
+ * `create` just returned is trusted. The provider can also refuse a command while it
+ * shuts a sandbox down, with `alive()` still true; the sandbox `get` returns then replaces
+ * the sandbox and runs the command that never started once more. State changes go to
+ * `onState` with the thread whose call caused them (the runner writes them as `sandbox`
+ * events).
  */
-import type { Sandbox } from "./ports/sandbox";
+import { type Sandbox, SandboxEndedError } from "./ports/sandbox";
 
 export type SandboxState = "starting" | "ready" | "stopped" | "failed";
 
 export interface SandboxSession {
   /**
-   * `threadId` is the calling thread. `restarted` is true when this thread held an
-   * earlier sandbox that has since been replaced: its files outside the mounts are gone,
-   * so tell the model (`RunLayout.restartNote`). It is true once per replacement per
-   * thread, and false on a thread's first call.
+   * `threadId` is the calling thread. When this thread held an earlier sandbox that has
+   * since been replaced, its files outside the mounts are gone: the returned sandbox then
+   * puts the restart note at the head of its next `exec` output, once, so the model reads
+   * it. A thread's first call gets no note.
    */
-  get(threadId: string): Promise<{ sandbox: Sandbox; restarted: boolean }>;
+  get(threadId: string): Promise<Sandbox>;
   /** Destroys the sandbox if one was created; later `get` calls throw. */
   close(): Promise<void>;
 }
@@ -35,15 +37,14 @@ interface Entry {
 export function sandboxSession(
   create: () => Promise<Sandbox>,
   onState: (threadId: string, state: SandboxState, detail?: string) => void,
-  /** The provider's idle timeout; the session skips `alive()` for this long after a hand-out. */
-  idleSeconds: number,
+  /** `RunLayout.restartNote`. */
+  restartNote: string,
 ): SandboxSession {
   // The one slot every creation goes through, so `close` sees a creation from the moment
   // it starts.
   let current: Entry | undefined;
   let closed = false;
   let generations = 0;
-  let lastHandedOut = 0;
   // The generation of the sandbox each thread last got.
   const lastSeen = new Map<string, number>();
 
@@ -73,34 +74,78 @@ export function sandboxSession(
     if (closed) throw new Error("the sandbox session is closed");
   };
 
+  // Callers that saw the same dead sandbox: the first replaces it in this synchronous
+  // step, the rest find the replacement. The replacement is trusted (just created), so a
+  // call replaces at most once.
+  const replace = async (dead: Entry, threadId: string): Promise<Entry> => {
+    assertOpen();
+    if (current === dead) {
+      current = start(threadId);
+      onState(threadId, "stopped", "ended by the provider");
+      await (await dead.sandbox).destroy();
+    }
+    current ??= start(threadId);
+    const entry = current;
+    await entry.sandbox;
+    assertOpen();
+    return entry;
+  };
+
   return {
     async get(threadId) {
       assertOpen();
       current ??= start(threadId);
       let entry = current;
-      let sandbox = await entry.sandbox;
+      const sandbox = await entry.sandbox;
       assertOpen();
-      const quiet = Date.now() - lastHandedOut >= idleSeconds * 1000;
-      if (entry.handedOut && quiet && !(await sandbox.alive())) {
-        assertOpen();
-        // Callers that saw the same dead sandbox: the first replaces it in this
-        // synchronous step, the rest find the replacement. The replacement is trusted
-        // (it was just created), so a get replaces at most once.
-        if (current === entry) {
-          current = start(threadId);
-          onState(threadId, "stopped", "ended by the provider");
-          await sandbox.destroy();
-        }
-        current ??= start(threadId);
-        entry = current;
-        sandbox = await entry.sandbox;
-        assertOpen();
-      }
+      if (entry.handedOut && !(await sandbox.alive())) entry = await replace(entry, threadId);
       entry.handedOut = true;
-      lastHandedOut = Date.now();
       const previous = lastSeen.get(threadId);
       lastSeen.set(threadId, entry.generation);
-      return { sandbox, restarted: previous !== undefined && previous !== entry.generation };
+
+      let held = entry;
+      let needsNote = previous !== undefined && previous !== entry.generation;
+      let noted = false;
+      // The provider refused to start the command: replace once, and the caller runs it again.
+      const swap = async () => {
+        held = await replace(held, threadId);
+        held.handedOut = true;
+        lastSeen.set(threadId, held.generation);
+        needsNote = previous !== undefined && !noted;
+      };
+      return {
+        alive: async () => (await held.sandbox).alive(),
+        destroy: async () => (await held.sandbox).destroy(),
+        async *exec(request, signal) {
+          for (let retried = false; ; retried = true) {
+            if (needsNote) {
+              needsNote = false;
+              noted = true;
+              yield { type: "stderr", data: `${restartNote}\n` };
+            }
+            let started = false;
+            try {
+              for await (const chunk of (await held.sandbox).exec(request, signal)) {
+                started = true;
+                yield chunk;
+              }
+              return;
+            } catch (error) {
+              if (started || retried || !(error instanceof SandboxEndedError)) throw error;
+              await swap();
+            }
+          }
+        },
+        async writeFile(path, bytes, signal) {
+          try {
+            await (await held.sandbox).writeFile(path, bytes, signal);
+          } catch (error) {
+            if (!(error instanceof SandboxEndedError)) throw error;
+            await swap();
+            await (await held.sandbox).writeFile(path, bytes, signal);
+          }
+        },
+      };
     },
     async close() {
       closed = true;
