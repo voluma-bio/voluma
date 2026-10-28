@@ -156,7 +156,7 @@ export const runSchema = z.object({
   id: runIdSchema,
   labId: z.string(),
   startedBy: userIdSchema,
-  /** The pins the server resolved from the request's `workflowId`, as in `r2.ts`'s `workflowPrefix`. */
+  /** The pins the server resolved from the request's `workflowId`, as in `r2.ts`'s `workflowSnapshotPrefix`. */
   workflows: z.array(workflowPinSchema).min(1),
   input: inputSchema,
   /**

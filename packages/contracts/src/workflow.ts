@@ -36,7 +36,7 @@ export const workflowPinSchema = z.object({
     .string()
     .regex(/^[0-9a-f]{40}$/)
     .optional(),
-  /** The package's root inside the repo when it is not the repo root (e.g. `workflows/mouse-oa`): lowercase segments, as in `repo`. */
+  /** The package's root inside the repo when it is not the repo root (e.g. `workflows/workflow-mouse-oa`): lowercase segments, as in `repo`. */
   path: z
     .string()
     .refine((p) => p.split("/").every((s) => part.safeParse(s).success), {
@@ -45,6 +45,12 @@ export const workflowPinSchema = z.object({
     .optional(),
 });
 export type WorkflowPin = z.infer<typeof workflowPinSchema>;
+
+/** A pin as the runner records it in a run's first event: the commit is known and required. */
+export const recordedPinSchema = workflowPinSchema.extend({
+  commit: z.string().regex(/^[0-9a-f]{40}$/),
+});
+export type RecordedPin = z.infer<typeof recordedPinSchema>;
 
 const nonEmpty = z.string().min(1);
 const declaredBase = { id: segmentSchema, required: z.boolean() };
