@@ -88,7 +88,7 @@
       "cortical-thickness-100-um-below-the-growth-plate",
       "cortical-thickness-1000-um-below-the-growth-plate"
     ],
-    "instructions": "Measure the cortical thickness 100 um and 1000 um below the growth plate. Use the cortex mask and distal growth-plate face that metaphyseal-roi wrote (meta/cortex.npy, meta/growth-plate-distal-face.npy); do not trace the face again. Follow references/oa-protocol.md and the orient-joint skill; the anatomy is in references/anatomy.md.",
+    "instructions": "Measure the cortical thickness 100 um and 1000 um below the growth plate. Use the cortex mask and distal growth-plate face that metaphyseal-roi wrote (/outputs/metaphyseal-roi/meta/cortex.npy and /outputs/metaphyseal-roi/meta/growth-plate-distal-face.npy); do not trace the face again. Follow references/oa-protocol.md and the orient-joint skill; the anatomy is in references/anatomy.md.",
     "doneWhen": ["Both levels are measured on the cortex mask and distal face of metaphyseal-roi."]
   },
   {

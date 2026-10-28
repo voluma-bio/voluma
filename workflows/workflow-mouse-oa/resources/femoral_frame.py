@@ -111,6 +111,7 @@ def main():
     if far:
         sidecar.fail(f'landmarks {far} are more than {MAX_OFF_BONE_MM} mm from femur bone: snap them '
                      'to the bone surface and look at the render again')
+    checks['dfl_over_dfw'] = dfl / dfw
     if dfl < MIN_LENGTH_OVER_WIDTH * dfw:
         sidecar.fail(f'DFL {dfl:.3f} mm is under {MIN_LENGTH_OVER_WIDTH} of DFW {dfw:.3f} mm: a and b were probably placed on an '
                      'end-on view of the joint face, so a-b runs across the notch. Render a view along the shaft '

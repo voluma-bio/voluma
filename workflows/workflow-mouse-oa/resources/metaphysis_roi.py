@@ -15,8 +15,9 @@ depth at which the bone fraction of the outer layers first drops below one half 
 reported as cortex_estimate_mm), or --cortex-mm. The cortex mask for Ct.Th is the bone within `search factor` times
 that depth of the outer edge, over 1.3 mm of shaft below the plate: it can include trabeculae that join the cortex.
 
-The script stops when the traced distal face lies at or above the proximal face (`--proximal-face`, from iioc.py) anywhere:
-the band between them cannot be thinner than nothing.
+The script stops when the distal trace does not cover the V range of the proximal one, or when the traced distal face lies
+at or above the proximal face (`--proximal-face`, from iioc.py) inside the tibia, where both come from traced points: the
+band between them cannot be thinner than nothing.
 
 Writes roi3-tissue.npy, cortex.npy, growth-plate-distal-face.npy (2D W index per V,U), roi3.json (the
 parameters used and the cortex estimate), a QC image. It writes regions only: TV, BV and BV/TV of ROI-3 (deck #16-18) and Tb.N/Th/Sp,
@@ -43,12 +44,43 @@ if CORE is None:
 sys.path[:0] = [str(HERE), str(CORE)]
 import sidecar
 from envelope import close_and_fill
-from iioc import load_annotations, traced_surface
+from iioc import load_annotations, need, traced_surface
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 CORTEX_SPAN_MM = 1.3  # shaft length below the plate the cortex mask covers: Ct.Th is asked at up to 1 mm
+
+
+def trace_extent(spec, key, shape):
+    """(valid, first V, last V): where a trace holds data. Beyond it the face is the nearest trace held constant."""
+    valid = traced_surface(spec, key, shape)[1]
+    levels = sorted(int(k) for k in spec['slices'])
+    return valid, levels[0], levels[-1]
+
+
+def check_below_proximal(ann, gd, prox, tib, shape, vox):
+    """Stop when the distal face is not below the proximal one, comparing only where both come from traced points.
+
+    Outside a trace (past its last section or the ends of its curves) a face is extrapolated and can cross the other
+    one without any traced point being wrong, so the agent is told which sections to add, not to lower the points.
+    """
+    pv, plo, phi = trace_extent(need(ann, 'growth_plate_curves', 'trace the proximal face of the growth plate'),
+                                'growth_plate_curves', shape)
+    dv, dlo, dhi = trace_extent(ann['growth_plate_distal_curves'], 'growth_plate_distal_curves', shape)
+    if dlo > plo or dhi < phi:
+        sidecar.fail(f'the distal face is traced on sections V={dlo}..{dhi} but the proximal face on V={plo}..{phi}, so the distal '
+                     'face is not known over the whole proximal one: '
+                     + ' and '.join(f'trace the distal face on a section near V={v} too'
+                                    for v, miss in ((plo, dlo > plo), (phi, dhi < phi)) if miss))
+    footprint = ndi.binary_fill_holes(tib.any(axis=0))
+    vs = np.arange(gd.shape[0])[:, None]
+    bad = (gd <= prox) & pv & dv & footprint & (vs >= max(plo, dlo)) & (vs <= min(phi, dhi))
+    if bad.any():
+        vi, ui = np.nonzero(bad)
+        sidecar.fail(f'the traced distal face lies at or above the proximal face at {int(bad.sum())} traced (V, U) positions, '
+                     f'V={vi.min()}..{vi.max()}, U={ui.min()}..{ui.max()} (worst {float((prox - gd)[bad].max()) * vox * 1000:.0f} um): '
+                     'retrace the distal face lower, or the proximal face higher, on sections in that V range')
 
 
 def edge_distance(filled, w0, w1):
@@ -100,10 +132,7 @@ def main():
     prox = np.load(a.proximal_face)
     if prox.shape != gd.shape:
         sidecar.fail(f'--proximal-face is {prox.shape} but the distal face is {gd.shape}: pass the face of the same tibia frame')
-    above = int((gd <= prox).sum())
-    if above:
-        sidecar.fail(f'the traced distal face lies at or above the proximal face on {above} of {gd.size} (V, U) positions '
-                     f'(worst {float((prox - gd).max()) * vox * 1000:.0f} um): retrace it lower on those sections')
+    check_below_proximal(ann, gd, prox, tib, h.shape, vox)
     w = np.arange(h.shape[0])[:, None, None]
     rel = (w - gd[None]) * vox * 1000  # um below the distal face
     w0 = max(int(np.floor(gd.min())), 0)

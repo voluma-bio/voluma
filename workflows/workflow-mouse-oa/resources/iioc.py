@@ -102,7 +102,7 @@ def ray_length(roi, start, direction, step=0.05, max_lead=3.0):
     """Distance in voxels from `start` along the unit `direction` to where the ray leaves `roi` (nearest-voxel membership).
 
     `start` sits on a traced face, which can round to a voxel just outside the ROI: the ray first walks up to `max_lead`
-    voxels to enter it, and the length counts from `start` to the exit. A ray that never enters is a bad input.
+    voxels to enter it, and the length counts from `start` to the exit. Returns None for a ray that never enters.
     """
     def inside(t):
         p = np.rint(start + t * direction).astype(int)
@@ -112,8 +112,7 @@ def ray_length(roi, start, direction, step=0.05, max_lead=3.0):
     while not inside(t):
         t += step
         if t > max_lead:
-            sidecar.fail(f'the ray from {np.round(start, 1).tolist()} does not enter ROI-1 within {max_lead} voxels: '
-                         'check the traced face and the point it starts from')
+            return None
     while inside(t):
         t += step
     return t
@@ -221,6 +220,7 @@ def main():
         tilt_deg=float(np.degrees(np.arccos(-normal[0]))),
     )
     height_ids = []
+    warnings = []
 
     def height(key, u, deck, what):
         v = v_star
@@ -238,13 +238,20 @@ def main():
             u=int(u),
             points_uvw=[[int(u), v, float(top[v, u])], [int(u), v, float(gp[v, u])]],
         )
-        values[f'{key}-normal'] = sidecar.value(
-            ray_length(roi, np.array([gp[v, u], v, u]), normal) * vox,
-            'mm',
-            f'{what}, deck {deck} measured the other way: from the traced growth-plate face at U={u}, V={v}, along the normal '
-            'of the plane fitted to the face, to where it leaves ROI-1 (the top of the articular bone)',
-            kind='diagnostic',
-        )
+        length = ray_length(roi, np.array([gp[v, u], v, u]), normal)
+        if length is None:
+            msg = (f'{key}-normal omitted: the ray from the traced face at U={u}, V={v} along the plane normal does not enter '
+                   'ROI-1 within 3 voxels; check the traced face there')
+            print(msg, file=sys.stderr)
+            warnings.append(msg)
+        else:
+            values[f'{key}-normal'] = sidecar.value(
+                length * vox,
+                'mm',
+                f'{what}, deck {deck} measured the other way: from the traced growth-plate face at U={u}, V={v}, along the normal '
+                'of the plane fitted to the face, to where it leaves ROI-1 (the top of the articular bone)',
+                kind='diagnostic',
+            )
         height_ids.append(key)
 
     height('iioc-height', u_mid, '#7', 'IIOC height at the middle of the growth plate')
@@ -337,7 +344,7 @@ def main():
     sidecar.write(
         out / 'iioc-tissue-scan.npy', like=a.hu_json, inputs=[a.hu_json, a.frame, a.mask], params=params, script='iioc.py'
     )
-    qc = qc_images(out, h, roi, gp, plates, values, height_ids, v_star)
+    qc = qc_images(out, h, roi, gp, plates, values, height_ids, v_star, vox)
     sidecar.emit_values(
         out / 'iioc.json',
         values,
@@ -350,34 +357,56 @@ def main():
         articular_top=str(out / 'articular-top-surface.npy'),
         plate_runs=[str(out / f'{s}-plate-run.npy') for s in plates],
         removed_disconnected_voxels=removed,
+        warnings=warnings,
     )
 
 
-QC_SECTIONS = 4  # coronal sections in qc-coronal.jpg: a 2 x 2 sheet keeps each panel near 1000 px wide
-QC_MARGIN = 40  # voxels shown above and below the traced face, and either side of the ROI footprint
+QC_SECTIONS = 4  # coronal sections in qc-coronal.jpg, laid out 2 x 2
+QC_MARGIN = 40  # voxels shown around the ROI and the traced face
+QC_MAX_PX = sidecar.MAX_IMAGE_PX - 10  # a few pixels under the view_image limit: the saved size rounds up
+QC_PAD_PX = (70, 20, 45, 45, 80, 90)  # left, right, top, bottom, gap between columns, gap between rows
 
 
-def qc_images(out, h, roi, gp, plates, values, height_ids, v_star):
-    """qc-coronal.jpg: sections cropped to the traced face (about 2.5 px per voxel, so 0.1 mm is 26 px), not the whole stack.
+def qc_images(out, h, roi, gp, plates, values, height_ids, v_star, vox):
+    """qc-coronal.jpg: sections framed on ROI-1 and the traced face (ROI top minus a margin, down to the face plus a margin).
 
     A whole-stack panel is 1 px per voxel or less and hides a traced face that cuts 10 voxels below the growth plate.
+    Every panel has the same size in voxels and the figure is sized to the panels at the largest scale that fits
+    `QC_MAX_PX`; the title states that scale.
     """
     vr = np.flatnonzero(roi.any(axis=(0, 2)))
-    vs = [int(v) for v in np.linspace(vr[0], vr[-1], QC_SECTIONS + 2)[1:-1]]
-    fig, axs = plt.subplots(2, 2, figsize=(20, 14))
-    for v, ax in zip(vs, axs.flat):
+    boxes = []
+    for v in (int(v) for v in np.linspace(vr[0], vr[-1], QC_SECTIONS + 2)[1:-1]):
         us = np.flatnonzero(roi[:, v, :].any(axis=0))
         u0, u1 = max(us[0] - QC_MARGIN, 0), min(us[-1] + QC_MARGIN, h.shape[2])
-        w0, w1 = max(int(gp[v, u0:u1].min()) - QC_MARGIN, 0), min(int(gp[v, u0:u1].max()) + QC_MARGIN, h.shape[0])
-        ax.imshow(h[w0:w1, v, u0:u1], cmap='gray', vmin=0, vmax=5000, extent=(u0 - 0.5, u1 - 0.5, w1 - 0.5, w0 - 0.5))
+        top = np.flatnonzero(roi[:, v, :].any(axis=1))[0]
+        w0, w1 = max(top - QC_MARGIN, 0), min(int(gp[v, u0:u1].max()) + QC_MARGIN, h.shape[0])
+        boxes.append((v, u0, u1, w0, w1))
+    nu = max(b[2] - b[1] for b in boxes)
+    nw = max(b[4] - b[3] for b in boxes)
+    left, right, top_pad, bottom, gap_x, gap_y = QC_PAD_PX
+    scale = min(3.0, (QC_MAX_PX - left - right - gap_x) / (2 * nu), (QC_MAX_PX - top_pad - bottom - gap_y) / (2 * nw))
+    fig_w, fig_h = 2 * nu * scale + left + right + gap_x, 2 * nw * scale + top_pad + bottom + gap_y
+    fig = plt.figure(figsize=(fig_w / 100, fig_h / 100), dpi=100)
+    for i, (v, u0, u1, w0, w1) in enumerate(boxes):
+        r, c = divmod(i, 2)
+        ax = fig.add_axes((
+            (left + c * (nu * scale + gap_x)) / fig_w,
+            1 - (top_pad + (r + 1) * nw * scale + r * gap_y) / fig_h,
+            nu * scale / fig_w,
+            nw * scale / fig_h,
+        ))
+        lim_u, lim_w = u0 + nu, w0 + nw  # equal panel size; the frame grows toward the shaft, past the face
+        u1, w1 = min(lim_u, h.shape[2]), min(lim_w, h.shape[0])
+        ax.imshow(h[w0:w1, v, u0:u1], cmap='gray', vmin=0, vmax=5000, extent=(u0 - 0.5, u1 - 0.5, w1 - 0.5, w0 - 0.5), aspect='equal')
         ax.contour(np.arange(u0, u1), np.arange(w0, w1), roi[w0:w1, v, u0:u1], levels=[0.5], colors='lime', linewidths=0.6)
         ax.plot(np.arange(u0, u1), gp[v, u0:u1], color='orange', lw=0.6)
         for side, c in (('medial', 'magenta'), ('lateral', 'cyan')):
             if plates[side][w0:w1, v, u0:u1].any():
                 ax.contour(np.arange(u0, u1), np.arange(w0, w1), plates[side][w0:w1, v, u0:u1], levels=[0.5], colors=[c], linewidths=0.6)
-        ax.set(title=f'V={v}: green ROI-1, orange growth-plate face', xlabel='U', ylabel='W', xlim=(u0, u1), ylim=(w1, w0))
+        ax.set(title=f'V={v}: green ROI-1, orange growth-plate face', xlabel='U', ylabel='W', xlim=(u0 - 0.5, lim_u - 0.5), ylim=(lim_w - 0.5, w0 - 0.5))
         ax.grid(alpha=0.15)
-    fig.tight_layout()
+    fig.suptitle(f'{scale:.2f} px per voxel: 0.1 mm = {0.1 / vox * scale:.0f} px', y=1 - 8 / fig_h, fontsize=10)
     p1 = out / 'qc-coronal.jpg'
     sidecar.save_image(fig, p1)
     plt.close(fig)

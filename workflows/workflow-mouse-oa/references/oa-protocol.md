@@ -30,7 +30,7 @@ is the resampling effect, known and left in; state which grid a number was count
 |---|---|---|---|
 | 1 | Align the tibia: shaft axis, +W from joint toward shaft, crop around the joint end | `tibia_frame.py --hu hu.npy --hu-json hu.json --labels labels.npy --label 2 --out frame` | `frame/tibia-frame-qc.jpg`: coronal sections, joint at top, tibia outline following the bone. If the crop cuts bone or the bone looks tilted, set `--shaft-z`, `--epiphysis-z` or the crop flags |
 | 2 | Trace the growth-plate proximal face on coronal sections (annotations, section A) | none: you write `annotations.json` | coronal sections of `tibia-hu.npy` with a pixel grid, every 20 V indices over the epiphysis |
-| 3 | ROI-1 (IIOC), heights, width, plate columns | `iioc.py --hu-aligned frame/tibia-hu.npy --mask frame/tibia-mask.npy --frame frame/tibia-frame.json --hu-json hu.json --annotations annotations.json --out iioc` | `iioc/qc-coronal.jpg` (four sections cropped to the face, about 2 px per voxel: 0.1 mm is 20 px; green ROI-1 must stop at the orange face, include marrow, exclude femur and growth-plate band) and `qc-heights.jpg` (rulers along W, endpoints at the face and the articular top) |
+| 3 | ROI-1 (IIOC), heights, width, plate columns | `iioc.py --hu-aligned frame/tibia-hu.npy --mask frame/tibia-mask.npy --frame frame/tibia-frame.json --hu-json hu.json --annotations annotations.json --out iioc` | `iioc/qc-coronal.jpg` (four sections framed from ROI-1's top to just below the face, at the scale its title states; green ROI-1 must stop at the orange face, include marrow, exclude femur and growth-plate band) and `qc-heights.jpg` (rulers along W, endpoints at the face and the articular top) |
 | 4 | Trace the boundary under the subchondral plate (section B) | none | coronal sections with the ROI-1 outline |
 | 5 | ROI-2 (IIOC trabecular) | `tibial_trabecular.py --iioc-tissue iioc/iioc-tissue.npy --growth-plate-face iioc/growth-plate-proximal-face.npy --hu-aligned frame/tibia-hu.npy --annotations annotations.json --out trab` | `trab/qc-coronal.jpg`: cyan sits under the plate and inside the cortex |
 | 6 | Trace the growth-plate distal face (section C), then ROI-3 and the cortex under the plate | `metaphysis_roi.py --hu-aligned frame/tibia-hu.npy --mask frame/tibia-mask.npy --hu-json hu.json --annotations annotations.json --proximal-face iioc/growth-plate-proximal-face.npy --out meta` | `meta/qc-roi3.jpg`: ROI-3 sits in marrow below the plate and clear of the cortex outline |
@@ -53,12 +53,12 @@ python $M trabecular --roi meta/roi3-tissue.npy --hu frame/tibia-hu.npy --hu-jso
   --id Tb.Th=metaphyseal-tb-th --id Tb.Sp=metaphyseal-tb-sp --id Tb.Nd=metaphyseal-tb-nd --id Tb.Tm=metaphyseal-tb-tm --out vol-roi3
 ```
 
-Commands for step 8 (axis 0 is W, depth grows with W). The `cortical` task depends on `metaphyseal-roi` and reads its `meta/` files: the
+Commands for step 8 (axis 0 is W, depth grows with W). The `cortical` task depends on `metaphyseal-roi` and reads its files in `/outputs/metaphyseal-roi/meta/`: the
 distal face is traced once, in step 6, and `metaphysis_roi.py` is not run again for the cortex:
 
 ```
-morphometry.py cortical --cortex meta/cortex.npy --surface meta/growth-plate-distal-face.npy --axis 0 --direction 1 \
-  --depth-um 100 --slab-um 50 --name cortical-thickness-100-um-below-the-growth-plate --grid meta/cortex.json --out meta/ct
+morphometry.py cortical --cortex /outputs/metaphyseal-roi/meta/cortex.npy --surface /outputs/metaphyseal-roi/meta/growth-plate-distal-face.npy --axis 0 --direction 1 \
+  --depth-um 100 --slab-um 50 --name cortical-thickness-100-um-below-the-growth-plate --grid /outputs/metaphyseal-roi/meta/cortex.json --out ct
       # then --depth-um 1000 --name cortical-thickness-1000-um-below-the-growth-plate
 morphometry.py cortical --cortex iioc/medial-plate-run.npy --surface iioc/articular-top-surface.npy --axis 0 --direction 1 \
   --depth-um 175 --slab-um 350 --name subchondral-bone-plate-thickness-medial --grid iioc/medial-plate-run.json --out plate
@@ -131,7 +131,8 @@ first and last point of each curve limit ROI-2 laterally (where the curves reach
 the proximal one on the coronal sections of `tibia-hu.npy`. There is no thickness fallback: ROI-3 starts 50 um below this face, so
 a guessed band thickness inside the 100 to 200 um range seen on OA6-1RK moves ROI-3 BV/TV from 23% to 15% and is not a
 measurement. OA6-1RK has a thin perforated mineralized band, not a clean cartilage plate: trace the face you can see, and look
-at it drawn on the sections before you run.
+at it drawn on the sections before you run. Trace it over at least the V range of the proximal face (section A); the script
+refuses a shorter trace, and a face at or above the proximal one inside that range, and says which V range to fix.
 
 **D, `landmarks.json`** (scan grid, `[z, y, x]`): `a` midpoint of the upper line of the intercondylar groove, `b`
 intercondylar notch, `c` midpoint of the ridge on the lateral condyle, `d` vertex of the medial condyle (deck figure,
