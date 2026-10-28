@@ -18,15 +18,20 @@
  *   sha256. A `verdict` counts only from a check thread.
  * - The last step sends each output to its review block, with the id
  *   `${taskId}/${outputId}`: `measurement` to `measurements`, `score` to
- *   `scores`, `file` to `files`, and `structure`, `annotation` and `volume` to
+ *   `scores`, `file` to `files` (its `title` is its name), and `structure`, `annotation` and `volume` to
  *   the revision's `structures`, `annotations` and `volumes`. A reference to
  *   another output (operands, `structureIds`, `annotationIds`, a structure's
- *   `volume`, an annotation's `volumeId`) is resolved to that id, and dropped
- *   if the revision has no such output of the right kind (an annotation's
- *   `volumeId` then stays as given: it may be the scan's).
- * - The plan is the first `revision.started`'s. Per task, `missing` is the
- *   declared outputs the current attempt hasn't reported and `undeclared` the
- *   ids of the outputs the plan doesn't declare; `Structure.declared` follows.
+ *   `volume`, an annotation's `volume`) is resolved to that id by one resolver
+ *   keyed by block kind (`volume:labels` is not `volume:image`). One that
+ *   doesn't resolve in the revision is dropped: a structure's `voxels` becomes
+ *   null, an annotation's `volumeId` null, which means the scan (the API fills
+ *   its id). So no later attempt of another task can leave a dangling id.
+ * - The plan is the first `revision.started`'s. An output fills a declaration
+ *   of its kind (a volume, also of its volume kind). Per task, `undeclared` is
+ *   the ids of the outputs that fill none; `missing` the declared outputs the
+ *   current attempt hasn't reported, except structures, and `missingRequired`
+ *   the required ones among all of them. A declared structure not reported is
+ *   emitted as a `Structure` with status `missing`.
  * - `resultRevisionId` is the revision in which the task's latest event so far
  *   was appended.
  * - To check items (all open; accepting one is the review lane's, and a check
@@ -41,7 +46,8 @@
  *   also sets each asset's `stage` to the task title (here the task id).
  */
 import type { RunEvent, ThreadKind } from "./events";
-import type { EvidenceRef } from "./output";
+import type { TaskStatus } from "./ids";
+import type { EvidenceRef, Output } from "./output";
 import { evidenceKey } from "./r2";
 import type {
   Annotation,
@@ -52,9 +58,24 @@ import type {
   Structure,
   Volume,
 } from "./review";
-import type { DeclaredOutput, OutputKind, TaskStatus } from "./workflow";
+import type { DeclaredOutput } from "./workflow";
 
 type OutputEvent = Extract<RunEvent, { type: "output" }>;
+
+/** The block an output fills, for resolving references; a `volume` is told apart by its own kind. */
+type RefKind = "measurement" | "structure" | "annotation" | "volume:image" | "volume:labels";
+
+const refKind = (o: Output): RefKind | undefined =>
+  o.kind === "volume"
+    ? `volume:${o.volume.kind}`
+    : o.kind === "score" || o.kind === "file"
+      ? undefined
+      : o.kind;
+
+/** Whether a reported output fills a declaration: the same kind, and for a volume the same volume kind. */
+const fills = (d: DeclaredOutput, o: Output) =>
+  d.kind === o.kind &&
+  (d.kind !== "volume" || (o.kind === "volume" && d.volumeKind === o.volume.kind));
 type Check = ReviewTask["checks"][number];
 
 export type Milestone = {
@@ -82,6 +103,8 @@ export type FoldedTask = Pick<
   | "evidence"
 > & {
   attemptId: string;
+  /** Ids of the required declared outputs, of any kind (structures too), the attempt hasn't reported. */
+  missingRequired: string[];
   /** The latest `task` event's reason; null while the attempt has none. */
   reason: string | null;
   threads: Pick<ReviewTask["threads"], "worker" | "check">;
@@ -96,16 +119,27 @@ export type FoldedRevision = {
   tasks: FoldedTask[];
   volumes: Volume[];
   structures: Structure[];
-  annotations: Annotation[];
+  annotations: FoldedAnnotation[];
 };
+
+/** An annotation as reported: a null `volumeId` is the scan, whose id the API knows. */
+export type FoldedAnnotation = Annotation extends infer A
+  ? A extends Annotation
+    ? Omit<A, "volumeId"> & { volumeId: string | null }
+    : never
+  : never;
 
 /**
  * The status the runtime's `check-result` rule gives a task whose check thread
  * ended, computed from `fold` of the log: `done` only for a `passed` verdict
- * with nothing open, otherwise `to-check`.
+ * with nothing open and no required output missing, otherwise `to-check`.
  */
-export function checkResult(t: Pick<FoldedTask, "checker" | "checks">): "done" | "to-check" {
-  return t.checker?.verdict === "passed" && t.checks.length === 0 ? "done" : "to-check";
+export function checkResult(
+  t: Pick<FoldedTask, "checker" | "checks" | "missingRequired">,
+): "done" | "to-check" {
+  return t.checker?.verdict === "passed" && t.checks.length === 0 && t.missingRequired.length === 0
+    ? "done"
+    : "to-check";
 }
 
 export type Folded = {
@@ -156,35 +190,39 @@ export function fold(events: readonly RunEvent[]): Folded {
   };
 
   const snapshot = (): Pick<FoldedRevision, "tasks" | "volumes" | "structures" | "annotations"> => {
-    const kinds = new Map<string, OutputKind>();
+    const kinds = new Map<string, RefKind>();
     for (const a of current.values())
-      for (const [id, v] of a.outputs) kinds.set(`${a.taskId}/${id}`, v.payload.output.kind);
-    // A reference the revision doesn't contain, or of the wrong kind, is dropped.
-    const ref = (a: Attempt, id: string | undefined, kind: OutputKind) => {
+      for (const [id, v] of a.outputs) {
+        const k = refKind(v.payload.output);
+        if (k) kinds.set(`${a.taskId}/${id}`, k);
+      }
+    // The one guarantee for references: one that doesn't resolve to an output of
+    // an accepted block kind in this revision is dropped (`undefined`).
+    const ref = (a: Attempt, id: string | undefined, ...accept: RefKind[]) => {
       if (id === undefined) return undefined;
       const full = id.includes("/") ? id : `${a.taskId}/${id}`;
-      return kinds.get(full) === kind ? full : undefined;
+      const k = kinds.get(full);
+      return k && accept.includes(k) ? full : undefined;
     };
-    const refs = (a: Attempt, ids: string[], kind: OutputKind) =>
+    const refs = (a: Attempt, ids: string[], kind: RefKind) =>
       ids.flatMap((id) => ref(a, id, kind) ?? []);
     const volumes: Volume[] = [];
     const structures: Structure[] = [];
-    const annotations: Annotation[] = [];
+    const annotations: FoldedAnnotation[] = [];
     const tasks = [...current.values()].map((a) => {
       const measurements: Measurement[] = [];
       const scores: Score[] = [];
       const files: Asset[] = [];
       const undeclared: string[] = [];
+      const declaredOutputs = [...(plan.get(a.taskId)?.values() ?? [])];
       for (const [outputId, v] of a.outputs) {
         const { payload: p } = v;
         const { output: o } = p;
         const id = `${a.taskId}/${outputId}`;
         const decl = plan.get(a.taskId)?.get(outputId);
-        const declared = decl?.kind === o.kind;
+        const declared = decl !== undefined && fills(decl, o);
         if (!declared) undeclared.push(id);
         const key = (sha: string) => evidenceKey(v.runId, sha);
-        const note = p.note !== undefined && { note: p.note };
-        const definition = p.definition !== undefined && { definition: p.definition };
         const evidenceIds = p.evidence.map((r) => r.sha256);
         const source = { threadId: v.threadId, eventId: v.id };
         switch (o.kind) {
@@ -196,9 +234,9 @@ export function fold(events: readonly RunEvent[]): Folded {
               title: p.title,
               value: o.value,
               unit: o.unit,
-              confidence: p.confidence,
-              ...note,
-              ...definition,
+              confidence: o.confidence,
+              ...(o.note !== undefined && { note: o.note }),
+              ...(o.definition !== undefined && { definition: o.definition }),
               evidenceIds,
               references: [],
               structureIds: refs(a, o.structureIds, "structure"),
@@ -215,15 +253,17 @@ export function fold(events: readonly RunEvent[]): Folded {
               title: p.title,
               level: o.level,
               scale: decl?.kind === "score" ? decl.levels : null,
-              confidence: p.confidence,
-              ...note,
-              ...definition,
+              confidence: o.confidence,
+              ...(o.note !== undefined && { note: o.note }),
+              ...(o.definition !== undefined && { definition: o.definition }),
               evidenceIds,
+              structureIds: refs(a, o.structureIds, "structure"),
+              annotationIds: refs(a, o.annotationIds, "annotation"),
               source,
             });
             break;
           case "structure": {
-            const volumeId = ref(a, o.volume, "volume");
+            const volumeId = ref(a, o.volume, "volume:labels");
             structures.push({
               id,
               name: p.title,
@@ -232,9 +272,9 @@ export function fold(events: readonly RunEvent[]): Folded {
                   ? null
                   : { volumeId, ...(o.label !== undefined && { label: o.label }) },
               declared,
-              status: null,
-              reason: null,
-              ...definition,
+              status: o.status ?? null,
+              reason: o.reason ?? null,
+              ...(o.definition !== undefined && { definition: o.definition }),
               ...(o.volumeMm3 !== undefined && { volumeMm3: o.volumeMm3 }),
               ...(o.mesh && {
                 mesh: {
@@ -253,8 +293,8 @@ export function fold(events: readonly RunEvent[]): Folded {
               ...o.annotation,
               id,
               name: p.title,
-              volumeId: ref(a, o.annotation.volumeId, "volume") ?? o.annotation.volumeId,
-              ...note,
+              volumeId: ref(a, o.volume, "volume:labels", "volume:image") ?? null,
+              ...(o.note !== undefined && { note: o.note }),
             });
             break;
           case "volume": {
@@ -270,17 +310,35 @@ export function fold(events: readonly RunEvent[]): Folded {
           case "file":
             files.push({
               id,
-              name: o.file.path,
+              name: p.title,
               stage: a.taskId,
               key: key(o.file.sha256),
               sha256: o.file.sha256,
+              mediaType: o.mediaType,
             });
             break;
         }
       }
-      const missing = [...(plan.get(a.taskId)?.values() ?? [])]
-        .filter((d) => a.outputs.get(d.id)?.payload.output.kind !== d.kind)
-        .map((d) => ({ outputId: d.id, kind: d.kind, required: d.required }));
+      const unreported = declaredOutputs.filter((d) => {
+        const o = a.outputs.get(d.id)?.payload.output;
+        return !(o && fills(d, o));
+      });
+      // A declared structure never reported is a `missing` structure, so the
+      // Structures panel is complete; `missing` lists the kinds with no such slot.
+      for (const d of unreported)
+        if (d.kind === "structure")
+          structures.push({
+            id: `${a.taskId}/${d.id}`,
+            name: d.name ?? d.id,
+            voxels: null,
+            declared: true,
+            status: "missing",
+            reason: `The workflow declares it${d.required ? " as required" : ""}; the task has not reported it.`,
+          });
+      const missing = unreported.flatMap((d) =>
+        d.kind === "structure" ? [] : [{ outputId: d.id, kind: d.kind, required: d.required }],
+      );
+      const missingRequired = unreported.filter((d) => d.required).map((d) => d.id);
       const checks: Check[] = a.toChecks.map((c) => ({ ...c }));
       if (a.flag)
         checks.push({
@@ -309,6 +367,7 @@ export function fold(events: readonly RunEvent[]): Folded {
         scores,
         files,
         missing,
+        missingRequired,
         undeclared,
         checks,
         evidence: [...a.evidence.values()],

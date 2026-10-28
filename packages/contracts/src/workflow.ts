@@ -8,22 +8,9 @@
  *   "done". `packages/workflow` parses `workflow.md` into it; the runtime
  *   records it in the run's first event (`revision.started`, `events.ts`), so
  *   the fold reads it from the log and never from the workflow.
- * - The checklist statuses a task moves through.
  */
 import { z } from "zod";
-import { segmentSchema, taskIdSchema } from "./r2";
-
-/** Checklist statuses (requirements, Vocabulary). */
-export const taskStatusSchema = z.enum([
-  "pending",
-  "in-progress",
-  "done",
-  "failed",
-  "to-check",
-  "under-review",
-  "stale",
-]);
-export type TaskStatus = z.infer<typeof taskStatusSchema>;
+import { segmentSchema, taskIdSchema } from "./ids";
 
 // Lowercase and exactly 40 hex characters, so one commit has one key.
 const part = z.string().regex(/^(?!\.+$)[a-z0-9._-]+$/);
@@ -41,17 +28,6 @@ export const workflowPinSchema = z.object({
   commit: z.string().regex(/^[0-9a-f]{40}$/),
 });
 export type WorkflowPin = z.infer<typeof workflowPinSchema>;
-
-/** The kinds of output a task reports; `output.ts` has the payload of each. */
-export const outputKindSchema = z.enum([
-  "measurement",
-  "score",
-  "structure",
-  "annotation",
-  "volume",
-  "file",
-]);
-export type OutputKind = z.infer<typeof outputKindSchema>;
 
 const nonEmpty = z.string().min(1);
 const declaredBase = { id: segmentSchema, required: z.boolean() };
@@ -72,7 +48,12 @@ export const declaredOutputSchema = z.discriminatedUnion("kind", [
     name: nonEmpty.optional(),
   }),
   z.object({ ...declaredBase, kind: z.literal("annotation"), shape: z.enum(["point", "line"]) }),
-  z.object({ ...declaredBase, kind: z.literal("volume") }),
+  /** `labels` holds structures' label values; a structure's `volume` must be one. */
+  z.object({
+    ...declaredBase,
+    kind: z.literal("volume"),
+    volumeKind: z.enum(["image", "labels"]),
+  }),
   z.object({ ...declaredBase, kind: z.literal("file"), mediaType: nonEmpty }),
 ]);
 export type DeclaredOutput = z.infer<typeof declaredOutputSchema>;

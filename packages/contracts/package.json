@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./ids": "./src/ids.ts",
     "./r2": "./src/r2.ts",
     "./events": "./src/events.ts",
     "./stream": "./src/stream.ts",

@@ -32,14 +32,9 @@
  * derives it.
  */
 import { z } from "zod";
-import {
-  runIdSchema,
-  sha256Schema as sha256,
-  storedKeySchema,
-  storedPrefixSchema,
-  taskIdSchema,
-} from "./r2";
-import { outputKindSchema, taskStatusSchema, workflowPinSchema } from "./workflow";
+import { outputKindSchema, runIdSchema, taskIdSchema, taskStatusSchema } from "./ids";
+import { sha256Schema as sha256, storedKeySchema, storedPrefixSchema } from "./r2";
+import { workflowPinSchema } from "./workflow";
 
 /** A position or direction in world mm. */
 const vec3 = z.tuple([z.number(), z.number(), z.number()]);
@@ -155,7 +150,12 @@ export const structureSchema = z.object({
   voxels: z
     .object({ volumeId: z.string(), label: z.number().int().positive().optional() })
     .nullable(),
-  /** Whether the workflow declared this structure; null when the producer doesn't say. */
+  /**
+   * Whether the workflow declared this structure; null when the producer
+   * doesn't say. A declared structure the run didn't report is listed here with
+   * status `missing`. The Review lane reads this, not `ReviewTask.undeclared`
+   * (which lists structures too, for the fold's own use).
+   */
   declared: z.boolean().nullable(),
   /** Null when the producer doesn't say. */
   status: z.enum(["done", "provisional", "missing"]).nullable(),
@@ -211,6 +211,8 @@ export const assetSchema = z.object({
   stage: z.string(),
   key: storedKeySchema,
   sha256,
+  /** Set for a file the workflow declared a media type for; absent for evidence. */
+  mediaType: z.string().optional(),
 });
 export type Asset = z.infer<typeof assetSchema>;
 
@@ -255,6 +257,9 @@ export const scoreSchema = z.object({
   note: z.string().optional(),
   definition: z.string().optional(),
   evidenceIds: z.array(z.string()),
+  /** What was graded: the medial plateau, the lesion a QC fail is about. */
+  structureIds: measurementSchema.shape.structureIds,
+  annotationIds: measurementSchema.shape.annotationIds,
   source: measurementSchema.shape.source,
 });
 export type Score = z.infer<typeof scoreSchema>;
@@ -282,9 +287,17 @@ export const taskSchema = z.object({
   }),
   measurements: z.array(measurementSchema),
   scores: z.array(scoreSchema),
-  /** Outputs the workflow declared for this task and the attempt hasn't reported. Required ones keep the task from `done`. */
+  /**
+   * Outputs the workflow declared for this task and the attempt hasn't reported,
+   * except structures: a missing structure is a `Structure` with status
+   * `missing`, so each fact has one place. Required ones keep the task from `done`.
+   */
   missing: z.array(
-    z.object({ outputId: z.string(), kind: outputKindSchema, required: z.boolean() }),
+    z.object({
+      outputId: z.string(),
+      kind: outputKindSchema.exclude(["structure"]),
+      required: z.boolean(),
+    }),
   ),
   /** Ids (`taskId/outputId`, as in the blocks) of the outputs the workflow didn't declare, of any kind. */
   undeclared: z.array(z.string()),
@@ -378,12 +391,10 @@ export const revisionSchema = z
       needAll(structures, t.structureIds, [...task, "structureIds"], "structure");
       const own = new Set(t.evidence.map((e) => e.id));
       t.scores.forEach((sc, si) => {
-        needAll(
-          own,
-          sc.evidenceIds,
-          [...task, "scores", si, "evidenceIds"],
-          "evidence in this task",
-        );
+        const at = [...task, "scores", si];
+        needAll(structures, sc.structureIds, [...at, "structureIds"], "structure");
+        needAll(annotations, sc.annotationIds, [...at, "annotationIds"], "annotation");
+        needAll(own, sc.evidenceIds, [...at, "evidenceIds"], "evidence in this task");
       });
       t.measurements.forEach((m, mi) => {
         const at = [...task, "measurements", mi];

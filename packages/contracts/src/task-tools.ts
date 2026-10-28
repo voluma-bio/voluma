@@ -69,24 +69,30 @@
  * - a structure's `label` and its `title` equal the declared `label` and
  *   `name`, where set;
  * - an annotation's shape equals the declared `shape`;
+ * - a volume's `kind` equals the declared `volumeKind`;
  * - a file's `mediaType` equals the declared one.
  * An output the plan doesn't declare is accepted if its kind's payload is valid;
  * the fold lists it as undeclared. A score without a declaration has no scale.
  * A required declared output the attempt hasn't reported keeps the task from
- * `done`: the worker's `checklist done` is refused, naming the missing outputs.
- * It may still set `to-check` or `failed`. Since outputs are never removed
- * within an attempt, a `done` task never lacks a required output, so
- * `checkResult` needs no such clause.
+ * `done`: the worker's `checklist done` is refused, naming the missing outputs
+ * (`missingRequired`, structures included). It may still set `to-check` or
+ * `failed`. `checkResult` checks it too, so a check never makes a task `done`
+ * while a required output is missing, whatever else changed. A required output
+ * reported with `value: null` (a measurement that could not be made) counts as
+ * reported: the task did its job and said so, and the `note` says why. The
+ * reviewer sees the null and the note; making the task fail is the worker's
+ * choice, with `failed`.
  *
  * References. `report_output` refuses a reference its target hasn't reported in
- * the named task's latest attempt: a measurement's `numeratorId`,
- * `denominatorId` (measurements), `structureIds` (structures) and
- * `annotationIds` (annotations), and a structure's `volume`, which must be a
- * `volume` output of kind `labels`. A volume's `dtype` must fit its kind
- * (`uint8`/`uint16` for `labels`, `int16`/`uint16`/`float32` for `image`). An
- * annotation's `volumeId` is not checked here: it is the scan's id or a volume
- * output. A later attempt may stop reporting a target; the fold drops such a
- * reference.
+ * the named task's latest attempt: a measurement's `numeratorId` and
+ * `denominatorId` (measurements), `structureIds` of a measurement or score
+ * (structures), `annotationIds` (annotations), a structure's `volume` (a
+ * `volume` output of kind `labels`) and an annotation's `volume` (any `volume`
+ * output; absent means the scan). A volume's `dtype` must fit its kind
+ * (`uint8`/`uint16` for `labels`, `int16`/`uint16`/`float32` for `image`). This
+ * is a write-time check only: a later attempt of another task may stop
+ * reporting a target, and the fold's resolver (`fold.ts`) alone guarantees that
+ * the review has no dangling reference.
  *
  * Evidence, and the files inside an output (a mesh, a volume's voxels, a
  * file output), are named by `{root, path}` (`evidenceRefSchema`). On success
@@ -112,8 +118,8 @@
  * Results reach the record as `tool.result.output`, the object as JSON.
  */
 import { z } from "zod";
+import { taskIdSchema } from "./ids";
 import { fileRefInputSchema, outputReportInputSchema } from "./output";
-import { taskIdSchema } from "./r2";
 
 const nonEmpty = z.string().min(1);
 

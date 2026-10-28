@@ -4,19 +4,8 @@
  * Prefixes end in `/` so they can be used directly as mount prefixes.
  */
 import { z } from "zod";
+import { segmentSchema } from "./ids";
 import { type WorkflowPin, workflowPinSchema } from "./workflow";
-
-/** One path segment: non-empty, no `/`, not `.` or `..`. */
-export const segmentSchema = z
-  .string()
-  .min(1)
-  .refine((s) => !s.includes("/") && s !== "." && s !== "..", {
-    message: "must be one path segment (no '/', '.' or '..')",
-  });
-
-export const runIdSchema = segmentSchema;
-export const taskIdSchema = segmentSchema;
-export const toolCallIdSchema = segmentSchema;
 
 /** A relative path under a prefix; every segment is validated. */
 export const relativePathSchema = z

@@ -1,197 +1,11 @@
 /**
- * Synthetic event sequences for `fold`: the cases where a mistake would show a
- * wrong result on the run screen or in the review without any error. Every
- * revision must also parse as part of a `ReviewRun`.
+ * Synthetic event sequences for `fold`: attempts, checks and revisions, where a
+ * mistake would show a wrong result on the run screen or in the review without
+ * any error. Outputs and references are in `fold-outputs.test.ts`.
  */
 import { describe, expect, it } from "vitest";
-import type { RunEvent } from "./events";
-import { checkResult, type Folded, type FoldedRevision, fold } from "./fold";
-import type { Output } from "./output";
-import { reviewRunSchema } from "./review";
-import type { WorkflowPlan } from "./workflow";
-
-type Payload<T extends RunEvent["type"]> = Extract<RunEvent, { type: T }>["payload"];
-
-const RUN = "run1";
-const SHA = (n: number) => n.toString(16).padStart(64, "0");
-
-/** A log under construction; `seq` and `createdAt` follow append order. */
-function log() {
-  const events: RunEvent[] = [];
-  const add = <T extends RunEvent["type"]>(
-    type: T,
-    id: string,
-    threadId: string,
-    payload: Payload<T>,
-  ) => {
-    const seq = events.length;
-    events.push({
-      id,
-      runId: RUN,
-      threadId,
-      createdAt: new Date(Date.UTC(2026, 9, 28, 0, 0, seq)).toISOString(),
-      seq,
-      type,
-      payload,
-    } as RunEvent);
-  };
-  const by = { kind: "agent" } as const;
-  const reportOutput = (
-    id: string,
-    thread: string,
-    taskId: string,
-    attemptId: string,
-    outputId: string,
-    output: Output,
-    extra: Partial<Payload<"output">> = {},
-  ) =>
-    add("output", id, thread, {
-      taskId,
-      attemptId,
-      outputId,
-      title: outputId,
-      confidence: null,
-      evidence: [],
-      output,
-      ...extra,
-    });
-  const rule = (r: "stuck" | "stale" | "check-start" | "check-result") =>
-    ({ kind: "rule", rule: r }) as const;
-  return {
-    events,
-    add,
-    revision: (id: string, thread: string, p: Payload<"revision.started">) =>
-      add("revision.started", id, thread, p),
-    /** The run's first event, with the plan the runtime copied from the workflow. */
-    run: (plan: WorkflowPlan = { tasks: [] }) =>
-      add("revision.started", "root:revision", "root", { reason: "run", plan }),
-    thread: (thread: string, kind: "worker" | "check" | "supervisor", attemptId?: string) =>
-      add("thread.started", `${thread}:started`, thread, {
-        parentThreadId: null,
-        kind,
-        ...(attemptId && { attemptId }),
-      }),
-    open: (id: string, thread: string, taskId: string) =>
-      add("attempt.opened", id, thread, { taskId }),
-    status: (
-      id: string,
-      thread: string,
-      taskId: string,
-      attemptId: string,
-      status: Payload<"task">["status"],
-      who: Payload<"task">["by"] = by,
-    ) =>
-      add("task", id, thread, { taskId, attemptId, status, reason: `${status} (${id})`, by: who }),
-    checkpoint: (
-      id: string,
-      thread: string,
-      taskId: string,
-      attemptId: string,
-      extra: Partial<Payload<"checkpoint">> = {},
-    ) =>
-      add("checkpoint", id, thread, {
-        taskId,
-        attemptId,
-        text: `milestone ${id}`,
-        by,
-        evidence: [],
-        ...extra,
-      }),
-    /** A `measurement` output (`value` in mm unless `extra` says otherwise). */
-    value: (
-      id: string,
-      thread: string,
-      taskId: string,
-      attemptId: string,
-      outputId: string,
-      value: number | null,
-      {
-        evidence = [],
-        ...extra
-      }: Partial<Extract<Output, { kind: "measurement" }>> & {
-        evidence?: Payload<"output">["evidence"];
-      } = {},
-    ) =>
-      reportOutput(
-        id,
-        thread,
-        taskId,
-        attemptId,
-        outputId,
-        { kind: "measurement", value, unit: "mm", structureIds: [], annotationIds: [], ...extra },
-        { evidence },
-      ),
-    output: reportOutput,
-    rule,
-    /** The runtime's `check-result`: the status `checkResult` gives the folded task. */
-    result: (thread: string, taskId: string, attemptId: string) => {
-      const t = need(fold(events), taskId);
-      add("task", `${thread}:result`, thread, {
-        taskId,
-        attemptId,
-        status: checkResult(t),
-        reason: "check result",
-        by: rule("check-result"),
-      });
-    },
-  };
-}
-
-const need = <T extends { id: string }>(x: { tasks: T[] } | T[], id: string): T => {
-  const t = (Array.isArray(x) ? x : x.tasks).find((t) => t.id === id);
-  if (!t) throw new Error(`no task ${id}`);
-  return t;
-};
-const rev = (f: Folded, n: number): FoldedRevision => {
-  const r = f.revisions[n];
-  if (!r) throw new Error(`no revision ${n}`);
-  return r;
-};
-
-/** Every revision, with the parts the API adds, must be a valid `ReviewRun`. */
-function expectParses(f: Folded) {
-  const run = {
-    id: RUN,
-    sample: "s",
-    workflows: [{ repo: "o/w", commit: "a".repeat(40) }],
-    revisions: f.revisions.map((r) => ({
-      id: r.id,
-      label: r.reason,
-      createdAt: r.createdAt,
-      volumes: r.volumes,
-      structures: r.structures,
-      annotations: r.annotations,
-      tasks: r.tasks.map((t) => ({
-        ...t,
-        title: t.id,
-        ask: "",
-        dependsOn: [],
-        structureIds: [],
-        threads: { ...t.threads, chat: null },
-      })),
-    })),
-  };
-  expect(reviewRunSchema.safeParse(run).error).toBeUndefined();
-}
-
-const W = "worker";
-const SUP = "sup";
-
-/** Tasks a and b finished by the worker, in one revision. */
-function twoDone() {
-  const l = log();
-  l.run();
-  l.open("w:1:open", W, "a");
-  l.status("w:1", W, "a", "w:1:open", "in-progress");
-  l.value("w:2", W, "a", "w:1:open", "width", 3.4, {
-    evidence: [{ root: "outputs", path: "a.png", sha256: SHA(1) }],
-  });
-  l.status("w:3", W, "a", "w:1:open", "done");
-  l.open("w:4:open", W, "b");
-  l.value("w:5", W, "b", "w:4:open", "width", 5);
-  l.status("w:6", W, "b", "w:4:open", "done");
-  return l;
-}
+import { fold } from "./fold";
+import { expectParses, log, need, rev, SHA, SUP, twoDone, W } from "./fold-test-log";
 
 describe("fold", () => {
   it("normal run: one revision holding every task", () => {
@@ -225,7 +39,7 @@ describe("fold", () => {
       l.status("sup:1:stale:b", SUP, "b", "w:4:open", "stale", l.rule("stale"));
       l.open("w:8:open", W, "a");
       l.status("w:8", W, "a", "w:8:open", "in-progress");
-      l.value("w:9", W, "a", "w:8:open", "width", 3.5);
+      l.measurement("w:9", W, "a", "w:8:open", "width", 3.5);
       l.status("w:10", W, "a", "w:8:open", "done");
       const f = fold(l.events);
       expect(f.revisions.map((r) => r.id)).toEqual(["root:revision", "sup:1:revision"]);
@@ -274,8 +88,8 @@ describe("fold", () => {
     l.checkpoint("chk:1", "chk", "a", "w:1:open", { verdict: "passed", text: "Fixed the plane." });
     l.revision("chk:2:revision", "chk", { reason: "fix", taskId: "a" });
     l.status("chk:2:stale:b", "chk", "b", "w:4:open", "stale", l.rule("stale"));
-    l.value("chk:2", "chk", "a", "w:1:open", "width", 3.39);
-    l.value("chk:3", "chk", "a", "w:1:open", "area", 12, {
+    l.measurement("chk:2", "chk", "a", "w:1:open", "width", 3.39);
+    l.measurement("chk:3", "chk", "a", "w:1:open", "area", 12, {
       evidence: [{ root: "scratch", path: "r.py", sha256: SHA(2) }],
     });
     l.result("chk", "a", "w:1:open");
@@ -333,12 +147,12 @@ describe("fold", () => {
     const l = log();
     l.run();
     l.open("w:1:open", W, "b");
-    l.value("w:1", W, "b", "w:1:open", "old", 1);
+    l.measurement("w:1", W, "b", "w:1:open", "old", 1);
     l.revision("sup:1:revision", SUP, { reason: "correction", taskId: "a" });
     l.status("sup:1:stale:b", SUP, "b", "w:1:open", "stale", l.rule("stale"));
     l.open("w:3:open", W, "b");
     l.status("w:3", W, "b", "w:3:open", "in-progress");
-    l.value("w:4", W, "b", "w:3:open", "new", 3);
+    l.measurement("w:4", W, "b", "w:3:open", "new", 3);
     const f = fold(l.events);
     const [r1, r2] = f.revisions;
     expect(need(r1?.tasks ?? [], "b").measurements.map((m) => m.id)).toEqual(["b/old"]);
@@ -420,7 +234,7 @@ describe("fold", () => {
   it("B: a second passing check on a fixed attempt stays to-check with the fix item open", () => {
     const l = checked(() => {});
     l.revision("chk:2:revision", "chk", { reason: "fix", taskId: "a" });
-    l.value("chk:2", "chk", "a", "w:1:open", "width", 3.39);
+    l.measurement("chk:2", "chk", "a", "w:1:open", "width", 3.39);
     l.result("chk", "a", "w:1:open");
     l.thread("chk2", "check", "w:1:open");
     l.status("chk2:start", "chk2", "a", "w:1:open", "under-review", l.rule("check-start"));
@@ -450,7 +264,7 @@ describe("fold", () => {
   it("C: the worker's doubt shows in the revision before a fix and again after it, with the same id", () => {
     const l = checked((l) => l.status("w:7", W, "a", "w:1:open", "to-check"));
     l.revision("chk:2:revision", "chk", { reason: "fix", taskId: "a" });
-    l.value("chk:2", "chk", "a", "w:1:open", "width", 3.39);
+    l.measurement("chk:2", "chk", "a", "w:1:open", "width", 3.39);
     l.result("chk", "a", "w:1:open");
     const f = fold(l.events);
     expect(need(rev(f, 0).tasks, "a").checks.map((c) => [c.id, c.title])).toEqual([
@@ -466,7 +280,7 @@ describe("fold", () => {
   it("D: a fix on the checked task leaves an unrelated done task alone", () => {
     const l = checked(() => {});
     l.revision("chk:2:revision", "chk", { reason: "fix", taskId: "a" });
-    l.value("chk:2", "chk", "a", "w:1:open", "width", 3.39);
+    l.measurement("chk:2", "chk", "a", "w:1:open", "width", 3.39);
     l.result("chk", "a", "w:1:open");
     const b = need(fold(l.events), "b");
     expect(b).toMatchObject({ status: "done", checks: [], checker: null });
@@ -506,217 +320,6 @@ describe("fold", () => {
     expect(f.tasks.map((t) => [t.id, t.attemptId, t.status])).toEqual([
       ["a", "w:3:open", "in-progress"],
     ]);
-    expectParses(f);
-  });
-
-  it("measurement ids repeat across tasks; operands resolve; a dangling one is dropped", () => {
-    const l = twoDone(); // a/width and b/width
-    l.open("w:7:open", W, "c");
-    l.value("w:8", W, "c", "w:7:open", "ratio", 0.5, {
-      numeratorId: "a/width",
-      denominatorId: "b/width",
-    });
-    l.value("w:9", W, "c", "w:7:open", "self", 1, { numeratorId: "ratio" });
-    l.status("w:10", W, "c", "w:7:open", "done");
-    // b is redone and no longer reports width.
-    l.revision("sup:1:revision", SUP, { reason: "correction", taskId: "b" });
-    l.status("sup:1", SUP, "b", "w:4:open", "stale");
-    l.open("w:11:open", W, "b");
-    l.value("w:12", W, "b", "w:11:open", "depth", 2);
-    const f = fold(l.events);
-    const [r1, r2] = f.revisions;
-    const ratio = (r: typeof r1) => need(r?.tasks ?? [], "c").measurements;
-    expect(r1?.tasks.flatMap((t) => t.measurements.map((m) => m.id))).toEqual([
-      "a/width",
-      "b/width",
-      "c/ratio",
-      "c/self",
-    ]);
-    expect(ratio(r1)?.[0]).toMatchObject({ numeratorId: "a/width", denominatorId: "b/width" });
-    expect(ratio(r1)?.[1]?.numeratorId).toBe("c/ratio");
-    expect(ratio(r2)?.[0]?.numeratorId).toBe("a/width");
-    expect(ratio(r2)?.[0]?.denominatorId).toBeUndefined();
-    expectParses(f);
-  });
-
-  const file = (n: number, path = `f${n}.npy`) => ({
-    root: "outputs" as const,
-    path,
-    sha256: SHA(n),
-  });
-  const labelsVolume = (n: number): Output => ({
-    kind: "volume",
-    volume: {
-      kind: "labels",
-      shapeZyx: [2, 2, 2],
-      affine: [
-        [1, 0, 0, 0],
-        [0, 1, 0, 0],
-        [0, 0, 1, 0],
-        [0, 0, 0, 1],
-      ],
-      unit: null,
-      file: file(n),
-      dtype: "uint8",
-    },
-  });
-  const structure = (volume: string, extra: Partial<Extract<Output, { kind: "structure" }>> = {}) =>
-    ({ kind: "structure", volume, label: 1, ...extra }) satisfies Output;
-  const plan = (...tasks: WorkflowPlan["tasks"]): WorkflowPlan => ({ tasks });
-
-  /** Task seg reports one output of each kind, all declared but the figure. */
-  function oneOfEach() {
-    const l = log();
-    l.run(
-      plan({
-        id: "seg",
-        outputs: [
-          { id: "width", kind: "measurement", required: true, unit: "mm" },
-          { id: "grade", kind: "score", required: true, levels: ["0", "1", "2", "3"] },
-          { id: "labels", kind: "volume", required: true },
-          { id: "femur", kind: "structure", required: true, label: 1, name: "Femur" },
-          { id: "landmark", kind: "annotation", required: false, shape: "point" },
-        ],
-      }),
-    );
-    l.open("w:1:open", W, "seg");
-    l.output("w:2", W, "seg", "w:1:open", "labels", labelsVolume(5));
-    l.output(
-      "w:3",
-      W,
-      "seg",
-      "w:1:open",
-      "femur",
-      structure("labels", {
-        volumeMm3: 7,
-        mesh: { vertices: 3, indices: 3, centerWorldMm: [0, 0, 0], file: file(6, "femur.bin") },
-      }),
-      { title: "Femur" },
-    );
-    l.output("w:4", W, "seg", "w:1:open", "landmark", {
-      kind: "annotation",
-      annotation: { kind: "point", volumeId: "labels", position: [1, 1, 1] },
-    });
-    l.value("w:5", W, "seg", "w:1:open", "width", 3.4, {
-      structureIds: ["femur", "gone"],
-      annotationIds: ["landmark"],
-    });
-    l.output("w:6", W, "seg", "w:1:open", "grade", { kind: "score", level: "2" });
-    l.output("w:7", W, "seg", "w:1:open", "fig", {
-      kind: "file",
-      file: file(8, "fig.png"),
-      mediaType: "image/png",
-    });
-    return l;
-  }
-
-  it("one output of each kind goes to its review block", () => {
-    const f = fold(oneOfEach().events);
-    const r = rev(f, 0);
-    const t = need(f, "seg");
-    expect(t.measurements[0]).toMatchObject({
-      id: "seg/width",
-      value: 3.4,
-      unit: "mm",
-      structureIds: ["seg/femur"], // "gone" is dropped
-      annotationIds: ["seg/landmark"],
-      source: { threadId: W, eventId: "w:5" },
-    });
-    expect(t.scores).toMatchObject([{ id: "seg/grade", level: "2", scale: ["0", "1", "2", "3"] }]);
-    expect(r.volumes).toMatchObject([
-      { id: "seg/labels", kind: "labels", data: { format: "npy", sha256: SHA(5), dtype: "uint8" } },
-    ]);
-    expect(r.structures).toMatchObject([
-      {
-        id: "seg/femur",
-        name: "Femur",
-        voxels: { volumeId: "seg/labels", label: 1 },
-        declared: true,
-        volumeMm3: 7,
-        mesh: { sha256: SHA(6), vertices: 3 },
-      },
-    ]);
-    expect(r.annotations).toMatchObject([
-      { id: "seg/landmark", kind: "point", volumeId: "seg/labels" },
-    ]);
-    expect(t.files).toMatchObject([{ id: "seg/fig", name: "fig.png", sha256: SHA(8) }]);
-    expectParses(f);
-  });
-
-  it("a declared output that is missing is listed until it is reported; an undeclared one is marked", () => {
-    const l = log();
-    l.run(
-      plan({
-        id: "a",
-        outputs: [
-          { id: "width", kind: "measurement", required: true, unit: "mm" },
-          { id: "femur", kind: "structure", required: true },
-          { id: "area", kind: "measurement", required: false, unit: "mm^2" },
-        ],
-      }),
-    );
-    l.open("w:1:open", W, "a");
-    l.value("w:2", W, "a", "w:1:open", "extra", 1);
-    l.output("w:3", W, "a", "w:1:open", "qc", { kind: "score", level: "pass" });
-    let f = fold(l.events);
-    expect(need(f, "a").missing).toEqual([
-      { outputId: "width", kind: "measurement", required: true },
-      { outputId: "femur", kind: "structure", required: true },
-      { outputId: "area", kind: "measurement", required: false },
-    ]);
-    expect(need(f, "a").undeclared).toEqual(["a/extra", "a/qc"]);
-    expect(need(f, "a").scores[0]?.scale).toBeNull(); // no declaration, no scale
-    expectParses(f);
-    l.value("w:4", W, "a", "w:1:open", "width", 3);
-    f = fold(l.events);
-    expect(need(f, "a").missing.map((m) => m.outputId)).toEqual(["femur", "area"]);
-    expect(need(f, "a").undeclared).toEqual(["a/extra", "a/qc"]);
-    expectParses(f);
-  });
-
-  it("a fix overlays a structure: the earlier revision keeps the worker's, the next has the fix", () => {
-    const l = oneOfEach();
-    l.status("w:8", W, "seg", "w:1:open", "done");
-    l.thread("chk", "check", "w:1:open");
-    l.status("chk:start", "chk", "seg", "w:1:open", "under-review", l.rule("check-start"));
-    l.checkpoint("chk:1", "chk", "seg", "w:1:open", { verdict: "passed", text: "Fixed." });
-    l.revision("chk:2:revision", "chk", { reason: "fix", taskId: "seg" });
-    l.output("chk:2", "chk", "seg", "w:1:open", "femur", structure("labels", { volumeMm3: 9 }), {
-      title: "Femur",
-    });
-    const f = fold(l.events);
-    const [r1, r2] = f.revisions;
-    expect(r1?.structures).toMatchObject([{ volumeMm3: 7, mesh: { sha256: SHA(6) } }]);
-    expect(r2?.structures).toHaveLength(1);
-    expect(r2?.structures[0]).toMatchObject({ id: "seg/femur", volumeMm3: 9 });
-    expect(r2?.structures[0]?.mesh).toBeUndefined();
-    expect(need(r2?.tasks ?? [], "seg").measurements[0]?.structureIds).toEqual(["seg/femur"]);
-    expectParses(f);
-  });
-
-  it("a ratio's operand is a declared output of another task; a task redone without it drops it", () => {
-    const l = log();
-    l.run(
-      plan(
-        { id: "a", outputs: [{ id: "width", kind: "measurement", required: true, unit: "mm" }] },
-        { id: "c", outputs: [{ id: "ratio", kind: "measurement", required: true, unit: "1" }] },
-      ),
-    );
-    l.open("w:1:open", W, "a");
-    l.value("w:2", W, "a", "w:1:open", "width", 3);
-    l.status("w:3", W, "a", "w:1:open", "done");
-    l.open("w:4:open", W, "c");
-    l.value("w:5", W, "c", "w:4:open", "ratio", 0.5, { numeratorId: "a/width", unit: "1" });
-    l.status("w:6", W, "c", "w:4:open", "done");
-    l.revision("sup:1:revision", SUP, { reason: "correction", taskId: "a" });
-    l.status("sup:1", SUP, "a", "w:1:open", "stale");
-    l.open("w:7:open", W, "a");
-    const f = fold(l.events);
-    const c = (n: number) => need(rev(f, n).tasks, "c");
-    expect(c(0)).toMatchObject({ undeclared: [], missing: [] });
-    expect(c(0).measurements[0]?.numeratorId).toBe("a/width");
-    expect(c(1).measurements[0]?.numeratorId).toBeUndefined();
-    expect(need(rev(f, 1).tasks, "a").missing.map((m) => m.outputId)).toEqual(["width"]);
     expectParses(f);
   });
 });

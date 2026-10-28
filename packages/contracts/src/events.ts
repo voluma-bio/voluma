@@ -16,9 +16,9 @@
  * folded from (see below).
  */
 import { z } from "zod";
+import { runIdSchema, taskIdSchema, taskStatusSchema, toolCallIdSchema } from "./ids";
 import { evidenceRefSchema, outputReportSchema } from "./output";
-import { runIdSchema, taskIdSchema, toolCallIdSchema } from "./r2";
-import { taskStatusSchema, workflowPinSchema, workflowPlanSchema } from "./workflow";
+import { workflowPinSchema, workflowPlanSchema } from "./workflow";
 
 const nonEmpty = z.string().min(1);
 
