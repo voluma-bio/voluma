@@ -45,9 +45,16 @@ OUTLINE = '#ffffff'  # in no label's palette entry, so the region outline never 
 
 
 def assignment(region, names):
-    """'region 2 (0.0056 mm3): yours = 1 femur, classic = 8 lateral-sesamoid', from the region's label counts."""
+    """'region 2 (0.0056 mm3): yours = 1 femur, classic = 8 lateral-sesamoid', from the region's label counts; a side
+    holding several labels lists them largest first with their shares, '8 lateral-sesamoid (97%) + 1 femur (3%)'."""
     def side(counts):
-        return ' + '.join(f'{k} {names.get(int(k), "(unnamed)")}' if int(k) else '0 unlabelled' for k in counts)
+        total = sum(counts.values())
+        parts = sorted(counts.items(), key=lambda kv: -kv[1])
+        return ' + '.join(
+            (f'{k} {names.get(int(k), "(unnamed)")}' if int(k) else '0 unlabelled')
+            + (f' ({100 * n / total:.0f}%)' if len(parts) > 1 else '')
+            for k, n in parts
+        )
     return (f'region {region["id"]} ({region["volume_mm3"]} mm3): yours = {side(region["your_labels"])}, '
             f'classic = {side(region["classic_labels"])}')
 
