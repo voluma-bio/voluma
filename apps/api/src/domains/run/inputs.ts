@@ -82,7 +82,13 @@ export function inputsRoutes({ reads, uploadStore, objects, uploadLimits }: RunD
       .filter((f) => staged.get(f.path) !== f.size && moved.get(f.path) !== f.size)
       .map((f) => f.path);
     if (missing.length > 0) {
-      return c.json({ error: `${missing.length} files are not uploaded yet.`, missing }, 409);
+      return c.json(
+        {
+          error: `${missing.length} of ${upload.files.length} files are not uploaded yet.`,
+          missing,
+        },
+        409,
+      );
     }
     await objects.move(
       upload.files

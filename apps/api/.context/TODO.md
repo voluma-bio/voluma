@@ -23,3 +23,7 @@
   in. Email and password showed the email form again, which is fine. `createSignIn` takes
   `prompt: "select_account"`. Wiring it needs a `signIn` option in `@voluma/api-client`
   (a contract PR) and a `prompt` query parameter on `/login`.
+- **Clean up abandoned scan uploads.** An upload never completed leaves an `uploading`
+  row and objects under `uploads/<inputId>/`; a PUT URL used after complete leaves a stray
+  object there too. Add an R2 lifecycle rule deleting `uploads/` objects after 2 days, and
+  delete `uploading` rows older than the URL lifetime (6 h, `inputs.ts`) on a schedule.
