@@ -6,7 +6,7 @@
  */
 import type { PlanTask } from "@voluma/harness/supervise-run";
 
-const COMMON = `You work in a sandbox with one shell tool, bash. Python 3.12 with numpy, scipy, scikit-image, pydicom, nibabel and SimpleITK is installed. There is no network.
+const COMMON = `You work in a sandbox with one shell tool, bash. Python 3.12 with numpy, scipy, scikit-image, pydicom, nibabel, SimpleITK, matplotlib and pyvista (offscreen) is installed. There is no network.
 /inputs holds the scan, /outputs/<task id>/ holds each task's result files, and /scratch is for temporary files.
 Record your work with the task tools: checklist (task status), checkpoint (a milestone, with the files it rests on) and report_output (a result). Check what you report against the files themselves, and say which file or header each number came from. A file you name in an output or checkpoint is {root: "outputs", path} relative to /outputs/<task id>/, or {root: "scratch", path} relative to /scratch.`;
 
