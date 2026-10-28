@@ -48,3 +48,12 @@ Meta's decoder, because `meta-sam-parser` takes minutes per response. The tool i
 when a Meta key exists (`VOLUMA_META_API_KEY`, or the visitor's key on a visitor run). What a
 call costs goes to the run's usage meter. How agents should use it (orientation, boxes,
 which structures share a call) is the `sam-segmentation` skill's job, not the tool's.
+
+# Runner: `view_image` shows the model files the sandbox wrote
+
+`packages/harness/src/tools/view-image.ts` reads up to 4 PNG or JPEG files (1 MiB each, type
+checked by magic bytes) from the run's bucket and returns them as image content; a `ToolResult`
+may carry `images`, which the Pi adapter turns into image blocks. The `tool.result` event holds
+only text (path, type, size, sha256). The images are in the thread's history, though: resume
+replays them to the model and every later request carries them, which is why the limits are
+small. If history size becomes a problem, store a reference there and re-read the file on load.

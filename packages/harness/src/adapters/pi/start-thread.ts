@@ -331,7 +331,10 @@ function toAgentTool(
         output: () => {},
       });
       return {
-        content: [{ type: "text", text: result.output }],
+        content: [
+          { type: "text" as const, text: result.output },
+          ...(result.images ?? []).map((i) => ({ type: "image" as const, ...i })),
+        ],
         details: { truncated: result.truncated },
         isError: result.isError,
       };

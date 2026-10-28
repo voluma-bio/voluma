@@ -178,6 +178,7 @@ export async function runClaim(
       meter.addModelCost(reply.usage.cost.total);
       return reply;
     });
+    const files = r2Files(config.r2);
     const supervised = superviseRun({
       runId,
       plan: plan.tasks,
@@ -187,9 +188,10 @@ export async function runClaim(
       history: client,
       sandbox: (id) => opened.get(id),
       evidence: r2Evidence(config.r2),
+      files,
       segmentSam: metaKey
         ? {
-            files: r2Files(config.r2),
+            files,
             segmenter: metaSegmenter({ apiKey: metaKey, log }),
             addCost: meter.addModelCost,
           }

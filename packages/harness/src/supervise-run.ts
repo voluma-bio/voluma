@@ -9,6 +9,7 @@ import type { Folded } from "@voluma/contracts/fold";
 import type { Judgment } from "./judgment";
 import type { RunLayout } from "./layout";
 import type { Evidence } from "./ports/evidence";
+import type { Files } from "./ports/files";
 import type { History } from "./ports/history";
 import type { Sandbox } from "./ports/sandbox";
 import type { PayloadOf, Recorder } from "./recorder";
@@ -19,6 +20,7 @@ import { bashTool } from "./tools/bash";
 import { type SegmentSamDeps, segmentSamTool } from "./tools/segment-sam";
 import { taskTools } from "./tools/task-tools";
 import { threadMessageTool } from "./tools/thread-message";
+import { viewImageTool } from "./tools/view-image";
 
 /** What a worker or check thread is told and runs on; the harness adds its tools. */
 export type RunRole = Omit<RoleSpec, "tools">;
@@ -37,6 +39,8 @@ export interface SuperviseRunOptions {
   evidence: Evidence;
   /** Offers `segment_sam` to threads when set (the host has a Segmenter and a key for it). */
   segmentSam?: Omit<SegmentSamDeps, "layout">;
+  /** Offers `view_image` to threads when set: the run's bucket, read host-side. */
+  files?: Files;
   judgment: Judgment;
   worker(task: PlanTask): RunRole;
   check(task: PlanTask): RunRole;
@@ -64,6 +68,7 @@ export function superviseRun(options: SuperviseRunOptions): Promise<Folded> {
   };
   const tools = () => [
     bashTool(layout),
+    ...(options.files ? [viewImageTool({ layout, files: options.files })] : []),
     ...(options.segmentSam ? [segmentSamTool({ layout, ...options.segmentSam })] : []),
     ...taskTools(runtime),
     threadMessageTool((from, to, text) => sup.message(from, to, text)),
