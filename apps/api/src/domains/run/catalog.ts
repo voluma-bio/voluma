@@ -1,25 +1,21 @@
 /**
- * The workflow catalog: server config mapping a `workflowId` to the packages a run pins.
- * A request names an id from here, never raw pins, so a caller can't make the runner
- * import an arbitrary repo. Adding a workflow is one entry that pins commits; the plan,
- * prompts and skills come from the packages themselves (`@voluma/workflow`), which the
- * runner imports when it claims the run.
+ * The workflow catalog: server config mapping a `workflowId` to the workflow directory
+ * (`workflows/<name>`) a run uses. A request names an id from here, never a path, so a caller
+ * can't point the runner at another directory. A run pins the deployed commit and that path;
+ * the runner snapshots the directory (and the ones its `workflow.md` lists in `uses`) into the
+ * run's R2 prefix when it starts. The plan, prompts and skills come from those files
+ * (`@voluma/workflow`). A workflow's text reaches a prompt only through a commit of this
+ * repo, which is the trust boundary.
  *
- * `pins[0]` is the workflow package (it holds `workflow.md`); the others are the packages
- * it draws agents and skills from, each pinned too. A package inside a repo's
- * subdirectory pins `path`.
- *
- * A package reaches a prompt only through a commit pinned here, in reviewed code; that is
- * the trust boundary for package text. `smoke` is this repo's own `workflows/smoke`: a
- * workflow that always runs, to check the runner end to end. `mouse-oa` follows with its
- * first commit.
+ * `smoke` is a two-task workflow that checks the runner end to end; `mouse-oa` follows with
+ * its first commit.
  */
-import type { WorkflowPin } from "@voluma/contracts/workflow";
-
 export interface CatalogEntry {
-  pins: WorkflowPin[];
+  workflow: string;
 }
 
 export type Catalog = Record<string, CatalogEntry>;
 
-export const catalog: Catalog = {};
+export const catalog: Catalog = {
+  smoke: { workflow: "workflows/smoke" },
+};

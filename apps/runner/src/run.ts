@@ -17,8 +17,9 @@
  * then closes the sandbox. A stop by the server or a lost lease reports nothing.
  */
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 import type { Api, Model, Models } from "@earendil-works/pi-ai";
-import { inputPrefix, referencePrefix } from "@voluma/contracts/r2";
+import { inputPrefix, referencePrefix, workflowSnapshotPrefix } from "@voluma/contracts/r2";
 import type { Claim, ReportRequest } from "@voluma/contracts/runner";
 import { runClient } from "@voluma/harness/adapters/http/run-client";
 import { runLayout } from "@voluma/harness/layout";
@@ -45,6 +46,8 @@ import { usageMeter } from "./usage.ts";
  * meanwhile, and the `stopped` event needs the close to finish); after a stop, the run's
  * report waits only on the platform's grace period.
  */
+/** The repo checkout this runner was deployed from: `workflows/` is read from it. */
+const REPO_ROOT = resolve(import.meta.dirname, "../../..");
 const CLOSE_BUDGET_MS = { ended: 60_000, stopped: 15_000 };
 /** How long threads get to end after a stop before the run is reported anyway. */
 const WIND_DOWN_MS = 5_000;
@@ -119,11 +122,15 @@ export async function runClaim(
     lease = holdLease({ client, meter, onStop: stop, log });
     log(`claimed (${visitor ? "visitor" : "voluma"} keys, model ${model.provider}/${model.id})`);
 
-    // Before any sandbox: an unreadable package or an unknown tool fails the run here, with its message.
-    const definition = await loadWorkflow(run.workflows, {
+    // Before any sandbox: an unreadable workflow or an unknown tool fails the run here, with its message.
+    // The run's pin names the workflow directory; its files are snapshotted from this
+    // runner's checkout once, so a resume reads what the run began with.
+    const workflowDir = run.workflows[0]?.path;
+    if (!workflowDir) throw new Error("the run pins no workflow directory");
+    const definition = await loadWorkflow(workflowDir, {
       store: r2Workflows(config.r2),
-      githubToken: config.githubToken,
-      signal: abort.signal,
+      prefix: workflowSnapshotPrefix(runId),
+      root: REPO_ROOT,
     });
     const { worker: workerAgent, checker: checkerAgent, main: mainAgent } = definition.roles;
     // Every assigned role's tools are checked now, so an unknown name fails at start whichever
@@ -163,7 +170,6 @@ export async function runClaim(
     const layout = runLayout(
       runId,
       run.input.source === "reference" ? referencePrefix("scan") : inputPrefix(run.input.id),
-      run.workflows,
     );
     const createSandbox = createModalSandbox({
       appName: RUNS_APP,

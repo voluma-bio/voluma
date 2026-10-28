@@ -114,11 +114,6 @@ export function modalToken(): { tokenId: string; tokenSecret: string } | undefin
   return tokenId && tokenSecret ? { tokenId, tokenSecret } : undefined;
 }
 
-/** Unauthenticated GitHub calls share a per-IP rate limit, so a deployed runner (Railway) must have a token. */
-function githubToken(): string | undefined {
-  return optional("RAILWAY_ENVIRONMENT") ? required("GITHUB_TOKEN") : optional("GITHUB_TOKEN");
-}
-
 export type Config = ReturnType<typeof runnerConfig>;
 
 export function runnerConfig() {
@@ -148,8 +143,6 @@ export function runnerConfig() {
     aliases: modelAliases(),
     modal,
     r2,
-    /** For importing workflow packages from private GitHub repos. */
-    githubToken: githubToken(),
     /** Every secret of ours, to redact from anything that leaves the process. */
     secrets: [
       api.token,
@@ -157,7 +150,6 @@ export function runnerConfig() {
       r2.accessKeyId,
       r2.secretAccessKey,
       r2.cloudflareApiToken,
-      optional("GITHUB_TOKEN"),
       modal?.tokenId,
       modal?.tokenSecret,
     ].filter((s): s is string => s !== undefined),

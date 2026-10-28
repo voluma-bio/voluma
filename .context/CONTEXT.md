@@ -19,7 +19,7 @@ packages/
   contracts     zod schemas for the four contracts and the shared formats
   harness       the agent harness: our tools, the Sandbox and EventLog ports, the Pi
                 adapter; runtime-neutral (no Node types)
-  workflow      a workflow package: import pinned packages from GitHub into R2 (`load.ts`), parse `workflow.md`, agents and skills (`parse.ts`), task graph, stale tasks
+  workflow      a workflow directory: snapshot it into the run's R2 prefix (`load.ts`), parse `workflow.md`, agents and skills (`parse.ts`), task graph, stale tasks
   api-client    typed commands and event stream; the only way web features reach the API
   viewer        local DICOM ZIP intake, Cornerstone acquired slices, persistent imaging slots
   ui            shared React components, styled from tokens
@@ -140,12 +140,7 @@ checklist, check threads, and review chat threads.
   heartbeat was sent. SIGTERM stops every run, each reports `released`, and the process
   exits. A `voluma` run uses our keys; a `visitor` run uses the claim's, in that run's scope
   only. `redact.ts` masks every literal key in stored events and history rows, console lines
-  (redacted before they are clipped) and the report's `error`. Before a run's sandbox exists the runner imports the run's pinned
-  packages (idempotent by commit, marker `.imported`), parses them into a `WorkflowDefinition` and builds the prompts from it
-  (`prompts.ts`): the worker or reviewer agent's instructions, the workflow intro, the skill list (name, description,
-  `/workflow/...` path; the agent reads the rest with bash), then the task's prose and done criteria. An unreadable
-  package or an agent tool the harness lacks (`packages/harness/src/tools/registry.ts`) fails the run at start. The claim
-  carries no plan; the plan is the parsed one. Workflow format: voluma-bio/docs `work/mvp-contracts-and-data/design/workflow-md-format.md`.
+  (redacted before they are clipped) and the report's `error`. Before a run's sandbox exists the runner snapshots the run's workflow directory (`workflows/<name>/`, plus the directories its `workflow.md` lists in `uses`) from its own checkout into the run's R2 prefix, once per run, and parses the snapshot into a `WorkflowDefinition`; it builds the prompts from that (`prompts.ts`): the worker or checker agent's instructions, the workflow intro, the skill list (name, description, `/workflow/...` path; the agent reads the rest with bash), then the task's prose and done criteria. An unreadable workflow or an agent tool the harness lacks (`packages/harness/src/tools/registry.ts`) fails the run at start. The claim carries no plan; the plan is the parsed one, and a resumed run keeps the plan its first event recorded. Workflow format: voluma-bio/docs `work/mvp-contracts-and-data/design/workflow-md-format.md`.
 - **`seq` and the database.** `seq` per run is gapless and in commit order: each
   append takes a per-run advisory lock as its own statement before the insert (a lock
   inside the insert's statement races under READ COMMITTED), so the stream hub can

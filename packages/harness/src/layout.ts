@@ -3,9 +3,12 @@
  * pairs a mount path with its R2 prefix: the runner mounts `mounts`, the tool description says
  * `description`, and tools turn keys into paths with `toolOutputPath`.
  */
-import { outputsPrefix, scratchPrefix, toolOutputKey, workflowPrefix } from "@voluma/contracts/r2";
-import type { WorkflowPin } from "@voluma/contracts/workflow";
-import { workflowMountPath } from "@voluma/workflow/mount";
+import {
+  outputsPrefix,
+  scratchPrefix,
+  toolOutputKey,
+  workflowSnapshotPrefix,
+} from "@voluma/contracts/r2";
 import type { SandboxMount } from "./ports/sandbox";
 
 const INPUTS = "/inputs";
@@ -24,29 +27,18 @@ export interface RunLayout {
 }
 
 /** `inputPrefix` is the R2 prefix of the run's read-only inputs; it is staged to local disk. */
-/** `workflows` are the run's pins: only their packages are mounted, one read-only mount each. */
-export function runLayout(
-  runId: string,
-  inputPrefix: string,
-  workflows: readonly WorkflowPin[],
-): RunLayout {
+export function runLayout(runId: string, inputPrefix: string): RunLayout {
   const scratch = scratchPrefix(runId);
   return {
     mounts: [
       { path: INPUTS, prefix: inputPrefix, access: "read-only", stage: true },
-      ...[...new Map(workflows.map((pin) => [workflowPrefix(pin), pin])).values()].map(
-        (pin): SandboxMount => ({
-          path: workflowMountPath(pin),
-          prefix: workflowPrefix(pin),
-          access: "read-only",
-        }),
-      ),
+      { path: WORKFLOW, prefix: workflowSnapshotPrefix(runId), access: "read-only" },
       { path: SCRATCH, prefix: scratch, access: "read-write" },
       { path: OUTPUTS, prefix: outputsPrefix(runId), access: "read-write" },
     ],
     description:
       `- ${INPUTS} is a local copy of the input data: read it, do not modify it.\n` +
-      `- ${WORKFLOW} holds the workflow's skills and resources: read them, do not modify them.\n` +
+      `- ${WORKFLOW} holds the workflow's skills and resources, under their repo paths: read them, do not modify them.\n` +
       `- ${OUTPUTS} is for files you produce; they are kept.\n` +
       `- ${SCRATCH} is for temporary files.`,
     restartNote: `The sandbox was restarted. ${OUTPUTS} and ${SCRATCH} were kept, ${INPUTS} was copied again, and local files elsewhere (including /tmp) are gone.`,
