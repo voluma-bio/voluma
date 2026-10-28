@@ -5,8 +5,22 @@
  */
 import { createMiddleware } from "hono/factory";
 
+/**
+ * How much of the lab's data a user sees: `lab` is all of it; `self` only the records
+ * the user created (a domain filters by `labId`, and by `userId` under `self`).
+ */
+export type Scope = "lab" | "self";
+
 export type Principal =
-  | { kind: "user"; userId: string; email: string; name: string | null; labId: string }
+  | {
+      kind: "user";
+      userId: string;
+      email: string;
+      name: string | null;
+      /** The user's WorkOS organization: the tenant every record is filed under. */
+      labId: string;
+      scope: Scope;
+    }
   | { kind: "service"; name: "runner" };
 
 /** The Hono environment of a domain app: `new Hono<AppEnv>()`. */
@@ -21,7 +35,7 @@ type UserPrincipal = Extract<Principal, { kind: "user" }>;
 /** The environment of a subtree behind `requireUser`: `new Hono<UserEnv>().use(requireUser)`. */
 export type UserEnv = { Variables: { principal: Principal; user: UserPrincipal } };
 
-/** Guard a subtree for a signed-in lab member, and narrow `c.var.user` to it. */
+/** Guard a subtree for a signed-in member of an allowed organization, and narrow `c.var.user` to it. */
 export const requireUser = createMiddleware<UserEnv>(async (c, next) => {
   const principal = c.get("principal");
   if (principal.kind !== "user") return c.json({ error: "forbidden" }, 403);

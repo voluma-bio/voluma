@@ -39,7 +39,8 @@ Variables on `@voluma/api`:
 | `APP_URL` | the origin browsers use, no trailing slash: the Railway domain today (`https://volumaapi-staging.up.railway.app`), `https://app.voluma.bio` after the DNS records. Must be https (the session cookie is then `Secure` and named `__Host-wos-session`). Builds the sign-in redirect and the `Origin` check |
 | `WORKOS_CLIENT_ID`, `WORKOS_API_KEY` | WorkOS dashboard, API Keys (staging environment) |
 | `WORKOS_COOKIE_PASSWORD` | `openssl rand -base64 32`; seals the session cookie |
-| `WORKOS_LAB_ORGANIZATION_ID` | the Yao Lab organization's id (`org_...`) |
+| `WORKOS_LAB_ORGANIZATION_ID` | the Yao Lab organization's id (`org_...`); its members get scope `lab` |
+| `WORKOS_DEMO_ORGANIZATION_ID` | optional: the Demo organization's id; its members get scope `self`. Unset means no demo sign-in |
 | `PORT` | set by Railway |
 
 The root `prepare` script skips `lefthook install` outside a git checkout, as in Railway's build.
@@ -130,7 +131,7 @@ before 2026-10-21 as exposed and rotate it.
 | `RAILWAY_TOKEN` (project token, `.env`) | the repo `.env` of whoever deploys | Dashboard, project settings, Tokens: create a new one, replace it in `.env`, delete the old |
 | `WORKOS_COOKIE_PASSWORD` | Railway `@voluma/api` variables; `.env` | New value in Railway; the redeploy applies it. Every session cookie stops unsealing, so everyone signs in again. Rotate it whenever it may have leaked: it is the key to forging a session cookie, though a forged one still needs a token WorkOS signed |
 | `WORKOS_API_KEY` | Railway `@voluma/api` variables; `.env` | Dashboard, API Keys: create a new key, replace it in Railway and redeploy, then delete the old one. It authorizes token refresh and session revocation |
-| `WORKOS_CLIENT_ID`, `WORKOS_LAB_ORGANIZATION_ID`, `APP_URL` | Railway `@voluma/api` variables | Identifiers, not secrets; change only if the WorkOS environment or the domain changes |
+| `WORKOS_CLIENT_ID`, `WORKOS_LAB_ORGANIZATION_ID`, `WORKOS_DEMO_ORGANIZATION_ID`, `APP_URL` | Railway `@voluma/api` variables | Identifiers, not secrets; change only if the WorkOS environment or the domain changes |
 | Model keys (`VOLUMA_OPENAI_API_KEY` and the others) | `.env` (runner) | Revoke and re-create in the provider console; replace in `.env`. Keep a spend cap on each |
 | R2 keys, `CLOUDFLARE_API_TOKEN` | `.env` (runner) | Cloudflare dashboard: roll the token, replace in `.env`. Keep the R2 token limited to the `voluma-staging` bucket |
 | Modal token | `.env` or `~/.modal.toml` | `modal token new`, revoke the old in the Modal dashboard |

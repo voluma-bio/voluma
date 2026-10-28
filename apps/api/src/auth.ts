@@ -3,7 +3,8 @@
  * caller, so there is no port). Two ways in:
  *  - `Authorization: Bearer <VOLUMA_API_TOKEN>`: the runner, principal `service`. When
  *    the header is present only the bearer counts; the cookie is never consulted.
- *  - the WorkOS AuthKit session cookie: a member of the lab, principal `user`.
+ *  - the WorkOS AuthKit session cookie: a member of an allowed organization, principal
+ *    `user` (its `labId` is that organization, its `scope` the organization's entry).
  * `createAuth` returns the pieces index.ts mounts on `/api/*`, in this order:
  *  1. `guards`: the bearer check and the CSRF rules. No I/O, so a forged request makes no
  *     WorkOS call.
@@ -33,15 +34,18 @@ import { GenericServerException, OauthException, WorkOS } from "@workos-inc/node
 import { type Context, Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import { timingSafeEqual } from "hono/utils/buffer";
-import { type Principal, requireUser, type UserEnv } from "./domain";
+import { type Principal, requireUser, type Scope, type UserEnv } from "./domain";
 
 export interface AuthConfig {
   clientId: string;
   apiKey: string;
   /** Seals the session cookie; at least 32 characters. */
   cookiePassword: string;
-  /** The Yao Lab organization: the only one whose members may sign in. */
-  labOrganizationId: string;
+  /**
+   * The organizations whose members may sign in, each with the data scope its members
+   * get. The first `lab` entry is the organization the sign-in page is pinned to.
+   */
+  organizations: { id: string; scope: Scope }[];
   /** Where the browser reaches the app (no trailing slash). Never taken from `Host`. */
   appUrl: string;
   /** The runner's bearer token. */
@@ -130,13 +134,14 @@ function isTransientRefreshError(error: unknown) {
   );
 }
 
-function userPrincipal(user: User, labId: string): Principal {
+function userPrincipal(user: User, labId: string, scope: Scope): Principal {
   return {
     kind: "user",
     userId: user.id,
     email: user.email,
     name: [user.firstName, user.lastName].filter(Boolean).join(" ") || null,
     labId,
+    scope,
   };
 }
 
@@ -147,6 +152,9 @@ function setCookies(c: Context, cookies: string[]) {
 
 export function createAuth(config: AuthConfig) {
   const appOrigin = new URL(config.appUrl).origin;
+  const scopes = new Map(config.organizations.map((org) => [org.id, org.scope]));
+  const signInOrganizationId = config.organizations.find((org) => org.scope === "lab")?.id;
+  if (!signInOrganizationId) throw new Error("createAuth needs a lab organization");
   // __Host- needs Secure, Path=/ and no Domain, so a sibling subdomain can't plant or
   // shadow the cookie. AuthKit sets Secure when the redirect URI is https.
   const cookieName = appOrigin.startsWith("https:") ? "__Host-wos-session" : "wos-session";
@@ -240,13 +248,15 @@ export function createAuth(config: AuthConfig) {
       return null;
     }
     // The enforcement point for membership, bounded by the access-token lifetime.
-    if (result.claims.org_id !== config.labOrganizationId) {
+    const orgId = result.claims.org_id;
+    const scope = orgId === undefined ? undefined : scopes.get(orgId);
+    if (orgId === undefined || scope === undefined) {
       await clearSessionCookies(request, sink);
       return null;
     }
     if (result.refreshed)
       await authkit.saveSession(sink, await core.encryptSession(result.session));
-    return userPrincipal(result.session.user, config.labOrganizationId);
+    return userPrincipal(result.session.user, orgId, scope);
   }
 
   const bearer = createMiddleware<RootEnv>(async (c, next) => {
@@ -298,7 +308,7 @@ export function createAuth(config: AuthConfig) {
   sessionRoutes.get("/login", async (c) => {
     const cookies: string[] = [];
     const start = (returnPathname: string | undefined) =>
-      authkit.createSignIn(cookies, { returnPathname, organizationId: config.labOrganizationId });
+      authkit.createSignIn(cookies, { returnPathname, organizationId: signInOrganizationId });
     let url: string;
     try {
       ({ url } = await start(returnPath(c.req.query("returnTo"))));
@@ -337,12 +347,12 @@ export function createAuth(config: AuthConfig) {
     const newId = core.parseTokenClaims(result.authResponse.accessToken).sid ?? null;
     const oldId = await requestSessionId(c.req.raw);
     const stale = oldId === newId ? null : oldId;
-    if (result.authResponse.organizationId === config.labOrganizationId) {
+    if (scopes.has(result.authResponse.organizationId ?? "")) {
       await revokeSessions([stale]);
       setCookies(c, cookies);
       return c.redirect(`${config.appUrl}${result.returnPathname}`);
     }
-    // Not a member: handleCallback has already sealed a session. Keep none of it,
+    // Not in an allowed organization: handleCallback has already sealed a session. Keep none of it,
     // and end it at WorkOS so no usable session survives.
     await revokeSessions([newId, stale]);
     cookies.length = 0;
