@@ -36,11 +36,35 @@ Variables on `@voluma/api`:
 |---|---|
 | `DATABASE_URL` | reference `${{Postgres.DATABASE_URL}}` (the private URL) |
 | `VOLUMA_API_TOKEN` | random 32 bytes, hex |
+| `APP_URL` | the origin browsers use, no trailing slash: the Railway domain today (`https://volumaapi-staging.up.railway.app`), `https://app.voluma.bio` after the DNS records. Must be https (the session cookie is then `Secure` and named `__Host-wos-session`). Builds the sign-in redirect and the `Origin` check |
+| `WORKOS_CLIENT_ID`, `WORKOS_API_KEY` | WorkOS dashboard, API Keys (staging environment) |
+| `WORKOS_COOKIE_PASSWORD` | `openssl rand -base64 32`; seals the session cookie |
+| `WORKOS_LAB_ORGANIZATION_ID` | the Yao Lab organization's id (`org_...`); its members get scope `lab` |
+| `WORKOS_JUDGES_ORGANIZATION_ID` | optional: the Judges organization's id; its members get scope `self`. Unset means no Judges sign-in |
 | `PORT` | set by Railway |
 
 The root `prepare` script skips `lefthook install` outside a git checkout, as in Railway's build.
 
 Staging URL: `https://volumaapi-staging.up.railway.app`.
+
+**In the WorkOS dashboard (staging), for each deployed origin:** add
+`<APP_URL>/api/auth/callback` to Redirects (`http://localhost:*/api/auth/callback` is
+already there for `pnpm dev`), and add `<APP_URL>/` as a sign-out redirect. Without the
+sign-out redirect WorkOS ends the session but lands the browser on the app's homepage URL
+(`https://voluma.bio/`), not the app. Set sign-up to invitation only: staging holds
+unrelated users, and AuthKit lets any of them through sign-in; the API refuses non-members
+after the fact (callback and every request), but invitation-only keeps them out of the
+organization to begin with.
+
+**Accepted risks.**
+- Refresh tokens: on staging WorkOS did not rotate them (three refreshes with one cookie
+  returned the same token). A copy of a sealed cookie therefore stays a session until the
+  WorkOS session ends, which is why sign-out revokes it server-side. Unknown for
+  production; check with one `curl` when production keys exist.
+- The PKCE verifier cookies (`wos-auth-verifier-<hash>`) are named by the library and
+  carry no `__Host-` prefix. A taken-over `*.voluma.bio` host could plant one together
+  with its `state` (login CSRF into the attacker's own account, who must be a lab member).
+  Not mitigated here.
 
 ## Deploying
 
@@ -105,11 +129,14 @@ before 2026-10-21 as exposed and rotate it.
 | `VOLUMA_API_TOKEN` | Railway `@voluma/api` variables; whoever runs the runner | New value (`openssl rand -hex 32`) in Railway variables; the redeploy applies it. Old token stops working at once. Whoever runs the runner puts the new value in their temp `VOLUMA_ENV_FILE` ([Operating staging](#operating-staging)) |
 | Postgres password | Railway `Postgres` variables (`POSTGRES_PASSWORD`; `PGPASSWORD`, `DATABASE_URL` reference it) | Railway's procedure: Database tab, Config, **Regenerate** (needs Jimmy's dashboard seat), then redeploy `@voluma/api`, then check `/health` and one authenticated call. Never edit the password variables or run `ALTER USER` by hand: each changes one side and leaves the variable and the database out of sync. The GraphQL schema has a `databasePasswordReset` mutation (input: `databaseType`, `environmentId`, `serviceId`); whether the project token may call it is untested. Try it only as a deliberate rotation. For a planned rotation with no suspected leak, Railway's [zero-downtime guide](https://docs.railway.com/guides/rotate-credentials-zero-downtime) uses a second role |
 | `RAILWAY_TOKEN` (project token, `.env`) | the repo `.env` of whoever deploys | Dashboard, project settings, Tokens: create a new one, replace it in `.env`, delete the old |
+| `WORKOS_COOKIE_PASSWORD` | Railway `@voluma/api` variables; `.env` | New value in Railway; the redeploy applies it. Every session cookie stops unsealing, so everyone signs in again. Rotate it whenever it may have leaked: it is the key to forging a session cookie, though a forged one still needs a token WorkOS signed |
+| `WORKOS_API_KEY` | Railway `@voluma/api` variables; `.env` | Dashboard, API Keys: create a new key, replace it in Railway and redeploy, then delete the old one. It authorizes token refresh and session revocation |
+| `WORKOS_CLIENT_ID`, `WORKOS_LAB_ORGANIZATION_ID`, `WORKOS_JUDGES_ORGANIZATION_ID`, `APP_URL` | Railway `@voluma/api` variables | Identifiers, not secrets; change only if the WorkOS environment or the domain changes |
 | Model keys (`VOLUMA_OPENAI_API_KEY` and the others) | `.env` (runner) | Revoke and re-create in the provider console; replace in `.env`. Keep a spend cap on each |
 | R2 keys, `CLOUDFLARE_API_TOKEN` | `.env` (runner) | Cloudflare dashboard: roll the token, replace in `.env`. Keep the R2 token limited to the `voluma-staging` bucket |
 | Modal token | `.env` or `~/.modal.toml` | `modal token new`, revoke the old in the Modal dashboard |
 
-Nothing but the API token and the database URL is in Railway today. The runner's
+Nothing but the API token, the database URL and the sign-in values is in Railway today. The runner's
 keys enter Railway only when the runner is deployed; then add them to its variables and
 this table.
 

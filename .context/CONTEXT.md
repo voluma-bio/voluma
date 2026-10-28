@@ -13,6 +13,7 @@ apps/api        Node server on Postgres (Drizzle), each domain a Hono app. src/i
                 /api/review/ (review data, chat threads, corrections) with app.route. A
                 domain's tables and Postgres adapters live in the domain; adapters/ is for
                 shared ports
+                Sign-in: see Authentication
 apps/runner     Node entry point that runs the agent harness against the API (Run lane)
 packages/
   contracts     zod schemas for the four contracts and the shared formats
@@ -95,6 +96,54 @@ checklist, check threads, and review chat threads.
 
 The design, the evidence behind it and the order of work are in the
 voluma-bio/docs work item `mvp-contracts-and-data` (`design/harness-v0.md`).
+
+## Authentication
+
+`apps/api/src/auth.ts` authenticates every `/api/*` request once, at the root, and sets
+`principal` (`apps/api/src/domain.ts`): `service` for the runner's bearer token
+(`VOLUMA_API_TOKEN`), `user` for a WorkOS AuthKit session cookie of a member of an allowed
+organization: the Yao Lab (`WORKOS_LAB_ORGANIZATION_ID`, scope `lab`) or, if set, the Judges
+organization (`WORKOS_JUDGES_ORGANIZATION_ID`, scope `self`). `org_id` must be in that list,
+checked on every request and again in the sign-in callback. The user's `labId` is their
+organization and `scope` its entry; domains receive `readerOf(user)` and never branch on
+`scope`. `self` has two producers, one per identity source: WorkOS users in the Judges
+organization, and anonymous demo visitors, whom our server mints (a sealed cookie, no WorkOS
+user, no email) in the demo entrance PR. No WorkOS user signs into a Demo organization, so
+none is in the list. WorkOS does not enforce the `organizationId` pin on sign-in, so the
+per-request allow-list is the only control. `scope` is server-internal: `/me` returns only the contract shape. When an `Authorization` header is present only the
+bearer counts. The root answers 401 for no principal on everything but `/api/auth/*`;
+a domain guards a subtree with `requireService` or `requireUser` (which also sets a typed
+`c.var.user`) and gets 403 for the other kind. A cookie-authenticated non-GET request must
+carry an `Origin` equal to `APP_URL`'s origin (`SameSite=Lax` is same-site, not
+same-origin) and a JSON content type; a WebSocket upgrade must carry the `Origin` only.
+Bearer requests are exempt. `APP_URL` (the Vite origin in `pnpm dev`, the public URL in
+production) is config, never the `Host` header: it builds the redirect
+`${APP_URL}/api/auth/callback`. There is no `users` table: records store the WorkOS user id.
+
+Routes: `GET /api/auth/login?returnTo=`, `GET /api/auth/callback`,
+`POST /api/auth/logout` (returns `{ logoutUrl }` for the browser to navigate to),
+`GET /api/auth/me`. A non-member is sent to `/?signin=not-a-member`, a failed callback to
+`/?signin=failed`; both leave no session cookie.
+
+The root mounts in this order: bearer and CSRF (no I/O, so a forged request makes no
+WorkOS call); login, callback and logout, the only writers of the session cookie (they
+authenticate through PKCE and state, or need only the cookie, not a refresh); the session
+cookie and the 401 for no principal; then `/me` and the domains. That order, not a check
+after the response, is what gives the cookie one writer. A refreshed session comes back as
+`Set-Cookie` on the response that triggered the refresh.
+
+A request makes at most one WorkOS refresh (`AuthKitCore.validateAndRefresh`), with a 3 s
+timeout and no SDK retries (AuthKit's own one-time 429 retry stays, so a rate-limited
+refresh is two calls). A failure that is 408, 429, 5xx or a network error leaves the
+cookie, so an outage does not sign people out; any other failure (revoked or expired
+session, `sso_required`) clears it, and an unreadable cookie is cleared without a call.
+
+Sign-out revokes the session at WorkOS on the server (`userManagement.revokeSession`), as
+does signing in over an existing session (the old one); refresh tokens are not rotated on
+use, so a copied cookie would otherwise stay a session. The access token already issued
+stays valid until it expires. `returnTo` is sanitized, limited to printable ASCII and 512
+characters, and dropped if it doesn't fit, which keeps a PKCE verifier cookie near 1.2 KB;
+`/login` evicts stale verifier cookies.
 
 ## Deployment
 
