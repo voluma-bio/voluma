@@ -191,18 +191,22 @@ export async function runClaim(
     );
     session = sandboxSession(
       () =>
-        createSandbox({
-          runId,
-          name: "main",
-          image: config.sandbox.image,
-          cpu: 2,
-          memoryMiB: 8192,
-          lifetimeSeconds: config.sandbox.lifetimeSeconds,
-          idleSeconds: config.sandbox.idleSeconds,
-          mounts: layout.mounts,
-        }),
+        createSandbox(
+          {
+            runId,
+            name: "main",
+            image: config.sandbox.image,
+            cpu: 2,
+            memoryMiB: 8192,
+            lifetimeSeconds: config.sandbox.lifetimeSeconds,
+            idleSeconds: config.sandbox.idleSeconds,
+            mounts: layout.mounts,
+          },
+          abort.signal,
+        ),
       (id, state, detail) => {
-        if (state === "ready") meter.sandboxUp();
+        // Metered from the start of creation, the sweep included: a conservative upper bound.
+        if (state === "starting") meter.sandboxUp();
         else if (state === "stopped" || state === "failed") meter.sandboxDown();
         events?.emit(id, "sandbox", { name: "main", state, detail });
       },
