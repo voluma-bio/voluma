@@ -1,5 +1,6 @@
 /** Task-scoped report and questions. Acceptance never changes scientific confidence. */
 import { useMutation } from "@tanstack/react-query";
+import { StatusBadge } from "@voluma/ui";
 import {
   ArrowUpRight,
   Check,
@@ -10,65 +11,29 @@ import {
   Send,
   ShieldCheck,
 } from "lucide-react";
-import { Dialog } from "radix-ui";
 import { useState } from "react";
-import type { Asset, ReviewRun, ReviewTask } from "./model";
+import { type Asset, type ReviewRun, type ReviewTask, taskStatus } from "./model";
 import type { ReviewService } from "./service";
 
+/** Evidence and files are R2 keys; the API doesn't serve them to the browser yet. */
 function Evidence({ asset }: { asset: Asset }) {
-  const [failed, setFailed] = useState(false);
   return (
-    <Dialog.Root>
-      <Dialog.Trigger asChild>
-        <button type="button" className="evidence-card">
-          <div className="evidence-image">
-            {asset.url && !failed ? (
-              <img src={asset.url} alt={asset.label} onError={() => setFailed(true)} />
-            ) : (
-              <ImageOff size={25} strokeWidth={1.3} />
-            )}
-          </div>
-          <span className="font-medium">{asset.label}</span>
-          <span className="text-xs text-muted-foreground">
-            {asset.url && !failed ? "Open evidence" : "Evidence unavailable"}
-            <ArrowUpRight size={13} />
-          </span>
-        </button>
-      </Dialog.Trigger>
-      <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="dialog-content evidence-dialog">
-          <Dialog.Title className="text-xl font-semibold">{asset.label}</Dialog.Title>
-          <Dialog.Description className="mt-3 text-muted-foreground">
-            {failed
-              ? "The evidence image could not be loaded."
-              : asset.unavailableReason || "Evidence attached to this task result."}
-          </Dialog.Description>
-          {asset.url && !failed ? (
-            <img
-              className="lightbox-image"
-              src={asset.url}
-              alt={asset.label}
-              onError={() => setFailed(true)}
-            />
-          ) : (
-            <div className="missing-evidence">
-              <ImageOff size={40} strokeWidth={1} />
-              <p>No image is available for this evidence.</p>
-            </div>
-          )}
-          <code className="file-path">{asset.path}</code>
-          <div className="mt-6 flex justify-end">
-            <Dialog.Close className="button">Close evidence</Dialog.Close>
-          </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+    <div className="evidence-card">
+      <div className="evidence-image">
+        <ImageOff size={25} strokeWidth={1.3} />
+      </div>
+      <span className="font-medium">{asset.name}</span>
+      <span className="text-xs text-muted-foreground">Image not served yet</span>
+    </div>
   );
 }
 
+const format = (value: number) =>
+  new Intl.NumberFormat("en-US", { maximumFractionDigits: 3 }).format(value);
+
 export function TaskReport({
   task,
+  structureName,
   taskNumber,
   runId,
   revisionId,
@@ -78,6 +43,8 @@ export function TaskReport({
   onCorrect,
 }: {
   task: ReviewTask;
+  /** A structure id to its name, for To check items that point at structures. */
+  structureName(id: string): string;
   taskNumber: number;
   runId: string;
   revisionId: string;
@@ -113,15 +80,28 @@ export function TaskReport({
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <span className="font-mono">{String(taskNumber).padStart(2, "0")}</span>
           <span>Task report</span>
-          <span className="ml-auto">Result {task.resultRevisionId.toUpperCase()}</span>
+          <span className="ml-auto">
+            <StatusBadge tone={taskStatus[task.status].tone}>
+              {taskStatus[task.status].label}
+            </StatusBadge>
+          </span>
         </div>
         <h1 className="text-2xl font-semibold mt-3">{task.title}</h1>
-        <p className="text-muted-foreground mt-3 leading-relaxed">{task.ask}</p>
+        {task.ask && <p className="text-muted-foreground mt-3 leading-relaxed">{task.ask}</p>}
+        {(task.models.worker || task.models.check) && (
+          <p className="text-xs text-muted-foreground mt-3">
+            {task.models.worker && <>Worker: {task.models.worker}</>}
+            {task.models.worker && task.models.check && " · "}
+            {task.models.check && <>Check: {task.models.check}</>}
+          </p>
+        )}
       </header>
       <section>
         <div className="section-heading">
           <h2>Measurements</h2>
-          <span className="badge warning">Provisional</span>
+          {task.measurements.some((m) => m.confidence) && (
+            <span className="badge warning">Provisional</span>
+          )}
         </div>
         <p className="text-xs text-muted-foreground mb-3">
           Missing values are not zero. Values link to their evidence.
@@ -138,27 +118,53 @@ export function TaskReport({
             {task.measurements.map((m) => (
               <tr key={m.id}>
                 <th scope="row">
-                  <a href={`#evidence-${m.evidenceIds[0]}`}>
-                    {m.label}
-                    <ArrowUpRight size={12} />
-                  </a>
+                  {m.evidenceIds[0] ? (
+                    <a href={`#evidence-${m.evidenceIds[0]}`}>
+                      {m.title ?? m.id}
+                      <ArrowUpRight size={12} />
+                    </a>
+                  ) : (
+                    (m.title ?? m.id)
+                  )}
                   <span className="measurement-source">
-                    {m.origin === "unavailable" ? "Not supplied" : "Measured result"}
-                    {m.status === "candidate" ? " · Candidate" : ""}
+                    {m.value === null ? "Not supplied" : "Measured result"}
+                    {m.confidence === "candidate" ? " · Candidate" : ""}
+                    {m.note ? ` · ${m.note}` : ""}
                   </span>
                 </th>
-                <td className="font-mono">
-                  {m.value === null
-                    ? "—"
-                    : new Intl.NumberFormat("en-US", {
-                        maximumFractionDigits: 3,
-                      }).format(m.value)}
-                </td>
+                <td className="font-mono">{m.value === null ? "—" : format(m.value)}</td>
                 <td className="text-muted-foreground">{m.unit || "ratio"}</td>
+              </tr>
+            ))}
+            {task.scores.map((sc) => (
+              <tr key={sc.id}>
+                <th scope="row">
+                  {sc.title ?? sc.id}
+                  <span className="measurement-source">
+                    Score{sc.scale ? ` (${sc.scale.join(", ")})` : ""}
+                  </span>
+                </th>
+                <td className="font-mono">{sc.level}</td>
+                <td className="text-muted-foreground">level</td>
+              </tr>
+            ))}
+            {task.missing.map((o) => (
+              <tr key={o.outputId}>
+                <th scope="row">
+                  {o.outputId}
+                  <span className="measurement-source">
+                    Not reported{o.required ? " · required" : ""}
+                  </span>
+                </th>
+                <td className="font-mono">—</td>
+                <td className="text-muted-foreground">{o.kind}</td>
               </tr>
             ))}
           </tbody>
         </table>
+        {task.measurements.length + task.scores.length + task.missing.length === 0 && (
+          <p className="notice">This task reported no measurements.</p>
+        )}
       </section>
       <section>
         <div className="section-heading">
@@ -182,6 +188,11 @@ export function TaskReport({
               <h3 className="font-medium">{check.title}</h3>
             </div>
             <p className="mt-2 leading-relaxed">{check.detail}</p>
+            {check.focus && check.focus.structureIds.length > 0 && (
+              <p className="text-xs text-muted-foreground mt-2">
+                About: {check.focus.structureIds.map((id) => structureName(id)).join(", ")}
+              </p>
+            )}
             <div className="flex flex-wrap items-center gap-2 mt-4">
               {check.status === "accepted" ? (
                 <span className="font-medium text-primary-text">
@@ -223,12 +234,18 @@ export function TaskReport({
           <h2>Second-agent check</h2>
           <ShieldCheck size={18} className="text-primary-text" />
         </div>
-        <p className="leading-relaxed text-muted-foreground">{task.checker.text}</p>
-        <p className="text-xs text-muted-foreground mt-2">
-          {task.checker.verdict === "passed"
-            ? "Technical check passed; anatomical decisions remain separate."
-            : "Reviewer judgment still required."}
-        </p>
+        {task.checker ? (
+          <>
+            <p className="leading-relaxed text-muted-foreground">{task.checker.text}</p>
+            <p className="text-xs text-muted-foreground mt-2">
+              {task.checker.verdict === "passed"
+                ? "Technical check passed; anatomical decisions remain separate."
+                : "Reviewer judgment still required."}
+            </p>
+          </>
+        ) : (
+          <p className="text-muted-foreground">No second agent checked this task.</p>
+        )}
       </section>
       {references.length > 0 && (
         <section>
@@ -247,7 +264,7 @@ export function TaskReport({
               {references.map(({ m, reference }) => (
                 <tr key={`${m.id}-${reference.reader}`}>
                   <th scope="row">
-                    {m.label}
+                    {m.title ?? m.id}
                     <span className="measurement-source">{reference.reader}</span>
                   </th>
                   <td className="font-mono">
@@ -270,18 +287,8 @@ export function TaskReport({
       )}
       <section>
         <div className="section-heading">
-          <h2>What the agent did</h2>
-        </div>
-        <ol className="actions-list">
-          {task.actions.map((action) => (
-            <li key={action}>{action}</li>
-          ))}
-        </ol>
-      </section>
-      <section>
-        <div className="section-heading">
           <h2>Evidence</h2>
-          <span className="text-sm text-muted-foreground">{task.evidence.length} checkpoints</span>
+          <span className="text-sm text-muted-foreground">{task.evidence.length} files</span>
         </div>
         <div className="evidence-grid">
           {task.evidence.map((asset) => (
@@ -300,20 +307,9 @@ export function TaskReport({
             <li key={file.id}>
               <FileText size={16} className="shrink-0 text-muted-foreground" />
               <div>
-                <p>{file.label}</p>
-                <code className="file-path">{file.path}</code>
-                <p className="text-xs text-muted-foreground mt-1">{file.unavailableReason}</p>
+                <p>{file.name}</p>
+                <p className="text-xs text-muted-foreground mt-1">Download not served yet</p>
               </div>
-              {file.url && (
-                <a
-                  className="text-primary-text"
-                  href={file.url}
-                  download
-                  aria-label={`Download ${file.label}`}
-                >
-                  <ArrowUpRight size={16} />
-                </a>
-              )}
             </li>
           ))}
         </ul>
@@ -324,16 +320,6 @@ export function TaskReport({
           <MessageSquare size={17} />
         </div>
         <p className="text-xs text-muted-foreground mb-4">A question never starts a rerun.</p>
-        <div className="space-y-3" aria-live="polite">
-          {task.messages.map((message) => (
-            <div key={message.id} className={`message ${message.role}`}>
-              <p className="font-medium text-xs mb-1">
-                {message.role === "user" ? "You" : "Assistant"}
-              </p>
-              <p>{message.text}</p>
-            </div>
-          ))}
-        </div>
         <form
           className="mt-4"
           onSubmit={(event) => {

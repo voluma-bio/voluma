@@ -2,8 +2,9 @@
 
 Review is one light-themed workspace at `/runs/:runId`. It downloads an
 authorized R2 input archive, displays acquired images and
-builds a bounded raw volume preview. It does not yet load analysis results, run
-analysis, or persist review decisions. `/runs/local` opens the R2 reference scan
+builds a bounded raw volume preview. On a real run it loads the run's results
+(`getReviewRun`, the shared `ReviewRun`). It does not run analysis or persist
+review decisions. `/runs/local` opens the R2 reference scan
 without creating a run in the API. There is no local-file intake or simulator.
 
 ## Scientific results and acquired images have separate ownership
@@ -11,7 +12,7 @@ without creating a run in the API. There is no local-file intake or simulator.
 ```diagram
 Authorized R2 archive → viewer package → acquired-slice viewport
 
-Future API adapter → ReviewRun snapshot → task report and decisions
+GET /api/review/runs/:runId → ReviewRun → task report and decisions
 ```
 
 Opening an image never populates measurements, task checks, segmentation
@@ -29,28 +30,29 @@ The public `@voluma/viewer` API owns ZIP/DICOM validation, ordering, decoding
 and rendering; see the [DICOM specification][dicom]. Opening a scan does not create
 a run or populate the results report.
 
-## The report UI is retained for the real adapter
+## The report renders the shared ReviewRun
 
-The three original phase commits contain the scaffold, reports and simulated
-interaction proof. The merged tree contains their presentation components,
-but no fixture measurements or simulated service. The current behavior is:
+`index.tsx` loads `getReviewRun(runId)` with React Query; `/runs/local` loads
+nothing. A 409 (the run has no plan) and a 404 show a notice in place of the
+report. The behavior is:
 
 | Area | Behavior |
 |---|---|
-| Tasks | Ordered tasks from the selected snapshot; selecting one updates the `task` query parameter |
+| Tasks | Ordered tasks from the selected revision, each with its status badge; selecting one updates the `task` query parameter |
 | Revisions | Latest snapshot by default; `revision` selects an earlier, read-only snapshot |
-| Measurements | Values retain units, origin, confidence and evidence references; null is unavailable, never zero |
-| Evidence/files | Supplied assets can open in the lightbox; unavailable assets explain why |
-| Checks/chat/corrections | Disabled without a service; corrections require a proposal with affected tasks, then confirmation |
+| Measurements | Measurements, scores and declared outputs the task didn't report, with units and confidence; null is unavailable, never zero |
+| Models | The worker's and checker's model, when the run recorded them |
+| Evidence/files | Listed by name; the API doesn't serve R2 run files yet, so no image or download |
+| Checks | To check items, with the structures their focus names; the checker is absent when no second agent checked the task |
+| Chat/corrections | Disabled without a service; corrections require a proposal with affected tasks, then confirmation |
 | CSV | Available only with a real snapshot; includes task result revision and evidence identifiers, and escapes spreadsheet formulas |
 | Structures | Visibility/opacity are display state, not scientific edits |
 | Viewer layout | Resizable nested panels; maximizing changes CSS layout without remounting the acquired image |
 
-The `report/model.ts` Zod schemas describe the current **presentation model**.
-The shared `ReviewRun` contract and `getReviewRun` client have landed; the screen's
-migration to them is separate. `ReviewService` describes commands the existing
-controls need; no implementation is mounted. Do not make a fake transport to fill
-the empty report.
+`report/model.ts` re-exports the contract's types and keeps only the correction
+command shapes, whose contract is still to come. `ReviewService` describes the
+commands the controls need (accept, ask, corrections); no implementation is mounted.
+Do not make a fake transport to fill the empty report.
 
 ## Intake remains usable through errors and replacement
 
