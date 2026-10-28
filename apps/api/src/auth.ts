@@ -5,11 +5,18 @@
  *    the header is present only the bearer counts; the cookie is never consulted.
  *  - the WorkOS AuthKit session cookie: a member of an allowed organization, principal
  *    `user` (its `labId` is that organization, its `scope` the organization's entry).
+ * With `config.guest` set, a request with neither a session cookie nor a bearer but a
+ * guest cookie is a guest: a `user` with account `visitor`, `labId` and `scope` from the
+ * config, identified by a server-minted id in its own sealed cookie (no WorkOS call).
+ * Only `POST /api/auth/guest` mints one; a GET never does. A session cookie that is
+ * refused is cleared and answered 401, never turned into a guest; with `guest` null the
+ * guest cookie is ignored and the request is a 401.
  * `createAuth` returns the pieces index.ts mounts on `/api/*`, in this order:
  *  1. `guards`: the bearer check and the CSRF rules. No I/O, so a forged request makes no
  *     WorkOS call.
- *  2. `sessionRoutes`: login, callback and logout, the only writers of the session cookie.
- *  3. `session`, then `requirePrincipal`: the cookie becomes a user principal, and
+ *  2. `sessionRoutes`: login, callback, logout and guest, the only writers of the session
+ *     and guest cookies.
+ *  3. `session`, then `requirePrincipal`: the cookie (else a guest cookie) becomes a user principal, and
  *     everything else without a principal is a 401. This is the only place that
  *     validates the cookie and refreshes an expired access token with WorkOS; the
  *     refreshed `Set-Cookie`s ride on the response (each its own header: AuthKit forbids
@@ -17,6 +24,7 @@
  *  4. `userRoutes` and the domains, which see a non-null principal (domain.ts).
  */
 
+import { randomUUID } from "node:crypto";
 import type { Me } from "@voluma/contracts/auth";
 import {
   AuthKitCore,
@@ -39,8 +47,10 @@ import {
   WorkOS,
 } from "@workos-inc/node";
 import { type Context, Hono } from "hono";
+import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
 import { timingSafeEqual } from "hono/utils/buffer";
+import { serialize } from "hono/utils/cookie";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { type Principal, requireUser, type Scope, type UserEnv } from "./domain";
 
@@ -54,6 +64,11 @@ export interface AuthConfig {
    * get. The first `lab` entry is the organization the sign-in page is pinned to.
    */
   organizations: { id: string; scope: Scope }[];
+  /**
+   * Who a request with no credential is, or null for a sign-in wall. Guests belong to
+   * `organizationId` and see what `scope` allows, as a member of it would.
+   */
+  guest: { organizationId: string; scope: Scope } | null;
   /** Where the browser reaches the app (no trailing slash). Never taken from `Host`. */
   appUrl: string;
   /** The runner's bearer token. */
@@ -97,6 +112,11 @@ class RequestStorage extends CookieSessionStorage<Request, string[]> {
 // Session cookie lifetime. The refresh token, not this, bounds the session; a month
 // keeps a lab member signed in across a holiday without a permanent cookie.
 const COOKIE_MAX_AGE = 30 * 24 * 60 * 60;
+
+// The guest cookie outlives any visit: a guest is a browser, and losing the cookie
+// loses their work under `scope: "self"`.
+const GUEST_MAX_AGE = 400 * 24 * 60 * 60;
+const GUEST_ID_PREFIX = "guest_";
 
 // Every WorkOS call is on a request path (refresh, revoke, code exchange), so it is
 // bounded: one attempt, 3 s. The SDK's default is 4 attempts and 60 s each.
@@ -207,10 +227,25 @@ function userPrincipal(user: User, labId: string, scope: Scope): Principal {
   return {
     kind: "user",
     userId: user.id,
+    account: "member",
     email: user.email,
     name: [user.firstName, user.lastName].filter(Boolean).join(" ") || null,
     labId,
     scope,
+  };
+}
+
+function guestPrincipal(
+  userId: string,
+  guest: NonNullable<AuthConfig["guest"]>,
+): Extract<Principal, { account: "visitor" }> {
+  return {
+    kind: "user",
+    userId,
+    account: "visitor",
+    name: null,
+    labId: guest.organizationId,
+    scope: guest.scope,
   };
 }
 
@@ -224,6 +259,9 @@ export function createAuth(config: AuthConfig) {
   const scopes = new Map(config.organizations.map((org) => [org.id, org.scope]));
   const signInOrganizationId = config.organizations.find((org) => org.scope === "lab")?.id;
   if (!signInOrganizationId) throw new Error("createAuth needs a lab organization");
+  if (config.guest && scopes.has(config.guest.organizationId)) {
+    throw new Error("The guest organization must not be one that members sign in to");
+  }
   // __Host- needs Secure, Path=/ and no Domain, so a sibling subdomain can't plant or
   // shadow the cookie. AuthKit sets Secure when the redirect URI is https.
   const cookieName = appOrigin.startsWith("https:") ? "__Host-wos-session" : "wos-session";
@@ -279,6 +317,10 @@ export function createAuth(config: AuthConfig) {
   }
   const core = new Core(getConfigurationProvider().getConfig(), workos, sessionEncryption);
   const memo = new RefreshMemo();
+  // Like the session cookie, __Host- on https. The prefix is in the name itself:
+  // `serialize` doesn't apply Hono's `prefix` option, so read and write use this name.
+  const https = appOrigin.startsWith("https:");
+  const guestCookieName = https ? "__Host-voluma-guest" : "voluma-guest";
 
   // Clears the session cookie and every pending PKCE verifier on the request, so
   // sign-out and refusals leave no AuthKit cookie behind.
@@ -322,8 +364,9 @@ export function createAuth(config: AuthConfig) {
     }
   }
 
-  // The principal for a request's session cookie, or null; "unavailable" when a refresh
-  // failed transiently. Cookies to set go to `sink`.
+  // The principal for a request's session cookie; "none" when it presented no cookie;
+  // "refused" when it presented one that is not (or no longer) good, which is cleared;
+  // "unavailable" when a refresh failed transiently. Cookies to set go to `sink`.
   // A dead cookie is cleared and remembered as dead, so a replay of it costs no WorkOS
   // call; a refreshed session is remembered until its access token expires. Any other
   // WorkOS failure keeps the cookie, is remembered briefly, and the caller answers 503, so
@@ -334,13 +377,13 @@ export function createAuth(config: AuthConfig) {
       session = await authkit.getSession(request);
     } catch {
       await clearSessionCookies(request, sink);
-      return null;
+      return "refused" as const;
     }
-    if (session === null) return null;
+    if (session === null) return "none" as const;
     const remembered = memo.get(session.refreshToken);
     if (remembered === "dead") {
       await clearSessionCookies(request, sink);
-      return null;
+      return "refused" as const;
     }
     if (remembered === "unavailable") return remembered;
     let result: Refreshed;
@@ -353,7 +396,7 @@ export function createAuth(config: AuthConfig) {
         if (isTerminalRefreshError(error)) {
           memo.dead(session.refreshToken);
           await clearSessionCookies(request, sink);
-          return null;
+          return "refused" as const;
         }
         console.error("session refresh failed; cookie kept", error);
         memo.unavailable(session.refreshToken);
@@ -366,11 +409,45 @@ export function createAuth(config: AuthConfig) {
     const scope = orgId === undefined ? undefined : scopes.get(orgId);
     if (orgId === undefined || scope === undefined) {
       await clearSessionCookies(request, sink);
-      return null;
+      return "refused" as const;
     }
     if (result.refreshed)
       await authkit.saveSession(sink, await core.encryptSession(result.session));
     return userPrincipal(result.session.user, orgId, scope);
+  }
+
+  // The guest for a request, or null for no valid guest cookie (absent, garbled, forged
+  // or sealed under another password).
+  async function guestIdFromCookie(c: Context) {
+    const sealed = getCookie(c, guestCookieName);
+    if (!sealed) return null;
+    try {
+      const { id } = await sessionEncryption.unsealData<{ id?: unknown }>(sealed, {
+        password: config.cookiePassword,
+      });
+      return typeof id === "string" && id.startsWith(GUEST_ID_PREFIX) ? id : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // Sets a new guest identity's cookie in `sink` and returns its id.
+  async function mintGuest(sink: string[]) {
+    const id = `${GUEST_ID_PREFIX}${randomUUID()}`;
+    sink.push(
+      serialize(
+        guestCookieName,
+        await sessionEncryption.sealData({ id }, { password: config.cookiePassword }),
+        {
+          httpOnly: true,
+          sameSite: "Lax",
+          maxAge: GUEST_MAX_AGE,
+          secure: https,
+          path: "/",
+        },
+      ),
+    );
+    return id;
   }
 
   const bearer = createMiddleware<RootEnv>(async (c, next) => {
@@ -404,10 +481,17 @@ export function createAuth(config: AuthConfig) {
   const session = createMiddleware<RootEnv>(async (c, next) => {
     if (c.req.header("authorization") !== undefined) return next(); // the bearer decided
     const cookies: string[] = [];
-    const principal = await userFromCookie(c.req.raw, cookies);
-    if (principal === "unavailable") return c.json({ error: "auth unavailable" }, 503);
+    const member = await userFromCookie(c.req.raw, cookies);
+    if (member === "unavailable") return c.json({ error: "auth unavailable" }, 503);
+    let principal: Principal | null = null;
+    if (member === "none") {
+      const id = config.guest && (await guestIdFromCookie(c));
+      principal = id && config.guest ? guestPrincipal(id, config.guest) : null;
+    } else if (member !== "refused") {
+      principal = member;
+    }
     c.set("principal", principal);
-    await next();
+    await next(); // a refused cookie's clear rides on the 401 from requirePrincipal
     for (const cookie of cookies) c.res.headers.append("Set-Cookie", cookie);
   });
 
@@ -493,11 +577,28 @@ export function createAuth(config: AuthConfig) {
     return c.json({ logoutUrl });
   });
 
+  // The only place a guest is minted: an explicit same-origin POST (behind the CSRF
+  // guard), so a cross-site GET or a 404 mints nothing. It answers like /me. A browser
+  // that already holds a guest cookie keeps its id.
+  sessionRoutes.post("/guest", async (c) => {
+    if (!config.guest) return c.json({ error: "not found" }, 404);
+    const cookies: string[] = [];
+    const id = (await guestIdFromCookie(c)) ?? (await mintGuest(cookies));
+    setCookies(c, cookies);
+    const { userId, name, labId } = guestPrincipal(id, config.guest);
+    return c.json({ kind: "visitor", userId, name, labId } satisfies Me);
+  });
+
   const userRoutes = new Hono<UserEnv>().use(requireUser);
 
   userRoutes.get("/me", (c) => {
-    const { userId, email, name, labId } = c.var.user;
-    return c.json({ kind: "member", userId, email, name, labId } satisfies Me);
+    const user = c.var.user;
+    const { userId, name, labId } = user;
+    const me: Me =
+      user.account === "member"
+        ? { kind: "member", userId, email: user.email, name, labId }
+        : { kind: "visitor", userId, name, labId };
+    return c.json(me);
   });
 
   return {
