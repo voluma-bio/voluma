@@ -31,8 +31,14 @@ Three screens under `RunLayout` (top bar and query client): `/` start (`start-pa
   guarded) and dropped by `settle` when their durable event lands: a reply by `messageId` (the
   `message`, or the `wake` for the main thread, whose streamed text is its JSON reply: the page
   shows its `note` as it grows), a call's arguments by `toolCallId` until its `tool.call`, its
-  output until its `tool.result`. Frames are not replayed, so a reload mid-reply shows that reply
-  only once its durable event lands.
+  output until its `tool.result`. Frames can trail their durable event (about a third of
+  `tool.output` frames arrive after the `tool.result`, and a short reply's single `text.delta`
+  can land after its `message`), so `settle` records each settled key in a `Settled` set the
+  stream owns and `applyFrame` ignores frames for those keys. A frame at offset 0 starts a partial
+  over (a re-asked wake reuses its id); any other gap drops the partial until the durable event.
+  A partial row and its durable row share a React key (message id, toolCallId), so the swap does
+  not remount it. Frames are not replayed, so a reload mid-reply shows that reply only once its
+  durable event lands. A thread's first `runtime` message is labelled its task brief.
 - **Ported from Flow**: `chat/` holds Flow's `ProcessDisclosure`, `ActivityRow`, `StreamingText`
   caret, `useChatFollowScroll`, `DisclosureStore`, `ChatThreadNavigation`, `TurnInfoButton` and the
   sub-agent row anatomy, restyled onto voluma's tokens; each file header names its source. Markdown
