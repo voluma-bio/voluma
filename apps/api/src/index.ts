@@ -10,7 +10,9 @@
  * Env: DATABASE_URL, VOLUMA_API_TOKEN, APP_URL, PORT, optionally HOST (`pnpm dev` sets
  * them; see tools/dev.mjs), and WORKOS_CLIENT_ID, WORKOS_API_KEY, WORKOS_COOKIE_PASSWORD,
  * WORKOS_LAB_ORGANIZATION_ID, and optionally WORKOS_JUDGES_ORGANIZATION_ID, and
- * GUEST_ORGANIZATION_ID with GUEST_SCOPE (lab|self, default lab) to let anyone in as a guest (the repo .env). Fails at startup if the database is unreachable or not migrated.
+ * GUEST_ORGANIZATION_ID with GUEST_SCOPE (lab|self, default lab) to let anyone in as a guest (the repo .env).
+ * Run limits, per organization (LAB, JUDGES, DEMO) and number: RUN_LIMITS_<ORG>_PER_CALLER, _CONCURRENT,
+ * _PER_DAY, _USD_PER_DAY; unset is no limit. Fails at startup if the database is unreachable or not migrated.
  */
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -23,8 +25,13 @@ import postgres from "postgres";
 import { createAuth } from "./auth";
 import { createReview } from "./domains/review";
 import { createRun } from "./domains/run";
+import { catalog } from "./domains/run/catalog";
+import { KeyVault } from "./domains/run/key-vault";
 import { pgEventLog } from "./domains/run/pg-event-log";
 import { pgHistory } from "./domains/run/pg-history";
+import { pgRunQueue } from "./domains/run/pg-queue";
+import { pgRunStore } from "./domains/run/pg-run-store";
+import type { Limits } from "./domains/run/run-store";
 
 const required = (name: string) => {
   const value = process.env[name];
@@ -37,6 +44,23 @@ function guestScope() {
   if (scope !== "lab" && scope !== "self") throw new Error("GUEST_SCOPE must be lab or self");
   return scope;
 }
+
+/** A run limit from env: unset means no limit. */
+function limitNumber(name: string): number | null {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return null;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) throw new Error(`${name} must be a number`);
+  return value;
+}
+
+/** An organization's run limits (`run.ts`), every number from `RUN_LIMITS_<ORG>_*` so it can change without a deploy. */
+const limitsFromEnv = (org: "LAB" | "JUDGES" | "DEMO"): Limits => ({
+  perCaller: limitNumber(`RUN_LIMITS_${org}_PER_CALLER`),
+  concurrent: limitNumber(`RUN_LIMITS_${org}_CONCURRENT`),
+  perDay: limitNumber(`RUN_LIMITS_${org}_PER_DAY`),
+  usdPerDay: limitNumber(`RUN_LIMITS_${org}_USD_PER_DAY`),
+});
 
 const client = postgres(required("DATABASE_URL"));
 const db = drizzle(client, { casing: "snake_case" });
@@ -62,6 +86,24 @@ const auth = createAuth({
   apiToken: required("VOLUMA_API_TOKEN"),
 });
 
+// The allow-list organizations (the same ids as `auth` above) and what each may run.
+const labId = required("WORKOS_LAB_ORGANIZATION_ID");
+const limitsByOrg = new Map<string, Limits>([[labId, limitsFromEnv("LAB")]]);
+if (process.env.WORKOS_JUDGES_ORGANIZATION_ID) {
+  limitsByOrg.set(process.env.WORKOS_JUDGES_ORGANIZATION_ID, limitsFromEnv("JUDGES"));
+}
+if (process.env.GUEST_ORGANIZATION_ID) {
+  limitsByOrg.set(process.env.GUEST_ORGANIZATION_ID, limitsFromEnv("DEMO"));
+}
+const limits = (org: string) => {
+  const found = limitsByOrg.get(org);
+  if (!found) throw new Error(`no run limits for organization ${org}`);
+  return found;
+};
+const runStore = pgRunStore(db, limits);
+const runQueue = pgRunQueue(db, limits);
+const keyVault = new KeyVault();
+
 const app = new Hono();
 app.get("/health", (c) => c.text("ok"));
 // Every /api request is authenticated here, in this order (auth.ts): the bearer and
@@ -74,8 +116,12 @@ app.route("/api/auth", auth.userRoutes);
 app.route(
   "/api/run",
   createRun({
+    store: runStore,
+    queue: runQueue,
     eventLog: pgEventLog(db),
     history: pgHistory(db),
+    catalog,
+    vault: keyVault,
   }),
 );
 app.route("/api/review", createReview({}));
@@ -113,6 +159,9 @@ app.onError((error, c) => {
 
 // Fail fast on a bad URL, bad credentials or a missing migration; /health stays liveness-only.
 await client`select 1 from threads limit 0`;
+// The vault is empty after a start, so no unclaimed visitor run has its keys any more.
+await runQueue.holdUnkeyedVisitorRuns();
+await runStore.ensureReferenceInputs([...limitsByOrg.keys()]);
 
 const server = serve(
   { fetch: app.fetch, port: Number(required("PORT")), hostname: process.env.HOST },

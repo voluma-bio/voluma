@@ -8,6 +8,13 @@
       "when": 1793154133586,
       "tag": "0000_round_sir_ram",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793167090314,
+      "tag": "0001_cuddly_mantis",
+      "breakpoints": true
     }
   ]
 }

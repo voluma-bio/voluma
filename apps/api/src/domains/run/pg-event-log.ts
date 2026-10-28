@@ -1,31 +1,34 @@
 /**
- * Postgres adapter for the EventLog port. One transaction per append:
+ * Postgres adapter for the run's event log (LeasedEventLog). One transaction per append:
  *
  * 1. take a per-run advisory lock, as its own statement. Under READ COMMITTED a
  *    statement's snapshot is taken when it starts, so a lock taken inside the insert's
  *    own statement would not see the previous holder's row and `seq` would collide;
- * 2. insert with `seq = MAX(seq) + 1`; a repeated event `id` inserts nothing;
- * 3. apply the `threads` projection, only if the event was new.
+ * 2. check the lease token against the run row (`LeaseLost` rolls the append back);
+ * 3. insert with `seq = MAX(seq) + 1`; a repeated event `id` inserts nothing;
+ * 4. apply the `threads` projection, only if the event was new.
  *
  * So `seq` is gapless and in commit order per run. The stream hub relies on that:
  * publish after commit, and a gap means backfill from the log.
  */
 import type { EventInput } from "@voluma/contracts/events";
-import type { EventLog } from "@voluma/harness/ports/event-log";
 import { eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import { assertLease } from "./run-rows";
+import type { LeasedEventLog } from "./run-store";
 import { events, threads } from "./schema";
 
 /** First key of the advisory lock pair; the second is the run. Distinguishes our locks from others'. */
 const EVENT_SEQ_LOCK = 0x76_6f_6c_75;
 
-export function pgEventLog(db: PostgresJsDatabase): EventLog {
+export function pgEventLog(db: PostgresJsDatabase): LeasedEventLog {
   return {
-    async append(event) {
+    async append(event, leaseToken) {
       await db.transaction(async (tx) => {
         await tx.execute(
           sql`SELECT pg_advisory_xact_lock(${EVENT_SEQ_LOCK}, hashtext(${event.runId}))`,
         );
+        await assertLease(tx, event.runId, leaseToken);
         const createdAt = new Date(event.createdAt);
         const inserted = await tx
           .insert(events)
