@@ -29,9 +29,11 @@ import { type RunRole, superviseRun } from "@voluma/harness/supervise-run";
 import type { Config } from "./config.ts";
 import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
+import { metaSegmenter } from "./meta-segmenter.ts";
 import { createModalSandbox, RUNS_APP, terminateClaim } from "./modal-sandbox.ts";
 import { CHECK_SYSTEM, checkPrompt, WORKER_SYSTEM, workerPrompt } from "./prompts.ts";
 import { r2Evidence } from "./r2-evidence.ts";
+import { r2Files } from "./r2-files.ts";
 import { type Redact, redactor } from "./redact.ts";
 import { usageMeter } from "./usage.ts";
 
@@ -81,6 +83,7 @@ export async function runClaim(
   const model = visitor ? ctx.visitorModel : ctx.model;
   const apiKey = visitor ? keys.metaApiKey : config.model.apiKey;
   const modal = visitor ? keys.modal : config.modal;
+  const metaKey = visitor ? keys.metaApiKey : config.metaApiKey;
   const redact: Redact = redactor([
     ...config.secrets,
     ...(visitor ? [keys.metaApiKey, keys.modal.tokenId, keys.modal.tokenSecret] : []),
@@ -184,6 +187,13 @@ export async function runClaim(
       history: client,
       sandbox: (id) => opened.get(id),
       evidence: r2Evidence(config.r2),
+      segmentSam: metaKey
+        ? {
+            files: r2Files(config.r2),
+            segmenter: metaSegmenter({ apiKey: metaKey, log }),
+            addCost: meter.addModelCost,
+          }
+        : undefined,
       judgment,
       worker: (task) => ({
         model,
