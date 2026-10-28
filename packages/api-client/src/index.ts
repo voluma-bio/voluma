@@ -4,6 +4,14 @@
  * emits "signed out" so the shell can show the sign-in screen.
  */
 import { logoutResponseSchema, type Me, meResponseSchema } from "@voluma/contracts/auth";
+import {
+  type Input,
+  listInputsResponseSchema,
+  listRunsResponseSchema,
+  type Run,
+  runSchema,
+  type StartRunRequest,
+} from "@voluma/contracts/run";
 
 /** A non-OK API response. Branch on `status` (403, 415, 5xx) rather than parsing the message. */
 export class ApiError extends Error {
@@ -63,4 +71,29 @@ export async function signOut(): Promise<void> {
     await json(await request("/auth/logout", { method: "POST" })),
   );
   location.href = logoutUrl;
+}
+
+/** Queues a run on one of the caller's inputs; it starts now or waits its turn. A 429 means the org's daily spend cap is reached. */
+export async function startRun(req: StartRunRequest): Promise<Run> {
+  return runSchema.parse(await json(await request("/run/runs", { method: "POST", body: req })));
+}
+
+export async function getRun(id: string): Promise<Run> {
+  return runSchema.parse(await json(await request(`/run/runs/${encodeURIComponent(id)}`)));
+}
+
+/** The caller's org's runs (only the caller's own under scope `self`), newest first. */
+export async function listRuns(): Promise<Run[]> {
+  return listRunsResponseSchema.parse(await json(await request("/run/runs"))).runs;
+}
+
+export async function cancelRun(id: string): Promise<Run> {
+  return runSchema.parse(
+    await json(await request(`/run/runs/${encodeURIComponent(id)}/cancel`, { method: "POST" })),
+  );
+}
+
+/** Inputs the caller may start a run on, newest first. */
+export async function listInputs(): Promise<Input[]> {
+  return listInputsResponseSchema.parse(await json(await request("/run/inputs"))).inputs;
 }

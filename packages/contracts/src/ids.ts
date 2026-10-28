@@ -15,6 +15,7 @@ export const segmentSchema = z
   });
 
 export const runIdSchema = segmentSchema;
+export const inputIdSchema = segmentSchema;
 export const taskIdSchema = segmentSchema;
 export const toolCallIdSchema = segmentSchema;
 

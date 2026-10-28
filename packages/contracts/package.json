@@ -16,7 +16,8 @@
     "./review": "./src/review.ts",
     "./workflow": "./src/workflow.ts",
     "./fold": "./src/fold.ts",
-    "./output": "./src/output.ts"
+    "./output": "./src/output.ts",
+    "./run": "./src/run.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
