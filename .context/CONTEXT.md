@@ -110,13 +110,22 @@ checklist, check threads, and review chat threads.
   run in this process; the header lists the rule per task status. Resume is the same code as a
   first run: a new process given the stored events and History starts nothing twice, wakes a
   thread the dead process left running, and names a redo's worker from the log's count. A
-  check that did not pass, or a failed thread, is a judgment point: `judgment.ts` is the one
-  seam (`decide(point) → accept | redo | fail`, bounded by a deadline and an abort signal). The
-  point is asked outside the section, then written as a `judgment` event with the id
-  `<thread>:judgment` (the point, arm, raw decision, applied action, and the fallback when the
-  arm errored or a redo was capped) before its action is applied; a replay applies the stored
-  action and does not ask the arm again. Its decisions record `by: judgment(arm)`. `llmJudgment`
-  is the first arm. A thread that throws or is refused before it starts (`ran` false), or an
+  task whose check passed has a boundary wake; a check that did not pass, or a failed thread,
+  is a judgment point. Both wake **the main thread** (`main-thread.ts`): one model thread per
+  run, kept as a conversation rebuilt from the log (the `wake` events), never held in memory,
+  so it is append-only (a provider's prompt cache keeps hitting its prefix) and a resumed run
+  asks from the context the first run had. Each wake is one call, asked outside the section
+  and bounded by a deadline and the abort signal (a stop is no answer and records nothing). It
+  answers with the whole notes block and, at a judgment point, `accept | redo | fail`. The
+  answer is written as a `wake` event `<thread>:wake` before anything uses it; the next step
+  turns a judgment point's decision into the `judgment` event `<thread>:judgment` (arm
+  `main:<model>`; the fallback when the call errored or a redo was capped) and applies it, as
+  `by: judgment(arm)`. A replay finds both and asks no one. The notes in force (the latest
+  `wake` with a `note`) go into the first message of every worker and check thread started
+  after, never a system prompt. Context grows by one wake message (the task's report) and one
+  answer (the notes block, rewritten whole) per wake: about 1 k tokens each, so ~15 k tokens
+  at the end of a 10-task run with a few judgments, read from cache after the first call.
+  The main thread has no tools or sandbox yet (`apps/runner/.context/TODO.md`). A thread that throws or is refused before it starts (`ran` false), or an
   error in a step, fails the run: threads aborted, the root ends `failed`. The supervisor never
   imports Pi; it is built by `superviseRun` (`packages/harness/src/supervise-run.ts`), which a host gives only adapters.
 - **The runner service** (`apps/runner`, `pnpm --filter @voluma/runner start`). It polls
