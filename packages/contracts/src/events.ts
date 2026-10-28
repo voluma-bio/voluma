@@ -9,10 +9,12 @@
  *
  * Reading back (the runner, to resume a run it claimed):
  *   GET /api/run/ingest/runs/:runId/events?after=<seq>  → 200 `runEventsResponseSchema`
- * with the lease token like every ingest call (`runner.ts`). It returns the
- * run's events with `seq > after` (0 for all) in `seq` order, at most `limit`
- * (`?limit=`, default and maximum 1000); `more` says another page follows, read
- * by passing the last `seq` as `after`. The runner reads them all before it
+ * with the lease token like every ingest call (`runner.ts`); a stale token is a
+ * 409 whose body is `leaseLostSchema`, and the runner stops. It returns the
+ * run's events with `seq > after` (0 or absent for all; `seq` starts at 1) in
+ * `seq` order, at most 1000; `more` says another page follows, read by passing
+ * the last `seq` as `after`. A stored event the runner can't parse fails the
+ * resume: skipping it would shift every later `seq`. The runner reads them all before it
  * decides anything, so its view is the stored log.
  *
  * These are the durable events. Live output (text and tool deltas, tool output

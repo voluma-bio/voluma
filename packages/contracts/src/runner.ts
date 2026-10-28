@@ -33,13 +33,13 @@
  * and the count of recoveries are columns of the run row. The expiry is judged
  * by the database's `now()` inside the claim's transaction, which is also where
  * expired leases are swept, so no API process's clock or memory decides it.
- * Every claim issues a new lease token (`leaseToken`). Every ingest write on
- * the run carries it in the `LEASE_TOKEN_HEADER` header: events, history,
- * heartbeat and report. The server checks it inside the write's
+ * Every claim issues a new lease token (`leaseToken`). Every ingest call on
+ * the run carries it in the `LEASE_TOKEN_HEADER` header: event and history
+ * writes and reads, heartbeat and report. The server checks it inside the write's
  * own transaction (for events, under the same per-run lock that assigns `seq`)
  * and answers a stale token with 409 and `leaseLostSchema` (a request with no token is 400), so a
  * runner that lost its run can write nothing, however late its request lands.
- * The runner treats a `leaseLostSchema` 409 on any write as "stop now". (A
+ * The runner treats a `leaseLostSchema` 409 on any call as "stop now". (A
  * history append's own 409 for a taken `idx` has a different body.)
  * The runner also stops itself, as a courtesy that frees its sandboxes sooner:
  * when it has not had a heartbeat acknowledged for `LEASE_SECONDS -
@@ -57,10 +57,7 @@
  * one that crashes the runner doesn't loop. A `released` run is not counted,
  * so deploys don't fail a long run.
  *
- * There is no tokenless write. The hand-started CLI (`apps/runner`, `run-task`) is a
- * claimer too: it claims a queued run and holds its lease like the service. Until the
- * API serves claims it takes the token from the environment; today's API checks no token,
- * so any value works.
+ * There is no tokenless call: the runner service is the only claimer.
  *
  * Cancel. The runner learns a run is over from the heartbeat: `stop` is true
  * once the server has ended it (cancelled by the user, or `failed` by the
@@ -95,7 +92,7 @@ export const HEARTBEAT_SECONDS = 15;
 /** How often an idle runner asks for a run. */
 export const CLAIM_POLL_SECONDS = 2;
 
-/** The header that carries the lease token on every ingest write on a run. */
+/** The header that carries the lease token on every ingest call on a run. */
 export const LEASE_TOKEN_HEADER = "x-lease-token";
 
 /** The body of the 409 for a stale lease token. */
