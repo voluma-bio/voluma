@@ -12,6 +12,7 @@ import type { Evidence } from "./ports/evidence";
 import type { Files } from "./ports/files";
 import type { History } from "./ports/history";
 import type { Sandbox } from "./ports/sandbox";
+import type { Segmenter } from "./ports/segmenter";
 import type { PayloadOf, Recorder } from "./recorder";
 import { type RoleSpec, supervisor, supervisorThreadId } from "./supervisor";
 import { type PlanTask, taskRuntime } from "./task-runtime";
@@ -20,7 +21,6 @@ import { bashTool } from "./tools/bash";
 import { buildTools } from "./tools/registry";
 import { taskTools } from "./tools/task-tools";
 import { threadMessageTool } from "./tools/thread-message";
-import { viewImageTool } from "./tools/view-image";
 
 /**
  * What a worker or check thread is told and runs on; the harness adds its always-on tools.
@@ -41,7 +41,7 @@ export interface SuperviseRunOptions {
   sandbox(threadId: string): Promise<Sandbox>;
   evidence: Evidence;
   /** Offers `segment_sam` to threads when set (the host has a Segmenter and a key for it). */
-  segmentSam?: Pick<SegmentSamDeps, "segmenter">;
+  segmenter?: Segmenter;
   /** The run's bucket, read and written host-side by `view_image` and `segment_sam`. */
   files: Files;
   judgment: Judgment;
@@ -71,13 +71,9 @@ export function superviseRun(options: SuperviseRunOptions): Promise<Folded> {
   };
   const tools = (granted: readonly string[] = []) => [
     bashTool(layout),
-    viewImageTool({ layout, files: options.files }),
-    ...(options.segmentSam
-      ? [segmentSamTool({ layout, files: options.files, ...options.segmentSam })]
-      : []),
     ...taskTools(runtime),
     threadMessageTool((from, to, text) => sup.message(from, to, text)),
-    ...buildTools(granted, { layout }),
+    ...buildTools(granted, { layout, files: options.files, segmenter: options.segmenter }),
   ];
   const sup = supervisor({
     runId,

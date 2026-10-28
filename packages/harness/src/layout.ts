@@ -43,6 +43,7 @@ export function runLayout(runId: string, inputPrefix: string): RunLayout {
     { path: OUTPUTS, prefix: outputsPrefix(runId), access: "read-write" },
   ];
   return {
+    mounts,
     description:
       `- ${INPUTS} is a local copy of the input data: read it, do not modify it.\n` +
       `- ${WORKFLOW} holds the workflow's skills and resources, under their repo paths: read them, do not modify them.\n` +

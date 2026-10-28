@@ -29,6 +29,7 @@ import { type SandboxSession, sandboxSession } from "@voluma/harness/sandbox-ses
 import { type RunRole, superviseRun } from "@voluma/harness/supervise-run";
 import { checkToolNames } from "@voluma/harness/tools";
 import { loadWorkflow } from "@voluma/workflow/load";
+import { adaptPlan, computePlan } from "@voluma/workflow/plan";
 import type { Config } from "./config.ts";
 import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
@@ -132,15 +133,14 @@ export async function runClaim(
       prefix: workflowSnapshotPrefix(runId),
       root: REPO_ROOT,
     });
-    const { worker: workerAgent, checker: checkerAgent } = definition.roles;
-    // Every assigned role's tools are checked now, so an unknown name fails at start whichever
-    // role it is on; main and review are not started yet, which the log says.
-    for (const [role, agent] of Object.entries(definition.roles)) {
-      checkToolNames(agent.tools, agent.name);
-      if (role === "main" || role === "review") {
-        log(`role ${role} is assigned to ${agent.name}, which this runner does not run yet`);
-      }
-    }
+    // The tasks that produce the selected outputs and what they need, adapted to the run's notes.
+    const computed = await adaptPlan(computePlan(definition.files, run.selectedOutputs), {
+      notes: run.notes,
+      files: definition.files,
+    });
+    // Every role's tools come from here, not from the workflow.
+    const roleTools = ["view_image", ...(metaKey ? ["segment_sam"] : [])];
+    checkToolNames(roleTools, "runner");
 
     const layout = runLayout(
       runId,
@@ -165,7 +165,7 @@ export async function runClaim(
     const plan =
       recorded?.type === "revision.started" && recorded.payload.reason === "run"
         ? recorded.payload.plan
-        : definition.plan;
+        : computed;
     events = recorder(
       {
         async append(event) {
@@ -223,8 +223,8 @@ export async function runClaim(
       sandbox: (id) => opened.get(id),
       evidence: r2Evidence(config.r2),
       files,
-      segmentSam: metaKey
-        ? { segmenter: metaSegmenter({ apiKey: metaKey, log, addCost: meter.addModelCost }) }
+      segmenter: metaKey
+        ? metaSegmenter({ apiKey: metaKey, log, addCost: meter.addModelCost })
         : undefined,
       judgment,
       worker: (task) => ({
@@ -232,14 +232,14 @@ export async function runClaim(
         streamFn,
         systemPrompt: workerSystem(definition),
         prompt: workerPrompt(definition, task),
-        tools: workerAgent.tools,
+        tools: roleTools,
       }),
       check: (task) => ({
         model,
         streamFn,
         systemPrompt: checkSystem(definition),
         prompt: checkPrompt(definition, task),
-        tools: checkerAgent?.tools,
+        tools: roleTools,
       }),
       signal: abort.signal,
     });

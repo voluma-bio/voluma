@@ -123,6 +123,8 @@ export function pgRunQueue(
         workflowId: string;
         pins: WorkflowPin[];
         inputId: string;
+        selectedOutputs?: string[];
+        notes?: string;
         /** Present for a visitor run. */
         keys?: VisitorKeys;
       },
@@ -151,6 +153,8 @@ export function pgRunQueue(
             startedBy: caller.userId,
             workflowId: request.workflowId,
             workflows: request.pins,
+            selectedOutputs: request.selectedOutputs ?? null,
+            notes: request.notes ?? null,
             inputId: request.inputId,
             credentials,
             state: "queued",
