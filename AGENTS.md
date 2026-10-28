@@ -23,7 +23,7 @@ reasons behind the setup: [.context/CONTEXT.md](.context/CONTEXT.md).
 | `pnpm --filter @voluma/runner run-task --provider <p> --model <id> --task <text>` | Run one agent thread on a task (API dev server running, keys in `.env`); see [CONTEXT.md](.context/CONTEXT.md) |
 | `pnpm --filter @voluma/<pkg> <script>` | One package's script, e.g. `pnpm --filter @voluma/api dev` |
 
-An agent that starts sandboxes runs `pnpm --filter @voluma/runner sandboxes:clean` before it finishes.
+An agent that starts sandboxes runs `pnpm --filter @voluma/runner sandboxes:clean --run <id>` for each of its runs before it finishes (without `--run` it ends every agent's sandboxes).
 
 Pre-commit runs Biome on staged files. Nothing runs on push. Use pnpm, never npm.
 

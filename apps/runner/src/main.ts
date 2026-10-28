@@ -25,7 +25,7 @@ import { recorder } from "@voluma/harness/recorder";
 import { sandboxSession } from "@voluma/harness/sandbox-session";
 import { bashTool } from "@voluma/harness/tools/bash";
 import { optional, required } from "./config.ts";
-import { createModalSandbox, RUNS_APP } from "./modal-sandbox.ts";
+import { createModalSandbox, RUNS_APP, terminateRun } from "./modal-sandbox.ts";
 
 const { values } = parseArgs({
   options: {
@@ -74,12 +74,17 @@ const events = recorder(
 
 const modalTokenId = optional("MODAL_TOKEN_ID");
 const modalTokenSecret = optional("MODAL_TOKEN_SECRET");
+const modal =
+  modalTokenId && modalTokenSecret
+    ? { tokenId: modalTokenId, tokenSecret: modalTokenSecret }
+    : undefined;
+const lifetimeSeconds = Number(optional("VOLUMA_SANDBOX_LIFETIME_SECONDS") ?? 3600);
+if (!Number.isInteger(lifetimeSeconds) || lifetimeSeconds <= 0) {
+  throw new Error("VOLUMA_SANDBOX_LIFETIME_SECONDS must be a positive integer");
+}
 const createSandbox = createModalSandbox({
   appName: RUNS_APP,
-  modal:
-    modalTokenId && modalTokenSecret
-      ? { tokenId: modalTokenId, tokenSecret: modalTokenSecret }
-      : undefined,
+  modal,
   r2: {
     accountId: required("R2_ACCOUNT_ID"),
     bucket: required("R2_BUCKET"),
@@ -95,7 +100,7 @@ const sandbox = sandboxSession(
       image: optional("VOLUMA_SANDBOX_IMAGE") ?? "voluma-microct",
       cpu: 2,
       memoryMiB: 4096,
-      lifetimeSeconds: Number(optional("VOLUMA_SANDBOX_LIFETIME_SECONDS") ?? 3600),
+      lifetimeSeconds,
       idleSeconds: 300,
       mounts: layout.mounts,
     }),
@@ -104,13 +109,20 @@ const sandbox = sandboxSession(
 
 const abort = new AbortController();
 // First SIGINT/SIGTERM/SIGHUP stops the running command; the `finally` below then closes the
-// sandbox. A second one closes the sandbox now, bounded, and exits.
+// sandbox. A second one closes it now, bounded, and exits. Closing the sandbox waits for any
+// creation in flight, so the second signal also terminates the run's sandboxes by tag.
 const FORCE_CLOSE_MS = 5000;
+// After a hangup the terminal is gone and any write throws EIO, which would end the process
+// before it cleans up.
+for (const stream of [process.stdout, process.stderr]) stream.on("error", () => {});
 for (const name of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
   process.on(name, () => {
     if (abort.signal.aborted) {
       console.error(`\n${name}: closing the sandbox and quitting`);
-      void Promise.race([sandbox.close(), new Promise((done) => setTimeout(done, FORCE_CLOSE_MS))])
+      void Promise.race([
+        Promise.allSettled([sandbox.close(), terminateRun(modal, runId)]),
+        new Promise((done) => setTimeout(done, FORCE_CLOSE_MS)),
+      ])
         .catch(() => {})
         .finally(() => process.exit(130));
       return;

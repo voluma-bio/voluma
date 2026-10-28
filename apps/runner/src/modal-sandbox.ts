@@ -57,6 +57,14 @@ const EXEC_DEADLINE_MARGIN_SECONDS = 30;
 /** The Modal app that owns every sandbox the runner creates; `sandboxes:clean` sweeps it. */
 export const RUNS_APP = "voluma-runs";
 
+/** Asks Modal to terminate every live sandbox of a run, without waiting for it to stop. */
+export async function terminateRun(modal: ModalSandboxConfig["modal"], runId: string) {
+  const client = new ModalClient(modal);
+  const app = await client.apps.fromName(RUNS_APP);
+  const live = client.sandboxes.list({ appId: app.appId, tags: { run: runId } });
+  for await (const sandbox of live) await sandbox.terminate();
+}
+
 export function createModalSandbox(config: ModalSandboxConfig): CreateSandbox {
   const client = new ModalClient(config.modal);
   return async (spec) => {
