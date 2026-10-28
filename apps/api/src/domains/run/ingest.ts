@@ -4,6 +4,7 @@
  *   POST /ingest/claim                                   take the oldest run the limits allow
  *   POST /ingest/runs/:runId/heartbeat | /report         extend the lease; end or release the run
  *   POST /ingest/runs/:runId/events                      append an event (EventInput)
+ *   POST /ingest/runs/:runId/live                        a batch of live frames, fanned out to the run's open streams, not stored
  *   GET  /ingest/runs/:runId/events?after=               stored events after a seq, one page of 1000 (RunEventsResponse)
  *   POST /ingest/runs/:runId/threads/:threadId/messages  append a history row {idx, message}
  *   GET  /ingest/runs/:runId/threads/:threadId/messages  all rows in order
@@ -23,10 +24,11 @@ import {
   type leaseLostSchema,
   reportRequestSchema,
 } from "@voluma/contracts/runner";
+import { liveFrameSchema } from "@voluma/contracts/stream";
 import { HistoryConflict } from "@voluma/harness/ports/history";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import type { z } from "zod";
+import { z } from "zod";
 import { type AppEnv, parseJson, requireService } from "../../domain";
 import type { RunDeps } from ".";
 import { afterParam, EVENTS_PAGE } from "./cursor";
@@ -46,7 +48,9 @@ const storableRow = historyRowSchema.refine(
 const inRun = (runId: string, threadId: string) => threadId.startsWith(`${runId}.`);
 const NOT_IN_RUN = "thread id must begin with <runId>.";
 
-export function ingestRoutes({ queue, eventLog, history }: RunDeps) {
+const liveBatchSchema = z.object({ frames: z.array(liveFrameSchema).max(1000) });
+
+export function ingestRoutes({ queue, eventLog, history, notifier }: RunDeps) {
   const app = new Hono<IngestEnv>();
   app.use("/ingest/*", requireService);
 
@@ -110,6 +114,19 @@ export function ingestRoutes({ queue, eventLog, history }: RunDeps) {
       throw new HTTPException(400, { message: NOT_IN_RUN });
     }
     await eventLog.append(event, c.var.leaseToken);
+    return c.body(null, 204);
+  });
+
+  // Live frames are best effort: the lease is checked (a stale runner must not speak for the
+  // run) but nothing is written, and nothing is retried by the runner.
+  app.post("/ingest/runs/:runId/live", async (c) => {
+    const runId = c.req.param("runId");
+    const { frames } = await parseJson(c, liveBatchSchema);
+    if (!frames.every((f) => f.runId === runId && inRun(runId, f.threadId))) {
+      throw new HTTPException(400, { message: NOT_IN_RUN });
+    }
+    await eventLog.checkLease(runId, c.var.leaseToken);
+    for (const frame of frames) notifier.publish(runId, frame);
     return c.body(null, 204);
   });
 

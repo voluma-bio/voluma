@@ -13,6 +13,7 @@
 import { WAKE_ERROR_MAX } from "@voluma/contracts/events";
 import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
 import { adaptPlan } from "@voluma/workflow/plan";
+import { replyFrames } from "./live";
 import type { MainThread, Reply } from "./main-thread";
 import { pointOf } from "./main-thread";
 import type { Recorder } from "./recorder";
@@ -43,6 +44,7 @@ export async function runStartPlan(o: RunStartOptions): Promise<readonly PlanTas
     return started.payload.plan.tasks;
   }
   const key = `${o.runId}.run-started@1`;
+  const wakeId = `${key}${WAKE_SUFFIX}`;
   const recorded = threadLog(events).wakes.get(key);
   if (recorded) return recorded.plan?.tasks ?? o.computed;
   if (!o.notes) return o.computed;
@@ -71,7 +73,10 @@ export async function runStartPlan(o: RunStartOptions): Promise<readonly PlanTas
   let usage: Reply["usage"];
   let plan: ReturnType<typeof adaptPlan> | undefined;
   try {
-    const reply = await Promise.race([o.main.ask(point, [], limit), expired]);
+    const reply = await Promise.race([
+      o.main.ask(point, [], limit, replyFrames(o.rootThreadId, wakeId, o.recorder.live)),
+      expired,
+    ]);
     usage = reply.usage;
     note = reply.note;
     if (reply.change) plan = adaptPlan(o.workflow, o.selectedOutputs, reply.change);
@@ -93,7 +98,7 @@ export async function runStartPlan(o: RunStartOptions): Promise<readonly PlanTas
             ...(plan && { plan }),
           }),
     },
-    `${key}${WAKE_SUFFIX}`,
+    wakeId,
   );
   return plan?.tasks ?? o.computed;
 }

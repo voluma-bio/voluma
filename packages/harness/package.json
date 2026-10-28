@@ -11,6 +11,7 @@
     "./ports/lease-lost": "./src/ports/lease-lost.ts",
     "./layout": "./src/layout.ts",
     "./recorder": "./src/recorder.ts",
+    "./live": "./src/live.ts",
     "./sandbox-session": "./src/sandbox-session.ts",
     "./adapters/http/hand-off": "./src/adapters/http/hand-off.ts",
     "./ports/evidence": "./src/ports/evidence.ts",
