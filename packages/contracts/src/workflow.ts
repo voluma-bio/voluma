@@ -1,9 +1,9 @@
 /**
  * What a run takes from its workflow packages, for both lanes:
  *
- * - Identity: a run pins the deployed commit of this repo and the workflow's directory
- *   (`path`, e.g. `workflows/workflow-mouse-oa`). `r2.ts` has the keys of a run's
- *   snapshot of it.
+ * - Identity: a run pins this repo and the workflow's directory (`path`, e.g.
+ *   `workflows/workflow-mouse-oa`); the runner adds the commit its checkout was at to the
+ *   pins in the run's first event. `r2.ts` has the keys of a run's snapshot of it.
  * - The plan: each task's instructions, declared outputs (a measurement's acceptance
  *   range), the workflow's own definition of "done", and the tasks each depends on, the
  *   graph staleness follows (`task-tools.ts`). `packages/workflow` builds it from the
@@ -18,7 +18,7 @@ import { segmentSchema, taskIdSchema } from "./ids";
 const part = z.string().regex(/^(?!\.+$)[a-z0-9._-]+$/);
 
 export const workflowPinSchema = z.object({
-  /** GitHub `owner/name`, lowercase. */
+  /** GitHub `owner/name`, lowercase: this repo. */
   repo: z
     .string()
     .refine(
@@ -27,7 +27,15 @@ export const workflowPinSchema = z.object({
         message: "must be lowercase `owner/name`",
       },
     ),
-  commit: z.string().regex(/^[0-9a-f]{40}$/),
+  /**
+   * The commit of the checkout the run's files came from. The run record pins only the
+   * path (the API does not read the files); the runner adds its commit to the pins in the
+   * run's first event.
+   */
+  commit: z
+    .string()
+    .regex(/^[0-9a-f]{40}$/)
+    .optional(),
   /** The package's root inside the repo when it is not the repo root (e.g. `workflows/mouse-oa`): lowercase segments, as in `repo`. */
   path: z
     .string()
