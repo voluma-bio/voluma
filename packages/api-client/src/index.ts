@@ -10,6 +10,7 @@ import { type ReviewRun, reviewRunSchema } from "@voluma/contracts/review";
 import {
   type CreateUploadRequest,
   type CreateUploadResponse,
+  completeUploadConflictSchema,
   createUploadResponseSchema,
   type Input,
   inputSchema,
@@ -245,7 +246,7 @@ export async function listInputs(): Promise<Input[]> {
 /**
  * Creates an upload: a new input and a presigned URL per file (`@voluma/contracts/run`,
  * Uploads). PUT each file with `putUploadFile`, then call `completeUpload`. 403 for a
- * guest, 413 over the server's limits.
+ * guest, 413 over the server's limits, 429 when the caller has too many uploads open.
  */
 export async function createUpload(req: CreateUploadRequest): Promise<CreateUploadResponse> {
   return createUploadResponseSchema.parse(
@@ -253,12 +254,36 @@ export async function createUpload(req: CreateUploadRequest): Promise<CreateUplo
   );
 }
 
-/** Makes an upload usable once every file is stored. 409: some aren't; PUT again the files whose PUT failed. */
+/** Complete's 409: these declared files are not stored at their declared size. */
+export class UploadIncompleteError extends ApiError {
+  constructor(
+    readonly missing: string[],
+    url: string,
+  ) {
+    super(409, url);
+    this.name = "UploadIncompleteError";
+  }
+}
+
+/**
+ * Makes an upload usable once every file is stored. Throws `UploadIncompleteError` naming
+ * the files that aren't: PUT them again, then complete again.
+ */
 export async function completeUpload(inputId: string): Promise<Input> {
-  return inputSchema.parse(
-    await json(
-      await request(`/run/inputs/${encodeURIComponent(inputId)}/complete`, { method: "POST" }),
-    ),
+  const res = await request(`/run/inputs/${encodeURIComponent(inputId)}/complete`, {
+    method: "POST",
+  });
+  if (res.status === 409) {
+    const { missing } = completeUploadConflictSchema.parse(await res.json());
+    throw new UploadIncompleteError(missing, res.url);
+  }
+  return inputSchema.parse(await json(res));
+}
+
+/** Drops an uncompleted upload and its stored files. 409 once it is completed. */
+export async function cancelUpload(inputId: string): Promise<void> {
+  checkResponse(
+    await request(`/run/inputs/${encodeURIComponent(inputId)}/cancel`, { method: "POST" }),
   );
 }
 

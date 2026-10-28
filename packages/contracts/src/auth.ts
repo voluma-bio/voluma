@@ -25,7 +25,11 @@
  *                                     email or password, or an account that must
  *                                     sign in another way: SSO, MFA), 403 for a user
  *                                     who belongs to no allowed organization, 429
- *                                     when the provider rate-limits attempts. A
+ *                                     after too many failed attempts for the email
+ *                                     (the server counts them, and passes the
+ *                                     caller's address and user agent to the
+ *                                     provider, which limits too); the server
+ *                                     never logs the request body. A
  *                                     script, which sends no `Origin` by itself,
  *                                     must send the rules below on this and every
  *                                     later call: `Origin: <app URL>` and
