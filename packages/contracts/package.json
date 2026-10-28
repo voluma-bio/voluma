@@ -12,7 +12,8 @@
     "./auth": "./src/auth.ts",
     "./history": "./src/history.ts",
     "./review": "./src/review.ts",
-    "./workflow": "./src/workflow.ts"
+    "./workflow": "./src/workflow.ts",
+    "./run": "./src/run.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"
