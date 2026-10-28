@@ -320,7 +320,11 @@ export const taskSchema = z.object({
     chat: z.string().min(1).nullable(),
   }),
   /** The model each thread called, `provider/id`; null where the thread is null or its start recorded none. */
-  models: z.object({ worker: modelRefSchema.nullable(), check: modelRefSchema.nullable() }),
+  models: z.object({
+    worker: modelRefSchema.nullable(),
+    check: modelRefSchema.nullable(),
+    chat: modelRefSchema.nullable(),
+  }),
   measurements: z.array(measurementSchema),
   scores: z.array(scoreSchema),
   /**

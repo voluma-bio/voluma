@@ -54,4 +54,7 @@ export const outputKindSchema = z.enum([
 export type OutputKind = z.infer<typeof outputKindSchema>;
 
 /** A model as the runner names it: `provider/id`, e.g. `meta/muse-spark-1.3`. */
-export const modelRefSchema = z.string().regex(/^[^/\s]+\/\S+$/, "model must be provider/model-id");
+export const modelRefSchema = z
+  .string()
+  .max(200)
+  .regex(/^[a-z0-9][a-z0-9-]*\/[A-Za-z0-9._:@/+-]+$/, "model must be provider/model-id");

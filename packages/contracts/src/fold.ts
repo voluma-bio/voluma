@@ -101,7 +101,6 @@ export type FoldedTask = Pick<
   | "status"
   | "resultRevisionId"
   | "checker"
-  | "models"
   | "measurements"
   | "scores"
   | "files"
@@ -116,6 +115,7 @@ export type FoldedTask = Pick<
   /** The latest `task` event's reason; null while the attempt has none. */
   reason: string | null;
   threads: Pick<ReviewTask["threads"], "worker" | "check">;
+  models: Pick<ReviewTask["models"], "worker" | "check">;
   milestones: Milestone[];
 };
 
@@ -422,7 +422,7 @@ export function fold(events: readonly RunEvent[]): Folded {
         threads: { worker: a.workerThread, check: a.checkThread },
         models: {
           worker: threadModel.get(a.workerThread) ?? null,
-          check: (a.checkThread && threadModel.get(a.checkThread)) || null,
+          check: a.checkThread ? (threadModel.get(a.checkThread) ?? null) : null,
         },
         milestones: a.milestones.map((m) => ({ ...m, evidenceIds: [...m.evidenceIds] })),
         measurements,
