@@ -4,11 +4,12 @@
  * - Identity: a package on GitHub pinned to a commit. A run is pinned to
  *   several (the OA workflow plus `microct-analysis`), so pins are always an
  *   array. `r2.ts` turns a pin into its key prefix.
- * - The plan: each task's declared outputs, the workflow's own definition of
- *   "done", and the tasks each depends on, the graph staleness follows
- *   (`task-tools.ts`). `packages/workflow` parses `workflow.md` into it; the runtime
- *   records it in the run's first event (`revision.started`, `events.ts`), so
- *   the fold reads it from the log and never from the workflow.
+ * - The plan: each task's declared outputs (a measurement's acceptance range),
+ *   the workflow's own definition of "done", and the tasks each depends on, the
+ *   graph staleness follows (`task-tools.ts`). `packages/workflow` parses
+ *   `workflow.md` into it; the runtime records it in the run's first event
+ *   (`revision.started`, `events.ts`), so the fold reads it from the log and
+ *   never from the workflow.
  */
 import { z } from "zod";
 import { segmentSchema, taskIdSchema } from "./ids";
@@ -27,6 +28,13 @@ export const workflowPinSchema = z.object({
       },
     ),
   commit: z.string().regex(/^[0-9a-f]{40}$/),
+  /** The package's root inside the repo when it is not the repo root (e.g. `workflows/mouse-oa`): lowercase segments, as in `repo`. */
+  path: z
+    .string()
+    .refine((p) => p.split("/").every((s) => part.safeParse(s).success), {
+      message: "must be a relative path of lowercase segments",
+    })
+    .optional(),
 });
 export type WorkflowPin = z.infer<typeof workflowPinSchema>;
 
@@ -38,7 +46,13 @@ const declaredBase = { id: segmentSchema, required: z.boolean() };
  * are what a reported output is checked against (`task-tools.ts`).
  */
 export const declaredOutputSchema = z.discriminatedUnion("kind", [
-  z.object({ ...declaredBase, kind: z.literal("measurement"), unit: nonEmpty }),
+  z.object({
+    ...declaredBase,
+    kind: z.literal("measurement"),
+    unit: nonEmpty,
+    /** Acceptance range `[min, max]` in `unit`: advice for the reviewer and the review screen, never a refusal. */
+    range: z.tuple([z.number(), z.number()]).optional(),
+  }),
   /** The scale, lowest first: a reported level must be one of these. */
   z.object({ ...declaredBase, kind: z.literal("score"), levels: z.array(nonEmpty).min(2) }),
   /** `label` is the value in the labels volume and `name` the structure's title; each, when set, must match. */
@@ -66,6 +80,8 @@ export const workflowPlanSchema = z
         id: taskIdSchema,
         /** Tasks this one builds on; a redo of one of them makes this one stale. */
         dependsOn: z.array(taskIdSchema),
+        /** The workflow's done criteria in its own words, shown to the worker and the check. */
+        doneWhen: z.array(nonEmpty).optional(),
         outputs: z.array(declaredOutputSchema),
       }),
     ),
@@ -79,6 +95,12 @@ export const workflowPlanSchema = z
       tasks.add(t.id);
       const outputs = new Set<string>();
       t.outputs.forEach((o, oi) => {
+        if (o.kind === "measurement" && o.range && o.range[0] > o.range[1])
+          ctx.addIssue({
+            code: "custom",
+            path: ["tasks", ti, "outputs", oi, "range"],
+            message: "range must be [min, max] with min <= max",
+          });
         if (outputs.has(o.id)) dup(["tasks", ti, "outputs", oi, "id"], `output id "${o.id}"`);
         outputs.add(o.id);
       });
