@@ -75,7 +75,7 @@ export async function signOut(): Promise<void> {
   location.href = logoutUrl;
 }
 
-/** Starts a run on an input the caller can read. With `keys` it runs on the caller's own credentials at once; otherwise it may queue. 409: the caller already has an active run of that kind. 429: the org's limit is reached. */
+/** Starts a run on an input the caller can read. With `keys` it runs on the caller's own credentials at once; otherwise it may queue. 409 and 429: the org's limits (see `@voluma/contracts/run`). */
 export async function startRun(req: StartRunRequest): Promise<Run> {
   return runSchema.parse(await json(await request("/run/runs", { method: "POST", body: req })));
 }

@@ -5,10 +5,7 @@
  *
  *   POST /api/run/runs             body `startRunRequestSchema` → 200 `runSchema`
  *                                  (404 for an unknown `workflowId` or an `inputId`
- *                                  the caller can't read; 409 when the caller already
- *                                  has a queued or running run with the same
- *                                  `credentials`; 429 when a `voluma` run would exceed
- *                                  one of the org's limits)
+ *                                  the caller can't read; 409 and 429: see Limits)
  *   GET  /api/run/runs             → 200 `listRunsResponseSchema`, newest first
  *   GET  /api/run/runs/:id         → 200 `runSchema`
  *   POST /api/run/runs/:id/cancel  → 200 `runSchema` with state `ended`/`cancelled`
@@ -16,8 +13,8 @@
  *                                  server records it and the runner obeys); cancelling
  *                                  an ended run is a no-op; 403 for an example run
  *   POST /api/run/runs/:id/keys    body `resendKeysRequestSchema` → 200 `runSchema`
- *                                  (409 unless the run is `awaiting-keys`; only the
- *                                  caller who started it can read it to send them)
+ *                                  (409 unless the run is `awaiting-keys`; 403 unless
+ *                                  the caller is its `startedBy`; 429: see Limits)
  *   GET  /api/run/inputs           → 200 `listInputsResponseSchema`, newest first
  *
  * Org scoping, enforced by the server on every call and every read:
@@ -46,8 +43,9 @@
  * pins, so a caller can't make the server import an arbitrary repo. The server
  * resolves the id to pinned packages and records them on the run.
  *
- * Creating a run. The rules below hold for every call that creates a run:
- * `startRun` and a fork (the corrections contract), and any added later.
+ * Starting work. The rules below hold for every call that creates a run or
+ * makes one run again: `startRun`, a fork or a rerun after a correction (the
+ * corrections contract), `/keys`, and any added later.
  *
  * Who pays (`credentials`): `visitor` when the request that creates the run
  * carries `keys`, else `voluma`. It never changes afterwards, and a `visitor`
@@ -55,23 +53,30 @@
  *
  * Visitor keys are the caller's own, kept in their browser. The server and the
  * runner hold them in memory for that run only: never in the database, on
- * disk, in logs or in any response (log no request body on these routes). If
- * the runner loses them (a restart or a deploy), the run moves to
- * `awaiting-keys` and resumes when the browser resends them (`/keys`). After
- * 24 h in `awaiting-keys` it ends `failed` with an `error`. Both keys or none:
- * a request with only one fails validation (400).
+ * disk, in logs or in any response (log no request body on these routes). The
+ * only channel that carries them past the server is the hand-off to the runner
+ * (the runner contract), which goes through no store. Text from a visitor's
+ * providers (errors, SDK messages) has the key values redacted before it is
+ * stored or logged. If the server or the runner loses the keys before the run
+ * ends (a restart or a deploy), the run moves to `awaiting-keys` and resumes
+ * when the browser resends them (`/keys`). After 24 h in `awaiting-keys` it
+ * ends `failed` with an `error`. Both keys or none: a request with only one
+ * fails validation (400). A `visitor` run's sandbox runs in the visitor's own
+ * account, so its outputs are untrusted: never seed an example from one.
  *
- * Limits: a caller has at most one queued or running run per `credentials`
- * kind; creating another answers 409.
- *
- * Queue and limits apply to `voluma` runs only; a `visitor` run starts at once.
- * Each org has its own limits, given to the run domain by the API's
- * composition root: runs per day, runs at once, and a dollar ceiling counted
- * from the server's own accounting, so the run record carries no cost fields.
- * A new `voluma` run starts `queued` while the org is at its concurrency, else
- * `running`. The daily and dollar limits are checked when the run is created
- * (429) and again when a queued run is dequeued; a run refused at dequeue ends
- * `failed` with an `error`.
+ * Limits: each org has its own, given to the run domain by the API's
+ * composition root:
+ *   - per caller: at most this many runs that haven't ended, per `credentials`
+ *     kind (none for an org whose members share one account); another answers
+ *     409;
+ *   - for `voluma` runs only: runs at once (a new one starts `queued` while the
+ *     org is at it, else `running`), runs per day, and a dollar ceiling counted
+ *     from the server's own accounting, so the run record carries no cost
+ *     fields. The daily and dollar limits answer 429 when work starts and are
+ *     checked again when a queued run is dequeued; a run refused at dequeue, or
+ *     a running one that crosses the dollar ceiling, ends `failed` with an
+ *     `error`.
+ * A `visitor` run starts at once.
  */
 import { z } from "zod";
 import { userIdSchema } from "./auth";
