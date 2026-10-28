@@ -18,6 +18,7 @@ import { evidenceKey, runPrefix } from "@voluma/contracts/r2";
 import { eq, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
+import { openChecks } from "./pg-event-log";
 import {
   EXAMPLES_OPERATOR,
   events,
@@ -125,9 +126,10 @@ await db.transaction(async (tx) => {
     startedAt: src.run.startedAt,
     endedAt: src.run.endedAt,
     // What the source run spent and left to check; limits skip examples, so no org pays twice.
+    // Counted here, since a source run that completed before `to_check` existed has none.
     modelCostUsd: src.run.modelCostUsd,
     sandboxSeconds: src.run.sandboxSeconds,
-    toCheck: src.run.toCheck,
+    toCheck: await openChecks(tx, source),
   });
 
   // Thread ids begin `<runId>.`; in the payloads they are the only strings that do.

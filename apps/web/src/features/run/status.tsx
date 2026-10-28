@@ -25,9 +25,10 @@ export function formatDuration(seconds: number): string {
   return `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min`;
 }
 
-/** From the first claim to the end, or to now while it runs; null before it starts. */
+/** From the first claim to the end, or to now while it runs; null while it waits (queued, or for keys). */
 export function runSeconds({ state }: Run, now = Date.now()): number | null {
-  if (state.status === "queued" || !state.startedAt) return null;
+  if (state.status === "queued" || state.status === "awaiting-keys" || !state.startedAt)
+    return null;
   const end = state.status === "ended" ? Date.parse(state.endedAt) : now;
   return (end - Date.parse(state.startedAt)) / 1000;
 }

@@ -82,7 +82,7 @@ export function RunsPage() {
                 header: "Cost",
                 align: "end",
                 cell: (run) =>
-                  run.usage && run.state.status !== "queued" ? (
+                  run.usage && run.usage.modelCostUsd > 0 ? (
                     <div className="grid gap-0.5">
                       <span>{formatUsd(run.usage.modelCostUsd)}</span>
                       {run.usage.sandboxSeconds > 0 && (

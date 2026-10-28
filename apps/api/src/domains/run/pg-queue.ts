@@ -10,7 +10,6 @@
  * so that holder is `lease-lost` (lease.ts).
  */
 import { randomBytes } from "node:crypto";
-import { fold } from "@voluma/contracts/fold";
 import type { Run, VisitorKeys } from "@voluma/contracts/run";
 import { LEASE_SECONDS, type Usage as RunnerUsage } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
@@ -21,9 +20,9 @@ import { admit, type Limits, type Refusal, refusalMessage, type Usage, usage } f
 import type { KeyVault } from "./key-vault";
 import { LeaseLost } from "./lease";
 import type { Notifier } from "./notifier";
-import { toRunEvent } from "./pg-event-log";
+import { openChecks } from "./pg-event-log";
 import { loadRun, loadRuns, readableInputs, readableRuns, type Tx } from "./pg-runs";
-import { events, inputs, runs } from "./schema";
+import { inputs, runs } from "./schema";
 
 /** Serializes every transaction that changes a run, so the limit counts can't race a claim. */
 const QUEUE_LOCK = 0x76_6f_6c_71;
@@ -52,19 +51,6 @@ export type Claimed = {
   /** The visitor run's keys, handed out once. */
   keys?: VisitorKeys;
 };
-
-/**
- * The run's open To check items, folded from its whole log once, when it completes. The
- * runner flushes its events before it reports, so the log is complete here.
- */
-async function openChecks(tx: Tx, runId: string): Promise<number> {
-  const rows = await tx
-    .select()
-    .from(events)
-    .where(eq(events.runId, runId))
-    .orderBy(asc(events.seq));
-  return fold(rows.map(toRunEvent)).tasks.reduce((n, task) => n + task.checks.length, 0);
-}
 
 /**
  * Takes the matching running runs back: a `voluma` run to `queued`, a `visitor` run to
@@ -346,6 +332,12 @@ export function pgRunQueue(
 
     /** Throws `LeaseLost` or `RunEnded`. */
     async report(runId: string, leaseToken: string, report: RunnerReport) {
+      // Counted before the queue lock, which every claim and heartbeat waits on. The runner
+      // flushes its events before it reports, so the log is final.
+      const toCheck =
+        report.kind === "ended" && report.outcome === "completed"
+          ? await openChecks(db, runId)
+          : null;
       await locked(async (tx) => {
         const [run] = await tx
           .select({ state: runs.state })
@@ -365,7 +357,7 @@ export function pgRunQueue(
             outcome: report.outcome,
             endedAt: sql`now()`,
             error: report.error ?? null,
-            toCheck: report.outcome === "completed" ? await openChecks(tx, runId) : null,
+            toCheck,
           })
           .where(eq(runs.id, runId));
       });
