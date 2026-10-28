@@ -5,6 +5,8 @@ export interface DicomSlice {
   file: Blob;
   position: Point3;
   frameOfReferenceUID?: string;
+  /** Stored pixel format and linear modality rescale, used to choose native 3D storage. */
+  stored: { bits: number; signed: boolean; slope: number; intercept: number };
 }
 
 export interface DicomSeries {
@@ -37,10 +39,6 @@ export function openDicomZip(
     signal.throwIfAborted();
     if (!file.name.toLowerCase().endsWith(".zip")) {
       reject(new Error("Choose a ZIP of DICOM files. Single DCM files are not supported yet."));
-      return;
-    }
-    if (file.size > 256 * 1024 * 1024) {
-      reject(new Error("This ZIP exceeds the current 256 MiB compressed limit."));
       return;
     }
     const worker = new Worker(new URL("./dicom.worker.ts", import.meta.url), { type: "module" });
