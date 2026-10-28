@@ -125,8 +125,9 @@ they need:
 - Domain code depends on interfaces; config picks the adapter at the
   composition root. Add an interface only where a second adapter is plausible
   (a local fake counts), and give each one a local adapter from day one.
-- Lint is Biome's recommended rules. The boundaries above are rules to
-  follow, not lint checks.
+- Lint is Biome's recommended rules, plus `noImportCycles`: an import cycle
+  fails `pnpm check` (vitest tolerates cycles, `tsx` and Node do not). The
+  boundaries above are rules to follow, not lint checks.
 - Colours come only from `packages/design-tokens`; components use token
   utilities (`bg-card`, `text-muted-foreground`). Visual rules: [DESIGN.md](DESIGN.md).
   Check shared components at `/dev/ui` in both themes.
