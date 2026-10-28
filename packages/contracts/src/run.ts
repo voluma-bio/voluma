@@ -8,13 +8,16 @@
  *                                  the caller can't read; 409 when the caller already
  *                                  has a queued or running run with the same
  *                                  `credentials`; 429 when a `voluma` run would exceed
- *                                  the org's daily spend cap)
+ *                                  one of the org's limits)
  *   GET  /api/run/runs             → 200 `listRunsResponseSchema`, newest first
  *   GET  /api/run/runs/:id         → 200 `runSchema`
  *   POST /api/run/runs/:id/cancel  → 200 `runSchema` with state `ended`/`cancelled`
  *                                  at once, even if the runner is still stopping (the
  *                                  server records it and the runner obeys); cancelling
  *                                  an ended run is a no-op; 403 for an example run
+ *   POST /api/run/runs/:id/keys    body `resendKeysRequestSchema` → 200 `runSchema`
+ *                                  (409 unless the run is `awaiting-keys`; only the
+ *                                  caller who started it can read it to send them)
  *   GET  /api/run/inputs           → 200 `listInputsResponseSchema`, newest first
  *
  * Org scoping, enforced by the server on every call and every read:
@@ -46,23 +49,27 @@
  * Creating a run. The rules below hold for every call that creates a run:
  * `startRun` and a fork (the corrections contract), and any added later.
  *
- * Who pays (`credentials`): picked by the server when the run is created:
- * `visitor` when the caller has stored both their own model key and their
- * sandbox token, else `voluma`. It never changes afterwards, and a `visitor`
- * run never falls back to Voluma's credentials: if its keys are deleted or
- * expire before it ends, it ends `failed` with an `error`. The keys never
- * appear in a contract; they're stored encrypted on the server, keyed by the
- * caller.
+ * Who pays (`credentials`): `visitor` when the request that creates the run
+ * carries `keys`, else `voluma`. It never changes afterwards, and a `visitor`
+ * run never falls back to Voluma's credentials.
+ *
+ * Visitor keys are the caller's own, kept in their browser. The server and the
+ * runner hold them in memory for that run only: never in the database, on
+ * disk, in logs or in any response (log no request body on these routes). If
+ * the runner loses them (a restart or a deploy), the run moves to
+ * `awaiting-keys` and resumes when the browser resends them (`/keys`).
  *
  * Limits: a caller has at most one queued or running run per `credentials`
  * kind; creating another answers 409.
  *
- * Queue and spend cap apply to `voluma` runs only; a `visitor` run starts at
- * once. The server may limit an org to one active `voluma` run; a new run then
- * starts `queued` while another is active, else `running`. The cap is enforced
+ * Queue and limits apply to `voluma` runs only; a `visitor` run starts at once.
+ * Each org has its own limits, given to the run domain by the API's
+ * composition root: runs per day, runs at once, and a dollar ceiling counted
  * from the server's own accounting, so the run record carries no cost fields.
- * It is checked when the run is created (429) and again when a queued run is
- * dequeued; a run refused at dequeue ends `failed` with an `error`.
+ * A new `voluma` run starts `queued` while the org is at its concurrency, else
+ * `running`. The daily and dollar limits are checked when the run is created
+ * (429) and again when a queued run is dequeued; a run refused at dequeue ends
+ * `failed` with an `error`.
  */
 import { z } from "zod";
 import { userIdSchema } from "./auth";
@@ -97,6 +104,8 @@ export const runStateSchema = z.discriminatedUnion("status", [
    */
   z.object({ status: z.literal("queued"), position: z.number().int().min(1) }),
   z.object({ status: z.literal("running"), startedAt: z.iso.datetime() }),
+  /** A `visitor` run whose keys the runner lost; it resumes when they're resent. */
+  z.object({ status: z.literal("awaiting-keys"), startedAt: z.iso.datetime() }),
   z.object({
     status: z.literal("ended"),
     outcome: z.enum(["completed", "failed", "cancelled"]),
@@ -132,11 +141,25 @@ export const runSchema = z.object({
 });
 export type Run = z.infer<typeof runSchema>;
 
+/**
+ * A visitor's own credentials: a Meta Model API key and a Modal token. Sent
+ * only in requests, never returned; see the header.
+ */
+export const visitorKeysSchema = z.object({
+  metaApiKey: z.string().min(1),
+  modal: z.object({ tokenId: z.string().min(1), tokenSecret: z.string().min(1) }),
+});
+export type VisitorKeys = z.infer<typeof visitorKeysSchema>;
+
 export const startRunRequestSchema = z.object({
   workflowId: workflowIdSchema,
   inputId: inputIdSchema,
+  /** Present: the run uses these and skips the queue (`credentials: "visitor"`). */
+  keys: visitorKeysSchema.optional(),
 });
 export type StartRunRequest = z.infer<typeof startRunRequestSchema>;
 
 export const listRunsResponseSchema = z.object({ runs: z.array(runSchema) });
 export const listInputsResponseSchema = z.object({ inputs: z.array(inputSchema) });
+export const resendKeysRequestSchema = z.object({ keys: visitorKeysSchema });
+export type ResendKeysRequest = z.infer<typeof resendKeysRequestSchema>;
