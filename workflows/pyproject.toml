@@ -1,0 +1,7 @@
+# Tool settings only; the dependencies are microct-analysis/requirements.txt.
+[tool.ruff]
+line-length = 100
+extend-exclude = [".venv"]
+
+[tool.pytest.ini_options]
+addopts = "-p no:cacheprovider"

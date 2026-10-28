@@ -2,13 +2,14 @@
  * Runs one run's plan to the end: the harness's own wiring of thread pool, task runtime,
  * tools and supervisor, so a host supplies only adapters (the stored record, the sandbox,
  * evidence, a model) and what a worker or check thread says and runs on (`RoleSpec` minus
- * its tools, which the harness fixes: bash, the task tools, thread messaging). Resume and a
+ * its tools, which the harness fixes: bash, the task tools, thread messaging, and `segment_sam` when offered). Resume and a
  * first run are the same call; the recorder is built on the stored events by the host.
  */
 import type { Folded } from "@voluma/contracts/fold";
 import type { Judgment } from "./judgment";
 import type { RunLayout } from "./layout";
 import type { Evidence } from "./ports/evidence";
+import type { Files } from "./ports/files";
 import type { History } from "./ports/history";
 import type { Sandbox } from "./ports/sandbox";
 import type { PayloadOf, Recorder } from "./recorder";
@@ -16,8 +17,10 @@ import { type RoleSpec, supervisor, supervisorThreadId } from "./supervisor";
 import { type PlanTask, taskRuntime } from "./task-runtime";
 import { threads } from "./threads";
 import { bashTool } from "./tools/bash";
+import { type SegmentSamDeps, segmentSamTool } from "./tools/segment-sam";
 import { taskTools } from "./tools/task-tools";
 import { threadMessageTool } from "./tools/thread-message";
+import { viewImageTool } from "./tools/view-image";
 
 /** What a worker or check thread is told and runs on; the harness adds its tools. */
 export type RunRole = Omit<RoleSpec, "tools">;
@@ -34,6 +37,10 @@ export interface SuperviseRunOptions {
   /** The run's sandbox for a thread (`sandboxSession.get`). */
   sandbox(threadId: string): Promise<Sandbox>;
   evidence: Evidence;
+  /** Offers `segment_sam` to threads when set (the host has a Segmenter and a key for it). */
+  segmentSam?: Pick<SegmentSamDeps, "segmenter">;
+  /** The run's bucket, read and written host-side by `view_image` and `segment_sam`. */
+  files: Files;
   judgment: Judgment;
   worker(task: PlanTask): RunRole;
   check(task: PlanTask): RunRole;
@@ -61,6 +68,10 @@ export function superviseRun(options: SuperviseRunOptions): Promise<Folded> {
   };
   const tools = () => [
     bashTool(layout),
+    viewImageTool({ layout, files: options.files }),
+    ...(options.segmentSam
+      ? [segmentSamTool({ layout, files: options.files, ...options.segmentSam })]
+      : []),
     ...taskTools(runtime),
     threadMessageTool((from, to, text) => sup.message(from, to, text)),
   ];
