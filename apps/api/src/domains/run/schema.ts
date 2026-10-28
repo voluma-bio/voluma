@@ -86,6 +86,16 @@ export const inputs = pgTable("inputs", {
   createdAt: timestamptz().notNull().defaultNow(),
 });
 
+/** The scan every org may start from: one row per org, uploaded by the examples operator. */
+export const EXAMPLES_OPERATOR = "voluma-examples";
+export const referenceInput = (labId: string): typeof inputs.$inferInsert => ({
+  id: `reference-${labId}`,
+  labId,
+  source: "reference",
+  uploadedBy: EXAMPLES_OPERATOR,
+  name: "OA6-1RK (mouse knee)",
+});
+
 /**
  * The run record (`runSchema`) plus the server's own columns. `state` is the
  * `runStateSchema` status; `queued`'s position is computed at read time. `workflow_id`

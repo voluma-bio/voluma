@@ -1,0 +1,152 @@
+/**
+ * Postgres adapter for the browser's reads of runs and inputs, and the row shapes the
+ * queue shares. Reads apply the caller's `Reader` (domain.ts) once, so another org's run
+ * is just absent. Every state change is in pg-queue.ts.
+ */
+import type { Input, Run } from "@voluma/contracts/run";
+import type { WorkflowPin } from "@voluma/contracts/workflow";
+import { and, asc, desc, eq, exists, or, type SQL, sql } from "drizzle-orm";
+import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import type { Reader } from "../../domain";
+import { inputs, referenceInput, runs } from "./schema";
+
+export type Tx = Parameters<Parameters<PostgresJsDatabase["transaction"]>[0]>[0];
+
+/** `lab_id = labId AND (ownerId IS NULL OR started_by = ownerId OR example)` */
+export const readableRuns = ({ labId, ownerId }: Reader): SQL | undefined =>
+  and(
+    eq(runs.labId, labId),
+    ownerId === null ? undefined : or(eq(runs.startedBy, ownerId), eq(runs.example, true)),
+  );
+
+/** The input rule: the caller's upload, or an input an example run reads. */
+export const readableInputs = ({ labId, ownerId }: Reader): SQL | undefined =>
+  and(
+    eq(inputs.labId, labId),
+    ownerId === null
+      ? undefined
+      : or(
+          eq(inputs.uploadedBy, ownerId),
+          exists(
+            sql`(SELECT 1 FROM ${runs} WHERE ${runs.inputId} = ${inputs.id} AND ${runs.example})`,
+          ),
+        ),
+  );
+
+type Row = {
+  run: typeof runs.$inferSelect;
+  input: typeof inputs.$inferSelect;
+  position: number | null;
+};
+
+const toInput = (row: typeof inputs.$inferSelect): Input => ({
+  id: row.id,
+  labId: row.labId,
+  source: row.source,
+  uploadedBy: row.uploadedBy,
+  name: row.name,
+});
+
+function toRun({ run, input, position }: Row): Run {
+  const iso = (d: Date | null) => d?.toISOString() ?? null;
+  const startedAt = iso(run.startedAt);
+  const state = ((): Run["state"] => {
+    switch (run.state) {
+      case "queued":
+        return { status: "queued", position: position ?? 1 };
+      case "running":
+        return { status: "running", startedAt: startedAt as string };
+      case "awaiting-keys":
+        return { status: "awaiting-keys", startedAt };
+      case "ended":
+        return {
+          status: "ended",
+          outcome: run.outcome as "completed" | "failed" | "cancelled",
+          startedAt,
+          endedAt: iso(run.endedAt) as string,
+          ...(run.error === null ? {} : { error: run.error }),
+        };
+    }
+  })();
+  return {
+    id: run.id,
+    labId: run.labId,
+    startedBy: run.startedBy,
+    workflows: run.workflows as WorkflowPin[],
+    input: toInput(input),
+    credentials: run.credentials,
+    example: run.example,
+    forkedFrom: run.forkedFrom,
+    createdAt: run.createdAt.toISOString(),
+    state,
+  };
+}
+
+/**
+ * Runs matching `where`, newest first. A queued `voluma` run's place is counted here, at
+ * read time: its place among its org's queued `voluma` runs, oldest first. A visitor run
+ * waits only for a runner, so its place is 1.
+ */
+export async function loadRuns(tx: Tx, where: SQL | undefined): Promise<Run[]> {
+  const place = tx.$with("place").as(
+    tx
+      .select({
+        id: runs.id,
+        position:
+          sql<number>`(row_number() OVER (PARTITION BY ${runs.labId} ORDER BY ${runs.createdAt}, ${runs.id}))::int`.as(
+            "position",
+          ),
+      })
+      .from(runs)
+      .where(and(eq(runs.state, "queued"), eq(runs.credentials, "voluma"))),
+  );
+  const rows = await tx
+    .with(place)
+    .select({ run: runs, input: inputs, position: place.position })
+    .from(runs)
+    .innerJoin(inputs, eq(runs.inputId, inputs.id))
+    .leftJoin(place, eq(place.id, runs.id))
+    .where(where)
+    .orderBy(desc(runs.createdAt), desc(runs.id));
+  return rows.map(toRun);
+}
+
+/** The run just written, which must exist. */
+export async function loadRun(tx: Tx, runId: string): Promise<Run> {
+  const [run] = await loadRuns(tx, eq(runs.id, runId));
+  if (!run) throw new Error(`run ${runId} vanished inside its transaction`);
+  return run;
+}
+
+export function pgRunReads(db: PostgresJsDatabase) {
+  return {
+    list: (reader: Reader) => db.transaction((tx) => loadRuns(tx, readableRuns(reader))),
+
+    get: async (reader: Reader, runId: string) =>
+      (
+        await db.transaction((tx) => loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId))))
+      )[0] ?? null,
+
+    async listInputs({ labId, ownerId }: Reader) {
+      const rows = await db
+        .select()
+        .from(inputs)
+        .where(
+          and(
+            eq(inputs.labId, labId),
+            ownerId === null ? undefined : eq(inputs.uploadedBy, ownerId),
+          ),
+        )
+        .orderBy(desc(inputs.createdAt), asc(inputs.id));
+      return rows.map(toInput);
+    },
+
+    /** The one write here: a boot-time seed so a lab member can start a run on the reference scan. */
+    async ensureReferenceInputs(labIds: string[]) {
+      if (labIds.length === 0) return;
+      await db.insert(inputs).values(labIds.map(referenceInput)).onConflictDoNothing();
+    },
+  };
+}
+
+export type RunReads = ReturnType<typeof pgRunReads>;

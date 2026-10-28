@@ -3,7 +3,10 @@
  * (auth.ts) and answers 401 itself when there is no principal, so a domain reads a
  * non-null `principal` and checks only its `kind`. Owned by both lanes; small PRs.
  */
+import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
+import { HTTPException } from "hono/http-exception";
+import type { z } from "zod";
 
 /**
  * How much of the lab's data a user sees: `lab` is all of it; `self` only the records
@@ -56,3 +59,10 @@ export const requireUser = createMiddleware<UserEnv>(async (c, next) => {
   c.set("user", principal);
   return next();
 });
+
+/** A request's JSON body as `schema` parses it; anything else is a 400 carrying the parse message. */
+export async function parseJson<T extends z.ZodType>(c: Context, schema: T): Promise<z.output<T>> {
+  const parsed = schema.safeParse(await c.req.json().catch(() => undefined));
+  if (!parsed.success) throw new HTTPException(400, { message: parsed.error.message });
+  return parsed.data;
+}

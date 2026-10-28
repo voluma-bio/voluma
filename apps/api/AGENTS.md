@@ -54,18 +54,21 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
 ## Run domain (`src/domains/run`)
 
 - `index.ts` is a mount list: `runs.ts` (browser routes, `requireUser`), `ingest.ts` (runner
-  routes, `requireService`), and a file per later route group. Ports are in `run-store.ts`;
-  the Postgres adapters are `pg-run-store.ts` (reads, start, cancel, resume), `pg-queue.ts`
-  (claim, lease, recovery) and the lease-checked `pg-event-log.ts`/`pg-history.ts`.
-- **Admission and the claim hold one lock** (`QUEUE_LOCK`, a transaction advisory lock), so
+  routes, `requireService`), and a file per later route group. The Postgres adapters:
+  `pg-queue.ts` owns every state change of a run (start, resume, cancel, claim, lease,
+  recovery) and the key vault, `pg-runs.ts` the reads, and the lease-checked
+  `pg-event-log.ts`/`pg-history.ts`; their port types are derived from them. `admission.ts`
+  is the one limits check and the one message per refusal.
+- **Every transition holds one lock** (`QUEUE_LOCK`, a transaction advisory lock), so
   limit counts can't race. The lease is judged by the database's `now()`. An ingest write
   checks the run's lease token inside its own transaction (`assertLease`, `FOR SHARE`); a
   late write can't land after a takeover.
-- **Visitor keys live only in `key-vault.ts`**, in memory. Never store, log or return them,
-  and log no body on a route that takes them. A route puts the keys there before the write
-  that makes the run claimable commits and drops them if it is refused; the claim moves
-  any queued visitor run whose keys its process doesn't hold to `awaiting-keys`. The vault
-  holds at most 100 runs per org (429), and `index.ts` caps every `/api` body at 256 KB (8 MB on `/api/run/ingest/*`, the trusted runner).
+- **Visitor keys live only in `key-vault.ts`**, in memory, and only `pg-queue.ts` touches it,
+  under the lock. Never store, log or return them, and log no body on a route that takes
+  them. A transition holds the keys before the write that makes the run claimable commits;
+  cancel, failure and the claim drop or hand them out; the claim moves any queued visitor
+  run whose keys its process doesn't hold to `awaiting-keys`. The vault holds at most 100
+  runs per org (429), and `index.ts` caps every `/api` body at 256 KB (8 MB on `/api/run/ingest/*`, the trusted runner).
 - **Limits come from env** (`RUN_LIMITS_<ORG>_*`, read in `index.ts`); the workflow catalog
   (`catalog.ts`) is code. `seed:example --from <runId>` makes an example run
-  (`src/seed-example.ts`). Outage and restart behaviour: [.context/deploy.md](.context/deploy.md).
+  (`src/domains/run/seed-example.ts`). Outage and restart behaviour: [.context/deploy.md](.context/deploy.md).

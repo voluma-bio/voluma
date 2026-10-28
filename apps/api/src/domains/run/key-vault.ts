@@ -1,11 +1,12 @@
 /**
  * Visitor keys, in this process's memory and nowhere else (`@voluma/contracts/run`,
- * "Starting work"). Held before a start or `/keys` commits, until a claim takes them, the claim
- * drops them (the run left `queued` unclaimed), or the run is cancelled or refused. A process that doesn't hold a queued visitor run's
- * keys can't claim it, so the claim moves it to `awaiting-keys`. An org holds at most
- * `MAX_PER_ORG` runs' keys: a backstop for an org with no `VISITOR_ACTIVE` set (the visitor cap, queued and
- * running runs only, is the real bound), so a client can't pin unbounded memory. Never log, store or
- * return a value held here.
+ * "Starting work"). Only the queue (pg-queue.ts) touches it, under its lock: it holds a
+ * run's keys before the transaction that makes the run `queued` commits, and the
+ * claim takes them or a cancel or failure drops them. A process that doesn't hold a
+ * queued visitor run's keys can't claim it, so the claim moves it to `awaiting-keys`. An
+ * org holds at most `MAX_PER_ORG` runs' keys: a backstop for an org with no
+ * `VISITOR_ACTIVE` set (the visitor cap, queued and running runs only, is the real bound),
+ * so a client can't pin unbounded memory. Never log, store or return a value held here.
  */
 import type { VisitorKeys } from "@voluma/contracts/run";
 

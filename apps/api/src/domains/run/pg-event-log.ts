@@ -1,5 +1,5 @@
 /**
- * Postgres adapter for the run's event log (LeasedEventLog). One transaction per append:
+ * Postgres adapter for the run's event log, lease-checked. One transaction per append:
  *
  * 1. take a per-run advisory lock, as its own statement. Under READ COMMITTED a
  *    statement's snapshot is taken when it starts, so a lock taken inside the insert's
@@ -15,16 +15,24 @@
 import type { EventInput } from "@voluma/contracts/events";
 import { and, eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { assertLease } from "./run-rows";
-import { EventIdTaken, type LeasedEventLog } from "./run-store";
+import { assertLease } from "./lease";
+import type { Tx } from "./pg-runs";
 import { events, threads } from "./schema";
+
+/** An event id already stored under another run. */
+export class EventIdTaken extends Error {
+  constructor() {
+    super("event id belongs to another run");
+  }
+}
 
 /** First key of the advisory lock pair; the second is the run. Distinguishes our locks from others'. */
 const EVENT_SEQ_LOCK = 0x76_6f_6c_75;
 
-export function pgEventLog(db: PostgresJsDatabase): LeasedEventLog {
+export function pgEventLog(db: PostgresJsDatabase) {
   return {
-    async append(event, leaseToken) {
+    /** Throws `LeaseLost`, or `EventIdTaken` for an id stored under another run. */
+    async append(event: EventInput, leaseToken: string) {
       await db.transaction(async (tx) => {
         await tx.execute(
           sql`SELECT pg_advisory_xact_lock(${EVENT_SEQ_LOCK}, hashtext(${event.runId}))`,
@@ -58,11 +66,7 @@ export function pgEventLog(db: PostgresJsDatabase): LeasedEventLog {
   };
 }
 
-async function projectThread(
-  tx: Parameters<Parameters<PostgresJsDatabase["transaction"]>[0]>[0],
-  event: EventInput,
-  createdAt: Date,
-) {
+async function projectThread(tx: Tx, event: EventInput, createdAt: Date) {
   switch (event.type) {
     case "thread.started":
       // A resumed thread starts again: same row, running again.
@@ -91,3 +95,5 @@ async function projectThread(
       return;
   }
 }
+
+export type LeasedEventLog = ReturnType<typeof pgEventLog>;

@@ -26,13 +26,13 @@ import postgres from "postgres";
 import { createAuth } from "./auth";
 import { createReview } from "./domains/review";
 import { createRun } from "./domains/run";
+import type { Limits } from "./domains/run/admission";
 import { catalog } from "./domains/run/catalog";
 import { KeyVault } from "./domains/run/key-vault";
 import { pgEventLog } from "./domains/run/pg-event-log";
 import { pgHistory } from "./domains/run/pg-history";
 import { pgRunQueue } from "./domains/run/pg-queue";
-import { pgRunStore } from "./domains/run/pg-run-store";
-import type { Limits, LimitsOf } from "./domains/run/run-store";
+import { pgRunReads } from "./domains/run/pg-runs";
 
 const required = (name: string) => {
   const value = process.env[name];
@@ -40,16 +40,16 @@ const required = (name: string) => {
   return value;
 };
 
-function guestScope() {
+function guestScope(): "lab" | "self" {
   const scope = process.env.GUEST_SCOPE ?? "lab";
   if (scope !== "lab" && scope !== "self") throw new Error("GUEST_SCOPE must be lab or self");
   return scope;
 }
 
-/** A run limit from env: unset means no limit. */
-function limitNumber(name: string): number | null {
+/** A run limit from env: unset means no limit (`Infinity`). */
+function limitNumber(name: string): number {
   const raw = process.env[name];
-  if (raw === undefined || raw === "") return null;
+  if (raw === undefined || raw === "") return Number.POSITIVE_INFINITY;
   const value = Number(raw);
   if (!Number.isFinite(value) || value < 0) throw new Error(`${name} must be a number`);
   return value;
@@ -67,41 +67,47 @@ const limitsFromEnv = (org: "LAB" | "JUDGES" | "DEMO"): Limits => ({
 const client = postgres(required("DATABASE_URL"));
 const db = drizzle(client, { casing: "snake_case" });
 
+// The organizations and what each may run. Members sign in to `members`; the guest
+// organization (auth.ts) is separate, and unset means the sign-in wall.
+const members = [
+  {
+    id: required("WORKOS_LAB_ORGANIZATION_ID"),
+    scope: "lab" as const,
+    limits: limitsFromEnv("LAB"),
+  },
+  ...(process.env.WORKOS_JUDGES_ORGANIZATION_ID
+    ? [
+        {
+          id: process.env.WORKOS_JUDGES_ORGANIZATION_ID,
+          scope: "self" as const,
+          limits: limitsFromEnv("JUDGES"),
+        },
+      ]
+    : []),
+];
+const guest = process.env.GUEST_ORGANIZATION_ID
+  ? { id: process.env.GUEST_ORGANIZATION_ID, scope: guestScope(), limits: limitsFromEnv("DEMO") }
+  : null;
+// An org missing here is no longer configured: its queued runs fail and its running ones stop.
+const limits: ReadonlyMap<string, Limits> = new Map(
+  [...members, ...(guest ? [guest] : [])].map((org) => [org.id, org.limits]),
+);
+
 const auth = createAuth({
   clientId: required("WORKOS_CLIENT_ID"),
   apiKey: required("WORKOS_API_KEY"),
   cookiePassword: required("WORKOS_COOKIE_PASSWORD"),
   // Who may sign in, and how much of the data each sees (auth.ts, domain.ts). No domain
-  // reads an organization id. The Judges organization is optional: unset means not allowed.
-  organizations: [
-    { id: required("WORKOS_LAB_ORGANIZATION_ID"), scope: "lab" },
-    ...(process.env.WORKOS_JUDGES_ORGANIZATION_ID
-      ? [{ id: process.env.WORKOS_JUDGES_ORGANIZATION_ID, scope: "self" as const }]
-      : []),
-  ],
+  // reads an organization id.
+  organizations: members.map(({ id, scope }) => ({ id, scope })),
   // Guests (auth.ts): a request with no credential is a guest in this organization.
-  // Unset means the sign-in wall.
-  guest: process.env.GUEST_ORGANIZATION_ID
-    ? { organizationId: process.env.GUEST_ORGANIZATION_ID, scope: guestScope() }
-    : null,
+  guest: guest && { organizationId: guest.id, scope: guest.scope },
   appUrl: required("APP_URL").replace(/\/$/, ""),
   apiToken: required("VOLUMA_API_TOKEN"),
 });
 
-// The allow-list organizations (the same ids as `auth` above) and what each may run.
-const labId = required("WORKOS_LAB_ORGANIZATION_ID");
-const limitsByOrg = new Map<string, Limits>([[labId, limitsFromEnv("LAB")]]);
-if (process.env.WORKOS_JUDGES_ORGANIZATION_ID) {
-  limitsByOrg.set(process.env.WORKOS_JUDGES_ORGANIZATION_ID, limitsFromEnv("JUDGES"));
-}
-if (process.env.GUEST_ORGANIZATION_ID) {
-  limitsByOrg.set(process.env.GUEST_ORGANIZATION_ID, limitsFromEnv("DEMO"));
-}
-// An org that is no longer configured has no limits: its queued runs fail and its running ones stop.
-const limits: LimitsOf = (org) => limitsByOrg.get(org) ?? null;
-const runStore = pgRunStore(db, limits);
-const runQueue = pgRunQueue(db, limits);
-const keyVault = new KeyVault();
+const reads = pgRunReads(db);
+const queue = pgRunQueue(db, limits, new KeyVault());
 
 const app = new Hono();
 app.get("/health", (c) => c.text("ok"));
@@ -123,12 +129,11 @@ app.route("/api/auth", auth.userRoutes);
 app.route(
   "/api/run",
   createRun({
-    store: runStore,
-    queue: runQueue,
+    reads,
+    queue,
     eventLog: pgEventLog(db),
     history: pgHistory(db),
     catalog,
-    vault: keyVault,
   }),
 );
 app.route("/api/review", createReview({}));
@@ -166,7 +171,7 @@ app.onError((error, c) => {
 
 // Fail fast on a bad URL, bad credentials or a missing migration; /health stays liveness-only.
 await client`select 1 from threads limit 0`;
-await runStore.ensureReferenceInputs([...limitsByOrg.keys()]);
+await reads.ensureReferenceInputs([...limits.keys()]);
 
 const server = serve(
   { fetch: app.fetch, port: Number(required("PORT")), hostname: process.env.HOST },

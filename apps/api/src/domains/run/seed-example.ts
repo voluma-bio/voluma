@@ -1,7 +1,7 @@
 /**
  * Operator script: copy a finished run into an example run in the Demo organization.
  *   pnpm --filter @voluma/api seed:example --from <runId> [--id <exampleRunId>]
- * Reads DATABASE_URL, WORKOS_DEMO_ORGANIZATION_ID and the R2 settings (the repo .env, or the host's variables).
+ * Reads DATABASE_URL, GUEST_ORGANIZATION_ID (the Demo organization) and the R2 settings (the repo .env, or the host's variables).
  *
  * The example gets the source's events, threads and history under its own run id (thread
  * ids are `<runId>.…`, so they are renamed), `startedBy: "voluma-examples"`, `example: true`,
@@ -18,8 +18,15 @@ import { evidenceKey, runPrefix } from "@voluma/contracts/r2";
 import { eq, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { EXAMPLES_OPERATOR, referenceInputId } from "./domains/run/pg-run-store";
-import { events, inputs, piMessages, runs, threads } from "./domains/run/schema";
+import {
+  EXAMPLES_OPERATOR,
+  events,
+  inputs,
+  piMessages,
+  referenceInput,
+  runs,
+  threads,
+} from "./schema";
 
 const { values } = parseArgs({ options: { from: { type: "string" }, id: { type: "string" } } });
 const required = (name: string) => {
@@ -30,7 +37,7 @@ const required = (name: string) => {
 if (!values.from) throw new Error("usage: seed:example --from <runId> [--id <exampleRunId>]");
 const source = runIdSchema.parse(values.from);
 const exampleId = runIdSchema.parse(values.id ?? `example-${source}`);
-const demoLabId = required("WORKOS_DEMO_ORGANIZATION_ID");
+const demoLabId = required("GUEST_ORGANIZATION_ID");
 
 const client = postgres(required("DATABASE_URL"));
 const db = drizzle(client, { casing: "snake_case" });
@@ -100,23 +107,15 @@ await db.transaction(async (tx) => {
   await tx.delete(events).where(eq(events.runId, exampleId));
   await tx.delete(runs).where(eq(runs.id, exampleId));
 
-  await tx
-    .insert(inputs)
-    .values({
-      id: referenceInputId(demoLabId),
-      labId: demoLabId,
-      source: "reference",
-      uploadedBy: EXAMPLES_OPERATOR,
-      name: src.input.name,
-    })
-    .onConflictDoNothing();
+  const reference = referenceInput(demoLabId);
+  await tx.insert(inputs).values(reference).onConflictDoNothing();
   await tx.insert(runs).values({
     id: exampleId,
     labId: demoLabId,
     startedBy: EXAMPLES_OPERATOR,
     workflowId: src.run.workflowId,
     workflows: src.run.workflows,
-    inputId: referenceInputId(demoLabId),
+    inputId: reference.id as string,
     credentials: "voluma",
     example: true,
     state: "ended",
