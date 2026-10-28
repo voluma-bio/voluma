@@ -1,48 +1,39 @@
 /**
- * The plan as a dependency graph: columns by depth, an edge from each task to what builds on it.
- * Node state shows what is running, waiting and done at a glance; a node opens the task's newest
- * thread, and hovering one lights its threads in the lanes and the feed.
+ * The plan as a compact dependency graph, top to bottom: one row per dependency depth, an edge
+ * from each task to what builds on it. Secondary to the transcript, so it is small: a state dot
+ * and a short title per task, the full name and state on hover. A task opens its newest thread.
  */
 import type { WorkflowPlan } from "@voluma/contracts/workflow";
-import { Link } from "react-router";
-import { threadHref } from "./feed";
-import { layoutPlan, type TaskState, type Thread } from "./run-feed";
+import { useOpenThread } from "./chat/thread-navigation";
+import { layoutPlan, type TaskState, type Thread } from "./run-model";
 import { taskTitle } from "./workflows";
 
-const W = 168;
-const H = 44;
-const GAP_X = 36;
-const GAP_Y = 10;
+const W = 104;
+const H = 28;
+const GAP_X = 8;
+const GAP_Y = 16;
 
 const STATE: Record<TaskState, { label: string; node: string; dot: string }> = {
   running: {
     label: "Working",
-    node: "border-info bg-info-tint text-info",
-    dot: "bg-info animate-pulse",
+    node: "border-info bg-info-tint",
+    dot: "bg-info motion-safe:animate-pulse",
   },
   checking: {
     label: "Being checked",
-    node: "border-info bg-info-tint text-info",
-    dot: "bg-info animate-pulse",
+    node: "border-info bg-info-tint",
+    dot: "bg-info motion-safe:animate-pulse",
   },
-  done: {
-    label: "Done",
-    node: "border-primary/40 bg-primary-tint text-primary-strong",
-    dot: "bg-primary",
-  },
-  "to-check": {
-    label: "To check",
-    node: "border-check-line bg-check-tint text-check-strong",
-    dot: "bg-check-solid",
-  },
+  done: { label: "Done", node: "border-primary/40 bg-primary-tint", dot: "bg-primary" },
+  "to-check": { label: "To check", node: "border-check-line bg-check-tint", dot: "bg-check-solid" },
   failed: {
     label: "Failed",
-    node: "border-destructive/40 bg-destructive-tint text-destructive",
+    node: "border-destructive/40 bg-destructive-tint",
     dot: "bg-destructive",
   },
   ready: {
     label: "Ready",
-    node: "border-border bg-card text-foreground",
+    node: "border-border bg-card",
     dot: "border border-line-strong bg-card",
   },
   waiting: {
@@ -56,114 +47,88 @@ export function TaskGraph({
   plan,
   states,
   threadByTask,
-  openThread,
-  hover,
-  onHover,
 }: {
   plan: WorkflowPlan;
   states: Map<string, TaskState>;
   threadByTask: Map<string, Thread>;
-  openThread: string | null;
-  hover: string | null;
-  onHover: (task: string | null) => void;
 }) {
+  const open = useOpenThread();
   const nodes = layoutPlan(plan);
+  const perLevel = new Map<number, number>();
+  for (const n of nodes) perLevel.set(n.level, (perLevel.get(n.level) ?? 0) + 1);
+  const columns = Math.max(...perLevel.values());
+  const width = columns * (W + GAP_X) - GAP_X;
+  const height = (Math.max(...nodes.map((n) => n.level)) + 1) * (H + GAP_Y) - GAP_Y;
+  // Each depth's tasks are centred in the row.
   const at = new Map(
-    nodes.map((n) => [n.id, { x: n.level * (W + GAP_X), y: n.row * (H + GAP_Y) }]),
+    nodes.map((n) => {
+      const count = perLevel.get(n.level) ?? 1;
+      const offset = ((columns - count) * (W + GAP_X)) / 2;
+      return [n.id, { x: offset + n.row * (W + GAP_X), y: n.level * (H + GAP_Y) }];
+    }),
   );
-  const width = (Math.max(...nodes.map((n) => n.level)) + 1) * (W + GAP_X) - GAP_X;
-  const height = (Math.max(...nodes.map((n) => n.row)) + 1) * (H + GAP_Y) - GAP_Y;
-  const hovered = nodes.find((n) => n.id === hover);
-  const related = (id: string) =>
-    hover === null ||
-    id === hover ||
-    hovered?.dependsOn.includes(id) ||
-    nodes.some((n) => n.id === id && n.dependsOn.includes(hover));
-  const done = [...states.values()].filter((s) => s === "done").length;
 
   return (
-    <nav aria-label="Tasks">
-      <h2 className="mb-2 flex items-baseline gap-3 text-ui font-medium">
-        Tasks
-        <span className="font-normal text-muted-foreground">
-          {done} of {nodes.length} done
-        </span>
-      </h2>
-      <div className="overflow-x-auto pb-1">
-        <div className="relative" style={{ width, height }}>
-          <svg
-            width={width}
-            height={height}
-            className="absolute inset-0 text-line-strong"
-            aria-hidden="true"
+    <div className="relative mx-auto" style={{ width, height }}>
+      <svg
+        width={width}
+        height={height}
+        className="absolute inset-0 text-line-strong"
+        aria-hidden="true"
+      >
+        {nodes.flatMap((n) =>
+          n.dependsOn.map((d) => {
+            const from = at.get(d);
+            const to = at.get(n.id);
+            if (!from || !to) return null;
+            const x1 = from.x + W / 2;
+            const y1 = from.y + H;
+            const x2 = to.x + W / 2;
+            const y2 = to.y;
+            const mid = (y1 + y2) / 2;
+            return (
+              <path
+                key={`${d}>${n.id}`}
+                d={`M${x1} ${y1} C${x1} ${mid} ${x2} ${mid} ${x2} ${y2}`}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.25}
+              />
+            );
+          }),
+        )}
+      </svg>
+      {nodes.map((n) => {
+        const s = STATE[states.get(n.id) ?? "waiting"];
+        const thread = threadByTask.get(n.id);
+        const pos = at.get(n.id);
+        const name = `${taskTitle(n.id)}: ${s.label}`;
+        const cls = `absolute flex items-center gap-1.5 rounded-md border px-2 text-meta ${s.node}`;
+        const style = { left: pos?.x, top: pos?.y, width: W, height: H };
+        const body = (
+          <>
+            <span className={`size-2 shrink-0 rounded-full ${s.dot}`} aria-hidden="true" />
+            <span className="min-w-0 truncate">{taskTitle(n.id)}</span>
+            <span className="sr-only">: {s.label}</span>
+          </>
+        );
+        return thread ? (
+          <button
+            key={n.id}
+            type="button"
+            title={name}
+            onClick={() => open(thread.id)}
+            className={`${cls} text-left hover:border-line-strong hover:shadow-sm`}
+            style={style}
           >
-            {nodes.flatMap((n) =>
-              n.dependsOn.map((d) => {
-                const from = at.get(d);
-                const to = at.get(n.id);
-                if (!from || !to) return null;
-                const x1 = from.x + W;
-                const y1 = from.y + H / 2;
-                const x2 = to.x;
-                const y2 = to.y + H / 2;
-                const mid = (x1 + x2) / 2;
-                const lit = hover !== null && (hover === n.id || hover === d);
-                return (
-                  <path
-                    key={`${d}>${n.id}`}
-                    d={`M${x1} ${y1} C${mid} ${y1} ${mid} ${y2} ${x2} ${y2}`}
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={lit ? 2 : 1.25}
-                    className={lit ? "text-foreground" : undefined}
-                    opacity={hover === null || lit ? 1 : 0.35}
-                  />
-                );
-              }),
-            )}
-          </svg>
-          {nodes.map((n) => {
-            const state = states.get(n.id) ?? "waiting";
-            const s = STATE[state];
-            const thread = threadByTask.get(n.id);
-            const pos = at.get(n.id);
-            const cls = `absolute flex flex-col justify-center rounded-lg border px-2.5 transition-opacity ${s.node} ${
-              related(n.id) ? "" : "opacity-40"
-            }`;
-            const body = (
-              <>
-                <span className="truncate text-ui font-medium leading-tight">
-                  {taskTitle(n.id)}
-                </span>
-                <span className="flex items-center gap-1.5 text-meta leading-tight opacity-90">
-                  <span className={`size-2 rounded-full ${s.dot}`} aria-hidden="true" />
-                  {s.label}
-                </span>
-              </>
-            );
-            const props = {
-              style: { left: pos?.x, top: pos?.y, width: W, height: H },
-              onMouseEnter: () => onHover(n.id),
-              onMouseLeave: () => onHover(null),
-            };
-            return thread ? (
-              <Link
-                key={n.id}
-                to={threadHref(thread.id)}
-                aria-current={thread.id === openThread ? "true" : undefined}
-                className={`${cls} aria-[current]:ring-2 aria-[current]:ring-primary`}
-                {...props}
-              >
-                {body}
-              </Link>
-            ) : (
-              <div key={n.id} className={cls} {...props}>
-                {body}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </nav>
+            {body}
+          </button>
+        ) : (
+          <div key={n.id} title={name} className={cls} style={style}>
+            {body}
+          </div>
+        );
+      })}
+    </div>
   );
 }
