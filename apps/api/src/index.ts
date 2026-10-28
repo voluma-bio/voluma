@@ -14,6 +14,7 @@
  * Run limits, per organization (LAB, JUDGES, DEMO) and number: RUN_LIMITS_<ORG>_PER_CALLER, _CONCURRENT,
  * _PER_DAY, _USD_PER_DAY, _VISITOR_ACTIVE; unset is no limit. Fails at startup if the database is unreachable or not migrated.
  */
+import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { serve } from "@hono/node-server";
@@ -107,6 +108,14 @@ const auth = createAuth({
   apiToken: required("VOLUMA_API_TOKEN"),
 });
 
+/** The commit this process was deployed from: Railway's, else the checkout's (`pnpm dev`). */
+function deployedCommit(): string {
+  return (
+    process.env.RAILWAY_GIT_COMMIT_SHA ??
+    execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim()
+  );
+}
+
 /** Aborts at SIGTERM so open event streams end and the drain isn't held. */
 const draining = new AbortController();
 const reads = pgRunReads(db);
@@ -139,6 +148,7 @@ app.route(
     notifier,
     history: pgHistory(db),
     catalog,
+    source: { repo: "voluma-bio/voluma", commit: deployedCommit() },
     shutdown: draining.signal,
   }),
 );

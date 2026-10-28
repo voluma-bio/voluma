@@ -131,12 +131,9 @@ they need:
 - Colours come only from `packages/design-tokens`; components use token
   utilities (`bg-card`, `text-muted-foreground`). Visual rules: [DESIGN.md](DESIGN.md).
   Check shared components at `/dev/ui` in both themes.
-- A workflow is a Mars schema v1 package (`mars.toml`, skills, `workflow.md`,
-  agents) in a GitHub repo, imported and pinned to a commit and, when it
-  isn't the repo root, a `path`: this repo's own packages live under
-  `workflows/` (`workflows/smoke` is the runner's smoke test). The generic
-  micro-CT skills are
-  [voluma-bio/microct-analysis]. This repo holds no Python. Analysis tools
+- A workflow is a directory of this repo, `workflows/<name>/`: `workflow.md`, `agents/` and
+  `skills/`, pinned by the run to a commit and that path (`workflows/smoke` is the runner's
+  smoke test). The generic micro-CT skills are in `workflows/microct-analysis` (planned). Analysis tools
   take and return paths, never bytes.
 - Test against the real thing, not fakes: real OA6-1RK data, the real API,
   the real sandbox. No fixture data and no mock transports. Add a unit test
@@ -156,4 +153,3 @@ for whoever uses it. Nothing in this repo requires it.
 
 [requirements]: https://github.com/voluma-bio/docs/blob/main/work/microct-workflow-mvp/requirements.md
 [visual direction]: https://github.com/voluma-bio/docs/blob/main/work/microct-workflow-mvp/mockups/direction.md
-[voluma-bio/microct-analysis]: https://github.com/voluma-bio/microct-analysis

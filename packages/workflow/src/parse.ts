@@ -15,12 +15,11 @@ import {
   WorkflowParseError,
 } from "./definition";
 
-/** One pinned package's files, paths relative to its root, and where it is mounted. */
-export interface PackageFiles {
-  /** `/workflow/<repo>/<commit>[/<path>]`, the package root in the sandbox. */
-  mount: string;
-  files: ReadonlyMap<string, string>;
-}
+/** A directory of the repo as a workflow reads it: `workflows/<name>`, no `..`, no trailing slash. */
+export const workflowDirSchema = z
+  .string()
+  .regex(/^workflows\/[a-z0-9._-]+(\/[a-z0-9._-]+)*$/)
+  .refine((d) => !d.split("/").some((p) => /^\.+$/.test(p)), "must not contain . or ..");
 
 /** Splits `---` frontmatter from the body; a file with none has `{}` and the whole text. */
 function frontmatter(file: string, text: string): { data: unknown; body: string } {
@@ -126,6 +125,8 @@ const frontmatterSchema = z.strictObject({
   name: z.string().min(1),
   title: z.string().min(1),
   roles: z.record(z.string(), z.string()).default({}),
+  /** Other workflow directories whose `agents/` and `skills/` this workflow may use. */
+  uses: z.array(workflowDirSchema).default([]),
 });
 const parameterEntry = z.strictObject({
   id: z.string().min(1),
@@ -209,7 +210,7 @@ function readAgent(file: string, text: string): Agent {
   };
 }
 
-function readSkill(file: string, dir: string, mount: string, text: string): Skill {
+function readSkill(file: string, dir: string, base: string, text: string): Skill {
   const fm = check(
     file,
     "frontmatter",
@@ -226,7 +227,7 @@ function readSkill(file: string, dir: string, mount: string, text: string): Skil
   return {
     name: dir,
     description: fm.description.replace(/\s+/g, " ").trim(),
-    path: `${mount}/skills/${dir}`,
+    path: `/workflow/${base}/skills/${dir}`,
   };
 }
 
@@ -274,41 +275,38 @@ function crossCheck(
 }
 
 /**
- * `packages[0]` is the workflow (it holds `workflow.md`); the rest supply agents and
- * skills it may name. Skills and agents are looked up across all of them.
+ * `dir` is the workflow's directory (`workflows/<name>`) and `files` the text files of the
+ * snapshot, keyed by repo path. The workflow's `workflow.md` names, in `uses`, other
+ * directories whose agents and skills it may use; agents and skills are looked up in all of them.
  */
-export function parseWorkflow(packages: readonly PackageFiles[]): WorkflowDefinition {
-  const [root] = packages;
-  const text = root?.files.get(FILE);
-  if (text === undefined)
-    throw new WorkflowParseError(FILE, "", "not found in the first pinned package");
+export function parseWorkflow(dir: string, files: ReadonlyMap<string, string>): WorkflowDefinition {
+  const text = files.get(`${dir}/${FILE}`);
+  if (text === undefined) throw new WorkflowParseError(`${dir}/${FILE}`, "", "not found");
 
   const agents = new Map<string, Agent>();
   const skills: Skill[] = [];
-  for (const pkg of packages) {
-    for (const [path, content] of pkg.files) {
-      const agent = /^agents\/([^/]+)\.md$/.exec(path);
+  const dirs = [
+    dir,
+    ...check(FILE, "frontmatter", frontmatterSchema, frontmatter(FILE, text).data).uses,
+  ];
+  for (const base of dirs) {
+    for (const [path, content] of files) {
+      if (!path.startsWith(`${base}/`)) continue;
+      const rel = path.slice(base.length + 1);
+      const agent = /^agents\/([^/]+)\.md$/.exec(rel);
       if (agent) {
         const a = readAgent(path, content);
         if (agents.has(a.name)) {
-          throw new WorkflowParseError(
-            path,
-            "frontmatter",
-            `agent "${a.name}" is defined in two pinned packages`,
-          );
+          throw new WorkflowParseError(path, "frontmatter", `agent "${a.name}" is defined twice`);
         }
         agents.set(a.name, a);
         continue;
       }
-      const skill = /^skills\/([^/]+)\/SKILL\.md$/.exec(path);
+      const skill = /^skills\/([^/]+)\/SKILL\.md$/.exec(rel);
       if (skill?.[1]) {
-        const sk = readSkill(path, skill[1], pkg.mount, content);
+        const sk = readSkill(path, skill[1], base, content);
         if (skills.some((x) => x.name === sk.name)) {
-          throw new WorkflowParseError(
-            path,
-            "frontmatter",
-            `skill "${sk.name}" is defined in two pinned packages`,
-          );
+          throw new WorkflowParseError(path, "frontmatter", `skill "${sk.name}" is defined twice`);
         }
         skills.push(sk);
       }
@@ -333,7 +331,7 @@ export function parseWorkflow(packages: readonly PackageFiles[]): WorkflowDefini
       throw new WorkflowParseError(
         FILE,
         "frontmatter",
-        `roles.${role}: no agent "${name}" in the pinned packages`,
+        `roles.${role}: no agent "${name}" in the workflow or the directories it uses`,
       );
     }
     assigned[role as Role] = agent;
@@ -350,7 +348,7 @@ export function parseWorkflow(packages: readonly PackageFiles[]): WorkflowDefini
         throw new WorkflowParseError(
           `agents/${agent.name}.md`,
           "skills",
-          `skill "${s}" is not in the pinned packages`,
+          `skill "${s}" is not in the workflow or the directories it uses`,
         );
       }
     }

@@ -3,6 +3,8 @@ name: smoke
 title: Runner smoke test
 roles:
   worker: smoke-analyst
+uses:
+  - workflows/smoke-skills
 ---
 
 A tiny workflow to check the runner end to end, not an analysis. Be brief, and say which

@@ -6,8 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./load": "./src/load.ts",
-    "./definition": "./src/definition.ts",
-    "./mount": "./src/mount.ts"
+    "./definition": "./src/definition.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
@@ -15,7 +14,8 @@
   },
   "devDependencies": {
     "typescript": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "@types/node": "^24.0.0"
   },
   "dependencies": {
     "@voluma/contracts": "workspace:*",
