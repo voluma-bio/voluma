@@ -57,10 +57,10 @@ export const liveFrameSchema = z.discriminatedUnion("type", [
   /** More of the reply's text. */
   frame("text.delta", { messageId: nonEmpty, offset: nonNegInt, text: z.string() }),
   /**
-   * More of the reply's reasoning (the model's thinking), as one string per reply: its
-   * thinking blocks joined with a blank line (`\n\n`, sent in the first delta of the next
-   * block), and `offset` counts across them. The durable `message`'s `reasoning` is the same
-   * string.
+   * More of the reply's reasoning (the model's thinking), as one string per reply: the
+   * provider's thinking text as it streams, with `offset` counting across thinking blocks.
+   * Providers add their own separators, so the deltas can differ in whitespace from the
+   * durable `message`'s `reasoning` (the blocks joined with a blank line), which replaces them.
    */
   frame("reasoning.delta", { messageId: nonEmpty, offset: nonNegInt, text: z.string() }),
   /** More of a tool call's JSON arguments, as the model writes them. */

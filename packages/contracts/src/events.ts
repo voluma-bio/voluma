@@ -192,7 +192,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         text: z.string(),
         /**
          * The reply's reasoning (thinking), its blocks joined with a blank line; absent when
-         * the model showed none. The same string the reply's `reasoning.delta` frames add up to.
+         * the model showed none. It replaces the partial the reply's `reasoning.delta` frames built.
          */
         reasoning: z.string().optional(),
         /** The reply's model usage; absent on a reply that never reached the model. */
