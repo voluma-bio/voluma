@@ -8,17 +8,18 @@
  * These are the durable events. Live output (text and tool deltas, tool output
  * chunks) is not stored and has no `seq`: see `stream.ts`.
  *
- * Ids that become R2 key segments (`runId`, `task`, `toolCallId`, evidence paths) are checked
+ * Ids that become R2 key segments (`runId`, `taskId`, `toolCallId`, evidence paths) are checked
  * with the `r2.ts` schemas here, so an accepted event can't fail later when a
  * key is built. `compaction` is added when something produces it.
  *
  * `task`, `checkpoint` and `value` are what the run screen and the review are
- * folded from; the fold is specified below.
+ * folded from (see below).
  */
 import { z } from "zod";
 import {
   relativePathSchema,
   runIdSchema,
+  segmentSchema,
   sha256Schema,
   taskIdSchema,
   toolCallIdSchema,
@@ -56,63 +57,32 @@ export const evidenceRefSchema = z.object({
 });
 export type EvidenceRef = z.infer<typeof evidenceRefSchema>;
 
-/** Who made a decision: a tool call, a named runtime rule, or a judgment seam. */
+/**
+ * Who made a decision: a tool call, a named runtime rule (`task-tools.ts`), or
+ * a judgment seam (the experiment's arm name).
+ */
 export const bySchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("agent") }),
   z.object({
     kind: z.literal("rule"),
-    rule: z.enum(["stuck", "stale", "check-result", "attempt-open", "fix"]),
+    rule: z.enum(["stuck", "stale", "check-start", "check-result"]),
   }),
   z.object({ kind: z.literal("judgment"), arm: nonEmpty }),
 ]);
 export type By = z.infer<typeof bySchema>;
 
 /**
- * THE FOLD: how the run screen and the review read `task`, `checkpoint` and
- * `value` events. Both lanes implement exactly this; nothing is summarised by a
- * model. The runtime guarantees the event rules in `task-tools.ts`.
+ * THE FOLD is the function `fold` in `fold.ts`: the one spec the run screen,
+ * the runtime's per-task record and the review all call. The runtime
+ * guarantees the event rules in `task-tools.ts`.
  *
- * Group by `payload.taskId`, in `seq` order. An *opener* is a `task` event with
- * status `in-progress`, or `under-review` with `by` rule `fix`. An *attempt* is
- * the events from one opener up to the next; the latest is the current one, the
- * earlier ones stay as revisions. Ignore a `verdict` unless its thread's
- * `thread.started` has kind `check`.
- *
- * Run screen, per task (current attempt):
- * - state: the latest `task` event's `status` and `reason`; `pending` if none.
- * - milestones: the `checkpoint` texts in order, with evidence. One with a
- *   `verdict` is the check line. "N to check" counts the `checks` below.
- * - outputs: the `value` events, the latest per `measurementId`.
- *
- * Review, a `ReviewTask` per attempt:
- * - `status`: the attempt's latest `task` status (the importer sets `done`).
- * - `resultRevisionId`: the opener event's id.
- * - measurements: each output becomes a `Measurement`: `id` is
- *   `${taskId}/${measurementId}`; `numeratorId`/`denominatorId` name a same-task
- *   `measurementId` or a `taskId/measurementId` and become full ids; `source` is
- *   the event's `{threadId, id}`; `evidenceIds` are its evidence sha256;
- *   `references` is empty; the other fields are copied.
- * - evidence: checkpoint and value files, unique by sha256, as `Asset { id:
- *   sha256, name: path, stage: task title, key: evidenceKey(runId, sha256),
- *   sha256 }`.
- * - checker: the latest checkpoint with a `verdict` → `{verdict, text}`, or null.
- * - checks, all `status: "open"` (accepting one is the review lane's, not an
- *   event): each `toCheck` checkpoint → `{id: event id, title: toCheck.title,
- *   detail: text}`; a `to-check` status event in an attempt with no `toCheck`
- *   checkpoint → `{id: event id, title: "Marked to check", detail: reason}`; an
- *   attempt opened by `fix` → `{id: opener id, title: "Changed by the second
- *   agent", detail: opener reason}`.
- * - threads: `worker` is the `threadId` of the attempt's events from a worker
- *   thread; `check` is the latest `thread.started` with kind `check` and `task`
- *   = this taskId after the opener; `chat` comes from the review lane.
- * - not from these events: `title`, `ask`, `dependsOn` and `structureIds` (the
- *   workflow), `files` (the API lists the task's output folder). A
- *   `structureIds`/`annotationIds` entry the revision doesn't contain is dropped.
- *
- * Run-level revisions (`ReviewRun.revisions`): one is cut at the run's first
- * opener and at each opener of a task that already has a `done` event in an
- * earlier attempt (a correction or a fix). Its id is that event's id and it
- * holds each task's latest attempt opened at or before it. Labels are the API's.
+ * Two runtime-owned markers carry the structure; nothing is inferred from the
+ * order of status events:
+ * - `revision.started` opens a revision at a point in the log. Revision *k* is
+ *   the fold of every event before revision *k+1* starts.
+ * - `attempt.opened` opens a work attempt on a task. Its id is that event's
+ *   id; the runtime stamps it as `attemptId` on the `task`, `checkpoint` and
+ *   `value` events that belong to it.
  */
 
 const envelope = {
@@ -139,8 +109,9 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
       /** Null on a run's root thread. */
       parentThreadId: z.string().nullable(),
       kind: threadKindSchema,
-      /** The `taskId` a check thread checks (the fold reads it). */
       task: taskIdSchema.optional(),
+      /** The attempt a check thread checks; set on check threads only. */
+      attemptId: nonEmpty.optional(),
       /** The tool call in the parent thread that started this thread. */
       spawnedBy: nonEmpty.optional(),
       /** Workflow packages the run is pinned to; set on the root thread only. */
@@ -224,6 +195,23 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
   );
 
   /**
+   * A revision starts: the first at the run's start, then one per correction
+   * (`taskId` is the corrected task) and one per fix (`taskId` is the task the
+   * check thread is fixing). Written by the runtime before the writes it covers.
+   */
+  const revisionStarted = event(
+    "revision.started",
+    z.discriminatedUnion("reason", [
+      z.object({ reason: z.literal("run") }),
+      z.object({ reason: z.literal("correction"), taskId: taskIdSchema }),
+      z.object({ reason: z.literal("fix"), taskId: taskIdSchema }),
+    ]),
+  );
+
+  /** A work attempt opens on a task: its first write, or a redo after a stale mark or a failure. */
+  const attemptOpened = event("attempt.opened", z.object({ taskId: taskIdSchema }));
+
+  /**
    * A checklist task changed status. Written when a `checklist` tool call
    * succeeds (`by` agent) or by the runtime's own code (`by` rule or judgment);
    * the envelope `threadId` is the thread whose tool or wake produced it.
@@ -232,6 +220,8 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     "task",
     z.object({
       taskId: taskIdSchema,
+      /** Runtime-stamped: the attempt this belongs to. */
+      attemptId: nonEmpty,
       status: taskStatusSchema,
       /** One plain-language line: why, shown beside the state. */
       reason: nonEmpty,
@@ -247,6 +237,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     "checkpoint",
     z.object({
       taskId: taskIdSchema,
+      attemptId: nonEmpty,
       text: nonEmpty,
       by: bySchema,
       evidence: z.array(evidenceRefSchema),
@@ -259,14 +250,16 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
 
   /**
    * A measurement from `report_value`. A new attempt reports the same
-   * `measurementId` again; within an attempt the latest wins.
+   * `measurementId` again; within an attempt the latest wins, a check thread's
+   * fix included.
    */
   const value = event(
     "value",
     z.object({
       taskId: taskIdSchema,
-      /** Stable across reruns of the task: the agent's name for the quantity, e.g. `femur-width`. */
-      measurementId: nonEmpty,
+      attemptId: nonEmpty,
+      /** Stable across reruns of the task: the agent's name for the quantity, e.g. `femur-width`. One segment, so `taskId/measurementId` is unambiguous. */
+      measurementId: segmentSchema,
       title: nonEmpty,
       /** Null when it could not be computed; say why in `note`. */
       value: z.number().finite().nullable(),
@@ -290,6 +283,8 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     toolCall,
     toolResult,
     sandbox,
+    revisionStarted,
+    attemptOpened,
     task,
     checkpoint,
     value,

@@ -239,9 +239,9 @@ export const taskSchema = z.object({
   dependsOn: z.array(z.string()),
   /** Structures the task uses; the Structures panel lists these. */
   structureIds: z.array(z.string()),
-  /** The task's latest `task` status in this attempt (`events.ts` fold); the importer sets `done`. */
+  /** The task's status in this revision: its status at that point in the log (`fold.ts`); the importer sets `done`. */
   status: taskStatusSchema,
-  /** Unchanged tasks keep this id across revisions. */
+  /** The revision in which the task last changed; unchanged tasks keep this id across revisions. */
   resultRevisionId: z.string(),
   /** Null when no second agent checked it. */
   checker: z.object({ verdict: z.enum(["passed", "needs-review"]), text: z.string() }).nullable(),

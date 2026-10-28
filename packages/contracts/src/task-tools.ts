@@ -1,42 +1,79 @@
 /**
- * The tools that write `task`, `checkpoint` and `value` events (`events.ts`,
- * which also holds the fold the run screen and review read them by). The fold
- * relies on the rules below; the runtime enforces them, these schemas only
- * shape the call.
+ * The tools that write `task`, `checkpoint` and `value` events (`events.ts`),
+ * and the rules the runtime enforces when they run. `fold` (`fold.ts`) relies
+ * on these; the schemas below only shape the calls.
  *
  * Who sets what. `checklist` and `report_value` are the worker's (the
  * supervisor's own checklist calls use `checklist` too); `checkpoint` is the
  * worker's and a check thread's. A worker sets only `in-progress`, `done`,
- * `failed` and `to-check`; `under-review` and `stale` are the supervisor's or
- * the runtime's. Only a check thread sets `verdict`. Nobody but the check
- * thread writes to a task under review.
+ * `failed` and `to-check`; `under-review` and `stale` are the runtime's, and
+ * `stale` also the supervisor's. Only a check thread sets `verdict`.
  *
- * Attempts belong to the runtime, as `task` events with `by` rule:
- * - `in-progress` on a task already in progress appends nothing.
- * - A `checkpoint` or `value` on a task that is neither in progress nor under
- *   review first appends `task in-progress` (`attempt-open`).
- * - A check thread's first `value` on a task appends `task under-review` (`fix`)
- *   unless the task's latest event already is one. That opens a fix attempt, so
- *   the worker's result stays in its own revision.
- * - When a check thread ends, the runtime sets the task's status (`check-result`):
- *   `passed` → `done`; `needs-review` → `to-check`; no verdict → `to-check`
- *   with a reason. A check that disagrees is a judgment point (`judgment` by).
+ * Attempts. The runtime writes `attempt.opened` and stamps `attemptId` on every
+ * `task`, `checkpoint` and `value` event, from the task's latest attempt. An
+ * attempt's status is its latest stamped `task` event, otherwise `in-progress`.
+ * The runtime rebuilds its per-task record by `fold` on a resume.
+ * - A task with no attempt is `pending`. An attempt opens automatically only on
+ *   the first write to a `pending` task.
+ * - A write to a `stale` or `failed` task is refused with the reason and "call
+ *   `checklist in-progress` to redo it"; that call opens the new attempt.
+ * - A worker's `in-progress` on its own `done` or `to-check` task is refused. A
+ *   redo goes through a stale mark. `in-progress` on a task already in progress
+ *   appends nothing.
+ * - Other writes to an `in-progress`, `done` or `to-check` task stay in its
+ *   attempt. Nobody but the check thread writes to a task under review.
+ *
+ * Checks. The runtime starts a check thread only on a `done` or `to-check`
+ * task. Its `thread.started` carries the attempt it checks, and the runtime
+ * appends `task under-review` (`check-start`) with the same `attemptId` before
+ * the thread runs. The check thread's events join that attempt.
+ * - A check thread's first `value` is a fix: the runtime appends
+ *   `revision.started` (`fix`), then a stale mark (`stale`) on each dependent
+ *   of the task that has an attempt, then the value. Later values add nothing.
+ * - When the check thread ends the runtime sets the status (`check-result`),
+ *   but only if the task is still under review: a check that fixed something
+ *   gives `to-check`; otherwise `passed` gives `done`, and `needs-review` or no
+ *   verdict gives `to-check` with a reason.
+ *
+ * Staleness. A correction is one `checklist stale` call by the supervisor on
+ * the corrected task, which has an attempt. The runtime appends
+ * `revision.started` (`correction`), the call's own stale event, and a stale
+ * mark (`stale`) on each dependent in the workflow's graph that has an attempt
+ * and isn't stale already. A stale mark on a task under review stops its check
+ * thread, so no `check-result` follows. When a worker thread ends with tasks
+ * still in progress, the stuck guard marks each `to-check` (`stuck`).
+ *
+ * Run start. The first event of a run is `revision.started` (`run`).
+ *
+ * Operands. `report_value` refuses a `numeratorId` or `denominatorId` the named
+ * task's latest attempt hasn't reported. A later attempt may stop reporting it;
+ * the fold drops such an operand.
  *
  * Evidence is named by `{root, path}` (`evidenceRefSchema`). On success the
  * runtime copies each file to its `evidenceKey` and appends the event with the
  * sha256; a missing file fails the call and appends nothing. The runtime scopes
  * paths to this run; `outputs` paths are under the call's `taskId`.
  *
- * Crashes. The id of the event a tool appends is its `toolCallId`, and of an
- * attempt-opening event it appends first, `${toolCallId}:open`, so a resume
- * finds them and answers the call with success. A tool succeeds only after its
- * append is acknowledged; these events never use the fire-and-forget path.
+ * Ids and crashes. Every event id has its thread as a prefix. A tool's event
+ * is `${threadId}:${toolCallId}`; the runtime's other events derive theirs from
+ * their trigger, so a resume never appends one twice:
+ * - `attempt.opened`: `${threadId}:${toolCallId}:open`
+ * - `revision.started`: `${threadId}:${toolCallId}:revision` (a run's first:
+ *   `${rootThreadId}:revision`), and its stale marks `…:stale:${taskId}`
+ * - `check-start`: `${checkThreadId}:start`; `check-result`: `${checkThreadId}:result`
+ * - stuck guard: `${workerThreadId}:stuck:${taskId}`
+ *
+ * The three task tools run with `executionMode: "sequential"`, and a tool
+ * succeeds only after its appends are acknowledged. A crash between an
+ * `attempt.opened` and the tool's own event leaves an `in-progress` attempt;
+ * the interrupted call is answered with an error and the model's retry lands in
+ * it.
  *
  * Results reach the record as `tool.result.output`, the object as JSON.
  */
 import { z } from "zod";
 import { taskStatusSchema } from "./events";
-import { relativePathSchema, taskIdSchema } from "./r2";
+import { relativePathSchema, segmentSchema, taskIdSchema } from "./r2";
 
 const nonEmpty = z.string().min(1);
 
@@ -86,7 +123,7 @@ export type CheckpointInput = z.infer<typeof checkpointInputSchema>;
 
 export const reportValueInputSchema = z.object({
   taskId: taskIdSchema,
-  measurementId: nonEmpty.describe(
+  measurementId: segmentSchema.describe(
     "Stable name for this quantity; reuse it when you redo the task.",
   ),
   title: nonEmpty,
