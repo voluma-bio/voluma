@@ -317,9 +317,10 @@ export function createAuth(config: AuthConfig) {
   }
   const core = new Core(getConfigurationProvider().getConfig(), workos, sessionEncryption);
   const memo = new RefreshMemo();
-  // Like the session cookie, __Host- on https. Hono enforces Secure and Path=/ for it.
+  // Like the session cookie, __Host- on https. The prefix is in the name itself:
+  // `serialize` doesn't apply Hono's `prefix` option, so read and write use this name.
   const https = appOrigin.startsWith("https:");
-  const guestCookieName = "voluma-guest";
+  const guestCookieName = https ? "__Host-voluma-guest" : "voluma-guest";
 
   // Clears the session cookie and every pending PKCE verifier on the request, so
   // sign-out and refusals leave no AuthKit cookie behind.
@@ -418,7 +419,7 @@ export function createAuth(config: AuthConfig) {
   // The guest for a request, or null for no valid guest cookie (absent, garbled, forged
   // or sealed under another password).
   async function guestIdFromCookie(c: Context) {
-    const sealed = getCookie(c, guestCookieName, https ? "host" : undefined);
+    const sealed = getCookie(c, guestCookieName);
     if (!sealed) return null;
     try {
       const { id } = await sessionEncryption.unsealData<{ id?: unknown }>(sealed, {
@@ -443,7 +444,6 @@ export function createAuth(config: AuthConfig) {
           maxAge: GUEST_MAX_AGE,
           secure: https,
           path: "/",
-          prefix: https ? "host" : undefined,
         },
       ),
     );
