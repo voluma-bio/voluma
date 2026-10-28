@@ -1,1 +1,0 @@
-- Recorder drops an invalid event with console.error; consider failing the run so contract tightenings can't be lost silently.
