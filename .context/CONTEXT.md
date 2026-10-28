@@ -131,7 +131,8 @@ bearer counts. The root answers 401 for no principal on everything but `/api/aut
 a domain guards a subtree with `requireService` or `requireUser` (which also sets a typed
 `c.var.user`) and gets 403 for the other kind. A cookie-authenticated non-GET request must
 carry an `Origin` equal to `APP_URL`'s origin (`SameSite=Lax` is same-site, not
-same-origin) and a JSON content type; a WebSocket upgrade must carry the `Origin` only.
+same-origin) and a JSON content type. GETs have no side effects; run streams are server-sent
+events (plain GETs), and nothing upgrades to WebSockets.
 Bearer requests are exempt. `APP_URL` (the Vite origin in `pnpm dev`, the public URL in
 production) is config, never the `Host` header: it builds the redirect
 `${APP_URL}/api/auth/callback`. There is no `users` table: records store the WorkOS user id.

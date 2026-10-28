@@ -460,19 +460,19 @@ export function createAuth(config: AuthConfig) {
 
   // The origin and content-type rules for requests that authenticate by cookie.
   // SameSite=Lax is same-site, not same-origin (every *.voluma.bio host is same-site),
-  // so state-changing requests and WebSocket upgrades must come from the app's origin.
+  // so state-changing requests must come from the app's origin. (There are no WebSocket
+  // upgrades: run streams are server-sent events, plain GETs.)
   // Service (bearer) requests carry no ambient credential and are exempt; a request
   // with some other Authorization header has no principal and is checked like any other.
   const csrf = createMiddleware<RootEnv>(async (c, next) => {
     const { method, headers } = c.req.raw;
     const mutates = method !== "GET" && method !== "HEAD";
-    const upgrade = headers.get("upgrade")?.toLowerCase() === "websocket";
-    if (c.get("principal")?.kind === "service" || !(mutates || upgrade)) return next();
+    if (c.get("principal")?.kind === "service" || !mutates) return next();
     const site = headers.get("sec-fetch-site");
     if (headers.get("origin") !== appOrigin || (site !== null && site !== "same-origin")) {
       return c.json({ error: "forbidden origin" }, 403);
     }
-    if (mutates && !/^application\/json\s*(;|$)/i.test(headers.get("content-type") ?? "")) {
+    if (!/^application\/json\s*(;|$)/i.test(headers.get("content-type") ?? "")) {
       return c.json({ error: "content-type must be application/json" }, 415);
     }
     return next();
