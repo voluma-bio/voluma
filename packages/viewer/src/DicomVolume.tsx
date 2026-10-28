@@ -202,6 +202,9 @@ function VolumeView({
           VOILUTFunction: "LINEAR",
         },
       });
+      // Local volumes start with no dirty frames in Cornerstone 4.22; mark
+      // every populated slice for GPU upload before the first render.
+      volume.invalidate();
       // Default VOI otherwise tries to load a synthetic local-image ID as DICOM.
       utilities.genericMetadataProvider.add(
         volume.imageIds[Math.floor(volume.imageIds.length / 2)] as string,
