@@ -25,8 +25,9 @@ export type Thread = {
   /** Model calls so far, and the sum of their usage; absent until one reports it. */
   calls: number;
   usage?: ModelUsage;
-  /** The tool call running now, by title. */
+  /** The tool call running now, by title; else the last one it made. */
   liveTool?: string;
+  lastTool?: string;
   /** The thread's last checkpoint, and its verdict for a checker. */
   result?: { text: string; verdict?: "passed" | "needs-review"; toCheck?: string };
   /** Its last prose, the report a finished card expands to. */
@@ -77,7 +78,8 @@ export function threadsOf(events: RunEvent[], live?: Live): Thread[] {
         if (t) {
           t.toolCalls++;
           const calls = running.get(e.threadId) ?? new Map<string, string>();
-          calls.set(e.payload.toolCallId, toolTitle(e.payload.name, e.payload.input));
+          t.lastTool = toolTitle(e.payload.name, e.payload.input);
+          calls.set(e.payload.toolCallId, t.lastTool);
           running.set(e.threadId, calls);
         }
         break;

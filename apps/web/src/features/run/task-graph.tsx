@@ -8,7 +8,9 @@ import { useOpenThread } from "./chat/thread-navigation";
 import { layoutPlan, type TaskState, type Thread } from "./run-model";
 import { taskTitle } from "./workflows";
 
-const W = 104;
+/** The rail's inner width; nodes share it, up to a comfortable maximum. */
+const SPACE = 328;
+const MAX_W = 150;
 const H = 28;
 const GAP_X = 8;
 const GAP_Y = 16;
@@ -57,6 +59,7 @@ export function TaskGraph({
   const perLevel = new Map<number, number>();
   for (const n of nodes) perLevel.set(n.level, (perLevel.get(n.level) ?? 0) + 1);
   const columns = Math.max(...perLevel.values());
+  const W = Math.min(MAX_W, Math.floor((SPACE - (columns - 1) * GAP_X) / columns));
   const width = columns * (W + GAP_X) - GAP_X;
   const height = (Math.max(...nodes.map((n) => n.level)) + 1) * (H + GAP_Y) - GAP_Y;
   // Each depth's tasks are centred in the row.

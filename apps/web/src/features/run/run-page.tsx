@@ -137,7 +137,12 @@ export function RunPage() {
   const states = plan
     ? taskStates(plan, new Map(folded.tasks.map((t) => [t.id, t.status])))
     : new Map<string, TaskState>();
-  const done = [...states.values()].filter((s) => s === "done").length;
+  // To check is finished too: the work is done and a person has items to look at.
+  const done = [...states.values()].filter((s) => s === "done" || s === "to-check").length;
+  const toCheck = [...states.values()].filter((s) => s === "to-check").length;
+  const progress = plan
+    ? `${done} of ${plan.tasks.length} finished${toCheck > 0 ? `, ${toCheck} to check` : ""}`
+    : "";
   const setRun = (next: Run) => queryClient.setQueryData(["run", id], next);
   const usage = threads.reduce<Thread["usage"]>(
     (sum, t) => (t.usage ? addUsage(sum, t.usage) : sum),
@@ -146,7 +151,7 @@ export function RunPage() {
   const graph = plan && (
     <TaskGraph plan={plan} states={states} threadByTask={latestThreadByTask(threads)} />
   );
-  const tasksLabel = plan ? `Tasks: ${done} of ${plan.tasks.length} done` : "Tasks";
+  const tasksLabel = plan ? `Tasks: ${progress}` : "Tasks";
 
   return (
     <DisclosureProvider>
@@ -230,11 +235,7 @@ export function RunPage() {
             >
               <h2 className="mb-3 text-ui font-medium">
                 Tasks
-                {plan && (
-                  <span className="ml-2 font-normal text-muted-foreground">
-                    {done} of {plan.tasks.length} done
-                  </span>
-                )}
+                {plan && <span className="ml-2 font-normal text-muted-foreground">{progress}</span>}
               </h2>
               {graph ?? (
                 <p className="text-ui text-muted-foreground">

@@ -18,12 +18,13 @@ import {
   PackageCheck,
   Terminal,
   Wand,
+  Workflow,
 } from "lucide-react";
 import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { ActivityRow } from "./chat/activity-row";
 import { AgentCard } from "./chat/agents";
 import { InfoButton, usageRows } from "./chat/info-button";
-import { Markdown, StreamingText } from "./chat/markdown";
+import { ClampedMarkdown, Markdown, StreamingText } from "./chat/markdown";
 import { ProcessDisclosure } from "./chat/process-disclosure";
 import { useFollowScroll } from "./chat/use-follow-scroll";
 import type { Thread } from "./run-model";
@@ -300,50 +301,73 @@ function OutputRow({ event }: { event: Extract<RunEvent, { type: "output" }> }) 
 }
 
 const POINTS: Record<Wake["payload"]["point"]["kind"], (task: string) => string> = {
-  "run-started": () => "Read the plan before the run started",
-  "task-checked": (t) => `Woke after the ${t} check passed`,
-  "check-disagreed": (t) => `Woke because the checker disagreed on ${t}`,
-  "thread-failed": (t) => `Woke because the ${t} worker failed`,
+  "run-started": () => "read the plan before the run started",
+  "task-checked": (t) => `woke after the ${t} check`,
+  "check-disagreed": (t) => `woke because the checker disagreed on ${t}`,
+  "thread-failed": (t) => `woke because the ${t} worker failed`,
 };
 
-/** A turn of the main thread: why it woke, what it decided, its notes for later threads. */
+const DECISION = {
+  accept: { label: "Accepted", tone: "primary" },
+  redo: { label: "Redo", tone: "info" },
+  fail: { label: "Failed the task", tone: "destructive" },
+} as const;
+
+function MainMark() {
+  return (
+    <span className="grid size-6 shrink-0 place-items-center rounded-full bg-primary-tint text-primary-strong">
+      <Workflow className="size-3.5" aria-hidden />
+    </span>
+  );
+}
+
+/** A turn of the main thread: who and why it woke, what it decided, then its notes, clamped. */
 function WakeTurn({ event, partial }: { event?: Wake; partial?: string }) {
   if (!event)
     return (
       <div>
-        <p className="mb-1 text-meta text-muted-foreground">Main thread</p>
-        <StreamingText text={partial ?? ""} streaming />
+        <p className="mb-1 flex items-center gap-2 text-ui">
+          <MainMark />
+          <span className="font-medium">Main thread</span>
+          <span className="text-muted-foreground">is writing</span>
+        </p>
+        <div className="pl-8">
+          <StreamingText text={partial ?? ""} streaming />
+        </div>
       </div>
     );
   const { point, note, decision, error, plan, usage, model } = event.payload;
+  const verdict = decision && DECISION[decision.action];
   return (
-    <div className="group relative">
-      <p className="mb-1 text-meta text-muted-foreground">
-        {POINTS[point.kind]("taskId" in point ? taskTitle(point.taskId) : "")}
-      </p>
-      {error && (
-        <p
-          role="alert"
-          className="rounded-xl bg-destructive-tint px-3 py-2 text-ui text-destructive"
-        >
-          It did not answer: {error}
-        </p>
-      )}
-      {decision && (
-        <p className="text-ui">
-          <span className="font-medium capitalize">{decision.action}.</span> {decision.reason}
-        </p>
-      )}
-      {plan && <p className="text-ui">It changed the plan.</p>}
-      {note && <Markdown text={note} className="mt-1" />}
-      {usage && (
-        <div className="absolute top-0 -left-8 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 max-[1100px]:hidden">
+    <div>
+      <div className="flex min-w-0 items-center gap-2 text-ui">
+        <MainMark />
+        <span className="shrink-0 font-medium">Main thread</span>
+        <span className="min-w-0 truncate text-muted-foreground">
+          {POINTS[point.kind]("taskId" in point ? taskTitle(point.taskId) : "")}
+        </span>
+        {verdict && <StatusBadge tone={verdict.tone}>{verdict.label}</StatusBadge>}
+        <span className="ml-auto" />
+        {usage && (
           <InfoButton
             label="Usage"
             sections={[{ title: "This wake", rows: usageRows(usage, model) }]}
           />
-        </div>
-      )}
+        )}
+      </div>
+      <div className="mt-1 grid gap-1.5 pl-8">
+        {error && (
+          <p
+            role="alert"
+            className="rounded-xl bg-destructive-tint px-3 py-2 text-ui text-destructive"
+          >
+            It did not answer: {error}
+          </p>
+        )}
+        {decision && <p className="text-sm">{decision.reason}</p>}
+        {plan && <p className="text-sm">It changed the plan.</p>}
+        {note && <ClampedMarkdown text={note} label="Notes for later threads" />}
+      </div>
     </div>
   );
 }

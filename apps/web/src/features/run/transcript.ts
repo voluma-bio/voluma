@@ -148,9 +148,17 @@ export function toolTitle(name: string, input: unknown): string {
   const s = (k: string) => (typeof r[k] === "string" ? (r[k] as string) : undefined);
   switch (name) {
     case "bash": {
-      const command = s("command") ?? "";
-      const line = command.split("\n").find((l) => l.trim() && !l.trim().startsWith("#"));
-      return line?.trim() ?? command;
+      const lines = (s("command") ?? "")
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l && !l.startsWith("#"));
+      const first = lines[0] ?? "";
+      // A heredoc's first line says only which interpreter: add its first real statement.
+      if (/<<-?\s*['"]?\w+['"]?\s*$/.test(first)) {
+        const body = lines.slice(1).find((l) => !/^(import|from)\s/.test(l));
+        if (body) return `${first} ${body}`;
+      }
+      return first;
     }
     case "view_image": {
       const paths = Array.isArray(r.paths) ? r.paths.filter((p) => typeof p === "string") : [];
@@ -159,7 +167,7 @@ export function toolTitle(name: string, input: unknown): string {
     case "checklist":
       return `Marked ${taskTitle(s("taskId") ?? "the task")} ${s("status") ?? ""}`.trim();
     case "checkpoint":
-      return `Checkpoint: ${s("text") ?? ""}`;
+      return "Recorded a checkpoint";
     case "report_output":
       return `Reported ${s("outputId") ?? "an output"}`;
     case "thread_message":

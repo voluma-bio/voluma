@@ -90,7 +90,7 @@ function ResultLine({ thread }: { thread: Thread }) {
   if (thread.status === "running")
     return (
       <p className="truncate font-mono text-meta text-muted-foreground">
-        {thread.liveTool ?? "Working"}
+        {thread.liveTool ?? thread.lastTool ?? "Starting"}
       </p>
     );
   if (thread.error) return <p className="text-meta text-destructive">{thread.error}</p>;
@@ -203,7 +203,7 @@ export function RunningStrip({ threads }: { threads: Thread[] }) {
               <AgentMark thread={t} />
               <AgentName thread={t} className="shrink-0" />
               <span className="min-w-0 flex-1 truncate font-mono text-meta text-muted-foreground">
-                {t.liveTool ?? "Working"}
+                {t.liveTool ?? t.lastTool ?? "Starting"}
               </span>
               <Elapsed thread={t} />
             </li>
