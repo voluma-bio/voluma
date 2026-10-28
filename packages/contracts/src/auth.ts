@@ -27,12 +27,13 @@ import { z } from "zod";
 export const signinOutcomeSchema = z.enum(["not-a-member", "failed"]);
 export type SigninOutcome = z.infer<typeof signinOutcomeSchema>;
 
-/** A WorkOS user id. */
+/** A WorkOS user id, or a server-minted id for an anonymous demo visitor ("Explore the demo"). */
 export const userIdSchema = z.string();
 
 export const meResponseSchema = z.object({
   userId: userIdSchema,
-  email: z.string(),
+  /** Null for an anonymous demo visitor, who has no account. */
+  email: z.string().nullable(),
   name: z.string().nullable(),
   labId: z.string(),
 });
