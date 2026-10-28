@@ -5,7 +5,7 @@ who ends it:
 
 1. **The runner, normally.** `run.ts` closes the run's sandbox when the supervisor ends,
    before it flushes events and reports, so the `stopped` event and the last sandbox seconds
-   are stored under the live lease. If the close takes over 15 s it asks Modal to terminate
+   are stored under the live lease. If the close takes over 60 s (15 s after a stop) it asks Modal to terminate
    the sandboxes of this claim, by their `{run, claim}` tags (the claim is a per-claim id: a
    released run's old runner must not kill the sandbox of the runner that reclaimed it).
 2. **A signal.** SIGINT and SIGTERM stop every run (the running command is killed), each

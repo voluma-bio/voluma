@@ -35,8 +35,13 @@ import { r2Evidence } from "./r2-evidence.ts";
 import { type Redact, redactor } from "./redact.ts";
 import { usageMeter } from "./usage.ts";
 
-/** How long closing the sandbox may take before Modal is asked to terminate the claim's by tag. */
-const CLOSE_BUDGET_MS = 15_000;
+/**
+ * How long closing the sandbox may take before Modal is asked to terminate the claim's by
+ * tag. Terminating takes tens of seconds, so a normal end waits longer (the lease is held
+ * meanwhile, and the `stopped` event needs the close to finish); after a stop, the run's
+ * report waits only on the platform's grace period.
+ */
+const CLOSE_BUDGET_MS = { ended: 60_000, stopped: 15_000 };
 /** How long threads get to end after a stop before the run is reported anyway. */
 const WIND_DOWN_MS = 5_000;
 
@@ -207,7 +212,7 @@ export async function runClaim(
     const stopped = why.stopped;
     const report = reportFor(stopped, error);
     abort.abort();
-    if (stopped === undefined) await closeSandbox();
+    if (stopped === undefined) await closeSandbox(CLOSE_BUDGET_MS.ended);
     await events?.flush();
     await lease?.end(report !== undefined);
     if (report) {
@@ -218,16 +223,16 @@ export async function runClaim(
     } else {
       log(`stopped (${stopped}); nothing more to report`);
     }
-    if (stopped !== undefined) await closeSandbox();
+    if (stopped !== undefined) await closeSandbox(CLOSE_BUDGET_MS.stopped);
   }
 
-  async function closeSandbox() {
+  async function closeSandbox(budgetMs: number) {
     if (!session) return;
     const closed = session.close().then(
       () => true,
       () => false,
     );
-    const timeout = new Promise<false>((resolve) => setTimeout(resolve, CLOSE_BUDGET_MS, false));
+    const timeout = new Promise<false>((resolve) => setTimeout(resolve, budgetMs, false));
     if (!(await Promise.race([closed, timeout]))) {
       log("sandbox did not close in time; terminating this claim's sandboxes");
       await terminateClaim(modal, runId, claimId).catch((e) => log(`terminate failed: ${e}`));
