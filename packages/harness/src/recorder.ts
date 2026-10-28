@@ -21,8 +21,8 @@
  * A `LeaseLost` is not retried: the run is no longer this runner's, so the recorder calls
  * `onLeaseLost` once (the creator aborts the run) and drops every event still queued.
  *
- * A durable event that exhausts its retries is lost and leaves the projection stale (a
- * finished thread shown as running). Giving up should become a visible run failure.
+ * A durable event that exhausts its retries is lost: `failure()` holds the error, and the
+ * supervisor fails the run on it rather than carry on from a record the store lacks.
  */
 import {
   type EventInput,
@@ -53,6 +53,8 @@ export interface Recorder {
   events(): readonly RunEvent[];
   /** Resolves once every event queued so far is stored or given up on. */
   flush(): Promise<void>;
+  /** The first error that made `emit` give up on an event; undefined while none has. */
+  failure(): unknown;
 }
 
 const ATTEMPTS = 5;
@@ -70,6 +72,8 @@ export function recorder(
   let leaseLost = false;
   const held: RunEvent[] = [...stored];
   const ids = new Set(held.map((e) => e.id)); // held, and queued for delivery
+  const storedIds = new Set(ids);
+  let failure: unknown;
 
   function loseLease() {
     if (leaseLost) return;
@@ -85,6 +89,7 @@ export function recorder(
         try {
           await eventLog.append(event);
           held.push({ ...event, seq: held.length + 1 });
+          storedIds.add(event.id);
           return;
         } catch (error) {
           if (error instanceof LeaseLost) loseLease();
@@ -134,11 +139,17 @@ export function recorder(
       enqueue(parsed.data, ATTEMPTS).catch((error) => {
         if (!(error instanceof LeaseLost)) {
           console.error(`recorder: gave up on ${type} ${id}: ${String(error)}`);
+          failure ??= error;
         }
       });
     },
     async append(threadId, type, payload, id) {
-      if (ids.has(id)) return queue.then(() => {}); // wait for it if it is still queued
+      if (ids.has(id)) {
+        await queue; // it may still be queued
+        if (!storedIds.has(id))
+          throw new Error(`the ${type} event ${id} was queued but not stored`);
+        return;
+      }
       const parsed = parse(threadId, type, payload, id);
       if (!parsed.success) {
         throw new Error(`the ${type} event ${id} is invalid: ${parsed.error.message}`);
@@ -148,5 +159,6 @@ export function recorder(
     flush: async () => {
       await queue;
     },
+    failure: () => failure,
   };
 }

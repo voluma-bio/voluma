@@ -33,6 +33,14 @@ import { readyTasks } from "@voluma/workflow";
 import { type Decision, decisionSchema, type Judgment, type JudgmentPoint } from "./judgment";
 import type { PayloadOf, Recorder } from "./recorder";
 import type { PlanTask, TaskRuntime } from "./task-runtime";
+import {
+  JUDGMENT_SUFFIX,
+  type Role,
+  startedFor,
+  type ThreadLog,
+  type ThreadRecord,
+  threadLog,
+} from "./thread-log";
 import type { ThreadSpec, Threads } from "./threads";
 
 /** What the caller decides about a worker or check thread; the supervisor adds its identity. */
@@ -56,29 +64,6 @@ export interface SupervisorOptions {
   signal?: AbortSignal;
 }
 
-type Role = "worker" | "check";
-
-/** A worker or check thread as the log shows it. */
-interface ThreadRecord {
-  id: string;
-  role: Role;
-  taskId: string;
-  /** How its latest invocation ended; undefined while the log shows it started and not ended. */
-  end: PayloadOf<"thread.ended"> | undefined;
-  /** Messages the runtime sent it to get it moving again. */
-  wakes: number;
-}
-
-/** Everything the supervisor reads from the log besides the fold. */
-interface Derived {
-  threads: Map<string, ThreadRecord>;
-  /** Judgment events by the id of the thread whose end raised the point. */
-  judgments: Map<string, PayloadOf<"judgment">>;
-  ids: Set<string>;
-}
-
-const JUDGMENT_SUFFIX = ":judgment";
-
 /** What `step` found: nothing to do, something done, or a judgment point to ask. */
 type Next = "idle" | "acted" | { point: JudgmentPoint; threadId: string };
 
@@ -94,66 +79,23 @@ export function supervisor(options: SupervisorOptions) {
   const arm: By = { kind: "judgment", arm: judgment.arm };
   let failure: unknown; // the first error that failed the run
 
-  // The log only grows, so its length says whether the derivation is current.
-  let memo: { length: number; value: Derived } | undefined;
-  function derive(): Derived {
-    const events = recorder.events();
-    if (memo?.length === events.length) return memo.value;
-    const value: Derived = { threads: new Map(), judgments: new Map(), ids: new Set() };
-    for (const e of events) {
-      value.ids.add(e.id);
-      const record = value.threads.get(e.threadId);
-      switch (e.type) {
-        case "thread.started": {
-          const { kind, task } = e.payload;
-          if ((kind === "worker" || kind === "check") && task) {
-            value.threads.set(e.threadId, {
-              id: e.threadId,
-              role: kind,
-              taskId: task,
-              end: undefined,
-              wakes: record?.wakes ?? 0,
-            });
-          }
-          break;
-        }
-        case "thread.ended":
-          if (record) record.end = e.payload;
-          break;
-        case "message":
-          if (record && e.payload.role === "user" && e.payload.sender.kind === "runtime") {
-            record.wakes++;
-          }
-          break;
-        case "judgment":
-          if (e.id.endsWith(JUDGMENT_SUFFIX)) {
-            value.judgments.set(e.id.slice(0, -JUDGMENT_SUFFIX.length), e.payload);
-          }
-          break;
-      }
-    }
-    memo = { length: events.length, value };
-    return value;
-  }
+  const derive = () => threadLog(recorder.events());
 
   /** A thread's record; a thread whose `thread.started` the store lacks counts as not ended. */
-  const recordOf = (d: Derived, id: string, role: Role, taskId: string): ThreadRecord =>
+  const recordOf = (d: ThreadLog, id: string, role: Role, taskId: string): ThreadRecord =>
     d.threads.get(id) ?? { id, role, taskId, end: undefined, wakes: 0 };
-
-  const startedFor = (d: Derived, taskId: string, role: Role) =>
-    [...d.threads.values()].filter((r) => r.taskId === taskId && r.role === role);
 
   /** `<runId>.<taskId>.<role>`, plus `.<n>` for the n-th (ids.ts: run and task ids hold no '.'). */
   const threadId = (taskId: string, role: Role, n: number) =>
     `${options.runId}.${taskId}.${role}${n === 1 ? "" : `.${n}`}`;
-  const nextThreadId = (d: Derived, taskId: string, role: Role) =>
+  const nextThreadId = (d: ThreadLog, taskId: string, role: Role) =>
     threadId(taskId, role, startedFor(d, taskId, role).length + 1);
 
   /**
    * The task's thread running in this process. The next id counts too: a thread just
    * started has not stored its `thread.started` yet.
    */
-  function liveThread(d: Derived, taskId: string) {
+  function liveThread(d: ThreadLog, taskId: string) {
     for (const role of ["worker", "check"] as const) {
       const ids = [...startedFor(d, taskId, role).map((r) => r.id), nextThreadId(d, taskId, role)];
       const id = ids.find((x) => threads.running(x));
@@ -215,7 +157,7 @@ export function supervisor(options: SupervisorOptions) {
    * name if it never touched the task. Every write has a derived id, so a replay writes nothing twice.
    */
   async function apply(
-    d: Derived,
+    d: ThreadLog,
     id: string,
     j: PayloadOf<"judgment">,
     t: FoldedTask | undefined,
@@ -227,8 +169,11 @@ export function supervisor(options: SupervisorOptions) {
     const reason = reasonOf(j);
     const action = j.applied.action;
     if (action === "redo") {
-      // A task that never had an attempt has nothing to mark: a fresh worker is the redo.
-      if (!t) return startWorker(taskId);
+      // A task with no attempt, or one this worker never wrote, has nothing of its own to
+      // mark: a fresh worker is the redo.
+      if (!t || (d.threads.get(id)?.role === "worker" && t.threads.worker !== id)) {
+        return startWorker(taskId);
+      }
       await recorder.append(
         root,
         "revision.started",
@@ -268,7 +213,7 @@ export function supervisor(options: SupervisorOptions) {
   }
 
   /** A worker that is not running and did not finish its task. */
-  async function stalled(d: Derived, w: ThreadRecord, t: FoldedTask | undefined): Promise<Next> {
+  async function stalled(d: ThreadLog, w: ThreadRecord, t: FoldedTask | undefined): Promise<Next> {
     const j = d.judgments.get(w.id);
     if (j) return apply(d, w.id, j, t);
     const { taskId } = w;
@@ -284,9 +229,13 @@ export function supervisor(options: SupervisorOptions) {
       wake(w, { text, sender: { kind: "runtime" } });
       return "acted";
     }
-    if (!t) {
+    if (!t || t.threads.worker !== w.id) {
+      // It never wrote to the attempt now current; marking that attempt is not its to do.
       const error = "the worker ended without touching its task";
-      return { point: { kind: "thread-failed", taskId, error, report: null }, threadId: w.id };
+      return {
+        point: { kind: "thread-failed", taskId, error, report: report(taskId) },
+        threadId: w.id,
+      };
     }
     await runtime.setStatus(
       w.id,
@@ -326,7 +275,7 @@ export function supervisor(options: SupervisorOptions) {
     return "acted";
   }
 
-  async function startCheck(d: Derived, t: FoldedTask): Promise<Next> {
+  async function startCheck(d: ThreadLog, t: FoldedTask): Promise<Next> {
     const id = nextThreadId(d, t.id, "check");
     await runtime.setStatus(
       id,
@@ -343,24 +292,27 @@ export function supervisor(options: SupervisorOptions) {
 
   async function stepTask(
     f: Folded,
-    d: Derived,
+    d: ThreadLog,
     taskId: string,
     ready: Set<string>,
   ): Promise<Next> {
     if (liveThread(d, taskId)) return "idle";
     const t = f.tasks.find((x) => x.id === taskId);
-    if (!t) {
-      // No attempt yet. A worker that ended without touching the task is a stall.
-      const worker = startedFor(d, taskId, "worker").at(-1);
-      if (worker) return stalled(d, worker, t);
-      return ready.has(taskId) ? startWorker(taskId) : "idle";
+    // The latest started worker is in charge of the task. One that is not running and has
+    // not written to the current attempt (none yet, or a stale one an earlier worker wrote),
+    // or left it in progress, stalls: wake it, then a judgment point.
+    const worker = startedFor(d, taskId, "worker").at(-1);
+    if (
+      worker &&
+      (!t || t.status === "in-progress" || (t.status === "stale" && t.threads.worker !== worker.id))
+    ) {
+      return stalled(d, worker, t);
     }
-    const workerId = t.threads.worker ?? "";
+    if (!t) return ready.has(taskId) ? startWorker(taskId) : "idle";
+    const workerId = worker?.id ?? "";
     switch (t.status) {
       case "stale":
         return ready.has(taskId) ? startWorker(taskId) : "idle";
-      case "in-progress":
-        return stalled(d, recordOf(d, workerId, "worker", taskId), t);
       case "done":
       case "to-check": {
         const checkId = t.threads.check;
@@ -466,7 +418,7 @@ export function supervisor(options: SupervisorOptions) {
     });
   }
 
-  const redosOf = (d: Derived, taskId: string) =>
+  const redosOf = (d: ThreadLog, taskId: string) =>
     [...d.judgments.values()].filter((j) => j.taskId === taskId && j.applied.action === "redo")
       .length;
 
@@ -475,46 +427,49 @@ export function supervisor(options: SupervisorOptions) {
     threads.abortAll();
   };
 
+  /** Whether the run has failed: a step error, a thread refused or thrown, an event given up on. */
+  function failed(): boolean {
+    const cause = threads.failure() ?? recorder.failure();
+    if (cause !== undefined) fail(cause);
+    return failure !== undefined;
+  }
+
   return {
     /** Runs the plan to the end: every task done, failed, to check, or blocked behind one that is. */
     async run(workflows?: PayloadOf<"thread.started">["workflows"]): Promise<Folded> {
-      // A derived id: a resumed run does not start its root twice.
-      recorder.emit(
-        root,
-        "thread.started",
-        { parentThreadId: null, kind: "supervisor", ...(workflows && { workflows }) },
-        `${root}:started`,
-      );
+      // Not a derived id: each invocation of the root is a thread start of its own.
+      recorder.emit(root, "thread.started", {
+        parentThreadId: null,
+        kind: "supervisor",
+        ...(workflows && { workflows }),
+      });
       try {
         await runtime.start();
         // `quiet`: the last step found nothing to do with no thread running.
         let quiet = false;
-        while (!signal?.aborted && failure === undefined) {
+        while (!signal?.aborted && !failed()) {
           const next = await runtime.section(step);
-          if (next === "acted") {
-            quiet = false;
-          } else if (next !== "idle") {
-            quiet = false;
+          const wasQuiet = quiet;
+          quiet = next === "idle" && !threads.active();
+          if (next === "acted") continue;
+          if (next !== "idle") {
             await judge(next);
           } else if (threads.active()) {
-            quiet = false;
             await threads.anyIdle();
             await recorder.flush(); // the thread's end is stored before the next step reads it
-            if (threads.failure() !== undefined) fail(threads.failure());
           } else {
             // Nothing is running: step once more after the log is stored, in case a thread
             // ended between the step and this check.
             await recorder.flush();
-            if (quiet) break;
-            quiet = true;
+            if (wasQuiet) break;
           }
         }
       } catch (error) {
         fail(error);
       }
       while (threads.active()) await threads.anyIdle();
-      failure ??= threads.failure();
       await recorder.flush();
+      failed();
       if (failure !== undefined) {
         const error = failure instanceof Error ? failure.message : String(failure);
         recorder.emit(root, "thread.ended", { status: "failed", error });

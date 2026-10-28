@@ -173,17 +173,14 @@ export function taskRuntime(options: TaskRuntimeOptions) {
         `${taskId} is ${status}${t?.reason ? ` (${t.reason})` : ""}: call checklist in-progress to redo it, then write to it.`,
       );
     }
-    const needsAttempt = status === "pending" || status === "stale" || status === "failed";
-    if (needsAttempt) {
-      const waiting = known(taskId).dependsOn.filter((d) => taskOf(d)?.status !== "done");
-      if (waiting.length > 0) {
-        throw new Refusal(`${taskId} builds on ${waiting.join(", ")}, which is not done yet.`);
-      }
+    if (t && status !== "stale" && status !== "failed") {
+      return { kind: "worker", attempt: async () => t.attemptId };
     }
-    return {
-      kind: "worker",
-      attempt: needsAttempt ? () => openAttempt(c, taskId) : async () => t?.attemptId ?? "",
-    };
+    const waiting = known(taskId).dependsOn.filter((d) => taskOf(d)?.status !== "done");
+    if (waiting.length > 0) {
+      throw new Refusal(`${taskId} builds on ${waiting.join(", ")}, which is not done yet.`);
+    }
+    return { kind: "worker", attempt: () => openAttempt(c, taskId) };
   }
 
   /**
