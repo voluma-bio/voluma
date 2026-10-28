@@ -9,7 +9,6 @@ Contracts, written when something produces or consumes them (the first contracts
 - An importer that turns the real OA6-1RK reference run into the review-data format, so the Review lane works on real data from day one. No hand-made fixtures.
 
 Later:
-- `/dev/ui` repeats the token list from `tokens.css` (`THEME_TOKENS`, `VIEWER_TOKENS`); read the custom properties at runtime instead.
 - `pnpm data:pull`: fetch the OA6-1RK scan and reference run from R2 into `.data/`. Both lanes need it from day one; blocked on the bucket existing.
 - Nx 24 and TypeScript 7 are released; the workspace is on Nx 23 and TypeScript 6. Upgrade in their own PR and check `pnpm check` timings.
 - Pin the sandbox image's base (`python:3.12-slim` in `apps/runner/src/publish-image.ts`) by digest so two builds match.

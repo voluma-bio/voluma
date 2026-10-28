@@ -9,9 +9,9 @@ export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 };
 
 const variants = {
-  primary: "bg-accent text-accent-fg hover:bg-accent-strong",
-  quiet: "border border-line bg-surface text-fg hover:bg-raised",
-  ghost: "text-fg-muted hover:bg-raised hover:text-fg",
+  primary: "bg-primary text-primary-foreground hover:bg-primary-strong",
+  quiet: "border border-border bg-card text-foreground hover:bg-accent",
+  ghost: "text-muted-foreground hover:bg-accent hover:text-foreground",
 };
 
 const sizes = {
@@ -31,7 +31,7 @@ export function Button({
       type={type}
       className={cx(
         "inline-flex cursor-pointer items-center justify-center gap-2 font-medium whitespace-nowrap transition-colors",
-        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
+        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
         "disabled:pointer-events-none disabled:opacity-50",
         variants[variant],
         sizes[size],

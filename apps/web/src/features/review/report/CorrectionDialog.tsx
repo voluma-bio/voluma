@@ -67,7 +67,7 @@ export function CorrectionDialog({
         >
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-sm text-fg-muted mb-2">
+              <p className="text-sm text-muted-foreground mb-2">
                 {task.title} / {revisionId.toUpperCase()}
               </p>
               <Dialog.Title className="text-xl font-semibold">
@@ -82,7 +82,7 @@ export function CorrectionDialog({
               <X size={18} />
             </Dialog.Close>
           </div>
-          <Dialog.Description className="text-fg-muted mt-3">
+          <Dialog.Description className="text-muted-foreground mt-3">
             Preview the affected tasks before confirming a rerun for this sample.
           </Dialog.Description>
           {!proposal ? (
@@ -133,7 +133,7 @@ export function CorrectionDialog({
                   {proposal.affectedTaskIds.map((id) => (
                     <li key={id}>
                       <span>{tasks.find((item) => item.id === id)?.title}</span>
-                      <span className="text-sm text-fg-muted">
+                      <span className="text-sm text-muted-foreground">
                         {id === task.id ? "Requested change" : "Depends on this result"}
                       </span>
                       {confirm.isPending ? (
@@ -145,7 +145,7 @@ export function CorrectionDialog({
                   ))}
                 </ul>
               </div>
-              <p className="text-sm text-fg-muted">
+              <p className="text-sm text-muted-foreground">
                 Earlier results and their evidence remain available. This changes this sample only,
                 not the workflow.
               </p>

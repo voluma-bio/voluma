@@ -35,7 +35,7 @@ export function Table<Row>({
   className,
 }: TableProps<Row>) {
   return (
-    <div className={cx("overflow-x-auto rounded-xl border border-line bg-surface", className)}>
+    <div className={cx("overflow-x-auto rounded-xl border border-border bg-card", className)}>
       <table aria-label={label} className="w-full border-collapse text-sm">
         <thead>
           <tr>
@@ -44,7 +44,7 @@ export function Table<Row>({
                 key={column.key}
                 scope="col"
                 className={cx(
-                  "border-b border-line px-4 py-2.5 text-meta font-medium text-fg-subtle",
+                  "border-b border-border px-4 py-2.5 text-meta font-medium text-fg-subtle",
                   column.align === "end" ? "text-right" : "text-left",
                 )}
               >
@@ -75,14 +75,14 @@ export function Table<Row>({
                 }
                 className={cx(
                   onRowClick &&
-                    "cursor-pointer hover:bg-canvas focus-visible:bg-canvas focus-visible:outline-none",
+                    "cursor-pointer hover:bg-background focus-visible:bg-background focus-visible:outline-none",
                 )}
               >
                 {columns.map((column) => (
                   <td
                     key={column.key}
                     className={cx(
-                      "border-b border-line-subtle px-4 py-3 align-top text-fg",
+                      "border-b border-line-subtle px-4 py-3 align-top text-foreground",
                       column.align === "end" && "text-right tabular-nums",
                     )}
                   >

@@ -6,8 +6,8 @@
 import type { ReactNode } from "react";
 import { cx } from "./cx";
 
-/** neutral: pending, stopped. accent: done, reviewed. check: to check. info: running, corrected. danger: failed. */
-export type StatusTone = "neutral" | "accent" | "check" | "info" | "danger";
+/** neutral: pending, stopped. primary: done, reviewed. check: to check. info: running, corrected. destructive: failed. */
+export type StatusTone = "neutral" | "primary" | "check" | "info" | "destructive";
 
 export type StatusBadgeProps = {
   tone: StatusTone;
@@ -16,11 +16,11 @@ export type StatusBadgeProps = {
 };
 
 const tones: Record<StatusTone, string> = {
-  neutral: "bg-raised text-fg-muted",
-  accent: "bg-accent-tint text-accent-strong",
+  neutral: "bg-muted text-muted-foreground",
+  primary: "bg-primary-tint text-primary-strong",
   check: "bg-check-tint text-check",
   info: "bg-info-tint text-info",
-  danger: "bg-danger-tint text-danger",
+  destructive: "bg-destructive-tint text-destructive",
 };
 
 export function StatusBadge({ tone, children, className }: StatusBadgeProps) {

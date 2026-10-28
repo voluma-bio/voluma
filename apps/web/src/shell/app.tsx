@@ -24,7 +24,7 @@ function NotFound() {
   return (
     <main className="grid min-h-dvh place-content-center gap-2 text-center">
       <h1 className="text-2xl font-semibold">Page not found</h1>
-      <Link to="/" className="text-accent-text hover:underline">
+      <Link to="/" className="text-primary-text hover:underline">
         Go to workflows
       </Link>
     </main>

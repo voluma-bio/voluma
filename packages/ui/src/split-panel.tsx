@@ -117,7 +117,7 @@ export function SplitPanel({
         onKeyDown={onKeyDown}
         className={cx(
           "absolute z-10 touch-none bg-clip-content transition-colors",
-          "hover:bg-accent/35 focus-visible:bg-accent/35 focus-visible:outline-none data-dragging:bg-accent/35",
+          "hover:bg-primary/35 focus-visible:bg-primary/35 focus-visible:outline-none data-dragging:bg-primary/35",
           horizontal
             ? "top-0 bottom-0 -ml-[5px] w-2.5 cursor-col-resize px-1"
             : "right-0 left-0 -mt-[5px] h-2.5 cursor-row-resize py-1",

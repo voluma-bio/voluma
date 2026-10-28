@@ -121,7 +121,7 @@ function LocalReview({ runId }: { runId: string }) {
                 </button>
               )}
             </div>
-            <p className="text-xs text-fg-muted mt-2">
+            <p className="text-xs text-muted-foreground mt-2">
               Local only. Not uploaded or saved. Use de-identified scans.
             </p>
             {progress && (
@@ -135,7 +135,7 @@ function LocalReview({ runId }: { runId: string }) {
               </p>
             )}
             {!!archive?.ignoredFiles && (
-              <p className="text-xs text-fg-muted mt-2">
+              <p className="text-xs text-muted-foreground mt-2">
                 Skipped {archive.ignoredFiles} non-image files.
               </p>
             )}

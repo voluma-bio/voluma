@@ -56,7 +56,7 @@ export function ViewerWorkspace({
     >
       <div className="viewer-heading">
         <h2 className="font-medium">Imaging workspace</h2>
-        <span className="text-xs text-fg-muted">
+        <span className="text-xs text-muted-foreground">
           {series ? "Local images · not an analysis" : "Open a DICOM ZIP to view images"}
         </span>
       </div>
@@ -94,18 +94,18 @@ export function ViewerWorkspace({
         </Group>
       </div>
       <div className="viewer-selection">
-        <span className="text-xs text-fg-muted">Task structures</span>
+        <span className="text-xs text-muted-foreground">Task structures</span>
         <div className="flex flex-wrap gap-2 mt-2">
           {selected.map((s) => (
             <span className="structure-chip" key={s.id}>
               {s.name}
-              <span className="text-fg-muted">
+              <span className="text-muted-foreground">
                 {display[s.id]?.visible === false ? "Hidden" : `${display[s.id]?.opacity ?? 100}%`}
               </span>
             </span>
           ))}
           {selected.length === 0 && (
-            <p className="text-sm text-fg-muted">No structures selected.</p>
+            <p className="text-sm text-muted-foreground">No structures selected.</p>
           )}
         </div>
       </div>
@@ -172,7 +172,7 @@ function ViewSlot({
             <div className="view-empty">
               <Icon size={36} strokeWidth={1} />
               <p className="font-medium mt-4">{view.description}</p>
-              <p className="text-xs text-fg-muted mt-1">
+              <p className="text-xs text-muted-foreground mt-1">
                 {series
                   ? "Meshes and reformatted planes are not generated yet."
                   : "No scan has been opened."}

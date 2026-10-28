@@ -29,7 +29,7 @@ function Evidence({ asset }: { asset: Asset }) {
             )}
           </div>
           <span className="font-medium">{asset.label}</span>
-          <span className="text-xs text-fg-muted">
+          <span className="text-xs text-muted-foreground">
             {asset.url && !failed ? "Open evidence" : "Evidence unavailable"}
             <ArrowUpRight size={13} />
           </span>
@@ -39,7 +39,7 @@ function Evidence({ asset }: { asset: Asset }) {
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="dialog-content evidence-dialog">
           <Dialog.Title className="text-xl font-semibold">{asset.label}</Dialog.Title>
-          <Dialog.Description className="mt-3 text-fg-muted">
+          <Dialog.Description className="mt-3 text-muted-foreground">
             {failed
               ? "The evidence image could not be loaded."
               : asset.unavailableReason || "Evidence attached to this task result."}
@@ -110,20 +110,20 @@ export function TaskReport({
   return (
     <article className="task-report" aria-label={`${task.title} report`}>
       <header>
-        <div className="flex items-center gap-2 text-sm text-fg-muted">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <span className="font-mono">{String(taskNumber).padStart(2, "0")}</span>
           <span>Task report</span>
           <span className="ml-auto">Result {task.resultRevisionId.toUpperCase()}</span>
         </div>
         <h1 className="text-2xl font-semibold mt-3">{task.title}</h1>
-        <p className="text-fg-muted mt-3 leading-relaxed">{task.ask}</p>
+        <p className="text-muted-foreground mt-3 leading-relaxed">{task.ask}</p>
       </header>
       <section>
         <div className="section-heading">
           <h2>Measurements</h2>
           <span className="badge warning">Provisional</span>
         </div>
-        <p className="text-xs text-fg-muted mb-3">
+        <p className="text-xs text-muted-foreground mb-3">
           Missing values are not zero. Values link to their evidence.
         </p>
         <table className="measurements">
@@ -154,7 +154,7 @@ export function TaskReport({
                         maximumFractionDigits: 3,
                       }).format(m.value)}
                 </td>
-                <td className="text-fg-muted">{m.unit || "ratio"}</td>
+                <td className="text-muted-foreground">{m.unit || "ratio"}</td>
               </tr>
             ))}
           </tbody>
@@ -163,7 +163,7 @@ export function TaskReport({
       <section>
         <div className="section-heading">
           <h2>To check</h2>
-          <span className="text-sm text-fg-muted">
+          <span className="text-sm text-muted-foreground">
             {task.checks.filter((c) => c.status === "open").length} open
           </span>
         </div>
@@ -184,7 +184,7 @@ export function TaskReport({
             <p className="mt-2 leading-relaxed">{check.detail}</p>
             <div className="flex flex-wrap items-center gap-2 mt-4">
               {check.status === "accepted" ? (
-                <span className="font-medium text-accent-text">
+                <span className="font-medium text-primary-text">
                   Accepted · values remain provisional
                 </span>
               ) : (
@@ -221,10 +221,10 @@ export function TaskReport({
       <section>
         <div className="section-heading">
           <h2>Second-agent check</h2>
-          <ShieldCheck size={18} className="text-accent-text" />
+          <ShieldCheck size={18} className="text-primary-text" />
         </div>
-        <p className="leading-relaxed text-fg-muted">{task.checker.text}</p>
-        <p className="text-xs text-fg-muted mt-2">
+        <p className="leading-relaxed text-muted-foreground">{task.checker.text}</p>
+        <p className="text-xs text-muted-foreground mt-2">
           {task.checker.verdict === "passed"
             ? "Technical check passed; anatomical decisions remain separate."
             : "Reviewer judgment still required."}
@@ -263,7 +263,7 @@ export function TaskReport({
               ))}
             </tbody>
           </table>
-          <p className="text-xs text-fg-muted mt-3">
+          <p className="text-xs text-muted-foreground mt-3">
             Reference comparisons do not change a measurement's review status.
           </p>
         </section>
@@ -281,7 +281,7 @@ export function TaskReport({
       <section>
         <div className="section-heading">
           <h2>Evidence</h2>
-          <span className="text-sm text-fg-muted">{task.evidence.length} checkpoints</span>
+          <span className="text-sm text-muted-foreground">{task.evidence.length} checkpoints</span>
         </div>
         <div className="evidence-grid">
           {task.evidence.map((asset) => (
@@ -298,15 +298,15 @@ export function TaskReport({
         <ul className="file-list">
           {task.files.map((file) => (
             <li key={file.id}>
-              <FileText size={16} className="shrink-0 text-fg-muted" />
+              <FileText size={16} className="shrink-0 text-muted-foreground" />
               <div>
                 <p>{file.label}</p>
                 <code className="file-path">{file.path}</code>
-                <p className="text-xs text-fg-muted mt-1">{file.unavailableReason}</p>
+                <p className="text-xs text-muted-foreground mt-1">{file.unavailableReason}</p>
               </div>
               {file.url && (
                 <a
-                  className="text-accent-text"
+                  className="text-primary-text"
                   href={file.url}
                   download
                   aria-label={`Download ${file.label}`}
@@ -323,7 +323,7 @@ export function TaskReport({
           <h2>Ask about this task</h2>
           <MessageSquare size={17} />
         </div>
-        <p className="text-xs text-fg-muted mb-4">A question never starts a rerun.</p>
+        <p className="text-xs text-muted-foreground mb-4">A question never starts a rerun.</p>
         <div className="space-y-3" aria-live="polite">
           {task.messages.map((message) => (
             <div key={message.id} className={`message ${message.role}`}>
