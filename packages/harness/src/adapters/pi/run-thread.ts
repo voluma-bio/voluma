@@ -151,7 +151,7 @@ export async function runThread(options: RunThreadOptions): Promise<ThreadOutcom
     if (stored.length === 0) {
       // A new thread: store the system message before anything else.
       if (system && (await persist(system))) {
-        emit("message", { role: "system", text: textOf(system) });
+        emit("message", { role: "system", text: textOf(system), sender: null });
       }
     }
     // A crash can leave tool calls without results, which providers reject.
@@ -172,7 +172,7 @@ export async function runThread(options: RunThreadOptions): Promise<ThreadOutcom
           if (message.role === "toolResult") emitToolResult(message);
           else if (message.role === "user" || message.role === "assistant") {
             const text = textOf(message);
-            if (text) emit("message", { role: message.role, text });
+            if (text) emit("message", { role: message.role, text, sender: null });
           }
           break;
         }
@@ -236,8 +236,8 @@ function toAgentTool(
         toolCallId,
         signal: signal ?? new AbortController().signal,
         sandbox: () => sandbox(threadId),
-        output: (stream, text) =>
-          recorder.emit(threadId, "tool.output", { toolCallId, stream, text }),
+        // Live output has no destination until the stream hub exists.
+        output: () => {},
       });
       return {
         content: [{ type: "text", text: result.output }],

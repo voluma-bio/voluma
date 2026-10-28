@@ -1,0 +1,20 @@
+/**
+ * The runner's history routes under `/run/ingest/threads/:threadId/messages`:
+ * the model's record of one thread, one row per Pi message, as a JSON string.
+ * The client and the API parse with the same schemas.
+ *
+ *   GET  → 200 `historyResponseSchema`, rows in `idx` order
+ *   POST → 204 with a `historyRowSchema` body. Appending the same `idx` with
+ *          the same `message` is a no-op; a different `message` at an `idx`
+ *          already stored is 409.
+ */
+import { z } from "zod";
+
+export const historyRowSchema = z.object({
+  idx: z.number().int().nonnegative(),
+  message: z.string(),
+});
+export type HistoryRow = z.infer<typeof historyRowSchema>;
+
+export const historyResponseSchema = z.object({ messages: z.array(z.string()) });
+export type HistoryResponse = z.infer<typeof historyResponseSchema>;
