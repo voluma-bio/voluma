@@ -11,15 +11,26 @@ const tasks = [
 ];
 
 describe("readyTasks", () => {
-  const status = (m: Record<string, string>) => (id: string) => m[id] ?? "pending";
+  // "to-check:x" is a to-check task missing required output x.
+  const status = (m: Record<string, string>) => (id: string) => {
+    const [s = "pending", ...missing] = (m[id] ?? "pending").split(":");
+    return { status: s, missingRequired: missing };
+  };
 
   it("starts roots, then what their dependencies finished", () => {
     expect(readyTasks(tasks, status({}))).toEqual(["a", "e"]);
     expect(readyTasks(tasks, status({ a: "done", e: "in-progress" }))).toEqual(["b", "c"]);
   });
 
-  it("waits for every dependency to be done, not just started or to check", () => {
-    expect(readyTasks(tasks, status({ a: "done", b: "done", c: "to-check" }))).toEqual(["e"]);
+  it("starts after a to-check dependency whose required outputs are in", () => {
+    expect(readyTasks(tasks, status({ a: "done", b: "done", c: "to-check" }))).toEqual(["d", "e"]);
+  });
+
+  it("waits for a dependency that is not usable: missing output, failed, started or under review", () => {
+    expect(readyTasks(tasks, status({ a: "done", b: "done", c: "to-check:x" }))).toEqual(["e"]);
+    expect(readyTasks(tasks, status({ a: "failed" }))).toEqual(["e"]);
+    expect(readyTasks(tasks, status({ a: "in-progress" }))).toEqual(["e"]);
+    expect(readyTasks(tasks, status({ a: "under-review" }))).toEqual(["e"]);
   });
 
   it("restarts a stale task but not one in progress, under review or failed", () => {
