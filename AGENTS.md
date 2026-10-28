@@ -60,8 +60,11 @@ it inside a feature PR. When you need a contract change:
 1. Stop the feature work that depends on it.
 2. Open a separate PR that changes only `packages/contracts`,
    `packages/api-client` and, for a new dependency, the
-   lockfile, and ask both owners to review it. If you can't, open an issue
-   describing the change and build against the current contract.
+   lockfile. It follows the same review rule as any PR: a fresh agent
+   reviews it, then merge it once CI is green. A sweeping change waits for
+   both owners to approve it: one that renames, reshapes or removes what the
+   other lane already uses. Adding schemas, fields or calls is not
+   sweeping.
 3. Merge `origin/main` into your branch once it lands, then continue.
 
 ## Working in parallel
@@ -90,7 +93,7 @@ cd ../voluma.worktrees/<name> && pnpm i
   changes behaviour (product logic, the harness, analysis) or structure
   (packages, boundaries, interfaces, the workspace), first have a fresh
   agent review it (one that didn't write it, given the diff and the PR
-  body) and fix what it finds. Docs and small config PRs need no review. Contract PRs are the exception: both owners approve them.
+  body) and fix what it finds. Docs and small config PRs need no review. Sweeping contract changes also wait for both owners (see Contract changes).
 - Tiny changes skip the PR: a typo, a comment, a doc line, or a one-line fix
   or config tweak in your own lane that changes nothing a user sees and
   doesn't touch `packages/contracts`. Run `pnpm check`, then

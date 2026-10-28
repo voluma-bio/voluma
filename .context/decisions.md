@@ -31,5 +31,6 @@ Product decisions live in the [requirements].
 - 2026-10-28: Staging runs on Railway: one service, `@voluma/api`, serves the built web app and `/api/*`, with Railway Postgres (private network only). Service settings (pre-deploy `src/migrate.ts`, start with `exec node`, healthcheck, 30 s drain) are set on the service, not in a `railway.json`, which Railway has deprecated; a merge to `main` deploys. ([#17](https://github.com/voluma-bio/voluma/pull/17))
 
 - 2026-10-28: Design tokens use shadcn/ui's names and meanings, with our palette as the values (`background`, `card`, `muted`, `accent` = hover fill, `primary` = brand green, `destructive`, `border`, `ring`, `chart-*`, `sidebar-*`); no aliases for the old names. Our own names remain only where shadcn has none (`check-*`, `info*`, `inverse*`, `scrim`, `fg-subtle`, `line-subtle`, `line-strong`, viewer and axis tokens). `StatusBadge` tones are now `primary` and `destructive`. (shadcn-tokens PR)
+- 2026-10-28: Contract PRs follow the normal PR rule (a fresh-agent review, then merge on green CI). Only a sweeping change, one that renames, reshapes or removes what the other lane already uses, waits for both owners. (Jimmy)
 
 [requirements]: https://github.com/voluma-bio/docs/blob/main/work/microct-workflow-mvp/requirements.md
