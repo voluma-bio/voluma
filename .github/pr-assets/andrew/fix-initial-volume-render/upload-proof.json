@@ -1,0 +1,130 @@
+[
+  {
+    "case": "base",
+    "dimensions": [75, 76, 128],
+    "dirtyBeforeRender": 0,
+    "frames": [
+      {
+        "dirtyAfterRender": 128,
+        "h": 644,
+        "lit": 0,
+        "uploads": 0,
+        "w": 944
+      }
+    ],
+    "initialDirty": 0,
+    "uploads": 0
+  },
+  {
+    "case": "invalidate",
+    "dimensions": [75, 76, 128],
+    "dirtyBeforeRender": 128,
+    "frames": [
+      {
+        "dirtyAfterRender": 128,
+        "h": 644,
+        "lit": 327645,
+        "uploads": 128,
+        "w": 944
+      }
+    ],
+    "initialDirty": 0,
+    "uploads": 128
+  },
+  {
+    "case": "base",
+    "dimensions": [75, 76, 128],
+    "dirtyBeforeRender": 0,
+    "frames": [
+      {
+        "dirtyAfterRender": 128,
+        "h": 644,
+        "lit": 0,
+        "uploads": 0,
+        "w": 944
+      }
+    ],
+    "initialDirty": 0,
+    "uploads": 0
+  },
+  {
+    "case": "invalidate",
+    "dimensions": [75, 76, 128],
+    "dirtyBeforeRender": 128,
+    "frames": [
+      {
+        "dirtyAfterRender": 128,
+        "h": 644,
+        "lit": 327633,
+        "uploads": 128,
+        "w": 944
+      }
+    ],
+    "initialDirty": 0,
+    "uploads": 128
+  },
+  {
+    "case": "invalidate",
+    "dimensions": [75, 76, 128],
+    "dirtyBeforeRender": 128,
+    "frames": [
+      {
+        "dirtyAfterRender": 128,
+        "h": 644,
+        "lit": 327655,
+        "uploads": 128,
+        "w": 944
+      }
+    ],
+    "initialDirty": 128,
+    "uploads": 128
+  },
+  {
+    "case": "source-fix-128",
+    "dimensions": [75, 76, 128],
+    "dirtyBeforeRender": 128,
+    "frames": [
+      {
+        "dirtyAfterRender": 128,
+        "h": 644,
+        "lit": 327622,
+        "uploads": 128,
+        "w": 944
+      }
+    ],
+    "initialDirty": 128,
+    "uploads": 128
+  },
+  {
+    "case": "source-fix-256",
+    "dimensions": [151, 152, 256],
+    "dirtyBeforeRender": 256,
+    "frames": [
+      {
+        "dirtyAfterRender": 256,
+        "h": 644,
+        "lit": 433424,
+        "uploads": 256,
+        "w": 944
+      }
+    ],
+    "initialDirty": 256,
+    "uploads": 256
+  },
+  {
+    "case": "source-fix-full",
+    "dimensions": [517, 520, 877],
+    "dirtyBeforeRender": 877,
+    "frames": [
+      {
+        "dirtyAfterRender": 877,
+        "h": 644,
+        "lit": 550248,
+        "uploads": 877,
+        "w": 944
+      }
+    ],
+    "initialDirty": 877,
+    "uploads": 877
+  }
+]

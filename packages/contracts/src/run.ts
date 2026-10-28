@@ -118,8 +118,8 @@
  *     409;
  *   - for `voluma` runs only: runs at once (a claim takes a `queued` run only
  *     while the org is under it), runs per day, and a dollar ceiling counted
- *     from the usage the runner reports with its heartbeats (`runner.ts`), so
- *     the run record carries no cost fields. The daily and dollar limits answer
+ *     from the usage the runner reports with its heartbeats (`runner.ts`), whose
+ *     sum the run record shows as `usage`. The daily and dollar limits answer
  *     429 when work starts and are checked again when a claim dequeues a run; a
  *     run refused at dequeue, or a running one that crosses the dollar ceiling,
  *     ends `failed` with an `error`. The daily limit counts a run once, so a
@@ -219,6 +219,25 @@ export const runSchema = z.object({
   forkedFrom: runIdSchema.nullable(),
   createdAt: z.iso.datetime(),
   state: runStateSchema,
+  /**
+   * What the run has spent so far: the sum of the usage its heartbeats reported (`runner.ts`).
+   * `modelCostUsd` is model calls and paid tool calls (`tool.result.costUsd`), in US dollars;
+   * `sandboxSeconds` is how long its sandbox was up. Per task: `spend` in `spend.ts`.
+   * Optional until the API writes it, as is `toCheck`.
+   */
+  usage: z
+    .object({
+      modelCostUsd: z.number().nonnegative(),
+      sandboxSeconds: z.number().nonnegative(),
+    })
+    .optional(),
+  /**
+   * The open To check items when the run last completed, counted by `fold` over its whole
+   * log; null while it runs, and when it ended failed or cancelled (a failed run's items are
+   * still in its review). Set each time the run completes; the review lane owns what happens
+   * to the items between.
+   */
+  toCheck: z.number().int().nonnegative().nullable().optional(),
 });
 export type Run = z.infer<typeof runSchema>;
 
