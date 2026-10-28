@@ -5,7 +5,7 @@ Deferred repo-wide work. Lane-specific items go in that directory's
 
 Contracts, written when something produces or consumes them (the first contracts PR covers the R2 key layout, the v0 event kinds and the review data):
 - A command map (name → zod input and output), including the review corrections (a request, and a proposal of what it would redo); `api-client` becomes one generic typed `call(name, input)` and `subscribe(runId)` over HTTP, so a new command needs no `api-client` edit.
-- The `task`, `value` and `compaction` event kinds, with the checklist, `report_value` and compaction.
+- The `compaction` event kind, when something produces it.
 - An importer that turns the real OA6-1RK reference run into the review-data format, so the Review lane works on real data from day one. No hand-made fixtures.
 
 Later:
@@ -20,3 +20,4 @@ Later:
 - Harness, PR F (stream hub): split the recorder's delivery by kind. Durable events (`thread.*`, `tool.call`, `tool.result`, `message`, `sandbox`) go on an ordered queue that never gives up silently before a `flush` deadline, and at the deadline fails the run visibly (today a durable event that exhausts its 5 attempts is dropped and leaves the `threads` projection stale). Live frames (`@voluma/contracts/stream`: text and tool-argument deltas, tool output chunks) go to the hub over a bounded drop-oldest channel that never waits behind the durable queue; the runner must also pick each reply's `messageId` as the id of its `message` event. Until then `ToolContext.output` goes nowhere. The console printer in `apps/runner/src/main.ts` becomes a listener instead of a wrapper on `append`, so it prints while the API is down.
 - Harness, PR F (supervisor): `startThread(opts) → { send(text), done }` so a running thread can be messaged (Pi's follow-up queue); a resume is `startThread` plus one `send` per pending input. Today `runThread` runs an idle thread and its `Agent` is local. The sandbox session, not the layout, should say whether this thread got a new sandbox, and only then is the restart note sent (`resumeNote` is now passed unconditionally by the runner).
 - Harness: `/inputs` is a writable local copy. Commands run as root, and the sandbox grants no capability to remount or `chattr` it; a non-root user cannot write the FUSE mounts. Revisit if a model edits inputs: mount the staged copy read-only through the image or a mount option.
+- Harness: emit tool input JSON Schemas as strict objects (`additionalProperties: false`), so a field a tool does not take is refused instead of silently dropped (found on #16: `report_output` strips per-kind fields the model sends).
