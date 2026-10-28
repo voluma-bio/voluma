@@ -144,7 +144,7 @@ function TaskRow({
   task: FoldedTask | undefined;
   outputs: number;
 }) {
-  const { label, tone } = taskStatus(task?.status, task?.threads.check != null);
+  const { label, tone } = taskStatus(task?.status);
   return (
     <li className="flex items-start gap-4 rounded-xl border border-border bg-card p-4">
       <span className="w-5 pt-px text-ui text-fg-subtle tabular-nums">{index}</span>

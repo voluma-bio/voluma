@@ -35,18 +35,15 @@ export function RunBadge({ run }: { run: Run }) {
   return <StatusBadge tone={tone}>{label}</StatusBadge>;
 }
 
-/** A task's badge: `checking` is a running task whose check thread has started. */
-export function taskStatus(
-  status: TaskStatus | undefined,
-  checking: boolean,
-): { label: string; tone: StatusTone } {
+/** A task's badge; `under-review` is the second agent's check. */
+export function taskStatus(status: TaskStatus | undefined): { label: string; tone: StatusTone } {
   switch (status) {
     case undefined:
     case "pending":
     case "stale":
       return { label: "Queued", tone: "neutral" };
     case "in-progress":
-      return checking ? { label: "Checking", tone: "info" } : { label: "Running", tone: "info" };
+      return { label: "Running", tone: "info" };
     case "done":
       return { label: "Done", tone: "primary" };
     case "to-check":
@@ -54,6 +51,6 @@ export function taskStatus(
     case "failed":
       return { label: "Failed", tone: "destructive" };
     case "under-review":
-      return { label: "Under review", tone: "info" };
+      return { label: "Checking", tone: "info" };
   }
 }
