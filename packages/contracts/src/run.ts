@@ -12,15 +12,21 @@
  *   POST /api/run/runs/:id/cancel  → 200 `runSchema` with state `ended`/`cancelled`
  *                                  at once, even if the runner is still stopping (the
  *                                  server records it and the runner obeys); cancelling
- *                                  an ended run is a no-op
+ *                                  an ended run is a no-op; 403 for an example run the
+ *                                  caller didn't start
  *   GET  /api/run/inputs           → 200 `listInputsResponseSchema`, newest first
  *
  * Org scoping, enforced by the server on every call and every read:
  *   - Every read is filtered by the caller's `labId`. Another org's run or
  *     input answers 404, never 403.
  *   - When the caller's server-side scope is `self` (not in `meResponseSchema`),
- *     reads are also filtered to the caller: a run by `startedBy`, an input by
- *     `uploadedBy`, each equal to the caller's `userId`. Scope `lab` sees the org.
+ *     reads are also filtered to the caller: a run when `startedBy` is the
+ *     caller's `userId` or the run is an `example`; an input when `uploadedBy`
+ *     is the caller or an example run reads it. Scope `lab` sees the org.
+ *   - Example runs are read-only to everyone but whoever started them. A
+ *     correction on one never changes it: the server creates the caller's own
+ *     run with `forkedFrom` set (the corrections contract), which reads the
+ *     same input.
  *   - Run-scoped records (events, corrections) inherit `labId` from their run
  *     and do not repeat it; read access to them is read access to the run.
  *     An input exists before any run and can serve several, so it carries its
@@ -33,12 +39,17 @@
  * pins, so a caller can't make the server import an arbitrary repo. The server
  * resolves the id to pinned packages and records them on the run.
  *
- * Queue: the server may limit an org to one active run. `startRun` then
- * returns `queued` while another run is active, else `running`.
+ * Who pays (`credentials`): the server picks it at `startRun`, `visitor` when
+ * the caller has stored their own model and sandbox keys, else `voluma`. The
+ * keys never appear in a contract: they're stored encrypted on the server,
+ * keyed by the visitor.
  *
- * Spend cap: enforced by the server from its own accounting, so the run record
- * carries no cost fields. The server checks it at `startRun` and again when a
- * queued run is dequeued; a run refused at dequeue ends `failed` with an `error`.
+ * Queue and spend cap apply to `voluma` runs only; a `visitor` run starts at
+ * once. The server may limit an org to one active `voluma` run; `startRun`
+ * then returns `queued` while another is active, else `running`. The cap is
+ * enforced from the server's own accounting, so the run record carries no cost
+ * fields. It is checked at `startRun` (429) and again when a queued run is
+ * dequeued; a run refused at dequeue ends `failed` with an `error`.
  */
 import { z } from "zod";
 import { userIdSchema } from "./auth";
@@ -50,8 +61,8 @@ import { workflowPinSchema } from "./workflow";
  * `inputPrefix(id)`; the `reference` scan is `referencePrefix("scan")`. The
  * server derives the R2 prefix; the browser never needs it. The upload call
  * that creates inputs is a later PR; its key layout (`inputKey`) is settled in
- * `r2.ts`. The reference input has no uploader rule yet, so a `self`-scoped
- * `listInputs` filtered by `uploadedBy` would not show it.
+ * `r2.ts`. Under `self`, `listInputs` lists only the caller's uploads; an
+ * example run's input is readable through the run, not listed.
  */
 export const inputSchema = z.object({
   id: inputIdSchema,
@@ -92,6 +103,12 @@ export const runSchema = z.object({
   /** The pins the server resolved from the request's `workflowId`, as in `r2.ts`'s `workflowPrefix`. */
   workflows: z.array(workflowPinSchema).min(1),
   input: inputSchema,
+  /** Who pays for models and sandboxes; see the header. */
+  credentials: z.enum(["voluma", "visitor"]),
+  /** A shared, read-only run every caller in the org can read, even under `self`. */
+  example: z.boolean(),
+  /** The run this one was forked from by a correction on it; null for a fresh run. */
+  forkedFrom: runIdSchema.nullable(),
   createdAt: z.iso.datetime(),
   state: runStateSchema,
 });
