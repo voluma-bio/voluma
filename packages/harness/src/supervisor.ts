@@ -27,8 +27,9 @@
  * again; a wake the model never answered before a crash is asked again.
  *
  * A thread whose stored History cannot be resumed (`stale`: a deploy changed its prompt, tools
- * or model) is not a failure: the supervisor records a code-made `redo` judgment for it
- * (`restartStale`) and the task starts again on a new thread.
+ * or model) is not a failure. A worker's task starts again on a new thread (a code-made `redo`
+ * judgment, `restartStale`); a check is replaced by a new check. A message sent to such a
+ * thread is lost.
  *
  * A thread that throws or is refused before it starts, or an error in a step (a store failure
  * above all), fails the run on purpose: the threads are aborted and the root ends `failed`,
@@ -122,8 +123,12 @@ export function supervisor(options: SupervisorOptions) {
   /** `<runId>.<taskId>.<role>`, plus `.<n>` for the n-th (ids.ts: run and task ids hold no '.'). */
   const threadId = (taskId: string, role: Role, n: number) =>
     `${options.runId}.${taskId}.${role}${n === 1 ? "" : `.${n}`}`;
-  const nextThreadId = (d: ThreadLog, taskId: string, role: Role) =>
-    threadId(taskId, role, startedFor(d, taskId, role).length + 1);
+  /** An id this process refused as unresumable counts as used, even if its `thread.started` never landed. */
+  const nextThreadId = (d: ThreadLog, taskId: string, role: Role) => {
+    let n = startedFor(d, taskId, role).length + 1;
+    while (threads.stale(threadId(taskId, role, n))) n++;
+    return threadId(taskId, role, n);
+  };
 
   /**
    * The task's thread running in this process. The next id counts too: a thread just
@@ -252,8 +257,8 @@ export function supervisor(options: SupervisorOptions) {
   }
 
   /**
-   * A thread whose stored History cannot be resumed (a deploy changed its prompt, tools or
-   * model): the work is redone on a fresh thread, as after a `redo` judgment, but decided here
+   * A worker whose stored History cannot be resumed (a deploy changed its prompt, tools or
+   * model): its task is redone on a fresh thread, as after a `redo` judgment, but decided here
    * with no model call. Recorded as the thread's judgment, so a resume applies it and a
    * restart does not try the thread again.
    */
@@ -399,8 +404,11 @@ export function supervisor(options: SupervisorOptions) {
         const c = recordOf(d, t.threads.check, "check", taskId);
         const j = d.judgments.get(c.id);
         if (j) return apply(d, c.id, j, t);
-        const unresumable = threads.stale(c.id);
-        if (unresumable) return restartStale(c, unresumable);
+        // A check that cannot resume is checked again by a new thread; the worker's result stands.
+        if (threads.stale(c.id)) {
+          launch("check", taskId, nextThreadId(d, taskId, "check"), { attemptId: t.attemptId });
+          return "acted";
+        }
         if (c.end?.status === "failed") {
           const error = c.end.error ?? "failed";
           return judgmentFor(
@@ -520,8 +528,10 @@ export function supervisor(options: SupervisorOptions) {
   }
 
   const redosOf = (d: ThreadLog, taskId: string) =>
-    [...d.judgments.values()].filter((j) => j.taskId === taskId && j.applied.action === "redo")
-      .length;
+    // A restart for an unresumable thread (`code:` arms) is not the main thread's to count.
+    [...d.judgments.values()].filter(
+      (j) => j.taskId === taskId && j.applied.action === "redo" && !j.arm.startsWith("code:"),
+    ).length;
 
   const fail = (error: unknown) => {
     failure ??= error;
