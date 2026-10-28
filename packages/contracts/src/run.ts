@@ -190,7 +190,7 @@ export type VisitorKeys = z.infer<typeof visitorKeysSchema>;
 export const startRunRequestSchema = z.object({
   workflowId: workflowIdSchema,
   inputId: inputIdSchema,
-  /** As `runSchema.selectedOutputs`; an id the workflow's `outputs.json` lacks is refused when the run starts. */
+  /** As `runSchema.selectedOutputs`; an id the workflow's `outputs.json` lacks fails the run at start, with that message. */
   selectedOutputs: z.array(segmentSchema).min(1).optional(),
   notes: z.string().max(4000).optional(),
   /** Present: the run uses these (`credentials: "visitor"`) and skips the org's runs-at-once count. */
