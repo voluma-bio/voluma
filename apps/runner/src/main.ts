@@ -84,6 +84,11 @@ const lifetimeSeconds = Number(optional("VOLUMA_SANDBOX_LIFETIME_SECONDS") ?? 36
 if (!Number.isInteger(lifetimeSeconds) || lifetimeSeconds <= 0) {
   throw new Error("VOLUMA_SANDBOX_LIFETIME_SECONDS must be a positive integer");
 }
+// The floor keeps a sandbox from idling out before its inputs finish staging.
+const idleSeconds = Number(optional("VOLUMA_SANDBOX_IDLE_SECONDS") ?? 300);
+if (!Number.isInteger(idleSeconds) || idleSeconds < 30) {
+  throw new Error("VOLUMA_SANDBOX_IDLE_SECONDS must be an integer of at least 30");
+}
 const createSandbox = createModalSandbox({
   appName: RUNS_APP,
   modal,
@@ -103,10 +108,11 @@ const session = sandboxSession(
       cpu: 2,
       memoryMiB: 4096,
       lifetimeSeconds,
-      idleSeconds: Number(optional("VOLUMA_SANDBOX_IDLE_SECONDS") ?? 300),
+      idleSeconds,
       mounts: layout.mounts,
     }),
   (id, state, detail) => events.emit(id, "sandbox", { name: "main", state, detail }),
+  idleSeconds,
 );
 
 const abort = new AbortController();

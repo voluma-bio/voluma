@@ -77,7 +77,8 @@ export interface Sandbox {
   writeFile(path: string, bytes: Uint8Array, signal?: AbortSignal): Promise<void>;
   /**
    * False once the provider has ended the sandbox (idle timeout, lifetime, termination);
-   * a command sent to it then fails. Cheap enough to ask before each tool call.
+   * a command sent to it then fails. One provider round trip (see `sandboxSession`, which
+   * asks only after the idle timeout could have passed).
    */
   alive(): Promise<boolean>;
   destroy(): Promise<void>;
