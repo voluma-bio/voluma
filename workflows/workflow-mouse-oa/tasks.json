@@ -1,6 +1,7 @@
 [
   {
     "id": "intake",
+    "title": "Scan intake",
     "dependsOn": [],
     "outputs": ["header"],
     "instructions": "Read the scan header and the files in /inputs: voxel spacing, size, orientation, and any problem with the data. Write what you found for the later tasks.",
@@ -10,6 +11,7 @@
   },
   {
     "id": "orientation",
+    "title": "Orientation",
     "dependsOn": ["intake"],
     "outputs": ["frame"],
     "instructions": "Orient the stack so the later tasks share one frame (a labels-ready volume with known axes). Follow references/oa-protocol.md and the orient-joint skill; the anatomy is in references/anatomy.md.",
@@ -17,6 +19,7 @@
   },
   {
     "id": "segmentation",
+    "title": "Segmentation volumes",
     "dependsOn": ["orientation"],
     "outputs": [
       "patella-volume",
@@ -31,6 +34,7 @@
   },
   {
     "id": "iioc",
+    "title": "Tibial IIOC",
     "dependsOn": ["segmentation"],
     "outputs": [
       "tv-tibial-iioc",
@@ -48,6 +52,7 @@
   },
   {
     "id": "subchondral-plate",
+    "title": "Subchondral bone plate",
     "dependsOn": ["iioc"],
     "outputs": [
       "subchondral-bone-plate-thickness-medial",
@@ -58,6 +63,7 @@
   },
   {
     "id": "trabecular-roi",
+    "title": "IIOC trabecular bone",
     "dependsOn": ["iioc", "subchondral-plate"],
     "outputs": ["tv-iioc-trab", "bv-iioc-trab", "bv-tv-iioc-trab"],
     "instructions": "Define ROI-2 (ROI-1 without the plate and the cortical line) and report its volumes. Follow references/oa-protocol.md and the orient-joint skill; the anatomy is in references/anatomy.md.",
@@ -65,6 +71,7 @@
   },
   {
     "id": "metaphyseal-roi",
+    "title": "Proximal tibial metaphysis",
     "dependsOn": ["iioc"],
     "outputs": [
       "metaphyseal-tv",
@@ -83,6 +90,7 @@
   },
   {
     "id": "cortical",
+    "title": "Cortical bone",
     "dependsOn": ["metaphyseal-roi"],
     "outputs": [
       "cortical-thickness-100-um-below-the-growth-plate",
@@ -93,6 +101,7 @@
   },
   {
     "id": "femoral-geometry",
+    "title": "Distal femur",
     "dependsOn": ["segmentation"],
     "outputs": ["distal-femoral-length-dfl", "distal-femoral-width-dfw", "width-length-ratio"],
     "instructions": "Place the femoral points and report the distal femoral length, width and their ratio. Follow references/oa-protocol.md and the orient-joint skill; the anatomy is in references/anatomy.md.",
