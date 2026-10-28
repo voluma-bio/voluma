@@ -29,3 +29,4 @@ Product decisions live in the [requirements].
 - 2026-10-28: Local DICOM 3D is an on-demand raw-volume preview, not segmented anatomical surfaces or analysis results. Standard/Compact cap axes at 256/128 and label downsampling; native-resolution research inspection remains a requirement and separate follow-up. ([#13](https://github.com/voluma-bio/voluma/pull/13))
 
 [requirements]: https://github.com/voluma-bio/docs/blob/main/work/microct-workflow-mvp/requirements.md
+- 2026-10-28: The run screen and the review are a deterministic fold of three run events by `taskId`: `task` (status), `checkpoint` (milestone with evidence; also carries the check thread's `verdict` and To check items via `toCheck`) and `value` (`report_value`). The fold is specified in `packages/contracts/src/events.ts`; tool schemas are in `task-tools.ts`. (contracts PR G)
