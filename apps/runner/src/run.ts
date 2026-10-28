@@ -21,14 +21,15 @@ import type { Api, Model, Models } from "@earendil-works/pi-ai";
 import { inputPrefix, referencePrefix } from "@voluma/contracts/r2";
 import type { Claim, ReportRequest } from "@voluma/contracts/runner";
 import { runClient } from "@voluma/harness/adapters/http/run-client";
-import { llmJudgment } from "@voluma/harness/judgment";
 import { runLayout } from "@voluma/harness/layout";
+import { llmMainThread, mainSystem } from "@voluma/harness/main-thread";
 import { type Recorder, recorder } from "@voluma/harness/recorder";
 import { type SandboxSession, sandboxSession } from "@voluma/harness/sandbox-session";
 import { type RunRole, superviseRun } from "@voluma/harness/supervise-run";
 import { resolveTools } from "@voluma/harness/tools";
+import type { Agent } from "@voluma/workflow/definition";
 import { loadWorkflow } from "@voluma/workflow/load";
-import type { Config } from "./config.ts";
+import { type Config, isVisitorSafe, providerKey } from "./config.ts";
 import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
 import { createModalSandbox, RUNS_APP, terminateClaim } from "./modal-sandbox.ts";
@@ -82,7 +83,9 @@ export async function runClaim(
   const claimId = randomUUID();
   const visitor = keys !== undefined;
   const model = visitor ? ctx.visitorModel : ctx.model;
-  const apiKey = visitor ? keys.metaApiKey : config.model.apiKey;
+  /** The key for a provider: a visitor's Meta key is good for Meta alone. */
+  const keyFor = (provider: string) =>
+    visitor ? (provider === "meta" ? keys.metaApiKey : undefined) : providerKey(provider);
   const modal = visitor ? keys.modal : config.modal;
   const redact: Redact = redactor([
     ...config.secrets,
@@ -126,6 +129,33 @@ export async function runClaim(
     const checkerAgent = definition.roles.checker;
     const workerTools = workerAgent ? resolveTools(workerAgent.tools, workerAgent.name) : [];
     const checkTools = checkerAgent ? resolveTools(checkerAgent.tools, checkerAgent.name) : [];
+    // The main thread has no tools yet (TODO.md), so its agent's `tools:` are not resolved.
+    const mainAgent = definition.roles.main;
+    const modelOf = (agent: Agent | undefined, fallback: string | undefined): Model<Api> => {
+      const alias = agent?.model ?? fallback;
+      if (!alias) return model;
+      const ref = config.aliases[alias];
+      const found = ref && models.getModel(ref.provider, ref.id);
+      if (!ref || !found) {
+        throw new Error(
+          `${agent?.name ?? "the main thread"}: model alias "${alias}" is not in the alias table or names an unknown model`,
+        );
+      }
+      if (visitor && !isVisitorSafe(ref)) {
+        throw new Error(
+          `${agent?.name ?? "the main thread"}: "${alias}" is not a Standard-mode meta/ model, so a visitor's key and scan may not go to it`,
+        );
+      }
+      if (!keyFor(ref.provider)) {
+        throw new Error(
+          `${agent?.name ?? "the main thread"}: no ${ref.provider} key for "${alias}"`,
+        );
+      }
+      return found;
+    };
+    const workerModel = modelOf(workerAgent, undefined);
+    const checkModel = modelOf(checkerAgent, undefined);
+    const mainModel = modelOf(mainAgent, "muse-wonder");
 
     const layout = runLayout(
       runId,
@@ -177,18 +207,25 @@ export async function runClaim(
     const opened = session;
 
     const streamFn: RunRole["streamFn"] = (m, context, options) => {
-      const stream = models.streamSimple(m, context, { ...options, apiKey });
+      const stream = models.streamSimple(m, context, { ...options, apiKey: keyFor(m.provider) });
       stream.result().then(
         (reply) => meter.addModelCost(reply.usage.cost.total),
         () => {},
       );
       return stream;
     };
-    const judgment = llmJudgment(`llm:${model.id}`, async (context, signal) => {
-      const reply = await models.completeSimple(model, context, { apiKey, signal });
-      meter.addModelCost(reply.usage.cost.total);
-      return reply;
-    });
+    const main = llmMainThread(
+      mainModel,
+      mainSystem(mainAgent?.instructions, definition.intro),
+      async (context, signal) => {
+        const reply = await models.completeSimple(mainModel, context, {
+          apiKey: keyFor(mainModel.provider),
+          signal,
+        });
+        meter.addModelCost(reply.usage.cost.total);
+        return reply;
+      },
+    );
     const supervised = superviseRun({
       runId,
       plan: plan.tasks,
@@ -198,19 +235,19 @@ export async function runClaim(
       history: client,
       sandbox: (id) => opened.get(id),
       evidence: r2Evidence(config.r2),
-      judgment,
-      worker: (task) => ({
-        model,
+      main,
+      worker: (task, notes) => ({
+        model: workerModel,
         streamFn,
         systemPrompt: workerSystem(definition),
-        prompt: workerPrompt(definition, task),
+        prompt: workerPrompt(definition, task, notes),
         tools: workerTools,
       }),
-      check: (task) => ({
-        model,
+      check: (task, notes) => ({
+        model: checkModel,
         streamFn,
         systemPrompt: checkSystem(definition),
-        prompt: checkPrompt(definition, task),
+        prompt: checkPrompt(definition, task, notes),
         tools: checkTools,
       }),
       signal: abort.signal,

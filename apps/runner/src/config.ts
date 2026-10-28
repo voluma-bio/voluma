@@ -52,7 +52,8 @@ function apiEndpoint(): { baseUrl: string; token: string } {
 }
 
 /** A model as `provider/id`, e.g. `openai/gpt-5.6-luna`. */
-function modelRef(name: string, fallback?: string): { provider: string; id: string } {
+type ModelRef = { provider: string; id: string };
+function modelRef(name: string, fallback?: string): ModelRef {
   const text = fallback ? (optional(name) ?? fallback) : required(name);
   const [provider, ...rest] = text.split("/");
   const id = rest.join("/");
@@ -64,15 +65,47 @@ function modelRef(name: string, fallback?: string): { provider: string; id: stri
  * A visitor run sends the visitor's Meta key with this model, so it must be a Meta model; a
  * `-contributor` one would let Meta train on the visitor's scan.
  */
-function visitorModel(): { provider: string; id: string } {
+function visitorModel(): ModelRef {
   const ref = modelRef("RUNNER_VISITOR_MODEL", "meta/muse-spark-1.3");
-  if (ref.provider !== "meta" || ref.id.endsWith("-contributor")) {
+  if (!isVisitorSafe(ref)) {
     throw new Error(
       `RUNNER_VISITOR_MODEL must be a Standard-mode meta/ model, got "${ref.provider}/${ref.id}"`,
     );
   }
   return ref;
 }
+
+/** Whether a visitor's Meta key and scan may go to this model (see `visitorModel`). */
+export const isVisitorSafe = (ref: ModelRef) =>
+  ref.provider === "meta" && !ref.id.endsWith("-contributor");
+
+/**
+ * The aliases an agent definition's `model:` may name, to `provider/id`: the defaults here,
+ * and `RUNNER_MODEL_ALIASES` (a JSON object of alias to `provider/id`) adds or overrides.
+ * Changing a model for every workflow means changing this table, not the package.
+ */
+function modelAliases(): Record<string, ModelRef> {
+  const table: Record<string, string> = {
+    "muse-wonder": "meta/muse-wonder-1.0",
+    "muse-spark": "meta/muse-spark-1.3",
+    ...JSON.parse(optional("RUNNER_MODEL_ALIASES") ?? "{}"),
+  };
+  return Object.fromEntries(
+    Object.entries(table).map(([alias, text]) => {
+      const [provider, ...rest] = String(text).split("/");
+      if (!provider || rest.length === 0) {
+        throw new Error(
+          `RUNNER_MODEL_ALIASES: "${alias}" must be provider/model-id, got "${text}"`,
+        );
+      }
+      return [alias, { provider, id: rest.join("/") }];
+    }),
+  );
+}
+
+/** Our key for a provider, if set (`VOLUMA_<PROVIDER>_API_KEY`). */
+export const providerKey = (provider: string) =>
+  optional(`VOLUMA_${provider.toUpperCase()}_API_KEY`);
 
 /** Our Modal token; absent: the SDK uses ~/.modal.toml. */
 export function modalToken(): { tokenId: string; tokenSecret: string } | undefined {
@@ -106,6 +139,8 @@ export function runnerConfig() {
      * `-contributor` model lets Meta train on what it is sent, the visitor's scan included.
      */
     visitorModel: visitorModel(),
+    /** Aliases a workflow's agents name for their model, resolved when a run starts. */
+    aliases: modelAliases(),
     modal,
     r2,
     /** For importing workflow packages from private GitHub repos. */
@@ -113,7 +148,7 @@ export function runnerConfig() {
     /** Every secret of ours, to redact from anything that leaves the process. */
     secrets: [
       api.token,
-      model.apiKey,
+      ...["anthropic", "meta", "openai"].map(providerKey),
       r2.accessKeyId,
       r2.secretAccessKey,
       r2.cloudflareApiToken,

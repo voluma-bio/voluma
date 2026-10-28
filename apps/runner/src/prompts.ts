@@ -51,15 +51,29 @@ function taskBrief(def: WorkflowDefinition, task: PlanTask): string {
   return [prose, done].filter(Boolean).join("\n\n");
 }
 
-export function workerPrompt(def: WorkflowDefinition, task: PlanTask): string {
+/** What the main thread has carried from earlier tasks; a thread's first message holds it, never its system prompt. */
+const notesBlock = (notes: string | undefined) =>
+  notes
+    ? `\nNotes from the main thread, from the tasks before this one. Do not redo or contradict what they settle without evidence, and say so if you find one is wrong:\n${notes}`
+    : "";
+
+export function workerPrompt(
+  def: WorkflowDefinition,
+  task: PlanTask,
+  notes: string | undefined,
+): string {
   const needs = task.dependsOn.length
     ? `It builds on ${task.dependsOn.join(", ")}; their files are in /outputs/<task id>/.`
     : "It builds on no other task.";
-  return `Your task is "${task.id}". ${needs}\n${taskBrief(def, task)}\n${outputList(task)}`;
+  return `Your task is "${task.id}". ${needs}\n${taskBrief(def, task)}\n${outputList(task)}${notesBlock(notes)}`;
 }
 
-export function checkPrompt(def: WorkflowDefinition, task: PlanTask): string {
-  return `Check task "${task.id}". The worker's files are in /outputs/${task.id}/.\n${taskBrief(def, task)}\n${outputList(task)}`;
+export function checkPrompt(
+  def: WorkflowDefinition,
+  task: PlanTask,
+  notes: string | undefined,
+): string {
+  return `Check task "${task.id}". The worker's files are in /outputs/${task.id}/.\n${taskBrief(def, task)}\n${outputList(task)}${notesBlock(notes)}`;
 }
 
 function outputList(task: PlanTask): string {

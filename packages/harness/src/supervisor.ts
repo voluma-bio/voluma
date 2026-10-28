@@ -1,5 +1,6 @@
 /**
- * The supervisor: routine wakes are code, judgment goes through one seam (`judgment.ts`).
+ * The supervisor: routine wakes are code; the main thread (`main-thread.ts`) is woken at
+ * task boundaries and judgment points.
  * It keeps no state of its own. Every step is a function of `fold` of the recorder's
  * events (the stored log, `recorder.ts`), the thread records read from that same log, and
  * which threads are running in this process, and it runs inside the task runtime's
@@ -14,12 +15,15 @@
  *   otherwise wake it with a message (it counts as a wake) up to `stuckLimit` wakes, then the
  *   stuck guard marks the task `to-check` (or, with no attempt at all, a judgment point);
  * - `done` or `to-check` without a check thread yet (and not left by a judgment): check-start,
- *   then start the check thread;
+ *   then start the check thread; once its check passed, the task has a boundary wake;
  * - `under-review`: a check that failed is a judgment point; otherwise its result is written,
  *   and a verdict that is not `passed` is a judgment point (`check-disagreed`).
- * A judgment point is asked outside the section, then recorded as a `judgment` event with the
- * id `<thread>:judgment` before it is applied. Replaying it applies the stored action and does
- * not ask the arm again. A step that finds a judgment recorded but not applied applies it.
+ * A wake (a boundary or a judgment point) is asked of the main thread outside the section,
+ * then recorded as a `wake` event with the id `<thread>:wake` (the notes it wrote, and at a
+ * judgment point its decision) before anything uses it: workers and checks started later get
+ * the notes in force, and the next step turns a judgment point's decision into a `judgment`
+ * event, `<thread>:judgment`, and applies it. A resume finds these events and asks no one
+ * again; a wake the model never answered before a crash is asked again.
  *
  * A thread that throws or is refused before it starts, or an error in a step (a store failure
  * above all), fails the run on purpose: the threads are aborted and the root ends `failed`,
@@ -30,7 +34,7 @@ import type { By } from "@voluma/contracts/events";
 import { checkResult, type Folded, type FoldedTask } from "@voluma/contracts/fold";
 import type { ThreadMessageResult } from "@voluma/contracts/thread-message";
 import { readyTasks } from "@voluma/workflow";
-import { type Decision, decisionSchema, type Judgment, type JudgmentPoint } from "./judgment";
+import { decisionSchema, type MainThread, pointOf, type WakePoint } from "./main-thread";
 import type { PayloadOf, Recorder } from "./recorder";
 import type { PlanTask, TaskRuntime } from "./task-runtime";
 import {
@@ -40,11 +44,15 @@ import {
   type ThreadLog,
   type ThreadRecord,
   threadLog,
+  WAKE_SUFFIX,
 } from "./thread-log";
 import type { ThreadSpec, Threads } from "./threads";
 
 /** What the caller decides about a worker or check thread; the supervisor adds its identity. */
 export type RoleSpec = Pick<ThreadSpec, "prompt" | "model" | "streamFn" | "systemPrompt" | "tools">;
+
+/** A point the main thread decides: a check that disagreed, or a thread that failed. */
+type JudgmentPoint = Exclude<WakePoint, { kind: "task-checked" }>;
 
 export interface SupervisorOptions {
   runId: string;
@@ -52,20 +60,21 @@ export interface SupervisorOptions {
   runtime: TaskRuntime;
   recorder: Recorder;
   threads: Threads;
-  judgment: Judgment;
-  worker(taskId: string): RoleSpec;
-  check(taskId: string): RoleSpec;
+  main: MainThread;
+  /** `notes` are the main thread's notes in force when the thread starts (none yet at the first task). */
+  worker(taskId: string, notes: string | undefined): RoleSpec;
+  check(taskId: string, notes: string | undefined): RoleSpec;
   /** Wakes of a worker that stopped with its task unfinished before the stuck guard marks it. */
   stuckLimit?: number;
   /** Redos a judgment may order for one task. */
   maxRedos?: number;
-  /** How long a judgment may take before it counts as failed. */
-  judgmentTimeoutMs?: number;
+  /** How long the main thread may take to answer a wake before it counts as failed. */
+  wakeTimeoutMs?: number;
   signal?: AbortSignal;
 }
 
 /** What `step` found: nothing to do, something done, or a judgment point to ask. */
-type Next = "idle" | "acted" | { point: JudgmentPoint; threadId: string };
+type Next = "idle" | "acted" | { point: WakePoint; threadId: string };
 
 /** The supervisor's own thread: the root, and the envelope of a run's first events. */
 export const supervisorThreadId = (runId: string) => `${runId}.supervisor`;
@@ -73,12 +82,11 @@ export const supervisorThreadId = (runId: string) => `${runId}.supervisor`;
 const rule = (r: Extract<By, { kind: "rule" }>["rule"]): By => ({ kind: "rule", rule: r });
 
 export function supervisor(options: SupervisorOptions) {
-  const { plan, runtime, recorder, threads, judgment, signal } = options;
+  const { plan, runtime, recorder, threads, main, signal } = options;
   const root = supervisorThreadId(options.runId);
   const stuckLimit = options.stuckLimit ?? 2;
   const maxRedos = options.maxRedos ?? 1;
-  const judgmentTimeoutMs = options.judgmentTimeoutMs ?? 60_000;
-  const arm: By = { kind: "judgment", arm: judgment.arm };
+  const wakeTimeoutMs = options.wakeTimeoutMs ?? 60_000;
   let failure: unknown; // the first error that failed the run
 
   const derive = () => threadLog(recorder.events());
@@ -112,8 +120,9 @@ export function supervisor(options: SupervisorOptions) {
     id: string,
     extra: { attemptId?: string; input?: ThreadSpec["input"] } = {},
   ) {
+    const { notes } = derive();
     threads.start({
-      ...(role === "worker" ? options.worker(taskId) : options.check(taskId)),
+      ...(role === "worker" ? options.worker(taskId, notes) : options.check(taskId, notes)),
       threadId: id,
       kind: role,
       parentThreadId: root,
@@ -170,6 +179,7 @@ export function supervisor(options: SupervisorOptions) {
     if (d.ids.has(eventId)) return "idle"; // already applied
     const reason = reasonOf(j);
     const action = j.applied.action;
+    const arm: By = { kind: "judgment", arm: j.arm };
     if (action === "redo") {
       // A task with no attempt, or one this worker never wrote, has nothing of its own to
       // mark: a fresh worker is the redo.
@@ -221,10 +231,7 @@ export function supervisor(options: SupervisorOptions) {
     const { taskId } = w;
     if (w.end?.status === "failed") {
       const error = w.end.error ?? "failed";
-      return {
-        point: { kind: "thread-failed", taskId, error, report: report(taskId) },
-        threadId: w.id,
-      };
+      return judgmentFor(d, { kind: "thread-failed", taskId, error, report: report(taskId) }, w.id);
     }
     if (w.wakes < stuckLimit) {
       const text = `You stopped, but ${taskId} is not finished. Report its outputs and set its status with checklist (done, to-check or failed).`;
@@ -234,10 +241,7 @@ export function supervisor(options: SupervisorOptions) {
     if (!t || t.threads.worker !== w.id) {
       // It never wrote to the attempt now current; marking that attempt is not its to do.
       const error = "the worker ended without touching its task";
-      return {
-        point: { kind: "thread-failed", taskId, error, report: report(taskId) },
-        threadId: w.id,
-      };
+      return judgmentFor(d, { kind: "thread-failed", taskId, error, report: report(taskId) }, w.id);
     }
     await runtime.setStatus(
       w.id,
@@ -322,13 +326,14 @@ export function supervisor(options: SupervisorOptions) {
         if (!checkId) return d.judgments.has(workerId) ? "idle" : startCheck(d, t);
         const c = recordOf(d, checkId, "check", taskId);
         if (t.status === "to-check" && t.checker?.verdict !== "passed" && !d.judgments.has(c.id)) {
-          return {
-            point: { kind: "check-disagreed", taskId, report: report(taskId) },
-            threadId: c.id,
-          };
+          return judgmentFor(d, { kind: "check-disagreed", taskId, report: report(taskId) }, c.id);
         }
         const j = d.judgments.get(c.id);
-        return j ? apply(d, c.id, j, t) : "idle";
+        if (j) return apply(d, c.id, j, t);
+        // The check passed: the task's boundary.
+        return d.wakes.has(c.id)
+          ? "idle"
+          : { point: { kind: "task-checked", taskId, report: report(taskId) }, threadId: c.id };
       }
       case "under-review": {
         // The task went under review but its check thread has no stored start: start it.
@@ -341,10 +346,11 @@ export function supervisor(options: SupervisorOptions) {
         if (j) return apply(d, c.id, j, t);
         if (c.end?.status === "failed") {
           const error = c.end.error ?? "failed";
-          return {
-            point: { kind: "thread-failed", taskId, error, report: report(taskId) },
-            threadId: c.id,
-          };
+          return judgmentFor(
+            d,
+            { kind: "thread-failed", taskId, error, report: report(taskId) },
+            c.id,
+          );
         }
         return finishCheck(t, c);
       }
@@ -366,10 +372,49 @@ export function supervisor(options: SupervisorOptions) {
     return "idle";
   }
 
-  /** One bounded call to the judgment: it counts as failed if it errors or runs past the limit. */
-  async function decide(point: JudgmentPoint): Promise<Decision | { error: string }> {
+  /**
+   * A judgment point: ask the main thread if it has not been, else record what was applied
+   * (the point, the model's decision and the action taken, and on a fallback why) as
+   * `<threadId>:judgment`. The next step applies it, as it would after a crash.
+   */
+  async function judgmentFor(d: ThreadLog, point: JudgmentPoint, threadId: string): Promise<Next> {
+    const wake = d.wakes.get(threadId);
+    if (!wake) return { point, threadId };
+    const { taskId } = point;
+    let action: "accept" | "redo" | "fail" = "accept";
+    let fallback: "error" | "redo-cap" | undefined;
+    if (!wake.decision) {
+      // A person can still read the task; a main thread that failed must not stall the run.
+      fallback = "error";
+    } else if (wake.decision.action === "redo" && redosOf(d, taskId) >= maxRedos) {
+      fallback = "redo-cap";
+    } else {
+      action = wake.decision.action;
+    }
+    const { kind, input } = pointOf(point);
+    await recorder.append(
+      root,
+      "judgment",
+      {
+        point: { kind, input },
+        arm: `main:${wake.model}`,
+        taskId,
+        ...(wake.decision && { decision: wake.decision }),
+        applied: { action, ...(fallback && { fallback }) },
+      },
+      `${threadId}${JUDGMENT_SUFFIX}`,
+    );
+    return "acted";
+  }
+
+  /**
+   * Asks the main thread one wake outside the section, bounded: it counts as failed if it
+   * errors or runs past the limit, and a stop is no answer. Its answer is stored as
+   * `<threadId>:wake` before anything uses it.
+   */
+  async function wakeMain({ point, threadId: id }: { point: WakePoint; threadId: string }) {
     const limit = AbortSignal.any([
-      AbortSignal.timeout(judgmentTimeoutMs),
+      AbortSignal.timeout(wakeTimeoutMs),
       ...(signal ? [signal] : []),
     ]);
     const expired = new Promise<never>((_, reject) =>
@@ -377,45 +422,30 @@ export function supervisor(options: SupervisorOptions) {
         once: true,
       }),
     );
+    const past = [...derive().wakes.values()];
+    let answer: Awaited<ReturnType<MainThread["ask"]>> | { error: string };
     try {
-      return await Promise.race([judgment.decide(point, limit), expired]);
+      answer = await Promise.race([main.ask(point, past, limit), expired]);
     } catch (error) {
-      return { error: String(error) };
+      answer = { error: String(error) };
     }
-  }
-
-  /**
-   * Asks the arm outside the section, then records the point (the point, the arm's raw
-   * answer, the action taken and, on a fallback, why) as `<threadId>:judgment` before anything
-   * applies it. The next step applies it, as it would after a crash.
-   */
-  async function judge({ point, threadId: id }: { point: JudgmentPoint; threadId: string }) {
-    const answer = await decide(point);
+    if (signal?.aborted) return;
     await runtime.section(async () => {
-      if (derive().judgments.has(id)) return;
-      const { taskId } = point;
-      let action: Decision["action"] = "accept";
-      let fallback: "error" | "redo-cap" | undefined;
-      if ("error" in answer) {
-        // A person can still read the task; a judgment that failed must not stall the run.
-        fallback = "error";
-      } else if (answer.action === "redo" && redosOf(derive(), taskId) >= maxRedos) {
-        fallback = "redo-cap";
-      } else {
-        action = answer.action;
-      }
-      const { kind, ...input } = point;
+      if (derive().wakes.has(id)) return;
       await recorder.append(
         root,
-        "judgment",
+        "wake",
         {
-          point: { kind, input },
-          arm: judgment.arm,
-          taskId,
-          ...(!("error" in answer) && { decision: answer }),
-          applied: { action, ...(fallback && { fallback }) },
+          point: pointOf(point),
+          model: main.model,
+          ...("error" in answer
+            ? { error: answer.error }
+            : {
+                ...(answer.note !== undefined && { note: answer.note }),
+                ...(answer.decision && { decision: answer.decision }),
+              }),
         },
-        `${id}${JUDGMENT_SUFFIX}`,
+        `${id}${WAKE_SUFFIX}`,
       );
     });
   }
@@ -455,7 +485,7 @@ export function supervisor(options: SupervisorOptions) {
           quiet = next === "idle" && !threads.active();
           if (next === "acted") continue;
           if (next !== "idle") {
-            await judge(next);
+            await wakeMain(next);
           } else if (threads.active()) {
             await threads.anyIdle();
             await recorder.flush(); // the thread's end is stored before the next step reads it

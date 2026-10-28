@@ -6,8 +6,8 @@
  * first run are the same call; the recorder is built on the stored events by the host.
  */
 import type { Folded } from "@voluma/contracts/fold";
-import type { Judgment } from "./judgment";
 import type { RunLayout } from "./layout";
+import type { MainThread } from "./main-thread";
 import type { Evidence } from "./ports/evidence";
 import type { History } from "./ports/history";
 import type { Sandbox } from "./ports/sandbox";
@@ -35,9 +35,10 @@ export interface SuperviseRunOptions {
   /** The run's sandbox for a thread (`sandboxSession.get`). */
   sandbox(threadId: string): Promise<Sandbox>;
   evidence: Evidence;
-  judgment: Judgment;
-  worker(task: PlanTask): RunRole;
-  check(task: PlanTask): RunRole;
+  main: MainThread;
+  /** `notes`: the main thread's notes in force when the thread starts. */
+  worker(task: PlanTask, notes: string | undefined): RunRole;
+  check(task: PlanTask, notes: string | undefined): RunRole;
   signal: AbortSignal;
 }
 
@@ -72,13 +73,13 @@ export function superviseRun(options: SuperviseRunOptions): Promise<Folded> {
     runtime,
     recorder,
     threads: pool,
-    judgment: options.judgment,
-    worker: (id) => {
-      const role = options.worker(task(id));
+    main: options.main,
+    worker: (id, notes) => {
+      const role = options.worker(task(id), notes);
       return { ...role, tools: tools(role.tools) };
     },
-    check: (id) => {
-      const role = options.check(task(id));
+    check: (id, notes) => {
+      const role = options.check(task(id), notes);
       return { ...role, tools: tools(role.tools) };
     },
     signal,
