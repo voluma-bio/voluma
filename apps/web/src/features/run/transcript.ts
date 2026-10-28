@@ -274,8 +274,6 @@ function rowBuilder() {
   };
 }
 
-const MAIN_KINDS = new Set(["supervisor"]);
-
 /** Tools whose result is its own visible row (a checkpoint or output event); the call adds nothing. */
 const SHOWN_AS_ROWS = new Set(["checkpoint", "report_output"]);
 
@@ -286,6 +284,7 @@ const SHOWN_AS_ROWS = new Set(["checkpoint", "report_output"]);
 export function threadRows(events: RunEvent[], threadId: string, live: Live = noLive): Row[] {
   const b = rowBuilder();
   const tools = new Map<string, ToolStep>();
+  let briefed = false;
   for (const e of events) {
     if (e.threadId !== threadId) continue;
     switch (e.type) {
@@ -299,12 +298,15 @@ export function threadRows(events: RunEvent[], threadId: string, live: Live = no
         } else if (p.role === "system") {
           b.row({ kind: "brief", id: e.id, label: "System prompt", text: p.text });
         } else {
-          const label =
-            p.sender.kind === "thread"
+          // The first is the supervisor's brief (the harness marks it as a person's message).
+          const label = !briefed
+            ? "Task brief"
+            : p.sender.kind === "thread"
               ? "Message from another thread"
               : p.sender.kind === "person"
                 ? "Message from a person"
-                : "Brief";
+                : "Message from the runtime";
+          briefed = true;
           b.row({ kind: "brief", id: e.id, label, text: p.text });
         }
         break;
@@ -393,7 +395,7 @@ export function threadRows(events: RunEvent[], threadId: string, live: Live = no
 export function mainRows(events: RunEvent[], live: Live = noLive): Row[] {
   const b = rowBuilder();
   const supervisor = events.find(
-    (e) => e.type === "thread.started" && MAIN_KINDS.has(e.payload.kind),
+    (e) => e.type === "thread.started" && e.payload.kind === "supervisor",
   )?.threadId;
   const seen = new Set<string>();
   for (const e of events) {
