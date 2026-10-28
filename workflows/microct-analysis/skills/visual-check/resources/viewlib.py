@@ -23,8 +23,10 @@ except ModuleNotFoundError as e:
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-PALETTE = ['#ff3b30', '#34c759', '#0a84ff', '#ffcc00', '#bf5af2', '#ff9f0a', '#64d2ff', '#ff6482',
-           '#30d158', '#ac8e68', '#5e5ce6', '#ffd60a']
+# One palette for every render. 16 hues that stay apart on black and in a mesh shading; label N takes entry N-1, so the
+# same structure has the same colour in the overlay, the 3D sheet and the disagreement panels.
+PALETTE = ['#ff3b30', '#34c759', '#4f8dff', '#ffd60a', '#ff9f0a', '#bf5af2', '#40e0f0', '#ff4fd8',
+           '#b6f23c', '#ffb3c7', '#1fa89a', '#d9c2ff', '#c8864b', '#fff3b0', '#8dffc2', '#a0a0a0']
 GRID_COLOR = '#00e5ff'
 
 
@@ -44,8 +46,19 @@ def auto_window(img):
 
 
 def parse_names(s):
-    """'1=femur,2=tibia' -> {1: 'femur', 2: 'tibia'}"""
-    return {} if not s else {int(k): v for k, v in (p.split('=', 1) for p in s.split(','))}
+    """'1=femur,2=tibia' -> {1: 'femur', 2: 'tibia'}; a path to the anatomy reference's anatomy.json gives every label's name."""
+    if not s:
+        return {}
+    if s.endswith('.json'):
+        return {int(e['id']): e['name'] for e in json.loads(Path(s).read_text())['labels']}
+    return {int(k): v for k, v in (p.split('=', 1) for p in s.split(','))}
+
+
+def draw_legend(fig, ids, names, loc='upper left'):
+    """A swatch and a name for every label in `ids`, in that label's colour; `label N` where no name was given."""
+    handles = [matplotlib.patches.Patch(fc=colour(i), ec='none', label=f'{i} {names.get(i, "(unnamed)")}') for i in ids]
+    fig.legend(handles=handles, loc=loc, ncol=min(len(handles), 6), fontsize=8, labelcolor='w', facecolor='k', edgecolor='none',
+               framealpha=0.7, handlelength=1, columnspacing=1.2, borderpad=0.4)
 
 
 def fig_for(w_px, h_px, max_px=sidecar.MAX_IMAGE_PX, dpi=100):

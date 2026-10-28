@@ -38,6 +38,7 @@ if SKILLS is None:
              'directory above it (<workflows>/workflow-mouse-oa/resources/ with <workflows>/microct-analysis/ beside it)')
 sys.path[:0] = [str(HERE), str(SKILLS / 'microct-core/resources'), str(SKILLS / 'regions-and-landmarks/resources')]
 import sidecar
+from envelope import close_and_fill
 from region_from_curves import surface_from_curves
 
 matplotlib.use('Agg')
@@ -58,7 +59,7 @@ def traced_surface(spec, key, shape):
     return H, valid
 
 
-def envelope(bone, gp, iterations=2):
+def envelope(bone, gp):
     """Filled tibial envelope under the face gp (W index per V,U). The cut face is sealed before filling marrow."""
     result = np.zeros(bone.shape, bool)
     wi = np.arange(bone.shape[0])[:, None]
@@ -74,8 +75,7 @@ def envelope(bone, gp, iterations=2):
         if len(us) > 1:
             uu = np.arange(us[0], us[-1] + 1)
             plane[np.clip(np.ceil(gp[v, uu]).astype(int) - 1, 0, bone.shape[0] - 1), uu] = True
-        closed = ndi.binary_closing(plane, iterations=iterations) | plane
-        result[:, v, :] = ndi.binary_fill_holes(closed)
+        result[:, v, :] = close_and_fill(plane)
     result = ndi.binary_fill_holes(ndi.binary_closing(result, iterations=1) | result)
     for u in range(bone.shape[2]):
         result[:, :, u] = ndi.binary_fill_holes(result[:, :, u])

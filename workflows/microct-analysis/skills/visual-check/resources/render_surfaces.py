@@ -1,7 +1,7 @@
 """6-view 3D sheet of a labels volume, one colour per label: the best check for "does one label cover two bones?" and
 for small fragments merged into a big bone.
 
-  python render_surfaces.py --labels labels.npy --out sheet.jpg [--frame frame.json] [--names 1=femur,2=tibia]
+  python render_surfaces.py --labels labels.npy --out sheet.jpg [--frame frame.json] [--names 1=femur,2=tibia | anatomy.json]
         [--step 3] [--header hu.json]
 
 Six views, 60 degrees apart, around the long axis of the limb (with `--frame`: the line from bone B's shaft to bone A's,
@@ -93,7 +93,7 @@ if __name__ == '__main__':
     ap.add_argument('--out', required=True)
     ap.add_argument('--frame')
     ap.add_argument('--header', help='hu.json for the spacing (default: the labels sidecar)')
-    ap.add_argument('--names')
+    ap.add_argument('--names', help='1=femur,2=tibia, or the anatomy.json path for every label name')
     ap.add_argument('--step', type=int)
     ap.add_argument('--azimuth', type=float, help='one big view at this azimuth (degrees) instead of the sheet')
     ap.add_argument('--size', type=int, default=1000, help='side of the single view in px')
@@ -132,7 +132,6 @@ if __name__ == '__main__':
         ax.imshow(t)
         ax.set_axis_off()
         ax.text(8, 24, f'{k * 60} deg', color='w', fontsize=9)
-    fig.text(0.005, 0.005, '  '.join(f'{lv}={names.get(lv, "")}' for lv in ms), color='w', va='bottom', fontsize=9,
-             bbox={'fc': 'k', 'ec': 'none', 'alpha': 0.6})
+    vl.draw_legend(fig, sorted(ms), names, loc='lower left')
     sl.save_image(fig, a.out)
     sl.emit(image=a.out, labels_drawn=sorted(ms), step=step, triangles=int(sum(m.n_faces for m in ms.values())))

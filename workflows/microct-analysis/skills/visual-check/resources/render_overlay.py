@@ -2,7 +2,7 @@
 bone unlabelled? The 2D check; it catches gross errors and can miss a small fragment, so pair it with the 3D sheet.
 
   python render_overlay.py --hu hu.npy --labels labels.npy --frame frame.json --out overlay.jpg
-        [--center s,r,c] [--window 1000,8000] [--names 1=femur,2=tibia] [--grid]
+        [--center s,r,c] [--window 1000,8000] [--names 1=femur,2=tibia | anatomy.json] [--grid]
   python render_overlay.py --hu oriented.npy --labels labels_oriented.npy --out overlay.jpg     (arrays already on one grid)
 
 With `--frame`, `hu` and `labels` are on the scan grid and the cuts are taken in the oriented frame (slice, row, column
@@ -46,7 +46,7 @@ if __name__ == '__main__':
     ap.add_argument('--out', required=True)
     ap.add_argument('--center', help='s,r,c (with --frame) or z,y,x (without)')
     ap.add_argument('--window')
-    ap.add_argument('--names', help='1=femur,2=tibia')
+    ap.add_argument('--names', help='1=femur,2=tibia, or the anatomy.json path for every label name')
     ap.add_argument('--grid', action='store_true')
     a = ap.parse_args()
     hu = np.load(a.hu, mmap_mode='r')
@@ -77,7 +77,6 @@ if __name__ == '__main__':
         vl.draw_labels(ax, lab)
         x += w
     present = sorted({int(v) for _, lab in cuts for v in np.unique(lab[lab > 0])})
-    fig.text(0.005, 0.99, '  '.join(f'{v}={names.get(v, "")}' for v in present), color='w', va='top', fontsize=9,
-             bbox={'fc': 'k', 'ec': 'none', 'alpha': 0.6})
+    vl.draw_legend(fig, present, names)
     sl.save_image(fig, a.out)
     sl.emit(image=a.out, center=center, labels_in_view=present)
