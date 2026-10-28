@@ -208,7 +208,7 @@ export async function runClaim(
           abort.signal,
         ),
       (id, state, detail) => {
-        // Billed from creation: `starting` is when the provider begins charging.
+        // Metered from the start of creation, the sweep included: a conservative upper bound.
         if (state === "starting") meter.sandboxUp();
         else if (state === "stopped" || state === "failed") meter.sandboxDown();
         events?.emit(id, "sandbox", { name: "main", state, detail });
