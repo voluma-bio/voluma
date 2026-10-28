@@ -133,12 +133,11 @@ they need:
 - Colours come only from `packages/design-tokens`; components use token
   utilities (`bg-card`, `text-muted-foreground`). Visual rules: [DESIGN.md](DESIGN.md).
   Check shared components at `/dev/ui` in both themes.
-- Workflows and analysis code live in `workflows/`. A workflow is a Mars
-  schema v1 package (`mars.toml`, skills, agents, `workflow.md`):
-  `workflows/microct-analysis` holds the generic micro-CT skills,
-  `workflows/mouse-oa` the mouse knee workflow (it arrives with the
-  workflow-packages lane, #57, which also makes a run pin the voluma commit
-  and the catalog name the workflow's directory). Python lives only in
+- Workflows and analysis code live in `workflows/`. A workflow is a
+  directory there with `workflow.md`, `agents/` and `skills/`, and a run
+  snapshots it: `workflows/microct-analysis` holds the generic micro-CT
+  skills, `workflows/mouse-oa` the mouse knee workflow (it arrives with the
+  workflow-packages lane, #57). Python lives only in
   `workflows/`, as skill resources: CLI scripts that take and return paths,
   never bytes. Their dependencies are
   `workflows/microct-analysis/requirements.txt`, compiled from `requirements.in`;
