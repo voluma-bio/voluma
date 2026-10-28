@@ -37,7 +37,7 @@ import {
 } from "./ids";
 import { evidenceRefSchema, outputReportSchema } from "./output";
 import { focusSchema } from "./review";
-import { workflowPinSchema, workflowPlanSchema } from "./workflow";
+import { recordedPinSchema, workflowPlanSchema } from "./workflow";
 
 const nonEmpty = z.string().min(1);
 
@@ -107,8 +107,8 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         attemptId: nonEmpty.optional(),
         /** The tool call in the parent thread that started this thread. */
         spawnedBy: nonEmpty.optional(),
-        /** Workflow packages the run is pinned to; set on the root thread only. */
-        workflows: z.array(workflowPinSchema).optional(),
+        /** The workflow files the run ran, with the commit the runner's checkout was at; required on the root thread, absent on child threads. */
+        workflows: z.array(recordedPinSchema).min(1).optional(),
         /**
          * The model this thread calls, as the runner names it: `provider/id`
          * (`meta/muse-spark-1.3`). Worker, check and chat threads call one and
@@ -120,6 +120,10 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
          * becomes required on those kinds.
          */
         model: modelRefSchema.optional(),
+      })
+      .refine((p) => p.parentThreadId !== null || p.workflows !== undefined, {
+        path: ["workflows"],
+        message: "the root thread records the workflows it ran",
       })
       .refine((p) => p.kind !== "supervisor" || p.model === undefined, {
         path: ["model"],

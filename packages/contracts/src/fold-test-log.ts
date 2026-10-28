@@ -66,6 +66,7 @@ export function log() {
     thread: (thread: string, kind: "worker" | "check" | "supervisor", attemptId?: string) =>
       add("thread.started", `${thread}:started`, thread, {
         parentThreadId: null,
+        workflows: [{ repo: "o/w", commit: "a".repeat(40) }],
         kind,
         ...(attemptId && { attemptId }),
       }),
