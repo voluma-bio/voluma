@@ -39,7 +39,7 @@ export function Follow({
   };
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col max-[1100px]:block">
+    <div className="relative flex min-h-72 flex-1 flex-col max-[1100px]:block">
       <div
         ref={ref}
         onScroll={onScroll}

@@ -8,7 +8,7 @@
  * are its mechanical steps and the feed shows them as such. The main thread has no message
  * events, so its thread transcript is its wakes plus the supervisor's own writes.
  */
-import type { RunEvent } from "@voluma/contracts/events";
+import type { ModelUsage, RunEvent } from "@voluma/contracts/events";
 import type { TaskStatus } from "@voluma/contracts/ids";
 import type { WorkflowPlan } from "@voluma/contracts/workflow";
 
@@ -26,6 +26,8 @@ export type Thread = {
   error?: string;
   toolCalls: number;
   toolErrors: number;
+  /** Sum of the model calls' usage so far; absent until one reports it. */
+  usage?: ModelUsage;
   /** The last few tool calls, oldest first; a call with no result yet is running. */
   recent: { callId: string; text: string; running: boolean; failed: boolean }[];
   /** The newest assistant text, for a thread that has made no tool call yet. */
@@ -49,6 +51,7 @@ export type ThreadItem =
       at: string;
       role: "user" | "assistant" | "system";
       text: string;
+      usage?: ModelUsage;
     }
   | {
       kind: "tool";
@@ -61,6 +64,22 @@ export type ThreadItem =
   | { kind: "event"; id: string; at: string; event: RunEvent };
 
 const RECENT = 3;
+
+export const addUsage = (a: ModelUsage | undefined, b: ModelUsage): ModelUsage => ({
+  input: (a?.input ?? 0) + b.input,
+  output: (a?.output ?? 0) + b.output,
+  cacheRead: (a?.cacheRead ?? 0) + b.cacheRead,
+  cacheWrite: (a?.cacheWrite ?? 0) + b.cacheWrite,
+  costUsd: (a?.costUsd ?? 0) + b.costUsd,
+});
+
+/** "12.3k in, 840 out, 85% cached, $0.04": the share cached is cacheRead of all input read. */
+export function usageLine(u: ModelUsage): string {
+  const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+  const read = u.input + u.cacheRead;
+  const cached = read > 0 ? `, ${Math.round((100 * u.cacheRead) / read)}% cached` : "";
+  return `${k(read)} in, ${k(u.output)} out${cached}, $${u.costUsd.toFixed(2)}`;
+}
 
 const ellipsis = (text: string, max: number) =>
   text.length > max ? `${text.slice(0, max - 1)}…` : text;
@@ -132,8 +151,10 @@ export function threadsOf(events: RunEvent[]): Thread[] {
         }
         break;
       case "message":
-        if (t && e.payload.role === "assistant" && e.payload.text)
-          t.said = ellipsis(e.payload.text, 140);
+        if (t && e.payload.role === "assistant") {
+          if (e.payload.text) t.said = ellipsis(e.payload.text, 140);
+          if (e.payload.usage) t.usage = addUsage(t.usage, e.payload.usage);
+        }
         break;
     }
   }
@@ -244,9 +265,15 @@ export function threadItemsOf(events: RunEvent[], threadId: string): ThreadItem[
     const base = { id: e.id, at: e.createdAt };
     switch (e.type) {
       case "message":
-        // A reply that only calls tools has empty text.
-        if (e.payload.text)
-          items.push({ ...base, kind: "message", role: e.payload.role, text: e.payload.text });
+        // A reply that only calls tools has empty text; it shows only for its usage.
+        if (e.payload.text || (e.payload.role === "assistant" && e.payload.usage))
+          items.push({
+            ...base,
+            kind: "message",
+            role: e.payload.role,
+            text: e.payload.text,
+            usage: e.payload.role === "assistant" ? e.payload.usage : undefined,
+          });
         break;
       case "tool.call": {
         const item: Extract<ThreadItem, { kind: "tool" }> = {

@@ -8,7 +8,7 @@ import { StatusBadge, type StatusTone } from "@voluma/ui";
 import { Bot, ChevronRight, Cog } from "lucide-react";
 import { Link } from "react-router";
 import { Clamp, clock, threadName } from "./parts";
-import type { FeedEntry, Thread, ThreadStatus } from "./run-feed";
+import { type FeedEntry, type Thread, type ThreadStatus, usageLine } from "./run-feed";
 import { taskTitle } from "./workflows";
 
 type Wake = Extract<RunEvent, { type: "wake" }>;
@@ -151,6 +151,11 @@ export function WakeCard({ event }: { event: Wake }) {
           Main thread
         </Link>
         <span className="font-mono text-meta opacity-80">{model}</span>
+        {event.payload.usage && (
+          <span className="text-meta tabular-nums opacity-80">
+            {usageLine(event.payload.usage)}
+          </span>
+        )}
       </div>
       <p className="mt-1 text-ui">{POINTS[point.kind](task)}</p>
       {error && <p className="mt-2 text-ui text-destructive">It did not answer: {error}</p>}

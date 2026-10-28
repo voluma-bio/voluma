@@ -7,7 +7,7 @@ import { Link } from "react-router";
 import { WakeCard } from "./feed";
 import { Follow } from "./follow";
 import { Clamp, clock, threadName } from "./parts";
-import { type Thread, type ThreadItem, threadItemsOf, toolSummary } from "./run-feed";
+import { type Thread, type ThreadItem, threadItemsOf, toolSummary, usageLine } from "./run-feed";
 import { taskTitle } from "./workflows";
 
 export function ThreadView({
@@ -31,6 +31,7 @@ export function ThreadView({
             {thread.model && <span className="font-mono">{thread.model}, </span>}
             {thread.status === "running" ? "working now" : thread.status}
             {thread.toolCalls > 0 && `, ${thread.toolCalls} tool calls`}
+            {thread.usage && `, ${usageLine(thread.usage)}`}
           </p>
         </div>
         <button
@@ -75,7 +76,15 @@ function Item({ item, all }: { item: ThreadItem; all: { value: boolean; n: numbe
   switch (item.kind) {
     case "message":
       return item.role === "assistant" ? (
-        <p className="whitespace-pre-wrap text-ui">{item.text}</p>
+        <div>
+          {item.text && <p className="whitespace-pre-wrap text-ui">{item.text}</p>}
+          {item.usage && (
+            <p className="text-meta text-fg-subtle tabular-nums">
+              {item.usage.cacheRead === 0 && "Cold, "}
+              {usageLine(item.usage)}
+            </p>
+          )}
+        </div>
       ) : (
         <details>
           <summary className="cursor-pointer text-meta text-muted-foreground">
