@@ -103,16 +103,33 @@ grid. Missing slices, uneven gaps, mixed frames and in-plane drift/gantry tilt
 disable 3D without disabling acquired slices. This does not establish acquisition
 completeness: a regularly subsampled series cannot reveal omitted source slices.
 
-Standard caps every axis at 256; Compact caps it at 128. The Float32 preview is
-therefore at most **64 MiB / 8 MiB** respectively. Small series use their native
-grid. Larger ones are visibly labelled **Downsampled**, with exact dimensions
-and voxel bytes shown before allocation. Trilinear interpolation preserves the
+**Full resolution** (the default) keeps the acquired grid, every voxel, with no
+interpolation. When every slice shares one increasing linear rescale (and the
+modality is not PT or RTDOSE), voxels hold the stored integers (Uint8/Uint16/Int16) rather
+than Float32: a half or a quarter of the bytes, and display maps intensities by range so the
+affine offset does not show. Otherwise voxels are Float32 modality values. Before
+allocation the panel shows dimensions, voxel bytes and type. Build is refused
+when WebGL2 is missing, an axis exceeds the browser's `MAX_3D_TEXTURE_SIZE`, or
+the estimated texture exceeds 2 GiB. The Cornerstone cache cap is raised to 256 MiB of slices **plus** the
+admitted volume while it exists, and restored on release.
+
+**Standard/Compact previews** cap every axis at 256/128 (Float32, at most
+64/8 MiB) and are labelled **Downsampled**. Trilinear interpolation preserves the
 first and last voxel centres in patient space, row/column spacing, orientation
 and modality rescale. This is display resampling, not an anti-aliased scientific
 reconstruction: small structures may disappear. There are no structure IDs,
 femur/tibia meshes or derived measurements.
 
-One bounded Float32 buffer backs the preview's local-image subarrays and GPU
+While dragging, ray sampling distance doubles and returns to full on release; the
+voxel grid never changes. Cornerstone 4.22 disables vtk.js half float, so 16-bit
+voxels upload as norm16 only where Cornerstone detects support, and otherwise as
+an R32F texture, converted one slice at a time. Admission therefore assumes 4 GPU
+bytes per 16-bit or Float32 voxel and refuses textures over 2 GiB; the panel shows
+that estimate when it exceeds the voxel bytes. vtk's `allocatedGPUMemoryInBytes`
+under-reports the R32F case. Prescale reversal is checked per voxel and the build
+fails rather than store a wrong integer.
+
+One voxel buffer backs the volume's local-image subarrays and GPU
 texture upload. The original DICOM Blobs remain available for slices. A displayed
 source slice plus a transient decoded slice and parsed dataset can also be live.
 Sampling consumes each contributing source slice once, in order, accumulating
@@ -129,11 +146,11 @@ Open `/runs/local` on the preview or local web app in Chrome with hardware
 acceleration enabled. Files stay in that browser, even when the app is served
 from an orb. Use a de-identified real scan within the intake caps:
 
-1. Open the ZIP and select the intended series. Choose Standard and build 3D.
+1. Open the ZIP and select the intended series. Keep Full resolution and build 3D.
 2. Drag to rotate, use arrow keys, zoom/reset and adjust intensity/opacity.
    Maximize/restore both viewports; check slice navigation still works.
 3. Expand **Performance**, choose **Measure rotation**, then **Save timings**.
-   Repeat maximized. Release 3D and repeat with Compact, then repeat from a
+   Repeat maximized. Release 3D and repeat with Standard and Compact, then repeat from a
    fresh page three times to separate cold starts from warm runs.
 4. Record scan dimensions and compressed/expanded sizes, browser/OS, GPU,
    display scaling and any visible stutter. Do not send patient identifiers.
@@ -143,7 +160,7 @@ from an orb. Use a de-identified real scan within the intake caps:
 
 The JSON contains dimensions, spacing, renderer, canvas pixels, DPR, build time,
 first render time, 24 sequential 15° rotation render latencies (p50/p95 and mean
-throughput), cache peak and a sampled JS heap peak where Chrome exposes it.
+throughput) at full and at drag sampling, cache peak and a sampled JS heap peak where Chrome exposes it.
 It contains no image pixels, filenames, patient identifiers or DICOM UIDs.
 First-visible time starts at Build, excludes ZIP intake, and ends at Cornerstone's
 render-complete event; it is not a GPU fence or a guarantee of compositor display.

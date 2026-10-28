@@ -5,6 +5,8 @@ export interface DicomSlice {
   file: Blob;
   position: Point3;
   frameOfReferenceUID?: string;
+  /** Stored pixel format and linear modality rescale, used to choose native 3D storage. */
+  stored: { bits: number; signed: boolean; slope: number; intercept: number };
 }
 
 export interface DicomSeries {

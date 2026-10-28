@@ -11,7 +11,7 @@ export type StructureDisplay = Record<string, { visible: boolean; opacity: numbe
 const views = [
   {
     id: "surface",
-    label: "3D preview",
+    label: "3D",
     axis: "",
     description: "No scan loaded",
     icon: Box,

@@ -205,6 +205,12 @@ async function readArchive(file: File): Promise<DicomArchive> {
               file: blob,
               position,
               frameOfReferenceUID: data.string("x00200052"),
+              stored: {
+                bits: stored,
+                signed: representation === 1,
+                slope: data.floatString("x00281053") ?? 1,
+                intercept: data.floatString("x00281052") ?? 0,
+              },
             });
           }
         }

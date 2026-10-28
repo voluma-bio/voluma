@@ -3,11 +3,14 @@ import { cache, init, type Types } from "@cornerstonejs/core";
 import { init as initDicom, wadouri } from "@cornerstonejs/dicom-image-loader";
 import type { DicomSeries } from "./dicom";
 
+/** Cornerstone cache budget for decoded source slices; a 3D volume is admitted on top. */
+export const sliceCacheBytes = 256 * 1024 * 1024;
+
 let initialization: Promise<void> | undefined;
 export function initializeDicom() {
   initialization ??= (async () => {
     await init();
-    cache.setMaxCacheSize(256 * 1024 * 1024);
+    cache.setMaxCacheSize(sliceCacheBytes);
     initDicom({ maxWebWorkers: 2 });
   })();
   return initialization;

@@ -1,8 +1,12 @@
-/** Geometry and bounded trilinear resampling for display, never segmentation or measurement. */
+/** Volume geometry, native-grid copy and bounded trilinear resampling for display, never segmentation or measurement. */
+import type { Types } from "@cornerstonejs/core";
 import type { DicomSeries, Point3 } from "./dicom";
 import type { DicomSession } from "./dicomSession";
 
-export function planVolume(series: DicomSeries, limit: 128 | 256) {
+/** Native grid, or a cap on voxels per axis. */
+export type VolumeSize = "full" | 256 | 128;
+
+export function planVolume(series: DicomSeries, size: VolumeSize) {
   const source: Point3 = [series.columns, series.rows, series.slices.length];
   const first = series.slices[0];
   const last = series.slices.at(-1);
@@ -45,9 +49,33 @@ export function planVolume(series: DicomSeries, limit: 128 | 256) {
     throw new Error(
       "3D requires regular spacing without missing slices or in-plane drift. This series can still be viewed as acquired slices.",
     );
-  const factor = Math.max(1, ...source.map((n) => (n - 1) / (limit - 1)));
+  const factor = size === "full" ? 1 : Math.max(1, ...source.map((n) => (n - 1) / (size - 1)));
   const dimensions = source.map((n) => Math.max(2, Math.floor((n - 1) / factor) + 1)) as Point3;
   const steps = axes.map((axis) => (source[axis] - 1) / (dimensions[axis] - 1)) as Point3;
+  // The native grid keeps stored integers when every slice shares one increasing
+  // linear rescale: 1 or 2 bytes per voxel instead of 4, and display maps
+  // intensities by range, so the affine offset is invisible. Otherwise (and for
+  // interpolated previews) voxels are Float32 modality values.
+  const { signed, slope, intercept } = first.stored;
+  const stored =
+    factor === 1 &&
+    // The loader's PT (SUV) and RTDOSE (dose grid) prescale is not the rescale.
+    !["PT", "RTDOSE"].includes(series.modality) &&
+    Number.isFinite(slope) &&
+    Number.isFinite(intercept) &&
+    slope > 0 &&
+    series.slices.every(
+      (s) =>
+        s.stored.signed === signed && s.stored.slope === slope && s.stored.intercept === intercept,
+    );
+  const bits = Math.max(...series.slices.map((s) => s.stored.bits));
+  const ArrayType = !stored
+    ? Float32Array
+    : signed
+      ? Int16Array
+      : bits <= 8
+        ? Uint8Array
+        : Uint16Array;
   const spacing: Point3 = [
     (series.spacing[1] as number) * steps[0],
     (series.spacing[0] as number) * steps[1],
@@ -70,7 +98,10 @@ export function planVolume(series: DicomSeries, limit: 128 | 256) {
       number,
       number,
     ],
-    bytes: dimensions[0] * dimensions[1] * dimensions[2] * 4,
+    ArrayType,
+    /** Voxels hold stored pixel values, not modality units (same order, linear). */
+    stored,
+    bytes: dimensions[0] * dimensions[1] * dimensions[2] * ArrayType.BYTES_PER_ELEMENT,
     downsampled: factor > 1,
   };
 }
@@ -89,9 +120,51 @@ export async function sampleVolume(
     dimensions: [width, height, depth],
     steps,
   } = plan;
-  const scalarData = new Float32Array(width * height * depth);
+  const scalarData = new plan.ArrayType(width * height * depth);
   let min = Infinity;
   let max = -Infinity;
+  const finishPlane = async (z: number) => {
+    for (let i = z * width * height; i < (z + 1) * width * height; i++) {
+      const value = scalarData[i] as number;
+      if (!Number.isFinite(value)) throw new Error("Invalid decoded intensity");
+      min = Math.min(min, value);
+      max = Math.max(max, value);
+    }
+    progress(z + 1);
+    // Allow cancel, slice navigation and progress to paint between planes.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  };
+  if (!plan.downsampled) {
+    // Native grid: copy each slice once, no interpolation.
+    for (let z = 0; z < depth; z++) {
+      signal.throwIfAborted();
+      await session.read(z, (image) => {
+        signal.throwIfAborted();
+        const { pixels, slope, intercept } = intensities(image);
+        const scaled = !!image.preScale?.scaled;
+        const plane = scalarData.subarray(z * width * height, (z + 1) * width * height);
+        for (let i = 0; i < plane.length; i++) {
+          const v = pixels[i] as number;
+          // Undo the decoder's prescale to recover the stored integer. Float32
+          // can't resolve it when the slope is below the value's precision.
+          const value = !plan.stored
+            ? v * slope + intercept
+            : scaled
+              ? Math.round((v - image.intercept) / image.slope)
+              : v;
+          plane[i] = value;
+          if (
+            plan.stored &&
+            (plane[i] !== value ||
+              (scaled && Math.fround(value * image.slope + image.intercept) !== v))
+          )
+            throw new Error("Stored intensity could not be recovered exactly");
+        }
+      });
+      await finishPlane(z);
+    }
+    return { scalarData, min, max: Math.max(max, min + 1) };
+  }
   const contributions = Array.from(
     { length: source[2] },
     () => [] as { z: number; weight: number; last: boolean }[],
@@ -110,12 +183,7 @@ export async function sampleVolume(
     if (!planes.length) continue;
     await session.read(slice, async (image) => {
       signal.throwIfAborted();
-      if (image.modalityLUT) throw new Error("Nonlinear modality LUT is not supported for 3D");
-      const pixels = image.getPixelData();
-      const slope = image.preScale?.scaled ? 1 : image.slope;
-      const intercept = image.preScale?.scaled ? 0 : image.intercept;
-      if (!Number.isFinite(slope) || !Number.isFinite(intercept))
-        throw new Error("Invalid intensity transform");
+      const { pixels, slope, intercept } = intensities(image);
       for (const { z, weight, last } of planes) {
         signal.throwIfAborted();
         for (let y = 0; y < height; y++) {
@@ -140,18 +208,19 @@ export async function sampleVolume(
               ((a * (1 - fy) + b * fy) * slope + intercept) * weight;
           }
         }
-        if (!last) continue;
-        for (let i = z * width * height; i < (z + 1) * width * height; i++) {
-          const value = scalarData[i] as number;
-          if (!Number.isFinite(value)) throw new Error("Invalid decoded intensity");
-          min = Math.min(min, value);
-          max = Math.max(max, value);
-        }
-        progress(z + 1);
-        // Allow cancel, slice navigation and progress to paint between planes.
-        await new Promise((resolve) => setTimeout(resolve, 0));
+        if (last) await finishPlane(z);
       }
     });
   }
   return { scalarData, min, max: Math.max(max, min + 1) };
+}
+
+/** Pixels plus the modality transform still to apply (none if the decoder prescaled). */
+function intensities(image: Types.IImage) {
+  if (image.modalityLUT) throw new Error("Nonlinear modality LUT is not supported for 3D");
+  const slope = image.preScale?.scaled ? 1 : image.slope;
+  const intercept = image.preScale?.scaled ? 0 : image.intercept;
+  if (!Number.isFinite(slope) || !Number.isFinite(intercept))
+    throw new Error("Invalid intensity transform");
+  return { pixels: image.getPixelData(), slope, intercept };
 }
