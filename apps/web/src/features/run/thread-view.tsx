@@ -2,12 +2,12 @@
 import type { RunEvent } from "@voluma/contracts/events";
 import { StatusBadge } from "@voluma/ui";
 import { X } from "lucide-react";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { WakeCard } from "./feed";
+import { Follow } from "./follow";
 import { Clamp, clock, threadName } from "./parts";
 import { type Thread, type ThreadItem, threadItemsOf, toolSummary } from "./run-feed";
-import { useStickToBottom } from "./stick";
 import { taskTitle } from "./workflows";
 
 export function ThreadView({
@@ -20,7 +20,8 @@ export function ThreadView({
   closeTo: string;
 }) {
   const items = useMemo(() => threadItemsOf(events, thread.id), [events, thread.id]);
-  const scroller = useStickToBottom<HTMLDivElement>(items.length, thread.id);
+  // `n` changes on each click so every tool row re-reads `value`.
+  const [all, setAll] = useState<{ value: boolean; n: number }>({ value: false, n: 0 });
   return (
     <aside className="flex min-h-0 flex-col rounded-xl border border-border bg-card max-[1100px]:min-h-[60dvh]">
       <header className="flex items-start gap-3 border-b border-border px-4 py-3">
@@ -32,6 +33,13 @@ export function ThreadView({
             {thread.toolCalls > 0 && `, ${thread.toolCalls} tool calls`}
           </p>
         </div>
+        <button
+          type="button"
+          onClick={() => setAll({ value: !all.value, n: all.n + 1 })}
+          className="rounded-md px-2 py-1 text-meta text-primary-text hover:bg-accent"
+        >
+          {all.value ? "Collapse all" : "Expand all"}
+        </button>
         <Link
           to={closeTo}
           aria-label="Close thread"
@@ -40,7 +48,7 @@ export function ThreadView({
           <X size={18} aria-hidden="true" />
         </Link>
       </header>
-      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+      <Follow changes={items} resetKey={thread.id} className="px-4 py-3">
         {items.length === 0 ? (
           <p className="text-ui text-muted-foreground">Nothing has happened in this thread yet.</p>
         ) : (
@@ -53,17 +61,17 @@ export function ThreadView({
                 >
                   {clock(item.at)}
                 </time>
-                <Item item={item} />
+                <Item item={item} all={all} />
               </li>
             ))}
           </ol>
         )}
-      </div>
+      </Follow>
     </aside>
   );
 }
 
-function Item({ item }: { item: ThreadItem }) {
+function Item({ item, all }: { item: ThreadItem; all: { value: boolean; n: number } }) {
   switch (item.kind) {
     case "message":
       return item.role === "assistant" ? (
@@ -79,20 +87,34 @@ function Item({ item }: { item: ThreadItem }) {
         </details>
       );
     case "tool":
-      return <ToolRow item={item} />;
+      return <ToolRow item={item} all={all} />;
     case "event":
       return <EventRow event={item.event} />;
   }
 }
 
-function ToolRow({ item }: { item: Extract<ThreadItem, { kind: "tool" }> }) {
+function ToolRow({
+  item,
+  all,
+}: {
+  item: Extract<ThreadItem, { kind: "tool" }>;
+  all: { value: boolean; n: number };
+}) {
   const { result } = item;
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (all.n > 0) setOpen(all.value);
+  }, [all.n]);
   const input =
     item.name === "bash" && typeof (item.input as { command?: unknown })?.command === "string"
       ? (item.input as { command: string }).command
       : JSON.stringify(item.input, null, 2);
   return (
-    <details open={result?.isError} className="rounded-md border border-border">
+    <details
+      open={open || result?.isError}
+      onToggle={(e) => setOpen(e.currentTarget.open)}
+      className="rounded-md border border-border"
+    >
       <summary className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-meta">
         <span className="font-mono font-medium">{item.name}</span>
         <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground">

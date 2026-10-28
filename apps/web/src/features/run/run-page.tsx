@@ -14,11 +14,19 @@ import { Button } from "@voluma/ui";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useOutletContext, useParams, useSearchParams } from "react-router";
 import { Feed } from "./feed";
+import { Follow } from "./follow";
 import { KeysForm } from "./keys";
-import { feedOf, latestThreadByTask, planOf, threadsOf } from "./run-feed";
+import { Lanes } from "./lanes";
+import {
+  feedOf,
+  latestThreadByTask,
+  planOf,
+  type TaskState,
+  taskStates,
+  threadsOf,
+} from "./run-feed";
 import { RunBadge, runStatus } from "./status";
-import { useStickToBottom } from "./stick";
-import { TaskRail } from "./task-rail";
+import { TaskGraph } from "./task-graph";
 import { ThreadView } from "./thread-view";
 import { workflowName } from "./workflows";
 
@@ -69,7 +77,7 @@ export function RunPage() {
   const threads = useMemo(() => threadsOf(events), [events]);
   const threadById = useMemo(() => new Map(threads.map((t) => [t.id, t])), [threads]);
   const entries = useMemo(() => feedOf(events), [events]);
-  const feedRef = useStickToBottom<HTMLDivElement>(entries.length, id);
+  const [hover, setHover] = useState<string | null>(null);
 
   if (run.isPending) return <Message>Loading run…</Message>;
   if (run.isError) {
@@ -87,6 +95,10 @@ export function RunPage() {
 
   const data = run.data;
   const plan = planOf(events);
+  const states = plan
+    ? taskStates(plan, new Map(folded.tasks.map((t) => [t.id, t.status])))
+    : new Map<string, TaskState>();
+  const threadByTask = latestThreadByTask(threads);
   const openId = params.get("thread");
   const open = openId ? threadById.get(openId) : undefined;
   const setRun = (next: Run) => queryClient.setQueryData(["run", id], next);
@@ -111,35 +123,49 @@ export function RunPage() {
 
       <div
         className={`mt-4 grid min-h-0 flex-1 gap-5 max-[1100px]:block ${
-          openId
-            ? "grid-cols-[15rem_minmax(0,1fr)_minmax(26rem,38rem)]"
-            : "grid-cols-[15rem_minmax(0,1fr)]"
+          openId ? "grid-cols-[minmax(0,1fr)_minmax(26rem,38rem)]" : "grid-cols-[minmax(0,1fr)]"
         }`}
       >
-        <div className={`min-h-0 overflow-y-auto ${openId ? "max-[1100px]:hidden" : ""}`}>
-          <TaskRail
-            plan={plan}
-            folded={folded.tasks}
-            threadByTask={latestThreadByTask(threads)}
-            openThread={openId}
-            ended={ended}
-          />
-        </div>
         <div
-          ref={feedRef}
-          className={`min-h-0 overflow-y-auto max-[1100px]:mt-4 max-[1100px]:overflow-visible ${
+          className={`flex min-h-0 min-w-0 flex-col gap-4 max-[1100px]:block max-[1100px]:space-y-4 ${
             openId ? "max-[1100px]:hidden" : ""
           }`}
         >
-          {entries.length === 0 ? (
+          {plan ? (
+            <TaskGraph
+              plan={plan}
+              states={states}
+              threadByTask={threadByTask}
+              openThread={openId}
+              hover={hover}
+              onHover={setHover}
+            />
+          ) : (
             <p className="text-ui text-muted-foreground">
               {ended
-                ? "This run ended before it started."
-                : "The run's story appears here once it starts."}
+                ? "This run ended before it made a plan."
+                : "The task list appears when the run starts."}
             </p>
-          ) : (
-            <Feed entries={entries} threads={threadById} openThread={openId} />
           )}
+          <Lanes
+            threads={threads.filter((t) => t.status === "running" && t.kind !== "supervisor")}
+            openThread={openId}
+            hover={hover}
+          />
+          <Follow changes={entries.length} resetKey={id}>
+            {entries.length === 0 ? (
+              <p className="text-ui text-muted-foreground">
+                {ended
+                  ? "This run ended before it started."
+                  : "The run's story appears here once it starts."}
+              </p>
+            ) : (
+              <>
+                <h2 className="mb-2 text-ui font-medium">The run so far</h2>
+                <Feed entries={entries} threads={threadById} openThread={openId} hover={hover} />
+              </>
+            )}
+          </Follow>
         </div>
         {openId &&
           (open ? (

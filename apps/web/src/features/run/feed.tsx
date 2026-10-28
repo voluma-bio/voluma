@@ -19,10 +19,12 @@ export function Feed({
   entries,
   threads,
   openThread,
+  hover,
 }: {
   entries: FeedEntry[];
   threads: Map<string, Thread>;
   openThread: string | null;
+  hover: string | null;
 }) {
   return (
     <ol className="grid gap-3">
@@ -36,7 +38,11 @@ export function Feed({
             >
               {clock(entry.at)}
             </time>
-            <Entry entry={entry} thread={thread} selected={thread?.id === openThread} />
+            <div
+              className={`min-w-0 transition-opacity ${hover !== null && thread?.taskId !== hover && entry.kind === "thread" ? "opacity-40" : ""}`}
+            >
+              <Entry entry={entry} thread={thread} selected={thread?.id === openThread} />
+            </div>
           </li>
         );
       })}
@@ -190,10 +196,9 @@ function ThreadCard({ thread, selected }: { thread: Thread; selected: boolean })
         </StatusBadge>
         <ChevronRight size={16} className="text-fg-subtle" aria-hidden="true" />
       </div>
-      {thread.latest && (
+      {thread.status === "running" && thread.recent.at(-1) && (
         <p className="mt-2 truncate font-mono text-meta text-muted-foreground">
-          {thread.latest.running && thread.status === "running" ? "Running " : ""}
-          {thread.latest.text}
+          {thread.recent.at(-1)?.text}
         </p>
       )}
       <p className="mt-1 text-meta text-fg-subtle">

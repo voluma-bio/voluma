@@ -9,6 +9,7 @@
  * events, so its thread transcript is its wakes plus the supervisor's own writes.
  */
 import type { RunEvent } from "@voluma/contracts/events";
+import type { TaskStatus } from "@voluma/contracts/ids";
 import type { WorkflowPlan } from "@voluma/contracts/workflow";
 
 type Ev<T extends RunEvent["type"]> = Extract<RunEvent, { type: T }>;
@@ -25,8 +26,10 @@ export type Thread = {
   error?: string;
   toolCalls: number;
   toolErrors: number;
-  /** The newest tool call, or the newest assistant text when there has been no call. */
-  latest?: { text: string; running: boolean };
+  /** The last few tool calls, oldest first; a call with no result yet is running. */
+  recent: { callId: string; text: string; running: boolean; failed: boolean }[];
+  /** The newest assistant text, for a thread that has made no tool call yet. */
+  said?: string;
 };
 
 export type FeedEntry =
@@ -57,6 +60,8 @@ export type ThreadItem =
     }
   | { kind: "event"; id: string; at: string; event: RunEvent };
 
+const RECENT = 3;
+
 const ellipsis = (text: string, max: number) =>
   text.length > max ? `${text.slice(0, max - 1)}…` : text;
 
@@ -80,7 +85,6 @@ const supervisorId = (events: RunEvent[]) =>
 /** Every thread the run has started, in start order. */
 export function threadsOf(events: RunEvent[]): Thread[] {
   const threads = new Map<string, Thread>();
-  const pending = new Map<string, Set<string>>();
   for (const e of events) {
     const t = threads.get(e.threadId);
     switch (e.type) {
@@ -96,6 +100,7 @@ export function threadsOf(events: RunEvent[]): Thread[] {
             status: "running",
             toolCalls: 0,
             toolErrors: 0,
+            recent: [],
           });
         break;
       case "thread.ended":
@@ -107,25 +112,28 @@ export function threadsOf(events: RunEvent[]): Thread[] {
       case "tool.call":
         if (t) {
           t.toolCalls++;
-          t.latest = {
+          t.recent.push({
+            callId: e.payload.toolCallId,
             text: `${e.payload.name} ${toolSummary(e.payload.name, e.payload.input)}`,
             running: true,
-          };
-          const open = pending.get(e.threadId) ?? new Set();
-          open.add(e.payload.toolCallId);
-          pending.set(e.threadId, open);
+            failed: false,
+          });
+          if (t.recent.length > RECENT) t.recent.shift();
         }
         break;
       case "tool.result":
         if (t) {
           if (e.payload.isError) t.toolErrors++;
-          pending.get(e.threadId)?.delete(e.payload.toolCallId);
-          if (t.latest) t.latest.running = (pending.get(e.threadId)?.size ?? 0) > 0;
+          const call = t.recent.find((c) => c.callId === e.payload.toolCallId);
+          if (call) {
+            call.running = false;
+            call.failed = e.payload.isError;
+          }
         }
         break;
       case "message":
-        if (t && e.payload.role === "assistant" && e.payload.text && !t.latest)
-          t.latest = { text: ellipsis(e.payload.text, 140), running: false };
+        if (t && e.payload.role === "assistant" && e.payload.text)
+          t.said = ellipsis(e.payload.text, 140);
         break;
     }
   }
@@ -266,4 +274,62 @@ export function threadItemsOf(events: RunEvent[], threadId: string): ThreadItem[
     }
   }
   return items;
+}
+
+export type TaskState =
+  | "running"
+  | "checking"
+  | "done"
+  | "to-check"
+  | "failed"
+  /** Not started, and every task it builds on is done. */
+  | "ready"
+  /** Not started, and a task it builds on is not done. */
+  | "waiting";
+
+/** Where each task stands, from the fold's statuses and the plan's dependencies. */
+export function taskStates(
+  plan: WorkflowPlan,
+  statuses: Map<string, TaskStatus | undefined>,
+): Map<string, TaskState> {
+  const states = new Map<string, TaskState>();
+  for (const t of plan.tasks) {
+    const status = statuses.get(t.id);
+    const blocked = t.dependsOn.some((d) => statuses.get(d) !== "done");
+    states.set(
+      t.id,
+      status === "in-progress"
+        ? "running"
+        : status === "under-review"
+          ? "checking"
+          : status === "done" || status === "to-check" || status === "failed"
+            ? status
+            : blocked
+              ? "waiting"
+              : "ready",
+    );
+  }
+  return states;
+}
+
+export type GraphNode = { id: string; level: number; row: number; dependsOn: string[] };
+
+/** Plan tasks placed in columns by dependency depth, rows in plan order. */
+export function layoutPlan(plan: WorkflowPlan): GraphNode[] {
+  const level = new Map<string, number>();
+  const depth = (id: string): number => {
+    const known = level.get(id);
+    if (known !== undefined) return known;
+    const task = plan.tasks.find((t) => t.id === id);
+    const d = task && task.dependsOn.length > 0 ? 1 + Math.max(...task.dependsOn.map(depth)) : 0;
+    level.set(id, d);
+    return d;
+  };
+  const rows = new Map<number, number>();
+  return plan.tasks.map((t) => {
+    const l = depth(t.id);
+    const row = rows.get(l) ?? 0;
+    rows.set(l, row + 1);
+    return { id: t.id, level: l, row, dependsOn: t.dependsOn };
+  });
 }
