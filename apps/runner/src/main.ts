@@ -1,7 +1,7 @@
 /**
  * The runner: runs one Pi agent thread on one task, with `bash` as its only tool, in a
  * Modal sandbox created on the first command. Everything is recorded through the API
- * (events and Pi messages) and printed. Ctrl-C aborts the running command and ends the
+ * (events and Pi messages) and printed. Ctrl-C (or SIGTERM, SIGHUP) aborts the running command and ends the
  * thread as cancelled; running again with the same --run and --thread resumes it. A
  * thread that already finished does nothing until given a new message with --input.
  *
@@ -25,7 +25,7 @@ import { recorder } from "@voluma/harness/recorder";
 import { sandboxSession } from "@voluma/harness/sandbox-session";
 import { bashTool } from "@voluma/harness/tools/bash";
 import { optional, required } from "./config.ts";
-import { createModalSandbox } from "./modal-sandbox.ts";
+import { createModalSandbox, RUNS_APP } from "./modal-sandbox.ts";
 
 const { values } = parseArgs({
   options: {
@@ -75,7 +75,7 @@ const events = recorder(
 const modalTokenId = optional("MODAL_TOKEN_ID");
 const modalTokenSecret = optional("MODAL_TOKEN_SECRET");
 const createSandbox = createModalSandbox({
-  appName: "voluma-runs",
+  appName: RUNS_APP,
   modal:
     modalTokenId && modalTokenSecret
       ? { tokenId: modalTokenId, tokenSecret: modalTokenSecret }
@@ -95,19 +95,30 @@ const sandbox = sandboxSession(
       image: optional("VOLUMA_SANDBOX_IMAGE") ?? "voluma-microct",
       cpu: 2,
       memoryMiB: 4096,
-      lifetimeSeconds: 3600,
-      idleSeconds: 900,
+      lifetimeSeconds: Number(optional("VOLUMA_SANDBOX_LIFETIME_SECONDS") ?? 3600),
+      idleSeconds: 300,
       mounts: layout.mounts,
     }),
   (id, state, detail) => events.emit(id, "sandbox", { name: "main", state, detail }),
 );
 
 const abort = new AbortController();
-process.on("SIGINT", () => {
-  if (abort.signal.aborted) process.exit(130);
-  console.error("\ninterrupted: stopping the running command (Ctrl-C again to quit now)");
-  abort.abort();
-});
+// First SIGINT/SIGTERM/SIGHUP stops the running command; the `finally` below then closes the
+// sandbox. A second one closes the sandbox now, bounded, and exits.
+const FORCE_CLOSE_MS = 5000;
+for (const name of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+  process.on(name, () => {
+    if (abort.signal.aborted) {
+      console.error(`\n${name}: closing the sandbox and quitting`);
+      void Promise.race([sandbox.close(), new Promise((done) => setTimeout(done, FORCE_CLOSE_MS))])
+        .catch(() => {})
+        .finally(() => process.exit(130));
+      return;
+    }
+    console.error(`\n${name}: stopping the running command (signal again to quit now)`);
+    abort.abort();
+  });
+}
 
 console.log(`run ${runId}  thread ${threadId}  model ${provider}/${modelId}`);
 try {
@@ -139,8 +150,11 @@ try {
   );
   process.exitCode = outcome.status === "completed" ? 0 : 1;
 } finally {
-  await sandbox.close();
-  await events.flush();
+  try {
+    await sandbox.close();
+  } finally {
+    await events.flush();
+  }
 }
 
 function printEvent(event: Parameters<typeof api.append>[0]): void {

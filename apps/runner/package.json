@@ -6,6 +6,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "run-task": "tsx src/main.ts",
+    "sandboxes:clean": "tsx src/sandboxes-clean.ts",
     "publish-image": "tsx src/publish-image.ts"
   },
   "dependencies": {
