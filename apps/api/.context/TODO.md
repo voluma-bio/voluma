@@ -5,7 +5,8 @@
   fresh local Postgres, run the app against the copy. Proves the "portable Postgres" rule.
 - **Scheduled `pg_dump` to R2**, so backups don't depend on Railway.
 - **Move the service settings into `.railway/railway.ts`** (Railway's Infrastructure as
-  Code; applied with the CLI's `railway config plan` and `apply`, not on deploy). Today
-  they exist only on the service, recorded in [deploy.md](deploy.md).
-- **Switch `@voluma/api` to the `main` branch** once the PR that adds this lands (it was
-  deployed from the PR branch to verify it).
+  Code, GA; applied with `railway config plan` then `apply`, not on deploy; project tokens
+  work with `RAILWAY_TOKEN`). Unblocked. Move the build, pre-deploy, start, healthcheck,
+  draining, restart, sleeping and watch-path settings and the `DATABASE_URL` reference from
+  [deploy.md](deploy.md)'s tables; leave secret values (`VOLUMA_API_TOKEN`) on the service.
+  Then shrink those tables to a pointer. Until then they exist only on the service and drift.

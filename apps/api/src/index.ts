@@ -5,7 +5,7 @@
  * Everything is under /api/. When apps/web/dist exists (after `pnpm --filter @voluma/web
  * build`) it also serves the built web app, with an SPA fallback.
  *
- * Start: `node --import tsx apps/api/src/index.ts` (not through pnpm, so node
+ * Start: `cd apps/api && node --import tsx src/index.ts` (tsx resolves only from there; not through pnpm, so node
  * receives SIGTERM; tsx because relative imports have no extensions).
  * Env: DATABASE_URL, VOLUMA_API_TOKEN, PORT, and optionally HOST (`pnpm dev` sets them;
  * see tools/dev.mjs). Fails at startup if the database is unreachable or not migrated.
@@ -57,9 +57,10 @@ if (existsSync(webDist)) {
   const files = serveStatic({ root: webDist, onFound });
   const spa = serveStatic({ root: webDist, path: "index.html", onFound });
   app.get("*", (c, next) => (isApi(c.req.path) ? next() : files(c, next)));
-  // The app shell for client-side routes; a missing /assets/ file is a real 404.
+  // The app shell for client-side routes, which have no extension; a missing file
+  // (/favicon.ico, /assets/x.js) is a real 404.
   app.get("*", (c, next) =>
-    isApi(c.req.path) || c.req.path.startsWith("/assets/") ? next() : spa(c, next),
+    isApi(c.req.path) || /\.[^/]+$/.test(c.req.path) ? next() : spa(c, next),
   );
 }
 app.notFound((c) =>
@@ -82,7 +83,7 @@ const server = serve(
   ({ address, port }) => console.log(`api listening on ${address}:${port}`),
 );
 
-// Stay under the host's drain period (drainingSeconds in railway.json).
+// Stay under the host's drain period (Railway's draining period, 30 s: apps/api/.context/deploy.md).
 const DRAIN_MS = 10_000;
 let stopping = false;
 process.once("SIGTERM", shutdown);
