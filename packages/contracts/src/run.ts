@@ -24,12 +24,14 @@
  *     reads are also filtered to the caller: a run when `startedBy` is the
  *     caller's `userId` or the run is an `example`; an input when `uploadedBy`
  *     is the caller or it is the org's reference scan (`source: "reference"`),
- *     which every reader of the org can read, list and start on. Scope `lab`
+ *     which every reader of the org can read, list and start on, so it must be
+ *     cleared for public use in an org that has guests. Scope `lab`
  *     sees the org.
  *   - Example runs are read-only to everyone. Only server-side seeding (an
  *     operator script, under a dedicated operator id) sets `example`, never
  *     `startRun` or a fork, and it never changes afterwards; to change an
- *     example, re-seed it. A correction on one never changes it: the server
+ *     example, re-seed it. An example always reads its org's reference scan.
+ *     A correction on one never changes it: the server
  *     creates the caller's own run with `forkedFrom` set (the corrections
  *     contract), which reads the same input. One caller has at most one fork
  *     per example; later corrections apply to it.
@@ -155,9 +157,8 @@ export const runSchema = z.object({
   credentials: z.enum(["voluma", "visitor"]),
   /**
    * A shared, read-only run every caller in the org can read, even under
-   * `self`, set only by seeding (see the header). Its input reaches every
-   * visitor, who can also start runs on it with their own sandbox, so an
-   * example's scan must be cleared for public use.
+   * `self`, set only by seeding (see the header). It always reads its org's
+   * reference scan.
    */
   example: z.boolean(),
   /** The example run this one was forked from by a correction on it; null for a fresh run. */
