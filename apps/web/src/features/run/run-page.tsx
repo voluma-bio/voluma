@@ -36,7 +36,15 @@ import {
 } from "./run-model";
 import { RunBadge, runStatus } from "./status";
 import { TaskGraph } from "./task-graph";
-import { applyFrame, type Live, mainRows, noLive, settle, threadRows } from "./transcript";
+import {
+  applyFrame,
+  type Live,
+  mainRows,
+  noLive,
+  type Settled,
+  settle,
+  threadRows,
+} from "./transcript";
 import { TranscriptView } from "./transcript-view";
 import { workflowName } from "./workflows";
 
@@ -54,6 +62,7 @@ function useRunStream(runId: string, onClosed: () => void): { events: RunEvent[]
   useEffect(() => {
     const events: RunEvent[] = [];
     let live = noLive;
+    const settled: Settled = new Set();
     let frame: number | undefined;
     const publish = () => {
       frame = undefined;
@@ -65,11 +74,11 @@ function useRunStream(runId: string, onClosed: () => void): { events: RunEvent[]
     const stop = subscribe(runId, {
       onEvent: (event) => {
         events.push(event);
-        live = settle(live, event);
+        live = settle(live, event, settled);
         schedule();
       },
       onLive: (f) => {
-        const next = applyFrame(live, f);
+        const next = applyFrame(live, f, settled);
         if (next === live) return;
         live = next;
         schedule();

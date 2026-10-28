@@ -34,34 +34,54 @@ export type Live = {
 };
 export const noLive: Live = { replies: new Map(), calls: new Map(), outputs: new Map() };
 
-/** Appends a frame where its `offset` fits what is held; a frame that doesn't fit is dropped. */
-export function applyFrame(live: Live, f: LiveFrame): Live {
+/**
+ * Keys of the partials whose durable event has landed. Frames can trail that event by a batch
+ * (`tool.output` after `tool.result` is common), and a trailing frame must not start a partial
+ * again. Owned by the stream and only grown, so it is not copied per event.
+ */
+export type Settled = Set<string>;
+const replyKey = (id: string) => `reply:${id}`;
+const callKey = (id: string) => `call:${id}`;
+const outputKey = (id: string) => `output:${id}`;
+
+/**
+ * Appends a frame where its `offset` continues what is held. A frame at offset 0 starts the
+ * partial over (a wake asked again after a runner restart reuses its id); any other gap means
+ * frames were dropped, so the partial is dropped until its durable event lands.
+ */
+export function applyFrame(live: Live, f: LiveFrame, settled: Settled): Live {
   switch (f.type) {
     case "text.delta":
     case "reasoning.delta": {
-      const held = live.replies.get(f.messageId) ?? {
-        threadId: f.threadId,
-        text: "",
-        reasoning: "",
-      };
+      if (settled.has(replyKey(f.messageId))) return live;
       const field = f.type === "text.delta" ? "text" : "reasoning";
-      if (held[field].length !== f.offset) return live;
+      const held = live.replies.get(f.messageId);
       const replies = new Map(live.replies);
-      replies.set(f.messageId, { ...held, [field]: held[field] + f.text });
+      if (f.offset === 0) {
+        const blank = { threadId: f.threadId, text: "", reasoning: "" };
+        replies.set(f.messageId, { ...(held ?? blank), [field]: f.text });
+      } else if (held && held[field].length === f.offset) {
+        replies.set(f.messageId, { ...held, [field]: held[field] + f.text });
+      } else if (held) {
+        replies.delete(f.messageId);
+      } else return live;
       return { ...live, replies };
     }
     case "tool.arguments.delta": {
-      const held = live.calls.get(f.toolCallId) ?? {
-        threadId: f.threadId,
-        messageId: f.messageId,
-        args: "",
-      };
-      if (held.args.length !== f.offset) return live;
+      if (settled.has(callKey(f.toolCallId))) return live;
+      const held = live.calls.get(f.toolCallId);
       const calls = new Map(live.calls);
-      calls.set(f.toolCallId, { ...held, args: held.args + f.text });
+      if (f.offset === 0) {
+        calls.set(f.toolCallId, { threadId: f.threadId, messageId: f.messageId, args: f.text });
+      } else if (held && held.args.length === f.offset) {
+        calls.set(f.toolCallId, { ...held, args: held.args + f.text });
+      } else if (held) {
+        calls.delete(f.toolCallId);
+      } else return live;
       return { ...live, calls };
     }
     case "tool.output": {
+      if (settled.has(outputKey(f.toolCallId))) return live;
       const outputs = new Map(live.outputs);
       outputs.set(f.toolCallId, (live.outputs.get(f.toolCallId) ?? "") + f.text);
       return { ...live, outputs };
@@ -69,8 +89,11 @@ export function applyFrame(live: Live, f: LiveFrame): Live {
   }
 }
 
-/** Drops what a durable event completes; returns `live` itself when nothing changed. */
-export function settle(live: Live, e: RunEvent): Live {
+/**
+ * Drops what a durable event completes and records it in `settled`; returns `live` itself when
+ * nothing changed.
+ */
+export function settle(live: Live, e: RunEvent, settled: Settled): Live {
   const drop = <V>(map: ReadonlyMap<string, V>, keep: (k: string, v: V) => boolean) => {
     let next: Map<string, V> | undefined;
     for (const [k, v] of map)
@@ -83,9 +106,18 @@ export function settle(live: Live, e: RunEvent): Live {
   let replies: Map<string, LiveReply> | undefined;
   let calls: Map<string, LiveCall> | undefined;
   let outputs: Map<string, string> | undefined;
-  if (e.type === "message" || e.type === "wake") replies = drop(live.replies, (k) => k !== e.id);
-  if (e.type === "tool.call") calls = drop(live.calls, (k) => k !== e.payload.toolCallId);
-  if (e.type === "tool.result") outputs = drop(live.outputs, (k) => k !== e.payload.toolCallId);
+  if (e.type === "message" || e.type === "wake") {
+    settled.add(replyKey(e.id));
+    replies = drop(live.replies, (k) => k !== e.id);
+  }
+  if (e.type === "tool.call") {
+    settled.add(callKey(e.payload.toolCallId));
+    calls = drop(live.calls, (k) => k !== e.payload.toolCallId);
+  }
+  if (e.type === "tool.result") {
+    settled.add(outputKey(e.payload.toolCallId));
+    outputs = drop(live.outputs, (k) => k !== e.payload.toolCallId);
+  }
   if (e.type === "thread.ended") {
     // A reply cut off mid-stream never gets its durable events.
     replies = drop(live.replies, (_, v) => v.threadId !== e.threadId);
@@ -298,15 +330,16 @@ export function threadRows(events: RunEvent[], threadId: string, live: Live = no
         } else if (p.role === "system") {
           b.row({ kind: "brief", id: e.id, label: "System prompt", text: p.text });
         } else {
-          // The first is the supervisor's brief (the harness marks it as a person's message).
-          const label = !briefed
-            ? "Task brief"
-            : p.sender.kind === "thread"
+          // The runtime's first message is the thread's brief; later ones nudge it on.
+          const label =
+            p.sender.kind === "thread"
               ? "Message from another thread"
               : p.sender.kind === "person"
                 ? "Message from a person"
-                : "Message from the runtime";
-          briefed = true;
+                : briefed
+                  ? "Message from the supervisor"
+                  : "Task brief";
+          if (p.sender.kind === "runtime") briefed = true;
           b.row({ kind: "brief", id: e.id, label, text: p.text });
         }
         break;

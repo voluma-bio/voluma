@@ -16,7 +16,7 @@ export interface ThreadRecord {
   taskId: string;
   /** How its latest invocation ended; undefined while the log shows it started and not ended. */
   end: PayloadOf<"thread.ended"> | undefined;
-  /** Messages the runtime sent it to get it moving again. */
+  /** Messages the runtime sent it to get it moving again (its brief, the first, is not one). */
   wakes: number;
   /** How many times the log shows it started: the first run and each resume. */
   starts: number;
@@ -49,6 +49,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
     notes: undefined,
     ids: new Set(),
   };
+  const briefed = new Set<string>(); // threads whose brief (first user message) the log holds
   for (const e of events) {
     value.ids.add(e.id);
     const record = value.threads.get(e.threadId);
@@ -72,7 +73,8 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         break;
       case "message":
         if (record && e.payload.role === "user" && e.payload.sender.kind === "runtime") {
-          record.wakes++;
+          if (briefed.has(e.threadId)) record.wakes++;
+          briefed.add(e.threadId);
         }
         break;
       case "judgment":
