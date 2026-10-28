@@ -12,7 +12,6 @@ export function reviewCsv(run: ReviewRun, revision: Revision): string {
       "value",
       "unit",
       "confidence",
-      "origin",
       "evidence",
     ],
   ];
@@ -23,11 +22,10 @@ export function reviewCsv(run: ReviewRun, revision: Revision): string {
         revision.id,
         task.title,
         task.resultRevisionId,
-        m.label,
+        m.title ?? m.id,
         m.value,
         m.unit,
-        m.status,
-        m.origin,
+        m.confidence,
         m.evidenceIds.join(";"),
       ]);
   }

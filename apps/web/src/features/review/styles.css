@@ -127,12 +127,6 @@
   .sidebar-note {
     @apply mx-5 mt-10 border-t border-border pt-4 text-xs leading-relaxed text-muted-foreground;
   }
-  .record-button {
-    @apply flex shrink-0 items-center gap-2 border-t border-border p-4 text-xs text-muted-foreground;
-  }
-  .record-button:hover {
-    @apply bg-accent text-primary-text;
-  }
   .review-panels {
     @apply min-w-0 flex-1;
   }
@@ -199,17 +193,11 @@
   .check-card.accepted {
     @apply border-border bg-background;
   }
-  .actions-list {
-    @apply list-decimal space-y-3 pl-5 text-sm leading-relaxed text-muted-foreground;
-  }
   .evidence-grid {
     @apply grid grid-cols-2 gap-3;
   }
   .evidence-card {
     @apply flex h-full w-full flex-col gap-2 rounded border border-border p-2 text-left text-xs;
-  }
-  .evidence-card:hover {
-    @apply border-primary;
   }
   .evidence-card > span:last-child {
     @apply flex items-center justify-between mt-auto;
@@ -217,23 +205,11 @@
   .evidence-image {
     @apply flex h-24 w-full items-center justify-center rounded-sm bg-muted text-muted-foreground;
   }
-  .evidence-image img {
-    @apply h-full w-full object-cover;
-  }
   .file-list li {
     @apply flex items-start gap-3 border-b border-border py-3 text-sm;
   }
-  .file-path {
-    @apply block break-all text-xs text-muted-foreground;
-  }
   .task-assistant {
     @apply border-t border-border pt-6 pb-4;
-  }
-  .message {
-    @apply rounded-md bg-background p-3 text-sm leading-relaxed;
-  }
-  .message.user {
-    @apply ml-6 bg-muted;
   }
   .viewer-workspace {
     @apply flex h-full min-h-0 flex-col bg-background p-4;
@@ -415,18 +391,6 @@
   .notice {
     @apply rounded-md bg-muted p-3 text-sm text-muted-foreground;
   }
-  .missing-evidence {
-    @apply my-6 flex min-h-48 flex-col items-center justify-center gap-4 bg-muted p-4 text-center text-muted-foreground;
-  }
-  .lightbox-image {
-    @apply my-5 max-h-[60dvh] w-full object-contain;
-  }
-  .record-list {
-    @apply my-5 space-y-4;
-  }
-  .record-list li {
-    @apply border-b border-border pb-4;
-  }
   .load-state {
     @apply flex min-h-dvh flex-col items-center justify-center gap-5 p-8 text-center text-muted-foreground;
   }
@@ -503,9 +467,6 @@
     white-space: nowrap;
     padding: 8px 12px;
     margin: 0;
-  }
-  .record-button {
-    padding: 10px 16px;
   }
   .review-panels > [data-group] {
     /* biome-ignore lint/complexity/noImportantStyles: stack the library's inline flex group without unmounting views. */

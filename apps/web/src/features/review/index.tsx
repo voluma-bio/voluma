@@ -3,8 +3,15 @@
  * does not create an analysis run or populate reports. Light Review chrome.
  * Owns its routes; the shell mounts them.
  */
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ApiError, downloadFile, getInputDownload, getRun, listInputs } from "@voluma/api-client";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+import {
+  ApiError,
+  downloadFile,
+  getInputDownload,
+  getReviewRun,
+  getRun,
+  listInputs,
+} from "@voluma/api-client";
 import { type DicomArchive, openDicomZip, ViewerWorkspace } from "@voluma/viewer";
 import { useEffect, useRef, useState } from "react";
 import { Link, type RouteObject, useParams, useSearchParams } from "react-router";
@@ -16,11 +23,40 @@ const queryClient = new QueryClient();
 function ReviewPage() {
   const { runId } = useParams();
   // A route change releases the scan instead of showing it under a different run.
-  return <ScanReview key={runId} runId={runId ?? "local"} />;
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ScanReview key={runId} runId={runId ?? "local"} />
+    </QueryClientProvider>
+  );
 }
 
 function ScanReview({ runId }: { runId: string }) {
   const [search, setSearch] = useSearchParams();
+  // `/runs/local` is the reference scan alone: no run, so no results.
+  const review = useQuery({
+    queryKey: ["review-run", runId],
+    queryFn: () => getReviewRun(runId),
+    enabled: runId !== "local",
+    // Only a server error may pass on retry; a 404, a 409 or data the contract rejects won't.
+    retry: (count, cause) => cause instanceof ApiError && cause.status >= 500 && count < 2,
+    // A run with no plan yet gets one once the runner starts it.
+    refetchInterval: (query) => {
+      const cause = query.state.error;
+      return cause instanceof ApiError && cause.status === 409 ? 5000 : false;
+    },
+  });
+  const status = review.error instanceof ApiError ? review.error.status : undefined;
+  // Loaded data stays on screen when a background refetch fails.
+  const notice =
+    runId === "local" || review.data
+      ? undefined
+      : review.isPending
+        ? "Loading results…"
+        : status === 409
+          ? "This run has no plan yet. Results appear here once it starts."
+          : status === 404
+            ? "This run is unavailable or you do not have access to it."
+            : "Could not load this run's results.";
   const [archive, setArchive] = useState<DicomArchive>();
   const [selectedSeries, setSelectedSeries] = useState("");
   const [progress, setProgress] = useState<string>();
@@ -90,77 +126,77 @@ function ScanReview({ runId }: { runId: string }) {
 
   const series = archive?.series.find((item) => item.id === selectedSeries);
   return (
-    <QueryClientProvider client={queryClient}>
-      <ReviewWorkspace
-        runId={runId}
-        taskId={search.get("task") ?? undefined}
-        revisionId={search.get("revision") ?? undefined}
-        navigate={(selection) => {
-          const next = new URLSearchParams();
-          if (selection.task) next.set("task", selection.task);
-          if (selection.revision) next.set("revision", selection.revision);
-          setSearch(next);
-        }}
-        backLink={<Link to="/runs">Back to runs</Link>}
-        intake={
-          <div className="dicom-intake">
-            <div className="flex flex-wrap items-center gap-3">
-              <button type="button" className="button primary" onClick={() => void open()}>
-                {runId === "local" ? "Open reference scan" : "Open run scan"}
-              </button>
-              {archive && (
-                <label className="revision-select">
-                  Series
-                  <select
-                    aria-label="DICOM series"
-                    value={selectedSeries}
-                    onChange={(event) => setSelectedSeries(event.target.value)}
-                  >
-                    <option value="" disabled>
-                      Choose a series
+    <ReviewWorkspace
+      runId={runId}
+      run={review.data}
+      notice={notice}
+      taskId={search.get("task") ?? undefined}
+      revisionId={search.get("revision") ?? undefined}
+      navigate={(selection) => {
+        const next = new URLSearchParams();
+        if (selection.task) next.set("task", selection.task);
+        if (selection.revision) next.set("revision", selection.revision);
+        setSearch(next);
+      }}
+      backLink={<Link to="/runs">Back to runs</Link>}
+      intake={
+        <div className="dicom-intake">
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="button" className="button primary" onClick={() => void open()}>
+              {runId === "local" ? "Open reference scan" : "Open run scan"}
+            </button>
+            {archive && (
+              <label className="revision-select">
+                Series
+                <select
+                  aria-label="DICOM series"
+                  value={selectedSeries}
+                  onChange={(event) => setSelectedSeries(event.target.value)}
+                >
+                  <option value="" disabled>
+                    Choose a series
+                  </option>
+                  {archive.series.map((item, i) => (
+                    <option key={item.id} value={item.id}>
+                      {i + 1}: {item.modality} · {item.columns} × {item.rows} · {item.slices.length}{" "}
+                      slices
                     </option>
-                    {archive.series.map((item, i) => (
-                      <option key={item.id} value={item.id}>
-                        {i + 1}: {item.modality} · {item.columns} × {item.rows} ·{" "}
-                        {item.slices.length} slices
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              {(archive || progress) && (
-                <button type="button" className="button" onClick={close}>
-                  {progress ? "Cancel import" : "Close scan"}
-                </button>
-              )}
-            </div>
-            {progress && (
-              <p className="text-sm mt-2" role="status">
-                {progress}
-              </p>
+                  ))}
+                </select>
+              </label>
             )}
-            {archive && !selectedSeries && (
-              <p className="text-sm mt-2" role="status">
-                Choose a series to view. Series are not combined.
-              </p>
-            )}
-            {!!archive?.ignoredFiles && (
-              <p className="text-xs text-muted-foreground mt-2">
-                Skipped {archive.ignoredFiles} non-image files.
-              </p>
-            )}
-            {error && (
-              <p className="error-message mt-2" role="alert">
-                {error}
-              </p>
+            {(archive || progress) && (
+              <button type="button" className="button" onClick={close}>
+                {progress ? "Cancel import" : "Close scan"}
+              </button>
             )}
           </div>
-        }
-        viewer={(selected, display) => (
-          <ViewerWorkspace selected={selected} display={display} series={series} />
-        )}
-        onResult={() => {}}
-      />
-    </QueryClientProvider>
+          {progress && (
+            <p className="text-sm mt-2" role="status">
+              {progress}
+            </p>
+          )}
+          {archive && !selectedSeries && (
+            <p className="text-sm mt-2" role="status">
+              Choose a series to view. Series are not combined.
+            </p>
+          )}
+          {!!archive?.ignoredFiles && (
+            <p className="text-xs text-muted-foreground mt-2">
+              Skipped {archive.ignoredFiles} non-image files.
+            </p>
+          )}
+          {error && (
+            <p className="error-message mt-2" role="alert">
+              {error}
+            </p>
+          )}
+        </div>
+      }
+      viewer={(selected, display) => (
+        <ViewerWorkspace selected={selected} display={display} series={series} />
+      )}
+      onResult={(updated) => queryClient.setQueryData(["review-run", runId], updated)}
+    />
   );
 }
