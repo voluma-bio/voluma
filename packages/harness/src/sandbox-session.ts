@@ -80,9 +80,10 @@ export function sandboxSession(
   const replace = async (dead: Entry, threadId: string): Promise<Entry> => {
     assertOpen();
     if (current === dead) {
-      current = start(threadId);
       onState(threadId, "stopped", "ended by the provider");
+      current = start(threadId);
       await (await dead.sandbox).destroy();
+      assertOpen();
     }
     current ??= start(threadId);
     const entry = current;
@@ -101,17 +102,21 @@ export function sandboxSession(
       if (entry.handedOut && !(await sandbox.alive())) entry = await replace(entry, threadId);
       entry.handedOut = true;
       const previous = lastSeen.get(threadId);
-      lastSeen.set(threadId, entry.generation);
 
       let held = entry;
+      // `lastSeen` moves on only once the note is yielded or none is owed, so a replacement
+      // that no `exec` reports is still owed to the thread's next call.
       let needsNote = previous !== undefined && previous !== entry.generation;
+      if (!needsNote) lastSeen.set(threadId, entry.generation);
       let noted = false;
+      // A command already ran on the sandbox this call is about to lose.
+      let ran = false;
       // The provider refused to start the command: replace once, and the caller runs it again.
       const swap = async () => {
         held = await replace(held, threadId);
         held.handedOut = true;
-        lastSeen.set(threadId, held.generation);
-        needsNote = previous !== undefined && !noted;
+        needsNote = (previous !== undefined || ran) && !noted;
+        if (!needsNote) lastSeen.set(threadId, held.generation);
       };
       return {
         alive: async () => (await held.sandbox).alive(),
@@ -121,6 +126,7 @@ export function sandboxSession(
             if (needsNote) {
               needsNote = false;
               noted = true;
+              lastSeen.set(threadId, held.generation);
               yield { type: "stderr", data: `${restartNote}\n` };
             }
             let started = false;
@@ -129,6 +135,7 @@ export function sandboxSession(
                 started = true;
                 yield chunk;
               }
+              ran = true;
               return;
             } catch (error) {
               if (started || retried || !(error instanceof SandboxEndedError)) throw error;
