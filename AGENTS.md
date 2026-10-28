@@ -131,9 +131,11 @@ they need:
 - Colours come only from `packages/design-tokens`; components use token
   utilities (`bg-card`, `text-muted-foreground`). Visual rules: [DESIGN.md](DESIGN.md).
   Check shared components at `/dev/ui` in both themes.
-- Workflows and analysis code are not in this repo. A workflow is a Mars
-  schema v1 package on GitHub (`mars.toml`, skills, `workflow.md`), imported
-  and pinned to a commit; the generic micro-CT skills are
+- A workflow is a Mars schema v1 package (`mars.toml`, skills, `workflow.md`,
+  agents) in a GitHub repo, imported and pinned to a commit and, when it
+  isn't the repo root, a `path`: this repo's own packages live under
+  `workflows/` (`workflows/smoke` is the runner's smoke test). The generic
+  micro-CT skills are
   [voluma-bio/microct-analysis]. This repo holds no Python. Analysis tools
   take and return paths, never bytes.
 - Test against the real thing, not fakes: real OA6-1RK data, the real API,

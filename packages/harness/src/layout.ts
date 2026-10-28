@@ -3,7 +3,9 @@
  * pairs a mount path with its R2 prefix: the runner mounts `mounts`, the tool description says
  * `description`, and tools turn keys into paths with `toolOutputPath`.
  */
-import { outputsPrefix, scratchPrefix, toolOutputKey, workflowsPrefix } from "@voluma/contracts/r2";
+import { outputsPrefix, scratchPrefix, toolOutputKey, workflowPrefix } from "@voluma/contracts/r2";
+import type { WorkflowPin } from "@voluma/contracts/workflow";
+import { workflowMountPath } from "@voluma/workflow/mount";
 import type { SandboxMount } from "./ports/sandbox";
 
 const INPUTS = "/inputs";
@@ -22,12 +24,23 @@ export interface RunLayout {
 }
 
 /** `inputPrefix` is the R2 prefix of the run's read-only inputs; it is staged to local disk. */
-export function runLayout(runId: string, inputPrefix: string): RunLayout {
+/** `workflows` are the run's pins: only their packages are mounted, one read-only mount each. */
+export function runLayout(
+  runId: string,
+  inputPrefix: string,
+  workflows: readonly WorkflowPin[],
+): RunLayout {
   const scratch = scratchPrefix(runId);
   return {
     mounts: [
       { path: INPUTS, prefix: inputPrefix, access: "read-only", stage: true },
-      { path: WORKFLOW, prefix: workflowsPrefix(), access: "read-only" },
+      ...[...new Map(workflows.map((pin) => [workflowPrefix(pin), pin])).values()].map(
+        (pin): SandboxMount => ({
+          path: workflowMountPath(pin),
+          prefix: workflowPrefix(pin),
+          access: "read-only",
+        }),
+      ),
       { path: SCRATCH, prefix: scratch, access: "read-write" },
       { path: OUTPUTS, prefix: outputsPrefix(runId), access: "read-write" },
     ],

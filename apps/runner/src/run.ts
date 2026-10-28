@@ -26,7 +26,7 @@ import { runLayout } from "@voluma/harness/layout";
 import { type Recorder, recorder } from "@voluma/harness/recorder";
 import { type SandboxSession, sandboxSession } from "@voluma/harness/sandbox-session";
 import { type RunRole, superviseRun } from "@voluma/harness/supervise-run";
-import { resolveTools } from "@voluma/harness/tools";
+import { checkToolNames } from "@voluma/harness/tools";
 import { loadWorkflow } from "@voluma/workflow/load";
 import type { Config } from "./config.ts";
 import { holdLease, type StopReason } from "./lease.ts";
@@ -120,15 +120,22 @@ export async function runClaim(
     const definition = await loadWorkflow(run.workflows, {
       store: r2Workflows(config.r2),
       githubToken: config.githubToken,
+      signal: abort.signal,
     });
-    const workerAgent = definition.roles.worker;
-    const checkerAgent = definition.roles.checker;
-    const workerTools = workerAgent ? resolveTools(workerAgent.tools, workerAgent.name) : [];
-    const checkTools = checkerAgent ? resolveTools(checkerAgent.tools, checkerAgent.name) : [];
+    const { worker: workerAgent, checker: checkerAgent } = definition.roles;
+    // Every assigned role's tools are checked now, so an unknown name fails at start whichever
+    // role it is on; main and review are not started yet, which the log says.
+    for (const [role, agent] of Object.entries(definition.roles)) {
+      checkToolNames(agent.tools, agent.name);
+      if (role === "main" || role === "review") {
+        log(`role ${role} is assigned to ${agent.name}, which this runner does not run yet`);
+      }
+    }
 
     const layout = runLayout(
       runId,
       run.input.source === "reference" ? referencePrefix("scan") : inputPrefix(run.input.id),
+      run.workflows,
     );
     const createSandbox = createModalSandbox({
       appName: RUNS_APP,
@@ -211,14 +218,14 @@ export async function runClaim(
         streamFn,
         systemPrompt: workerSystem(definition),
         prompt: workerPrompt(definition, task),
-        tools: workerTools,
+        tools: workerAgent.tools,
       }),
       check: (task) => ({
         model,
         streamFn,
         systemPrompt: checkSystem(definition),
         prompt: checkPrompt(definition, task),
-        tools: checkTools,
+        tools: checkerAgent?.tools,
       }),
       signal: abort.signal,
     });

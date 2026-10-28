@@ -99,7 +99,7 @@ export const referenceInput = (labId: string): typeof inputs.$inferInsert => ({
 /**
  * The run record (`runSchema`) plus the server's own columns. `state` is the
  * `runStateSchema` status; `queued`'s position is computed at read time. `workflow_id`
- * names the catalog entry whose current plan a claim hands out; `workflows` are the
+ * names the catalog entry the run was started from; `workflows` are the
  * pins resolved at start. The lease columns are null unless the run is held.
  */
 export const runs = pgTable(
