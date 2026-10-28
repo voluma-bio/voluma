@@ -33,7 +33,7 @@
  * the run carries it in the `LEASE_TOKEN_HEADER` header: events, history,
  * heartbeat and report. The server checks it inside the write's
  * own transaction (for events, under the same per-run lock that assigns `seq`)
- * and answers a stale or missing token with 409 and `leaseLostSchema`, so a
+ * and answers a stale token with 409 and `leaseLostSchema` (a request with no token is 400), so a
  * runner that lost its run can write nothing, however late its request lands.
  * The runner treats a `leaseLostSchema` 409 on any write as "stop now". (A
  * history append's own 409 for a taken `idx` has a different body.)
@@ -52,6 +52,10 @@
  * whose lease expired three times with no `released` ends `failed` instead, so
  * one that crashes the runner doesn't loop. A `released` run is not counted,
  * so deploys don't fail a long run.
+ *
+ * There is no tokenless write. The hand-started CLI (`apps/runner`, `run-task`) is a
+ * claimer too: it claims a queued run and holds its lease like the service. Until the
+ * API serves claims it cannot write.
  *
  * Cancel. The runner learns a run is over from the heartbeat: `stop` is true
  * once the server has ended it (cancelled by the user, or `failed` by the
@@ -89,7 +93,7 @@ export const CLAIM_POLL_SECONDS = 2;
 /** The header that carries the lease token on every ingest write on a run. */
 export const LEASE_TOKEN_HEADER = "x-lease-token";
 
-/** The body of the 409 for a stale or missing lease token. */
+/** The body of the 409 for a stale lease token. */
 export const leaseLostSchema = z.object({ code: z.literal("lease-lost") });
 
 /**

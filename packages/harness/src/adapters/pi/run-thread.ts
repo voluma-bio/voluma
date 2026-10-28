@@ -33,6 +33,8 @@ export interface RunThreadOptions {
   threadId: string;
   kind: ThreadKind;
   parentThreadId?: string;
+  /** The plan task a worker or check thread works on; absent for a supervisor. */
+  taskId?: string;
   /** The thread's first user message; also sent if a resumed thread never stored one. */
   task: string;
   /**
@@ -162,7 +164,7 @@ export async function runThread(options: RunThreadOptions): Promise<ThreadOutcom
     emit("thread.started", {
       parentThreadId: options.parentThreadId ?? null,
       kind: options.kind,
-      task: options.task,
+      task: options.taskId,
     });
     if (stored.length === 0) {
       // A new thread: store the system message before anything else.

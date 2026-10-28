@@ -18,6 +18,7 @@ import { createModels } from "@earendil-works/pi-ai";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { metaProvider } from "@earendil-works/pi-ai/providers/meta";
 import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
+import { runIdSchema } from "@voluma/contracts/ids";
 import { referencePrefix } from "@voluma/contracts/r2";
 import { httpClient } from "@voluma/harness/adapters/http";
 import { runThread } from "@voluma/harness/adapters/pi";
@@ -44,7 +45,7 @@ if (!provider || !modelId || !task) {
     "usage: main.ts --provider openai|anthropic|meta --model <id> --task <text> [--run <id>] [--thread <id>] [--input <text>]",
   );
 }
-const runId = values.run ?? `run-${randomUUID().slice(0, 8)}`;
+const runId = runIdSchema.parse(values.run ?? `run-${randomUUID().slice(0, 8)}`);
 const threadId = values.thread ?? `${runId}.main`;
 
 const models = createModels();
@@ -56,13 +57,19 @@ const model = models.getModel(provider, modelId);
 if (!model) throw new Error(`unknown model ${provider}/${modelId}`);
 
 const apiUrl = optional("VOLUMA_API_URL");
-const api = httpClient(
-  apiUrl ? { baseUrl: apiUrl, token: required("VOLUMA_API_TOKEN") } : localApi(),
-);
+// Every ingest write carries the lease of a claimed run (`@voluma/contracts/runner`). This CLI
+// should claim a queued run and take the token from the claim; until the API serves claims
+// (lane A) and the claimer exists (lane E), the token is passed in and nothing can write.
+const api = httpClient({
+  ...(apiUrl ? { baseUrl: apiUrl, token: required("VOLUMA_API_TOKEN") } : localApi()),
+  runId,
+  leaseToken: required("VOLUMA_LEASE_TOKEN"),
+});
 const layout = runLayout(runId, referencePrefix("scan"));
 const systemPrompt = `You are an analysis agent with one tool, bash, which runs commands in a sandbox.
 Python 3.12 with numpy, scipy, scikit-image, pydicom, nibabel and SimpleITK is installed.
 Check what you report against the files themselves, and say which file or header each number came from.`;
+const abort = new AbortController();
 const events = recorder(
   {
     async append(event) {
@@ -71,6 +78,7 @@ const events = recorder(
     },
   },
   runId,
+  () => abort.abort(),
 );
 
 const modalTokenId = optional("MODAL_TOKEN_ID");
@@ -108,7 +116,6 @@ const sandbox = sandboxSession(
   (id, state, detail) => events.emit(id, "sandbox", { name: "main", state, detail }),
 );
 
-const abort = new AbortController();
 // First SIGINT/SIGTERM/SIGHUP stops the running command; the `finally` below then closes the
 // sandbox. A second one closes it now, bounded, and exits. Closing the sandbox waits for any
 // creation in flight, so the second signal also terminates the run's sandboxes by tag.
@@ -139,6 +146,7 @@ try {
     runId,
     threadId,
     kind: "worker",
+    taskId: "cli",
     model,
     // The key goes with each request; pi-ai is never left to look in process.env.
     streamFn: (m, context, options) => models.streamSimple(m, context, { ...options, apiKey }),

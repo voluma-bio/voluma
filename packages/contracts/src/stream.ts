@@ -15,6 +15,13 @@
  * `Last-Event-ID` is always a cursor with nothing missing below it, and the
  * browser needs no dedupe.
  *
+ * The stream has an end. Once the run has ended and the hub has sent every stored event,
+ * it closes the response; a request for an ended run with nothing after the cursor is
+ * answered 204, which stops `EventSource` for good (it reconnects after any other close).
+ * A non-200 status or a non-`text/event-stream` response also stops it. The browser sees
+ * that as `readyState === CLOSED` and can then refetch the run, or call `getMe` to tell a
+ * sign-out from an ended run.
+ *
  * Reserved, not served yet: `liveFrameSchema` below is the shape of token-by-token
  * streaming (text and tool-argument deltas, tool output chunks) for the review
  * chat. No route carries it.

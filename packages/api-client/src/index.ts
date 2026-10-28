@@ -113,12 +113,19 @@ export async function listInputs(): Promise<Input[]> {
  * Opens a run's event stream (`@voluma/contracts/stream`): `onEvent` gets each durable event
  * in order, once. `EventSource` reconnects by itself and resumes from the last event's `id`.
  * `after` is the highest `seq` the caller already holds, for the first connect only. `onError`
- * is told of a message that fails to parse; a dropped connection is not an error, and neither
- * is a 401, which `EventSource` cannot report. Returns the function that closes the stream.
+ * is told of a message that fails to parse; a dropped connection is not an error.
+ * `onClosed` fires when the stream is over for good (`EventSource` hides the status): refetch the
+ * run to tell an ended run from a 404, or call `getMe` to catch a sign-out. Returns the
+ * function that closes the stream.
  */
 export function subscribe(
   runId: string,
-  handlers: { onEvent: (event: RunEvent) => void; onError?: (error: unknown) => void },
+  handlers: {
+    onEvent: (event: RunEvent) => void;
+    onError?: (error: unknown) => void;
+    /** The stream will not reconnect: the run has ended, or the server refused it (404, 401). */
+    onClosed?: () => void;
+  },
   after = 0,
 ): () => void {
   const source = new EventSource(
@@ -130,6 +137,9 @@ export function subscribe(
     } catch (error) {
       handlers.onError?.(error);
     }
+  };
+  source.onerror = () => {
+    if (source.readyState === EventSource.CLOSED) handlers.onClosed?.();
   };
   return () => source.close();
 }

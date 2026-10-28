@@ -1,7 +1,10 @@
 /**
- * The runner's history routes under `/run/ingest/threads/:threadId/messages`:
- * the model's record of one thread, one row per Pi message, as a JSON string.
- * The client and the API parse with the same schemas.
+ * The runner's history routes under
+ * `/run/ingest/runs/:runId/threads/:threadId/messages`: the model's record of one thread, one row per Pi message, as a JSON string.
+ * The client and the API parse with the same schemas. The run is in the path because a
+ * thread's first history call comes before any event names the thread, so the server can
+ * look the lease up only by the run. A thread id must begin with `<runId>.` (`ids.ts`: a
+ * run id holds no '.'); anything else is 400.
  *
  *   GET  → 200 `historyResponseSchema`, rows in `idx` order
  *   POST → 204 with a `historyRowSchema` body. Appending the same `idx` with

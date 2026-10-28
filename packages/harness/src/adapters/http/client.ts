@@ -6,7 +6,8 @@
  * (an idx repeated with the same content is a no-op), so network and 5xx failures retry.
  * A 409 on a history append is the port's `HistoryConflict`, unless its body says the lease
  * is gone: on any call that is `LeaseLost`, never retried. `leaseToken` is the claim's, sent
- * on every call; the hand-started CLI has no claim and sends none.
+ * on every call: there is no tokenless write (`@voluma/contracts/runner`), so the hand-started
+ * CLI cannot write until it can claim a run.
  */
 import type { EventInput } from "@voluma/contracts/events";
 import { type HistoryRow, historyResponseSchema } from "@voluma/contracts/history";
@@ -39,9 +40,13 @@ function parseJson(text: string): unknown {
 export function httpClient(config: {
   baseUrl: string;
   token: string;
-  leaseToken?: string;
+  /** The run this client writes for: the history routes are under it. */
+  runId: string;
+  leaseToken: string;
 }): EventLog & History {
   const url = (path: string) => new URL(path, config.baseUrl);
+  const historyPath = (threadId: string) =>
+    `/api/run/ingest/runs/${encodeURIComponent(config.runId)}/threads/${encodeURIComponent(threadId)}/messages`;
 
   /** `retryForMs`: keep retrying network and 5xx failures until this long has passed. */
   async function send(path: string, init: RequestInit, retryForMs = 0): Promise<Response> {
@@ -53,7 +58,7 @@ export function httpClient(config: {
           headers: {
             ...init.headers,
             authorization: `Bearer ${config.token}`,
-            ...(config.leaseToken && { [LEASE_TOKEN_HEADER]: config.leaseToken }),
+            [LEASE_TOKEN_HEADER]: config.leaseToken,
           },
           signal: AbortSignal.timeout(ATTEMPT_TIMEOUT_MS),
         });
@@ -94,20 +99,12 @@ export function httpClient(config: {
       await post(`/api/run/ingest/runs/${encodeURIComponent(event.runId)}/events`, event);
     },
     async load(threadId) {
-      const response = await send(
-        `/api/run/ingest/threads/${encodeURIComponent(threadId)}/messages`,
-        {},
-        HISTORY_BUDGET_MS,
-      );
+      const response = await send(historyPath(threadId), {}, HISTORY_BUDGET_MS);
       return historyResponseSchema.parse(await response.json()).messages;
     },
     async appendMessage(threadId, idx, message) {
       try {
-        await post(
-          `/api/run/ingest/threads/${encodeURIComponent(threadId)}/messages`,
-          { idx, message } satisfies HistoryRow,
-          HISTORY_BUDGET_MS,
-        );
+        await post(historyPath(threadId), { idx, message } satisfies HistoryRow, HISTORY_BUDGET_MS);
       } catch (error) {
         if (error instanceof HttpError && error.status === 409) {
           throw new HistoryConflict(error.message);

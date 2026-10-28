@@ -76,18 +76,30 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
    */
   const threadStarted = event(
     "thread.started",
-    z.object({
-      /** Null on a run's root thread. */
-      parentThreadId: z.string().nullable(),
-      kind: threadKindSchema,
-      task: taskIdSchema.optional(),
-      /** The attempt a check thread checks; set on check threads only. */
-      attemptId: nonEmpty.optional(),
-      /** The tool call in the parent thread that started this thread. */
-      spawnedBy: nonEmpty.optional(),
-      /** Workflow packages the run is pinned to; set on the root thread only. */
-      workflows: z.array(workflowPinSchema).optional(),
-    }),
+    z
+      .object({
+        /** Null on a run's root thread. */
+        parentThreadId: z.string().nullable(),
+        kind: threadKindSchema,
+        /** The task a worker or check thread works on; required for those, absent on the supervisor. */
+        task: taskIdSchema.optional(),
+        /** The attempt a check thread checks; set on check threads only. */
+        attemptId: nonEmpty.optional(),
+        /** The tool call in the parent thread that started this thread. */
+        spawnedBy: nonEmpty.optional(),
+        /** Workflow packages the run is pinned to; set on the root thread only. */
+        workflows: z.array(workflowPinSchema).optional(),
+      })
+      .refine(
+        (p) =>
+          p.kind === "worker" || p.kind === "check"
+            ? p.task !== undefined
+            : p.kind !== "supervisor" || p.task === undefined,
+        {
+          path: ["task"],
+          message: "task goes with worker and check threads, and not the supervisor",
+        },
+      ),
   );
 
   const threadEnded = event(
@@ -95,20 +107,13 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     z.object({
       status: z.enum(["completed", "failed", "cancelled"]),
       error: z.string().optional(),
-      /**
-       * The reply that was streaming when the invocation was cut off, if its
-       * `message` was never written. It ends that reply's live partial
-       * (`stream.ts`), so every clearing rule stays keyed by an id.
-       */
-      messageId: nonEmpty.optional(),
     }),
   );
 
   /**
-   * Replaces the live partial text whose `messageId` equals this event's `id`
-   * (`stream.ts`). The runner writes one for every assistant reply that
-   * streamed, including an empty or failed one. A tool call is a separate
-   * event; the `message` of a reply that only calls tools has empty text.
+   * The runner writes one for every assistant reply, including an empty or
+   * failed one. A tool call is a separate event; the `message` of a reply that
+   * only calls tools has empty text.
    */
   const message = event(
     "message",
