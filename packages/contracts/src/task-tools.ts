@@ -1,9 +1,9 @@
 /**
- * The tools that write `task`, `checkpoint` and `value` events (`events.ts`),
+ * The tools that write `task`, `checkpoint` and `output` events (`events.ts`),
  * and the rules the runtime enforces when they run. `fold` (`fold.ts`) relies
  * on these; the schemas below only shape the calls.
  *
- * Who sets what. `checklist` and `report_value` are the worker's (the
+ * Who sets what. `checklist` and `report_output` are the worker's (the
  * supervisor's own checklist calls use `checklist` too); `checkpoint` is the
  * worker's and a check thread's. A worker sets only `in-progress`, `done`,
  * `failed` and `to-check`; `under-review` is the runtime's, `stale` the
@@ -18,7 +18,7 @@
  * check-result, the stuck guard and corrections all take it.
  *
  * Attempts. The runtime writes `attempt.opened` and stamps `attemptId` on every
- * `task`, `checkpoint` and `value` event, from the task's latest attempt. An
+ * `task`, `checkpoint` and `output` event, from the task's latest attempt. An
  * attempt's status is its latest stamped `task` event, otherwise `in-progress`.
  * The runtime rebuilds its per-task record by `fold` on a resume.
  * - A task with no attempt is `pending`. An attempt opens automatically only on
@@ -37,10 +37,10 @@
  * the thread runs. The check thread's events join that attempt,
  * and it writes only to the task it checks (a write to another task is
  * refused).
- * - A check thread's first `value` is a fix of the task it checks: the
+ * - A check thread's first `output` is a fix of the task it checks: the
  *   runtime appends `revision.started` (`fix`, with that `taskId`), then a
  *   stale mark (`stale`) on each transitive dependent of the task that has an
- *   attempt and isn't stale already, then the value. Later values add nothing.
+ *   attempt and isn't stale already, then the output. Later outputs add nothing.
  * - A check never clears an open To check item. When the check thread ends the
  *   runtime sets the status (`check-result`) to `checkResult(task)` (`fold.ts`)
  *   with a reason, but only if the task is still under review: `done` only for
@@ -55,15 +55,43 @@
  * thread, so no `check-result` follows. When a worker thread ends with tasks
  * still in progress, the stuck guard marks each `to-check` (`stuck`).
  *
- * Run start. The first event of a run is `revision.started` (`run`).
+ * Run start. The first event of a run is `revision.started` (`run`), carrying
+ * the plan: every task's declared outputs (`workflowPlanSchema`), copied from
+ * the workflow. The runtime reads the plan back from the log by `fold`, not from
+ * the workflow, so a resume sees the plan the run began with.
  *
- * Operands. `report_value` refuses a `numeratorId` or `denominatorId` the named
- * task's latest attempt hasn't reported. A later attempt may stop reporting it;
- * the fold drops such an operand.
+ * Declared outputs. `report_output` checks the call against the plan's
+ * declaration for that `taskId` and `outputId`, and refuses a mismatch with the
+ * declaration quoted:
+ * - the `kind` equals the declared kind;
+ * - a measurement's `unit` equals the declared unit;
+ * - a score's `level` is one of the declared `levels`;
+ * - a structure's `label` and its `title` equal the declared `label` and
+ *   `name`, where set;
+ * - an annotation's shape equals the declared `shape`;
+ * - a file's `mediaType` equals the declared one.
+ * An output the plan doesn't declare is accepted if its kind's payload is valid;
+ * the fold lists it as undeclared. A score without a declaration has no scale.
+ * A required declared output the attempt hasn't reported keeps the task from
+ * `done`: the worker's `checklist done` is refused, naming the missing outputs.
+ * It may still set `to-check` or `failed`. Since outputs are never removed
+ * within an attempt, a `done` task never lacks a required output, so
+ * `checkResult` needs no such clause.
  *
- * Evidence is named by `{root, path}` (`evidenceRefSchema`). On success the
- * runtime copies each file to its `evidenceKey` and appends the event with the
- * sha256; a missing file fails the call and appends nothing. The runtime scopes
+ * References. `report_output` refuses a reference its target hasn't reported in
+ * the named task's latest attempt: a measurement's `numeratorId`,
+ * `denominatorId` (measurements), `structureIds` (structures) and
+ * `annotationIds` (annotations), and a structure's `volume`, which must be a
+ * `volume` output of kind `labels`. A volume's `dtype` must fit its kind
+ * (`uint8`/`uint16` for `labels`, `int16`/`uint16`/`float32` for `image`). An
+ * annotation's `volumeId` is not checked here: it is the scan's id or a volume
+ * output. A later attempt may stop reporting a target; the fold drops such a
+ * reference.
+ *
+ * Evidence, and the files inside an output (a mesh, a volume's voxels, a
+ * file output), are named by `{root, path}` (`evidenceRefSchema`). On success
+ * the runtime copies each file to its `evidenceKey` and appends the event with
+ * the sha256; a missing file fails the call and appends nothing. The runtime scopes
  * paths to this run; `outputs` paths are under the call's `taskId`.
  *
  * Ids and crashes. Every event id has its thread as a prefix. A tool's event
@@ -84,21 +112,12 @@
  * Results reach the record as `tool.result.output`, the object as JSON.
  */
 import { z } from "zod";
-import { relativePathSchema, segmentSchema, taskIdSchema } from "./r2";
+import { fileRefInputSchema, outputReportInputSchema } from "./output";
+import { taskIdSchema } from "./r2";
 
 const nonEmpty = z.string().min(1);
 
-const evidencePaths = z
-  .array(
-    z.object({
-      root: z
-        .enum(["outputs", "scratch"])
-        .default("outputs")
-        .describe("`outputs` is this task's output folder; `scratch` is the run's scratch."),
-      path: relativePathSchema,
-    }),
-  )
-  .describe("Files the line rests on.");
+const evidencePaths = z.array(fileRefInputSchema).describe("Files the line rests on.");
 
 /** Every tool answers the same way: a short line, and the id of the event it wrote. */
 export const taskToolResultSchema = z.object({
@@ -133,32 +152,5 @@ export const checkpointInputSchema = z.object({
 });
 export type CheckpointInput = z.infer<typeof checkpointInputSchema>;
 
-export const reportValueInputSchema = z.object({
-  taskId: taskIdSchema,
-  measurementId: segmentSchema.describe(
-    "Stable name for this quantity; reuse it when you redo the task.",
-  ),
-  title: nonEmpty,
-  value: z
-    .number()
-    .finite()
-    .nullable()
-    .describe("Null if it could not be computed; explain in note."),
-  unit: nonEmpty.describe("`mm`, `mm^3`, `1/mm`; `1` for a ratio or a count."),
-  confidence: z.enum(["provisional", "candidate"]).nullable(),
-  note: z.string().optional(),
-  definition: z.string().optional(),
-  evidence: evidencePaths,
-  structureIds: z
-    .array(nonEmpty)
-    .default([])
-    .describe("Structures it was counted from or drawn on."),
-  annotationIds: z.array(nonEmpty).default([]).describe("Annotations that show it."),
-  numeratorId: nonEmpty
-    .optional()
-    .describe(
-      "Ratios: a `measurementId` you reported for this task, or `taskId/measurementId`. Report the operands first.",
-    ),
-  denominatorId: nonEmpty.optional().describe("Like `numeratorId`."),
-});
-export type ReportValueInput = z.infer<typeof reportValueInputSchema>;
+export const reportOutputInputSchema = outputReportInputSchema.extend({ taskId: taskIdSchema });
+export type ReportOutputInput = z.infer<typeof reportOutputInputSchema>;

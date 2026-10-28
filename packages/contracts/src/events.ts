@@ -12,50 +12,18 @@
  * with the `r2.ts` schemas here, so an accepted event can't fail later when a
  * key is built. `compaction` is added when something produces it.
  *
- * `task`, `checkpoint` and `value` are what the run screen and the review are
+ * `task`, `checkpoint` and `output` are what the run screen and the review are
  * folded from (see below).
  */
 import { z } from "zod";
-import {
-  relativePathSchema,
-  runIdSchema,
-  segmentSchema,
-  sha256Schema,
-  taskIdSchema,
-  toolCallIdSchema,
-} from "./r2";
-import { workflowPinSchema } from "./workflow";
+import { evidenceRefSchema, outputReportSchema } from "./output";
+import { runIdSchema, taskIdSchema, toolCallIdSchema } from "./r2";
+import { taskStatusSchema, workflowPinSchema, workflowPlanSchema } from "./workflow";
 
 const nonEmpty = z.string().min(1);
 
 export const threadKindSchema = z.enum(["supervisor", "worker", "check", "chat"]);
 export type ThreadKind = z.infer<typeof threadKindSchema>;
-
-/** Checklist statuses (requirements, Vocabulary). */
-export const taskStatusSchema = z.enum([
-  "pending",
-  "in-progress",
-  "done",
-  "failed",
-  "to-check",
-  "under-review",
-  "stale",
-]);
-export type TaskStatus = z.infer<typeof taskStatusSchema>;
-
-/**
- * A file the agent named, as recorded: copied to `evidenceKey(runId, sha256)`
- * before the event is appended, so a rerun can't erase it. `path` is under
- * `root`: `outputs` is the task's output folder (`outputKey`), `scratch` the
- * run's scratch (`scratchKey`), where a check thread keeps its reproductions.
- * The runtime scopes every path to this run.
- */
-export const evidenceRefSchema = z.object({
-  root: z.enum(["outputs", "scratch"]),
-  path: relativePathSchema,
-  sha256: sha256Schema,
-});
-export type EvidenceRef = z.infer<typeof evidenceRefSchema>;
 
 /**
  * Who made a decision: a tool call, a named runtime rule (`task-tools.ts`), or
@@ -82,7 +50,7 @@ export type By = z.infer<typeof bySchema>;
  *   the fold of every event before revision *k+1* starts.
  * - `attempt.opened` opens a work attempt on a task. Its id is that event's
  *   id; the runtime stamps it as `attemptId` on the `task`, `checkpoint` and
- *   `value` events that belong to it.
+ *   `output` events that belong to it.
  */
 
 const envelope = {
@@ -202,7 +170,8 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
   const revisionStarted = event(
     "revision.started",
     z.discriminatedUnion("reason", [
-      z.object({ reason: z.literal("run") }),
+      /** The run's first event; `plan` is the declared outputs of every task, copied from the workflow. */
+      z.object({ reason: z.literal("run"), plan: workflowPlanSchema }),
       z.object({ reason: z.literal("correction"), taskId: taskIdSchema }),
       z.object({ reason: z.literal("fix"), taskId: taskIdSchema }),
     ]),
@@ -249,31 +218,13 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
   );
 
   /**
-   * A measurement from `report_value`. A new attempt reports the same
-   * `measurementId` again; within an attempt the latest wins, a check thread's
-   * fix included.
+   * A result from `report_output` (`output.ts`). A new attempt reports the same
+   * `outputId` again; within an attempt the latest wins, a check thread's fix
+   * included.
    */
-  const value = event(
-    "value",
-    z.object({
-      taskId: taskIdSchema,
-      attemptId: nonEmpty,
-      /** Stable across reruns of the task: the agent's name for the quantity, e.g. `femur-width`. One segment, so `taskId/measurementId` is unambiguous. */
-      measurementId: segmentSchema,
-      title: nonEmpty,
-      /** Null when it could not be computed; say why in `note`. */
-      value: z.number().finite().nullable(),
-      unit: nonEmpty,
-      confidence: z.enum(["provisional", "candidate"]).nullable(),
-      note: z.string().optional(),
-      definition: z.string().optional(),
-      evidence: z.array(evidenceRefSchema),
-      structureIds: z.array(nonEmpty),
-      annotationIds: z.array(nonEmpty),
-      /** Ratios: a same-task `measurementId` or `taskId/measurementId`. */
-      numeratorId: nonEmpty.optional(),
-      denominatorId: nonEmpty.optional(),
-    }),
+  const output = event(
+    "output",
+    outputReportSchema.extend({ taskId: taskIdSchema, attemptId: nonEmpty }),
   );
 
   return z.discriminatedUnion("type", [
@@ -287,7 +238,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     attemptOpened,
     task,
     checkpoint,
-    value,
+    output,
   ]);
 };
 

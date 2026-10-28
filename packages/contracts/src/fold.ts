@@ -1,5 +1,5 @@
 /**
- * The fold: the one place the run's `task`, `checkpoint` and `value` events
+ * The fold: the one place the run's `task`, `checkpoint` and `output` events
  * become the run screen's rows and the review's tasks and revisions. The
  * runtime's per-task record, the run screen and the API's `ReviewRun` all call
  * it. It is pure: events in `seq` order in, plain data out. The rules the
@@ -14,8 +14,19 @@
  *   Attempt status: the latest stamped `task` event, otherwise `in-progress`.
  * - A check thread's events join the attempt it checks, so a fix lands in the
  *   worker's attempt: the earlier revision holds the result as the check found
- *   it. Outputs are the latest `value` per `measurementId`; evidence is unique
- *   by sha256. A `verdict` counts only from a check thread.
+ *   it. Outputs are the latest `output` per `outputId`; evidence is unique by
+ *   sha256. A `verdict` counts only from a check thread.
+ * - The last step sends each output to its review block, with the id
+ *   `${taskId}/${outputId}`: `measurement` to `measurements`, `score` to
+ *   `scores`, `file` to `files`, and `structure`, `annotation` and `volume` to
+ *   the revision's `structures`, `annotations` and `volumes`. A reference to
+ *   another output (operands, `structureIds`, `annotationIds`, a structure's
+ *   `volume`, an annotation's `volumeId`) is resolved to that id, and dropped
+ *   if the revision has no such output of the right kind (an annotation's
+ *   `volumeId` then stays as given: it may be the scan's).
+ * - The plan is the first `revision.started`'s. Per task, `missing` is the
+ *   declared outputs the current attempt hasn't reported and `undeclared` the
+ *   ids of the outputs the plan doesn't declare; `Structure.declared` follows.
  * - `resultRevisionId` is the revision in which the task's latest event so far
  *   was appended.
  * - To check items (all open; accepting one is the review lane's, and a check
@@ -26,15 +37,24 @@
  *   and "Changed by the second agent" for each fix revision on the attempt.
  *   `checkResult` turns a folded task into the status `check-result` gives.
  * - Not from these events (the API adds them): `title`, `ask`, `dependsOn`,
- *   `structureIds`, `files`, `threads.chat`, revision labels; the API also
- *   sets each asset's `stage` to the task title (here the task id) and drops a
- *   `structureIds`/`annotationIds` entry the revision doesn't contain.
+ *   `structureIds`, `threads.chat`, revision labels, the scan's volume; the API
+ *   also sets each asset's `stage` to the task title (here the task id).
  */
-import type { EvidenceRef, RunEvent, TaskStatus, ThreadKind } from "./events";
+import type { RunEvent, ThreadKind } from "./events";
+import type { EvidenceRef } from "./output";
 import { evidenceKey } from "./r2";
-import type { Asset, Measurement, ReviewTask } from "./review";
+import type {
+  Annotation,
+  Asset,
+  Measurement,
+  ReviewTask,
+  Score,
+  Structure,
+  Volume,
+} from "./review";
+import type { DeclaredOutput, OutputKind, TaskStatus } from "./workflow";
 
-type ValueEvent = Extract<RunEvent, { type: "value" }>;
+type OutputEvent = Extract<RunEvent, { type: "output" }>;
 type Check = ReviewTask["checks"][number];
 
 export type Milestone = {
@@ -49,7 +69,17 @@ export type Milestone = {
 /** A task's current attempt in one revision: the `ReviewTask` parts the events decide, plus what the run screen shows. */
 export type FoldedTask = Pick<
   ReviewTask,
-  "id" | "status" | "resultRevisionId" | "checker" | "measurements" | "checks" | "evidence"
+  | "id"
+  | "status"
+  | "resultRevisionId"
+  | "checker"
+  | "measurements"
+  | "scores"
+  | "files"
+  | "missing"
+  | "undeclared"
+  | "checks"
+  | "evidence"
 > & {
   attemptId: string;
   /** The latest `task` event's reason; null while the attempt has none. */
@@ -64,6 +94,9 @@ export type FoldedRevision = {
   reason: "run" | "correction" | "fix";
   taskId?: string;
   tasks: FoldedTask[];
+  volumes: Volume[];
+  structures: Structure[];
+  annotations: Annotation[];
 };
 
 /**
@@ -96,7 +129,7 @@ type Attempt = {
   toChecks: Check[];
   fixes: string[];
   checker: ReviewTask["checker"];
-  outputs: Map<string, ValueEvent>;
+  outputs: Map<string, OutputEvent>;
   evidence: Map<string, Asset>;
 };
 
@@ -105,7 +138,9 @@ export function fold(events: readonly RunEvent[]): Folded {
   const attempts = new Map<string, Attempt>();
   const current = new Map<string, Attempt>();
   const revisions: FoldedRevision[] = [];
-  let header: Omit<FoldedRevision, "tasks"> | undefined;
+  let header: Pick<FoldedRevision, "id" | "createdAt" | "reason" | "taskId"> | undefined;
+  // taskId → outputId → declaration, from the run's first event.
+  const plan = new Map<string, Map<string, DeclaredOutput>>();
   // The run's first event is `revision.started` (`task-tools.ts`).
   let revisionId = "";
 
@@ -120,38 +155,132 @@ export function fold(events: readonly RunEvent[]): Folded {
       });
   };
 
-  const snapshot = (): FoldedTask[] => {
-    const known = new Set<string>();
+  const snapshot = (): Pick<FoldedRevision, "tasks" | "volumes" | "structures" | "annotations"> => {
+    const kinds = new Map<string, OutputKind>();
     for (const a of current.values())
-      for (const m of a.outputs.keys()) known.add(`${a.taskId}/${m}`);
-    // An operand the revision doesn't contain is dropped.
-    const operand = (a: Attempt, id: string | undefined) => {
+      for (const [id, v] of a.outputs) kinds.set(`${a.taskId}/${id}`, v.payload.output.kind);
+    // A reference the revision doesn't contain, or of the wrong kind, is dropped.
+    const ref = (a: Attempt, id: string | undefined, kind: OutputKind) => {
       if (id === undefined) return undefined;
       const full = id.includes("/") ? id : `${a.taskId}/${id}`;
-      return known.has(full) ? full : undefined;
+      return kinds.get(full) === kind ? full : undefined;
     };
-    return [...current.values()].map((a) => {
-      const measurements = [...a.outputs.values()].map((v): Measurement => {
+    const refs = (a: Attempt, ids: string[], kind: OutputKind) =>
+      ids.flatMap((id) => ref(a, id, kind) ?? []);
+    const volumes: Volume[] = [];
+    const structures: Structure[] = [];
+    const annotations: Annotation[] = [];
+    const tasks = [...current.values()].map((a) => {
+      const measurements: Measurement[] = [];
+      const scores: Score[] = [];
+      const files: Asset[] = [];
+      const undeclared: string[] = [];
+      for (const [outputId, v] of a.outputs) {
         const { payload: p } = v;
-        const numeratorId = operand(a, p.numeratorId);
-        const denominatorId = operand(a, p.denominatorId);
-        return {
-          id: `${a.taskId}/${p.measurementId}`,
-          title: p.title,
-          value: p.value,
-          unit: p.unit,
-          confidence: p.confidence,
-          ...(p.note !== undefined && { note: p.note }),
-          ...(p.definition !== undefined && { definition: p.definition }),
-          evidenceIds: p.evidence.map((r) => r.sha256),
-          references: [],
-          structureIds: p.structureIds,
-          annotationIds: p.annotationIds,
-          ...(numeratorId !== undefined && { numeratorId }),
-          ...(denominatorId !== undefined && { denominatorId }),
-          source: { threadId: v.threadId, eventId: v.id },
-        };
-      });
+        const { output: o } = p;
+        const id = `${a.taskId}/${outputId}`;
+        const decl = plan.get(a.taskId)?.get(outputId);
+        const declared = decl?.kind === o.kind;
+        if (!declared) undeclared.push(id);
+        const key = (sha: string) => evidenceKey(v.runId, sha);
+        const note = p.note !== undefined && { note: p.note };
+        const definition = p.definition !== undefined && { definition: p.definition };
+        const evidenceIds = p.evidence.map((r) => r.sha256);
+        const source = { threadId: v.threadId, eventId: v.id };
+        switch (o.kind) {
+          case "measurement": {
+            const numeratorId = ref(a, o.numeratorId, "measurement");
+            const denominatorId = ref(a, o.denominatorId, "measurement");
+            measurements.push({
+              id,
+              title: p.title,
+              value: o.value,
+              unit: o.unit,
+              confidence: p.confidence,
+              ...note,
+              ...definition,
+              evidenceIds,
+              references: [],
+              structureIds: refs(a, o.structureIds, "structure"),
+              annotationIds: refs(a, o.annotationIds, "annotation"),
+              ...(numeratorId !== undefined && { numeratorId }),
+              ...(denominatorId !== undefined && { denominatorId }),
+              source,
+            });
+            break;
+          }
+          case "score":
+            scores.push({
+              id,
+              title: p.title,
+              level: o.level,
+              scale: decl?.kind === "score" ? decl.levels : null,
+              confidence: p.confidence,
+              ...note,
+              ...definition,
+              evidenceIds,
+              source,
+            });
+            break;
+          case "structure": {
+            const volumeId = ref(a, o.volume, "volume");
+            structures.push({
+              id,
+              name: p.title,
+              voxels:
+                volumeId === undefined
+                  ? null
+                  : { volumeId, ...(o.label !== undefined && { label: o.label }) },
+              declared,
+              status: null,
+              reason: null,
+              ...definition,
+              ...(o.volumeMm3 !== undefined && { volumeMm3: o.volumeMm3 }),
+              ...(o.mesh && {
+                mesh: {
+                  key: key(o.mesh.file.sha256),
+                  sha256: o.mesh.file.sha256,
+                  vertices: o.mesh.vertices,
+                  indices: o.mesh.indices,
+                  centerWorldMm: o.mesh.centerWorldMm,
+                },
+              }),
+            });
+            break;
+          }
+          case "annotation":
+            annotations.push({
+              ...o.annotation,
+              id,
+              name: p.title,
+              volumeId: ref(a, o.annotation.volumeId, "volume") ?? o.annotation.volumeId,
+              ...note,
+            });
+            break;
+          case "volume": {
+            const { file, dtype, ...grid } = o.volume;
+            volumes.push({
+              ...grid,
+              id,
+              name: p.title,
+              data: { format: "npy", key: key(file.sha256), sha256: file.sha256, dtype },
+            });
+            break;
+          }
+          case "file":
+            files.push({
+              id,
+              name: o.file.path,
+              stage: a.taskId,
+              key: key(o.file.sha256),
+              sha256: o.file.sha256,
+            });
+            break;
+        }
+      }
+      const missing = [...(plan.get(a.taskId)?.values() ?? [])]
+        .filter((d) => a.outputs.get(d.id)?.payload.output.kind !== d.kind)
+        .map((d) => ({ outputId: d.id, kind: d.kind, required: d.required }));
       const checks: Check[] = a.toChecks.map((c) => ({ ...c }));
       if (a.flag)
         checks.push({
@@ -177,10 +306,15 @@ export function fold(events: readonly RunEvent[]): Folded {
         threads: { worker: a.workerThread, check: a.checkThread },
         milestones: a.milestones.map((m) => ({ ...m, evidenceIds: [...m.evidenceIds] })),
         measurements,
+        scores,
+        files,
+        missing,
+        undeclared,
         checks,
         evidence: [...a.evidence.values()],
       };
     });
+    return { tasks, volumes, structures, annotations };
   };
 
   for (const e of events) {
@@ -195,9 +329,11 @@ export function fold(events: readonly RunEvent[]): Folded {
         break;
       }
       case "revision.started": {
-        if (header) revisions.push({ ...header, tasks: snapshot() });
+        if (header) revisions.push({ ...header, ...snapshot() });
         revisionId = e.id;
         const { payload: p } = e;
+        if (p.reason === "run")
+          for (const t of p.plan.tasks) plan.set(t.id, new Map(t.outputs.map((o) => [o.id, o])));
         header =
           p.reason === "run"
             ? { id: e.id, createdAt: e.createdAt, reason: p.reason }
@@ -256,11 +392,11 @@ export function fold(events: readonly RunEvent[]): Folded {
         a.resultRevisionId = revisionId;
         break;
       }
-      case "value": {
+      case "output": {
         const a = attempts.get(e.payload.attemptId);
         if (!a) break;
         addEvidence(a, e.runId, e.payload.evidence);
-        a.outputs.set(e.payload.measurementId, e);
+        a.outputs.set(e.payload.outputId, e);
         a.resultRevisionId = revisionId;
         break;
       }
@@ -269,7 +405,7 @@ export function fold(events: readonly RunEvent[]): Folded {
     }
   }
 
-  const tasks = snapshot();
-  if (header) revisions.push({ ...header, tasks });
-  return { tasks, revisions };
+  const last = snapshot();
+  if (header) revisions.push({ ...header, ...last });
+  return { tasks: last.tasks, revisions };
 }

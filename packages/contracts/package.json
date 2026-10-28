@@ -13,7 +13,8 @@
     "./history": "./src/history.ts",
     "./review": "./src/review.ts",
     "./workflow": "./src/workflow.ts",
-    "./fold": "./src/fold.ts"
+    "./fold": "./src/fold.ts",
+    "./output": "./src/output.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

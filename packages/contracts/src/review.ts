@@ -7,7 +7,7 @@
  * review with no new Review-lane code:
  *
  * - A generic core: the run, its revisions, and per revision the tasks with
- *   their measurements, checks and evidence files.
+ *   their measurements, scores, checks and evidence files.
  * - Building blocks on each revision, a closed set the shell knows how to
  *   render: `volumes`, `structures` and `annotations`. A workflow fills them
  *   with what it has; it cannot invent a new kind. A kind the shell cannot
@@ -32,7 +32,6 @@
  * derives it.
  */
 import { z } from "zod";
-import { taskStatusSchema } from "./events";
 import {
   runIdSchema,
   sha256Schema as sha256,
@@ -40,7 +39,7 @@ import {
   storedPrefixSchema,
   taskIdSchema,
 } from "./r2";
-import { workflowPinSchema } from "./workflow";
+import { outputKindSchema, taskStatusSchema, workflowPinSchema } from "./workflow";
 
 /** A position or direction in world mm. */
 const vec3 = z.tuple([z.number(), z.number(), z.number()]);
@@ -52,6 +51,9 @@ type R4 = z.infer<typeof row4>;
 /** Voxel types the viewer loads: intensities for `image` volumes, label values for `labels` volumes. */
 const imageDtype = z.enum(["int16", "uint16", "float32"]);
 const labelDtype = z.enum(["uint8", "uint16"]);
+
+/** Every voxel type an `.npy` volume may hold. */
+export const npyDtypeSchema = z.enum([...imageDtype.options, ...labelDtype.options]);
 
 /** Where a volume's voxels are stored, in a format the viewer loads. */
 export const volumeDataSchema = z.discriminatedUnion("format", [
@@ -70,7 +72,7 @@ export const volumeDataSchema = z.discriminatedUnion("format", [
     format: z.literal("npy"),
     key: storedKeySchema,
     sha256,
-    dtype: z.enum([...imageDtype.options, ...labelDtype.options]),
+    dtype: npyDtypeSchema,
   }),
 ]);
 
@@ -175,6 +177,20 @@ const annotationBase = {
   note: z.string().optional(),
 };
 
+/** A landmark. */
+export const pointAnnotationSchema = z.object({
+  ...annotationBase,
+  kind: z.literal("point"),
+  position: vec3,
+});
+/** A ruler between two endpoints, or an axis. */
+export const lineAnnotationSchema = z.object({
+  ...annotationBase,
+  kind: z.literal("line"),
+  a: vec3,
+  b: vec3,
+});
+
 /**
  * Something drawn in the views. Positions are world mm. The shell renders
  * every kind; a workflow chooses which to supply. A region of interest is a
@@ -182,10 +198,8 @@ const annotationBase = {
  * `.context/TODO.md`.
  */
 export const annotationSchema = z.discriminatedUnion("kind", [
-  /** A landmark. */
-  z.object({ ...annotationBase, kind: z.literal("point"), position: vec3 }),
-  /** A ruler between two endpoints, or an axis. */
-  z.object({ ...annotationBase, kind: z.literal("line"), a: vec3, b: vec3 }),
+  pointAnnotationSchema,
+  lineAnnotationSchema,
 ]);
 export type Annotation = z.infer<typeof annotationSchema>;
 
@@ -225,10 +239,25 @@ export const measurementSchema = z.object({
   /** Ratios: ids of the measurements divided. */
   numeratorId: z.string().optional(),
   denominatorId: z.string().optional(),
-  /** The thread event that reported it. Null from the importer; set once `report_value` lands. */
+  /** The thread event that reported it. Null from the importer. */
   source: z.object({ threadId: z.string().min(1), eventId: z.string().min(1) }).nullable(),
 });
 export type Measurement = z.infer<typeof measurementSchema>;
+
+/** A level on a scale: an OARSI grade, a yes/no, a QC pass. Same producer-given fields as a measurement. */
+export const scoreSchema = z.object({
+  id: z.string(),
+  title: z.string().optional(),
+  level: z.string().min(1),
+  /** The levels the workflow declared, lowest first; null when it declared none. */
+  scale: z.array(z.string().min(1)).nullable(),
+  confidence: measurementSchema.shape.confidence,
+  note: z.string().optional(),
+  definition: z.string().optional(),
+  evidenceIds: z.array(z.string()),
+  source: measurementSchema.shape.source,
+});
+export type Score = z.infer<typeof scoreSchema>;
 
 export const taskSchema = z.object({
   /** The r2 task segment (`outputKey`). */
@@ -252,6 +281,13 @@ export const taskSchema = z.object({
     chat: z.string().min(1).nullable(),
   }),
   measurements: z.array(measurementSchema),
+  scores: z.array(scoreSchema),
+  /** Outputs the workflow declared for this task and the attempt hasn't reported. Required ones keep the task from `done`. */
+  missing: z.array(
+    z.object({ outputId: z.string(), kind: outputKindSchema, required: z.boolean() }),
+  ),
+  /** Ids (`taskId/outputId`, as in the blocks) of the outputs the workflow didn't declare, of any kind. */
+  undeclared: z.array(z.string()),
   checks: z.array(
     z.object({
       id: z.string(),
@@ -296,6 +332,10 @@ export const revisionSchema = z
       rev.tasks.flatMap((t) => t.measurements),
       "tasks",
     );
+    idsOf(
+      rev.tasks.flatMap((t) => t.scores),
+      "tasks",
+    );
     const kindOf = new Map(rev.volumes.map((v) => [v.id, v.kind]));
     // Each id in `ids` (optional ones may be undefined) must be in `known`.
     const needAll = (
@@ -337,6 +377,14 @@ export const revisionSchema = z
       needAll(tasks, t.dependsOn, [...task, "dependsOn"], "task");
       needAll(structures, t.structureIds, [...task, "structureIds"], "structure");
       const own = new Set(t.evidence.map((e) => e.id));
+      t.scores.forEach((sc, si) => {
+        needAll(
+          own,
+          sc.evidenceIds,
+          [...task, "scores", si, "evidenceIds"],
+          "evidence in this task",
+        );
+      });
       t.measurements.forEach((m, mi) => {
         const at = [...task, "measurements", mi];
         needAll(structures, m.structureIds, [...at, "structureIds"], "structure");

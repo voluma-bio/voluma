@@ -7,7 +7,6 @@ Contracts, written when something produces or consumes them (the first contracts
 - A command map (name → zod input and output), including the review corrections (a request, and a proposal of what it would redo); `api-client` becomes one generic typed `call(name, input)` and `subscribe(runId)` over HTTP, so a new command needs no `api-client` edit.
 - The `compaction` event kind, when something produces it.
 - An importer that turns the real OA6-1RK reference run into the review-data format, so the Review lane works on real data from day one. No hand-made fixtures.
-- A revision's `structures` and `annotations` have no source yet: no event or rule says where they come from, so the API drops every `structureIds` and `annotationIds` entry until something does (`packages/contracts/src/fold.ts`).
 
 Later:
 - `/dev/ui` repeats the token list from `tokens.css` (`THEME_TOKENS`, `VIEWER_TOKENS`); read the custom properties at runtime instead.
