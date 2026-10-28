@@ -5,14 +5,9 @@
   scan and a real micro-CT; check whether the GPU texture is norm16, half float
   or Float32 there; for scans past the 2 GiB / texture-size limits, bricked or
   region-of-interest loading.
-- Performance investigation: use the real OA6-1RK ZIP and a representative large
-  micro-CT acquisition. Measure import time, time to first visible slice, scrub
-  latency, peak browser/GPU memory, repeated replacement and close. Use the
-  volume preview's Performance → Measure rotation → Save timings in Standard
-  and Compact, normal and maximized; the workstation recipe is in CONTEXT.md.
-  Test on a hardware GPU; orb Chromium is not a performance proxy for a researcher's
-  workstation. Revisit intake caps, disk-backed/streaming storage, worker
-  lifetimes and the lazy viewer bundle using those measurements.
+- Performance instrumentation was removed for the hackathon. Reintroduce it only
+  when a concrete investigation needs it. Use real OA6-1RK data and a hardware GPU;
+  orb Chromium is not a performance proxy for a researcher's workstation.
 - Expand compatibility only with real inputs: compressed syntaxes beyond the
   exercised JPEG-LS sample, irregular/oblique acquisitions, multi-frame DICOM,
   standalone DCM, missing spatial metadata, and representative browser engines.

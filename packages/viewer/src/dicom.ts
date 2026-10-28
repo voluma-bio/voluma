@@ -1,4 +1,4 @@
-/** Local DICOM intake contract. Blobs live only for the open workspace; no uploads or persistence. */
+/** In-browser DICOM intake contract. Blobs live only for the open workspace; no uploads or persistence. */
 export type Point3 = [number, number, number];
 export type Orientation = [number, number, number, number, number, number];
 export interface DicomSlice {
