@@ -595,10 +595,12 @@ export function createAuth(config: AuthConfig) {
       });
     } catch (error) {
       const status = (error as { status?: number }).status;
-      if (status === 429) return c.json({ error: "too many attempts" }, 429);
-      if (status !== undefined && status >= 400 && status < 500) {
+      if (status !== undefined && status >= 400 && status < 500 && status !== 429) {
         return c.json({ error: "sign-in refused" }, 401);
       }
+      // Not the caller's fault (a WorkOS limit or outage): the attempt doesn't count.
+      tries.count--;
+      if (status === 429) return c.json({ error: "too many attempts" }, 429);
       throw error;
     }
     tries.count--;

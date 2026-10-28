@@ -108,7 +108,10 @@ const me = meResponseSchema.parse(await signIn.json());
 console.log(`Signed in as ${me.kind === "member" ? me.email : me.kind}`);
 
 const created = await api("/run/inputs", { name: values.name, files });
-if (!created.ok) await fail("create", created);
+if (!created.ok) {
+  await api("/auth/logout", {});
+  await fail("create", created);
+}
 const { inputId, uploads } = createUploadResponseSchema.parse(await created.json());
 console.log(`Upload ${inputId}`);
 
@@ -129,7 +132,14 @@ const worker = async () => {
 };
 await Promise.all(Array.from({ length: 8 }, worker));
 
-const completed = await api(`/run/inputs/${inputId}/complete`, {});
+// Complete is idempotent, so a 5xx or a proxy timeout during a long copy is retried; only
+// files missing (409) or retries running out cancel the upload.
+let completed = await api(`/run/inputs/${inputId}/complete`, {});
+for (let retry = 1; retry <= 3 && !completed.ok && completed.status !== 409; retry++) {
+  console.error(`complete: ${completed.status}, retrying`);
+  await new Promise((r) => setTimeout(r, 5000 * retry));
+  completed = await api(`/run/inputs/${inputId}/complete`, {});
+}
 if (!completed.ok) {
   const failure =
     completed.status === 409

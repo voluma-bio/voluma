@@ -164,7 +164,8 @@ export function ScanUpload({ onUploaded }: { onUploaded: (input: Input) => void 
 
   /** PUTs `paths` with `current`'s URLs, then completes; what is still missing becomes the failed list. */
   async function send(current: CreateUploadResponse, paths: string[]) {
-    if (Date.parse(current.expiresAt) <= Date.now()) {
+    // Only new PUTs need a live URL; a complete-only retry works after expiry.
+    if (paths.length > 0 && Date.parse(current.expiresAt) <= Date.now()) {
       return setPhase({
         kind: "error",
         message: "This upload has expired. Cancel it and upload the scan again.",
@@ -302,7 +303,7 @@ export function ScanUpload({ onUploaded }: { onUploaded: (input: Input) => void 
         )}
       </div>
 
-      {!started && (
+      {!started && !creating && (
         <>
           <div className="grid grid-cols-2 gap-2">
             <Button size="sm" onClick={() => folderInput.current?.click()}>
