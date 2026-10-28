@@ -5,7 +5,7 @@ Deferred repo-wide work. Lane-specific items go in that directory's
 
 Contracts, written when something produces or consumes them (the first contracts PR covers the R2 key layout, the v0 event kinds and the review data):
 - A command map (name → zod input and output), including the review corrections (a request, and a proposal of what it would redo); `api-client` becomes one generic typed `call(name, input)` and `subscribe(runId)` over HTTP, so a new command needs no `api-client` edit.
-- The `task`, `value` and `compaction` event kinds, with the checklist, `report_value` and compaction.
+- The `compaction` event kind, when something produces it.
 - An importer that turns the real OA6-1RK reference run into the review-data format, so the Review lane works on real data from day one. No hand-made fixtures.
 
 Later:

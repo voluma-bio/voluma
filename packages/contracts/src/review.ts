@@ -32,6 +32,7 @@
  * derives it.
  */
 import { z } from "zod";
+import { taskStatusSchema } from "./events";
 import {
   runIdSchema,
   sha256Schema as sha256,
@@ -238,6 +239,8 @@ export const taskSchema = z.object({
   dependsOn: z.array(z.string()),
   /** Structures the task uses; the Structures panel lists these. */
   structureIds: z.array(z.string()),
+  /** The task's latest `task` status in this attempt (`events.ts` fold); the importer sets `done`. */
+  status: taskStatusSchema,
   /** Unchanged tasks keep this id across revisions. */
   resultRevisionId: z.string(),
   /** Null when no second agent checked it. */
