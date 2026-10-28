@@ -2,7 +2,7 @@
  * Run lane's API domain, mounted at /api/run/ (paths are relative to the mount). A short
  * mount list: each file owns its routes and its guard.
  *   runs.ts    the browser's run routes (users and guests)
- *   inputs.ts  the browser's scans: list, and upload (members)
+ *   inputs.ts  the browser's scans: list, and upload (members); `upload-scan.ts` is the CLI for it
  *   stream.ts  the browser's server-sent event stream of a run's stored events
  *   ingest.ts  the runner's claim, heartbeat, report, events and history (bearer token)
  * RunDeps lists what it needs; index.ts supplies the adapters (the queue is built with the limits and the key vault). The factory

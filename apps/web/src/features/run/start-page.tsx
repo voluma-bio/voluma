@@ -10,6 +10,7 @@ import { Button, Card } from "@voluma/ui";
 import { useState } from "react";
 import { Link, useNavigate, useOutletContext } from "react-router";
 import { forgetKeys, KeysForm, loadKeys } from "./keys";
+import { ScanUpload } from "./scan-upload";
 import { RunBadge, runHref, runStatus } from "./status";
 import { ALL_OUTPUT_IDS, OUTPUT_GROUPS, WORKFLOW, workflowName } from "./workflows";
 
@@ -167,7 +168,10 @@ export function StartPage() {
       </section>
 
       <aside className="flex min-h-0 flex-col gap-6 overflow-y-auto border-l border-border p-5 max-[1100px]:border-l-0 max-[1100px]:border-t">
-        <ScanPicker inputs={inputs} inputId={inputId} onPick={setPicked} />
+        <section>
+          <ScanPicker inputs={inputs} inputId={inputId} onPick={setPicked} />
+          {me.kind === "member" && <ScanUpload onUploaded={(input) => setPicked(input.id)} />}
+        </section>
 
         {needsKeys && (
           <section>
@@ -235,7 +239,7 @@ function ScanPicker({
   onPick: (id: string) => void;
 }) {
   return (
-    <section>
+    <>
       <h2 className="mb-2 text-meta font-semibold text-fg-subtle">Scan</h2>
       {inputs.isPending && <p className="text-ui text-muted-foreground">Loading scans…</p>}
       {inputs.isError && (
@@ -271,7 +275,7 @@ function ScanPicker({
           </label>
         ))}
       </div>
-    </section>
+    </>
   );
 }
 
