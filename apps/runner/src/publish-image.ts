@@ -4,14 +4,12 @@
  * publish-image <name>`. The name is what `SandboxSpec.image` refers to.
  */
 import { ModalClient } from "modal";
-import { optional } from "./config.ts";
+import { modalToken } from "./config.ts";
 
 const [name] = process.argv.slice(2);
 if (!name) throw new Error("usage: publish-image.ts <name>");
 
-const tokenId = optional("MODAL_TOKEN_ID");
-const tokenSecret = optional("MODAL_TOKEN_SECRET");
-const client = new ModalClient(tokenId && tokenSecret ? { tokenId, tokenSecret } : undefined);
+const client = new ModalClient(modalToken());
 const app = await client.apps.fromName("voluma-images", { createIfMissing: true });
 const image = await client.images
   .fromRegistry("python:3.12-slim")

@@ -12,11 +12,13 @@
  * - Read-only inputs flagged `stage` are copied to local disk at their path at create, 32
  *   files at a time (the copy is writable: commands run as root, and a sandbox cannot
  *   remount or `chattr` a path or run as another user and still write the mounts); the bucket is mounted at a private path under /staged for the copy.
- * - Each sandbox gets a fresh name and the tags `{run, name, startedAt}` (`startedAt` is epoch
+ * - Each sandbox gets a fresh name and the tags `{run, name, claim, startedAt}` (`startedAt` is epoch
  *   ms; the SDK exposes no creation time, and `sandboxes:clean` reports age from it). Creating one first
  *   terminates any live sandbox with the same tags: one a dead process left behind would
  *   otherwise keep running its command, with write access to /outputs, beside the resumed thread.
- *   That assumes one runner per run (v0).
+ *   That sweep is by `{run, name}` and runs only once this runner holds the run's lease, so
+ *   it ends only a previous holder's. Ending one's own sandboxes after a slow close is by
+ *   claim (`terminateClaim`), never by run.
  */
 
 import { randomUUID } from "node:crypto";
@@ -36,6 +38,12 @@ export interface ModalSandboxConfig {
   modal?: { tokenId: string; tokenSecret: string };
   /** The Modal app that owns the sandboxes; created if missing. */
   appName: string;
+  /**
+   * Names this claim of the run, tagged on every sandbox it creates, so `terminateClaim` ends
+   * only these: a run released and reclaimed has the next claimer's sandboxes under the same
+   * run tag while this claim is still cleaning up.
+   */
+  claim: string;
   r2: {
     accountId: string;
     bucket: string;
@@ -58,11 +66,15 @@ const EXEC_DEADLINE_MARGIN_SECONDS = 30;
 /** The Modal app that owns every sandbox the runner creates; `sandboxes:clean` sweeps it. */
 export const RUNS_APP = "voluma-runs";
 
-/** Asks Modal to terminate every live sandbox of a run, without waiting for it to stop. */
-export async function terminateRun(modal: ModalSandboxConfig["modal"], runId: string) {
+/** Asks Modal to terminate every live sandbox of one claim of a run, without waiting for it to stop. */
+export async function terminateClaim(
+  modal: ModalSandboxConfig["modal"],
+  runId: string,
+  claim: string,
+) {
   const client = new ModalClient(modal);
   const app = await client.apps.fromName(RUNS_APP);
-  const live = client.sandboxes.list({ appId: app.appId, tags: { run: runId } });
+  const live = client.sandboxes.list({ appId: app.appId, tags: { run: runId, claim } });
   for await (const sandbox of live) await sandbox.terminate();
 }
 
@@ -92,7 +104,7 @@ export function createModalSandbox(config: ModalSandboxConfig): CreateSandbox {
       await old.terminate({ wait: true });
     const modal = await client.sandboxes.create(app, image, {
       name: `${spec.runId}.${spec.name}.${randomUUID().slice(0, 8)}`,
-      tags: { ...tags, startedAt: String(Date.now()) },
+      tags: { ...tags, claim: config.claim, startedAt: String(Date.now()) },
       cpu: spec.cpu,
       memoryMiB: spec.memoryMiB,
       gpu: spec.gpu,
