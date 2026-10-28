@@ -6,6 +6,7 @@
  * first run are the same call; the recorder is built on the stored events by the host.
  */
 import type { Folded } from "@voluma/contracts/fold";
+import type { RecordedPin } from "@voluma/contracts/workflow";
 import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
 import type { RunLayout } from "./layout";
 import type { MainThread } from "./main-thread";
@@ -14,7 +15,7 @@ import type { Files } from "./ports/files";
 import type { History } from "./ports/history";
 import type { Sandbox } from "./ports/sandbox";
 import type { Segmenter } from "./ports/segmenter";
-import type { PayloadOf, Recorder } from "./recorder";
+import type { Recorder } from "./recorder";
 import { runStartPlan } from "./run-start";
 import { type RoleSpec, supervisor, supervisorThreadId } from "./supervisor";
 import { type PlanTask, taskRuntime } from "./task-runtime";
@@ -41,7 +42,7 @@ export interface SuperviseRunOptions {
   /** The user's notes for the run. */
   notes?: string;
   /** The workflow packages the run starts from, as recorded on the root's first event. */
-  workflows?: PayloadOf<"thread.started">["workflows"];
+  workflows: RecordedPin[];
   layout: RunLayout;
   recorder: Recorder;
   history: History;
@@ -66,7 +67,7 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
   recorder.emit(rootThreadId, "thread.started", {
     parentThreadId: null,
     kind: "supervisor",
-    ...(options.workflows && { workflows: options.workflows }),
+    workflows: options.workflows,
   });
   const plan = await runStartPlan({
     runId,

@@ -51,8 +51,6 @@ export type StartThreadOptions = ThreadIdentity & {
   attemptId?: string;
   /** The tool call in the parent thread that started this thread. */
   spawnedBy?: string;
-  /** Workflow packages the run is pinned to; set on the root thread only. */
-  workflows?: PayloadOf<"thread.started">["workflows"];
   /** The thread's first user message; also sent if a resumed thread never stored one. */
   prompt: string;
   /**
@@ -204,7 +202,6 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
         ...(options.taskId && { task: options.taskId }),
         ...(options.attemptId && { attemptId: options.attemptId }),
         ...(options.spawnedBy && { spawnedBy: options.spawnedBy }),
-        ...(options.workflows && { workflows: options.workflows }),
       });
       if (stored.length === 0) {
         // A new thread: store the system message before anything else.
