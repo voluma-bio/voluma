@@ -55,8 +55,9 @@ export interface SuperviseRunOptions {
   files: Files;
   main: MainThread;
   /** `notes`: the main thread's notes in force when the thread starts. */
-  worker(task: PlanTask, notes: string | undefined): RunRole;
-  check(task: PlanTask, notes: string | undefined): RunRole;
+  /** `model`: the one a resumed thread started on (`provider/id`), which it must keep. */
+  worker(task: PlanTask, notes: string | undefined, model: string | undefined): RunRole;
+  check(task: PlanTask, notes: string | undefined, model: string | undefined): RunRole;
   signal: AbortSignal;
 }
 
@@ -111,12 +112,12 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
     recorder,
     threads: pool,
     main: options.main,
-    worker: (id, notes) => {
-      const role = options.worker(task(id), notes);
+    worker: (id, notes, model) => {
+      const role = options.worker(task(id), notes, model);
       return { ...role, tools: tools("worker", role.tools) };
     },
-    check: (id, notes) => {
-      const role = options.check(task(id), notes);
+    check: (id, notes, model) => {
+      const role = options.check(task(id), notes, model);
       return { ...role, tools: tools("check", role.tools) };
     },
     signal,

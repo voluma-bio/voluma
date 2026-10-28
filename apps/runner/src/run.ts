@@ -36,6 +36,7 @@ import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
 import { metaSegmenter } from "./meta-segmenter.ts";
 import { createModalSandbox, RUNS_APP, terminateClaim } from "./modal-sandbox.ts";
+import type { ModelFallback } from "./model-fallback.ts";
 import { retryMetaNotFound } from "./model-retry.ts";
 import { checkPrompt, checkSystem, workerPrompt, workerSystem } from "./prompts.ts";
 import { r2Evidence } from "./r2-evidence.ts";
@@ -64,6 +65,8 @@ export interface RunnerContext {
   /** The models the config names for a `voluma` run's roles, resolved at startup. */
   roles: Record<"worker" | "check" | "main", Model<Api>>;
   visitorModel: Model<Api>;
+  /** Starts worker and check threads on the fallback model while their model is failing. */
+  fallback: ModelFallback;
   log(line: string): void;
 }
 
@@ -214,6 +217,26 @@ export async function runClaim(
     );
     const opened = session;
 
+    // A thread keeps the model it started on (the log records it); a new one starts on the
+    // fallback while the primary is failing. A visitor's run never falls back: their key and
+    // scan go to Standard-mode Meta only.
+    const threadModel = (primary: Model<Api>, recorded: string | undefined) => {
+      if (recorded) {
+        // Only a model this run may use: a visitor's scan goes to Standard-mode Meta only, and
+        // a fallback that was switched off stays off for threads that started on it.
+        const [provider = "", ...id] = recorded.split("/");
+        const allowed = visitor
+          ? isVisitorSafe({ provider, id: id.join("/") })
+          : [workerModel, checkModel, mainModel, config.fallbackModel].some(
+              (m) => m && `${m.provider}/${m.id}` === recorded,
+            );
+        const model = allowed ? models.getModel(provider, id.join("/")) : undefined;
+        if (!model)
+          throw new Error(`the thread started on ${recorded}, which this run may not use`);
+        return model;
+      }
+      return visitor ? primary : ctx.fallback.pick(primary);
+    };
     const callModel = retryMetaNotFound((m, context, options) =>
       models.streamSimple(m, context, {
         ...options,
@@ -226,7 +249,11 @@ export async function runClaim(
       (m, context, options) => {
         const stream = callModel(m, context, options);
         stream.result().then(
-          (reply) => meter.addModelCall(role, usageOf(reply)),
+          (reply) => {
+            meter.addModelCall(role, usageOf(reply));
+            if (reply.stopReason === "error" && !visitor)
+              ctx.fallback.failed(m, reply.errorMessage);
+          },
           () => {},
         );
         return stream;
@@ -277,15 +304,15 @@ export async function runClaim(
           })
         : undefined,
       main,
-      worker: (task, notes) => ({
-        model: workerModel,
+      worker: (task, notes, recorded) => ({
+        model: threadModel(workerModel, recorded),
         streamFn: streamFor("worker"),
         systemPrompt: workerSystem(definition),
         prompt: workerPrompt(task, { user: run.notes, main: notes }),
         tools: roleTools,
       }),
-      check: (task, notes) => ({
-        model: checkModel,
+      check: (task, notes, recorded) => ({
+        model: threadModel(checkModel, recorded),
         streamFn: streamFor("check"),
         systemPrompt: checkSystem(definition),
         prompt: checkPrompt(task, { user: run.notes, main: notes }),
