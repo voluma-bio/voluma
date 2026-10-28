@@ -20,6 +20,10 @@ Three screens under `RunLayout` (top bar and query client): `/` start (`start-pa
   with `visitorKeysSchema`; another user of the browser never sees them (a guest has no sign-out, and
   signing in as a member switches id). "Forget keys" on the start screen removes them. The start screen
   asks for keys only for a visitor; a run in `awaiting-keys` shows the form on its page (`resendKeys`) only to the user who started it.
+- **Upload scan** (`scan-upload.tsx`, members only) sits under the scan picker. A folder pick drops the
+  top folder from each path (it becomes the default name) and skips hidden files; each file is a
+  presigned PUT straight to R2 (`putUploadFile`), 4 at once, 3 tries each, then the failed ones are
+  listed with Retry. Complete selects the new scan. API side: `apps/api/src/domains/run/.context/uploads.md`.
 - A completed run links to `/runs/:runId`, the review lane's route; the live page is `/runs/:id/live` so it never shadows it. Active runs open live; stopped and failed runs open live too (it shows the error).
 
 Gaps: the list cannot show "N to check" or "Reviewed" (a `Run` carries neither; the review lane

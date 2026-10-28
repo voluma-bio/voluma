@@ -63,9 +63,12 @@ export interface SupervisorOptions {
   recorder: Recorder;
   threads: Threads;
   main: MainThread;
-  /** `notes` are the main thread's notes in force when the thread starts (none yet at the first task). */
-  worker(taskId: string, notes: string | undefined): RoleSpec;
-  check(taskId: string, notes: string | undefined): RoleSpec;
+  /**
+   * `notes` are the main thread's notes in force when the thread starts (none yet at the first
+   * task). `model` is the one a resumed thread started on, which it must keep.
+   */
+  worker(taskId: string, notes: string | undefined, model: string | undefined): RoleSpec;
+  check(taskId: string, notes: string | undefined, model: string | undefined): RoleSpec;
   /** Wakes of a worker that stopped with its task unfinished before the stuck guard marks it. */
   stuckLimit?: number;
   /** Redos a judgment may order for one task. */
@@ -95,7 +98,15 @@ export function supervisor(options: SupervisorOptions) {
 
   /** A thread's record; a thread whose `thread.started` the store lacks counts as not ended. */
   const recordOf = (d: ThreadLog, id: string, role: Role, taskId: string): ThreadRecord =>
-    d.threads.get(id) ?? { id, role, taskId, end: undefined, wakes: 0, starts: 0 };
+    d.threads.get(id) ?? {
+      id,
+      role,
+      taskId,
+      end: undefined,
+      wakes: 0,
+      starts: 0,
+      model: undefined,
+    };
 
   /**
    * A wake's key: the thread whose end raised it and how many times the log shows it started,
@@ -129,9 +140,12 @@ export function supervisor(options: SupervisorOptions) {
     id: string,
     extra: { attemptId?: string; input?: ThreadSpec["input"] } = {},
   ) {
-    const { notes } = derive();
+    const { notes, threads: known } = derive();
+    const model = known.get(id)?.model;
     threads.start({
-      ...(role === "worker" ? options.worker(taskId, notes) : options.check(taskId, notes)),
+      ...(role === "worker"
+        ? options.worker(taskId, notes, model)
+        : options.check(taskId, notes, model)),
       threadId: id,
       kind: role,
       parentThreadId: root,

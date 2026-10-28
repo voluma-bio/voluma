@@ -143,12 +143,15 @@ function conversation(model: Model<Api>, past: readonly Wake[], point: Wake["poi
   for (const w of past) {
     if (w.error !== undefined) continue;
     messages.push({ role: "user", content: wakeText(w.point), timestamp: at });
-    // `plan` is the one the run-started answer's `change` built; later wakes would not
-    // otherwise see it (the system prompt's brief is the computed plan). It comes from the
-    // log, so every later wake and a resume replay the same bytes.
+    // `plan` is the one the run-started answer's `change` built (tasks, order and done-when
+    // lines; the instructions stay out, they are large); later wakes would not otherwise see it
+    // (the system prompt's brief is the computed plan). It comes from the log, so every later
+    // wake and a resume replay the same bytes.
     const answer = {
       ...(w.note !== undefined && { note: w.note }),
-      ...(w.plan !== undefined && { plan: w.plan }),
+      ...(w.plan !== undefined && {
+        plan: w.plan.tasks.map(({ id, dependsOn, doneWhen }) => ({ id, dependsOn, doneWhen })),
+      }),
       decision: w.decision,
     };
     messages.push({
