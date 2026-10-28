@@ -16,8 +16,15 @@ import matplotlib
 import numpy as np
 from scipy import ndimage as ndi
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'microct-core/resources'))
-import sidecar
+HERE = Path(__file__).resolve().parent
+# `python -I` puts no script directory on sys.path, so every directory a script imports from is added here.
+sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'microct-core/resources')]
+try:
+    import sidecar
+except ModuleNotFoundError as e:
+    sys.exit(f'{e}: this script expects <workflows>/microct-analysis/skills/<skill>/resources/ with '
+             '<workflows>/microct-analysis/skills/microct-core/resources/sidecar.py beside it')
+
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -27,8 +34,10 @@ def local_thickness(phase, step=0.5):
     """Diameter, in voxels, of the largest sphere contained in `phase` that covers each voxel (0 outside).
 
     Distances use voxel centres and the phase is padded with background, so a phase cut by the array edge or by
-    an ROI is measured as if solid ends there. Radii are quantised at `step` voxels, so a diameter can read up
-    to 2*step voxels low. This is not the mean of twice the distance transform.
+    an ROI is measured as if solid ends there. Radii are quantised at `step` voxels, so a diameter is a whole number of
+    voxels and a structure an odd number of voxels wide reads one voxel high (a 1-voxel plate reads 2, 3 reads 4; even
+    widths read exactly; +9% on OA6-1RK ROI-3 against the same mask upsampled 2x). Report the voxel size with every
+    thickness. This is not the mean of twice the distance transform.
     """
     phase = np.pad(np.asarray(phase, dtype=bool), 1)
     if not phase.any():
@@ -50,7 +59,8 @@ def skeleton_counts(bone, roi, margin):
 
     A skeleton voxel with 1 neighbour (26-connectivity) is an end; voxels with >=3 neighbours are junction voxels,
     and a connected cluster of them is one node. ROI clipping cuts struts, so ends and nodes within `margin`
-    voxels of the ROI boundary are counted separately and left out of the interior counts.
+    voxels of the ROI boundary are counted separately and left out of the interior counts; `interior_voxels` is the
+    part of the ROI those counts come from, and the density divides by it.
     """
     from skimage.morphology import skeletonize
 
@@ -68,6 +78,7 @@ def skeleton_counts(bone, roi, margin):
         else np.zeros(0, bool)
     )
     return {
+        'interior_voxels': int((interior & roi).sum()),
         'skeleton_voxels': int(sk.sum()),
         'nodes_all': int(n_nodes),
         'nodes_interior': int(node_inside.sum()),
@@ -92,7 +103,7 @@ def crop_box(mask, pad=0):
 
 
 def val(value, unit, definition, **extra):
-    return dict(value=float(value), unit=unit, definition=definition, **extra)
+    return dict(value=None if value is None else float(value), unit=unit, definition=definition, **extra)
 
 
 def write_crop_map(path, arr, parent_grid, spacing, box, inputs, params):
@@ -118,17 +129,21 @@ def trabecular(a):
     roi = load_bool(a.roi, 'ROI')
     inputs = [a.roi]
     if a.bone is not None:
-        bone = load_bool(a.bone, 'bone mask') & roi
+        bone = load_bool(a.bone, 'bone mask')
+        if bone.shape != roi.shape:
+            sidecar.fail(f'bone mask shape {bone.shape} differs from ROI shape {roi.shape}: they must be on the same grid')
+        bone = bone & roi
         inputs.append(a.bone)
         hu = None
     else:
-        if a.hu is None or a.threshold is None:
-            sidecar.fail('pass either --bone MASK.npy, or --hu hu.npy together with --threshold HU')
+        if a.hu is None:
+            sidecar.fail('pass either --bone MASK.npy, or --hu hu.npy (bone = HU above --threshold, default the lab threshold)')
         hu = np.load(a.hu, mmap_mode='r')
+        if hu.shape != roi.shape:
+            sidecar.fail(f'hu shape {hu.shape} differs from ROI shape {roi.shape}: they must be on the same grid')
+        a.threshold = sidecar.bone_threshold_hu(a.grid, a.threshold)
         inputs.append(a.hu)
         bone = roi & (np.asarray(hu) > a.threshold)
-    if bone.shape != roi.shape:
-        sidecar.fail(f'bone mask shape {bone.shape} differs from ROI shape {roi.shape}: they must be on the same grid')
     marrow = roi & ~bone
     if not bone.any() or not marrow.any():
         sidecar.fail('the ROI holds only bone or only marrow at this threshold: check the threshold and the ROI')
@@ -148,12 +163,15 @@ def trabecular(a):
         'TV': val(tv, 'mm^3', 'ROI voxel count x voxel volume; trabeculae plus marrow'),
         'BV': val(bv, 'mm^3', 'bone voxels in the ROI x voxel volume'),
         'BV/TV': val(frac * 100, '%', 'BV / TV'),
-        'Tb.Th': val(tbth, 'mm', 'mean diameter of the largest sphere inside bone covering each bone voxel'),
+        'Tb.Th': val(
+            tbth, 'mm', 'mean diameter of the largest sphere inside bone covering each bone voxel', voxel_mm=vox
+        ),
         'Tb.Sp': val(
             tbsp,
             'mm',
             'mean diameter of the largest sphere inside marrow covering each marrow voxel; '
             'the space outside the ROI does not count as marrow',
+            voxel_mm=vox,
         ),
         'Tb.N': val(frac / tbth, '1/mm', 'model-derived (BV/TV)/Tb.Th (Bouxsein 2010), not a direct count of struts'),
     }
@@ -170,22 +188,26 @@ def trabecular(a):
         counts = c
         n_in = c['nodes_interior']
         e_in = c['ends_interior']
+        tv_in = c['interior_voxels'] * vox**3
+        where = (
+            f'counted in the part of the ROI farther than {a.edge_margin_voxels:g} voxels from its edge '
+            f'({tv_in:.5f} mm^3 of {tv:.5f}), per mm^3 of that tissue volume; not validated against Scanco'
+        )
         values['Tb.Nd'] = val(
-            n_in / tv,
+            n_in / tv_in,
             '1/mm^3',
-            'junction clusters (skeleton voxels with >=3 neighbours, 26-connected '
-            'clusters merged) not within the edge margin of the ROI, per mm^3 of TV; '
-            'not validated against Scanco',
+            'junction clusters (skeleton voxels with >=3 neighbours, 26-connected clusters merged) ' + where,
             count=n_in,
+            counted_volume_mm3=tv_in,
         )
         values['Tb.Tm'] = val(
-            e_in / tv,
+            e_in / tv_in,
             '1/mm^3',
-            'skeleton end voxels (1 neighbour) not within the edge margin of the '
-            'ROI, per mm^3 of TV; not validated against Scanco',
+            'skeleton end voxels (1 neighbour) ' + where,
             count=e_in,
+            counted_volume_mm3=tv_in,
         )
-        values['Nd/Tm'] = val(n_in / e_in if e_in else float('nan'), '1', 'Tb.Nd / Tb.Tm')
+        values['Nd/Tm'] = val(n_in / e_in if e_in else None, '1', 'Tb.Nd / Tb.Tm (null when there are no ends)')
 
     qc = out / 'qc.jpg'
     qc_figure(qc, a, hu, roi, bone, th, sep, box, sk, values)
@@ -209,7 +231,7 @@ def trabecular(a):
         qc=str(qc),
         thickness=str(maps['thickness']),
         separation=str(maps['separation']),
-        values={k: {'value': round(v['value'], 6), 'unit': v['unit']} for k, v in values.items()},
+        values={k: {'value': None if v['value'] is None else round(v['value'], 6), 'unit': v['unit']} for k, v in values.items()},
     )
 
 
@@ -255,7 +277,7 @@ def qc_figure(path, a, hu, roi, bone, th, sep, box, sk, values):
     axs.flat[6].text(
         0,
         1,
-        '\n'.join(f'{k}: {v["value"]:.4g} {v["unit"]}' for k, v in values.items()),
+        '\n'.join(f'{k}: {v["value"]:.4g} {v["unit"]}' if v['value'] is not None else f'{k}: -' for k, v in values.items()),
         va='top',
         family='monospace',
         fontsize=11,
@@ -306,6 +328,7 @@ def cortical(a):
             'mm',
             f'mean diameter of the largest sphere inside the cortical mask, over cortical '
             f'voxels within {a.slab_um} um of {a.depth_um} um below the reference surface (axis {ax})',
+            voxel_mm=vox,
             std=float(t.std()),
             median=float(np.median(t)),
             n_voxels=int(t.size),
@@ -354,8 +377,8 @@ def main():
     t = sub.add_parser('trabecular', help='TV, BV, BV/TV, Tb.Th, Tb.Sp, Tb.N [, Tb.Nd, Tb.Tm] in an ROI')
     t.add_argument('--roi', required=True, help='bool .npy: the region measured')
     t.add_argument('--bone', help='bool .npy of bone (clipped to the ROI)')
-    t.add_argument('--hu', help='hu.npy: with --threshold, bone = hu > threshold')
-    t.add_argument('--threshold', type=float, help='bone threshold in HU')
+    t.add_argument('--hu', help='hu.npy: bone = hu > threshold (the BV rule: ROI and HU, no label gate)')
+    t.add_argument('--threshold', type=float, help='bone threshold in HU (default: the lab threshold, 2.16/cm, from --grid)')
     t.add_argument('--grid', required=True, help='hu.json (or any sidecar) of the grid these masks are on')
     t.add_argument('--out', required=True, help='output directory')
     t.add_argument('--skeleton', action='store_true', help='also count nodes (Tb.Nd) and ends (Tb.Tm)')

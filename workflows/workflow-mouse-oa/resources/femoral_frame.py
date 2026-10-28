@@ -2,7 +2,8 @@
 
   python femoral_frame.py --landmarks landmarks.json --hu-json hu.json --out <dir> [--labels labels.npy --label 1]
 
-Landmarks (zyx voxel indices on the scan grid, floats allowed; see ../SKILL.md for how to place them):
+Landmarks (zyx voxel indices on the scan grid, floats allowed; the points.json `pick.py` writes for picks named a to d works as is;
+see ../references/oa-protocol.md for how to place them):
   a  midpoint of the upper line of the intercondylar groove      c  midpoint of the ridge on the lateral condyle
   b  intercondylar notch                                         d  vertex of the medial condyle
 DFL = |a - b|, DFW = |c - d|, W/L = DFW / DFL, all straight 3D distances through physical spacing. The script also
@@ -21,7 +22,14 @@ from pathlib import Path
 import numpy as np
 from scipy import ndimage as ndi
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[4] / 'microct-analysis/skills/microct-core/resources'))
+HERE = Path(__file__).resolve().parent
+# `python -I` puts no script directory on sys.path; microct-core is found by walking up to the directory that holds it.
+CORE = next((p / 'microct-analysis/skills/microct-core/resources' for p in HERE.parents
+             if (p / 'microct-analysis/skills/microct-core/resources/sidecar.py').exists()), None)
+if CORE is None:
+    sys.exit('Cannot find microct-core: this script expects microct-analysis/skills/microct-core/resources/ in a '
+             'directory above it (<workflows>/workflow-mouse-oa/resources/ with <workflows>/microct-analysis/ beside it)')
+sys.path[:0] = [str(HERE), str(CORE)]
 import sidecar
 
 IDS = ('a', 'b', 'c', 'd')
@@ -49,13 +57,13 @@ def off_bone_mm(point, femur, vox):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--landmarks', required=True, help='JSON {"a": [z,y,x], "b": ..., "c": ..., "d": ...}')
+    ap.add_argument('--landmarks', required=True, help='JSON {"a": [z,y,x], "b": ..., "c": ..., "d": ...}, or the points.json pick.py wrote with picks named a, b, c, d')
     ap.add_argument('--hu-json', required=True, help='hu.json: spacing and grid')
     ap.add_argument('--out', required=True)
     ap.add_argument('--labels', help='labels.npy on the scan grid: checks each landmark against the femur')
     ap.add_argument('--label', type=int, default=1, help='femur label id')
     a = ap.parse_args()
-    lm = json.loads(Path(a.landmarks).read_text())
+    lm = sidecar.load_points(a.landmarks)
     missing = [i for i in IDS if i not in lm]
     if missing:
         sidecar.fail(f'landmarks.json is missing {missing}: place a, b (length) and c, d (width)')

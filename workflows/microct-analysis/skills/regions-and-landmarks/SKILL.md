@@ -11,7 +11,8 @@ A pick is a pixel you point at on an image. Code turns it into a voxel on the sc
 you keep it. Never type voxel coordinates you read off an image: a pixel on a render is not a voxel.
 
 Generic: any bone, any joint. The protocol that says which point or region you need (growth plate, ROI, landmarks) is in
-the workflow's own skill.
+the workflow's protocol reference, which also names the script that builds a protocol region when the protocol has one (use it
+instead of assembling the region here).
 
 ## Loop
 
@@ -64,7 +65,9 @@ the slice; `on_mask` says whether it lies on the bone: a concave section can put
 
 Two modes. Both write `region.npy` (boolean, scan grid, with sidecar), `region-check.jpg` and print the voxel count, volume
 in mm^3 and bounding box. Both take an optional bone mask (`--bone` or `--labels`/`--ids`) to clip to, and
-`--clearance-mm` to also drop voxels closer than that to the bone surface.
+`--clearance-mm` to also drop voxels closer than that to the **outer** surface of the mask you pass. For a filled bone that
+is the periosteum, so the cortex stays inside the region; a clearance from the inner cortex needs the cortex depth added, which
+is the protocol's job.
 
 ```
 python region_from_curves.py between --surface-a A.json --surface-b B.json --grid hu.json --bone bone.npy --out DIR
@@ -90,6 +93,18 @@ Trace slices where the shape changes, and at the ends of the region.
 
 Trace on slices you have looked at with a pixel grid (`visual-check`). Fewer than about five traced slices across a curved
 region gives a coarse surface: add slices where the curve bends.
+
+## Hand the points to the lab: Amira
+
+```
+python amira_landmarks.py --points points.json --header hu.json --out landmarks.landmarkAscii
+```
+
+`--points` is a `pick.py` `points.json` or a plain `{"name": [z, y, x]}` file. Each point is moved to physical millimetres with
+the DICOM affine in `hu.json` and written as one Amira landmark set (`# AmiraMesh 3D ASCII 2.0`, `ContentType "LandmarkSet"`);
+`<out>.names.json` lists the order, because the format has no names. The lab loads it in Amira on the same series to check the
+points. The file layout follows the open-source writer in R's `nat` package and has not been opened in Amira itself: if Amira
+rejects it, report that. Report the file as evidence with the `pick-check.jpg` of each point.
 
 ## Checked on
 

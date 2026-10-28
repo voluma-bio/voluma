@@ -19,8 +19,15 @@ from pathlib import Path
 import numpy as np
 from scipy import ndimage as ndi
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'visual-check/resources'))
-import viewlib as vl
+HERE = Path(__file__).resolve().parent
+# `python -I` puts no script directory on sys.path, so every directory a script imports from is added here.
+sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'microct-core/resources'), str(HERE.parents[1] / 'visual-check/resources')]
+try:
+    import viewlib as vl
+except ModuleNotFoundError as e:
+    sys.exit(f'{e}: this script expects <workflows>/microct-analysis/skills/<skill>/resources/ with '
+             '<workflows>/microct-analysis/skills/microct-core/resources/sidecar.py beside it')
+
 
 sidecar = vl.sidecar
 

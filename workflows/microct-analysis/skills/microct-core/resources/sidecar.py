@@ -12,9 +12,11 @@ Library use (other resources import this file):
   import sidecar
   sidecar.write(out_npy, like='hu.json', inputs=[hu_path], params={...})   # same grid as `like`
   sidecar.write(out_npy, grid_id=new_id, spacing_zyx_mm=[...], inputs=[...], params={...})   # a new grid
-  sidecar.grid(path)       # the grid fields (grid_id, spacing_zyx_mm) of a sidecar or an intake header
-  sidecar.emit(**fields)   # print the one JSON line a resource prints to stdout
+  sidecar.grid(path)       # the grid fields (grid_id, spacing_zyx_mm, and shape when the file has one) of a sidecar or an intake header
+  sidecar.bone_threshold_hu(header, override)   # the lab's measurement threshold in this scan's HU, or the override
+  sidecar.emit(**fields)   # print the one JSON line a resource prints to stdout (fails on NaN)
   sidecar.save_image(fig, path)  # the image limits below, JPEG
+  sidecar.load_points(path)   # {name: [z, y, x]} from pick.py's points.json or a plain name-to-point file
   sidecar.fail(sentence)   # print a sentence the agent can act on to stderr and exit 2
 
 CLI (for an array you made yourself):
@@ -28,7 +30,7 @@ from pathlib import Path
 
 import numpy as np
 
-MAX_IMAGE_PX = 2000  # Pi's image limit for Meta models; larger images may be rejected or resized
+MAX_IMAGE_PX = 2000  # view_image's limit; larger images may be rejected or resized
 MAX_IMAGE_BYTES = 1 << 20  # view_image refuses files over 1 MiB, and every image is resent with later requests
 JPEG_QUALITY = 85
 
@@ -50,7 +52,27 @@ def grid(path):
     d = json.loads(Path(path).read_text())
     if 'grid_id' not in d or 'spacing_zyx_mm' not in d:
         fail(f'{path} has no grid_id/spacing_zyx_mm: pass the hu.json that scan-intake wrote, or an array sidecar')
-    return {'grid_id': d['grid_id'], 'spacing_zyx_mm': d['spacing_zyx_mm']}
+    shape = d.get('shape', d.get('shape_zyx'))
+    return {'grid_id': d['grid_id'], 'spacing_zyx_mm': d['spacing_zyx_mm'], **({'shape': shape} if shape else {})}
+
+
+LAB_BONE_MU_PER_CM = 2.16  # the lab's bone threshold, as a Scanco linear attenuation coefficient
+
+
+def bone_threshold_hu(header, override=None):
+    """The bone threshold every BV, BV/TV and TV measurement uses: `override` if given, else the lab's 2.16/cm in HU.
+
+    HU = 1000 * (mu / mu_water - 1), with mu_water from the `calibration` block scan-intake wrote into hu.json (2459.9 HU
+    at mu_water 0.6243/cm). Another scanner or energy gives another HU value for the same 2.16/cm, so there is no literal.
+    This is the measurement threshold; the 2500 HU used to build segmentation masks is a separate, passed-in choice.
+    """
+    if override is not None:
+        return float(override)
+    cal = json.loads(Path(header).read_text()).get('calibration', {}) if header else {}
+    if 'mu_water_per_cm' not in cal:
+        fail(f'{header} has no Scanco calibration (mu_water_per_cm), so the lab threshold of {LAB_BONE_MU_PER_CM}/cm cannot be '
+             'converted to HU: pass the threshold explicitly with --threshold and say where it came from')
+    return round(1000 * (LAB_BONE_MU_PER_CM / cal['mu_water_per_cm'] - 1), 3)
 
 
 def derived_grid_id(parent_grid_id, frame):
@@ -78,8 +100,30 @@ def write(array_path, *, like=None, grid_id=None, spacing_zyx_mm=None, inputs=()
     return out
 
 
+def load_points(path):
+    """{name: [z, y, x]} scan-grid voxel indices from `pick.py`'s points.json or a plain {"name": [z, y, x]} file."""
+    d = json.loads(Path(path).read_text())
+    if isinstance(d, dict) and 'points' in d:
+        return {p['name']: p['zyx'] for p in d['points']}
+    return d
+
+
 def emit(**fields):
-    print(json.dumps(fields, default=float))
+    """Print the one JSON line a resource prints. NaN and infinity are not JSON: a value that is one is a failure."""
+    try:
+        line = json.dumps(fields, default=float, allow_nan=False)
+    except ValueError:
+        bad = [k for k, v in fields.items() if _has_nonfinite(v)]
+        fail(f'{sys.argv[0]} computed a NaN or infinite value ({", ".join(bad)}): the input does not support this measurement')
+    print(line)
+
+
+def _has_nonfinite(v):
+    if isinstance(v, dict):
+        return any(_has_nonfinite(x) for x in v.values())
+    if isinstance(v, (list, tuple)):
+        return any(_has_nonfinite(x) for x in v)
+    return isinstance(v, float) and not np.isfinite(v)
 
 
 def fail(sentence):

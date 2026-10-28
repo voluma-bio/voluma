@@ -11,23 +11,25 @@ description: >
 SAM proposes, and you own the final labels. Code checks gate and your eyes confirm: run the checks in section 1 first,
 then look at what they flag and at the 3D sheet (`visual-check`). Looking alone has missed a fragment carrying the wrong
 label on a 2D overlay. A labels volume leaves your task only after every label has passed the checks below, and every
-disagreement you could not settle has been raised as a To check item that names the region. The workflow's anatomy skill
+disagreement you could not settle has been raised as a To check item that names the region. The workflow's anatomy reference
 gives the label table and the expected volumes (`anatomy.json`). This skill gives the method. Resources are in
 `<this skill>/resources/`; all inputs are on the scan grid.
 
 ## 1. Check each label
 
 ```
-python label_stats.py --labels labels.npy --out qc/stats.json --ranges <anatomy skill>/resources/anatomy.json
+python label_stats.py --labels labels.npy --out qc/stats.json --ranges <the anatomy reference's anatomy.json>
 ```
 
 Per label: voxels, volume in mm³, the number of 3D pieces and their sizes, the bounding box and the labels it touches.
-With `--ranges` it flags a volume outside the range and a piece count that differs from the expected one. Then:
+With `--ranges` it flags a volume outside the range and a piece count that differs from the expected one. Pieces under
+`--min-piece-mm3` (0.01) are counted as `specks`, not pieces: a clipped SAM label carries hundreds, and counting them would
+flag every label. Look at the specks total if it is large. Then:
 
 - **One bone, one main piece.** A second large piece means the label is on two bones, or a bone has broken. Look at
   the 3D sheet. (Clipping can split a thin bone: check the pieces after `clip_to_envelope.py` too.)
-- **Volume inside the anatomy skill's range.** Unclipped SAM masks run 15-60% over on small structures and include soft
-  tissue on large ones: clip first, then compare. The ranges come from one scan; a value just outside is a question,
+- **Volume inside the anatomy reference's range.** Unclipped SAM masks include soft tissue (`sam-segmentation`): clip first,
+  then compare. The ranges come from one scan; a value just outside is a question,
   not an error.
 - **No label on two bones.** On the overlay, check each joint face: the boundary should run through the dark joint space, not
   through bone.
@@ -42,10 +44,11 @@ Sesamoids, joint mineralizations, ossicles and margin fragments decide measureme
 the femur. For each candidate from `unlabelled.py`, or each piece `label_stats.py` flags:
 
 1. Render its crop sheet and look: `render_crops.py --hu hu.npy --labels labels.npy --component-at <centre_zyx>`. Name it from
-   the anatomy skill's table, or call it unknown.
-2. Treat each 3D piece as its own component: a structure in two pieces needs one SAM box per piece.
+   the anatomy reference's table, or call it unknown.
+2. Treat each 3D piece as its own component: a structure in two pieces needs one SAM box and one temporary label per piece (`sam-segmentation`).
 3. Label it, either by relabelling the piece (`relabel.py --labels labels.npy --out fixed.npy --at z,y,x --to N --pieces
-   qc/cand.npy`) or with a small-structure SAM request (`sam-segmentation`). Then look at the overlay again.
+   qc/cand.npy`) or with a small-structure SAM request (`sam-segmentation`, steps 6-9, which starts from these candidates).
+   Then look at the overlay again.
 4. If you cannot name it, leave it unlabelled and raise a To check item that asks what it is. Do not borrow a name because
    a model offered one.
 
@@ -73,19 +76,19 @@ at its panel and decide:
 | One method's boundary runs through the joint space and the other's through bone | Keep the one in the joint space. Note it in the checkpoint. |
 | A one-voxel rim of partial volume along the surface | Ignore it. Say so once for the whole label. |
 | A fragment that is its own bone in one method and part of a big bone in the other | Treat it as a small structure (section 2). |
-| You cannot tell from the CT | Keep the classic label and raise a To check item. |
+| You cannot tell from the CT | Keep neither by default: raise a To check item, and say in it which label you kept meanwhile and why. |
 
-Never average or vote. Settle a region on the anatomy, or hand it on. How much to expect: on OA6-1RK, the bake-off's validator
-flagged 5.4% of the watershed's bone for SAM's labels (its own definition, and it covered 98% of the voxels the agent loop
-later corrected); `disagree.py` on the same run, big bones only, flags 2.6%. So a large region is worth a To check item even when you keep
-your label. The classic labels of the reference looked right at every disagreement inspected on that scan, which is one scan.
+Never average or vote. Settle a region on the anatomy, or hand it on. How much to expect: on OA6-1RK, an earlier validator
+flagged 5.4% of the watershed's bone for SAM's labels (its own definition); `disagree.py` on the same run, big bones only,
+flags 2.6%. So a large region is worth a To check item even when you keep
+your label.
 
 ## 4. Fix
 
 Choose the cheapest fix that addresses the cause:
 
-- Wrong box or missing neighbour: fix the prompt and call `segment_sam` again. One rerun is normal. A third rerun on the same
-  problem is a To check item, not another call.
+- Wrong box or missing neighbour: fix the prompt and call `segment_sam` again. One rerun is normal; the limit on reruns is in
+  `sam-segmentation`.
 - A whole piece carries the wrong label: `relabel.py`.
 - Two bones share one label across a contact: split them with a watershed restricted to that label,
   `classic_segment.py ... --within <label> --seeds seeds.json` (`{"<label>": [[z,y,x], ...]}`, one entry per part, a seed
@@ -100,3 +103,20 @@ Raise one To check item per region with `checkpoint`: `toCheck: {title, focus: {
 <the disagreement labels volume output>, label: <region>}}` (both arrays are required). In the title, give the place and the
 question ("Medial joint face, slices 140-170: femur or tibia?"). In the text, give both methods' labels and the one you kept.
 Report `disagreement.npy` as a `volume` output of kind `labels` so the focus resolves.
+
+## When you check a task
+
+You are the checker: you judge a finished task and do not redo it (you have no `segment_sam`). If a segmentation is wrong,
+say what and where, and let the main thread decide on a rerun.
+
+1. Read the task's done criteria, the worker's checkpoints and its outputs.
+2. Re-derive what is cheap, writing under `/scratch/recheck/` so the worker's evidence stays as it was: `label_stats.py` and
+   `unlabelled.py` on the worker's labels, a distance or volume recomputed with `measure.py`, a value against the plan's range.
+3. Look yourself (`visual-check`): the 3D sheet, the overlay on the keyframe, the crop of anything `unlabelled.py` found, and
+   every image the worker cited. Do not trust a description of an image you have not opened.
+4. Answer `ok` or `needs-review`. For `needs-review` name the cause (a wrong box, a missing neighbour, a merged fragment, a
+   label on two bones, a number out of range with no explanation, a result that cannot be traced to a file), cite the image
+   or number, and give the region (slice, coordinates, label) so a To check item can point at it.
+
+Your eyes are fallible on small things and on bone names away from the joint: confirm in code before you reject, and say
+which of the two you relied on. A To check item the worker raised for a real question is not a defect.

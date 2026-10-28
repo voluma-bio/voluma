@@ -7,10 +7,20 @@
 of that label. The crop is a cube of the piece's bounding box plus `--pad-mm`, with the piece itself drawn in white.
 """
 import argparse
+import sys
+from pathlib import Path
 
 import numpy as np
-import viewlib as vl
 from scipy import ndimage as ndi
+
+HERE = Path(__file__).resolve().parent
+# `python -I` puts no script directory on sys.path, so every directory a script imports from is added here.
+sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'microct-core/resources')]
+try:
+    import viewlib as vl
+except ModuleNotFoundError as e:
+    sys.exit(f'{e}: this script expects <workflows>/microct-analysis/skills/<skill>/resources/ with '
+             '<workflows>/microct-analysis/skills/microct-core/resources/sidecar.py beside it')
 
 sl = vl.sidecar
 
@@ -35,11 +45,13 @@ if __name__ == '__main__':
     ap.add_argument('--out', required=True)
     ap.add_argument('--component-at')
     ap.add_argument('--label', type=int)
-    ap.add_argument('--bone-hu', type=float, default=2500, help='threshold defining a piece of bone for --component-at')
+    ap.add_argument('--bone-hu', type=float, help='threshold defining a piece of bone, required with --component-at')
     ap.add_argument('--header', help='hu.json, for spacing (default: from the labels sidecar)')
     ap.add_argument('--pad-mm', type=float, default=1.5)
     ap.add_argument('--window')
     a = ap.parse_args()
+    if a.component_at is not None and a.bone_hu is None:
+        sl.fail('--component-at needs --bone-hu: the HU threshold that defines a piece of bone')
     if (a.component_at is None) == (a.label is None):
         sl.fail('give exactly one of --component-at or --label')
     hu = np.load(a.hu, mmap_mode='r')

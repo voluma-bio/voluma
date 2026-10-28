@@ -15,8 +15,15 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'microct-core/resources'))
-import sidecar
+HERE = Path(__file__).resolve().parent
+# `python -I` puts no script directory on sys.path, so every directory a script imports from is added here.
+sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'microct-core/resources')]
+try:
+    import sidecar
+except ModuleNotFoundError as e:
+    sys.exit(f'{e}: this script expects <workflows>/microct-analysis/skills/<skill>/resources/ with '
+             '<workflows>/microct-analysis/skills/microct-core/resources/sidecar.py beside it')
+
 
 
 def distance_mm(points_zyx, spacing_zyx_mm):

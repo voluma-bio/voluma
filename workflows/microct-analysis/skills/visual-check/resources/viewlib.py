@@ -11,11 +11,17 @@ import matplotlib
 import numpy as np
 from scipy import ndimage as ndi
 
+HERE = Path(__file__).resolve().parent
+# `python -I` puts no script directory on sys.path, so every directory a script imports from is added here.
+sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'microct-core/resources')]
+try:
+    import sidecar
+except ModuleNotFoundError as e:
+    sys.exit(f'{e}: this script expects <workflows>/microct-analysis/skills/<skill>/resources/ with '
+             '<workflows>/microct-analysis/skills/microct-core/resources/sidecar.py beside it')
+
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'microct-core/resources'))
-import sidecar
 
 PALETTE = ['#ff3b30', '#34c759', '#0a84ff', '#ffcc00', '#bf5af2', '#ff9f0a', '#64d2ff', '#ff6482',
            '#30d158', '#ac8e68', '#5e5ce6', '#ffd60a']

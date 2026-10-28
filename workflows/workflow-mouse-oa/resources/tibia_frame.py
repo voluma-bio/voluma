@@ -4,7 +4,8 @@
          [--joint-end low|high] [--shaft-frac 0.5 0.95] [--epiphysis-frac 0 0.2] [--depth-mm 3.15] [--pad 10]
 
 Fits the bone's shaft axis (centroid regression over the shaft part), takes the epiphyseal long cross-axis as U
-(oriented +U medial/+V anterior by the sign rule below), and resamples the HU volume and the bone mask onto that
+(+U medial and +V anterior come from a sign rule on scan y and `--joint-end` that assumes one knee and one scan orientation:
+confirm it on the QC montage before naming a side), and resamples the HU volume and the bone mask onto that
 frame, cropped around the joint end. Everything the protocol annotates (growth-plate curves, heights, plate
 patches) is indexed on this aligned grid: array axes (W, V, U), W running from the joint end toward the shaft.
 
@@ -21,7 +22,14 @@ import matplotlib
 import numpy as np
 from scipy import ndimage as ndi
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[4] / 'microct-analysis/skills/microct-core/resources'))
+HERE = Path(__file__).resolve().parent
+# `python -I` puts no script directory on sys.path; microct-core is found by walking up to the directory that holds it.
+CORE = next((p / 'microct-analysis/skills/microct-core/resources' for p in HERE.parents
+             if (p / 'microct-analysis/skills/microct-core/resources/sidecar.py').exists()), None)
+if CORE is None:
+    sys.exit('Cannot find microct-core: this script expects microct-analysis/skills/microct-core/resources/ in a '
+             'directory above it (<workflows>/workflow-mouse-oa/resources/ with <workflows>/microct-analysis/ beside it)')
+sys.path[:0] = [str(HERE), str(CORE)]
 import sidecar
 
 matplotlib.use('Agg')

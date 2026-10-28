@@ -1,9 +1,14 @@
 """Per-label checks on a labels volume: voxels, volume in mm3, 3D pieces and their sizes, bounding box, neighbours, and,
 with a ranges file, whether each label is inside the expected volume range and piece count.
 
-  python label_stats.py --labels labels.npy --out stats.json [--ranges anatomy.json] [--header hu.json]
+  python label_stats.py --labels labels.npy --out stats.json [--ranges anatomy.json] [--header hu.json] [--min-piece-mm3 0.01]
 
-`--ranges` is the anatomy skill's JSON: {"labels": [{"id": 1, "name": "femur", "volume_mm3": [lo, hi], "components": 1}]}.
+Pieces smaller than `--min-piece-mm3` are specks, not pieces: clipping a SAM mask to the bone envelope leaves hundreds of
+them (a clipped, unmerged SAM volume on OA6-1RK: 64 to 915 pieces per label, almost all under 0.01 mm3), and counting them
+would flag every label. They are reported as `specks` (count and volume) and left out of `pieces`. 0.01 mm3 is the size
+`unlabelled.py` uses for a candidate, a fifth of the smallest labelled structure on OA6-1RK (0.051 mm3).
+
+`--ranges` is the anatomy reference's anatomy.json: {"labels": [{"id": 1, "name": "femur", "volume_mm3": [lo, hi], "components": 1}]}.
 Prints a one-line summary with the labels that fail; the full table is in `--out`.
 """
 import argparse
@@ -14,8 +19,15 @@ from pathlib import Path
 import numpy as np
 from scipy import ndimage as ndi
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'microct-core/resources'))
-import sidecar
+HERE = Path(__file__).resolve().parent
+# `python -I` puts no script directory on sys.path, so every directory a script imports from is added here.
+sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'microct-core/resources')]
+try:
+    import sidecar
+except ModuleNotFoundError as e:
+    sys.exit(f'{e}: this script expects <workflows>/microct-analysis/skills/<skill>/resources/ with '
+             '<workflows>/microct-analysis/skills/microct-core/resources/sidecar.py beside it')
+
 
 CONN26 = np.ones((3, 3, 3))
 
@@ -27,7 +39,7 @@ def neighbours(lab, mask, label):
     return {int(i): int(c) for i, c in zip(ids, counts) if i != label}
 
 
-def stats_for(labels, label, sp):
+def stats_for(labels, label, sp, min_piece_mm3):
     sl = ndi.find_objects((labels == label).astype(np.uint8))[0]
     pad = tuple(slice(max(0, s.start - 1), s.stop + 1) for s in sl)
     sub = labels[pad]
@@ -35,8 +47,12 @@ def stats_for(labels, label, sp):
     pieces, n = ndi.label(mask, CONN26)
     sizes = np.sort(np.bincount(pieces.ravel())[1:])[::-1]
     v = float(np.prod(sp))
+    specks = sizes[sizes * v < min_piece_mm3]
+    sizes = sizes[sizes * v >= min_piece_mm3]
+    n = len(sizes)
     return {
         'voxels': int(mask.sum()), 'volume_mm3': round(float(mask.sum()) * v, 4), 'pieces': int(n),
+        'specks': {'count': len(specks), 'mm3': round(float(specks.sum()) * v, 5)},
         'piece_mm3': [round(float(s) * v, 4) for s in sizes[:8]],
         'bbox_zyx': [[int(s.start), int(s.stop)] for s in sl],
         'neighbour_voxels': neighbours(sub, mask, label)}
@@ -48,6 +64,7 @@ if __name__ == '__main__':
     ap.add_argument('--out', required=True)
     ap.add_argument('--ranges')
     ap.add_argument('--header', help='hu.json (default: the labels sidecar)')
+    ap.add_argument('--min-piece-mm3', type=float, default=0.01, help='smaller pieces are specks, not counted as pieces')
     a = ap.parse_args()
     labels = np.load(a.labels)
     sp = sidecar.grid(a.header or str(sidecar.sidecar_path(a.labels)))['spacing_zyx_mm']
@@ -57,7 +74,7 @@ if __name__ == '__main__':
     table, flags = {}, []
     ids = [int(i) for i in np.unique(labels) if i > 0]
     for lv in ids:
-        s = stats_for(labels, lv, sp)
+        s = stats_for(labels, lv, sp, a.min_piece_mm3)
         e = expected.get(lv)
         if e:
             lo, hi = e['volume_mm3']
@@ -77,4 +94,4 @@ if __name__ == '__main__':
         flags.append(f'labels {unknown} are not in the ranges file')
     Path(a.out).write_text(json.dumps(table, indent=1) + '\n')
     sidecar.emit(stats=a.out, labels=ids, volume_mm3={lv: table[lv]['volume_mm3'] for lv in ids},
-                 pieces={lv: table[lv]['pieces'] for lv in ids}, flags=flags)
+                 pieces={lv: table[lv]['pieces'] for lv in ids}, specks={lv: table[lv]['specks']['count'] for lv in ids}, flags=flags)

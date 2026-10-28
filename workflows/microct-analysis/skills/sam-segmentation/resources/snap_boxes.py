@@ -1,6 +1,6 @@
 """Snap hand-drawn boxes to the bone they contain, so a prompt box does not cut off bone edges.
 
-  python snap_boxes.py --in oriented.npy --index 159 --threshold-hu 2500 --boxes r0,c0,r1,c1 [r0,c0,r1,c1 ...] [--out boxes.json]
+  python snap_boxes.py --in oriented.npy --index 159 --threshold-hu <T> --boxes r0,c0,r1,c1 [r0,c0,r1,c1 ...] [--out boxes.json]
 
 Prints the snapped boxes, in the [row0, col0, row1, col1] inclusive form `segment_sam` takes, in the same order. Boxes drawn
 by eye cut 14-20 px off bone edges (patella front, tibia); snapped boxes land within 3 px of the bone. Each box grows to the
@@ -15,8 +15,15 @@ from pathlib import Path
 import numpy as np
 from scipy import ndimage as ndi
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'microct-core/resources'))
-import sidecar
+HERE = Path(__file__).resolve().parent
+# `python -I` puts no script directory on sys.path, so every directory a script imports from is added here.
+sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'microct-core/resources')]
+try:
+    import sidecar
+except ModuleNotFoundError as e:
+    sys.exit(f'{e}: this script expects <workflows>/microct-analysis/skills/<skill>/resources/ with '
+             '<workflows>/microct-analysis/skills/microct-core/resources/sidecar.py beside it')
+
 
 
 def snap_box(image, box, threshold, pad=3, min_px=50):

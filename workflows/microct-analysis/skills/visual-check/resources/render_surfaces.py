@@ -17,11 +17,20 @@ asserted. Needs pyvista with an off-screen VTK (vtk-osmesa in the sandbox).
 """
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
-import viewlib as vl
 from skimage.measure import marching_cubes
+
+HERE = Path(__file__).resolve().parent
+# `python -I` puts no script directory on sys.path, so every directory a script imports from is added here.
+sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'microct-core/resources')]
+try:
+    import viewlib as vl
+except ModuleNotFoundError as e:
+    sys.exit(f'{e}: this script expects <workflows>/microct-analysis/skills/<skill>/resources/ with '
+             '<workflows>/microct-analysis/skills/microct-core/resources/sidecar.py beside it')
 
 sl = vl.sidecar
 TILE = 640

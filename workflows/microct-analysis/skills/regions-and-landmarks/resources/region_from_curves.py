@@ -4,7 +4,7 @@
             slices; the region is every voxel between them along one axis, and only where the curves reach
   polygon   one closed outline per traced slice, interpolated between traced slices by signed distance
 
-The region can then be clipped to a bone mask and kept a clearance (mm) inside the bone's surface.
+The region can then be clipped to a bone mask and kept a clearance (mm) inside the mask's outer surface.
 Writes region.npy (bool, same grid as --grid) with its sidecar, and region-check.jpg. Schemas: ../SKILL.md.
 """
 
@@ -18,8 +18,15 @@ import numpy as np
 from scipy import ndimage as ndi
 from skimage.draw import polygon as draw_polygon
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'microct-core/resources'))
-import sidecar
+HERE = Path(__file__).resolve().parent
+# `python -I` puts no script directory on sys.path, so every directory a script imports from is added here.
+sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'microct-core/resources')]
+try:
+    import sidecar
+except ModuleNotFoundError as e:
+    sys.exit(f'{e}: this script expects <workflows>/microct-analysis/skills/<skill>/resources/ with '
+             '<workflows>/microct-analysis/skills/microct-core/resources/sidecar.py beside it')
+
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -152,7 +159,7 @@ def main():
         q.add_argument('--labels', help='label .npy, with --ids, instead of --bone')
         q.add_argument('--ids', type=int, nargs='+')
         q.add_argument(
-            '--clearance-mm', type=float, default=0, help='also drop voxels closer than this to the bone surface'
+            '--clearance-mm', type=float, default=0, help='also drop voxels closer than this to the outer surface of the bone mask you pass (periosteum for a filled bone, not the inner surface of the cortex)'
         )
         q.add_argument('--hu', help='hu.npy: background for the check image')
         q.add_argument('--out', required=True, help='output directory')

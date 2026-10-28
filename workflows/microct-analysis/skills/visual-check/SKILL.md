@@ -26,8 +26,8 @@ a side and 1 MiB (the `view_image` limit); a 6-view 3D sheet of OA6-1RK is about
 | What is this small thing, and which label is it under? | Crop sheet: three orthogonal cuts through the piece, labels outlined | `render_crops.py --hu hu.npy --labels labels.npy --component-at z,y,x` (or `--label N`) |
 | Which segmentation is right here? | Disagreement panel: CT beside both outlines with the disagreeing voxels filled | `segmentation-check`: `disagree.py` |
 
-Open up to four images in one `view_image` call: for example, the overlay and the 3D sheet together. Pass `--names
-1=femur,2=tibia` to put a legend on a sheet, and `--window lo,hi` (the workflow's anatomy skill gives the HU window) to make bone
+Open up to four images in one `view_image` call: for example, the overlay and the 3D sheet together. **Only the images of your last two `view_image` calls stay visible**; older ones are a line of text. To compare before and after a fix, open both in one call. Pass `--names
+1=femur,2=tibia` to put a legend on a sheet, and `--window lo,hi` (the workflow's anatomy reference gives the HU window) to make bone
 readable.
 
 **Coordinates on every image:** x is the column (numbers along the top), y is the row (numbers down the left), both in
@@ -45,13 +45,13 @@ eyes can do"). Every result is n=1 on one scan: treat the rules as defaults, and
   the femur, in every case tried (4 of 4). Look at it after every change to the labels.
 - **2D overlays catch gross errors and can miss small ones.** A leak across the joint and an unlabelled patella were
   caught (2 of 3 overlay tests). A small fragment carrying the wrong label was reported as "unlabelled", at the wrong
-  place (about 150 px off) by the smaller model. When an overlay shows something small, check it in code
+  place (about 150 px off) by one of the two models tested. When an overlay shows something small, check it in code
   (`label_stats.py`, or the label value at that voxel) before acting.
 - **Name bones only on the keyframe through the joint, or on the 3D sheet.** On a single slice away from the joint, the
   tibia was called the femur and the fibula the tibia (both models). When you need a bone's identity elsewhere, follow
   its label or component from the keyframe. Do not rename it from the new slice.
 - **Coordinates you read off an image are approximate.** Boxes read by eye were off by up to ~55 px at the joint on a
-  928 px slice (smaller model; the larger one was within 5 px on big bones and worse on the patella). Draw boxes and picks
+  928 px slice (one model; the other was within 5 px on big bones and worse on the patella). Draw boxes and picks
   roughly, let the snapping resource fit them to the bone (`snap_boxes.py`, `pick.py`), and look at the snapped result.
 - **Never estimate an angle, a length or a volume by eye.** Flexion read off renders came out 10-38 degrees against a
   measured 64. Measure in code, then look to confirm that the measured thing is the right thing. (The renders were not
@@ -59,8 +59,9 @@ eyes can do"). Every result is n=1 on one scan: treat the rules as defaults, and
 - **Prefer stills to video.** A model once described a bone rotating into view in a video whose frames were
   identical. Take a model's account of what changed across frames as unverified. The sheet shows the same views and is
   also the evidence the reviewer sees.
-- **A model's name for a small structure is a guess.** Both models called the posterior ossicle (reference label 5) a fabella on every
-  render. That is unconfirmed (see the anatomy skill): name what the data and the protocol support, and ask for the rest.
+- **A model's name for a small structure is a guess.** In the evidence run, one model called a small posterior piece a fabella on every
+  overlay and the other on the keyframe. That is unconfirmed (see the anatomy reference): name what the data and the protocol
+  support, and ask for the rest.
 
 ## How to look
 
@@ -71,6 +72,5 @@ eyes can do"). Every result is n=1 on one scan: treat the rules as defaults, and
    checkpoint, with the image as evidence.
 4. Once you have fixed a problem, render the same view again and look again before you move on.
 
-A look costs roughly $0.02-0.03 on the smaller model and $0.10-0.17 on the larger, mostly in reasoning. Look where a
-decision depends on it. Ten looks in a task is normal, and fifty means you are looping. Each image stays in the
-thread: open the ones you need, not every cut.
+A look costs real money, mostly in reasoning. Look where a
+decision depends on it. Ten looks in a task is normal, and fifty means you are looping. Open the ones you need, not every cut.

@@ -26,21 +26,21 @@
       "name": "fibula",
       "volume_mm3": [0.744, 1.29],
       "components": 1,
-      "notes": "Touches the tibia and can fuse with it on a threshold; see the fibula hint in SKILL.md. Range is the OA6-1RK reference volume 0.992 mm3 widened (x0.75 to x1.3); one scan only (n=1), not a population range."
+      "notes": "Touches the tibia and can fuse with it on a threshold; see the prompts section of anatomy.md. Range is the OA6-1RK reference volume 0.992 mm3 widened (x0.75 to x1.3); one scan only (n=1), not a population range."
     },
     {
       "id": 5,
       "name": "medial-joint-mineralization",
       "volume_mm3": [0.114, 0.572],
       "components": 1,
-      "notes": "UNRESOLVED NAME: fabella or medial joint mineralization is an open question for the lab. Keep the reference name; do not call it a fabella. Range is the OA6-1RK reference volume 0.286 mm3 widened (x0.4 to x2.0); one scan only (n=1), not a population range."
+      "notes": "Name is the reference's (\"medial-joint-mineralization\") and unconfirmed: the lab reads this label as the medial meniscus with spurs (deck #3), and a vision model called it a fabella; none of this is anatomically checked. Keep the reference name; do not call it a fabella. Range is the OA6-1RK reference volume 0.286 mm3 widened (x0.4 to x2.0); one scan only (n=1), not a population range."
     },
     {
       "id": 6,
       "name": "lateral-joint-mineralization",
       "volume_mm3": [0.164, 0.822],
       "components": 2,
-      "notes": "Two 3D pieces on OA6-1RK (0.24 and 0.17 mm3): needs one SAM box per piece. Name follows the reference; not lab-confirmed. Range is the OA6-1RK reference volume 0.411 mm3 widened (x0.4 to x2.0); one scan only (n=1), not a population range."
+      "notes": "Two 3D pieces on OA6-1RK (0.24 and 0.17 mm3): needs one SAM box per piece. Name follows the reference; not lab-confirmed. The lab reads this label as the lateral meniscus with spurs (deck #2), not anatomically checked. Range is the OA6-1RK reference volume 0.411 mm3 widened (x0.4 to x2.0); one scan only (n=1), not a population range."
     },
     {
       "id": 7,
@@ -85,7 +85,8 @@
       "notes": "Separate from the patella core (label 3); inclusion in the patella is a question for the lab. Range is the OA6-1RK reference volume 0.121 mm3 widened (x0.4 to x2.0); one scan only (n=1), not a population range."
     }
   ],
-  "bone_threshold_hu": 2500,
   "window_hu": [1000, 8000],
-  "source": "review-07-separated of the OA6-1RK reference run, spacing 0.0105 mm isotropic; n=1 scan"
+  "source": "review-07-separated of the OA6-1RK reference run, spacing 0.0105 mm isotropic; n=1 scan",
+  "segmentation_threshold_hu": 2500,
+  "threshold_note": "2500 HU builds masks (orientation, box snapping, envelopes, candidates). It is not the BV threshold: measurement scripts derive the lab's 2.16/cm from hu.json."
 }

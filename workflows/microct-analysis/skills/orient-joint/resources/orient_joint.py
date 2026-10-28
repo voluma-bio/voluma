@@ -4,13 +4,14 @@ plane they span, a stack of slices along that plane's normal, and the keyframe s
 Run this BEFORE `segment_sam`: SAM tracks through a stack of slices, so each slice must show the bones it should
 follow, and the scanner's own axes often do not do that.
 
-  python orient_joint.py --in hu.npy --header hu.json --out <outdir> [--threshold-hu 2500]
+  python orient_joint.py --in hu.npy --header hu.json --out <outdir> [--threshold-hu <T>]
         [--shaft-radius-mm 1.2] [--ref-radius-mm 3.15] [--min-object-mm3 0.0035] [--margin-mm 0.126]
       Writes <outdir>/frame.json (the frame), oriented.npy (float32 HU stack, axis 0 = slices) with its sidecar,
       and keyframe.jpg (the sheet to look at before going on). Prints the keyframe index and the bend angle.
 
   from orient_joint import joint_frame, reslice, to_scan     # frame = joint_frame(hu, spacing_mm)
       to_scan(labels_on_stack, frame, scan_shape)             # nearest neighbour, for labels made on the stack
+      to_oriented_points(zyx, frame), to_scan_points(srs, frame)   # points between the scan grid and the stack
 
 Needs isotropic voxels (the stack is cut on the scan's voxel size), HU in, ZYX order. The three lengths are in mm and
 convert to voxels with the scan's spacing; the defaults suit a mouse knee (a mouse femur shaft is under 1.2 mm in
@@ -36,10 +37,16 @@ from pathlib import Path
 import numpy as np
 from scipy import ndimage as ndi
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'microct-core/resources'))
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'visual-check/resources'))
-import render_slices
-import sidecar
+HERE = Path(__file__).resolve().parent
+# `python -I` puts no script directory on sys.path, so every directory a script imports from is added here.
+sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'microct-core/resources'), str(HERE.parents[1] / 'visual-check/resources')]
+try:
+    import render_slices
+    import sidecar
+except ModuleNotFoundError as e:
+    sys.exit(f'{e}: this script expects <workflows>/microct-analysis/skills/<skill>/resources/ with '
+             '<workflows>/microct-analysis/skills/microct-core/resources/sidecar.py beside it')
+
 
 END_FRAC = 0.30
 SHAFT_RANGE = (0.35, 0.95)
@@ -231,6 +238,16 @@ def to_scan(stack, frame, scan_shape):
         ok = (idx[0] >= 0) & (idx[0] < S) & (idx[1] >= 0) & (idx[1] < H) & (idx[2] >= 0) & (idx[2] < W)
         out[z][ok] = stack[idx[0][ok], idx[1][ok], idx[2][ok]]
     return out
+
+
+def to_oriented_points(points_zyx, frame):
+    """(slice, row, column) on the oriented stack of scan-grid points (z, y, x); fractional, shape (..., 3)."""
+    return (np.asarray(points_zyx, float) - np.array(frame['origin_zyx'])) @ np.array(frame['R']).T
+
+
+def to_scan_points(points_srs, frame):
+    """Scan-grid (z, y, x) of oriented-stack points (slice, row, column); the inverse of `to_oriented_points`."""
+    return np.asarray(points_srs, float) @ np.array(frame['R']) + np.array(frame['origin_zyx'])
 
 
 if __name__ == '__main__':

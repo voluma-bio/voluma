@@ -1,8 +1,7 @@
 """Tibial secondary ossification centre (IIOC, ROI-1): tissue region, TV/BV/BV/TV, heights, width, plate columns.
 
   python iioc.py --hu-aligned tibia-hu.npy --mask tibia-mask.npy --frame tibia-frame.json
-         --hu hu.npy --hu-json hu.json --annotations annotations.json --out <dir> [--threshold 2500]
-         [--gp-shift-voxels 0]
+         --hu hu.npy --hu-json hu.json --annotations annotations.json --out <dir> [--threshold HU] [--gp-shift-voxels 0]
 
 ROI-1 is the tibial bone between the articular surface and the proximal face of the growth plate (growth-plate
 band and metaphysis excluded; marrow and cortical shell included), cut along growth-plate curves the agent traced
@@ -10,8 +9,13 @@ on coronal sections of the aligned stack (see ../SKILL.md for the annotation sch
 scan grid: the aligned region is mapped back with nearest-neighbour and thresholded on unresampled HU.
 
 Writes (aligned grid, array axes W,V,U) iioc-tissue.npy, iioc-bone.npy, growth-plate-proximal-face.npy,
-articular-top-surface.npy (2D, W index per V,U), <side>-plate-run.npy, and on the scan grid iioc-tissue-scan.npy;
-plus iioc.json (every value, with its definition) and QC images. Prints one JSON line.
+articular-top-surface.npy (2D, W index per V,U), <side>-plate-run.npy, and on the scan grid iioc-tissue-scan.npy and
+width-points-scan.json (the two width points as [z, y, x] scan indices, for `amira_landmarks.py`); plus iioc.json (every
+value, with its definition) and QC images. Prints one JSON line.
+
+Bone is the ROI and unresampled HU above the threshold (default: the lab's 2.16/cm in this scan's HU, from hu.json's
+calibration); no label gates it. BV/TV is in %. Heights are measured along W, the tibial shaft axis; `shaft_to_growth_plate_normal_deg`
+says how far that is from perpendicular to the growth-plate face.
 """
 
 import argparse
@@ -23,7 +27,14 @@ import matplotlib
 import numpy as np
 from scipy import ndimage as ndi
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[4] / 'microct-analysis/skills/microct-core/resources'))
+HERE = Path(__file__).resolve().parent
+# `python -I` puts no script directory on sys.path; microct-core is found by walking up to the directory that holds it.
+CORE = next((p / 'microct-analysis/skills/microct-core/resources' for p in HERE.parents
+             if (p / 'microct-analysis/skills/microct-core/resources/sidecar.py').exists()), None)
+if CORE is None:
+    sys.exit('Cannot find microct-core: this script expects microct-analysis/skills/microct-core/resources/ in a '
+             'directory above it (<workflows>/workflow-mouse-oa/resources/ with <workflows>/microct-analysis/ beside it)')
+sys.path[:0] = [str(HERE), str(CORE)]
 import sidecar
 
 matplotlib.use('Agg')
@@ -117,7 +128,7 @@ def main():
     ap.add_argument('--hu-json', required=True, help='hu.json of the scan')
     ap.add_argument('--annotations', required=True)
     ap.add_argument('--out', required=True)
-    ap.add_argument('--threshold', type=float, default=2500.0, help='bone threshold in HU')
+    ap.add_argument('--threshold', type=float, help='bone threshold in HU (default: the lab threshold, 2.16/cm, from --hu-json)')
     ap.add_argument(
         '--gp-shift-voxels',
         type=float,
@@ -128,6 +139,7 @@ def main():
     ann = json.loads(Path(a.annotations).read_text())
     frame = json.loads(Path(a.frame).read_text())
     g = sidecar.grid(a.hu_json)
+    a.threshold = sidecar.bone_threshold_hu(a.hu_json, a.threshold)
     vox = frame['spacing_zyx_mm'][0]
     h = np.load(a.hu_aligned, mmap_mode='r')
     tib = np.load(a.mask)
@@ -164,7 +176,7 @@ def main():
         'iioc_bv': val(
             bv, 'mm^3', f'ROI-1 bone volume (deck #5): unresampled scan HU > {a.threshold} inside the same ROI'
         ),
-        'iioc_bv_tv': val(bv / tv, '1', 'ROI-1 BV/TV as a fraction (deck #6); whole-IIOC, includes shell and plate'),
+        'iioc_bv_tv': val(bv / tv * 100, '%', 'ROI-1 BV/TV in % (deck #6); whole-IIOC, includes shell and plate'),
     }
     valid = roi.any(axis=0)
     top = np.argmax(roi, axis=0).astype(float)
@@ -184,6 +196,11 @@ def main():
 
     def height(key, u, deck, what):
         v = v_star
+        if not (0 <= u < valid.shape[1] and 0 <= v < valid.shape[0]) or not interior[v, u]:
+            sidecar.fail(
+                f'{key}: U={u} on section V={v} is outside the ROI-1 footprint, or within {EDGE_ERODE} voxels of its edge, '
+                'so there is no height to measure there: move that point (or height_section_v) onto the tibia'
+            )
         values[key] = val(
             local_height[v, u] * vox,
             'mm',
@@ -192,6 +209,7 @@ def main():
             section_v=v,
             u=int(u),
             points_uvw=[[int(u), v, float(top[v, u])], [int(u), v, float(gp[v, u])]],
+            voxel_mm=vox,
         )
 
     height('iioc_height', u_mid, '#7', 'IIOC height at the middle of the growth plate')
@@ -204,6 +222,14 @@ def main():
         section_v=int(vmax),
         u=int(umax),
     )
+    vv, uu = np.nonzero(valid)
+    slope_u, slope_v, _ = np.linalg.lstsq(np.column_stack([uu, vv, np.ones(len(uu))]), gp[vv, uu], rcond=None)[0]
+    values['shaft_to_growth_plate_normal_deg'] = val(
+        np.degrees(np.arccos(1 / np.sqrt(1 + slope_u**2 + slope_v**2))),
+        'deg',
+        'angle between the tibial shaft axis (W) and the normal of the plane fitted to the traced growth-plate face over the '
+        'ROI-1 footprint: 0 means "along the shaft" and "perpendicular to the growth plate" are the same direction for heights #7-9',
+    )
     width = float(np.linalg.norm((wp[1] - wp[0]) * vox))
     values['tibial_width'] = val(
         width,
@@ -213,6 +239,11 @@ def main():
         'the other side)',
         points_uvw=wp.tolist(),
     )
+    basis = np.array(frame['output_xyz_to_original_xyz_matrix'])
+    origin_xyz = np.array(frame['output_xyz_to_original_xyz_offset'])
+    width_points_zyx = {
+        name: (basis @ p + origin_xyz)[::-1].tolist() for name, p in zip(('width_a', 'width_b'), wp, strict=True)
+    }
     plates = {}
     for side in ('medial', 'lateral'):
         patch = ann.get('plate_patches', {}).get(side)
@@ -243,12 +274,13 @@ def main():
             mean=float(np.mean(th)),
             p10_p90=np.percentile(th, [10, 90]).tolist(),
             columns=len(th),
+            voxel_mm=vox,
         )
     meta = {
         'removed_disconnected_voxels': removed,
         'threshold_hu': a.threshold,
         'gp_shift_voxels': a.gp_shift_voxels,
-        'aligned_bv_tv': float(bone.sum() / roi.sum()),
+        'aligned_bv_tv_percent': float(bone.sum() / roi.sum() * 100),
         'height_section_v': v_star,
         'growth_plate_mid_u': u_mid,
     }
@@ -273,6 +305,7 @@ def main():
             params=params,
             script='iioc.py',
         )
+    (out / 'width-points-scan.json').write_text(json.dumps(width_points_zyx, indent=1) + '\n')
     np.save(out / 'iioc-tissue-scan.npy', scan_roi)
     sidecar.write(
         out / 'iioc-tissue-scan.npy', like=a.hu_json, inputs=[a.hu, a.frame, a.mask], params=params, script='iioc.py'
@@ -286,6 +319,7 @@ def main():
         qc=qc,
         tissue=str(out / 'iioc-tissue.npy'),
         tissue_scan=str(out / 'iioc-tissue-scan.npy'),
+        width_points_scan=str(out / 'width-points-scan.json'),
         growth_plate_face=str(out / 'growth-plate-proximal-face.npy'),
         articular_top=str(out / 'articular-top-surface.npy'),
         plate_runs=[str(out / f'{s}-plate-run.npy') for s in plates],

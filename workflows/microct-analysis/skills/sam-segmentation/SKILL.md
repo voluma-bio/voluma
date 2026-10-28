@@ -26,47 +26,63 @@ give, under `/outputs` or `/scratch`. Everything else here is numpy in the sandb
 - **A scan that may not leave the lab.** SAM runs on Meta's API (Standard mode: not trained on, still retained). If the
   study's terms forbid sending the scan out, do not call it, and say so.
 
+## Names
+
+- `labels_oriented.npy`: SAM's output, on the oriented stack. Only the oriented grid has this name.
+- `labels.npy`: the final labels, on the **scan grid** (`microct-core`). Nothing on the oriented grid is called `labels.npy`.
+
 ## Steps
+
+All commands are in `<this skill>/resources/` unless named otherwise. Thresholds are the segmentation mask threshold
+the workflow's anatomy reference gives, not the measurement threshold.
 
 1. **Orient first** (`orient-joint`). Pass the oriented stack, `axis` 0, and the keyframe. Look at `keyframe.jpg` before
    going on.
 2. **Name each bone on the keyframe and draw a rough box** as `[row0, col0, row1, col1]`, ends inclusive, in pixels
-   of that slice (`visual-check` explains the grid). Use the window the anatomy skill gives. The anatomy skill lists the
-   structures, their labels, and which need another slice (`frame`).
-3. **Snap the boxes:**
-   `python <this skill>/resources/snap_boxes.py --in oriented.npy --index <keyframe> --threshold-hu <T> --boxes r0,c0,r1,c1 ...`.
-   Boxes drawn by eye cut 14-20 px off the front of the patella and tibia (patella Dice 0.82-0.86); snapped to the threshold
-   components mostly inside each box, +3 px, they land within 3 px of the bone. Draw the snapped boxes on the keyframe and
-   look (`render_slices.py --boxes`).
+   of that slice (`visual-check` explains the grid). The anatomy reference gives the structures, their labels, the display
+   window, and which bones need another slice (`frame`).
+3. **Snap the boxes:** `python snap_boxes.py --in oriented.npy --index <keyframe> --threshold-hu <T> --boxes r0,c0,r1,c1 ...`.
+   Boxes drawn by eye cut 14-20 px off bone edges; snapped to the threshold components mostly inside each box, +3 px, they land
+   within 3 px. Draw the snapped boxes on the keyframe and look (`render_slices.py --boxes`).
 4. **Big bones in one request, with their neighbours.** One call is one multiplexed request: its structures are tracked
-   together and never share a voxel. Include a box for every bone a target could track into: without a fibula box the
-   tibia tracked into the fibula (819,000 voxels), with it 209,000. Put a neighbour's box on a slice where it is separate,
-   via the structure's `frame`. Up to 16 structures per call. Never one request per bone: three times the cost, overlapping
-   masks (653,000 voxels claimed by femur and patella), and a small bone beside a large one tracked onto it (Dice 0.02).
-   Then give `labels.npy` its grid (`microct-core`, `sidecar.py --like oriented.json`).
-5. **Small structures in a second request, trimmed.** Do not add sesamoids, joint mineralizations or fragments to the
-   big-bone request: they cost the patella (Dice 0.95 to 0.86), because the patella track loses frames and follows the
-   femoral shaft. Send them in their own `segment_sam` call (about $0.10), each with a box snapped on the slice where its
-   component is largest and clear of big bones, and **one box per 3D piece** of a structure in several pieces (an unboxed
-   piece is never found; Dice 0.45 for a two-piece label with one box). Then trim each track to the frames it occupies:
-   `python <this skill>/resources/trim_tracks.py --labels small.npy --out trimmed.npy --targets <label>:<promptFrame> ...`.
-   It keeps the unbroken run of slices around each prompt frame where the mask is non-empty and confidence is 0.5 or more
-   (read from `small.json`; without it, mask overlap with the neighbouring slice, IoU 0.3). Untrimmed, an object keeps
-   tracking after its structure ends and picks up whatever sits at the same spot (201,000 voxels of another label, 49,000 of
-   the tibia). With boxes you can place, trimmed tracks reached Dice 0.90-0.98 for 6 of 8 small labels on OA6-1RK (0.80
-   and 0.45 for the other two). Merge the two label volumes with the big bones winning overlaps, except that a small label
-   must not take patella or femur voxels you have already labelled; if it does, raise it. Trimmed volumes run 10-20%
-   under the reference (trimming cuts track ends): report small-structure volumes with that caveat. The rule was set
-   after seeing one scan: check it on yours.
-6. **Map back and clip.** Map labels to the scan grid (`orient-joint`, `to_scan.py`). SAM masks include soft tissue (a third
-   of the patella mask; whole-mask volumes run 15-60% over on small structures). Clip each label to a filled threshold
-   envelope before reporting a volume:
-   `python <this skill>/resources/clip_to_envelope.py --hu hu.npy --labels labels.npy --out clipped.npy --threshold-hu <T>`.
-   It moves bone-voxel Dice by at most 0.002, so it changes what the numbers count, not how well the bones agree. Never
-   refill clipped voxels by nearest label: the tibia refills with fibula.
-7. **Check and own the labels** with `segmentation-check`. SAM's label is evidence, not an answer: SAM agreeing with a
-   watershed (Dice 0.95-0.98 on the big bones) is agreement, not accuracy. Where the two differ at the joint, the
-   watershed looked right in every panel inspected.
+   together and never share a voxel. Include a box for every bone a target could track into (the anatomy reference names
+   them), each on a slice where it is separate from its neighbour, via the structure's `frame`. Up to 16 structures per
+   call. Never one request per bone: three times the cost, overlapping masks, and a small bone beside a large one tracked
+   onto it. Write the output to `labels_big_oriented.npy`.
+5. **Map back and clip the big bones.** `python <orient-joint>/resources/to_scan.py --in labels_big_oriented.npy --frame frame.json
+   --header hu.json --out labels_big.npy`, then
+   `python clip_to_envelope.py --hu hu.npy --labels labels_big.npy --out labels_big_clipped.npy --threshold-hu <T>`.
+   SAM masks include soft tissue (whole-mask volumes ran 7-60% over the reference); the clip counts bone, not soft tissue, and
+   moves bone-voxel Dice by at most 0.002. Never refill clipped voxels by nearest label: a tibia refills with fibula.
+6. **Find the small structures on the scan grid.** Run `unlabelled.py` on `labels_big_clipped.npy` and look at each candidate
+   (`segmentation-check`, section 2). Keep the ones you can name from the anatomy reference or want to ask about.
+7. **Small structures in their own request, one temporary label per 3D piece.** Do not add them to the big-bone request: they
+   cost the patella (Dice 0.95 to 0.86), because the patella track loses frames and follows the femoral shaft.
+   - **Boxes on the stack:** a candidate lives on the scan grid and the request on the oriented stack.
+     `python <orient-joint>/resources/map_points.py --frame frame.json --pieces qc/cand.npy --ids 3 5 --out qc/boxes.json`
+     gives each candidate's `promptFrame` (the slice that cuts most of it) and `box`. Snap each box on its own slice
+     (`snap_boxes.py --index <promptFrame>`) and look at it (`render_slices.py --boxes`). A candidate is one 3D piece; a
+     structure in several pieces needs one box per piece, and an unboxed piece is never found.
+   - **Labels:** `segment_sam` rejects duplicate labels, so each piece gets a **temporary label** that no label of the
+     structures you keep uses, for example 61 and 62 for the two pieces of one structure. Write down which temporary label is
+     which final label.
+   - Send it, writing `small_oriented.npy`.
+8. **Trim each track to the frames it occupies.**
+   `python trim_tracks.py --labels small_oriented.npy --out small_trimmed_oriented.npy --like oriented.json`
+   (`--only 61 62` limits it). It keeps the unbroken run of slices around each prompt frame where the mask is non-empty and
+   confidence is 0.5 or more (read from `small_oriented.json`), and checks the grid before it writes anything. Untrimmed, an
+   object keeps tracking after its structure ends and picks up whatever sits at the same spot (the tibia, unlabelled bone).
+   Trimmed volumes run 10-20% under the reference (trimming cuts track ends): report small-structure volumes with that
+   caveat. The rule was set after seeing one scan (OA6-1RK): check it on yours.
+9. **Map the small request back and merge.**
+   `to_scan.py --in small_trimmed_oriented.npy --frame frame.json --header hu.json --out small_trimmed.npy`, then
+   `python merge_labels.py --big labels_big_clipped.npy --small small_trimmed.npy --map 61:6 62:6 5:5 --out labels_merged.npy`
+   (pieces go back to their label; several temporary labels may map to one). **The big bones win overlaps. This rule is
+   untested**: the experiment that set the others did not run it, and it showed a three-piece structure leaking into the
+   patella, so the merge reports how many voxels each piece lost to a big bone: a large loss is a To check item.
+   Clip again: `clip_to_envelope.py --labels labels_merged.npy --out labels.npy`. That is the final `labels.npy`.
+10. **Check and own the labels** with `segmentation-check`. SAM's label is evidence, not an answer: SAM agreeing with a
+   watershed is agreement, not accuracy.
 
 ## Results vary between runs
 
@@ -75,5 +91,5 @@ one stack agreed at Dice 0.994-0.998 on OA6-1RK. Do not claim a voxel-exact numb
 `prompt` and the labels file as evidence, and if a measurement must be stable, call twice and report the spread. A rerun
 costs the same as the first call: plan reruns, do not loop on a prompt. A third rerun on one problem is a To check item.
 
-Everything above is the recipe as of 2026-10-28 and was measured on one scan (OA6-1RK) plus two public femurs: the shape
-is stable, the numbers may move.
+The recipe is as of 2026-10-28 and was measured on one scan (OA6-1RK) plus two public femurs: the shape is stable, the
+numbers may move. The knee-specific numbers (boxes, Dice) are in the design doc, not here.

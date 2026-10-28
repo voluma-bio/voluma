@@ -1,7 +1,7 @@
 """A second opinion on boundaries: a seeded watershed inside the bone threshold, seeded from the labels you already have.
 
-  python classic_segment.py --hu hu.npy --labels labels.npy --out classic.npy --threshold-hu 2500 [--core-mm 0.05]
-  python classic_segment.py --hu hu.npy --labels labels.npy --out split.npy --threshold-hu 2500 --within 2 --seeds seeds.json
+  python classic_segment.py --hu hu.npy --labels labels.npy --out classic.npy --threshold-hu <T> [--core-mm 0.05]
+  python classic_segment.py --hu hu.npy --labels labels.npy --out split.npy --threshold-hu <T> --within 2 --seeds seeds.json
 
 Default mode: seeds are the eroded cores of each label (`--core-mm` deep; a label with no core left seeds from its bone voxels),
 the elevation is the Gaussian gradient magnitude of the HU volume (sigma 1 voxel), and basins grow with 6-connectivity inside
@@ -22,8 +22,15 @@ import numpy as np
 from scipy import ndimage as ndi
 from skimage.segmentation import watershed
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'microct-core/resources'))
-import sidecar
+HERE = Path(__file__).resolve().parent
+# `python -I` puts no script directory on sys.path, so every directory a script imports from is added here.
+sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'microct-core/resources')]
+try:
+    import sidecar
+except ModuleNotFoundError as e:
+    sys.exit(f'{e}: this script expects <workflows>/microct-analysis/skills/<skill>/resources/ with '
+             '<workflows>/microct-analysis/skills/microct-core/resources/sidecar.py beside it')
+
 
 MARGIN = 10
 

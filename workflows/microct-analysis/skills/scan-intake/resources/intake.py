@@ -14,8 +14,15 @@ from pathlib import Path
 import numpy as np
 import pydicom
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'microct-core/resources'))
-import sidecar
+HERE = Path(__file__).resolve().parent
+# `python -I` puts no script directory on sys.path, so every directory a script imports from is added here.
+sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'microct-core/resources')]
+try:
+    import sidecar
+except ModuleNotFoundError as e:
+    sys.exit(f'{e}: this script expects <workflows>/microct-analysis/skills/<skill>/resources/ with '
+             '<workflows>/microct-analysis/skills/microct-core/resources/sidecar.py beside it')
+
 
 CT_IMAGE_STORAGE = '1.2.840.10008.5.1.4.1.1.2'
 
@@ -72,7 +79,7 @@ def check_geometry(headers):
 
 
 def load_series(source, out):
-    paths = sorted(Path(source).rglob('*.dcm'))
+    paths = sorted(p for p in Path(source).rglob('*') if p.suffix.lower() == '.dcm')
     if len(paths) < 2:
         sidecar.fail(f'Need at least two .dcm slices under {source}')
     headers = [pydicom.dcmread(p, stop_before_pixels=True) for p in paths]

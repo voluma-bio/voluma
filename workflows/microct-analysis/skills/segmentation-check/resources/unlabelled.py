@@ -1,11 +1,11 @@
 """Find bone no label covers: candidate small structures (sesamoids, mineralizations, fragments) for you to name.
 
-  python unlabelled.py --hu hu.npy --labels labels.npy --out cand.npy --threshold-hu 2500 [--min-mm3 0.01] [--rim-mm 0.02]
+  python unlabelled.py --hu hu.npy --labels labels.npy --out cand.npy --threshold-hu <T> [--min-mm3 0.01] [--rim-mm 0.02]
 
 Candidates are the 26-connected pieces of (bone >= threshold, with no label within `--rim-mm` of it) at least `--min-mm3`
 big. The rim keeps the partial-volume skin around a labelled bone from joining them into one piece. Writes `--out`, a uint16
 volume where each candidate has an id (1 = largest), with its sidecar, and prints the list. Open each one with
-`render_crops.py --component-at <centre>`, name it from the anatomy skill, then label it (`relabel.py`) or raise a To check item.
+`render_crops.py --component-at <centre>`, name it from the anatomy reference, then label it (`relabel.py`) or raise a To check item.
 """
 import argparse
 import sys
@@ -14,8 +14,15 @@ from pathlib import Path
 import numpy as np
 from scipy import ndimage as ndi
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'microct-core/resources'))
-import sidecar
+HERE = Path(__file__).resolve().parent
+# `python -I` puts no script directory on sys.path, so every directory a script imports from is added here.
+sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'microct-core/resources')]
+try:
+    import sidecar
+except ModuleNotFoundError as e:
+    sys.exit(f'{e}: this script expects <workflows>/microct-analysis/skills/<skill>/resources/ with '
+             '<workflows>/microct-analysis/skills/microct-core/resources/sidecar.py beside it')
+
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])

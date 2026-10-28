@@ -7,10 +7,19 @@ that a box or pick is where you meant.
 `--in` is a 3D stack (slice `--index` along axis 0) or a 2D image. x is the column (top labels), y the row (left labels).
 """
 import argparse
+import sys
 from pathlib import Path
 
 import numpy as np
-import viewlib as vl
+
+HERE = Path(__file__).resolve().parent
+# `python -I` puts no script directory on sys.path, so every directory a script imports from is added here.
+sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'microct-core/resources')]
+try:
+    import viewlib as vl
+except ModuleNotFoundError as e:
+    sys.exit(f'{e}: this script expects <workflows>/microct-analysis/skills/<skill>/resources/ with '
+             '<workflows>/microct-analysis/skills/microct-core/resources/sidecar.py beside it')
 
 sl = vl.sidecar
 
