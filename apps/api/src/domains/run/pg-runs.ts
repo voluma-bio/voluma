@@ -5,7 +5,7 @@
  */
 import type { Input, Run } from "@voluma/contracts/run";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
-import { and, asc, desc, eq, exists, or, type SQL, sql } from "drizzle-orm";
+import { and, asc, desc, eq, or, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { Reader } from "../../domain";
 import { inputs, referenceInput, runs } from "./schema";
@@ -19,18 +19,13 @@ export const readableRuns = ({ labId, ownerId }: Reader): SQL | undefined =>
     ownerId === null ? undefined : or(eq(runs.startedBy, ownerId), eq(runs.example, true)),
   );
 
-/** The input rule: the caller's upload, or an input an example run reads. */
+/** The input rule: the caller's upload, or the org's reference scan. */
 export const readableInputs = ({ labId, ownerId }: Reader): SQL | undefined =>
   and(
     eq(inputs.labId, labId),
     ownerId === null
       ? undefined
-      : or(
-          eq(inputs.uploadedBy, ownerId),
-          exists(
-            sql`(SELECT 1 FROM ${runs} WHERE ${runs.inputId} = ${inputs.id} AND ${runs.example})`,
-          ),
-        ),
+      : or(eq(inputs.uploadedBy, ownerId), eq(inputs.source, "reference")),
   );
 
 type Row = {
@@ -131,12 +126,7 @@ export function pgRunReads(db: PostgresJsDatabase) {
       const rows = await db
         .select()
         .from(inputs)
-        .where(
-          and(
-            eq(inputs.labId, labId),
-            ownerId === null ? undefined : eq(inputs.uploadedBy, ownerId),
-          ),
-        )
+        .where(readableInputs({ labId, ownerId }))
         .orderBy(desc(inputs.createdAt), asc(inputs.id));
       return rows.map(toInput);
     },

@@ -60,6 +60,20 @@ function modelRef(name: string, fallback?: string): { provider: string; id: stri
   return { provider, id };
 }
 
+/**
+ * A visitor run sends the visitor's Meta key with this model, so it must be a Meta model; a
+ * `-contributor` one would let Meta train on the visitor's scan.
+ */
+function visitorModel(): { provider: string; id: string } {
+  const ref = modelRef("RUNNER_VISITOR_MODEL", "meta/muse-spark-1.3");
+  if (ref.provider !== "meta" || ref.id.endsWith("-contributor")) {
+    throw new Error(
+      `RUNNER_VISITOR_MODEL must be a Standard-mode meta/ model, got "${ref.provider}/${ref.id}"`,
+    );
+  }
+  return ref;
+}
+
 /** Our Modal token; absent: the SDK uses ~/.modal.toml. */
 export function modalToken(): { tokenId: string; tokenSecret: string } | undefined {
   const tokenId = optional("MODAL_TOKEN_ID");
@@ -92,7 +106,7 @@ export function runnerConfig() {
      * The model of a `visitor` run, which uses the visitor's Meta key. Standard mode: a
      * `-contributor` model lets Meta train on what it is sent, the visitor's scan included.
      */
-    visitorModel: modelRef("RUNNER_VISITOR_MODEL", "meta/muse-spark-1.3"),
+    visitorModel: visitorModel(),
     modal,
     /** Meta's key for SAM (`segment_sam`) on a `voluma` run; absent: the tool is not offered. A visitor's run uses the visitor's own key. */
     metaApiKey,
