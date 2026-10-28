@@ -48,8 +48,7 @@ export function runLayout(runId: string, inputPrefix: string): RunLayout {
       `- ${INPUTS} is a local copy of the input data: read it, do not modify it.\n` +
       `- ${WORKFLOW} holds the workflow's skills and resources, under their repo paths: read them, do not modify them.\n` +
       `- ${OUTPUTS} is for files you produce; they are kept.\n` +
-      `- ${SCRATCH} is for intermediate files; it is kept too.\n` +
-      `${OUTPUTS} and ${SCRATCH} are network-backed: write each file whole, once. Rename, append, in-place edits (\`sed -i\`) and memory-mapped writes fail there; build the file under /tmp (local disk), then cp it in.`,
+      `- ${SCRATCH} is for intermediate files; it is kept too.`,
     restartNote: `The sandbox was restarted. ${OUTPUTS} and ${SCRATCH} were kept, ${INPUTS} was copied again, and local files elsewhere (including /tmp) are gone.`,
     toolOutputPath: (toolCallId) =>
       `${SCRATCH}/${toolOutputKey(runId, toolCallId).slice(scratch.length)}`,

@@ -27,26 +27,34 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
 /**
- * What models send to `checkpoint` by habit, reshaped to the schema without losing meaning:
- * a `title` copied from `report_output` is dropped (`text` is the milestone), a `path` that
- * is itself a `{root, path}` is unwrapped, and `toCheck` given as a string, or with its
- * words under `text`, becomes the `title` it needs. Anything else is left for validation.
+ * What models send to `checkpoint` by habit, reshaped to the schema without losing meaning.
+ * Only these habits are touched; any other unknown key stays for validation to refuse.
+ * - A top-level `title` copied from `report_output` is dropped when `text` is there, and is
+ *   the `text` when it is not.
+ * - An evidence `path` that is itself `{root, path}` is unwrapped, unless its root differs
+ *   from the outer one.
+ * - `toCheck` given as a string, or with its words under `text`, becomes the `title` it needs.
  */
 export function prepareCheckpoint(args: unknown): unknown {
   if (!isRecord(args)) return args;
-  const known = Object.keys(checkpointInputSchema.shape);
-  const out = Object.fromEntries(Object.entries(args).filter(([k]) => known.includes(k)));
+  const { title, ...rest } = args;
+  const out: Record<string, unknown> = { ...rest };
+  if (out.text === undefined && typeof title === "string") out.text = title;
+  else if (title !== undefined && typeof title !== "string") out.title = title;
   if (Array.isArray(out.evidence)) {
-    out.evidence = out.evidence.map((f) => (isRecord(f) && isRecord(f.path) ? f.path : f));
+    out.evidence = out.evidence.map((f) => {
+      if (!isRecord(f) || !isRecord(f.path)) return f;
+      const root = f.path.root ?? f.root;
+      return f.root !== undefined && f.path.root !== undefined && f.root !== f.path.root
+        ? f
+        : { ...f.path, ...(root !== undefined && { root }) };
+    });
   }
   const { toCheck } = out;
   if (typeof toCheck === "string") out.toCheck = { title: toCheck };
-  else if (isRecord(toCheck)) {
-    const { text, ...rest } = toCheck;
-    const title = rest.title ?? text;
-    out.toCheck = Object.fromEntries(
-      Object.entries({ ...rest, title }).filter(([k]) => ["title", "focus"].includes(k)),
-    );
+  else if (isRecord(toCheck) && typeof toCheck.text === "string") {
+    const { text, ...kept } = toCheck;
+    out.toCheck = { ...kept, title: kept.title ?? text };
   }
   return out;
 }
