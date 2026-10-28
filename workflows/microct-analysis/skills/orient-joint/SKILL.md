@@ -21,9 +21,9 @@ python <this skill>/resources/orient_joint.py --in hu.npy --header hu.json --out
 It writes `frame.json` (the frame), `oriented.npy` (float32 HU stack, axis 0 = slices, its own `grid_id`) and
 `keyframe.jpg`, and prints the keyframe index, the bend angle between the shafts and `skew_vox`.
 
-How it chooses: a threshold; the bones are the largest 3D piece plus the largest other piece lying beyond one end of it
-(femur and tibia touching, or two pieces across a healthy joint space: both work); a piece beside the largest one (the
-patella) is the reference object. Each end of the bones seeds a shaft axis, refit on its shaft only (35-95% of its
+How it chooses: a threshold; the bones are the largest 3D piece plus the largest other piece near it that is at least
+`--second-bone-frac` (default a quarter) of its size (femur and tibia touching, or two pieces across a healthy joint
+space: both work); the largest smaller piece near the joint (the patella) is the reference object. Each end of the bones seeds a shaft axis, refit on its shaft only (35-95% of its
 length from the joint); the plane spanned by the two axes is the bending plane; slices stack along its normal; the
 keyframe is the slice through the joint. "Bone A" is the shaft passing nearer the reference object (at the knee, the
 femur: the patella sits on it). Voxels must be isotropic. The lengths (`--shaft-radius-mm`, `--ref-radius-mm`,
@@ -39,12 +39,12 @@ imaged as the ends only (Zanjani-Pour 2020, the largest piece measures 1.24) has
 - Two separate bone pieces: the leg axis is the line through their two centroids, the joint is half way across the gap,
   `shafts_found` is false and `bend_deg` and `skew_vox` are `null`. The bend is not measured; do not report one. The
   plane holds that axis and the reference object (or, with none, the widest spread of the bones), and bone A is the bigger
-  bone. With no shaft the second piece must be at least a quarter of the largest (`--second-bone-frac`; the Zanjani-Pour
-  tibia is 50%, the OA6-1RK patella 8%): a shorter tibia stub stops the script, and lowering `--second-bone-frac` to
-  0.15 oriented the 19% stub of Zanjani-Pour (`hu[110:]`) with the tibia in the keyframe. Lower it only after you have
-  looked at the keyframe.
-- One piece: it stops with "No shaft in the field". Scan more of the leg, or lower `--threshold-hu` if a second bone is
-  lost below the threshold. Cropped OA6-1RK (z 180:400, 200:380, :500, 300:) stops here.
+  bone. The plane rule ignores which bone the reference object sits on here; it sets only the plane and the side of the slice.
+- One piece, or a second piece under `--second-bone-frac` of the largest: it stops with "No shaft in the field", naming
+  which test failed. When it says a smaller piece is near (the Zanjani-Pour tibia is 50% of the femur, the OA6-1RK
+  patella 8%; a tibia cut to a short stub can fall under 25%), lower `--second-bone-frac` (0.15 oriented the 19% stub of
+  Zanjani-Pour, `hu[110:]`) and then check that the keyframe holds the tibia, not the patella. Otherwise scan more of
+  the leg. Cropped OA6-1RK (z 180:400, 200:380, :500, 300:) stops here.
 
 ## Look before you go on
 
@@ -54,9 +54,10 @@ voxels in the keyframe (`keyframe_bone_vox` in its output); that does not prove 
 If a bone is missing, cut off, or the joint space is not in the slice, do not run SAM: check `bend_deg` (64 degrees on
 OA6-1RK; `null` when there is no shaft), `skew_vox` (axes far apart out of plane: one slice cannot cut both shafts),
 and try another `--threshold-hu`. A small piece taken for the reference object is harmless to the cut (on Zanjani-Pour
-2020 a 311k-voxel piece took that role; the keyframe still cuts both bones) but it names bone A and the side of the slice.
-Where it fails: a joint inside either 30% end portion, a non-bone piece taken for the second bone or the reference
-object when no shaft is in the field, and the cases above that stop.
+2020 a 311k-voxel piece, probably the fibula head, took that role; the keyframe still cuts both bones) but it sets the
+side of the slice, and, when shafts are found, which bone is A.
+Where it fails: a joint inside either 30% end portion, a non-bone piece taken for the second bone (a patella or
+fragment at least a quarter of the largest piece) or for the reference object, and the cases above that stop.
 
 A wrong frame makes everything after it stale: orientation is its own task, and a corrected frame reruns the rest.
 

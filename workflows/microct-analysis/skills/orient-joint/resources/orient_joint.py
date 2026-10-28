@@ -20,10 +20,8 @@ radius; the reference object, the patella, sits within 3.15 mm of the joint). Re
 
 How it chooses (details in the comments of joint_frame):
  1. A threshold (Otsu unless given) and 3D pieces. The bones are the largest piece plus, if there is one, the largest
-    other piece lying beyond one end of it along its main axis and within --ref-radius-mm: femur and tibia are one
-    touching piece, or two pieces across the joint space. A piece beside the largest one (the patella) is a reference
-    object candidate. When the largest piece is not clearly longer than wide (elongation under 2: a field holding only
-    bone ends), position says nothing, and a second piece is a bone only if it is at least --second-bone-frac of it.
+    other piece within --ref-radius-mm of it that is at least --second-bone-frac of its size: femur and tibia are one
+    touching piece, or two pieces across the joint space. Smaller pieces (the patella) are reference object candidates.
  2. The two end portions of the bones along their main axis seed the two shaft axes; each axis is refit three times
     on its shaft only (35-95% of its length from the joint), so condyles and plateau do not pull it. The joint is
     where the axes pass closest. Each shaft in the field must be at least 3 shaft radii long.
@@ -38,7 +36,9 @@ How it chooses (details in the comments of joint_frame):
  5. It counts each bone's voxels in the keyframe (`keyframe_bone_vox`) and stops if one has under 5% of the other's.
 Where it fails: a joint inside either 30% end portion (a very short stub); two axes far apart out of plane (one slice
 cannot cut both shafts: see `skew_vox`); no shaft and no second piece of at least --second-bone-frac (stops); a non-bone
-piece taken for the second bone or the reference object when position and size cannot tell (a fabella, a fragment).
+piece taken for the second bone or the reference object when size cannot tell (a large patella, a fragment). The keyframe
+check splits voxels by side of the joint, so with one touching piece it cannot tell two bones from one bone's shaft and
+condyles; the 3-radius shaft check covers that case.
 A fused neighbouring bone (the fibula) pulls bone B's axis slightly.
 """
 import argparse
@@ -184,41 +184,38 @@ def joint_frame(hu, spacing_mm, threshold_hu=None, shaft_radius_mm=1.2, ref_radi
     sizes = ndi.sum_labels(fg, lab, range(1, n + 1)) * 8
     order = np.argsort(-sizes)
     cents = np.array(ndi.center_of_mass(fg, lab, range(1, n + 1))) * 2 + 0.5
-    # Bones: the largest piece, plus the largest other piece lying beyond one end of it and within reach of it. A piece
-    # beside the largest one (the patella) is never a bone. Without a shaft in the largest piece there is no "beside",
-    # and a second piece counts as a bone only when it is at least `second_bone_frac` of the largest.
+    # Bones: the largest piece, plus the largest other piece within reach of it and at least `second_bone_frac` of its
+    # size. Position along the largest piece does not separate tibia from patella in a flexed or cropped knee, so size
+    # alone decides, and the keyframe check catches a second bone the slice misses.
     P0 = np.argwhere(lab == order[0] + 1).astype(np.float64) * 2 + 0.5
-    mu0, a0 = _line_fit(P0)
-    t0 = (P0 - mu0) @ a0
-    has_shaft = _elongation(P0) >= MIN_ELONGATION
     tree = cKDTree(P0[::4])
-    second = None
+    second, small_near = None, False
     for i in order[1:]:
         if sizes[i] < min_small_vox:
             break
-        if has_shaft and t0.min() < (cents[i] - mu0) @ a0 < t0.max():
-            continue
-        if not has_shaft and sizes[i] < second_bone_frac * sizes[order[0]]:
-            break  # position says nothing here, so only size tells a bone end from a sesamoid
         Pi = np.argwhere(lab == i + 1).astype(np.float64) * 2 + 0.5
-        if tree.query(Pi[::4])[0].min() <= ref_radius:
-            second = i
-            break
+        if tree.query(Pi[::4])[0].min() > ref_radius:
+            continue
+        small_near = sizes[i] < second_bone_frac * sizes[order[0]]
+        second = None if small_near else i
+        break
     ids = [order[0]] + ([] if second is None else [second])
     P = np.vstack([P0] + ([] if second is None else [Pi]))
     fit = _fit_shafts(P, cyl_radius) if _elongation(P) >= MIN_ELONGATION else None
     if fit is not None and min(f['extent_vox'] for f in fit[1][-1]) < MIN_SHAFT_RADII * cyl_radius:
         fit = None
     if fit is None and second is None:
-        sidecar.fail('No shaft in the field: the bone piece is not clearly longer than it is wide, and no second bone '
-                     'piece was found, so no axis can be fitted. Scan more of the leg; or, if the second bone is in the '
-                     'field but under a quarter of the first piece (a short stub), lower --second-bone-frac; or lower '
-                     '--threshold-hu if it is lost below the threshold')
+        why = ('the bones are not clearly longer than wide' if _elongation(P) < MIN_ELONGATION else
+               f'a shaft reaches under {MIN_SHAFT_RADII:g} shaft radii from the joint')
+        hint = (f'; a piece near it is under --second-bone-frac {second_bone_frac:g} of its size: if that is the other '
+                'long bone (a short stub), lower --second-bone-frac and check that the keyframe holds it'
+                if small_near else '; scan more of the leg')
+        sidecar.fail(f'No shaft in the field: {why}, and there is no second bone piece, so no axis can be fitted{hint}')
     if fit is not None:
         ax, fits, joint, skew = fit
         ext = [f['extent_vox'] for f in fits[-1]]
     else:  # two separate pieces, no shaft in the field
-        PA, PB = (P0, Pi) if sizes[ids[0]] >= sizes[ids[1]] else (Pi, P0)
+        PA, PB = P0, Pi  # the largest piece is A
         ax, joint = _gap_axis(PA, PB)
         fits, skew = None, None
         ext = [float(((Q - joint) @ a).max()) for Q, (_, a) in zip((PA, PB), ax)]
@@ -346,8 +343,8 @@ if __name__ == '__main__':
     ap.add_argument('--shaft-radius-mm', type=float, default=1.2)
     ap.add_argument('--ref-radius-mm', type=float, default=3.15)
     ap.add_argument('--min-object-mm3', type=float, default=0.0035)
-    ap.add_argument('--second-bone-frac', type=float, default=0.25, help='with no shaft in the field: smallest second '
-                    'bone piece, as a fraction of the largest')
+    ap.add_argument('--second-bone-frac', type=float, default=0.25, help='smallest second bone piece, as a fraction '
+                    'of the largest; smaller pieces are reference object candidates')
     ap.add_argument('--margin-mm', type=float, default=0.126)
     ap.add_argument('--window', help='lo,hi for the keyframe sheet, e.g. 1000,8000')
     a = ap.parse_args()
