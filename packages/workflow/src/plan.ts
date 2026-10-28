@@ -71,6 +71,7 @@ export function computePlan(files: WorkflowFiles, selected?: readonly string[]):
       .filter((t) => included.has(t.id))
       .map((t) => ({
         id: t.id,
+        ...(t.title && { title: t.title }),
         dependsOn: t.dependsOn,
         instructions: t.instructions,
         ...(t.doneWhen.length && { doneWhen: t.doneWhen }),
