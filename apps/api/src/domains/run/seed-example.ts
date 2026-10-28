@@ -124,6 +124,10 @@ await db.transaction(async (tx) => {
     outcome: "completed",
     startedAt: src.run.startedAt,
     endedAt: src.run.endedAt,
+    // What the source run spent and left to check; limits skip examples, so no org pays twice.
+    modelCostUsd: src.run.modelCostUsd,
+    sandboxSeconds: src.run.sandboxSeconds,
+    toCheck: src.run.toCheck,
   });
 
   // Thread ids begin `<runId>.`; in the payloads they are the only strings that do.

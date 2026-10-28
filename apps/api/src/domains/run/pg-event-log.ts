@@ -33,7 +33,7 @@ export class EventIdTaken extends Error {
 /** First key of the advisory lock pair; the second is the run. Distinguishes our locks from others'. */
 const EVENT_SEQ_LOCK = 0x76_6f_6c_75;
 
-const toRunEvent = (row: typeof events.$inferSelect) =>
+export const toRunEvent = (row: typeof events.$inferSelect) =>
   ({ ...row, createdAt: row.createdAt.toISOString() }) as RunEvent;
 
 export function pgEventLog(db: PostgresJsDatabase, notifier: Notifier) {

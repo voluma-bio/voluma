@@ -132,6 +132,8 @@ export const runs = pgTable(
     recoveries: integer().notNull().default(0),
     modelCostUsd: doublePrecision().notNull().default(0),
     sandboxSeconds: doublePrecision().notNull().default(0),
+    /** Open To check items when the run completed (`runSchema.toCheck`); null otherwise. */
+    toCheck: integer(),
   },
   (t) => [
     index("runs_lab_state").on(t.labId, t.state, t.createdAt),

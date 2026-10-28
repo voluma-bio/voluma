@@ -35,6 +35,14 @@ export interface SegmentResult {
 }
 
 export interface Segmenter {
-  /** Tracks every object through the whole stack, both directions from its box. */
-  segment(stack: SliceStack, objects: SegmentObject[], signal: AbortSignal): Promise<SegmentResult>;
+  /**
+   * Tracks every object through the whole stack, both directions from its box. `bill` gets
+   * what the provider charged, as soon as it says, even if the call then fails.
+   */
+  segment(
+    stack: SliceStack,
+    objects: SegmentObject[],
+    signal: AbortSignal,
+    bill: (usd: number) => void,
+  ): Promise<SegmentResult>;
 }

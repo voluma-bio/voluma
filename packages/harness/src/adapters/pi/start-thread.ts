@@ -93,12 +93,16 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
   const { threadId, recorder, history, signal } = options;
   const emit = <T extends EventType>(type: T, payload: PayloadOf<T>) =>
     recorder.emit(threadId, type, payload);
+  // What each running tool call has been billed (`ToolContext.bill`), until its result is emitted.
+  const billed = new Map<string, number>();
+  const bill = (toolCallId: string, usd: number) =>
+    billed.set(toolCallId, (billed.get(toolCallId) ?? 0) + usd);
 
   const agent = new Agent({
     initialState: {
       systemPrompt: options.systemPrompt,
       model: options.model,
-      tools: options.tools.map((tool) => toAgentTool(tool, options)),
+      tools: options.tools.map((tool) => toAgentTool(tool, options, bill)),
       messages: [],
     },
     streamFn: options.streamFn,
@@ -125,13 +129,17 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       return false;
     }
   };
-  const emitToolResult = (result: ToolResultMessage) =>
+  const emitToolResult = (result: ToolResultMessage) => {
+    const costUsd = billed.get(result.toolCallId);
+    billed.delete(result.toolCallId);
     emit("tool.result", {
       toolCallId: result.toolCallId,
       isError: result.isError,
       output: textOf(result),
       truncated: (result.details as { truncated?: boolean } | undefined)?.truncated === true,
+      ...(costUsd !== undefined && { costUsd }),
     });
+  };
 
   // The sender of each user message we prompt with, kept with the message itself.
   const senders = new WeakMap<AgentMessage, UserSender>();
@@ -332,6 +340,7 @@ const historyFailure = (error: unknown): Omit<ThreadOutcome, "ran" | "reply"> =>
 function toAgentTool(
   tool: Tool,
   { runId, threadId, kind, taskId, sandbox, recorder }: StartThreadOptions,
+  bill: (toolCallId: string, usd: number) => void,
 ): AgentTool {
   const { $schema: _, ...jsonSchema } = z.toJSONSchema(tool.input, { io: "input" });
   return {
@@ -352,6 +361,7 @@ function toAgentTool(
         sandbox: () => sandbox(threadId),
         output: (stream, text) =>
           recorder.live({ type: "tool.output", threadId, toolCallId, stream, text }),
+        bill: (usd) => bill(toolCallId, usd),
       });
       return {
         content: [
