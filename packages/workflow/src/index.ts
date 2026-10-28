@@ -14,17 +14,37 @@ export interface GraphTask {
 /** Statuses that make a task start (or restart): never started, or marked for a redo. */
 const STARTABLE = new Set(["pending", "stale"]);
 
+/** What the graph needs of a task's latest attempt; `FoldedTask` fits it. */
+export interface TaskState {
+  status: string;
+  /** Required declared outputs the attempt hasn't reported. */
+  missingRequired: readonly string[];
+}
+
+/**
+ * Whether a task that builds on this one may start: it is `done`, or `to-check` with every
+ * required output present. A To check item is for the researcher in review; it must not
+ * stop the run, but a task with no usable result still blocks. `undefined`: no attempt yet.
+ */
+export function isSatisfied(task: TaskState | undefined): boolean {
+  return (
+    task?.status === "done" || (task?.status === "to-check" && task.missingRequired.length === 0)
+  );
+}
+
 /**
  * Tasks to start now, in plan order: `pending` or `stale`, with every dependency
- * `done`. `statusOf` answers `pending` for a task with no attempt.
+ * satisfied (`isSatisfied`). `stateOf` answers `undefined` for a task with no attempt.
  */
 export function readyTasks(
   tasks: readonly GraphTask[],
-  statusOf: (id: string) => string,
+  stateOf: (id: string) => TaskState | undefined,
 ): string[] {
   return tasks
     .filter(
-      (t) => STARTABLE.has(statusOf(t.id)) && t.dependsOn.every((d) => statusOf(d) === "done"),
+      (t) =>
+        STARTABLE.has(stateOf(t.id)?.status ?? "pending") &&
+        t.dependsOn.every((d) => isSatisfied(stateOf(d))),
     )
     .map((t) => t.id);
 }
