@@ -2,14 +2,9 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { threadHref } from "./feed";
-import { threadRole } from "./parts";
+import { elapsed, threadRole } from "./parts";
 import type { Thread } from "./run-feed";
 import { taskTitle } from "./workflows";
-
-function elapsed(from: string, now: number): string {
-  const s = Math.max(0, Math.floor((now - new Date(from).getTime()) / 1000));
-  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
-}
 
 function useNow(active: boolean): number {
   const [now, setNow] = useState(() => Date.now());

@@ -13,11 +13,12 @@ import type { Run } from "@voluma/contracts/run";
 import { Button } from "@voluma/ui";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useOutletContext, useParams, useSearchParams } from "react-router";
-import { Feed } from "./feed";
+import { Feed, threadHref } from "./feed";
 import { Follow } from "./follow";
 import { KeysForm } from "./keys";
 import { Lanes } from "./lanes";
 import {
+  type FeedEntry,
   feedOf,
   latestThreadByTask,
   planOf,
@@ -28,7 +29,7 @@ import {
 import { RunBadge, runStatus } from "./status";
 import { TaskGraph } from "./task-graph";
 import { ThreadView } from "./thread-view";
-import { workflowName } from "./workflows";
+import { taskTitle, workflowName } from "./workflows";
 
 /** Events as they arrive, published at most every 200 ms: a busy run emits many per second. */
 function useRunEvents(runId: string, onClosed: () => void): RunEvent[] {
@@ -131,6 +132,7 @@ export function RunPage() {
             openId ? "max-[1100px]:hidden" : ""
           }`}
         >
+          <Attention entries={entries} />
           {plan ? (
             <TaskGraph
               plan={plan}
@@ -162,7 +164,13 @@ export function RunPage() {
             ) : (
               <>
                 <h2 className="mb-2 text-ui font-medium">The run so far</h2>
-                <Feed entries={entries} threads={threadById} openThread={openId} hover={hover} />
+                <Feed
+                  entries={entries}
+                  threads={threadById}
+                  openThread={openId}
+                  hover={hover}
+                  started={threads.length > 1}
+                />
               </>
             )}
           </Follow>
@@ -180,6 +188,51 @@ export function RunPage() {
           ))}
       </div>
     </main>
+  );
+}
+
+/** What needs a person first: failures, To check items and checks that want review. */
+function Attention({ entries }: { entries: FeedEntry[] }) {
+  const items = entries.flatMap((e) =>
+    e.kind === "error"
+      ? [{ id: e.id, tone: "destructive", text: e.text, to: e.threadId }]
+      : e.kind === "to-check"
+        ? [
+            {
+              id: e.id,
+              tone: "check",
+              text: `To check: ${e.event.payload.toCheck?.title}`,
+              to: e.event.threadId,
+            },
+          ]
+        : e.kind === "verdict" && e.event.payload.verdict === "needs-review"
+          ? [
+              {
+                id: e.id,
+                tone: "check",
+                text: `Needs review: ${taskTitle(e.event.payload.taskId)}`,
+                to: e.event.threadId,
+              },
+            ]
+          : [],
+  );
+  if (items.length === 0) return null;
+  return (
+    <section aria-label="Needs attention" className="grid gap-1">
+      {items.map((i) => (
+        <Link
+          key={i.id}
+          to={threadHref(i.to)}
+          className={`truncate rounded-lg px-3 py-1.5 text-ui hover:underline ${
+            i.tone === "check"
+              ? "bg-check-tint text-check-strong"
+              : "bg-destructive-tint text-destructive"
+          }`}
+        >
+          {i.text}
+        </Link>
+      ))}
+    </section>
   );
 }
 

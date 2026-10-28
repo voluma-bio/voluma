@@ -1,13 +1,21 @@
 /** One thread's full transcript: model messages, tool calls with arguments and results, and the thread's other events, in order. */
 import type { RunEvent } from "@voluma/contracts/events";
 import { StatusBadge } from "@voluma/ui";
-import { X } from "lucide-react";
+import { ChevronRight, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { WakeCard } from "./feed";
 import { Follow } from "./follow";
-import { Clamp, clock, threadName } from "./parts";
-import { type Thread, type ThreadItem, threadItemsOf, toolSummary, usageLine } from "./run-feed";
+import { Clamp, elapsed, threadName } from "./parts";
+import {
+  groupThread,
+  type Thread,
+  type ThreadBlock,
+  type ThreadItem,
+  threadItemsOf,
+  toolSummary,
+  usageLine,
+} from "./run-feed";
 import { taskTitle } from "./workflows";
 
 export function ThreadView({
@@ -20,6 +28,7 @@ export function ThreadView({
   closeTo: string;
 }) {
   const items = useMemo(() => threadItemsOf(events, thread.id), [events, thread.id]);
+  const blocks = useMemo(() => groupThread(items), [items]);
   // `n` changes on each click so every tool row re-reads `value`.
   const [all, setAll] = useState<{ value: boolean; n: number }>({ value: false, n: 0 });
   return (
@@ -29,7 +38,11 @@ export function ThreadView({
           <h2 className="font-medium">{threadName(thread)}</h2>
           <p className="text-meta text-muted-foreground">
             {thread.model && <span className="font-mono">{thread.model}, </span>}
-            {thread.status === "running" ? "working now" : thread.status}
+            <span title={new Date(thread.startedAt).toLocaleString()}>
+              {thread.status === "running"
+                ? "working now"
+                : `${thread.status}, started ${elapsed(thread.startedAt, Date.now())} ago`}
+            </span>
             {thread.toolCalls > 0 && `, ${thread.toolCalls} tool calls`}
             {thread.usage && `, ${usageLine(thread.usage)}`}
           </p>
@@ -54,15 +67,13 @@ export function ThreadView({
           <p className="text-ui text-muted-foreground">Nothing has happened in this thread yet.</p>
         ) : (
           <ol className="grid gap-3">
-            {items.map((item) => (
-              <li key={item.id} className="grid grid-cols-[4rem_minmax(0,1fr)] gap-2">
-                <time
-                  dateTime={item.at}
-                  className="pt-0.5 text-meta whitespace-nowrap text-fg-subtle tabular-nums"
-                >
-                  {clock(item.at)}
-                </time>
-                <Item item={item} all={all} />
+            {blocks.map((block) => (
+              <li key={block.kind === "run" ? block.id : block.item.id}>
+                {block.kind === "run" ? (
+                  <ToolRun block={block} all={all} />
+                ) : (
+                  <Item item={block.item} all={all} />
+                )}
               </li>
             ))}
           </ol>
@@ -100,6 +111,52 @@ function Item({ item, all }: { item: ThreadItem; all: { value: boolean; n: numbe
     case "event":
       return <EventRow event={item.event} />;
   }
+}
+
+/** A fold over the tool calls between two things worth reading; closed until asked, even while it streams. */
+function ToolRun({
+  block,
+  all,
+}: {
+  block: Extract<ThreadBlock, { kind: "run" }>;
+  all: { value: boolean; n: number };
+}) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (all.n > 0) setOpen(all.value);
+  }, [all.n]);
+  const label = block.running
+    ? `Running ${block.running}`
+    : `Ran ${block.calls} tool ${block.calls === 1 ? "call" : "calls"}`;
+  return (
+    <div>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-1.5 text-left text-meta font-medium text-muted-foreground hover:text-foreground"
+      >
+        <ChevronRight
+          size={12}
+          className={`shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
+          aria-hidden="true"
+        />
+        <span className={`min-w-0 truncate ${block.running ? "font-mono" : ""}`}>{label}</span>
+        {block.failed > 0 && (
+          <span className="shrink-0 text-destructive">{block.failed} failed</span>
+        )}
+      </button>
+      {open && (
+        <ol className="mt-2 grid gap-2 pl-4">
+          {block.items.map((item) => (
+            <li key={item.id}>
+              <Item item={item} all={all} />
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
 }
 
 function ToolRow({

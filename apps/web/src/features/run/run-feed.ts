@@ -30,6 +30,8 @@ export type Thread = {
   usage?: ModelUsage;
   /** The last few tool calls, oldest first; a call with no result yet is running. */
   recent: { callId: string; text: string; running: boolean; failed: boolean }[];
+  /** The thread's last checkpoint (a check's verdict line), shown when the thread is folded. */
+  result?: string;
   /** The newest assistant text, for a thread that has made no tool call yet. */
   said?: string;
 };
@@ -149,6 +151,9 @@ export function threadsOf(events: RunEvent[]): Thread[] {
             call.failed = e.payload.isError;
           }
         }
+        break;
+      case "checkpoint":
+        if (t) t.result = e.payload.text;
         break;
       case "message":
         if (t && e.payload.role === "assistant") {
@@ -359,4 +364,54 @@ export function layoutPlan(plan: WorkflowPlan): GraphNode[] {
     rows.set(l, row + 1);
     return { id: t.id, level: l, row, dependsOn: t.dependsOn };
   });
+}
+
+export type ThreadBlock =
+  | { kind: "item"; item: ThreadItem }
+  /** Consecutive tool calls and other low-signal events between two things worth reading. */
+  | {
+      kind: "run";
+      id: string;
+      items: ThreadItem[];
+      calls: number;
+      failed: number;
+      running?: string;
+    };
+
+/** What stays visible in a transcript: the model's words, verdicts, outputs, wakes and failures. */
+const worthReading = (item: ThreadItem): boolean => {
+  if (item.kind === "tool") return false;
+  if (item.kind === "message") return item.text !== "";
+  const e = item.event;
+  return (
+    e.type === "checkpoint" ||
+    e.type === "output" ||
+    e.type === "wake" ||
+    e.type === "judgment" ||
+    (e.type === "thread.ended" && e.payload.status === "failed")
+  );
+};
+
+/** Folds each run of tool calls between visible items into one block. */
+export function groupThread(items: ThreadItem[]): ThreadBlock[] {
+  const blocks: ThreadBlock[] = [];
+  for (const item of items) {
+    if (worthReading(item)) {
+      blocks.push({ kind: "item", item });
+      continue;
+    }
+    let last = blocks.at(-1);
+    if (last?.kind !== "run") {
+      last = { kind: "run", id: item.id, items: [], calls: 0, failed: 0 };
+      blocks.push(last);
+    }
+    last.items.push(item);
+    if (item.kind === "tool") {
+      last.calls++;
+      if (item.result?.isError) last.failed++;
+      last.running = item.result ? undefined : `${item.name} ${toolSummary(item.name, item.input)}`;
+    }
+  }
+  // A run of only low-signal events (thread start and end) has nothing to open.
+  return blocks.filter((b) => b.kind === "item" || b.calls > 0);
 }

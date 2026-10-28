@@ -4,10 +4,12 @@
  * quiet lines; worker and checker cards update live and open their thread beside the feed.
  */
 import type { RunEvent } from "@voluma/contracts/events";
+import type { WorkflowPlan } from "@voluma/contracts/workflow";
 import { StatusBadge, type StatusTone } from "@voluma/ui";
 import { Bot, ChevronRight, Cog } from "lucide-react";
+import { useState } from "react";
 import { Link } from "react-router";
-import { Clamp, clock, threadName } from "./parts";
+import { Clamp, threadName } from "./parts";
 import { type FeedEntry, type Thread, type ThreadStatus, usageLine } from "./run-feed";
 import { taskTitle } from "./workflows";
 
@@ -20,7 +22,9 @@ export function Feed({
   threads,
   openThread,
   hover,
+  started,
 }: {
+  started: boolean;
   entries: FeedEntry[];
   threads: Map<string, Thread>;
   openThread: string | null;
@@ -30,19 +34,15 @@ export function Feed({
     <ol className="grid gap-3">
       {entries.map((entry) => {
         const thread = entry.kind === "thread" ? threads.get(entry.threadId) : undefined;
+        const dim = hover !== null && entry.kind === "thread" && thread?.taskId !== hover;
         return (
-          <li key={entry.id} className="grid grid-cols-[4rem_minmax(0,1fr)] gap-3">
-            <time
-              dateTime={entry.at}
-              className="pt-3 text-meta whitespace-nowrap text-fg-subtle tabular-nums"
-            >
-              {clock(entry.at)}
-            </time>
-            <div
-              className={`min-w-0 transition-opacity ${hover !== null && thread?.taskId !== hover && entry.kind === "thread" ? "opacity-40" : ""}`}
-            >
-              <Entry entry={entry} thread={thread} selected={thread?.id === openThread} />
-            </div>
+          <li key={entry.id} className={`min-w-0 transition-opacity ${dim ? "opacity-40" : ""}`}>
+            <Entry
+              entry={entry}
+              thread={thread}
+              selected={thread?.id === openThread}
+              started={started}
+            />
           </li>
         );
       })}
@@ -54,32 +54,16 @@ function Entry({
   entry,
   thread,
   selected,
+  started,
 }: {
+  started: boolean;
   entry: FeedEntry;
   thread: Thread | undefined;
   selected: boolean;
 }) {
   switch (entry.kind) {
     case "plan":
-      return (
-        <section className="rounded-xl border border-border bg-card p-4">
-          <h2 className="font-medium">The plan</h2>
-          <ol className="mt-2 grid gap-1 text-ui">
-            {entry.plan.tasks.map((t, i) => (
-              <li key={t.id} className="flex gap-3">
-                <span className="w-5 text-fg-subtle tabular-nums">{i + 1}</span>
-                <span className="font-medium">{taskTitle(t.id)}</span>
-                <span className="text-muted-foreground">
-                  {t.dependsOn.length > 0
-                    ? `after ${t.dependsOn.map(taskTitle).join(", ")}`
-                    : "starts first"}
-                  {`, ${t.outputs.length} ${t.outputs.length === 1 ? "output" : "outputs"}`}
-                </span>
-              </li>
-            ))}
-          </ol>
-        </section>
-      );
+      return <PlanCard plan={entry.plan} started={started} />;
     case "wake":
       return <WakeCard event={entry.event} />;
     case "thread":
@@ -183,34 +167,74 @@ const STATUS: Record<ThreadStatus, { label: string; tone: StatusTone }> = {
 
 function ThreadCard({ thread, selected }: { thread: Thread; selected: boolean }) {
   const status = STATUS[thread.status];
+  const live = thread.status === "running";
+  const last = thread.recent.at(-1);
   return (
     <Link
       to={threadHref(thread.id)}
       aria-current={selected ? "true" : undefined}
-      className={`block rounded-xl border bg-card p-4 hover:border-line-strong ${
+      className={`block rounded-xl border bg-card hover:border-line-strong ${live ? "p-4" : "px-4 py-2.5"} ${
         selected ? "border-primary ring-1 ring-primary" : "border-border"
       }`}
     >
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="font-medium">{threadName(thread)}</span>
-        {thread.model && (
-          <span className="font-mono text-meta text-muted-foreground">{thread.model}</span>
+      <div className="flex items-center gap-x-3">
+        <span className="shrink-0 font-medium">{threadName(thread)}</span>
+        <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+        {!live && thread.result && (
+          <span className="min-w-0 flex-1 truncate text-ui text-muted-foreground">
+            {thread.result}
+          </span>
         )}
-        <StatusBadge tone={status.tone} className="ml-auto">
-          {status.label}
-        </StatusBadge>
-        <ChevronRight size={16} className="text-fg-subtle" aria-hidden="true" />
+        <span className="ml-auto shrink-0 text-meta text-fg-subtle">
+          {thread.toolCalls} {thread.toolCalls === 1 ? "call" : "calls"}
+          {thread.toolErrors > 0 && `, ${thread.toolErrors} failed`}
+        </span>
+        <ChevronRight size={16} className="shrink-0 text-fg-subtle" aria-hidden="true" />
       </div>
-      {thread.status === "running" && thread.recent.at(-1) && (
-        <p className="mt-2 truncate font-mono text-meta text-muted-foreground">
-          {thread.recent.at(-1)?.text}
-        </p>
+      {live && last && (
+        <p className="mt-2 truncate font-mono text-meta text-muted-foreground">{last.text}</p>
       )}
-      <p className="mt-1 text-meta text-fg-subtle">
-        {thread.toolCalls} tool {thread.toolCalls === 1 ? "call" : "calls"}
-        {thread.toolErrors > 0 && `, ${thread.toolErrors} failed`}
-      </p>
       {thread.error && <p className="mt-1 text-ui text-destructive">{thread.error}</p>}
     </Link>
+  );
+}
+
+/** Open until the first thread starts, then one line; a click on the summary overrides either. */
+function PlanCard({ plan, started }: { plan: WorkflowPlan; started: boolean }) {
+  const [userOpen, setUserOpen] = useState<boolean | null>(null);
+  const open = userOpen ?? !started;
+  return (
+    <section className="rounded-xl border border-border bg-card px-4 py-3">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setUserOpen(!open)}
+        className="flex w-full items-center gap-2 text-left"
+      >
+        <ChevronRight
+          size={14}
+          className={`transition-transform ${open ? "rotate-90" : ""}`}
+          aria-hidden="true"
+        />
+        <span className="font-medium">The plan</span>
+        <span className="text-meta text-muted-foreground">{plan.tasks.length} tasks</span>
+      </button>
+      {open && (
+        <ol className="mt-2 grid gap-1 text-ui">
+          {plan.tasks.map((t, i) => (
+            <li key={t.id} className="flex gap-3">
+              <span className="w-5 text-fg-subtle tabular-nums">{i + 1}</span>
+              <span className="font-medium">{taskTitle(t.id)}</span>
+              <span className="text-muted-foreground">
+                {t.dependsOn.length > 0
+                  ? `after ${t.dependsOn.map(taskTitle).join(", ")}`
+                  : "starts first"}
+                {`, ${t.outputs.length} ${t.outputs.length === 1 ? "output" : "outputs"}`}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
   );
 }

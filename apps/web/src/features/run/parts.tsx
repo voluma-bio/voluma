@@ -3,16 +3,16 @@ import { useState } from "react";
 import type { Thread } from "./run-feed";
 import { taskTitle } from "./workflows";
 
-export const clock = (iso: string) =>
-  new Date(iso).toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  });
+/** A duration as the reader says it: "45 s", "4 min", "2 h 5 min". */
+export function elapsed(from: string, now: number): string {
+  const s = Math.max(0, Math.floor((now - new Date(from).getTime()) / 1000));
+  if (s < 60) return `${s} s`;
+  const m = Math.floor(s / 60);
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
+}
 
-const LINES = 10;
-const CHARS = 800;
+const LINES = 6;
+const CHARS = 500;
 
 /** Text that collapses past a few lines, with an expand. `mono` is for command output. */
 export function Clamp({ text, mono, tone }: { text: string; mono?: boolean; tone?: "error" }) {
