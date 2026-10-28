@@ -18,10 +18,13 @@
  *   by sha256. A `verdict` counts only from a check thread.
  * - `resultRevisionId` is the revision in which the task's latest event so far
  *   was appended.
- * - To check items (all open; accepting one is the review lane's): each
- *   `toCheck` checkpoint; "Marked to check", from the `to-check` status event,
- *   when the attempt is `to-check` and has no `toCheck` checkpoint; and
- *   "Changed by the second agent" for each fix revision on the attempt.
+ * - To check items (all open; accepting one is the review lane's, and a check
+ *   never clears one): each `toCheck` checkpoint; "Marked to check", an
+ *   attempt-level flag that the latest `to-check` event not written by
+ *   `check-result` sets and a later `in-progress`, `done`, `stale` or `failed`
+ *   clears (`under-review` and `check-result` leave it), its id that event's;
+ *   and "Changed by the second agent" for each fix revision on the attempt.
+ *   `checkResult` turns a folded task into the status `check-result` gives.
  * - Not from these events (the API adds them): `title`, `ask`, `dependsOn`,
  *   `structureIds`, `files`, `threads.chat`, revision labels; the API also
  *   sets each asset's `stage` to the task title (here the task id) and drops a
@@ -63,6 +66,15 @@ export type FoldedRevision = {
   tasks: FoldedTask[];
 };
 
+/**
+ * The status the runtime's `check-result` rule gives a task whose check thread
+ * ended, computed from `fold` of the log: `done` only for a `passed` verdict
+ * with nothing open, otherwise `to-check`.
+ */
+export function checkResult(t: Pick<FoldedTask, "checker" | "checks">): "done" | "to-check" {
+  return t.checker?.verdict === "passed" && t.checks.length === 0 ? "done" : "to-check";
+}
+
 export type Folded = {
   /** The run now: the last revision's tasks. */
   tasks: FoldedTask[];
@@ -77,7 +89,8 @@ type Attempt = {
   checkThread: string | null;
   status: TaskStatus;
   reason: string | null;
-  statusEventId: string | null;
+  /** "Marked to check": the event that set it and its reason. */
+  flag: { id: string; reason: string } | null;
   resultRevisionId: string;
   milestones: Milestone[];
   toChecks: Check[];
@@ -88,14 +101,13 @@ type Attempt = {
 };
 
 export function fold(events: readonly RunEvent[]): Folded {
-  const seen = new Set<string>();
   const threadKind = new Map<string, ThreadKind>();
   const attempts = new Map<string, Attempt>();
   const current = new Map<string, Attempt>();
   const revisions: FoldedRevision[] = [];
   let header: Omit<FoldedRevision, "tasks"> | undefined;
-  // Events ahead of the first `revision.started` count as part of it.
-  let revisionId = events.find((e) => e.type === "revision.started")?.id ?? "";
+  // The run's first event is `revision.started` (`task-tools.ts`).
+  let revisionId = "";
 
   const addEvidence = (a: Attempt, runId: string, refs: EvidenceRef[]) => {
     for (const r of refs)
@@ -141,11 +153,11 @@ export function fold(events: readonly RunEvent[]): Folded {
         };
       });
       const checks: Check[] = a.toChecks.map((c) => ({ ...c }));
-      if (a.status === "to-check" && a.toChecks.length === 0 && a.statusEventId)
+      if (a.flag)
         checks.push({
-          id: a.statusEventId,
+          id: a.flag.id,
           title: "Marked to check",
-          detail: a.reason ?? "",
+          detail: a.flag.reason,
           status: "open",
         });
       for (const id of a.fixes)
@@ -172,13 +184,14 @@ export function fold(events: readonly RunEvent[]): Folded {
   };
 
   for (const e of events) {
-    if (seen.has(e.id)) continue;
-    seen.add(e.id);
     switch (e.type) {
       case "thread.started": {
         threadKind.set(e.threadId, e.payload.kind);
         const checked = e.payload.attemptId && attempts.get(e.payload.attemptId);
-        if (e.payload.kind === "check" && checked) checked.checkThread = e.threadId;
+        if (e.payload.kind === "check" && checked) {
+          checked.checkThread = e.threadId;
+          checked.checker = null; // the verdict shown is this check's
+        }
         break;
       }
       case "revision.started": {
@@ -200,7 +213,7 @@ export function fold(events: readonly RunEvent[]): Folded {
           checkThread: null,
           status: "in-progress",
           reason: null,
-          statusEventId: null,
+          flag: null,
           resultRevisionId: revisionId,
           milestones: [],
           toChecks: [],
@@ -216,9 +229,12 @@ export function fold(events: readonly RunEvent[]): Folded {
       case "task": {
         const a = attempts.get(e.payload.attemptId);
         if (!a) break;
-        a.status = e.payload.status;
-        a.reason = e.payload.reason;
-        a.statusEventId = e.id;
+        const { status, reason, by } = e.payload;
+        a.status = status;
+        a.reason = reason;
+        if (status === "to-check") {
+          if (!(by.kind === "rule" && by.rule === "check-result")) a.flag = { id: e.id, reason };
+        } else if (status !== "under-review") a.flag = null;
         a.resultRevisionId = revisionId;
         break;
       }

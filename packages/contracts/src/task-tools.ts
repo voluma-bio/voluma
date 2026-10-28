@@ -6,8 +6,16 @@
  * Who sets what. `checklist` and `report_value` are the worker's (the
  * supervisor's own checklist calls use `checklist` too); `checkpoint` is the
  * worker's and a check thread's. A worker sets only `in-progress`, `done`,
- * `failed` and `to-check`; `under-review` and `stale` are the runtime's, and
- * `stale` also the supervisor's. Only a check thread sets `verdict`.
+ * `failed` and `to-check`; `under-review` is the runtime's, `stale` the
+ * runtime's and the supervisor's, and `to-check` also the supervisor's. Only a
+ * check thread sets `verdict`. Only a worker thread opens an attempt: a
+ * supervisor's `checklist` call that would need a new attempt is refused.
+ *
+ * Decisions. The runtime decides from `fold` of the log (`fold.ts`), refolded
+ * for each decision; it keeps no second record. It takes each decision and its
+ * appends inside one per-run critical section, whichever thread asks, so a
+ * decision sees every earlier task write of the run. Task tools, check-start,
+ * check-result, the stuck guard and corrections all take it.
  *
  * Attempts. The runtime writes `attempt.opened` and stamps `attemptId` on every
  * `task`, `checkpoint` and `value` event, from the task's latest attempt. An
@@ -26,20 +34,24 @@
  * Checks. The runtime starts a check thread only on a `done` or `to-check`
  * task. Its `thread.started` carries the attempt it checks, and the runtime
  * appends `task under-review` (`check-start`) with the same `attemptId` before
- * the thread runs. The check thread's events join that attempt.
- * - A check thread's first `value` is a fix: the runtime appends
- *   `revision.started` (`fix`), then a stale mark (`stale`) on each dependent
- *   of the task that has an attempt, then the value. Later values add nothing.
- * - When the check thread ends the runtime sets the status (`check-result`),
- *   but only if the task is still under review: a check that fixed something
- *   gives `to-check`; otherwise `passed` gives `done`, and `needs-review` or no
- *   verdict gives `to-check` with a reason.
+ * the thread runs. The check thread's events join that attempt,
+ * and it writes only to the task it checks (a write to another task is
+ * refused).
+ * - A check thread's first `value` is a fix of the task it checks: the
+ *   runtime appends `revision.started` (`fix`, with that `taskId`), then a
+ *   stale mark (`stale`) on each transitive dependent of the task that has an
+ *   attempt and isn't stale already, then the value. Later values add nothing.
+ * - A check never clears an open To check item. When the check thread ends the
+ *   runtime sets the status (`check-result`) to `checkResult(task)` (`fold.ts`)
+ *   with a reason, but only if the task is still under review: `done` only for
+ *   a `passed` verdict with no open item (a worker's doubt, a `toCheck`
+ *   checkpoint, a fix), otherwise `to-check`.
  *
  * Staleness. A correction is one `checklist stale` call by the supervisor on
  * the corrected task, which has an attempt. The runtime appends
  * `revision.started` (`correction`), the call's own stale event, and a stale
- * mark (`stale`) on each dependent in the workflow's graph that has an attempt
- * and isn't stale already. A stale mark on a task under review stops its check
+ * mark (`stale`) on each transitive dependent in the workflow's
+ * graph that has an attempt and isn't stale already. A stale mark on a task under review stops its check
  * thread, so no `check-result` follows. When a worker thread ends with tasks
  * still in progress, the stuck guard marks each `to-check` (`stuck`).
  *
@@ -63,8 +75,8 @@
  * - `check-start`: `${checkThreadId}:start`; `check-result`: `${checkThreadId}:result`
  * - stuck guard: `${workerThreadId}:stuck:${taskId}`
  *
- * The three task tools run with `executionMode: "sequential"`, and a tool
- * succeeds only after its appends are acknowledged. A crash between an
+ * The three task tools run with `executionMode: "sequential"` within a
+ * thread, and a tool succeeds only after its appends are acknowledged. A crash between an
  * `attempt.opened` and the tool's own event leaves an `in-progress` attempt;
  * the interrupted call is answered with an error and the model's retry lands in
  * it.
@@ -72,7 +84,6 @@
  * Results reach the record as `tool.result.output`, the object as JSON.
  */
 import { z } from "zod";
-import { taskStatusSchema } from "./events";
 import { relativePathSchema, segmentSchema, taskIdSchema } from "./r2";
 
 const nonEmpty = z.string().min(1);
@@ -99,7 +110,8 @@ export type TaskToolResult = z.infer<typeof taskToolResultSchema>;
 
 export const checklistInputSchema = z.object({
   taskId: taskIdSchema,
-  status: taskStatusSchema,
+  // The statuses a caller may set; who may set which is in the rules above.
+  status: z.enum(["in-progress", "done", "failed", "to-check", "stale"]),
   reason: nonEmpty.describe("One plain-language line: why the task is in this state."),
 });
 export type ChecklistInput = z.infer<typeof checklistInputSchema>;
