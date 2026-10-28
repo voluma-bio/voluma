@@ -33,3 +33,27 @@ who ends it:
    run, which is what to use when other agents have runs going: the bare form ends theirs too.
 
 Run `sandboxes:clean --run <your run>` before finishing any work that started sandboxes.
+
+# Runner: `segment_sam` runs on the host
+
+The tool (`packages/harness/src/tools/segment-sam.ts`) runs in the runner process, never in
+the sandbox: the sandbox has no network and Meta's key must not enter it. It reads the
+volume and writes the labels straight to the run's bucket (`Files` port, `r2-files.ts`;
+`RunLayout.keyOf` maps the sandbox path the model names to its key), so a file the
+sandbox just wrote is visible to it and the labels are visible to the sandbox after the call.
+The Meta adapter (`meta-segmenter.ts`) shells out to `ffmpeg` for the lossless H.264 stack, so
+the runner host needs it on PATH; it deletes its upload from Meta's file store when the call
+ends (a failed delete is logged). Its response masks decode in `one-bit-mask.ts`, a port of
+Meta's decoder, because `meta-sam-parser` takes minutes per response. The tool is offered only
+when a Meta key exists (`VOLUMA_META_API_KEY`, or the visitor's key on a visitor run). What a
+call costs goes to the run's usage meter (the adapter reports it as soon as Meta gives the frame count, so a failed call is still billed). The tool also writes a sidecar `<labels>.json` (prompt frames and per-slice confidence per object). The runner checks `ffmpeg -version` at start when a Meta key is set. How agents should use it (orientation, boxes,
+which structures share a call) is the `sam-segmentation` skill's job, not the tool's.
+
+# Runner: `view_image` shows the model files the sandbox wrote
+
+`packages/harness/src/tools/view-image.ts` reads up to 4 PNG or JPEG files (1 MiB and 2000 px a side each, type
+checked by magic bytes) from the run's bucket and returns them as image content; a `ToolResult`
+may carry `images`, which the Pi adapter turns into image blocks. The `tool.result` event holds
+only text (path, type, size, sha256). The images are in the thread's history (resume needs
+them), but `adapters/pi/elide-images.ts` keeps image blocks only for the last 2 `view_image`
+calls in each request, so request size does not grow with the thread.
