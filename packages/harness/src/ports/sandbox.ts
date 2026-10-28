@@ -88,13 +88,15 @@ export interface Sandbox {
    */
   writeFile(path: string, bytes: Uint8Array, signal?: AbortSignal): Promise<void>;
   /**
-   * False once the provider has ended the sandbox (idle timeout, lifetime, termination);
-   * a command sent to it then fails. One provider round trip (30-40 ms against Modal). It
-   * can still be true while the provider is shutting the sandbox down; that case surfaces as
+   * The sandbox's exit code once the provider has ended it (idle timeout, lifetime,
+   * termination; 137 is a kill, usually out of memory), null while it runs; a command sent
+   * to an ended one fails. One provider round trip (30-40 ms against Modal). It can still be
+   * null while the provider is shutting the sandbox down; that case surfaces as
    * `SandboxEndedError` from `exec` or `writeFile`.
    */
-  alive(): Promise<boolean>;
+  exitCode(): Promise<number | null>;
   destroy(): Promise<void>;
 }
 
-export type CreateSandbox = (spec: SandboxSpec) => Promise<Sandbox>;
+/** `signal` aborts a creation that has not yet acted on the provider; it rejects with the abort. */
+export type CreateSandbox = (spec: SandboxSpec, signal?: AbortSignal) => Promise<Sandbox>;
