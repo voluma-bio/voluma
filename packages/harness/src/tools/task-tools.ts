@@ -33,7 +33,8 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
  *   the `text` when it is not.
  * - An evidence `path` that is itself `{root, path}` is unwrapped, unless its root differs
  *   from the outer one.
- * - `toCheck` given as a string, or with its words under `text`, becomes the `title` it needs.
+ * - `toCheck` given as a string, or with its words under `text`, becomes the `title` it needs;
+ *   `text` beside a `title` is appended to the checkpoint's `text`.
  */
 export function prepareCheckpoint(args: unknown): unknown {
   if (!isRecord(args)) return args;
@@ -52,9 +53,16 @@ export function prepareCheckpoint(args: unknown): unknown {
   }
   const { toCheck } = out;
   if (typeof toCheck === "string") out.toCheck = { title: toCheck };
-  else if (isRecord(toCheck) && toCheck.title === undefined && typeof toCheck.text === "string") {
+  else if (isRecord(toCheck) && typeof toCheck.text === "string") {
+    // Its words are the explanation `text` already carries: with a title they join `text`,
+    // without one they are the title.
     const { text, ...kept } = toCheck;
-    out.toCheck = { ...kept, title: text };
+    if (kept.title === undefined) out.toCheck = { ...kept, title: text };
+    else {
+      out.toCheck = kept;
+      if (typeof out.text === "string" && !out.text.includes(text))
+        out.text = `${out.text}\n${text}`;
+    }
   }
   return out;
 }
