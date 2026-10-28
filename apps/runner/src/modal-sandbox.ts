@@ -20,13 +20,14 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type {
-  CreateSandbox,
-  ExecChunk,
-  ExecRequest,
-  Sandbox,
-  SandboxMount,
-  SandboxSpec,
+import {
+  type CreateSandbox,
+  type ExecChunk,
+  type ExecRequest,
+  type Sandbox,
+  SandboxEndedError,
+  type SandboxMount,
+  type SandboxSpec,
 } from "@voluma/harness/ports/sandbox";
 import { ModalClient, type Sandbox as ModalSandbox } from "modal";
 
@@ -180,6 +181,8 @@ class ModalSandboxAdapter implements Sandbox {
         yield finished && signal?.aborted ? { type: "exit", code: 143 } : chunk;
       }
     } catch (error) {
+      // Nothing started, so there is no group to kill.
+      if (error instanceof SandboxEndedError) finished = true;
       // Killing the sandbox as a fallback ends the streams with an error.
       if (!signal?.aborted) throw error;
       finished = true;
@@ -210,6 +213,11 @@ class ModalSandboxAdapter implements Sandbox {
     if (code !== 0) throw new Error(`writing ${path} failed (exit ${code}): ${stderr.trim()}`);
   }
 
+  async alive(): Promise<boolean> {
+    // `poll` is null while the sandbox runs and its exit code once it has ended.
+    return (await this.#modal.poll()) === null;
+  }
+
   async destroy(): Promise<void> {
     await this.#modal.terminate({ wait: true });
   }
@@ -219,10 +227,14 @@ class ModalSandboxAdapter implements Sandbox {
     deadlineSeconds: number,
     env?: Record<string, string>,
   ): AsyncGenerator<ExecChunk> {
-    const process = await this.#modal.exec(argv, {
-      env,
-      timeoutMs: (deadlineSeconds + EXEC_DEADLINE_MARGIN_SECONDS) * 1000,
-    });
+    const process = await this.#modal
+      .exec(argv, {
+        env,
+        timeoutMs: (deadlineSeconds + EXEC_DEADLINE_MARGIN_SECONDS) * 1000,
+      })
+      .catch((error: unknown) => {
+        throw isShuttingDown(error) ? new SandboxEndedError(error) : error;
+      });
     const readers = {
       stdout: process.stdout.getReader(),
       stderr: process.stderr.getReader(),
@@ -270,6 +282,15 @@ class ModalSandboxAdapter implements Sandbox {
     }
     await this.destroy();
   }
+}
+
+// Modal refuses to start a command in a sandbox it is ending, while `poll()` still says the
+// sandbox runs (seen for at least 15 s after the idle timeout). nice-grpc's ClientError,
+// matched by shape so this file needs no nice-grpc import; 9 is FAILED_PRECONDITION. The
+// SDK does not retry that status, and the failure is the start itself, so nothing ran.
+function isShuttingDown(error: unknown): boolean {
+  const { code, details } = error as { code?: unknown; details?: unknown };
+  return code === 9 && typeof details === "string" && details.includes("shutting down");
 }
 
 // Where the bucket prefix is mounted: a staged mount is mounted privately and copied to its path.

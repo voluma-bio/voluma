@@ -5,11 +5,18 @@
  *    the header is present only the bearer counts; the cookie is never consulted.
  *  - the WorkOS AuthKit session cookie: a member of an allowed organization, principal
  *    `user` (its `labId` is that organization, its `scope` the organization's entry).
+ * With `config.guest` set, a request with neither a session cookie nor a bearer but a
+ * guest cookie is a guest: a `user` with account `visitor`, `labId` and `scope` from the
+ * config, identified by a server-minted id in its own sealed cookie (no WorkOS call).
+ * Only `POST /api/auth/guest` mints one; a GET never does. A session cookie that is
+ * refused is cleared and answered 401, never turned into a guest; with `guest` null the
+ * guest cookie is ignored and the request is a 401.
  * `createAuth` returns the pieces index.ts mounts on `/api/*`, in this order:
  *  1. `guards`: the bearer check and the CSRF rules. No I/O, so a forged request makes no
  *     WorkOS call.
- *  2. `sessionRoutes`: login, callback and logout, the only writers of the session cookie.
- *  3. `session`, then `requirePrincipal`: the cookie becomes a user principal, and
+ *  2. `sessionRoutes`: login, callback, logout and guest, the only writers of the session
+ *     and guest cookies.
+ *  3. `session`, then `requirePrincipal`: the cookie (else a guest cookie) becomes a user principal, and
  *     everything else without a principal is a 401. This is the only place that
  *     validates the cookie and refreshes an expired access token with WorkOS; the
  *     refreshed `Set-Cookie`s ride on the response (each its own header: AuthKit forbids
@@ -17,6 +24,7 @@
  *  4. `userRoutes` and the domains, which see a non-null principal (domain.ts).
  */
 
+import { randomUUID } from "node:crypto";
 import type { Me } from "@voluma/contracts/auth";
 import {
   AuthKitCore,
@@ -39,8 +47,11 @@ import {
   WorkOS,
 } from "@workos-inc/node";
 import { type Context, Hono } from "hono";
+import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
 import { timingSafeEqual } from "hono/utils/buffer";
+import { serialize } from "hono/utils/cookie";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import { type Principal, requireUser, type Scope, type UserEnv } from "./domain";
 
 export interface AuthConfig {
@@ -53,6 +64,11 @@ export interface AuthConfig {
    * get. The first `lab` entry is the organization the sign-in page is pinned to.
    */
   organizations: { id: string; scope: Scope }[];
+  /**
+   * Who a request with no credential is, or null for a sign-in wall. Guests belong to
+   * `organizationId` and see what `scope` allows, as a member of it would.
+   */
+  guest: { organizationId: string; scope: Scope } | null;
   /** Where the browser reaches the app (no trailing slash). Never taken from `Host`. */
   appUrl: string;
   /** The runner's bearer token. */
@@ -97,9 +113,17 @@ class RequestStorage extends CookieSessionStorage<Request, string[]> {
 // keeps a lab member signed in across a holiday without a permanent cookie.
 const COOKIE_MAX_AGE = 30 * 24 * 60 * 60;
 
+// The guest cookie outlives any visit: a guest is a browser, and losing the cookie
+// loses their work under `scope: "self"`.
+const GUEST_MAX_AGE = 400 * 24 * 60 * 60;
+const GUEST_ID_PREFIX = "guest_";
+
 // Every WorkOS call is on a request path (refresh, revoke, code exchange), so it is
 // bounded: one attempt, 3 s. The SDK's default is 4 attempts and 60 s each.
 const WORKOS_TIMEOUT_MS = 3000;
+
+// Refresh outcomes remembered per process (see `RefreshMemo`).
+const MEMO_ENTRIES = 10_000;
 
 // The sealed PKCE verifier cookie must stay under 4 KB. A returnTo that is a printable
 // ASCII path of at most this many characters keeps it near 1.2 KB, so several pending
@@ -121,34 +145,107 @@ function returnPath(raw: string | undefined) {
   }
 }
 
-// Whether a failed refresh means the session is over. Matched positively, as
-// @workos-inc/node's CookieSession.refresh does (classifyTerminalRefreshError, then
+// Whether a failed refresh means the session is over. Modelled on
+// @workos-inc/node's CookieSession.refresh (classifyTerminalRefreshError, then
 // classifyRetryableRefreshError, both unexported; re-diff them when bumping the pin):
-// an OAuth or authentication error, or any other 4xx except 408 and 429, ends the
-// session. Everything else (5xx, network errors, an HTML error page that surfaces as
-// `Error("Unexpected error")`, anything unknown) keeps the cookie, so an outage does
-// not sign people out.
+// an OAuth or authentication error, or any other 4xx, ends the session. The status
+// is checked first, because the SDK reports its own request timeout as an
+// `OauthException` with status 408. 408, 429, 5xx, network errors, an HTML error page
+// (`Error("Unexpected error")`) and anything unknown keep the cookie, so an outage
+// does not sign people out (and, with the refresh memo, is never remembered as dead).
 function isTerminalRefreshError(error: unknown) {
   if (!(error instanceof TokenRefreshError)) return false;
   const cause = error.cause;
-  if (cause instanceof OauthException || cause instanceof AuthenticationException) return true;
+  const status = (cause as { status?: number } | undefined)?.status;
+  if (status === 408 || status === 429 || (status !== undefined && status >= 500)) return false;
   return (
-    cause instanceof GenericServerException &&
-    cause.status >= 400 &&
-    cause.status < 500 &&
-    cause.status !== 408 &&
-    cause.status !== 429
+    cause instanceof OauthException ||
+    cause instanceof AuthenticationException ||
+    (cause instanceof GenericServerException &&
+      status !== undefined &&
+      status >= 400 &&
+      status < 500)
   );
 }
+
+type Refreshed = Awaited<ReturnType<AuthKitCore["validateAndRefresh"]>>;
+
+// What a refresh token last got from WorkOS, so a client that replays a cookie (never
+// storing the Set-Cookie) can't drive a WorkOS call per request. `Refreshed` holds until
+// its access token expires; `dead` (terminal failure, sign-out, revoke) until the
+// cookie's max age; `unavailable` (transient failure) for UNAVAILABLE_MS, so a replay
+// during an outage or rate limit adds no load. `dead` is final: a refresh that was in
+// flight when the session ended finishes later and must not bring it back. Keyed by the
+// refresh token; a bounded LRU (a Map is insertion-ordered), so memory does not grow
+// with the cookies seen.
+type Remembered = { outcome: Refreshed | "dead" | "unavailable"; until: number };
+
+// AuthKit's 429 Retry-After cap, so the memo does not outlast the rate limit it reports.
+const UNAVAILABLE_MS = 10_000;
+
+class RefreshMemo {
+  private entries = new Map<string, Remembered>();
+
+  get(refreshToken: string) {
+    const entry = this.entries.get(refreshToken);
+    if (!entry) return undefined;
+    this.entries.delete(refreshToken);
+    if (entry.until <= Date.now()) return undefined;
+    this.entries.set(refreshToken, entry);
+    return entry.outcome;
+  }
+
+  // The only way to mark a session over.
+  dead(refreshToken: string) {
+    this.put(refreshToken, { outcome: "dead", until: Date.now() + COOKIE_MAX_AGE * 1000 });
+  }
+
+  refreshed(refreshToken: string, result: Refreshed) {
+    this.put(refreshToken, { outcome: result, until: (result.claims.exp ?? 0) * 1000 });
+  }
+
+  unavailable(refreshToken: string) {
+    this.put(refreshToken, { outcome: "unavailable", until: Date.now() + UNAVAILABLE_MS });
+  }
+
+  private put(refreshToken: string, next: Remembered) {
+    const current = this.entries.get(refreshToken);
+    if (current?.outcome === "dead" && next.outcome !== "dead" && current.until > Date.now()) {
+      return;
+    }
+    this.entries.delete(refreshToken);
+    this.entries.set(refreshToken, next);
+    if (this.entries.size > MEMO_ENTRIES) {
+      this.entries.delete(this.entries.keys().next().value as string);
+    }
+  }
+}
+
+type SessionRef = { id: string; refreshToken: string };
 
 function userPrincipal(user: User, labId: string, scope: Scope): Principal {
   return {
     kind: "user",
     userId: user.id,
+    account: "member",
     email: user.email,
     name: [user.firstName, user.lastName].filter(Boolean).join(" ") || null,
     labId,
     scope,
+  };
+}
+
+function guestPrincipal(
+  userId: string,
+  guest: NonNullable<AuthConfig["guest"]>,
+): Extract<Principal, { account: "visitor" }> {
+  return {
+    kind: "user",
+    userId,
+    account: "visitor",
+    name: null,
+    labId: guest.organizationId,
+    scope: guest.scope,
   };
 }
 
@@ -162,6 +259,9 @@ export function createAuth(config: AuthConfig) {
   const scopes = new Map(config.organizations.map((org) => [org.id, org.scope]));
   const signInOrganizationId = config.organizations.find((org) => org.scope === "lab")?.id;
   if (!signInOrganizationId) throw new Error("createAuth needs a lab organization");
+  if (config.guest && scopes.has(config.guest.organizationId)) {
+    throw new Error("The guest organization must not be one that members sign in to");
+  }
   // __Host- needs Secure, Path=/ and no Domain, so a sibling subdomain can't plant or
   // shadow the cookie. AuthKit sets Secure when the redirect URI is https.
   const cookieName = appOrigin.startsWith("https:") ? "__Host-wos-session" : "wos-session";
@@ -190,11 +290,37 @@ export function createAuth(config: AuthConfig) {
       }),
   });
   const workos = authkit.getWorkOS();
+  // Keys are kept for the process lifetime (`cacheMaxAge: Infinity`; jose defaults are a 5 s
+  // timeout and a 10 min cache). The reason is outages: with a 10 min cache, the first
+  // verification after the cache lapses during a WorkOS outage fails for every valid token,
+  // each then refreshes and gets 503. An unknown `kid` still reloads, behind jose's 30 s
+  // cooldown, so rotation works. The timeout is the same 3 s as every WorkOS call.
+  const jwks = createRemoteJWKSet(new URL(workos.userManagement.getJwksUrl(config.clientId)), {
+    timeoutDuration: WORKOS_TIMEOUT_MS,
+    cacheMaxAge: Number.POSITIVE_INFINITY,
+  });
   // The AuthKit layer under `withAuth`, which swallows the refresh error. One refresh per
   // request goes through here, so its failures are typed and concurrent refreshes of one
   // cookie share a single WorkOS call. AuthKit retries a 429 once after the Retry-After
-  // (at most 10 s), so a rate-limited refresh is two calls; it is left on.
-  const core = new AuthKitCore(getConfigurationProvider().getConfig(), workos, sessionEncryption);
+  // (at most 10 s), so a rate-limited refresh is two calls; it is left on. `verifyToken`
+  // is overridden to use `jwks`; `override` fails the typecheck if an upgrade removes it,
+  // but re-check that `validateAndRefresh` still calls it when bumping the pin.
+  class Core extends AuthKitCore {
+    override async verifyToken(token: string) {
+      try {
+        await jwtVerify(token, jwks);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+  }
+  const core = new Core(getConfigurationProvider().getConfig(), workos, sessionEncryption);
+  const memo = new RefreshMemo();
+  // Like the session cookie, __Host- on https. The prefix is in the name itself:
+  // `serialize` doesn't apply Hono's `prefix` option, so read and write use this name.
+  const https = appOrigin.startsWith("https:");
+  const guestCookieName = https ? "__Host-voluma-guest" : "voluma-guest";
 
   // Clears the session cookie and every pending PKCE verifier on the request, so
   // sign-out and refusals leave no AuthKit cookie behind.
@@ -207,15 +333,16 @@ export function createAuth(config: AuthConfig) {
     }
   }
 
-  // Ends WorkOS sessions server-side, so a copy of a sealed cookie dies with them
-  // (refresh tokens are not rotated on use). Never throws: callers clear the cookie
-  // whatever happens here.
-  async function revokeSessions(sessionIds: (string | null)[]) {
+  // Ends WorkOS sessions server-side and marks their refresh tokens dead in the memo (the
+  // guarantee is in .context/CONTEXT.md, Authentication). Never throws:
+  // callers clear the cookie whatever happens here.
+  async function revokeSessions(sessions: (SessionRef | null)[]) {
     await Promise.all(
-      sessionIds.map(async (sessionId) => {
-        if (sessionId === null) return;
+      sessions.map(async (ref) => {
+        if (ref === null) return;
+        memo.dead(ref.refreshToken);
         try {
-          await workos.userManagement.revokeSession({ sessionId });
+          await workos.userManagement.revokeSession({ sessionId: ref.id });
         } catch (error) {
           const { name, status } = error as { name?: string; status?: number };
           console.error("WorkOS session revoke failed:", name, status);
@@ -224,47 +351,103 @@ export function createAuth(config: AuthConfig) {
     );
   }
 
-  // The session id (`sid`) of the request's cookie, read without refreshing (it works on
-  // an expired token, and while WorkOS is unreachable), or null for no readable cookie.
-  async function requestSessionId(request: Request) {
+  // The session id (`sid`) and refresh token of the request's cookie, read without
+  // refreshing (it works on an expired token, and while WorkOS is unreachable), or null
+  // for no readable cookie.
+  async function requestSession(request: Request): Promise<SessionRef | null> {
     try {
       const session = await authkit.getSession(request);
-      return session ? (core.parseTokenClaims(session.accessToken).sid ?? null) : null;
+      const id = session ? core.parseTokenClaims(session.accessToken).sid : undefined;
+      return session && id ? { id, refreshToken: session.refreshToken } : null;
     } catch {
       return null;
     }
   }
 
-  // The principal for a request's session cookie, or null; cookies to set go to `sink`.
-  // A dead cookie is cleared (once cleared it costs no further WorkOS calls), any
-  // other WorkOS failure keeps it, so an outage does not sign people out.
+  // The principal for a request's session cookie; "none" when it presented no cookie;
+  // "refused" when it presented one that is not (or no longer) good, which is cleared;
+  // "unavailable" when a refresh failed transiently. Cookies to set go to `sink`.
+  // A dead cookie is cleared and remembered as dead, so a replay of it costs no WorkOS
+  // call; a refreshed session is remembered until its access token expires. Any other
+  // WorkOS failure keeps the cookie, is remembered briefly, and the caller answers 503, so
+  // an outage does not sign people out.
   async function userFromCookie(request: Request, sink: string[]) {
     let session: Awaited<ReturnType<typeof authkit.getSession>>;
     try {
       session = await authkit.getSession(request);
     } catch {
       await clearSessionCookies(request, sink);
-      return null;
+      return "refused" as const;
     }
-    if (session === null) return null;
-    let result: Awaited<ReturnType<typeof core.validateAndRefresh>>;
-    try {
-      result = await core.validateAndRefresh(session);
-    } catch (error) {
-      if (isTerminalRefreshError(error)) await clearSessionCookies(request, sink);
-      else console.error("session refresh failed; cookie kept", error);
-      return null;
+    if (session === null) return "none" as const;
+    const remembered = memo.get(session.refreshToken);
+    if (remembered === "dead") {
+      await clearSessionCookies(request, sink);
+      return "refused" as const;
+    }
+    if (remembered === "unavailable") return remembered;
+    let result: Refreshed;
+    if (remembered) {
+      result = { ...remembered, refreshed: false };
+    } else {
+      try {
+        result = await core.validateAndRefresh(session);
+      } catch (error) {
+        if (isTerminalRefreshError(error)) {
+          memo.dead(session.refreshToken);
+          await clearSessionCookies(request, sink);
+          return "refused" as const;
+        }
+        console.error("session refresh failed; cookie kept", error);
+        memo.unavailable(session.refreshToken);
+        return "unavailable" as const;
+      }
+      if (result.refreshed) memo.refreshed(session.refreshToken, result);
     }
     // The enforcement point for membership, bounded by the access-token lifetime.
     const orgId = result.claims.org_id;
     const scope = orgId === undefined ? undefined : scopes.get(orgId);
     if (orgId === undefined || scope === undefined) {
       await clearSessionCookies(request, sink);
-      return null;
+      return "refused" as const;
     }
     if (result.refreshed)
       await authkit.saveSession(sink, await core.encryptSession(result.session));
     return userPrincipal(result.session.user, orgId, scope);
+  }
+
+  // The guest for a request, or null for no valid guest cookie (absent, garbled, forged
+  // or sealed under another password).
+  async function guestIdFromCookie(c: Context) {
+    const sealed = getCookie(c, guestCookieName);
+    if (!sealed) return null;
+    try {
+      const { id } = await sessionEncryption.unsealData<{ id?: unknown }>(sealed, {
+        password: config.cookiePassword,
+      });
+      return typeof id === "string" && id.startsWith(GUEST_ID_PREFIX) ? id : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // Sets a new guest identity's cookie in `sink` and returns its id.
+  async function mintGuest(sink: string[]) {
+    const id = `${GUEST_ID_PREFIX}${randomUUID()}`;
+    sink.push(
+      serialize(
+        guestCookieName,
+        await sessionEncryption.sealData({ id }, { password: config.cookiePassword }),
+        {
+          httpOnly: true,
+          sameSite: "Lax",
+          maxAge: GUEST_MAX_AGE,
+          secure: https,
+          path: "/",
+        },
+      ),
+    );
+    return id;
   }
 
   const bearer = createMiddleware<RootEnv>(async (c, next) => {
@@ -277,19 +460,19 @@ export function createAuth(config: AuthConfig) {
 
   // The origin and content-type rules for requests that authenticate by cookie.
   // SameSite=Lax is same-site, not same-origin (every *.voluma.bio host is same-site),
-  // so state-changing requests and WebSocket upgrades must come from the app's origin.
+  // so state-changing requests must come from the app's origin. Nothing upgrades to
+  // WebSockets; a route that ever does must check `Origin` on the upgrade here too.
   // Service (bearer) requests carry no ambient credential and are exempt; a request
   // with some other Authorization header has no principal and is checked like any other.
   const csrf = createMiddleware<RootEnv>(async (c, next) => {
     const { method, headers } = c.req.raw;
     const mutates = method !== "GET" && method !== "HEAD";
-    const upgrade = headers.get("upgrade")?.toLowerCase() === "websocket";
-    if (c.get("principal")?.kind === "service" || !(mutates || upgrade)) return next();
+    if (c.get("principal")?.kind === "service" || !mutates) return next();
     const site = headers.get("sec-fetch-site");
     if (headers.get("origin") !== appOrigin || (site !== null && site !== "same-origin")) {
       return c.json({ error: "forbidden origin" }, 403);
     }
-    if (mutates && !/^application\/json\s*(;|$)/i.test(headers.get("content-type") ?? "")) {
+    if (!/^application\/json\s*(;|$)/i.test(headers.get("content-type") ?? "")) {
       return c.json({ error: "content-type must be application/json" }, 415);
     }
     return next();
@@ -298,8 +481,17 @@ export function createAuth(config: AuthConfig) {
   const session = createMiddleware<RootEnv>(async (c, next) => {
     if (c.req.header("authorization") !== undefined) return next(); // the bearer decided
     const cookies: string[] = [];
-    c.set("principal", await userFromCookie(c.req.raw, cookies));
-    await next();
+    const member = await userFromCookie(c.req.raw, cookies);
+    if (member === "unavailable") return c.json({ error: "auth unavailable" }, 503);
+    let principal: Principal | null = null;
+    if (member === "none") {
+      const id = config.guest && (await guestIdFromCookie(c));
+      principal = id && config.guest ? guestPrincipal(id, config.guest) : null;
+    } else if (member !== "refused") {
+      principal = member;
+    }
+    c.set("principal", principal);
+    await next(); // a refused cookie's clear rides on the 401 from requirePrincipal
     for (const cookie of cookies) c.res.headers.append("Set-Cookie", cookie);
   });
 
@@ -352,9 +544,10 @@ export function createAuth(config: AuthConfig) {
       return c.redirect("/?signin=failed");
     }
     // Signing in over an existing session replaces its cookie; end the old session too.
-    const newId = core.parseTokenClaims(result.authResponse.accessToken).sid ?? null;
-    const oldId = await requestSessionId(c.req.raw);
-    const stale = oldId === newId ? null : oldId;
+    const newSid = core.parseTokenClaims(result.authResponse.accessToken).sid;
+    const created = newSid ? { id: newSid, refreshToken: result.authResponse.refreshToken } : null;
+    const old = await requestSession(c.req.raw);
+    const stale = old?.id === created?.id ? null : old;
     if (scopes.has(result.authResponse.organizationId ?? "")) {
       await revokeSessions([stale]);
       setCookies(c, cookies);
@@ -362,7 +555,7 @@ export function createAuth(config: AuthConfig) {
     }
     // Not in an allowed organization: handleCallback has already sealed a session. Keep none of it,
     // and end it at WorkOS so no usable session survives.
-    await revokeSessions([newId, stale]);
+    await revokeSessions([created, stale]);
     cookies.length = 0;
     await clearSessionCookies(c.req.raw, cookies);
     setCookies(c, cookies);
@@ -370,13 +563,13 @@ export function createAuth(config: AuthConfig) {
   });
 
   sessionRoutes.post("/logout", async (c) => {
-    // End the WorkOS session here, not only in the browser: a copy of the sealed
-    // cookie must stop working.
-    const sessionId = await requestSessionId(c.req.raw);
-    await revokeSessions([sessionId]);
+    // End the WorkOS session here, not only in the browser. What a copy of the cookie
+    // still gets afterwards: .context/CONTEXT.md, Authentication.
+    const current = await requestSession(c.req.raw);
+    await revokeSessions([current]);
     // The browser still visits logoutUrl, which ends WorkOS's own AuthKit session.
-    const logoutUrl = sessionId
-      ? workos.userManagement.getLogoutUrl({ sessionId, returnTo: `${config.appUrl}/` })
+    const logoutUrl = current
+      ? workos.userManagement.getLogoutUrl({ sessionId: current.id, returnTo: `${config.appUrl}/` })
       : "/";
     const cookies: string[] = [];
     await clearSessionCookies(c.req.raw, cookies);
@@ -384,11 +577,28 @@ export function createAuth(config: AuthConfig) {
     return c.json({ logoutUrl });
   });
 
+  // The only place a guest is minted: an explicit same-origin POST (behind the CSRF
+  // guard), so a cross-site GET or a 404 mints nothing. It answers like /me. A browser
+  // that already holds a guest cookie keeps its id.
+  sessionRoutes.post("/guest", async (c) => {
+    if (!config.guest) return c.json({ error: "not found" }, 404);
+    const cookies: string[] = [];
+    const id = (await guestIdFromCookie(c)) ?? (await mintGuest(cookies));
+    setCookies(c, cookies);
+    const { userId, name, labId } = guestPrincipal(id, config.guest);
+    return c.json({ kind: "visitor", userId, name, labId } satisfies Me);
+  });
+
   const userRoutes = new Hono<UserEnv>().use(requireUser);
 
   userRoutes.get("/me", (c) => {
-    const { userId, email, name, labId } = c.var.user;
-    return c.json({ kind: "member", userId, email, name, labId } satisfies Me);
+    const user = c.var.user;
+    const { userId, name, labId } = user;
+    const me: Me =
+      user.account === "member"
+        ? { kind: "member", userId, email: user.email, name, labId }
+        : { kind: "visitor", userId, name, labId };
+    return c.json(me);
   });
 
   return {

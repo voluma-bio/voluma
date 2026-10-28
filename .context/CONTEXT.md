@@ -73,7 +73,7 @@ checklist, check threads, and review chat threads.
   and fails if the stored system message differs from the current prompt and tools. `apps/runner/src/main.ts` wires it to the HTTP client
   (`packages/harness/src/adapters/http`), the Modal sandbox and a model:
   `pnpm --filter @voluma/runner run-task --provider openai --model <id> --task "<text>"`
-  (needs `pnpm dev` running, which writes the API's URL and token to `.dev/env.json` for the runner unless `.env` sets `VOLUMA_API_URL`; keys are in `.env`, which the runner reads
+  (needs `pnpm dev` running, which writes the API's URL and token to `.dev/env.json` for the runner unless `.env` sets `VOLUMA_API_URL`. Until the CLI can claim a run (lanes A and E) it also needs a lease token in `VOLUMA_LEASE_TOKEN`; today's API checks no token, so any value works. Keys are in `.env`, which the runner reads
   into a config object rather than `process.env`; model keys are `VOLUMA_<PROVIDER>_API_KEY`). The sandbox is
   created on the first `bash` call and destroyed at the end (every exit path, and what a crash
   leaves: `apps/runner/.context/CONTEXT.md`); Ctrl-C kills the running
@@ -110,12 +110,31 @@ organization and `scope` its entry; domains receive `readerOf(user)` and never b
 organization, and anonymous demo visitors, whom our server mints (a sealed cookie, no WorkOS
 user, no email) in the demo entrance PR. No WorkOS user signs into a Demo organization, so
 none is in the list. WorkOS does not enforce the `organizationId` pin on sign-in, so the
-per-request allow-list is the only control. `scope` is server-internal: `/me` returns only the contract shape. When an `Authorization` header is present only the
+per-request allow-list is the only control. `scope` is server-internal: `/me` returns only the contract shape.
+
+**Guests.** With `GUEST_ORGANIZATION_ID` (and `GUEST_SCOPE`, `lab` or `self`, default `lab`; the
+Demo org runs `self`) set, a request with no session cookie, no bearer and a valid guest cookie
+is a guest: a `user` principal with `account: "visitor"`, no email, and that organization and
+scope, so domains and `readerOf` treat it like any member. Its id (`guest_…`) is minted by
+`POST /api/auth/guest` (same-origin, behind the CSRF guard; it returns the `/me` body) into its
+own sealed cookie (`voluma-guest`, `__Host-` on https, HttpOnly, 400 days; same seal as the
+session cookie, no WorkOS call). A GET or a 404 never mints. The web gate calls it when `/me`
+is a 401; a server with guests off answers 404 and the gate shows the sign-in screen. A session
+cookie that is refused is cleared and answered 401, never turned into a guest: the gate then
+re-loads, and lands on a guest or the sign-in screen. `/me` returns `kind: "visitor"`. Unset
+means the sign-in wall, and a guest cookie is ignored. `createAuth` throws when the guest
+organization is a member organization. There is no per-visitor mint limit: every cap is per
+org. Guests belong to the Demo organization, never the Yao Lab: lab data is the lab's to
+share, run by run, so it is for signed-in members; public examples are seeded into the Demo
+organization instead. They share the Demo workspace
+but each sees only their own runs (`self`). When an `Authorization` header is present only the
 bearer counts. The root answers 401 for no principal on everything but `/api/auth/*`;
 a domain guards a subtree with `requireService` or `requireUser` (which also sets a typed
 `c.var.user`) and gets 403 for the other kind. A cookie-authenticated non-GET request must
 carry an `Origin` equal to `APP_URL`'s origin (`SameSite=Lax` is same-site, not
-same-origin) and a JSON content type; a WebSocket upgrade must carry the `Origin` only.
+same-origin) and a JSON content type. No GET changes app state. Nothing upgrades to
+WebSockets (run streams are planned as server-sent events, plain GETs, in #28); a route that
+ever accepts an upgrade must add the `Origin` check for upgrades back to the CSRF guard.
 Bearer requests are exempt. `APP_URL` (the Vite origin in `pnpm dev`, the public URL in
 production) is config, never the `Host` header: it builds the redirect
 `${APP_URL}/api/auth/callback`. There is no `users` table: records store the WorkOS user id.
@@ -134,14 +153,27 @@ after the response, is what gives the cookie one writer. A refreshed session com
 
 A request makes at most one WorkOS refresh (`AuthKitCore.validateAndRefresh`), with a 3 s
 timeout and no SDK retries (AuthKit's own one-time 429 retry stays, so a rate-limited
-refresh is two calls). A failure that is 408, 429, 5xx or a network error leaves the
-cookie, so an outage does not sign people out; any other failure (revoked or expired
-session, `sso_required`) clears it, and an unreadable cookie is cleared without a call.
+refresh is two calls). The JWKS fetch has the same 3 s bound and its keys are kept for the
+process lifetime (an unknown `kid` reloads, behind jose's 30 s cooldown), so a cold process
+during an outage spends at most 3 s on keys plus 3 s on the refresh. Each process also
+remembers refresh outcomes in a 10k-entry LRU keyed by the refresh token: a
+refreshed session until its access token expires, a dead one until the cookie's max age, a
+transient failure for 10 s. A
+client replaying one cookie therefore costs one WorkOS call per access-token lifetime, or
+none once the session is dead; the allow-list is still checked on every request. A failure
+that is 408, 429, 5xx or a network error leaves the cookie, is remembered for 10 s (a
+replay in that time makes no WorkOS call), and answers
+503 `{ "error": "auth unavailable" }` (not 401, which signs the web client out), so an
+outage shows the gate's can't-be-reached screen and keeps the session; any other failure (revoked or expired session,
+`sso_required`) clears it, and an unreadable cookie is cleared without a call.
 
 Sign-out revokes the session at WorkOS on the server (`userManagement.revokeSession`), as
 does signing in over an existing session (the old one); refresh tokens are not rotated on
-use, so a copied cookie would otherwise stay a session. The access token already issued
-stays valid until it expires. `returnTo` is sanitized, limited to printable ASCII and 512
+use, so a copied cookie would otherwise stay a session. Sign-out refuses copies of the
+cookie at once in the process that handled it (its memo marks the refresh token dead, and
+a refresh already in flight cannot undo that); in another process, or after the memo
+evicted the entry, a copy works until its access token expires (5 min on staging) and is
+refused at its next refresh. `returnTo` is sanitized, limited to printable ASCII and 512
 characters, and dropped if it doesn't fit, which keeps a PKCE verifier cookie near 1.2 KB;
 `/login` evicts stale verifier cookies.
 

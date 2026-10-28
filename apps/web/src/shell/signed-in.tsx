@@ -2,10 +2,11 @@
  * The sign-in gate: a layout route that asks the API who is signed in, then
  * renders the feature routes with the account menu, or the sign-in screen.
  * Features read the signed-in user with `useOutletContext<Me>()`; they never
- * call `getMe` themselves. A 401 from any later call (`onSignedOut`) returns
- * to the sign-in screen.
+ * call `getMe` themselves. With no session, the gate asks the server for a guest
+ * (`POST /api/auth/guest`); a server with guests off refuses, and the sign-in screen
+ * shows. A 401 from any later call (`onSignedOut`) runs the same load again.
  */
-import { ApiError, getMe, onSignedOut, signOut } from "@voluma/api-client";
+import { ApiError, getMe, onSignedOut, signIn, signOut, startGuest } from "@voluma/api-client";
 import type { Me } from "@voluma/contracts/auth";
 import { Button } from "@voluma/ui";
 import { ChevronDown } from "lucide-react";
@@ -26,29 +27,31 @@ export function SignedIn() {
 
   const load = useCallback(
     () =>
-      getMe().then(
-        (me) => setSession(me ? { state: "signed-in", me } : { state: "signed-out" }),
-        (error: unknown) => {
-          // TypeError: no network. SyntaxError: something other than the API
-          // (a captive portal, a proxy) answered with a non-JSON page.
-          if (error instanceof TypeError || error instanceof SyntaxError)
-            setSession({ state: "unreachable", cause: "offline" });
-          else if (error instanceof ApiError && error.status >= 500)
-            setSession({ state: "unreachable", cause: "down" });
-          // A schema mismatch or an unexpected status is a bug: hand it to
-          // the router's error screen rather than stalling on "Loading…".
-          else
-            setSession(() => {
-              throw error;
-            });
-        },
-      ),
+      getMe()
+        .then((me) => me ?? startGuest())
+        .then(
+          (me) => setSession(me ? { state: "signed-in", me } : { state: "signed-out" }),
+          (error: unknown) => {
+            // TypeError: no network. SyntaxError: something other than the API
+            // (a captive portal, a proxy) answered with a non-JSON page.
+            if (error instanceof TypeError || error instanceof SyntaxError)
+              setSession({ state: "unreachable", cause: "offline" });
+            else if (error instanceof ApiError && error.status >= 500)
+              setSession({ state: "unreachable", cause: "down" });
+            // A schema mismatch or an unexpected status is a bug: hand it to
+            // the router's error screen rather than stalling on "Loading…".
+            else
+              setSession(() => {
+                throw error;
+              });
+          },
+        ),
     [],
   );
 
   useEffect(() => {
     load();
-    return onSignedOut(() => setSession({ state: "signed-out" }));
+    return onSignedOut(() => void load());
   }, [load]);
 
   switch (session.state) {
@@ -105,10 +108,13 @@ function UnreachableScreen({
   );
 }
 
+const itemClass =
+  "cursor-pointer rounded-md px-2.5 py-1.5 text-ui outline-none data-disabled:opacity-50 data-highlighted:bg-accent";
+
 // Features own their screens and there is no shared top bar yet, so the menu
 // sits over the top-right corner of every screen.
 function AccountMenu({ me }: { me: Me }) {
-  const who = me.name ?? (me.kind === "member" ? me.email : "Demo visitor");
+  const who = me.name ?? (me.kind === "member" ? me.email : "Guest");
   const [signOutState, setSignOutState] = useState<"idle" | "pending" | "failed">("idle");
   return (
     <DropdownMenu.Root
@@ -140,22 +146,33 @@ function AccountMenu({ me }: { me: Me }) {
             )}
           </div>
           <DropdownMenu.Separator className="my-1 h-px bg-border" />
-          <DropdownMenu.Item
-            disabled={signOutState === "pending"}
-            onSelect={(event) => {
-              // Keep the menu open, so a failure has somewhere to show.
-              event.preventDefault();
-              setSignOutState("pending");
-              signOut().catch(() => setSignOutState("failed"));
-            }}
-            className="cursor-pointer rounded-md px-2.5 py-1.5 text-ui outline-none data-disabled:opacity-50 data-highlighted:bg-accent"
-          >
-            {signOutState === "pending" ? "Signing out…" : "Sign out"}
-          </DropdownMenu.Item>
-          {signOutState === "failed" && (
-            <p role="alert" className="px-2.5 pt-1 pb-1.5 text-meta text-destructive">
-              Couldn't sign out. Try again.
-            </p>
+          {me.kind === "visitor" ? (
+            <DropdownMenu.Item
+              onSelect={() => signIn(location.pathname + location.search)}
+              className={itemClass}
+            >
+              Sign in
+            </DropdownMenu.Item>
+          ) : (
+            <>
+              <DropdownMenu.Item
+                disabled={signOutState === "pending"}
+                onSelect={(event) => {
+                  // Keep the menu open, so a failure has somewhere to show.
+                  event.preventDefault();
+                  setSignOutState("pending");
+                  signOut().catch(() => setSignOutState("failed"));
+                }}
+                className={itemClass}
+              >
+                {signOutState === "pending" ? "Signing out…" : "Sign out"}
+              </DropdownMenu.Item>
+              {signOutState === "failed" && (
+                <p role="alert" className="px-2.5 pt-1 pb-1.5 text-meta text-destructive">
+                  Couldn't sign out. Try again.
+                </p>
+              )}
+            </>
           )}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
