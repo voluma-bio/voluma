@@ -34,7 +34,7 @@ export function bashTool(layout: RunLayout): Tool<typeof inputSchema> {
     description:
       "Run a shell command in the sandbox and return its combined stdout and stderr and exit code. " +
       "Long output is cut to its start and end; the full text is kept at the path the result names. " +
-      `${layout.describe()}\nThere is no network.`,
+      `${layout.description}\nThere is no network.`,
     input: inputSchema,
     async execute({ command, timeoutSeconds }, ctx) {
       const sandbox = await ctx.sandbox();

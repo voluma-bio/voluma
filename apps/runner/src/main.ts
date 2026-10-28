@@ -2,7 +2,8 @@
  * The runner: runs one Pi agent thread on one task, with `bash` as its only tool, in a
  * Modal sandbox created on the first command. Everything is recorded through the API
  * (events and Pi messages) and printed. Ctrl-C aborts the running command and ends the
- * thread as cancelled; running again with the same --run and --thread resumes it.
+ * thread as cancelled; running again with the same --run and --thread resumes it. A
+ * thread that already finished does nothing until given a new message with --input.
  *
  *   pnpm --filter @voluma/runner run-task --provider openai --model gpt-5-mini \
  *     --task "Report the slice count of the scan in /inputs"
@@ -31,6 +32,7 @@ const { values } = parseArgs({
     provider: { type: "string" },
     model: { type: "string" },
     task: { type: "string" },
+    input: { type: "string" },
     run: { type: "string" },
     thread: { type: "string" },
   },
@@ -38,7 +40,7 @@ const { values } = parseArgs({
 const { provider, model: modelId, task } = values;
 if (!provider || !modelId || !task) {
   throw new Error(
-    "usage: main.ts --provider openai|anthropic|meta --model <id> --task <text> [--run <id>] [--thread <id>]",
+    "usage: main.ts --provider openai|anthropic|meta --model <id> --task <text> [--run <id>] [--thread <id>] [--input <text>]",
   );
 }
 const runId = values.run ?? `run-${randomUUID().slice(0, 8)}`;
@@ -58,8 +60,7 @@ const api = httpClient({
 });
 const layout = runLayout(runId, referencePrefix("scan"));
 const systemPrompt = `You are an analysis agent with one tool, bash, which runs commands in a sandbox.
-Python 3.12 with numpy, scipy, scikit-image, pydicom, nibabel and SimpleITK is installed. There is no network.
-${layout.describe()}
+Python 3.12 with numpy, scipy, scikit-image, pydicom, nibabel and SimpleITK is installed.
 Check what you report against the files themselves, and say which file or header each number came from.`;
 const events = recorder(
   {
@@ -119,7 +120,8 @@ try {
     streamFn: (m, context, options) => models.streamSimple(m, context, { ...options, apiKey }),
     systemPrompt,
     task,
-    input: layout.restartNote(),
+    input: values.input,
+    resumeNote: layout.restartNote,
     tools: [bashTool(layout)],
     recorder: events,
     history: api,
@@ -127,6 +129,9 @@ try {
     signal: abort.signal,
   });
   const u = outcome.usage;
+  if (!outcome.ran && outcome.status === "completed") {
+    console.log("this thread already finished; pass --input <text> to continue it");
+  }
   console.log(
     `\n${outcome.status}${outcome.error ? `: ${outcome.error}` : ""}\n` +
       `model usage this invocation: ${u.input} in, ${u.cacheRead} cache read, ${u.cacheWrite} cache write, ` +

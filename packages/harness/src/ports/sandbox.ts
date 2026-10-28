@@ -18,7 +18,8 @@ export interface SandboxMount {
   /**
    * Read-only only: copy the files to local disk at `path` when the sandbox is created,
    * so commands read `path` as a local directory. Mounted reads cost a round trip per
-   * file; analysis code wants local reads.
+   * file; analysis code wants local reads. The copy is writable (the sandbox cannot
+   * enforce read-only on it); the source objects are unaffected.
    */
   stage?: boolean;
 }

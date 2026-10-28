@@ -2,8 +2,14 @@
  * A run's stream record writer. `emit` queues an event and returns at once; one queue
  * delivers events in order, so `seq` follows emission order, and nothing in the agent
  * loop waits for the API. A failed delivery never ends a thread: the event is retried
- * in the background, except `tool.output`, which is live-only and dropped. Callers
- * `flush()` when a thread ends so the record is complete before the process exits.
+ * in the background, and this is the only place events are retried (the client makes one
+ * attempt). `tool.output` is live-only: it gets one attempt, and is dropped if it waited
+ * in the queue longer than LIVE_MAX_AGE_MS, so a stale chunk never delays the durable
+ * events behind it. The creator of the recorder `flush()`es when its threads end so the
+ * record is complete before the process exits.
+ *
+ * A durable event that exhausts its retries is lost and leaves the projection stale (a
+ * finished thread shown as running). Giving up should become a visible run failure.
  */
 import { type EventInput, type EventType, eventInputSchema } from "@voluma/contracts/events";
 import type { EventLog } from "./ports/event-log";
@@ -18,6 +24,7 @@ export interface Recorder {
 
 const ATTEMPTS = 5;
 const RETRY_DELAY_MS = 2_000;
+const LIVE_MAX_AGE_MS = 5_000;
 
 export function recorder(
   eventLog: EventLog,
@@ -26,8 +33,10 @@ export function recorder(
 ): Recorder {
   let queue: Promise<void> = Promise.resolve();
 
-  async function deliver(event: EventInput): Promise<void> {
-    const attempts = event.type === "tool.output" ? 1 : ATTEMPTS;
+  async function deliver(event: EventInput, queuedAt: number): Promise<void> {
+    const live = event.type === "tool.output";
+    if (live && Date.now() - queuedAt > LIVE_MAX_AGE_MS) return;
+    const attempts = live ? 1 : ATTEMPTS;
     for (let attempt = 1; ; attempt++) {
       try {
         await eventLog.append(event);
@@ -59,7 +68,8 @@ export function recorder(
         console.error(`recorder: dropped invalid ${type} event: ${parsed.error.message}`);
         return;
       }
-      queue = queue.then(() => deliver(parsed.data));
+      const queuedAt = Date.now();
+      queue = queue.then(() => deliver(parsed.data, queuedAt));
     },
     flush: () => queue,
   };

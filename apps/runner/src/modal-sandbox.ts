@@ -10,8 +10,12 @@
  *   signals all of it) and records that group;
  *   an abort kills that group with a second exec, or terminates the sandbox if that fails.
  * - Read-only inputs flagged `stage` are copied to local disk at their path at create, 32
- *   files at a time; the bucket is mounted at a private path under /staged for the copy.
- * - Each sandbox gets a fresh name, so one left behind by a dead process cannot block a resume.
+ *   files at a time (the copy is writable: commands run as root, and a sandbox cannot
+ *   remount or `chattr` a path or run as another user and still write the mounts); the bucket is mounted at a private path under /staged for the copy.
+ * - Each sandbox gets a fresh name and the tags `{run, name}`. Creating one first
+ *   terminates any live sandbox with the same tags: one a dead process left behind would
+ *   otherwise keep running its command, with write access to /outputs, beside the resumed thread.
+ *   That assumes one runner per run (v0).
  */
 
 import { randomUUID } from "node:crypto";
@@ -70,9 +74,12 @@ export function createModalSandbox(config: ModalSandboxConfig): CreateSandbox {
         keyPrefix: mount.prefix,
       });
     }
+    const tags = { run: spec.runId, name: spec.name };
+    for await (const old of client.sandboxes.list({ appId: app.appId, tags }))
+      await old.terminate({ wait: true });
     const modal = await client.sandboxes.create(app, image, {
       name: `${spec.runId}.${spec.name}.${randomUUID().slice(0, 8)}`,
-      tags: { run: spec.runId },
+      tags,
       cpu: spec.cpu,
       memoryMiB: spec.memoryMiB,
       gpu: spec.gpu,
