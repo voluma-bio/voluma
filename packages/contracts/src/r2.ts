@@ -2,21 +2,14 @@
  * The one place R2 key layout is written. Every reader and writer of the
  * bucket (sandbox mounts, tool-output spill, importers) builds keys here.
  * Prefixes end in `/` so they can be used directly as mount prefixes.
+ *
+ * Inputs live under `inputs/<inputId>/`, not under a run: a scan is uploaded
+ * before any run exists and one input can serve several runs. The sandbox
+ * mounts the run's input prefix (or the reference scan's) read-only at `/inputs`.
  */
 import { z } from "zod";
+import { segmentSchema } from "./ids";
 import { type WorkflowPin, workflowPinSchema } from "./workflow";
-
-/** One path segment: non-empty, no `/`, not `.` or `..`. */
-export const segmentSchema = z
-  .string()
-  .min(1)
-  .refine((s) => !s.includes("/") && s !== "." && s !== "..", {
-    message: "must be one path segment (no '/', '.' or '..')",
-  });
-
-export const runIdSchema = segmentSchema;
-export const taskIdSchema = segmentSchema;
-export const toolCallIdSchema = segmentSchema;
 
 /** A relative path under a prefix; every segment is validated. */
 export const relativePathSchema = z
@@ -39,15 +32,15 @@ export const workflowPrefix = (pin: WorkflowPin) => {
   return `workflows/${repo}/${commit}/`;
 };
 
+export const inputPrefix = (inputId: string) => `inputs/${seg(inputId)}/`;
 export const runPrefix = (runId: string) => `runs/${seg(runId)}/`;
-export const inputsPrefix = (runId: string) => `${runPrefix(runId)}inputs/`;
 export const scratchPrefix = (runId: string) => `${runPrefix(runId)}scratch/`;
 /** All tasks' outputs; the sandbox mounts this read-write at `/outputs`. */
 export const outputsPrefix = (runId: string) => `${runPrefix(runId)}outputs/`;
 export const taskOutputPrefix = (runId: string, task: string) =>
   `${outputsPrefix(runId)}${seg(task)}/`;
 
-export const inputKey = (runId: string, path: string) => `${inputsPrefix(runId)}${rel(path)}`;
+export const inputKey = (inputId: string, path: string) => `${inputPrefix(inputId)}${rel(path)}`;
 export const scratchKey = (runId: string, path: string) => `${scratchPrefix(runId)}${rel(path)}`;
 export const outputKey = (runId: string, task: string, path: string) =>
   `${taskOutputPrefix(runId, task)}${rel(path)}`;
@@ -85,14 +78,14 @@ export const storedKeySchema = z.string().refine(
 );
 
 /**
- * A stored pointer to a folder of files (a DICOM series): a prefix under the
- * run's inputs or under the reference scan. Ends in `/`.
+ * A stored pointer to a folder of files (a DICOM series): a prefix under an
+ * input or under the reference scan. Ends in `/`.
  */
 export const storedPrefixSchema = z.string().refine(
   (k) => {
     if (!k.endsWith("/")) return false;
     const path = k.slice(0, -1);
-    const inputs = /^runs\/([^/]+)\/inputs\/(.+)$/.exec(path);
+    const inputs = /^inputs\/([^/]+)\/(.+)$/.exec(path);
     if (inputs) {
       return (
         segmentSchema.safeParse(inputs[1]).success &&
@@ -103,5 +96,5 @@ export const storedPrefixSchema = z.string().refine(
     if (k === scan) return true;
     return path.startsWith(scan) && relativePathSchema.safeParse(path.slice(scan.length)).success;
   },
-  { message: "must be a folder under a run's inputs or the reference scan" },
+  { message: "must be a folder under an input or the reference scan" },
 );
