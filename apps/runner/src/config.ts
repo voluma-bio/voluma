@@ -8,6 +8,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseEnv } from "node:util";
+import { modelRefSchema } from "@voluma/contracts/ids";
 import { PROVIDERS } from "./providers.ts";
 
 const file = process.env.VOLUMA_ENV_FILE ?? resolve(import.meta.dirname, "../../../.env");
@@ -59,7 +60,10 @@ function modelRef(name: string, fallback?: string): ModelRef {
   const text = fallback ? (optional(name) ?? fallback) : required(name);
   const [provider, ...rest] = text.split("/");
   const id = rest.join("/");
-  if (!provider || !id) throw new Error(`${name} must be provider/model-id, got "${text}"`);
+  // The form `thread.started.model` takes: a role's model is recorded on its threads.
+  if (!provider || !id || !modelRefSchema.safeParse(text).success) {
+    throw new Error(`${name} must be provider/model-id, got "${text}"`);
+  }
   return { provider, id };
 }
 

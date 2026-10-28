@@ -166,6 +166,19 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
             "a resumed thread keeps the prompt it started with (prompt-cache rule 1)",
         );
       }
+      // The model is part of a thread's identity, like its prompt: History is the record of it
+      // (an assistant message names the model that wrote it), not `thread.started`, which may
+      // not have landed before a crash.
+      const wrote = stored.find((m) => m.role === "assistant");
+      if (
+        wrote?.role === "assistant" &&
+        (wrote.provider !== options.model.provider || wrote.model !== options.model.id)
+      ) {
+        throw new ThreadFailure(
+          `the thread was written by ${wrote.provider}/${wrote.model}, not ${options.model.provider}/${options.model.id}; ` +
+            "a resumed thread keeps its model",
+        );
+      }
       const repairs = interruptedToolResults(stored);
       const hasUser = stored.some((m) => m.role === "user");
       const finished = isFinished([...stored, ...repairs].at(-1));

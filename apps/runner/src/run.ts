@@ -222,9 +222,17 @@ export async function runClaim(
     // scan go to Standard-mode Meta only.
     const threadModel = (primary: Model<Api>, recorded: string | undefined) => {
       if (recorded) {
+        // Only a model this run may use: a visitor's scan goes to Standard-mode Meta only, and
+        // a fallback that was switched off stays off for threads that started on it.
         const [provider = "", ...id] = recorded.split("/");
-        const model = models.getModel(provider, id.join("/"));
-        if (!model) throw new Error(`the thread started on ${recorded}, which this runner lacks`);
+        const allowed = visitor
+          ? isVisitorSafe({ provider, id: id.join("/") })
+          : [workerModel, checkModel, mainModel, config.fallbackModel].some(
+              (m) => m && `${m.provider}/${m.id}` === recorded,
+            );
+        const model = allowed ? models.getModel(provider, id.join("/")) : undefined;
+        if (!model)
+          throw new Error(`the thread started on ${recorded}, which this run may not use`);
         return model;
       }
       return visitor ? primary : ctx.fallback.pick(primary);

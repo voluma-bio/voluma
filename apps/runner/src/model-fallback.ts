@@ -2,7 +2,8 @@
  * The worker fallback model (`RUNNER_FALLBACK_MODEL`, off unless set): while a primary model is
  * failing, worker and check threads that start (a redo, the next task) start on the fallback
  * instead. A thread keeps the model it started on (`thread.started.model`; `run.ts` reads it
- * back for a resume), so this never switches a thread mid-way.
+ * back for a resume; the harness refuses a resume on another model), so this never switches a
+ * thread mid-way. Unsetting the fallback ends it for new threads; one that started on it keeps it.
  *
  * Not covered: the main thread's calls (a judgment, the run-start wake) stay on their own
  * model, so a Meta outage that reaches it leaves a failed task unjudged (accepted for a
