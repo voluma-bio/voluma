@@ -97,14 +97,18 @@ function tail(full: string, total: number, chars: number): string {
   return total > full.length ? "" : full.slice(-chars);
 }
 
+// The mount cannot append (reopening a file there fails with ENOENT), so the text is
+// assembled in a local temp file and copied over in one write.
 async function spill(sandbox: Sandbox, path: string, text: string): Promise<void> {
   const bytes = new TextEncoder().encode(text);
   const q = shellQuote(path);
-  await run(sandbox, `mkdir -p "$(dirname ${q})" && : > ${q}`);
+  const tmp = `/tmp/voluma-spill-${crypto.randomUUID()}`;
+  await run(sandbox, `: > ${tmp}`);
   for (let at = 0; at < bytes.length; at += SPILL_CHUNK_BYTES) {
     const chunk = base64(bytes.subarray(at, at + SPILL_CHUNK_BYTES));
-    await run(sandbox, `printf %s '${chunk}' | base64 -d >> ${q}`);
+    await run(sandbox, `printf %s '${chunk}' | base64 -d >> ${tmp}`);
   }
+  await run(sandbox, `mkdir -p "$(dirname ${q})" && cp ${tmp} ${q}; rc=$?; rm -f ${tmp}; exit $rc`);
 }
 
 async function run(sandbox: Sandbox, command: string): Promise<void> {

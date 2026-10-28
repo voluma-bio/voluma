@@ -20,6 +20,7 @@ reasons behind the setup: [.context/CONTEXT.md](.context/CONTEXT.md).
 | `pnpm dev` | Web app; Vite prints the URL (it takes a free port) |
 | `pnpm format` | Biome format and safe fixes |
 | `pnpm check:pr-body <body.md>` | Check a PR body draft against the template |
+| `pnpm --filter @voluma/runner run-task --provider <p> --model <id> --task <text>` | Run one agent thread on a task (API dev server running, keys in `.env`); see [CONTEXT.md](.context/CONTEXT.md) |
 | `pnpm --filter @voluma/<pkg> <script>` | One package's script, e.g. `pnpm --filter @voluma/api dev` |
 
 Pre-commit runs Biome on staged files. Nothing runs on push. Use pnpm, never npm.

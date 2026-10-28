@@ -84,6 +84,11 @@ export async function runThread(options: RunThreadOptions): Promise<ThreadOutcom
     streamFn: options.streamFn,
     sessionId: threadId,
   });
+  await emit("thread.started", {
+    parentThreadId: options.parentThreadId ?? null,
+    kind: options.kind,
+    task: options.task,
+  });
   // A new thread's system message is made by Pi; store it before anything else.
   if (stored.length === 0) {
     const system = agent.state.messages[0];
@@ -125,11 +130,6 @@ export async function runThread(options: RunThreadOptions): Promise<ThreadOutcom
   const abort = () => agent.abort();
   signal?.addEventListener("abort", abort);
 
-  await emit("thread.started", {
-    parentThreadId: options.parentThreadId ?? null,
-    kind: options.kind,
-    task: options.task,
-  });
   let outcome: Omit<ThreadOutcome, "usage">;
   try {
     if (signal?.aborted) outcome = { status: "cancelled" };

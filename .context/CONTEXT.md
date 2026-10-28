@@ -53,6 +53,19 @@ checklist, check threads, and review chat threads.
   under `timeout -k`, which leads its own process group,; a timeout or an abort kills the whole
   group, except a descendant that calls `setsid` itself, which survives until the
   sandbox is destroyed.
+- **One thread, step by step.** `runThread` (`packages/harness/src/adapters/pi`) loads
+  the thread's stored history, builds a Pi `Agent` from it, and records every Pi message
+  to `History` at `message_end` and every tool call, result and `tool.output` chunk to
+  `EventLog`. `apps/runner/src/main.ts` wires it to the HTTP client
+  (`packages/harness/src/adapters/http`), the Modal sandbox and a model:
+  `pnpm --filter @voluma/runner run-task --provider openai --model <id> --task "<text>"`
+  (needs `pnpm --filter @voluma/api dev` running and the keys in `.env`). The sandbox is
+  created on the first `bash` call and destroyed at the end; Ctrl-C kills the running
+  command and ends the thread as cancelled; the same `--run` and `--thread` resume it.
+  A Claude `refusal` ends the thread as failed with that reason. The `bash` tool lives
+  in `packages/harness/src/tools`; it caps what the model sees and writes the full text
+  to `toolOutputKey` through `/scratch`. An R2 mount cannot append to a file, so
+  anything written there must be written in one go.
 - **Where the runner lives.** For now it's a Node process (`apps/runner`)
   that talks to the API. Whether it moves into a Durable Object per run is
   decided after the first real run.

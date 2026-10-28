@@ -14,4 +14,6 @@ Later:
 - `pnpm data:pull`: fetch the OA6-1RK scan and reference run from R2 into `.data/`. Both lanes need it from day one; blocked on the bucket existing.
 - Nx 24 and TypeScript 7 are released; the workspace is on Nx 23 and TypeScript 6. Upgrade in their own PR and check `pnpm check` timings.
 - Pin the sandbox image's base (`python:3.12-slim` in `apps/runner/src/publish-image.ts`) by digest so two builds match.
-- Harness: record `sandbox` events (created, staged, exec started and exited) in the event log once the EventLog adapter lands, and wire `createModalSandbox` into the runner entry point with the harness tools.
+- Harness: `tool.output` flushes only when the next chunk arrives, so a command that prints once and then goes quiet shows nothing live until it ends. Add a timer flush when the live stream (PR F) needs it.
+- Harness: a `bash` result keeps and stores at most 4 MB of output (`KEEP_CHARS` in `tools/bash.ts`); the model is told when output was dropped. Storing it takes one sandbox command per 48 KB. A tool that returns large files should write them to `/outputs` instead; revisit if a real task needs more.
+- Harness: first real-model run (OpenAI and Claude) on the OA6-1RK task: see the PR for what has and hasn't been run.
