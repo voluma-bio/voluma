@@ -4,8 +4,8 @@
  * coded as zero/nonzero flags plus order-two/one/zero symbol models over spatial-predictor
  * residuals, thresholded at 129). A port of the decode half of `meta-sam-parser`'s
  * `_mask_codec`, whose pure-Python and JS decoders take minutes per OA6-1RK response (1,363
- * masks); this takes seconds. The parser's canonical-form re-encode check on `!` is dropped:
- * the response is trusted after TLS.
+ * masks); this takes seconds. The parser's canonical-form re-encode check for both encodings is
+ * dropped: the response is trusted after TLS.
  */
 
 // Printable ASCII without the characters the wire format uses (" \ , ; < > |); the radix is 85.
@@ -54,19 +54,18 @@ function unpack(payload: string): Uint8Array {
   if (rest) {
     let v = 0;
     for (let i = 0; i < 5; i++) v = v * 85 + (i < rest + 1 ? digit(src + i) : 84);
+    if (v > 0xffffffff) throw new Error("mask payload has an out-of-range tail");
     for (let i = 0; i < rest; i++) out[length - rest + i] = v / 2 ** (24 - 8 * i);
   }
   return out;
 }
-
-const MAX_AREA = 1 << 28;
 
 /** The mask as `height * width` bytes, 1 inside. `encoded` is a whole payload, marker first. */
 export function decodeMask(encoded: string, width: number, height: number): Uint8Array {
   if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0 || height <= 0) {
     throw new Error("mask dimensions must be positive integers");
   }
-  if (width * height > MAX_AREA) throw new Error("mask dimensions are too large");
+  if (!Number.isSafeInteger(width * height)) throw new Error("mask dimensions are too large");
   const marker = encoded[0];
   if (marker === "!") return decodeOneBit(encoded.slice(1), width, height);
   if (marker === "~") return decodeLossless(encoded.slice(1), width, height);

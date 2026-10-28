@@ -257,6 +257,16 @@ function paste(
       const y1 = num(box, "y1");
       const boxW = num(box, "x2") - x1 + 1;
       const boxH = num(box, "y2") - y1 + 1;
+      if (
+        boxW <= 0 ||
+        boxH <= 0 ||
+        x1 < 0 ||
+        y1 < 0 ||
+        x1 + boxW > paddedWidth ||
+        y1 + boxH > paddedHeight
+      ) {
+        throw new Error("the response has a box outside the frame");
+      }
       const [h, w, encoded] = /^(\d+),(\d+),(.*)$/s.exec(field(mask, "data") ?? "")?.slice(1) ?? [];
       if (encoded === undefined) throw new Error("the response has a mask without a payload");
       if (
