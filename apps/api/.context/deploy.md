@@ -42,6 +42,7 @@ Variables on `@voluma/api`:
 | `WORKOS_LAB_ORGANIZATION_ID` | the Yao Lab organization's id (`org_...`); its members get scope `lab` |
 | `GUEST_ORGANIZATION_ID`, `GUEST_SCOPE` | optional: let anyone in as a guest of this organization (`lab` or `self`, default `lab`). Staging runs open: the Demo organization (`WORKOS_DEMO_ORGANIZATION_ID`'s value) with `GUEST_SCOPE=self`; never the Yao Lab, whose data is for signed-in members only (startup throws if the guest organization is one members sign in to). Unset means the sign-in wall |
 | `WORKOS_JUDGES_ORGANIZATION_ID` | optional: the Judges organization's id; its members get scope `self`. Unset means no Judges sign-in |
+| `RUN_LIMITS_<ORG>_<LIMIT>` | what an organization may run, `<ORG>` one of `LAB`, `JUDGES`, `DEMO` (the guest organization) and `<LIMIT>` one of `PER_CALLER`, `CONCURRENT`, `PER_DAY`, `USD_PER_DAY`, `VISITOR_ACTIVE` (visitor runs queued or running, per org: a start or `/keys` past it is a 429; `awaiting-keys` runs don't count). Unset is no limit, so set them: Yao Lab `CONCURRENT=4`; Judges `CONCURRENT=2`, `PER_DAY=50`; Demo `PER_CALLER=1`, `CONCURRENT=2`, `PER_DAY=10`, `VISITOR_ACTIVE=4` while staging is open to guests (then `CONCURRENT=1`, `PER_DAY=2` for the hackathon). Read at start: a change is a restart, not a deploy of code |
 | `PORT` | set by Railway |
 
 The root `prepare` script skips `lefthook install` outside a git checkout, as in Railway's build.
@@ -77,6 +78,14 @@ the old one, moves traffic once `/health` answers, then sends the old one SIGTER
 deployment then fails its healthcheck. So every migration must work with the code that is
 deployed now: expand first, contract in a later PR. The rule is in
 [../AGENTS.md](../AGENTS.md).
+
+## What a restart or outage does to runs
+
+- **One API replica.** The visitor-key vault and (soon) the live hub are in this process's memory, which is correct only while there is one replica. Do not scale the API out.
+- **A deploy or restart** empties the vault. Every claim moves the queued `visitor` runs whose keys its process doesn't hold to `awaiting-keys` (so a run started on the old process during a deploy overlap is held too), and the browser resends the keys (`/keys`). Running `voluma` runs are unaffected; their leases are in Postgres.
+- **An API outage of more than 45 s** (the runner's self-stop margin, `LEASE_SECONDS - HEARTBEAT_SECONDS`) stops every running run: the runner can't heartbeat. A `released` run is recovered at once when the API returns; a run whose lease the database expired counts one of its three recoveries. A `visitor` run goes to `awaiting-keys` either way, because its keys are gone.
+- **Guests share Demo's allowance.** The daily and dollar limits are per org, so a scripted guest (guests cost nothing to mint) can use up Demo's `PER_DAY` and `USD_PER_DAY` for every other guest. That is the design, not a bug: it bounds what open staging can spend. The same goes for `VISITOR_ACTIVE`: scripted guests can fill Demo's visitor cap and leave honest guests a 429 until those runs end. Both are accepted for open staging. `VISITOR_ACTIVE` bounds the keys the API holds and the runner slots Demo's visitors take; the claim's round-robin across orgs (the org claimed from least recently goes first) keeps them from starving Yao Lab's runs; the vault's 100-runs-per-org cap is a backstop for an org with no cap set.
+- **A migration** takes no queue lock; the claim and the runs table follow the expand-first rule like any other.
 
 ## Operating staging
 
@@ -114,11 +123,8 @@ A rollback restores the old code, not the old schema: migrations have already ru
 aren't reversed. It is safe only if the migrations since that deployment followed the
 expand-then-contract rule. Otherwise fix forward.
 
-The runner needs the staging `VOLUMA_API_TOKEN`: read it with the variables query above.
-Put it, with `VOLUMA_API_URL=https://volumaapi-staging.up.railway.app`, in a temp copy of
-`.env` and run the one command with `VOLUMA_ENV_FILE=<temp file>` (the runner reads its
-settings only from that file, not from the shell). Delete the file after; the staging token
-never goes into `.env`.
+`run-task` talks only to the local dev API: it claims the next queued run, which on staging
+is a visitor's, and would take their keys. The deployed claimer is the runner service.
 
 ## Rotating secrets
 
@@ -127,7 +133,7 @@ before 2026-10-21 as exposed and rotate it.
 
 | Secret | Lives in | Rotate |
 |---|---|---|
-| `VOLUMA_API_TOKEN` | Railway `@voluma/api` variables; whoever runs the runner | New value (`openssl rand -hex 32`) in Railway variables; the redeploy applies it. Old token stops working at once. Whoever runs the runner puts the new value in their temp `VOLUMA_ENV_FILE` ([Operating staging](#operating-staging)) |
+| `VOLUMA_API_TOKEN` | Railway `@voluma/api` variables; whoever runs the runner | New value (`openssl rand -hex 32`) in Railway variables; the redeploy applies it. Old token stops working at once. Whoever runs the runner service updates its copy |
 | Postgres password | Railway `Postgres` variables (`POSTGRES_PASSWORD`; `PGPASSWORD`, `DATABASE_URL` reference it) | Railway's procedure: Database tab, Config, **Regenerate** (needs Jimmy's dashboard seat), then redeploy `@voluma/api`, then check `/health` and one authenticated call. Never edit the password variables or run `ALTER USER` by hand: each changes one side and leaves the variable and the database out of sync. The GraphQL schema has a `databasePasswordReset` mutation (input: `databaseType`, `environmentId`, `serviceId`); whether the project token may call it is untested. Try it only as a deliberate rotation. For a planned rotation with no suspected leak, Railway's [zero-downtime guide](https://docs.railway.com/guides/rotate-credentials-zero-downtime) uses a second role |
 | `RAILWAY_TOKEN` (project token, `.env`) | the repo `.env` of whoever deploys | Dashboard, project settings, Tokens: create a new one, replace it in `.env`, delete the old |
 | `WORKOS_COOKIE_PASSWORD` | Railway `@voluma/api` variables; `.env` | New value in Railway; the redeploy applies it. Every session cookie stops unsealing, so everyone signs in again. Rotate it whenever it may have leaked: it is the key to forging a session cookie, though a forged one still needs a token WorkOS signed |

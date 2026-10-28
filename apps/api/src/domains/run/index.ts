@@ -1,72 +1,33 @@
 /**
- * Run lane's API domain, mounted at /api/run/ (paths below are relative to the mount).
- * Today: the runner's ingest of the stream record and the model history of a run's
- * threads, under /ingest/ and guarded for the runner (`service` principal; other routes will take `user`).
- *   POST /ingest/runs/:runId/events          append an event (EventInput)
- *   POST /ingest/runs/:runId/threads/:threadId/messages  append a history row {idx, message}
- *   GET  /ingest/runs/:runId/threads/:threadId/messages  all rows in order
- * (a thread id must begin with `<runId>.`, else 400)
- * Later: workflows and their package import, runs, the supervisor. RunDeps lists
- * what it needs; index.ts supplies adapters. The factory returns a Hono app, so
- * routes, params and (later) WebSocket upgrades use Hono; the domain does not know its mount.
- * The Postgres adapters and tables for it are in this directory.
+ * Run lane's API domain, mounted at /api/run/ (paths are relative to the mount). A short
+ * mount list: each file owns its routes and its guard.
+ *   runs.ts    the browser's run and input routes (users and guests)
+ *   ingest.ts  the runner's claim, heartbeat, report, events and history (bearer token)
+ * RunDeps lists what it needs; index.ts supplies the adapters (the queue is built with the limits and the key vault). The factory
+ * returns a Hono app and does not know its mount. The Postgres adapters and tables are in
+ * this directory.
  */
-import { eventInputSchema } from "@voluma/contracts/events";
-import { type HistoryResponse, historyRowSchema } from "@voluma/contracts/history";
-import type { EventLog } from "@voluma/harness/ports/event-log";
-import { type History, HistoryConflict } from "@voluma/harness/ports/history";
 import { Hono } from "hono";
-import { type AppEnv, requireService } from "../../domain";
+import type { AppEnv } from "../../domain";
+import type { Catalog } from "./catalog";
+import { ingestRoutes } from "./ingest";
+import type { LeasedEventLog } from "./pg-event-log";
+import type { LeasedHistory } from "./pg-history";
+import type { RunQueue } from "./pg-queue";
+import type { RunReads } from "./pg-runs";
+import { runsRoutes } from "./runs";
 
 export interface RunDeps {
-  eventLog: EventLog;
-  history: History;
+  reads: RunReads;
+  queue: RunQueue;
+  eventLog: LeasedEventLog;
+  history: LeasedHistory;
+  catalog: Catalog;
 }
 
-// Postgres text cannot hold a raw NUL; the harness's JSON.stringify output escapes it.
-const storableRow = historyRowSchema.refine(
-  (row) => !row.message.includes("\0"),
-  "message contains a NUL byte",
-);
-
-export function createRun({ eventLog, history }: RunDeps) {
+export function createRun(deps: RunDeps) {
   const app = new Hono<AppEnv>();
-  app.use("/ingest/*", requireService);
-
-  app.post("/ingest/runs/:runId/events", async (c) => {
-    const parsed = eventInputSchema.safeParse(await readJson(c.req));
-    if (!parsed.success) return c.text(parsed.error.message, 400);
-    if (parsed.data.runId !== c.req.param("runId")) {
-      return c.text("event runId does not match the path", 400);
-    }
-    await eventLog.append(parsed.data);
-    return c.body(null, 204);
-  });
-
-  // The thread's run is in the path: no event names a fresh thread before its first history call.
-  app.use("/ingest/runs/:runId/threads/:threadId/*", async (c, next) => {
-    const { runId, threadId } = c.req.param();
-    if (!threadId.startsWith(`${runId}.`)) return c.text("thread id must begin with <runId>.", 400);
-    await next();
-  });
-
-  app.get("/ingest/runs/:runId/threads/:threadId/messages", async (c) =>
-    c.json({ messages: await history.load(c.req.param("threadId")) } satisfies HistoryResponse),
-  );
-
-  app.post("/ingest/runs/:runId/threads/:threadId/messages", async (c) => {
-    const parsed = storableRow.safeParse(await readJson(c.req));
-    if (!parsed.success) return c.text(parsed.error.message, 400);
-    try {
-      await history.appendMessage(c.req.param("threadId"), parsed.data.idx, parsed.data.message);
-    } catch (error) {
-      if (error instanceof HistoryConflict) return c.text(error.message, 409);
-      throw error;
-    }
-    return c.body(null, 204);
-  });
-
+  app.route("/", runsRoutes(deps));
+  app.route("/", ingestRoutes(deps));
   return app;
 }
-
-const readJson = (req: { json(): Promise<unknown> }) => req.json().catch(() => undefined);

@@ -10,7 +10,9 @@
  * Env: DATABASE_URL, VOLUMA_API_TOKEN, APP_URL, PORT, optionally HOST (`pnpm dev` sets
  * them; see tools/dev.mjs), and WORKOS_CLIENT_ID, WORKOS_API_KEY, WORKOS_COOKIE_PASSWORD,
  * WORKOS_LAB_ORGANIZATION_ID, and optionally WORKOS_JUDGES_ORGANIZATION_ID, and
- * GUEST_ORGANIZATION_ID with GUEST_SCOPE (lab|self, default lab) to let anyone in as a guest (the repo .env). Fails at startup if the database is unreachable or not migrated.
+ * GUEST_ORGANIZATION_ID with GUEST_SCOPE (lab|self, default lab) to let anyone in as a guest (the repo .env).
+ * Run limits, per organization (LAB, JUDGES, DEMO) and number: RUN_LIMITS_<ORG>_PER_CALLER, _CONCURRENT,
+ * _PER_DAY, _USD_PER_DAY, _VISITOR_ACTIVE; unset is no limit. Fails at startup if the database is unreachable or not migrated.
  */
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -18,13 +20,19 @@ import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { type Context, Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
 import postgres from "postgres";
 import { createAuth } from "./auth";
 import { createReview } from "./domains/review";
 import { createRun } from "./domains/run";
+import type { Limits } from "./domains/run/admission";
+import { catalog } from "./domains/run/catalog";
+import { KeyVault } from "./domains/run/key-vault";
 import { pgEventLog } from "./domains/run/pg-event-log";
 import { pgHistory } from "./domains/run/pg-history";
+import { pgRunQueue } from "./domains/run/pg-queue";
+import { pgRunReads } from "./domains/run/pg-runs";
 
 const required = (name: string) => {
   const value = process.env[name];
@@ -32,38 +40,85 @@ const required = (name: string) => {
   return value;
 };
 
-function guestScope() {
+function guestScope(): "lab" | "self" {
   const scope = process.env.GUEST_SCOPE ?? "lab";
   if (scope !== "lab" && scope !== "self") throw new Error("GUEST_SCOPE must be lab or self");
   return scope;
 }
 
+/** A run limit from env: unset means no limit (`Infinity`). */
+function limitNumber(name: string): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return Number.POSITIVE_INFINITY;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) throw new Error(`${name} must be a number`);
+  return value;
+}
+
+/** An organization's run limits (`run.ts`), every number from `RUN_LIMITS_<ORG>_*` so it can change without a deploy. */
+const limitsFromEnv = (org: "LAB" | "JUDGES" | "DEMO"): Limits => ({
+  perCaller: limitNumber(`RUN_LIMITS_${org}_PER_CALLER`),
+  concurrent: limitNumber(`RUN_LIMITS_${org}_CONCURRENT`),
+  perDay: limitNumber(`RUN_LIMITS_${org}_PER_DAY`),
+  usdPerDay: limitNumber(`RUN_LIMITS_${org}_USD_PER_DAY`),
+  visitorActive: limitNumber(`RUN_LIMITS_${org}_VISITOR_ACTIVE`),
+});
+
 const client = postgres(required("DATABASE_URL"));
 const db = drizzle(client, { casing: "snake_case" });
+
+// The organizations and what each may run. Members sign in to `members`; the guest
+// organization (auth.ts) is separate, and unset means the sign-in wall.
+const members = [
+  {
+    id: required("WORKOS_LAB_ORGANIZATION_ID"),
+    scope: "lab" as const,
+    limits: limitsFromEnv("LAB"),
+  },
+  ...(process.env.WORKOS_JUDGES_ORGANIZATION_ID
+    ? [
+        {
+          id: process.env.WORKOS_JUDGES_ORGANIZATION_ID,
+          scope: "self" as const,
+          limits: limitsFromEnv("JUDGES"),
+        },
+      ]
+    : []),
+];
+const guest = process.env.GUEST_ORGANIZATION_ID
+  ? { id: process.env.GUEST_ORGANIZATION_ID, scope: guestScope(), limits: limitsFromEnv("DEMO") }
+  : null;
+// An org missing here is no longer configured: its queued runs fail and its running ones stop.
+const limits: ReadonlyMap<string, Limits> = new Map(
+  [...members, ...(guest ? [guest] : [])].map((org) => [org.id, org.limits]),
+);
 
 const auth = createAuth({
   clientId: required("WORKOS_CLIENT_ID"),
   apiKey: required("WORKOS_API_KEY"),
   cookiePassword: required("WORKOS_COOKIE_PASSWORD"),
   // Who may sign in, and how much of the data each sees (auth.ts, domain.ts). No domain
-  // reads an organization id. The Judges organization is optional: unset means not allowed.
-  organizations: [
-    { id: required("WORKOS_LAB_ORGANIZATION_ID"), scope: "lab" },
-    ...(process.env.WORKOS_JUDGES_ORGANIZATION_ID
-      ? [{ id: process.env.WORKOS_JUDGES_ORGANIZATION_ID, scope: "self" as const }]
-      : []),
-  ],
+  // reads an organization id.
+  organizations: members.map(({ id, scope }) => ({ id, scope })),
   // Guests (auth.ts): a request with no credential is a guest in this organization.
-  // Unset means the sign-in wall.
-  guest: process.env.GUEST_ORGANIZATION_ID
-    ? { organizationId: process.env.GUEST_ORGANIZATION_ID, scope: guestScope() }
-    : null,
+  guest: guest && { organizationId: guest.id, scope: guest.scope },
   appUrl: required("APP_URL").replace(/\/$/, ""),
   apiToken: required("VOLUMA_API_TOKEN"),
 });
 
+const reads = pgRunReads(db);
+const queue = pgRunQueue(db, limits, new KeyVault());
+
 const app = new Hono();
 app.get("/health", (c) => c.text("ok"));
+// A body over the limit is a 413 before anything reads it. Browsers get 256 KB (the key
+// vault and the event log keep what they send). The runner is trusted, and a model's
+// history row can be large (reasoning blobs, long tool calls), so /ingest/* gets 8 MB.
+const browserLimit = bodyLimit({ maxSize: 256 * 1024 });
+const runnerLimit = bodyLimit({ maxSize: 8 * 1024 * 1024 });
+app.use("/api/*", (c, next) =>
+  c.req.path.startsWith("/api/run/ingest/") ? runnerLimit(c, next) : browserLimit(c, next),
+);
 // Every /api request is authenticated here, in this order (auth.ts): the bearer and
 // CSRF checks, which do no I/O; the routes that write the session cookie; the session
 // cookie and the 401 for no principal; then the routes that need a user.
@@ -74,8 +129,11 @@ app.route("/api/auth", auth.userRoutes);
 app.route(
   "/api/run",
   createRun({
+    reads,
+    queue,
     eventLog: pgEventLog(db),
     history: pgHistory(db),
+    catalog,
   }),
 );
 app.route("/api/review", createReview({}));
@@ -113,6 +171,7 @@ app.onError((error, c) => {
 
 // Fail fast on a bad URL, bad credentials or a missing migration; /health stays liveness-only.
 await client`select 1 from threads limit 0`;
+await reads.ensureReferenceInputs([...limits.keys()]);
 
 const server = serve(
   { fetch: app.fetch, port: Number(required("PORT")), hostname: process.env.HOST },
