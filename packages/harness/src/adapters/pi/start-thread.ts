@@ -76,7 +76,7 @@ export type StartThreadOptions = ThreadIdentity & {
 
 export interface ThreadHandle {
   /** Steers a user message into the running thread. False once the thread has ended or never ran. */
-  send(text: string, sender?: UserSender): boolean;
+  send(text: string, sender: UserSender): boolean;
   done: Promise<ThreadOutcome>;
 }
 
@@ -194,8 +194,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       const finished = isFinished([...stored, ...repairs].at(-1));
       // A thread with no user message yet (new, or a crash before the first one was stored)
       // starts from the prompt. A finished one runs only for a new input. Each message
-      // carries its sender; the prompt counts as a person's, since the harness can't tell a
-      // supervisor's task from a human's. The sandbox restart note reaches the model through
+      // carries its sender; the prompt is the runtime's (the supervisor's brief). The sandbox restart note reaches the model through
       // the sandbox's command output (`sandbox-session.ts`), not as a message here.
       const prompts: AgentMessage[] = [];
       const addPrompt = (text: string | undefined, sender: UserSender) => {
@@ -204,7 +203,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       if (hasUser) {
         if (options.input) addPrompt(options.input.text, options.input.sender);
       } else {
-        addPrompt(options.prompt, { kind: "person" });
+        addPrompt(options.prompt, { kind: "runtime" });
       }
       for (const { text, sender } of early.splice(0)) addPrompt(text, sender);
       const message = prompts.length > 0 ? prompts : undefined;
@@ -332,7 +331,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
   }
 
   return {
-    send(text, sender = { kind: "person" }) {
+    send(text, sender) {
       if (ended) return false;
       if (!accepting) {
         early.push({ text, sender });

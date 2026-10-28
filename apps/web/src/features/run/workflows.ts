@@ -1,11 +1,17 @@
 /**
- * The workflow the start screen offers and its outputs, grouped for the "What do you want
- * measured?" checklist. The outputs come from the workflow's own `outputs.json`, bundled at
- * build: the API never reads workflow files (`apps/api/.context/deploy.md`), and the runner
- * validates every selected id against the same file at its own commit.
+ * The workflow the start screen offers, its task titles, and its outputs grouped for the "What
+ * do you want measured?" checklist. Both come from the workflow's own `tasks.json` and
+ * `outputs.json`, bundled at build: the API never reads workflow files
+ * (`apps/api/.context/deploy.md`), and the runner validates every selected id against the same
+ * file at its own commit.
  */
-import { type OutputEntry, outputsFileSchema } from "@voluma/contracts/workflow-files";
+import {
+  type OutputEntry,
+  outputsFileSchema,
+  tasksFileSchema,
+} from "@voluma/contracts/workflow-files";
 import outputsJson from "../../../../../workflows/workflow-mouse-oa/outputs.json?raw";
+import tasksJson from "../../../../../workflows/workflow-mouse-oa/tasks.json?raw";
 
 export const WORKFLOW = {
   /** The catalog id `startRun` takes (`apps/api/src/domains/run/catalog.ts`). */
@@ -15,20 +21,12 @@ export const WORKFLOW = {
   description: "Measures the proximal tibia, the distal femur and the knee's bone structures.",
 };
 
-/** Task titles, also the titles of the checklist groups; a task not listed here shows its id. */
-const TASK_TITLES: Record<string, string> = {
-  intake: "Scan intake",
-  orientation: "Orientation",
-  segmentation: "Segmentation volumes",
-  iioc: "Tibial IIOC",
-  "subchondral-plate": "Subchondral bone plate",
-  "trabecular-roi": "IIOC trabecular bone",
-  "metaphyseal-roi": "Proximal tibial metaphysis",
-  cortical: "Cortical bone",
-  "femoral-geometry": "Distal femur",
-};
+const titles = new Map(
+  tasksFileSchema.parse(JSON.parse(tasksJson)).flatMap((t) => (t.title ? [[t.id, t.title]] : [])),
+);
 
-export const taskTitle = (id: string) => TASK_TITLES[id] ?? id;
+/** A task's title, also its checklist group's; a task without one shows its id. */
+export const taskTitle = (id: string) => titles.get(id) ?? id;
 
 export type OutputGroup = { title: string; outputs: OutputEntry[] };
 

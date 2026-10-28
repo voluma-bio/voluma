@@ -1,5 +1,4 @@
-/** Run and task status as the list badges (the caller's statuses mapped to `StatusBadge` tones), and how a run's spend reads. */
-import type { TaskStatus } from "@voluma/contracts/ids";
+/** Run status as the list badge (the caller's statuses mapped to `StatusBadge` tones), and how a run's spend reads. */
 import type { Run } from "@voluma/contracts/run";
 import { StatusBadge, type StatusTone } from "@voluma/ui";
 
@@ -65,24 +64,4 @@ export function runStatus({ state, toCheck }: Run): RunStatus {
 export function RunBadge({ run }: { run: Run }) {
   const { label, tone } = runStatus(run);
   return <StatusBadge tone={tone}>{label}</StatusBadge>;
-}
-
-/** A task's badge; `under-review` is the second agent's check. */
-export function taskStatus(status: TaskStatus | undefined): { label: string; tone: StatusTone } {
-  switch (status) {
-    case undefined:
-    case "pending":
-    case "stale":
-      return { label: "Queued", tone: "neutral" };
-    case "in-progress":
-      return { label: "Running", tone: "info" };
-    case "done":
-      return { label: "Done", tone: "primary" };
-    case "to-check":
-      return { label: "To check", tone: "check" };
-    case "failed":
-      return { label: "Failed", tone: "destructive" };
-    case "under-review":
-      return { label: "Checking", tone: "info" };
-  }
 }

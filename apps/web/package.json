@@ -22,8 +22,11 @@
     "radix-ui": "1.8.1",
     "react": "catalog:",
     "react-dom": "catalog:",
+    "react-markdown": "catalog:",
     "react-resizable-panels": "catalog:",
     "react-router": "^8.5.0",
+    "remark-gfm": "catalog:",
+    "remend": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
