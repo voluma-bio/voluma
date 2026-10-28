@@ -343,12 +343,6 @@
   .volume-actions {
     @apply flex shrink-0 flex-wrap items-start gap-3 px-3 py-1 text-xs text-muted-foreground;
   }
-  .volume-actions summary {
-    @apply cursor-pointer;
-  }
-  .volume-actions details p {
-    @apply my-1;
-  }
   .viewer-selection {
     @apply shrink-0 pt-4;
   }

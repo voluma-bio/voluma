@@ -1,5 +1,5 @@
 /**
- * Review lane: local or authorized server DICOM intake beside the result workspace. Opening images
+ * Review lane: authorized R2 scan intake beside the result workspace. Opening images
  * does not create an analysis run or populate reports. Light Review chrome.
  * Owns its routes; the shell mounts them.
  */
@@ -15,18 +15,17 @@ const queryClient = new QueryClient();
 
 function ReviewPage() {
   const { runId } = useParams();
-  // A route change releases local data instead of showing it under a different run.
-  return <LocalReview key={runId} runId={runId ?? "local"} />;
+  // A route change releases the scan instead of showing it under a different run.
+  return <ScanReview key={runId} runId={runId ?? "local"} />;
 }
 
-function LocalReview({ runId }: { runId: string }) {
+function ScanReview({ runId }: { runId: string }) {
   const [search, setSearch] = useSearchParams();
   const [archive, setArchive] = useState<DicomArchive>();
   const [selectedSeries, setSelectedSeries] = useState("");
   const [progress, setProgress] = useState<string>();
   const [error, setError] = useState<string>();
   const controller = useRef<AbortController | null>(null);
-  const input = useRef<HTMLInputElement>(null);
   useEffect(() => () => controller.current?.abort(), []);
 
   function close() {
@@ -38,31 +37,29 @@ function LocalReview({ runId }: { runId: string }) {
     setError(undefined);
   }
 
-  async function open(file?: File) {
+  async function open() {
     close();
     const request = new AbortController();
     controller.current = request;
-    setProgress(file ? "Reading ZIP…" : "Looking up scan…");
+    setProgress("Looking up scan…");
     try {
-      if (!file) {
-        const inputId =
-          runId === "local"
-            ? (await listInputs()).find((item) => item.source === "reference")?.id
-            : (await getRun(runId)).input.id;
-        request.signal.throwIfAborted();
-        if (!inputId) throw new Error("No reference scan is available in this workspace.");
-        const descriptor = await getInputDownload(inputId, request.signal);
-        file = await downloadFile(descriptor, {
-          acceptedMediaTypes: ["application/zip"],
-          // Compressed transfer limit; the importer separately caps expanded DICOM data.
-          maxBytes: 2 * 1024 ** 3,
-          signal: request.signal,
-          onProgress: (received, total) =>
-            setProgress(
-              `Downloading scan ${Math.floor((received / total) * 100)}% (${(received / 1024 ** 2).toFixed(1)} / ${(total / 1024 ** 2).toFixed(1)} MiB)…`,
-            ),
-        });
-      }
+      const inputId =
+        runId === "local"
+          ? (await listInputs()).find((item) => item.source === "reference")?.id
+          : (await getRun(runId)).input.id;
+      request.signal.throwIfAborted();
+      if (!inputId) throw new Error("No reference scan is available in this workspace.");
+      const descriptor = await getInputDownload(inputId, request.signal);
+      const file = await downloadFile(descriptor, {
+        acceptedMediaTypes: ["application/zip"],
+        // Compressed transfer limit; the importer separately caps expanded DICOM data.
+        maxBytes: 2 * 1024 ** 3,
+        signal: request.signal,
+        onProgress: (received, total) =>
+          setProgress(
+            `Downloading scan ${Math.floor((received / total) * 100)}% (${(received / 1024 ** 2).toFixed(1)} / ${(total / 1024 ** 2).toFixed(1)} MiB)…`,
+          ),
+      });
       request.signal.throwIfAborted();
       setProgress("Reading ZIP…");
       const loaded = await openDicomZip(file, request.signal, (done, total) =>
@@ -77,13 +74,13 @@ function LocalReview({ runId }: { runId: string }) {
         setError(
           cause instanceof ApiError
             ? cause.status === 503
-              ? "Reference scan storage is not configured yet. You can still open a local DICOM ZIP."
+              ? "Scan storage is not configured. Contact the workspace administrator."
               : cause.status === 404
                 ? "This scan is unavailable or you do not have access to it."
                 : "Could not download the scan. Try opening it again."
             : cause instanceof Error
               ? cause.message
-              : "Could not open this ZIP.",
+              : "Could not open this scan.",
         );
       }
     } finally {
@@ -108,24 +105,8 @@ function LocalReview({ runId }: { runId: string }) {
         intake={
           <div className="dicom-intake">
             <div className="flex flex-wrap items-center gap-3">
-              <input
-                ref={input}
-                type="file"
-                accept=".zip,application/zip"
-                aria-label="DICOM ZIP"
-                className="sr-only"
-                tabIndex={-1}
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  event.target.value = "";
-                  if (file) void open(file);
-                }}
-              />
               <button type="button" className="button primary" onClick={() => void open()}>
                 {runId === "local" ? "Open reference scan" : "Open run scan"}
-              </button>
-              <button type="button" className="button" onClick={() => input.current?.click()}>
-                Open DICOM ZIP
               </button>
               {archive && (
                 <label className="revision-select">
@@ -153,10 +134,6 @@ function LocalReview({ runId }: { runId: string }) {
                 </button>
               )}
             </div>
-            <p className="text-xs text-muted-foreground mt-2">
-              Scans open in this browser. Local ZIPs are not uploaded or saved. Use de-identified
-              scans.
-            </p>
             {progress && (
               <p className="text-sm mt-2" role="status">
                 {progress}
