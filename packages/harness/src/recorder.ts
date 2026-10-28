@@ -3,9 +3,8 @@
  * delivers events in order, so `seq` follows emission order, and nothing in the agent
  * loop waits for the API. A failed delivery never ends a thread: the event is retried
  * in the background, and this is the only place events are retried (the client makes one
- * attempt). `tool.output` is live-only: it gets one attempt, and is dropped if it waited
- * in the queue longer than LIVE_MAX_AGE_MS, so a stale chunk never delays the durable
- * events behind it. The creator of the recorder `flush()`es when its threads end so the
+ * attempt). Live output is not an event (see `@voluma/contracts/stream`) and does not
+ * pass through here. The creator of the recorder `flush()`es when its threads end so the
  * record is complete before the process exits.
  *
  * A durable event that exhausts its retries is lost and leaves the projection stale (a
@@ -24,7 +23,6 @@ export interface Recorder {
 
 const ATTEMPTS = 5;
 const RETRY_DELAY_MS = 2_000;
-const LIVE_MAX_AGE_MS = 5_000;
 
 export function recorder(
   eventLog: EventLog,
@@ -33,19 +31,15 @@ export function recorder(
 ): Recorder {
   let queue: Promise<void> = Promise.resolve();
 
-  async function deliver(event: EventInput, queuedAt: number): Promise<void> {
-    const live = event.type === "tool.output";
-    if (live && Date.now() - queuedAt > LIVE_MAX_AGE_MS) return;
-    const attempts = live ? 1 : ATTEMPTS;
+  async function deliver(event: EventInput): Promise<void> {
     for (let attempt = 1; ; attempt++) {
       try {
         await eventLog.append(event);
         return;
       } catch (error) {
-        if (attempt >= attempts) {
+        if (attempt >= ATTEMPTS) {
           // The id is stable, so a later duplicate would be a no-op; this one is lost.
-          if (event.type !== "tool.output")
-            console.error(`recorder: gave up on ${event.type} ${event.id}: ${String(error)}`);
+          console.error(`recorder: gave up on ${event.type} ${event.id}: ${String(error)}`);
           return;
         }
         await new Promise((resolve) => setTimeout(resolve, retryDelayMs * attempt));
@@ -68,8 +62,7 @@ export function recorder(
         console.error(`recorder: dropped invalid ${type} event: ${parsed.error.message}`);
         return;
       }
-      const queuedAt = Date.now();
-      queue = queue.then(() => deliver(parsed.data, queuedAt));
+      queue = queue.then(() => deliver(parsed.data));
     },
     flush: () => queue,
   };

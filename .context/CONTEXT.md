@@ -63,10 +63,10 @@ checklist, check threads, and review chat threads.
 - **One thread, step by step.** `runThread` (`packages/harness/src/adapters/pi`) loads
   the thread's stored history, builds a Pi `Agent` from it, and records every Pi message
   to `History` at `message_end`, synchronously: if a write fails the agent stops and
-  nothing more is stored, so the history is always an exact prefix. Tool calls, results
-  and `tool.output` chunks go through the run's `recorder` (`src/recorder.ts`): a
-  background queue in emission order whose failures never end a thread (events are
-  retried, `tool.output` is dropped). `runThread({task, input?})`: a new thread sends
+  nothing more is stored, so the history is always an exact prefix. Tool calls and results
+  go through the run's `recorder` (`src/recorder.ts`): a background queue in emission
+  order whose failures never end a thread (events are retried). Live tool output
+  (`ToolContext.output`) goes nowhere until the stream hub (PR F). `runThread({task, input?})`: a new thread sends
   the task; a thread with history sends `input`, or continues if there is none. On
   resume it answers every tool call without a result (appended, never editing history)
   and fails if the stored system message differs from the current prompt and tools. `apps/runner/src/main.ts` wires it to the HTTP client

@@ -11,11 +11,11 @@
  * The Postgres adapters and tables for it are in this directory.
  */
 import { eventInputSchema } from "@voluma/contracts/events";
+import { type HistoryResponse, historyRowSchema } from "@voluma/contracts/history";
 import type { EventLog } from "@voluma/harness/ports/event-log";
 import { type History, HistoryConflict } from "@voluma/harness/ports/history";
 import { Hono } from "hono";
 import { bearerAuth } from "hono/bearer-auth";
-import { z } from "zod";
 
 export interface RunDeps {
   eventLog: EventLog;
@@ -24,11 +24,11 @@ export interface RunDeps {
   apiToken: string;
 }
 
-const historyRowSchema = z.object({
-  idx: z.number().int().nonnegative(),
-  // Postgres text cannot hold a raw NUL; the harness's JSON.stringify output escapes it.
-  message: z.string().refine((text) => !text.includes("\0"), "message contains a NUL byte"),
-});
+// Postgres text cannot hold a raw NUL; the harness's JSON.stringify output escapes it.
+const storableRow = historyRowSchema.refine(
+  (row) => !row.message.includes("\0"),
+  "message contains a NUL byte",
+);
 
 export function createRun({ eventLog, history, apiToken }: RunDeps) {
   const app = new Hono();
@@ -45,11 +45,11 @@ export function createRun({ eventLog, history, apiToken }: RunDeps) {
   });
 
   app.get("/ingest/threads/:threadId/messages", async (c) =>
-    c.json({ messages: await history.load(c.req.param("threadId")) }),
+    c.json({ messages: await history.load(c.req.param("threadId")) } satisfies HistoryResponse),
   );
 
   app.post("/ingest/threads/:threadId/messages", async (c) => {
-    const parsed = historyRowSchema.safeParse(await readJson(c.req));
+    const parsed = storableRow.safeParse(await readJson(c.req));
     if (!parsed.success) return c.text(parsed.error.message, 400);
     try {
       await history.appendMessage(c.req.param("threadId"), parsed.data.idx, parsed.data.message);

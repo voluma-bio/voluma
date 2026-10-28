@@ -7,6 +7,9 @@
     ".": "./src/index.ts",
     "./r2": "./src/r2.ts",
     "./events": "./src/events.ts",
+    "./stream": "./src/stream.ts",
+    "./thread-message": "./src/thread-message.ts",
+    "./history": "./src/history.ts",
     "./review": "./src/review.ts",
     "./workflow": "./src/workflow.ts"
   },

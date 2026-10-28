@@ -35,7 +35,7 @@ Pre-commit runs Biome on staged files. Nothing runs on push. Use pnpm, never npm
 | `apps/web/src/features/run`, `apps/api/src/domains/run`, `packages/workflow`, `packages/harness`, `apps/runner` | Run lane |
 | `apps/web/src/features/review`, `apps/api/src/domains/review`, `packages/viewer` | Review lane |
 | `packages/contracts`, `packages/api-client` | Both; contract PRs only |
-| `packages/design-tokens`, `packages/ui`, `apps/web/src/shell`, `apps/web/src/dev-ui`, `apps/web` and `apps/api` root files, `apps/api/src/{index,domain}.ts`, `apps/api/src/ports`, `apps/api/src/adapters`, root config, `tools/ci` | Both; small PRs |
+| `packages/design-tokens`, `packages/ui`, `apps/web/src/shell`, `apps/web/src/dev-ui`, `apps/web` and `apps/api` root files, `apps/api/src/index.ts`, `apps/api/src/ports`, root config, `tools/` | Both; small PRs |
 
 - Edit only your lane's directories. When you need a change in the other
   lane's code, open a GitHub issue for its owner.
