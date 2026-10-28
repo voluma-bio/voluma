@@ -15,3 +15,8 @@
   session id (`sid`) to close sockets on sign-out: add `sessionId` to the user `Principal`
   then (`core.parseTokenClaims(accessToken).sid` in `auth.ts`), not as a second root
   variable. Decide whether `/logout` closes sockets by session id.
+- **"Sign in with another account" can't force an account chooser.** After `not-a-member`,
+  `/api/auth/login` passes no `prompt`, so Google may sign the same account straight back
+  in. Email and password showed the email form again, which is fine. `createSignIn` takes
+  `prompt: "select_account"`. Wiring it needs a `signIn` option in `@voluma/api-client`
+  (a contract PR) and a `prompt` query parameter on `/login`.
