@@ -38,7 +38,7 @@ if CORE is None:
              'directory above it (<workflows>/workflow-mouse-oa/resources/ with <workflows>/microct-analysis/ beside it)')
 sys.path[:0] = [str(HERE), str(CORE)]
 import sidecar
-from iioc import traced_surface
+from iioc import load_annotations, traced_surface
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -79,8 +79,8 @@ def main():
     ap.add_argument('--cortex-mm', type=float, help='cortex thickness for the clearance (default: estimated)')
     ap.add_argument('--cortex-search-factor', type=float, default=2.0)
     a = ap.parse_args()
-    ann = json.loads(Path(a.annotations).read_text())
     g = sidecar.grid(sidecar.sidecar_path(a.mask))
+    ann = load_annotations(a.annotations, g['grid_id'])
     vox = g['spacing_zyx_mm'][0]
     h = np.load(a.hu_aligned, mmap_mode='r')
     tib = np.load(a.mask)

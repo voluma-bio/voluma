@@ -30,3 +30,12 @@ From the structural review of PR #62 (`review-pr62` p231, structure) and the cor
 - **A kept synthetic-truth test (p230), for the user to decide.** A tilted planar growth-plate face under a flat top, where `iioc.py`'s height
   along W equals h / cos θ and the perpendicular height equals h. The heights moving by 3 to 7% between the two definitions was silent until a
   reviewer recomputed it; the same shape of test would pin plate thickness and node density. None is added.
+
+## From the round-3 review (p246, 2026-10-28)
+- `morphometry.py` volume definitions should name the grid the count was made on
+  (scan vs aligned); today only the record's `grid_id` says it, and stdout omits it.
+- `volumes`/`trabecular` without `--id` write bare keys (`TV`, `BV/TV`); two calls
+  collide and nothing binds to `outputs.json`. Consider requiring `--id` for every key.
+- `sidecar.py:78-80`: read the calibration after the `if not header: fail`, drop the ternary.
+- `annotations.json` mixes point orders: curves are `[w, u]`, `width_points_uvw` and
+  `plate_patches` are `[u, v, w]`. Documented, but a hand-writing agent holds two orders.

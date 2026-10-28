@@ -13,7 +13,6 @@ The annotation schema is in ../references/oa-protocol.md.
 """
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -30,7 +29,7 @@ if CORE is None:
              'directory above it (<workflows>/workflow-mouse-oa/resources/ with <workflows>/microct-analysis/ beside it)')
 sys.path[:0] = [str(HERE), str(CORE)]
 import sidecar
-from iioc import need, traced_surface
+from iioc import load_annotations, need, traced_surface
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -70,8 +69,8 @@ def main():
         '--upper-shift-voxels', type=float, default=0.0, help='move the under-plate boundary: sensitivity run'
     )
     a = ap.parse_args()
-    ann = json.loads(Path(a.annotations).read_text())
     g = sidecar.grid(sidecar.sidecar_path(a.iioc_tissue))
+    ann = load_annotations(a.annotations, g['grid_id'])
     vox = g['spacing_zyx_mm'][0]
     parent = np.load(a.iioc_tissue)
     gp = np.load(a.growth_plate_face)

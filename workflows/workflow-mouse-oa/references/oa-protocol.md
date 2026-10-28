@@ -86,12 +86,15 @@ first and last). Trace across the whole width and expect edge guesses to be wron
 of its aligned frame: a worked example of the keys and the point order. It has no section C (no distal face was traced), and
 it is a record of what was traced on that scan, not a starting point for another one.
 
-One `annotations.json` can hold all three sections. Each script reads only its own keys.
+One `annotations.json` can hold all three sections. Each script reads only its own keys. Every file needs the
+`grid_id` of the aligned grid it was traced on (from `tibia-frame.json`); the scripts refuse a file without it or from
+another grid.
 
 **A, for `iioc.py`**
 
 ```json
 {
+  "grid_id": "<grid_id from tibia-frame.json>",
   "growth_plate_curves": {"axis": 1, "height": "row",
                           "slices": {"60": [[149, 60], [150, 170]], "80": [[145, 60], [159, 210]]}},
   "articular_corrections": [{"u_range": [120, 210], "v_range": [150, 181],

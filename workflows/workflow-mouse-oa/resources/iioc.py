@@ -118,6 +118,16 @@ def first_run(bone, v, u):
     return start, end
 
 
+def load_annotations(path, grid_id):
+    """Annotations hold indices on one aligned grid; read them only for that grid."""
+    ann = json.loads(Path(path).read_text())
+    if 'grid_id' not in ann:
+        sidecar.fail(f'{path} has no "grid_id": copy the grid_id of the aligned grid you traced on (tibia-frame.json) into it')
+    if ann['grid_id'] != grid_id:
+        sidecar.fail(f'{path} was traced on another aligned grid (grid_id differs): its indices do not apply here; trace again')
+    return ann
+
+
 def need(ann, key, hint):
     if key not in ann:
         sidecar.fail(f'annotations.json has no "{key}": {hint}')
@@ -140,8 +150,8 @@ def main():
         help='move the traced growth-plate face by this many voxels (+ = toward the shaft): sensitivity run',
     )
     a = ap.parse_args()
-    ann = json.loads(Path(a.annotations).read_text())
     frame = json.loads(Path(a.frame).read_text())
+    ann = load_annotations(a.annotations, frame['grid_id'])
     g = sidecar.grid(a.hu_json)
     a.threshold = sidecar.bone_threshold_hu(a.hu_json, a.threshold)
     vox = frame['spacing_zyx_mm'][0]
@@ -149,8 +159,6 @@ def main():
     tib = np.load(a.mask)
     if frame['parent_grid_id'] != g['grid_id']:
         sidecar.fail('the frame was made on another scan grid than hu.json: rerun tibia_frame.py on this scan')
-    if ann.get('grid_id', frame['grid_id']) != frame['grid_id']:
-        sidecar.fail('annotations.json was traced on another aligned grid than this frame (grid_id differs): its indices do not apply; trace again')
     gp = (
         traced_surface(
             need(ann, 'growth_plate_curves', 'trace the proximal face of the growth plate'), 'growth_plate_curves', h.shape
