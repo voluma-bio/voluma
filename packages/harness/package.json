@@ -4,12 +4,26 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./ports/sandbox": "./src/ports/sandbox.ts"
+    "./ports/sandbox": "./src/ports/sandbox.ts",
+    "./ports/event-log": "./src/ports/event-log.ts",
+    "./ports/history": "./src/ports/history.ts",
+    "./sandbox-session": "./src/sandbox-session.ts",
+    "./tools/bash": "./src/tools/bash.ts",
+    "./tools/tool": "./src/tools/tool.ts",
+    "./adapters/pi": "./src/adapters/pi/run-thread.ts",
+    "./adapters/http": "./src/adapters/http/client.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
     "typescript": "catalog:"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "1.4.0",
+    "@earendil-works/pi-ai": "1.4.0",
+    "typebox": "^1.4.3",
+    "zod": "catalog:",
+    "@voluma/contracts": "workspace:*"
   }
 }
