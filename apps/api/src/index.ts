@@ -56,11 +56,10 @@ if (existsSync(webDist)) {
     );
   const files = serveStatic({ root: webDist, onFound });
   const spa = serveStatic({ root: webDist, path: "index.html", onFound });
-  // A missing /assets/ file is a real 404, not the app shell.
+  app.get("*", (c, next) => (isApi(c.req.path) ? next() : files(c, next)));
+  // The app shell for client-side routes; a missing /assets/ file is a real 404.
   app.get("*", (c, next) =>
-    isApi(c.req.path)
-      ? next()
-      : files(c, c.req.path.startsWith("/assets/") ? next : () => spa(c, next)),
+    isApi(c.req.path) || c.req.path.startsWith("/assets/") ? next() : spa(c, next),
   );
 }
 app.notFound((c) =>
