@@ -24,7 +24,7 @@ packages/
   viewer        local DICOM ZIP intake, Cornerstone acquired slices, persistent imaging slots
   ui            shared React components, styled from tokens
   design-tokens tokens.css (raw values, two themes) and theme.css (Tailwind mapping)
-workflows/      Workflow directories (`workflow.md`, `agents/`, `skills/`) and their Python skill resources (microct-analysis; mouse-oa arrives with #57)
+workflows/      Workflow directories (`workflow.md`, `agents/`, `skills/`) and their Python skill resources (microct-analysis; workflow-mouse-oa arrives with #57)
 tools/ci        PR-body check
 tools/dev.mjs   the `pnpm dev` launcher (below)
 ```
