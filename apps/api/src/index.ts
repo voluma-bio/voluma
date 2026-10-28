@@ -139,6 +139,7 @@ app.route(
     notifier,
     history: pgHistory(db),
     catalog,
+    repo: "voluma-bio/voluma",
     shutdown: draining.signal,
   }),
 );

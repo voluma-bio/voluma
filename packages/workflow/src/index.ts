@@ -1,7 +1,7 @@
 /**
  * Pure functions over a workflow's plan: which tasks are ready to start and
- * which go stale when one changes. No I/O. (Reading `workflow.md` into the plan
- * is not built yet.)
+ * which go stale when one changes. No I/O. (Building the plan from a workflow's files is
+ * `plan.ts`; reading them is `load.ts`.)
  */
 
 /** The part of a plan task the graph needs; `WorkflowPlan` tasks fit it. */

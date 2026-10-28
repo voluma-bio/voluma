@@ -68,6 +68,8 @@ function toRun({ run, input, position }: Row): Run {
     labId: run.labId,
     startedBy: run.startedBy,
     workflows: run.workflows as WorkflowPin[],
+    ...(run.selectedOutputs !== null && { selectedOutputs: run.selectedOutputs as string[] }),
+    ...(run.notes !== null && { notes: run.notes }),
     input: toInput(input),
     credentials: run.credentials,
     example: run.example,

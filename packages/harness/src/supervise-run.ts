@@ -12,18 +12,21 @@ import type { Evidence } from "./ports/evidence";
 import type { Files } from "./ports/files";
 import type { History } from "./ports/history";
 import type { Sandbox } from "./ports/sandbox";
+import type { Segmenter } from "./ports/segmenter";
 import type { PayloadOf, Recorder } from "./recorder";
 import { type RoleSpec, supervisor, supervisorThreadId } from "./supervisor";
 import { type PlanTask, taskRuntime } from "./task-runtime";
 import { threads } from "./threads";
 import { bashTool } from "./tools/bash";
-import { type SegmentSamDeps, segmentSamTool } from "./tools/segment-sam";
+import { buildTools } from "./tools/registry";
 import { taskTools } from "./tools/task-tools";
 import { threadMessageTool } from "./tools/thread-message";
-import { viewImageTool } from "./tools/view-image";
 
-/** What a worker or check thread is told and runs on; the harness adds its tools. */
-export type RunRole = Omit<RoleSpec, "tools">;
+/**
+ * What a worker or check thread is told and runs on; the harness adds its always-on tools.
+ * `tools` names the optional tools its agent grants (`tools/registry.ts`).
+ */
+export type RunRole = Omit<RoleSpec, "tools"> & { tools?: readonly string[] };
 export type { PlanTask };
 
 export interface SuperviseRunOptions {
@@ -38,7 +41,7 @@ export interface SuperviseRunOptions {
   sandbox(threadId: string): Promise<Sandbox>;
   evidence: Evidence;
   /** Offers `segment_sam` to threads when set (the host has a Segmenter and a key for it). */
-  segmentSam?: Pick<SegmentSamDeps, "segmenter">;
+  segmenter?: Segmenter;
   /** The run's bucket, read and written host-side by `view_image` and `segment_sam`. */
   files: Files;
   judgment: Judgment;
@@ -66,14 +69,11 @@ export function superviseRun(options: SuperviseRunOptions): Promise<Folded> {
     if (!found) throw new Error(`${id} is not a task of the plan`);
     return found;
   };
-  const tools = () => [
+  const tools = (granted: readonly string[] = []) => [
     bashTool(layout),
-    viewImageTool({ layout, files: options.files }),
-    ...(options.segmentSam
-      ? [segmentSamTool({ layout, files: options.files, ...options.segmentSam })]
-      : []),
     ...taskTools(runtime),
     threadMessageTool((from, to, text) => sup.message(from, to, text)),
+    ...buildTools(granted, { layout, files: options.files, segmenter: options.segmenter }),
   ];
   const sup = supervisor({
     runId,
@@ -82,8 +82,14 @@ export function superviseRun(options: SuperviseRunOptions): Promise<Folded> {
     recorder,
     threads: pool,
     judgment: options.judgment,
-    worker: (id) => ({ ...options.worker(task(id)), tools: tools() }),
-    check: (id) => ({ ...options.check(task(id)), tools: tools() }),
+    worker: (id) => {
+      const role = options.worker(task(id));
+      return { ...role, tools: tools(role.tools) };
+    },
+    check: (id) => {
+      const role = options.check(task(id));
+      return { ...role, tools: tools(role.tools) };
+    },
     signal,
   });
   return sup.run(options.workflows);

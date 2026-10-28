@@ -8,12 +8,14 @@ import {
   relativePathSchema,
   scratchPrefix,
   toolOutputKey,
+  workflowSnapshotPrefix,
 } from "@voluma/contracts/r2";
 import type { SandboxMount } from "./ports/sandbox";
 
 const INPUTS = "/inputs";
 const OUTPUTS = "/outputs";
 const SCRATCH = "/scratch";
+const WORKFLOW = "/workflow";
 
 export interface RunLayout {
   mounts: SandboxMount[];
@@ -36,6 +38,7 @@ export function runLayout(runId: string, inputPrefix: string): RunLayout {
   const scratch = scratchPrefix(runId);
   const mounts: SandboxMount[] = [
     { path: INPUTS, prefix: inputPrefix, access: "read-only", stage: true },
+    { path: WORKFLOW, prefix: workflowSnapshotPrefix(runId), access: "read-only" },
     { path: SCRATCH, prefix: scratch, access: "read-write" },
     { path: OUTPUTS, prefix: outputsPrefix(runId), access: "read-write" },
   ];
@@ -43,6 +46,7 @@ export function runLayout(runId: string, inputPrefix: string): RunLayout {
     mounts,
     description:
       `- ${INPUTS} is a local copy of the input data: read it, do not modify it.\n` +
+      `- ${WORKFLOW} holds the workflow's skills and resources, under their repo paths: read them, do not modify them.\n` +
       `- ${OUTPUTS} is for files you produce; they are kept.\n` +
       `- ${SCRATCH} is for temporary files.`,
     restartNote: `The sandbox was restarted. ${OUTPUTS} and ${SCRATCH} were kept, ${INPUTS} was copied again, and local files elsewhere (including /tmp) are gone.`,

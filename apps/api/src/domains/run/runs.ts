@@ -21,21 +21,32 @@ function refusal(c: Context, refused: Refusal | "no-input" | "full") {
   return c.json({ error: refusalMessage[refused] }, refused === "per-caller" ? 409 : 429);
 }
 
-export function runsRoutes({ reads, queue, catalog }: RunDeps) {
+export function runsRoutes({ reads, queue, catalog, repo }: RunDeps) {
   const app = new Hono<UserEnv>();
   app.use("/runs", requireUser);
   app.use("/runs/*", requireUser);
   app.use("/inputs", requireUser);
 
   app.post("/runs", async (c) => {
-    const { workflowId, inputId, keys } = await parseJson(c, startRunRequestSchema);
+    const { workflowId, inputId, selectedOutputs, notes, keys } = await parseJson(
+      c,
+      startRunRequestSchema,
+    );
     const entry = Object.hasOwn(catalog, workflowId) ? catalog[workflowId] : undefined;
     if (!entry) return c.json({ error: "unknown workflow" }, 404);
     const user = c.var.user;
     const result = await queue.start(
       readerOf(user),
       { userId: user.userId },
-      { id: randomUUID(), workflowId, pins: entry.pins, inputId, keys },
+      {
+        id: randomUUID(),
+        workflowId,
+        pins: [{ repo, path: entry.workflow }],
+        inputId,
+        selectedOutputs,
+        notes,
+        keys,
+      },
     );
     return "refused" in result ? refusal(c, result.refused) : c.json(result.run satisfies Run);
   });

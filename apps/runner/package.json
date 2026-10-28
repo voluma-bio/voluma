@@ -14,6 +14,7 @@
     "@voluma/contracts": "workspace:*",
     "@voluma/harness": "workspace:*",
     "modal": "0.11.1",
+    "@voluma/workflow": "workspace:*",
     "tsx": "^4.23.15"
   },
   "devDependencies": {

@@ -20,7 +20,7 @@ cannot `serviceConnect`, but `environmentPatchCommit` (config as a patch) create
 | Draining | 60 s: above the runner's `SHUTDOWN_BUDGET_MS` (30 s), which is how long it waits for runs to report `released` |
 | Restart | on failure, 10 retries |
 | Healthcheck | none: the runner serves nothing, so a healthcheck would fail every deploy |
-| Watch paths | `/apps/runner/**`, `/packages/harness/**`, `/packages/contracts/**`, `/pnpm-lock.yaml`, `/package.json`, `/.tool-versions`, `/tsconfig.base.json`, `/pnpm-workspace.yaml` |
+| Watch paths | `/apps/runner/**`, `/packages/harness/**`, `/packages/workflow/**`, `/packages/contracts/**`, `/workflows/**` (the runner reads `workflows/` from its own checkout, so editing a workflow must redeploy it), `/pnpm-lock.yaml`, `/package.json`, `/.tool-versions`, `/tsconfig.base.json`, `/pnpm-workspace.yaml` |
 
 Variables (names only; values never go in the repo):
 

@@ -28,6 +28,8 @@ export interface RunDeps {
   /** Wakes open streams when a run's events or state change. */
   notifier: Notifier;
   catalog: Catalog;
+  /** The repo whose `workflows/` a run uses. The runner adds the commit its checkout was at. */
+  repo: string;
   /** Aborts when the API starts draining; open streams end so the drain isn't held. */
   shutdown: AbortSignal;
 }

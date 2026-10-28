@@ -1,42 +1,22 @@
 /**
- * The workflow catalog: server config mapping a `workflowId` to the packages it pins and
- * the plan a claim hands the runner (`@voluma/contracts/workflow`). A request names an
- * id from here, never raw pins, so a caller can't make the server import an arbitrary
- * repo. Adding a workflow is a code change that pins a commit.
+ * The workflow catalog: server config mapping a `workflowId` to the workflow directory
+ * (`workflows/workflow-<name>`) a run uses. A request names an id from here, never a path, so a caller
+ * can't point the runner at another directory. A run pins the deployed commit and that path;
+ * the runner snapshots the directory (and the ones its `SKILL.md` lists in `uses`) into the
+ * run's R2 prefix when it starts. The plan and skills come from those files
+ * (`@voluma/workflow`). A workflow's text reaches a prompt only through a commit of this
+ * repo, which is the trust boundary.
  *
- * Missing: the mouse-OA entry. No Mars package in `voluma-bio/microct-analysis` has a
- * `workflow.md`, and `packages/workflow` (the parser that would produce the plan) is
- * empty, so there is no plan to pin yet. Add it with its first workflow package.
+ * `smoke` is a two-task workflow that checks the runner end to end.
  */
-import type { WorkflowPin, WorkflowPlan } from "@voluma/contracts/workflow";
-import { workflowPlanSchema } from "@voluma/contracts/workflow";
-
 export interface CatalogEntry {
-  pins: WorkflowPin[];
-  plan: WorkflowPlan;
+  workflow: string;
 }
 
 export type Catalog = Record<string, CatalogEntry>;
 
 export const catalog: Catalog = {
-  // A small plan to exercise the run lifecycle: two tasks, the second building on the first.
-  "two-task-test": {
-    pins: [
-      { repo: "voluma-bio/microct-analysis", commit: "a96736e05c9c60b47d364f2ee86ca6b4f973b12b" },
-    ],
-    plan: workflowPlanSchema.parse({
-      tasks: [
-        {
-          id: "segment-tibia",
-          dependsOn: [],
-          outputs: [{ id: "tibia", kind: "structure", required: true, name: "Tibia" }],
-        },
-        {
-          id: "measure-tibia",
-          dependsOn: ["segment-tibia"],
-          outputs: [{ id: "tibia-volume", kind: "measurement", required: true, unit: "mm3" }],
-        },
-      ],
-    }),
-  },
+  smoke: { workflow: "workflows/workflow-smoke" },
+  // A starter for the lab to edit (`workflows/workflow-mouse-oa/SKILL.md`).
+  "mouse-oa": { workflow: "workflows/workflow-mouse-oa" },
 };

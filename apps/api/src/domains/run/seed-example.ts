@@ -115,6 +115,8 @@ await db.transaction(async (tx) => {
     startedBy: EXAMPLES_OPERATOR,
     workflowId: src.run.workflowId,
     workflows: src.run.workflows,
+    selectedOutputs: src.run.selectedOutputs ?? null,
+    notes: src.run.notes ?? null,
     inputId: reference.id as string,
     credentials: "voluma",
     example: true,

@@ -46,7 +46,7 @@ const storableRow = historyRowSchema.refine(
 const inRun = (runId: string, threadId: string) => threadId.startsWith(`${runId}.`);
 const NOT_IN_RUN = "thread id must begin with <runId>.";
 
-export function ingestRoutes({ queue, eventLog, history, catalog }: RunDeps) {
+export function ingestRoutes({ queue, eventLog, history }: RunDeps) {
   const app = new Hono<IngestEnv>();
   app.use("/ingest/*", requireService);
 
@@ -67,12 +67,9 @@ export function ingestRoutes({ queue, eventLog, history, catalog }: RunDeps) {
     const { runnerId } = await parseJson(c, claimRequestSchema);
     const claimed = await queue.claim(runnerId);
     if (!claimed) return c.json({ claim: null } satisfies ClaimResponse);
-    const { run, workflowId, leaseToken, keys } = claimed;
-    const entry = catalog[workflowId];
-    if (!entry)
-      throw new Error(`run ${run.id} names workflow ${workflowId}, which is not in the catalog`);
+    const { run, leaseToken, keys } = claimed;
     return c.json({
-      claim: { run, plan: entry.plan, leaseToken, ...(keys && { keys }) },
+      claim: { run, leaseToken, ...(keys && { keys }) },
     } satisfies ClaimResponse);
   });
 

@@ -17,8 +17,9 @@
  * then closes the sandbox. A stop by the server or a lost lease reports nothing.
  */
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 import type { Api, Model, Models } from "@earendil-works/pi-ai";
-import { inputPrefix, referencePrefix } from "@voluma/contracts/r2";
+import { inputPrefix, referencePrefix, workflowSnapshotPrefix } from "@voluma/contracts/r2";
 import type { Claim, ReportRequest } from "@voluma/contracts/runner";
 import { runClient } from "@voluma/harness/adapters/http/run-client";
 import { llmJudgment } from "@voluma/harness/judgment";
@@ -26,15 +27,18 @@ import { runLayout } from "@voluma/harness/layout";
 import { type Recorder, recorder } from "@voluma/harness/recorder";
 import { type SandboxSession, sandboxSession } from "@voluma/harness/sandbox-session";
 import { type RunRole, superviseRun } from "@voluma/harness/supervise-run";
+import { loadWorkflow } from "@voluma/workflow/load";
+import { adaptPlan, computePlan } from "@voluma/workflow/plan";
 import type { Config } from "./config.ts";
 import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
 import { metaSegmenter } from "./meta-segmenter.ts";
 import { createModalSandbox, RUNS_APP, terminateClaim } from "./modal-sandbox.ts";
 import { retryMetaNotFound } from "./model-retry.ts";
-import { CHECK_SYSTEM, checkPrompt, WORKER_SYSTEM, workerPrompt } from "./prompts.ts";
+import { checkPrompt, checkSystem, workerPrompt, workerSystem } from "./prompts.ts";
 import { r2Evidence } from "./r2-evidence.ts";
 import { r2Files } from "./r2-files.ts";
+import { r2Workflows } from "./r2-workflows.ts";
 import { type Redact, redactor } from "./redact.ts";
 import { usageMeter } from "./usage.ts";
 
@@ -44,6 +48,8 @@ import { usageMeter } from "./usage.ts";
  * meanwhile, and the `stopped` event needs the close to finish); after a stop, the run's
  * report waits only on the platform's grace period.
  */
+/** The repo checkout this runner was deployed from: `workflows/` is read from it. */
+const REPO_ROOT = resolve(import.meta.dirname, "../../..");
 const CLOSE_BUDGET_MS = { ended: 60_000, stopped: 15_000 };
 /** How long threads get to end after a stop before the run is reported anyway. */
 const WIND_DOWN_MS = 5_000;
@@ -79,7 +85,7 @@ export async function runClaim(
   shutdown: AbortSignal,
 ): Promise<void> {
   const { config, models } = ctx;
-  const { run, plan, leaseToken, keys } = claim;
+  const { run, leaseToken, keys } = claim;
   const runId = run.id;
   const claimId = randomUUID();
   const visitor = keys !== undefined;
@@ -119,6 +125,33 @@ export async function runClaim(
     lease = holdLease({ client, meter, onStop: stop, log });
     log(`claimed (${visitor ? "visitor" : "voluma"} keys, model ${model.provider}/${model.id})`);
 
+    // Before any sandbox: an unreadable workflow or a bad selection fails the run here, with its
+    // message. The run's pin names the workflow directory; its files are snapshotted from this
+    // runner's checkout once (at `config.commit`), so a resume reads what the run began with.
+    const workflowDir = run.workflows[0]?.path;
+    if (!workflowDir) throw new Error("the run pins no workflow directory");
+    const definition = await loadWorkflow(workflowDir, {
+      store: r2Workflows(config.r2),
+      prefix: workflowSnapshotPrefix(runId),
+      root: REPO_ROOT,
+      commit: config.commit,
+    });
+    const stored = await client.storedEvents();
+    // A resumed run keeps the plan its first event recorded. Only a new run computes one: the
+    // tasks that produce the selected outputs and what they need, adapted to the run's notes.
+    const recorded = stored.find(
+      (e) => e.type === "revision.started" && e.payload.reason === "run",
+    );
+    const plan =
+      recorded?.type === "revision.started" && recorded.payload.reason === "run"
+        ? recorded.payload.plan
+        : await adaptPlan(computePlan(definition.files, run.selectedOutputs), {
+            notes: run.notes,
+            files: definition.files,
+          });
+    // Every role's tools come from here, not from the workflow.
+    const roleTools = ["view_image", ...(metaKey ? ["segment_sam"] : [])];
+
     const layout = runLayout(
       runId,
       run.input.source === "reference" ? referencePrefix("scan") : inputPrefix(run.input.id),
@@ -134,7 +167,6 @@ export async function runClaim(
         cloudflareApiToken: config.r2.cloudflareApiToken,
       },
     });
-    const stored = await client.storedEvents();
     events = recorder(
       {
         async append(event) {
@@ -188,24 +220,32 @@ export async function runClaim(
     const supervised = superviseRun({
       runId,
       plan: plan.tasks,
-      workflows: run.workflows,
+      // The commit the files came from: the snapshot's, which a resume keeps.
+      workflows: run.workflows.map((pin) => ({ ...pin, commit: definition.commit })),
       layout,
       recorder: events,
       history: client,
       sandbox: (id) => opened.get(id),
       evidence: r2Evidence(config.r2),
       files,
-      segmentSam: metaKey
-        ? { segmenter: metaSegmenter({ apiKey: metaKey, log, addCost: meter.addModelCost }) }
+      segmenter: metaKey
+        ? metaSegmenter({ apiKey: metaKey, log, addCost: meter.addModelCost })
         : undefined,
       judgment,
       worker: (task) => ({
         model,
         streamFn,
-        systemPrompt: WORKER_SYSTEM,
+        systemPrompt: workerSystem(definition),
         prompt: workerPrompt(task),
+        tools: roleTools,
       }),
-      check: (task) => ({ model, streamFn, systemPrompt: CHECK_SYSTEM, prompt: checkPrompt(task) }),
+      check: (task) => ({
+        model,
+        streamFn,
+        systemPrompt: checkSystem(definition),
+        prompt: checkPrompt(task),
+        tools: roleTools,
+      }),
       signal: abort.signal,
     });
     supervised.catch(() => {}); // an error after the race below is moot: the run is stopping
