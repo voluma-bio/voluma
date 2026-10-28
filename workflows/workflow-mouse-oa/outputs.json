@@ -1,5 +1,21 @@
 [
   {
+    "id": "header",
+    "name": "Scan header",
+    "kind": "file",
+    "mediaType": "application/json",
+    "region": "hu.json from scan-intake: voxel spacing (z, y, x, mm), shape, calibration evidence and the grid id every later step uses",
+    "task": "intake"
+  },
+  {
+    "id": "frame",
+    "name": "Orientation frame",
+    "kind": "file",
+    "mediaType": "application/json",
+    "region": "frame.json from orient-joint: the shaft axes, the bending plane and the keyframe the oriented stack is cut on",
+    "task": "orientation"
+  },
+  {
     "id": "patella-volume",
     "name": "Patella volume",
     "kind": "measurement",
