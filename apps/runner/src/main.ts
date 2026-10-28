@@ -21,7 +21,7 @@ import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
 import { runIdSchema } from "@voluma/contracts/ids";
 import { referencePrefix } from "@voluma/contracts/r2";
 import { httpClient } from "@voluma/harness/adapters/http";
-import { runThread } from "@voluma/harness/adapters/pi";
+import { startThread } from "@voluma/harness/adapters/pi";
 import { runLayout } from "@voluma/harness/layout";
 import { recorder } from "@voluma/harness/recorder";
 import { sandboxSession } from "@voluma/harness/sandbox-session";
@@ -150,7 +150,7 @@ for (const name of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
 
 console.log(`run ${runId}  thread ${threadId}  model ${provider}/${modelId}`);
 try {
-  const outcome = await runThread({
+  const outcome = await startThread({
     runId,
     threadId,
     kind: "worker",
@@ -159,15 +159,14 @@ try {
     // The key goes with each request; pi-ai is never left to look in process.env.
     streamFn: (m, context, options) => models.streamSimple(m, context, { ...options, apiKey }),
     systemPrompt,
-    task,
-    input: values.input,
-    resumeNote: layout.restartNote,
+    prompt: task,
+    input: values.input ? { text: values.input, sender: { kind: "person" } } : undefined,
     tools: [bashTool(layout)],
     recorder: events,
     history: api,
     sandbox: (id) => session.get(id),
     signal: abort.signal,
-  });
+  }).done;
   const u = outcome.usage;
   if (!outcome.ran && outcome.status === "completed") {
     console.log("this thread already finished; pass --input <text> to continue it");

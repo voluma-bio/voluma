@@ -1,0 +1,507 @@
+/**
+ * The supervisor: routine wakes are code, judgment goes through one seam (`judgment.ts`).
+ * It keeps no state of its own. Every step is a function of `fold` of the recorder's
+ * events (the stored log, `recorder.ts`), the thread records read from that same log, and
+ * which threads are running in this process, and it runs inside the task runtime's
+ * `section`. A new process given the stored events steps from where the last one stopped:
+ * resume and a first run are the same code.
+ *
+ * What a step does for a task, by its status (the first applicable):
+ * - a thread of the task is running: nothing, wait for it;
+ * - `pending` or `stale`, every dependency done: start a worker, named by how many the log
+ *   has started for the task (a redo gets a fresh thread, never the old one);
+ * - `in-progress`, or `pending` with a worker that ended: a failed worker is a judgment point;
+ *   otherwise wake it with a message (it counts as a wake) up to `stuckLimit` wakes, then the
+ *   stuck guard marks the task `to-check` (or, with no attempt at all, a judgment point);
+ * - `done` or `to-check` without a check thread yet (and not left by a judgment): check-start,
+ *   then start the check thread;
+ * - `under-review`: a check that failed is a judgment point; otherwise its result is written,
+ *   and a verdict that is not `passed` is a judgment point (`check-disagreed`).
+ * A judgment point is asked outside the section, then recorded as a `judgment` event with the
+ * id `<thread>:judgment` before it is applied. Replaying it applies the stored action and does
+ * not ask the arm again. A step that finds a judgment recorded but not applied applies it.
+ *
+ * A thread that throws or is refused before it starts, or an error in a step (a store failure
+ * above all), fails the run on purpose: the threads are aborted and the root ends `failed`,
+ * because the supervisor must not carry on from a record the store does not hold. The root
+ * is the supervisor's own thread: it runs no agent loop and calls no tool.
+ */
+import type { By } from "@voluma/contracts/events";
+import { checkResult, type Folded, type FoldedTask } from "@voluma/contracts/fold";
+import type { ThreadMessageResult } from "@voluma/contracts/thread-message";
+import { readyTasks } from "@voluma/workflow";
+import { type Decision, decisionSchema, type Judgment, type JudgmentPoint } from "./judgment";
+import type { PayloadOf, Recorder } from "./recorder";
+import type { PlanTask, TaskRuntime } from "./task-runtime";
+import {
+  JUDGMENT_SUFFIX,
+  type Role,
+  startedFor,
+  type ThreadLog,
+  type ThreadRecord,
+  threadLog,
+} from "./thread-log";
+import type { ThreadSpec, Threads } from "./threads";
+
+/** What the caller decides about a worker or check thread; the supervisor adds its identity. */
+export type RoleSpec = Pick<ThreadSpec, "prompt" | "model" | "streamFn" | "systemPrompt" | "tools">;
+
+export interface SupervisorOptions {
+  runId: string;
+  plan: readonly PlanTask[];
+  runtime: TaskRuntime;
+  recorder: Recorder;
+  threads: Threads;
+  judgment: Judgment;
+  worker(taskId: string): RoleSpec;
+  check(taskId: string): RoleSpec;
+  /** Wakes of a worker that stopped with its task unfinished before the stuck guard marks it. */
+  stuckLimit?: number;
+  /** Redos a judgment may order for one task. */
+  maxRedos?: number;
+  /** How long a judgment may take before it counts as failed. */
+  judgmentTimeoutMs?: number;
+  signal?: AbortSignal;
+}
+
+/** What `step` found: nothing to do, something done, or a judgment point to ask. */
+type Next = "idle" | "acted" | { point: JudgmentPoint; threadId: string };
+
+const rule = (r: Extract<By, { kind: "rule" }>["rule"]): By => ({ kind: "rule", rule: r });
+
+export function supervisor(options: SupervisorOptions) {
+  const { plan, runtime, recorder, threads, judgment, signal } = options;
+  /** The supervisor's own thread: the root, and the envelope of its events. */
+  const root = `${options.runId}.supervisor`;
+  const stuckLimit = options.stuckLimit ?? 2;
+  const maxRedos = options.maxRedos ?? 1;
+  const judgmentTimeoutMs = options.judgmentTimeoutMs ?? 60_000;
+  const arm: By = { kind: "judgment", arm: judgment.arm };
+  let failure: unknown; // the first error that failed the run
+
+  const derive = () => threadLog(recorder.events());
+
+  /** A thread's record; a thread whose `thread.started` the store lacks counts as not ended. */
+  const recordOf = (d: ThreadLog, id: string, role: Role, taskId: string): ThreadRecord =>
+    d.threads.get(id) ?? { id, role, taskId, end: undefined, wakes: 0 };
+
+  /** `<runId>.<taskId>.<role>`, plus `.<n>` for the n-th (ids.ts: run and task ids hold no '.'). */
+  const threadId = (taskId: string, role: Role, n: number) =>
+    `${options.runId}.${taskId}.${role}${n === 1 ? "" : `.${n}`}`;
+  const nextThreadId = (d: ThreadLog, taskId: string, role: Role) =>
+    threadId(taskId, role, startedFor(d, taskId, role).length + 1);
+
+  /**
+   * The task's thread running in this process. The next id counts too: a thread just
+   * started has not stored its `thread.started` yet.
+   */
+  function liveThread(d: ThreadLog, taskId: string) {
+    for (const role of ["worker", "check"] as const) {
+      const ids = [...startedFor(d, taskId, role).map((r) => r.id), nextThreadId(d, taskId, role)];
+      const id = ids.find((x) => threads.running(x));
+      if (id) return id;
+    }
+    return undefined;
+  }
+
+  function launch(
+    role: Role,
+    taskId: string,
+    id: string,
+    extra: { attemptId?: string; input?: ThreadSpec["input"] } = {},
+  ) {
+    threads.start({
+      ...(role === "worker" ? options.worker(taskId) : options.check(taskId)),
+      threadId: id,
+      kind: role,
+      parentThreadId: root,
+      taskId,
+      ...extra,
+    });
+  }
+
+  /** Starts the thread again with a message: it resumes from its History. */
+  function wake(r: ThreadRecord, input: NonNullable<ThreadSpec["input"]>, attemptId?: string) {
+    launch(r.role, r.taskId, r.id, { ...(attemptId && { attemptId }), input });
+  }
+
+  /** What a judgment is shown about the task. */
+  function report(taskId: string): unknown {
+    const t = runtime.taskOf(taskId);
+    return (
+      t && {
+        status: t.status,
+        reason: t.reason,
+        milestones: t.milestones.map((m) => m.text),
+        verdict: t.checker,
+        openItems: t.checks.map((c) => c.title),
+        missingRequired: t.missingRequired,
+      }
+    );
+  }
+
+  /** The reason a recorded judgment applied, rebuilt from the event. */
+  function reasonOf(j: PayloadOf<"judgment">): string {
+    const { fallback } = j.applied;
+    if (fallback === "error") return "The judgment could not decide; left for a person.";
+    const { reason } = decisionSchema.parse(j.decision);
+    return fallback === "redo-cap"
+      ? `${reason} (A redo was ordered, but ${j.taskId} was already redone ${maxRedos} time(s); left for a person.)`
+      : reason;
+  }
+
+  /**
+   * Applies a recorded judgment: a redo is a correction (a revision, a stale mark on each
+   * dependent, and last the task's own stale event, which marks it applied); `accept` and
+   * `fail` set the task `to-check` or `failed`, first opening an attempt in the failed worker's
+   * name if it never touched the task. Every write has a derived id, so a replay writes nothing twice.
+   */
+  async function apply(
+    d: ThreadLog,
+    id: string,
+    j: PayloadOf<"judgment">,
+    t: FoldedTask | undefined,
+  ): Promise<Next> {
+    const taskId = j.taskId;
+    if (!taskId) throw new Error(`judgment ${id} names no task`);
+    const eventId = `${root}:${id}${JUDGMENT_SUFFIX}`;
+    if (d.ids.has(eventId)) return "idle"; // already applied
+    const reason = reasonOf(j);
+    const action = j.applied.action;
+    if (action === "redo") {
+      // A task with no attempt, or one this worker never wrote, has nothing of its own to
+      // mark: a fresh worker is the redo.
+      if (!t || (d.threads.get(id)?.role === "worker" && t.threads.worker !== id)) {
+        return startWorker(taskId);
+      }
+      await recorder.append(
+        root,
+        "revision.started",
+        { reason: "correction", taskId },
+        `${eventId}:revision`,
+      );
+      await runtime.staleDependents(
+        root,
+        eventId,
+        taskId,
+        `${taskId} was corrected, so this result may no longer hold.`,
+      );
+      await runtime.setStatus(root, eventId, taskId, t.attemptId, "stale", reason, arm);
+      return "acted";
+    }
+    let attemptId = t?.attemptId;
+    if (!attemptId) {
+      attemptId = `${id}:judgment:open`;
+      await recorder.append(id, "attempt.opened", { taskId }, attemptId);
+    }
+    await runtime.setStatus(
+      root,
+      eventId,
+      taskId,
+      attemptId,
+      action === "fail" ? "failed" : "to-check",
+      reason,
+      arm,
+    );
+    return "acted";
+  }
+
+  function startWorker(taskId: string): Next {
+    const d = derive();
+    launch("worker", taskId, nextThreadId(d, taskId, "worker"));
+    return "acted";
+  }
+
+  /** A worker that is not running and did not finish its task. */
+  async function stalled(d: ThreadLog, w: ThreadRecord, t: FoldedTask | undefined): Promise<Next> {
+    const j = d.judgments.get(w.id);
+    if (j) return apply(d, w.id, j, t);
+    const { taskId } = w;
+    if (w.end?.status === "failed") {
+      const error = w.end.error ?? "failed";
+      return {
+        point: { kind: "thread-failed", taskId, error, report: report(taskId) },
+        threadId: w.id,
+      };
+    }
+    if (w.wakes < stuckLimit) {
+      const text = `You stopped, but ${taskId} is not finished. Report its outputs and set its status with checklist (done, to-check or failed).`;
+      wake(w, { text, sender: { kind: "runtime" } });
+      return "acted";
+    }
+    if (!t || t.threads.worker !== w.id) {
+      // It never wrote to the attempt now current; marking that attempt is not its to do.
+      const error = "the worker ended without touching its task";
+      return {
+        point: { kind: "thread-failed", taskId, error, report: report(taskId) },
+        threadId: w.id,
+      };
+    }
+    await runtime.setStatus(
+      w.id,
+      `${w.id}:stuck:${taskId}`,
+      taskId,
+      t.attemptId,
+      "to-check",
+      "The worker stopped before finishing this task.",
+      rule("stuck"),
+    );
+    return "acted";
+  }
+
+  /** The result of a check thread that is over: the task takes `checkResult` of its fold. */
+  async function finishCheck(t: FoldedTask, c: ThreadRecord): Promise<Next> {
+    const status = checkResult(t);
+    const verdict = t.checker?.verdict;
+    const reason =
+      status === "done"
+        ? "The second agent checked this task and agrees."
+        : verdict === undefined
+          ? "The check ended without a verdict."
+          : verdict === "needs-review"
+            ? "The second agent asks for a person to look."
+            : t.missingRequired.length > 0
+              ? `Required outputs are missing: ${t.missingRequired.join(", ")}.`
+              : "The check passed, but items are still open for a person.";
+    await runtime.setStatus(
+      c.id,
+      `${c.id}:result`,
+      t.id,
+      t.attemptId,
+      status,
+      reason,
+      rule("check-result"),
+    );
+    return "acted";
+  }
+
+  async function startCheck(d: ThreadLog, t: FoldedTask): Promise<Next> {
+    const id = nextThreadId(d, t.id, "check");
+    await runtime.setStatus(
+      id,
+      `${id}:start`,
+      t.id,
+      t.attemptId,
+      "under-review",
+      "A second agent is checking this task.",
+      rule("check-start"),
+    );
+    launch("check", t.id, id, { attemptId: t.attemptId });
+    return "acted";
+  }
+
+  async function stepTask(
+    f: Folded,
+    d: ThreadLog,
+    taskId: string,
+    ready: Set<string>,
+  ): Promise<Next> {
+    if (liveThread(d, taskId)) return "idle";
+    const t = f.tasks.find((x) => x.id === taskId);
+    // The latest started worker is in charge of the task. One that is not running and has
+    // not written to the current attempt (none yet, or a stale one an earlier worker wrote),
+    // or left it in progress, stalls: wake it, then a judgment point.
+    const worker = startedFor(d, taskId, "worker").at(-1);
+    if (
+      worker &&
+      (!t || t.status === "in-progress" || (t.status === "stale" && t.threads.worker !== worker.id))
+    ) {
+      return stalled(d, worker, t);
+    }
+    if (!t) return ready.has(taskId) ? startWorker(taskId) : "idle";
+    const workerId = worker?.id ?? "";
+    switch (t.status) {
+      case "stale":
+        return ready.has(taskId) ? startWorker(taskId) : "idle";
+      case "done":
+      case "to-check": {
+        const checkId = t.threads.check;
+        // A judgment left the task for a person: no check follows.
+        if (!checkId) return d.judgments.has(workerId) ? "idle" : startCheck(d, t);
+        const c = recordOf(d, checkId, "check", taskId);
+        if (t.status === "to-check" && t.checker?.verdict !== "passed" && !d.judgments.has(c.id)) {
+          return {
+            point: { kind: "check-disagreed", taskId, report: report(taskId) },
+            threadId: c.id,
+          };
+        }
+        const j = d.judgments.get(c.id);
+        return j ? apply(d, c.id, j, t) : "idle";
+      }
+      case "under-review": {
+        // The task went under review but its check thread has no stored start: start it.
+        if (!t.threads.check) {
+          launch("check", taskId, nextThreadId(d, taskId, "check"), { attemptId: t.attemptId });
+          return "acted";
+        }
+        const c = recordOf(d, t.threads.check, "check", taskId);
+        const j = d.judgments.get(c.id);
+        if (j) return apply(d, c.id, j, t);
+        if (c.end?.status === "failed") {
+          const error = c.end.error ?? "failed";
+          return {
+            point: { kind: "thread-failed", taskId, error, report: report(taskId) },
+            threadId: c.id,
+          };
+        }
+        return finishCheck(t, c);
+      }
+      default:
+        return "idle"; // failed: left for a person
+    }
+  }
+
+  /** One decision, inside the section: the first task with something to do. */
+  async function step(): Promise<Next> {
+    const f = runtime.view();
+    const d = derive();
+    const status = (id: string) => f.tasks.find((t) => t.id === id)?.status ?? "pending";
+    const ready = new Set(readyTasks(plan, status));
+    for (const { id } of plan) {
+      const next = await stepTask(f, d, id, ready);
+      if (next !== "idle") return next;
+    }
+    return "idle";
+  }
+
+  /** One bounded call to the judgment: it counts as failed if it errors or runs past the limit. */
+  async function decide(point: JudgmentPoint): Promise<Decision | { error: string }> {
+    const limit = AbortSignal.any([
+      AbortSignal.timeout(judgmentTimeoutMs),
+      ...(signal ? [signal] : []),
+    ]);
+    const expired = new Promise<never>((_, reject) =>
+      limit.addEventListener("abort", () => reject(new Error("timed out or cancelled")), {
+        once: true,
+      }),
+    );
+    try {
+      return await Promise.race([judgment.decide(point, limit), expired]);
+    } catch (error) {
+      return { error: String(error) };
+    }
+  }
+
+  /**
+   * Asks the arm outside the section, then records the point (the point, the arm's raw
+   * answer, the action taken and, on a fallback, why) as `<threadId>:judgment` before anything
+   * applies it. The next step applies it, as it would after a crash.
+   */
+  async function judge({ point, threadId: id }: { point: JudgmentPoint; threadId: string }) {
+    const answer = await decide(point);
+    await runtime.section(async () => {
+      if (derive().judgments.has(id)) return;
+      const { taskId } = point;
+      let action: Decision["action"] = "accept";
+      let fallback: "error" | "redo-cap" | undefined;
+      if ("error" in answer) {
+        // A person can still read the task; a judgment that failed must not stall the run.
+        fallback = "error";
+      } else if (answer.action === "redo" && redosOf(derive(), taskId) >= maxRedos) {
+        fallback = "redo-cap";
+      } else {
+        action = answer.action;
+      }
+      const { kind, ...input } = point;
+      await recorder.append(
+        root,
+        "judgment",
+        {
+          point: { kind, input },
+          arm: judgment.arm,
+          taskId,
+          ...(!("error" in answer) && { decision: answer }),
+          applied: { action, ...(fallback && { fallback }) },
+        },
+        `${id}${JUDGMENT_SUFFIX}`,
+      );
+    });
+  }
+
+  const redosOf = (d: ThreadLog, taskId: string) =>
+    [...d.judgments.values()].filter((j) => j.taskId === taskId && j.applied.action === "redo")
+      .length;
+
+  const fail = (error: unknown) => {
+    failure ??= error;
+    threads.abortAll();
+  };
+
+  /** Whether the run has failed: a step error, a thread refused or thrown, an event given up on. */
+  function failed(): boolean {
+    const cause = threads.failure() ?? recorder.failure();
+    if (cause !== undefined) fail(cause);
+    return failure !== undefined;
+  }
+
+  return {
+    /** Runs the plan to the end: every task done, failed, to check, or blocked behind one that is. */
+    async run(workflows?: PayloadOf<"thread.started">["workflows"]): Promise<Folded> {
+      // Not a derived id: each invocation of the root is a thread start of its own.
+      recorder.emit(root, "thread.started", {
+        parentThreadId: null,
+        kind: "supervisor",
+        ...(workflows && { workflows }),
+      });
+      try {
+        await runtime.start();
+        // `quiet`: the last step found nothing to do with no thread running.
+        let quiet = false;
+        while (!signal?.aborted && !failed()) {
+          const next = await runtime.section(step);
+          const wasQuiet = quiet;
+          quiet = next === "idle" && !threads.active();
+          if (next === "acted") continue;
+          if (next !== "idle") {
+            await judge(next);
+          } else if (threads.active()) {
+            await threads.anyIdle();
+            await recorder.flush(); // the thread's end is stored before the next step reads it
+          } else {
+            // Nothing is running: step once more after the log is stored, in case a thread
+            // ended between the step and this check.
+            await recorder.flush();
+            if (wasQuiet) break;
+          }
+        }
+      } catch (error) {
+        fail(error);
+      }
+      while (threads.active()) await threads.anyIdle();
+      await recorder.flush();
+      failed();
+      if (failure !== undefined) {
+        const error = failure instanceof Error ? failure.message : String(failure);
+        recorder.emit(root, "thread.ended", { status: "failed", error });
+        throw failure;
+      }
+      recorder.emit(root, "thread.ended", { status: signal?.aborted ? "cancelled" : "completed" });
+      return runtime.view();
+    },
+
+    /** `thread_message`: steer a running thread, or wake an idle one if its task is waiting on it. */
+    async message(from: string, to: string, text: string): Promise<ThreadMessageResult> {
+      if (to === from) throw new Error("a thread cannot message itself");
+      const sender = { kind: "thread", threadId: from } as const;
+      if (threads.send(to, text, sender)) return { delivery: "steered" };
+      // `send` refuses once the thread has ended, a moment before it stops running.
+      await threads.idle(to);
+      await recorder.flush();
+      await runtime.section(async () => {
+        const d = derive();
+        const r = d.threads.get(to);
+        if (!r) throw new Error(`no worker or check thread ${to} in this run`);
+        const t = runtime.taskOf(r.taskId);
+        const waiting =
+          r.role === "worker"
+            ? t?.status === "in-progress" && t.threads.worker === to
+            : t?.status === "under-review" && t.threads.check === to;
+        if (!waiting || liveThread(d, r.taskId)) {
+          throw new Error(`${to} is not waiting: its task ${r.taskId} is not being worked on.`);
+        }
+        wake(r, { text, sender }, r.role === "check" ? t?.attemptId : undefined);
+      });
+      return { delivery: "queued" };
+    },
+  };
+}

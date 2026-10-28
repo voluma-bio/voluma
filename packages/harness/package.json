@@ -13,8 +13,16 @@
     "./sandbox-session": "./src/sandbox-session.ts",
     "./tools/bash": "./src/tools/bash.ts",
     "./tools/tool": "./src/tools/tool.ts",
-    "./adapters/pi": "./src/adapters/pi/run-thread.ts",
-    "./adapters/http": "./src/adapters/http/client.ts"
+    "./adapters/pi": "./src/adapters/pi/start-thread.ts",
+    "./adapters/http": "./src/adapters/http/client.ts",
+    "./ports/evidence": "./src/ports/evidence.ts",
+    "./adapters/local/evidence": "./src/adapters/local/evidence.ts",
+    "./threads": "./src/threads.ts",
+    "./task-runtime": "./src/task-runtime.ts",
+    "./supervisor": "./src/supervisor.ts",
+    "./judgment": "./src/judgment.ts",
+    "./tools/task-tools": "./src/tools/task-tools.ts",
+    "./tools/thread-message": "./src/tools/thread-message.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"
@@ -27,6 +35,7 @@
     "@earendil-works/pi-ai": "1.4.0",
     "typebox": "^1.4.3",
     "zod": "catalog:",
-    "@voluma/contracts": "workspace:*"
+    "@voluma/contracts": "workspace:*",
+    "@voluma/workflow": "workspace:*"
   }
 }
