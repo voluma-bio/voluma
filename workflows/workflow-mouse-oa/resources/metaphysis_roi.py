@@ -1,10 +1,11 @@
 """Metaphyseal regions under the tibial growth plate: ROI-3 (deck #16-23) and the cortex for Ct.Th (deck #24, #25).
 
   python metaphysis_roi.py --hu-aligned tibia-hu.npy --mask tibia-mask.npy --hu-json hu.json --annotations annotations.json
-         --out <dir> [--threshold HU] [--start-um 50] [--length-um 200] [--cortex-clearance-um 20] [--cortex-mm X]
+         --proximal-face growth-plate-proximal-face.npy --proximal-valid growth-plate-proximal-valid.npy --out <dir> [--threshold HU] [--start-um 50] [--length-um 200] [--cortex-clearance-um 20] [--cortex-mm X]
          [--cortex-search-factor 2]
 
-The growth plate's distal face is the reference surface, and it must be traced (`growth_plate_distal_curves` in the
+The growth plate's distal face is the reference surface (one face for the whole run: `cortical` reads this script's output,
+it does not trace its own), and it must be traced (`growth_plate_distal_curves` in the
 annotations): ROI-3 starts 50 um below it, so a guessed band thickness (100-200 um on OA6-1RK) moves BV/TV from 23% to
 15% and is not a measurement. The bone threshold (default: the lab's 2.16/cm in this scan's HU, from hu.json's calibration)
 is used here only to estimate the cortex and to build the cortex mask; no label gates it.
@@ -13,6 +14,12 @@ cross-section, at least `cortex + clearance` from its outer edge. The cortex thi
 depth at which the bone fraction of the outer layers first drops below one half (estimated in the ROI-3 slices,
 reported as cortex_estimate_mm), or --cortex-mm. The cortex mask for Ct.Th is the bone within `search factor` times
 that depth of the outer edge, over 1.3 mm of shaft below the plate: it can include trabeculae that join the cortex.
+
+The script stops when the distal trace does not cover the V range of the proximal one (`--proximal-valid`, from iioc.py,
+marks where its proximal face was traced), or when the distal face lies at or above the proximal face (`--proximal-face`)
+inside the tibia: the band between them cannot be thinner than nothing. Where both faces are traced that means a point is
+wrong; where either is held constant past its curves' ends it means the curves must reach further, and the message says
+which face and sections.
 
 Writes roi3-tissue.npy, cortex.npy, growth-plate-distal-face.npy (2D W index per V,U), roi3.json (the
 parameters used and the cortex estimate), a QC image. It writes regions only: TV, BV and BV/TV of ROI-3 (deck #16-18) and Tb.N/Th/Sp,
@@ -38,12 +45,51 @@ if CORE is None:
              'directory above it (<workflows>/workflow-mouse-oa/resources/ with <workflows>/microct-analysis/ beside it)')
 sys.path[:0] = [str(HERE), str(CORE)]
 import sidecar
+from envelope import close_and_fill
 from iioc import load_annotations, traced_surface
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 CORTEX_SPAN_MM = 1.3  # shaft length below the plate the cortex mask covers: Ct.Th is asked at up to 1 mm
+
+
+def check_below_proximal(gd, dv, dlo, dhi, prox, pv, tib, vox):
+    """Stop when the distal face is not below the proximal one, inside the tibia over the V range both faces cover.
+
+    `dv` and `pv` say where each face comes from traced points; elsewhere it is the nearest trace held constant. A crossing
+    between two traced points is a wrong point (retrace lower or higher). A crossing where either face is held constant is
+    an unknown, and the cortex mask and Ct.Th read exactly there (the tibia's outer edge), so the message names the face
+    and the sections to extend.
+    """
+    prows = np.flatnonzero(pv.any(axis=1))
+    plo, phi = int(prows[0]), int(prows[-1])
+    if dlo > plo or dhi < phi:
+        sidecar.fail(f'the distal face is traced on sections V={dlo}..{dhi} but the proximal face on V={plo}..{phi}, so the distal '
+                     'face is not known over the whole proximal one: '
+                     + ' and '.join(f'trace the distal face on a section near V={v} too'
+                                    for v, miss in ((plo, dlo > plo), (phi, dhi < phi)) if miss))
+    footprint = ndi.binary_fill_holes(tib.any(axis=0))
+    vs = np.arange(gd.shape[0])[:, None]
+    cross = (gd <= prox) & footprint & (vs >= max(plo, dlo)) & (vs <= min(phi, dhi))
+    bad = cross & pv & dv
+    if bad.any():
+        vi, ui = np.nonzero(bad)
+        sidecar.fail(f'the traced distal face lies at or above the proximal face at {int(bad.sum())} traced (V, U) positions, '
+                     f'V={vi.min()}..{vi.max()}, U={ui.min()}..{ui.max()} (worst {float((prox - gd)[bad].max()) * vox * 1000:.0f} um): '
+                     'retrace the distal face lower, or the proximal face higher, on sections in that V range')
+    needs = []
+    for name, known in (('distal', dv), ('proximal', pv)):
+        held = cross & ~known
+        if held.any():
+            vi, ui = np.nonzero(held)
+            where = f'sections V={vi.min()}..{vi.max()} to U={ui.min()}..{ui.max()}'
+            needs.append(f'extend the distal curves on {where}' if name == 'distal'
+                         else f'extend the proximal curves on {where} (they are traced for iioc.py: rerun it, then this script)')
+    if needs:
+        sidecar.fail('the distal face is at or above the proximal face inside the tibia where a face is extrapolated past the end '
+                     f'of its curves ({int(cross.sum())} (V, U) positions, worst {float((prox - gd)[cross].max()) * vox * 1000:.0f} um): '
+                     + ' and '.join(needs) + ' so that both are traced across the tibia')
 
 
 def edge_distance(filled, w0, w1):
@@ -71,6 +117,8 @@ def main():
     ap.add_argument('--mask', required=True, help='tibia-mask.npy from tibia_frame.py')
     ap.add_argument('--hu-json', required=True, help='hu.json of the scan: the lab threshold in HU comes from its calibration')
     ap.add_argument('--annotations', required=True)
+    ap.add_argument('--proximal-face', required=True, help='growth-plate-proximal-face.npy from iioc.py: the distal face must lie below it')
+    ap.add_argument('--proximal-valid', required=True, help='growth-plate-proximal-valid.npy from iioc.py: where the proximal face was traced')
     ap.add_argument('--out', required=True)
     ap.add_argument('--threshold', type=float, help='bone threshold in HU (default: the lab threshold, 2.16/cm, from --hu-json)')
     ap.add_argument('--start-um', type=float, default=50.0, help='ROI-3 starts this far below the growth plate')
@@ -91,13 +139,19 @@ def main():
         )
     a.threshold = sidecar.bone_threshold_hu(a.hu_json, a.threshold)
     gd = traced_surface(ann['growth_plate_distal_curves'], 'growth_plate_distal_curves', h.shape)[0].astype(np.float32)
+    prox = np.load(a.proximal_face)
+    if prox.shape != gd.shape:
+        sidecar.fail(f'--proximal-face is {prox.shape} but the distal face is {gd.shape}: pass the face of the same tibia frame')
+    dv = traced_surface(ann['growth_plate_distal_curves'], 'growth_plate_distal_curves', h.shape)[1]
+    dlo, dhi = (f(int(k) for k in ann['growth_plate_distal_curves']['slices']) for f in (min, max))
+    check_below_proximal(gd, dv, dlo, dhi, prox, np.load(a.proximal_valid), tib, vox)
     w = np.arange(h.shape[0])[:, None, None]
     rel = (w - gd[None]) * vox * 1000  # um below the distal face
     w0 = max(int(np.floor(gd.min())), 0)
     w1 = min(int(np.ceil(gd.max() + CORTEX_SPAN_MM / vox)) + 1, h.shape[0])
     filled = np.zeros(h.shape, bool)
     for k in range(w0, w1):
-        filled[k] = ndi.binary_fill_holes(tib[k])
+        filled[k] = close_and_fill(tib[k])
     dist = edge_distance(filled, w0, w1)
     bone_all = np.asarray(h) > a.threshold  # HU alone; `filled` (from the tibia label) only limits where it is looked at
     slab = (rel >= a.start_um) & (rel < a.start_um + a.length_um)
@@ -112,7 +166,7 @@ def main():
     meta = {'distal_face': 'traced distal curves', 'cortex_estimate_mm': est, 'cortex_mm_used': cortex_mm, 'threshold': a.threshold}
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    inputs = [a.hu_aligned, a.mask, a.annotations]
+    inputs = [a.hu_aligned, a.mask, a.annotations, a.proximal_face, a.proximal_valid]
     params = dict(
         meta,
         start_um=a.start_um,

@@ -26,6 +26,7 @@
       "name": "fibula",
       "volume_mm3": [0.744, 1.29],
       "components": 1,
+      "must_touch": [2],
       "notes": "Touches the tibia and can fuse with it on a threshold; see the prompts section of anatomy.md. Range is the OA6-1RK reference volume 0.992 mm3 widened (x0.75 to x1.3); one scan only (n=1), not a population range."
     },
     {
@@ -88,5 +89,5 @@
   "window_hu": [1000, 8000],
   "source": "review-07-separated of the OA6-1RK reference run, spacing 0.0105 mm isotropic; n=1 scan",
   "segmentation_threshold_hu": 2500,
-  "threshold_note": "2500 HU builds masks (orientation, box snapping, envelopes, candidates). It is not the BV threshold: measurement scripts derive the lab's 2.16/cm from hu.json."
+  "threshold_note": "2500 HU builds masks (orientation, box snapping, clipping to bone, candidates). It is not the BV threshold: measurement scripts derive the lab's 2.16/cm from hu.json."
 }

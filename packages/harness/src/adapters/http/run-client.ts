@@ -14,6 +14,7 @@
  * HISTORY_BUDGET_MS; they are idempotent on the server (an idx repeated with the same
  * content is a no-op), so network and 5xx failures retry. A 409 on a history append is the
  * port's `HistoryConflict`. `storedEvents` is the resume read, paged (`@voluma/contracts/events`).
+ * `live` posts a batch of live frames (`live.ts`): one attempt, and the caller drops a failure.
  * `heartbeat` makes one attempt: the caller keeps the usage and resends it if this throws.
  * `report` ends or releases the run; a 409 means the server ended the run first or the lease
  * is no longer ours, so it returns. A network failure is retried for REPORT_BUDGET_MS; the
@@ -27,6 +28,7 @@ import {
   type ReportRequest,
   type Usage,
 } from "@voluma/contracts/runner";
+import type { LiveFrame } from "@voluma/contracts/stream";
 import type { EventLog } from "../../ports/event-log";
 import { type History, HistoryConflict } from "../../ports/history";
 import { LeaseLost } from "../../ports/lease-lost";
@@ -39,6 +41,8 @@ export interface RunClient extends EventLog, History {
   storedEvents(): Promise<RunEvent[]>;
   heartbeat(usage: Usage): Promise<HeartbeatResponse>;
   report(report: ReportRequest["report"]): Promise<void>;
+  /** One batch of live frames: a single attempt, no retry (they are best effort). */
+  live(frames: LiveFrame[]): Promise<void>;
 }
 
 export function runClient(
@@ -96,6 +100,9 @@ export function runClient(
         }
         throw error;
       }
+    },
+    async live(frames) {
+      await post(`${runPath}/live`, { frames });
     },
     async heartbeat(usage) {
       const response = await post(`${runPath}/heartbeat`, { usage });

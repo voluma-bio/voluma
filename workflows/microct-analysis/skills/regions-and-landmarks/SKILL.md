@@ -16,7 +16,7 @@ instead of assembling the region here).
 
 ## Loop
 
-1. **Render** a view of the structure (`visual-check`). For a 3D pick, render one view with `render_surfaces.py --azimuth DEG` (a 100 px grid) and keep its `.camera.json`: it holds the `image` and `camera` keys of the surface-pick JSON.
+1. **Render** a view of the structure (`visual-check`). For a 3D pick, render one view with `render_surfaces.py --azimuth DEG` (a 100 px grid) and keep its `.camera.json`: it holds the `image` and `camera` keys of the surface-pick JSON. Place the two ends of a length on a view that shows that length side-on (for a bone, along the shaft, not looking at the joint face): an end-on view foreshortens it and the points land across it.
 2. **Pick** on it: read the pixel from the image's pixel grid, write the picks JSON.
 3. **Snap**: run `pick.py`. It writes `points.json` and `pick-check.jpg`.
 4. **Look** at `pick-check.jpg` (`view_image`): red x is your pick, green circle is where it landed. Check the circle sits on

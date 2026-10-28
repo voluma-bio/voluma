@@ -11,11 +11,19 @@
  * a provider's prompt cache keeps hitting the prefix. The context grows by one wake and
  * one answer per wake.
  */
-import type { Api, AssistantMessage, Context, Message, Model } from "@earendil-works/pi-ai";
+import type {
+  Api,
+  AssistantMessage,
+  AssistantMessageEvent,
+  Context,
+  Message,
+  Model,
+} from "@earendil-works/pi-ai";
 import { WAKE_ERROR_MAX, WAKE_NOTE_MAX } from "@voluma/contracts/events";
 import type { WorkflowPlan } from "@voluma/contracts/workflow";
 import type { PlanChange } from "@voluma/workflow/plan";
 import { z } from "zod";
+import { usageOf } from "./model-usage";
 import type { PayloadOf } from "./recorder";
 import type { PlanTask } from "./task-runtime";
 
@@ -55,6 +63,8 @@ export type Decision = z.infer<typeof decisionSchema>;
  * needs, and at `run-started` a change to the plan (absent: keep the computed one).
  */
 export interface Reply {
+  /** The model call's usage, recorded on the `wake`. */
+  usage?: Wake["usage"];
   note?: string;
   decision?: Decision;
   change?: PlanChange;
@@ -75,8 +85,16 @@ export type Wake = PayloadOf<"wake">;
 export interface MainThread {
   /** The model as `provider/id`, which each `wake` records. */
   model: string;
-  /** `signal` aborts at the supervisor's deadline or when the run is cancelled; stop then. */
-  ask(point: WakePoint, past: readonly Wake[], signal: AbortSignal): Promise<Reply>;
+  /**
+   * `signal` aborts at the supervisor's deadline or when the run is cancelled; stop then.
+   * `onEvent` gets the model's reply as it streams (live frames; the answer is the `wake`).
+   */
+  ask(
+    point: WakePoint,
+    past: readonly Wake[],
+    signal: AbortSignal,
+    onEvent?: (event: AssistantMessageEvent) => void,
+  ): Promise<Reply>;
 }
 
 /** The role prompt, fixed for the run: a changed one would miss the cache and change what resume asks. */
@@ -158,14 +176,19 @@ function conversation(model: Model<Api>, past: readonly Wake[], point: Wake["poi
 export function llmMainThread(
   model: Model<Api>,
   system: string,
-  complete: (context: Context, signal: AbortSignal) => Promise<AssistantMessage>,
+  complete: (
+    context: Context,
+    signal: AbortSignal,
+    onEvent?: (event: AssistantMessageEvent) => void,
+  ) => Promise<AssistantMessage>,
 ): MainThread {
   return {
     model: `${model.provider}/${model.id}`,
-    async ask(point, past, signal) {
+    async ask(point, past, signal, onEvent) {
       const reply = await complete(
         { systemPrompt: system, messages: conversation(model, past, pointOf(point)) },
         signal,
+        onEvent,
       );
       const text = reply.content.flatMap((c) => (c.type === "text" ? [c.text] : [])).join("");
       const json = text.match(/\{[\s\S]*\}/)?.[0];
@@ -176,6 +199,7 @@ export function llmMainThread(
         throw new Error("the main thread gave no decision at a judgment point");
       }
       return {
+        usage: usageOf(reply),
         note: answer.note?.slice(0, WAKE_NOTE_MAX),
         decision: judged ? answer.decision : undefined,
         change: point.kind === "run-started" ? answer.change : undefined,

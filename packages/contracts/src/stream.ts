@@ -22,9 +22,14 @@
  * that as `readyState === CLOSED` and can then refetch the run, or call `getMe` to tell a
  * sign-out from an ended run.
  *
- * Reserved, not served yet: `liveFrameSchema` below is the shape of token-by-token
- * streaming (text and tool-argument deltas, tool output chunks) for the review
- * chat. No route carries it.
+ * Live frames (`liveFrameSchema` below) ride the same response as a *named* SSE event,
+ * `event: live`, `data:` one frame's JSON, and never an `id:` line, so `Last-Event-ID` stays
+ * the durable `seq`. They are the model's output as it is written (text, reasoning, tool
+ * arguments, tool output), are not stored and have no `seq`, and are sent only to streams
+ * open when they arrive: a reconnect or reload does not replay them, and a reply that was
+ * mid-stream then appears only when its durable `message` event does. Frames are best
+ * effort, so a client drops a frame that does not fit (see `offset`) and treats the
+ * durable event as the record.
  */
 import { z } from "zod";
 import { runIdSchema, toolCallIdSchema } from "./ids";
@@ -35,13 +40,15 @@ const nonNegInt = z.number().int().nonnegative();
 /**
  * `offset` is the index in `text`'s accumulated string (UTF-16 code units, as
  * JS counts) where this delta starts; the first delta of a reply or a call is
- * 0. The hub and the browser append a delta only when its `offset` equals the
+ * 0. The browser appends a delta only when its `offset` equals the
  * length they hold, so a lost, repeated or reordered frame is dropped instead
  * of corrupting the partial.
  *
  * `messageId` is the `id` of the durable `message` event that will complete
  * the reply, picked before streaming starts. A thread streams one reply at a
- * time. No thinking text is streamed.
+ * time. A frame's text is appended to what the client holds for its key; the durable
+ * `message` event with that `messageId` replaces the partial (its `text` and `reasoning` are
+ * the final strings).
  */
 const frame = <T extends string, P extends z.ZodRawShape>(type: T, payload: P) =>
   z.object({ type: z.literal(type), runId: runIdSchema, threadId: nonEmpty, ...payload });
@@ -49,6 +56,13 @@ const frame = <T extends string, P extends z.ZodRawShape>(type: T, payload: P) =
 export const liveFrameSchema = z.discriminatedUnion("type", [
   /** More of the reply's text. */
   frame("text.delta", { messageId: nonEmpty, offset: nonNegInt, text: z.string() }),
+  /**
+   * More of the reply's reasoning (the model's thinking), as one string per reply: the
+   * provider's thinking text as it streams, with `offset` counting across thinking blocks.
+   * Providers add their own separators, so the deltas can differ in whitespace from the
+   * durable `message`'s `reasoning` (the blocks joined with a blank line), which replaces them.
+   */
+  frame("reasoning.delta", { messageId: nonEmpty, offset: nonNegInt, text: z.string() }),
   /** More of a tool call's JSON arguments, as the model writes them. */
   frame("tool.arguments.delta", {
     messageId: nonEmpty,
@@ -68,4 +82,6 @@ export const liveFrameSchema = z.discriminatedUnion("type", [
     text: z.string(),
   }),
 ]);
+/** The SSE event name that carries a `LiveFrame`. */
+export const LIVE_EVENT = "live";
 export type LiveFrame = z.infer<typeof liveFrameSchema>;
