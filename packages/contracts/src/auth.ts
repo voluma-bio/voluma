@@ -20,11 +20,18 @@
  *   POST /api/auth/password         body `passwordSignInRequestSchema` → 200
  *                                     `meResponseSchema` and the session cookie,
  *                                     for scripts (the scan upload CLI); a browser
- *                                     signs in through `login`. 401 for a wrong
- *                                     email or password, 403 for a user who belongs
- *                                     to no lab
+ *                                     signs in through `login`. 401 when the
+ *                                     identity provider refuses the sign-in (a wrong
+ *                                     email or password, or an account that must
+ *                                     sign in another way: SSO, MFA), 403 for a user
+ *                                     who belongs to no allowed organization, 429
+ *                                     when the provider rate-limits attempts. A
+ *                                     script, which sends no `Origin` by itself,
+ *                                     must send the rules below on this and every
+ *                                     later call: `Origin: <app URL>` and
+ *                                     `content-type: application/json`
  *
- * Rules for every cookie-authenticated request under `/api`:
+ * Rules for every request under `/api` that doesn't carry the runner's bearer token:
  *   - A non-GET/HEAD request must send `content-type: application/json`, or
  *     the server answers 415.
  *   - `Origin` must equal the app's origin, or the server answers 403

@@ -20,26 +20,37 @@
  *   POST /api/run/inputs           body `createUploadRequestSchema` → 200
  *                                  `createUploadResponseSchema`: a new upload and a URL per
  *                                  file (see Uploads); 403 for a guest; 413 over the
- *                                  server's limits
+ *                                  server's limits; 429 when the caller already has as
+ *                                  many uploads open as the server allows
  *   POST /api/run/inputs/:id/complete → 200 `inputSchema` once every declared file is
  *                                  stored with its declared size; 409
  *                                  `completeUploadConflictSchema` listing the files that
- *                                  aren't; completing a completed upload is a no-op
+ *                                  aren't; completing a completed upload is a no-op; 404
+ *                                  unless the caller is the uploader
  *
  * Uploads. A scan's files never pass through the API: the server answers a create
- * with a presigned `PUT` URL per file, straight to object storage (`inputKey(inputId,
- * path)` in `r2.ts`), valid until `expiresAt`. The client PUTs each file's bytes with
- * `Content-Length` equal to the declared `size` (the signature covers it; any other
- * length is refused by storage), retrying a file by PUTting it again to the same URL,
- * then calls complete. Until complete succeeds the input is not listed and a run can't
- * start on it (`startRun` answers 409). One PUT per file, no multipart: a file is at
- * most `MAX_UPLOAD_FILE_BYTES`, the object store's single-PUT limit; a scan is a folder
- * of slices, or one volume of a few GB at most, so a retry re-sends one file. Creating
- * an upload needs a member account (a guest gets 403); the files, the bytes and the
- * paths are checked against the server's limits and the rules on `uploadPathSchema`.
- * The input is the uploader's: under scope `self` only they list and start on it, under
- * `lab` the whole org does. Complete answers 404 for an input the caller can't read, and
- * 403 to a reader who isn't its uploader.
+ * with a presigned `PUT` URL per file, straight to object storage, valid until
+ * `expiresAt` (at least 6 h after the create). The client PUTs each file's bytes with
+ * `Content-Length` equal to the declared `size` and no other required header (no
+ * `Content-Type` is signed, so any or none may be sent); the server signs
+ * `content-length` into each URL, so storage refuses a body of any other length. A
+ * failed PUT is retried by PUTting the file again to the same URL. Then the client calls
+ * complete: the server checks every declared file is stored at its declared size and
+ * moves the files to the input's own prefix (`inputKey` in `r2.ts`), which no URL can
+ * write. The URLs write only to the upload's staging prefix (`uploadKey`), so a URL
+ * used after complete changes nothing a run reads. After `expiresAt` an upload that was
+ * not completed can't be finished by new PUTs; create a new one. The server may delete an
+ * uncompleted upload and its files any time after `expiresAt`.
+ *
+ * Until complete succeeds the input is its uploader's alone: it isn't listed, complete
+ * and `startRun` answer 404 to everyone else, and `startRun` answers 409 to the uploader.
+ * Once complete, it is read like any input (scoping below): under scope `self` only the
+ * uploader lists and starts on it, under `lab` the whole org does. One PUT per file, no
+ * multipart: a file is at most `MAX_UPLOAD_FILE_BYTES`, the object store's single-PUT
+ * limit; a scan is a folder of slices, or one volume of a few GB at most, so a retry
+ * re-sends one file. Creating an upload needs a member account (judges included; a guest
+ * gets 403). The server limits files and bytes per upload, and how many uncompleted,
+ * unexpired uploads a member may have open.
  *
  * Org scoping, enforced by the server on every call and every read:
  *   - Every read is filtered by the caller's `labId`. Another org's run or
@@ -237,14 +248,26 @@ export type ResendKeysRequest = z.infer<typeof resendKeysRequestSchema>;
 /** The object store's limit on one PUT (R2: 5 GB); a larger file can't be uploaded. */
 export const MAX_UPLOAD_FILE_BYTES = 5_000_000_000;
 
+/** Bidirectional formatting characters, which can disguise a name in the picker. */
+const BIDI = /[\u202a-\u202e\u2066-\u2069]/;
+
 /**
  * A file's path inside the uploaded folder, as `inputKey` stores it: relative, `/`
- * separated, no `.` or `..` segment, no empty segment, no backslash or control
- * character, at most 300 characters. The worker sees it at `/inputs/<path>`.
+ * separated, no `.` or `..` segment, no empty segment, no backslash, control or
+ * bidirectional-formatting character, Unicode NFC, at most 300 characters. The worker
+ * sees it at `/inputs/<path>`.
  */
 export const uploadPathSchema = relativePathSchema.refine(
-  (p) => p.length <= 300 && ![...p].some((ch) => ch === "\\" || ch < " " || ch === "\x7f"),
-  { message: "must be at most 300 characters, with no backslash or control character" },
+  (p) =>
+    p.length <= 300 &&
+    p === p.normalize("NFC") &&
+    !p.includes("\\") &&
+    !/\p{Cc}/u.test(p) &&
+    !BIDI.test(p),
+  {
+    message:
+      "must be NFC, at most 300 characters, with no backslash, control or bidi-formatting character",
+  },
 );
 
 export const uploadFileSchema = z.object({
@@ -257,12 +280,24 @@ export type UploadFile = z.infer<typeof uploadFileSchema>;
 export const createUploadRequestSchema = z.object({
   /** Shown in the scan picker and on every run of it. */
   name: z.string().trim().min(1).max(200),
-  /** Each path once. The server's own limits on count and total bytes are lower. */
+  /**
+   * Each path once, and no path is also a folder of another (`a` and `a/b`): a mounted
+   * folder can't hold both. The server's own limits on count and total bytes are lower.
+   */
   files: z
     .array(uploadFileSchema)
     .min(1)
     .max(10_000)
-    .refine((files) => new Set(files.map((f) => f.path)).size === files.length, "duplicate path"),
+    .refine((files) => new Set(files.map((f) => f.path)).size === files.length, "duplicate path")
+    .refine((files) => {
+      const paths = new Set(files.map((f) => f.path));
+      return files.every((f) =>
+        f.path
+          .split("/")
+          .slice(0, -1)
+          .every((_, i, dirs) => !paths.has(dirs.slice(0, i + 1).join("/"))),
+      );
+    }, "a path is also another path's folder"),
 });
 export type CreateUploadRequest = z.infer<typeof createUploadRequestSchema>;
 
@@ -270,7 +305,7 @@ export const createUploadResponseSchema = z.object({
   inputId: inputIdSchema,
   /** One per requested file, in request order. */
   uploads: z.array(z.object({ path: uploadPathSchema, url: z.url() })),
-  /** When the URLs stop working. Complete still works after it if every file is stored. */
+  /** When the URLs stop working; see Uploads. */
   expiresAt: z.iso.datetime(),
 });
 export type CreateUploadResponse = z.infer<typeof createUploadResponseSchema>;
