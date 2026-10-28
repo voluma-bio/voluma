@@ -44,7 +44,8 @@ const meFields = {
  * Who is signed in. `member` is a WorkOS account (a lab member or a judge);
  * `visitor` is a guest: anyone without an account, given a server-minted id
  * by `POST /api/auth/guest`, with no email. A guest has no sign-out; signing
- * in as a member replaces it, and signing out returns to it.
+ * in as a member replaces it, and signing out returns to being a guest (the
+ * browser's earlier guest, or a new one if it had none).
  */
 export const meResponseSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("member"), email: z.string(), ...meFields }),
