@@ -12,7 +12,8 @@
  * - Read-only inputs flagged `stage` are copied to local disk at their path at create, 32
  *   files at a time (the copy is writable: commands run as root, and a sandbox cannot
  *   remount or `chattr` a path or run as another user and still write the mounts); the bucket is mounted at a private path under /staged for the copy.
- * - Each sandbox gets a fresh name and the tags `{run, name}`. Creating one first
+ * - Each sandbox gets a fresh name and the tags `{run, name, startedAt}` (`startedAt` is epoch
+ *   ms; the SDK exposes no creation time, and `sandboxes:clean` reports age from it). Creating one first
  *   terminates any live sandbox with the same tags: one a dead process left behind would
  *   otherwise keep running its command, with write access to /outputs, beside the resumed thread.
  *   That assumes one runner per run (v0).
@@ -53,6 +54,17 @@ const CREDENTIAL_MARGIN_SECONDS = 15 * 60;
 // Modal's own exec deadline is a backstop behind `timeout -k`; it must not cut that short.
 const EXEC_DEADLINE_MARGIN_SECONDS = 30;
 
+/** The Modal app that owns every sandbox the runner creates; `sandboxes:clean` sweeps it. */
+export const RUNS_APP = "voluma-runs";
+
+/** Asks Modal to terminate every live sandbox of a run, without waiting for it to stop. */
+export async function terminateRun(modal: ModalSandboxConfig["modal"], runId: string) {
+  const client = new ModalClient(modal);
+  const app = await client.apps.fromName(RUNS_APP);
+  const live = client.sandboxes.list({ appId: app.appId, tags: { run: runId } });
+  for await (const sandbox of live) await sandbox.terminate();
+}
+
 export function createModalSandbox(config: ModalSandboxConfig): CreateSandbox {
   const client = new ModalClient(config.modal);
   return async (spec) => {
@@ -79,7 +91,7 @@ export function createModalSandbox(config: ModalSandboxConfig): CreateSandbox {
       await old.terminate({ wait: true });
     const modal = await client.sandboxes.create(app, image, {
       name: `${spec.runId}.${spec.name}.${randomUUID().slice(0, 8)}`,
-      tags,
+      tags: { ...tags, startedAt: String(Date.now()) },
       cpu: spec.cpu,
       memoryMiB: spec.memoryMiB,
       gpu: spec.gpu,
@@ -104,9 +116,11 @@ export function createModalSandbox(config: ModalSandboxConfig): CreateSandbox {
 class ModalSandboxAdapter implements Sandbox {
   readonly #modal: ModalSandbox;
   readonly #mounts: SandboxMount[];
+  readonly #lifetimeSeconds: number;
 
   constructor(modal: ModalSandbox, spec: SandboxSpec) {
     this.#modal = modal;
+    this.#lifetimeSeconds = spec.lifetimeSeconds;
     this.#mounts = spec.mounts;
   }
 
@@ -138,6 +152,8 @@ class ModalSandboxAdapter implements Sandbox {
       yield { type: "exit", code: 143 };
       return;
     }
+    // A command must not outlive the sandbox that Modal ends at its lifetime.
+    const timeoutSeconds = Math.min(request.timeoutSeconds, this.#lifetimeSeconds);
     const id = randomUUID();
     // The inner shell records its process group, then becomes the command.
     const script = `mkdir -p ${GROUP_DIR}; awk '{print $5}' /proc/$$/stat > ${GROUP_DIR}/${id}; exec bash -c "$0"`;
@@ -145,7 +161,7 @@ class ModalSandboxAdapter implements Sandbox {
       "timeout",
       "-k",
       String(KILL_GRACE_SECONDS),
-      String(request.timeoutSeconds),
+      String(timeoutSeconds),
       "bash",
       "-c",
       script,
@@ -158,11 +174,7 @@ class ModalSandboxAdapter implements Sandbox {
     signal?.addEventListener("abort", kill);
     let finished = false;
     try {
-      for await (const chunk of this.#run(
-        argv,
-        request.timeoutSeconds + KILL_GRACE_SECONDS,
-        request.env,
-      )) {
+      for await (const chunk of this.#run(argv, timeoutSeconds + KILL_GRACE_SECONDS, request.env)) {
         finished = chunk.type === "exit";
         // The caller knows it aborted, so say so whatever the signal made the exit code.
         yield finished && signal?.aborted ? { type: "exit", code: 143 } : chunk;

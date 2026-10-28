@@ -71,7 +71,8 @@ checklist, check threads, and review chat threads.
   `pnpm --filter @voluma/runner run-task --provider openai --model <id> --task "<text>"`
   (needs `pnpm --filter @voluma/api dev` running and the keys in `.env`, which the runner reads
   into a config object rather than `process.env`; model keys are `VOLUMA_<PROVIDER>_API_KEY`). The sandbox is
-  created on the first `bash` call and destroyed at the end; Ctrl-C kills the running
+  created on the first `bash` call and destroyed at the end (every exit path, and what a crash
+  leaves: `apps/runner/.context/CONTEXT.md`); Ctrl-C kills the running
   command and ends the thread as cancelled; the same `--run` and `--thread` resume it.
   A Claude `refusal` ends the thread as failed with that reason. The `bash` tool lives
   in `packages/harness/src/tools`; it caps what the model sees (head and tail) and

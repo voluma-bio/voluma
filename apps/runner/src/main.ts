@@ -1,7 +1,7 @@
 /**
  * The runner: runs one Pi agent thread on one task, with `bash` as its only tool, in a
  * Modal sandbox created on the first command. Everything is recorded through the API
- * (events and Pi messages) and printed. Ctrl-C aborts the running command and ends the
+ * (events and Pi messages) and printed. Ctrl-C (or SIGTERM, SIGHUP) aborts the running command and ends the
  * thread as cancelled; running again with the same --run and --thread resumes it. A
  * thread that already finished does nothing until given a new message with --input.
  *
@@ -25,7 +25,7 @@ import { recorder } from "@voluma/harness/recorder";
 import { sandboxSession } from "@voluma/harness/sandbox-session";
 import { bashTool } from "@voluma/harness/tools/bash";
 import { optional, required } from "./config.ts";
-import { createModalSandbox } from "./modal-sandbox.ts";
+import { createModalSandbox, RUNS_APP, terminateRun } from "./modal-sandbox.ts";
 
 const { values } = parseArgs({
   options: {
@@ -74,12 +74,17 @@ const events = recorder(
 
 const modalTokenId = optional("MODAL_TOKEN_ID");
 const modalTokenSecret = optional("MODAL_TOKEN_SECRET");
+const modal =
+  modalTokenId && modalTokenSecret
+    ? { tokenId: modalTokenId, tokenSecret: modalTokenSecret }
+    : undefined;
+const lifetimeSeconds = Number(optional("VOLUMA_SANDBOX_LIFETIME_SECONDS") ?? 3600);
+if (!Number.isInteger(lifetimeSeconds) || lifetimeSeconds <= 0) {
+  throw new Error("VOLUMA_SANDBOX_LIFETIME_SECONDS must be a positive integer");
+}
 const createSandbox = createModalSandbox({
-  appName: "voluma-runs",
-  modal:
-    modalTokenId && modalTokenSecret
-      ? { tokenId: modalTokenId, tokenSecret: modalTokenSecret }
-      : undefined,
+  appName: RUNS_APP,
+  modal,
   r2: {
     accountId: required("R2_ACCOUNT_ID"),
     bucket: required("R2_BUCKET"),
@@ -95,19 +100,37 @@ const sandbox = sandboxSession(
       image: optional("VOLUMA_SANDBOX_IMAGE") ?? "voluma-microct",
       cpu: 2,
       memoryMiB: 4096,
-      lifetimeSeconds: 3600,
-      idleSeconds: 900,
+      lifetimeSeconds,
+      idleSeconds: 300,
       mounts: layout.mounts,
     }),
   (id, state, detail) => events.emit(id, "sandbox", { name: "main", state, detail }),
 );
 
 const abort = new AbortController();
-process.on("SIGINT", () => {
-  if (abort.signal.aborted) process.exit(130);
-  console.error("\ninterrupted: stopping the running command (Ctrl-C again to quit now)");
-  abort.abort();
-});
+// First SIGINT/SIGTERM/SIGHUP stops the running command; the `finally` below then closes the
+// sandbox. A second one closes it now, bounded, and exits. Closing the sandbox waits for any
+// creation in flight, so the second signal also terminates the run's sandboxes by tag.
+const FORCE_CLOSE_MS = 5000;
+// After a hangup the terminal is gone and any write throws EIO, which would end the process
+// before it cleans up.
+for (const stream of [process.stdout, process.stderr]) stream.on("error", () => {});
+for (const name of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+  process.on(name, () => {
+    if (abort.signal.aborted) {
+      console.error(`\n${name}: closing the sandbox and quitting`);
+      void Promise.race([
+        Promise.allSettled([sandbox.close(), terminateRun(modal, runId)]),
+        new Promise((done) => setTimeout(done, FORCE_CLOSE_MS)),
+      ])
+        .catch(() => {})
+        .finally(() => process.exit(130));
+      return;
+    }
+    console.error(`\n${name}: stopping the running command (signal again to quit now)`);
+    abort.abort();
+  });
+}
 
 console.log(`run ${runId}  thread ${threadId}  model ${provider}/${modelId}`);
 try {
@@ -139,8 +162,11 @@ try {
   );
   process.exitCode = outcome.status === "completed" ? 0 : 1;
 } finally {
-  await sandbox.close();
-  await events.flush();
+  try {
+    await sandbox.close();
+  } finally {
+    await events.flush();
+  }
 }
 
 function printEvent(event: Parameters<typeof api.append>[0]): void {
