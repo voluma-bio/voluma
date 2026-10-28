@@ -18,6 +18,7 @@ import { createModels } from "@earendil-works/pi-ai";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { metaProvider } from "@earendil-works/pi-ai/providers/meta";
 import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
+import { runIdSchema } from "@voluma/contracts/ids";
 import { referencePrefix } from "@voluma/contracts/r2";
 import { httpClient } from "@voluma/harness/adapters/http";
 import { startThread } from "@voluma/harness/adapters/pi";
@@ -44,8 +45,9 @@ if (!provider || !modelId || !task) {
     "usage: main.ts --provider openai|anthropic|meta --model <id> --task <text> [--run <id>] [--thread <id>] [--input <text>]",
   );
 }
-const runId = values.run ?? `run-${randomUUID().slice(0, 8)}`;
+const runId = runIdSchema.parse(values.run ?? `run-${randomUUID().slice(0, 8)}`);
 const threadId = values.thread ?? `${runId}.main`;
+if (!threadId.startsWith(`${runId}.`)) throw new Error(`--thread must begin with "${runId}."`);
 
 const models = createModels();
 const providers = { anthropic: anthropicProvider, meta: metaProvider, openai: openaiProvider };
@@ -56,13 +58,20 @@ const model = models.getModel(provider, modelId);
 if (!model) throw new Error(`unknown model ${provider}/${modelId}`);
 
 const apiUrl = optional("VOLUMA_API_URL");
-const api = httpClient(
-  apiUrl ? { baseUrl: apiUrl, token: required("VOLUMA_API_TOKEN") } : localApi(),
-);
+// Every ingest write carries the lease of a claimed run (`@voluma/contracts/runner`). This CLI
+// should claim a queued run and take the token from the claim; until the API serves claims
+// (lane A) and the claimer exists (lane E), the token is passed in. Today's API checks no token,
+// so any value works.
+const api = httpClient({
+  ...(apiUrl ? { baseUrl: apiUrl, token: required("VOLUMA_API_TOKEN") } : localApi()),
+  runId,
+  leaseToken: required("VOLUMA_LEASE_TOKEN"),
+});
 const layout = runLayout(runId, referencePrefix("scan"));
 const systemPrompt = `You are an analysis agent with one tool, bash, which runs commands in a sandbox.
 Python 3.12 with numpy, scipy, scikit-image, pydicom, nibabel and SimpleITK is installed.
 Check what you report against the files themselves, and say which file or header each number came from.`;
+const abort = new AbortController();
 const events = recorder(
   {
     async append(event) {
@@ -71,6 +80,7 @@ const events = recorder(
     },
   },
   runId,
+  () => abort.abort(),
 );
 
 const modalTokenId = optional("MODAL_TOKEN_ID");
@@ -83,6 +93,11 @@ const lifetimeSeconds = Number(optional("VOLUMA_SANDBOX_LIFETIME_SECONDS") ?? 36
 if (!Number.isInteger(lifetimeSeconds) || lifetimeSeconds <= 0) {
   throw new Error("VOLUMA_SANDBOX_LIFETIME_SECONDS must be a positive integer");
 }
+// The floor keeps a sandbox from idling out before its inputs finish staging.
+const idleSeconds = Number(optional("VOLUMA_SANDBOX_IDLE_SECONDS") ?? 300);
+if (!Number.isInteger(idleSeconds) || idleSeconds < 30) {
+  throw new Error("VOLUMA_SANDBOX_IDLE_SECONDS must be an integer of at least 30");
+}
 const createSandbox = createModalSandbox({
   appName: RUNS_APP,
   modal,
@@ -93,7 +108,7 @@ const createSandbox = createModalSandbox({
     cloudflareApiToken: required("CLOUDFLARE_API_TOKEN"),
   },
 });
-const sandbox = sandboxSession(
+const session = sandboxSession(
   () =>
     createSandbox({
       runId,
@@ -102,13 +117,13 @@ const sandbox = sandboxSession(
       cpu: 2,
       memoryMiB: 4096,
       lifetimeSeconds,
-      idleSeconds: 300,
+      idleSeconds,
       mounts: layout.mounts,
     }),
   (id, state, detail) => events.emit(id, "sandbox", { name: "main", state, detail }),
+  layout.restartNote,
 );
 
-const abort = new AbortController();
 // First SIGINT/SIGTERM/SIGHUP stops the running command; the `finally` below then closes the
 // sandbox. A second one closes it now, bounded, and exits. Closing the sandbox waits for any
 // creation in flight, so the second signal also terminates the run's sandboxes by tag.
@@ -121,7 +136,7 @@ for (const name of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
     if (abort.signal.aborted) {
       console.error(`\n${name}: closing the sandbox and quitting`);
       void Promise.race([
-        Promise.allSettled([sandbox.close(), terminateRun(modal, runId)]),
+        Promise.allSettled([session.close(), terminateRun(modal, runId)]),
         new Promise((done) => setTimeout(done, FORCE_CLOSE_MS)),
       ])
         .catch(() => {})
@@ -139,17 +154,17 @@ try {
     runId,
     threadId,
     kind: "worker",
+    taskId: "cli",
     model,
     // The key goes with each request; pi-ai is never left to look in process.env.
     streamFn: (m, context, options) => models.streamSimple(m, context, { ...options, apiKey }),
     systemPrompt,
     prompt: task,
     input: values.input ? { text: values.input, sender: { kind: "person" } } : undefined,
-    resumeNote: layout.restartNote,
     tools: [bashTool(layout)],
     recorder: events,
     history: api,
-    sandbox: (id) => sandbox.get(id),
+    sandbox: (id) => session.get(id),
     signal: abort.signal,
   }).done;
   const u = outcome.usage;
@@ -164,7 +179,7 @@ try {
   process.exitCode = outcome.status === "completed" ? 0 : 1;
 } finally {
   try {
-    await sandbox.close();
+    await session.close();
   } finally {
     await events.flush();
   }

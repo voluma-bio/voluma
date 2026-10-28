@@ -73,7 +73,7 @@ checklist, check threads, and review chat threads.
   and fails if the stored system message differs from the current prompt and tools. `apps/runner/src/main.ts` wires it to the HTTP client
   (`packages/harness/src/adapters/http`), the Modal sandbox and a model:
   `pnpm --filter @voluma/runner run-task --provider openai --model <id> --task "<text>"`
-  (needs `pnpm dev` running, which writes the API's URL and token to `.dev/env.json` for the runner unless `.env` sets `VOLUMA_API_URL`; keys are in `.env`, which the runner reads
+  (needs `pnpm dev` running, which writes the API's URL and token to `.dev/env.json` for the runner unless `.env` sets `VOLUMA_API_URL`. Until the CLI can claim a run (lanes A and E) it also needs a lease token in `VOLUMA_LEASE_TOKEN`; today's API checks no token, so any value works. Keys are in `.env`, which the runner reads
   into a config object rather than `process.env`; model keys are `VOLUMA_<PROVIDER>_API_KEY`). The sandbox is
   created on the first `bash` call and destroyed at the end (every exit path, and what a crash
   leaves: `apps/runner/.context/CONTEXT.md`); Ctrl-C kills the running
@@ -156,14 +156,17 @@ cookie that is refused is cleared and answered 401, never turned into a guest: t
 re-loads, and lands on a guest or the sign-in screen. `/me` returns `kind: "visitor"`. Unset
 means the sign-in wall, and a guest cookie is ignored. `createAuth` throws when the guest
 organization is a member organization. There is no per-visitor mint limit: every cap is per
-org. Guests belong to the Demo organization, never the Yao Lab: lab runs include scans not
-cleared for public use, so lab data is for signed-in members. They share the Demo workspace
+org. Guests belong to the Demo organization, never the Yao Lab: lab data is the lab's to
+share, run by run, so it is for signed-in members; public examples are seeded into the Demo
+organization instead. They share the Demo workspace
 but each sees only their own runs (`self`). When an `Authorization` header is present only the
 bearer counts. The root answers 401 for no principal on everything but `/api/auth/*`;
 a domain guards a subtree with `requireService` or `requireUser` (which also sets a typed
 `c.var.user`) and gets 403 for the other kind. A cookie-authenticated non-GET request must
 carry an `Origin` equal to `APP_URL`'s origin (`SameSite=Lax` is same-site, not
-same-origin) and a JSON content type; a WebSocket upgrade must carry the `Origin` only.
+same-origin) and a JSON content type. No GET changes app state. Nothing upgrades to
+WebSockets (run streams are planned as server-sent events, plain GETs, in #28); a route that
+ever accepts an upgrade must add the `Origin` check for upgrades back to the CSRF guard.
 Bearer requests are exempt. `APP_URL` (the Vite origin in `pnpm dev`, the public URL in
 production) is config, never the `Host` header: it builds the redirect
 `${APP_URL}/api/auth/callback`. There is no `users` table: records store the WorkOS user id.

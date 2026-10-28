@@ -16,6 +16,9 @@
  * pass through here. The creator of the recorder `flush()`es when its threads end so the
  * record is complete before the process exits.
  *
+ * A `LeaseLost` is not retried: the run is no longer this runner's, so the recorder calls
+ * `onLeaseLost` once (the creator aborts the run) and drops every event still queued.
+ *
  * A durable event that exhausts its retries is lost and leaves the projection stale (a
  * finished thread shown as running). Giving up should become a visible run failure.
  */
@@ -26,6 +29,7 @@ import {
   type RunEvent,
 } from "@voluma/contracts/events";
 import type { EventLog } from "./ports/event-log";
+import { LeaseLost } from "./ports/lease-lost";
 
 export type PayloadOf<T extends EventType> = Extract<EventInput, { type: T }>["payload"];
 
@@ -56,19 +60,31 @@ const RETRY_DELAY_MS = 2_000;
 export function recorder(
   eventLog: EventLog,
   runId: string,
+  onLeaseLost: () => void,
   retryDelayMs = RETRY_DELAY_MS,
   stored: readonly RunEvent[] = [],
 ): Recorder {
   let queue: Promise<unknown> = Promise.resolve();
+  let leaseLost = false;
   const held: RunEvent[] = [...stored];
   const ids = new Set(held.map((e) => e.id));
 
+  function loseLease() {
+    if (leaseLost) return;
+    leaseLost = true;
+    onLeaseLost();
+  }
+
   async function deliver(event: EventInput): Promise<void> {
-    for (let attempt = 1; ; attempt++) {
+    for (let attempt = 1; !leaseLost; attempt++) {
       try {
         await eventLog.append(event);
         return;
       } catch (error) {
+        if (error instanceof LeaseLost) {
+          loseLease();
+          return;
+        }
         if (attempt >= ATTEMPTS) {
           // The id is stable, so a later duplicate would be a no-op; this one is lost.
           console.error(`recorder: gave up on ${event.type} ${event.id}: ${String(error)}`);
@@ -120,7 +136,12 @@ export function recorder(
       if (!parsed.success) {
         throw new Error(`the ${type} event ${id} is invalid: ${parsed.error.message}`);
       }
-      await eventLog.append(parsed.data);
+      try {
+        await eventLog.append(parsed.data);
+      } catch (error) {
+        if (error instanceof LeaseLost) loseLease();
+        throw error;
+      }
       hold(parsed.data);
     },
     flush: async () => {

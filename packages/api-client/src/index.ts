@@ -4,6 +4,7 @@
  * emits "signed out" so the shell can show the sign-in screen.
  */
 import { logoutResponseSchema, type Me, meResponseSchema } from "@voluma/contracts/auth";
+import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
 import {
   type Input,
   listInputsResponseSchema,
@@ -62,6 +63,13 @@ export async function getMe(): Promise<Me | null> {
   return meResponseSchema.parse(await json(res));
 }
 
+/** The caller's guest identity, made on first call; null when the server lets no guests in (404). */
+export async function startGuest(): Promise<Me | null> {
+  const res = await request("/auth/guest", { method: "POST" });
+  if (res.status === 404) return null;
+  return meResponseSchema.parse(await json(res));
+}
+
 /** Starts sign-in: navigates to the identity provider, then back to `returnTo`. The server validates `returnTo`. */
 export function signIn(returnTo = location.pathname + location.search): void {
   location.href = `/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`;
@@ -75,7 +83,7 @@ export async function signOut(): Promise<void> {
   location.href = logoutUrl;
 }
 
-/** Starts a run on an input the caller can read. With `keys` it runs on the caller's own credentials at once; otherwise it may queue. 409 and 429: the org's limits (see `@voluma/contracts/run`). */
+/** Starts a run on an input the caller can read. With `keys` it runs on the caller's own credentials and skips the org's runs-at-once count; either way it waits for the runner to claim it. 409 and 429: the org's limits (see `@voluma/contracts/run`). */
 export async function startRun(req: StartRunRequest): Promise<Run> {
   return runSchema.parse(await json(await request("/run/runs", { method: "POST", body: req })));
 }
@@ -106,4 +114,39 @@ export async function resendKeys(id: string, keys: VisitorKeys): Promise<Run> {
 /** Inputs the caller may start a run on, newest first. */
 export async function listInputs(): Promise<Input[]> {
   return listInputsResponseSchema.parse(await json(await request("/run/inputs"))).inputs;
+}
+
+/**
+ * Opens a run's event stream (`@voluma/contracts/stream`): `onEvent` gets each durable event
+ * in order, once. `EventSource` reconnects by itself and resumes from the last event's `id`.
+ * `after` is the highest `seq` the caller already holds, for the first connect only. `onError`
+ * is told of a message that fails to parse; a dropped connection is not an error.
+ * `onClosed` fires when the stream is over for good (`EventSource` hides the status): refetch the
+ * run to tell an ended run from a 404, or call `getMe` to catch a sign-out. Returns the
+ * function that closes the stream.
+ */
+export function subscribe(
+  runId: string,
+  handlers: {
+    onEvent: (event: RunEvent) => void;
+    onError?: (error: unknown) => void;
+    /** The stream will not reconnect: the run has ended, or the server refused it (404, 401). */
+    onClosed?: () => void;
+  },
+  after = 0,
+): () => void {
+  const source = new EventSource(
+    `/api/run/runs/${encodeURIComponent(runId)}/stream?after=${after}`,
+  );
+  source.onmessage = (e) => {
+    try {
+      handlers.onEvent(runEventSchema.parse(JSON.parse(e.data)));
+    } catch (error) {
+      handlers.onError?.(error);
+    }
+  };
+  source.onerror = () => {
+    if (source.readyState === EventSource.CLOSED) handlers.onClosed?.();
+  };
+  return () => source.close();
 }

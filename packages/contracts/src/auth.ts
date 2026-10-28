@@ -1,7 +1,7 @@
 /**
  * The sign-in routes under `/api/auth`. The browser follows the redirects;
- * only `me` and `logout` return JSON, and the client parses them with these
- * schemas.
+ * `me`, `guest` and `logout` return JSON, and the client parses them with
+ * these schemas.
  *
  *   GET  /api/auth/login?returnTo=  → redirect to the identity provider;
  *                                     `returnTo` is a same-origin path
@@ -13,6 +13,10 @@
  *   POST /api/auth/logout           → 200 `logoutResponseSchema`; the client
  *                                     navigates to `logoutUrl`
  *   GET  /api/auth/me               → 200 `meResponseSchema`; 401 means signed out
+ *   POST /api/auth/guest            → 200 `meResponseSchema` (`kind: "visitor"`):
+ *                                     the caller's guest identity, made on first
+ *                                     call and kept in a cookie; 404 when the
+ *                                     server lets no guests in
  *
  * Rules for every cookie-authenticated request under `/api`:
  *   - A non-GET/HEAD request must send `content-type: application/json`, or
@@ -27,7 +31,7 @@ import { z } from "zod";
 export const signinOutcomeSchema = z.enum(["not-a-member", "failed"]);
 export type SigninOutcome = z.infer<typeof signinOutcomeSchema>;
 
-/** A WorkOS user id, or a server-minted id for an anonymous demo visitor ("Explore the demo"). */
+/** A WorkOS user id, or a server-minted id for a guest (an anonymous visitor). */
 export const userIdSchema = z.string();
 
 const meFields = {
@@ -38,8 +42,10 @@ const meFields = {
 
 /**
  * Who is signed in. `member` is a WorkOS account (a lab member or a judge);
- * `visitor` is an anonymous demo visitor ("Explore the demo"), who has no
- * account and no email. Signing a visitor out throws their identity away.
+ * `visitor` is a guest: anyone without an account, given a server-minted id
+ * by `POST /api/auth/guest`, with no email. A guest has no sign-out; signing
+ * in as a member replaces it, and signing out returns to being a guest (the
+ * browser's earlier guest, or a new one if it had none).
  */
 export const meResponseSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("member"), email: z.string(), ...meFields }),

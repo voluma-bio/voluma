@@ -6,14 +6,13 @@
  * (`POST /api/auth/guest`); a server with guests off refuses, and the sign-in screen
  * shows. A 401 from any later call (`onSignedOut`) runs the same load again.
  */
-import { ApiError, getMe, onSignedOut, signIn, signOut } from "@voluma/api-client";
+import { ApiError, getMe, onSignedOut, signIn, signOut, startGuest } from "@voluma/api-client";
 import type { Me } from "@voluma/contracts/auth";
 import { Button } from "@voluma/ui";
 import { ChevronDown } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
 import { useCallback, useEffect, useState } from "react";
 import { Outlet } from "react-router";
-import { startGuest } from "./guest";
 import { GateScreen, SignInScreen } from "./sign-in-screen";
 
 type Session =

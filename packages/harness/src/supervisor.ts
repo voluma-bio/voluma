@@ -46,10 +46,6 @@ export interface SupervisorOptions {
 
 export function supervisor(options: SupervisorOptions) {
   const { plan, runtime, threads, judgment, signal } = options;
-  // The root and thread ids join their parts with '.', so no part may contain one.
-  for (const part of [options.runId, ...plan.map((t) => t.id)]) {
-    if (part.includes(".")) throw new Error(`"${part}" may not contain "." in a supervised run`);
-  }
   /** The supervisor's own thread: the root, and the envelope of its events. */
   const root = `${options.runId}.supervisor`;
   const stuckLimit = options.stuckLimit ?? 2;
@@ -62,13 +58,13 @@ export function supervisor(options: SupervisorOptions) {
   const starts = new Map<string, number>(); // `${taskId}.${role}` → threads started
   const wakes = new Map<string, number>(); // worker thread → wakes so far
   const redos = new Map<string, number>(); // task → redos ordered
-  const ending = new Set<string>(); // worker threads whose end is being handled
+  const ending = new Set<string>(); // worker and check threads whose end is being handled
   let failure: unknown; // the first error that failed the run
 
   const nextThread = (taskId: string, role: "worker" | "check") => {
     const n = (starts.get(`${taskId}.${role}`) ?? 0) + 1;
     starts.set(`${taskId}.${role}`, n);
-    // History is keyed by thread id alone, so the id carries the run.
+    // `<runId>.<taskId>.<role>`, plus `.<n>` for a restart (ids.ts: run and task ids hold no '.').
     return `${options.runId}.${taskId}.${role}${n === 1 ? "" : `.${n}`}`;
   };
 
@@ -97,7 +93,15 @@ export function supervisor(options: SupervisorOptions) {
       }
     });
   const watchCheck = (taskId: string, threadId: string, done: Promise<ThreadOutcome>) =>
-    watch(taskId, async () => onCheckEnd(taskId, threadId, await done));
+    watch(taskId, async () => {
+      const outcome = await done;
+      ending.add(threadId);
+      try {
+        return await onCheckEnd(taskId, threadId, outcome);
+      } finally {
+        ending.delete(threadId);
+      }
+    });
 
   function startWorker(taskId: string) {
     active.add(taskId);
@@ -162,11 +166,10 @@ export function supervisor(options: SupervisorOptions) {
   }
 
   /**
-   * Asks the judgment and applies its decision. Every path leaves a `task` event by the
-   * judgment arm whose reason says what it decided, or why the fallback was taken (the
-   * judgment errored, or a redo was over the limit), so no point is silent in the record.
-   * `workerThreadId` is the thread whose end raised the point. Returns whether a worker was
-   * started for the task.
+   * Asks the judgment and applies its decision. Every point is a `judgment` event (the
+   * point, the arm's raw answer, the action taken and, on a fallback, why), and the task
+   * event it causes carries the arm's own reason. `workerThreadId` is the thread whose end
+   * raised the point. Returns whether a worker was started for the task.
    */
   async function judge(
     point: JudgmentPoint,
@@ -178,16 +181,27 @@ export function supervisor(options: SupervisorOptions) {
     const { taskId } = point;
     let action: Decision["action"];
     let reason: string;
+    let fallback: "error" | "redo-cap" | undefined;
     if ("error" in answer) {
       // A person can still read the task; a judgment that failed must not stall the run.
       action = "accept";
-      reason = `The judgment failed (${answer.error}); left for a person.`;
+      fallback = "error";
+      reason = "The judgment could not decide; left for a person.";
     } else if (answer.action === "redo" && (redos.get(taskId) ?? 0) >= maxRedos) {
       action = "accept";
-      reason = `A redo was ordered (${answer.reason}) but ${taskId} was already redone ${maxRedos} time(s); left for a person.`;
+      fallback = "redo-cap";
+      reason = `${answer.reason} (A redo was ordered, but ${taskId} was already redone ${maxRedos} time(s); left for a person.)`;
     } else {
       ({ action, reason } = answer);
     }
+    const { kind, ...input } = point;
+    options.recorder.emit(root, "judgment", {
+      point: { kind, input },
+      arm: judgment.arm,
+      taskId,
+      ...(!("error" in answer) && { decision: answer }),
+      applied: { action, ...(fallback && { fallback }) },
+    });
     if (action === "redo") {
       redos.set(taskId, (redos.get(taskId) ?? 0) + 1);
       if (runtime.taskOf(taskId)) {
@@ -276,23 +290,26 @@ export function supervisor(options: SupervisorOptions) {
     }
   }
 
-  // A wake from `thread_message`: admitted for a worker whose task is in flight, and watched.
+  // A wake from `thread_message`: admitted for the worker of a task in progress or the
+  // check of a task under review, while the supervisor is not already ending that thread.
   threads.onWake((spec, start) => {
-    const { threadId, taskId } = spec;
-    if (spec.kind !== "worker" || !taskId) {
-      throw new Error(`${threadId} cannot be woken: only a worker in flight takes a message.`);
+    const { threadId } = spec;
+    if (spec.kind !== "worker" && spec.kind !== "check") {
+      throw new Error(
+        `${threadId} cannot be woken: only a worker or check thread takes a message.`,
+      );
     }
+    const { taskId } = spec;
     const t = runtime.taskOf(taskId);
-    if (
-      !active.has(taskId) ||
-      ending.has(threadId) ||
-      t?.status !== "in-progress" ||
-      t.threads.worker !== threadId
-    ) {
+    const inFlight =
+      spec.kind === "worker"
+        ? t?.status === "in-progress" && t.threads.worker === threadId
+        : t?.status === "under-review" && t.threads.check === threadId;
+    if (!active.has(taskId) || ending.has(threadId) || !inFlight) {
       throw new Error(`${threadId} is not in flight: its task ${taskId} is not being worked on.`);
     }
     const handle = start();
-    watchWorker(taskId, threadId, handle.done);
+    (spec.kind === "worker" ? watchWorker : watchCheck)(taskId, threadId, handle.done);
     return handle;
   });
 

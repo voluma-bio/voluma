@@ -34,13 +34,16 @@ import type { Tool } from "../../tools/tool";
 
 export type UserSender = Extract<PayloadOf<"message">, { role: "user" }>["sender"];
 
-export interface StartThreadOptions {
+/** The `thread.started` rule on `task`, in types: a worker or check thread has a task, a supervisor none. */
+type ThreadIdentity =
+  | { kind: "worker" | "check"; taskId: string }
+  | { kind: "supervisor"; taskId?: never }
+  | { kind: "chat"; taskId?: string };
+
+export type StartThreadOptions = ThreadIdentity & {
   runId: string;
   threadId: string;
-  kind: ThreadKind;
   parentThreadId?: string;
-  /** The checklist task the thread works on or checks; set on worker and check threads. */
-  taskId?: string;
   /** The attempt a check thread checks. */
   attemptId?: string;
   /** The tool call in the parent thread that started this thread. */
@@ -54,8 +57,6 @@ export interface StartThreadOptions {
    * ended its turn does nothing without one (`ran` is false in the outcome).
    */
   input?: { text: string; sender: UserSender };
-  /** Sent before `input` when a thread with history resumes mid-turn (never for a finished one). */
-  resumeNote?: string;
   model: Model<Api>;
   /** `models.streamSimple.bind(models)` from pi-ai. */
   streamFn: StreamFn;
@@ -68,7 +69,7 @@ export interface StartThreadOptions {
   sandbox: (threadId: string) => Promise<Sandbox>;
   /** Aborting ends the thread as cancelled and kills a running command. */
   signal?: AbortSignal;
-}
+};
 
 export interface ThreadHandle {
   /** Steers a user message into the running thread. False once the thread has ended or never ran. */
@@ -168,16 +169,15 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       const hasUser = stored.some((m) => m.role === "user");
       const finished = isFinished([...stored, ...repairs].at(-1));
       // A thread with no user message yet (new, or a crash before the first one was stored)
-      // starts from the prompt. A finished one runs only for a new input; an unfinished one
-      // gets the resume note first, as its own message. Each message carries its sender, so
-      // the stream record never labels the restart note as a person's words. The prompt
-      // counts as a person's: the harness can't tell a supervisor's task from a human's.
+      // starts from the prompt. A finished one runs only for a new input. Each message
+      // carries its sender; the prompt counts as a person's, since the harness can't tell a
+      // supervisor's task from a human's. The sandbox restart note reaches the model through
+      // the sandbox's command output (`sandbox-session.ts`), not as a message here.
       const prompts: AgentMessage[] = [];
       const addPrompt = (text: string | undefined, sender: UserSender) => {
         if (text) prompts.push(userMessage(text, sender));
       };
       if (hasUser) {
-        if (!finished) addPrompt(options.resumeNote, { kind: "runtime" });
         if (options.input) addPrompt(options.input.text, options.input.sender);
       } else {
         addPrompt(options.prompt, { kind: "person" });

@@ -60,7 +60,10 @@
  * stored or logged. If the server or the runner loses the keys before the run
  * ends (a restart or a deploy), the run moves to `awaiting-keys` and resumes
  * when the browser resends them (`/keys`). After 24 h in `awaiting-keys` it
- * ends `failed` with an `error`. Both keys or none: a request with only one
+ * ends `failed` with an `error`. `/keys` moves the run `awaiting-keys` →
+ * `queued`, where a claim picks it up. The API holds a `visitor` run's keys
+ * only in memory, so on start it moves every unclaimed `visitor` run to
+ * `awaiting-keys` (`startedAt` null if it never started). Both keys or none: a request with only one
  * fails validation (400). A `visitor` run's sandbox runs in the visitor's own
  * account, so its outputs are untrusted: never seed an example from one.
  *
@@ -69,14 +72,16 @@
  *   - per caller: at most this many runs that haven't ended, per `credentials`
  *     kind (none for an org whose members share one account); another answers
  *     409;
- *   - for `voluma` runs only: runs at once (a new one starts `queued` while the
- *     org is at it, else `running`), runs per day, and a dollar ceiling counted
- *     from the server's own accounting, so the run record carries no cost
- *     fields. The daily and dollar limits answer 429 when work starts and are
- *     checked again when a queued run is dequeued; a run refused at dequeue, or
- *     a running one that crosses the dollar ceiling, ends `failed` with an
- *     `error`.
- * A `visitor` run starts at once.
+ *   - for `voluma` runs only: runs at once (a claim takes a `queued` run only
+ *     while the org is under it), runs per day, and a dollar ceiling counted
+ *     from the usage the runner reports with its heartbeats (`runner.ts`), so
+ *     the run record carries no cost fields. The daily and dollar limits answer
+ *     429 when work starts and are checked again when a claim dequeues a run; a
+ *     run refused at dequeue, or a running one that crosses the dollar ceiling,
+ *     ends `failed` with an `error`. The daily limit counts a run once, so a
+ *     recovered run isn't refused for a limit it already passed.
+ * Every run is created `queued`, and only a claim starts it (`runner.ts`). A
+ * `visitor` run skips the org's runs-at-once count but still waits for a claim.
  */
 import { z } from "zod";
 import { userIdSchema } from "./auth";
@@ -108,11 +113,17 @@ export const runStateSchema = z.discriminatedUnion("status", [
    * 1-based place in the org's queue; 1 starts next. The server computes it at
    * read time and doesn't store it, so the run screen polls `getRun` to see it
    * move. Under `self`, it still counts other visitors' runs (only a count leaks).
+   * A `visitor` run is not held by the org's runs-at-once limit, so its
+   * position is always 1: it waits only for a free runner.
    */
   z.object({ status: z.literal("queued"), position: z.number().int().min(1) }),
+  /** The first claim's time: a re-claim after a recovery keeps it. */
   z.object({ status: z.literal("running"), startedAt: z.iso.datetime() }),
-  /** A `visitor` run whose keys the runner lost; it resumes when they're resent. */
-  z.object({ status: z.literal("awaiting-keys"), startedAt: z.iso.datetime() }),
+  /**
+   * A `visitor` run whose keys the server or the runner lost; it resumes when
+   * they're resent. `startedAt` is null if it was never claimed.
+   */
+  z.object({ status: z.literal("awaiting-keys"), startedAt: z.iso.datetime().nullable() }),
   z.object({
     status: z.literal("ended"),
     outcome: z.enum(["completed", "failed", "cancelled"]),
@@ -161,7 +172,7 @@ export type VisitorKeys = z.infer<typeof visitorKeysSchema>;
 export const startRunRequestSchema = z.object({
   workflowId: workflowIdSchema,
   inputId: inputIdSchema,
-  /** Present: the run uses these and skips the queue (`credentials: "visitor"`). */
+  /** Present: the run uses these (`credentials: "visitor"`) and skips the org's runs-at-once count. */
   keys: visitorKeysSchema.optional(),
 });
 export type StartRunRequest = z.infer<typeof startRunRequestSchema>;
