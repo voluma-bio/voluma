@@ -39,7 +39,7 @@ export default function DicomStack({ series }: { series: DicomSeries }) {
         engine.enableElement({ viewportId: "scan", type: Enums.ViewportType.STACK, element: host });
         const viewport = engine.getViewport("scan") as Types.IStackViewport;
         observer = new ResizeObserver(() => {
-          if (host.clientWidth && host.clientHeight) engine?.resize(true, false);
+          if (host.clientWidth && host.clientHeight) engine?.resize(true, true);
         });
         observer.observe(host);
         await session.read(

@@ -5,14 +5,15 @@ import { Group, Panel, Separator } from "react-resizable-panels";
 import type { DicomSeries } from "./dicom";
 
 const DicomStack = lazy(() => import("./DicomStack"));
+const DicomVolume = lazy(() => import("./DicomVolume"));
 
 export type StructureDisplay = Record<string, { visible: boolean; opacity: number }>;
 const views = [
   {
     id: "surface",
-    label: "3D surface",
+    label: "3D preview",
     axis: "",
-    description: "No mesh loaded",
+    description: "No scan loaded",
     icon: Box,
   },
   {
@@ -153,7 +154,7 @@ function ViewSlot({
               {isMax ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
             </button>
           </header>
-          {view.id === "acquired" && series ? (
+          {(view.id === "acquired" || view.id === "surface") && series ? (
             <Suspense
               fallback={
                 <div className="view-empty" role="status">
@@ -161,7 +162,11 @@ function ViewSlot({
                 </div>
               }
             >
-              <DicomStack key={series.id} series={series} />
+              {view.id === "acquired" ? (
+                <DicomStack key={series.id} series={series} />
+              ) : (
+                <DicomVolume key={series.id} series={series} />
+              )}
             </Suspense>
           ) : (
             <div className="view-empty">
@@ -181,6 +186,10 @@ function ViewSlot({
                   {series.columns} × {series.rows}
                 </span>
                 <span>{series.spacing.join(" × ")} mm / pixel</span>
+              </>
+            ) : view.id === "surface" && series ? (
+              <>
+                Display only<span>No anatomical meshes</span>
               </>
             ) : (
               <>

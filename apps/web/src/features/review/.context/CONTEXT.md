@@ -1,7 +1,8 @@
 # Review workspace specification
 
 Review is one light-themed workspace at `/runs/:runId`. It can open a local
-DICOM ZIP and display acquired images. It does not yet load server runs, run
+DICOM ZIP, display acquired images and build a bounded raw volume preview.
+It does not yet load server runs, run
 analysis, or persist review decisions. `/runs/local` is a workspace identifier,
 not a run created in the API. There is no demo route or simulator in the app.
 
@@ -56,10 +57,15 @@ changes terminate the import worker and release viewer resources. Reloading
 loses local scan state; query parameters never contain local files or identifiers.
 
 The light Review chrome surrounds a dark imaging well. The first loaded image
-is an acquired slice, not necessarily axial. Coronal, sagittal and 3D slots
-remain explicitly unavailable until those outputs exist. At narrow widths the
-existing layout stacks report and imaging areas; desktop panel sizes and image
-state remain independent.
+is an acquired slice, not necessarily axial. The **3D preview** slot builds a
+raw volume only on request, validates reconstructable geometry separately, and
+labels downsampling and the absence of anatomical meshes. Its rotation, zoom,
+intensity and opacity controls affect display only. Release 3D preserves slices;
+maximize/restore preserves both engines and camera state. The Performance panel
+exports local timings without scan identifiers for workstation comparison.
+Coronal and sagittal slots remain unavailable. At narrow widths the existing
+layout stacks report and imaging areas; desktop panel sizes and image state
+remain independent.
 
 ## Integration with the Run lane
 
