@@ -17,7 +17,6 @@
  *  4. `userRoutes` and the domains, which see a non-null principal (domain.ts).
  */
 
-import { createHash } from "node:crypto";
 import type { Me } from "@voluma/contracts/auth";
 import {
   AuthKitCore,
@@ -42,7 +41,7 @@ import {
 import { type Context, Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import { timingSafeEqual } from "hono/utils/buffer";
-import { createRemoteJWKSet } from "jose";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import { type Principal, requireUser, type Scope, type UserEnv } from "./domain";
 
 export interface AuthConfig {
@@ -153,37 +152,49 @@ type Refreshed = Awaited<ReturnType<AuthKitCore["validateAndRefresh"]>>;
 
 // What a refresh token last got from WorkOS, so a client that replays a cookie (never
 // storing the Set-Cookie) can't drive a WorkOS call per request. `Refreshed` holds until
-// its access token expires; `dead` (terminal failure) until the cookie's max age.
-// Transient failures are never stored. Keyed by a hash of the refresh token; a bounded
-// LRU (a Map is insertion-ordered), so memory does not grow with the cookies seen.
-type Remembered = { outcome: Refreshed | "dead"; until: number };
+// its access token expires; `dead` (terminal failure, sign-out, revoke) until the
+// cookie's max age; `unavailable` (transient failure) for UNAVAILABLE_MS, so a replay
+// during an outage or rate limit adds no load. `dead` is final: a refresh that was in
+// flight when the session ended finishes later and must not bring it back. Keyed by the
+// refresh token; a bounded LRU (a Map is insertion-ordered), so memory does not grow
+// with the cookies seen.
+type Remembered = { outcome: Refreshed | "dead" | "unavailable"; until: number };
+
+// AuthKit's 429 Retry-After cap, so the memo does not outlast the rate limit it reports.
+const UNAVAILABLE_MS = 10_000;
 
 class RefreshMemo {
   private entries = new Map<string, Remembered>();
 
-  private key(refreshToken: string) {
-    return createHash("sha256").update(refreshToken).digest("base64");
-  }
-
   get(refreshToken: string) {
-    const key = this.key(refreshToken);
-    const entry = this.entries.get(key);
+    const entry = this.entries.get(refreshToken);
     if (!entry) return undefined;
-    this.entries.delete(key);
+    this.entries.delete(refreshToken);
     if (entry.until <= Date.now()) return undefined;
-    this.entries.set(key, entry);
+    this.entries.set(refreshToken, entry);
     return entry.outcome;
   }
 
-  // Remembers a session that is over (terminal refresh failure, sign-out, revoke).
+  // The only way to mark a session over.
   dead(refreshToken: string) {
-    this.set(refreshToken, "dead", Date.now() + COOKIE_MAX_AGE * 1000);
+    this.put(refreshToken, { outcome: "dead", until: Date.now() + COOKIE_MAX_AGE * 1000 });
   }
 
-  set(refreshToken: string, outcome: Refreshed | "dead", until: number) {
-    const key = this.key(refreshToken);
-    this.entries.delete(key);
-    this.entries.set(key, { outcome, until });
+  refreshed(refreshToken: string, result: Refreshed) {
+    this.put(refreshToken, { outcome: result, until: (result.claims.exp ?? 0) * 1000 });
+  }
+
+  unavailable(refreshToken: string) {
+    this.put(refreshToken, { outcome: "unavailable", until: Date.now() + UNAVAILABLE_MS });
+  }
+
+  private put(refreshToken: string, next: Remembered) {
+    const current = this.entries.get(refreshToken);
+    if (current?.outcome === "dead" && next.outcome !== "dead" && current.until > Date.now()) {
+      return;
+    }
+    this.entries.delete(refreshToken);
+    this.entries.set(refreshToken, next);
     if (this.entries.size > MEMO_ENTRIES) {
       this.entries.delete(this.entries.keys().next().value as string);
     }
@@ -241,21 +252,32 @@ export function createAuth(config: AuthConfig) {
       }),
   });
   const workos = authkit.getWorkOS();
-  // The AuthKit layer under `withAuth`, which swallows the refresh error. One refresh per
-  // request goes through here, so its failures are typed and concurrent refreshes of one
-  // cookie share a single WorkOS call. AuthKit retries a 429 once after the Retry-After
-  // (at most 10 s), so a rate-limited refresh is two calls; it is left on.
-  const core = new AuthKitCore(getConfigurationProvider().getConfig(), workos, sessionEncryption);
-  // Replaces AuthKitCore's `getPublicKey` (jose defaults: 5 s timeout, 10 min cache, so a
-  // cold process in an outage spends 5 s on the key set before the refresh). Same 3 s
-  // bound as every WorkOS call, and keys are kept for the process lifetime; an unknown
-  // `kid` still reloads, behind jose's 30 s cooldown, so rotation works. Re-check
-  // `getPublicKey` in @workos/authkit-session when bumping the pin.
+  // Keys are kept for the process lifetime (`cacheMaxAge: Infinity`; jose defaults are a 5 s
+  // timeout and a 10 min cache). The reason is outages: with a 10 min cache, the first
+  // verification after the cache lapses during a WorkOS outage fails for every valid token,
+  // each then refreshes and gets 503. An unknown `kid` still reloads, behind jose's 30 s
+  // cooldown, so rotation works. The timeout is the same 3 s as every WorkOS call.
   const jwks = createRemoteJWKSet(new URL(workos.userManagement.getJwksUrl(config.clientId)), {
     timeoutDuration: WORKOS_TIMEOUT_MS,
     cacheMaxAge: Number.POSITIVE_INFINITY,
   });
-  (core as unknown as { getPublicKey: () => typeof jwks }).getPublicKey = () => jwks;
+  // The AuthKit layer under `withAuth`, which swallows the refresh error. One refresh per
+  // request goes through here, so its failures are typed and concurrent refreshes of one
+  // cookie share a single WorkOS call. AuthKit retries a 429 once after the Retry-After
+  // (at most 10 s), so a rate-limited refresh is two calls; it is left on. `verifyToken`
+  // is overridden to use `jwks`; `override` fails the typecheck if an upgrade removes it,
+  // but re-check that `validateAndRefresh` still calls it when bumping the pin.
+  class Core extends AuthKitCore {
+    override async verifyToken(token: string) {
+      try {
+        await jwtVerify(token, jwks);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+  }
+  const core = new Core(getConfigurationProvider().getConfig(), workos, sessionEncryption);
   const memo = new RefreshMemo();
 
   // Clears the session cookie and every pending PKCE verifier on the request, so
@@ -269,9 +291,8 @@ export function createAuth(config: AuthConfig) {
     }
   }
 
-  // Ends WorkOS sessions server-side, so a copy of a sealed cookie dies with them at its
-  // next refresh (refresh tokens are not rotated on use), and marks their refresh tokens
-  // dead in the memo, so a copy is not served a remembered session either. Never throws:
+  // Ends WorkOS sessions server-side and marks their refresh tokens dead in the memo (the
+  // guarantee is in .context/CONTEXT.md, Authentication). Never throws:
   // callers clear the cookie whatever happens here.
   async function revokeSessions(sessions: (SessionRef | null)[]) {
     await Promise.all(
@@ -305,7 +326,7 @@ export function createAuth(config: AuthConfig) {
   // failed transiently. Cookies to set go to `sink`.
   // A dead cookie is cleared and remembered as dead, so a replay of it costs no WorkOS
   // call; a refreshed session is remembered until its access token expires. Any other
-  // WorkOS failure keeps the cookie and is not remembered, and the caller answers 503, so
+  // WorkOS failure keeps the cookie, is remembered briefly, and the caller answers 503, so
   // an outage does not sign people out.
   async function userFromCookie(request: Request, sink: string[]) {
     let session: Awaited<ReturnType<typeof authkit.getSession>>;
@@ -321,6 +342,7 @@ export function createAuth(config: AuthConfig) {
       await clearSessionCookies(request, sink);
       return null;
     }
+    if (remembered === "unavailable") return remembered;
     let result: Refreshed;
     if (remembered) {
       result = { ...remembered, refreshed: false };
@@ -334,11 +356,10 @@ export function createAuth(config: AuthConfig) {
           return null;
         }
         console.error("session refresh failed; cookie kept", error);
+        memo.unavailable(session.refreshToken);
         return "unavailable" as const;
       }
-      if (result.refreshed) {
-        memo.set(session.refreshToken, result, (result.claims.exp ?? 0) * 1000);
-      }
+      if (result.refreshed) memo.refreshed(session.refreshToken, result);
     }
     // The enforcement point for membership, bounded by the access-token lifetime.
     const orgId = result.claims.org_id;
@@ -458,9 +479,8 @@ export function createAuth(config: AuthConfig) {
   });
 
   sessionRoutes.post("/logout", async (c) => {
-    // End the WorkOS session here, not only in the browser. A copy of the sealed cookie
-    // stops working at its next refresh; until then its access token (5 min on staging)
-    // is still checked locally and answers 200.
+    // End the WorkOS session here, not only in the browser. What a copy of the cookie
+    // still gets afterwards: .context/CONTEXT.md, Authentication.
     const current = await requestSession(c.req.raw);
     await revokeSessions([current]);
     // The browser still visits logoutUrl, which ends WorkOS's own AuthKit session.
