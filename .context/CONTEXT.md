@@ -102,11 +102,15 @@ voluma-bio/docs work item `mvp-contracts-and-data` (`design/harness-v0.md`).
 `apps/api/src/auth.ts` authenticates every `/api/*` request once, at the root, and sets
 `principal` (`apps/api/src/domain.ts`): `service` for the runner's bearer token
 (`VOLUMA_API_TOKEN`), `user` for a WorkOS AuthKit session cookie of a member of an allowed
-organization: the Yao Lab (`WORKOS_LAB_ORGANIZATION_ID`, scope `lab`) or, if set, the Demo
-organization (`WORKOS_DEMO_ORGANIZATION_ID`, scope `self`). `org_id` must be in that list,
+organization: the Yao Lab (`WORKOS_LAB_ORGANIZATION_ID`, scope `lab`) or, if set, the Judges
+organization (`WORKOS_JUDGES_ORGANIZATION_ID`, scope `self`). `org_id` must be in that list,
 checked on every request and again in the sign-in callback. The user's `labId` is their
-organization and `scope` its entry; domains filter by `labId`, and by `userId` too under
-`self`. `scope` is server-internal: `/me` returns only the contract shape. When an `Authorization` header is present only the
+organization and `scope` its entry; domains receive `readerOf(user)` and never branch on
+`scope`. `self` has two producers, one per identity source: WorkOS users in the Judges
+organization, and anonymous demo visitors, whom our server mints (a sealed cookie, no WorkOS
+user, no email) in the demo entrance PR. No WorkOS user signs into a Demo organization, so
+none is in the list. WorkOS does not enforce the `organizationId` pin on sign-in, so the
+per-request allow-list is the only control. `scope` is server-internal: `/me` returns only the contract shape. When an `Authorization` header is present only the
 bearer counts. The root answers 401 for no principal on everything but `/api/auth/*`;
 a domain guards a subtree with `requireService` or `requireUser` (which also sets a typed
 `c.var.user`) and gets 403 for the other kind. A cookie-authenticated non-GET request must

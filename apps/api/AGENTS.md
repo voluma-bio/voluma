@@ -33,10 +33,12 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   `new Hono<AppEnv>()` (`src/domain.ts`) and reads `c.get("principal")`; the runner's
   ingest subtree is behind `requireService`. A subtree for signed-in members is
   `new Hono<UserEnv>().use(requireUser)`, whose handlers read the narrowed
-  `c.var.user` (`userId`, `email`, `name`, `labId`, `scope`) and never check `kind`. Any
-  other kind gets 403. **Filter records by `labId`, and also by `userId` when
-  `scope === "self"`** (the Demo organization: a visitor sees only their own records).
-  `scope` is server-internal; no domain reads an organization id. A domain never reads cookies, tokens or `Origin`; the CSRF and Origin checks
+  `c.var.user` (`userId`, `email` (nullable), `name`, `labId`, `scope`) and never check `kind`. Any
+  other kind gets 403. **Reads go through the reader:** a domain passes `readerOf(c.var.user)`
+  (`src/domain.ts`: `{ labId, ownerId }`, `ownerId` null for a lab member and the user's id for
+  a `self` user) into its store port's read methods, and the adapter applies it once
+  (`labId = ? AND (ownerId IS NULL OR created_by = ownerId)`). Handlers never branch on
+  `scope`, which is server-internal; no domain reads an organization id. A domain never reads cookies, tokens or `Origin`; the CSRF and Origin checks
   are the root's.
 - Each domain's factory returns a Hono app, mounted by `index.ts` with `app.route`. Use
   Hono's routing and params; the root's JSON 404 and `onError` cover the domains.

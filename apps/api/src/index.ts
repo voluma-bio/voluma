@@ -9,7 +9,7 @@
  * receives SIGTERM; tsx because relative imports have no extensions).
  * Env: DATABASE_URL, VOLUMA_API_TOKEN, APP_URL, PORT, optionally HOST (`pnpm dev` sets
  * them; see tools/dev.mjs), and WORKOS_CLIENT_ID, WORKOS_API_KEY, WORKOS_COOKIE_PASSWORD,
- * WORKOS_LAB_ORGANIZATION_ID, and optionally WORKOS_DEMO_ORGANIZATION_ID (the repo .env). Fails at startup if the database is unreachable or not migrated.
+ * WORKOS_LAB_ORGANIZATION_ID, and optionally WORKOS_JUDGES_ORGANIZATION_ID (the repo .env). Fails at startup if the database is unreachable or not migrated.
  */
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -39,11 +39,11 @@ const auth = createAuth({
   apiKey: required("WORKOS_API_KEY"),
   cookiePassword: required("WORKOS_COOKIE_PASSWORD"),
   // Who may sign in, and how much of the data each sees (auth.ts, domain.ts). No domain
-  // reads an organization id. The Demo organization is optional: unset means not allowed.
+  // reads an organization id. The Judges organization is optional: unset means not allowed.
   organizations: [
     { id: required("WORKOS_LAB_ORGANIZATION_ID"), scope: "lab" },
-    ...(process.env.WORKOS_DEMO_ORGANIZATION_ID
-      ? [{ id: process.env.WORKOS_DEMO_ORGANIZATION_ID, scope: "self" as const }]
+    ...(process.env.WORKOS_JUDGES_ORGANIZATION_ID
+      ? [{ id: process.env.WORKOS_JUDGES_ORGANIZATION_ID, scope: "self" as const }]
       : []),
   ],
   appUrl: required("APP_URL").replace(/\/$/, ""),

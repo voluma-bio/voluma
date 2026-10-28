@@ -30,7 +30,12 @@ import {
   TokenRefreshError,
   type User,
 } from "@workos/authkit-session";
-import { GenericServerException, OauthException, WorkOS } from "@workos-inc/node";
+import {
+  AuthenticationException,
+  GenericServerException,
+  OauthException,
+  WorkOS,
+} from "@workos-inc/node";
 import { type Context, Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import { timingSafeEqual } from "hono/utils/buffer";
@@ -114,23 +119,23 @@ function returnPath(raw: string | undefined) {
   }
 }
 
-// What @workos-inc/node's classifyRetryableRefreshError (not exported) treats as
-// transient: 408, 429, 5xx and network errors. A request that fails this way keeps its
-// cookie; any other refresh failure (a revoked or expired session, `sso_required`, ...)
-// means the cookie is dead.
-function isTransientRefreshError(error: unknown) {
+// Whether a failed refresh means the session is over. Matched positively, as
+// @workos-inc/node's CookieSession.refresh does (classifyTerminalRefreshError, then
+// classifyRetryableRefreshError, both unexported; re-diff them when bumping the pin):
+// an OAuth or authentication error, or any other 4xx except 408 and 429, ends the
+// session. Everything else (5xx, network errors, an HTML error page that surfaces as
+// `Error("Unexpected error")`, anything unknown) keeps the cookie, so an outage does
+// not sign people out.
+function isTerminalRefreshError(error: unknown) {
   if (!(error instanceof TokenRefreshError)) return false;
   const cause = error.cause;
-  const status =
-    cause instanceof OauthException || cause instanceof GenericServerException
-      ? cause.status
-      : undefined;
+  if (cause instanceof OauthException || cause instanceof AuthenticationException) return true;
   return (
-    status === 408 ||
-    status === 429 ||
-    (status !== undefined && status >= 500) ||
-    cause instanceof TypeError ||
-    (cause instanceof Error && cause.cause instanceof TypeError)
+    cause instanceof GenericServerException &&
+    cause.status >= 400 &&
+    cause.status < 500 &&
+    cause.status !== 408 &&
+    cause.status !== 429
   );
 }
 
@@ -229,8 +234,8 @@ export function createAuth(config: AuthConfig) {
   }
 
   // The principal for a request's session cookie, or null; cookies to set go to `sink`.
-  // A dead cookie is cleared (once cleared it costs no further WorkOS calls), a
-  // transient WorkOS failure keeps it, so an outage does not sign people out.
+  // A dead cookie is cleared (once cleared it costs no further WorkOS calls), any
+  // other WorkOS failure keeps it, so an outage does not sign people out.
   async function userFromCookie(request: Request, sink: string[]) {
     let session: Awaited<ReturnType<typeof authkit.getSession>>;
     try {
@@ -244,7 +249,8 @@ export function createAuth(config: AuthConfig) {
     try {
       result = await core.validateAndRefresh(session);
     } catch (error) {
-      if (!isTransientRefreshError(error)) await clearSessionCookies(request, sink);
+      if (isTerminalRefreshError(error)) await clearSessionCookies(request, sink);
+      else console.error("session refresh failed; cookie kept", error);
       return null;
     }
     // The enforcement point for membership, bounded by the access-token lifetime.
