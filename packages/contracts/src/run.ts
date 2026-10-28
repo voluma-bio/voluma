@@ -26,16 +26,16 @@
  */
 import { z } from "zod";
 import { userIdSchema } from "./auth";
-import { runIdSchema, storedPrefixSchema } from "./r2";
+import { inputIdSchema, runIdSchema, storedPrefixSchema } from "./r2";
 import { workflowPinSchema } from "./workflow";
 
 /**
- * A scan a run reads. `prefix` is the folder of files under a run's inputs
- * (`inputsPrefix`) or the reference scan, so it is mountable as-is. The upload
- * mechanism that creates inputs is a later PR; this PR only names its result.
+ * A scan a run reads. `prefix` is `inputPrefix(id)` or the reference scan's
+ * prefix, so it is mountable as-is. The upload call that creates inputs is a
+ * later PR; its key layout (`inputKey`) is settled here.
  */
 export const inputSchema = z.object({
-  id: z.string(),
+  id: inputIdSchema,
   prefix: storedPrefixSchema,
   uploadedBy: userIdSchema,
   name: z.string(),
@@ -70,7 +70,7 @@ export type Run = z.infer<typeof runSchema>;
 
 export const startRunRequestSchema = z.object({
   workflow: z.array(workflowPinSchema).min(1),
-  inputId: z.string(),
+  inputId: inputIdSchema,
 });
 export type StartRunRequest = z.infer<typeof startRunRequestSchema>;
 
