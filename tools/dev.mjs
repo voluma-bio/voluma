@@ -2,15 +2,19 @@
  * `pnpm dev`: the one dev launcher. Starts the API and the web app for this worktree
  * without sharing anything with other worktrees:
  *  - two free ports, picked up front (the API's, and Vite's with --strictPort);
- *  - a database named after the worktree directory (`voluma_<dir>`), created on the
- *    Postgres server in DATABASE_SERVER_URL (`pnpm db:up` starts one) and migrated;
- *  - the API token from .env, or a random one per launch.
+ *  - a database named after the worktree directory and a hash of its path
+ *    (`voluma_<dir>_<hash8>`), created on the Postgres server in DATABASE_SERVER_URL
+ *    (`pnpm db:up` starts one) and migrated;
+ *  - a random API token per launch.
  * It writes { apiUrl, appUrl, databaseUrl, apiToken } to the git-ignored .dev/env.json,
- * which the runner reads when VOLUMA_API_URL is unset. Ctrl-C stops everything.
+ * which the runner reads when VOLUMA_API_URL is unset. Ctrl-C stops everything
+ * and removes it.
+ * `pnpm db:reset` (`node tools/dev.mjs reset`) drops this worktree's database and exits;
+ * the next `pnpm dev` recreates and migrates it.
  */
 import { spawn, spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { basename, resolve } from "node:path";
 import { parseEnv } from "node:util";
@@ -21,14 +25,28 @@ const envFile = resolve(root, ".env");
 const dotenv = existsSync(envFile) ? parseEnv(readFileSync(envFile, "utf8")) : {};
 
 const serverUrl = new URL(
-  dotenv.DATABASE_SERVER_URL || "postgres://voluma:voluma@localhost:54432/postgres",
+  process.env.DATABASE_SERVER_URL ||
+    dotenv.DATABASE_SERVER_URL ||
+    "postgres://voluma:voluma@localhost:54432/postgres",
 );
-const dbName = `voluma_${basename(root)
+// The slug tells databases apart for a person; the hash keeps clones that share a
+// basename (or fold to the same slug) apart.
+const slug = basename(root)
   .toLowerCase()
-  .replace(/[^a-z0-9]+/g, "_")}`.slice(0, 63);
+  .replace(/[^a-z0-9]+/g, "_")
+  .slice(0, 40);
+const dbName = `voluma_${slug}_${createHash("sha256").update(root).digest("hex").slice(0, 8)}`;
 const databaseUrl = new URL(serverUrl);
 databaseUrl.pathname = `/${dbName}`;
 
+if (process.argv[2] === "reset") {
+  await withAdmin(async (admin) => {
+    // dbName is [a-z0-9_] only, so quoting it is enough.
+    await admin.unsafe(`DROP DATABASE IF EXISTS "${dbName}" WITH (FORCE)`);
+  });
+  console.log(`dropped ${dbName}; \`pnpm dev\` recreates it`);
+  process.exit(0);
+}
 await ensureDatabase();
 
 const [apiPort, webPort] = [await freePort(), await freePort()];
@@ -36,17 +54,24 @@ const env = {
   apiUrl: `http://localhost:${apiPort}`,
   appUrl: `http://localhost:${webPort}`,
   databaseUrl: databaseUrl.href,
-  apiToken: dotenv.VOLUMA_API_TOKEN || randomBytes(24).toString("hex"),
+  apiToken: randomBytes(24).toString("hex"),
 };
+const envPath = resolve(root, ".dev/env.json");
 mkdirSync(resolve(root, ".dev"), { recursive: true });
-writeFileSync(resolve(root, ".dev/env.json"), `${JSON.stringify(env, null, 2)}\n`);
+writeFileSync(envPath, `${JSON.stringify(env, null, 2)}\n`);
 
 const migrate = spawnSync("pnpm", ["--filter", "@voluma/api", "db:migrate"], {
   cwd: root,
   stdio: "inherit",
   env: { ...process.env, DATABASE_URL: env.databaseUrl },
 });
-if (migrate.status !== 0) process.exit(migrate.status ?? 1);
+if (migrate.status !== 0) {
+  console.error(
+    "\nMigration failed. If you regenerated a migration after merging origin/main, this\ndatabase still holds the old one: run `pnpm db:reset`, then `pnpm dev`.",
+  );
+  rmSync(envPath, { force: true });
+  process.exit(migrate.status ?? 1);
+}
 
 console.log(`\nweb  ${env.appUrl}\napi  ${env.apiUrl}\ndb   ${dbName}\n`);
 const children = [
@@ -58,6 +83,7 @@ const children = [
       DATABASE_URL: env.databaseUrl,
       VOLUMA_API_TOKEN: env.apiToken,
       PORT: String(apiPort),
+      HOST: "127.0.0.1",
     },
   }),
   spawn(
@@ -76,16 +102,22 @@ for (const child of children) {
 process.on("SIGINT", () => stop(0));
 process.on("SIGTERM", () => stop(0));
 function stop(code) {
+  rmSync(envPath, { force: true });
   for (const child of children) child.kill("SIGTERM");
   setTimeout(() => process.exit(code), 500).unref();
 }
 
-async function ensureDatabase() {
+function ensureDatabase() {
+  return withAdmin(async (admin) => {
+    const found = await admin`SELECT 1 FROM pg_database WHERE datname = ${dbName}`;
+    if (found.length === 0) await admin.unsafe(`CREATE DATABASE "${dbName}"`);
+  });
+}
+
+async function withAdmin(run) {
   const admin = postgres(serverUrl.href, { max: 1, onnotice: () => {} });
   try {
-    const found = await admin`SELECT 1 FROM pg_database WHERE datname = ${dbName}`;
-    // dbName is [a-z0-9_] only, so quoting it is enough.
-    if (found.length === 0) await admin.unsafe(`CREATE DATABASE "${dbName}"`);
+    await run(admin);
   } catch (error) {
     console.error(
       `Cannot reach Postgres at ${serverUrl.host}: ${error.message}\nStart it with \`pnpm db:up\`, or set DATABASE_SERVER_URL in .env.`,

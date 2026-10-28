@@ -6,7 +6,8 @@
  *
  * Start: `node --import tsx apps/api/src/index.ts` (not through pnpm, so node
  * receives SIGTERM; tsx because relative imports have no extensions).
- * Env: DATABASE_URL, VOLUMA_API_TOKEN, PORT (`pnpm dev` sets them; see tools/dev.mjs).
+ * Env: DATABASE_URL, VOLUMA_API_TOKEN, PORT, and optionally HOST (`pnpm dev` sets them;
+ * see tools/dev.mjs). Fails at startup if the database is unreachable or not migrated.
  */
 import { serve } from "@hono/node-server";
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -56,14 +57,29 @@ app.onError((error, c) => {
     : c.text("Internal error", 500);
 });
 
-const server = serve({ fetch: app.fetch, port: Number(required("PORT")) }, ({ port }) =>
-  console.log(`api listening on :${port}`),
+// Fail fast on a bad URL, bad credentials or a missing migration; /health stays liveness-only.
+await client`select 1 from threads limit 0`;
+
+const server = serve(
+  { fetch: app.fetch, port: Number(required("PORT")), hostname: process.env.HOST },
+  ({ address, port }) => console.log(`api listening on ${address}:${port}`),
 );
 
+// Stay under the host's drain period (Railway's, once deployed).
+const DRAIN_MS = 10_000;
+let stopping = false;
 process.once("SIGTERM", shutdown);
 process.once("SIGINT", shutdown);
+// Dev delivers both SIGINT (terminal) and SIGTERM (launcher), hence the guard.
 function shutdown() {
-  server.close();
-  if ("closeAllConnections" in server) server.closeAllConnections();
-  client.end().then(() => process.exit(0));
+  if (stopping) return;
+  stopping = true;
+  server.close(async () => {
+    await client.end({ timeout: 5 }).catch(console.error);
+    process.exit(0);
+  });
+  if ("closeIdleConnections" in server) server.closeIdleConnections();
+  setTimeout(() => {
+    if ("closeAllConnections" in server) server.closeAllConnections();
+  }, DRAIN_MS).unref();
 }

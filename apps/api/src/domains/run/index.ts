@@ -10,7 +10,7 @@
  */
 import { timingSafeEqual } from "node:crypto";
 import { eventInputSchema } from "@voluma/contracts/events";
-import type { EventLog } from "@voluma/harness/ports/event-log";
+import { EventIdConflict, type EventLog } from "@voluma/harness/ports/event-log";
 import { type History, HistoryConflict } from "@voluma/harness/ports/history";
 import { z } from "zod";
 import type { DomainHandler } from "../../domain";
@@ -22,7 +22,11 @@ export interface RunDeps {
   apiToken: string;
 }
 
-const historyRowSchema = z.object({ idx: z.number().int().nonnegative(), message: z.string() });
+const historyRowSchema = z.object({
+  idx: z.number().int().nonnegative(),
+  // Postgres text cannot hold a raw NUL; the harness's JSON.stringify output escapes it.
+  message: z.string().refine((text) => !text.includes("\0"), "message contains a NUL byte"),
+});
 
 export function createRun({ eventLog, history, apiToken }: RunDeps): DomainHandler {
   return async (request, pathname) => {
@@ -39,7 +43,12 @@ export function createRun({ eventLog, history, apiToken }: RunDeps): DomainHandl
       if (parsed.data.runId !== runId) {
         return badRequest("event runId does not match the path");
       }
-      await eventLog.append(parsed.data);
+      try {
+        await eventLog.append(parsed.data);
+      } catch (error) {
+        if (error instanceof EventIdConflict) return new Response(error.message, { status: 409 });
+        throw error;
+      }
       return new Response(null, { status: 204 });
     }
     const messages = /^\/ingest\/threads\/([^/]+)\/messages$/.exec(pathname);

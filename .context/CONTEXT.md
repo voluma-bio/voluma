@@ -152,11 +152,11 @@ support, geometry, limits, library integration and verification coverage.
 Several agents from two people work at once, each in its own worktree.
 Nothing they run shares mutable state:
 - `pnpm dev` (`tools/dev.mjs`) picks two free ports for the API and Vite (`--strictPort`,
-  `/api` proxied to the API), gives the worktree its own database `voluma_<directory name>`
+  `/api` proxied to the API), gives the worktree its own database `voluma_<directory name>_<hash of its path>`
   on the Postgres server in `DATABASE_SERVER_URL` (`pnpm db:up` starts one container,
   `voluma-pg` on port 54432, shared by all worktrees as a server only), migrates it, and
   writes `.dev/env.json` (git-ignored) for the runner. `.env` holds nothing per worktree;
-  the API token comes from `.env` or is generated per launch;
+  the API token is generated per launch (`pnpm db:reset` drops the worktree's database);
 - Nx keeps its cache in the worktree's `.nx/` and runs without a daemon;
 - sandboxes are named `<runId>.<name>` and tagged with the run id, so give each
   worktree's runs their own run ids; the event log is in the worktree's own

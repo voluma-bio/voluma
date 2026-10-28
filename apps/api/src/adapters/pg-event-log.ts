@@ -11,7 +11,7 @@
  * publish after commit, and a gap means backfill from the log.
  */
 import type { EventInput } from "@voluma/contracts/events";
-import type { EventLog } from "@voluma/harness/ports/event-log";
+import { EventIdConflict, type EventLog } from "@voluma/harness/ports/event-log";
 import { eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { events, threads } from "../domains/run/schema";
@@ -40,7 +40,16 @@ export function pgEventLog(db: PostgresJsDatabase): EventLog {
           })
           .onConflictDoNothing({ target: events.id })
           .returning({ id: events.id });
-        if (inserted.length === 0) return;
+        if (inserted.length === 0) {
+          const [existing] = await tx
+            .select({ runId: events.runId })
+            .from(events)
+            .where(eq(events.id, event.id));
+          if (existing?.runId !== event.runId) {
+            throw new EventIdConflict(`event ${event.id} belongs to another run`);
+          }
+          return;
+        }
         await projectThread(tx, event, createdAt);
       });
     },

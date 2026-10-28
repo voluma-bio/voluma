@@ -1,5 +1,5 @@
 {
-  "id": "7044809d-c534-476c-931e-4e60ade3f492",
+  "id": "ffa993f0-43ad-484d-8a94-489aa1780127",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -40,7 +40,7 @@
         },
         "payload": {
           "name": "payload",
-          "type": "jsonb",
+          "type": "json",
           "primaryKey": false,
           "notNull": true
         },
@@ -193,17 +193,7 @@
           "with": {}
         }
       },
-      "foreignKeys": {
-        "threads_parent_thread_id_threads_id_fk": {
-          "name": "threads_parent_thread_id_threads_id_fk",
-          "tableFrom": "threads",
-          "tableTo": "threads",
-          "columnsFrom": ["parent_thread_id"],
-          "columnsTo": ["id"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
