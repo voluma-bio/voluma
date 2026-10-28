@@ -21,8 +21,9 @@
  * A `LeaseLost` is not retried: the run is no longer this runner's, so the recorder calls
  * `onLeaseLost` once (the creator aborts the run) and drops every event still queued.
  *
- * A durable event that exhausts its retries is lost: `failure()` holds the error, and the
- * supervisor fails the run on it rather than carry on from a record the store lacks.
+ * A durable event that exhausts its retries is lost, and an `emit` of an invalid event is
+ * refused (our code broke the contract): `failure()` holds the error, and the supervisor
+ * fails the run on it rather than carry on from a record the store lacks.
  */
 import {
   type EventInput,
@@ -139,7 +140,11 @@ export function recorder(
       if (ids.has(id)) return;
       const parsed = parse(threadId, type, payload, id);
       if (!parsed.success) {
-        console.error(`recorder: dropped invalid ${type} event: ${parsed.error.message}`);
+        // Our code broke the contract: fail the run (the supervisor reads `failure()`) rather
+        // than store a record with a hole in it.
+        const error = new Error(`the ${type} event ${id} is invalid: ${parsed.error.message}`);
+        console.error(`recorder: ${error.message}`);
+        failure ??= error;
         return;
       }
       enqueue(parsed.data, ATTEMPTS).catch((error) => {
