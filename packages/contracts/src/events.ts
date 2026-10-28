@@ -41,6 +41,10 @@ import { workflowPinSchema, workflowPlanSchema } from "./workflow";
 
 const nonEmpty = z.string().min(1);
 
+/** Bounds on what a `wake` stores, in UTF-16 code units: the notes block goes into every later worker's prompt. */
+export const WAKE_NOTE_MAX = 6000;
+export const WAKE_ERROR_MAX = 1000;
+
 export const threadKindSchema = z.enum(["supervisor", "worker", "check", "chat"]);
 export type ThreadKind = z.infer<typeof threadKindSchema>;
 
@@ -108,7 +112,8 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         /**
          * The model this thread calls, as the runner names it: `provider/id`
          * (`meta/muse-spark-1.3`). Worker, check and chat threads call one and
-         * should set it; the supervisor calls none and must not. A thread's model is
+         * should set it. The supervisor thread sets none: the main thread's calls run on
+         * it and each `wake` records the model that answered. A thread's model is
          * fixed for its life: every `thread.started` of a thread names the same one, and
          * the harness fails a resume on a different model, as it does for a differing
          * system prompt. Optional in the schema until the harness writes it; then it
@@ -288,29 +293,56 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
   );
 
   /**
-   * One wake of the run's main thread: what it was told (`point`, of `taskId`), what it
-   * answered, and which model. Written before the runtime applies the answer, so a resumed
-   * run applies this and does not ask again. `note` is the whole notes block in force from
-   * here on (absent: unchanged); the supervisor passes it into later workers' and checkers'
-   * prompts. `decision` is present at a judgment point (`check-disagreed`, `thread-failed`),
-   * and a `judgment` event records what was applied. `error`: the model did not answer.
-   * `fold` ignores it.
+   * One wake of the run's main thread: what it was told (`point`), what it answered, and
+   * which model (`provider/id`). Written before the runtime applies the answer, so a resumed
+   * run applies this and does not ask again. The main thread runs on the root thread, which
+   * has no `model` on `thread.started`: each wake names the model that answered, and a
+   * resume may run on another one (the thread's context is rebuilt from the recorded
+   * answers, not from a provider-side session).
+   *
+   * Points: `run-started` (the run's first wake: the main thread may adapt the computed plan;
+   * `plan` is the plan it chose, absent when it kept the computed one, and
+   * `revision.started.plan` stays the record of what was applied), `task-checked` (a task's
+   * check passed), and the judgment points `check-disagreed` and `thread-failed`, which
+   * need a `decision`; a `judgment` event records what was applied. `note` is the whole
+   * notes block in force from here on (absent: unchanged), at most `WAKE_NOTE_MAX` UTF-16
+   * code units; the supervisor passes it into later workers' and checkers' prompts. `error`
+   * (the writer truncates it to `WAKE_ERROR_MAX`): the model did not answer, so there is no
+   * note, decision or plan. `fold` ignores it.
    */
+  const wakePoint = z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("run-started"), input: z.unknown() }),
+    z.object({ kind: z.literal("task-checked"), taskId: taskIdSchema, input: z.unknown() }),
+    z.object({ kind: z.literal("check-disagreed"), taskId: taskIdSchema, input: z.unknown() }),
+    z.object({ kind: z.literal("thread-failed"), taskId: taskIdSchema, input: z.unknown() }),
+  ]);
   const wake = event(
     "wake",
-    z.object({
-      point: z.object({
-        kind: z.enum(["task-checked", "check-disagreed", "thread-failed"]),
-        taskId: taskIdSchema,
-        input: z.unknown(),
+    z
+      .object({
+        point: wakePoint,
+        model: modelRefSchema,
+        note: z.string().max(WAKE_NOTE_MAX).optional(),
+        decision: z
+          .object({ action: z.enum(["accept", "redo", "fail"]), reason: nonEmpty })
+          .optional(),
+        plan: workflowPlanSchema.optional(),
+        error: z.string().max(WAKE_ERROR_MAX).optional(),
+      })
+      .superRefine((p, ctx) => {
+        const judged = p.point.kind === "check-disagreed" || p.point.kind === "thread-failed";
+        const issue = (message: string) => ctx.addIssue({ code: "custom", message });
+        if (p.error !== undefined) {
+          if (p.note !== undefined || p.decision !== undefined || p.plan !== undefined) {
+            issue("a wake the model did not answer has no note, decision or plan");
+          }
+        } else if (judged !== (p.decision !== undefined)) {
+          issue("a decision goes with, and only with, a judgment point the model answered");
+        }
+        if (p.plan !== undefined && p.point.kind !== "run-started") {
+          issue("only the run-started wake carries a plan");
+        }
       }),
-      model: nonEmpty,
-      note: z.string().optional(),
-      decision: z
-        .object({ action: z.enum(["accept", "redo", "fail"]), reason: nonEmpty })
-        .optional(),
-      error: z.string().optional(),
-    }),
   );
 
   return z.discriminatedUnion("type", [
