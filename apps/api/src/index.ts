@@ -160,7 +160,7 @@ const app = new Hono();
 app.get("/health", (c) => c.text("ok"));
 // A body over the limit is a 413 before anything reads it. Browsers get 256 KB (the key
 // vault and the event log keep what they send), except an upload's file list (up to
-// 10,000 paths of 300 characters: 4 MB). The runner is trusted, and a model's
+// 10,000 paths of 300 ASCII characters: 4 MB). The runner is trusted, and a model's
 // history row can be large (reasoning blobs, long tool calls), so /ingest/* gets 8 MB.
 const browserLimit = bodyLimit({ maxSize: 256 * 1024 });
 const fileListLimit = bodyLimit({ maxSize: 4 * 1024 * 1024 });

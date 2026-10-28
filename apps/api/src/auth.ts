@@ -576,10 +576,13 @@ export function createAuth(config: AuthConfig) {
     const { email, password } = await parseJson(c, passwordSignInRequestSchema);
     const key = email.trim().toLowerCase();
     const now = Date.now();
-    const failed = failedSignIns.get(key);
-    if (failed && failed.until > now && failed.count >= PASSWORD_ATTEMPTS) {
-      return c.json({ error: "too many attempts" }, 429);
-    }
+    for (const [k, v] of failedSignIns) if (v.until <= now) failedSignIns.delete(k);
+    // Counted before the WorkOS call, so parallel guesses can't all pass the check; a
+    // success gives the attempt back.
+    const tries = failedSignIns.get(key) ?? { count: 0, until: now + PASSWORD_WINDOW_MS };
+    if (tries.count >= PASSWORD_ATTEMPTS) return c.json({ error: "too many attempts" }, 429);
+    tries.count++;
+    failedSignIns.set(key, tries);
     let auth: Awaited<ReturnType<typeof workos.userManagement.authenticateWithPassword>>;
     try {
       auth = await workos.userManagement.authenticateWithPassword({
@@ -594,17 +597,11 @@ export function createAuth(config: AuthConfig) {
       const status = (error as { status?: number }).status;
       if (status === 429) return c.json({ error: "too many attempts" }, 429);
       if (status !== undefined && status >= 400 && status < 500) {
-        for (const [k, v] of failedSignIns) if (v.until <= now) failedSignIns.delete(k);
-        const live = failedSignIns.get(key);
-        failedSignIns.set(key, {
-          count: (live?.count ?? 0) + 1,
-          until: live?.until ?? now + PASSWORD_WINDOW_MS,
-        });
         return c.json({ error: "sign-in refused" }, 401);
       }
       throw error;
     }
-    failedSignIns.delete(key);
+    tries.count--;
     const sid = core.parseTokenClaims(auth.accessToken).sid;
     const scope = scopes.get(auth.organizationId ?? "");
     if (!scope || !auth.organizationId) {

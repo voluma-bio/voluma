@@ -4,11 +4,11 @@
  *   pnpm --filter @voluma/api upload:scan --dir <folder> --name "<scan name>"
  * Reads VOLUMA_URL (the app's origin, e.g. https://volumaapi-staging.up.railway.app),
  * VOLUMA_EMAIL and VOLUMA_PASSWORD (a member's own WorkOS password sign-in) from the
- * environment or the repo .env, and never prints them. Prints the new input's id; the scan
- * then shows in the start screen's picker.
+ * environment or the repo .env, and never prints the password. Prints the new input's id;
+ * the scan then shows in the start screen's picker.
  *
  * Hidden files (a leading `.`, e.g. `.DS_Store`) are skipped. Each PUT is retried a few
- * times; if some still fail, complete names them and the script exits non-zero.
+ * times; if some still fail, the upload is cancelled and the script exits non-zero.
  */
 import { openAsBlob } from "node:fs";
 import { readdir } from "node:fs/promises";
@@ -60,15 +60,19 @@ async function fail(step: string, res: Response): Promise<never> {
   throw new Error(`${step}: ${res.status} ${await res.text()}`);
 }
 
+/** On-disk path for each upload path (NFC), which may differ on a filesystem that kept NFD names. */
+const diskPaths = new Map<string, string>();
+
 async function listFiles(): Promise<UploadFile[]> {
   const entries = await readdir(dir, { recursive: true, withFileTypes: true });
   const files: UploadFile[] = [];
   for (const entry of entries) {
     if (!entry.isFile()) continue;
-    const path = relative(dir, join(entry.parentPath, entry.name)).split(sep).join("/");
+    const disk = join(entry.parentPath, entry.name);
+    const path = relative(dir, disk).split(sep).join("/").normalize("NFC");
     if (path.split("/").some((s) => s.startsWith("."))) continue;
-    const size = (await openAsBlob(join(dir, path))).size;
-    files.push({ path: path.normalize("NFC"), size });
+    diskPaths.set(path, disk);
+    files.push({ path, size: (await openAsBlob(disk)).size });
   }
   return files.sort((a, b) => a.path.localeCompare(b.path));
 }
@@ -78,7 +82,7 @@ async function put(url: string, path: string): Promise<boolean> {
     try {
       const res = await fetch(url, {
         method: "PUT",
-        body: await openAsBlob(join(dir, path)),
+        body: await openAsBlob(diskPaths.get(path) as string),
       });
       if (res.ok) return true;
       console.error(`${path}: ${res.status} (attempt ${attempt})`);
@@ -126,10 +130,16 @@ const worker = async () => {
 await Promise.all(Array.from({ length: 8 }, worker));
 
 const completed = await api(`/run/inputs/${inputId}/complete`, {});
-if (completed.status === 409) {
-  const { missing } = completeUploadConflictSchema.parse(await completed.json());
-  throw new Error(`Not stored: ${missing.join(", ")}. Run the script again for a new upload.`);
+if (!completed.ok) {
+  const failure =
+    completed.status === 409
+      ? `Not stored: ${completeUploadConflictSchema.parse(await completed.json()).missing.join(", ")}`
+      : `complete: ${completed.status} ${await completed.text()}`;
+  // Frees the upload's place under the open-upload limit.
+  await api(`/run/inputs/${inputId}/cancel`, {});
+  await api("/auth/logout", {});
+  throw new Error(`${failure}. The upload was cancelled; run the script again.`);
 }
-if (!completed.ok) await fail("complete", completed);
 const input = inputSchema.parse(await completed.json());
+await api("/auth/logout", {});
 console.log(`Ready: "${input.name}" (${input.id})`);

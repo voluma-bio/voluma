@@ -1,6 +1,6 @@
 /**
  * Postgres adapter for upload rows: an `inputs` row that is `uploading` from create until
- * complete finds every declared file in storage (`uploads.ts`). Reads apply the caller's
+ * complete finds every declared file in storage (`inputs.ts`). Reads apply the caller's
  * `Reader`, like every other read of an input.
  */
 import type { UploadFile } from "@voluma/contracts/run";

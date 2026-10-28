@@ -20,7 +20,7 @@ import {
 } from "@voluma/contracts/run";
 import { Button } from "@voluma/ui";
 import { FolderOpen, Upload } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 /** Files PUT at once; enough to fill a lab uplink without starving the page. */
 const PARALLEL = 4;
@@ -35,9 +35,12 @@ interface Picked {
 
 type Phase =
   | { kind: "pick" }
+  | { kind: "creating" }
   | { kind: "uploading" }
+  | { kind: "finishing" }
   | { kind: "failed"; paths: string[] }
-  | { kind: "error"; message: string };
+  /** `retryComplete`: every file is stored and only complete failed. */
+  | { kind: "error"; message: string; retryComplete?: true };
 
 /** A folder pick reports `top/sub/file`; the top folder becomes the default name, not a path segment. */
 function fromFileList(list: FileList): { picked: Picked[]; folder?: string } {
@@ -74,6 +77,14 @@ function createError(error: unknown): string {
   return "Couldn't start the upload. Try again.";
 }
 
+interface Attempt {
+  controller: AbortController;
+  /** Bytes sent per path, carried over from the attempt this one retries. */
+  progress: Map<string, number>;
+  /** The pending animation frame that publishes the byte total, or 0. */
+  frame: number;
+}
+
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export function ScanUpload({ onUploaded }: { onUploaded: (input: Input) => void }) {
@@ -82,17 +93,21 @@ export function ScanUpload({ onUploaded }: { onUploaded: (input: Input) => void 
   const [picked, setPicked] = useState<Picked[]>([]);
   const [name, setName] = useState("");
   const [phase, setPhase] = useState<Phase>({ kind: "pick" });
+  /** The upload the server created; set once, cleared only by reset. */
+  const [upload, setUpload] = useState<CreateUploadResponse>();
   const [sent, setSent] = useState(0);
   const [doneFiles, setDoneFiles] = useState(0);
-  const upload = useRef<CreateUploadResponse>(undefined);
-  /** Bytes sent per path, so a retried file's progress replaces its earlier try. */
-  const progress = useRef(new Map<string, number>());
-  const abort = useRef<AbortController>(undefined);
+  /**
+   * The attempt in flight. Every async step checks it is still the current one before
+   * writing state, so a cancelled or superseded attempt can't touch the panel.
+   */
+  const attempt = useRef<Attempt>(undefined);
   const folderInput = useRef<HTMLInputElement>(null);
   const filesInput = useRef<HTMLInputElement>(null);
 
-  const total = picked.reduce((sum, p) => sum + p.file.size, 0);
-  const busy = phase.kind === "uploading";
+  const total = useMemo(() => picked.reduce((sum, p) => sum + p.file.size, 0), [picked]);
+  const busy =
+    phase.kind === "creating" || phase.kind === "uploading" || phase.kind === "finishing";
 
   // Leaving the page mid-upload loses it; ask first.
   useEffect(() => {
@@ -102,18 +117,21 @@ export function ScanUpload({ onUploaded }: { onUploaded: (input: Input) => void 
     return () => window.removeEventListener("beforeunload", warn);
   }, [busy]);
 
-  const request = {
-    name: name.trim(),
-    files: picked.map((p) => ({ path: p.path, size: p.file.size })),
-  };
-  const tooBig = picked.find((p) => p.file.size > MAX_UPLOAD_FILE_BYTES);
-  const invalid =
-    picked.length > 0 && !tooBig && !createUploadRequestSchema.safeParse(request).success;
+  // Validated when the pick or name changes, never on a progress render.
+  const request = useMemo(
+    () => ({ name: name.trim(), files: picked.map((p) => ({ path: p.path, size: p.file.size })) }),
+    [name, picked],
+  );
+  const tooBig = useMemo(() => picked.find((p) => p.file.size > MAX_UPLOAD_FILE_BYTES), [picked]);
+  const invalid = useMemo(
+    () => picked.length > 0 && !tooBig && !createUploadRequestSchema.safeParse(request).success,
+    [picked, tooBig, request],
+  );
 
   function reset() {
-    abort.current?.abort();
-    upload.current = undefined;
-    progress.current.clear();
+    attempt.current?.controller.abort();
+    attempt.current = undefined;
+    setUpload(undefined);
     setPicked([]);
     setName("");
     setSent(0);
@@ -131,20 +149,43 @@ export function ScanUpload({ onUploaded }: { onUploaded: (input: Input) => void 
     setPhase({ kind: "pick" });
   }
 
-  /** PUTs `paths`, then completes; anything still missing becomes the failed list. */
-  async function send(paths: string[]) {
-    const current = upload.current;
-    if (!current) return;
-    const controller = new AbortController();
-    abort.current = controller;
+  /** A new attempt, replacing (and aborting) any earlier one. */
+  function begin(): Attempt {
+    attempt.current?.controller.abort();
+    const next: Attempt = {
+      controller: new AbortController(),
+      progress: attempt.current?.progress ?? new Map(),
+      frame: 0,
+    };
+    attempt.current = next;
+    return next;
+  }
+  const live = (a: Attempt) => attempt.current === a && !a.controller.signal.aborted;
+
+  /** PUTs `paths` with `current`'s URLs, then completes; what is still missing becomes the failed list. */
+  async function send(current: CreateUploadResponse, paths: string[]) {
+    if (Date.parse(current.expiresAt) <= Date.now()) {
+      return setPhase({
+        kind: "error",
+        message: "This upload has expired. Cancel it and upload the scan again.",
+      });
+    }
+    const a = begin();
     setPhase({ kind: "uploading" });
     const urls = new Map(current.uploads.map((u) => [u.path, u.url]));
     const files = new Map(picked.map((p) => [p.path, p.file]));
     const queue = [...paths];
     const failed: string[] = [];
+    // Bytes per path, so a retried file's progress replaces its earlier try; the total is
+    // published at most once a frame.
     const report = (path: string, bytes: number) => {
-      progress.current.set(path, bytes);
-      setSent([...progress.current.values()].reduce((a, b) => a + b, 0));
+      if (!live(a)) return;
+      a.progress.set(path, bytes);
+      if (a.frame) return;
+      a.frame = requestAnimationFrame(() => {
+        a.frame = 0;
+        if (live(a)) setSent([...a.progress.values()].reduce((x, y) => x + y, 0));
+      });
     };
     const worker = async () => {
       for (let path = queue.shift(); path !== undefined; path = queue.shift()) {
@@ -153,16 +194,17 @@ export function ScanUpload({ onUploaded }: { onUploaded: (input: Input) => void 
         for (let attempt = 1; attempt <= TRIES && !ok; attempt++) {
           try {
             await putUploadFile(urls.get(path) as string, file, {
-              signal: controller.signal,
+              signal: a.controller.signal,
               onProgress: (bytes) => report(path, bytes),
             });
             ok = true;
           } catch {
-            if (controller.signal.aborted) return;
+            if (!live(a)) return;
             report(path, 0);
             if (attempt < TRIES) await wait(1000 * 2 ** attempt);
           }
         }
+        if (!live(a)) return;
         if (ok) {
           report(path, file.size);
           setDoneFiles((n) => n + 1);
@@ -170,35 +212,56 @@ export function ScanUpload({ onUploaded }: { onUploaded: (input: Input) => void 
       }
     };
     await Promise.all(Array.from({ length: PARALLEL }, worker));
-    if (controller.signal.aborted) return;
+    if (!live(a)) return;
     if (failed.length > 0) return setPhase({ kind: "failed", paths: failed });
+    // Cancel is hidden from here: the server may already be moving the files.
+    setPhase({ kind: "finishing" });
     try {
       const input = await completeUpload(current.inputId);
+      if (!live(a)) return;
       await queryClient.invalidateQueries({ queryKey: ["inputs"] });
       onUploaded(input);
       reset();
       setOpen(false);
     } catch (error) {
+      if (!live(a)) return;
       if (error instanceof UploadIncompleteError) {
         for (const path of error.missing) report(path, 0);
         setDoneFiles((n) => n - error.missing.length);
         return setPhase({ kind: "failed", paths: error.missing });
       }
-      setPhase({ kind: "error", message: "Couldn't finish the upload. Try again." });
+      setPhase({
+        kind: "error",
+        message: "Couldn't finish the upload. Try again.",
+        retryComplete: true,
+      });
     }
   }
 
   async function start() {
+    // A second click before the re-render that disables the button.
+    if (attempt.current) return;
+    const a = begin();
+    setPhase({ kind: "creating" });
+    let created: CreateUploadResponse;
     try {
-      upload.current = await createUpload(request);
+      created = await createUpload(request);
     } catch (error) {
-      return setPhase({ kind: "error", message: createError(error) });
+      if (!live(a)) return;
+      attempt.current = undefined;
+      setPhase({ kind: "error", message: createError(error) });
+      return;
     }
-    await send(picked.map((p) => p.path));
+    if (!live(a)) return;
+    setUpload(created);
+    await send(
+      created,
+      picked.map((p) => p.path),
+    );
   }
 
   async function cancel() {
-    const id = upload.current?.inputId;
+    const id = upload?.inputId;
     reset();
     setOpen(false);
     // Frees the upload's place under the open-upload limit; if this fails it expires.
@@ -214,7 +277,8 @@ export function ScanUpload({ onUploaded }: { onUploaded: (input: Input) => void 
     );
   }
 
-  const started = upload.current !== undefined;
+  const started = upload !== undefined;
+  const creating = phase.kind === "creating";
   const percent = total > 0 ? Math.min(100, Math.floor((sent / total) * 100)) : 0;
 
   return (
@@ -224,7 +288,7 @@ export function ScanUpload({ onUploaded }: { onUploaded: (input: Input) => void 
     >
       <div className="flex items-baseline justify-between">
         <h3 className="font-medium">Upload scan</h3>
-        {!started && (
+        {!started && !creating && (
           <button
             type="button"
             className="text-meta text-primary-text hover:underline"
@@ -287,7 +351,7 @@ export function ScanUpload({ onUploaded }: { onUploaded: (input: Input) => void 
             <input
               value={name}
               maxLength={200}
-              disabled={started}
+              disabled={started || creating}
               onChange={(e) => setName(e.target.value)}
               className="h-9 rounded-lg border border-input bg-card px-3 text-ui outline-none focus-visible:border-ring disabled:opacity-60"
             />
@@ -360,28 +424,28 @@ export function ScanUpload({ onUploaded }: { onUploaded: (input: Input) => void 
           <Button
             variant="primary"
             className="flex-1"
-            disabled={picked.length === 0 || invalid || tooBig !== undefined}
+            disabled={picked.length === 0 || invalid || tooBig !== undefined || creating}
             onClick={() => void start()}
           >
-            Upload
+            {creating ? "Starting…" : "Upload"}
           </Button>
         )}
         {phase.kind === "failed" && (
-          <Button variant="primary" className="flex-1" onClick={() => void send(phase.paths)}>
-            Retry {phase.paths.length === 1 ? "file" : `${phase.paths.length} files`}
-          </Button>
-        )}
-        {phase.kind === "error" && started && (
           <Button
             variant="primary"
             className="flex-1"
-            // Every file is stored; only complete failed.
-            onClick={() => void send([])}
+            onClick={() => upload && void send(upload, phase.paths)}
           >
+            Retry {phase.paths.length === 1 ? "file" : `${phase.paths.length} files`}
+          </Button>
+        )}
+        {phase.kind === "error" && phase.retryComplete && upload && (
+          <Button variant="primary" className="flex-1" onClick={() => void send(upload, [])}>
             Try again
           </Button>
         )}
-        {started && (
+        {phase.kind === "finishing" && <p className="text-ui text-muted-foreground">Finishing…</p>}
+        {started && phase.kind !== "finishing" && (
           <Button
             className={phase.kind === "uploading" ? "flex-1" : undefined}
             onClick={() => void cancel()}

@@ -26,4 +26,6 @@
 - **Clean up abandoned scan uploads.** An upload never completed leaves an `uploading`
   row and objects under `uploads/<inputId>/`; a PUT URL used after complete leaves a stray
   object there too. Add an R2 lifecycle rule deleting `uploads/` objects after 2 days, and
-  delete `uploading` rows older than the URL lifetime (6 h, `inputs.ts`) on a schedule.
+  delete `uploading` rows older than the URL lifetime (6 h, `inputs.ts`) on a schedule. Also
+  delete `inputs/<id>/` for any id with no `ready` row: a complete cancelled or abandoned
+  part way through its copy leaves files there.
