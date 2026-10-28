@@ -7,12 +7,13 @@
  * Settings: config.ts and `.env.example`.
  */
 import { randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import { createModels } from "@earendil-works/pi-ai";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { metaProvider } from "@earendil-works/pi-ai/providers/meta";
 import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
 import { CLAIM_POLL_SECONDS } from "@voluma/contracts/runner";
-import { handOff } from "@voluma/harness/adapters/http/hand-off";
+import { claimRun } from "@voluma/harness/adapters/http/hand-off";
 import { runnerConfig } from "./config.ts";
 import { redactor } from "./redact.ts";
 import { type RunnerContext, runClaim } from "./run.ts";
@@ -34,12 +35,10 @@ const resolve = (ref: { provider: string; id: string }) => {
   return model;
 };
 const model = resolve(config.model);
-config.modelKey(model.provider); // fail at start, not at the first claim
 
 const runnerId = `runner-${randomUUID().slice(0, 8)}`;
 const ctx: RunnerContext = {
   config,
-  api: handOff(config.api, runnerId),
   models,
   model,
   visitorModel: resolve(config.visitorModel),
@@ -60,18 +59,8 @@ for (const name of ["SIGINT", "SIGTERM"] as const) {
 const shuttingDown = new Promise<void>((resolve) =>
   shutdown.signal.addEventListener("abort", () => resolve(), { once: true }),
 );
-const sleep = (ms: number) =>
-  new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    shutdown.signal.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        resolve();
-      },
-      { once: true },
-    );
-  });
+// Aborts on shutdown, and removes its own listener when it settles.
+const sleep = (ms: number) => delay(ms, undefined, { signal: shutdown.signal }).catch(() => {});
 
 log(
   `${runnerId} up: ${config.concurrency} slot(s), model ${config.model.provider}/${config.model.id}, api ${config.api.baseUrl}`,
@@ -81,9 +70,9 @@ while (!shutdown.signal.aborted) {
     await Promise.race([...active, shuttingDown]);
     continue;
   }
-  let claim: Awaited<ReturnType<typeof ctx.api.claim>>;
+  let claim: Awaited<ReturnType<typeof claimRun>>;
   try {
-    claim = await ctx.api.claim();
+    claim = await claimRun(config.api, runnerId);
   } catch (error) {
     log(`claim failed: ${error instanceof Error ? error.message : error}`);
     await sleep(CLAIM_POLL_SECONDS * 1000);
@@ -93,11 +82,8 @@ while (!shutdown.signal.aborted) {
     await sleep(CLAIM_POLL_SECONDS * 1000);
     continue;
   }
-  const done = runClaim(ctx, claim, shutdown.signal)
-    .catch((error) =>
-      log(`[${claim.run.id}] run crashed: ${error instanceof Error ? error.stack : error}`),
-    )
-    .finally(() => active.delete(done));
+  // `runClaim` never rejects: it logs its own failures through the run's redaction.
+  const done = runClaim(ctx, claim, shutdown.signal).finally(() => active.delete(done));
   active.add(done);
 }
 

@@ -1,12 +1,12 @@
-/** One console line for a stored event, clipped. */
+/** One console line for a stored event: redacted first, then clipped (a clipped key would escape the mask). */
 import type { EventInput } from "@voluma/contracts/events";
+import type { Redact } from "./redact.ts";
 
-const clip = (value: unknown, max = 300) => {
-  const text = typeof value === "string" ? value : JSON.stringify(value);
-  return text.length > max ? `${text.slice(0, max)}…` : text;
-};
-
-export function eventLine(event: EventInput): string {
+export function eventLine(event: EventInput, redact: Redact): string {
+  const clip = (value: unknown, max = 300) => {
+    const text = redact(typeof value === "string" ? value : JSON.stringify(value));
+    return text.length > max ? `${text.slice(0, max)}…` : text;
+  };
   const p = event.payload as Record<string, unknown>;
   const thread = event.threadId.slice(event.runId.length + 1);
   switch (event.type) {

@@ -3,11 +3,14 @@
 Sandboxes cost money while up (a GPU one a lot), so every one must end. In order of
 who ends it:
 
-1. **The runner, normally.** `run.ts` closes the run's sandbox in a `finally` when the
-   supervisor ends, then flushes events and reports. If the close takes over 15 s it asks
-   Modal to terminate the run's sandboxes by their `{run}` tag.
+1. **The runner, normally.** `run.ts` closes the run's sandbox when the supervisor ends,
+   before it flushes events and reports, so the `stopped` event and the last sandbox seconds
+   are stored under the live lease. If the close takes over 15 s it asks Modal to terminate
+   the sandboxes of this claim, by their `{run, claim}` tags (the claim is a per-claim id: a
+   released run's old runner must not kill the sandbox of the runner that reclaimed it).
 2. **A signal.** SIGINT and SIGTERM stop every run (the running command is killed), each
-   closes its sandbox and reports `released`; the service waits up to 30 s. A second signal
+   reports `released` first, so the run is recovered within the platform's grace period,
+   then closes its sandbox (no `stopped` event is stored); the service waits up to 30 s. A second signal
    exits 130 at once and leaves the sandboxes (use `sandboxes:clean`). Signal the process
    group (Ctrl-C does); `kill <pid of pnpm>` alone leaves the runner running.
 3. **A resume.** `create` terminates live sandboxes tagged with the same `{run, name}`.

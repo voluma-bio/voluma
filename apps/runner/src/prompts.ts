@@ -4,7 +4,7 @@
  * nothing that varies by run. The plan carries a task's id, dependencies and declared
  * outputs and no description yet (`workflow.md` is not parsed), so that is all the prompt says.
  */
-import type { PlanTask } from "@voluma/harness/task-runtime";
+import type { PlanTask } from "@voluma/harness/supervise-run";
 
 const COMMON = `You work in a sandbox with one shell tool, bash. Python 3.12 with numpy, scipy, scikit-image, pydicom, nibabel and SimpleITK is installed. There is no network.
 /inputs holds the scan, /outputs/<task id>/ holds each task's result files, and /scratch is for temporary files.

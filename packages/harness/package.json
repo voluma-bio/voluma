@@ -5,25 +5,17 @@
   "type": "module",
   "exports": {
     "./ports/sandbox": "./src/ports/sandbox.ts",
-    "./ports/event-log": "./src/ports/event-log.ts",
     "./ports/history": "./src/ports/history.ts",
     "./ports/lease-lost": "./src/ports/lease-lost.ts",
     "./layout": "./src/layout.ts",
     "./recorder": "./src/recorder.ts",
     "./sandbox-session": "./src/sandbox-session.ts",
-    "./tools/bash": "./src/tools/bash.ts",
-    "./tools/tool": "./src/tools/tool.ts",
-    "./adapters/pi": "./src/adapters/pi/start-thread.ts",
-    "./adapters/http": "./src/adapters/http/client.ts",
     "./adapters/http/hand-off": "./src/adapters/http/hand-off.ts",
     "./ports/evidence": "./src/ports/evidence.ts",
     "./adapters/local/evidence": "./src/adapters/local/evidence.ts",
-    "./threads": "./src/threads.ts",
-    "./task-runtime": "./src/task-runtime.ts",
-    "./supervisor": "./src/supervisor.ts",
     "./judgment": "./src/judgment.ts",
-    "./tools/task-tools": "./src/tools/task-tools.ts",
-    "./tools/thread-message": "./src/tools/thread-message.ts"
+    "./adapters/http/run-client": "./src/adapters/http/run-client.ts",
+    "./supervise-run": "./src/supervise-run.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"

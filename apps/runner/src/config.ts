@@ -39,7 +39,9 @@ function positiveInt(name: string, fallback: number, min = 1): number {
 function apiEndpoint(): { baseUrl: string; token: string } {
   const baseUrl = optional("VOLUMA_API_URL");
   const token = optional("VOLUMA_API_TOKEN");
-  if (baseUrl && token) return { baseUrl, token };
+  if (baseUrl || token) {
+    return { baseUrl: required("VOLUMA_API_URL"), token: required("VOLUMA_API_TOKEN") };
+  }
   const path = resolve(import.meta.dirname, "../../../.dev/env.json");
   try {
     const { apiUrl, apiToken } = JSON.parse(readFileSync(path, "utf8"));
@@ -58,11 +60,19 @@ function modelRef(name: string, fallback?: string): { provider: string; id: stri
   return { provider, id };
 }
 
+/** Our Modal token; absent: the SDK uses ~/.modal.toml. */
+export function modalToken(): { tokenId: string; tokenSecret: string } | undefined {
+  const tokenId = optional("MODAL_TOKEN_ID");
+  const tokenSecret = optional("MODAL_TOKEN_SECRET");
+  return tokenId && tokenSecret ? { tokenId, tokenSecret } : undefined;
+}
+
 export type Config = ReturnType<typeof runnerConfig>;
 
 export function runnerConfig() {
-  const modalTokenId = optional("MODAL_TOKEN_ID");
-  const modalTokenSecret = optional("MODAL_TOKEN_SECRET");
+  const modal = modalToken();
+  const ref = modelRef("RUNNER_MODEL");
+  const model = { ...ref, apiKey: required(`VOLUMA_${ref.provider.toUpperCase()}_API_KEY`) };
   const api = apiEndpoint();
   const r2 = {
     accountId: required("R2_ACCOUNT_ID"),
@@ -75,27 +85,21 @@ export function runnerConfig() {
     api,
     /** Runs at once. */
     concurrency: positiveInt("RUNNER_CONCURRENCY", 2),
-    /** The model of a `voluma` run, whose key is ours. */
-    model: modelRef("RUNNER_MODEL"),
+    /** The model of a `voluma` run, with our key for its provider (`VOLUMA_<PROVIDER>_API_KEY`). */
+    model,
     /** The model of a `visitor` run, which uses the visitor's Meta key. */
     visitorModel: modelRef("RUNNER_VISITOR_MODEL", "meta/muse-spark-1.3-contributor"),
-    /** Our model keys by provider, from `VOLUMA_<PROVIDER>_API_KEY`. */
-    modelKey: (provider: string) => required(`VOLUMA_${provider.toUpperCase()}_API_KEY`),
-    /** Our Modal token; absent: the SDK uses ~/.modal.toml. */
-    modal:
-      modalTokenId && modalTokenSecret
-        ? { tokenId: modalTokenId, tokenSecret: modalTokenSecret }
-        : undefined,
+    modal,
     r2,
     /** Every secret of ours, to redact from anything that leaves the process. */
     secrets: [
       api.token,
+      model.apiKey,
       r2.accessKeyId,
       r2.secretAccessKey,
       r2.cloudflareApiToken,
-      modalTokenId,
-      modalTokenSecret,
-      ...["OPENAI", "META", "ANTHROPIC"].map((p) => optional(`VOLUMA_${p}_API_KEY`)),
+      modal?.tokenId,
+      modal?.tokenSecret,
     ].filter((s): s is string => s !== undefined),
     sandbox: {
       image: optional("VOLUMA_SANDBOX_IMAGE") ?? "voluma-microct",

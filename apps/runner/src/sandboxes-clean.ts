@@ -8,15 +8,13 @@
  */
 import { parseArgs } from "node:util";
 import { ModalClient, NotFoundError } from "modal";
-import { optional } from "./config.ts";
+import { modalToken } from "./config.ts";
 import { RUNS_APP } from "./modal-sandbox.ts";
 
 const { values } = parseArgs({
   options: { "dry-run": { type: "boolean" }, run: { type: "string" } },
 });
-const tokenId = optional("MODAL_TOKEN_ID");
-const tokenSecret = optional("MODAL_TOKEN_SECRET");
-const client = new ModalClient(tokenId && tokenSecret ? { tokenId, tokenSecret } : undefined);
+const client = new ModalClient(modalToken());
 
 // The app is created by the first sandbox; before that there is nothing to sweep.
 const app = await client.apps.fromName(RUNS_APP).catch((error) => {

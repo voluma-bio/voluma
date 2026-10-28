@@ -118,19 +118,20 @@ checklist, check threads, and review chat threads.
   action and does not ask the arm again. Its decisions record `by: judgment(arm)`. `llmJudgment`
   is the first arm. A thread that throws or is refused before it starts (`ran` false), or an
   error in a step, fails the run: threads aborted, the root ends `failed`. The supervisor never
-  imports Pi; it gets threads, the runtime and the judgment from its caller (`apps/runner/src/run.ts`).
+  imports Pi; it is built by `superviseRun` (`packages/harness/src/supervise-run.ts`), which a host gives only adapters.
 - **The runner service** (`apps/runner`, `pnpm --filter @voluma/runner start`). It polls
   `claim` while it has a free slot (`RUNNER_CONCURRENCY`); `run.ts` runs each claim the same
   way whether the run is fresh or recovered: read the run's stored events (paged) and every
-  thread's history over HTTP, build the recorder from them, then the task runtime, threads,
-  judgment and supervisor, and `supervisor.run()`. `lease.ts` heartbeats every 15 s with the
+  thread's history over HTTP, build the recorder from them, and call the harness's `superviseRun` with the sandbox,
+  evidence and model adapters. All run-scoped HTTP (events, history, heartbeat, report) is one
+  `runClient`, which also stops the run on a lost lease and redacts what it sends. `lease.ts` heartbeats every 15 s with the
   usage since the last acknowledged one (model dollars from Pi's per-reply cost, sandbox
   seconds from the session's ready/stopped states) and stops the run on `stop`, on a
   `LeaseLost` from events, history or heartbeat, or 45 s after the last acknowledged
   heartbeat was sent. SIGTERM stops every run, each reports `released`, and the process
   exits. A `voluma` run uses our keys; a `visitor` run uses the claim's, in that run's scope
   only. `redact.ts` masks every literal key in stored events and history rows, console lines
-  and the report's `error`. Worker and check prompts come from the plan's ids and declared
+  (redacted before they are clipped) and the report's `error`. Worker and check prompts come from the plan's ids and declared
   outputs (`prompts.ts`) because the plan has no task text until `workflow.md` is parsed.
 - **`seq` and the database.** `seq` per run is gapless and in commit order: each
   append takes a per-run advisory lock as its own statement before the insert (a lock

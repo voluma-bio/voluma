@@ -1,6 +1,6 @@
 /**
- * One HTTP call to the API's ingest routes, shared by the run-scoped client and the
- * hand-off: bearer token, the lease token header when given, a per-attempt timeout, and
+ * One HTTP call to the API's ingest routes, shared by the run client and the
+ * claim: bearer token, the lease token header when given, a per-attempt timeout, and
  * optional retry of network and 5xx failures. A 409 whose body is `leaseLostSchema` is
  * `LeaseLost` on any call, never retried (`@voluma/contracts/runner`).
  */
@@ -77,15 +77,16 @@ export function postJson(
   endpoint: Endpoint,
   path: string,
   body: unknown,
-  options: { leaseToken?: string; retryForMs?: number } = {},
+  options: { leaseToken?: string; retryForMs?: number; redact?(text: string): string } = {},
 ): Promise<Response> {
+  const text = JSON.stringify(body);
   return send(
     endpoint,
     path,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
+      body: options.redact ? options.redact(text) : text,
       leaseToken: options.leaseToken,
     },
     options.retryForMs,
