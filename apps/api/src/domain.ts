@@ -11,18 +11,19 @@ import { createMiddleware } from "hono/factory";
  */
 export type Scope = "lab" | "self";
 
+type UserBase = {
+  kind: "user";
+  userId: string;
+  name: string | null;
+  /** The user's WorkOS organization: the tenant every record is filed under. */
+  labId: string;
+  scope: Scope;
+};
+
 export type Principal =
-  | {
-      kind: "user";
-      userId: string;
-      /** A `visitor` is a guest the server minted: no account, no email. */
-      account: "member" | "visitor";
-      email: string | null;
-      name: string | null;
-      /** The user's WorkOS organization: the tenant every record is filed under. */
-      labId: string;
-      scope: Scope;
-    }
+  | (UserBase & { account: "member"; email: string })
+  /** A guest the server minted: no account, no email. */
+  | (UserBase & { account: "visitor" })
   | { kind: "service"; name: "runner" };
 
 /** The Hono environment of a domain app: `new Hono<AppEnv>()`. */

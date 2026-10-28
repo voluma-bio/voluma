@@ -2,8 +2,9 @@
  * The sign-in gate: a layout route that asks the API who is signed in, then
  * renders the feature routes with the account menu, or the sign-in screen.
  * Features read the signed-in user with `useOutletContext<Me>()`; they never
- * call `getMe` themselves. A 401 from any later call (`onSignedOut`) returns
- * to the sign-in screen.
+ * call `getMe` themselves. With no session, the gate asks the server for a guest
+ * (`POST /api/auth/guest`); a server with guests off refuses, and the sign-in screen
+ * shows. A 401 from any later call (`onSignedOut`) runs the same load again.
  */
 import { ApiError, getMe, onSignedOut, signIn, signOut } from "@voluma/api-client";
 import type { Me } from "@voluma/contracts/auth";
@@ -12,6 +13,7 @@ import { ChevronDown } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
 import { useCallback, useEffect, useState } from "react";
 import { Outlet } from "react-router";
+import { startGuest } from "./guest";
 import { GateScreen, SignInScreen } from "./sign-in-screen";
 
 type Session =
@@ -26,29 +28,31 @@ export function SignedIn() {
 
   const load = useCallback(
     () =>
-      getMe().then(
-        (me) => setSession(me ? { state: "signed-in", me } : { state: "signed-out" }),
-        (error: unknown) => {
-          // TypeError: no network. SyntaxError: something other than the API
-          // (a captive portal, a proxy) answered with a non-JSON page.
-          if (error instanceof TypeError || error instanceof SyntaxError)
-            setSession({ state: "unreachable", cause: "offline" });
-          else if (error instanceof ApiError && error.status >= 500)
-            setSession({ state: "unreachable", cause: "down" });
-          // A schema mismatch or an unexpected status is a bug: hand it to
-          // the router's error screen rather than stalling on "Loading…".
-          else
-            setSession(() => {
-              throw error;
-            });
-        },
-      ),
+      getMe()
+        .then((me) => me ?? startGuest())
+        .then(
+          (me) => setSession(me ? { state: "signed-in", me } : { state: "signed-out" }),
+          (error: unknown) => {
+            // TypeError: no network. SyntaxError: something other than the API
+            // (a captive portal, a proxy) answered with a non-JSON page.
+            if (error instanceof TypeError || error instanceof SyntaxError)
+              setSession({ state: "unreachable", cause: "offline" });
+            else if (error instanceof ApiError && error.status >= 500)
+              setSession({ state: "unreachable", cause: "down" });
+            // A schema mismatch or an unexpected status is a bug: hand it to
+            // the router's error screen rather than stalling on "Loading…".
+            else
+              setSession(() => {
+                throw error;
+              });
+          },
+        ),
     [],
   );
 
   useEffect(() => {
     load();
-    return onSignedOut(() => setSession({ state: "signed-out" }));
+    return onSignedOut(() => void load());
   }, [load]);
 
   switch (session.state) {

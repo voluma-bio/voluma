@@ -112,18 +112,21 @@ user, no email) in the demo entrance PR. No WorkOS user signs into a Demo organi
 none is in the list. WorkOS does not enforce the `organizationId` pin on sign-in, so the
 per-request allow-list is the only control. `scope` is server-internal: `/me` returns only the contract shape.
 
-**Guests.** With `GUEST_ORGANIZATION_ID` (and `GUEST_SCOPE`, `lab` or `self`, default `lab`) set, a
-request with no usable session cookie and no bearer is a guest instead of a 401: a `user`
-principal with `account: "visitor"`, no email, and that organization and scope, so domains and
-`readerOf` treat it like any member. Its id (`guest_…`) is minted by the server into its own
-sealed cookie (`voluma-guest`, `__Host-` on https, HttpOnly, 400 days; same seal as the session
-cookie, no WorkOS call), and `/me` returns `kind: "visitor"`. A valid member session wins over
-the guest cookie; signing out returns the member to the same guest. Unset means the sign-in
-wall, and a guest cookie is ignored. Minting is limited to 20 per client address per hour
-(in-process; `X-Real-IP`, which Railway is said to overwrite, unverified), then 429. Guests
-belong to the Demo organization, never the Yao Lab: lab runs include scans not cleared for
-public use, so lab data is for signed-in members. They share the Demo workspace (scope `lab`
-for now; `self` for the hackathon). When an `Authorization` header is present only the
+**Guests.** With `GUEST_ORGANIZATION_ID` (and `GUEST_SCOPE`, `lab` or `self`, default `lab`; the
+Demo org runs `self`) set, a request with no session cookie, no bearer and a valid guest cookie
+is a guest: a `user` principal with `account: "visitor"`, no email, and that organization and
+scope, so domains and `readerOf` treat it like any member. Its id (`guest_…`) is minted by
+`POST /api/auth/guest` (same-origin, behind the CSRF guard; it returns the `/me` body) into its
+own sealed cookie (`voluma-guest`, `__Host-` on https, HttpOnly, 400 days; same seal as the
+session cookie, no WorkOS call). A GET or a 404 never mints. The web gate calls it when `/me`
+is a 401; a server with guests off answers 404 and the gate shows the sign-in screen. A session
+cookie that is refused is cleared and answered 401, never turned into a guest: the gate then
+re-loads, and lands on a guest or the sign-in screen. `/me` returns `kind: "visitor"`. Unset
+means the sign-in wall, and a guest cookie is ignored. `createAuth` throws when the guest
+organization is a member organization. There is no per-visitor mint limit: every cap is per
+org. Guests belong to the Demo organization, never the Yao Lab: lab runs include scans not
+cleared for public use, so lab data is for signed-in members. They share the Demo workspace
+but each sees only their own runs (`self`). When an `Authorization` header is present only the
 bearer counts. The root answers 401 for no principal on everything but `/api/auth/*`;
 a domain guards a subtree with `requireService` or `requireUser` (which also sets a typed
 `c.var.user`) and gets 403 for the other kind. A cookie-authenticated non-GET request must
