@@ -1,0 +1,17 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "RAILPACK",
+    "buildCommand": "pnpm --filter @voluma/web build",
+    "watchPatterns": ["/apps/api/**", "/apps/web/**", "/packages/**", "/pnpm-lock.yaml"]
+  },
+  "deploy": {
+    "preDeployCommand": ["pnpm --filter @voluma/api db:migrate"],
+    "startCommand": "cd apps/api && exec node --import tsx src/index.ts",
+    "healthcheckPath": "/health",
+    "drainingSeconds": 30,
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10,
+    "sleepApplication": false
+  }
+}

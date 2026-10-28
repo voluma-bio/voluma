@@ -2,16 +2,20 @@
  * Voluma API, a Node server and the composition root: the only place that reads
  * env, builds adapters, and hands each domain its ports. Each domain is a Hono app
  * that owns every path under its mount (`app.route`) and does not know the mount.
- * Everything is under /api/.
+ * Everything is under /api/. When apps/web/dist exists (after `pnpm --filter @voluma/web
+ * build`) it also serves the built web app, with an SPA fallback.
  *
  * Start: `node --import tsx apps/api/src/index.ts` (not through pnpm, so node
  * receives SIGTERM; tsx because relative imports have no extensions).
  * Env: DATABASE_URL, VOLUMA_API_TOKEN, PORT, and optionally HOST (`pnpm dev` sets them;
  * see tools/dev.mjs). Fails at startup if the database is unreachable or not migrated.
  */
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { serve } from "@hono/node-server";
+import { serveStatic } from "@hono/node-server/serve-static";
 import { drizzle } from "drizzle-orm/postgres-js";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import postgres from "postgres";
 import { createReview } from "./domains/review";
@@ -39,14 +43,34 @@ app.route(
   }),
 );
 app.route("/api/review", createReview({}));
+
+const isApi = (path: string) => path === "/api" || path.startsWith("/api/");
+const webDist = resolve(import.meta.dirname, "../../web/dist");
+if (existsSync(webDist)) {
+  // Vite hashes the names under assets/, so those never change; everything else
+  // (index.html above all) must be revalidated to pick up a new deploy.
+  const onFound = (path: string, c: Context) =>
+    c.header(
+      "Cache-Control",
+      path.startsWith(`${webDist}/assets/`) ? "public, max-age=31536000, immutable" : "no-cache",
+    );
+  const files = serveStatic({ root: webDist, onFound });
+  const spa = serveStatic({ root: webDist, path: "index.html", onFound });
+  // A missing /assets/ file is a real 404, not the app shell.
+  app.get("*", (c, next) =>
+    isApi(c.req.path)
+      ? next()
+      : files(c, c.req.path.startsWith("/assets/") ? next : () => spa(c, next)),
+  );
+}
 app.notFound((c) =>
-  c.req.path.startsWith("/api/") ? c.json({ error: "not found" }, 404) : c.text("Not found", 404),
+  isApi(c.req.path) ? c.json({ error: "not found" }, 404) : c.text("Not found", 404),
 );
 app.onError((error, c) => {
   // Middleware (bearerAuth) rejects by throwing; keep its status.
   if (error instanceof HTTPException) return error.getResponse();
   console.error(error);
-  return c.req.path.startsWith("/api/")
+  return isApi(c.req.path)
     ? c.json({ error: "internal error" }, 500)
     : c.text("Internal error", 500);
 });
@@ -59,7 +83,7 @@ const server = serve(
   ({ address, port }) => console.log(`api listening on ${address}:${port}`),
 );
 
-// Stay under the host's drain period (Railway's, once deployed).
+// Stay under the host's drain period (drainingSeconds in railway.json).
 const DRAIN_MS = 10_000;
 let stopping = false;
 process.once("SIGTERM", shutdown);
