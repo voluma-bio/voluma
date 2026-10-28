@@ -10,8 +10,20 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   regenerate it, then `pnpm db:reset`.** The worktree's database still holds the old
   migration and cannot apply the new one; `db:reset` drops it and `pnpm dev` rebuilds it. Two branches that generate from the same base collide on the
   migration number, the journal and the snapshots.
-- Migrations run from one place: `pnpm db:migrate` locally (`pnpm dev` does it), the
-  deploy's pre-deploy step later. Never at server start: `migrate()` takes no lock.
+- Migrations run from one place, `src/migrate.ts` (`pnpm db:migrate`): `pnpm dev` runs it
+  locally, Railway's pre-deploy step in production. Never at server start: `migrate()`
+  takes no lock. It is not drizzle-kit, a devDependency that Railway prunes.
+- **A migration must work with the code that is deployed now.** Railway migrates, then
+  starts the new deployment beside the old one, which keeps serving until `/health`
+  passes, and the migration stays applied if that deploy fails. So expand first (add
+  nullable columns or tables, columns with defaults), and contract (drop, rename, add
+  `NOT NULL`) in a later PR, after the code that stopped using the old shape is deployed.
+  See [.context/deploy.md](.context/deploy.md).
+- Anything the server or `migrate.ts` runs in production belongs in `dependencies`
+  (Railway prunes dev dependencies after the build).
+- When `apps/web/dist` exists, `index.ts` also serves it (hashed `assets/` immutable,
+  everything else `no-cache`, the app shell for extensionless non-`/api` GETs). Deploying to staging:
+  [.context/deploy.md](.context/deploy.md).
 - `pi_messages.message` stays `text`; `jsonb` would reorder keys and break the
   byte-for-byte history.
 - Only `src/index.ts` reads env.

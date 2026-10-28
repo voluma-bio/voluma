@@ -1,4 +1,4 @@
-/** drizzle-kit: `pnpm --filter @voluma/api db:generate` and `db:migrate`. Never `push`. */
+/** drizzle-kit, for `pnpm --filter @voluma/api db:generate` only. Migrations run from src/migrate.ts; never `push`. */
 import { defineConfig } from "drizzle-kit";
 
 export default defineConfig({

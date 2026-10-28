@@ -109,6 +109,9 @@ importers:
       postgres:
         specifier: 'catalog:'
         version: 3.4.9
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
       zod:
         specifier: 'catalog:'
         version: 4.6.7
@@ -119,9 +122,6 @@ importers:
       drizzle-kit:
         specifier: ^0.31.11
         version: 0.31.11
-      tsx:
-        specifier: ^4.23.15
-        version: 4.23.15
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
