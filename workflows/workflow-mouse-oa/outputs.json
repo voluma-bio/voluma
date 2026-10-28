@@ -1,0 +1,254 @@
+[
+  {
+    "id": "patella-volume",
+    "name": "Patella volume",
+    "kind": "measurement",
+    "unit": "mm³",
+    "region": "patella label, thresholded voxels",
+    "task": "segmentation",
+    "sourceRef": "deck #1"
+  },
+  {
+    "id": "lateral-meniscus-osteophyte-volume",
+    "name": "Lateral meniscus/osteophyte volume",
+    "kind": "measurement",
+    "unit": "mm³",
+    "region": "lateral joint mineralization label (open question for the lab: which structure the lab means)",
+    "task": "segmentation",
+    "sourceRef": "deck #2"
+  },
+  {
+    "id": "medial-meniscus-osteophyte-volume",
+    "name": "Medial meniscus/osteophyte volume",
+    "kind": "measurement",
+    "unit": "mm³",
+    "region": "medial joint mineralization label (open question for the lab: which structure the lab means)",
+    "task": "segmentation",
+    "sourceRef": "deck #3"
+  },
+  {
+    "id": "tv-tibial-iioc",
+    "name": "TV, tibial IIOC",
+    "kind": "measurement",
+    "unit": "mm³",
+    "region": "ROI-1: growth plate to articular surface",
+    "task": "iioc",
+    "sourceRef": "deck #4"
+  },
+  {
+    "id": "bv-tibial-iioc",
+    "name": "BV, tibial IIOC",
+    "kind": "measurement",
+    "unit": "mm³",
+    "region": "ROI-1",
+    "task": "iioc",
+    "sourceRef": "deck #5"
+  },
+  {
+    "id": "bv-tv-tibial-iioc",
+    "name": "BV/TV, tibial IIOC",
+    "kind": "measurement",
+    "unit": "%",
+    "region": "ROI-1",
+    "task": "iioc",
+    "sourceRef": "deck #6"
+  },
+  {
+    "id": "iioc-height",
+    "name": "IIOC height",
+    "kind": "measurement",
+    "unit": "mm",
+    "region": "middle of the growth plate to the top of the articular bone, vertical",
+    "task": "iioc",
+    "sourceRef": "deck #7"
+  },
+  {
+    "id": "iioc-height-medial-compartment",
+    "name": "IIOC height, medial compartment",
+    "kind": "measurement",
+    "unit": "mm",
+    "region": "as #7, medial",
+    "task": "iioc",
+    "sourceRef": "deck #8"
+  },
+  {
+    "id": "iioc-height-lateral-compartment",
+    "name": "IIOC height, lateral compartment",
+    "kind": "measurement",
+    "unit": "mm",
+    "region": "as #7, lateral",
+    "task": "iioc",
+    "sourceRef": "deck #9"
+  },
+  {
+    "id": "tibial-width-at-the-growth-plate",
+    "name": "Tibial width at the growth plate",
+    "kind": "measurement",
+    "unit": "mm",
+    "region": "centre of the fibula–tibia junction on the tibial surface to the prominent point on the other side (open question for the lab: confirm the endpoints on one annotated scan)",
+    "task": "iioc",
+    "sourceRef": "deck #10"
+  },
+  {
+    "id": "subchondral-bone-plate-thickness-medial",
+    "name": "Subchondral bone plate thickness, medial",
+    "kind": "measurement",
+    "unit": "mm",
+    "region": "medial plate",
+    "task": "subchondral-plate",
+    "sourceRef": "deck #11"
+  },
+  {
+    "id": "subchondral-bone-plate-thickness-lateral",
+    "name": "Subchondral bone plate thickness, lateral",
+    "kind": "measurement",
+    "unit": "mm",
+    "region": "lateral plate",
+    "task": "subchondral-plate",
+    "sourceRef": "deck #12"
+  },
+  {
+    "id": "tv-iioc-trab",
+    "name": "TV, IIOC-trab",
+    "kind": "measurement",
+    "unit": "mm³",
+    "region": "ROI-2: ROI-1 minus the subchondral plate and the cortical line next to the growth plate",
+    "task": "trabecular-roi",
+    "sourceRef": "deck #13"
+  },
+  {
+    "id": "bv-iioc-trab",
+    "name": "BV, IIOC-trab",
+    "kind": "measurement",
+    "unit": "mm³",
+    "region": "ROI-2",
+    "task": "trabecular-roi",
+    "sourceRef": "deck #14"
+  },
+  {
+    "id": "bv-tv-iioc-trab",
+    "name": "BV/TV, IIOC-trab",
+    "kind": "measurement",
+    "unit": "%",
+    "region": "ROI-2",
+    "task": "trabecular-roi",
+    "sourceRef": "deck #15"
+  },
+  {
+    "id": "tv-proximal-tibial-trabeculae",
+    "name": "TV, proximal tibial trabeculae",
+    "kind": "measurement",
+    "unit": "mm³",
+    "region": "ROI-3: from 50 µm below the growth plate, 200 µm long, 20 µm clear of cortical bone",
+    "task": "metaphyseal-roi",
+    "sourceRef": "deck #16"
+  },
+  {
+    "id": "metaphyseal-bv",
+    "name": "BV, proximal tibial trabeculae",
+    "kind": "measurement",
+    "unit": "mm³",
+    "region": "ROI-3",
+    "task": "metaphyseal-roi",
+    "sourceRef": "deck #17"
+  },
+  {
+    "id": "metaphyseal-bv-tv",
+    "name": "BV/TV, proximal tibial trabeculae",
+    "kind": "measurement",
+    "unit": "%",
+    "region": "ROI-3",
+    "task": "metaphyseal-roi",
+    "sourceRef": "deck #18"
+  },
+  {
+    "id": "metaphyseal-tb-n",
+    "name": "Tb.N, proximal tibial trabeculae",
+    "kind": "measurement",
+    "unit": "1/mm",
+    "region": "ROI-3",
+    "task": "metaphyseal-roi",
+    "sourceRef": "deck #19"
+  },
+  {
+    "id": "metaphyseal-tb-th",
+    "name": "Tb.Th, proximal tibial trabeculae",
+    "kind": "measurement",
+    "unit": "mm",
+    "region": "ROI-3, largest contained sphere",
+    "task": "metaphyseal-roi",
+    "sourceRef": "deck #20"
+  },
+  {
+    "id": "metaphyseal-tb-sp",
+    "name": "Tb.Sp, proximal tibial trabeculae",
+    "kind": "measurement",
+    "unit": "mm",
+    "region": "ROI-3, largest contained sphere in marrow",
+    "task": "metaphyseal-roi",
+    "sourceRef": "deck #21"
+  },
+  {
+    "id": "metaphyseal-tb-nd",
+    "name": "Tb.Nd, trabecular nodes",
+    "kind": "measurement",
+    "unit": "count",
+    "region": "ROI-3, 3D skeleton junctions of ≥3 struts (open question for the lab: report as a count or per tissue volume)",
+    "task": "metaphyseal-roi",
+    "sourceRef": "deck #22"
+  },
+  {
+    "id": "metaphyseal-tb-tm",
+    "name": "Tb.Tm, trabecular ends",
+    "kind": "measurement",
+    "unit": "count",
+    "region": "ROI-3, skeleton free ends (open question for the lab: report as a count or per tissue volume)",
+    "task": "metaphyseal-roi",
+    "sourceRef": "deck #23"
+  },
+  {
+    "id": "cortical-thickness-100-um-below-the-growth-plate",
+    "name": "Cortical thickness, 100 µm below the growth plate",
+    "kind": "measurement",
+    "unit": "mm",
+    "region": "cortical shell at that level",
+    "task": "cortical",
+    "sourceRef": "deck #24"
+  },
+  {
+    "id": "cortical-thickness-1000-um-below-the-growth-plate",
+    "name": "Cortical thickness, 1000 µm below the growth plate",
+    "kind": "measurement",
+    "unit": "mm",
+    "region": "as #24",
+    "task": "cortical",
+    "sourceRef": "deck #25"
+  },
+  {
+    "id": "distal-femoral-length-dfl",
+    "name": "Distal femoral length (DFL)",
+    "kind": "measurement",
+    "unit": "mm",
+    "region": "midpoint (a) of the upper line of the intercondylar groove to the intercondylar notch (b)",
+    "task": "femoral-geometry",
+    "sourceRef": "deck #26"
+  },
+  {
+    "id": "distal-femoral-width-dfw",
+    "name": "Distal femoral width (DFW)",
+    "kind": "measurement",
+    "unit": "mm",
+    "region": "midpoint (c) of the ridge on the lateral condyle surface to the vertex (d) of the medial condyle (open question for the lab: confirm the endpoints on one annotated scan)",
+    "task": "femoral-geometry",
+    "sourceRef": "deck #27"
+  },
+  {
+    "id": "width-length-ratio",
+    "name": "Width/length ratio",
+    "kind": "measurement",
+    "unit": "1",
+    "region": "#27 ÷ #26",
+    "task": "femoral-geometry",
+    "sourceRef": "deck #28"
+  }
+]

@@ -1,14 +1,14 @@
 /**
- * The prompts of a run's worker and check threads, built from the workflow's definition
- * (`@voluma/workflow`). A thread's system prompt is fixed for its life (a resumed thread
- * that differs fails), so it takes only what the pinned packages fix: the agent's
- * instructions, the workflow's intro, the skill list, and the runtime's own rules. What
- * varies by task goes in the thread's first message.
+ * The prompts of a run's worker and check threads: the harness's role prompts plus the
+ * workflow's skills and task text (`@voluma/workflow`). A thread's system prompt is fixed for
+ * its life (a resumed thread that differs fails), so it takes only the role's rules and the
+ * skill list, both fixed by the run's snapshot. What varies by task goes in the thread's
+ * first message.
  */
 import type { PlanTask } from "@voluma/harness/supervise-run";
-import type { Agent, WorkflowDefinition } from "@voluma/workflow/definition";
+import type { WorkflowDefinition } from "@voluma/workflow/definition";
 
-const COMMON = `You work in a sandbox with one shell tool, bash. Python 3.12 with numpy, scipy, scikit-image, pydicom, nibabel and SimpleITK is installed. There is no network.
+const COMMON = `You work in a sandbox with one shell tool, bash. Python 3.12 with numpy, scipy, scikit-image, pydicom, nibabel, SimpleITK, matplotlib and pyvista (offscreen) is installed. There is no network.
 /inputs holds the scan, /outputs/<task id>/ holds each task's result files, and /scratch is for temporary files.
 Record your work with the task tools: checklist (task status), checkpoint (a milestone, with the files it rests on) and report_output (a result). Check what you report against the files themselves, and say which file or header each number came from. A file you name in an output or checkpoint is {root: "outputs", path} relative to /outputs/<task id>/, or {root: "scratch", path} relative to /scratch.`;
 
@@ -19,36 +19,26 @@ const CHECK = `You are a second agent checking another agent's work on one task 
 Re-derive the task's results from the scan and the worker's files in /outputs/<task id>/ before you trust them. Write a checkpoint with verdict "passed" if you agree, or "needs-review" if you do not or cannot tell, with one plain line of why. You may fix a result with report_output; say so in the checkpoint. Check only your own task.`;
 
 /**
- * The skills a role may use, progressively disclosed: name, description and path here, the
- * skill and its resources read with bash when needed. An agent that names none sees all.
+ * The skills every role may use, progressively disclosed: name, description and path here, the
+ * skill and its references and resources read with bash when needed. The workflow's own skill
+ * comes first and is read first.
  */
-function skillList(def: WorkflowDefinition, agent: Agent | undefined): string {
-  const named = new Set([...(agent?.load ?? []), ...(agent?.available ?? [])]);
-  const skills = def.skills.filter((s) => named.size === 0 || named.has(s.name));
-  if (skills.length === 0) return "";
-  const first = new Set(agent?.load);
-  const lines = skills.map(
-    (s) =>
-      `- ${s.name}: ${s.description} (${s.path}/SKILL.md)${first.has(s.name) ? " [read first]" : ""}`,
+function skillList(def: WorkflowDefinition): string {
+  const lines = def.skills.map(
+    (s, i) => `- ${s.name}: ${s.description} (${s.path}/SKILL.md)${i === 0 ? " [read first]" : ""}`,
   );
   return `Skills: read a skill's SKILL.md with bash before you rely on it; its other files sit beside it in the same directory.\n${lines.join("\n")}`;
 }
 
-function system(def: WorkflowDefinition, agent: Agent | undefined, fallback: string): string {
-  return [agent?.instructions, def.intro, skillList(def, agent), fallback]
-    .filter((part): part is string => !!part)
-    .join("\n\n");
-}
-
-export const workerSystem = (def: WorkflowDefinition) => system(def, def.roles.worker, WORKER);
-export const checkSystem = (def: WorkflowDefinition) => system(def, def.roles.checker, CHECK);
+export const workerSystem = (def: WorkflowDefinition) => `${WORKER}\n\n${skillList(def)}`;
+export const checkSystem = (def: WorkflowDefinition) => `${CHECK}\n\n${skillList(def)}`;
 
 function taskBrief(def: WorkflowDefinition, task: PlanTask): string {
-  const prose = def.instructions[task.id];
+  const instructions = def.files.tasks.find((t) => t.id === task.id)?.instructions;
   const done = task.doneWhen?.length
     ? `Done when:\n${task.doneWhen.map((d) => `- ${d}`).join("\n")}`
     : "";
-  return [prose, done].filter(Boolean).join("\n\n");
+  return [instructions, done].filter(Boolean).join("\n\n");
 }
 
 /** What the main thread has carried from earlier tasks; a thread's first message holds it, never its system prompt. */

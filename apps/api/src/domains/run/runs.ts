@@ -28,7 +28,10 @@ export function runsRoutes({ reads, queue, catalog, source }: RunDeps) {
   app.use("/inputs", requireUser);
 
   app.post("/runs", async (c) => {
-    const { workflowId, inputId, keys } = await parseJson(c, startRunRequestSchema);
+    const { workflowId, inputId, selectedOutputs, notes, keys } = await parseJson(
+      c,
+      startRunRequestSchema,
+    );
     const entry = Object.hasOwn(catalog, workflowId) ? catalog[workflowId] : undefined;
     if (!entry) return c.json({ error: "unknown workflow" }, 404);
     const user = c.var.user;
@@ -40,6 +43,8 @@ export function runsRoutes({ reads, queue, catalog, source }: RunDeps) {
         workflowId,
         pins: [{ ...source, path: entry.workflow }],
         inputId,
+        selectedOutputs,
+        notes,
         keys,
       },
     );

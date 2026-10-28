@@ -79,30 +79,6 @@ function visitorModel(): ModelRef {
 export const isVisitorSafe = (ref: ModelRef) =>
   ref.provider === "meta" && !ref.id.endsWith("-contributor");
 
-/**
- * The aliases an agent definition's `model:` may name, to `provider/id`: the defaults here,
- * and `RUNNER_MODEL_ALIASES` (a JSON object of alias to `provider/id`) adds or overrides.
- * Changing a model for every workflow means changing this table, not the package.
- */
-function modelAliases(): Record<string, ModelRef> {
-  const table: Record<string, string> = {
-    "muse-wonder": "meta/muse-wonder-1.0",
-    "muse-spark": "meta/muse-spark-1.3",
-    ...JSON.parse(optional("RUNNER_MODEL_ALIASES") ?? "{}"),
-  };
-  return Object.fromEntries(
-    Object.entries(table).map(([alias, text]) => {
-      const [provider, ...rest] = String(text).split("/");
-      if (!provider || rest.length === 0) {
-        throw new Error(
-          `RUNNER_MODEL_ALIASES: "${alias}" must be provider/model-id, got "${text}"`,
-        );
-      }
-      return [alias, { provider, id: rest.join("/") }];
-    }),
-  );
-}
-
 /** Our key for a provider, if set (`VOLUMA_<PROVIDER>_API_KEY`). */
 export const providerKey = (provider: string) =>
   optional(`VOLUMA_${provider.toUpperCase()}_API_KEY`);
@@ -118,9 +94,15 @@ export type Config = ReturnType<typeof runnerConfig>;
 
 export function runnerConfig() {
   const modal = modalToken();
-  const ref = modelRef("RUNNER_MODEL");
-  const model = { ...ref, apiKey: required(`VOLUMA_${ref.provider.toUpperCase()}_API_KEY`) };
+  // Each role's model on a `voluma` run; a role left out takes the one before it.
+  const worker = modelRef("RUNNER_MODEL");
+  const check = optional("RUNNER_CHECK_MODEL") ? modelRef("RUNNER_CHECK_MODEL") : worker;
+  const main = modelRef("RUNNER_MAIN_MODEL", "meta/muse-wonder-1.0");
+  const roles = { worker, check, main };
+  for (const { provider } of Object.values(roles))
+    required(`VOLUMA_${provider.toUpperCase()}_API_KEY`);
   const api = apiEndpoint();
+  const metaApiKey = optional("VOLUMA_META_API_KEY");
   const r2 = {
     accountId: required("R2_ACCOUNT_ID"),
     bucket: required("R2_BUCKET"),
@@ -132,16 +114,21 @@ export function runnerConfig() {
     api,
     /** Runs at once. */
     concurrency: positiveInt("RUNNER_CONCURRENCY", 2),
-    /** The model of a `voluma` run, with our key for its provider (`VOLUMA_<PROVIDER>_API_KEY`). */
-    model,
+    /**
+     * The model of each role of a `voluma` run: `RUNNER_MODEL` (worker), `RUNNER_CHECK_MODEL`
+     * (the check threads; default the worker's) and `RUNNER_MAIN_MODEL` (the main thread;
+     * default Muse Wonder, Standard mode). Our key for each provider is
+     * `VOLUMA_<PROVIDER>_API_KEY`.
+     */
+    roles,
     /**
      * The model of a `visitor` run, which uses the visitor's Meta key. Standard mode: a
      * `-contributor` model lets Meta train on what it is sent, the visitor's scan included.
      */
     visitorModel: visitorModel(),
-    /** Aliases a workflow's agents name for their model, resolved when a run starts. */
-    aliases: modelAliases(),
     modal,
+    /** Meta's key for SAM (`segment_sam`) on a `voluma` run; absent: the tool is not offered. A visitor's run uses the visitor's own key. */
+    metaApiKey,
     r2,
     /** Every secret of ours, to redact from anything that leaves the process. */
     secrets: [
@@ -150,6 +137,7 @@ export function runnerConfig() {
       r2.accessKeyId,
       r2.secretAccessKey,
       r2.cloudflareApiToken,
+      metaApiKey,
       modal?.tokenId,
       modal?.tokenSecret,
     ].filter((s): s is string => s !== undefined),

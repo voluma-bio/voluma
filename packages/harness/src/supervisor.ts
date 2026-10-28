@@ -52,7 +52,7 @@ import type { ThreadSpec, Threads } from "./threads";
 export type RoleSpec = Pick<ThreadSpec, "prompt" | "model" | "streamFn" | "systemPrompt" | "tools">;
 
 /** A point the main thread decides: a check that disagreed, or a thread that failed. */
-type JudgmentPoint = Exclude<WakePoint, { kind: "task-checked" }>;
+type JudgmentPoint = Extract<WakePoint, { kind: "check-disagreed" | "thread-failed" }>;
 
 export interface SupervisorOptions {
   runId: string;
@@ -476,14 +476,11 @@ export function supervisor(options: SupervisorOptions) {
   }
 
   return {
-    /** Runs the plan to the end: every task done, failed, to check, or blocked behind one that is. */
-    async run(workflows?: PayloadOf<"thread.started">["workflows"]): Promise<Folded> {
-      // Not a derived id: each invocation of the root is a thread start of its own.
-      recorder.emit(root, "thread.started", {
-        parentThreadId: null,
-        kind: "supervisor",
-        ...(workflows && { workflows }),
-      });
+    /**
+     * Runs the plan to the end: every task done, failed, to check, or blocked behind one that is.
+     * The caller has emitted the root's `thread.started` (`superviseRun`).
+     */
+    async run(): Promise<Folded> {
       try {
         await runtime.start();
         // `quiet`: the last step found nothing to do with no thread running.

@@ -1,6 +1,7 @@
 packages:
   - apps/*
   - packages/*
+  - workflows
 
 # Packages whose install scripts may run. pnpm skips every other install script.
 allowBuilds:

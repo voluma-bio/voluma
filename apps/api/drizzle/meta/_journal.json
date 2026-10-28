@@ -15,6 +15,13 @@
       "when": 1793168156911,
       "tag": "0001_fast_red_skull",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793200890122,
+      "tag": "0002_unknown_wonder_man",
+      "breakpoints": true
     }
   ]
 }

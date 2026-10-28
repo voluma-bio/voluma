@@ -6,6 +6,7 @@
  * a sandbox it leaves is ended by Modal's idle timeout, or by `sandboxes:clean`.
  * Settings: config.ts and `.env.example`.
  */
+import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { createModels } from "@earendil-works/pi-ai";
@@ -22,6 +23,14 @@ import { type RunnerContext, runClaim } from "./run.ts";
 const SHUTDOWN_BUDGET_MS = 30_000;
 
 const config = runnerConfig();
+// `segment_sam` encodes with ffmpeg: a host without it should fail here, not in a run.
+if (config.metaApiKey) {
+  const probe = spawnSync("ffmpeg", ["-version"], { stdio: "ignore" });
+  if (probe.status !== 0)
+    throw new Error(
+      "VOLUMA_META_API_KEY is set, but `ffmpeg -version` failed: install ffmpeg on this host",
+    );
+}
 const redact = redactor(config.secrets);
 const log = (line: string) => console.log(`${new Date().toISOString()} ${redact(line)}`);
 
@@ -34,13 +43,17 @@ const resolve = (ref: { provider: string; id: string }) => {
   if (!model) throw new Error(`unknown model ${ref.provider}/${ref.id}`);
   return model;
 };
-const model = resolve(config.model);
+const roles = {
+  worker: resolve(config.roles.worker),
+  check: resolve(config.roles.check),
+  main: resolve(config.roles.main),
+};
 
 const runnerId = `runner-${randomUUID().slice(0, 8)}`;
 const ctx: RunnerContext = {
   config,
   models,
-  model,
+  roles,
   visitorModel: resolve(config.visitorModel),
   log,
 };
@@ -63,7 +76,9 @@ const shuttingDown = new Promise<void>((resolve) =>
 const sleep = (ms: number) => delay(ms, undefined, { signal: shutdown.signal }).catch(() => {});
 
 log(
-  `${runnerId} up: ${config.concurrency} slot(s), model ${config.model.provider}/${config.model.id}, api ${config.api.baseUrl}`,
+  `${runnerId} up: ${config.concurrency} slot(s), models ${Object.entries(config.roles)
+    .map(([role, m]) => `${role} ${m.provider}/${m.id}`)
+    .join(", ")}, api ${config.api.baseUrl}`,
 );
 while (!shutdown.signal.aborted) {
   if (active.size >= config.concurrency) {

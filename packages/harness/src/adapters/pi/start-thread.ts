@@ -31,6 +31,7 @@ import type { History } from "../../ports/history";
 import type { Sandbox } from "../../ports/sandbox";
 import type { PayloadOf, Recorder } from "../../recorder";
 import type { Tool } from "../../tools/tool";
+import { elideOldImages } from "./elide-images";
 
 export type UserSender = Extract<PayloadOf<"message">, { role: "user" }>["sender"];
 
@@ -104,6 +105,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       messages: [],
     },
     streamFn: options.streamFn,
+    transformContext: async (messages) => elideOldImages(messages),
     sessionId: threadId,
   });
   // Pi made the system message the current prompt and tools call for.
@@ -331,7 +333,10 @@ function toAgentTool(
         output: () => {},
       });
       return {
-        content: [{ type: "text", text: result.output }],
+        content: [
+          { type: "text" as const, text: result.output },
+          ...(result.images ?? []).map((i) => ({ type: "image" as const, ...i })),
+        ],
         details: { truncated: result.truncated },
         isError: result.isError,
       };

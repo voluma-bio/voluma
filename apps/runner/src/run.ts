@@ -23,19 +23,21 @@ import { inputPrefix, referencePrefix, workflowSnapshotPrefix } from "@voluma/co
 import type { Claim, ReportRequest } from "@voluma/contracts/runner";
 import { runClient } from "@voluma/harness/adapters/http/run-client";
 import { runLayout } from "@voluma/harness/layout";
-import { llmMainThread, mainSystem } from "@voluma/harness/main-thread";
+import { llmMainThread, MAIN_SYSTEM } from "@voluma/harness/main-thread";
 import { type Recorder, recorder } from "@voluma/harness/recorder";
 import { type SandboxSession, sandboxSession } from "@voluma/harness/sandbox-session";
 import { type RunRole, superviseRun } from "@voluma/harness/supervise-run";
 import { checkToolNames } from "@voluma/harness/tools";
-import type { Agent } from "@voluma/workflow/definition";
 import { loadWorkflow } from "@voluma/workflow/load";
+import { computePlan } from "@voluma/workflow/plan";
 import { type Config, isVisitorSafe, providerKey } from "./config.ts";
 import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
+import { metaSegmenter } from "./meta-segmenter.ts";
 import { createModalSandbox, RUNS_APP, terminateClaim } from "./modal-sandbox.ts";
 import { checkPrompt, checkSystem, workerPrompt, workerSystem } from "./prompts.ts";
 import { r2Evidence } from "./r2-evidence.ts";
+import { r2Files } from "./r2-files.ts";
 import { r2Workflows } from "./r2-workflows.ts";
 import { type Redact, redactor } from "./redact.ts";
 import { usageMeter } from "./usage.ts";
@@ -55,8 +57,8 @@ const WIND_DOWN_MS = 5_000;
 export interface RunnerContext {
   config: Config;
   models: Models;
-  /** The models the config names, resolved at startup. */
-  model: Model<Api>;
+  /** The models the config names for a `voluma` run's roles, resolved at startup. */
+  roles: Record<"worker" | "check" | "main", Model<Api>>;
   visitorModel: Model<Api>;
   log(line: string): void;
 }
@@ -85,11 +87,22 @@ export async function runClaim(
   const runId = run.id;
   const claimId = randomUUID();
   const visitor = keys !== undefined;
-  const model = visitor ? ctx.visitorModel : ctx.model;
+  // A visitor's key and scan go to Standard-mode Meta models only: the main thread keeps its
+  // configured model when that is one, else the visitor model.
+  const roleModel = (role: "worker" | "check" | "main") =>
+    !visitor
+      ? ctx.roles[role]
+      : role === "main" && isVisitorSafe(config.roles.main)
+        ? ctx.roles.main
+        : ctx.visitorModel;
+  const workerModel = roleModel("worker");
+  const checkModel = roleModel("check");
+  const mainModel = roleModel("main");
   /** The key for a provider: a visitor's Meta key is good for Meta alone. */
   const keyFor = (provider: string) =>
     visitor ? (provider === "meta" ? keys.metaApiKey : undefined) : providerKey(provider);
   const modal = visitor ? keys.modal : config.modal;
+  const metaKey = visitor ? keys.metaApiKey : config.metaApiKey;
   const redact: Redact = redactor([
     ...config.secrets,
     ...(visitor ? [keys.metaApiKey, keys.modal.tokenId, keys.modal.tokenSecret] : []),
@@ -120,7 +133,9 @@ export async function runClaim(
   let error: string | undefined;
   try {
     lease = holdLease({ client, meter, onStop: stop, log });
-    log(`claimed (${visitor ? "visitor" : "voluma"} keys, model ${model.provider}/${model.id})`);
+    log(
+      `claimed (${visitor ? "visitor" : "voluma"} keys, model ${workerModel.provider}/${workerModel.id})`,
+    );
 
     // Before any sandbox: an unreadable workflow or an unknown tool fails the run here, with its message.
     // The run's pin names the workflow directory; its files are snapshotted from this
@@ -132,40 +147,12 @@ export async function runClaim(
       prefix: workflowSnapshotPrefix(runId),
       root: REPO_ROOT,
     });
-    const { worker: workerAgent, checker: checkerAgent, main: mainAgent } = definition.roles;
-    // Every assigned role's tools are checked now, so an unknown name fails at start whichever
-    // role it is on. The main thread has no tools yet (TODO.md); review is not started yet.
-    for (const [role, agent] of Object.entries(definition.roles)) {
-      checkToolNames(agent.tools, agent.name);
-      if (role === "review") {
-        log(`role ${role} is assigned to ${agent.name}, which this runner does not run yet`);
-      }
-    }
-    const modelOf = (agent: Agent | undefined, fallback: string | undefined): Model<Api> => {
-      const alias = agent?.model ?? fallback;
-      if (!alias) return model;
-      const ref = config.aliases[alias];
-      const found = ref && models.getModel(ref.provider, ref.id);
-      if (!ref || !found) {
-        throw new Error(
-          `${agent?.name ?? "the main thread"}: model alias "${alias}" is not in the alias table or names an unknown model`,
-        );
-      }
-      if (visitor && !isVisitorSafe(ref)) {
-        throw new Error(
-          `${agent?.name ?? "the main thread"}: "${alias}" is not a Standard-mode meta/ model, so a visitor's key and scan may not go to it`,
-        );
-      }
-      if (!keyFor(ref.provider)) {
-        throw new Error(
-          `${agent?.name ?? "the main thread"}: no ${ref.provider} key for "${alias}"`,
-        );
-      }
-      return found;
-    };
-    const workerModel = modelOf(workerAgent, undefined);
-    const checkModel = modelOf(checkerAgent, undefined);
-    const mainModel = modelOf(mainAgent, "muse-wonder");
+    // The tasks that produce the selected outputs and what they need. The main thread may adapt
+    // them to the run's notes when the run starts (`superviseRun`).
+    const computed = computePlan(definition.files, run.selectedOutputs);
+    // Every role's tools come from here, not from the workflow.
+    const roleTools = ["view_image", ...(metaKey ? ["segment_sam"] : [])];
+    checkToolNames(roleTools, "runner");
 
     const layout = runLayout(
       runId,
@@ -183,14 +170,6 @@ export async function runClaim(
       },
     });
     const stored = await client.storedEvents();
-    // A resumed run keeps the plan its first event recorded; only a new run takes the parsed one.
-    const recorded = stored.find(
-      (e) => e.type === "revision.started" && e.payload.reason === "run",
-    );
-    const plan =
-      recorded?.type === "revision.started" && recorded.payload.reason === "run"
-        ? recorded.payload.plan
-        : definition.plan;
     events = recorder(
       {
         async append(event) {
@@ -232,41 +211,44 @@ export async function runClaim(
       );
       return stream;
     };
-    const main = llmMainThread(
-      mainModel,
-      mainSystem(mainAgent?.instructions, definition.intro),
-      async (context, signal) => {
-        const reply = await models.completeSimple(mainModel, context, {
-          apiKey: keyFor(mainModel.provider),
-          signal,
-        });
-        meter.addModelCost(reply.usage.cost.total);
-        return reply;
-      },
-    );
+    const main = llmMainThread(mainModel, MAIN_SYSTEM, async (context, signal) => {
+      const reply = await models.completeSimple(mainModel, context, {
+        apiKey: keyFor(mainModel.provider),
+        signal,
+      });
+      meter.addModelCost(reply.usage.cost.total);
+      return reply;
+    });
+    const files = r2Files(config.r2);
     const supervised = superviseRun({
       runId,
-      plan: plan.tasks,
+      plan: computed.tasks,
+      selectedOutputs: run.selectedOutputs,
+      notes: run.notes,
       workflows: run.workflows,
       layout,
       recorder: events,
       history: client,
       sandbox: (id) => opened.get(id),
       evidence: r2Evidence(config.r2),
+      files,
+      segmenter: metaKey
+        ? metaSegmenter({ apiKey: metaKey, log, addCost: meter.addModelCost })
+        : undefined,
       main,
       worker: (task, notes) => ({
         model: workerModel,
         streamFn,
         systemPrompt: workerSystem(definition),
         prompt: workerPrompt(definition, task, notes),
-        tools: workerAgent.tools,
+        tools: roleTools,
       }),
       check: (task, notes) => ({
         model: checkModel,
         streamFn,
         systemPrompt: checkSystem(definition),
         prompt: checkPrompt(definition, task, notes),
-        tools: checkerAgent?.tools,
+        tools: roleTools,
       }),
       signal: abort.signal,
     });

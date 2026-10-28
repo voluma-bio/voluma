@@ -110,6 +110,9 @@ export const runs = pgTable(
     startedBy: text().notNull(),
     workflowId: text().notNull(),
     workflows: json().notNull(),
+    /** The output ids the user selected (`runSchema.selectedOutputs`); null: every output. */
+    selectedOutputs: json(),
+    notes: text(),
     inputId: text().notNull(),
     credentials: text({ enum: ["voluma", "visitor"] }).notNull(),
     example: boolean().notNull().default(false),

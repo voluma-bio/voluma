@@ -1,7 +1,7 @@
 ---
-name: scan-notes
+name: smoke-skills
 description: >
-  How to count and list the files of a scan folder. Load when asked to count or list scan files.
+  How to count and list the files of a scan folder, for the runner smoke test. Read when asked to count or list scan files.
 ---
 
 # Scan notes
