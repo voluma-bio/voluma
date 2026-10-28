@@ -76,7 +76,7 @@ export type StartThreadOptions = ThreadIdentity & {
 
 export interface ThreadHandle {
   /** Steers a user message into the running thread. False once the thread has ended or never ran. */
-  send(text: string, sender?: UserSender): boolean;
+  send(text: string, sender: UserSender): boolean;
   done: Promise<ThreadOutcome>;
 }
 
@@ -85,6 +85,8 @@ export interface ThreadOutcome {
   ran: boolean;
   status: "completed" | "failed" | "cancelled";
   error?: string;
+  /** The thread was refused because it cannot be resumed as stored (see `ThreadStale`). */
+  stale?: true;
   /** The text of the thread's last reply in this invocation; empty if it made none. */
   reply: string;
 }
@@ -161,7 +163,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       // Every check that can refuse the thread runs before `thread.started`: a refused
       // re-invocation must not relabel a finished thread in the stream record.
       if (stored.length > 0 && !sameSystem(stored[0], system)) {
-        throw new ThreadFailure(
+        throw new ThreadStale(
           "the stored system message differs from the current system prompt or tools; " +
             "a resumed thread keeps the prompt it started with (prompt-cache rule 1)",
         );
@@ -174,7 +176,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
         wrote?.role === "assistant" &&
         (wrote.provider !== options.model.provider || wrote.model !== options.model.id)
       ) {
-        throw new ThreadFailure(
+        throw new ThreadStale(
           `the thread was written by ${wrote.provider}/${wrote.model}, not ${options.model.provider}/${options.model.id}; ` +
             "a resumed thread keeps its model",
         );
@@ -184,8 +186,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       const finished = isFinished([...stored, ...repairs].at(-1));
       // A thread with no user message yet (new, or a crash before the first one was stored)
       // starts from the prompt. A finished one runs only for a new input. Each message
-      // carries its sender; the prompt counts as a person's, since the harness can't tell a
-      // supervisor's task from a human's. The sandbox restart note reaches the model through
+      // carries its sender; the prompt is the runtime's (the supervisor's brief). The sandbox restart note reaches the model through
       // the sandbox's command output (`sandbox-session.ts`), not as a message here.
       const prompts: AgentMessage[] = [];
       const addPrompt = (text: string | undefined, sender: UserSender) => {
@@ -194,7 +195,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       if (hasUser) {
         if (options.input) addPrompt(options.input.text, options.input.sender);
       } else {
-        addPrompt(options.prompt, { kind: "person" });
+        addPrompt(options.prompt, { kind: "runtime" });
       }
       for (const { text, sender } of early.splice(0)) addPrompt(text, sender);
       const message = prompts.length > 0 ? prompts : undefined;
@@ -307,6 +308,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       outcome = {
         status: "failed",
         error: error instanceof ThreadFailure ? error.message : String(error),
+        ...(error instanceof ThreadStale && { stale: true }),
       };
       if (!(error instanceof ThreadFailure)) unexpected = error;
     } finally {
@@ -321,7 +323,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
   }
 
   return {
-    send(text, sender = { kind: "person" }) {
+    send(text, sender) {
       if (ended) return false;
       if (!accepting) {
         early.push({ text, sender });
@@ -336,6 +338,12 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
 
 /** A failure of the thread itself, as opposed to a bug: reported as the outcome, not thrown. */
 class ThreadFailure extends Error {}
+
+/**
+ * The stored thread cannot be resumed as it is (its prompt, tools or model changed, e.g. by a
+ * deploy): `ran` is false and `stale` true. The caller starts the work again on a new thread.
+ */
+class ThreadStale extends ThreadFailure {}
 
 const historyFailure = (error: unknown): Omit<ThreadOutcome, "ran" | "reply"> => ({
   status: "failed",

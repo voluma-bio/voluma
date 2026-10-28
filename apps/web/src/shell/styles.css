@@ -3,6 +3,7 @@
 @import "@voluma/design-tokens/tokens.css";
 @import "@voluma/design-tokens/theme.css";
 @import "../features/review/styles.css";
+@import "../features/run/styles.css";
 
 /* Let Tailwind see the classes used inside the shared packages. */
 @source "../../../../packages/ui/src";
