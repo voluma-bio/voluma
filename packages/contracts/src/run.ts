@@ -57,7 +57,9 @@
  * runner hold them in memory for that run only: never in the database, on
  * disk, in logs or in any response (log no request body on these routes). If
  * the runner loses them (a restart or a deploy), the run moves to
- * `awaiting-keys` and resumes when the browser resends them (`/keys`).
+ * `awaiting-keys` and resumes when the browser resends them (`/keys`). After
+ * 24 h in `awaiting-keys` it ends `failed` with an `error`. Both keys or none:
+ * a request with only one fails validation (400).
  *
  * Limits: a caller has at most one queued or running run per `credentials`
  * kind; creating another answers 409.
