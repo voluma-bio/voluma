@@ -21,6 +21,7 @@ import type { ThreadSpec, Threads } from "./threads";
 export type RoleSpec = Pick<ThreadSpec, "prompt" | "model" | "streamFn" | "systemPrompt" | "tools">;
 
 export interface SupervisorOptions {
+  runId: string;
   /** The supervisor's own thread: the root, and the envelope of its events. */
   threadId: string;
   plan: readonly PlanTask[];
@@ -52,7 +53,8 @@ export function supervisor(options: SupervisorOptions) {
   const nextThread = (taskId: string, role: "worker" | "check") => {
     const n = (starts.get(`${taskId}.${role}`) ?? 0) + 1;
     starts.set(`${taskId}.${role}`, n);
-    return n === 1 ? `${taskId}.${role}` : `${taskId}.${role}.${n}`;
+    // History is keyed by thread id alone, so the id carries the run.
+    return `${options.runId}.${taskId}.${role}${n === 1 ? "" : `.${n}`}`;
   };
 
   /** `body` returns whether a successor thread took over the task. */
