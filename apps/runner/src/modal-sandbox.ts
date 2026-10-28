@@ -210,6 +210,11 @@ class ModalSandboxAdapter implements Sandbox {
     if (code !== 0) throw new Error(`writing ${path} failed (exit ${code}): ${stderr.trim()}`);
   }
 
+  async alive(): Promise<boolean> {
+    // `poll` is null while the sandbox runs and its exit code once it has ended.
+    return (await this.#modal.poll()) === null;
+  }
+
   async destroy(): Promise<void> {
     await this.#modal.terminate({ wait: true });
   }

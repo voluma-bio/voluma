@@ -22,6 +22,7 @@ import { referencePrefix } from "@voluma/contracts/r2";
 import { httpClient } from "@voluma/harness/adapters/http";
 import { runThread } from "@voluma/harness/adapters/pi";
 import { runLayout } from "@voluma/harness/layout";
+import type { Sandbox } from "@voluma/harness/ports/sandbox";
 import { recorder } from "@voluma/harness/recorder";
 import { sandboxSession } from "@voluma/harness/sandbox-session";
 import { bashTool } from "@voluma/harness/tools/bash";
@@ -93,7 +94,7 @@ const createSandbox = createModalSandbox({
     cloudflareApiToken: required("CLOUDFLARE_API_TOKEN"),
   },
 });
-const sandbox = sandboxSession(
+const session = sandboxSession(
   () =>
     createSandbox({
       runId,
@@ -102,7 +103,7 @@ const sandbox = sandboxSession(
       cpu: 2,
       memoryMiB: 4096,
       lifetimeSeconds,
-      idleSeconds: 300,
+      idleSeconds: Number(optional("VOLUMA_SANDBOX_IDLE_SECONDS") ?? 300),
       mounts: layout.mounts,
     }),
   (id, state, detail) => events.emit(id, "sandbox", { name: "main", state, detail }),
@@ -121,7 +122,7 @@ for (const name of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
     if (abort.signal.aborted) {
       console.error(`\n${name}: closing the sandbox and quitting`);
       void Promise.race([
-        Promise.allSettled([sandbox.close(), terminateRun(modal, runId)]),
+        Promise.allSettled([session.close(), terminateRun(modal, runId)]),
         new Promise((done) => setTimeout(done, FORCE_CLOSE_MS)),
       ])
         .catch(() => {})
@@ -149,7 +150,10 @@ try {
     tools: [bashTool(layout)],
     recorder: events,
     history: api,
-    sandbox: (id) => sandbox.get(id),
+    sandbox: async (id) => {
+      const { sandbox: current, restarted } = await session.get(id);
+      return restarted ? announceRestart(current, layout.restartNote) : current;
+    },
     signal: abort.signal,
   });
   const u = outcome.usage;
@@ -164,10 +168,27 @@ try {
   process.exitCode = outcome.status === "completed" ? 0 : 1;
 } finally {
   try {
-    await sandbox.close();
+    await session.close();
   } finally {
     await events.flush();
   }
+}
+
+// Puts the restart note at the head of the first command's output, so the model reads it once.
+function announceRestart(sandbox: Sandbox, note: string): Sandbox {
+  let pending = true;
+  return {
+    writeFile: (path, bytes, signal) => sandbox.writeFile(path, bytes, signal),
+    alive: () => sandbox.alive(),
+    destroy: () => sandbox.destroy(),
+    async *exec(request, signal) {
+      if (pending) {
+        pending = false;
+        yield { type: "stderr", data: `${note}\n` };
+      }
+      yield* sandbox.exec(request, signal);
+    },
+  };
 }
 
 function printEvent(event: Parameters<typeof api.append>[0]): void {

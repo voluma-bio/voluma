@@ -75,6 +75,11 @@ export interface Sandbox {
    * read-write mount, which cannot append. Aborting `signal` rejects.
    */
   writeFile(path: string, bytes: Uint8Array, signal?: AbortSignal): Promise<void>;
+  /**
+   * False once the provider has ended the sandbox (idle timeout, lifetime, termination);
+   * a command sent to it then fails. Cheap enough to ask before each tool call.
+   */
+  alive(): Promise<boolean>;
   destroy(): Promise<void>;
 }
 
