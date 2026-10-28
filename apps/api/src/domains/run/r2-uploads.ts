@@ -1,7 +1,7 @@
 /**
  * The object store side of scan uploads (`@voluma/contracts/run`, Uploads): presigned PUT
- * URLs straight to R2, the sizes of what landed under a prefix, and the move from the
- * staging prefix to the input's own. The API holds the R2 keys; no file's bytes pass
+ * URLs straight to R2, the sizes of what landed under a prefix, the move from the
+ * staging prefix to the input's own, and deleting a cancelled upload's files. The API holds the R2 keys; no file's bytes pass
  * through it (a copy is server-side in R2). Built by index.ts.
  */
 import {
@@ -69,19 +69,25 @@ export function r2Uploads(config: {
         }
       };
       await Promise.all(Array.from({ length: 16 }, copyNext));
-      for (let i = 0; i < pairs.length; i += 1000) {
-        await s3.send(
-          new DeleteObjectsCommand({
-            Bucket: bucket,
-            Delete: {
-              Objects: pairs.slice(i, i + 1000).map(([from]) => ({ Key: from })),
-              Quiet: true,
-            },
-          }),
-        );
-      }
+      await deleteKeys(pairs.map(([from]) => from));
+    },
+
+    /** Deletes every object under `prefix`. */
+    async deletePrefix(prefix: string): Promise<void> {
+      await deleteKeys([...(await this.sizes(prefix)).keys()].map((k) => prefix + k));
     },
   };
+
+  async function deleteKeys(keys: string[]): Promise<void> {
+    for (let i = 0; i < keys.length; i += 1000) {
+      await s3.send(
+        new DeleteObjectsCommand({
+          Bucket: bucket,
+          Delete: { Objects: keys.slice(i, i + 1000).map((Key) => ({ Key })), Quiet: true },
+        }),
+      );
+    }
+  }
 }
 
 export type Uploads = ReturnType<typeof r2Uploads>;

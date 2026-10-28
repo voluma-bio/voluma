@@ -25,8 +25,13 @@
  *   POST /api/run/inputs/:id/complete → 200 `inputSchema` once every declared file is
  *                                  stored with its declared size; 409
  *                                  `completeUploadConflictSchema` listing the files that
- *                                  aren't; completing a completed upload is a no-op; 404
- *                                  unless the caller is the uploader
+ *                                  aren't; completing a completed upload is a no-op, and
+ *                                  a retried complete finishes one that failed part way;
+ *                                  404 unless the caller is the uploader
+ *   POST /api/run/inputs/:id/cancel → 204: drops an uncompleted upload and its stored
+ *                                  files, freeing its place under the open-upload limit;
+ *                                  404 unless the caller is the uploader; 409 once
+ *                                  completed (a completed scan is not deleted here)
  *
  * Uploads. A scan's files never pass through the API: the server answers a create
  * with a presigned `PUT` URL per file, straight to object storage, valid until
@@ -248,25 +253,24 @@ export type ResendKeysRequest = z.infer<typeof resendKeysRequestSchema>;
 /** The object store's limit on one PUT (R2: 5 GB); a larger file can't be uploaded. */
 export const MAX_UPLOAD_FILE_BYTES = 5_000_000_000;
 
-/** Bidirectional formatting characters, which can disguise a name in the picker. */
-const BIDI = /[\u202a-\u202e\u2066-\u2069]/;
+/**
+ * Control, format (bidi marks, zero-width characters) and line or paragraph separator
+ * characters, which are invisible in the picker and can disguise a name; and a lone
+ * surrogate, which no URL or object key can hold.
+ */
+const UNSAFE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}]/u;
 
 /**
  * A file's path inside the uploaded folder, as `inputKey` stores it: relative, `/`
- * separated, no `.` or `..` segment, no empty segment, no backslash, control or
- * bidirectional-formatting character, Unicode NFC, at most 300 characters. The worker
- * sees it at `/inputs/<path>`.
+ * separated, no `.` or `..` segment, no empty segment, no backslash or invisible
+ * character (control, format, line or paragraph separator), well-formed Unicode in NFC,
+ * at most 300 characters. The worker sees it at `/inputs/<path>`.
  */
 export const uploadPathSchema = relativePathSchema.refine(
-  (p) =>
-    p.length <= 300 &&
-    p === p.normalize("NFC") &&
-    !p.includes("\\") &&
-    !/\p{Cc}/u.test(p) &&
-    !BIDI.test(p),
+  (p) => p.length <= 300 && p === p.normalize("NFC") && !p.includes("\\") && !UNSAFE.test(p),
   {
     message:
-      "must be NFC, at most 300 characters, with no backslash, control or bidi-formatting character",
+      "must be well-formed NFC, at most 300 characters, with no backslash or invisible character",
   },
 );
 

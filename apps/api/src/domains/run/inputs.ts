@@ -1,7 +1,8 @@
 /**
  * The browser's input routes (`@voluma/contracts/run`): list the scans a run can start
  * on, and upload one (Uploads): create (an `uploading` input and a presigned PUT URL per
- * file), then complete once storage holds every declared file at its declared size.
+ * file), then complete once storage holds every declared file at its declared size, or
+ * cancel.
  * Uploading is for members only: a guest can list and start on inputs but not store
  * files. No file passes through here.
  */
@@ -95,8 +96,26 @@ export function inputsRoutes({ reads, uploadStore, objects, uploadLimits }: RunD
         .filter((f) => staged.get(f.path) === f.size)
         .map((f): [string, string] => [uploadKey(id, f.path), inputKey(id, f.path)]),
     );
-    await uploadStore.markReady(id);
+    // A cancel that won the race deleted the row; its files may be gone.
+    if (!(await uploadStore.markReady(id))) return c.json({ error: "not found" }, 404);
     return c.json(upload.input);
+  });
+
+  app.post("/inputs/:id/cancel", async (c) => {
+    const user = c.var.user;
+    const id = c.req.param("id");
+    const upload = await uploadStore.findOwn(readerOf(user), user.userId, id);
+    if (!upload) return c.json({ error: "not found" }, 404);
+    if (upload.status === "ready") return c.json({ error: "The scan is already uploaded." }, 409);
+    if (!objects) return c.json({ error: "Scan upload is not set up on this server." }, 503);
+    // The row first, and only while uploading: a complete that already marked it ready
+    // keeps its files, and one still moving them then finds no row and answers 404.
+    if (!(await uploadStore.remove(id))) {
+      return c.json({ error: "The scan is already uploaded." }, 409);
+    }
+    await objects.deletePrefix(uploadPrefix(id));
+    await objects.deletePrefix(inputPrefix(id));
+    return c.body(null, 204);
   });
 
   return app;

@@ -254,6 +254,10 @@ function setCookies(c: Context, cookies: string[]) {
   for (const cookie of cookies) c.header("Set-Cookie", cookie, { append: true });
 }
 
+/** Failed password sign-ins allowed per email in each window. */
+const PASSWORD_ATTEMPTS = 10;
+const PASSWORD_WINDOW_MS = 15 * 60 * 1000;
+
 export function createAuth(config: AuthConfig) {
   const appOrigin = new URL(config.appUrl).origin;
   const scopes = new Map(config.organizations.map((org) => [org.id, org.scope]));
@@ -564,24 +568,43 @@ export function createAuth(config: AuthConfig) {
 
   // Password sign-in for scripts (the scan upload CLI); a browser goes through /login. The
   // same membership rule as the callback. Behind the CSRF guard like every POST, so another
-  // site can't sign a browser in as someone else. WorkOS throttles attempts.
+  // site can't sign a browser in as someone else. Failed attempts are counted per email
+  // here (in memory: one API replica), and WorkOS gets the caller's address to limit too.
+  // The CLI keeps each response's Set-Cookie: WorkOS rotates the refresh token.
+  const failedSignIns = new Map<string, { count: number; until: number }>();
   sessionRoutes.post("/password", async (c) => {
     const { email, password } = await parseJson(c, passwordSignInRequestSchema);
+    const key = email.trim().toLowerCase();
+    const now = Date.now();
+    const failed = failedSignIns.get(key);
+    if (failed && failed.until > now && failed.count >= PASSWORD_ATTEMPTS) {
+      return c.json({ error: "too many attempts" }, 429);
+    }
     let auth: Awaited<ReturnType<typeof workos.userManagement.authenticateWithPassword>>;
     try {
       auth = await workos.userManagement.authenticateWithPassword({
         clientId: config.clientId,
         email,
         password,
+        // Railway's proxy sets x-real-ip; a client can't override it there.
+        ipAddress: c.req.header("x-real-ip"),
+        userAgent: c.req.header("user-agent"),
       });
     } catch (error) {
       const status = (error as { status?: number }).status;
       if (status === 429) return c.json({ error: "too many attempts" }, 429);
       if (status !== undefined && status >= 400 && status < 500) {
+        for (const [k, v] of failedSignIns) if (v.until <= now) failedSignIns.delete(k);
+        const live = failedSignIns.get(key);
+        failedSignIns.set(key, {
+          count: (live?.count ?? 0) + 1,
+          until: live?.until ?? now + PASSWORD_WINDOW_MS,
+        });
         return c.json({ error: "sign-in refused" }, 401);
       }
       throw error;
     }
+    failedSignIns.delete(key);
     const sid = core.parseTokenClaims(auth.accessToken).sid;
     const scope = scopes.get(auth.organizationId ?? "");
     if (!scope || !auth.organizationId) {

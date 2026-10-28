@@ -58,8 +58,23 @@ export function pgUploads(db: PostgresJsDatabase) {
         : null;
     },
 
-    async markReady(id: string): Promise<void> {
-      await db.update(inputs).set({ status: "ready" }).where(eq(inputs.id, id));
+    /** Deletes the upload if it is still uploading; false if it is gone or completed. */
+    async remove(id: string): Promise<boolean> {
+      const gone = await db
+        .delete(inputs)
+        .where(and(eq(inputs.id, id), eq(inputs.status, "uploading")))
+        .returning({ id: inputs.id });
+      return gone.length > 0;
+    },
+
+    /** Marks the upload ready; false if a cancel deleted it first. */
+    async markReady(id: string): Promise<boolean> {
+      const done = await db
+        .update(inputs)
+        .set({ status: "ready" })
+        .where(eq(inputs.id, id))
+        .returning({ id: inputs.id });
+      return done.length > 0;
     },
   };
 }
