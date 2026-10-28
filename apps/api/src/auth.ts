@@ -175,6 +175,11 @@ class RefreshMemo {
     return entry.outcome;
   }
 
+  // Remembers a session that is over (terminal refresh failure, sign-out, revoke).
+  dead(refreshToken: string) {
+    this.set(refreshToken, "dead", Date.now() + COOKIE_MAX_AGE * 1000);
+  }
+
   set(refreshToken: string, outcome: Refreshed | "dead", until: number) {
     const key = this.key(refreshToken);
     this.entries.delete(key);
@@ -184,6 +189,8 @@ class RefreshMemo {
     }
   }
 }
+
+type SessionRef = { id: string; refreshToken: string };
 
 function userPrincipal(user: User, labId: string, scope: Scope): Principal {
   return {
@@ -262,15 +269,17 @@ export function createAuth(config: AuthConfig) {
     }
   }
 
-  // Ends WorkOS sessions server-side, so a copy of a sealed cookie dies with them
-  // (refresh tokens are not rotated on use). Never throws: callers clear the cookie
-  // whatever happens here.
-  async function revokeSessions(sessionIds: (string | null)[]) {
+  // Ends WorkOS sessions server-side, so a copy of a sealed cookie dies with them at its
+  // next refresh (refresh tokens are not rotated on use), and marks their refresh tokens
+  // dead in the memo, so a copy is not served a remembered session either. Never throws:
+  // callers clear the cookie whatever happens here.
+  async function revokeSessions(sessions: (SessionRef | null)[]) {
     await Promise.all(
-      sessionIds.map(async (sessionId) => {
-        if (sessionId === null) return;
+      sessions.map(async (ref) => {
+        if (ref === null) return;
+        memo.dead(ref.refreshToken);
         try {
-          await workos.userManagement.revokeSession({ sessionId });
+          await workos.userManagement.revokeSession({ sessionId: ref.id });
         } catch (error) {
           const { name, status } = error as { name?: string; status?: number };
           console.error("WorkOS session revoke failed:", name, status);
@@ -279,12 +288,14 @@ export function createAuth(config: AuthConfig) {
     );
   }
 
-  // The session id (`sid`) of the request's cookie, read without refreshing (it works on
-  // an expired token, and while WorkOS is unreachable), or null for no readable cookie.
-  async function requestSessionId(request: Request) {
+  // The session id (`sid`) and refresh token of the request's cookie, read without
+  // refreshing (it works on an expired token, and while WorkOS is unreachable), or null
+  // for no readable cookie.
+  async function requestSession(request: Request): Promise<SessionRef | null> {
     try {
       const session = await authkit.getSession(request);
-      return session ? (core.parseTokenClaims(session.accessToken).sid ?? null) : null;
+      const id = session ? core.parseTokenClaims(session.accessToken).sid : undefined;
+      return session && id ? { id, refreshToken: session.refreshToken } : null;
     } catch {
       return null;
     }
@@ -317,7 +328,7 @@ export function createAuth(config: AuthConfig) {
         result = await core.validateAndRefresh(session);
       } catch (error) {
         if (isTerminalRefreshError(error)) {
-          memo.set(session.refreshToken, "dead", Date.now() + COOKIE_MAX_AGE * 1000);
+          memo.dead(session.refreshToken);
           await clearSessionCookies(request, sink);
         } else console.error("session refresh failed; cookie kept", error);
         return null;
@@ -423,9 +434,10 @@ export function createAuth(config: AuthConfig) {
       return c.redirect("/?signin=failed");
     }
     // Signing in over an existing session replaces its cookie; end the old session too.
-    const newId = core.parseTokenClaims(result.authResponse.accessToken).sid ?? null;
-    const oldId = await requestSessionId(c.req.raw);
-    const stale = oldId === newId ? null : oldId;
+    const newSid = core.parseTokenClaims(result.authResponse.accessToken).sid;
+    const created = newSid ? { id: newSid, refreshToken: result.authResponse.refreshToken } : null;
+    const old = await requestSession(c.req.raw);
+    const stale = old?.id === created?.id ? null : old;
     if (scopes.has(result.authResponse.organizationId ?? "")) {
       await revokeSessions([stale]);
       setCookies(c, cookies);
@@ -433,7 +445,7 @@ export function createAuth(config: AuthConfig) {
     }
     // Not in an allowed organization: handleCallback has already sealed a session. Keep none of it,
     // and end it at WorkOS so no usable session survives.
-    await revokeSessions([newId, stale]);
+    await revokeSessions([created, stale]);
     cookies.length = 0;
     await clearSessionCookies(c.req.raw, cookies);
     setCookies(c, cookies);
@@ -441,13 +453,14 @@ export function createAuth(config: AuthConfig) {
   });
 
   sessionRoutes.post("/logout", async (c) => {
-    // End the WorkOS session here, not only in the browser: a copy of the sealed
-    // cookie must stop working.
-    const sessionId = await requestSessionId(c.req.raw);
-    await revokeSessions([sessionId]);
+    // End the WorkOS session here, not only in the browser. A copy of the sealed cookie
+    // stops working at its next refresh; until then its access token (5 min on staging)
+    // is still checked locally and answers 200.
+    const current = await requestSession(c.req.raw);
+    await revokeSessions([current]);
     // The browser still visits logoutUrl, which ends WorkOS's own AuthKit session.
-    const logoutUrl = sessionId
-      ? workos.userManagement.getLogoutUrl({ sessionId, returnTo: `${config.appUrl}/` })
+    const logoutUrl = current
+      ? workos.userManagement.getLogoutUrl({ sessionId: current.id, returnTo: `${config.appUrl}/` })
       : "/";
     const cookies: string[] = [];
     await clearSessionCookies(c.req.raw, cookies);
