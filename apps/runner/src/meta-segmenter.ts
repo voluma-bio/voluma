@@ -4,7 +4,7 @@
  * H.264 video (default quality moves the masks; the slices are the frames, so frame `n` is
  * slice `n`), uploaded through the Files API, tracked both ways from the box prompts, and
  * the upload deleted afterwards. Needs `ffmpeg` on the runner's PATH. Meta's mask format,
- * and that masks come back cropped to their box, are in `one-bit-mask.ts` and the pasting
+ * and that masks come back cropped to their box, are in `sam-mask.ts` and the pasting
  * below.
  */
 import { spawn } from "node:child_process";
@@ -19,7 +19,7 @@ import type {
   SegmentResult,
   SliceStack,
 } from "@voluma/harness/ports/segmenter";
-import { decodeOneBit } from "./one-bit-mask.ts";
+import { decodeMask } from "./sam-mask.ts";
 
 const BASE = "https://api.meta.ai/v1";
 /** Meta bills $0.20 per 1,000 video frames, at least 50 per request. */
@@ -32,8 +32,13 @@ export function metaSegmenter(options: {
   log(line: string): void;
   /** Called with what Meta billed, as soon as it reports the frames (even if the call then fails). */
   addCost(usd: number): void;
+  /**
+   * Stores a response that could not be pasted, since Meta bills it and the sandbox's local
+   * disk is lost; resolves to where a person can read it.
+   */
+  keepFailed(text: string): Promise<string>;
 }): Segmenter {
-  const { apiKey, log, addCost } = options;
+  const { apiKey, log, addCost, keepFailed } = options;
   const auth = { Authorization: `Bearer ${apiKey}` };
   return {
     async segment(stack, objects, signal) {
@@ -64,7 +69,13 @@ export function metaSegmenter(options: {
         }
         signal.throwIfAborted();
         const text = await track(prompt, fileId, signal);
-        return { ...paste(text, stack, objects, width, height), prompt };
+        try {
+          return { ...paste(text, stack, objects, width, height), prompt };
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          const kept = await keepFailed(text).catch((e) => `not kept (${e})`);
+          throw new Error(`${detail}; Meta's response: ${kept}`, { cause: error });
+        }
       } finally {
         if (fileId) await deleteUpload(fileId);
         await rm(dir, { recursive: true, force: true });
@@ -251,15 +262,29 @@ function paste(
       if (!known.has(label))
         throw new Error(`the response names object ${id}, which was not prompted`);
       if (num(box, "w") !== paddedWidth || num(box, "h") !== paddedHeight) {
-        throw new Error("the response is for a frame size other than the one sent");
+        throw new Error(
+          `the response is for a frame size other than the one sent (slice ${frame}, object ${id})`,
+        );
       }
       const x1 = num(box, "x1");
       const y1 = num(box, "y1");
       const boxW = num(box, "x2") - x1 + 1;
       const boxH = num(box, "y2") - y1 + 1;
+      if (
+        boxW <= 0 ||
+        boxH <= 0 ||
+        x1 < 0 ||
+        y1 < 0 ||
+        !Number.isInteger(x1) ||
+        !Number.isInteger(y1) ||
+        x1 + boxW > paddedWidth ||
+        y1 + boxH > paddedHeight
+      ) {
+        throw new Error(`the response has a box outside the frame (slice ${frame}, object ${id})`);
+      }
       const [h, w, encoded] = /^(\d+),(\d+),(.*)$/s.exec(field(mask, "data") ?? "")?.slice(1) ?? [];
-      if (encoded === undefined || !encoded.startsWith("!")) {
-        throw new Error("the response has a mask that is not one_bit");
+      if (encoded === undefined) {
+        throw new Error(`the response mask has no payload (slice ${frame}, object ${id})`);
       }
       if (
         num(mask, "x") !== 0 ||
@@ -267,15 +292,25 @@ function paste(
         Number(w) !== boxW ||
         Number(h) !== boxH
       ) {
-        throw new Error("the response has a mask that is not at the origin of its own box");
+        throw new Error(
+          `the response has a mask that is not at the origin of its own box (slice ${frame}, object ${id})`,
+        );
       }
-      const bits = decodeOneBit(encoded.slice(1), boxW, boxH);
+      let bits: Uint8Array;
+      try {
+        bits = decodeMask(encoded, boxW, boxH);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `the response mask failed to decode (slice ${frame}, object ${id}, encoding ${encoded[0] ?? "none"}, ${h}x${w}): ${detail}`,
+        );
+      }
       for (let i = 0; i < boxH; i++) {
         const y = y1 + i;
-        if (y < 0 || y >= height) continue;
+        if (y >= height) continue;
         for (let j = 0; j < boxW; j++) {
           const x = x1 + j;
-          if (x < 0 || x >= width) continue;
+          if (x >= width) continue;
           const at = base + y * width + x;
           if (bits[i * boxW + j] && labels[at] === 0) labels[at] = label;
         }

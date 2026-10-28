@@ -43,7 +43,7 @@ volume and writes the labels straight to the run's bucket (`Files` port, `r2-fil
 sandbox just wrote is visible to it and the labels are visible to the sandbox after the call.
 The Meta adapter (`meta-segmenter.ts`) shells out to `ffmpeg` for the lossless H.264 stack, so
 the runner host needs it on PATH; it deletes its upload from Meta's file store when the call
-ends (a failed delete is logged). Its response masks decode in `one-bit-mask.ts`, a port of
+ends (a failed delete is logged). Its response masks (`!` one_bit and `~` lossless) decode in `sam-mask.ts`, a port of
 Meta's decoder, because `meta-sam-parser` takes minutes per response. The tool is offered only
 when a Meta key exists (`VOLUMA_META_API_KEY`, or the visitor's key on a visitor run). What a
 call costs goes to the run's usage meter (the adapter reports it as soon as Meta gives the frame count, so a failed call is still billed). The tool also writes a sidecar `<labels>.json` (prompt frames and per-slice confidence per object). The runner checks `ffmpeg -version` at start when a Meta key is set. How agents should use it (orientation, boxes,
