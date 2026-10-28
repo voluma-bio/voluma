@@ -28,12 +28,14 @@ import { createReview } from "./domains/review";
 import { createRun } from "./domains/run";
 import type { Limits } from "./domains/run/admission";
 import { catalog } from "./domains/run/catalog";
+import { EVENTS_PAGE } from "./domains/run/cursor";
 import { KeyVault } from "./domains/run/key-vault";
 import { createNotifier } from "./domains/run/notifier";
 import { pgEventLog } from "./domains/run/pg-event-log";
 import { pgHistory } from "./domains/run/pg-history";
 import { pgRunQueue } from "./domains/run/pg-queue";
 import { pgRunReads } from "./domains/run/pg-runs";
+import type { RunRecords } from "./ports";
 
 const required = (name: string) => {
   const value = process.env[name];
@@ -112,6 +114,22 @@ const draining = new AbortController();
 const reads = pgRunReads(db);
 const notifier = createNotifier();
 const queue = pgRunQueue(db, limits, new KeyVault(), notifier);
+const eventLog = pgEventLog(db, notifier);
+
+/** The review's read of a run: the run and its whole log, page by page. */
+const runRecords: RunRecords = {
+  async load(reader, runId) {
+    const run = await reads.get(reader, runId);
+    if (!run) return null;
+    const events = [];
+    for (;;) {
+      const page = await eventLog.stream(reader, runId, events.at(-1)?.seq ?? 0, EVENTS_PAGE);
+      if (!page) return null;
+      events.push(...page.events);
+      if (page.events.length < EVENTS_PAGE) return { run, events };
+    }
+  },
+};
 
 const app = new Hono();
 app.get("/health", (c) => c.text("ok"));
@@ -135,7 +153,7 @@ app.route(
   createRun({
     reads,
     queue,
-    eventLog: pgEventLog(db, notifier),
+    eventLog,
     notifier,
     history: pgHistory(db),
     catalog,
@@ -143,7 +161,7 @@ app.route(
     shutdown: draining.signal,
   }),
 );
-app.route("/api/review", createReview({}));
+app.route("/api/review", createReview({ runs: runRecords }));
 
 const isApi = (path: string) => path === "/api" || path.startsWith("/api/");
 const webDist = resolve(import.meta.dirname, "../../web/dist");
