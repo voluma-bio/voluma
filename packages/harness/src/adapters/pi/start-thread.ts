@@ -7,8 +7,8 @@
  * stays valid; steering and follow-ups are new messages, never edits.
  *
  * `startThread` returns at once with a handle. While the thread runs, `send` steers a
- * message into it (Pi's steering queue: delivered after the current tool calls). Once it
- * ends, `send` answers false, and the way to wake it is another `startThread` with the same
+ * message into it (Pi's steering queue: delivered after the current tool calls); one sent
+ * before the loop starts is queued for it. Once the thread has ended, `send` answers false, and the way to wake it is another `startThread` with the same
  * thread id and an `input`, which resumes from History (`threads.ts` does this). Several
  * threads share one process, and one sandbox through `sandbox`.
  */
@@ -142,6 +142,9 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
   // messages, with no await between that check and clearing it, so a message accepted here
   // is always run.
   let accepting = false;
+  let ended = false;
+  // Messages sent before the loop starts; they join the first turn (or are steered in).
+  const early: { text: string; sender: UserSender }[] = [];
   let reply = "";
 
   async function run(): Promise<ThreadOutcome> {
@@ -179,6 +182,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       } else {
         addPrompt(options.prompt, { kind: "person" });
       }
+      for (const { text, sender } of early.splice(0)) addPrompt(text, sender);
       const message = prompts.length > 0 ? prompts : undefined;
       if (message === undefined && finished) {
         return { status: "completed", ran: false, reply, usage };
@@ -249,6 +253,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
 
       if (!historyError && !signal?.aborted) {
         accepting = true;
+        for (const { text, sender } of early.splice(0)) agent.steer(userMessage(text, sender));
         if (message !== undefined) await agent.prompt(message);
         else await agent.continue();
         // A message steered in as the loop was ending is still queued.
@@ -268,6 +273,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       if (!(error instanceof ThreadFailure)) unexpected = error;
     } finally {
       accepting = false;
+      ended = true;
       signal?.removeEventListener("abort", abort);
     }
     // The caller owns the recorder and flushes it.
@@ -278,7 +284,11 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
 
   return {
     send(text, sender = { kind: "person" }) {
-      if (!accepting) return false;
+      if (ended) return false;
+      if (!accepting) {
+        early.push({ text, sender });
+        return true;
+      }
       agent.steer(userMessage(text, sender));
       return true;
     },

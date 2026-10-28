@@ -32,7 +32,8 @@ export type Decision = z.infer<typeof decisionSchema>;
 export interface Judgment {
   /** Names the implementation in the record (`by: judgment(arm)`). */
   arm: string;
-  decide(point: JudgmentPoint): Promise<Decision>;
+  /** `signal` aborts at the supervisor's deadline or when the run is cancelled; an arm should stop then. */
+  decide(point: JudgmentPoint, signal: AbortSignal): Promise<Decision>;
 }
 
 const SYSTEM = `You are the supervisor of an analysis run. A task of the run needs a decision.
@@ -41,14 +42,14 @@ Reply with one JSON object and nothing else: {"action": "accept" | "redo" | "fai
 - redo: a worker should do the task again. Choose this only when the report shows a concrete mistake a second attempt could fix.
 - fail: the task cannot be done.`;
 
-/** `complete` is one model call, e.g. `(c) => models.completeSimple(model, c, { apiKey })`. */
+/** `complete` is one model call, e.g. `(c, signal) => models.completeSimple(model, c, { apiKey, signal })`. */
 export function llmJudgment(
   arm: string,
-  complete: (context: Context) => Promise<AssistantMessage>,
+  complete: (context: Context, signal: AbortSignal) => Promise<AssistantMessage>,
 ): Judgment {
   return {
     arm,
-    async decide(point) {
+    async decide(point, signal) {
       const question =
         point.kind === "check-disagreed"
           ? `The second agent that checked task ${point.taskId} did not pass it.`
@@ -63,7 +64,7 @@ export function llmJudgment(
           },
         ],
       };
-      const reply = await complete(context);
+      const reply = await complete(context, signal);
       const text = reply.content.flatMap((c) => (c.type === "text" ? [c.text] : [])).join("");
       const json = text.match(/\{[\s\S]*\}/)?.[0];
       if (!json) throw new Error(`the judgment model answered without JSON: ${text.slice(0, 200)}`);

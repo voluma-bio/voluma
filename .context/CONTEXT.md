@@ -83,18 +83,25 @@ checklist, check threads, and review chat threads.
   writes the full text to `toolOutputKey` with `Sandbox.writeFile`, which exists
   because an R2 mount cannot append: the adapter writes locally and copies in one go.
 - **Many threads, one run.** `startThread` returns `{send, done}` at once: `send` steers a
-  message into the running thread (Pi's steering queue) and answers false once it ended.
+  message into the thread (Pi's steering queue; one sent before the loop starts is queued
+  for it) and answers false once it ended.
   `threads.ts` is the run's thread registry: it starts and resumes threads (another
   `startThread` on the same id, from History) and implements `thread_message`
   (`tools/thread-message.ts`): steer a running target, wake an idle one, `wait` only toward the
-  caller's own children. Thread ids must be unique across runs (History is keyed by the
-  thread id alone); the supervisor prefixes them with the run id.
+  caller's own children. A wake from a message goes through the supervisor (`onWake`): it
+  admits only a worker whose task is in flight, and watches the thread. Thread ids must be
+  unique across runs (History is keyed by the thread id alone): the supervisor's are
+  `<runId>.supervisor` and `<runId>.<taskId>.<role>`, joined with `.`, so it refuses a run
+  or task id that contains one.
 - **The checklist is a fold.** `task-runtime.ts` is the only writer of `task`, `checkpoint`,
   `output`, `attempt.opened` and `revision.started` events, under `@voluma/contracts/task-tools`.
-  Its only view of the run is `fold(recorder.events())`, refolded for each decision, inside one
-  per-run critical section; it waits for each append to be stored (`recorder.emit` resolves
-  true) before a tool returns. The recorder keeps the events it emitted for this; a resume
-  passes it the stored events (see TODO). `tools/task-tools.ts` wraps it as the model's
+  Its only view of the run is `fold(recorder.events())` (folded once per change of the log),
+  inside one per-run critical section. It writes through `recorder.append`, which makes one
+  attempt and puts the event in the view only once the store has acknowledged it, so the
+  runtime never decides from an event the store lacks; a store failure fails the tool call,
+  and the supervisor fails the run. Hashing and copying evidence happen outside the section.
+  A thread writes only to its own task, and a worker opens an attempt only when every task
+  it builds on is done. A resume passes the recorder the stored events (see TODO). `tools/task-tools.ts` wraps it as the model's
   `checklist`, `checkpoint` and `report_output`. `output-checks.ts` holds the declared-output
   and reference checks. Files named as evidence go through the `Evidence` port.
 - **The supervisor** (`supervisor.ts`) is code, not a thread with a model: it starts workers for
@@ -102,8 +109,10 @@ checklist, check threads, and review chat threads.
   up to `stuckLimit` times, then the stuck guard marks the task, starts a check thread on a
   done or to-check task, and writes the check result. A check that did not pass, or a failed
   thread, is a judgment point: `judgment.ts` is the one seam (`decide(point) → accept | redo |
-  fail`), its decisions record `by: judgment(arm)`, and `llmJudgment` is the first arm (one
-  fresh structured call per decision). The supervisor never imports Pi; it gets threads, the
+  fail`, bounded by a deadline and an abort signal), its decisions record `by: judgment(arm)`
+  with a reason that also says when the arm errored or a redo was capped, and `llmJudgment` is
+  the first arm (one fresh structured call per decision). An error while handling a thread's
+  end fails the run: threads aborted, the root ends `failed`. The supervisor never imports Pi; it gets threads, the
   runtime and the judgment from its caller.
 - **`seq` and the database.** `seq` per run is gapless and in commit order: each
   append takes a per-run advisory lock as its own statement before the insert (a lock

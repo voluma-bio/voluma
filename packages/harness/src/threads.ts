@@ -3,7 +3,9 @@
  * reaches another. `start` launches a thread (or resumes an idle one); `message` is what
  * the `thread_message` tool calls (`@voluma/contracts/thread-message`): a running target is
  * steered, an idle one is woken with the message as its input, and `wait` is allowed only
- * toward the sender's own children so two threads can never wait on each other.
+ * toward the sender's own children so two threads can never wait on each other. A wake from
+ * a message goes through the supervisor's `onWake`, which may refuse it and watches the
+ * thread it starts; the supervisor's own `resume` does not.
  */
 import type { ThreadMessageResult } from "@voluma/contracts/thread-message";
 import {
@@ -29,6 +31,13 @@ export interface Threads {
   message(from: string, to: string, text: string, wait: boolean): Promise<ThreadMessageResult>;
   /** Stops a running thread as cancelled. */
   abort(threadId: string): void;
+  /** Stops every running thread. */
+  abortAll(): void;
+  /**
+   * Sets who admits and watches a wake from `thread_message`. `wake` throws to refuse, or
+   * calls `start` and returns its handle. Without one, a wake just starts the thread.
+   */
+  onWake(wake: (spec: ThreadSpec, start: () => ThreadHandle) => ThreadHandle): void;
 }
 
 interface Entry {
@@ -40,6 +49,7 @@ interface Entry {
 
 export function threads(shared: Shared, signal?: AbortSignal): Threads {
   const entries = new Map<string, Entry>();
+  let wake: Parameters<Threads["onWake"]>[0] = (_, start) => start();
 
   function launch(spec: ThreadSpec): Entry {
     const abort = new AbortController();
@@ -74,6 +84,12 @@ export function threads(shared: Shared, signal?: AbortSignal): Threads {
       return launch({ ...entry.spec, input }).handle;
     },
     abort: (threadId) => entries.get(threadId)?.abort.abort(),
+    abortAll: () => {
+      for (const entry of entries.values()) entry.abort.abort();
+    },
+    onWake: (fn) => {
+      wake = fn;
+    },
     async message(from, to, text, wait) {
       const target = entries.get(to);
       if (!target) throw new Error(`no thread ${to} in this run`);
@@ -86,7 +102,10 @@ export function threads(shared: Shared, signal?: AbortSignal): Threads {
       let handle = target.handle;
       if (!(target.running && handle.send(text, sender))) {
         delivery = "queued";
-        handle = this.resume(to, { text, sender });
+        // `send` refuses once the thread has ended, a moment before `running` clears.
+        await handle.done.catch(() => {});
+        const input = { text, sender };
+        handle = wake({ ...target.spec, input }, () => this.resume(to, input));
       }
       if (!wait) return { delivery };
       const outcome: ThreadOutcome = await handle.done;
