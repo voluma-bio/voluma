@@ -64,6 +64,8 @@ export type OutputEntry = z.infer<typeof outputEntrySchema>;
 
 export const taskEntrySchema = z.strictObject({
   id: taskIdSchema,
+  /** Short plain-language name for people ("Scan intake"); the id stays the identity. */
+  title: nonEmpty.optional(),
   /** Tasks this one builds on; a redo of one of them makes this one stale. */
   dependsOn: z.array(taskIdSchema),
   /** Ids from `outputs.json` this task produces. */
