@@ -32,6 +32,12 @@ The prompt lists each skill with its directory. A resource is a script in that d
 `python <skill dir>/resources/<name>.py --in <path> ... --out <path> [parameters]`. Every one:
 
 - takes and writes paths, and prints **one JSON line** (paths written, counts, volumes in mm³) and never an array;
+- if it reports numbers, writes them as one **result record**: `{"values": {"<id>": {"value", "unit", "definition", "kind"}}}`
+  in its JSON file (plus provenance such as the points or labels used), and prints the same under `values` without the provenance.
+  The id is the output id the caller gave (`--id KEY=output-id` in `morphometry.py`, the name in a `measure.py` spec, fixed in a
+  workflow's own scripts), so `report_output` binds to it. `kind` is `measurement` or `diagnostic`: a diagnostic helps you judge a
+  measurement (a voxel size, a count, a cross-check) and is not an output. `value` is null when there is nothing to measure;
+  units are `mm`, `mm³`, `%`, `1/mm`, `1/mm³`, `1`;
 - exits non-zero with a sentence that says what to change; read it, fix the input, run again;
 - writes images as JPEG, at most 2000 px a side and 1 MiB (what `view_image` accepts);
 - has `--help`.

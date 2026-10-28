@@ -7,8 +7,9 @@ neighbouring bone, unlabelled bone). For every object in the sidecar `segment_sa
 default `<labels>.json`), this keeps the unbroken run of slices around its prompt frame in which the object has a mask
 with confidence >= `--min-conf` (0.5), and clears its label elsewhere. Run it on the small-structure request only, and
 give `--only 5 7 8` to limit it to some labels. Slices are axis 0, so pass labels on the stack `segment_sam` was given,
-before `to_scan.py`. `--like` is that stack's sidecar (`oriented.json`): the output is checked against its grid before anything
-is written, because `segment_sam`'s own sidecar has no grid.
+before `to_scan.py`. `--like` is that stack's sidecar (`oriented.json`). `segment_sam`'s own sidecar has no grid, so stamp
+one on its output right after the call (`sidecar.py --array small_oriented.npy --like oriented.json`); this script refuses
+labels whose `grid_id` is not `--like`'s, so labels from another orientation of the same scan cannot pass.
 
 One rule, set after seeing OA6-1RK's reference, validated on that scan only (Dice 0.90-0.98 for 6 of 8 small labels). The
 cut shortens a structure's ends, so trimmed volumes run 10-20% under the reference. A rule that follows overlap with the
@@ -78,9 +79,10 @@ if __name__ == '__main__':
     tracks = load_tracks(tracks_path)
     grid = sidecar.grid(a.like)
     labels = np.load(a.labels)
-    if 'shape' in grid and list(labels.shape) != grid['shape']:
-        sidecar.fail(f'{a.labels} has shape {list(labels.shape)} but {a.like} is a stack of {grid["shape"]}: '
-                     'these labels are not on that grid')
+    stamped = json.loads(sidecar.sidecar_path(a.labels).read_text()).get('grid_id')
+    if stamped != grid['grid_id']:
+        sidecar.fail(f'{a.labels} is not stamped with the grid of {a.like} (it has {stamped}): run '
+                     f'`sidecar.py --array {a.labels} --like {a.like}` right after segment_sam, and check that it was run on that stack')
     unknown = [lv for lv in (a.only or []) if lv not in tracks]
     if unknown:
         sidecar.fail(f'labels {unknown} are not objects in {tracks_path} (it has {sorted(tracks)})')

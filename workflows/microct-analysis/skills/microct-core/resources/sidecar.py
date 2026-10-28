@@ -15,9 +15,16 @@ Library use (other resources import this file):
   sidecar.grid(path)       # the grid fields (grid_id, spacing_zyx_mm, and shape when the file has one) of a sidecar or an intake header
   sidecar.bone_threshold_hu(header, override)   # the lab's measurement threshold in this scan's HU, or the override
   sidecar.emit(**fields)   # print the one JSON line a resource prints to stdout (fails on NaN)
+  sidecar.value(v, unit, definition, kind='measurement', **provenance)   # one entry of a result record
+  sidecar.emit_values(out_json, values, meta=None, **fields)   # write the result record, print it (below)
   sidecar.save_image(fig, path)  # the image limits below, JPEG
   sidecar.load_points(path)   # {name: [z, y, x]} from pick.py's points.json or a plain name-to-point file
   sidecar.fail(sentence)   # print a sentence the agent can act on to stderr and exit 2
+
+Result record: every script that reports numbers writes `{"values": {id: {value, unit, definition, kind, ...}}, ...meta}`
+to its JSON file and prints `{"out": path, "values": {id: {value, unit, definition, kind}}, ...}` (values rounded to 6 decimals).
+`id` is the output id the caller asks for (a flag or a spec key; the workflow's `outputs.json` binds to it), `kind` is
+`measurement` or `diagnostic` (a number that helps judge a measurement but is not one), and `value` may be null.
 
 CLI (for an array you made yourself):
   python sidecar.py --array out.npy --like hu.json [--input a.npy ...] [--param key=value ...]
@@ -69,6 +76,8 @@ def bone_threshold_hu(header, override=None):
     if override is not None:
         return float(override)
     cal = json.loads(Path(header).read_text()).get('calibration', {}) if header else {}
+    if not header:
+        fail('the bone threshold needs the scan\'s hu.json for its calibration (--hu-json), or an explicit --threshold in HU')
     if 'mu_water_per_cm' not in cal:
         fail(f'{header} has no Scanco calibration (mu_water_per_cm), so the lab threshold of {LAB_BONE_MU_PER_CM}/cm cannot be '
              'converted to HU: pass the threshold explicitly with --threshold and say where it came from')
@@ -116,6 +125,25 @@ def emit(**fields):
         bad = [k for k, v in fields.items() if _has_nonfinite(v)]
         fail(f'{sys.argv[0]} computed a NaN or infinite value ({", ".join(bad)}): the input does not support this measurement')
     print(line)
+
+
+def value(v, unit, definition, kind='measurement', **provenance):
+    """One entry of a result record. `provenance` (points, labels, ...) goes in the file, not on stdout."""
+    return dict(value=None if v is None else float(v), unit=unit, definition=definition, kind=kind, **provenance)
+
+
+def emit_values(out_json, values, meta=None, **fields):
+    """Write the result record to `out_json` and print it, with `fields` (paths of what the script wrote) beside it."""
+    record = {'values': values, **(meta or {})}
+    try:
+        text = json.dumps(record, indent=1, default=float, allow_nan=False)
+    except ValueError:
+        bad = [k for k, v in values.items() if _has_nonfinite(v)]
+        fail(f'{sys.argv[0]} computed a NaN or infinite value ({", ".join(bad)}): the input does not support this measurement')
+    Path(out_json).write_text(text + '\n')
+    brief = {k: {'value': None if v['value'] is None else round(v['value'], 6), 'unit': v['unit'], 'definition': v['definition'],
+                 'kind': v['kind']} for k, v in values.items()}
+    emit(out=str(out_json), **fields, values=brief)
 
 
 def _has_nonfinite(v):

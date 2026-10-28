@@ -7,11 +7,22 @@ proposals until you have seen them drawn on the scan. This reference owns the ma
 `bone-morphometry` defines the measurements and builds no region.
 
 Inputs: `hu.npy` and `hu.json` (scan-intake), `labels.npy` on the same grid (femur 1, tibia 2; see `anatomy.md`).
-Use isotropic voxels. Scripts are in `resources/` of this workflow, print one JSON line and write next to `--out`. The masks that
-need thickness or nodes go to `morphometry.py` (`bone-morphometry`), which takes the masks and their sidecar as `--grid`.
+Use isotropic voxels. Scripts are in `resources/` of this workflow and write next to `--out`. Every number comes out as a result
+record (`microct-core`): `{output id: {value, unit, definition, kind}}`, with the output ids of the 28-row table below.
+`kind` is `measurement` for a deck parameter and `diagnostic` for a number that helps you judge one.
 
-**Bone threshold.** BV is always the ROI and HU above the lab's 2.16/cm, converted to this scan's HU from the calibration in
-`hu.json` (2459.875 HU on OA6-1RK). The scripts take `--hu-json` for it; `--threshold` overrides. No label gates BV. BV/TV is in %.
+**One owner per concept.** Region scripts (`iioc.py`, `tibial_trabecular.py`, `metaphysis_roi.py`) write regions and, for `iioc.py`, the
+geometry that needs the protocol's own steps (heights, width, plate columns). All TV, BV and BV/TV, and the thickness and node
+measures, come from `morphometry.py` (`bone-morphometry`). Every curve you trace uses the one schema of `region_from_curves.py`.
+
+**Bone threshold.** BV is always the region and HU above the lab's 2.16/cm, converted to this scan's HU from the calibration in
+`hu.json` (2459.875 HU on OA6-1RK). `morphometry.py` takes `--hu-json` for it (kept apart from `--grid`, the grid the region is on);
+`--threshold` overrides. No label gates BV. BV/TV is in %.
+
+**Grid rule.** A volume is counted where the region is defined: a region traced on the aligned stack is counted on the aligned
+stack, on `tibia-hu.npy`, a linear resampling of the scan. `iioc.py` also writes `iioc-tissue-scan.npy` (nearest-neighbour onto the
+scan grid): counting ROI-1 there on unresampled `hu.npy` gives BV/TV 67.43% against 67.69% on the aligned grid. That 0.26-point gap
+is the resampling effect, known and left in; state which grid a number was counted on.
 
 ## Steps, in order
 
@@ -19,23 +30,38 @@ need thickness or nodes go to `morphometry.py` (`bone-morphometry`), which takes
 |---|---|---|---|
 | 1 | Align the tibia: shaft axis, +W from joint toward shaft, crop around the joint end | `tibia_frame.py --hu hu.npy --hu-json hu.json --labels labels.npy --label 2 --out frame` | `frame/tibia-frame-qc.jpg`: coronal sections, joint at top, tibia outline following the bone. If the crop cuts bone or the bone looks tilted, set `--shaft-z`, `--epiphysis-z` or the crop flags |
 | 2 | Trace the growth-plate proximal face on coronal sections (annotations, section A) | none: you write `annotations.json` | coronal sections of `tibia-hu.npy` with a pixel grid, every 20 V indices over the epiphysis |
-| 3 | ROI-1 (IIOC), heights, width, plate columns | `iioc.py --hu-aligned frame/tibia-hu.npy --mask frame/tibia-mask.npy --frame frame/tibia-frame.json --hu hu.npy --hu-json hu.json --annotations annotations.json --out iioc` | `iioc/qc-coronal.jpg` (green ROI-1 must stop at the orange face, include marrow, exclude femur and growth-plate band) and `qc-heights.jpg` (rulers along W, endpoints at the face and the articular top) |
+| 3 | ROI-1 (IIOC), heights, width, plate columns | `iioc.py --hu-aligned frame/tibia-hu.npy --mask frame/tibia-mask.npy --frame frame/tibia-frame.json --hu-json hu.json --annotations annotations.json --out iioc` | `iioc/qc-coronal.jpg` (green ROI-1 must stop at the orange face, include marrow, exclude femur and growth-plate band) and `qc-heights.jpg` (rulers along W, endpoints at the face and the articular top) |
 | 4 | Trace the boundary under the subchondral plate (section B) | none | coronal sections with the ROI-1 outline |
-| 5 | ROI-2 (IIOC trabecular) | `tibial_trabecular.py --iioc-tissue iioc/iioc-tissue.npy --growth-plate-face iioc/growth-plate-proximal-face.npy --hu-aligned frame/tibia-hu.npy --hu-json hu.json --annotations annotations.json --out trab` | `trab/qc-coronal.jpg`: cyan sits under the plate and inside the cortex |
+| 5 | ROI-2 (IIOC trabecular) | `tibial_trabecular.py --iioc-tissue iioc/iioc-tissue.npy --growth-plate-face iioc/growth-plate-proximal-face.npy --hu-aligned frame/tibia-hu.npy --annotations annotations.json --out trab` | `trab/qc-coronal.jpg`: cyan sits under the plate and inside the cortex |
 | 6 | Trace the growth-plate distal face (section C), then ROI-3 and the cortex under the plate | `metaphysis_roi.py --hu-aligned frame/tibia-hu.npy --mask frame/tibia-mask.npy --hu-json hu.json --annotations annotations.json --out meta` | `meta/qc-roi3.jpg`: ROI-3 sits in marrow below the plate and clear of the cortex outline |
-| 7 | Tb.N, Tb.Th, Tb.Sp, nodes, ends on ROI-2 and ROI-3 | `morphometry.py trabecular --roi <tissue.npy> --bone <bone.npy> --grid <tissue.json> --out <dir> [--skeleton]` | the QC image it writes |
+| 7 | TV, BV, BV/TV of ROI-1 and ROI-2 (deck #4-6, #13-15); TV, BV, BV/TV, Tb.N, Tb.Th, Tb.Sp, nodes and ends of ROI-3 (deck #16-23) | `morphometry.py` (commands below), one per region | the QC image `trabecular` writes |
 | 8 | Ct.Th at 100 and 1000 um; plate thickness | `morphometry.py cortical` (commands below) | its QC image |
 | 9 | Femoral landmarks: place four points on a 3D render of the femur (`regions-and-landmarks`, `pick.py` with picks named `a`, `b`, `c`, `d`), then compute | `femoral_frame.py --landmarks points.json --hu-json hu.json --labels labels.npy --out femoral` | `pick-check.jpg` of each point, and `femoral.json`: `off_bone_mm` and the `warnings` the script prints. There is no image with the four points and the two lines drawn |
 | 10 | Volumes of labels 3, 5 and 6 (deck #1 to #3) | `measure.py --spec <this workflow>/resources/deck_volumes_spec.json --grid hu.json --out volumes.json` (the spec names `labels.npy` relative to where you run it) | the 3D sheet (`visual-check`) |
 | 11 | Hand the points to the lab (below) | `amira_landmarks.py` | the lab opens it in Amira |
 
+Commands for step 7 (`--id KEY=output-id` names each value; `--region` only labels the definitions):
+
+```
+M=<bone-morphometry>/resources/morphometry.py
+python $M volumes --roi iioc/iioc-tissue.npy --hu frame/tibia-hu.npy --hu-json hu.json --region ROI-1 \
+  --id TV=tv-tibial-iioc --id BV=bv-tibial-iioc --id BV/TV=bv-tv-tibial-iioc --out vol-roi1
+python $M volumes --roi trab/iioc-trab-tissue.npy --hu frame/tibia-hu.npy --hu-json hu.json --region ROI-2 \
+  --id TV=tv-iioc-trab --id BV=bv-iioc-trab --id BV/TV=bv-tv-iioc-trab --out vol-roi2
+python $M trabecular --roi meta/roi3-tissue.npy --hu frame/tibia-hu.npy --hu-json hu.json --region ROI-3 --skeleton \
+  --id TV=metaphyseal-tv --id BV=metaphyseal-bv --id BV/TV=metaphyseal-bv-tv --id Tb.N=metaphyseal-tb-n \
+  --id Tb.Th=metaphyseal-tb-th --id Tb.Sp=metaphyseal-tb-sp --id Tb.Nd=metaphyseal-tb-nd --id Tb.Tm=metaphyseal-tb-tm --out vol-roi3
+```
+
 Commands for step 8 (axis 0 is W, depth grows with W):
 
 ```
 morphometry.py cortical --cortex meta/cortex.npy --surface meta/growth-plate-distal-face.npy --axis 0 --direction 1 \
-  --depth-um 100 --slab-um 50 --name Ct.Th-100 --grid meta/cortex.json --out meta/ct      # then --depth-um 1000
-morphometry.py cortical --cortex iioc/medial-plate-run.npy --surface iioc/articular-top-surface.npy --axis 0 \
-  --direction 1 --depth-um 175 --slab-um 350 --name plate-medial --grid iioc/medial-plate-run.json --out plate
+  --depth-um 100 --slab-um 50 --name cortical-thickness-100-um-below-the-growth-plate --grid meta/cortex.json --out meta/ct
+      # then --depth-um 1000 --name cortical-thickness-1000-um-below-the-growth-plate
+morphometry.py cortical --cortex iioc/medial-plate-run.npy --surface iioc/articular-top-surface.npy --axis 0 --direction 1 \
+  --depth-um 175 --slab-um 350 --name subchondral-bone-plate-thickness-medial --grid iioc/medial-plate-run.json --out plate
+      # and lateral-plate-run.npy with --name subchondral-bone-plate-thickness-lateral
 ```
 
 Rerun with the changed trace to test how much a boundary matters: `iioc.py --gp-shift-voxels 2` and
@@ -46,10 +72,19 @@ Rerun with the changed trace to test how much a boundary matters: `iioc.py --gp-
 `tibia_frame.py` writes `tibia-hu.npy`, `tibia-mask.npy` and `tibia-frame.json` on an **aligned grid**: array axes
 (W, V, U), the scan's voxel size, W from the joint toward the shaft. +U medial and +V anterior come from a sign rule on scan y
 and `--joint-end` that assumes one knee and one scan orientation: **confirm it on the QC montage** before you name a side
-(a left knee flips it). Its `grid_id` is derived from the scan's. **Every coordinate below is an index on that grid**, as
-`[u, w]` (column, row) read off a coronal section at a given V, or `[u, v, w]` for a point. Check the sidecar `grid_id` before you
-reuse an annotation file on another run: indices mean nothing on another frame. Femoral landmarks are the exception: they are
-`[z, y, x]` indices on the scan grid.
+(a left knee flips it). Its `grid_id` is derived from the scan's. **Every coordinate below is an index on that grid.** Check the
+sidecar `grid_id` before you reuse an annotation file on another run: indices mean nothing on another frame. Femoral landmarks are
+the exception: they are `[z, y, x]` indices on the scan grid.
+
+**One curve schema.** Every traced surface is `{"axis": 1, "height": "row", "slices": {"<v>": [[w, u], ...]}}`: the coronal section
+at V = `<v>` (array axis 1), and each point `[row, column]` = `[W, U]` read off that section's pixel grid. This is the schema
+`region_from_curves.py` documents, and its `surface_from_curves` is the one interpolator the three scripts import: a surface is
+linear in U along a curve (points in any order, constant past the ends) and linear in V between traced sections (constant past the
+first and last). Trace across the whole width and expect edge guesses to be wrong. A point is `[w, u]`, not `[u, w]`.
+
+`oa6-1rk-annotations.json` in this directory is the OA6-1RK annotation set (sections A and B) in that schema, with the `grid_id`
+of its aligned frame: a worked example of the keys and the point order. It has no section C (no distal face was traced), and
+it is a record of what was traced on that scan, not a starting point for another one.
 
 One `annotations.json` can hold all three sections. Each script reads only its own keys.
 
@@ -57,9 +92,11 @@ One `annotations.json` can hold all three sections. Each script reads only its o
 
 ```json
 {
-  "growth_plate_curves": {"60": [[60, 149], [170, 150]], "80": [[60, 145], [210, 159]]},
+  "growth_plate_curves": {"axis": 1, "height": "row",
+                          "slices": {"60": [[149, 60], [150, 170]], "80": [[145, 60], [159, 210]]}},
   "articular_corrections": [{"u_range": [120, 210], "v_range": [150, 181],
-                             "curves": {"150": [[120, 87], [210, 95]], "180": [[120, 81], [210, 91]]}}],
+                             "curves": {"axis": 1, "height": "row",
+                                        "slices": {"150": [[87, 120], [95, 210]], "180": [[81, 120], [91, 210]]}}}],
   "compartment_midpoint_u": {"lateral": 140, "medial": 290},
   "width_points_uvw": [[36, 173, 137], [378, 173, 177]],
   "growth_plate_mid_u": 207, "height_section_v": 218,
@@ -67,14 +104,12 @@ One `annotations.json` can hold all three sections. Each script reads only its o
 }
 ```
 
-- `growth_plate_curves` (required): the proximal face of the growth plate, as curves on at least two V sections,
-  `u` strictly increasing. The surface is linear in U along a curve and linear in V between curves, and constant
-  past the ends: trace across the whole width, and expect edge guesses to be wrong.
+- `growth_plate_curves` (required): the proximal face of the growth plate, on at least two V sections.
 - `articular_corrections` (optional): where part of the tibia label is really femur or fibula above the articular
   surface, `curves` mark the true articular surface inside `u_range` x `v_range`; ROI-1 keeps only what lies below.
 - `compartment_midpoint_u` (required): the U index at the middle of each plateau compartment. A height point outside the ROI-1
   footprint (or within 3 voxels of its edge) stops the script with a sentence: move the point.
-- `width_points_uvw` (required): deck #10: the centre of the fibula-tibia junction on the tibial surface, and the
+- `width_points_uvw` (required): deck #10, as `[u, v, w]` points: the centre of the fibula-tibia junction on the tibial surface, and the
   most prominent point on the other side.
 - `growth_plate_mid_u` (optional): where "the middle of the growth plate" is for height #7; default is the midpoint
   of the two width points.
@@ -83,11 +118,12 @@ One `annotations.json` can hold all three sections. Each script reads only its o
 - `plate_patches` (optional): U and V ranges of the subchondral-plate patch per compartment; default is 500 um
   wide (deck figure) around the compartment midpoint and `height_section_v`.
 
-**B, for `tibial_trabecular.py`**: `under_plate_curves` (same schema as the curves above): the boundary between the
+**B, for `tibial_trabecular.py`**: `under_plate_curves` (the same schema): the boundary between the
 subchondral plate and the trabecular compartment, with the end points on the inner side of the cortex, because the
-first and last point of each curve limit ROI-2 laterally. `v_limits`: `[first V, last V]`.
+first and last point of each curve limit ROI-2 laterally (where the curves reach, the `valid` mask of `surface_from_curves`).
+`v_limits`: `[first V, last V]`.
 
-**C, for `metaphysis_roi.py`**: `growth_plate_distal_curves` (required), the distal face of the growth-plate band, traced like
+**C, for `metaphysis_roi.py`**: `growth_plate_distal_curves` (required, the same schema), the distal face of the growth-plate band, traced like
 the proximal one on the coronal sections of `tibia-hu.npy`. There is no thickness fallback: ROI-3 starts 50 um below this face, so
 a guessed band thickness inside the 100 to 200 um range seen on OA6-1RK moves ROI-3 BV/TV from 23% to 15% and is not a
 measurement. OA6-1RK has a thin perforated mineralized band, not a clean cartilage plate: trace the face you can see, and look
@@ -107,10 +143,15 @@ the joint space or floating, and the script warns.
   ridge on the lateral condyle) to d (vertex of the medial condyle). The old run used an outer-edge chord at one
   plane for the width: do not carry it over. #28 is DFW / DFL.
 - #7 to #9 heights: from the middle of the growth plate (whole, medial compartment, lateral compartment) up to the top
-  surface of the articular bone, "vertically". **Open for the lab:** the lab accepts perpendicular to the growth-plate plane, or
-  along the tibial shaft axis if that is easier. The script measures along W, the shaft axis, and `iioc.json` carries
-  `shaft_to_growth_plate_normal_deg`, the angle between that axis and the normal of the plane fitted to the traced face
-  (10.7 degrees on OA6-1RK), so a reader sees how far the two definitions are apart.
+  surface of the articular bone, "vertically". **Open for the lab:** it accepts perpendicular to the growth-plate plane or along
+  the tibial shaft axis, and has not chosen. `iioc.py` reports both until it does. Along W, the shaft axis, are the three deck values
+  (`iioc-height`, `iioc-height-medial-compartment`, `iioc-height-lateral-compartment`). Perpendicular is a `-normal` diagnostic beside each:
+  the ray from the traced face at that point along the normal of the plane fitted to the face, to where it leaves ROI-1. The
+  traced face is far from a plane (`growth-plate-plane-rms`, 0.113 mm on OA6-1RK, max 0.298 mm, tilt 10.7 degrees), so the two differ
+  in size and in sign: on OA6-1RK #7 is 0.8738 along W and 0.8416 perpendicular, #8 0.4636 and 0.4988, #9 0.6332 and 0.6179. Report
+  both with the plane residual, and say which the deck value is. Deck #7 uses the midpoint of the two width points as "the middle of
+  the growth plate" (new definition, no old reference). The old run's "max local height" (0.9205 mm, `iioc-max-local-height`) is a
+  diagnostic, and its height/width ratio (0.2546) used that value; with #7 it would be about 0.24.
 - #22 and #23: Tb.Nd and Tb.Tm are counts per mm^3 of tissue volume (closed). They are counted in the part of ROI-3 away from
   its edge and divided by that volume, which the values carry.
 - #2 and #3 (meniscus plus osteophytes): in meniscus-injury OA, new bone forms around the injured meniscus and the spurs cannot
@@ -123,41 +164,47 @@ the joint space or floating, and the script warns.
 
 ## The 28 parameters
 
-The only table of the parameters. Status is what the code does today. "Computed" means the script produces the number from the
-regions you traced; it does not mean the number is validated. Nothing here has been checked against the lab's own software or a
-second scan. BV/TV is in %. Every thickness carries the voxel size; the sphere method reads **high** for structures an odd number
-of voxels wide (`bone-morphometry`), and whether Scanco uses the same convention is open.
+The only table of the parameters. **Output id** is the id the value is written under (and the id `outputs.json` binds to); a script
+other than `morphometry.py` and `measure.py` writes the id itself, and for those two you pass it (`--id`, `--name`, the spec key).
+Status is what the code does today. "Computed" means the script produces the number from the regions you traced; it does not mean the
+number is validated. Nothing here has been checked against the lab's own software or a second scan. BV/TV is in %. Every thickness
+record carries the voxel size; the sphere method reads **high** for structures an odd number of voxels wide (`bone-morphometry`),
+and whether Scanco uses the same convention is open.
 
-| # | Parameter | Region | Script and field | Status |
-|---|---|---|---|---|
-| 1 | Patella volume | label 3 | `measure.py` (step 10) `patella_volume` | computed; whether label 12 counts is open |
-| 2 | Lateral meniscus/osteophyte volume | label 6 | `measure.py` `lateral_meniscus_osteophyte_volume` | computed; the mapping is the lab's working reading, whether labels 9 to 11 count is open |
-| 3 | Medial meniscus/osteophyte volume | label 5 | `measure.py` `medial_meniscus_osteophyte_volume` | computed; same |
-| 4 | TV of IIOC | ROI-1 | `iioc.py` `iioc_tv` | computed (counted on the scan grid) |
-| 5 | BV in IIOC | ROI-1 | `iioc.py` `iioc_bv` | computed (unresampled HU) |
-| 6 | BV/TV in IIOC | ROI-1 | `iioc.py` `iioc_bv_tv` (%) | computed |
-| 7 | Height of IIOC | ROI-1, middle of growth plate | `iioc.py` `iioc_height` | computed along W; "vertical" is open, see above (new definition, no old reference) |
-| 8 | Height, medial compartment | ROI-1 | `iioc.py` `iioc_height_medial` | computed, same caveat |
-| 9 | Height, lateral compartment | ROI-1 | `iioc.py` `iioc_height_lateral` | computed, same caveat |
-| 10 | Tibial width at the growth plate | growth plate | `iioc.py` `tibial_width` | computed, only as good as your two points |
-| 11 | Subchondral plate thickness, medial | plate patch | `iioc.py` `subchondral_plate_medial_first_run` and `morphometry.py cortical` on `medial-plate-run.npy` | computed, **unvalidated**: the two disagree by about 2x on OA6-1RK and the deck does not say which it means |
-| 12 | Subchondral plate thickness, lateral | plate patch | `subchondral_plate_lateral_first_run`, same | computed, **unvalidated**, same caveat |
-| 13 | TV of IIOC-trab | ROI-2 | `tibial_trabecular.py` `iioc_trab_tv` | computed (aligned grid) |
-| 14 | BV of IIOC-trab | ROI-2 | `iioc_trab_bv` | computed |
-| 15 | BV/TV in IIOC-trab | ROI-2 | `iioc_trab_bv_tv` (%) | computed |
-| 16 | TV, proximal tibial trabeculae | ROI-3 | `metaphysis_roi.py` `roi3_tv` | computed, needs a traced distal face |
-| 17 | BV within ROI-3 | ROI-3 | `roi3_bv` | computed |
-| 18 | BV/TV | ROI-3 | `roi3_bv_tv` (%) | computed |
-| 19 | Tb.N | ROI-3 | `morphometry.py trabecular` on `roi3-*.npy` | computed; model-derived, inherits the thickness bias |
-| 20 | Tb.Th | ROI-3 | same | computed, with `voxel_mm` |
-| 21 | Tb.Sp | ROI-3 | same | computed, with `voxel_mm` |
-| 22 | Tb.Nd (nodes) | ROI-3 | same with `--skeleton` | computed per mm^3 of the counted tissue volume, **unvalidated** |
-| 23 | Tb.Tm (ends) | ROI-3 | same | same |
-| 24 | Cortical thickness, 100 um under the plate | cortex | `metaphysis_roi.py` makes the cortex mask, `morphometry.py cortical` measures | computed; the cortex mask is a heuristic |
-| 25 | Cortical thickness, 1000 um under the plate | cortex | same | same |
-| 26 | DFL | femur | `femoral_frame.py` `DFL` | computed |
-| 27 | DFW | femur | `femoral_frame.py` `DFW` | computed |
-| 28 | DFW/DFL | femur | `femoral_frame.py` `DFW/DFL` | computed |
+| # | Parameter | Output id | Region | Produced by | Status |
+|---|---|---|---|---|---|
+| 1 | Patella volume | `patella-volume` | label 3 | `measure.py` (step 10) | computed; whether label 12 counts is open |
+| 2 | Lateral meniscus/osteophyte volume | `lateral-meniscus-osteophyte-volume` | label 6 | `measure.py` | computed; the mapping is the lab's working reading, whether labels 9 to 11 count is open |
+| 3 | Medial meniscus/osteophyte volume | `medial-meniscus-osteophyte-volume` | label 5 | `measure.py` | computed; same |
+| 4 | TV of IIOC | `tv-tibial-iioc` | ROI-1 | `morphometry.py volumes` | computed (aligned grid) |
+| 5 | BV in IIOC | `bv-tibial-iioc` | ROI-1 | same | computed |
+| 6 | BV/TV in IIOC | `bv-tv-tibial-iioc` (%) | ROI-1 | same | computed |
+| 7 | Height of IIOC | `iioc-height` | ROI-1, middle of growth plate | `iioc.py` | computed along W; "vertical" is open, the perpendicular value is `iioc-height-normal` (new definition, no old reference) |
+| 8 | Height, medial compartment | `iioc-height-medial-compartment` | ROI-1 | `iioc.py` | computed, same caveat (`-normal`) |
+| 9 | Height, lateral compartment | `iioc-height-lateral-compartment` | ROI-1 | `iioc.py` | computed, same caveat (`-normal`) |
+| 10 | Tibial width at the growth plate | `tibial-width-at-the-growth-plate` | growth plate | `iioc.py` | computed, only as good as your two points |
+| 11 | Subchondral plate thickness, medial | `subchondral-bone-plate-thickness-medial` | plate patch | `morphometry.py cortical` on `medial-plate-run.npy` | computed, **unvalidated**: `iioc.py`'s diagnostic `subchondral-plate-medial-first-run` and the sphere value disagree by about 2x on OA6-1RK and the deck does not say which it means |
+| 12 | Subchondral plate thickness, lateral | `subchondral-bone-plate-thickness-lateral` | plate patch | same, `lateral-plate-run.npy` | computed, **unvalidated**, same caveat |
+| 13 | TV of IIOC-trab | `tv-iioc-trab` | ROI-2 | `morphometry.py volumes` | computed (aligned grid) |
+| 14 | BV of IIOC-trab | `bv-iioc-trab` | ROI-2 | same | computed |
+| 15 | BV/TV in IIOC-trab | `bv-tv-iioc-trab` (%) | ROI-2 | same | computed |
+| 16 | TV, proximal tibial trabeculae | `metaphyseal-tv` | ROI-3 | `morphometry.py trabecular` | computed, needs a traced distal face |
+| 17 | BV within ROI-3 | `metaphyseal-bv` | ROI-3 | same | computed |
+| 18 | BV/TV | `metaphyseal-bv-tv` (%) | ROI-3 | same | computed |
+| 19 | Tb.N | `metaphyseal-tb-n` | ROI-3 | same | computed; model-derived, inherits the thickness bias |
+| 20 | Tb.Th | `metaphyseal-tb-th` | ROI-3 | same | computed, with the `voxel-size` diagnostic |
+| 21 | Tb.Sp | `metaphyseal-tb-sp` | ROI-3 | same | computed, with the `voxel-size` diagnostic |
+| 22 | Tb.Nd (nodes) | `metaphyseal-tb-nd` (1/mm³) | ROI-3 | same with `--skeleton` | computed per mm³ of the counted tissue volume, **unvalidated** |
+| 23 | Tb.Tm (ends) | `metaphyseal-tb-tm` (1/mm³) | ROI-3 | same | same |
+| 24 | Cortical thickness, 100 um under the plate | `cortical-thickness-100-um-below-the-growth-plate` | cortex | `metaphysis_roi.py` makes the cortex mask, `morphometry.py cortical` measures | computed; the cortex mask is a heuristic |
+| 25 | Cortical thickness, 1000 um under the plate | `cortical-thickness-1000-um-below-the-growth-plate` | cortex | same | same |
+| 26 | DFL | `distal-femoral-length-dfl` | femur | `femoral_frame.py` | computed |
+| 27 | DFW | `distal-femoral-width-dfw` | femur | `femoral_frame.py` | computed |
+| 28 | DFW/DFL | `width-length-ratio` | femur | `femoral_frame.py` | computed |
+
+Diagnostics (`kind: diagnostic`) travel in the same records and are not outputs: the perpendicular heights `*-normal`,
+`growth-plate-plane-rms`, `iioc-max-local-height`, `subchondral-plate-*-first-run`, `voxel-size`, and the node and end counts and counted
+volume of `morphometry.py trabecular --skeleton`.
 
 Also **not computed**: the deck's "developing new parameters" (centre lines of trabeculae along the long axis of ROI-3) and the
 vertebral parameters (slides 9 and 10: another bone, out of this workflow's knee scope). ROI-2 TV excludes the cortex and growth-plate
@@ -178,8 +225,8 @@ Both are scan-grid points moved to physical millimetres with the DICOM affine. R
 ## Limits to state in every report
 
 - Every region follows traces you made on one scan; the old run labelled its values provisional and so do we.
-- The aligned grid is a linear resampling of HU. TV and BV for ROI-1 are counted back on the scan grid; the others on the aligned
-  grid. The difference on OA6-1RK is below 1%.
+- The aligned grid is a linear resampling of HU, and every region traced on it is counted on it (grid rule above). Counting ROI-1 on
+  the scan grid instead moves BV/TV by 0.26 points on OA6-1RK.
 - ROI-3 depends on the traced distal face, and its cortex edge uses an estimated cortex depth (reported as `cortex_estimate_mm`):
   a wrong depth moves ROI-3.
 - Medial/lateral follows the aligned frame (+U medial). Confirm it on the render before you name a compartment.

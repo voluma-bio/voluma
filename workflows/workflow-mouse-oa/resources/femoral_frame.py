@@ -11,11 +11,10 @@ builds a frame (ML from d to c, SI from b to a made perpendicular to ML, normal 
 reports how far each landmark lies from femur bone, so a landmark floating in
 the joint space is caught, and whether SI points toward the femoral shaft.
 
-Writes femoral.json (values, frame, checks); prints one JSON line.
+Writes femoral.json (the result record of `microct-core/resources/sidecar.py`, plus frame and checks); prints it.
 """
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -74,19 +73,19 @@ def main():
     dist = lambda x, y: float(np.linalg.norm((p[x] - p[y]) * sp))
     dfl, dfw = dist('a', 'b'), dist('c', 'd')
     values = {
-        'DFL': {
-            'value': dfl,
-            'unit': 'mm',
-            'definition': 'deck #26: straight distance from a (midpoint of the upper line of '
+        'distal-femoral-length-dfl': sidecar.value(
+            dfl,
+            'mm',
+            'deck #26: straight distance from a (midpoint of the upper line of '
             'the intercondylar groove) to b (intercondylar notch)',
-        },
-        'DFW': {
-            'value': dfw,
-            'unit': 'mm',
-            'definition': 'deck #27: straight distance from c (midpoint of the ridge on the '
+        ),
+        'distal-femoral-width-dfw': sidecar.value(
+            dfw,
+            'mm',
+            'deck #27: straight distance from c (midpoint of the ridge on the '
             'lateral condyle) to d (vertex of the medial condyle)',
-        },
-        'DFW/DFL': {'value': dfw / dfl, 'unit': '1', 'definition': 'deck #28: distal femoral width-to-length ratio'},
+        ),
+        'width-length-ratio': sidecar.value(dfw / dfl, '1', 'deck #28: distal femoral width-to-length ratio, DFW / DFL'),
     }
     pm = {i: p[i] * sp for i in IDS}  # mm, zyx
     checks = {'warnings': []}
@@ -123,12 +122,10 @@ def main():
                 checks['warnings'].append('SI points away from the femoral bulk: a and b (or c and d) may be swapped')
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    (out / 'femoral.json').write_text(
-        json.dumps({'values': values, 'landmarks_zyx': lm, 'frame': frame, 'checks': checks}, indent=1) + '\n'
-    )
-    sidecar.emit(
-        out=str(out / 'femoral.json'),
-        values={k: round(v['value'], 5) for k, v in values.items()},
+    sidecar.emit_values(
+        out / 'femoral.json',
+        values,
+        meta={'landmarks_zyx': lm, 'frame': frame, 'checks': checks},
         warnings=checks['warnings'],
     )
 

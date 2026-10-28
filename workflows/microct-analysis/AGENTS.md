@@ -10,7 +10,8 @@ its scripts). Design: `design/microct-skillset.md` in the docs repo.
   skills, and what is role-specific lives in `microct-core` ("By role") and `segmentation-check` ("When you check a task").
 - **Resource contract:** CLI scripts that take and return paths. `.npy` outputs get a JSON sidecar
   (`microct-core/resources/sidecar.py`: grid id, spacing, input sha256, params; it keeps the keys `segment_sam` wrote). One JSON line
-  on stdout, never arrays, never NaN (`sidecar.emit` fails on it). A sentence on stderr and exit 2 for what the agent can fix; argument
+  on stdout, never arrays, never NaN (`sidecar.emit` fails on it). A script that reports numbers uses one result record,
+  `sidecar.emit_values`: `{id: {value, unit, definition, kind}}`, ids from the caller. A sentence on stderr and exit 2 for what the agent can fix; argument
   checks come before any work or write. Images are JPEG, at most 2000 px and 1 MiB (`view_image`'s limit): use
   `sidecar.save_image`. Every parameter that is a length is in mm; voxels come from `hu.json`.
 - **Imports:** every script works under `python -I` from any directory. It puts its own directory and `microct-core/resources` (and

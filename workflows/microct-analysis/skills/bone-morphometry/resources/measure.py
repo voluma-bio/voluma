@@ -1,10 +1,11 @@
-"""Distances, label volumes and ratios from a JSON spec, in mm and mm^3, each with its definition and inputs.
+"""Distances, label volumes and ratios from a JSON spec, in mm and mm³, each with its definition and inputs.
 
-Spec (all sections optional; names are yours and must be unique across sections):
+Spec (all sections optional; a name is the output id the value is written under, unique across sections; an entry may
+add "kind": "diagnostic" for a number that is not a deliverable):
   {"distances": {"name": {"points_zyx": [[z, y, x], [z, y, x]], "definition": "..."}},
    "volumes":   {"name": {"labels": "labels.npy", "ids": [3], "definition": "..."}},
    "ratios":    {"name": {"num": "name_a", "den": "name_b", "definition": "..."}}}
-Points are voxel indices on the grid of --grid (fractions allowed). A ratio's unit is "1" when both values share a
+Writes the result record described in `microct-core/resources/sidecar.py`. Points are voxel indices on the grid of --grid (fractions allowed). A ratio's unit is "1" when both values share a
 unit, else "<num unit>/<den unit>". Ratios may use distances, volumes and earlier ratios.
 """
 
@@ -51,7 +52,7 @@ def measure(spec, grid):
     def add(name, value, unit, entry, **extra):
         if name in out:
             sidecar.fail(f'the name {name!r} is used twice in the spec: give each measurement its own name')
-        out[name] = dict(value=value, unit=unit, definition=entry.get('definition', ''), **extra)
+        out[name] = sidecar.value(value, unit, entry.get('definition', ''), entry.get('kind', 'measurement'), **extra)
 
     for name, d in spec.get('distances', {}).items():
         try:
@@ -65,7 +66,7 @@ def measure(spec, grid):
         add(
             name,
             volume_mm3(np.load(v['labels'], mmap_mode='r'), v['ids'], sp),
-            'mm^3',
+            'mm³',
             v,
             labels=v['labels'],
             ids=v['ids'],
@@ -91,13 +92,9 @@ def main():
     grid = sidecar.grid(a.grid)
     values, inputs = measure(json.loads(Path(a.spec).read_text()), grid)
     inputs.update({a.grid: sidecar.sha256_file(a.grid), a.spec: sidecar.sha256_file(a.spec)})
-    Path(a.out).write_text(
-        json.dumps(
-            {'values': values, 'grid_id': grid['grid_id'], 'spacing_zyx_mm': grid['spacing_zyx_mm'], 'inputs': inputs}, indent=1
-        )
-        + '\n'
+    sidecar.emit_values(
+        a.out, values, meta={'grid_id': grid['grid_id'], 'spacing_zyx_mm': grid['spacing_zyx_mm'], 'inputs': inputs}
     )
-    sidecar.emit(out=a.out, values={k: {'value': round(v['value'], 6), 'unit': v['unit']} for k, v in values.items()})
 
 
 if __name__ == '__main__':

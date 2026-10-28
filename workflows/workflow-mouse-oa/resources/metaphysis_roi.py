@@ -6,17 +6,18 @@
 
 The growth plate's distal face is the reference surface, and it must be traced (`growth_plate_distal_curves` in the
 annotations): ROI-3 starts 50 um below it, so a guessed band thickness (100-200 um on OA6-1RK) moves BV/TV from 23% to
-15% and is not a measurement. Bone is the ROI and aligned-grid HU (a linear resampling of the scan) above the threshold (default: the lab's 2.16/cm
-in this scan's HU, from hu.json's calibration), with no label gate; BV/TV is in %.
+15% and is not a measurement. The bone threshold (default: the lab's 2.16/cm in this scan's HU, from hu.json's calibration)
+is used here only to estimate the cortex and to build the cortex mask; no label gates it.
 ROI-3 is the slab between `start` and `start + length` below that face (measured along W), inside the filled tibial
 cross-section, at least `cortex + clearance` from its outer edge. The cortex thickness used for that edge is the
 depth at which the bone fraction of the outer layers first drops below one half (estimated in the ROI-3 slices,
 reported as cortex_estimate_mm), or --cortex-mm. The cortex mask for Ct.Th is the bone within `search factor` times
 that depth of the outer edge, over 1.3 mm of shaft below the plate: it can include trabeculae that join the cortex.
 
-Writes roi3-tissue.npy, roi3-bone.npy, cortex.npy, growth-plate-distal-face.npy (2D W index per V,U), roi3.json,
-a QC image. TV, BV and BV/TV come out here; the rest (Tb.N/Th/Sp, nodes/ends, Ct.Th) is `morphometry.py` on
-these masks (`trabecular` on roi3-*, `cortical` on cortex.npy with the distal face as --surface).
+Writes roi3-tissue.npy, cortex.npy, growth-plate-distal-face.npy (2D W index per V,U), roi3.json (the
+parameters used and the cortex estimate), a QC image. It writes regions only: TV, BV and BV/TV of ROI-3 (deck #16-18) and Tb.N/Th/Sp,
+nodes/ends (deck #19-23) are `morphometry.py trabecular` on roi3-tissue.npy, and Ct.Th is `morphometry.py cortical` on
+cortex.npy with the distal face as --surface. The annotation schema is in ../references/oa-protocol.md.
 """
 
 import argparse
@@ -37,7 +38,7 @@ if CORE is None:
              'directory above it (<workflows>/workflow-mouse-oa/resources/ with <workflows>/microct-analysis/ beside it)')
 sys.path[:0] = [str(HERE), str(CORE)]
 import sidecar
-from iioc import boundary_surface
+from iioc import traced_surface
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -89,7 +90,7 @@ def main():
             'sections of tibia-hu.npy (the side facing the shaft, like the proximal face in section A) and run again'
         )
     a.threshold = sidecar.bone_threshold_hu(a.hu_json, a.threshold)
-    gd = boundary_surface(ann['growth_plate_distal_curves'], h.shape[1:]).astype(np.float32)
+    gd = traced_surface(ann['growth_plate_distal_curves'], 'growth_plate_distal_curves', h.shape)[0].astype(np.float32)
     w = np.arange(h.shape[0])[:, None, None]
     rel = (w - gd[None]) * vox * 1000  # um below the distal face
     w0 = max(int(np.floor(gd.min())), 0)
@@ -106,21 +107,8 @@ def main():
     roi = slab & filled & (dist > edge)
     if not roi.any():
         sidecar.fail('ROI-3 is empty: check the growth-plate surfaces, or lower --cortex-mm')
-    bone = roi & bone_all
     below = (rel >= 0) & (w < w1)
     cortex = bone_all & below & filled & (dist <= cortex_mm * a.cortex_search_factor / vox)
-    tv, bv = float(roi.sum()) * vox**3, float(bone.sum()) * vox**3
-    values = {
-        'roi3_tv': {
-            'value': tv,
-            'unit': 'mm^3',
-            'definition': f'deck #16: tissue volume of ROI-3, {a.start_um:g}-'
-            f'{a.start_um + a.length_um:g} um below the growth plate, >= {a.cortex_clearance_um:g} um inside '
-            f'the cortex ({cortex_mm * 1000:.0f} um)',
-        },
-        'roi3_bv': {'value': bv, 'unit': 'mm^3', 'definition': f'deck #17: HU > {a.threshold} inside ROI-3'},
-        'roi3_bv_tv': {'value': bv / tv * 100, 'unit': '%', 'definition': 'deck #18: BV/TV in %'},
-    }
     meta = {'distal_face': 'traced distal curves', 'cortex_estimate_mm': est, 'cortex_mm_used': cortex_mm, 'threshold': a.threshold}
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -134,7 +122,6 @@ def main():
     )
     for name, arr in (
         ('roi3-tissue.npy', roi),
-        ('roi3-bone.npy', bone),
         ('cortex.npy', cortex),
         ('growth-plate-distal-face.npy', gd),
     ):
@@ -147,7 +134,7 @@ def main():
             params=params,
             script='metaphysis_roi.py',
         )
-    (out / 'roi3.json').write_text(json.dumps({'values': values, 'meta': meta}, indent=1) + '\n')
+    (out / 'roi3.json').write_text(json.dumps(params, indent=1) + '\n')
     vs = np.linspace(*np.flatnonzero(roi.any(axis=(0, 2)))[[0, -1]], 4).astype(int)
     fig, axs = plt.subplots(2, 4, figsize=(20, 10))
     for v, ax in zip(vs, axs[0]):
@@ -167,14 +154,13 @@ def main():
     sidecar.save_image(fig, qc)
     plt.close(fig)
     sidecar.emit(
-        out=str(out / 'roi3.json'),
+        params=str(out / 'roi3.json'),
         qc=str(qc),
         roi3_tissue=str(out / 'roi3-tissue.npy'),
-        roi3_bone=str(out / 'roi3-bone.npy'),
         cortex=str(out / 'cortex.npy'),
         distal_face=str(out / 'growth-plate-distal-face.npy'),
         cortex_estimate_mm=round(est, 4),
-        values={k: round(v['value'], 5) for k, v in values.items()},
+        roi3_voxels=int(roi.sum()),
     )
 
 

@@ -64,7 +64,7 @@ the slice; `on_mask` says whether it lies on the bone: a concave section can put
 ## region_from_curves.py
 
 Two modes. Both write `region.npy` (boolean, scan grid, with sidecar), `region-check.jpg` and print the voxel count, volume
-in mm^3 and bounding box. Both take an optional bone mask (`--bone` or `--labels`/`--ids`) to clip to, and
+in mm³ and bounding box. Both take an optional bone mask (`--bone` or `--labels`/`--ids`) to clip to, and
 `--clearance-mm` to also drop voxels closer than that to the **outer** surface of the mask you pass. For a filled bone that
 is the periosteum, so the cortex stays inside the region; a clearance from the inner cortex needs the cortex depth added, which
 is the protocol's job.
@@ -82,10 +82,12 @@ python region_from_curves.py polygon --polygons poly.json --grid hu.json --bone 
 {"axis": 1, "height": "row", "slices": {"100": [[140, 80], [123, 95], [122, 120]], "190": [[138, 80], [103, 100]]}}
 ```
 
-A polyline is read as height as a function of the other coordinate, joined linearly. Between traced slices the surface is
+This curves schema (`axis`, `height`, `slices`) and `surface_from_curves` in `region_from_curves.py` are the only way surfaces are
+traced and interpolated: a workflow's own region scripts import that function rather than carry a second one, so a trace means
+the same thing in every script. A polyline is read as height as a function of the other coordinate, joined linearly. Between traced slices the surface is
 joined linearly; the region exists only between the first and last traced slices (or `--slice-range lo hi`) and only
 where the polylines reach along the other axis. `--offset-a-mm` and `--offset-b-mm` move a surface along the height axis,
-which makes a slab at a set distance from a surface (for example 50 um to 250 um below it).
+which makes a slab at a set distance from a surface (for example a 100 um band starting 30 um above a traced surface).
 
 **polygon**: `{"axis": 0, "slices": {"230": [[row, col], ...], "270": [[row, col], ...]}}`, one closed outline per traced slice,
 at least two slices. Slices between are interpolated by signed distance, so the outline morphs smoothly; it is not an extrusion.

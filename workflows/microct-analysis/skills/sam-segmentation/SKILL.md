@@ -62,15 +62,20 @@ the workflow's anatomy reference gives, not the measurement threshold.
      `python <orient-joint>/resources/map_points.py --frame frame.json --pieces qc/cand.npy --ids 3 5 --out qc/boxes.json`
      gives each candidate's `promptFrame` (the slice that cuts most of it) and `box`. Snap each box on its own slice
      (`snap_boxes.py --index <promptFrame>`) and look at it (`render_slices.py --boxes`). A candidate is one 3D piece; a
-     structure in several pieces needs one box per piece, and an unboxed piece is never found.
+     structure in several pieces needs one box per piece, and an unboxed piece is never found. A piece the stack's edge cuts
+     is listed under `cut_by_stack` (`voxels_outside_stack` > 0): its track would be truncated, so re-orient with a larger
+     `--margin-mm` (`orient-joint`) and map again before you prompt it.
    - **Labels:** `segment_sam` rejects duplicate labels, so each piece gets a **temporary label** that no label of the
      structures you keep uses, for example 61 and 62 for the two pieces of one structure. Write down which temporary label is
      which final label.
-   - Send it, writing `small_oriented.npy`.
+   - Send it, writing `small_oriented.npy`, and **stamp its grid right away**:
+     `python <microct-core>/resources/sidecar.py --array small_oriented.npy --like oriented.json` (it keeps SAM's keys in
+     `small_oriented.json` and adds the grid). `segment_sam`'s own sidecar has none, and `trim_tracks.py` refuses labels
+     stamped with any other grid, so labels from a different orientation of the same scan cannot be mapped back by mistake.
 8. **Trim each track to the frames it occupies.**
    `python trim_tracks.py --labels small_oriented.npy --out small_trimmed_oriented.npy --like oriented.json`
    (`--only 61 62` limits it). It keeps the unbroken run of slices around each prompt frame where the mask is non-empty and
-   confidence is 0.5 or more (read from `small_oriented.json`), and checks the grid before it writes anything. Untrimmed, an
+   confidence is 0.5 or more (read from `small_oriented.json`), and checks the stamped grid before it writes anything. Untrimmed, an
    object keeps tracking after its structure ends and picks up whatever sits at the same spot (the tibia, unlabelled bone).
    Trimmed volumes run 10-20% under the reference (trimming cuts track ends): report small-structure volumes with that
    caveat. The rule was set after seeing one scan (OA6-1RK): check it on yours.

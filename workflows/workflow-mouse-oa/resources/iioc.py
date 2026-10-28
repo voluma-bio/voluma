@@ -1,21 +1,23 @@
-"""Tibial secondary ossification centre (IIOC, ROI-1): tissue region, TV/BV/BV/TV, heights, width, plate columns.
+"""Tibial secondary ossification centre (IIOC, ROI-1): the tissue region, heights, width and plate columns.
 
   python iioc.py --hu-aligned tibia-hu.npy --mask tibia-mask.npy --frame tibia-frame.json
-         --hu hu.npy --hu-json hu.json --annotations annotations.json --out <dir> [--threshold HU] [--gp-shift-voxels 0]
+         --hu-json hu.json --annotations annotations.json --out <dir> [--threshold HU] [--gp-shift-voxels 0]
 
 ROI-1 is the tibial bone between the articular surface and the proximal face of the growth plate (growth-plate
 band and metaphysis excluded; marrow and cortical shell included), cut along growth-plate curves the agent traced
-on coronal sections of the aligned stack (see ../SKILL.md for the annotation schema). TV and BV are counted on the
-scan grid: the aligned region is mapped back with nearest-neighbour and thresholded on unresampled HU.
+on coronal sections of the aligned stack. The annotation schema and the whole protocol are in ../references/oa-protocol.md.
+This script writes regions and heights only: TV, BV and BV/TV of ROI-1 (deck #4-6) come from `morphometry.py volumes`.
 
-Writes (aligned grid, array axes W,V,U) iioc-tissue.npy, iioc-bone.npy, growth-plate-proximal-face.npy,
-articular-top-surface.npy (2D, W index per V,U), <side>-plate-run.npy, and on the scan grid iioc-tissue-scan.npy and
-width-points-scan.json (the two width points as [z, y, x] scan indices, for `amira_landmarks.py`); plus iioc.json (every
-value, with its definition) and QC images. Prints one JSON line.
+Writes (aligned grid, array axes W,V,U) iioc-tissue.npy, growth-plate-proximal-face.npy, articular-top-surface.npy (2D,
+W index per V,U), <side>-plate-run.npy, and on the scan grid iioc-tissue-scan.npy and width-points-scan.json (the two
+width points as [z, y, x] scan indices, for `amira_landmarks.py`); plus iioc.json (every value, with its definition) and QC
+images. Prints the result record (`microct-core/resources/sidecar.py`) with the paths.
 
-Bone is the ROI and unresampled HU above the threshold (default: the lab's 2.16/cm in this scan's HU, from hu.json's
-calibration); no label gates it. BV/TV is in %. Heights are measured along W, the tibial shaft axis; `shaft_to_growth_plate_normal_deg`
-says how far that is from perpendicular to the growth-plate face.
+Heights #7-9 are reported two ways until the lab chooses: along W, the tibial shaft axis (the deck values), and
+perpendicular to the plane fitted to the traced growth-plate face (diagnostics `*-normal`). The plane's rms residual says
+how far the traced face is from planar; where it is large, the two differ in size and in sign from one height to the next.
+Plate-run bone is the ROI and aligned HU above the threshold (default: the lab's 2.16/cm in this scan's HU, from hu.json's
+calibration); no label gates it.
 """
 
 import argparse
@@ -28,14 +30,15 @@ import numpy as np
 from scipy import ndimage as ndi
 
 HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; microct-core is found by walking up to the directory that holds it.
-CORE = next((p / 'microct-analysis/skills/microct-core/resources' for p in HERE.parents
-             if (p / 'microct-analysis/skills/microct-core/resources/sidecar.py').exists()), None)
-if CORE is None:
+# `python -I` puts no script directory on sys.path; the generic skills are found by walking up to the directory that holds them.
+SKILLS = next((p / 'microct-analysis/skills' for p in HERE.parents
+               if (p / 'microct-analysis/skills/microct-core/resources/sidecar.py').exists()), None)
+if SKILLS is None:
     sys.exit('Cannot find microct-core: this script expects microct-analysis/skills/microct-core/resources/ in a '
              'directory above it (<workflows>/workflow-mouse-oa/resources/ with <workflows>/microct-analysis/ beside it)')
-sys.path[:0] = [str(HERE), str(CORE)]
+sys.path[:0] = [str(HERE), str(SKILLS / 'microct-core/resources'), str(SKILLS / 'regions-and-landmarks/resources')]
 import sidecar
+from region_from_curves import surface_from_curves
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -44,19 +47,15 @@ MIN_COMPONENT = 50  # coronal fragments below this many pixels are segmentation 
 EDGE_ERODE = 3  # footprint erosion for the local-height search: avoids tangential edge extrema
 
 
-def boundary_surface(curves, shape_vu):
-    """W index per (V, U) from curves {"<v>": [[u, w], ...]}: linear in U along each curve, linear in V between."""
-    if len(curves) < 2:
-        sidecar.fail('a boundary needs curves on at least two coronal sections (V indices): trace more sections')
-    levels = sorted(map(int, curves))
-    rows = []
-    for v in levels:
-        pts = np.array(curves[str(v)], float)
-        if len(pts) < 2 or np.any(np.diff(pts[:, 0]) <= 0):
-            sidecar.fail(f'curve at V={v} needs at least two [u, w] points with strictly increasing u')
-        rows.append(np.interp(np.arange(shape_vu[1]), pts[:, 0], pts[:, 1]))
-    rows = np.array(rows)
-    return np.array([np.interp(np.arange(shape_vu[0]), levels, rows[:, u]) for u in range(shape_vu[1])]).T
+def traced_surface(spec, key, shape):
+    """W index per (V, U) from curves in region_from_curves' schema, traced on coronal sections (axis 1, height = row)."""
+    if spec.get('axis') != 1 or spec.get('height', 'row') != 'row':
+        sidecar.fail(f'"{key}" must be traced on coronal sections of the aligned stack: {{"axis": 1, "height": "row", "slices": '
+                     '{"<v>": [[w, u], ...]}} (a point is [row = W, column = U])')
+    if len(spec.get('slices', {})) < 2:
+        sidecar.fail(f'"{key}" needs curves on at least two coronal sections (V indices): trace more sections')
+    H, *_, valid = surface_from_curves(spec, shape)
+    return H, valid
 
 
 def envelope(bone, gp, iterations=2):
@@ -99,6 +98,16 @@ def largest(mask):
     return cc == n.argmax(), int(mask.sum() - n.max())
 
 
+def ray_length(roi, start, direction, step=0.05):
+    """Distance in voxels from `start` along the unit `direction` until the ray leaves `roi` (nearest-voxel membership)."""
+    t = 0.0
+    while True:
+        t += step
+        p = np.rint(start + t * direction).astype(int)
+        if not (p >= 0).all() or not (p < roi.shape).all() or not roi[tuple(p)]:
+            return t
+
+
 def first_run(bone, v, u):
     ww = np.flatnonzero(bone[:, v, u])
     if not len(ww):
@@ -115,17 +124,12 @@ def need(ann, key, hint):
     return ann[key]
 
 
-def val(value, unit, definition, **extra):
-    return dict(value=float(value), unit=unit, definition=definition, **extra)
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--hu-aligned', required=True, help='tibia-hu.npy from tibia_frame.py')
     ap.add_argument('--mask', required=True, help='tibia-mask.npy from tibia_frame.py')
     ap.add_argument('--frame', required=True, help='tibia-frame.json from tibia_frame.py')
-    ap.add_argument('--hu', required=True, help='hu.npy of the scan: TV and BV are counted on this grid')
-    ap.add_argument('--hu-json', required=True, help='hu.json of the scan')
+    ap.add_argument('--hu-json', required=True, help='hu.json of the scan: its grid, and the calibration the lab threshold in HU comes from')
     ap.add_argument('--annotations', required=True)
     ap.add_argument('--out', required=True)
     ap.add_argument('--threshold', type=float, help='bone threshold in HU (default: the lab threshold, 2.16/cm, from --hu-json)')
@@ -145,16 +149,19 @@ def main():
     tib = np.load(a.mask)
     if frame['parent_grid_id'] != g['grid_id']:
         sidecar.fail('the frame was made on another scan grid than hu.json: rerun tibia_frame.py on this scan')
-    shape_vu = h.shape[1:]
+    if ann.get('grid_id', frame['grid_id']) != frame['grid_id']:
+        sidecar.fail('annotations.json was traced on another aligned grid than this frame (grid_id differs): its indices do not apply; trace again')
     gp = (
-        boundary_surface(need(ann, 'growth_plate_curves', 'trace the proximal face of the growth plate'), shape_vu)
+        traced_surface(
+            need(ann, 'growth_plate_curves', 'trace the proximal face of the growth plate'), 'growth_plate_curves', h.shape
+        )[0]
         + a.gp_shift_voxels
     )
     env = envelope(tib, gp)
     w = np.arange(h.shape[0])[:, None, None]
     roi = env & (w < gp[None])
     for fix in ann.get('articular_corrections', []):
-        surf = boundary_surface(fix['curves'], shape_vu)
+        surf = traced_surface(fix['curves'], 'articular_corrections[].curves', h.shape)[0]
         ulo, uhi = fix['u_range']
         vlo, vhi = fix['v_range']
         keep = np.ones(h.shape, bool)
@@ -162,22 +169,8 @@ def main():
         roi &= keep
     roi, removed = largest(roi)
     bone = roi & (np.asarray(h) > a.threshold)
-    raw = np.load(a.hu, mmap_mode='r')
-    scan_roi = to_scan(roi, frame, raw.shape)
-    tv = int(scan_roi.sum()) * vox**3
-    bv = int(np.count_nonzero(raw[scan_roi] > a.threshold)) * vox**3
-    values = {
-        'iioc_tv': val(
-            tv,
-            'mm^3',
-            'ROI-1 tissue volume (deck #4): bone, marrow and cortical shell between the articular '
-            'surface and the traced proximal growth-plate face; counted on the scan grid',
-        ),
-        'iioc_bv': val(
-            bv, 'mm^3', f'ROI-1 bone volume (deck #5): unresampled scan HU > {a.threshold} inside the same ROI'
-        ),
-        'iioc_bv_tv': val(bv / tv * 100, '%', 'ROI-1 BV/TV in % (deck #6); whole-IIOC, includes shell and plate'),
-    }
+    scan_roi = to_scan(roi, frame, g['shape'])
+    values = {'voxel-size': sidecar.value(vox, 'mm', 'voxel edge of the aligned grid, which every length here is a multiple of', kind='diagnostic')}
     valid = roi.any(axis=0)
     top = np.argmax(roi, axis=0).astype(float)
     local_height = np.where(valid, gp - top, np.nan)
@@ -193,6 +186,22 @@ def main():
     wp = np.array(wp, float)
     u_mid = round(ann.get('growth_plate_mid_u', wp[:, 0].mean()))
     mids = need(ann, 'compartment_midpoint_u', 'U index of the middle of the lateral and the medial compartment')
+    vv, uu = np.nonzero(valid)
+    (slope_u, slope_v, icpt), *_ = np.linalg.lstsq(np.column_stack([uu, vv, np.ones(len(uu))]), gp[vv, uu], rcond=None)
+    plane = slope_u * np.arange(h.shape[2])[None, :] + slope_v * np.arange(h.shape[1])[:, None] + icpt  # W of the fitted plane per (V, U)
+    resid = (gp - plane)[valid]
+    normal = np.array([-1.0, slope_v, slope_u])  # (w, v, u), toward the articular surface
+    normal /= np.linalg.norm(normal)
+    values['growth-plate-plane-rms'] = sidecar.value(
+        np.sqrt(np.mean(resid**2)) * vox,
+        'mm',
+        'rms distance along W of the traced growth-plate face from the plane fitted to it over the ROI-1 footprint: how non-planar '
+        'the face is, and so how far the heights along W and perpendicular to the plane can differ',
+        kind='diagnostic',
+        max_mm=float(np.abs(resid).max() * vox),
+        tilt_deg=float(np.degrees(np.arccos(-normal[0]))),
+    )
+    height_ids = []
 
     def height(key, u, deck, what):
         v = v_star
@@ -201,37 +210,37 @@ def main():
                 f'{key}: U={u} on section V={v} is outside the ROI-1 footprint, or within {EDGE_ERODE} voxels of its edge, '
                 'so there is no height to measure there: move that point (or height_section_v) onto the tibia'
             )
-        values[key] = val(
+        values[key] = sidecar.value(
             local_height[v, u] * vox,
             'mm',
             f'{what}: vertical (W) distance on coronal section V={v} at U={u} from the growth-plate face '
-            f'to the top of the ROI-1 surface (deck {deck})',
+            f'to the top of the ROI-1 surface (deck {deck}), measured along the shaft axis',
             section_v=v,
             u=int(u),
             points_uvw=[[int(u), v, float(top[v, u])], [int(u), v, float(gp[v, u])]],
-            voxel_mm=vox,
         )
+        values[f'{key}-normal'] = sidecar.value(
+            ray_length(roi, np.array([gp[v, u], v, u]), normal) * vox,
+            'mm',
+            f'{what}, deck {deck} measured the other way: from the traced growth-plate face at U={u}, V={v}, along the normal '
+            'of the plane fitted to the face, to where it leaves ROI-1 (the top of the articular bone)',
+            kind='diagnostic',
+        )
+        height_ids.append(key)
 
-    height('iioc_height', u_mid, '#7', 'IIOC height at the middle of the growth plate')
-    height('iioc_height_medial', mids['medial'], '#8', 'IIOC height, medial compartment')
-    height('iioc_height_lateral', mids['lateral'], '#9', 'IIOC height, lateral compartment')
-    values['iioc_max_local_height'] = val(
+    height('iioc-height', u_mid, '#7', 'IIOC height at the middle of the growth plate')
+    height('iioc-height-medial-compartment', mids['medial'], '#8', 'IIOC height, medial compartment')
+    height('iioc-height-lateral-compartment', mids['lateral'], '#9', 'IIOC height, lateral compartment')
+    values['iioc-max-local-height'] = sidecar.value(
         local_height[vmax, umax] * vox,
         'mm',
-        'diagnostic: largest growth-plate-to-top distance over the eroded footprint (not a deck parameter)',
+        'largest growth-plate-to-top distance along W over the eroded footprint (the old run\'s "max local height")',
+        kind='diagnostic',
         section_v=int(vmax),
         u=int(umax),
     )
-    vv, uu = np.nonzero(valid)
-    slope_u, slope_v, _ = np.linalg.lstsq(np.column_stack([uu, vv, np.ones(len(uu))]), gp[vv, uu], rcond=None)[0]
-    values['shaft_to_growth_plate_normal_deg'] = val(
-        np.degrees(np.arccos(1 / np.sqrt(1 + slope_u**2 + slope_v**2))),
-        'deg',
-        'angle between the tibial shaft axis (W) and the normal of the plane fitted to the traced growth-plate face over the '
-        'ROI-1 footprint: 0 means "along the shaft" and "perpendicular to the growth plate" are the same direction for heights #7-9',
-    )
     width = float(np.linalg.norm((wp[1] - wp[0]) * vox))
-    values['tibial_width'] = val(
+    values['tibial-width-at-the-growth-plate'] = sidecar.value(
         width,
         'mm',
         'tibial width at the growth plate (deck #10): straight distance between '
@@ -264,25 +273,25 @@ def main():
                 f'no bone in the {side} plate patch u={patch["u"]} v={patch["v"]}: move the compartment midpoint'
             )
         plates[side] = run
-        values[f'subchondral_plate_{side}_first_run'] = val(
+        values[f'subchondral-plate-{side}-first-run'] = sidecar.value(
             np.median(th),
             'mm',
             f'directional diagnostic for deck #{11 if side == "medial" else 12}: median length along W of '
             f'the first contiguous bone run below the ROI top, over {len(th)} columns of the {side} patch; trabecular '
             'bridges can lengthen a run. The sphere thickness of the run mask (plate-run.npy) is the deck value',
+            kind='diagnostic',
             patch=patch,
             mean=float(np.mean(th)),
             p10_p90=np.percentile(th, [10, 90]).tolist(),
             columns=len(th),
-            voxel_mm=vox,
         )
     meta = {
         'removed_disconnected_voxels': removed,
         'threshold_hu': a.threshold,
         'gp_shift_voxels': a.gp_shift_voxels,
-        'aligned_bv_tv_percent': float(bone.sum() / roi.sum() * 100),
         'height_section_v': v_star,
         'growth_plate_mid_u': u_mid,
+        'grid_id': frame['grid_id'],
     }
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -290,7 +299,6 @@ def main():
     params = {'threshold': a.threshold, 'gp_shift_voxels': a.gp_shift_voxels}
     arrays = {
         'iioc-tissue.npy': roi,
-        'iioc-bone.npy': bone,
         'growth-plate-proximal-face.npy': gp.astype(np.float32),
         'articular-top-surface.npy': np.where(valid, top, np.nan).astype(np.float32),
     }
@@ -308,14 +316,13 @@ def main():
     (out / 'width-points-scan.json').write_text(json.dumps(width_points_zyx, indent=1) + '\n')
     np.save(out / 'iioc-tissue-scan.npy', scan_roi)
     sidecar.write(
-        out / 'iioc-tissue-scan.npy', like=a.hu_json, inputs=[a.hu, a.frame, a.mask], params=params, script='iioc.py'
+        out / 'iioc-tissue-scan.npy', like=a.hu_json, inputs=[a.hu_json, a.frame, a.mask], params=params, script='iioc.py'
     )
-    (out / 'iioc.json').write_text(
-        json.dumps({'values': values, 'meta': meta, 'grid_id': frame['grid_id']}, indent=1) + '\n'
-    )
-    qc = qc_images(out, h, roi, gp, plates, values, v_star)
-    sidecar.emit(
-        out=str(out / 'iioc.json'),
+    qc = qc_images(out, h, roi, gp, plates, values, height_ids, v_star)
+    sidecar.emit_values(
+        out / 'iioc.json',
+        values,
+        meta,
         qc=qc,
         tissue=str(out / 'iioc-tissue.npy'),
         tissue_scan=str(out / 'iioc-tissue-scan.npy'),
@@ -323,12 +330,11 @@ def main():
         growth_plate_face=str(out / 'growth-plate-proximal-face.npy'),
         articular_top=str(out / 'articular-top-surface.npy'),
         plate_runs=[str(out / f'{s}-plate-run.npy') for s in plates],
-        values={k: round(v['value'], 5) for k, v in values.items()},
         removed_disconnected_voxels=removed,
     )
 
 
-def qc_images(out, h, roi, gp, plates, values, v_star):
+def qc_images(out, h, roi, gp, plates, values, height_ids, v_star):
     vs = [
         int(v)
         for v in np.linspace(np.flatnonzero(roi.any(axis=(0, 2)))[0], np.flatnonzero(roi.any(axis=(0, 2)))[-1], 8)[1:-1]
@@ -348,8 +354,7 @@ def qc_images(out, h, roi, gp, plates, values, v_star):
     sidecar.save_image(fig, p1)
     plt.close(fig)
     fig, axs = plt.subplots(1, 3, figsize=(18, 7))
-    keys = ['iioc_height', 'iioc_height_medial', 'iioc_height_lateral']
-    for k, ax in zip(keys, axs):
+    for k, ax in zip(height_ids, axs):
         pts = np.array(values[k]['points_uvw'])
         ax.imshow(h[:, v_star, :], cmap='gray', vmin=0, vmax=5000)
         ax.contour(roi[:, v_star, :], levels=[0.5], colors='lime', linewidths=0.7)

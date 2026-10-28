@@ -9,6 +9,8 @@ gets a SAM box on the stack.
 prompt for the stack: `promptFrame` (the slice that cuts most of the piece), `box` ([row0, col0, row1, col1], ends inclusive,
 that piece's extent on that slice), `centre_srs` and the slice range it spans. The box is where the piece is, not yet snapped to
 the bone: pass it to `snap_boxes.py --index <promptFrame>` and look at it. Prints the same table and writes it to `--out`.
+A piece with `voxels_outside_stack` > 0 is cut by the stack's edge and is listed under `cut_by_stack`: its box and its SAM track
+would be truncated, so re-orient with a larger `--margin-mm` before prompting it.
 Points are fractional where the mapping is; a point outside the stack is reported, not clipped.
 """
 import argparse
@@ -17,6 +19,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+from scipy import ndimage as ndi
 
 HERE = Path(__file__).resolve().parent
 # `python -I` puts no script directory on sys.path, so every directory a script imports from is added here.
@@ -79,11 +82,15 @@ if __name__ == '__main__':
             sidecar.fail(f'{a.pieces} is not on the scan grid this frame was made from: run unlabelled.py on the scan-grid labels')
         cand = np.load(a.pieces, mmap_mode='r')
         ids = a.ids or [int(i) for i in np.unique(cand) if i > 0]
+        cand = np.asarray(cand)
+        boxes = ndi.find_objects(cand)  # one pass over the volume, then each piece is searched inside its own box only
         prompts = {}
         for i in ids:
-            vox = np.argwhere(np.asarray(cand) == i)
-            if not len(vox):
+            if i < 1 or i > len(boxes) or boxes[i - 1] is None:
                 sidecar.fail(f'candidate {i} is not in {a.pieces}')
+            sl = boxes[i - 1]
+            vox = np.argwhere(cand[sl] == i) + [s.start for s in sl]
             prompts[str(i)] = piece_prompt(vox, frame)
+        cut = [i for i, p in prompts.items() if p['voxels_outside_stack']]
         Path(a.out).write_text(json.dumps(prompts, indent=1) + '\n')
-        sidecar.emit(boxes=a.out, pieces=prompts)
+        sidecar.emit(boxes=a.out, pieces=prompts, cut_by_stack=cut)
