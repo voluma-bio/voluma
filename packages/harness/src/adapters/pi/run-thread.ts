@@ -133,6 +133,10 @@ export async function runThread(options: RunThreadOptions): Promise<ThreadOutcom
       ? [finished ? undefined : options.resumeNote, options.input].filter(Boolean).join("\n\n") ||
         undefined
       : options.task;
+    // With no input on a resumed thread the user message is only the restart note. When the
+    // note is joined to an input, the whole message counts as the person's.
+    const promptSender =
+      hasUser && !options.input ? ({ kind: "system" } as const) : ({ kind: "person" } as const);
     if (message === undefined && finished) {
       return { status: "completed", ran: false, usage };
     }
@@ -151,7 +155,7 @@ export async function runThread(options: RunThreadOptions): Promise<ThreadOutcom
     if (stored.length === 0) {
       // A new thread: store the system message before anything else.
       if (system && (await persist(system))) {
-        emit("message", { role: "system", text: textOf(system), sender: null });
+        emit("message", { role: "system", text: textOf(system), sender: { kind: "system" } });
       }
     }
     // A crash can leave tool calls without results, which providers reject.
@@ -172,7 +176,10 @@ export async function runThread(options: RunThreadOptions): Promise<ThreadOutcom
           if (message.role === "toolResult") emitToolResult(message);
           else if (message.role === "user" || message.role === "assistant") {
             const text = textOf(message);
-            if (text) emit("message", { role: message.role, text, sender: null });
+            if (text) {
+              const sender = message.role === "user" ? promptSender : null;
+              emit("message", { role: message.role, text, sender });
+            }
           }
           break;
         }

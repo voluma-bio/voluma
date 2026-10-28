@@ -68,13 +68,20 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
       role: z.enum(["system", "user", "assistant"]),
       text: z.string(),
       /**
-       * Who sent it: another thread's `thread_message` (`thread-message.ts`),
-       * or null for a person or the system. An assistant reply has null. A
-       * `thread_message` arrives as `role: "user"` on the target.
+       * Who sent it: another thread's `thread_message` (`thread-message.ts`,
+       * arriving as `role: "user"` on the target), the system (the restart
+       * note, the system prompt), or a person. Null for an assistant reply,
+       * which nobody sent to the thread.
        * This event replaces the live partial text whose `messageId` equals this
        * event's `id` (`stream.ts`).
        */
-      sender: z.object({ threadId: nonEmpty }).nullable(),
+      sender: z
+        .discriminatedUnion("kind", [
+          z.object({ kind: z.literal("thread"), threadId: nonEmpty }),
+          z.object({ kind: z.literal("system") }),
+          z.object({ kind: z.literal("person") }),
+        ])
+        .nullable(),
     }),
   );
 

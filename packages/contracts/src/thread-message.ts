@@ -7,7 +7,9 @@
  * runtime enforces all three; these schemas only shape the call.
  *
  * It lives in contracts because the sender's tool and `message.sender` in
- * `events.ts` must agree, and both lanes read that event.
+ * `events.ts` must agree, and both lanes read that event. The tool's result
+ * reaches the record as `tool.result.output`, which for `thread_message` is
+ * `threadMessageResultSchema`'s object as JSON, so the run screen can parse it.
  *
  * Delivery: a running target receives it as a follow-up in its current turn;
  * an idle target queues it and wakes. It is stored as a new `message` event
