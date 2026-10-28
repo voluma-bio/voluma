@@ -2,12 +2,12 @@
  * One row of a process fold: an icon chip on a timeline rail, a one-line title with a status
  * dot, and an inline expand whose contents are built only when opened. Ported from Meridian
  * Flow's `ActivityRow` (apps/app/src/features/chat), restyled onto voluma's tokens: running is
- * the info blue (DESIGN.md: blue means running), failed the destructive red.
+ * the info blue (DESIGN.md: blue means running), failed the destructive red, stopped grey.
  */
 import { ChevronRight, type LucideIcon } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
 
-export type ActivityRowStatus = "running" | "done" | "error";
+export type ActivityRowStatus = "running" | "done" | "error" | "stopped";
 
 // The chip sits on the title's first line: the line box of `text-ui`.
 const LINE_BOX = "box-content min-h-[calc(var(--text-ui)*var(--text-ui--line-height))]";
@@ -75,6 +75,12 @@ export function ActivityRow({
         className="mt-[7px] size-1.5 shrink-0 rounded-full bg-destructive"
         role="img"
         aria-label="Failed"
+      />
+    ) : status === "stopped" ? (
+      <span
+        className="mt-[7px] size-1.5 shrink-0 rounded-full bg-muted-foreground"
+        role="img"
+        aria-label="Stopped"
       />
     ) : null;
 

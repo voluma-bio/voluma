@@ -21,6 +21,12 @@ Three screens under `RunLayout` (top bar and query client): `/` start (`start-pa
   tool calls. `?thread=<threadId>` shows that thread's transcript in its place. Running workers and
   checkers are listed above the main transcript; failures and To check items sit at the top; the
   plan is a compact graph in a right rail (a closed "Tasks" fold under 1100 px).
+- **The log is not complete when a run ends.** Stop ends the run in the API at once, and a killed
+  runner writes nothing more, so threads can have a `thread.started` and no `thread.ended`. The
+  run's end comes from `Run.state` and is passed to `threadsOf`, `threadRows` and `taskStates`: a
+  thread, tool call or task still open then shows as stopped. Never decide "running" from the events alone.
+- **The attention list** (`attentionOf`) is built from `fold`'s tasks (To check items, the checker's
+  verdict), so it agrees with review; a failure counts only on a task's latest thread.
 - **Transcripts** (`transcript.ts`, pure): prose stays visible as Markdown; reasoning and each run
   of tool calls between two pieces of prose fold into one closed `ProcessDisclosure` whose label is
   a digest ("Ran 12 commands, 1 failed"). Folds never open or close by themselves, and their rows'
@@ -38,14 +44,17 @@ Three screens under `RunLayout` (top bar and query client): `/` start (`start-pa
   over (a re-asked wake reuses its id); any other gap drops the partial until the durable event.
   A partial row and its durable row share a React key (message id, toolCallId), so the swap does
   not remount it. Frames are not replayed, so a reload mid-reply shows that reply only once its
-  durable event lands. A thread's first `runtime` message is labelled its task brief.
+  durable event lands. A thread's partials are dropped when it ends or starts again (a runner
+  restart gives the resumed thread new reply ids), and all of them when the stream closes. Only
+  `live` changes per frame; `events` keeps its identity, so the event derivations don't rerun per
+  token. A thread's first `runtime` message is labelled its task brief.
 - **Ported from Flow**: `chat/` holds Flow's `ProcessDisclosure`, `ActivityRow`, `StreamingText`
   caret, `useChatFollowScroll`, `DisclosureStore`, `ChatThreadNavigation`, `TurnInfoButton` and the
   sub-agent row anatomy, restyled onto voluma's tokens; each file header names its source. Markdown
   is `react-markdown` + `remark-gfm`, with `remend` closing open constructs while text streams (the
   same tail repair Flow uses); raw HTML is skipped and images show as their alt text.
 - **Live tasks** are `fold(events)` over the run's stream (`subscribe`), published at most once per
-  animation frame. "Finished" counts To check tasks: their work is done. The task list comes from the `revision.started` plan; a task with no attempt yet is Queued.
+  animation frame. "Finished" counts To check tasks: their work is done. The task list comes from the `revision.started` plan; a task not started yet is Ready when every task it builds on is done, else Waiting.
   Queue position and run state are not events, so `getRun` is polled every 3 s until the run ends.
 - **Visitor keys** (`keys.tsx`) live in localStorage under `voluma.visitor-keys.<userId>` and are parsed
   with `visitorKeysSchema`; another user of the browser never sees them (a guest has no sign-out, and

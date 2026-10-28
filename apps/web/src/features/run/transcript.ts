@@ -34,6 +34,9 @@ export type Live = {
 };
 export const noLive: Live = { replies: new Map(), calls: new Map(), outputs: new Map() };
 
+/** When the run ended, from `Run.state`: the log may hold no end for a thread it stopped. */
+export type RunEnd = { endedAt: string };
+
 /**
  * Keys of the partials whose durable event has landed. Frames can trail that event by a batch
  * (`tool.output` after `tool.result` is common), and a trailing frame must not start a partial
@@ -118,8 +121,8 @@ export function settle(live: Live, e: RunEvent, settled: Settled): Live {
     settled.add(outputKey(e.payload.toolCallId));
     outputs = drop(live.outputs, (k) => k !== e.payload.toolCallId);
   }
-  if (e.type === "thread.ended") {
-    // A reply cut off mid-stream never gets its durable events.
+  if (e.type === "thread.ended" || e.type === "thread.started") {
+    // A reply cut off mid-stream, by its end or a runner restart, never gets its durable events.
     replies = drop(live.replies, (_, v) => v.threadId !== e.threadId);
     calls = drop(live.calls, (_, v) => v.threadId !== e.threadId);
   }
@@ -229,7 +232,8 @@ export type ToolStep = {
   name?: string;
   title: string;
   input: unknown;
-  status: "running" | "done" | "error";
+  /** `stopped`: its thread or the run ended before it returned. */
+  status: "running" | "done" | "error" | "stopped";
   output?: string;
   truncated?: boolean;
 };
@@ -311,11 +315,20 @@ const SHOWN_AS_ROWS = new Set(["checkpoint", "report_output"]);
 
 /**
  * One worker, checker or chat thread's transcript: what it was told, its prose, its folded
- * process, its milestones, then whatever of its reply is still streaming.
+ * process, its milestones, then whatever of its reply is still streaming. A tool call still
+ * running when its thread or the run (`end`) ended shows as stopped.
  */
-export function threadRows(events: RunEvent[], threadId: string, live: Live = noLive): Row[] {
+export function threadRows(
+  events: RunEvent[],
+  threadId: string,
+  live: Live = noLive,
+  end?: RunEnd,
+): Row[] {
   const b = rowBuilder();
   const tools = new Map<string, ToolStep>();
+  const stopRunning = () => {
+    for (const step of tools.values()) if (step.status === "running") step.status = "stopped";
+  };
   let briefed = false;
   for (const e of events) {
     if (e.threadId !== threadId) continue;
@@ -390,18 +403,22 @@ export function threadRows(events: RunEvent[], threadId: string, live: Live = no
         });
         break;
       case "task":
-        b.step({
-          kind: "note",
-          id: e.id,
-          text: `${taskTitle(e.payload.taskId)} is ${e.payload.status}: ${e.payload.reason}`,
-        });
+        // An agent's status change is its `checklist` call, already a row.
+        if (e.payload.by.kind !== "agent")
+          b.step({
+            kind: "note",
+            id: e.id,
+            text: `${taskTitle(e.payload.taskId)} is ${e.payload.status}: ${e.payload.reason}`,
+          });
         break;
       case "thread.ended":
+        stopRunning();
         if (e.payload.status === "failed")
           b.row({ kind: "failure", id: e.id, text: e.payload.error ?? "The thread failed." });
         break;
     }
   }
+  if (end) stopRunning();
   for (const [id, reply] of live.replies) {
     if (reply.threadId !== threadId) continue;
     if (reply.reasoning)

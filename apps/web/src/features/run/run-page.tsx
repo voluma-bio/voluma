@@ -33,6 +33,7 @@ import {
   taskStates,
   threadName,
   threadsOf,
+  withLiveCalls,
 } from "./run-model";
 import { RunBadge, runStatus } from "./status";
 import { TaskGraph } from "./task-graph";
@@ -51,6 +52,8 @@ import { workflowName } from "./workflows";
 /**
  * The run's stream as it arrives: durable events, and live frames folded until their durable
  * event lands. Published at most once per animation frame: a busy run sends many per second.
+ * `events` keeps its identity while only frames arrive, so the event derivations don't rerun
+ * per token. Live partials are dropped when the stream closes: nothing will complete them.
  */
 function useRunStream(runId: string, onClosed: () => void): { events: RunEvent[]; live: Live } {
   const [state, setState] = useState<{ events: RunEvent[]; live: Live }>({
@@ -61,12 +64,14 @@ function useRunStream(runId: string, onClosed: () => void): { events: RunEvent[]
   closed.current = onClosed;
   useEffect(() => {
     const events: RunEvent[] = [];
+    let published: RunEvent[] = [];
     let live = noLive;
     const settled: Settled = new Set();
     let frame: number | undefined;
     const publish = () => {
       frame = undefined;
-      setState({ events: [...events], live });
+      if (published.length !== events.length) published = [...events];
+      setState({ events: published, live });
     };
     const schedule = () => {
       frame ??= requestAnimationFrame(publish);
@@ -85,6 +90,7 @@ function useRunStream(runId: string, onClosed: () => void): { events: RunEvent[]
       },
       onClosed: () => {
         if (frame !== undefined) cancelAnimationFrame(frame);
+        live = noLive;
         publish();
         closed.current();
       },
@@ -109,17 +115,26 @@ export function RunPage() {
     refetchInterval: (q) => (q.state.data?.state.status === "ended" ? false : 3000),
   });
   const { events, live } = useRunStream(id, () => void run.refetch());
+  const state = run.data?.state;
+  const endedAt = state?.status === "ended" ? state.endedAt : undefined;
+  const end = useMemo(() => (endedAt ? { endedAt } : undefined), [endedAt]);
   const folded = useMemo(() => fold(events), [events]);
-  const threads = useMemo(() => threadsOf(events, live), [events, live]);
+  const settledThreads = useMemo(() => threadsOf(events, end), [events, end]);
+  const threads = useMemo(() => withLiveCalls(settledThreads, live), [settledThreads, live]);
   const threadById = useMemo(() => new Map(threads.map((t) => [t.id, t])), [threads]);
-  const attention = useMemo(() => attentionOf(events), [events]);
+  const attention = useMemo(
+    () => attentionOf(folded.tasks, settledThreads, events),
+    [folded, settledThreads, events],
+  );
   const main = threads.find((t) => t.kind === "supervisor");
   const openId = params.get("thread");
   const open = openId && openId !== main?.id ? threadById.get(openId) : undefined;
   const rows = useMemo(
     () =>
-      openId && openId !== main?.id ? threadRows(events, openId, live) : mainRows(events, live),
-    [events, live, openId, main?.id],
+      openId && openId !== main?.id
+        ? threadRows(events, openId, live, end)
+        : mainRows(events, live),
+    [events, live, end, openId, main?.id],
   );
   const openThread = useCallback(
     (threadId: string | null) => setParams(threadId ? { thread: threadId } : {}),
@@ -152,6 +167,7 @@ export function RunPage() {
             t.kind === "worker" && t.status === "running" && t.taskId ? [t.taskId] : [],
           ),
         ),
+        ended,
       )
     : new Map<string, TaskState>();
   // To check is finished too: the work is done and a person has items to look at.

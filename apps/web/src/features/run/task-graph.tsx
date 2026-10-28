@@ -33,6 +33,11 @@ const STATE: Record<TaskState, { label: string; node: string; dot: string }> = {
     node: "border-destructive/40 bg-destructive-tint",
     dot: "bg-destructive",
   },
+  stopped: {
+    label: "Stopped",
+    node: "border-border bg-muted text-muted-foreground",
+    dot: "bg-muted-foreground",
+  },
   ready: {
     label: "Ready",
     node: "border-border bg-card",

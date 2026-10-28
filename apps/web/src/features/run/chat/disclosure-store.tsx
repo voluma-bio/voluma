@@ -26,7 +26,6 @@ export function DisclosureProvider({ children }: { children: ReactNode }) {
 
 export function useDisclosure(key: string): [boolean, (value: boolean) => void] {
   const store = useContext(DisclosureContext);
-  const [local, setLocal] = useState(false);
-  if (!store) return [local, setLocal];
+  if (!store) throw new Error("useDisclosure needs a DisclosureProvider");
   return [store.values.get(key) ?? false, (value) => store.set(key, value)];
 }

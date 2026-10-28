@@ -4,9 +4,10 @@
  * and where each task stands. Transcripts are in `transcript.ts`.
  */
 import type { ModelUsage, RunEvent } from "@voluma/contracts/events";
+import type { FoldedTask } from "@voluma/contracts/fold";
 import type { TaskStatus } from "@voluma/contracts/ids";
 import type { WorkflowPlan } from "@voluma/contracts/workflow";
-import { type Live, toolTitle } from "./transcript";
+import { type Live, type RunEnd, toolTitle } from "./transcript";
 import { taskTitle } from "./workflows";
 
 export type ThreadStatus = "running" | "completed" | "failed" | "cancelled";
@@ -16,6 +17,7 @@ export type Thread = {
   kind: "supervisor" | "worker" | "check" | "chat";
   taskId?: string;
   model?: string;
+  /** Its latest start: a woken thread's clock counts from its wake. */
   startedAt: string;
   endedAt?: string;
   status: ThreadStatus;
@@ -42,8 +44,12 @@ export const addUsage = (a: ModelUsage | undefined, b: ModelUsage): ModelUsage =
   costUsd: (a?.costUsd ?? 0) + b.costUsd,
 });
 
-/** Every thread the run has started, in start order; `live` adds a call still being written. */
-export function threadsOf(events: RunEvent[], live?: Live): Thread[] {
+/**
+ * Every thread the run has started, in start order. A thread still open when the run ended
+ * (`end`) is stopped then: a cancel ends the run in the API at once, and a killed runner never
+ * writes its threads' `thread.ended`.
+ */
+export function threadsOf(events: RunEvent[], end?: RunEnd): Thread[] {
   const threads = new Map<string, Thread>();
   const running = new Map<string, Map<string, string>>();
   for (const e of events) {
@@ -52,6 +58,7 @@ export function threadsOf(events: RunEvent[], live?: Live): Thread[] {
       case "thread.started":
         if (t) {
           t.status = "running";
+          t.startedAt = e.createdAt;
           t.endedAt = undefined;
         } else
           threads.set(e.threadId, {
@@ -112,16 +119,25 @@ export function threadsOf(events: RunEvent[], live?: Live): Thread[] {
         break;
     }
   }
-  for (const [id, calls] of running) {
-    const t = threads.get(id);
-    if (t) t.liveTool = [...calls.values()].at(-1);
+  for (const t of threads.values()) {
+    if (t.status !== "running") continue;
+    if (end) {
+      t.status = "cancelled";
+      t.endedAt = end.endedAt;
+    } else t.liveTool = [...(running.get(t.id)?.values() ?? [])].at(-1);
   }
-  if (live)
-    for (const call of live.calls.values()) {
-      const t = threads.get(call.threadId);
-      if (t?.status === "running" && !t.liveTool) t.liveTool = "Writing a tool call…";
-    }
   return [...threads.values()];
+}
+
+/** Threads with a tool call still being written and none running say so; others are kept as is. */
+export function withLiveCalls(threads: Thread[], live: Live): Thread[] {
+  const writing = new Set([...live.calls.values()].map((c) => c.threadId));
+  if (writing.size === 0) return threads;
+  return threads.map((t) =>
+    t.status === "running" && !t.liveTool && writing.has(t.id)
+      ? { ...t, liveTool: "Writing a tool call…" }
+      : t,
+  );
 }
 
 export const threadRole = (t: Pick<Thread, "kind">) =>
@@ -141,40 +157,63 @@ export type Attention = {
   id: string;
   tone: "destructive" | "check";
   text: string;
-  threadId: string;
+  /** The thread the item opens; null opens the main thread. */
+  threadId: string | null;
 };
 
-/** What needs a person first: failures, To check items, tasks left To check and checks that want review. */
-export function attentionOf(events: RunEvent[]): Attention[] {
+/**
+ * What needs a person first, from the fold's tasks so it agrees with review: each To check
+ * item, a check that wants review, and failures. A failure counts only on a task's latest
+ * thread, so a redone task drops it.
+ */
+export function attentionOf(
+  tasks: FoldedTask[],
+  threads: Thread[],
+  events: RunEvent[],
+): Attention[] {
   const items: Attention[] = [];
-  // A task's latest status, kept while it is To check and has no To check item of its own.
-  const toCheck = new Map<string, Attention>();
-  for (const e of events) {
-    const base = { id: e.id, threadId: e.threadId };
-    if (e.type === "thread.ended" && e.payload.status === "failed")
-      items.push({ ...base, tone: "destructive", text: e.payload.error ?? "A thread failed." });
-    else if (e.type === "sandbox" && e.payload.state === "failed")
+  const latest = latestThreadByTask(threads);
+  for (const t of threads)
+    if (t.status === "failed" && (!t.taskId || latest.get(t.taskId) === t))
       items.push({
-        ...base,
+        id: `failed:${t.id}`,
+        tone: "destructive",
+        text: `${threadName(t)} failed${t.error ? `: ${t.error}` : "."}`,
+        threadId: t.id,
+      });
+  for (const e of events)
+    if (e.type === "sandbox" && e.payload.state === "failed")
+      items.push({
+        id: e.id,
         tone: "destructive",
         text: `Sandbox ${e.payload.name} failed${e.payload.detail ? `: ${e.payload.detail}` : "."}`,
+        threadId: e.threadId,
       });
-    else if (e.type === "checkpoint" && e.payload.toCheck) {
-      items.push({ ...base, tone: "check", text: `To check: ${e.payload.toCheck.title}` });
-      toCheck.delete(e.payload.taskId);
-    } else if (e.type === "checkpoint" && e.payload.verdict === "needs-review")
-      items.push({ ...base, tone: "check", text: `Needs review: ${taskTitle(e.payload.taskId)}` });
-    else if (e.type === "task") {
-      if (e.payload.status === "to-check")
-        toCheck.set(e.payload.taskId, {
-          ...base,
-          tone: "check",
-          text: `To check: ${taskTitle(e.payload.taskId)}. ${e.payload.reason}`,
-        });
-      else toCheck.delete(e.payload.taskId);
-    }
+  for (const task of tasks) {
+    const threadId = task.threads.check ?? task.threads.worker;
+    const title = taskTitle(task.id);
+    if (
+      (task.status === "under-review" || task.status === "to-check") &&
+      task.checker?.verdict === "needs-review"
+    )
+      items.push({
+        id: `review:${task.id}`,
+        tone: "check",
+        text: `Needs review: ${title}`,
+        threadId,
+      });
+    if (task.status !== "to-check") continue;
+    for (const c of task.checks)
+      items.push({ id: `check:${c.id}`, tone: "check", text: `${title}: ${c.title}`, threadId });
+    if (task.checks.length === 0)
+      items.push({
+        id: `to-check:${task.id}`,
+        tone: "check",
+        text: `To check: ${title}${task.reason ? `. ${task.reason}` : ""}`,
+        threadId,
+      });
   }
-  return [...items, ...toCheck.values()];
+  return items;
 }
 
 export const planOf = (events: RunEvent[]): WorkflowPlan | undefined => {
@@ -197,26 +236,32 @@ export type TaskState =
   | "done"
   | "to-check"
   | "failed"
+  /** Working or being checked when the run ended. */
+  | "stopped"
   /** Not started, and every task it builds on is done. */
   | "ready"
   /** Not started, and a task it builds on is not done. */
   | "waiting";
 
-/** Where each task stands, from the fold's statuses and the plan's dependencies. */
+/**
+ * Where each task stands, from the fold's statuses and the plan's dependencies. Once the run
+ * has ended (`ended`), a task left in progress or under review is stopped: the log has no end
+ * for the work the run cut off.
+ */
 export function taskStates(
   plan: WorkflowPlan,
   statuses: Map<string, TaskStatus | undefined>,
   /** Tasks with a worker running: Working before the worker marks it in progress. */
   working: Set<string>,
+  ended: boolean,
 ): Map<string, TaskState> {
   const states = new Map<string, TaskState>();
   for (const t of plan.tasks) {
     const status = statuses.get(t.id);
     const blocked = t.dependsOn.some((d) => statuses.get(d) !== "done");
-    states.set(
-      t.id,
+    const state: TaskState =
       status === "in-progress" ||
-        ((status === undefined || status === "pending" || status === "stale") && working.has(t.id))
+      ((status === undefined || status === "pending" || status === "stale") && working.has(t.id))
         ? "running"
         : status === "under-review"
           ? "checking"
@@ -224,8 +269,8 @@ export function taskStates(
             ? status
             : blocked
               ? "waiting"
-              : "ready",
-    );
+              : "ready";
+    states.set(t.id, ended && (state === "running" || state === "checking") ? "stopped" : state);
   }
   return states;
 }
