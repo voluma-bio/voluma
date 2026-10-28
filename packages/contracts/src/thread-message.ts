@@ -6,8 +6,8 @@
  * other. The message can't change the target's model, tools or prompt. The
  * runtime enforces all three; these schemas only shape the call.
  *
- * It lives in contracts because the sender's tool and `message.sender` in
- * `events.ts` must agree, and both lanes read that event. The tool's result
+ * It lives in contracts because the sender's tool and the `sender` of a user
+ * `message` in `events.ts` must agree, and both lanes read that event. The tool's result
  * reaches the record as `tool.result.output`, which for `thread_message` is
  * `threadMessageResultSchema`'s object as JSON, so the run screen can parse it.
  *

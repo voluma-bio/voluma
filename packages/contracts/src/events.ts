@@ -59,30 +59,40 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     z.object({
       status: z.enum(["completed", "failed", "cancelled"]),
       error: z.string().optional(),
+      /**
+       * The reply that was streaming when the invocation was cut off, if its
+       * `message` was never written. It ends that reply's live partial
+       * (`stream.ts`), so every clearing rule stays keyed by an id.
+       */
+      messageId: nonEmpty.optional(),
     }),
   );
 
+  /**
+   * Replaces the live partial text whose `messageId` equals this event's `id`
+   * (`stream.ts`). The runner writes one for every assistant reply that
+   * streamed, including an empty or failed one. A tool call is a separate
+   * event; the `message` of a reply that only calls tools has empty text.
+   */
   const message = event(
     "message",
-    z.object({
-      role: z.enum(["system", "user", "assistant"]),
-      text: z.string(),
-      /**
-       * Who sent it: another thread's `thread_message` (`thread-message.ts`,
-       * arriving as `role: "user"` on the target), the system (the restart
-       * note, the system prompt), or a person. Null for an assistant reply,
-       * which nobody sent to the thread.
-       * This event replaces the live partial text whose `messageId` equals this
-       * event's `id` (`stream.ts`).
-       */
-      sender: z
-        .discriminatedUnion("kind", [
+    z.discriminatedUnion("role", [
+      z.object({
+        role: z.literal("user"),
+        text: z.string(),
+        /**
+         * Who sent it: another thread's `thread_message` (`thread-message.ts`),
+         * the runtime (the restart note), or a person.
+         */
+        sender: z.discriminatedUnion("kind", [
           z.object({ kind: z.literal("thread"), threadId: nonEmpty }),
-          z.object({ kind: z.literal("system") }),
+          z.object({ kind: z.literal("runtime") }),
           z.object({ kind: z.literal("person") }),
-        ])
-        .nullable(),
-    }),
+        ]),
+      }),
+      z.object({ role: z.literal("assistant"), text: z.string() }),
+      z.object({ role: z.literal("system"), text: z.string() }),
+    ]),
   );
 
   const toolCall = event(

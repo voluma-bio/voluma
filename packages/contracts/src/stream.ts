@@ -108,10 +108,11 @@ export type ThreadSnapshot = z.infer<typeof threadSnapshotSchema>;
  *    frames are never sent separately.
  * 3. Then `frame` and new `event` messages as they happen.
  *
- * Events reach a browser in `seq` order, and `seq` is gapless per run, so a
- * browser can tell it missed one. The hub reads stored events asynchronously
- * while live ones keep arriving, so it may send an event twice but never
- * skips one.
+ * Events and frames may arrive in any order, and an event may arrive twice.
+ * `seq` is gapless per run, so the browser's cursor is the highest `seq` it
+ * holds with no gap below it. If it sees a gap, it resubscribes from that
+ * cursor. The hub reads stored events asynchronously while live ones keep
+ * arriving, so it may send an event twice but never skips one.
  *
  * What the browser must do (the hub applies the same rules to its own state):
  * - An `event` whose `seq` it already holds is not appended again, but still
@@ -121,23 +122,29 @@ export type ThreadSnapshot = z.infer<typeof threadSnapshotSchema>;
  *   snapshot against the events it holds, because the hub may not have seen an
  *   event yet that the browser read in step 1.
  *
- * Frames and events travel by separate paths and can arrive in either order,
- * so these rules apply to the live state of a thread, whichever arrives:
- * - A `message` with `id === messageId` clears the partial text. (Tool
- *   arguments are not in a `message`; they stay until `tool.call`.)
- * - A `tool.call` clears that call's `toolArguments`; a `tool.result` clears
- *   that call's output chunks.
- * - A frame is dropped when its `messageId` already has a stored `message`, or
- *   its `toolCallId` already has a `tool.result`. A `tool.arguments.delta` is
- *   also dropped when its `toolCallId` already has a `tool.call`.
- * - A delta whose `offset` is not the length held is dropped; the partial then
- *   waits for the durable event.
- * - A delta with a new `messageId` on the thread discards the previous
- *   partial (one reply at a time). `thread.ended` clears everything held for
- *   the thread. A reply with no text, one that failed, or one cut off by a
- *   crash never gets a `message`; these rules end its partial. (`thread.started`
- *   does not clear: it can reach the hub after the resumed reply's first
- *   frames.)
+ * Every rule below is keyed by an id, so order does not matter. Frames of one
+ * thread arrive in the order the runner sent them, and the drop rules run
+ * before the others.
+ * - Clearing: a `message` with `id === messageId` clears the partial text (tool
+ *   arguments are not in a `message`; they stay until `tool.call`). A
+ *   `thread.ended` with a `messageId` clears that reply's partial. A `tool.call`
+ *   clears that call's `toolArguments`; a `tool.result` clears that call's
+ *   output chunks.
+ * - Dropping: a frame is dropped when its `messageId` already has a stored
+ *   `message`, or its `toolCallId` already has a `tool.result`. A
+ *   `tool.arguments.delta` is also dropped when its `toolCallId` already has a
+ *   `tool.call`. A delta whose `offset` is not the length held is dropped; the
+ *   partial then waits for the durable event.
+ * - A delta with a new `messageId` on the thread discards the previous partial
+ *   (one reply at a time). The runner writes a `message` for every reply that
+ *   streamed, so only a crash, or a failed write of that event, leaves a
+ *   partial with no ending event; the next reply or `thread.ended.messageId`
+ *   ends it. `thread.started` and `thread.ended` clear nothing else: either can
+ *   reach the hub after a later invocation's first frames.
+ *
+ * Because frames of a thread are ordered, a late frame can only belong to the
+ * thread's latest reply and its recent calls: the hub needs to keep only each
+ * thread's latest ids.
  *
  * If the hub restarts mid-reply the partial is lost, but the stored events still arrive.
  */
