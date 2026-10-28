@@ -1,10 +1,16 @@
 /**
- * Runs one thread on Pi's agent loop and records it twice (see the harness plan):
+ * Starts one thread on Pi's agent loop and records it twice (see the harness plan):
  * every Pi message goes to History at `message_end` (the model's view, resumable,
  * written synchronously), and Pi's events go to the run's recorder (the stream
  * record, queued in the background). A thread with stored
  * history resumes from it unchanged, system message included, so the prompt cache
  * stays valid; steering and follow-ups are new messages, never edits.
+ *
+ * `startThread` returns at once with a handle. While the thread runs, `send` steers a
+ * message into it (Pi's steering queue: delivered after the current tool calls). Once it
+ * ends, `send` answers false, and the way to wake it is another `startThread` with the same
+ * thread id and an `input`, which resumes from History (`threads.ts` does this). Several
+ * threads share one process, and one sandbox through `sandbox`.
  */
 import {
   Agent,
@@ -26,20 +32,28 @@ import type { Sandbox } from "../../ports/sandbox";
 import type { PayloadOf, Recorder } from "../../recorder";
 import type { Tool } from "../../tools/tool";
 
-type UserSender = Extract<PayloadOf<"message">, { role: "user" }>["sender"];
+export type UserSender = Extract<PayloadOf<"message">, { role: "user" }>["sender"];
 
-export interface RunThreadOptions {
+export interface StartThreadOptions {
   runId: string;
   threadId: string;
   kind: ThreadKind;
   parentThreadId?: string;
+  /** The checklist task the thread works on or checks; set on worker and check threads. */
+  taskId?: string;
+  /** The attempt a check thread checks. */
+  attemptId?: string;
+  /** The tool call in the parent thread that started this thread. */
+  spawnedBy?: string;
+  /** Workflow packages the run is pinned to; set on the root thread only. */
+  workflows?: PayloadOf<"thread.started">["workflows"];
   /** The thread's first user message; also sent if a resumed thread never stored one. */
-  task: string;
+  prompt: string;
   /**
    * A new user message for a thread that already has history. A thread whose last reply
    * ended its turn does nothing without one (`ran` is false in the outcome).
    */
-  input?: string;
+  input?: { text: string; sender: UserSender };
   /** Sent before `input` when a thread with history resumes mid-turn (never for a finished one). */
   resumeNote?: string;
   model: Model<Api>;
@@ -56,20 +70,28 @@ export interface RunThreadOptions {
   signal?: AbortSignal;
 }
 
+export interface ThreadHandle {
+  /** Steers a user message into the running thread. False once the thread has ended or never ran. */
+  send(text: string, sender?: UserSender): boolean;
+  done: Promise<ThreadOutcome>;
+}
+
 export interface ThreadOutcome {
   /** False when nothing happened: the thread was finished and got no input, or it was refused before starting. */
   ran: boolean;
   status: "completed" | "failed" | "cancelled";
   error?: string;
+  /** The text of the thread's last reply in this invocation; empty if it made none. */
+  reply: string;
   /** Model usage of this invocation only (a resume does not recount earlier turns). */
   usage: { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number };
 }
 
-export async function runThread(options: RunThreadOptions): Promise<ThreadOutcome> {
+export function startThread(options: StartThreadOptions): ThreadHandle {
   const { threadId, recorder, history, signal } = options;
   const emit = <T extends EventType>(type: T, payload: PayloadOf<T>) =>
     recorder.emit(threadId, type, payload);
-  const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+  const usage = { input: 0, output: 0, cacheRead: 0, cost: 0, cacheWrite: 0 };
 
   const agent = new Agent({
     initialState: {
@@ -111,143 +133,176 @@ export async function runThread(options: RunThreadOptions): Promise<ThreadOutcom
 
   // The sender of each user message we prompt with, kept with the message itself.
   const senders = new WeakMap<AgentMessage, UserSender>();
-  let started = false;
-  let outcome: Omit<ThreadOutcome, "usage" | "ran">;
-  let unexpected: unknown;
-  const abort = () => agent.abort();
-  signal?.addEventListener("abort", abort);
-  try {
-    const stored = (await history.load(threadId)).map((row) => JSON.parse(row) as AgentMessage);
-    nextIdx = stored.length;
-    // Every check that can refuse the thread runs before `thread.started`: a refused
-    // re-invocation must not relabel a finished thread in the stream record.
-    if (stored.length > 0 && !sameSystem(stored[0], system)) {
-      throw new ThreadFailure(
-        "the stored system message differs from the current system prompt or tools; " +
-          "a resumed thread keeps the prompt it started with (prompt-cache rule 1)",
-      );
-    }
-    const repairs = interruptedToolResults(stored);
-    const hasUser = stored.some((m) => m.role === "user");
-    const finished = isFinished([...stored, ...repairs].at(-1));
-    // A thread with no user message yet (new, or a crash before the first one was stored)
-    // starts from the task. A finished one runs only for a new input; an unfinished one
-    // gets the resume note first, as its own message. Each message carries its sender, so
-    // the stream record never labels the restart note as a person's words. The task counts
-    // as a person's: the harness can't tell a supervisor's task from a human's.
-    const prompts: AgentMessage[] = [];
-    const addPrompt = (text: string | undefined, sender: UserSender) => {
-      if (!text) return;
-      const prompt: AgentMessage = { role: "user", content: text, timestamp: Date.now() };
-      senders.set(prompt, sender);
-      prompts.push(prompt);
-    };
-    if (hasUser) {
-      if (!finished) addPrompt(options.resumeNote, { kind: "runtime" });
-      addPrompt(options.input, { kind: "person" });
-    } else {
-      addPrompt(options.task, { kind: "person" });
-    }
-    const message = prompts.length > 0 ? prompts : undefined;
-    if (message === undefined && finished) {
-      return { status: "completed", ran: false, usage };
-    }
-    if (message === undefined && needsUserTurn([...stored, ...repairs])) {
-      throw new ThreadFailure(
-        `thread ${threadId} ends with an assistant message: pass an input to continue it`,
-      );
-    }
+  const userMessage = (text: string, sender: UserSender): AgentMessage => {
+    const message: AgentMessage = { role: "user", content: text, timestamp: Date.now() };
+    senders.set(message, sender);
+    return message;
+  };
+  // True from the moment the agent loop is about to start until its last check for queued
+  // messages, with no await between that check and clearing it, so a message accepted here
+  // is always run.
+  let accepting = false;
+  let reply = "";
 
-    started = true;
-    emit("thread.started", {
-      parentThreadId: options.parentThreadId ?? null,
-      kind: options.kind,
-      task: options.task,
-    });
-    if (stored.length === 0) {
-      // A new thread: store the system message before anything else.
-      if (system && (await persist(system))) {
-        emit("message", { role: "system", text: textOf(system) });
+  async function run(): Promise<ThreadOutcome> {
+    let started = false;
+    let outcome: Omit<ThreadOutcome, "usage" | "ran" | "reply">;
+    let unexpected: unknown;
+    const abort = () => agent.abort();
+    signal?.addEventListener("abort", abort);
+    try {
+      const stored = (await history.load(threadId)).map((row) => JSON.parse(row) as AgentMessage);
+      nextIdx = stored.length;
+      // Every check that can refuse the thread runs before `thread.started`: a refused
+      // re-invocation must not relabel a finished thread in the stream record.
+      if (stored.length > 0 && !sameSystem(stored[0], system)) {
+        throw new ThreadFailure(
+          "the stored system message differs from the current system prompt or tools; " +
+            "a resumed thread keeps the prompt it started with (prompt-cache rule 1)",
+        );
       }
-    }
-    // A crash can leave tool calls without results, which providers reject.
-    for (const result of repairs) {
-      if (!(await persist(result))) break;
-      stored.push(result);
-      emitToolResult(result);
-    }
-    if (stored.length > 0) agent.state.messages = stored;
+      const repairs = interruptedToolResults(stored);
+      const hasUser = stored.some((m) => m.role === "user");
+      const finished = isFinished([...stored, ...repairs].at(-1));
+      // A thread with no user message yet (new, or a crash before the first one was stored)
+      // starts from the prompt. A finished one runs only for a new input; an unfinished one
+      // gets the resume note first, as its own message. Each message carries its sender, so
+      // the stream record never labels the restart note as a person's words. The prompt
+      // counts as a person's: the harness can't tell a supervisor's task from a human's.
+      const prompts: AgentMessage[] = [];
+      const addPrompt = (text: string | undefined, sender: UserSender) => {
+        if (text) prompts.push(userMessage(text, sender));
+      };
+      if (hasUser) {
+        if (!finished) addPrompt(options.resumeNote, { kind: "runtime" });
+        if (options.input) addPrompt(options.input.text, options.input.sender);
+      } else {
+        addPrompt(options.prompt, { kind: "person" });
+      }
+      const message = prompts.length > 0 ? prompts : undefined;
+      if (message === undefined && finished) {
+        return { status: "completed", ran: false, reply, usage };
+      }
+      if (message === undefined && needsUserTurn([...stored, ...repairs])) {
+        throw new ThreadFailure(
+          `thread ${threadId} ends with an assistant message: pass an input to continue it`,
+        );
+      }
 
-    agent.subscribe(async (event) => {
-      switch (event.type) {
-        case "message_end": {
-          const { message } = event;
-          const ok = await persist(message);
-          if (message.role === "assistant") addUsage(usage, message);
-          if (!ok) break;
-          if (message.role === "toolResult") emitToolResult(message);
-          else if (message.role === "assistant") {
-            // Every reply gets a `message`, even an empty or failed one: it ends the
-            // reply's live partial (`stream.ts`).
-            emit("message", { role: "assistant", text: textOf(message) });
-          } else if (message.role === "user") {
-            const sender = senders.get(message);
-            if (!sender) throw new Error("a user message reached message_end without a sender");
-            const text = textOf(message);
-            if (text) emit("message", { role: "user", text, sender });
-          }
-          break;
+      started = true;
+      emit("thread.started", {
+        parentThreadId: options.parentThreadId ?? null,
+        kind: options.kind,
+        ...(options.taskId && { task: options.taskId }),
+        ...(options.attemptId && { attemptId: options.attemptId }),
+        ...(options.spawnedBy && { spawnedBy: options.spawnedBy }),
+        ...(options.workflows && { workflows: options.workflows }),
+      });
+      if (stored.length === 0) {
+        // A new thread: store the system message before anything else.
+        if (system && (await persist(system))) {
+          emit("message", { role: "system", text: textOf(system) });
         }
-        case "tool_execution_start":
-          // The call is in History (its assistant message was stored first) unless a write failed.
-          if (historyError) break;
-          emit("tool.call", {
-            toolCallId: event.toolCallId,
-            name: event.toolName,
-            input: event.args,
-          });
-          break;
       }
-    });
+      // A crash can leave tool calls without results, which providers reject.
+      for (const result of repairs) {
+        if (!(await persist(result))) break;
+        stored.push(result);
+        emitToolResult(result);
+      }
+      if (stored.length > 0) agent.state.messages = stored;
 
-    if (!historyError && !signal?.aborted) {
-      if (message !== undefined) await agent.prompt(message);
-      else await agent.continue();
+      agent.subscribe(async (event) => {
+        switch (event.type) {
+          case "message_end": {
+            const { message } = event;
+            const ok = await persist(message);
+            if (message.role === "assistant") {
+              addUsage(usage, message);
+              reply = textOf(message);
+            }
+            if (!ok) break;
+            if (message.role === "toolResult") emitToolResult(message);
+            else if (message.role === "assistant") {
+              // Every reply gets a `message`, even an empty or failed one: it ends the
+              // reply's live partial (`stream.ts`).
+              emit("message", { role: "assistant", text: textOf(message) });
+            } else if (message.role === "user") {
+              const sender = senders.get(message);
+              if (!sender) throw new Error("a user message reached message_end without a sender");
+              const text = textOf(message);
+              if (text) emit("message", { role: "user", text, sender });
+            }
+            break;
+          }
+          case "tool_execution_start":
+            // The call is in History (its assistant message was stored first) unless a write failed.
+            if (historyError) break;
+            emit("tool.call", {
+              toolCallId: event.toolCallId,
+              name: event.toolName,
+              input: event.args,
+            });
+            break;
+        }
+      });
+
+      if (!historyError && !signal?.aborted) {
+        accepting = true;
+        if (message !== undefined) await agent.prompt(message);
+        else await agent.continue();
+        // A message steered in as the loop was ending is still queued.
+        while (!historyError && !signal?.aborted && agent.hasQueuedMessages()) {
+          await agent.continue();
+        }
+      }
+      accepting = false;
+      outcome = historyError
+        ? historyFailure(historyError)
+        : outcomeOf(agent.state.messages.at(-1), signal?.aborted === true);
+    } catch (error) {
+      outcome = {
+        status: "failed",
+        error: error instanceof ThreadFailure ? error.message : String(error),
+      };
+      if (!(error instanceof ThreadFailure)) unexpected = error;
+    } finally {
+      accepting = false;
+      signal?.removeEventListener("abort", abort);
     }
-    outcome = historyError
-      ? historyFailure(historyError)
-      : outcomeOf(agent.state.messages.at(-1), signal?.aborted === true);
-  } catch (error) {
-    outcome = {
-      status: "failed",
-      error: error instanceof ThreadFailure ? error.message : String(error),
-    };
-    if (!(error instanceof ThreadFailure)) unexpected = error;
-  } finally {
-    signal?.removeEventListener("abort", abort);
+    // The caller owns the recorder and flushes it.
+    if (started) emit("thread.ended", outcome);
+    if (unexpected) throw unexpected;
+    return { ...outcome, ran: started, reply, usage };
   }
-  // The caller owns the recorder and flushes it.
-  if (started) emit("thread.ended", outcome);
-  if (unexpected) throw unexpected;
-  return { ...outcome, ran: started, usage };
+
+  return {
+    send(text, sender = { kind: "person" }) {
+      if (!accepting) return false;
+      agent.steer(userMessage(text, sender));
+      return true;
+    },
+    done: run(),
+  };
 }
 
 /** A failure of the thread itself, as opposed to a bug: reported as the outcome, not thrown. */
 class ThreadFailure extends Error {}
 
-const historyFailure = (error: unknown): Omit<ThreadOutcome, "usage" | "ran"> => ({
+const historyFailure = (error: unknown): Omit<ThreadOutcome, "usage" | "ran" | "reply"> => ({
   status: "failed",
   error: `storing the thread's history failed, so it stopped: ${String(error)}`,
 });
 
 /** Wraps our tool as a Pi tool: JSON Schema for the model, zod for validation and defaults. */
-function toAgentTool(tool: Tool, { runId, threadId, sandbox }: RunThreadOptions): AgentTool {
+function toAgentTool(tool: Tool, { runId, threadId, sandbox }: StartThreadOptions): AgentTool {
   const { $schema: _, ...jsonSchema } = z.toJSONSchema(tool.input, { io: "input" });
   return {
     name: tool.name,
     label: tool.name,
     description: tool.description,
-    parameters: Type.Unsafe(jsonSchema),
+    parameters: Type.Unsafe(strictObjects(jsonSchema)),
+    ...(tool.sequential && { executionMode: "sequential" as const }),
     execute: async (toolCallId, params, signal) => {
       const result = await tool.execute(tool.input.parse(params), {
         runId,
@@ -265,6 +320,22 @@ function toAgentTool(tool: Tool, { runId, threadId, sandbox }: RunThreadOptions)
       };
     },
   };
+}
+
+/**
+ * Closes every object schema (`additionalProperties: false`), so a field a tool does not
+ * take is refused when Pi validates the call, instead of silently dropped by zod.
+ */
+function strictObjects<T>(schema: T): T {
+  if (Array.isArray(schema)) return schema.map(strictObjects) as T;
+  if (typeof schema !== "object" || schema === null) return schema;
+  const entries = Object.entries(schema).map(([key, value]) => [key, strictObjects(value)]);
+  const closed = Object.fromEntries(entries);
+  return (
+    closed.type === "object" && closed.properties && closed.additionalProperties === undefined
+      ? { ...closed, additionalProperties: false }
+      : closed
+  ) as T;
 }
 
 /** The stored system message must be the one the current prompt and tools would make. */
@@ -334,7 +405,7 @@ const isFinished = (last: AgentMessage | undefined) =>
 function outcomeOf(
   last: AgentMessage | undefined,
   aborted: boolean,
-): Omit<ThreadOutcome, "usage" | "ran"> {
+): Omit<ThreadOutcome, "usage" | "ran" | "reply"> {
   if (aborted && !(last?.role === "assistant" && last.stopReason === "stop")) {
     return { status: "cancelled" };
   }

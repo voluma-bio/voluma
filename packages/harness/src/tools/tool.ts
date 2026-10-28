@@ -29,5 +29,7 @@ export interface Tool<S extends z.ZodType = z.ZodType> {
   name: string;
   description: string;
   input: S;
+  /** Runs one call at a time within its thread (the task tools, whose appends must not interleave). */
+  sequential?: boolean;
   execute(input: z.infer<S>, ctx: ToolContext): Promise<ToolResult>;
 }
