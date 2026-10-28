@@ -9,9 +9,9 @@
  * what it needs; index.ts supplies adapters.
  */
 import { eventInputSchema } from "@voluma/contracts/events";
+import { type HistoryResponse, historyRowSchema } from "@voluma/contracts/history";
 import type { EventLog } from "@voluma/harness/ports/event-log";
 import { type History, HistoryConflict } from "@voluma/harness/ports/history";
-import { z } from "zod";
 import type { DomainHandler } from "../../domain";
 
 export interface RunDeps {
@@ -20,8 +20,6 @@ export interface RunDeps {
   /** Callers present this as `Authorization: Bearer <token>`. */
   apiToken: string;
 }
-
-const historyRowSchema = z.object({ idx: z.number().int().nonnegative(), message: z.string() });
 
 export function createRun({ eventLog, history, apiToken }: RunDeps): DomainHandler {
   return async (request) => {
@@ -48,7 +46,7 @@ export function createRun({ eventLog, history, apiToken }: RunDeps): DomainHandl
       const threadId = decode(messages[1] as string);
       if (threadId === undefined) return badRequest("malformed path");
       if (request.method === "GET")
-        return Response.json({ messages: await history.load(threadId) });
+        return Response.json({ messages: await history.load(threadId) } satisfies HistoryResponse);
       if (request.method === "POST") {
         const parsed = historyRowSchema.safeParse(await readJson(request));
         if (!parsed.success) return badRequest(parsed.error.message);

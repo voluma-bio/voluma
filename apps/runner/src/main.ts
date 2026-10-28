@@ -182,8 +182,6 @@ function printEvent(event: Parameters<typeof api.append>[0]): void {
     case "tool.call":
       console.log(`[call ${p.toolCallId}] ${clip(p.input)}`);
       break;
-    case "tool.output":
-      break;
     case "tool.result":
       console.log(`[result ${p.toolCallId}${p.truncated ? " truncated" : ""}] ${clip(p.output)}`);
       break;
