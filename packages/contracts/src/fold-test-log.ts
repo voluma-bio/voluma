@@ -188,7 +188,6 @@ export function expectParses(f: Folded) {
         ...t,
         title: t.id,
         ask: "",
-        dependsOn: [],
         structureIds: [],
         threads: { ...t.threads, chat: null },
       })),

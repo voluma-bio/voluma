@@ -5,7 +5,8 @@
  *   several (the OA workflow plus `microct-analysis`), so pins are always an
  *   array. `r2.ts` turns a pin into its key prefix.
  * - The plan: each task's declared outputs, the workflow's own definition of
- *   "done". `packages/workflow` parses `workflow.md` into it; the runtime
+ *   "done", and the tasks each depends on, the graph staleness follows
+ *   (`task-tools.ts`). `packages/workflow` parses `workflow.md` into it; the runtime
  *   records it in the run's first event (`revision.started`, `events.ts`), so
  *   the fold reads it from the log and never from the workflow.
  */
@@ -60,7 +61,14 @@ export type DeclaredOutput = z.infer<typeof declaredOutputSchema>;
 
 export const workflowPlanSchema = z
   .object({
-    tasks: z.array(z.object({ id: taskIdSchema, outputs: z.array(declaredOutputSchema) })),
+    tasks: z.array(
+      z.object({
+        id: taskIdSchema,
+        /** Tasks this one builds on; a redo of one of them makes this one stale. */
+        dependsOn: z.array(taskIdSchema),
+        outputs: z.array(declaredOutputSchema),
+      }),
+    ),
   })
   .superRefine((plan, ctx) => {
     const dup = (path: (string | number)[], what: string) =>
@@ -75,5 +83,42 @@ export const workflowPlanSchema = z
         outputs.add(o.id);
       });
     });
+    plan.tasks.forEach((t, ti) => {
+      t.dependsOn.forEach((d, di) => {
+        if (!tasks.has(d))
+          ctx.addIssue({
+            code: "custom",
+            path: ["tasks", ti, "dependsOn", di],
+            message: `"${d}" is not a task in the plan`,
+          });
+      });
+    });
+    const deps = new Map(plan.tasks.map((t) => [t.id, t.dependsOn]));
+    // Depth-first; a task met again while still on the path closes a cycle.
+    const done = new Set<string>();
+    const path: string[] = [];
+    const visit = (id: string): string[] | undefined => {
+      if (path.includes(id)) return [...path.slice(path.indexOf(id)), id];
+      if (done.has(id)) return undefined;
+      path.push(id);
+      for (const d of deps.get(id) ?? []) {
+        const cycle = visit(d);
+        if (cycle) return cycle;
+      }
+      path.pop();
+      done.add(id);
+      return undefined;
+    };
+    for (const t of plan.tasks) {
+      const cycle = visit(t.id);
+      if (cycle) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["tasks"],
+          message: `dependency cycle: ${cycle.join(" → ")}`,
+        });
+        break;
+      }
+    }
   });
 export type WorkflowPlan = z.infer<typeof workflowPlanSchema>;

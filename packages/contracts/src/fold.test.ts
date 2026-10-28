@@ -322,4 +322,22 @@ describe("fold", () => {
     ]);
     expectParses(f);
   });
+
+  it("a dependency without a row is left out; a woken check thread keeps its verdict", () => {
+    const l = log();
+    l.run({
+      tasks: [
+        { id: "a", dependsOn: [], outputs: [] },
+        { id: "c", dependsOn: ["a"], outputs: [] },
+      ],
+    });
+    l.open("w:1:open", W, "c");
+    l.status("w:1", W, "c", "w:1:open", "to-check");
+    expect(need(fold(l.events), "c").dependsOn).toEqual([]);
+    expectParses(fold(l.events));
+    l.thread("chk", "check", "w:1:open");
+    l.checkpoint("chk:1", "chk", "c", "w:1:open", { verdict: "passed" });
+    l.thread("chk", "check", "w:1:open"); // a wake: same thread, started again
+    expect(need(fold(l.events), "c").checker?.verdict).toBe("passed");
+  });
 });

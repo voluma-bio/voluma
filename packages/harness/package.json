@@ -7,6 +7,7 @@
     "./ports/sandbox": "./src/ports/sandbox.ts",
     "./ports/event-log": "./src/ports/event-log.ts",
     "./ports/history": "./src/ports/history.ts",
+    "./ports/lease-lost": "./src/ports/lease-lost.ts",
     "./layout": "./src/layout.ts",
     "./recorder": "./src/recorder.ts",
     "./sandbox-session": "./src/sandbox-session.ts",

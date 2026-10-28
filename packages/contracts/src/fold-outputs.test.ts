@@ -76,6 +76,7 @@ describe("fold outputs", () => {
     l.run(
       plan({
         id: "seg",
+        dependsOn: [],
         outputs: [
           { id: "width", kind: "measurement", required: true, unit: "mm" },
           { id: "grade", kind: "score", required: true, levels: ["0", "1", "2", "3"] },
@@ -175,6 +176,7 @@ describe("fold outputs", () => {
     l.run(
       plan({
         id: "a",
+        dependsOn: [],
         outputs: [
           { id: "width", kind: "measurement", required: true, unit: "mm" },
           { id: "femur", kind: "structure", required: true },
@@ -236,8 +238,16 @@ describe("fold outputs", () => {
     const l = log();
     l.run(
       plan(
-        { id: "a", outputs: [{ id: "width", kind: "measurement", required: true, unit: "mm" }] },
-        { id: "c", outputs: [{ id: "ratio", kind: "measurement", required: true, unit: "1" }] },
+        {
+          id: "a",
+          dependsOn: [],
+          outputs: [{ id: "width", kind: "measurement", required: true, unit: "mm" }],
+        },
+        {
+          id: "c",
+          dependsOn: ["a"],
+          outputs: [{ id: "ratio", kind: "measurement", required: true, unit: "1" }],
+        },
       ),
     );
     l.open("w:1:open", W, "a");
@@ -263,6 +273,7 @@ describe("fold outputs", () => {
     l.run(
       plan({
         id: "seg",
+        dependsOn: [],
         outputs: [
           { id: "labels", kind: "volume", required: true, volumeKind: "labels" },
           { id: "width", kind: "measurement", required: true, unit: "mm" },
