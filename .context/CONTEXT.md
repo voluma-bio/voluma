@@ -120,8 +120,10 @@ sealed cookie (`voluma-guest`, `__Host-` on https, HttpOnly, 400 days; same seal
 cookie, no WorkOS call), and `/me` returns `kind: "visitor"`. A valid member session wins over
 the guest cookie; signing out returns the member to the same guest. Unset means the sign-in
 wall, and a guest cookie is ignored. Minting is limited to 20 per client address per hour
-(in-process; `X-Real-IP`, which Railway overwrites), then 429. The same mechanism is the
-hackathon's anonymous demo visitor: point it at the Demo organization with `self`. When an `Authorization` header is present only the
+(in-process; `X-Real-IP`, which Railway is said to overwrite, unverified), then 429. Guests
+belong to the Demo organization, never the Yao Lab: lab runs include scans not cleared for
+public use, so lab data is for signed-in members. They share the Demo workspace (scope `lab`
+for now; `self` for the hackathon). When an `Authorization` header is present only the
 bearer counts. The root answers 401 for no principal on everything but `/api/auth/*`;
 a domain guards a subtree with `requireService` or `requireUser` (which also sets a typed
 `c.var.user`) and gets 403 for the other kind. A cookie-authenticated non-GET request must
@@ -148,19 +150,24 @@ timeout and no SDK retries (AuthKit's own one-time 429 retry stays, so a rate-li
 refresh is two calls). The JWKS fetch has the same 3 s bound and its keys are kept for the
 process lifetime (an unknown `kid` reloads, behind jose's 30 s cooldown), so a cold process
 during an outage spends at most 3 s on keys plus 3 s on the refresh. Each process also
-remembers refresh outcomes in a 10k-entry LRU keyed by a hash of the refresh token: a
-refreshed session until its access token expires, a dead one until the cookie's max age. A
+remembers refresh outcomes in a 10k-entry LRU keyed by the refresh token: a
+refreshed session until its access token expires, a dead one until the cookie's max age, a
+transient failure for 10 s. A
 client replaying one cookie therefore costs one WorkOS call per access-token lifetime, or
 none once the session is dead; the allow-list is still checked on every request. A failure
-that is 408, 429, 5xx or a network error leaves the cookie, is not remembered, and answers
+that is 408, 429, 5xx or a network error leaves the cookie, is remembered for 10 s (a
+replay in that time makes no WorkOS call), and answers
 503 `{ "error": "auth unavailable" }` (not 401, which signs the web client out), so an
 outage shows the gate's can't-be-reached screen and keeps the session; any other failure (revoked or expired session,
 `sso_required`) clears it, and an unreadable cookie is cleared without a call.
 
 Sign-out revokes the session at WorkOS on the server (`userManagement.revokeSession`), as
 does signing in over an existing session (the old one); refresh tokens are not rotated on
-use, so a copied cookie would otherwise stay a session. The access token already issued
-stays valid until it expires. `returnTo` is sanitized, limited to printable ASCII and 512
+use, so a copied cookie would otherwise stay a session. Sign-out refuses copies of the
+cookie at once in the process that handled it (its memo marks the refresh token dead, and
+a refresh already in flight cannot undo that); in another process, or after the memo
+evicted the entry, a copy works until its access token expires (5 min on staging) and is
+refused at its next refresh. `returnTo` is sanitized, limited to printable ASCII and 512
 characters, and dropped if it doesn't fit, which keeps a PKCE verifier cookie near 1.2 KB;
 `/login` evicts stale verifier cookies.
 
