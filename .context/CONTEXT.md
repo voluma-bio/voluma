@@ -19,12 +19,12 @@ packages/
   contracts     zod schemas for the four contracts and the shared formats
   harness       the agent harness: our tools, the Sandbox and EventLog ports, the Pi
                 adapter; runtime-neutral (no Node types)
-  workflow      a workflow directory: snapshot it into the run's R2 prefix (`load.ts`), parse `workflow.md`, agents and skills (`parse.ts`), task graph, stale tasks
+  workflow      a workflow skill directory: snapshot it into the run's R2 prefix and read it (`load.ts`), build the plan from the selected outputs (`plan.ts`), task graph, stale tasks
   api-client    typed commands and event stream; the only way web features reach the API
   viewer        local DICOM ZIP intake, Cornerstone acquired slices, persistent imaging slots
   ui            shared React components, styled from tokens
   design-tokens tokens.css (raw values, two themes) and theme.css (Tailwind mapping)
-workflows/      Workflow directories (`workflow.md`, `agents/`, `skills/`) and their Python skill resources (microct-analysis; mouse-oa arrives with #57)
+workflows/      Workflow skill directories (`SKILL.md`, `outputs.json`, `tasks.json`, `references/`, `resources/`) and their Python skill resources
 tools/ci        PR-body check
 tools/dev.mjs   the `pnpm dev` launcher (below)
 ```
@@ -133,7 +133,7 @@ checklist, check threads, and review chat threads.
   heartbeat was sent. SIGTERM stops every run, each reports `released`, and the process
   exits. A `voluma` run uses our keys; a `visitor` run uses the claim's, in that run's scope
   only. `redact.ts` masks every literal key in stored events and history rows, console lines
-  (redacted before they are clipped) and the report's `error`. Before a run's sandbox exists the runner snapshots the run's workflow directory (`workflows/<name>/`, plus the directories its `workflow.md` lists in `uses`) from its own checkout into the run's R2 prefix, once per run, and parses the snapshot into a `WorkflowDefinition`; it builds the prompts from that (`prompts.ts`): the worker or checker agent's instructions, the workflow intro, the skill list (name, description, `/workflow/...` path; the agent reads the rest with bash), then the task's prose and done criteria. An unreadable workflow or an agent tool the harness lacks (`packages/harness/src/tools/registry.ts`) fails the run at start. The claim carries no plan; the plan is the parsed one, and a resumed run keeps the plan its first event recorded. Workflow format: voluma-bio/docs `work/mvp-contracts-and-data/design/workflow-md-format.md`.
+  (redacted before they are clipped) and the report's `error`. Before a run's sandbox exists the runner snapshots the run's workflow skill directory (`workflows/workflow-<name>/`, plus the skill directories its `SKILL.md` lists in `uses`) from its own checkout into the run's R2 prefix, once per run, and reads the snapshot (`packages/workflow`). The plan is the tasks that produce the outputs the user selected (`Run.selectedOutputs`, all if absent) and what they depend on, built from `tasks.json` and `outputs.json` (`computePlan`), passed through `adaptPlan` (where the main thread will adapt it to the run's notes) and recorded in the first event; a resumed run keeps the plan its first event recorded. The prompts are the harness's role prompts plus the skill list (name, description, `/workflow/...` path; the agent reads the rest with bash) and the task's instructions and done criteria (`prompts.ts`). Every role's tools are `view_image` and, with a Meta key, `segment_sam`, built from the registry (`packages/harness/src/tools/registry.ts`). The claim carries no plan. Workflow format: voluma-bio/docs `work/mvp-contracts-and-data/design/workflow-format.md`.
 - **`seq` and the database.** `seq` per run is gapless and in commit order: each
   append takes a per-run advisory lock as its own statement before the insert (a lock
   inside the insert's statement races under READ COMMITTED), so the stream hub can

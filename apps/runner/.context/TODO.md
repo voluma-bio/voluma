@@ -13,3 +13,5 @@ From the skillset move (`workflows/` in this repo):
 
 - **The sandbox image does not follow the pinned commit.** The image is chosen by name in config, so an old pin runs on the newest image. To tie them: publish under a tag from the hash of `workflows/microct-analysis/requirements.txt`, have the runner resolve that tag from the requirements at the run's pinned commit, and record the image in the run's first event. Needs the workflow-packages lane's pin and the `/workflow` mount to read that file.
 - **The deploy lane's `sandbox/Dockerfile`** (branch `jimyao/runner-deploy`) still has an inline pip line; when both land, `COPY` `workflows/microct-analysis/requirements.txt` and `pip install --no-deps -r` it (the file's header says why `--no-deps`).
+- **Models per role.** Every role runs on the runner's configured model. The server-side alias table and the per-workflow override (spec: `workflow-format.md`) are not built.
+- **Roles `main` and `review` are not started.** The main-thread lane builds them; `adaptPlan` in `packages/workflow/src/plan.ts` is its seam for the run's notes.

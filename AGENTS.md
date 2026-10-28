@@ -38,7 +38,7 @@ Pre-commit runs Biome on staged files. Nothing runs on push. Use pnpm, never npm
 | `apps/web/src/features/run`, `apps/api/src/domains/run`, `packages/workflow`, `packages/harness`, `apps/runner` | Run lane |
 | `apps/web/src/features/review`, `apps/api/src/domains/review`, `packages/viewer` | Review lane |
 | `workflows/microct-analysis` | Run lane |
-| `workflows/mouse-oa`, `workflows/` root files (`package.json`, `test.sh`, `pyproject.toml`) | Both; small PRs |
+| `workflows/workflow-mouse-oa`, `workflows/` root files (`package.json`, `test.sh`, `pyproject.toml`) | Both; small PRs |
 | `packages/contracts`, `packages/api-client` | Both; contract PRs only |
 | `packages/design-tokens`, `packages/ui`, `apps/web/src/shell`, `apps/web/src/dev-ui`, `apps/web` and `apps/api` root files, `apps/api/src/index.ts`, `apps/api/src/ports`, root config, `tools/` | Both; small PRs |
 
@@ -133,11 +133,12 @@ they need:
 - Colours come only from `packages/design-tokens`; components use token
   utilities (`bg-card`, `text-muted-foreground`). Visual rules: [DESIGN.md](DESIGN.md).
   Check shared components at `/dev/ui` in both themes.
-- Workflows and analysis code live in `workflows/`. A workflow is a
-  directory there with `workflow.md`, `agents/` and `skills/`, and a run
+- Workflows and analysis code live in `workflows/`. A workflow is one skill
+  directory there, `workflows/workflow-<name>/`: `SKILL.md` (its `uses:` lists
+  other skill directories), `outputs.json` (every output a run can produce),
+  `tasks.json` (the task list), `references/` and `resources/`. A run
   snapshots it: `workflows/microct-analysis` holds the generic micro-CT
-  skills, `workflows/mouse-oa` the mouse knee workflow (it arrives with the
-  workflow-packages lane, #57). Python lives only in
+  skills, `workflows/workflow-mouse-oa` the mouse knee workflow. Python lives only in
   `workflows/`, as skill resources: CLI scripts that take and return paths,
   never bytes. Their dependencies are
   `workflows/microct-analysis/requirements.txt`, compiled from `requirements.in`;
