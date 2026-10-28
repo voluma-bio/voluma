@@ -10,8 +10,9 @@
  *
  * Both are strict: an unknown key or a dangling id fails with the path to it. `packages/workflow`
  * turns them into the run's `WorkflowPlan` (`workflow.ts`) for the outputs a run selected.
- * `outputsFileJsonSchema` and `tasksFileJsonSchema` are JSON Schemas for editor autocomplete
- * (`"$schema"` in the file, or a VS Code `json.schemas` mapping).
+ * `outputsFileJsonSchema` and `tasksFileJsonSchema` are JSON Schemas for editor autocomplete.
+ * Both files are arrays, which cannot carry a `"$schema"` key, so map them in the editor
+ * instead (VS Code `json.schemas`, matching each workflow directory's `outputs.json` and `tasks.json`).
  */
 import { z } from "zod";
 import { segmentSchema, taskIdSchema } from "./ids";
@@ -112,6 +113,8 @@ export const workflowFilesSchema = z
         if (!taskIds.has(d)) issue(["tasks", i, "dependsOn", j], `"${d}" is not a task`);
       });
       t.outputs.forEach((id, j) => {
+        if (t.outputs.indexOf(id) !== j)
+          issue(["tasks", i, "outputs", j], `duplicate output "${id}"`);
         const o = byId.get(id);
         if (!o) issue(["tasks", i, "outputs", j], `"${id}" is not in outputs.json`);
         else if (o.task !== t.id) {

@@ -146,6 +146,12 @@ export const runStateSchema = z.discriminatedUnion("status", [
 ]);
 export type RunState = z.infer<typeof runStateSchema>;
 
+/** Output ids the user selected; at most 200, each once. */
+const selectedOutputsSchema = z
+  .array(segmentSchema)
+  .max(200)
+  .refine((ids) => new Set(ids).size === ids.length, "duplicate output id");
+
 export const runSchema = z.object({
   id: runIdSchema,
   labId: z.string(),
@@ -157,7 +163,7 @@ export const runSchema = z.object({
    * The output ids the user selected ("What do you want measured?", `outputs.json`); the run
    * covers the tasks that produce them and the tasks those depend on. Absent: every output.
    */
-  selectedOutputs: z.array(segmentSchema).optional(),
+  selectedOutputs: selectedOutputsSchema.optional(),
   /** Free text the user added at the start; the workflow's main thread reads it. */
   notes: z.string().max(4000).optional(),
   /** Who pays for models and sandboxes; see the header. */
@@ -191,7 +197,7 @@ export const startRunRequestSchema = z.object({
   workflowId: workflowIdSchema,
   inputId: inputIdSchema,
   /** As `runSchema.selectedOutputs`; an id the workflow's `outputs.json` lacks fails the run at start, with that message. */
-  selectedOutputs: z.array(segmentSchema).min(1).optional(),
+  selectedOutputs: selectedOutputsSchema.min(1).optional(),
   notes: z.string().max(4000).optional(),
   /** Present: the run uses these (`credentials: "visitor"`) and skips the org's runs-at-once count. */
   keys: visitorKeysSchema.optional(),
