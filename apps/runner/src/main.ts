@@ -12,8 +12,8 @@
  *     --task "Report the slice count of the scan in /inputs"
  *
  * Reads the repo's .env (see config.ts): model keys, R2 and Modal credentials,
- * VOLUMA_API_URL and VOLUMA_API_TOKEN (unset: the API `pnpm dev` started in this worktree,
- * from .dev/env.json). None of them enter the sandbox or process.env.
+ * It talks only to the API `pnpm dev` started in this worktree (.dev/env.json). None of
+ * them enter the sandbox or process.env.
  */
 import { randomUUID } from "node:crypto";
 import { parseArgs } from "node:util";
@@ -56,8 +56,8 @@ const apiKey = required(`VOLUMA_${provider.toUpperCase()}_API_KEY`);
 const model = models.getModel(provider, modelId);
 if (!model) throw new Error(`unknown model ${provider}/${modelId}`);
 
-const apiUrl = optional("VOLUMA_API_URL");
-const apiConfig = apiUrl ? { baseUrl: apiUrl, token: required("VOLUMA_API_TOKEN") } : localApi();
+// Local only: a claim takes whatever run is next, which on a deployed API is a visitor's.
+const apiConfig = localApi();
 // Every ingest write carries the lease of a claimed run (`@voluma/contracts/runner`).
 const claim = await claimNext(apiConfig, `run-task-${randomUUID().slice(0, 8)}`);
 const runId = claim.run.id;

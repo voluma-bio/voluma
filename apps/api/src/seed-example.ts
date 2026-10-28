@@ -88,13 +88,13 @@ await db.transaction(async (tx) => {
   if (src.input.source !== "reference") throw new Error("an example reads the reference scan");
   if (src.run.example) throw new Error(`run ${source} is itself an example`);
 
-  copied = await copyEvidence(); // after the checks, so a refused seed copies nothing
-
   // Replace an earlier seeding of this example, and nothing else.
   const [existing] = await tx.select().from(runs).where(eq(runs.id, exampleId));
   if (existing && !(existing.example && existing.startedBy === EXAMPLES_OPERATOR)) {
     throw new Error(`run ${exampleId} exists and is not an example; pick another --id`);
   }
+
+  copied = await copyEvidence(); // after every check, so a refused seed copies nothing
   await tx.delete(piMessages).where(sql`starts_with(${piMessages.threadId}, ${`${exampleId}.`})`);
   await tx.delete(threads).where(eq(threads.runId, exampleId));
   await tx.delete(events).where(eq(events.runId, exampleId));

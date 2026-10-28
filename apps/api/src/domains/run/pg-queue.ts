@@ -11,7 +11,7 @@ import { and, asc, eq, notInArray, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { runningCount, spentToday, startedToday } from "./pg-limits";
 import { loadRun, QUEUE_LOCK, type Tx } from "./run-rows";
-import { type Claimed, LeaseLost, type LimitsOf, RunEnded, type RunQueue } from "./run-store";
+import { type ClaimOutcome, LeaseLost, type LimitsOf, RunEnded, type RunQueue } from "./run-store";
 import { runs } from "./schema";
 
 /** Lease expiries with no `released` before a run ends `failed` (so a run that crashes the runner doesn't loop). */
@@ -57,21 +57,26 @@ const fail = (tx: Tx, runId: string, error: string) =>
 export function pgRunQueue(db: PostgresJsDatabase, limitsOf: LimitsOf): RunQueue {
   return {
     claim: (runnerId, keyedRunIds) =>
-      db.transaction(async (tx): Promise<Claimed | null> => {
+      db.transaction(async (tx): Promise<ClaimOutcome> => {
         await tx.execute(sql`SELECT pg_advisory_xact_lock(${QUEUE_LOCK})`);
         await sweep(tx);
         // The keys live in this process's memory. A queued visitor run whose keys it
         // doesn't hold (another process took the start, or it restarted) can't be claimed.
-        await tx
+        // The ids are read under the lock: a start that holds its keys before it commits
+        // is then either in this list or not yet queued.
+        const dropped: string[] = [];
+        const unkeyed = await tx
           .update(runs)
           .set({ state: "awaiting-keys", awaitingSince: sql`now()` })
           .where(
             and(
               eq(runs.state, "queued"),
               eq(runs.credentials, "visitor"),
-              notInArray(runs.id, keyedRunIds),
+              notInArray(runs.id, keyedRunIds()),
             ),
-          );
+          )
+          .returning({ id: runs.id });
+        dropped.push(...unkeyed.map((run) => run.id));
         // Round-robin by org: the org claimed longest ago goes first (never claimed: first),
         // and within an org the oldest run, so one org's backlog can't starve another.
         const queued = await tx
@@ -87,6 +92,7 @@ export function pgRunQueue(db: PostgresJsDatabase, limitsOf: LimitsOf): RunQueue
           const limits = limitsOf(run.labId);
           if (!limits) {
             await fail(tx, run.id, "This organization can no longer run work.");
+            if (run.credentials === "visitor") dropped.push(run.id);
             continue;
           }
           // A visitor run skips the runs-at-once count, and the visitor cap was checked
@@ -127,9 +133,12 @@ export function pgRunQueue(db: PostgresJsDatabase, limitsOf: LimitsOf): RunQueue
               leaseExpiresAt: leaseUntil,
             })
             .where(eq(runs.id, run.id));
-          return { run: await loadRun(tx, run.id), workflowId: run.workflowId, leaseToken };
+          return {
+            claimed: { run: await loadRun(tx, run.id), workflowId: run.workflowId, leaseToken },
+            dropped,
+          };
         }
-        return null;
+        return { claimed: null, dropped };
       }),
 
     heartbeat: (runId, leaseToken, usage) =>

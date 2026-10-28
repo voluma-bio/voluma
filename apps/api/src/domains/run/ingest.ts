@@ -77,7 +77,8 @@ export function ingestRoutes({ queue, eventLog, history, catalog, vault }: Inges
   app.post("/ingest/claim", async (c) => {
     const parsed = claimRequestSchema.safeParse(await readJson(c.req));
     if (!parsed.success) return c.text(parsed.error.message, 400);
-    const claimed = await queue.claim(parsed.data.runnerId, vault.ids());
+    const { claimed, dropped } = await queue.claim(parsed.data.runnerId, () => vault.ids());
+    for (const runId of dropped) vault.drop(runId);
     if (!claimed) return c.json({ claim: null } satisfies ClaimResponse);
     const { run, workflowId, leaseToken } = claimed;
     const keys = run.credentials === "visitor" ? vault.take(run.id) : undefined;

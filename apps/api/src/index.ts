@@ -105,9 +105,14 @@ const keyVault = new KeyVault();
 
 const app = new Hono();
 app.get("/health", (c) => c.text("ok"));
-// A request body over 256 KB is a 413 before anything reads it (the key vault and the
-// event log keep what clients send).
-app.use("/api/*", bodyLimit({ maxSize: 256 * 1024 }));
+// A body over the limit is a 413 before anything reads it. Browsers get 256 KB (the key
+// vault and the event log keep what they send). The runner is trusted, and a model's
+// history row can be large (reasoning blobs, long tool calls), so /ingest/* gets 8 MB.
+const browserLimit = bodyLimit({ maxSize: 256 * 1024 });
+const runnerLimit = bodyLimit({ maxSize: 8 * 1024 * 1024 });
+app.use("/api/*", (c, next) =>
+  c.req.path.startsWith("/api/run/ingest/") ? runnerLimit(c, next) : browserLimit(c, next),
+);
 // Every /api request is authenticated here, in this order (auth.ts): the bearer and
 // CSRF checks, which do no I/O; the routes that write the session cookie; the session
 // cookie and the 401 for no principal; then the routes that need a user.

@@ -88,6 +88,9 @@ export interface RunStore {
 
 export type Claimed = { run: Run; workflowId: string; leaseToken: string };
 
+/** `dropped`: visitor runs the claim left queued without claiming (moved or failed), whose keys the vault must forget. */
+export type ClaimOutcome = { claimed: Claimed | null; dropped: string[] };
+
 export type RunnerReport =
   | { kind: "ended"; outcome: "completed" | "failed"; error?: string }
   | { kind: "released" };
@@ -95,10 +98,10 @@ export type RunnerReport =
 export interface RunQueue {
   /**
    * One transaction: sweep expired leases, send the queued visitor runs not in
-   * `keyedRunIds` to `awaiting-keys` (this process doesn't hold their keys), then take
+   * `keyedRunIds()` (read under the queue lock) to `awaiting-keys` (this process doesn't hold their keys), then take
    * the oldest queued run of the org served longest ago that the limits allow.
    */
-  claim(runnerId: string, keyedRunIds: string[]): Promise<Claimed | null>;
+  claim(runnerId: string, keyedRunIds: () => string[]): Promise<ClaimOutcome>;
   /** Extends the lease and adds the usage; `stop` once the run has ended. Throws `LeaseLost`. */
   heartbeat(runId: string, leaseToken: string, usage: Usage): Promise<{ stop: boolean }>;
   /** Throws `LeaseLost` or `RunEnded`. */

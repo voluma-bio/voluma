@@ -123,11 +123,8 @@ A rollback restores the old code, not the old schema: migrations have already ru
 aren't reversed. It is safe only if the migrations since that deployment followed the
 expand-then-contract rule. Otherwise fix forward.
 
-The runner needs the staging `VOLUMA_API_TOKEN`: read it with the variables query above.
-Put it, with `VOLUMA_API_URL=https://volumaapi-staging.up.railway.app`, in a temp copy of
-`.env` and run the one command with `VOLUMA_ENV_FILE=<temp file>` (the runner reads its
-settings only from that file, not from the shell). Delete the file after; the staging token
-never goes into `.env`.
+`run-task` talks only to the local dev API: it claims the next queued run, which on staging
+is a visitor's, and would take their keys. The deployed claimer is the runner service.
 
 ## Rotating secrets
 
@@ -136,7 +133,7 @@ before 2026-10-21 as exposed and rotate it.
 
 | Secret | Lives in | Rotate |
 |---|---|---|
-| `VOLUMA_API_TOKEN` | Railway `@voluma/api` variables; whoever runs the runner | New value (`openssl rand -hex 32`) in Railway variables; the redeploy applies it. Old token stops working at once. Whoever runs the runner puts the new value in their temp `VOLUMA_ENV_FILE` ([Operating staging](#operating-staging)) |
+| `VOLUMA_API_TOKEN` | Railway `@voluma/api` variables; whoever runs the runner | New value (`openssl rand -hex 32`) in Railway variables; the redeploy applies it. Old token stops working at once. Whoever runs the runner service updates its copy |
 | Postgres password | Railway `Postgres` variables (`POSTGRES_PASSWORD`; `PGPASSWORD`, `DATABASE_URL` reference it) | Railway's procedure: Database tab, Config, **Regenerate** (needs Jimmy's dashboard seat), then redeploy `@voluma/api`, then check `/health` and one authenticated call. Never edit the password variables or run `ALTER USER` by hand: each changes one side and leaves the variable and the database out of sync. The GraphQL schema has a `databasePasswordReset` mutation (input: `databaseType`, `environmentId`, `serviceId`); whether the project token may call it is untested. Try it only as a deliberate rotation. For a planned rotation with no suspected leak, Railway's [zero-downtime guide](https://docs.railway.com/guides/rotate-credentials-zero-downtime) uses a second role |
 | `RAILWAY_TOKEN` (project token, `.env`) | the repo `.env` of whoever deploys | Dashboard, project settings, Tokens: create a new one, replace it in `.env`, delete the old |
 | `WORKOS_COOKIE_PASSWORD` | Railway `@voluma/api` variables; `.env` | New value in Railway; the redeploy applies it. Every session cookie stops unsealing, so everyone signs in again. Rotate it whenever it may have leaked: it is the key to forging a session cookie, though a forged one still needs a token WorkOS signed |
