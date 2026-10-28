@@ -93,14 +93,15 @@ def load_series(source, out):
     dest = out / 'hu.npy'
     if dest.exists():
         sidecar.fail(f'{dest} exists: write to a fresh output directory')
-    volume = np.lib.format.open_memmap(dest, mode='w+', dtype='float32', shape=(len(paths), first.Rows, first.Columns))
+    # Built in memory and written once: /outputs is a bucket mount, which cannot take a memory-mapped or piecemeal write.
+    volume = np.empty((len(paths), first.Rows, first.Columns), np.float32)
     sources = []
     for z, idx in enumerate(order):
         p = paths[idx]
         d = pydicom.dcmread(p)
         volume[z] = d.pixel_array.astype(np.float32) * cal['slope'] + cal['intercept']
         sources.append({'path': str(p.resolve()), 'sha256': sidecar.sha256_file(p)})
-    volume.flush()
+    np.save(dest, volume)
     meta = {'shape_zyx': list(volume.shape), 'spacing_zyx_mm': spacing_xyz[::-1], 'spacing_xyz_mm': spacing_xyz,
                 'affine_xyz_to_world_mm': affine.tolist(), 'calibration': cal, 'sources': sources,
                 'coordinate_note': 'Array indices are Z,Y,X; the affine consumes X,Y,Z voxel-center indices',
@@ -108,7 +109,7 @@ def load_series(source, out):
     ident = {k: meta[k] for k in ('shape_zyx', 'affine_xyz_to_world_mm', 'sources')}
     meta['grid_id'] = hashlib.sha256(json.dumps(ident, sort_keys=True).encode()).hexdigest()
     (out / 'hu.json').write_text(json.dumps(meta, indent=1) + '\n')
-    return meta
+    return meta, float(volume.min()), float(volume.max())
 
 
 if __name__ == '__main__':
@@ -116,8 +117,7 @@ if __name__ == '__main__':
     ap.add_argument('--in', dest='src', required=True, help='directory holding the DICOM series')
     ap.add_argument('--out', required=True, help='new output directory')
     a = ap.parse_args()
-    m = load_series(a.src, Path(a.out))
-    hu = np.load(Path(a.out) / 'hu.npy', mmap_mode='r')
+    m, hu_min, hu_max = load_series(a.src, Path(a.out))
     sidecar.emit(hu=str(Path(a.out) / 'hu.npy'), header=str(Path(a.out) / 'hu.json'), shape_zyx=m['shape_zyx'],
                  spacing_zyx_mm=m['spacing_zyx_mm'], grid_id=m['grid_id'], calibration=m['calibration']['evidence'],
-                 hu_min=float(hu.min()), hu_max=float(hu.max()))
+                 hu_min=hu_min, hu_max=hu_max)

@@ -14,8 +14,8 @@
  * waits its turn in the queue, makes one attempt and resolves once the store has
  * acknowledged the event, so it never sleeps inside the runtime's critical section; it throws
  * if the event is invalid or the store refuses it, and the id can be written again.
- * Live output is not an event (see `@voluma/contracts/stream`) and does not
- * pass through here. The creator of the recorder `flush()`es when its threads end so the
+ * Live frames are not events (see `@voluma/contracts/stream`): `live` hands them to a batcher
+ * (`live.ts`) that never waits, and they do not join the queue, the view or `flush`. The creator of the recorder `flush()`es when its threads end so the
  * record is complete before the process exits.
  *
  * A `LeaseLost` is not retried: the run is no longer this runner's, so the recorder calls
@@ -30,6 +30,8 @@ import {
   eventInputSchema,
   type RunEvent,
 } from "@voluma/contracts/events";
+import type { LiveFrame } from "@voluma/contracts/stream";
+import type { LiveBatcher, LiveBody } from "./live";
 import type { EventLog } from "./ports/event-log";
 import { LeaseLost } from "./ports/lease-lost";
 
@@ -38,6 +40,8 @@ export type PayloadOf<T extends EventType> = Extract<EventInput, { type: T }>["p
 export interface Recorder {
   /** Queues the event for background delivery with retries; `id` defaults to a random one. */
   emit<T extends EventType>(threadId: string, type: T, payload: PayloadOf<T>, id?: string): void;
+  /** Sends a live frame, best effort: it returns at once and may be dropped. */
+  live(frame: LiveBody): void;
   /**
    * Stores the event after everything queued before it, with one attempt, and adds it to the
    * view once stored; an id already held or queued is a no-op. Throws if the event is invalid
@@ -67,6 +71,7 @@ export function recorder(
   onLeaseLost: () => void,
   retryDelayMs = RETRY_DELAY_MS,
   stored: readonly RunEvent[] = [],
+  live?: LiveBatcher,
 ): Recorder {
   let queue: Promise<unknown> = Promise.resolve();
   let leaseLost = false;
@@ -129,6 +134,7 @@ export function recorder(
 
   return {
     events: () => held,
+    live: (frame) => live?.push({ ...frame, runId } as LiveFrame),
     emit(threadId, type, payload, id = crypto.randomUUID()) {
       if (ids.has(id)) return;
       const parsed = parse(threadId, type, payload, id);

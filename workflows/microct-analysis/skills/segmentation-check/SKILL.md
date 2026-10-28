@@ -27,7 +27,7 @@ With `--ranges` it flags a volume outside the range and a piece count that diffe
 flag every label. Look at the specks total if it is large. Then:
 
 - **One bone, one main piece.** A second large piece means the label is on two bones, or a bone has broken. Look at
-  the 3D sheet. (Clipping can split a thin bone: check the pieces after `clip_to_envelope.py` too.)
+  the 3D sheet. (Clipping can split a thin bone: check the pieces after `clip_to_bone.py` too.)
 - **Volume inside the anatomy reference's range.** Unclipped SAM masks include soft tissue (`sam-segmentation`): clip first,
   then compare. The ranges come from one scan; a value just outside is a question,
   not an error.
@@ -63,7 +63,7 @@ classic labels grown from SAM's femur, tibia and patella alone agreed with the r
 0.97 / 0.95 / 0.94, for that reason). Then:
 
 ```
-python disagree.py --hu hu.npy --labels labels.npy --classic qc/classic.npy --threshold-hu <T> --frame frame.json --out qc/disagree
+python disagree.py --hu hu.npy --labels labels.npy --classic qc/classic.npy --threshold-hu <T> --frame frame.json --names <anatomy.json> --out qc/disagree
 ```
 
 It finds the bone voxels the classic method labels that your labels give to another label or to nothing, groups them into
@@ -75,8 +75,24 @@ at its panel and decide:
 |---|---|
 | One method's boundary runs through the joint space and the other's through bone | Keep the one in the joint space. Note it in the checkpoint. |
 | A one-voxel rim of partial volume along the surface | Ignore it. Say so once for the whole label. |
-| A fragment that is its own bone in one method and part of a big bone in the other | Treat it as a small structure (section 2). |
+| A fragment that is its own bone in one method and part of a big bone in the other | Treat it as a small structure (section 2): name it from the anatomy table, then give it its own label. |
 | You cannot tell from the CT | Keep neither by default: raise a To check item, and say in it which label you kept meanwhile and why. |
+
+Do not keep your label because it is yours, and do not take the classic one because it is the check. Use evidence that does not
+come from either method. Each panel prints the region's assignment and size at the top ("region 2 (0.0056 mm3): yours = 1 femur,
+classic = 8 lateral-sesamoid"): read that line first, then the tinted region in each half, which is the colour of the label that
+side gave it. For a zoom on the region, use the panel, or `render_overlay.py --center <region centre> --names <anatomy.json>`;
+`render_crops.py` takes a whole connected piece of bone, so on a region that touches a big bone it shows the big bone. Then the
+3D sheet and the anatomy table.
+
+**Compare volumes only when the region is a sizeable share of the smaller structure's range.** If the classic label is a structure
+the table lists (a sesamoid) and the region is a large part of that structure's range, or would move the big bone's volume across
+the edge of its range, the volume check decides it. A region far smaller than both ranges cannot: on OA6-1RK, region 2 (4,849 voxels,
+0.006 mm³) is 0.1% of the femur's range width and 1.5% of the sesamoid's, so neither volume tells you anything, and the call
+rests on the CT (the panel shows a separate bone beside the femur) and the anatomy table. Region 1 in the same run runs the other way
+(yours = lateral-sesamoid, classic = femur, 0.01 mm³). A region you keep as it was, against the other method, needs the
+reason written in the checkpoint; if the reason is only "the panel was unclear", it is the last row of the
+table, and the region goes to the researcher as a To check item with `focus` on it.
 
 Never average or vote. Settle a region on the anatomy, or hand it on. How much to expect: on OA6-1RK, an earlier validator
 flagged 5.4% of the watershed's bone for SAM's labels (its own definition); `disagree.py` on the same run, big bones only,

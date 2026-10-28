@@ -27,6 +27,7 @@ import {
 } from "@earendil-works/pi-ai";
 import type { EventType } from "@voluma/contracts/events";
 import { z } from "zod";
+import { replyFrames } from "../../live";
 import { usageOf } from "../../model-usage";
 import type { History } from "../../ports/history";
 import type { Sandbox } from "../../ports/sandbox";
@@ -215,8 +216,20 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       }
       if (stored.length > 0) agent.state.messages = stored;
 
+      // The id the reply's live frames carry, picked when it starts and used by its `message`.
+      let replyId: string | undefined;
+      let frames: ReturnType<typeof replyFrames> | undefined;
       agent.subscribe(async (event) => {
         switch (event.type) {
+          case "message_start":
+            if (event.message.role === "assistant") {
+              replyId = crypto.randomUUID();
+              frames = replyFrames(threadId, replyId, recorder.live);
+            }
+            break;
+          case "message_update":
+            frames?.(event.assistantMessageEvent);
+            break;
           case "message_end": {
             const { message } = event;
             const ok = await persist(message);
@@ -229,11 +242,19 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
               // Every reply gets a `message`, even an empty or failed one: it ends the
               // reply's live partial (`stream.ts`).
               const used = usageOf(message);
-              emit("message", {
-                role: "assistant",
-                text: textOf(message),
-                ...(used && { usage: used }),
-              });
+              const reasoning = reasoningOf(message);
+              recorder.emit(
+                threadId,
+                "message",
+                {
+                  role: "assistant",
+                  text: textOf(message),
+                  ...(reasoning && { reasoning }),
+                  ...(used && { usage: used }),
+                },
+                replyId,
+              );
+              replyId = frames = undefined;
             } else if (message.role === "user") {
               const sender = senders.get(message);
               if (!sender) throw new Error("a user message reached message_end without a sender");
@@ -310,7 +331,7 @@ const historyFailure = (error: unknown): Omit<ThreadOutcome, "ran" | "reply"> =>
 /** Wraps our tool as a Pi tool: JSON Schema for the model, zod for validation and defaults. */
 function toAgentTool(
   tool: Tool,
-  { runId, threadId, kind, taskId, sandbox }: StartThreadOptions,
+  { runId, threadId, kind, taskId, sandbox, recorder }: StartThreadOptions,
 ): AgentTool {
   const { $schema: _, ...jsonSchema } = z.toJSONSchema(tool.input, { io: "input" });
   return {
@@ -318,6 +339,7 @@ function toAgentTool(
     label: tool.name,
     description: tool.description,
     parameters: Type.Unsafe(strictObjects(jsonSchema)),
+    ...(tool.prepare && { prepareArguments: tool.prepare }),
     ...(tool.sequential && { executionMode: "sequential" as const }),
     execute: async (toolCallId, params, signal) => {
       const result = await tool.execute(tool.input.parse(params), {
@@ -328,8 +350,8 @@ function toAgentTool(
         toolCallId,
         signal: signal ?? new AbortController().signal,
         sandbox: () => sandbox(threadId),
-        // Live output has no destination until the stream hub exists.
-        output: () => {},
+        output: (stream, text) =>
+          recorder.live({ type: "tool.output", threadId, toolCallId, stream, text }),
       });
       return {
         content: [
@@ -458,4 +480,15 @@ function textOf(message: { content: unknown }): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   return content.flatMap((part) => (part?.type === "text" ? [part.text as string] : [])).join("");
+}
+
+/** The reply's thinking blocks, joined with a blank line (`message.reasoning`). */
+function reasoningOf(message: { content: unknown }): string {
+  const { content } = message;
+  if (!Array.isArray(content)) return "";
+  return content
+    .flatMap((part) =>
+      part?.type === "thinking" && part.thinking ? [part.thinking as string] : [],
+    )
+    .join("\n\n");
 }

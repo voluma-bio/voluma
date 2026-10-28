@@ -13,7 +13,7 @@
 vtk-osmesa==9.3.1
 numpy==2.5.4
 scipy==1.18.1
-scikit-image==0.26.0
+scikit-image==0.26.0  # classic_segment.grow calls the private watershed_raveled: re-check it before bumping
 pydicom==3.0.2
 nibabel==5.4.2
 SimpleITK==2.5.6
