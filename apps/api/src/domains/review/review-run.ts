@@ -7,6 +7,7 @@ import type { RunEvent } from "@voluma/contracts/events";
 import { type FoldedRevision, type FoldedTask, fold } from "@voluma/contracts/fold";
 import {
   type Annotation,
+  type Focus,
   type ReviewRun,
   type ReviewTask,
   reviewRunSchema,
@@ -18,10 +19,11 @@ import type { WorkflowPlan } from "@voluma/contracts/workflow";
 export function reviewRun(run: Run, events: readonly RunEvent[]): ReviewRun | null {
   const { revisions } = fold(events);
   if (revisions.length === 0) return null;
-  const first = events[0];
+  // Not `events[0]`: the supervisor's `thread.started` and the run-start `wake` come first.
+  const start = events.find((e) => e.type === "revision.started");
   const plan: WorkflowPlan["tasks"] =
-    first?.type === "revision.started" && first.payload.reason === "run"
-      ? first.payload.plan.tasks
+    start?.type === "revision.started" && start.payload.reason === "run"
+      ? start.payload.plan.tasks
       : [];
   const planned = new Map(plan.map((t) => [t.id, t]));
   // TODO(.context/TODO.md): the plan's task `title` once it lands (#86).
@@ -30,18 +32,21 @@ export function reviewRun(run: Run, events: readonly RunEvent[]): ReviewRun | nu
   // TODO(.context/TODO.md): an annotation on the scan (`volumeId` null) needs the scan's
   // volume, whose geometry the API doesn't read yet; until then it and every reference to
   // it are left out.
-  const onScan = (rev: FoldedRevision) =>
-    new Set(rev.annotations.filter((a) => a.volumeId === null).map((a) => a.id));
-
-  const task = (t: FoldedTask, rev: FoldedRevision): ReviewTask => {
+  const task = (t: FoldedTask, rev: FoldedRevision, onScan: Set<string>): ReviewTask => {
     const title = titleOf(t.id);
     const staged = <A extends { stage: string }>(assets: A[]) =>
       assets.map((a) => ({ ...a, stage: title }));
-    const dropped = onScan(rev);
     const kept = <X extends { annotationIds: string[] }>(x: X) => ({
       ...x,
-      annotationIds: x.annotationIds.filter((id) => !dropped.has(id)),
+      annotationIds: x.annotationIds.filter((id) => !onScan.has(id)),
     });
+    // As `fold` does: a focus left pointing at nothing is absent, which means the whole task.
+    const focused = (f: Focus): Focus | undefined => {
+      const k = kept(f);
+      return k.structureIds.length + k.annotationIds.length > 0 || k.volumeId || k.box || k.point
+        ? k
+        : undefined;
+    };
     // The structures it reported, and those its numbers were counted from.
     const own = rev.structures.filter((s) => s.id.startsWith(`${t.id}/`)).map((s) => s.id);
     const cited = [...t.measurements, ...t.scores].flatMap((m) => m.structureIds);
@@ -61,7 +66,10 @@ export function reviewRun(run: Run, events: readonly RunEvent[]): ReviewRun | nu
       scores: t.scores.map(kept),
       missing: t.missing,
       undeclared: t.undeclared,
-      checks: t.checks.map((c) => (c.focus ? { ...c, focus: kept(c.focus) } : c)),
+      checks: t.checks.map(({ focus, ...c }) => {
+        const f = focus && focused(focus);
+        return f ? { ...c, focus: f } : c;
+      }),
       evidence: staged(t.evidence),
       files: staged(t.files),
     };
@@ -76,14 +84,17 @@ export function reviewRun(run: Run, events: readonly RunEvent[]): ReviewRun | nu
     id: run.id,
     sample: run.input.name,
     workflows: run.workflows,
-    revisions: revisions.map((rev) => ({
-      id: rev.id,
-      label: label(rev),
-      createdAt: rev.createdAt,
-      tasks: rev.tasks.map((t) => task(t, rev)),
-      volumes: rev.volumes,
-      structures: rev.structures,
-      annotations: rev.annotations.filter((a): a is Annotation => a.volumeId !== null),
-    })),
+    revisions: revisions.map((rev) => {
+      const onScan = new Set(rev.annotations.filter((a) => a.volumeId === null).map((a) => a.id));
+      return {
+        id: rev.id,
+        label: label(rev),
+        createdAt: rev.createdAt,
+        tasks: rev.tasks.map((t) => task(t, rev, onScan)),
+        volumes: rev.volumes,
+        structures: rev.structures,
+        annotations: rev.annotations.filter((a): a is Annotation => a.volumeId !== null),
+      };
+    }),
   });
 }

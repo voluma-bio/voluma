@@ -28,7 +28,6 @@ import { createReview } from "./domains/review";
 import { createRun } from "./domains/run";
 import type { Limits } from "./domains/run/admission";
 import { catalog } from "./domains/run/catalog";
-import { EVENTS_PAGE } from "./domains/run/cursor";
 import { KeyVault } from "./domains/run/key-vault";
 import { createNotifier } from "./domains/run/notifier";
 import { pgEventLog } from "./domains/run/pg-event-log";
@@ -116,18 +115,12 @@ const notifier = createNotifier();
 const queue = pgRunQueue(db, limits, new KeyVault(), notifier);
 const eventLog = pgEventLog(db, notifier);
 
-/** The review's read of a run: the run and its whole log, page by page. */
+/** The review's read of a run: the run, then its whole log in one statement. */
 const runRecords: RunRecords = {
   async load(reader, runId) {
     const run = await reads.get(reader, runId);
-    if (!run) return null;
-    const events = [];
-    for (;;) {
-      const page = await eventLog.stream(reader, runId, events.at(-1)?.seq ?? 0, EVENTS_PAGE);
-      if (!page) return null;
-      events.push(...page.events);
-      if (page.events.length < EVENTS_PAGE) return { run, events };
-    }
+    const log = run && (await eventLog.stream(reader, runId, 0, 2 ** 31 - 1));
+    return run && log ? { run, events: log.events } : null;
   },
 };
 

@@ -16,7 +16,7 @@ export function runRoutes({ runs }: ReviewDeps) {
     const record = await runs.load(readerOf(c.var.user), c.req.param("runId"));
     if (!record) return c.json({ error: "not found" }, 404);
     const review = reviewRun(record.run, record.events);
-    if (!review) return c.json({ error: "this run has no plan yet" }, 409);
+    if (!review) return c.json({ error: "this run has no plan" }, 409);
     return c.json(review);
   });
 
