@@ -10,3 +10,8 @@
   draining, restart, sleeping and watch-path settings and the `DATABASE_URL` reference from
   [deploy.md](deploy.md)'s tables; leave secret values (`VOLUMA_API_TOKEN`) on the service.
   Then shrink those tables to a pointer. Until then they exist only on the service and drift.
+- **Stream hub: tie sockets to sessions.** An open WebSocket outlives sign-out, a revoked
+  session and a refresh that drops the user from the lab. The hub's upgrade route needs the
+  session id (`sid`) to close sockets on sign-out: add `sessionId` to the user `Principal`
+  then (`core.parseTokenClaims(accessToken).sid` in `auth.ts`), not as a second root
+  variable. Decide whether `/logout` closes sockets by session id.

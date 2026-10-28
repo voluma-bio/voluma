@@ -45,11 +45,13 @@ const auth = createAuth({
 
 const app = new Hono();
 app.get("/health", (c) => c.text("ok"));
-// Every /api request is authenticated here; past the auth routes, no principal is a 401.
-app.route("/api/auth", auth.signIn); // PKCE-authenticated; needs no principal
-app.use("/api/*", ...auth.middleware);
-app.route("/api/auth", auth.routes);
-app.use("/api/*", auth.requirePrincipal);
+// Every /api request is authenticated here, in this order (auth.ts): the bearer and
+// CSRF checks, which do no I/O; the routes that write the session cookie; the session
+// cookie and the 401 for no principal; then the routes that need a user.
+app.use("/api/*", ...auth.guards);
+app.route("/api/auth", auth.sessionRoutes);
+app.use("/api/*", ...auth.session);
+app.route("/api/auth", auth.userRoutes);
 app.route(
   "/api/run",
   createRun({

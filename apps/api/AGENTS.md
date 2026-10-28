@@ -29,11 +29,13 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
 - Only `src/index.ts` reads env. It hands `createAuth` (`src/auth.ts`) the WorkOS values;
   AuthKit would otherwise read `WORKOS_*` from `process.env` itself.
 - **Domains read the caller from the context, not the request.** The root authenticates
-  once (`src/auth.ts`) and answers 401 when there is no principal; a domain app is
-  `new Hono<AppEnv>()` (`src/domain.ts`), reads `c.get("principal")` (`kind: "user"` with
-  `userId`, `email`, `name`, `labId`; or `kind: "service"`), and guards a subtree with
-  `requireService` (runner ingest) or `requireUser`. A domain never reads cookies, tokens
-  or `Origin`; the CSRF and Origin checks are the root's. Any other kind gets 403.
+  once (`src/auth.ts`) and answers 401 when there is no principal. A domain app is
+  `new Hono<AppEnv>()` (`src/domain.ts`) and reads `c.get("principal")`; the runner's
+  ingest subtree is behind `requireService`. A subtree for signed-in members is
+  `new Hono<UserEnv>().use(requireUser)`, whose handlers read the narrowed
+  `c.var.user` (`userId`, `email`, `name`, `labId`) and never check `kind`. Any other kind
+  gets 403. A domain never reads cookies, tokens or `Origin`; the CSRF and Origin checks
+  are the root's.
 - Each domain's factory returns a Hono app, mounted by `index.ts` with `app.route`. Use
   Hono's routing and params; the root's JSON 404 and `onError` cover the domains.
 - A domain's tables and their Postgres adapters live in the domain

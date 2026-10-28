@@ -13,6 +13,7 @@
     "@voluma/contracts": "workspace:*",
     "@voluma/harness": "workspace:*",
     "@voluma/workflow": "workspace:*",
+    "@workos-inc/node": "10.14.0",
     "@workos/authkit-session": "0.8.0",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.14",
