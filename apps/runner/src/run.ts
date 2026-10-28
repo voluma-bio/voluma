@@ -32,9 +32,11 @@ import { loadWorkflow } from "@voluma/workflow/load";
 import type { Config } from "./config.ts";
 import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
+import { metaSegmenter } from "./meta-segmenter.ts";
 import { createModalSandbox, RUNS_APP, terminateClaim } from "./modal-sandbox.ts";
 import { checkPrompt, checkSystem, workerPrompt, workerSystem } from "./prompts.ts";
 import { r2Evidence } from "./r2-evidence.ts";
+import { r2Files } from "./r2-files.ts";
 import { r2Workflows } from "./r2-workflows.ts";
 import { type Redact, redactor } from "./redact.ts";
 import { usageMeter } from "./usage.ts";
@@ -87,6 +89,7 @@ export async function runClaim(
   const model = visitor ? ctx.visitorModel : ctx.model;
   const apiKey = visitor ? keys.metaApiKey : config.model.apiKey;
   const modal = visitor ? keys.modal : config.modal;
+  const metaKey = visitor ? keys.metaApiKey : config.metaApiKey;
   const redact: Redact = redactor([
     ...config.secrets,
     ...(visitor ? [keys.metaApiKey, keys.modal.tokenId, keys.modal.tokenSecret] : []),
@@ -209,6 +212,7 @@ export async function runClaim(
       meter.addModelCost(reply.usage.cost.total);
       return reply;
     });
+    const files = r2Files(config.r2);
     const supervised = superviseRun({
       runId,
       plan: plan.tasks,
@@ -218,6 +222,10 @@ export async function runClaim(
       history: client,
       sandbox: (id) => opened.get(id),
       evidence: r2Evidence(config.r2),
+      files,
+      segmentSam: metaKey
+        ? { segmenter: metaSegmenter({ apiKey: metaKey, log, addCost: meter.addModelCost }) }
+        : undefined,
       judgment,
       worker: (task) => ({
         model,

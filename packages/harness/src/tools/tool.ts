@@ -27,6 +27,11 @@ export interface ToolResult {
   isError: boolean;
   /** The model saw a cut, and the full output is stored at `toolOutputKey(runId, toolCallId)`. */
   truncated: boolean;
+  /**
+   * Images the model sees with the text (base64). They go to the model and the thread's
+   * history, never into the `tool.result` event: the text says which files they are.
+   */
+  images?: { mimeType: string; data: string }[];
 }
 
 export interface Tool<S extends z.ZodType = z.ZodType> {

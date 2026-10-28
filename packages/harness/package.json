@@ -6,6 +6,8 @@
   "exports": {
     "./ports/sandbox": "./src/ports/sandbox.ts",
     "./ports/history": "./src/ports/history.ts",
+    "./ports/files": "./src/ports/files.ts",
+    "./ports/segmenter": "./src/ports/segmenter.ts",
     "./ports/lease-lost": "./src/ports/lease-lost.ts",
     "./layout": "./src/layout.ts",
     "./recorder": "./src/recorder.ts",
