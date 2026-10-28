@@ -15,7 +15,7 @@ reasons behind the setup: [.context/CONTEXT.md](.context/CONTEXT.md).
 
 | Command | Does |
 |---|---|
-| `pnpm i` | Install; also installs the pre-commit hook. `pnpm check` also needs [uv](https://docs.astral.sh/uv/) for the Python in `workflows/` |
+| `pnpm i` | Install; also installs the pre-commit hook. `pnpm check` also needs [uv](https://docs.astral.sh/uv/) for the Python in `workflows/` (on macOS or ARM, Docker too) |
 | `pnpm check` | Lint, typecheck and tests across the workspace. CI runs the same |
 | `pnpm db:up` | Start the local Postgres container (once per machine; needs Docker) |
 | `pnpm dev` | API and web app on free ports, with this worktree's own database; prints both URLs |
@@ -38,7 +38,7 @@ Pre-commit runs Biome on staged files. Nothing runs on push. Use pnpm, never npm
 | `apps/web/src/features/run`, `apps/api/src/domains/run`, `packages/workflow`, `packages/harness`, `apps/runner` | Run lane |
 | `apps/web/src/features/review`, `apps/api/src/domains/review`, `packages/viewer` | Review lane |
 | `workflows/microct-analysis` | Run lane |
-| `workflows/mouse-oa` | Both; small PRs |
+| `workflows/mouse-oa`, `workflows/` root files (`package.json`, `test.sh`, `pyproject.toml`) | Both; small PRs |
 | `packages/contracts`, `packages/api-client` | Both; contract PRs only |
 | `packages/design-tokens`, `packages/ui`, `apps/web/src/shell`, `apps/web/src/dev-ui`, `apps/web` and `apps/api` root files, `apps/api/src/index.ts`, `apps/api/src/ports`, root config, `tools/` | Both; small PRs |
 
@@ -136,12 +136,15 @@ they need:
 - Workflows and analysis code live in `workflows/`. A workflow is a Mars
   schema v1 package (`mars.toml`, skills, agents, `workflow.md`):
   `workflows/microct-analysis` holds the generic micro-CT skills,
-  `workflows/mouse-oa` the mouse knee workflow. A run pins the voluma commit;
-  the catalog names the workflow's directory. Python lives only in
+  `workflows/mouse-oa` the mouse knee workflow (it arrives with the
+  workflow-packages lane, #57, which also makes a run pin the voluma commit
+  and the catalog name the workflow's directory). Python lives only in
   `workflows/`, as skill resources: CLI scripts that take and return paths,
   never bytes. Their dependencies are
-  `workflows/microct-analysis/requirements.txt`; changing it republishes the
-  sandbox image. `pnpm check` runs ruff and pytest there through `uv`.
+  `workflows/microct-analysis/requirements.txt`, compiled from `requirements.in`;
+  changing it republishes the sandbox image. `pnpm check` runs ruff and pytest
+  there through `uv`; the sandbox image is linux/x86_64, so on macOS or ARM the
+  Python tests run in a `linux/amd64` Docker container.
 - Test against the real thing, not fakes: real OA6-1RK data, the real API,
   the real sandbox. No fixture data and no mock transports. Add a unit test
   only where a bug would be silent and expensive (the stale-task graph, unit
