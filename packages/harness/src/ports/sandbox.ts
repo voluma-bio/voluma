@@ -64,6 +64,18 @@ export type ExecChunk =
   /** Last chunk. 124: the timeout ended the command; 143 or 137: it was killed (abort, or it ignored SIGTERM). */
   | { type: "exit"; code: number };
 
+/**
+ * Thrown by `exec` and `writeFile` when the provider refused to start the command because
+ * the sandbox is ending. Nothing ran, so the caller may run it again on another sandbox.
+ * Errors from a command that started (its stream, its exit) are never this.
+ */
+export class SandboxEndedError extends Error {
+  constructor(cause: unknown) {
+    super("the sandbox is shutting down", { cause });
+    this.name = "SandboxEndedError";
+  }
+}
+
 export interface Sandbox {
   /**
    * Runs the command and streams its output. Aborting `signal` kills the command and
@@ -75,6 +87,13 @@ export interface Sandbox {
    * read-write mount, which cannot append. Aborting `signal` rejects.
    */
   writeFile(path: string, bytes: Uint8Array, signal?: AbortSignal): Promise<void>;
+  /**
+   * False once the provider has ended the sandbox (idle timeout, lifetime, termination);
+   * a command sent to it then fails. One provider round trip (30-40 ms against Modal). It
+   * can still be true while the provider is shutting the sandbox down; that case surfaces as
+   * `SandboxEndedError` from `exec` or `writeFile`.
+   */
+  alive(): Promise<boolean>;
   destroy(): Promise<void>;
 }
 

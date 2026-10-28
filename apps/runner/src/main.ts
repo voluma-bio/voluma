@@ -93,6 +93,11 @@ const lifetimeSeconds = Number(optional("VOLUMA_SANDBOX_LIFETIME_SECONDS") ?? 36
 if (!Number.isInteger(lifetimeSeconds) || lifetimeSeconds <= 0) {
   throw new Error("VOLUMA_SANDBOX_LIFETIME_SECONDS must be a positive integer");
 }
+// The floor keeps a sandbox from idling out before its inputs finish staging.
+const idleSeconds = Number(optional("VOLUMA_SANDBOX_IDLE_SECONDS") ?? 300);
+if (!Number.isInteger(idleSeconds) || idleSeconds < 30) {
+  throw new Error("VOLUMA_SANDBOX_IDLE_SECONDS must be an integer of at least 30");
+}
 const createSandbox = createModalSandbox({
   appName: RUNS_APP,
   modal,
@@ -103,7 +108,7 @@ const createSandbox = createModalSandbox({
     cloudflareApiToken: required("CLOUDFLARE_API_TOKEN"),
   },
 });
-const sandbox = sandboxSession(
+const session = sandboxSession(
   () =>
     createSandbox({
       runId,
@@ -112,10 +117,11 @@ const sandbox = sandboxSession(
       cpu: 2,
       memoryMiB: 4096,
       lifetimeSeconds,
-      idleSeconds: 300,
+      idleSeconds,
       mounts: layout.mounts,
     }),
   (id, state, detail) => events.emit(id, "sandbox", { name: "main", state, detail }),
+  layout.restartNote,
 );
 
 // First SIGINT/SIGTERM/SIGHUP stops the running command; the `finally` below then closes the
@@ -130,7 +136,7 @@ for (const name of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
     if (abort.signal.aborted) {
       console.error(`\n${name}: closing the sandbox and quitting`);
       void Promise.race([
-        Promise.allSettled([sandbox.close(), terminateRun(modal, runId)]),
+        Promise.allSettled([session.close(), terminateRun(modal, runId)]),
         new Promise((done) => setTimeout(done, FORCE_CLOSE_MS)),
       ])
         .catch(() => {})
@@ -159,7 +165,7 @@ try {
     tools: [bashTool(layout)],
     recorder: events,
     history: api,
-    sandbox: (id) => sandbox.get(id),
+    sandbox: (id) => session.get(id),
     signal: abort.signal,
   });
   const u = outcome.usage;
@@ -174,7 +180,7 @@ try {
   process.exitCode = outcome.status === "completed" ? 0 : 1;
 } finally {
   try {
-    await sandbox.close();
+    await session.close();
   } finally {
     await events.flush();
   }
