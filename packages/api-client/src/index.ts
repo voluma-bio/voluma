@@ -8,9 +8,11 @@ import {
   type Input,
   listInputsResponseSchema,
   listRunsResponseSchema,
+  type ResendKeysRequest,
   type Run,
   runSchema,
   type StartRunRequest,
+  type VisitorKeys,
 } from "@voluma/contracts/run";
 
 /** A non-OK API response. Branch on `status` (403, 415, 5xx) rather than parsing the message. */
@@ -73,7 +75,7 @@ export async function signOut(): Promise<void> {
   location.href = logoutUrl;
 }
 
-/** Queues a run on one of the caller's inputs; it starts now or waits its turn. A 429 means the org's daily spend cap is reached. */
+/** Starts a run on an input the caller can read. With `keys` it runs on the caller's own credentials at once; otherwise it may queue. 409 and 429: the org's limits (see `@voluma/contracts/run`). */
 export async function startRun(req: StartRunRequest): Promise<Run> {
   return runSchema.parse(await json(await request("/run/runs", { method: "POST", body: req })));
 }
@@ -90,6 +92,14 @@ export async function listRuns(): Promise<Run[]> {
 export async function cancelRun(id: string): Promise<Run> {
   return runSchema.parse(
     await json(await request(`/run/runs/${encodeURIComponent(id)}/cancel`, { method: "POST" })),
+  );
+}
+
+/** Resends a visitor run's keys after the runner lost them (state `awaiting-keys`). */
+export async function resendKeys(id: string, keys: VisitorKeys): Promise<Run> {
+  const body: ResendKeysRequest = { keys };
+  return runSchema.parse(
+    await json(await request(`/run/runs/${encodeURIComponent(id)}/keys`, { method: "POST", body })),
   );
 }
 
