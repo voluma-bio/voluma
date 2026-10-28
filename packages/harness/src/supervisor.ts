@@ -67,12 +67,14 @@ export interface SupervisorOptions {
 /** What `step` found: nothing to do, something done, or a judgment point to ask. */
 type Next = "idle" | "acted" | { point: JudgmentPoint; threadId: string };
 
+/** The supervisor's own thread: the root, and the envelope of a run's first events. */
+export const supervisorThreadId = (runId: string) => `${runId}.supervisor`;
+
 const rule = (r: Extract<By, { kind: "rule" }>["rule"]): By => ({ kind: "rule", rule: r });
 
 export function supervisor(options: SupervisorOptions) {
   const { plan, runtime, recorder, threads, judgment, signal } = options;
-  /** The supervisor's own thread: the root, and the envelope of its events. */
-  const root = `${options.runId}.supervisor`;
+  const root = supervisorThreadId(options.runId);
   const stuckLimit = options.stuckLimit ?? 2;
   const maxRedos = options.maxRedos ?? 1;
   const judgmentTimeoutMs = options.judgmentTimeoutMs ?? 60_000;
