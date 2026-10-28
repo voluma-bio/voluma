@@ -6,6 +6,7 @@
 import { logoutResponseSchema, type Me, meResponseSchema } from "@voluma/contracts/auth";
 import { type DownloadDescriptor, downloadDescriptorSchema } from "@voluma/contracts/download";
 import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
+import { type ReviewRun, reviewRunSchema } from "@voluma/contracts/review";
 import {
   type Input,
   listInputsResponseSchema,
@@ -222,6 +223,13 @@ export async function resendKeys(id: string, keys: VisitorKeys): Promise<Run> {
   const body: ResendKeysRequest = { keys };
   return runSchema.parse(
     await json(await request(`/run/runs/${encodeURIComponent(id)}/keys`, { method: "POST", body })),
+  );
+}
+
+/** A run's review data, built from its event log on each call. 404: unreadable or unknown run; 409: the run has no plan. */
+export async function getReviewRun(runId: string): Promise<ReviewRun> {
+  return reviewRunSchema.parse(
+    await json(await request(`/review/runs/${encodeURIComponent(runId)}`)),
   );
 }
 

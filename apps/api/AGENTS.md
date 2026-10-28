@@ -72,3 +72,19 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
 - **Limits come from env** (`RUN_LIMITS_<ORG>_*`, read in `index.ts`); the workflow catalog
   (`catalog.ts`) is code. `seed:example --from <runId>` makes an example run
   (`src/domains/run/seed-example.ts`). Outage and restart behaviour: [.context/deploy.md](.context/deploy.md).
+
+## Review domain (`src/domains/review`)
+
+- `index.ts` is a mount list, like the run domain's. `runs.ts` serves `GET /runs/:runId`: the
+  run's `ReviewRun` (`@voluma/contracts/review`), built on each read by `review-run.ts` from
+  `fold` over the run's whole event log, plus what `fold` leaves to the API. It parses the
+  result with `reviewRunSchema`, so a bad build is a 500, never invalid data.
+- It reads runs only through `RunRecords` (`src/ports`), which `src/index.ts` wires to the run
+  domain's reads and shared event log, with the caller's `readerOf`.
+- `inputs.ts` owns `/inputs/:inputId/download` and `/inputs/:inputId/file`, guarded by
+  `requireUser` only under `/inputs/:inputId/*`. Both authorize through `ReviewInputs`
+  and `readerOf` before using `ReferenceArchive`. Reject HEAD before opening R2; keep
+  the descriptor's ETag pin and stream the file without buffering.
+- `r2-reference-archive.ts` serves only the published reference scan. Evidence and run
+  file delivery still need scoped routes that reuse this download pattern. Deferred work:
+  [.context/TODO.md](src/domains/review/.context/TODO.md).
