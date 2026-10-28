@@ -49,11 +49,12 @@ export function runStatus({ state, toCheck }: Run): RunStatus {
     case "awaiting-keys":
       return { label: "Needs your keys", tone: "check" };
     case "ended":
-      // "Reviewed" needs review state, which the review lane doesn't expose yet.
+      // "Reviewed" needs review state, which the review lane doesn't expose yet. No items is
+      // still "Completed": a failed task raises none.
       if (state.outcome === "completed")
         return toCheck
           ? { label: `${toCheck} to check`, tone: "check" }
-          : { label: toCheck === 0 ? "Nothing to check" : "Completed", tone: "primary" };
+          : { label: "Completed", tone: "primary" };
       if (state.outcome === "failed")
         return { label: "Failed", tone: "destructive", detail: state.error };
       return { label: "Stopped", tone: "neutral" };

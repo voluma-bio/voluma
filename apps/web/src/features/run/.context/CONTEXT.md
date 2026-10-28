@@ -22,5 +22,10 @@ Three screens under `RunLayout` (top bar and query client): `/` start (`start-pa
   asks for keys only for a visitor; a run in `awaiting-keys` shows the form on its page (`resendKeys`) only to the user who started it.
 - A completed run links to `/runs/:runId`, the review lane's route; the live page is `/runs/:id/live` so it never shadows it. Active runs open live; stopped and failed runs open live too (it shows the error).
 
-Gaps: the list cannot show "N to check" or "Reviewed" (a `Run` carries neither; the review lane
-owns the counts), so completed runs read "Completed". Workflow versions are not shown (no versions yet).
+- **Runs list status, time and cost** come from the `Run` alone, no events: a completed run with open
+  items reads "N to check" (`Run.toCheck`, counted by the API when the run completes), else "Completed",
+  since a failed task raises no item. Time is first claim to end; cost is `Run.usage.modelCostUsd`
+  (models and SAM) with sandbox uptime under it. Formatters (`formatUsd`, `formatDuration`) are in `status.tsx`.
+  Per-task spend for the live page is `spend(events)` (`@voluma/contracts/spend`).
+
+Gaps: "Reviewed" needs review state, which the review lane doesn't expose yet ([#102](https://github.com/voluma-bio/voluma/issues/102)). Workflow versions are not shown (no versions yet).

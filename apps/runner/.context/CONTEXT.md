@@ -46,7 +46,7 @@ the runner host needs it on PATH; it deletes its upload from Meta's file store w
 ends (a failed delete is logged). Its response masks (`!` one_bit and `~` lossless) decode in `sam-mask.ts`, a port of
 Meta's decoder, because `meta-sam-parser` takes minutes per response. The tool is offered only
 when a Meta key exists (`VOLUMA_META_API_KEY`, or the visitor's key on a visitor run). What a
-call costs goes to the run's usage meter (the adapter reports it as soon as Meta gives the frame count, so a failed call is still billed). The tool also writes a sidecar `<labels>.json` (prompt frames and per-slice confidence per object). The runner checks `ffmpeg -version` at start when a Meta key is set. How agents should use it (orientation, boxes,
+call costs goes to the run's usage meter and to the call's own `bill`, which the harness records as the `tool.result`'s `costUsd` so `spend` can charge the task (the adapter reports it as soon as Meta gives the frame count, so a failed call is still billed). The tool also writes a sidecar `<labels>.json` (prompt frames and per-slice confidence per object). The runner checks `ffmpeg -version` at start when a Meta key is set. How agents should use it (orientation, boxes,
 which structures share a call) is the `sam-segmentation` skill's job, not the tool's.
 
 # Runner: `view_image` shows the model files the sandbox wrote
@@ -65,6 +65,8 @@ in five on 2026-10-28 with a working key), retried up to 4 attempts in all, 1 s,
 when the call failed before streaming any content. Any other error ends the thread as before.
 Cost is Pi's per-reply price, summed per claim; the log prints it
 when a claim reports (`model cost this claim`), and the API stores it as `runs.model_cost_usd`.
+On 2026-10-28 the claims' lines summed to the run's `model_cost_usd` and to `spend(events).total`
+($0.9763 over five claims of one run).
 
 # Runner: what `/outputs` and `/scratch` support
 
