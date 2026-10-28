@@ -51,8 +51,7 @@
  * same way: a `voluma` run goes back to `queued`, ahead of newer runs; a
  * `visitor` run goes to `awaiting-keys`, because its keys are gone. The runner
  * keeps its `events` already written, and the next claim resumes the thread
- * from them. The claim carries no plan: the runner imports the run's pinned
- * packages and parses their plan itself (`packages/workflow`), and a resumed run
+ * from them. The plan in the claim is the workflow's current one; a resumed run
  * keeps the plan its first `revision.started` recorded (`task-tools.ts`). A run
  * whose lease expired three times with no `released` ends `failed` instead, so
  * one that crashes the runner doesn't loop. A `released` run is not counted,
@@ -84,6 +83,7 @@
  */
 import { z } from "zod";
 import { runSchema, visitorKeysSchema } from "./run";
+import { workflowPlanSchema } from "./workflow";
 
 /** How long a run stays leased after the server's last heartbeat for it. */
 export const LEASE_SECONDS = 60;
@@ -111,6 +111,7 @@ export const claimSchema = z
   .object({
     /** In state `running`. */
     run: runSchema,
+    plan: workflowPlanSchema,
     /** Changes with every claim; see Lease. */
     leaseToken: z.string().min(1),
     /** Present exactly for a `visitor` run; returned once. */
