@@ -5,15 +5,16 @@
  *
  *   POST /api/run/runs             body `startRunRequestSchema` → 200 `runSchema`
  *                                  (404 for an unknown `workflowId` or an `inputId`
- *                                  the caller can't read; 429 when the org's daily
- *                                  spend cap is reached)
+ *                                  the caller can't read; 409 when the caller already
+ *                                  has a queued or running run with the same
+ *                                  `credentials`; 429 when a `voluma` run would exceed
+ *                                  the org's daily spend cap)
  *   GET  /api/run/runs             → 200 `listRunsResponseSchema`, newest first
  *   GET  /api/run/runs/:id         → 200 `runSchema`
  *   POST /api/run/runs/:id/cancel  → 200 `runSchema` with state `ended`/`cancelled`
  *                                  at once, even if the runner is still stopping (the
  *                                  server records it and the runner obeys); cancelling
- *                                  an ended run is a no-op; 403 for an example run the
- *                                  caller didn't start
+ *                                  an ended run is a no-op; 403 for an example run
  *   GET  /api/run/inputs           → 200 `listInputsResponseSchema`, newest first
  *
  * Org scoping, enforced by the server on every call and every read:
@@ -23,10 +24,13 @@
  *     reads are also filtered to the caller: a run when `startedBy` is the
  *     caller's `userId` or the run is an `example`; an input when `uploadedBy`
  *     is the caller or an example run reads it. Scope `lab` sees the org.
- *   - Example runs are read-only to everyone but whoever started them. A
- *     correction on one never changes it: the server creates the caller's own
- *     run with `forkedFrom` set (the corrections contract), which reads the
- *     same input.
+ *   - Example runs are read-only to everyone. Only server-side seeding (an
+ *     operator script, under a dedicated operator id) sets `example`, never
+ *     `startRun` or a fork, and it never changes afterwards; to change an
+ *     example, re-seed it. A correction on one never changes it: the server
+ *     creates the caller's own run with `forkedFrom` set (the corrections
+ *     contract), which reads the same input. One caller has at most one fork
+ *     per example; later corrections apply to it.
  *   - Run-scoped records (events, corrections) inherit `labId` from their run
  *     and do not repeat it; read access to them is read access to the run.
  *     An input exists before any run and can serve several, so it carries its
@@ -39,16 +43,25 @@
  * pins, so a caller can't make the server import an arbitrary repo. The server
  * resolves the id to pinned packages and records them on the run.
  *
- * Who pays (`credentials`): the server picks it at `startRun`, `visitor` when
- * the caller has stored their own model and sandbox keys, else `voluma`. The
- * keys never appear in a contract: they're stored encrypted on the server,
- * keyed by the visitor.
+ * Creating a run. The rules below hold for every call that creates a run:
+ * `startRun` and a fork (the corrections contract), and any added later.
+ *
+ * Who pays (`credentials`): picked by the server when the run is created:
+ * `visitor` when the caller has stored both their own model key and their
+ * sandbox token, else `voluma`. It never changes afterwards, and a `visitor`
+ * run never falls back to Voluma's credentials: if its keys are deleted or
+ * expire before it ends, it ends `failed` with an `error`. The keys never
+ * appear in a contract; they're stored encrypted on the server, keyed by the
+ * caller.
+ *
+ * Limits: a caller has at most one queued or running run per `credentials`
+ * kind; creating another answers 409.
  *
  * Queue and spend cap apply to `voluma` runs only; a `visitor` run starts at
- * once. The server may limit an org to one active `voluma` run; `startRun`
- * then returns `queued` while another is active, else `running`. The cap is
- * enforced from the server's own accounting, so the run record carries no cost
- * fields. It is checked at `startRun` (429) and again when a queued run is
+ * once. The server may limit an org to one active `voluma` run; a new run then
+ * starts `queued` while another is active, else `running`. The cap is enforced
+ * from the server's own accounting, so the run record carries no cost fields.
+ * It is checked when the run is created (429) and again when a queued run is
  * dequeued; a run refused at dequeue ends `failed` with an `error`.
  */
 import { z } from "zod";
@@ -105,9 +118,14 @@ export const runSchema = z.object({
   input: inputSchema,
   /** Who pays for models and sandboxes; see the header. */
   credentials: z.enum(["voluma", "visitor"]),
-  /** A shared, read-only run every caller in the org can read, even under `self`. */
+  /**
+   * A shared, read-only run every caller in the org can read, even under
+   * `self`, set only by seeding (see the header). Its input reaches every
+   * visitor, who can also start runs on it with their own sandbox, so an
+   * example's scan must be cleared for public use.
+   */
   example: z.boolean(),
-  /** The run this one was forked from by a correction on it; null for a fresh run. */
+  /** The example run this one was forked from by a correction on it; null for a fresh run. */
   forkedFrom: runIdSchema.nullable(),
   createdAt: z.iso.datetime(),
   state: runStateSchema,
