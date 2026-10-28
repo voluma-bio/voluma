@@ -54,7 +54,11 @@ skipped files. A `.dcm`/`.dicom` entry without a valid Part 10 header rejects th
 archive. Extensionless Part 10 files work. A malformed or unsupported DICOM
 rejects the whole archive rather than silently dropping slices from an otherwise
 plausible scan. Pixel boundary validation rejects truncated native data and
-invalid fragment tables before decoding. Codec/render errors replace the image
+invalid fragment tables before decoding. For native images, parsing stops at
+Pixel Data and checks its declared length against dimensions and available bytes.
+Only metadata and the declared pixels are passed to the decoder: trailing scanner
+block padding (present in OA6-1RK) is not image data. Compressed images retain
+full fragment-table parsing. Codec/render errors replace the image
 with an error and retry action; they never leave a prior slice presented as the
 requested one.
 

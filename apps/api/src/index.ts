@@ -25,6 +25,7 @@ import { HTTPException } from "hono/http-exception";
 import postgres from "postgres";
 import { createAuth } from "./auth";
 import { createReview } from "./domains/review";
+import { r2ReferenceArchive } from "./domains/review/r2-reference-archive";
 import { createRun } from "./domains/run";
 import type { Limits } from "./domains/run/admission";
 import { catalog } from "./domains/run/catalog";
@@ -154,7 +155,22 @@ app.route(
     shutdown: draining.signal,
   }),
 );
-app.route("/api/review", createReview({ runs: runRecords }));
+const r2 = {
+  accountId: process.env.R2_ACCOUNT_ID,
+  bucket: process.env.R2_BUCKET,
+  accessKeyId: process.env.R2_ACCESS_KEY_ID,
+  secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+};
+const referenceArchive =
+  r2.accountId && r2.bucket && r2.accessKeyId && r2.secretAccessKey
+    ? r2ReferenceArchive({
+        accountId: r2.accountId,
+        bucket: r2.bucket,
+        accessKeyId: r2.accessKeyId,
+        secretAccessKey: r2.secretAccessKey,
+      })
+    : null;
+app.route("/api/review", createReview({ runs: runRecords, inputs: reads, referenceArchive }));
 
 const isApi = (path: string) => path === "/api" || path.startsWith("/api/");
 const webDist = resolve(import.meta.dirname, "../../web/dist");

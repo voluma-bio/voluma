@@ -67,7 +67,7 @@ export function ReviewWorkspace({
             {backLink}
           </div>
           <h1 className="text-xl font-semibold mt-2">
-            {run?.sample ?? (runId === "local" ? "Local scan" : runId)}
+            {run?.sample ?? (runId === "local" ? "Scan viewer" : runId)}
           </h1>
           {run && (
             <p className="text-sm text-muted-foreground">
