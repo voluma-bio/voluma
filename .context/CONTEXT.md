@@ -24,6 +24,7 @@ packages/
   viewer        local DICOM ZIP intake, Cornerstone acquired slices, persistent imaging slots
   ui            shared React components, styled from tokens
   design-tokens tokens.css (raw values, two themes) and theme.css (Tailwind mapping)
+workflows/      Mars workflow packages and their Python skill resources (microct-analysis, mouse-oa)
 tools/ci        PR-body check
 tools/dev.mjs   the `pnpm dev` launcher (below)
 ```
@@ -57,7 +58,8 @@ checklist, check threads, and review chat threads.
   would block a resume). `packages/harness/src/layout.ts` owns which prefix is mounted
   where; prompts and tools take paths from it.
   There is no internet. The image is prebuilt and named
-  (`pnpm --filter @voluma/runner publish-image <name>`). Every command runs
+  (`pnpm --filter @voluma/runner publish-image <name>`), installing
+  `workflows/microct-analysis/requirements.txt`. Every command runs
   under `timeout -k`, which leads its own process group,; a timeout or an abort kills the whole
   group, except a descendant that calls `setsid` itself, which survives until the
   sandbox is destroyed.

@@ -1,0 +1,4 @@
+[package]
+name = "microct-analysis"
+version = "0.1.0"
+description = "Generic micro-CT analysis skills and their Python resources, for Voluma workflows"

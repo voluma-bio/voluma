@@ -15,7 +15,7 @@ reasons behind the setup: [.context/CONTEXT.md](.context/CONTEXT.md).
 
 | Command | Does |
 |---|---|
-| `pnpm i` | Install; also installs the pre-commit hook |
+| `pnpm i` | Install; also installs the pre-commit hook. `pnpm check` also needs [uv](https://docs.astral.sh/uv/) for the Python in `workflows/` |
 | `pnpm check` | Lint, typecheck and tests across the workspace. CI runs the same |
 | `pnpm db:up` | Start the local Postgres container (once per machine; needs Docker) |
 | `pnpm dev` | API and web app on free ports, with this worktree's own database; prints both URLs |
@@ -37,6 +37,8 @@ Pre-commit runs Biome on staged files. Nothing runs on push. Use pnpm, never npm
 |---|---|
 | `apps/web/src/features/run`, `apps/api/src/domains/run`, `packages/workflow`, `packages/harness`, `apps/runner` | Run lane |
 | `apps/web/src/features/review`, `apps/api/src/domains/review`, `packages/viewer` | Review lane |
+| `workflows/microct-analysis` | Run lane |
+| `workflows/mouse-oa` | Both; small PRs |
 | `packages/contracts`, `packages/api-client` | Both; contract PRs only |
 | `packages/design-tokens`, `packages/ui`, `apps/web/src/shell`, `apps/web/src/dev-ui`, `apps/web` and `apps/api` root files, `apps/api/src/index.ts`, `apps/api/src/ports`, root config, `tools/` | Both; small PRs |
 
@@ -131,11 +133,15 @@ they need:
 - Colours come only from `packages/design-tokens`; components use token
   utilities (`bg-card`, `text-muted-foreground`). Visual rules: [DESIGN.md](DESIGN.md).
   Check shared components at `/dev/ui` in both themes.
-- Workflows and analysis code are not in this repo. A workflow is a Mars
-  schema v1 package on GitHub (`mars.toml`, skills, `workflow.md`), imported
-  and pinned to a commit; the generic micro-CT skills are
-  [voluma-bio/microct-analysis]. This repo holds no Python. Analysis tools
-  take and return paths, never bytes.
+- Workflows and analysis code live in `workflows/`. A workflow is a Mars
+  schema v1 package (`mars.toml`, skills, agents, `workflow.md`):
+  `workflows/microct-analysis` holds the generic micro-CT skills,
+  `workflows/mouse-oa` the mouse knee workflow. A run pins the voluma commit;
+  the catalog names the workflow's directory. Python lives only in
+  `workflows/`, as skill resources: CLI scripts that take and return paths,
+  never bytes. Their dependencies are
+  `workflows/microct-analysis/requirements.txt`; changing it republishes the
+  sandbox image. `pnpm check` runs ruff and pytest there through `uv`.
 - Test against the real thing, not fakes: real OA6-1RK data, the real API,
   the real sandbox. No fixture data and no mock transports. Add a unit test
   only where a bug would be silent and expensive (the stale-task graph, unit
@@ -154,4 +160,3 @@ for whoever uses it. Nothing in this repo requires it.
 
 [requirements]: https://github.com/voluma-bio/docs/blob/main/work/microct-workflow-mvp/requirements.md
 [visual direction]: https://github.com/voluma-bio/docs/blob/main/work/microct-workflow-mvp/mockups/direction.md
-[voluma-bio/microct-analysis]: https://github.com/voluma-bio/microct-analysis
