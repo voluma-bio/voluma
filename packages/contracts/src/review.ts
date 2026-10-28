@@ -3,7 +3,8 @@
  * for the reference run, the importer builds from its manifest). It is not a
  * stored document, so a rerun rewrites no other task's data.
  * Served by `GET /api/review/runs/:runId` (`getReviewRun`): 404 when the caller
- * can't read the run, 409 before the run's first `revision.started`.
+ * can't read the run, 409 when it has no plan (no `revision.started`: not started,
+ * or ended before one).
  *
  * Two layers, so a different workflow (vascular, materials) gets its own final
  * review with no new Review-lane code:

@@ -226,7 +226,7 @@ export async function resendKeys(id: string, keys: VisitorKeys): Promise<Run> {
   );
 }
 
-/** A run's review data, built from its event log on each call. 404: unreadable or unknown run; 409: the run has no plan yet. */
+/** A run's review data, built from its event log on each call. 404: unreadable or unknown run; 409: the run has no plan. */
 export async function getReviewRun(runId: string): Promise<ReviewRun> {
   return reviewRunSchema.parse(
     await json(await request(`/review/runs/${encodeURIComponent(runId)}`)),
