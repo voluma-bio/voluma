@@ -17,6 +17,7 @@
     "./review": "./src/review.ts",
     "./workflow": "./src/workflow.ts",
     "./fold": "./src/fold.ts",
+    "./spend": "./src/spend.ts",
     "./output": "./src/output.ts",
     "./run": "./src/run.ts",
     "./runner": "./src/runner.ts",
