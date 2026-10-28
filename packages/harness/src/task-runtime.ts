@@ -23,7 +23,7 @@ import type {
   ReportOutputInput,
   TaskToolResult,
 } from "@voluma/contracts/task-tools";
-import type { DeclaredOutput, WorkflowPlan } from "@voluma/contracts/workflow";
+import type { WorkflowPlan } from "@voluma/contracts/workflow";
 import { isSatisfied, transitiveDependents } from "@voluma/workflow";
 import { declarationProblem, referenceProblem } from "./output-checks";
 import type { Evidence } from "./ports/evidence";
