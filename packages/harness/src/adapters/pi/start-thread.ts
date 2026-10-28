@@ -86,15 +86,12 @@ export interface ThreadOutcome {
   error?: string;
   /** The text of the thread's last reply in this invocation; empty if it made none. */
   reply: string;
-  /** Model usage of this invocation only (a resume does not recount earlier turns). */
-  usage: { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number };
 }
 
 export function startThread(options: StartThreadOptions): ThreadHandle {
   const { threadId, recorder, history, signal } = options;
   const emit = <T extends EventType>(type: T, payload: PayloadOf<T>) =>
     recorder.emit(threadId, type, payload);
-  const usage = { input: 0, output: 0, cacheRead: 0, cost: 0, cacheWrite: 0 };
 
   const agent = new Agent({
     initialState: {
@@ -153,7 +150,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
 
   async function run(): Promise<ThreadOutcome> {
     let started = false;
-    let outcome: Omit<ThreadOutcome, "usage" | "ran" | "reply">;
+    let outcome: Omit<ThreadOutcome, "ran" | "reply">;
     let unexpected: unknown;
     const abort = () => agent.abort();
     signal?.addEventListener("abort", abort);
@@ -188,7 +185,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       for (const { text, sender } of early.splice(0)) addPrompt(text, sender);
       const message = prompts.length > 0 ? prompts : undefined;
       if (message === undefined && finished) {
-        return { status: "completed", ran: false, reply, usage };
+        return { status: "completed", ran: false, reply };
       }
       if (message === undefined && needsUserTurn([...stored, ...repairs])) {
         throw new ThreadFailure(
@@ -224,7 +221,6 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
             const { message } = event;
             const ok = await persist(message);
             if (message.role === "assistant") {
-              addUsage(usage, message);
               reply = textOf(message);
             }
             if (!ok) break;
@@ -286,7 +282,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     // The caller owns the recorder and flushes it.
     if (started) emit("thread.ended", outcome);
     if (unexpected) throw unexpected;
-    return { ...outcome, ran: started, reply, usage };
+    return { ...outcome, ran: started, reply };
   }
 
   return {
@@ -306,7 +302,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
 /** A failure of the thread itself, as opposed to a bug: reported as the outcome, not thrown. */
 class ThreadFailure extends Error {}
 
-const historyFailure = (error: unknown): Omit<ThreadOutcome, "usage" | "ran" | "reply"> => ({
+const historyFailure = (error: unknown): Omit<ThreadOutcome, "ran" | "reply"> => ({
   status: "failed",
   error: `storing the thread's history failed, so it stopped: ${String(error)}`,
 });
@@ -430,7 +426,7 @@ const isFinished = (last: AgentMessage | undefined) =>
 function outcomeOf(
   last: AgentMessage | undefined,
   aborted: boolean,
-): Omit<ThreadOutcome, "usage" | "ran" | "reply"> {
+): Omit<ThreadOutcome, "ran" | "reply"> {
   if (aborted && !(last?.role === "assistant" && last.stopReason === "stop")) {
     return { status: "cancelled" };
   }
@@ -455,14 +451,6 @@ function outcomeOf(
     default:
       return { status: "failed", error: `unexpected stop reason ${last.stopReason}` };
   }
-}
-
-function addUsage(total: ThreadOutcome["usage"], message: AssistantMessage): void {
-  total.input += message.usage.input;
-  total.output += message.usage.output;
-  total.cacheRead += message.usage.cacheRead;
-  total.cacheWrite += message.usage.cacheWrite;
-  total.cost += message.usage.cost.total;
 }
 
 function textOf(message: { content: unknown }): string {
