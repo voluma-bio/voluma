@@ -85,7 +85,8 @@ export function modalToken(): { tokenId: string; tokenSecret: string } | undefin
  * The public sandbox image every run uses, pinned by digest (built from
  * sandbox/Dockerfile by the "Sandbox image" workflow, which prints the new digest).
  */
-const SANDBOX_IMAGE = "ghcr.io/voluma-bio/voluma-sandbox@sha256:TODO";
+const SANDBOX_IMAGE =
+  "ghcr.io/voluma-bio/voluma-sandbox@sha256:8e70f7a2cf84e37178d4174031c0c02f9a0830038c3cc815e796791fe0eb22a6";
 
 export type Config = ReturnType<typeof runnerConfig>;
 
