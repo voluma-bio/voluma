@@ -270,7 +270,9 @@ function paste(
         throw new Error("the response has a box outside the frame");
       }
       const [h, w, encoded] = /^(\d+),(\d+),(.*)$/s.exec(field(mask, "data") ?? "")?.slice(1) ?? [];
-      if (encoded === undefined) throw new Error("the response has a mask without a payload");
+      if (encoded === undefined) {
+        throw new Error(`the response mask has no payload (slice ${frame}, object ${id})`);
+      }
       if (
         num(mask, "x") !== 0 ||
         num(mask, "y") !== 0 ||
@@ -279,7 +281,15 @@ function paste(
       ) {
         throw new Error("the response has a mask that is not at the origin of its own box");
       }
-      const bits = decodeMask(encoded, boxW, boxH);
+      let bits: Uint8Array;
+      try {
+        bits = decodeMask(encoded, boxW, boxH);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `the response mask failed to decode (slice ${frame}, object ${id}, encoding ${encoded[0] ?? "none"}, ${h}x${w}): ${detail}`,
+        );
+      }
       for (let i = 0; i < boxH; i++) {
         const y = y1 + i;
         if (y >= height) continue;
