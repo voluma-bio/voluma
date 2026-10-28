@@ -1,30 +1,85 @@
 /** Task-scoped report and questions. Acceptance never changes scientific confidence. */
 import { useMutation } from "@tanstack/react-query";
+import { reviewFileUrl } from "@voluma/api-client";
 import { StatusBadge } from "@voluma/ui";
 import {
   ArrowUpRight,
   Check,
   CircleAlert,
+  Download,
   FileText,
   ImageOff,
   MessageSquare,
   Send,
   ShieldCheck,
 } from "lucide-react";
+import { Dialog } from "radix-ui";
 import { useState } from "react";
 import { type Asset, type ReviewRun, type ReviewTask, taskStatus } from "./model";
 import type { ReviewService } from "./service";
 
-/** Evidence and files are R2 keys; the API doesn't serve them to the browser yet. */
-function Evidence({ asset }: { asset: Asset }) {
+/** The file name to save as: the last segment of the path the task gave it. */
+const fileName = (asset: Asset) => asset.name.split("/").at(-1) ?? asset.name;
+
+/** A downloadable file; the server sends anything that isn't an image as an attachment. */
+function FileLink({ runId, asset }: { runId: string; asset: Asset }) {
   return (
-    <div className="evidence-card">
-      <div className="evidence-image">
-        <ImageOff size={25} strokeWidth={1.3} />
-      </div>
-      <span className="font-medium">{asset.name}</span>
-      <span className="text-xs text-muted-foreground">Image not served yet</span>
-    </div>
+    <a
+      className="file-link"
+      href={reviewFileUrl(runId, asset.sha256)}
+      download={fileName(asset)}
+      aria-label={`Download ${asset.name}`}
+    >
+      <FileText size={16} className="shrink-0 text-muted-foreground" />
+      <span className="min-w-0 flex-1 break-all">{asset.name}</span>
+      <Download size={15} className="shrink-0 text-primary-text" />
+    </a>
+  );
+}
+
+/**
+ * A checkpoint image opens in a lightbox; other evidence (values, scripts) downloads. The
+ * name only picks the card: the server decides what is an image from the bytes.
+ */
+function Evidence({ runId, asset }: { runId: string; asset: Asset }) {
+  const [failed, setFailed] = useState(false);
+  if (!/\.(jpe?g|png)$/i.test(asset.name)) return <FileLink runId={runId} asset={asset} />;
+  const url = reviewFileUrl(runId, asset.sha256);
+  return (
+    <Dialog.Root>
+      <Dialog.Trigger asChild>
+        <button type="button" className="evidence-card">
+          <div className="evidence-image">
+            {failed ? (
+              <ImageOff size={25} strokeWidth={1.3} />
+            ) : (
+              <img src={url} alt="" loading="lazy" onError={() => setFailed(true)} />
+            )}
+          </div>
+          <span className="font-medium break-all">{asset.name}</span>
+          <span className="text-xs text-muted-foreground">
+            {failed ? "Image unavailable" : "Open evidence"}
+          </span>
+        </button>
+      </Dialog.Trigger>
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay" />
+        <Dialog.Content className="dialog-content lightbox">
+          <Dialog.Title className="text-xl font-semibold break-all">{asset.name}</Dialog.Title>
+          <Dialog.Description className="mt-3 text-muted-foreground">
+            {failed ? "The image could not be loaded." : `Evidence from ${asset.stage}.`}
+          </Dialog.Description>
+          {!failed && <img className="lightbox-image" src={url} alt={asset.name} />}
+          <div className="mt-6 flex justify-end gap-2">
+            <a className="button" href={url} download={fileName(asset)}>
+              <Download size={15} />
+              Download
+            </a>
+            <Dialog.Close className="button">Close evidence</Dialog.Close>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 
@@ -304,7 +359,7 @@ export function TaskReport({
         <div className="evidence-grid">
           {task.evidence.map((asset) => (
             <div id={`evidence-${asset.id}`} key={asset.id} className="scroll-mt-6">
-              <Evidence asset={asset} />
+              <Evidence runId={runId} asset={asset} />
             </div>
           ))}
         </div>
@@ -316,14 +371,11 @@ export function TaskReport({
         <ul className="file-list">
           {task.files.map((file) => (
             <li key={file.id}>
-              <FileText size={16} className="shrink-0 text-muted-foreground" />
-              <div>
-                <p>{file.name}</p>
-                <p className="text-xs text-muted-foreground mt-1">Download not served yet</p>
-              </div>
+              <FileLink runId={runId} asset={file} />
             </li>
           ))}
         </ul>
+        {task.files.length === 0 && <p className="notice">This task reported no data files.</p>}
       </section>
       <section className="task-assistant">
         <div className="section-heading">

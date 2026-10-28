@@ -28,6 +28,7 @@ import postgres from "postgres";
 import { createAuth } from "./auth";
 import { createReview } from "./domains/review";
 import { r2ReferenceArchive } from "./domains/review/r2-reference-archive";
+import { r2RunFiles } from "./domains/review/r2-run-files";
 import { createRun } from "./domains/run";
 import type { Limits } from "./domains/run/admission";
 import { catalog } from "./domains/run/catalog";
@@ -136,9 +137,10 @@ const runRecords: RunRecords = {
     const log = run && (await eventLog.stream(reader, runId, 0, 2 ** 31 - 1));
     return run && log ? { run, events: log.events } : null;
   },
+  readable: async (reader, runId) => (await reads.get(reader, runId)) !== null,
 };
 
-/** R2, optional as a group: without it the reference download and scan uploads are 503s. */
+/** R2, optional as a group: without it the reference download, run files and scan uploads are 503s. */
 const r2Env = {
   accountId: process.env.R2_ACCOUNT_ID,
   bucket: process.env.R2_BUCKET,
@@ -155,6 +157,7 @@ const r2 =
       }
     : null;
 const referenceArchive = r2 && r2ReferenceArchive(r2);
+const runFiles = r2 && r2RunFiles(r2);
 
 const app = new Hono();
 app.get("/health", (c) => c.text("ok"));
@@ -198,7 +201,10 @@ app.route(
     shutdown: draining.signal,
   }),
 );
-app.route("/api/review", createReview({ runs: runRecords, inputs: reads, referenceArchive }));
+app.route(
+  "/api/review",
+  createReview({ runs: runRecords, files: runFiles, inputs: reads, referenceArchive }),
+);
 
 const isApi = (path: string) => path === "/api" || path.startsWith("/api/");
 const webDist = resolve(import.meta.dirname, "../../web/dist");
