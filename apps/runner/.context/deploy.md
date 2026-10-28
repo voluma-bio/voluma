@@ -14,6 +14,7 @@ cannot `serviceConnect`, but `environmentPatchCommit` (config as a patch) create
 | Setting | Value |
 |---|---|
 | Source | GitHub repo `voluma-bio/voluma`, root `/`, branch `jimyao/runner-deploy` while #59 is open. **At merge, change the branch to `main`** (`environmentPatchCommit` with `services.<id>.source.branch`), or the runner stops following pushes once the branch is deleted |
+| CI check suites | Enabled (`source.checkSuites: true`); Railway waits for GitHub check suites before deploying |
 | Build | Railpack, build command `echo runner has no build step`. `tsx` is a runtime dependency, because Railpack prunes dev dependencies |
 | Start | `cd apps/runner && exec node --import tsx src/main.ts`. `exec` makes node the container's process, so it gets SIGTERM |
 | Draining | 60 s: above the runner's `SHUTDOWN_BUDGET_MS` (30 s), which is how long it waits for runs to report `released` |
@@ -39,8 +40,7 @@ Visitor runs use `RUNNER_VISITOR_MODEL` (default `meta/muse-spark-1.3`) with the
 `sandbox/Dockerfile` is the one definition of the image. The "Sandbox image" workflow
 (`.github/workflows/sandbox-image.yml`) builds it for linux/amd64 on a change to the Dockerfile
 or by hand, pushes `ghcr.io/voluma-bio/voluma-sandbox:<commit>` and prints the digest. Put
-that digest in `SANDBOX_IMAGE` (`src/config.ts`). A rebuild gives a new digest even for an
-unchanged Dockerfile (image timestamps), so rebuild only when the contents change. The package
+that digest in `SANDBOX_IMAGE` (`src/config.ts`). Every run of the workflow gives a new digest, even for the same contents (image timestamps), and it also runs when the workflow file or `requirements.txt` changes, so bump `SANDBOX_IMAGE` only when the contents changed. The package
 must be **public**, or a visitor's Modal workspace cannot pull it: GitHub, the org's Packages,
 `voluma-sandbox`, Package settings, Danger Zone, Change visibility.
 

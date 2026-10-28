@@ -34,7 +34,7 @@ import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
 import { metaSegmenter } from "./meta-segmenter.ts";
 import { createModalSandbox, RUNS_APP, terminateClaim } from "./modal-sandbox.ts";
-import { withModelRetry } from "./model-retry.ts";
+import { retryMetaNotFound } from "./model-retry.ts";
 import { checkPrompt, checkSystem, workerPrompt, workerSystem } from "./prompts.ts";
 import { r2Evidence } from "./r2-evidence.ts";
 import { r2Files } from "./r2-files.ts";
@@ -53,6 +53,8 @@ const REPO_ROOT = resolve(import.meta.dirname, "../../..");
 const CLOSE_BUDGET_MS = { ended: 60_000, stopped: 15_000 };
 /** How long threads get to end after a stop before the run is reported anyway. */
 const WIND_DOWN_MS = 5_000;
+/** Pi's own retries of a model call (429 honours retry-after, 5xx, dropped connections). */
+const MODEL_RETRIES = 3;
 
 export interface RunnerContext {
   config: Config;
@@ -198,20 +200,20 @@ export async function runClaim(
     );
     const opened = session;
 
-    const callModel = withModelRetry((m, context, options) =>
-      models.streamSimple(m, context, { ...options, apiKey }),
+    const callModel = retryMetaNotFound((m, context, options) =>
+      models.streamSimple(m, context, { ...options, apiKey, maxRetries: MODEL_RETRIES }),
     );
     const streamFn: RunRole["streamFn"] = (m, context, options) => {
       const stream = callModel(m, context, options);
       stream.result().then(
-        (reply) => meter.addModelCost(reply.usage.cost.total),
+        (reply) => meter.addModelCost(reply.usage?.cost.total ?? 0),
         () => {},
       );
       return stream;
     };
     const judgment = llmJudgment(`llm:${model.id}`, async (context, signal) => {
       const reply = await callModel(model, context, { signal }).result();
-      meter.addModelCost(reply.usage.cost.total);
+      meter.addModelCost(reply.usage?.cost.total ?? 0);
       return reply;
     });
     const files = r2Files(config.r2);
