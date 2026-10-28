@@ -26,6 +26,8 @@ import type { Sandbox } from "../../ports/sandbox";
 import type { PayloadOf, Recorder } from "../../recorder";
 import type { Tool } from "../../tools/tool";
 
+type UserSender = Extract<PayloadOf<"message">, { role: "user" }>["sender"];
+
 export interface RunThreadOptions {
   runId: string;
   threadId: string;
@@ -107,6 +109,8 @@ export async function runThread(options: RunThreadOptions): Promise<ThreadOutcom
       truncated: (result.details as { truncated?: boolean } | undefined)?.truncated === true,
     });
 
+  // The sender of each user message we prompt with, kept with the message itself.
+  const senders = new WeakMap<AgentMessage, UserSender>();
   let started = false;
   let outcome: Omit<ThreadOutcome, "usage" | "ran">;
   let unexpected: unknown;
@@ -128,11 +132,23 @@ export async function runThread(options: RunThreadOptions): Promise<ThreadOutcom
     const finished = isFinished([...stored, ...repairs].at(-1));
     // A thread with no user message yet (new, or a crash before the first one was stored)
     // starts from the task. A finished one runs only for a new input; an unfinished one
-    // gets the resume note first.
-    const message = hasUser
-      ? [finished ? undefined : options.resumeNote, options.input].filter(Boolean).join("\n\n") ||
-        undefined
-      : options.task;
+    // gets the resume note first, as its own message. Each message carries its sender, so
+    // the stream record never labels the restart note as a person's words. The task counts
+    // as a person's: the harness can't tell a supervisor's task from a human's.
+    const prompts: AgentMessage[] = [];
+    const addPrompt = (text: string | undefined, sender: UserSender) => {
+      if (!text) return;
+      const prompt: AgentMessage = { role: "user", content: text, timestamp: Date.now() };
+      senders.set(prompt, sender);
+      prompts.push(prompt);
+    };
+    if (hasUser) {
+      if (!finished) addPrompt(options.resumeNote, { kind: "runtime" });
+      addPrompt(options.input, { kind: "person" });
+    } else {
+      addPrompt(options.task, { kind: "person" });
+    }
+    const message = prompts.length > 0 ? prompts : undefined;
     if (message === undefined && finished) {
       return { status: "completed", ran: false, usage };
     }
@@ -170,9 +186,15 @@ export async function runThread(options: RunThreadOptions): Promise<ThreadOutcom
           if (message.role === "assistant") addUsage(usage, message);
           if (!ok) break;
           if (message.role === "toolResult") emitToolResult(message);
-          else if (message.role === "user" || message.role === "assistant") {
+          else if (message.role === "assistant") {
+            // Every reply gets a `message`, even an empty or failed one: it ends the
+            // reply's live partial (`stream.ts`).
+            emit("message", { role: "assistant", text: textOf(message) });
+          } else if (message.role === "user") {
+            const sender = senders.get(message);
+            if (!sender) throw new Error("a user message reached message_end without a sender");
             const text = textOf(message);
-            if (text) emit("message", { role: message.role, text });
+            if (text) emit("message", { role: "user", text, sender });
           }
           break;
         }
@@ -219,10 +241,7 @@ const historyFailure = (error: unknown): Omit<ThreadOutcome, "usage" | "ran"> =>
 });
 
 /** Wraps our tool as a Pi tool: JSON Schema for the model, zod for validation and defaults. */
-function toAgentTool(
-  tool: Tool,
-  { runId, threadId, sandbox, recorder }: RunThreadOptions,
-): AgentTool {
+function toAgentTool(tool: Tool, { runId, threadId, sandbox }: RunThreadOptions): AgentTool {
   const { $schema: _, ...jsonSchema } = z.toJSONSchema(tool.input, { io: "input" });
   return {
     name: tool.name,
@@ -236,8 +255,8 @@ function toAgentTool(
         toolCallId,
         signal: signal ?? new AbortController().signal,
         sandbox: () => sandbox(threadId),
-        output: (stream, text) =>
-          recorder.emit(threadId, "tool.output", { toolCallId, stream, text }),
+        // Live output has no destination until the stream hub exists.
+        output: () => {},
       });
       return {
         content: [{ type: "text", text: result.output }],

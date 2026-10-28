@@ -13,7 +13,7 @@ const HEAD_CHARS = 4_000;
 const TAIL_CHARS = 8_000;
 // The stored copy holds at most this much (memory is the limit); the tail is always kept apart.
 const STORE_CHARS = 4_000_000;
-// One live `tool.output` event per window, or sooner when the buffer fills.
+// One live `tool.output` frame per window, or sooner when the buffer fills.
 const FLUSH_MS = 300;
 const FLUSH_CHARS = 8_000;
 
@@ -112,7 +112,7 @@ async function modelView(
   return { output: `${output.head}\n[${note}]\n${output.tail}`, truncated: stored };
 }
 
-/** Batches live chunks per stream into `tool.output` events. */
+/** Batches live chunks per stream into `tool.output` frames. */
 function coalescer(ctx: ToolContext) {
   const buffers = { stdout: "", stderr: "" };
   let lastFlush = Date.now();

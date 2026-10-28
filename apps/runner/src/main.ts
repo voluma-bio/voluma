@@ -9,7 +9,8 @@
  *     --task "Report the slice count of the scan in /inputs"
  *
  * Reads the repo's .env (see config.ts): model keys, R2 and Modal credentials,
- * VOLUMA_API_URL and VOLUMA_API_TOKEN. None of them enter the sandbox or process.env.
+ * VOLUMA_API_URL and VOLUMA_API_TOKEN (unset: the API `pnpm dev` started in this worktree,
+ * from .dev/env.json). None of them enter the sandbox or process.env.
  */
 import { randomUUID } from "node:crypto";
 import { parseArgs } from "node:util";
@@ -24,7 +25,7 @@ import { runLayout } from "@voluma/harness/layout";
 import { recorder } from "@voluma/harness/recorder";
 import { sandboxSession } from "@voluma/harness/sandbox-session";
 import { bashTool } from "@voluma/harness/tools/bash";
-import { optional, required } from "./config.ts";
+import { localApi, optional, required } from "./config.ts";
 import { createModalSandbox, RUNS_APP, terminateRun } from "./modal-sandbox.ts";
 
 const { values } = parseArgs({
@@ -54,10 +55,10 @@ const apiKey = required(`VOLUMA_${provider.toUpperCase()}_API_KEY`);
 const model = models.getModel(provider, modelId);
 if (!model) throw new Error(`unknown model ${provider}/${modelId}`);
 
-const api = httpClient({
-  baseUrl: required("VOLUMA_API_URL"),
-  token: required("VOLUMA_API_TOKEN"),
-});
+const apiUrl = optional("VOLUMA_API_URL");
+const api = httpClient(
+  apiUrl ? { baseUrl: apiUrl, token: required("VOLUMA_API_TOKEN") } : localApi(),
+);
 const layout = runLayout(runId, referencePrefix("scan"));
 const systemPrompt = `You are an analysis agent with one tool, bash, which runs commands in a sandbox.
 Python 3.12 with numpy, scipy, scikit-image, pydicom, nibabel and SimpleITK is installed.
@@ -181,8 +182,6 @@ function printEvent(event: Parameters<typeof api.append>[0]): void {
       break;
     case "tool.call":
       console.log(`[call ${p.toolCallId}] ${clip(p.input)}`);
-      break;
-    case "tool.output":
       break;
     case "tool.result":
       console.log(`[result ${p.toolCallId}${p.truncated ? " truncated" : ""}] ${clip(p.output)}`);

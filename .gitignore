@@ -7,7 +7,6 @@ dist/
 .env
 .env.*
 !.env.example
-.dev.vars
 
 # Temp / scratch
 logs/
@@ -24,7 +23,6 @@ temp/
 .nx/
 .amp/in/
 .amp/portals/
-.wrangler/
 .venv/
 __pycache__/
 *.py[cod]
@@ -56,3 +54,4 @@ meridian.local.toml
 
 .clipboard
 *.code-workspace
+.dev/

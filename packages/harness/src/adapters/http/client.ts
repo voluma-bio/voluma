@@ -7,6 +7,7 @@
  * A 409 on a history append is the port's `HistoryConflict`.
  */
 import type { EventInput } from "@voluma/contracts/events";
+import { type HistoryRow, historyResponseSchema } from "@voluma/contracts/history";
 import type { EventLog } from "../../ports/event-log";
 import { type History, HistoryConflict } from "../../ports/history";
 
@@ -65,24 +66,21 @@ export function httpClient(config: { baseUrl: string; token: string }): EventLog
 
   return {
     async append(event: EventInput) {
-      await post(`/run/ingest/runs/${encodeURIComponent(event.runId)}/events`, event);
+      await post(`/api/run/ingest/runs/${encodeURIComponent(event.runId)}/events`, event);
     },
     async load(threadId) {
       const response = await send(
-        `/run/ingest/threads/${encodeURIComponent(threadId)}/messages`,
+        `/api/run/ingest/threads/${encodeURIComponent(threadId)}/messages`,
         {},
         HISTORY_BUDGET_MS,
       );
-      return ((await response.json()) as { messages: string[] }).messages;
+      return historyResponseSchema.parse(await response.json()).messages;
     },
     async appendMessage(threadId, idx, message) {
       try {
         await post(
-          `/run/ingest/threads/${encodeURIComponent(threadId)}/messages`,
-          {
-            idx,
-            message,
-          },
+          `/api/run/ingest/threads/${encodeURIComponent(threadId)}/messages`,
+          { idx, message } satisfies HistoryRow,
           HISTORY_BUDGET_MS,
         );
       } catch (error) {

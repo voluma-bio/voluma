@@ -1,7 +1,7 @@
 /**
  * The Sandbox port: what the harness's tools need from an isolated machine. A
  * sandbox is created from a spec, runs commands that stream their output, and is
- * destroyed. Runtime-neutral (no Node or Worker types); the Modal adapter is
+ * destroyed. Runtime-neutral (no Node types); the Modal adapter is
  * apps/runner/src/modal-sandbox.ts.
  */
 
