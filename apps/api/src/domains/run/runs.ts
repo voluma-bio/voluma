@@ -1,6 +1,6 @@
 /**
  * The browser's run routes (`@voluma/contracts/run`), for signed-in users and guests:
- * start, list, get, cancel, resend keys, and list inputs. Each handler parses, calls the
+ * start, list, get, cancel and resend keys. Each handler parses, calls the
  * queue or the reads, and maps the answer. Every read goes through the caller's
  * `readerOf(user)`, so another org's run is a 404. Visitor keys go straight to the queue,
  * which holds them in memory; no handler logs a body.
@@ -13,8 +13,9 @@ import type { RunDeps } from ".";
 import { type Refusal, refusalMessage } from "./admission";
 
 /** The answer to a start or resend the queue refused. */
-function refusal(c: Context, refused: Refusal | "no-input" | "full") {
+function refusal(c: Context, refused: Refusal | "no-input" | "input-not-ready" | "full") {
   if (refused === "no-input") return c.json({ error: "unknown input" }, 404);
+  if (refused === "input-not-ready") return c.json({ error: "The scan is still uploading." }, 409);
   if (refused === "full") {
     return c.json({ error: "Too many runs are waiting with keys; try again shortly." }, 429);
   }
@@ -25,7 +26,6 @@ export function runsRoutes({ reads, queue, catalog, repo }: RunDeps) {
   const app = new Hono<UserEnv>();
   app.use("/runs", requireUser);
   app.use("/runs/*", requireUser);
-  app.use("/inputs", requireUser);
 
   app.post("/runs", async (c) => {
     const { workflowId, inputId, selectedOutputs, notes, keys } = await parseJson(
@@ -76,8 +76,6 @@ export function runsRoutes({ reads, queue, catalog, repo }: RunDeps) {
     if (typeof result === "string") return refusal(c, result);
     return c.json(result);
   });
-
-  app.get("/inputs", async (c) => c.json({ inputs: await reads.listInputs(readerOf(c.var.user)) }));
 
   return app;
 }

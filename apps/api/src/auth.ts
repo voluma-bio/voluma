@@ -14,7 +14,7 @@
  * `createAuth` returns the pieces index.ts mounts on `/api/*`, in this order:
  *  1. `guards`: the bearer check and the CSRF rules. No I/O, so a forged request makes no
  *     WorkOS call.
- *  2. `sessionRoutes`: login, callback, logout and guest, the only writers of the session
+ *  2. `sessionRoutes`: login, callback, password, logout and guest, the only writers of the session
  *     and guest cookies.
  *  3. `session`, then `requirePrincipal`: the cookie (else a guest cookie) becomes a user principal, and
  *     everything else without a principal is a 401. This is the only place that
@@ -25,7 +25,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { Me } from "@voluma/contracts/auth";
+import { type Me, passwordSignInRequestSchema } from "@voluma/contracts/auth";
 import {
   AuthKitCore,
   CookieSessionStorage,
@@ -52,7 +52,7 @@ import { createMiddleware } from "hono/factory";
 import { timingSafeEqual } from "hono/utils/buffer";
 import { serialize } from "hono/utils/cookie";
 import { createRemoteJWKSet, jwtVerify } from "jose";
-import { type Principal, requireUser, type Scope, type UserEnv } from "./domain";
+import { type Principal, parseJson, requireUser, type Scope, type UserEnv } from "./domain";
 
 export interface AuthConfig {
   clientId: string;
@@ -560,6 +560,55 @@ export function createAuth(config: AuthConfig) {
     await clearSessionCookies(c.req.raw, cookies);
     setCookies(c, cookies);
     return c.redirect(`${config.appUrl}/?signin=not-a-member`);
+  });
+
+  // Password sign-in for scripts (the scan upload CLI); a browser goes through /login. The
+  // same membership rule as the callback. Behind the CSRF guard like every POST, so another
+  // site can't sign a browser in as someone else. WorkOS throttles attempts.
+  sessionRoutes.post("/password", async (c) => {
+    const { email, password } = await parseJson(c, passwordSignInRequestSchema);
+    let auth: Awaited<ReturnType<typeof workos.userManagement.authenticateWithPassword>>;
+    try {
+      auth = await workos.userManagement.authenticateWithPassword({
+        clientId: config.clientId,
+        email,
+        password,
+      });
+    } catch (error) {
+      const status = (error as { status?: number }).status;
+      if (status === 429) return c.json({ error: "too many attempts" }, 429);
+      if (status !== undefined && status >= 400 && status < 500) {
+        return c.json({ error: "sign-in refused" }, 401);
+      }
+      throw error;
+    }
+    const sid = core.parseTokenClaims(auth.accessToken).sid;
+    const scope = scopes.get(auth.organizationId ?? "");
+    if (!scope || !auth.organizationId) {
+      await revokeSessions([sid ? { id: sid, refreshToken: auth.refreshToken } : null]);
+      return c.json({ error: "not-a-member" }, 403);
+    }
+    const cookies: string[] = [];
+    await authkit.saveSession(
+      cookies,
+      await core.encryptSession({
+        accessToken: auth.accessToken,
+        refreshToken: auth.refreshToken,
+        user: auth.user,
+        impersonator: auth.impersonator,
+      }),
+    );
+    setCookies(c, cookies);
+    const {
+      userId,
+      email: memberEmail,
+      name,
+      labId,
+    } = userPrincipal(auth.user, auth.organizationId, scope) as Extract<
+      Principal,
+      { account: "member" }
+    >;
+    return c.json({ kind: "member", userId, email: memberEmail, name, labId } satisfies Me);
   });
 
   sessionRoutes.post("/logout", async (c) => {

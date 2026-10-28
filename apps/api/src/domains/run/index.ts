@@ -1,7 +1,8 @@
 /**
  * Run lane's API domain, mounted at /api/run/ (paths are relative to the mount). A short
  * mount list: each file owns its routes and its guard.
- *   runs.ts    the browser's run and input routes (users and guests)
+ *   runs.ts    the browser's run routes (users and guests)
+ *   inputs.ts  the browser's scans: list, and upload (members)
  *   stream.ts  the browser's server-sent event stream of a run's stored events
  *   ingest.ts  the runner's claim, heartbeat, report, events and history (bearer token)
  * RunDeps lists what it needs; index.ts supplies the adapters (the queue is built with the limits and the key vault). The factory
@@ -12,11 +13,14 @@ import { Hono } from "hono";
 import type { AppEnv } from "../../domain";
 import type { Catalog } from "./catalog";
 import { ingestRoutes } from "./ingest";
+import { inputsRoutes, type UploadLimits } from "./inputs";
 import type { Notifier } from "./notifier";
 import type { LeasedEventLog } from "./pg-event-log";
 import type { LeasedHistory } from "./pg-history";
 import type { RunQueue } from "./pg-queue";
 import type { RunReads } from "./pg-runs";
+import type { PgUploads } from "./pg-uploads";
+import type { Uploads } from "./r2-uploads";
 import { runsRoutes } from "./runs";
 import { streamRoutes } from "./stream";
 
@@ -28,6 +32,10 @@ export interface RunDeps {
   /** Wakes open streams when a run's events or state change. */
   notifier: Notifier;
   catalog: Catalog;
+  /** Upload rows, and the object store their files go to (presigned, never through the API). */
+  uploadStore: PgUploads;
+  objects: Uploads;
+  uploadLimits: UploadLimits;
   /** The repo whose `workflows/` a run uses. The runner adds the commit its checkout was at. */
   repo: string;
   /** Aborts when the API starts draining; open streams end so the drain isn't held. */
@@ -37,6 +45,7 @@ export interface RunDeps {
 export function createRun(deps: RunDeps) {
   const app = new Hono<AppEnv>();
   app.route("/", runsRoutes(deps));
+  app.route("/", inputsRoutes(deps));
   app.route("/", streamRoutes(deps));
   app.route("/", ingestRoutes(deps));
   return app;
