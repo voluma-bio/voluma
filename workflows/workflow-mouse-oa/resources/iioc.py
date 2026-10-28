@@ -8,8 +8,8 @@ band and metaphysis excluded; marrow and cortical shell included), cut along gro
 on coronal sections of the aligned stack. The annotation schema and the whole protocol are in ../references/oa-protocol.md.
 This script writes regions and heights only: TV, BV and BV/TV of ROI-1 (deck #4-6) come from `morphometry.py volumes`.
 
-Writes (aligned grid, array axes W,V,U) iioc-tissue.npy, growth-plate-proximal-face.npy, articular-top-surface.npy (2D,
-W index per V,U), <side>-plate-run.npy, and on the scan grid iioc-tissue-scan.npy and width-points-scan.json (the two
+Writes (aligned grid, array axes W,V,U) iioc-tissue.npy, growth-plate-proximal-face.npy, growth-plate-proximal-valid.npy (2D bool: where the face is traced,
+not held constant past its first and last section or its curves' ends), articular-top-surface.npy (2D, W index per V,U), <side>-plate-run.npy, and on the scan grid iioc-tissue-scan.npy and width-points-scan.json (the two
 width points as [z, y, x] scan indices, for `amira_landmarks.py`); plus iioc.json (every value, with its definition) and QC
 images. Prints the result record (`microct-core/resources/sidecar.py`) with the paths.
 
@@ -169,12 +169,11 @@ def main():
     tib = np.load(a.mask)
     if frame['parent_grid_id'] != g['grid_id']:
         sidecar.fail('the frame was made on another scan grid than hu.json: rerun tibia_frame.py on this scan')
-    gp = (
-        traced_surface(
-            need(ann, 'growth_plate_curves', 'trace the proximal face of the growth plate'), 'growth_plate_curves', h.shape
-        )[0]
-        + a.gp_shift_voxels
-    )
+    gp_spec = need(ann, 'growth_plate_curves', 'trace the proximal face of the growth plate')
+    gp, gp_traced = traced_surface(gp_spec, 'growth_plate_curves', h.shape)
+    gp = gp + a.gp_shift_voxels
+    v_traced = sorted(int(k) for k in gp_spec['slices'])
+    gp_traced = gp_traced & (np.arange(gp.shape[0])[:, None] >= v_traced[0]) & (np.arange(gp.shape[0])[:, None] <= v_traced[-1])
     env = envelope(tib, gp)
     w = np.arange(h.shape[0])[:, None, None]
     roi = env & (w < gp[None])
@@ -220,7 +219,6 @@ def main():
         tilt_deg=float(np.degrees(np.arccos(-normal[0]))),
     )
     height_ids = []
-    warnings = []
 
     def height(key, u, deck, what):
         v = v_star
@@ -239,19 +237,14 @@ def main():
             points_uvw=[[int(u), v, float(top[v, u])], [int(u), v, float(gp[v, u])]],
         )
         length = ray_length(roi, np.array([gp[v, u], v, u]), normal)
-        if length is None:
-            msg = (f'{key}-normal omitted: the ray from the traced face at U={u}, V={v} along the plane normal does not enter '
-                   'ROI-1 within 3 voxels; check the traced face there')
-            print(msg, file=sys.stderr)
-            warnings.append(msg)
-        else:
-            values[f'{key}-normal'] = sidecar.value(
-                length * vox,
-                'mm',
-                f'{what}, deck {deck} measured the other way: from the traced growth-plate face at U={u}, V={v}, along the normal '
-                'of the plane fitted to the face, to where it leaves ROI-1 (the top of the articular bone)',
-                kind='diagnostic',
-            )
+        values[f'{key}-normal'] = sidecar.value(
+            None if length is None else length * vox,
+            'mm',
+            f'{what}, deck {deck} measured the other way: from the traced growth-plate face at U={u}, V={v}, along the normal '
+            'of the plane fitted to the face, to where it leaves ROI-1 (the top of the articular bone); null when the ray '
+            'does not enter ROI-1 within 3 voxels, so check the traced face there',
+            kind='diagnostic',
+        )
         height_ids.append(key)
 
     height('iioc-height', u_mid, '#7', 'IIOC height at the middle of the growth plate')
@@ -326,6 +319,7 @@ def main():
     arrays = {
         'iioc-tissue.npy': roi,
         'growth-plate-proximal-face.npy': gp.astype(np.float32),
+        'growth-plate-proximal-valid.npy': gp_traced,
         'articular-top-surface.npy': np.where(valid, top, np.nan).astype(np.float32),
     }
     arrays.update({f'{s}-plate-run.npy': m for s, m in plates.items()})
@@ -354,10 +348,10 @@ def main():
         tissue_scan=str(out / 'iioc-tissue-scan.npy'),
         width_points_scan=str(out / 'width-points-scan.json'),
         growth_plate_face=str(out / 'growth-plate-proximal-face.npy'),
+        growth_plate_traced=str(out / 'growth-plate-proximal-valid.npy'),
         articular_top=str(out / 'articular-top-surface.npy'),
         plate_runs=[str(out / f'{s}-plate-run.npy') for s in plates],
         removed_disconnected_voxels=removed,
-        warnings=warnings,
     )
 
 
