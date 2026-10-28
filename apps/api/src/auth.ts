@@ -17,6 +17,7 @@
  *  4. `userRoutes` and the domains, which see a non-null principal (domain.ts).
  */
 
+import { createHash } from "node:crypto";
 import type { Me } from "@voluma/contracts/auth";
 import {
   AuthKitCore,
@@ -41,6 +42,7 @@ import {
 import { type Context, Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import { timingSafeEqual } from "hono/utils/buffer";
+import { createRemoteJWKSet } from "jose";
 import { type Principal, requireUser, type Scope, type UserEnv } from "./domain";
 
 export interface AuthConfig {
@@ -101,6 +103,9 @@ const COOKIE_MAX_AGE = 30 * 24 * 60 * 60;
 // bounded: one attempt, 3 s. The SDK's default is 4 attempts and 60 s each.
 const WORKOS_TIMEOUT_MS = 3000;
 
+// Refresh outcomes remembered per process (see `RefreshMemo`).
+const MEMO_ENTRIES = 10_000;
+
 // The sealed PKCE verifier cookie must stay under 4 KB. A returnTo that is a printable
 // ASCII path of at most this many characters keeps it near 1.2 KB, so several pending
 // verifiers still fit in one Cookie header.
@@ -121,24 +126,63 @@ function returnPath(raw: string | undefined) {
   }
 }
 
-// Whether a failed refresh means the session is over. Matched positively, as
-// @workos-inc/node's CookieSession.refresh does (classifyTerminalRefreshError, then
+// Whether a failed refresh means the session is over. Modelled on
+// @workos-inc/node's CookieSession.refresh (classifyTerminalRefreshError, then
 // classifyRetryableRefreshError, both unexported; re-diff them when bumping the pin):
-// an OAuth or authentication error, or any other 4xx except 408 and 429, ends the
-// session. Everything else (5xx, network errors, an HTML error page that surfaces as
-// `Error("Unexpected error")`, anything unknown) keeps the cookie, so an outage does
-// not sign people out.
+// an OAuth or authentication error, or any other 4xx, ends the session. The status
+// is checked first, because the SDK reports its own request timeout as an
+// `OauthException` with status 408. 408, 429, 5xx, network errors, an HTML error page
+// (`Error("Unexpected error")`) and anything unknown keep the cookie, so an outage
+// does not sign people out (and, with the refresh memo, is never remembered as dead).
 function isTerminalRefreshError(error: unknown) {
   if (!(error instanceof TokenRefreshError)) return false;
   const cause = error.cause;
-  if (cause instanceof OauthException || cause instanceof AuthenticationException) return true;
+  const status = (cause as { status?: number } | undefined)?.status;
+  if (status === 408 || status === 429 || (status !== undefined && status >= 500)) return false;
   return (
-    cause instanceof GenericServerException &&
-    cause.status >= 400 &&
-    cause.status < 500 &&
-    cause.status !== 408 &&
-    cause.status !== 429
+    cause instanceof OauthException ||
+    cause instanceof AuthenticationException ||
+    (cause instanceof GenericServerException &&
+      status !== undefined &&
+      status >= 400 &&
+      status < 500)
   );
+}
+
+type Refreshed = Awaited<ReturnType<AuthKitCore["validateAndRefresh"]>>;
+
+// What a refresh token last got from WorkOS, so a client that replays a cookie (never
+// storing the Set-Cookie) can't drive a WorkOS call per request. `Refreshed` holds until
+// its access token expires; `dead` (terminal failure) until the cookie's max age.
+// Transient failures are never stored. Keyed by a hash of the refresh token; a bounded
+// LRU (a Map is insertion-ordered), so memory does not grow with the cookies seen.
+type Remembered = { outcome: Refreshed | "dead"; until: number };
+
+class RefreshMemo {
+  private entries = new Map<string, Remembered>();
+
+  private key(refreshToken: string) {
+    return createHash("sha256").update(refreshToken).digest("base64");
+  }
+
+  get(refreshToken: string) {
+    const key = this.key(refreshToken);
+    const entry = this.entries.get(key);
+    if (!entry) return undefined;
+    this.entries.delete(key);
+    if (entry.until <= Date.now()) return undefined;
+    this.entries.set(key, entry);
+    return entry.outcome;
+  }
+
+  set(refreshToken: string, outcome: Refreshed | "dead", until: number) {
+    const key = this.key(refreshToken);
+    this.entries.delete(key);
+    this.entries.set(key, { outcome, until });
+    if (this.entries.size > MEMO_ENTRIES) {
+      this.entries.delete(this.entries.keys().next().value as string);
+    }
+  }
 }
 
 function userPrincipal(user: User, labId: string, scope: Scope): Principal {
@@ -195,6 +239,17 @@ export function createAuth(config: AuthConfig) {
   // cookie share a single WorkOS call. AuthKit retries a 429 once after the Retry-After
   // (at most 10 s), so a rate-limited refresh is two calls; it is left on.
   const core = new AuthKitCore(getConfigurationProvider().getConfig(), workos, sessionEncryption);
+  // Replaces AuthKitCore's `getPublicKey` (jose defaults: 5 s timeout, 10 min cache, so a
+  // cold process in an outage spends 5 s on the key set before the refresh). Same 3 s
+  // bound as every WorkOS call, and keys are kept for the process lifetime; an unknown
+  // `kid` still reloads, behind jose's 30 s cooldown, so rotation works. Re-check
+  // `getPublicKey` in @workos/authkit-session when bumping the pin.
+  const jwks = createRemoteJWKSet(new URL(workos.userManagement.getJwksUrl(config.clientId)), {
+    timeoutDuration: WORKOS_TIMEOUT_MS,
+    cacheMaxAge: Number.POSITIVE_INFINITY,
+  });
+  (core as unknown as { getPublicKey: () => typeof jwks }).getPublicKey = () => jwks;
+  const memo = new RefreshMemo();
 
   // Clears the session cookie and every pending PKCE verifier on the request, so
   // sign-out and refusals leave no AuthKit cookie behind.
@@ -236,8 +291,10 @@ export function createAuth(config: AuthConfig) {
   }
 
   // The principal for a request's session cookie, or null; cookies to set go to `sink`.
-  // A dead cookie is cleared (once cleared it costs no further WorkOS calls), any
-  // other WorkOS failure keeps it, so an outage does not sign people out.
+  // A dead cookie is cleared and remembered as dead, so a replay of it costs no WorkOS
+  // call; a refreshed session is remembered until its access token expires. Any other
+  // WorkOS failure keeps the cookie and is not remembered, so an outage does not sign
+  // people out.
   async function userFromCookie(request: Request, sink: string[]) {
     let session: Awaited<ReturnType<typeof authkit.getSession>>;
     try {
@@ -247,13 +304,27 @@ export function createAuth(config: AuthConfig) {
       return null;
     }
     if (session === null) return null;
-    let result: Awaited<ReturnType<typeof core.validateAndRefresh>>;
-    try {
-      result = await core.validateAndRefresh(session);
-    } catch (error) {
-      if (isTerminalRefreshError(error)) await clearSessionCookies(request, sink);
-      else console.error("session refresh failed; cookie kept", error);
+    const remembered = memo.get(session.refreshToken);
+    if (remembered === "dead") {
+      await clearSessionCookies(request, sink);
       return null;
+    }
+    let result: Refreshed;
+    if (remembered) {
+      result = { ...remembered, refreshed: false };
+    } else {
+      try {
+        result = await core.validateAndRefresh(session);
+      } catch (error) {
+        if (isTerminalRefreshError(error)) {
+          memo.set(session.refreshToken, "dead", Date.now() + COOKIE_MAX_AGE * 1000);
+          await clearSessionCookies(request, sink);
+        } else console.error("session refresh failed; cookie kept", error);
+        return null;
+      }
+      if (result.refreshed) {
+        memo.set(session.refreshToken, result, (result.claims.exp ?? 0) * 1000);
+      }
     }
     // The enforcement point for membership, bounded by the access-token lifetime.
     const orgId = result.claims.org_id;

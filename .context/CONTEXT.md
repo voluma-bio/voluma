@@ -134,9 +134,16 @@ after the response, is what gives the cookie one writer. A refreshed session com
 
 A request makes at most one WorkOS refresh (`AuthKitCore.validateAndRefresh`), with a 3 s
 timeout and no SDK retries (AuthKit's own one-time 429 retry stays, so a rate-limited
-refresh is two calls). A failure that is 408, 429, 5xx or a network error leaves the
-cookie, so an outage does not sign people out; any other failure (revoked or expired
-session, `sso_required`) clears it, and an unreadable cookie is cleared without a call.
+refresh is two calls). The JWKS fetch has the same 3 s bound and its keys are kept for the
+process lifetime (an unknown `kid` reloads, behind jose's 30 s cooldown), so a cold process
+during an outage spends at most 3 s on keys plus 3 s on the refresh. Each process also
+remembers refresh outcomes in a 10k-entry LRU keyed by a hash of the refresh token: a
+refreshed session until its access token expires, a dead one until the cookie's max age. A
+client replaying one cookie therefore costs one WorkOS call per access-token lifetime, or
+none once the session is dead; the allow-list is still checked on every request. A failure
+that is 408, 429, 5xx or a network error leaves the cookie and is not remembered, so an
+outage does not sign people out; any other failure (revoked or expired session,
+`sso_required`) clears it, and an unreadable cookie is cleared without a call.
 
 Sign-out revokes the session at WorkOS on the server (`userManagement.revokeSession`), as
 does signing in over an existing session (the old one); refresh tokens are not rotated on
