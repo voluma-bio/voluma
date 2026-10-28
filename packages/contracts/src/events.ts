@@ -7,6 +7,14 @@
  * unique and increasing per run, which is also the stream cursor the UI
  * resumes from.
  *
+ * Reading back (the runner, to resume a run it claimed):
+ *   GET /api/run/ingest/runs/:runId/events?after=<seq>  → 200 `runEventsResponseSchema`
+ * with the lease token like every ingest call (`runner.ts`). It returns the
+ * run's events with `seq > after` (0 for all) in `seq` order, at most `limit`
+ * (`?limit=`, default and maximum 1000); `more` says another page follows, read
+ * by passing the last `seq` as `after`. The runner reads them all before it
+ * decides anything, so its view is the stored log.
+ *
  * These are the durable events. Live output (text and tool deltas, tool output
  * chunks) is not stored, has no `seq` and is not served yet: see `stream.ts`.
  *
@@ -281,3 +289,10 @@ export type EventInput = z.infer<typeof eventInputSchema>;
 export const runEventSchema = eventUnion({ seq: z.number().int().nonnegative() });
 export type RunEvent = z.infer<typeof runEventSchema>;
 export type EventType = RunEvent["type"];
+
+/** A page of a run's stored events, oldest first. */
+export const runEventsResponseSchema = z.object({
+  events: z.array(runEventSchema),
+  more: z.boolean(),
+});
+export type RunEventsResponse = z.infer<typeof runEventsResponseSchema>;
