@@ -17,11 +17,12 @@ reasons behind the setup: [.context/CONTEXT.md](.context/CONTEXT.md).
 |---|---|
 | `pnpm i` | Install; also installs the pre-commit hook |
 | `pnpm check` | Lint, typecheck and tests across the workspace. CI runs the same |
-| `pnpm dev` | Web app; Vite prints the URL (it takes a free port) |
+| `pnpm db:up` | Start the local Postgres container (once per machine; needs Docker) |
+| `pnpm dev` | API and web app on free ports, with this worktree's own database; prints both URLs |
 | `pnpm format` | Biome format and safe fixes |
 | `pnpm check:pr-body <body.md>` | Check a PR body draft against the template |
-| `pnpm --filter @voluma/runner run-task --provider <p> --model <id> --task <text>` | Run one agent thread on a task (API dev server running, keys in `.env`); see [CONTEXT.md](.context/CONTEXT.md) |
-| `pnpm --filter @voluma/<pkg> <script>` | One package's script, e.g. `pnpm --filter @voluma/api dev` |
+| `pnpm --filter @voluma/runner run-task --provider <p> --model <id> --task <text>` | Run one agent thread on a task (`pnpm dev` running, keys in `.env`); see [CONTEXT.md](.context/CONTEXT.md) |
+| `pnpm --filter @voluma/<pkg> <script>` | One package's script, e.g. `pnpm --filter @voluma/api db:migrate` |
 
 An agent that starts sandboxes runs `pnpm --filter @voluma/runner sandboxes:clean --run <id>` for each of its runs before it finishes (without `--run` it ends every agent's sandboxes).
 
@@ -34,7 +35,7 @@ Pre-commit runs Biome on staged files. Nothing runs on push. Use pnpm, never npm
 | `apps/web/src/features/run`, `apps/api/src/domains/run`, `packages/workflow`, `packages/harness`, `apps/runner` | Run lane |
 | `apps/web/src/features/review`, `apps/api/src/domains/review`, `packages/viewer` | Review lane |
 | `packages/contracts`, `packages/api-client` | Both; contract PRs only |
-| `packages/design-tokens`, `packages/ui`, `apps/web/src/shell`, `apps/web/src/dev-ui`, `apps/web` and `apps/api` root files, `apps/api/src/{index,domain}.ts`, `apps/api/src/ports`, `apps/api/src/adapters`, root config, `tools/ci` | Both; small PRs |
+| `packages/design-tokens`, `packages/ui`, `apps/web/src/shell`, `apps/web/src/dev-ui`, `apps/web` and `apps/api` root files, `apps/api/src/index.ts`, `apps/api/src/ports`, root config, `tools/` | Both; small PRs |
 
 - Edit only your lane's directories. When you need a change in the other
   lane's code, open a GitHub issue for its owner.
@@ -70,8 +71,8 @@ git worktree add ../voluma.worktrees/<name> -b <owner>/<topic> origin/main
 cd ../voluma.worktrees/<name> && pnpm i
 ```
 
-- Worktrees share nothing mutable: no fixed dev ports (Vite and Wrangler pick
-  free ones), no shared database, Nx cache per worktree, no Nx daemon.
+- Worktrees share nothing mutable: no fixed dev ports (`pnpm dev` picks
+  free ones), no shared database (it makes one per worktree), Nx cache per worktree, no Nx daemon.
 - Small PRs to `main`. Keep your branch current with
   `git merge origin/main`. Never rebase, force-push or commit to someone
   else's branch.

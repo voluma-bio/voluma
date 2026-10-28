@@ -7,21 +7,24 @@ commands are in [AGENTS.md](../AGENTS.md).
 
 ```
 apps/web        React + Vite. shell/ mounts routes; features/run and features/review own screens
-apps/api        Cloudflare Worker. src/index.ts is the composition root: the only code that
-                reads env; it builds adapters/ for the ports/ and mounts domains/run at /run/
-                (runs, the event log) and domains/review at /review/
-                (review data, chat threads, corrections)
+apps/api        Node server on Postgres (Drizzle), each domain a Hono app. src/index.ts is the
+                composition root: the only code that reads env; it builds the adapters and
+                mounts domains/run at /api/run/ (runs, the event log) and domains/review at
+                /api/review/ (review data, chat threads, corrections) with app.route. A
+                domain's tables and Postgres adapters live in the domain; adapters/ is for
+                shared ports
 apps/runner     Node entry point that runs the agent harness against the API (Run lane)
 packages/
   contracts     zod schemas for the four contracts and the shared formats
   harness       the agent harness: our tools, the Sandbox and EventLog ports, the Pi
-                adapter; runtime-neutral (no Node or Worker types)
+                adapter; runtime-neutral (no Node types)
   workflow      pure functions over a workflow package: read and validate it, task graph, stale tasks
   api-client    typed commands and event stream; the only way web features reach the API
   viewer        local DICOM ZIP intake, Cornerstone acquired slices, persistent imaging slots
   ui            shared React components, styled from tokens
   design-tokens tokens.css (raw values, two themes) and theme.css (Tailwind mapping)
 tools/ci        PR-body check
+tools/dev.mjs   the `pnpm dev` launcher (below)
 ```
 
 Dependencies point down: apps → feature code → packages. `contracts` and
@@ -35,7 +38,7 @@ outside the sandbox, so credentials never enter it. A run is a tree of
 threads: a supervisor (the root), a worker that goes through the task
 checklist, check threads, and review chat threads.
 - **Event log.** Ours, kept separately from Pi's history: the `threads` and
-  `events` tables in D1, behind the run domain's API. Each event is saved
+  `events` tables in Postgres, behind the run domain's API. Each event is saved
   before it is published, and `seq` (per run) is the stream cursor. Both the
   UI and the review read this log. Pi's own messages go in `pi_messages`,
   one row per message, so a thread can resume.
@@ -69,7 +72,7 @@ checklist, check threads, and review chat threads.
   and fails if the stored system message differs from the current prompt and tools. `apps/runner/src/main.ts` wires it to the HTTP client
   (`packages/harness/src/adapters/http`), the Modal sandbox and a model:
   `pnpm --filter @voluma/runner run-task --provider openai --model <id> --task "<text>"`
-  (needs `pnpm --filter @voluma/api dev` running and the keys in `.env`, which the runner reads
+  (needs `pnpm dev` running, which writes the API's URL and token to `.dev/env.json` for the runner unless `.env` sets `VOLUMA_API_URL`; keys are in `.env`, which the runner reads
   into a config object rather than `process.env`; model keys are `VOLUMA_<PROVIDER>_API_KEY`). The sandbox is
   created on the first `bash` call and destroyed at the end (every exit path, and what a crash
   leaves: `apps/runner/.context/CONTEXT.md`); Ctrl-C kills the running
@@ -78,6 +81,14 @@ checklist, check threads, and review chat threads.
   in `packages/harness/src/tools`; it caps what the model sees (head and tail) and
   writes the full text to `toolOutputKey` with `Sandbox.writeFile`, which exists
   because an R2 mount cannot append: the adapter writes locally and copies in one go.
+- **`seq` and the database.** `seq` per run is gapless and in commit order: each
+  append takes a per-run advisory lock as its own statement before the insert (a lock
+  inside the insert's statement races under READ COMMITTED), so the stream hub can
+  publish after commit and treat a gap as "backfill". `pi_messages.message` is `text`
+  because `jsonb` would reorder keys and break byte-for-byte history. Migrations are
+  generated Drizzle `.sql` files in `apps/api/drizzle/`, run from one place
+  (`pnpm db:migrate` locally, the deploy's pre-deploy step later), never at server start
+  because `migrate()` takes no lock and never with `push`.
 - **Where the runner lives.** For now it's a Node process (`apps/runner`)
   that talks to the API. Whether it moves into a Durable Object per run is
   decided after the first real run.
@@ -141,11 +152,16 @@ support, geometry, limits, library integration and verification coverage.
 
 Several agents from two people work at once, each in its own worktree.
 Nothing they run shares mutable state:
-- dev servers take free ports (Vite moves to the next free one);
+- `pnpm dev` (`tools/dev.mjs`) picks two free ports for the API and Vite (`--strictPort`,
+  `/api` proxied to the API), gives the worktree its own database `voluma_<directory name>_<hash of its path>`
+  on the Postgres server in `DATABASE_SERVER_URL` (`pnpm db:up` starts one container,
+  `voluma-pg` on port 54432, shared by all worktrees as a server only), migrates it, and
+  writes `.dev/env.json` (git-ignored) for the runner. `.env` holds nothing per worktree;
+  the API token is generated per launch (`pnpm db:reset` drops the worktree's database);
 - Nx keeps its cache in the worktree's `.nx/` and runs without a daemon;
 - sandboxes are named `<runId>.<name>` and tagged with the run id, so give each
-  worktree's runs their own run ids; when the thread store lands, each worktree gets
-  its own local store;
+  worktree's runs their own run ids; the event log is in the worktree's own
+  database;
 - the pnpm store is shared, but it is content-addressed and append-only.
 
 The pre-commit hook lives in the shared `.git`, so every worktree runs the
