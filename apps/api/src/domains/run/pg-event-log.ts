@@ -11,10 +11,10 @@
  * publish after commit, and a gap means backfill from the log.
  */
 import type { EventInput } from "@voluma/contracts/events";
-import { EventIdConflict, type EventLog } from "@voluma/harness/ports/event-log";
+import type { EventLog } from "@voluma/harness/ports/event-log";
 import { eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { events, threads } from "../domains/run/schema";
+import { events, threads } from "./schema";
 
 /** First key of the advisory lock pair; the second is the run. Distinguishes our locks from others'. */
 const EVENT_SEQ_LOCK = 0x76_6f_6c_75;
@@ -40,16 +40,7 @@ export function pgEventLog(db: PostgresJsDatabase): EventLog {
           })
           .onConflictDoNothing({ target: events.id })
           .returning({ id: events.id });
-        if (inserted.length === 0) {
-          const [existing] = await tx
-            .select({ runId: events.runId })
-            .from(events)
-            .where(eq(events.id, event.id));
-          if (existing?.runId !== event.runId) {
-            throw new EventIdConflict(`event ${event.id} belongs to another run`);
-          }
-          return;
-        }
+        if (inserted.length === 0) return;
         await projectThread(tx, event, createdAt);
       });
     },

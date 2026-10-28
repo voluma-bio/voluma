@@ -1,8 +1,8 @@
 /**
  * Voluma API, a Node server and the composition root: the only place that reads
- * env, builds adapters, and hands each domain its ports. Hono is used here only, to
- * route to the domains; each domain owns every path under its mount and gets the
- * path relative to it. Everything is under /api/.
+ * env, builds adapters, and hands each domain its ports. Each domain is a Hono app
+ * that owns every path under its mount (`app.route`) and does not know the mount.
+ * Everything is under /api/.
  *
  * Start: `node --import tsx apps/api/src/index.ts` (not through pnpm, so node
  * receives SIGTERM; tsx because relative imports have no extensions).
@@ -12,11 +12,12 @@
 import { serve } from "@hono/node-server";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
 import postgres from "postgres";
-import { pgEventLog, pgHistory } from "./adapters";
-import type { DomainHandler } from "./domain";
 import { createReview } from "./domains/review";
 import { createRun } from "./domains/run";
+import { pgEventLog } from "./domains/run/pg-event-log";
+import { pgHistory } from "./domains/run/pg-history";
 
 const required = (name: string) => {
   const value = process.env[name];
@@ -27,30 +28,23 @@ const required = (name: string) => {
 const client = postgres(required("DATABASE_URL"));
 const db = drizzle(client, { casing: "snake_case" });
 
-const mounts: [prefix: string, handler: DomainHandler][] = [
-  [
-    "/api/run",
-    createRun({
-      eventLog: pgEventLog(db),
-      history: pgHistory(db),
-      apiToken: required("VOLUMA_API_TOKEN"),
-    }),
-  ],
-  ["/api/review", createReview({})],
-];
-
 const app = new Hono();
 app.get("/health", (c) => c.text("ok"));
-for (const [prefix, handler] of mounts) {
-  app.all(`${prefix}/*`, async (c) => {
-    const path = new URL(c.req.url).pathname.slice(prefix.length);
-    return (await handler(c.req.raw, path)) ?? c.notFound();
-  });
-}
+app.route(
+  "/api/run",
+  createRun({
+    eventLog: pgEventLog(db),
+    history: pgHistory(db),
+    apiToken: required("VOLUMA_API_TOKEN"),
+  }),
+);
+app.route("/api/review", createReview({}));
 app.notFound((c) =>
   c.req.path.startsWith("/api/") ? c.json({ error: "not found" }, 404) : c.text("Not found", 404),
 );
 app.onError((error, c) => {
+  // Middleware (bearerAuth) rejects by throwing; keep its status.
+  if (error instanceof HTTPException) return error.getResponse();
   console.error(error);
   return c.req.path.startsWith("/api/")
     ? c.json({ error: "internal error" }, 500)

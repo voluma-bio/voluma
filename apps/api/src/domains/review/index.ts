@@ -4,10 +4,10 @@
  * proposal. It reaches the supervisor through a port in ReviewDeps that
  * index.ts wires to the run domain, never by importing domains/run.
  */
-import type { DomainHandler } from "../../domain";
+import { Hono } from "hono";
 
 export type ReviewDeps = Record<string, never>;
 
-export function createReview(_deps: ReviewDeps): DomainHandler {
-  return () => null;
+export function createReview(_deps: ReviewDeps) {
+  return new Hono();
 }

@@ -6,8 +6,9 @@
  *    (`voluma_<dir>_<hash8>`), created on the Postgres server in DATABASE_SERVER_URL
  *    (`pnpm db:up` starts one) and migrated;
  *  - a random API token per launch.
- * It writes { apiUrl, appUrl, databaseUrl, apiToken } to the git-ignored .dev/env.json,
- * which the runner reads when VOLUMA_API_URL is unset. Ctrl-C stops everything
+ * The API also reads the repo .env (--env-file-if-exists), as it would read Railway's
+ * variables. It writes { apiUrl, apiToken } to the git-ignored .dev/env.json, which
+ * the runner reads when VOLUMA_API_URL is unset. Ctrl-C stops everything
  * and removes it.
  * `pnpm db:reset` (`node tools/dev.mjs reset`) drops this worktree's database and exits;
  * the next `pnpm dev` recreates and migrates it.
@@ -50,10 +51,9 @@ if (process.argv[2] === "reset") {
 await ensureDatabase();
 
 const [apiPort, webPort] = [await freePort(), await freePort()];
+const appUrl = `http://localhost:${webPort}`;
 const env = {
   apiUrl: `http://localhost:${apiPort}`,
-  appUrl: `http://localhost:${webPort}`,
-  databaseUrl: databaseUrl.href,
   apiToken: randomBytes(24).toString("hex"),
 };
 const envPath = resolve(root, ".dev/env.json");
@@ -63,7 +63,7 @@ writeFileSync(envPath, `${JSON.stringify(env, null, 2)}\n`);
 const migrate = spawnSync("pnpm", ["--filter", "@voluma/api", "db:migrate"], {
   cwd: root,
   stdio: "inherit",
-  env: { ...process.env, DATABASE_URL: env.databaseUrl },
+  env: { ...process.env, DATABASE_URL: databaseUrl.href },
 });
 if (migrate.status !== 0) {
   console.error(
@@ -73,14 +73,14 @@ if (migrate.status !== 0) {
   process.exit(migrate.status ?? 1);
 }
 
-console.log(`\nweb  ${env.appUrl}\napi  ${env.apiUrl}\ndb   ${dbName}\n`);
+console.log(`\nweb  ${appUrl}\napi  ${env.apiUrl}\ndb   ${dbName}\n`);
 const children = [
-  spawn("node", ["--import", "tsx", "--watch", "src/index.ts"], {
+  spawn("node", ["--env-file-if-exists", envFile, "--import", "tsx", "--watch", "src/index.ts"], {
     cwd: resolve(root, "apps/api"),
     stdio: "inherit",
     env: {
       ...process.env,
-      DATABASE_URL: env.databaseUrl,
+      DATABASE_URL: databaseUrl.href,
       VOLUMA_API_TOKEN: env.apiToken,
       PORT: String(apiPort),
       HOST: "127.0.0.1",
@@ -119,13 +119,19 @@ async function withAdmin(run) {
   try {
     await run(admin);
   } catch (error) {
+    if (!isConnectionError(error)) throw error;
     console.error(
-      `Cannot reach Postgres at ${serverUrl.host}: ${error.message}\nStart it with \`pnpm db:up\`, or set DATABASE_SERVER_URL in .env.`,
+      `Cannot reach Postgres at ${serverUrl.host}: ${error.message || error.code}\nStart it with \`pnpm db:up\`, or set DATABASE_SERVER_URL in .env.`,
     );
     process.exit(1);
   } finally {
     await admin.end();
   }
+}
+
+// Refused or unresolved host, bad credentials, no such database.
+function isConnectionError(error) {
+  return ["ECONNREFUSED", "ENOTFOUND", "ETIMEDOUT", "28P01", "3D000"].includes(error.code);
 }
 
 function freePort() {

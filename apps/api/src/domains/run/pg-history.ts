@@ -7,7 +7,7 @@
 import { type History, HistoryConflict } from "@voluma/harness/ports/history";
 import { and, asc, eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { piMessages } from "../domains/run/schema";
+import { piMessages } from "./schema";
 
 export function pgHistory(db: PostgresJsDatabase): History {
   return {

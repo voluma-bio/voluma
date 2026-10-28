@@ -15,3 +15,9 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
 - `pi_messages.message` stays `text`; `jsonb` would reorder keys and break the
   byte-for-byte history.
 - Only `src/index.ts` reads env.
+- Each domain's factory returns a Hono app, mounted by `index.ts` with `app.route`. Use
+  Hono's routing and params; the root's JSON 404 and `onError` cover the domains.
+- A domain's tables and their Postgres adapters live in the domain
+  (`src/domains/<domain>/pg-*.ts`), constructed only by `index.ts`. `src/adapters/` is for
+  adapters of the shared `src/ports/`.
+- `pnpm dev` is the only launcher, and it starts the API with the repo `.env`.

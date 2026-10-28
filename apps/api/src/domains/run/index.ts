@@ -6,14 +6,16 @@
  *   POST /ingest/threads/:threadId/messages  append a history row {idx, message}
  *   GET  /ingest/threads/:threadId/messages  all rows in order
  * Later: workflows and their package import, runs, the supervisor. RunDeps lists
- * what it needs; index.ts supplies adapters.
+ * what it needs; index.ts supplies adapters. The factory returns a Hono app, so
+ * routes, params and (later) WebSocket upgrades use Hono; the domain does not know its mount.
+ * The Postgres adapters and tables for it are in this directory.
  */
-import { timingSafeEqual } from "node:crypto";
 import { eventInputSchema } from "@voluma/contracts/events";
-import { EventIdConflict, type EventLog } from "@voluma/harness/ports/event-log";
+import type { EventLog } from "@voluma/harness/ports/event-log";
 import { type History, HistoryConflict } from "@voluma/harness/ports/history";
+import { Hono } from "hono";
+import { bearerAuth } from "hono/bearer-auth";
 import { z } from "zod";
-import type { DomainHandler } from "../../domain";
 
 export interface RunDeps {
   eventLog: EventLog;
@@ -28,68 +30,37 @@ const historyRowSchema = z.object({
   message: z.string().refine((text) => !text.includes("\0"), "message contains a NUL byte"),
 });
 
-export function createRun({ eventLog, history, apiToken }: RunDeps): DomainHandler {
-  return async (request, pathname) => {
-    if (!pathname.startsWith(INGEST)) return null;
-    if (!bearerMatches(request.headers.get("authorization"), apiToken)) {
-      return new Response("Unauthorized", { status: 401 });
+export function createRun({ eventLog, history, apiToken }: RunDeps) {
+  const app = new Hono();
+  app.use("/ingest/*", bearerAuth({ token: apiToken }));
+
+  app.post("/ingest/runs/:runId/events", async (c) => {
+    const parsed = eventInputSchema.safeParse(await readJson(c.req));
+    if (!parsed.success) return c.text(parsed.error.message, 400);
+    if (parsed.data.runId !== c.req.param("runId")) {
+      return c.text("event runId does not match the path", 400);
     }
-    const events = /^\/ingest\/runs\/([^/]+)\/events$/.exec(pathname);
-    if (events && request.method === "POST") {
-      const runId = decode(events[1] as string);
-      if (runId === undefined) return badRequest("malformed path");
-      const parsed = eventInputSchema.safeParse(await readJson(request));
-      if (!parsed.success) return badRequest(parsed.error.message);
-      if (parsed.data.runId !== runId) {
-        return badRequest("event runId does not match the path");
-      }
-      try {
-        await eventLog.append(parsed.data);
-      } catch (error) {
-        if (error instanceof EventIdConflict) return new Response(error.message, { status: 409 });
-        throw error;
-      }
-      return new Response(null, { status: 204 });
+    await eventLog.append(parsed.data);
+    return c.body(null, 204);
+  });
+
+  app.get("/ingest/threads/:threadId/messages", async (c) =>
+    c.json({ messages: await history.load(c.req.param("threadId")) }),
+  );
+
+  app.post("/ingest/threads/:threadId/messages", async (c) => {
+    const parsed = historyRowSchema.safeParse(await readJson(c.req));
+    if (!parsed.success) return c.text(parsed.error.message, 400);
+    try {
+      await history.appendMessage(c.req.param("threadId"), parsed.data.idx, parsed.data.message);
+    } catch (error) {
+      if (error instanceof HistoryConflict) return c.text(error.message, 409);
+      throw error;
     }
-    const messages = /^\/ingest\/threads\/([^/]+)\/messages$/.exec(pathname);
-    if (messages) {
-      const threadId = decode(messages[1] as string);
-      if (threadId === undefined) return badRequest("malformed path");
-      if (request.method === "GET")
-        return Response.json({ messages: await history.load(threadId) });
-      if (request.method === "POST") {
-        const parsed = historyRowSchema.safeParse(await readJson(request));
-        if (!parsed.success) return badRequest(parsed.error.message);
-        try {
-          await history.appendMessage(threadId, parsed.data.idx, parsed.data.message);
-        } catch (error) {
-          if (error instanceof HistoryConflict) return new Response(error.message, { status: 409 });
-          throw error;
-        }
-        return new Response(null, { status: 204 });
-      }
-    }
-    return null;
-  };
+    return c.body(null, 204);
+  });
+
+  return app;
 }
 
-const INGEST = "/ingest/";
-
-const decode = (segment: string) => {
-  try {
-    return decodeURIComponent(segment);
-  } catch {
-    return undefined;
-  }
-};
-
-const encoder = new TextEncoder();
-// Constant time for equal lengths; the length of the expected header is not secret.
-function bearerMatches(header: string | null, token: string): boolean {
-  const given = encoder.encode(header ?? "");
-  const expected = encoder.encode(`Bearer ${token}`);
-  return given.byteLength === expected.byteLength && timingSafeEqual(given, expected);
-}
-
-const readJson = (request: Request) => request.json().catch(() => undefined);
-const badRequest = (message: string) => new Response(message, { status: 400 });
+const readJson = (req: { json(): Promise<unknown> }) => req.json().catch(() => undefined);

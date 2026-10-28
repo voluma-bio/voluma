@@ -7,11 +7,12 @@ commands are in [AGENTS.md](../AGENTS.md).
 
 ```
 apps/web        React + Vite. shell/ mounts routes; features/run and features/review own screens
-apps/api        Node server (Hono at the root only) on Postgres (Drizzle). src/index.ts is the
-                composition root: the only code that reads env; it builds adapters/ for the
-                ports/ and mounts domains/run at /api/run/ (runs, the event log) and
-                domains/review at /api/review/ (review data, chat threads, corrections).
-                Domains get the path relative to their mount
+apps/api        Node server on Postgres (Drizzle), each domain a Hono app. src/index.ts is the
+                composition root: the only code that reads env; it builds the adapters and
+                mounts domains/run at /api/run/ (runs, the event log) and domains/review at
+                /api/review/ (review data, chat threads, corrections) with app.route. A
+                domain's tables and Postgres adapters live in the domain; adapters/ is for
+                shared ports
 apps/runner     Node entry point that runs the agent harness against the API (Run lane)
 packages/
   contracts     zod schemas for the four contracts and the shared formats
