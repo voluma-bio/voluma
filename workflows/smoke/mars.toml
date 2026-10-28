@@ -1,0 +1,5 @@
+[package]
+schema = 1
+name = "smoke"
+version = "0.1.0"
+description = "A two-task workflow that checks the runner end to end: import, skills, tools and the plan"

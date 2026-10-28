@@ -23,19 +23,14 @@ import type {
   ReportOutputInput,
   TaskToolResult,
 } from "@voluma/contracts/task-tools";
-import type { DeclaredOutput } from "@voluma/contracts/workflow";
+import type { DeclaredOutput, WorkflowPlan } from "@voluma/contracts/workflow";
 import { transitiveDependents } from "@voluma/workflow";
 import { declarationProblem, referenceProblem } from "./output-checks";
 import type { Evidence } from "./ports/evidence";
 import type { PayloadOf, Recorder } from "./recorder";
 
-/** A plan task: its declared outputs and the tasks it builds on. */
-export interface PlanTask {
-  id: string;
-  dependsOn: readonly string[];
-  doneWhen?: readonly string[];
-  outputs: DeclaredOutput[];
-}
+/** A plan task as the workflow declares it (`workflowPlanSchema`). */
+export type PlanTask = WorkflowPlan["tasks"][number];
 
 /** The calling tool call, and the thread's identity (`ToolContext`). */
 export interface Caller {
@@ -248,12 +243,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
           {
             reason: "run",
             plan: {
-              tasks: plan.map((t) => ({
-                id: t.id,
-                dependsOn: [...t.dependsOn],
-                ...(t.doneWhen && { doneWhen: [...t.doneWhen] }),
-                outputs: t.outputs,
-              })),
+              tasks: [...plan],
             },
           },
           `${rootThreadId}:revision`,

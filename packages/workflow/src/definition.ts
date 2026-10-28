@@ -41,7 +41,8 @@ export interface WorkflowDefinition {
   parameters: unknown[];
   structures: unknown[];
   review: unknown;
-  roles: Partial<Record<Role, Agent>>;
+  /** `worker` is always set; the parser refuses a workflow without it. */
+  roles: Partial<Record<Role, Agent>> & { worker: Agent };
   /** Every skill in the run's pinned packages. */
   skills: Skill[];
 }

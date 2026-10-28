@@ -9,7 +9,10 @@
  * it draws agents and skills from, each pinned too. A package inside a repo's
  * subdirectory pins `path`.
  *
- * Empty: `mouse-oa` has no `workflow.md` package yet. Add its entry with its first commit.
+ * A package reaches a prompt only through a commit pinned here, in reviewed code; that is
+ * the trust boundary for package text. `smoke` is this repo's own `workflows/smoke`: a
+ * workflow that always runs, to check the runner end to end. `mouse-oa` follows with its
+ * first commit.
  */
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 

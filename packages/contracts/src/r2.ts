@@ -29,7 +29,8 @@ export const workflowsPrefix = () => "workflows/";
 
 export const workflowPrefix = (pin: WorkflowPin) => {
   const { repo, commit, path } = workflowPinSchema.parse(pin);
-  return `workflows/${repo}/${commit}/${path ? `${path}/` : ""}`;
+  // `root/` and `sub/<path>/` never nest, so a subpackage's files can't land in the root package's.
+  return `workflows/${repo}/${commit}/${path ? `sub/${path}` : "root"}/`;
 };
 
 export const inputPrefix = (inputId: string) => `inputs/${seg(inputId)}/`;

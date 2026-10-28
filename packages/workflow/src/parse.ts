@@ -89,15 +89,32 @@ function splitBlock(lines: string[]): { yaml?: string; prose: string[] } {
   };
 }
 
-/** `### Done when` bullets split off a task's prose. */
-function splitDone(prose: string[]): { text: string; doneWhen: string[] } {
+/**
+ * A task's `### Done when` section: bullets, each with its indented continuation lines.
+ * It ends the task's prose, so any other non-blank line after it is refused, not dropped.
+ */
+function splitDone(
+  where: string,
+  prose: string[],
+): { text: string; doneWhen: string[]; headed: boolean } {
   const i = prose.findIndex((l) => /^### Done when\s*$/.test(l));
   const head = i < 0 ? prose : prose.slice(0, i);
-  const done = i < 0 ? [] : prose.slice(i + 1);
-  const doneWhen = done
-    .map((l) => /^\s*[-*]\s+(.*\S)\s*$/.exec(l)?.[1])
-    .filter((l): l is string => l !== undefined);
-  return { text: head.join("\n").trim(), doneWhen };
+  const doneWhen: string[] = [];
+  for (const line of i < 0 ? [] : prose.slice(i + 1)) {
+    if (line.trim() === "") continue;
+    const bullet = /^[-*]\s+(.*\S)\s*$/.exec(line);
+    if (bullet?.[1]) doneWhen.push(bullet[1]);
+    else if (/^\s+\S/.test(line) && doneWhen.length > 0) {
+      doneWhen[doneWhen.length - 1] += ` ${line.trim()}`;
+    } else {
+      throw new WorkflowParseError(
+        FILE,
+        where,
+        `"### Done when" must be the last part of a task, bullets only; found "${line.trim()}"`,
+      );
+    }
+  }
+  return { text: head.join("\n").trim(), doneWhen, headed: i >= 0 };
 }
 
 const FILE = "workflow.md";
@@ -110,7 +127,44 @@ const frontmatterSchema = z.strictObject({
   title: z.string().min(1),
   roles: z.record(z.string(), z.string()).default({}),
 });
-const catalogEntry = z.looseObject({ id: z.string().min(1), name: z.string().min(1) });
+const parameterEntry = z.strictObject({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  unit: z.string().min(1).optional(),
+  description: z.string().optional(),
+});
+const structureEntry = z.strictObject({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  label: z.number().int().positive().optional(),
+  find: z.string().optional(),
+});
+const reviewBlock = z.strictObject({
+  "default-layout": z.array(z.string()).default([]),
+  "per-task": z
+    .record(
+      z.string(),
+      z.strictObject({
+        show: z.array(z.string()).default([]),
+        table: z.array(z.string()).default([]),
+      }),
+    )
+    .default({}),
+});
+/**
+ * Keys of Mars agent files that Voluma does not read. Every other key must be one Voluma
+ * reads, so a typo such as `tool:` fails instead of silently dropping the tool.
+ */
+const MARS_AGENT_KEYS = [
+  "description",
+  "effort",
+  "model-policies",
+  "sandbox",
+  "harness",
+  "approval",
+  "mode",
+  "type",
+] as const;
 
 /** A declared output as written: `required` defaults to true; an unknown key is an error. */
 function output(where: string, raw: Record<string, unknown>) {
@@ -131,7 +185,7 @@ function readAgent(file: string, text: string): Agent {
   const fm = check(
     file,
     "frontmatter",
-    z.looseObject({
+    z.strictObject({
       name: z.string().min(1),
       model: z.string().optional(),
       skills: z
@@ -141,6 +195,7 @@ function readAgent(file: string, text: string): Agent {
         })
         .default({ load: [], available: [] }),
       tools: z.array(z.string()).default([]),
+      ...Object.fromEntries(MARS_AGENT_KEYS.map((k) => [k, z.unknown().optional()])),
     }),
     data,
   );
@@ -175,6 +230,49 @@ function readSkill(file: string, dir: string, mount: string, text: string): Skil
   };
 }
 
+/** Where the catalogs and the review template name tasks and outputs, they must agree. */
+function crossCheck(
+  plan: z.infer<typeof workflowPlanSchema>,
+  parameters: z.infer<typeof parameterEntry>[],
+  structures: z.infer<typeof structureEntry>[],
+  review: z.infer<typeof reviewBlock>,
+) {
+  const fail = (where: string, message: string) => {
+    throw new WorkflowParseError(FILE, where, message);
+  };
+  const outputIds = new Set<string>();
+  for (const t of plan.tasks) {
+    for (const o of t.outputs) {
+      outputIds.add(o.id);
+      const where = `## Task: ${t.id}, output ${o.id}`;
+      if (o.kind === "measurement") {
+        const p = parameters.find((x) => x.id === o.id);
+        if (p?.unit && p.unit !== o.unit) {
+          fail(where, `unit "${o.unit}" disagrees with the parameter catalog's "${p.unit}"`);
+        }
+      }
+      if (o.kind === "structure") {
+        const st = structures.find((x) => x.id === o.id);
+        if (st?.label !== undefined && o.label !== undefined && st.label !== o.label) {
+          fail(where, `label ${o.label} disagrees with the structure catalog's ${st.label}`);
+        }
+        if (st && o.name !== undefined && st.name !== o.name) {
+          fail(where, `name "${o.name}" disagrees with the structure catalog's "${st.name}"`);
+        }
+      }
+    }
+  }
+  const known = new Set([...outputIds, ...structures.map((x) => x.id)]);
+  const taskIds = new Set(plan.tasks.map((t) => t.id));
+  for (const [task, v] of Object.entries(review["per-task"])) {
+    if (!taskIds.has(task)) fail("## Review", `per-task.${task}: not a task of the plan`);
+    for (const id of [...v.show, ...v.table]) {
+      if (!known.has(id))
+        fail("## Review", `per-task.${task}: "${id}" is neither an output nor a structure`);
+    }
+  }
+}
+
 /**
  * `packages[0]` is the workflow (it holds `workflow.md`); the rest supply agents and
  * skills it may name. Skills and agents are looked up across all of them.
@@ -192,11 +290,28 @@ export function parseWorkflow(packages: readonly PackageFiles[]): WorkflowDefini
       const agent = /^agents\/([^/]+)\.md$/.exec(path);
       if (agent) {
         const a = readAgent(path, content);
-        if (!agents.has(a.name)) agents.set(a.name, a);
+        if (agents.has(a.name)) {
+          throw new WorkflowParseError(
+            path,
+            "frontmatter",
+            `agent "${a.name}" is defined in two pinned packages`,
+          );
+        }
+        agents.set(a.name, a);
         continue;
       }
       const skill = /^skills\/([^/]+)\/SKILL\.md$/.exec(path);
-      if (skill?.[1]) skills.push(readSkill(path, skill[1], pkg.mount, content));
+      if (skill?.[1]) {
+        const sk = readSkill(path, skill[1], pkg.mount, content);
+        if (skills.some((x) => x.name === sk.name)) {
+          throw new WorkflowParseError(
+            path,
+            "frontmatter",
+            `skill "${sk.name}" is defined in two pinned packages`,
+          );
+        }
+        skills.push(sk);
+      }
     }
   }
 
@@ -204,7 +319,7 @@ export function parseWorkflow(packages: readonly PackageFiles[]): WorkflowDefini
   const fm = check(FILE, "frontmatter", frontmatterSchema, data);
   const parts = sections(body);
 
-  const roles: Partial<Record<Role, Agent>> = {};
+  const assigned: Partial<Record<Role, Agent>> = {};
   for (const [role, name] of Object.entries(fm.roles)) {
     if (!(ROLES as readonly string[]).includes(role)) {
       throw new WorkflowParseError(
@@ -221,9 +336,12 @@ export function parseWorkflow(packages: readonly PackageFiles[]): WorkflowDefini
         `roles.${role}: no agent "${name}" in the pinned packages`,
       );
     }
-    roles[role as Role] = agent;
+    assigned[role as Role] = agent;
   }
-  if (!roles.worker) throw new WorkflowParseError(FILE, "frontmatter", "roles.worker is required");
+  if (!assigned.worker) {
+    throw new WorkflowParseError(FILE, "frontmatter", "roles.worker is required");
+  }
+  const roles = { ...assigned, worker: assigned.worker };
 
   const skillNames = new Set(skills.map((s) => s.name));
   for (const agent of new Set(Object.values(roles))) {
@@ -240,9 +358,9 @@ export function parseWorkflow(packages: readonly PackageFiles[]): WorkflowDefini
 
   const tasks: { id: string; dependsOn: string[]; doneWhen?: string[]; outputs: unknown[] }[] = [];
   const instructions: Record<string, string> = {};
-  let parameters: unknown[] = [];
-  let structures: unknown[] = [];
-  let review: unknown = {};
+  let parameters: z.infer<typeof parameterEntry>[] = [];
+  let structures: z.infer<typeof structureEntry>[] = [];
+  let review: z.infer<typeof reviewBlock> = reviewBlock.parse({});
   for (const section of parts.sections) {
     const { yaml, prose } = splitBlock(section.lines);
     const where = `## ${section.heading}`;
@@ -252,7 +370,10 @@ export function parseWorkflow(packages: readonly PackageFiles[]): WorkflowDefini
       if (yaml === undefined)
         throw new WorkflowParseError(FILE, where, "missing the ```yaml block (depends, outputs)");
       const block = check(FILE, where, taskBlock, yamlBlock(FILE, where, yaml) ?? {});
-      const { text: prosetext, doneWhen } = splitDone(prose);
+      const { text: prosetext, doneWhen, headed } = splitDone(where, prose);
+      if (headed && doneWhen.length === 0) {
+        throw new WorkflowParseError(FILE, where, "### Done when has no bullets (- criterion)");
+      }
       tasks.push({
         id,
         dependsOn: block.depends,
@@ -261,11 +382,12 @@ export function parseWorkflow(packages: readonly PackageFiles[]): WorkflowDefini
       });
       instructions[id] = prosetext;
     } else if (section.heading === "Parameters" || section.heading === "Structures") {
-      const list = check(FILE, where, z.array(catalogEntry), yamlBlock(FILE, where, yaml ?? ""));
-      if (section.heading === "Parameters") parameters = list;
-      else structures = list;
+      const raw = yamlBlock(FILE, where, yaml ?? "");
+      if (section.heading === "Parameters")
+        parameters = check(FILE, where, z.array(parameterEntry), raw);
+      else structures = check(FILE, where, z.array(structureEntry), raw);
     } else if (section.heading === "Review") {
-      review = yamlBlock(FILE, where, yaml ?? "") ?? {};
+      review = check(FILE, where, reviewBlock, yamlBlock(FILE, where, yaml ?? "") ?? {});
     } else {
       throw new WorkflowParseError(
         FILE,
@@ -280,6 +402,7 @@ export function parseWorkflow(packages: readonly PackageFiles[]): WorkflowDefini
     const issue = plan.error.issues[0];
     throw new WorkflowParseError(FILE, "tasks", `${issue?.path.join(".")}: ${issue?.message}`);
   }
+  crossCheck(plan.data, parameters, structures, review);
   return {
     name: fm.name,
     title: fm.title,

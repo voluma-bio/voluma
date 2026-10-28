@@ -28,7 +28,13 @@
  * folded from (see below).
  */
 import { z } from "zod";
-import { runIdSchema, taskIdSchema, taskStatusSchema, toolCallIdSchema } from "./ids";
+import {
+  modelRefSchema,
+  runIdSchema,
+  taskIdSchema,
+  taskStatusSchema,
+  toolCallIdSchema,
+} from "./ids";
 import { evidenceRefSchema, outputReportSchema } from "./output";
 import { focusSchema } from "./review";
 import { workflowPinSchema, workflowPlanSchema } from "./workflow";
@@ -99,6 +105,20 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         spawnedBy: nonEmpty.optional(),
         /** Workflow packages the run is pinned to; set on the root thread only. */
         workflows: z.array(workflowPinSchema).optional(),
+        /**
+         * The model this thread calls, as the runner names it: `provider/id`
+         * (`meta/muse-spark-1.3`). Worker, check and chat threads call one and
+         * should set it; the supervisor calls none and must not. A thread's model is
+         * fixed for its life: every `thread.started` of a thread names the same one, and
+         * the harness fails a resume on a different model, as it does for a differing
+         * system prompt. Optional in the schema until the harness writes it; then it
+         * becomes required on those kinds.
+         */
+        model: modelRefSchema.optional(),
+      })
+      .refine((p) => p.kind !== "supervisor" || p.model === undefined, {
+        path: ["model"],
+        message: "the supervisor calls no model",
       })
       .refine(
         (p) =>

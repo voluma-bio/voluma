@@ -16,12 +16,15 @@ import { type RoleSpec, supervisor, supervisorThreadId } from "./supervisor";
 import { type PlanTask, taskRuntime } from "./task-runtime";
 import { threads } from "./threads";
 import { bashTool } from "./tools/bash";
+import { buildTools } from "./tools/registry";
 import { taskTools } from "./tools/task-tools";
 import { threadMessageTool } from "./tools/thread-message";
-import type { Tool } from "./tools/tool";
 
-/** What a worker or check thread is told and runs on; the harness adds its tools after `tools`, the role's extras. */
-export type RunRole = Omit<RoleSpec, "tools"> & { tools?: Tool[] };
+/**
+ * What a worker or check thread is told and runs on; the harness adds its always-on tools.
+ * `tools` names the optional tools its agent grants (`tools/registry.ts`).
+ */
+export type RunRole = Omit<RoleSpec, "tools"> & { tools?: readonly string[] };
 export type { PlanTask };
 
 export interface SuperviseRunOptions {
@@ -61,11 +64,11 @@ export function superviseRun(options: SuperviseRunOptions): Promise<Folded> {
     if (!found) throw new Error(`${id} is not a task of the plan`);
     return found;
   };
-  const tools = (extra: Tool[] = []) => [
+  const tools = (granted: readonly string[] = []) => [
     bashTool(layout),
     ...taskTools(runtime),
     threadMessageTool((from, to, text) => sup.message(from, to, text)),
-    ...extra,
+    ...buildTools(granted, { layout }),
   ];
   const sup = supervisor({
     runId,

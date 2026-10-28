@@ -26,7 +26,7 @@ import { llmMainThread, mainSystem } from "@voluma/harness/main-thread";
 import { type Recorder, recorder } from "@voluma/harness/recorder";
 import { type SandboxSession, sandboxSession } from "@voluma/harness/sandbox-session";
 import { type RunRole, superviseRun } from "@voluma/harness/supervise-run";
-import { resolveTools } from "@voluma/harness/tools";
+import { checkToolNames } from "@voluma/harness/tools";
 import type { Agent } from "@voluma/workflow/definition";
 import { loadWorkflow } from "@voluma/workflow/load";
 import { type Config, isVisitorSafe, providerKey } from "./config.ts";
@@ -123,14 +123,17 @@ export async function runClaim(
     const definition = await loadWorkflow(run.workflows, {
       store: r2Workflows(config.r2),
       githubToken: config.githubToken,
+      signal: abort.signal,
     });
-    const { plan } = definition;
-    const workerAgent = definition.roles.worker;
-    const checkerAgent = definition.roles.checker;
-    const workerTools = workerAgent ? resolveTools(workerAgent.tools, workerAgent.name) : [];
-    const checkTools = checkerAgent ? resolveTools(checkerAgent.tools, checkerAgent.name) : [];
-    // The main thread has no tools yet (TODO.md), so its agent's `tools:` are not resolved.
-    const mainAgent = definition.roles.main;
+    const { worker: workerAgent, checker: checkerAgent, main: mainAgent } = definition.roles;
+    // Every assigned role's tools are checked now, so an unknown name fails at start whichever
+    // role it is on. The main thread has no tools yet (TODO.md); review is not started yet.
+    for (const [role, agent] of Object.entries(definition.roles)) {
+      checkToolNames(agent.tools, agent.name);
+      if (role === "review") {
+        log(`role ${role} is assigned to ${agent.name}, which this runner does not run yet`);
+      }
+    }
     const modelOf = (agent: Agent | undefined, fallback: string | undefined): Model<Api> => {
       const alias = agent?.model ?? fallback;
       if (!alias) return model;
@@ -160,6 +163,7 @@ export async function runClaim(
     const layout = runLayout(
       runId,
       run.input.source === "reference" ? referencePrefix("scan") : inputPrefix(run.input.id),
+      run.workflows,
     );
     const createSandbox = createModalSandbox({
       appName: RUNS_APP,
@@ -173,6 +177,14 @@ export async function runClaim(
       },
     });
     const stored = await client.storedEvents();
+    // A resumed run keeps the plan its first event recorded; only a new run takes the parsed one.
+    const recorded = stored.find(
+      (e) => e.type === "revision.started" && e.payload.reason === "run",
+    );
+    const plan =
+      recorded?.type === "revision.started" && recorded.payload.reason === "run"
+        ? recorded.payload.plan
+        : definition.plan;
     events = recorder(
       {
         async append(event) {
@@ -241,14 +253,14 @@ export async function runClaim(
         streamFn,
         systemPrompt: workerSystem(definition),
         prompt: workerPrompt(definition, task, notes),
-        tools: workerTools,
+        tools: workerAgent.tools,
       }),
       check: (task, notes) => ({
         model: checkModel,
         streamFn,
         systemPrompt: checkSystem(definition),
         prompt: checkPrompt(definition, task, notes),
-        tools: checkTools,
+        tools: checkerAgent?.tools,
       }),
       signal: abort.signal,
     });
