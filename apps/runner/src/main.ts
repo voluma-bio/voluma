@@ -13,6 +13,7 @@ import { createModels } from "@earendil-works/pi-ai";
 import { CLAIM_POLL_SECONDS } from "@voluma/contracts/runner";
 import { claimRun } from "@voluma/harness/adapters/http/hand-off";
 import { runnerConfig } from "./config.ts";
+import { modelFallback } from "./model-fallback.ts";
 import { PROVIDERS } from "./providers.ts";
 import { redactor } from "./redact.ts";
 import { type RunnerContext, runClaim } from "./run.ts";
@@ -51,6 +52,7 @@ const ctx: RunnerContext = {
   models,
   roles,
   visitorModel: resolve(config.visitorModel),
+  fallback: modelFallback(config.fallbackModel && resolve(config.fallbackModel), log),
   log,
 };
 
@@ -74,7 +76,9 @@ const sleep = (ms: number) => delay(ms, undefined, { signal: shutdown.signal }).
 log(
   `${runnerId} up: ${config.concurrency} slot(s), models ${Object.entries(config.roles)
     .map(([role, m]) => `${role} ${m.provider}/${m.id}`)
-    .join(", ")}, api ${config.api.baseUrl}`,
+    .join(
+      ", ",
+    )}${config.fallbackModel ? `, fallback ${config.fallbackModel.provider}/${config.fallbackModel.id}` : ""}, api ${config.api.baseUrl}`,
 );
 while (!shutdown.signal.aborted) {
   if (active.size >= config.concurrency) {

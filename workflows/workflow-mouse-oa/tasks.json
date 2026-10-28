@@ -19,7 +19,7 @@
   },
   {
     "id": "segmentation",
-    "title": "Segmentation volumes",
+    "title": "Segmentation",
     "dependsOn": ["orientation"],
     "outputs": [
       "patella-volume",
@@ -90,7 +90,7 @@
   },
   {
     "id": "cortical",
-    "title": "Cortical bone",
+    "title": "Tibial cortical thickness",
     "dependsOn": ["metaphyseal-roi"],
     "outputs": [
       "cortical-thickness-100-um-below-the-growth-plate",

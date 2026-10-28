@@ -126,7 +126,8 @@ export function pgRunQueue(
 
   return {
     /**
-     * Creates the run `queued`. Refuses an input the reader can't read, a limit already
+     * Creates the run `queued`. Refuses an input the reader can't read or that is still
+     * uploading, a limit already
      * reached, and a visitor run when the vault is full.
      */
     async start(
@@ -142,15 +143,19 @@ export function pgRunQueue(
         /** Present for a visitor run. */
         keys?: VisitorKeys;
       },
-    ): Promise<{ run: Run } | { refused: Refusal | "no-input" | "full" }> {
+    ): Promise<{ run: Run } | { refused: Refusal | "no-input" | "input-not-ready" | "full" }> {
       const credentials = request.keys ? "visitor" : "voluma";
       try {
         return await locked(async (tx) => {
           const [input] = await tx
-            .select({ id: inputs.id })
+            .select({ status: inputs.status, uploadedBy: inputs.uploadedBy })
             .from(inputs)
             .where(and(readableInputs(reader), eq(inputs.id, request.inputId)));
-          if (!input) return { refused: "no-input" as const };
+          // An uncompleted upload exists only for its uploader.
+          if (!input || (input.status !== "ready" && input.uploadedBy !== caller.userId)) {
+            return { refused: "no-input" as const };
+          }
+          if (input.status !== "ready") return { refused: "input-not-ready" as const };
           const refused = admit(
             "start",
             limitsOf(reader.labId),

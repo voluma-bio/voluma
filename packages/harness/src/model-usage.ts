@@ -1,7 +1,7 @@
 /**
  * A model reply's usage as the event log records it (`modelUsageSchema`); undefined when the
  * provider returned none. Telemetry must never invalidate the event that carries it (the
- * recorder drops an event the schema rejects), and some Pi adapters can report a negative
+ * recorder fails the run on an event the schema rejects), and some Pi adapters can report a negative
  * input or a NaN cost, so counts are clamped to whole non-negative numbers here.
  */
 import type { AssistantMessage } from "@earendil-works/pi-ai";

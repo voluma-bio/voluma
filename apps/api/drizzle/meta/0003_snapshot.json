@@ -1,5 +1,5 @@
 {
-  "id": "c5798b9d-3022-43f0-a431-3e5b6a8aee50",
+  "id": "a4b54589-bd43-4613-9222-ed276ef97f20",
   "prevId": "44b6c299-9bc8-48d5-9c7d-ce11a814aad1",
   "version": "7",
   "dialect": "postgresql",
@@ -127,6 +127,19 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'ready'"
+        },
+        "files": {
+          "name": "files",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},
@@ -331,12 +344,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": 0
-        },
-        "to_check": {
-          "name": "to_check",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {

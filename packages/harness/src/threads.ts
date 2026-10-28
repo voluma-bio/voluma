@@ -3,7 +3,9 @@
  * keeps no run state beyond that. `start` launches a thread, or resumes one of the same id
  * from its History when given an `input`; the supervisor decides what to start and when,
  * from the stored log plus `running` (`supervisor.ts`). A thread that throws, or is refused
- * before it starts (`ran` false), is a failure of the run: `failure()` holds the first.
+ * before it starts (`ran` false), is a failure of the run: `failure()` holds the first. One
+ * refused because its stored History cannot be resumed (`stale`: a deploy changed its prompt,
+ * tools or model) is not: `stale(threadId)` says why, and the supervisor restarts the work.
  */
 import {
   type StartThreadOptions,
@@ -40,6 +42,8 @@ export interface Threads {
   anyIdle(): Promise<void>;
   /** The first error a thread threw or was refused with. */
   failure(): unknown;
+  /** Why a thread was refused as unresumable, if it was. */
+  stale(threadId: string): string | undefined;
 }
 
 interface Entry {
@@ -53,6 +57,7 @@ interface Entry {
 export function threads(shared: Shared, signal?: AbortSignal): Threads {
   const entries = new Map<string, Entry>();
   let failure: unknown;
+  const stale = new Map<string, string>();
 
   function launch(spec: ThreadSpec): Entry {
     const abort = new AbortController();
@@ -65,7 +70,8 @@ export function threads(shared: Shared, signal?: AbortSignal): Threads {
     entry.settled = handle.done
       .then(
         (outcome) => {
-          if (!outcome.ran) {
+          if (outcome.stale) stale.set(spec.threadId, outcome.error ?? "unresumable");
+          else if (!outcome.ran) {
             failure ??= new Error(
               `thread ${spec.threadId} did not run: ${outcome.error ?? "it had nothing to do"}`,
             );
@@ -108,5 +114,6 @@ export function threads(shared: Shared, signal?: AbortSignal): Threads {
       if (running.length > 0) await Promise.race(running.map((e) => e.settled));
     },
     failure: () => failure,
+    stale: (threadId) => stale.get(threadId),
   };
 }

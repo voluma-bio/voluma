@@ -2,10 +2,10 @@
  * A run's sandbox, created on the first tool call that needs it and destroyed at the
  * end. Concurrent first calls share one creation; a failed creation is forgotten, so
  * the next call tries again. A sandbox the provider ended (idle timeout, lifetime) is
- * replaced on the next call: `get` asks `alive()` about every sandbox it has handed out
+ * replaced on the next call: `get` asks `exitCode()` about every sandbox it has handed out
  * before (a round trip of 30-40 ms), emits `stopped` and creates a new one. A sandbox
  * `create` just returned is trusted. The provider can also refuse a command while it
- * shuts a sandbox down, with `alive()` still true; the sandbox `get` returns then replaces
+ * shuts a sandbox down, with `exitCode()` still null; the sandbox `get` returns then replaces
  * the sandbox and runs the command that never started once more. State changes go to
  * `onState` with the thread whose call caused them (the runner writes them as `sandbox`
  * events).
@@ -77,10 +77,15 @@ export function sandboxSession(
   // Callers that saw the same dead sandbox: the first replaces it in this synchronous
   // step, the rest find the replacement. The replacement is trusted (just created), so a
   // call replaces at most once.
-  const replace = async (dead: Entry, threadId: string): Promise<Entry> => {
+  const replace = async (dead: Entry, threadId: string, code?: number): Promise<Entry> => {
     assertOpen();
     if (current === dead) {
-      onState(threadId, "stopped", "ended by the provider");
+      // A refused command (`swap`) has no code.
+      onState(
+        threadId,
+        "stopped",
+        code === undefined ? "ended by the provider" : `ended by the provider (exit code ${code})`,
+      );
       current = start(threadId);
       await (await dead.sandbox).destroy();
       assertOpen();
@@ -99,7 +104,8 @@ export function sandboxSession(
       let entry = current;
       const sandbox = await entry.sandbox;
       assertOpen();
-      if (entry.handedOut && !(await sandbox.alive())) entry = await replace(entry, threadId);
+      const code = entry.handedOut ? await sandbox.exitCode() : null;
+      if (code !== null) entry = await replace(entry, threadId, code);
       entry.handedOut = true;
       const previous = lastSeen.get(threadId);
 
@@ -119,7 +125,7 @@ export function sandboxSession(
         if (!needsNote) lastSeen.set(threadId, held.generation);
       };
       return {
-        alive: async () => (await held.sandbox).alive(),
+        exitCode: async () => (await held.sandbox).exitCode(),
         destroy: async () => (await held.sandbox).destroy(),
         async *exec(request, signal) {
           for (let retried = false; ; retried = true) {

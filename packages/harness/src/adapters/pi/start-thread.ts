@@ -85,6 +85,8 @@ export interface ThreadOutcome {
   ran: boolean;
   status: "completed" | "failed" | "cancelled";
   error?: string;
+  /** The thread was refused because it cannot be resumed as stored (see `ThreadStale`). */
+  stale?: true;
   /** The text of the thread's last reply in this invocation; empty if it made none. */
   reply: string;
 }
@@ -169,9 +171,22 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       // Every check that can refuse the thread runs before `thread.started`: a refused
       // re-invocation must not relabel a finished thread in the stream record.
       if (stored.length > 0 && !sameSystem(stored[0], system)) {
-        throw new ThreadFailure(
+        throw new ThreadStale(
           "the stored system message differs from the current system prompt or tools; " +
             "a resumed thread keeps the prompt it started with (prompt-cache rule 1)",
+        );
+      }
+      // The model is part of a thread's identity, like its prompt: History is the record of it
+      // (an assistant message names the model that wrote it), not `thread.started`, which may
+      // not have landed before a crash.
+      const wrote = stored.find((m) => m.role === "assistant");
+      if (
+        wrote?.role === "assistant" &&
+        (wrote.provider !== options.model.provider || wrote.model !== options.model.id)
+      ) {
+        throw new ThreadStale(
+          `the thread was written by ${wrote.provider}/${wrote.model}, not ${options.model.provider}/${options.model.id}; ` +
+            "a resumed thread keeps its model",
         );
       }
       const repairs = interruptedToolResults(stored);
@@ -209,6 +224,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
         ...(options.taskId && { task: options.taskId }),
         ...(options.attemptId && { attemptId: options.attemptId }),
         ...(options.spawnedBy && { spawnedBy: options.spawnedBy }),
+        model: `${options.model.provider}/${options.model.id}`,
       });
       if (stored.length === 0) {
         // A new thread: store the system message before anything else.
@@ -301,6 +317,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       outcome = {
         status: "failed",
         error: error instanceof ThreadFailure ? error.message : String(error),
+        ...(error instanceof ThreadStale && { stale: true }),
       };
       if (!(error instanceof ThreadFailure)) unexpected = error;
     } finally {
@@ -330,6 +347,12 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
 
 /** A failure of the thread itself, as opposed to a bug: reported as the outcome, not thrown. */
 class ThreadFailure extends Error {}
+
+/**
+ * The stored thread cannot be resumed as it is (its prompt, tools or model changed, e.g. by a
+ * deploy): `ran` is false and `stale` true. The caller starts the work again on a new thread.
+ */
+class ThreadStale extends ThreadFailure {}
 
 const historyFailure = (error: unknown): Omit<ThreadOutcome, "ran" | "reply"> => ({
   status: "failed",

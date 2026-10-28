@@ -8,6 +8,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseEnv } from "node:util";
+import { modelRefSchema } from "@voluma/contracts/ids";
 import { PROVIDERS } from "./providers.ts";
 
 const file = process.env.VOLUMA_ENV_FILE ?? resolve(import.meta.dirname, "../../../.env");
@@ -59,7 +60,10 @@ function modelRef(name: string, fallback?: string): ModelRef {
   const text = fallback ? (optional(name) ?? fallback) : required(name);
   const [provider, ...rest] = text.split("/");
   const id = rest.join("/");
-  if (!provider || !id) throw new Error(`${name} must be provider/model-id, got "${text}"`);
+  // The form `thread.started.model` takes: a role's model is recorded on its threads.
+  if (!provider || !id || !modelRefSchema.safeParse(text).success) {
+    throw new Error(`${name} must be provider/model-id, got "${text}"`);
+  }
   return { provider, id };
 }
 
@@ -126,6 +130,19 @@ export function runnerConfig() {
       ? modelRef("RUNNER_MAIN_MODEL", "meta/muse-wonder-1.0")
       : worker;
   const roles = { worker, check, main };
+  // Off unless set: lab data goes to Standard-mode Meta models by default, so a fallback to
+  // another provider is a per-deploy choice (see model-fallback.ts).
+  const fallbackModel = optional("RUNNER_FALLBACK_MODEL")
+    ? modelRef("RUNNER_FALLBACK_MODEL")
+    : undefined;
+  if (fallbackModel) {
+    required(`VOLUMA_${fallbackModel.provider.toUpperCase()}_API_KEY`);
+    if (fallbackModel.provider === "meta" && fallbackModel.id.endsWith("-contributor")) {
+      throw new Error(
+        "RUNNER_FALLBACK_MODEL must not be a -contributor model: Meta may train on lab data",
+      );
+    }
+  }
   for (const { provider } of Object.values(roles))
     required(`VOLUMA_${provider.toUpperCase()}_API_KEY`);
   const api = apiEndpoint();
@@ -148,6 +165,8 @@ export function runnerConfig() {
      * `VOLUMA_<PROVIDER>_API_KEY`.
      */
     roles,
+    /** Where new worker and check threads go while their model is failing; absent: nowhere. */
+    fallbackModel,
     /**
      * The model of a `visitor` run, which uses the visitor's Meta key. Standard mode: a
      * `-contributor` model lets Meta train on what it is sent, the visitor's scan included.
