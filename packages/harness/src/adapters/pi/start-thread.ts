@@ -201,6 +201,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
         ...(options.taskId && { task: options.taskId }),
         ...(options.attemptId && { attemptId: options.attemptId }),
         ...(options.spawnedBy && { spawnedBy: options.spawnedBy }),
+        model: `${options.model.provider}/${options.model.id}`,
       });
       if (stored.length === 0) {
         // A new thread: store the system message before anything else.

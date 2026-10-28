@@ -131,7 +131,14 @@ export function runnerConfig() {
   const fallbackModel = optional("RUNNER_FALLBACK_MODEL")
     ? modelRef("RUNNER_FALLBACK_MODEL")
     : undefined;
-  if (fallbackModel) required(`VOLUMA_${fallbackModel.provider.toUpperCase()}_API_KEY`);
+  if (fallbackModel) {
+    required(`VOLUMA_${fallbackModel.provider.toUpperCase()}_API_KEY`);
+    if (fallbackModel.provider === "meta" && fallbackModel.id.endsWith("-contributor")) {
+      throw new Error(
+        "RUNNER_FALLBACK_MODEL must not be a -contributor model: Meta may train on lab data",
+      );
+    }
+  }
   for (const { provider } of Object.values(roles))
     required(`VOLUMA_${provider.toUpperCase()}_API_KEY`);
   const api = apiEndpoint();

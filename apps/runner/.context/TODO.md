@@ -1,7 +1,6 @@
 # Runner TODO
 
 From the round-2 review of #40 (`voluma-bio/docs` `work/mvp-contracts-and-data/research/review-pr40-round2.md`):
-- **`thread.started.model` is not written yet**, so a fallback thread's model is in the runner log (`is failing: starting this thread on the fallback`), not the event log. Writing it needs a resumed thread to keep its recorded model: the breaker is per process, so a resume after a restart would pick the primary again.
 
 - **`released` can miss Railway's 30 s drain under a slow API.** `lease.end` waits for an in-flight heartbeat and sends one more (up to 15 s each) before the report. Skip or shorten the final heartbeat when the report is `released`.
 - **`redact.ts` header:** say that a run resumed from stored, redacted events can differ from the live one when a key appeared in content.

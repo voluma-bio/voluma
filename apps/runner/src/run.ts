@@ -217,8 +217,18 @@ export async function runClaim(
     );
     const opened = session;
 
-    // A visitor's run never falls back: their key and scan go to Standard-mode Meta only.
-    const threadModel = (primary: Model<Api>) => (visitor ? primary : ctx.fallback.pick(primary));
+    // A thread keeps the model it started on (the log records it); a new one starts on the
+    // fallback while the primary is failing. A visitor's run never falls back: their key and
+    // scan go to Standard-mode Meta only.
+    const threadModel = (primary: Model<Api>, recorded: string | undefined) => {
+      if (recorded) {
+        const [provider = "", ...id] = recorded.split("/");
+        const model = models.getModel(provider, id.join("/"));
+        if (!model) throw new Error(`the thread started on ${recorded}, which this runner lacks`);
+        return model;
+      }
+      return visitor ? primary : ctx.fallback.pick(primary);
+    };
     const callModel = retryMetaNotFound((m, context, options) =>
       models.streamSimple(m, context, {
         ...options,
@@ -286,15 +296,15 @@ export async function runClaim(
           })
         : undefined,
       main,
-      worker: (task, notes) => ({
-        model: threadModel(workerModel),
+      worker: (task, notes, recorded) => ({
+        model: threadModel(workerModel, recorded),
         streamFn: streamFor("worker"),
         systemPrompt: workerSystem(definition),
         prompt: workerPrompt(task, { user: run.notes, main: notes }),
         tools: roleTools,
       }),
-      check: (task, notes) => ({
-        model: threadModel(checkModel),
+      check: (task, notes, recorded) => ({
+        model: threadModel(checkModel, recorded),
         streamFn: streamFor("check"),
         systemPrompt: checkSystem(definition),
         prompt: checkPrompt(task, { user: run.notes, main: notes }),
