@@ -9,8 +9,7 @@
  * through the task runtime. It runs until nothing is running and nothing is ready.
  *
  * Every thread invocation is watched: a wake from `thread_message` comes through `onWake`,
- * which admits only a worker whose task is in flight (a check thread is never woken: the
- * fold resets its verdict on a second `thread.started`). An error in handling a thread's end,
+ * which admits a worker whose task is in progress or a check whose task is under review. An error in handling a thread's end,
  * a store failure above all, fails the run on purpose: the threads are aborted and the root
  * ends `failed`, because the runtime must not carry on from a record the store does not hold.
  */

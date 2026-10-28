@@ -89,10 +89,12 @@ checklist, check threads, and review chat threads.
   `startThread` on the same id, from History) and implements `thread_message`
   (`tools/thread-message.ts`): steer a running target, wake an idle one, `wait` only toward the
   caller's own children. A wake from a message goes through the supervisor (`onWake`): it
-  admits only a worker whose task is in flight, and watches the thread. Thread ids must be
-  unique across runs (History is keyed by the thread id alone): the supervisor's are
-  `<runId>.supervisor` and `<runId>.<taskId>.<role>`, joined with `.`, so it refuses a run
-  or task id that contains one.
+  admits a worker whose task is in progress or a check whose task is under review (the fold
+  keeps a check's verdict across a second `thread.started`), and watches the thread. Thread
+  ids are unique across runs (History is keyed by the thread id alone) and follow
+  `@voluma/contracts/ids`: the root is `<runId>.supervisor`, the others
+  `<runId>.<taskId>.<role>` (plus `.<n>` for a restart); run and task ids hold no `.`.
+  `thread.started` carries the task id for a worker or check thread.
 - **The checklist is a fold.** `task-runtime.ts` is the only writer of `task`, `checkpoint`,
   `output`, `attempt.opened` and `revision.started` events, under `@voluma/contracts/task-tools`.
   Its only view of the run is `fold(recorder.events())` (folded once per change of the log),
@@ -109,8 +111,9 @@ checklist, check threads, and review chat threads.
   up to `stuckLimit` times, then the stuck guard marks the task, starts a check thread on a
   done or to-check task, and writes the check result. A check that did not pass, or a failed
   thread, is a judgment point: `judgment.ts` is the one seam (`decide(point) → accept | redo |
-  fail`, bounded by a deadline and an abort signal), its decisions record `by: judgment(arm)`
-  with a reason that also says when the arm errored or a redo was capped, and `llmJudgment` is
+  fail`, bounded by a deadline and an abort signal), its decisions record `by: judgment(arm)`,
+  and every point also writes a `judgment` event (point, arm, raw decision, applied action,
+  and the fallback when the arm errored or a redo was capped). `llmJudgment` is
   the first arm (one fresh structured call per decision). An error while handling a thread's
   end fails the run: threads aborted, the root ends `failed`. The supervisor never imports Pi; it gets threads, the
   runtime and the judgment from its caller.
