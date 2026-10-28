@@ -61,14 +61,14 @@ checklist, check threads, and review chat threads.
   under `timeout -k`, which leads its own process group,; a timeout or an abort kills the whole
   group, except a descendant that calls `setsid` itself, which survives until the
   sandbox is destroyed.
-- **One thread, step by step.** `runThread` (`packages/harness/src/adapters/pi`) loads
+- **One thread, step by step.** `startThread` (`packages/harness/src/adapters/pi`) loads
   the thread's stored history, builds a Pi `Agent` from it, and records every Pi message
   to `History` at `message_end`, synchronously: if a write fails the agent stops and
   nothing more is stored, so the history is always an exact prefix. Tool calls and results
   go through the run's `recorder` (`src/recorder.ts`): a background queue in emission
   order whose failures never end a thread (events are retried). Live tool output
-  (`ToolContext.output`) goes nowhere until the stream hub (PR F). `runThread({task, input?})`: a new thread sends
-  the task; a thread with history sends `input`, or continues if there is none. On
+  (`ToolContext.output`) goes nowhere until the stream hub (PR F). `startThread({prompt, input?})`: a new thread sends
+  the prompt; a thread with history sends `input`, or continues if there is none. On
   resume it answers every tool call without a result (appended, never editing history)
   and fails if the stored system message differs from the current prompt and tools. `apps/runner/src/main.ts` wires it to the HTTP client
   (`packages/harness/src/adapters/http`), the Modal sandbox and a model:
@@ -82,6 +82,51 @@ checklist, check threads, and review chat threads.
   in `packages/harness/src/tools`; it caps what the model sees (head and tail) and
   writes the full text to `toolOutputKey` with `Sandbox.writeFile`, which exists
   because an R2 mount cannot append: the adapter writes locally and copies in one go.
+- **Many threads, one run.** `startThread` returns `{send, done}` at once: `send` steers a
+  message into the thread (Pi's steering queue; one sent before the loop starts is queued
+  for it) and answers false once it ended.
+  `threads.ts` is the run's registry of what is running in this process (start or resume a
+  thread, `send`, `abort`, wait for one to go idle) and holds no run state. `thread_message`
+  (`tools/thread-message.ts`) calls the supervisor's `message`: steer a running thread, or
+  wake an idle one whose task is waiting on it. `wait` is refused until a thread can start
+  children. Thread ids are unique across runs (History is keyed by the thread id alone) and
+  follow `@voluma/contracts/ids`: the root is `<runId>.supervisor`, the others
+  `<runId>.<taskId>.<role>` (plus `.<n>` for the n-th), where n is how many the log has started
+  for that task and role, so a redo never reuses a thread. `thread.started` carries the task id
+  for a worker or check thread.
+- **The log is the run.** `recorder.ts` has one ordered delivery queue for `emit` and
+  `append`, and an event joins the view (`events()`) only once the store has acknowledged it, in
+  delivery order. The view is always a prefix of the store, so `recorder(..., stored)` on a
+  resume holds exactly the view the run had. A retrying `emit` holds back every later event,
+  because nothing should be decided past a gap in the record.
+- **The checklist is a fold.** `task-runtime.ts` writes the `task`, `checkpoint`, `output`,
+  `attempt.opened` and `revision.started` events a thread's tool call causes, under
+  `@voluma/contracts/task-tools`. Its only view of the run is `fold(recorder.events())` (folded
+  once per change of the log), inside one per-run critical section (`section`). A thread's
+  kind and task come from its tool context, not the log. It writes through `recorder.append`,
+  which makes one attempt, so the runtime never decides from an event the store lacks; a
+  store failure fails the tool call, and the supervisor fails the run. Hashing and copying
+  evidence happen outside the section. A thread writes only to its own task, and a worker
+  opens an attempt only when every task it builds on is done. `tools/task-tools.ts` wraps it
+  as the model's `checklist`, `checkpoint` and `report_output`. `output-checks.ts` holds the
+  declared-output and reference checks. Files named as evidence go through the `Evidence` port.
+- **The supervisor** (`supervisor.ts`) is code, not a thread with a model, and keeps no state
+  of its own. Each step, inside the runtime's `section`, is a function of `fold` of the log, the
+  thread records read from the same log (started, ended, wakes, judgments) and which threads
+  run in this process; the header lists the rule per task status. Resume is the same code as a
+  first run: a new process given the stored events and History starts nothing twice, wakes a
+  thread the dead process left running, and names a redo's worker from the log's count. A
+  check that did not pass, or a failed thread, is a judgment point: `judgment.ts` is the one
+  seam (`decide(point) → accept | redo | fail`, bounded by a deadline and an abort signal). The
+  point is asked outside the section, then written as a `judgment` event with the id
+  `<thread>:judgment` (the point, arm, raw decision, applied action, and the fallback when the
+  arm errored or a redo was capped) before its action is applied; a replay applies the stored
+  action and does not ask the arm again. Its decisions record `by: judgment(arm)`. `llmJudgment`
+  is the first arm. A thread that throws or is refused before it starts (`ran` false), or an
+  error in a step, fails the run: threads aborted, the root ends `failed`. The supervisor never
+  imports Pi; it gets threads, the runtime and the judgment from its caller. Nothing in the
+  repo calls `supervisor`, `taskRuntime` or `threads` yet; lane E's first PR wires them
+  (`apps/runner` still calls `startThread` alone), before anything else builds on them.
 - **`seq` and the database.** `seq` per run is gapless and in commit order: each
   append takes a per-run advisory lock as its own statement before the insert (a lock
   inside the insert's statement races under READ COMMITTED), so the stream hub can
