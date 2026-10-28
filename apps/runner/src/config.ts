@@ -86,7 +86,7 @@ export function modalToken(): { tokenId: string; tokenSecret: string } | undefin
  * sandbox/Dockerfile by the "Sandbox image" workflow, which prints the new digest).
  */
 const SANDBOX_IMAGE =
-  "ghcr.io/voluma-bio/voluma-sandbox@sha256:8e70f7a2cf84e37178d4174031c0c02f9a0830038c3cc815e796791fe0eb22a6";
+  "ghcr.io/voluma-bio/voluma-sandbox@sha256:e6f41b0386216d31c44f39c42a8406785186d53f4c29e95bf6c28abb99d929fe";
 
 export type Config = ReturnType<typeof runnerConfig>;
 

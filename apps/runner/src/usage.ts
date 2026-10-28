@@ -9,10 +9,14 @@ export function usageMeter() {
   let modelCostUsd = 0;
   let sandboxSeconds = 0;
   let upSince: number | undefined;
+  // Everything accumulated over the run, for the log; `take` only drains the heartbeat's share.
+  let totalCostUsd = 0;
   return {
     addModelCost(usd: number) {
       modelCostUsd += usd;
+      totalCostUsd += usd;
     },
+    totalModelCostUsd: () => totalCostUsd,
     sandboxUp() {
       upSince ??= Date.now();
     },
