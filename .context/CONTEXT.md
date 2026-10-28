@@ -116,17 +116,25 @@ checklist, check threads, and review chat threads.
   is a judgment point. Both wake **the main thread** (`main-thread.ts`): one model thread per
   run, kept as a conversation rebuilt from the log (the `wake` events), never held in memory,
   so it is append-only (a provider's prompt cache keeps hitting its prefix) and a resumed run
-  asks from the context the first run had. Each wake is one call, asked outside the section
-  and bounded by a deadline and the abort signal (a stop is no answer and records nothing). It
-  answers with the whole notes block and, at a judgment point, `accept | redo | fail`. The
-  answer is written as a `wake` event `<thread>:wake` before anything uses it; the next step
-  turns a judgment point's decision into the `judgment` event `<thread>:judgment` (arm
-  `main:<model>`; the fallback when the call errored or a redo was capped) and applies it, as
-  `by: judgment(arm)`. A replay finds both and asks no one. The notes in force (the latest
-  `wake` with a `note`) go into the first message of every worker and check thread started
-  after, never a system prompt. Context grows by one wake message (the task's report) and one
-  answer (the notes block, rewritten whole) per wake: about 1 k tokens each, so ~15 k tokens
-  at the end of a 10-task run with a few judgments, read from cache after the first call.
+  asks from the context the first run had (each wake names the model that answered; a resume
+  may use another). The run's first wake, `run-started` (`run-start.ts`, from `superviseRun`
+  before the task runtime exists), may adapt the computed plan to the user's notes: no notes,
+  no call; an answer that drops a selected output's task or does not parse is recorded as an
+  `error` and the computed plan runs; `revision.started.plan` stays the record of what applied.
+  Each wake is one call, asked outside the section and bounded by a deadline and the abort
+  signal (a stop is no answer and records nothing). It answers with the whole notes block (at
+  most `WAKE_NOTE_MAX` characters) and, at a judgment point, `accept | redo | fail`. The
+  answer is written as a `wake` event `<thread>@<starts>:wake` (the start count lets a
+  re-woken thread have a second wake) before anything uses it; the next step turns a judgment
+  point's decision into the `judgment` event `<thread>:judgment` (arm `main:<provider/id>`; the
+  fallback when the call errored or a redo was capped) and applies it, as `by: judgment(arm)`.
+  A replay finds both and asks no one. The notes in force (the latest `wake` with a `note`) go
+  into the first message of every worker and check thread started after, never a system
+  prompt. Context grows by one wake message (the task's report) and one answer (the notes
+  block, rewritten whole) per wake: about 0.3 k tokens each on a probe run with short
+  reports, at most ~1.5 k for a full-length note. A 10-task run with a few judgments is ~13
+  wakes: 5 to 25 k tokens at the end, and every wake after the first re-reads the earlier
+  ones from the cache.
   The main thread has no tools or sandbox yet (`apps/runner/.context/TODO.md`). A thread that throws or is refused before it starts (`ran` false), or an
   error in a step, fails the run: threads aborted, the root ends `failed`. The supervisor never
   imports Pi; it is built by `superviseRun` (`packages/harness/src/supervise-run.ts`), which a host gives only adapters.
