@@ -107,7 +107,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         attemptId: nonEmpty.optional(),
         /** The tool call in the parent thread that started this thread. */
         spawnedBy: nonEmpty.optional(),
-        /** The workflow files the run ran, with the commit the runner's checkout was at; required on the root thread, absent on child threads. */
+        /** The workflow files the run ran, with the commit the runner's checkout was at; required on the root thread; child threads may omit it. */
         workflows: z.array(recordedPinSchema).min(1).optional(),
         /**
          * The model this thread calls, as the runner names it: `provider/id`
