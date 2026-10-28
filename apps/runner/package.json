@@ -4,14 +4,20 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "run-task": "tsx src/main.ts",
+    "sandboxes:clean": "tsx src/sandboxes-clean.ts",
+    "publish-image": "tsx src/publish-image.ts"
   },
   "dependencies": {
+    "@earendil-works/pi-ai": "1.4.0",
+    "@voluma/contracts": "workspace:*",
     "@voluma/harness": "workspace:*",
     "modal": "0.11.1"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "tsx": "^4.23.15",
     "typescript": "catalog:"
   }
 }

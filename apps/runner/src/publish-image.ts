@@ -1,14 +1,17 @@
 /**
  * Builds the sandbox image and publishes it under a name, so sandbox start doesn't
- * build one. Run after changing the package list: `node --env-file=.env
- * apps/runner/src/publish-image.ts <name>`. The name is what `SandboxSpec.image` refers to.
+ * build one. Run after changing the package list: `pnpm --filter @voluma/runner
+ * publish-image <name>`. The name is what `SandboxSpec.image` refers to.
  */
 import { ModalClient } from "modal";
+import { optional } from "./config.ts";
 
 const [name] = process.argv.slice(2);
 if (!name) throw new Error("usage: publish-image.ts <name>");
 
-const client = new ModalClient();
+const tokenId = optional("MODAL_TOKEN_ID");
+const tokenSecret = optional("MODAL_TOKEN_SECRET");
+const client = new ModalClient(tokenId && tokenSecret ? { tokenId, tokenSecret } : undefined);
 const app = await client.apps.fromName("voluma-images", { createIfMissing: true });
 const image = await client.images
   .fromRegistry("python:3.12-slim")

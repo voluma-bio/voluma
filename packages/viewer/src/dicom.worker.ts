@@ -201,7 +201,11 @@ async function readArchive(file: File): Promise<DicomArchive> {
                 "One series contains inconsistent image geometry. Export each reconstruction or localizer as a separate series.",
               );
             }
-            stack.slices.push({ file: blob, position });
+            stack.slices.push({
+              file: blob,
+              position,
+              frameOfReferenceUID: data.string("x00200052"),
+            });
           }
         }
       }

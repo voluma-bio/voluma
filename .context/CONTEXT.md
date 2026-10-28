@@ -46,13 +46,38 @@ checklist, check threads, and review chat threads.
   workflow and the inputs read-only, the run's scratch and outputs read-write. Each
   mount gets its own temporary R2 credential, limited to its prefix and the sandbox's
   lifetime, minted from `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_BUCKET` and `CLOUDFLARE_API_TOKEN`; the credentials never enter
-  the sandbox. Inputs flagged `stage` are copied to local disk at create (a cold mounted
-  read of the scan is slow; see the POC in the docs repo, `research/modal-poc.md`).
+  the sandbox. Inputs flagged `stage` are copied to local disk at their mount path at create (a cold
+  mounted read of the scan is slow; see the POC in the docs repo, `research/modal-poc.md`);
+  the bucket is mounted privately for the copy. Each sandbox gets a fresh name (Modal
+  names are unique among running sandboxes, so a sandbox a dead runner left behind
+  would block a resume). `packages/harness/src/layout.ts` owns which prefix is mounted
+  where; prompts and tools take paths from it.
   There is no internet. The image is prebuilt and named
-  (`node --env-file=.env apps/runner/src/publish-image.ts <name>`). Every command runs
+  (`pnpm --filter @voluma/runner publish-image <name>`). Every command runs
   under `timeout -k`, which leads its own process group,; a timeout or an abort kills the whole
   group, except a descendant that calls `setsid` itself, which survives until the
   sandbox is destroyed.
+- **One thread, step by step.** `runThread` (`packages/harness/src/adapters/pi`) loads
+  the thread's stored history, builds a Pi `Agent` from it, and records every Pi message
+  to `History` at `message_end`, synchronously: if a write fails the agent stops and
+  nothing more is stored, so the history is always an exact prefix. Tool calls, results
+  and `tool.output` chunks go through the run's `recorder` (`src/recorder.ts`): a
+  background queue in emission order whose failures never end a thread (events are
+  retried, `tool.output` is dropped). `runThread({task, input?})`: a new thread sends
+  the task; a thread with history sends `input`, or continues if there is none. On
+  resume it answers every tool call without a result (appended, never editing history)
+  and fails if the stored system message differs from the current prompt and tools. `apps/runner/src/main.ts` wires it to the HTTP client
+  (`packages/harness/src/adapters/http`), the Modal sandbox and a model:
+  `pnpm --filter @voluma/runner run-task --provider openai --model <id> --task "<text>"`
+  (needs `pnpm --filter @voluma/api dev` running and the keys in `.env`, which the runner reads
+  into a config object rather than `process.env`; model keys are `VOLUMA_<PROVIDER>_API_KEY`). The sandbox is
+  created on the first `bash` call and destroyed at the end (every exit path, and what a crash
+  leaves: `apps/runner/.context/CONTEXT.md`); Ctrl-C kills the running
+  command and ends the thread as cancelled; the same `--run` and `--thread` resume it.
+  A Claude `refusal` ends the thread as failed with that reason. The `bash` tool lives
+  in `packages/harness/src/tools`; it caps what the model sees (head and tail) and
+  writes the full text to `toolOutputKey` with `Sandbox.writeFile`, which exists
+  because an R2 mount cannot append: the adapter writes locally and copies in one go.
 - **Where the runner lives.** For now it's a Node process (`apps/runner`)
   that talks to the API. Whether it moves into a Durable Object per run is
   decided after the first real run.

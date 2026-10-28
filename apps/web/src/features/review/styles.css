@@ -288,7 +288,11 @@
     @apply max-w-2xl;
   }
   .dicom-stack {
-    @apply flex min-h-0 flex-1 flex-col;
+    @apply flex min-h-0 flex-1 flex-col overflow-y-auto;
+  }
+  .dicom-stack > .view-empty {
+    @apply shrink-0 py-3;
+    min-height: min-content;
   }
   .dicom-canvas-wrap {
     @apply relative min-h-20 flex-1;
@@ -319,6 +323,31 @@
   }
   .image-controls input {
     @apply w-20 rounded border border-line bg-surface px-1 py-1 font-mono text-fg;
+  }
+  .volume-canvas {
+    touch-action: none;
+    cursor: grab;
+  }
+  .volume-canvas:active {
+    cursor: grabbing;
+  }
+  .volume-note {
+    @apply shrink-0 px-3 py-1 text-xs text-fg-muted;
+  }
+  .volume-quality {
+    @apply my-3 flex max-w-full flex-col gap-1 text-xs;
+  }
+  .volume-quality select {
+    @apply min-w-0 rounded border border-line bg-surface p-1 text-fg;
+  }
+  .volume-actions {
+    @apply flex shrink-0 flex-wrap items-start gap-3 px-3 py-1 text-xs text-fg-muted;
+  }
+  .volume-actions summary {
+    @apply cursor-pointer;
+  }
+  .volume-actions details p {
+    @apply my-1;
   }
   .viewer-selection {
     @apply shrink-0 pt-4;

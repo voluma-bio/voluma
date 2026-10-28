@@ -1,0 +1,30 @@
+diff --git a/dist/esm/decodeImageFrameWorker.js b/dist/esm/decodeImageFrameWorker.js
+index 66f5f839f5dee03fa9bb36accf6e1d5f8e122052..eb24a7a45c9cda9b131568bcff391bb998ebca11 100644
+--- a/dist/esm/decodeImageFrameWorker.js
++++ b/dist/esm/decodeImageFrameWorker.js
+@@ -58,7 +58,10 @@ export function postProcessDecodedPixels(imageFrame, options, start, decodeConfi
+         pixelDataArray = _handleTargetBuffer(options, imageFrame, typedArrayConstructors, pixelDataArray);
+     }
+     else if (options.preScale.enabled && !disableScale) {
+-        pixelDataArray = _handlePreScaleSetup(options, minBeforeScale, maxBeforeScale, imageFrame);
++        // Integral extrema do not imply integral interior values after rescaling.
++        pixelDataArray = hasFloatRescale
++            ? new Float32Array(imageFrame.pixelData)
++            : _handlePreScaleSetup(options, minBeforeScale, maxBeforeScale, imageFrame);
+     }
+     else {
+         pixelDataArray = _getDefaultPixelDataArray(minBeforeScale, maxBeforeScale, imageFrame);
+diff --git a/dist/esm/imageLoader/setPixelDataType.js b/dist/esm/imageLoader/setPixelDataType.js
+index 54513af24007095358f2fef49a11dfa97361a77f..fcfb8104cd8353a573411e8870835d47984c04b3 100644
+--- a/dist/esm/imageLoader/setPixelDataType.js
++++ b/dist/esm/imageLoader/setPixelDataType.js
+@@ -1,5 +1,9 @@
+ import getPixelDataTypeFromMinMax from '../shared/getPixelDataTypeFromMinMax';
+ function setPixelDataType(imageFrame) {
++    // Preserve fractions in the worker's rescaled buffer, even with integral extrema.
++    if (imageFrame.pixelData instanceof Float32Array) {
++        return;
++    }
+     const minValue = imageFrame.smallestPixelValue;
+     const maxValue = imageFrame.largestPixelValue;
+     const TypedArray = getPixelDataTypeFromMinMax(minValue, maxValue);
