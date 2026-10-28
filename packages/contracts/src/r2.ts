@@ -24,6 +24,11 @@ const seg = (s: string) => segmentSchema.parse(s);
 const rel = (p: string) => relativePathSchema.parse(p);
 
 export const inputPrefix = (inputId: string) => `inputs/${seg(inputId)}/`;
+/**
+ * Where an upload's presigned PUTs land before complete moves them to `inputPrefix`, so a
+ * PUT URL that outlives the upload can't change what a run reads (`run.ts`, Uploads).
+ */
+export const uploadPrefix = (inputId: string) => `uploads/${seg(inputId)}/`;
 export const runPrefix = (runId: string) => `runs/${seg(runId)}/`;
 /**
  * The run's snapshot of the workflow directories it uses (`workflows/<name>/` and the
@@ -39,6 +44,7 @@ export const taskOutputPrefix = (runId: string, task: string) =>
   `${outputsPrefix(runId)}${seg(task)}/`;
 
 export const inputKey = (inputId: string, path: string) => `${inputPrefix(inputId)}${rel(path)}`;
+export const uploadKey = (inputId: string, path: string) => `${uploadPrefix(inputId)}${rel(path)}`;
 export const scratchKey = (runId: string, path: string) => `${scratchPrefix(runId)}${rel(path)}`;
 export const outputKey = (runId: string, task: string, path: string) =>
   `${taskOutputPrefix(runId, task)}${rel(path)}`;
