@@ -1,0 +1,109 @@
+/**
+ * `pnpm dev`: the one dev launcher. Starts the API and the web app for this worktree
+ * without sharing anything with other worktrees:
+ *  - two free ports, picked up front (the API's, and Vite's with --strictPort);
+ *  - a database named after the worktree directory (`voluma_<dir>`), created on the
+ *    Postgres server in DATABASE_SERVER_URL (`pnpm db:up` starts one) and migrated;
+ *  - the API token from .env, or a random one per launch.
+ * It writes { apiUrl, appUrl, databaseUrl, apiToken } to the git-ignored .dev/env.json,
+ * which the runner reads when VOLUMA_API_URL is unset. Ctrl-C stops everything.
+ */
+import { spawn, spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
+import { basename, resolve } from "node:path";
+import { parseEnv } from "node:util";
+import postgres from "postgres";
+
+const root = resolve(import.meta.dirname, "..");
+const envFile = resolve(root, ".env");
+const dotenv = existsSync(envFile) ? parseEnv(readFileSync(envFile, "utf8")) : {};
+
+const serverUrl = new URL(
+  dotenv.DATABASE_SERVER_URL || "postgres://voluma:voluma@localhost:54432/postgres",
+);
+const dbName = `voluma_${basename(root)
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, "_")}`.slice(0, 63);
+const databaseUrl = new URL(serverUrl);
+databaseUrl.pathname = `/${dbName}`;
+
+await ensureDatabase();
+
+const [apiPort, webPort] = [await freePort(), await freePort()];
+const env = {
+  apiUrl: `http://localhost:${apiPort}`,
+  appUrl: `http://localhost:${webPort}`,
+  databaseUrl: databaseUrl.href,
+  apiToken: dotenv.VOLUMA_API_TOKEN || randomBytes(24).toString("hex"),
+};
+mkdirSync(resolve(root, ".dev"), { recursive: true });
+writeFileSync(resolve(root, ".dev/env.json"), `${JSON.stringify(env, null, 2)}\n`);
+
+const migrate = spawnSync("pnpm", ["--filter", "@voluma/api", "db:migrate"], {
+  cwd: root,
+  stdio: "inherit",
+  env: { ...process.env, DATABASE_URL: env.databaseUrl },
+});
+if (migrate.status !== 0) process.exit(migrate.status ?? 1);
+
+console.log(`\nweb  ${env.appUrl}\napi  ${env.apiUrl}\ndb   ${dbName}\n`);
+const children = [
+  spawn("node", ["--import", "tsx", "--watch", "src/index.ts"], {
+    cwd: resolve(root, "apps/api"),
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      DATABASE_URL: env.databaseUrl,
+      VOLUMA_API_TOKEN: env.apiToken,
+      PORT: String(apiPort),
+    },
+  }),
+  spawn(
+    "pnpm",
+    ["--filter", "@voluma/web", "exec", "vite", "--port", String(webPort), "--strictPort"],
+    {
+      cwd: root,
+      stdio: "inherit",
+      env: { ...process.env, VOLUMA_API_URL: env.apiUrl },
+    },
+  ),
+];
+for (const child of children) {
+  child.on("exit", () => stop(1));
+}
+process.on("SIGINT", () => stop(0));
+process.on("SIGTERM", () => stop(0));
+function stop(code) {
+  for (const child of children) child.kill("SIGTERM");
+  setTimeout(() => process.exit(code), 500).unref();
+}
+
+async function ensureDatabase() {
+  const admin = postgres(serverUrl.href, { max: 1, onnotice: () => {} });
+  try {
+    const found = await admin`SELECT 1 FROM pg_database WHERE datname = ${dbName}`;
+    // dbName is [a-z0-9_] only, so quoting it is enough.
+    if (found.length === 0) await admin.unsafe(`CREATE DATABASE "${dbName}"`);
+  } catch (error) {
+    console.error(
+      `Cannot reach Postgres at ${serverUrl.host}: ${error.message}\nStart it with \`pnpm db:up\`, or set DATABASE_SERVER_URL in .env.`,
+    );
+    process.exit(1);
+  } finally {
+    await admin.end();
+  }
+}
+
+function freePort() {
+  return new Promise((done, fail) => {
+    const server = createServer()
+      .unref()
+      .listen(0, "127.0.0.1", () => {
+        const { port } = server.address();
+        server.close(() => done(port));
+      })
+      .on("error", fail);
+  });
+}

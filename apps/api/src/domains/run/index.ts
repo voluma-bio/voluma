@@ -1,13 +1,14 @@
 /**
- * Run lane's API domain, mounted at /run/. Today: the runner's ingest of the
- * stream record and the model history of a run's threads, under /run/ingest/ and
- * behind a bearer token (other /run/ routes will use user auth).
- *   POST /run/ingest/runs/:runId/events          append an event (EventInput)
- *   POST /run/ingest/threads/:threadId/messages  append a history row {idx, message}
- *   GET  /run/ingest/threads/:threadId/messages  all rows in order
+ * Run lane's API domain, mounted at /api/run/ (paths below are relative to the mount).
+ * Today: the runner's ingest of the stream record and the model history of a run's
+ * threads, under /ingest/ and behind a bearer token (other routes will use user auth).
+ *   POST /ingest/runs/:runId/events          append an event (EventInput)
+ *   POST /ingest/threads/:threadId/messages  append a history row {idx, message}
+ *   GET  /ingest/threads/:threadId/messages  all rows in order
  * Later: workflows and their package import, runs, the supervisor. RunDeps lists
  * what it needs; index.ts supplies adapters.
  */
+import { timingSafeEqual } from "node:crypto";
 import { eventInputSchema } from "@voluma/contracts/events";
 import type { EventLog } from "@voluma/harness/ports/event-log";
 import { type History, HistoryConflict } from "@voluma/harness/ports/history";
@@ -24,14 +25,12 @@ export interface RunDeps {
 const historyRowSchema = z.object({ idx: z.number().int().nonnegative(), message: z.string() });
 
 export function createRun({ eventLog, history, apiToken }: RunDeps): DomainHandler {
-  return async (request) => {
-    const { pathname } = new URL(request.url);
+  return async (request, pathname) => {
     if (!pathname.startsWith(INGEST)) return null;
-    if (!apiToken) return new Response("API_TOKEN is not configured", { status: 500 });
     if (!bearerMatches(request.headers.get("authorization"), apiToken)) {
       return new Response("Unauthorized", { status: 401 });
     }
-    const events = /^\/run\/ingest\/runs\/([^/]+)\/events$/.exec(pathname);
+    const events = /^\/ingest\/runs\/([^/]+)\/events$/.exec(pathname);
     if (events && request.method === "POST") {
       const runId = decode(events[1] as string);
       if (runId === undefined) return badRequest("malformed path");
@@ -43,7 +42,7 @@ export function createRun({ eventLog, history, apiToken }: RunDeps): DomainHandl
       await eventLog.append(parsed.data);
       return new Response(null, { status: 204 });
     }
-    const messages = /^\/run\/ingest\/threads\/([^/]+)\/messages$/.exec(pathname);
+    const messages = /^\/ingest\/threads\/([^/]+)\/messages$/.exec(pathname);
     if (messages) {
       const threadId = decode(messages[1] as string);
       if (threadId === undefined) return badRequest("malformed path");
@@ -65,7 +64,7 @@ export function createRun({ eventLog, history, apiToken }: RunDeps): DomainHandl
   };
 }
 
-const INGEST = "/run/ingest/";
+const INGEST = "/ingest/";
 
 const decode = (segment: string) => {
   try {
@@ -80,7 +79,7 @@ const encoder = new TextEncoder();
 function bearerMatches(header: string | null, token: string): boolean {
   const given = encoder.encode(header ?? "");
   const expected = encoder.encode(`Bearer ${token}`);
-  return given.byteLength === expected.byteLength && crypto.subtle.timingSafeEqual(given, expected);
+  return given.byteLength === expected.byteLength && timingSafeEqual(given, expected);
 }
 
 const readJson = (request: Request) => request.json().catch(() => undefined);

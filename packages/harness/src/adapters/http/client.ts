@@ -65,11 +65,11 @@ export function httpClient(config: { baseUrl: string; token: string }): EventLog
 
   return {
     async append(event: EventInput) {
-      await post(`/run/ingest/runs/${encodeURIComponent(event.runId)}/events`, event);
+      await post(`/api/run/ingest/runs/${encodeURIComponent(event.runId)}/events`, event);
     },
     async load(threadId) {
       const response = await send(
-        `/run/ingest/threads/${encodeURIComponent(threadId)}/messages`,
+        `/api/run/ingest/threads/${encodeURIComponent(threadId)}/messages`,
         {},
         HISTORY_BUDGET_MS,
       );
@@ -78,7 +78,7 @@ export function httpClient(config: { baseUrl: string; token: string }): EventLog
     async appendMessage(threadId, idx, message) {
       try {
         await post(
-          `/run/ingest/threads/${encodeURIComponent(threadId)}/messages`,
+          `/api/run/ingest/threads/${encodeURIComponent(threadId)}/messages`,
           {
             idx,
             message,

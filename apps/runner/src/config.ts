@@ -19,3 +19,17 @@ export function required(name: string): string {
   if (!value) throw new Error(`${name} is not set in ${file}`);
   return value;
 }
+
+/**
+ * The local API `pnpm dev` started in this worktree (tools/dev.mjs writes `.dev/env.json`).
+ * Used when VOLUMA_API_URL is unset; throws if the launcher has not run.
+ */
+export function localApi(): { baseUrl: string; token: string } {
+  const path = resolve(import.meta.dirname, "../../../.dev/env.json");
+  try {
+    const { apiUrl, apiToken } = JSON.parse(readFileSync(path, "utf8"));
+    return { baseUrl: apiUrl, token: apiToken };
+  } catch {
+    throw new Error(`VOLUMA_API_URL is not set and ${path} is missing: run \`pnpm dev\` first`);
+  }
+}
