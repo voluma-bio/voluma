@@ -220,6 +220,12 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
       output: z.string(),
       /** When true the full output is at `toolOutputKey(runId, toolCallId)`. */
       truncated: z.boolean(),
+      /**
+       * What the call was billed in US dollars, for a tool that pays a provider (`segment_sam`'s
+       * Meta charge), even when it then failed; absent for a free tool. The run's model cost
+       * includes it (`Run.usage`).
+       */
+      costUsd: z.number().nonnegative().optional(),
     }),
   );
 
