@@ -37,7 +37,7 @@ function ThemeColumn({ theme }: { theme: (typeof THEMES)[number] }) {
     <div id={`theme-${theme}`} data-theme={theme} className="grid content-start gap-10 p-8">
       <header>
         <h1 className="text-2xl font-semibold">{THEME_LABELS[theme]}</h1>
-        <p className="text-ui text-fg-muted">
+        <p className="text-ui text-muted-foreground">
           {theme === "light" ? "Workflows and runs" : "Review imaging workspace"}
         </p>
       </header>
@@ -74,11 +74,11 @@ function ThemeColumn({ theme }: { theme: (typeof THEMES)[number] }) {
           <Card>
             <p className="font-mono text-meta text-fg-subtle">Task 2</p>
             <p>Only the trabecular part of the tibial IIOC</p>
-            <p className="mt-2 text-ui text-fg-muted">BV/TV, Tb.Th, Tb.Sp, Tb.N</p>
+            <p className="mt-2 text-ui text-muted-foreground">BV/TV, Tb.Th, Tb.Sp, Tb.N</p>
           </Card>
           <Card interactive>
             <p className="font-semibold">Draft from a methods section</p>
-            <p className="text-ui text-fg-muted">Each drafted task cites its source.</p>
+            <p className="text-ui text-muted-foreground">Each drafted task cites its source.</p>
           </Card>
         </div>
       </Section>
@@ -105,7 +105,7 @@ function ThemeColumn({ theme }: { theme: (typeof THEMES)[number] }) {
         <LightboxDemo />
       </Section>
       <Section title="Split panel">
-        <div className="h-48 overflow-hidden rounded-xl border border-line">
+        <div className="h-48 overflow-hidden rounded-xl border border-border">
           <SplitPanel
             label="Resize task panel"
             defaultSize={180}
@@ -131,9 +131,11 @@ function ThemeColumn({ theme }: { theme: (typeof THEMES)[number] }) {
         </div>
       </Section>
       <Section title="Tokens">
-        <Swatches names={THEME_TOKENS} />
+        <Swatches names={tokenNames((s) => s.includes('[data-theme="light"]'))} />
         <h3 className="mt-2 text-meta font-medium text-fg-subtle">Viewer (same in both themes)</h3>
-        <Swatches names={VIEWER_TOKENS} />
+        <Swatches
+          names={tokenNames((s) => s === ":root").filter((n) => !FONT_TOKENS.includes(n))}
+        />
       </Section>
     </div>
   );
@@ -142,7 +144,7 @@ function ThemeColumn({ theme }: { theme: (typeof THEMES)[number] }) {
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="grid gap-3">
-      <h2 className="text-sm font-semibold text-fg-muted">{title}</h2>
+      <h2 className="text-sm font-semibold text-muted-foreground">{title}</h2>
       {children}
     </section>
   );
@@ -151,10 +153,10 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 const BADGES: Array<[StatusTone, string]> = [
   ["neutral", "Pending"],
   ["info", "Running"],
-  ["accent", "Done"],
+  ["primary", "Done"],
   ["check", "2 to check"],
   ["info", "Corrected"],
-  ["danger", "Failed"],
+  ["destructive", "Failed"],
   ["neutral", "Stopped"],
 ];
 
@@ -176,7 +178,7 @@ const RUNS: RunRow[] = [
   {
     scan: "OA6-2LK",
     workflow: "Mouse OA v1",
-    status: ["accent", "Reviewed"],
+    status: ["primary", "Reviewed"],
     finished: "21 Oct, 09:40",
   },
 ];
@@ -196,7 +198,7 @@ function ChatDemo() {
   const [draft, setDraft] = useState("");
   const [sent, setSent] = useState<string[]>([]);
   return (
-    <div className="grid gap-4 rounded-xl border border-line bg-surface p-4">
+    <div className="grid gap-4 rounded-xl border border-border bg-card p-4">
       <ChatThread>
         <ChatMessage from="agent" author="Agent">
           Femur length is 15.82 mm, 5.8% above the paper's first reader. The distal endpoint sits on
@@ -261,8 +263,8 @@ function Pane({
         "grid h-full place-items-center text-meta",
         well
           ? "bg-viewer-well text-viewer-chip-fg"
-          : "border-r border-line bg-surface text-fg-muted",
-        edge === "bottom" ? "border-b border-line" : "",
+          : "border-r border-border bg-card text-muted-foreground",
+        edge === "bottom" ? "border-b border-border" : "",
       ].join(" ")}
     >
       {children}
@@ -270,60 +272,39 @@ function Pane({
   );
 }
 
-const THEME_TOKENS = [
-  "canvas",
-  "surface",
-  "raised",
-  "line-subtle",
-  "line",
-  "line-strong",
-  "fg",
-  "fg-muted",
-  "fg-subtle",
-  "accent",
-  "accent-strong",
-  "accent-fg",
-  "accent-tint",
-  "check",
-  "check-solid",
-  "check-strong",
-  "check-tint",
-  "check-line",
-  "info",
-  "info-tint",
-  "danger",
-  "danger-tint",
-  "inverse",
-];
+/** Custom property names declared by the rules `match` selects, read from the loaded stylesheets. */
+function tokenNames(match: (selector: string) => boolean): string[] {
+  const names = new Set<string>();
+  const visit = (rules: CSSRuleList) => {
+    for (const rule of rules) {
+      if (rule instanceof CSSStyleRule && match(rule.selectorText)) {
+        for (const name of rule.style) {
+          // Lightning CSS (production build) emits --lightningcss-* helpers for color-scheme.
+          if (name.startsWith("--") && !name.startsWith("--lightningcss-"))
+            names.add(name.slice(2));
+        }
+      } else if (rule instanceof CSSGroupingRule) visit(rule.cssRules);
+    }
+  };
+  for (const sheet of document.styleSheets) {
+    try {
+      visit(sheet.cssRules);
+    } catch {
+      // A cross-origin stylesheet (CDN font link, extension) throws SecurityError; it holds none of our tokens.
+    }
+  }
+  return [...names];
+}
 
-const VIEWER_TOKENS = [
-  "viewer-well",
-  "axis-x",
-  "axis-y",
-  "axis-z",
-  "bone",
-  "bone-alt",
-  "bone-warm",
-  "ruler",
-  "ruler-edit",
-  "landmark-warn",
-  "check-outline",
-  "scale-bar",
-  "label-1",
-  "label-2",
-  "label-3",
-  "label-4",
-  "label-5",
-  "label-6",
-];
+const FONT_TOKENS = ["sans", "mono"];
 
 function Swatches({ names }: { names: string[] }) {
   return (
     <ul className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-2">
       {names.map((name) => (
-        <li key={name} className="flex items-center gap-2 text-meta text-fg-muted">
+        <li key={name} className="flex items-center gap-2 text-meta text-muted-foreground">
           <span
-            className="size-5 shrink-0 rounded-md border border-line"
+            className="size-5 shrink-0 rounded-md border border-border"
             style={{ background: `var(--${name})` }}
           />
           <code className="font-mono">--{name}</code>

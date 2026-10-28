@@ -11,8 +11,8 @@ export function Card({ interactive = false, className, ...props }: CardProps) {
   return (
     <div
       className={cx(
-        "rounded-xl border border-line bg-surface p-4",
-        interactive && "transition-colors hover:border-accent",
+        "rounded-xl border border-border bg-card p-4",
+        interactive && "transition-colors hover:border-primary",
         className,
       )}
       {...props}

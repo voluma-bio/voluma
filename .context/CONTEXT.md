@@ -128,6 +128,15 @@ where it is used and `data-theme` on any element themes its subtree. That is
 how `/dev/ui` shows both themes side by side. Review now selects light, following
 Andrew's implementation direction. Tailwind's default palette is removed.
 
+The token names are shadcn/ui's (`background`, `card`, `muted`, `accent`,
+`primary`, `destructive`, `border`, `ring`, `chart-*`, `sidebar-*`), with
+shadcn's meanings and our palette as the values, so a shadcn component copied
+into the repo works unchanged. Note `accent` is shadcn's hover fill, not the
+brand green: that is `primary` (with `primary-tint`, `primary-strong`,
+`primary-text`). Tokens shadcn has no name for keep ours (`check-*`, `info*`,
+`inverse*`, `scrim`, `fg-subtle`, `line-subtle`, `line-strong`, viewer and axis
+tokens). Add a colour to `tokens.css` and `theme.css` together.
+
 The viewer's colours (axes, bone, rulers, labels) are tokens too. Canvas and
 WebGL code reads them with `getComputedStyle` rather than copying values, so
 the CSS stays the one source.
