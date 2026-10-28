@@ -18,13 +18,15 @@ export interface ThreadRecord {
   end: PayloadOf<"thread.ended"> | undefined;
   /** Messages the runtime sent it to get it moving again. */
   wakes: number;
+  /** How many times the log shows it started: the first run and each resume. */
+  starts: number;
 }
 
 export interface ThreadLog {
   threads: Map<string, ThreadRecord>;
   /** Judgment events by the id of the thread whose end raised the point. */
   judgments: Map<string, PayloadOf<"judgment">>;
-  /** The main thread's wakes by the id of the thread whose end raised them, and in log order. */
+  /** The main thread's wakes by `<thread id>@<starts>` of the thread whose end raised them, in log order. */
   wakes: Map<string, PayloadOf<"wake">>;
   /** The notes block in force: the latest wake's `note`. */
   notes: string | undefined;
@@ -60,6 +62,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
             taskId: task,
             end: undefined,
             wakes: record?.wakes ?? 0,
+            starts: (record?.starts ?? 0) + 1,
           });
         }
         break;
