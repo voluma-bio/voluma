@@ -1,9 +1,9 @@
 /**
- * Retries a model call that failed before it produced any output, so one flaky call does not
- * fail a worker thread. Transient means a 408, 429 or 5xx, a dropped connection, or Meta's
- * intermittent `404 model_not_found` (seen on about one call in five that carries tools,
- * with a key that works a second later). Any other error ends the call as before. A call that
- * failed after streaming content is not retried: its partial output is already delivered.
+ * Meta intermittently answers a call that carries tools with `404 model_not_found` (about one
+ * in five on 2026-10-28, with a key that works a second later). Pi's own retries
+ * (`maxRetries`, which `run.ts` sets) cover 408, 429, 5xx and dropped connections but treat a
+ * 404 as final, so this retries that one error: only from the `meta` provider, and only when
+ * the call failed before streaming any content. Anything else ends the call as before.
  */
 import {
   type Api,
@@ -26,21 +26,16 @@ type Stream = (
 ) => AssistantMessageEventStream;
 
 /** Pi formats provider errors as `<provider> API error (<status>): <body>`. */
-export function isTransientModelError(provider: string, message: string | undefined): boolean {
-  if (!message) return false;
-  const status = /API error \((\d{3})\)/.exec(message)?.[1];
-  if (status) {
-    const code = Number(status);
-    if (code === 408 || code === 429 || code >= 500) return true;
-    return provider === "meta" && code === 404 && message.includes('"code":"model_not_found"');
-  }
-  return /connection error|ECONNRESET|ETIMEDOUT|EPIPE|socket hang up|fetch failed|terminated/i.test(
-    message,
+export function isMetaNotFound(provider: string, message: string | undefined): boolean {
+  return (
+    provider === "meta" &&
+    /API error \(404\)/.test(message ?? "") &&
+    (message ?? "").includes('"code":"model_not_found"')
   );
 }
 
-/** `stream`, but a transient failure before any content is retried with exponential backoff. */
-export function withModelRetry(stream: Stream, sleep = wait): Stream {
+/** `stream`, but Meta's transient 404 before any content is retried with exponential backoff. */
+export function retryMetaNotFound(stream: Stream, sleep = wait): Stream {
   return (model, context, options) => {
     const out = createAssistantMessageEventStream();
     const signal = options?.signal;
@@ -60,11 +55,11 @@ export function withModelRetry(stream: Stream, sleep = wait): Stream {
           }
         }
         if (!failed) return;
-        const retry =
-          attempt < ATTEMPTS &&
-          !signal?.aborted &&
-          isTransientModelError(model.provider, failed.errorMessage);
-        if (!retry) {
+        if (
+          attempt >= ATTEMPTS ||
+          signal?.aborted ||
+          !isMetaNotFound(model.provider, failed.errorMessage)
+        ) {
           if (started) out.push(started);
           out.push({ type: "error", reason: failed.stopReason as "error", error: failed });
           return;
@@ -89,14 +84,12 @@ export function withModelRetry(stream: Stream, sleep = wait): Stream {
 
 function wait(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        resolve();
-      },
-      { once: true },
-    );
+    const done = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener("abort", done, { once: true });
   });
 }
