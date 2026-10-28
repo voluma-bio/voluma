@@ -33,7 +33,7 @@ Variables (names only; values never go in the repo):
 | `RAILPACK_DEPLOY_APT_PACKAGES` | `ffmpeg`: installed in the runner's container (segment_sam needs it) |
 | `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `CLOUDFLARE_API_TOKEN` | as in `.env` |
 
-Visitor runs use `RUNNER_VISITOR_MODEL` (default `meta/muse-spark-1.3`) with the visitor's key.
+`RUNNER_FALLBACK_MODEL` (unset: no fallback) is Jimmy's per-deploy choice, since it sends lab data to another provider; see `src/model-fallback.ts`. Visitor runs use `RUNNER_VISITOR_MODEL` (default `meta/muse-spark-1.3`) with the visitor's key.
 
 ## The sandbox image
 

@@ -126,6 +126,12 @@ export function runnerConfig() {
       ? modelRef("RUNNER_MAIN_MODEL", "meta/muse-wonder-1.0")
       : worker;
   const roles = { worker, check, main };
+  // Off unless set: lab data goes to Standard-mode Meta models by default, so a fallback to
+  // another provider is a per-deploy choice (see model-fallback.ts).
+  const fallbackModel = optional("RUNNER_FALLBACK_MODEL")
+    ? modelRef("RUNNER_FALLBACK_MODEL")
+    : undefined;
+  if (fallbackModel) required(`VOLUMA_${fallbackModel.provider.toUpperCase()}_API_KEY`);
   for (const { provider } of Object.values(roles))
     required(`VOLUMA_${provider.toUpperCase()}_API_KEY`);
   const api = apiEndpoint();
@@ -148,6 +154,8 @@ export function runnerConfig() {
      * `VOLUMA_<PROVIDER>_API_KEY`.
      */
     roles,
+    /** Where new worker and check threads go while their model is failing; absent: nowhere. */
+    fallbackModel,
     /**
      * The model of a `visitor` run, which uses the visitor's Meta key. Standard mode: a
      * `-contributor` model lets Meta train on what it is sent, the visitor's scan included.
