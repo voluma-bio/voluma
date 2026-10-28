@@ -27,15 +27,26 @@ type Ev<T extends RunEvent["type"]> = Extract<RunEvent, { type: T }>;
 
 export type LiveReply = { threadId: string; text: string; reasoning: string };
 export type LiveCall = { threadId: string; messageId: string; args: string };
+/** A running call's output so far; only its tail is kept, as `bash.ts` keeps for the result. */
+export type LiveOutput = { text: string; truncated: boolean };
 export type Live = {
   replies: ReadonlyMap<string, LiveReply>;
   calls: ReadonlyMap<string, LiveCall>;
-  outputs: ReadonlyMap<string, string>;
+  outputs: ReadonlyMap<string, LiveOutput>;
 };
 export const noLive: Live = { replies: new Map(), calls: new Map(), outputs: new Map() };
 
-/** When the run ended, from `Run.state`: the log may hold no end for a thread it stopped. */
-export type RunEnd = { endedAt: string };
+/**
+ * Why the runner is not running the run's threads, from `Run.state`: the log holds no end for
+ * the threads it cut off. `ended` is set only once the stream has closed, when the log is whole;
+ * `paused` while the run waits for a runner again (its lease expired) or for its starter's keys.
+ */
+export type Halt =
+  | { kind: "ended"; at: string; outcome: "completed" | "failed" | "cancelled" }
+  | { kind: "paused" };
+
+/** `bash.ts`'s `TAIL_CHARS`: what the durable result keeps of the output's end. */
+const OUTPUT_TAIL_CHARS = 8_000;
 
 /**
  * Keys of the partials whose durable event has landed. Frames can trail that event by a batch
@@ -51,6 +62,10 @@ const outputKey = (id: string) => `output:${id}`;
  * Appends a frame where its `offset` continues what is held. A frame at offset 0 starts the
  * partial over (a wake asked again after a runner restart reuses its id); any other gap means
  * frames were dropped, so the partial is dropped until its durable event lands.
+ *
+ * A thread streams one reply at a time, so a new reply drops the thread's other partials: one
+ * cut off by a runner restart never gets its durable events. Doing it here, not on
+ * `thread.started`, keeps a reply whose frames overtook a lagging `thread.started`.
  */
 export function applyFrame(live: Live, f: LiveFrame, settled: Settled): Live {
   switch (f.type) {
@@ -59,10 +74,17 @@ export function applyFrame(live: Live, f: LiveFrame, settled: Settled): Live {
       if (settled.has(replyKey(f.messageId))) return live;
       const field = f.type === "text.delta" ? "text" : "reasoning";
       const held = live.replies.get(f.messageId);
+      if (f.offset === 0 && !held) {
+        const replies = new Map([...live.replies].filter(([, r]) => r.threadId !== f.threadId)).set(
+          f.messageId,
+          { threadId: f.threadId, text: "", reasoning: "", [field]: f.text },
+        );
+        const calls = new Map([...live.calls].filter(([, c]) => c.threadId !== f.threadId));
+        return { ...live, replies, calls };
+      }
       const replies = new Map(live.replies);
-      if (f.offset === 0) {
-        const blank = { threadId: f.threadId, text: "", reasoning: "" };
-        replies.set(f.messageId, { ...(held ?? blank), [field]: f.text });
+      if (held && f.offset === 0) {
+        replies.set(f.messageId, { ...held, [field]: f.text });
       } else if (held && held[field].length === f.offset) {
         replies.set(f.messageId, { ...held, [field]: held[field] + f.text });
       } else if (held) {
@@ -85,8 +107,12 @@ export function applyFrame(live: Live, f: LiveFrame, settled: Settled): Live {
     }
     case "tool.output": {
       if (settled.has(outputKey(f.toolCallId))) return live;
-      const outputs = new Map(live.outputs);
-      outputs.set(f.toolCallId, (live.outputs.get(f.toolCallId) ?? "") + f.text);
+      const held = live.outputs.get(f.toolCallId);
+      const text = (held?.text ?? "") + f.text;
+      const outputs = new Map(live.outputs).set(f.toolCallId, {
+        text: text.slice(-OUTPUT_TAIL_CHARS),
+        truncated: Boolean(held?.truncated) || text.length > OUTPUT_TAIL_CHARS,
+      });
       return { ...live, outputs };
     }
   }
@@ -108,7 +134,7 @@ export function settle(live: Live, e: RunEvent, settled: Settled): Live {
   };
   let replies: Map<string, LiveReply> | undefined;
   let calls: Map<string, LiveCall> | undefined;
-  let outputs: Map<string, string> | undefined;
+  let outputs: Map<string, LiveOutput> | undefined;
   if (e.type === "message" || e.type === "wake") {
     settled.add(replyKey(e.id));
     replies = drop(live.replies, (k) => k !== e.id);
@@ -121,8 +147,8 @@ export function settle(live: Live, e: RunEvent, settled: Settled): Live {
     settled.add(outputKey(e.payload.toolCallId));
     outputs = drop(live.outputs, (k) => k !== e.payload.toolCallId);
   }
-  if (e.type === "thread.ended" || e.type === "thread.started") {
-    // A reply cut off mid-stream, by its end or a runner restart, never gets its durable events.
+  if (e.type === "thread.ended") {
+    // A reply cut off by the thread's end never gets its durable events.
     replies = drop(live.replies, (_, v) => v.threadId !== e.threadId);
     calls = drop(live.calls, (_, v) => v.threadId !== e.threadId);
   }
@@ -231,8 +257,11 @@ export type ToolStep = {
   /** Absent while the call's arguments are still streaming (frames carry no tool name). */
   name?: string;
   title: string;
-  input: unknown;
-  /** `stopped`: its thread or the run ended before it returned. */
+  /** The parsed arguments, once the call is durable. */
+  input?: unknown;
+  /** The arguments as the model writes them, while the call streams. */
+  args?: string;
+  /** `stopped`: its thread ended, or the runner stopped, before it returned. */
   status: "running" | "done" | "error" | "stopped";
   output?: string;
   truncated?: boolean;
@@ -241,7 +270,7 @@ export type ToolStep = {
 export type Step =
   | ToolStep
   | { kind: "reasoning"; id: string; text: string }
-  /** A mechanical step: the sandbox, an attempt opening, the supervisor's code. */
+  /** A mechanical step: the sandbox, the supervisor's code. */
   | { kind: "note"; id: string; text: string; failed?: boolean };
 
 export type Row =
@@ -316,13 +345,13 @@ const SHOWN_AS_ROWS = new Set(["checkpoint", "report_output"]);
 /**
  * One worker, checker or chat thread's transcript: what it was told, its prose, its folded
  * process, its milestones, then whatever of its reply is still streaming. A tool call still
- * running when its thread or the run (`end`) ended shows as stopped.
+ * running when its thread ended, or when the runner stopped (`halt`), shows as stopped.
  */
 export function threadRows(
   events: RunEvent[],
   threadId: string,
   live: Live = noLive,
-  end?: RunEnd,
+  halt?: Halt,
 ): Row[] {
   const b = rowBuilder();
   const tools = new Map<string, ToolStep>();
@@ -365,7 +394,8 @@ export function threadRows(
           title: toolTitle(e.payload.name, e.payload.input),
           input: e.payload.input,
           status: "running",
-          output: live.outputs.get(e.payload.toolCallId),
+          output: live.outputs.get(e.payload.toolCallId)?.text,
+          truncated: live.outputs.get(e.payload.toolCallId)?.truncated,
         };
         tools.set(step.id, step);
         if (!SHOWN_AS_ROWS.has(e.payload.name)) b.step(step);
@@ -395,15 +425,8 @@ export function threadRows(
           failed: e.payload.state === "failed",
         });
         break;
-      case "attempt.opened":
-        b.step({
-          kind: "note",
-          id: e.id,
-          text: `Opened an attempt on ${taskTitle(e.payload.taskId)}`,
-        });
-        break;
       case "task":
-        // An agent's status change is its `checklist` call, already a row.
+        // An agent's status change (and the attempt it opens) is its `checklist` call, already a row.
         if (e.payload.by.kind !== "agent")
           b.step({
             kind: "note",
@@ -418,7 +441,7 @@ export function threadRows(
         break;
     }
   }
-  if (end) stopRunning();
+  if (halt) stopRunning();
   for (const [id, reply] of live.replies) {
     if (reply.threadId !== threadId) continue;
     if (reply.reasoning)
@@ -431,7 +454,7 @@ export function threadRows(
       kind: "tool",
       id,
       title: partialTitle(call.args),
-      input: call.args,
+      args: call.args,
       status: "running",
     });
   }

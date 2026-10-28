@@ -8,14 +8,14 @@
 import { StatusBadge } from "@voluma/ui";
 import { Bot, ChevronDown, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
-import { type Thread, threadName } from "../run-model";
-import { useDisclosure } from "./disclosure-store";
-import { InfoButton, usageRows } from "./info-button";
-import { Markdown } from "./markdown";
-import { useOpenThread } from "./thread-navigation";
+import { useDisclosure } from "./chat/disclosure-store";
+import { InfoButton, usageRows } from "./chat/info-button";
+import { Markdown } from "./chat/markdown";
+import { useOpenThread } from "./chat/thread-navigation";
+import { type Thread, threadName } from "./run-model";
 
 /** A duration as the reader says it: "45 s", "4 min 10 s", "2 h 5 min". */
-export function duration(ms: number): string {
+function duration(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000));
   if (s < 60) return `${s} s`;
   const m = Math.floor(s / 60);
@@ -45,6 +45,7 @@ export function Elapsed({ thread }: { thread: Thread }) {
 
 const MARK: Record<Thread["status"], string> = {
   running: "bg-info-tint text-info",
+  paused: "bg-muted text-muted-foreground",
   completed: "bg-primary-tint text-primary-strong",
   failed: "bg-destructive-tint text-destructive",
   cancelled: "bg-muted text-muted-foreground",
@@ -87,7 +88,7 @@ const VERDICT = {
 } as const;
 
 function ResultLine({ thread }: { thread: Thread }) {
-  if (thread.status === "running")
+  if (thread.status === "running" || thread.status === "paused")
     return (
       <p className="truncate font-mono text-meta text-muted-foreground">
         {thread.liveTool ?? thread.lastTool ?? "Starting"}
@@ -106,6 +107,7 @@ function ResultLine({ thread }: { thread: Thread }) {
 
 const STATUS_WORD: Record<Thread["status"], string> = {
   running: "Working",
+  paused: "Paused",
   completed: "Finished",
   failed: "Failed",
   cancelled: "Stopped",

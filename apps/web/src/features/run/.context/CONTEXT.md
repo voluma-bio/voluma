@@ -10,8 +10,9 @@ Three screens under `RunLayout` (top bar and query client): `/` start (`start-pa
   `/workflows/*/outputs.json` (set; see `apps/api/.context/deploy.md`), so an outputs change redeploys the web app.
   With every output ticked the request sends no `selectedOutputs` (absent means all), so a default run
   doesn't depend on the bundle matching the runner. Groups are one per producing task.
-- **Task titles** are `TASK_TITLES` in `workflows.ts`, a copy of the workflow's task names (neither
-  `tasks.json` nor the plan carries a title); don't add another copy. The page reads the plan from the first
+- **Task titles** come from `workflows/workflow-mouse-oa/tasks.json`, bundled the same way and read by
+  `taskTitle` in `workflows.ts` (a task without a title shows its id); don't add another copy. The
+  watch paths need `/workflows/*/tasks.json` too. The page reads the plan from the first
   `revision.started` itself because `fold` doesn't expose it.
 - **The live page** behaves like Meridian Flow's chat, adapted to a run. The main view is the main
   thread's transcript, which is the run's orchestration: its wakes (who woke it, why, its decision,
@@ -21,10 +22,18 @@ Three screens under `RunLayout` (top bar and query client): `/` start (`start-pa
   tool calls. `?thread=<threadId>` shows that thread's transcript in its place. Running workers and
   checkers are listed above the main transcript; failures and To check items sit at the top; the
   plan is a compact graph in a right rail (a closed "Tasks" fold under 1100 px).
-- **The log is not complete when a run ends.** Stop ends the run in the API at once, and a killed
-  runner writes nothing more, so threads can have a `thread.started` and no `thread.ended`. The
-  run's end comes from `Run.state` and is passed to `threadsOf`, `threadRows` and `taskStates`: a
-  thread, tool call or task still open then shows as stopped. Never decide "running" from the events alone.
+- **The log is not complete when the runner stops.** Stop ends the run in the API at once, and a
+  lost runner writes nothing more (its lease expires and the run goes back to queued or awaiting
+  keys), so threads can have a `thread.started` and no `thread.ended`. `haltOf(Run.state, closed)`
+  says why the runner isn't running the threads, and is the one input `runView` and `threadRows`
+  take: once ended, a thread, tool call or task still open shows as Stopped (Failed if the run
+  failed, at the run's end); while queued or awaiting keys it shows as Paused, its clock frozen at
+  its last event, until the runner's `thread.started` resumes it. The end applies only once the
+  stream has closed, when the log is whole, so a reload never shows a finished thread as Stopped
+  while its backlog loads. Never decide "running" from the events alone.
+- **Run-level data** is one `runView(events, folded, halt)` (`run-model.ts`): threads, attention,
+  plan, task states, progress and usage, memoized on the events. `withLiveCalls` overlays the tool
+  calls being written per frame.
 - **The attention list** (`attentionOf`) is built from `fold`'s tasks (To check items, the checker's
   verdict), so it agrees with review; a failure counts only on a task's latest thread.
 - **Transcripts** (`transcript.ts`, pure): prose stays visible as Markdown; reasoning and each run
@@ -42,15 +51,20 @@ Three screens under `RunLayout` (top bar and query client): `/` start (`start-pa
   can land after its `message`), so `settle` records each settled key in a `Settled` set the
   stream owns and `applyFrame` ignores frames for those keys. A frame at offset 0 starts a partial
   over (a re-asked wake reuses its id); any other gap drops the partial until the durable event.
+  A live `tool.output` keeps only its last 8,000 characters, the tail `bash.ts` keeps.
   A partial row and its durable row share a React key (message id, toolCallId), so the swap does
   not remount it. Frames are not replayed, so a reload mid-reply shows that reply only once its
-  durable event lands. A thread's partials are dropped when it ends or starts again (a runner
-  restart gives the resumed thread new reply ids), and all of them when the stream closes. Only
+  durable event lands. A thread streams one reply at a time, so the first frame of a new reply
+  drops the thread's other partials (one cut off by a runner restart); not `thread.started`,
+  which can lag the frames. A thread's partials are also dropped when it ends, and all of them
+  when the stream closes. Only
   `live` changes per frame; `events` keeps its identity, so the event derivations don't rerun per
   token. A thread's first `runtime` message is labelled its task brief.
 - **Ported from Flow**: `chat/` holds Flow's `ProcessDisclosure`, `ActivityRow`, `StreamingText`
-  caret, `useChatFollowScroll`, `DisclosureStore`, `ChatThreadNavigation`, `TurnInfoButton` and the
-  sub-agent row anatomy, restyled onto voluma's tokens; each file header names its source. Markdown
+  caret, `useChatFollowScroll`, `DisclosureStore`, `ChatThreadNavigation` and `TurnInfoButton`,
+  restyled onto voluma's tokens; each file header names its source. `chat/` stays generic (no run
+  model), so it can move to `packages/ui`; the sub-agent cards built on Flow's anatomy are
+  `agents.tsx`, at feature level. Markdown
   is `react-markdown` + `remark-gfm`, with `remend` closing open constructs while text streams (the
   same tail repair Flow uses); raw HTML is skipped and images show as their alt text.
 - **Live tasks** are `fold(events)` over the run's stream (`subscribe`), published at most once per

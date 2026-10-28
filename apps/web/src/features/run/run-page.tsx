@@ -16,7 +16,7 @@ import { Button } from "@voluma/ui";
 import { ArrowLeft } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useOutletContext, useParams, useSearchParams } from "react-router";
-import { AgentMark, Elapsed, RunningStrip } from "./chat/agents";
+import { AgentMark, Elapsed, RunningStrip } from "./agents";
 import { DisclosureProvider } from "./chat/disclosure-store";
 import { InfoButton, usageRows } from "./chat/info-button";
 import { ProcessDisclosure } from "./chat/process-disclosure";
@@ -24,15 +24,11 @@ import { ThreadNavigationProvider, useOpenThread } from "./chat/thread-navigatio
 import { KeysForm } from "./keys";
 import {
   type Attention,
-  addUsage,
-  attentionOf,
+  haltOf,
   latestThreadByTask,
-  planOf,
-  type TaskState,
+  runView,
   type Thread,
-  taskStates,
   threadName,
-  threadsOf,
   withLiveCalls,
 } from "./run-model";
 import { RunBadge, runStatus } from "./status";
@@ -53,25 +49,31 @@ import { workflowName } from "./workflows";
  * The run's stream as it arrives: durable events, and live frames folded until their durable
  * event lands. Published at most once per animation frame: a busy run sends many per second.
  * `events` keeps its identity while only frames arrive, so the event derivations don't rerun
- * per token. Live partials are dropped when the stream closes: nothing will complete them.
+ * per token. `closed` once the stream is over for good, when the log is whole; live partials are
+ * dropped then: nothing will complete them.
  */
-function useRunStream(runId: string, onClosed: () => void): { events: RunEvent[]; live: Live } {
-  const [state, setState] = useState<{ events: RunEvent[]; live: Live }>({
+function useRunStream(
+  runId: string,
+  onClosed: () => void,
+): { events: RunEvent[]; live: Live; closed: boolean } {
+  const [state, setState] = useState<{ events: RunEvent[]; live: Live; closed: boolean }>({
     events: [],
     live: noLive,
+    closed: false,
   });
-  const closed = useRef(onClosed);
-  closed.current = onClosed;
+  const onClosedRef = useRef(onClosed);
+  onClosedRef.current = onClosed;
   useEffect(() => {
     const events: RunEvent[] = [];
     let published: RunEvent[] = [];
     let live = noLive;
     const settled: Settled = new Set();
+    let closed = false;
     let frame: number | undefined;
     const publish = () => {
       frame = undefined;
       if (published.length !== events.length) published = [...events];
-      setState({ events: published, live });
+      setState({ events: published, live, closed });
     };
     const schedule = () => {
       frame ??= requestAnimationFrame(publish);
@@ -91,8 +93,9 @@ function useRunStream(runId: string, onClosed: () => void): { events: RunEvent[]
       onClosed: () => {
         if (frame !== undefined) cancelAnimationFrame(frame);
         live = noLive;
+        closed = true;
         publish();
-        closed.current();
+        onClosedRef.current();
       },
     });
     return () => {
@@ -114,27 +117,23 @@ export function RunPage() {
     // Queue position and state changes aren't events; the stream is the source for the rest.
     refetchInterval: (q) => (q.state.data?.state.status === "ended" ? false : 3000),
   });
-  const { events, live } = useRunStream(id, () => void run.refetch());
+  const { events, live, closed } = useRunStream(id, () => void run.refetch());
   const state = run.data?.state;
-  const endedAt = state?.status === "ended" ? state.endedAt : undefined;
-  const end = useMemo(() => (endedAt ? { endedAt } : undefined), [endedAt]);
+  // Query's structural sharing keeps `state` the same object across polls that change nothing.
+  const halt = useMemo(() => state && haltOf(state, closed), [state, closed]);
   const folded = useMemo(() => fold(events), [events]);
-  const settledThreads = useMemo(() => threadsOf(events, end), [events, end]);
-  const threads = useMemo(() => withLiveCalls(settledThreads, live), [settledThreads, live]);
+  const view = useMemo(() => runView(events, folded, halt), [events, folded, halt]);
+  const threads = useMemo(() => withLiveCalls(view.threads, live), [view.threads, live]);
   const threadById = useMemo(() => new Map(threads.map((t) => [t.id, t])), [threads]);
-  const attention = useMemo(
-    () => attentionOf(folded.tasks, settledThreads, events),
-    [folded, settledThreads, events],
-  );
   const main = threads.find((t) => t.kind === "supervisor");
   const openId = params.get("thread");
   const open = openId && openId !== main?.id ? threadById.get(openId) : undefined;
   const rows = useMemo(
     () =>
       openId && openId !== main?.id
-        ? threadRows(events, openId, live, end)
+        ? threadRows(events, openId, live, halt)
         : mainRows(events, live),
-    [events, live, end, openId, main?.id],
+    [events, live, halt, openId, main?.id],
   );
   const openThread = useCallback(
     (threadId: string | null) => setParams(threadId ? { thread: threadId } : {}),
@@ -156,31 +155,9 @@ export function RunPage() {
   }
 
   const data = run.data;
-  const ended = data.state.status === "ended";
-  const plan = planOf(events);
-  const states = plan
-    ? taskStates(
-        plan,
-        new Map(folded.tasks.map((t) => [t.id, t.status])),
-        new Set(
-          threads.flatMap((t) =>
-            t.kind === "worker" && t.status === "running" && t.taskId ? [t.taskId] : [],
-          ),
-        ),
-        ended,
-      )
-    : new Map<string, TaskState>();
-  // To check is finished too: the work is done and a person has items to look at.
-  const done = [...states.values()].filter((s) => s === "done" || s === "to-check").length;
-  const toCheck = [...states.values()].filter((s) => s === "to-check").length;
-  const progress = plan
-    ? `${done} of ${plan.tasks.length} finished${toCheck > 0 ? `, ${toCheck} to check` : ""}`
-    : "";
+  const ended = halt?.kind === "ended";
+  const { attention, plan, states, progress, usage } = view;
   const setRun = (next: Run) => queryClient.setQueryData(["run", id], next);
-  const usage = threads.reduce<Thread["usage"]>(
-    (sum, t) => (t.usage ? addUsage(sum, t.usage) : sum),
-    undefined,
-  );
   const graph = plan && (
     <TaskGraph plan={plan} states={states} threadByTask={latestThreadByTask(threads)} />
   );
@@ -248,7 +225,7 @@ export function RunPage() {
                       ? open.status === "running"
                         ? (open.liveTool ?? "Thinking")
                         : null
-                      : !ended && events.length > 0
+                      : !halt && events.length > 0
                         ? ""
                         : null
                   }

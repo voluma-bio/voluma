@@ -21,8 +21,8 @@ import {
   Workflow,
 } from "lucide-react";
 import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
+import { AgentCard } from "./agents";
 import { ActivityRow } from "./chat/activity-row";
-import { AgentCard } from "./chat/agents";
 import { InfoButton, usageRows } from "./chat/info-button";
 import { ClampedMarkdown, Markdown, StreamingText } from "./chat/markdown";
 import { ProcessDisclosure } from "./chat/process-disclosure";
@@ -202,12 +202,12 @@ function StepView({ step }: { step: Step }) {
 }
 
 function ToolBody({ step }: { step: ToolStep }) {
+  const command = (step.input as { command?: unknown } | undefined)?.command;
   const input =
-    typeof step.input === "string"
-      ? step.input
-      : step.name === "bash" && typeof (step.input as { command?: unknown })?.command === "string"
-        ? (step.input as { command: string }).command
-        : JSON.stringify(step.input, null, 2);
+    step.args ??
+    (step.name === "bash" && typeof command === "string"
+      ? command
+      : JSON.stringify(step.input, null, 2));
   return (
     <div className="grid gap-1.5">
       <Pre>{input}</Pre>
@@ -218,7 +218,7 @@ function ToolBody({ step }: { step: ToolStep }) {
       )}
       {step.truncated && (
         <p className="text-meta text-muted-foreground">
-          The runner shortened this output to its start and end.
+          Shortened: part of the output is not shown.
         </p>
       )}
     </div>

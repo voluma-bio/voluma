@@ -1,16 +1,17 @@
 /**
- * The live run page's run-level data, derived with no React from the run's events: the
- * threads (main, workers, checkers) with what each is doing now, the attention list, the plan
- * and where each task stands. Transcripts are in `transcript.ts`.
+ * The live run page's run-level data, derived with no React from the run's events and state:
+ * the threads (main, workers, checkers) with what each is doing now, the attention list, the
+ * plan, where each task stands, and the run's usage. Transcripts are in `transcript.ts`.
  */
 import type { ModelUsage, RunEvent } from "@voluma/contracts/events";
-import type { FoldedTask } from "@voluma/contracts/fold";
-import type { TaskStatus } from "@voluma/contracts/ids";
+import type { Folded, FoldedTask } from "@voluma/contracts/fold";
+import type { RunState } from "@voluma/contracts/run";
 import type { WorkflowPlan } from "@voluma/contracts/workflow";
-import { type Live, type RunEnd, toolTitle } from "./transcript";
+import { type Halt, type Live, toolTitle } from "./transcript";
 import { taskTitle } from "./workflows";
 
-export type ThreadStatus = "running" | "completed" | "failed" | "cancelled";
+/** `paused`: open while the run waits for a runner or keys; it resumes with a `thread.started`. */
+export type ThreadStatus = "running" | "paused" | "completed" | "failed" | "cancelled";
 
 export type Thread = {
   id: string;
@@ -19,6 +20,7 @@ export type Thread = {
   model?: string;
   /** Its latest start: a woken thread's clock counts from its wake. */
   startedAt: string;
+  /** Where its clock stops: its end, the run's end, or its last event while paused. */
   endedAt?: string;
   status: ThreadStatus;
   error?: string;
@@ -31,12 +33,12 @@ export type Thread = {
   liveTool?: string;
   lastTool?: string;
   /** The thread's last checkpoint, and its verdict for a checker. */
-  result?: { text: string; verdict?: "passed" | "needs-review"; toCheck?: string };
+  result?: { text: string; verdict?: "passed" | "needs-review" };
   /** Its last prose, the report a finished card expands to. */
   said?: string;
 };
 
-export const addUsage = (a: ModelUsage | undefined, b: ModelUsage): ModelUsage => ({
+const addUsage = (a: ModelUsage | undefined, b: ModelUsage): ModelUsage => ({
   input: (a?.input ?? 0) + b.input,
   output: (a?.output ?? 0) + b.output,
   cacheRead: (a?.cacheRead ?? 0) + b.cacheRead,
@@ -45,15 +47,34 @@ export const addUsage = (a: ModelUsage | undefined, b: ModelUsage): ModelUsage =
 });
 
 /**
- * Every thread the run has started, in start order. A thread still open when the run ended
- * (`end`) is stopped then: a cancel ends the run in the API at once, and a killed runner never
- * writes its threads' `thread.ended`.
+ * When the runner is not running the run's threads (see `Halt`). A queued run with no threads
+ * open is paused too, which changes nothing.
  */
-export function threadsOf(events: RunEvent[], end?: RunEnd): Thread[] {
+export function haltOf(state: RunState, streamClosed: boolean): Halt | undefined {
+  switch (state.status) {
+    case "running":
+      return undefined;
+    case "queued":
+    case "awaiting-keys":
+      return { kind: "paused" };
+    case "ended":
+      return streamClosed
+        ? { kind: "ended", at: state.endedAt, outcome: state.outcome }
+        : undefined;
+  }
+}
+
+/**
+ * Every thread the run has started, in start order, as the log tells it; `halted` applies what
+ * the log can't say.
+ */
+function threadsOf(events: RunEvent[]): { threads: Thread[]; lastAt: Map<string, string> } {
   const threads = new Map<string, Thread>();
   const running = new Map<string, Map<string, string>>();
+  const lastAt = new Map<string, string>();
   for (const e of events) {
     const t = threads.get(e.threadId);
+    lastAt.set(e.threadId, e.createdAt);
     switch (e.type) {
       case "thread.started":
         if (t) {
@@ -97,12 +118,7 @@ export function threadsOf(events: RunEvent[], end?: RunEnd): Thread[] {
         }
         break;
       case "checkpoint":
-        if (t)
-          t.result = {
-            text: e.payload.text,
-            verdict: e.payload.verdict,
-            toCheck: e.payload.toCheck?.title,
-          };
+        if (t) t.result = { text: e.payload.text, verdict: e.payload.verdict };
         break;
       case "message":
         if (t && e.payload.role === "assistant") {
@@ -119,14 +135,29 @@ export function threadsOf(events: RunEvent[], end?: RunEnd): Thread[] {
         break;
     }
   }
-  for (const t of threads.values()) {
-    if (t.status !== "running") continue;
-    if (end) {
-      t.status = "cancelled";
-      t.endedAt = end.endedAt;
-    } else t.liveTool = [...(running.get(t.id)?.values() ?? [])].at(-1);
-  }
-  return [...threads.values()];
+  for (const t of threads.values())
+    if (t.status === "running") t.liveTool = [...(running.get(t.id)?.values() ?? [])].at(-1);
+  return { threads: [...threads.values()], lastAt };
+}
+
+/**
+ * A thread still open when the runner stopped has no `thread.ended`: a cancel ends the run in
+ * the API at once, and a lost runner writes nothing. It is stopped (failed, if the run failed)
+ * at the run's end, or paused at its last event while the run waits to resume.
+ */
+function halted(threads: Thread[], lastAt: Map<string, string>, halt: Halt): Thread[] {
+  return threads.map((t) =>
+    t.status !== "running"
+      ? t
+      : halt.kind === "ended"
+        ? {
+            ...t,
+            status: halt.outcome === "failed" ? "failed" : "cancelled",
+            endedAt: halt.at,
+            liveTool: undefined,
+          }
+        : { ...t, status: "paused", endedAt: lastAt.get(t.id), liveTool: undefined },
+  );
 }
 
 /** Threads with a tool call still being written and none running say so; others are kept as is. */
@@ -140,7 +171,7 @@ export function withLiveCalls(threads: Thread[], live: Live): Thread[] {
   );
 }
 
-export const threadRole = (t: Pick<Thread, "kind">) =>
+const threadRole = (t: Pick<Thread, "kind">) =>
   t.kind === "worker"
     ? "worker"
     : t.kind === "check"
@@ -164,13 +195,10 @@ export type Attention = {
 /**
  * What needs a person first, from the fold's tasks so it agrees with review: each To check
  * item, a check that wants review, and failures. A failure counts only on a task's latest
- * thread, so a redone task drops it.
+ * thread, so a redone task drops it. `threads` are as logged: a thread the run's failure cut
+ * off is the run's error, which the page shows on its own.
  */
-export function attentionOf(
-  tasks: FoldedTask[],
-  threads: Thread[],
-  events: RunEvent[],
-): Attention[] {
+function attentionOf(tasks: FoldedTask[], threads: Thread[], events: RunEvent[]): Attention[] {
   const items: Attention[] = [];
   const latest = latestThreadByTask(threads);
   for (const t of threads)
@@ -216,7 +244,7 @@ export function attentionOf(
   return items;
 }
 
-export const planOf = (events: RunEvent[]): WorkflowPlan | undefined => {
+const planOf = (events: RunEvent[]): WorkflowPlan | undefined => {
   const first = events.find((e) => e.type === "revision.started" && e.payload.reason === "run");
   return first?.type === "revision.started" && first.payload.reason === "run"
     ? first.payload.plan
@@ -238,23 +266,33 @@ export type TaskState =
   | "failed"
   /** Working or being checked when the run ended. */
   | "stopped"
+  /** Working or being checked while the run waits for a runner or keys. */
+  | "paused"
   /** Not started, and every task it builds on is done. */
   | "ready"
   /** Not started, and a task it builds on is not done. */
   | "waiting";
 
 /**
- * Where each task stands, from the fold's statuses and the plan's dependencies. Once the run
- * has ended (`ended`), a task left in progress or under review is stopped: the log has no end
- * for the work the run cut off.
+ * Where each task stands, from the fold's statuses and the plan's dependencies. A task with a
+ * worker open is Working before the worker marks it in progress. While the runner is stopped
+ * (`halt`), a task left in progress or under review is stopped or paused: the log has no end
+ * for the work it cut off.
  */
-export function taskStates(
+function taskStates(
   plan: WorkflowPlan,
-  statuses: Map<string, TaskStatus | undefined>,
-  /** Tasks with a worker running: Working before the worker marks it in progress. */
-  working: Set<string>,
-  ended: boolean,
+  tasks: FoldedTask[],
+  threads: Thread[],
+  halt: Halt | undefined,
 ): Map<string, TaskState> {
+  const statuses = new Map(tasks.map((t) => [t.id, t.status]));
+  const working = new Set(
+    threads.flatMap((t) =>
+      t.kind === "worker" && (t.status === "running" || t.status === "paused") && t.taskId
+        ? [t.taskId]
+        : [],
+    ),
+  );
   const states = new Map<string, TaskState>();
   for (const t of plan.tasks) {
     const status = statuses.get(t.id);
@@ -270,9 +308,51 @@ export function taskStates(
             : blocked
               ? "waiting"
               : "ready";
-    states.set(t.id, ended && (state === "running" || state === "checking") ? "stopped" : state);
+    states.set(
+      t.id,
+      halt && (state === "running" || state === "checking")
+        ? halt.kind === "ended"
+          ? "stopped"
+          : "paused"
+        : state,
+    );
   }
   return states;
+}
+
+export type RunView = {
+  /** Without the tool calls still being written: `withLiveCalls` adds those per frame. */
+  threads: Thread[];
+  attention: Attention[];
+  plan?: WorkflowPlan;
+  states: Map<string, TaskState>;
+  /** "3 of 7 finished, 1 to check". */
+  progress: string;
+  usage?: ModelUsage;
+};
+
+/** Everything the run page shows about the run as a whole, from its durable events. */
+export function runView(events: RunEvent[], folded: Folded, halt: Halt | undefined): RunView {
+  const logged = threadsOf(events);
+  const threads = halt ? halted(logged.threads, logged.lastAt, halt) : logged.threads;
+  const plan = planOf(events);
+  const states = plan ? taskStates(plan, folded.tasks, threads, halt) : new Map();
+  // To check is finished too: the work is done and a person has items to look at.
+  const done = [...states.values()].filter((s) => s === "done" || s === "to-check").length;
+  const toCheck = [...states.values()].filter((s) => s === "to-check").length;
+  return {
+    threads,
+    attention: attentionOf(folded.tasks, logged.threads, events),
+    plan,
+    states,
+    progress: plan
+      ? `${done} of ${plan.tasks.length} finished${toCheck > 0 ? `, ${toCheck} to check` : ""}`
+      : "",
+    usage: threads.reduce<ModelUsage | undefined>(
+      (sum, t) => (t.usage ? addUsage(sum, t.usage) : sum),
+      undefined,
+    ),
+  };
 }
 
 export type GraphNode = { id: string; level: number; row: number; dependsOn: string[] };
