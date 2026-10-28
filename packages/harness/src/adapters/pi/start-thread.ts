@@ -316,6 +316,7 @@ function toAgentTool(
     label: tool.name,
     description: tool.description,
     parameters: Type.Unsafe(strictObjects(jsonSchema)),
+    ...(tool.prepare && { prepareArguments: tool.prepare }),
     ...(tool.sequential && { executionMode: "sequential" as const }),
     execute: async (toolCallId, params, signal) => {
       const result = await tool.execute(tool.input.parse(params), {

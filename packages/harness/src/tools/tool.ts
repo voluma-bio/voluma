@@ -38,6 +38,11 @@ export interface Tool<S extends z.ZodType = z.ZodType> {
   name: string;
   description: string;
   input: S;
+  /**
+   * Reshapes the model's raw arguments before they are validated against `input`, to accept
+   * what models send by habit when the meaning is unambiguous.
+   */
+  prepare?(args: unknown): unknown;
   /** Runs one call at a time within its thread (the task tools, whose appends must not interleave). */
   sequential?: boolean;
   execute(input: z.infer<S>, ctx: ToolContext): Promise<ToolResult>;

@@ -65,3 +65,29 @@ in five on 2026-10-28 with a working key), retried up to 4 attempts in all, 1 s,
 when the call failed before streaming any content. Any other error ends the thread as before.
 Cost is Pi's per-reply price, summed per claim; the log prints it
 when a claim reports (`model cost this claim`), and the API stores it as `runs.model_cost_usd`.
+
+# Runner: what `/outputs` and `/scratch` support
+
+Both are R2 bucket mounts (`modal-sandbox.ts`), so a file is written whole, once. Rename
+(`sed -i`, editors), append, in-place edits and memory-mapped writes
+(`np.lib.format.open_memmap(mode="w+")`) fail there: the model builds a file under `/tmp`
+(local disk, lost on a sandbox restart) and `cp`s it in. The worker and check prompts
+(`prompts.ts`) and the bash tool description (`layout.ts`) say so.
+
+**`/scratch` stays an R2 mount**, though it is only intermediate files. Three things read it
+from the host, not from the sandbox: `segment_sam` reads its volume and writes its labels
+there (`RunLayout.keyOf`), a long bash output is stored there for the model to open
+(`toolOutputPath`), and a checkpoint's evidence may be a `scratch` file, which the host copies
+into the run's evidence (`r2-evidence.ts`). The restart note also promises it survives a restart.
+A local `/scratch` would break all three.
+
+# Runner: who gets which task tools
+
+A worker has `checklist`, `checkpoint` and `report_output`; a check thread only `checkpoint`
+(`supervise-run.ts`). A check re-derives values to compare and gives them in its checkpoint's
+text with its verdict (the review shows the checker's verdict and text); it never replaces the
+worker's outputs, so the runtime refuses its `report_output` and never opens a `fix` revision.
+`fix` stays in the event schema and `fold` for now (removing it is a contract change).
+`checkpoint`'s arguments go through `prepareCheckpoint` before validation, so the habits of
+models (a top-level `title`, `toCheck` as a string or with `text`, a nested `{root, path}`)
+don't cost a turn.

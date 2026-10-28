@@ -85,6 +85,7 @@ export function metaSegmenter(options: {
   }
 
   async function track(prompt: string, fileId: string, signal: AbortSignal) {
+    const started = Date.now();
     const res = await fetch(`${BASE}/responses`, {
       method: "POST",
       headers: { ...auth, "Content-Type": "application/json", Accept: "text/event-stream" },
@@ -119,7 +120,11 @@ export function metaSegmenter(options: {
         if (event.type === "response.output_text.delta") text += event.delta;
         else if (event.type === "response.completed") {
           const frames: number = event.response?.usage?.video_frames_processed ?? 0;
-          addCost(Math.max(frames, MIN_FRAMES) * USD_PER_FRAME);
+          const usd = Math.max(frames, MIN_FRAMES) * USD_PER_FRAME;
+          addCost(usd);
+          log(
+            `SAM call: ${frames} frames, $${usd.toFixed(4)} added to the run's cost, ${Math.round((Date.now() - started) / 1000)} s`,
+          );
         } else if (event.type === "error" || event.type === "response.failed") {
           throw new Error(`Meta request failed: ${JSON.stringify(event).slice(0, 500)}`);
         }
