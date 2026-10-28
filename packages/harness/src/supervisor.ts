@@ -449,6 +449,7 @@ export function supervisor(options: SupervisorOptions) {
           ...("error" in answer
             ? { error: answer.error.slice(0, WAKE_ERROR_MAX) }
             : {
+                ...(answer.usage && { usage: answer.usage }),
                 ...(answer.note !== undefined && { note: answer.note }),
                 ...(answer.decision && { decision: answer.decision }),
               }),
