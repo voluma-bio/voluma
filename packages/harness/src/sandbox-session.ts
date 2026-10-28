@@ -80,7 +80,7 @@ export function sandboxSession(
   const replace = async (dead: Entry, threadId: string, code?: number): Promise<Entry> => {
     assertOpen();
     if (current === dead) {
-      // 137 is a kill, usually out of memory; a refused command (`swap`) has no code.
+      // A refused command (`swap`) has no code.
       onState(
         threadId,
         "stopped",

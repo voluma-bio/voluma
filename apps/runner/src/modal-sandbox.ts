@@ -19,8 +19,7 @@
  *   otherwise keep running its command, with write access to /outputs, beside the resumed thread.
  *   That sweep is by `{run, name}`; it ends only a previous holder's, because the creation is
  *   aborted (checked before the sweep, between terminations and before `create`) once the run's
- *   lease is released or lost. A creation already past its last check can still sweep the
- *   next holder's sandbox (a window of one Modal call). Ending one's own sandboxes after a slow close is by
+ *   lease is released or lost (a process frozen past its lease can still act late). Ending one's own sandboxes after a slow close is by
  *   claim (`terminateClaim`), never by run.
  */
 
@@ -85,6 +84,7 @@ export function createModalSandbox(config: ModalSandboxConfig): CreateSandbox {
   const client = new ModalClient(config.modal);
   return async (spec, signal) => {
     validate(spec);
+    signal?.throwIfAborted();
     const [app, image] = await Promise.all([
       client.apps.fromName(config.appName, { createIfMissing: true }),
       client.images.fromRegistry(spec.image),
@@ -104,8 +104,7 @@ export function createModalSandbox(config: ModalSandboxConfig): CreateSandbox {
     }
     const tags = { run: spec.runId, name: spec.name };
     // A run released or stopped while this creation was in flight may have been reclaimed by
-    // another runner; the sweep below would end that runner's sandbox. The check narrows that
-    // window to the calls between it and the terminate.
+    // another runner, whose sandbox the sweep below would end.
     signal?.throwIfAborted();
     for await (const old of client.sandboxes.list({ appId: app.appId, tags })) {
       signal?.throwIfAborted();
