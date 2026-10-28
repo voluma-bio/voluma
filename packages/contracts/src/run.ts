@@ -191,9 +191,10 @@ export const runSchema = z.object({
     })
     .optional(),
   /**
-   * The open To check items when the run completed, counted by `fold` over its whole log;
-   * null for a run that hasn't ended or ended otherwise. Fixed at the run's end: the review
-   * lane owns what happens to the items after.
+   * The open To check items when the run last completed, counted by `fold` over its whole
+   * log; null while it runs, and when it ended failed or cancelled (a failed run's items are
+   * still in its review). Set each time the run completes; the review lane owns what happens
+   * to the items between.
    */
   toCheck: z.number().int().nonnegative().nullable().optional(),
 });
