@@ -9,6 +9,7 @@ would flag every label. They are reported as `specks` (count and volume) and lef
 `unlabelled.py` uses for a candidate, a fifth of the smallest labelled structure on OA6-1RK (0.051 mm3).
 
 `--ranges` is the anatomy reference's anatomy.json: {"labels": [{"id": 1, "name": "femur", "volume_mm3": [lo, hi], "components": 1}]}.
+`piece_mm3` lists the largest pieces and `piece_voxel_zyx` a voxel inside each, in the same order.
 Prints a one-line summary with the labels that fail; the full table is in `--out`.
 """
 import argparse
@@ -45,15 +46,23 @@ def stats_for(labels, label, sp, min_piece_mm3):
     sub = labels[pad]
     mask = sub == label
     pieces, n = ndi.label(mask, CONN26)
-    sizes = np.sort(np.bincount(pieces.ravel())[1:])[::-1]
+    counts = np.bincount(pieces.ravel())[1:]
+    order = np.argsort(-counts)
+    sizes = counts[order]
     v = float(np.prod(sp))
     specks = sizes[sizes * v < min_piece_mm3]
-    sizes = sizes[sizes * v >= min_piece_mm3]
+    keep = order[sizes * v >= min_piece_mm3]
+    sizes = counts[keep]
     n = len(sizes)
+    objs = ndi.find_objects(pieces)
+    voxels = []  # one voxel inside each of the first 8 pieces, for `relabel.py --at` and the seeds of `classic_segment.py`
+    for i in keep[:8]:
+        pts = np.argwhere(pieces[objs[i]] == i + 1)
+        voxels.append((pts[len(pts) // 2] + [t.start + q.start for t, q in zip(objs[i], pad)]).tolist())
     return {
         'voxels': int(mask.sum()), 'volume_mm3': round(float(mask.sum()) * v, 4), 'pieces': int(n),
         'specks': {'count': len(specks), 'mm3': round(float(specks.sum()) * v, 5)},
-        'piece_mm3': [round(float(s) * v, 4) for s in sizes[:8]],
+        'piece_mm3': [round(float(s) * v, 4) for s in sizes[:8]], 'piece_voxel_zyx': voxels,
         'bbox_zyx': [[int(s.start), int(s.stop)] for s in sl],
         'neighbour_voxels': neighbours(sub, mask, label)}
 

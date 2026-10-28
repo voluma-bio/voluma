@@ -7,7 +7,7 @@ nothing), grouped into 3D regions, ranked by size, with a panel for the largest 
 Writes <outdir>/disagreement.npy (uint16 region id by rank, 1 = largest; regions under the floor are not numbered) with its
 sidecar, <outdir>/regions.json, and <outdir>/panel_<id>.jpg for the `--render` largest regions: three
 side-by-side cuts: the CT alone, your labels, the classic labels, each in the label colours of `visual-check` with a legend, and the
-disagreeing voxels filled amber in the last two. (Overlaid outlines of two near-identical segmentations cannot be told apart.) `--ids` limits which classic
+region outlined in white and, inside it, each side's label in a strong tint, with the region's assignment printed on top. (Overlaid outlines of two near-identical segmentations cannot be told apart.) `--ids` limits which classic
 labels count (e.g. the big bones). The panels cut the scan grid along axis 0 through the region's centre, or the oriented
 keyframe direction with `--frame`. Register each region you cannot settle as a labels volume output so a To check item can
 point at it (`focus.volumeId`, `focus.label` = the region id).
@@ -41,9 +41,22 @@ def flagged(labels, classic, ids, bone_hu_mask):
     return f
 
 
-def region_panel(hu, labels, classic, region_mask, centre, frame, window, path, names, pad=60):
-    """CT, your labels, the classic labels, side by side around `centre` (z,y,x); disagreeing pixels amber on the last two."""
+OUTLINE = '#ffffff'  # in no label's palette entry, so the region outline never reads as a label
+
+
+def assignment(region, names):
+    """'region 2 (0.0056 mm3): yours = 1 femur, classic = 8 lateral-sesamoid', from the region's label counts."""
+    def side(counts):
+        return ' + '.join(f'{k} {names.get(int(k), "(unnamed)")}' if int(k) else '0 unlabelled' for k in counts)
+    return (f'region {region["id"]} ({region["volume_mm3"]} mm3): yours = {side(region["your_labels"])}, '
+            f'classic = {side(region["classic_labels"])}')
+
+
+def region_panel(hu, labels, classic, region_mask, region, frame, window, path, names, pad=60):
+    """CT, your labels, the classic labels, side by side around the region's centre. Inside the region each side's own
+    label is tinted strongly in its palette colour; a thin white outline marks the region; the region's assignment is printed."""
     import matplotlib.colors
+    centre = region['centre_zyx']
     if frame:
         R = np.array(frame['R'])
         s, r, c = (R @ (np.array(centre) - np.array(frame['origin_zyx']))).round().astype(int)
@@ -64,10 +77,14 @@ def region_panel(hu, labels, classic, region_mask, centre, frame, window, path, 
         vl.show_slice(ax, img, window, grid=False)
         if shown is not None:
             vl.draw_labels(ax, shown)
-            ax.imshow(np.ma.masked_where(~dis, dis), cmap=matplotlib.colors.ListedColormap(['#ffb000']), alpha=0.3,
-                      interpolation='nearest')
-            ax.contour(dis.astype(float), levels=[0.5], colors=['#ffb000'], linewidths=1.8)
-        ax.text(2, 10, title if shown is None else f'{title} (amber = disagree)', color='w', fontsize=9)
+            for lv in np.unique(shown[dis]):
+                inside = dis & (shown == lv)
+                if lv:
+                    ax.imshow(np.ma.masked_where(~inside, inside), cmap=matplotlib.colors.ListedColormap([vl.colour(lv)]),
+                              alpha=0.7, interpolation='nearest')
+            ax.contour(dis.astype(float), levels=[0.5], colors=[OUTLINE], linewidths=0.8, linestyles='dashed')
+        ax.text(2, 10, title if shown is None else f'{title} (white outline = region)', color='w', fontsize=9)
+    fig.text(0.5, 0.995, assignment(region, names), color='w', fontsize=9, ha='center', va='top')
     vl.draw_legend(fig, sorted({int(v) for v in np.unique(np.concatenate([lab[lab > 0], cla[cla > 0]]))}), names, loc='lower left')
     sidecar.save_image(fig, path)
 
@@ -125,7 +142,7 @@ if __name__ == '__main__':
     panels = []
     for rg in regions[:a.render]:
         p = out / f'panel_{rg["id"]}.jpg'
-        region_panel(hu, labels, classic, reg == rg['id'], rg['centre_zyx'], frame, window, p, names)
+        region_panel(hu, labels, classic, reg == rg['id'], rg, frame, window, p, names)
         panels.append(str(p))
     sidecar.emit(regions=str(out / 'regions.json'), disagreement=str(out / 'disagreement.npy'), panels=panels,
                  flagged_voxels=int(f.sum()), flagged_pct_of_classic_bone=round(100 * float(f.sum()) / max(classic_bone, 1), 2),

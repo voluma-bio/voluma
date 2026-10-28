@@ -79,12 +79,19 @@ at its panel and decide:
 | You cannot tell from the CT | Keep neither by default: raise a To check item, and say in it which label you kept meanwhile and why. |
 
 Do not keep your label because it is yours, and do not take the classic one because it is the check. Use evidence that does not
-come from either method: the 3D sheet and the crop of the region (`render_crops.py --component-at <centre of the region>`), and
-the anatomy table. **Before you decide, compare volumes**: a region where the classic label is a structure the table lists
-(for example a sesamoid) and your volume for that structure is below its range, or the big bone's volume is above its range, is
-evidence for the classic side. On OA6-1RK, region 2 (4,849 voxels) was lateral-sesamoid in the classic labels and femur in SAM's; the
-femur took 4,849 to 9,774 voxels of the sesamoid and the reference agrees with the classic labels. A region you keep as it was, against the other
-method, needs the reason written in the checkpoint; if the reason is only "the panel was unclear", it is the last row of the
+come from either method. Each panel prints the region's assignment and size at the top ("region 2 (0.0056 mm3): yours = 1 femur,
+classic = 8 lateral-sesamoid"): read that line first, then the tinted region in each half, which is the colour of the label that
+side gave it. For a zoom on the region, use the panel, or `render_overlay.py --center <region centre> --names <anatomy.json>`;
+`render_crops.py` takes a whole connected piece of bone, so on a region that touches a big bone it shows the big bone. Then the
+3D sheet and the anatomy table.
+
+**Compare volumes only when the region is a sizeable share of the smaller structure's range.** If the classic label is a structure
+the table lists (a sesamoid) and the region is a large part of that structure's range, or would move the big bone's volume across
+the edge of its range, the volume check decides it. A region far smaller than both ranges cannot: on OA6-1RK, region 2 (4,849 voxels,
+0.006 mm³) is 0.1% of the femur's range width and 1.5% of the sesamoid's, so neither volume tells you anything, and the call
+rests on the CT (the panel shows a separate bone beside the femur) and the anatomy table. Region 1 in the same run runs the other way
+(yours = lateral-sesamoid, classic = femur, 0.01 mm³). A region you keep as it was, against the other method, needs the
+reason written in the checkpoint; if the reason is only "the panel was unclear", it is the last row of the
 table, and the region goes to the researcher as a To check item with `focus` on it.
 
 Never average or vote. Settle a region on the anatomy, or hand it on. How much to expect: on OA6-1RK, an earlier validator

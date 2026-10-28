@@ -55,13 +55,25 @@ the workflow's anatomy reference gives, not the measurement threshold.
    `python <segmentation-check>/resources/label_stats.py --labels labels_big_clipped.npy --out qc/stats_big.json --ranges <anatomy.json>`.
    Clipping is not optional: a SAM mask spans soft tissue and marrow (on OA6-1RK the patella mask was 16 mm³, its bone 2.5), and
    the anatomy ranges are bone volumes. Never refill clipped voxels by nearest label: a tibia refills with fibula.
-   Read the flags of the clipped labels as a per-label verdict, not as a verdict on SAM. A label inside its range with one piece
-   is done. A label **above its range or in extra pieces has taken bone from a neighbour**: `neighbour_voxels` in `stats_big.json`
-   and the 3D sheet show from whom. Fix it with `segmentation-check` section 4 (split with `classic_segment.py --within`,
-   `relabel.py`), or rerun once with a box for the neighbour it took from. A big bone that is in range keeps SAM's label. Do not
-   discard the whole request because one or two labels are off: on OA6-1RK femur and tibia were right, the fibula box took 1.06 mm³
-   of tibia and the patella 1.2 mm³ of the structures beside it. A label **below** its range lost bone to a neighbour that
-   is above: fix the pair together. A small structure's label is absent here by design: step 7.
+   Read the flags of the clipped labels as a per-label verdict, not as a verdict on SAM; `stats_big.json` gives each piece's
+   size (`piece_mm3`) and a voxel inside it (`piece_voxel_zyx`), and `neighbour_voxels` the labels the label touches. Per label:
+   - **In its range, one piece:** done. A big bone in range keeps SAM's label.
+   - **In its range, extra pieces:** each extra piece is bone that is not this structure. Look at it on the 3D sheet. Clear it
+     (`relabel.py --at <its voxel> --to 0`, so step 6's `unlabelled.py` finds it) or give it its own label (`--to N`) if it is a
+     structure you can name. On OA6-1RK the femur had two (0.29 and 0.12 mm³), unlabelled bone (its neighbours are background only).
+   - **Above its range:** it has taken bone from a neighbour. A piece that is wholly the neighbour's: `relabel.py --to <neighbour>`
+     (the fibula's 0.64 mm³ piece was tibia). A piece that is partly both, joined at a contact: `classic_segment.py --within <label>
+     --seeds seeds.json` with **one seed per connected piece of each part**, at the contact piece as well as the far one: a
+     piece with only one part's seed is given to that part whole. On OA6-1RK the fibula needed a fibula seed and a tibia seed in
+     its main piece; with the tibia seed alone, 0.42 mm³ of tibia stayed in it. Do not discard the whole request because one or
+     two labels are off: femur and tibia were right.
+   - **Below its range:** it lost bone to a neighbour that is above: fix the pair together.
+   Then run `label_stats.py` again, and repeat until every label is in range with one piece, or what is left is something you can
+   explain (a To check item). Run as written on the OA6-1RK run's clipped SAM labels, this flagged femur (3 pieces), patella (2.53 mm³,
+   14 pieces) and fibula (2.00 mm³, 4 pieces). After clearing the femur's 2 extra pieces and the patella's 13, relabelling the
+   fibula's tibia piece and splitting the fibula at its contact, the femur was 8.06, the tibia 6.81, the patella 1.43 (one piece)
+   and the fibula 0.98 mm³, all in range; the fibula still had a 0.06 mm³ second piece to clear or explain.
+   A small structure's label is absent here by design: step 7.
 6. **Find the small structures on the scan grid.** Run `unlabelled.py` on `labels_big_clipped.npy` and look at each candidate
    (`segmentation-check`, section 2). Keep the ones you can name from the anatomy reference or want to ask about.
 7. **Small structures in their own request, one temporary label per 3D piece.** Do not add them to the big-bone request: they
