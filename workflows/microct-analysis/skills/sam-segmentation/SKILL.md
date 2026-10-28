@@ -49,11 +49,19 @@ the workflow's anatomy reference gives, not the measurement threshold.
    them), each on a slice where it is separate from its neighbour, via the structure's `frame`. Up to 16 structures per
    call. Never one request per bone: three times the cost, overlapping masks, and a small bone beside a large one tracked
    onto it. Write the output to `labels_big_oriented.npy`.
-5. **Map back and clip the big bones.** `python <orient-joint>/resources/to_scan.py --in labels_big_oriented.npy --frame frame.json
-   --header hu.json --out labels_big.npy`, then
-   `python clip_to_envelope.py --hu hu.npy --labels labels_big.npy --out labels_big_clipped.npy --threshold-hu <T>`.
-   SAM masks include soft tissue (whole-mask volumes ran 7-60% over the reference); the clip counts bone, not soft tissue, and
-   moves bone-voxel Dice by at most 0.002. Never refill clipped voxels by nearest label: a tibia refills with fibula.
+5. **Map back, clip to bone, and check every label before going on.**
+   `python <orient-joint>/resources/to_scan.py --in labels_big_oriented.npy --frame frame.json --header hu.json --out labels_big.npy`, then
+   `python clip_to_bone.py --hu hu.npy --labels labels_big.npy --out labels_big_clipped.npy --threshold-hu <T>`, then
+   `python <segmentation-check>/resources/label_stats.py --labels labels_big_clipped.npy --out qc/stats_big.json --ranges <anatomy.json>`.
+   Clipping is not optional: a SAM mask spans soft tissue and marrow (on OA6-1RK the patella mask was 16 mm³, its bone 2.5), and
+   the anatomy ranges are bone volumes. Never refill clipped voxels by nearest label: a tibia refills with fibula.
+   Read the flags of the clipped labels as a per-label verdict, not as a verdict on SAM. A label inside its range with one piece
+   is done. A label **above its range or in extra pieces has taken bone from a neighbour**: `neighbour_voxels` in `stats_big.json`
+   and the 3D sheet show from whom. Fix it with `segmentation-check` section 4 (split with `classic_segment.py --within`,
+   `relabel.py`), or rerun once with a box for the neighbour it took from. A big bone that is in range keeps SAM's label. Do not
+   discard the whole request because one or two labels are off: on OA6-1RK femur and tibia were right, the fibula box took 1.06 mm³
+   of tibia and the patella 1.2 mm³ of the structures beside it. A label **below** its range lost bone to a neighbour that
+   is above: fix the pair together. A small structure's label is absent here by design: step 7.
 6. **Find the small structures on the scan grid.** Run `unlabelled.py` on `labels_big_clipped.npy` and look at each candidate
    (`segmentation-check`, section 2). Keep the ones you can name from the anatomy reference or want to ask about.
 7. **Small structures in their own request, one temporary label per 3D piece.** Do not add them to the big-bone request: they
@@ -85,7 +93,7 @@ the workflow's anatomy reference gives, not the measurement threshold.
    (pieces go back to their label; several temporary labels may map to one). **The big bones win overlaps. This rule is
    untested**: the experiment that set the others did not run it, and it showed a three-piece structure leaking into the
    patella, so the merge reports how many voxels each piece lost to a big bone: a large loss is a To check item.
-   Clip again: `clip_to_envelope.py --labels labels_merged.npy --out labels.npy`. That is the final `labels.npy`.
+   Clip again: `clip_to_bone.py --labels labels_merged.npy --out labels.npy`. That is the final `labels.npy`.
 10. **Check and own the labels** with `segmentation-check`. SAM's label is evidence, not an answer: SAM agreeing with a
    watershed is agreement, not accuracy.
 

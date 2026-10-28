@@ -3,7 +3,7 @@ with a ranges file, whether each label is inside the expected volume range and p
 
   python label_stats.py --labels labels.npy --out stats.json [--ranges anatomy.json] [--header hu.json] [--min-piece-mm3 0.01]
 
-Pieces smaller than `--min-piece-mm3` are specks, not pieces: clipping a SAM mask to the bone envelope leaves hundreds of
+Pieces smaller than `--min-piece-mm3` are specks, not pieces: clipping a SAM mask to bone leaves hundreds of
 them (a clipped, unmerged SAM volume on OA6-1RK: 64 to 915 pieces per label, almost all under 0.01 mm3), and counting them
 would flag every label. They are reported as `specks` (count and volume) and left out of `pieces`. 0.01 mm3 is the size
 `unlabelled.py` uses for a candidate, a fifth of the smallest labelled structure on OA6-1RK (0.051 mm3).
