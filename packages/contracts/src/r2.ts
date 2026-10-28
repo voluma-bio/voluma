@@ -24,7 +24,7 @@ export const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 const seg = (s: string) => segmentSchema.parse(s);
 const rel = (p: string) => relativePathSchema.parse(p);
 
-/** All workflow packages; the sandbox mounts this read-only at `/workflow`. */
+/** Not used by a run: it mounts its own snapshot (`workflowSnapshotPrefix`), not all workflows. */
 export const workflowsPrefix = () => "workflows/";
 
 export const workflowPrefix = (pin: WorkflowPin) => {
