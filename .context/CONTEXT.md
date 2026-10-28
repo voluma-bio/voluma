@@ -157,14 +157,27 @@ after the response, is what gives the cookie one writer. A refreshed session com
 
 A request makes at most one WorkOS refresh (`AuthKitCore.validateAndRefresh`), with a 3 s
 timeout and no SDK retries (AuthKit's own one-time 429 retry stays, so a rate-limited
-refresh is two calls). A failure that is 408, 429, 5xx or a network error leaves the
-cookie, so an outage does not sign people out; any other failure (revoked or expired
-session, `sso_required`) clears it, and an unreadable cookie is cleared without a call.
+refresh is two calls). The JWKS fetch has the same 3 s bound and its keys are kept for the
+process lifetime (an unknown `kid` reloads, behind jose's 30 s cooldown), so a cold process
+during an outage spends at most 3 s on keys plus 3 s on the refresh. Each process also
+remembers refresh outcomes in a 10k-entry LRU keyed by the refresh token: a
+refreshed session until its access token expires, a dead one until the cookie's max age, a
+transient failure for 10 s. A
+client replaying one cookie therefore costs one WorkOS call per access-token lifetime, or
+none once the session is dead; the allow-list is still checked on every request. A failure
+that is 408, 429, 5xx or a network error leaves the cookie, is remembered for 10 s (a
+replay in that time makes no WorkOS call), and answers
+503 `{ "error": "auth unavailable" }` (not 401, which signs the web client out), so an
+outage shows the gate's can't-be-reached screen and keeps the session; any other failure (revoked or expired session,
+`sso_required`) clears it, and an unreadable cookie is cleared without a call.
 
 Sign-out revokes the session at WorkOS on the server (`userManagement.revokeSession`), as
 does signing in over an existing session (the old one); refresh tokens are not rotated on
-use, so a copied cookie would otherwise stay a session. The access token already issued
-stays valid until it expires. `returnTo` is sanitized, limited to printable ASCII and 512
+use, so a copied cookie would otherwise stay a session. Sign-out refuses copies of the
+cookie at once in the process that handled it (its memo marks the refresh token dead, and
+a refresh already in flight cannot undo that); in another process, or after the memo
+evicted the entry, a copy works until its access token expires (5 min on staging) and is
+refused at its next refresh. `returnTo` is sanitized, limited to printable ASCII and 512
 characters, and dropped if it doesn't fit, which keeps a PKCE verifier cookie near 1.2 KB;
 `/login` evicts stale verifier cookies.
 
