@@ -9,7 +9,9 @@
   },
   "dependencies": {
     "@voluma/contracts": "workspace:*",
-    "@voluma/workflow": "workspace:*"
+    "@voluma/harness": "workspace:*",
+    "@voluma/workflow": "workspace:*",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261023.1",

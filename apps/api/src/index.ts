@@ -4,6 +4,7 @@
  * its ports. Each domain owns every path under its prefix.
  */
 
+import { d1EventLog, d1History } from "./adapters";
 import type { DomainHandler } from "./domain";
 import { createReview } from "./domains/review";
 import { createRun } from "./domains/run";
@@ -14,11 +15,18 @@ interface Env {
 }
 
 export default {
-  async fetch(request, _env, ctx) {
+  async fetch(request, env, ctx) {
     const { pathname } = new URL(request.url);
     if (pathname === "/health") return new Response("ok");
     const mounts: [prefix: string, handler: DomainHandler][] = [
-      ["/run/", createRun({})],
+      [
+        "/run/",
+        createRun({
+          eventLog: d1EventLog(env.DB),
+          history: d1History(env.DB),
+          apiToken: env.API_TOKEN,
+        }),
+      ],
       ["/review/", createReview({})],
     ];
     const mount = mounts.find(([prefix]) => pathname.startsWith(prefix));
