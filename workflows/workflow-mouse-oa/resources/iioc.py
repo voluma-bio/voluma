@@ -98,14 +98,25 @@ def largest(mask):
     return cc == n.argmax(), int(mask.sum() - n.max())
 
 
-def ray_length(roi, start, direction, step=0.05):
-    """Distance in voxels from `start` along the unit `direction` until the ray leaves `roi` (nearest-voxel membership)."""
-    t = 0.0
-    while True:
-        t += step
+def ray_length(roi, start, direction, step=0.05, max_lead=3.0):
+    """Distance in voxels from `start` along the unit `direction` to where the ray leaves `roi` (nearest-voxel membership).
+
+    `start` sits on a traced face, which can round to a voxel just outside the ROI: the ray first walks up to `max_lead`
+    voxels to enter it, and the length counts from `start` to the exit. A ray that never enters is a bad input.
+    """
+    def inside(t):
         p = np.rint(start + t * direction).astype(int)
-        if not (p >= 0).all() or not (p < roi.shape).all() or not roi[tuple(p)]:
-            return t
+        return (p >= 0).all() and (p < roi.shape).all() and roi[tuple(p)]
+
+    t = 0.0
+    while not inside(t):
+        t += step
+        if t > max_lead:
+            sidecar.fail(f'the ray from {np.round(start, 1).tolist()} does not enter ROI-1 within {max_lead} voxels: '
+                         'check the traced face and the point it starts from')
+    while inside(t):
+        t += step
+    return t
 
 
 def first_run(bone, v, u):
@@ -342,20 +353,29 @@ def main():
     )
 
 
+QC_SECTIONS = 4  # coronal sections in qc-coronal.jpg: a 2 x 2 sheet keeps each panel near 1000 px wide
+QC_MARGIN = 40  # voxels shown above and below the traced face, and either side of the ROI footprint
+
+
 def qc_images(out, h, roi, gp, plates, values, height_ids, v_star):
-    vs = [
-        int(v)
-        for v in np.linspace(np.flatnonzero(roi.any(axis=(0, 2)))[0], np.flatnonzero(roi.any(axis=(0, 2)))[-1], 8)[1:-1]
-    ][:6]
-    fig, axs = plt.subplots(2, 3, figsize=(18, 11))
+    """qc-coronal.jpg: sections cropped to the traced face (about 2.5 px per voxel, so 0.1 mm is 26 px), not the whole stack.
+
+    A whole-stack panel is 1 px per voxel or less and hides a traced face that cuts 10 voxels below the growth plate.
+    """
+    vr = np.flatnonzero(roi.any(axis=(0, 2)))
+    vs = [int(v) for v in np.linspace(vr[0], vr[-1], QC_SECTIONS + 2)[1:-1]]
+    fig, axs = plt.subplots(2, 2, figsize=(20, 14))
     for v, ax in zip(vs, axs.flat):
-        ax.imshow(h[:, v, :], cmap='gray', vmin=0, vmax=5000)
-        ax.contour(roi[:, v, :], levels=[0.5], colors='lime', linewidths=0.8)
-        ax.plot(np.arange(h.shape[2]), gp[v], color='orange', lw=0.8)
+        us = np.flatnonzero(roi[:, v, :].any(axis=0))
+        u0, u1 = max(us[0] - QC_MARGIN, 0), min(us[-1] + QC_MARGIN, h.shape[2])
+        w0, w1 = max(int(gp[v, u0:u1].min()) - QC_MARGIN, 0), min(int(gp[v, u0:u1].max()) + QC_MARGIN, h.shape[0])
+        ax.imshow(h[w0:w1, v, u0:u1], cmap='gray', vmin=0, vmax=5000, extent=(u0 - 0.5, u1 - 0.5, w1 - 0.5, w0 - 0.5))
+        ax.contour(np.arange(u0, u1), np.arange(w0, w1), roi[w0:w1, v, u0:u1], levels=[0.5], colors='lime', linewidths=0.6)
+        ax.plot(np.arange(u0, u1), gp[v, u0:u1], color='orange', lw=0.6)
         for side, c in (('medial', 'magenta'), ('lateral', 'cyan')):
-            if plates[side][:, v, :].any():
-                ax.contour(plates[side][:, v, :], levels=[0.5], colors=[c], linewidths=0.8)
-        ax.set(title=f'V={v}: green ROI-1, orange growth-plate face', xlabel='U', ylabel='W')
+            if plates[side][w0:w1, v, u0:u1].any():
+                ax.contour(np.arange(u0, u1), np.arange(w0, w1), plates[side][w0:w1, v, u0:u1], levels=[0.5], colors=[c], linewidths=0.6)
+        ax.set(title=f'V={v}: green ROI-1, orange growth-plate face', xlabel='U', ylabel='W', xlim=(u0, u1), ylim=(w1, w0))
         ax.grid(alpha=0.15)
     fig.tight_layout()
     p1 = out / 'qc-coronal.jpg'

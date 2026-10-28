@@ -9,7 +9,11 @@ would flag every label. They are reported as `specks` (count and volume) and lef
 `unlabelled.py` uses for a candidate, a fifth of the smallest labelled structure on OA6-1RK (0.051 mm3).
 
 `--ranges` is the anatomy reference's anatomy.json: {"labels": [{"id": 1, "name": "femur", "volume_mm3": [lo, hi], "components": 1}]}.
-`piece_mm3` lists the largest pieces and `piece_voxel_zyx` a voxel inside each, in the same order.
+`piece_mm3` lists the largest pieces and `piece_voxel_zyx` a voxel inside each, in the same order; `piece_touches_edge` says,
+in the same order, whether the piece reaches the scan's edge (what lies there is out of the field of view, or cut by it).
+Two more rules read optional anatomy keys: `must_touch: [ids]` flags a label that touches none of a neighbour the anatomy
+requires (a label on the wrong bone often touches only background), and an edge-touching piece is flagged unless
+`may_touch_edge` is true (a long bone the field cuts), in which case only a piece other than its largest is flagged.
 Prints a one-line summary with the labels that fail; the full table is in `--out`.
 """
 import argparse
@@ -55,6 +59,8 @@ def stats_for(labels, label, sp, min_piece_mm3):
     sizes = counts[keep]
     n = len(sizes)
     objs = ndi.find_objects(pieces)
+    edge = [bool(any(t.start + q.start == 0 or t.stop + q.start == d for t, q, d in zip(objs[i], pad, labels.shape)))
+            for i in keep[:8]]
     voxels = []  # one voxel inside each of the first 8 pieces, for `relabel.py --at` and the seeds of `classic_segment.py`
     for i in keep[:8]:
         pts = np.argwhere(pieces[objs[i]] == i + 1)
@@ -62,7 +68,7 @@ def stats_for(labels, label, sp, min_piece_mm3):
     return {
         'voxels': int(mask.sum()), 'volume_mm3': round(float(mask.sum()) * v, 4), 'pieces': int(n),
         'specks': {'count': len(specks), 'mm3': round(float(specks.sum()) * v, 5)},
-        'piece_mm3': [round(float(s) * v, 4) for s in sizes[:8]], 'piece_voxel_zyx': voxels,
+        'piece_mm3': [round(float(s) * v, 4) for s in sizes[:8]], 'piece_voxel_zyx': voxels, 'piece_touches_edge': edge,
         'bbox_zyx': [[int(s.start), int(s.stop)] for s in sl],
         'neighbour_voxels': neighbours(sub, mask, label)}
 
@@ -94,6 +100,14 @@ if __name__ == '__main__':
                 flags.append(f'{lv} {e["name"]}: {s["volume_mm3"]} mm3 outside {lo}-{hi}')
             if s['pieces'] != s['pieces_expected']:
                 flags.append(f'{lv} {e["name"]}: {s["pieces"]} pieces, expected {s["pieces_expected"]}')
+            missing = [t for t in e.get('must_touch', []) if not s['neighbour_voxels'].get(t)]
+            if missing:
+                flags.append(f'{lv} {e["name"]}: touches no label {missing} (touches {sorted(s["neighbour_voxels"])}); '
+                             'is it on the right bone?')
+            at_edge = s['piece_touches_edge'][1 if e.get('may_touch_edge') else 0:]
+            if any(at_edge):
+                flags.append(f'{lv} {e["name"]}: a piece touches the scan edge (out-of-field bone?), pieces {s["piece_mm3"]} '
+                             f'mm3, at edge {s["piece_touches_edge"]}')
         table[lv] = s
     for lv, e in expected.items():
         if lv not in table:

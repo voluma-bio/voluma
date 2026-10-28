@@ -1,15 +1,17 @@
 """Distal femoral length, width, W/L ratio and landmark frame from four annotated landmarks (deck #26-28).
 
-  python femoral_frame.py --landmarks landmarks.json --hu-json hu.json --out <dir> [--labels labels.npy --label 1]
+  python femoral_frame.py --landmarks landmarks.json --hu-json hu.json --labels labels.npy --out <dir> [--label 1]
 
 Landmarks (zyx voxel indices on the scan grid, floats allowed; the points.json `pick.py` writes for picks named a to d works as is;
 see ../references/oa-protocol.md for how to place them):
   a  midpoint of the upper line of the intercondylar groove      c  midpoint of the ridge on the lateral condyle
   b  intercondylar notch                                         d  vertex of the medial condyle
 DFL = |a - b|, DFW = |c - d|, W/L = DFW / DFL, all straight 3D distances through physical spacing. The script also
-builds a frame (ML from d to c, SI from b to a made perpendicular to ML, normal = ML x SI) and, with --labels,
-reports how far each landmark lies from femur bone, so a landmark floating in
-the joint space is caught, and whether SI points toward the femoral shaft.
+builds a frame (ML from d to c, SI from b to a made perpendicular to ML, normal = ML x SI) and checks the points against
+the femur label. A failed check stops the script (exit 2, nothing written): re-place the points, do not explain the check
+away. The checks: each landmark within MAX_OFF_BONE_MM of femur bone; DFL at least MIN_LENGTH_OVER_WIDTH of DFW (an
+end-on view of the joint face puts a and b across the notch and DFL comes out a third of its size); and SI (b to a)
+pointing toward the shaft.
 
 Writes femoral.json (the result record of `microct-core/resources/sidecar.py`, plus frame and checks); prints it.
 """
@@ -33,7 +35,8 @@ import sidecar
 
 IDS = ('a', 'b', 'c', 'd')
 SNAP_BOX = 40  # voxels either side of a landmark searched for the nearest femur voxel
-MAX_OFF_BONE_MM = 0.05  # a landmark further than this from femur bone is flagged
+MAX_OFF_BONE_MM = 0.05  # a landmark further than this from femur bone fails the check
+MIN_LENGTH_OVER_WIDTH = 0.4  # DFL / DFW below this fails. One scan (n=1): OA6-1RK reference 0.71, the end-on pick that was wrong 0.27
 
 
 def unit(v):
@@ -59,7 +62,7 @@ def main():
     ap.add_argument('--landmarks', required=True, help='JSON {"a": [z,y,x], "b": ..., "c": ..., "d": ...}, or the points.json pick.py wrote with picks named a, b, c, d')
     ap.add_argument('--hu-json', required=True, help='hu.json: spacing and grid')
     ap.add_argument('--out', required=True)
-    ap.add_argument('--labels', help='labels.npy on the scan grid: checks each landmark against the femur')
+    ap.add_argument('--labels', required=True, help='labels.npy on the scan grid: the landmarks are checked against the femur')
     ap.add_argument('--label', type=int, default=1, help='femur label id')
     a = ap.parse_args()
     lm = sidecar.load_points(a.landmarks)
@@ -88,45 +91,40 @@ def main():
         'width-length-ratio': sidecar.value(dfw / dfl, '1', 'deck #28: distal femoral width-to-length ratio, DFW / DFL'),
     }
     pm = {i: p[i] * sp for i in IDS}  # mm, zyx
-    checks = {'warnings': []}
+    checks = {}
     si_seed = pm['a'] - pm['b']
     ml = unit(pm['c'] - pm['d'])
     si_perp = si_seed - (si_seed @ ml) * ml
     if np.linalg.norm(si_perp) < 0.01:
-        checks['warnings'].append('the length axis a-b is parallel to the width axis c-d: re-place the landmarks')
-        frame = None
-    else:
-        si = unit(si_perp)
-        frame = {
-            'ml_vector_zyx': ml.tolist(),
-            'si_vector_zyx': si.tolist(),
-            'normal_vector_zyx': np.cross(ml, si).tolist(),
-            'note': 'ml: d to c; si: b toward a, made perpendicular to ml (toward the shaft); normal = ml x si, '
-            'anterior or posterior depending on the knee: confirm on a render before using its sign',
-        }
-    if a.labels:
-        labels = np.load(a.labels, mmap_mode='r')
-        femur = np.asarray(labels) == a.label
-        checks['off_bone_mm'] = {i: off_bone_mm(p[i], femur, sp[0]) for i in IDS}
-        far = [i for i, d in checks['off_bone_mm'].items() if d is None or d > MAX_OFF_BONE_MM]
-        if far:
-            checks['warnings'].append(
-                f'landmarks {far} are more than {MAX_OFF_BONE_MM} mm from femur bone: snap them '
-                'to the bone surface and look at the render again'
-            )
-        if frame:
-            centroid = np.argwhere(femur[::4, ::4, ::4]).mean(axis=0) * 4 * sp
-            toward = bool((centroid - (pm['c'] + pm['d']) / 2) @ np.array(frame['si_vector_zyx']) > 0)
-            checks['si_points_toward_shaft'] = toward
-            if not toward:
-                checks['warnings'].append('SI points away from the femoral bulk: a and b (or c and d) may be swapped')
+        sidecar.fail('the length axis a-b is parallel to the width axis c-d: re-place the landmarks')
+    si = unit(si_perp)
+    frame = {
+        'ml_vector_zyx': ml.tolist(),
+        'si_vector_zyx': si.tolist(),
+        'normal_vector_zyx': np.cross(ml, si).tolist(),
+        'note': 'ml: d to c; si: b toward a, made perpendicular to ml (toward the shaft); normal = ml x si, '
+        'anterior or posterior depending on the knee: confirm on a render before using its sign',
+    }
+    femur = np.asarray(np.load(a.labels, mmap_mode='r')) == a.label
+    checks['off_bone_mm'] = {i: off_bone_mm(p[i], femur, sp[0]) for i in IDS}
+    far = [i for i, d in checks['off_bone_mm'].items() if d is None or d > MAX_OFF_BONE_MM]
+    if far:
+        sidecar.fail(f'landmarks {far} are more than {MAX_OFF_BONE_MM} mm from femur bone: snap them '
+                     'to the bone surface and look at the render again')
+    if dfl < MIN_LENGTH_OVER_WIDTH * dfw:
+        sidecar.fail(f'DFL {dfl:.3f} mm is under {MIN_LENGTH_OVER_WIDTH} of DFW {dfw:.3f} mm: a and b were probably placed on an '
+                     'end-on view of the joint face, so a-b runs across the notch. Render a view along the shaft '
+                     '(regions-and-landmarks) and re-place a and b on it')
+    centroid = np.argwhere(femur[::4, ::4, ::4]).mean(axis=0) * 4 * sp
+    if (centroid - (pm['c'] + pm['d']) / 2) @ si <= 0:
+        sidecar.fail('SI (b toward a) points away from the femoral bulk: a is not the groove end nearer the shaft, or the '
+                     'points are on the wrong view. Re-place a and b; do not explain this away')
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     sidecar.emit_values(
         out / 'femoral.json',
         values,
         meta={'landmarks_zyx': lm, 'frame': frame, 'checks': checks},
-        warnings=checks['warnings'],
     )
 
 

@@ -5,6 +5,7 @@
       "name": "femur",
       "volume_mm3": [6.296, 10.913],
       "components": 1,
+      "may_touch_edge": true,
       "notes": "Range is the OA6-1RK reference volume 8.395 mm3 widened (x0.75 to x1.3); one scan only (n=1), not a population range."
     },
     {
@@ -12,6 +13,7 @@
       "name": "tibia",
       "volume_mm3": [5.283, 9.157],
       "components": 1,
+      "may_touch_edge": true,
       "notes": "Tibia and fibula fuse on a threshold: the tibia label is the one that must not contain the fibula. Range is the OA6-1RK reference volume 7.044 mm3 widened (x0.75 to x1.3); one scan only (n=1), not a population range."
     },
     {
@@ -26,6 +28,8 @@
       "name": "fibula",
       "volume_mm3": [0.744, 1.29],
       "components": 1,
+      "may_touch_edge": true,
+      "must_touch": [2],
       "notes": "Touches the tibia and can fuse with it on a threshold; see the prompts section of anatomy.md. Range is the OA6-1RK reference volume 0.992 mm3 widened (x0.75 to x1.3); one scan only (n=1), not a population range."
     },
     {

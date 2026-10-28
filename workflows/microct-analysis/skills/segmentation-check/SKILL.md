@@ -26,6 +26,10 @@ With `--ranges` it flags a volume outside the range and a piece count that diffe
 `--min-piece-mm3` (0.01) are counted as `specks`, not pieces: a clipped SAM label carries hundreds, and counting them would
 flag every label. Look at the specks total if it is large. Then:
 
+- **Read the flags literally.** With the workflow's `anatomy.json`, `label_stats.py` also flags a label that touches none of the
+  neighbours the anatomy requires (`must_touch`: a fibula that touches only background is on the wrong bone, however good its
+  volume) and a piece that reaches the scan edge (`may_touch_edge` marks the long bones the field cuts). Treat either as a wrong
+  seed or box and fix it (section 4); raise it as a To check item only if the CT leaves it open.
 - **One bone, one main piece.** A second large piece means the label is on two bones, or a bone has broken. Look at
   the 3D sheet. (Clipping can split a thin bone: check the pieces after `clip_to_bone.py` too.)
 - **Volume inside the anatomy reference's range.** Unclipped SAM masks include soft tissue (`sam-segmentation`): clip first,

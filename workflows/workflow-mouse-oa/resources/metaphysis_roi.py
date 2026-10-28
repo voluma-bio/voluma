@@ -1,10 +1,11 @@
 """Metaphyseal regions under the tibial growth plate: ROI-3 (deck #16-23) and the cortex for Ct.Th (deck #24, #25).
 
   python metaphysis_roi.py --hu-aligned tibia-hu.npy --mask tibia-mask.npy --hu-json hu.json --annotations annotations.json
-         --out <dir> [--threshold HU] [--start-um 50] [--length-um 200] [--cortex-clearance-um 20] [--cortex-mm X]
+         --proximal-face growth-plate-proximal-face.npy --out <dir> [--threshold HU] [--start-um 50] [--length-um 200] [--cortex-clearance-um 20] [--cortex-mm X]
          [--cortex-search-factor 2]
 
-The growth plate's distal face is the reference surface, and it must be traced (`growth_plate_distal_curves` in the
+The growth plate's distal face is the reference surface (one face for the whole run: `cortical` reads this script's output,
+it does not trace its own), and it must be traced (`growth_plate_distal_curves` in the
 annotations): ROI-3 starts 50 um below it, so a guessed band thickness (100-200 um on OA6-1RK) moves BV/TV from 23% to
 15% and is not a measurement. The bone threshold (default: the lab's 2.16/cm in this scan's HU, from hu.json's calibration)
 is used here only to estimate the cortex and to build the cortex mask; no label gates it.
@@ -13,6 +14,9 @@ cross-section, at least `cortex + clearance` from its outer edge. The cortex thi
 depth at which the bone fraction of the outer layers first drops below one half (estimated in the ROI-3 slices,
 reported as cortex_estimate_mm), or --cortex-mm. The cortex mask for Ct.Th is the bone within `search factor` times
 that depth of the outer edge, over 1.3 mm of shaft below the plate: it can include trabeculae that join the cortex.
+
+The script stops when the traced distal face lies at or above the proximal face (`--proximal-face`, from iioc.py) anywhere:
+the band between them cannot be thinner than nothing.
 
 Writes roi3-tissue.npy, cortex.npy, growth-plate-distal-face.npy (2D W index per V,U), roi3.json (the
 parameters used and the cortex estimate), a QC image. It writes regions only: TV, BV and BV/TV of ROI-3 (deck #16-18) and Tb.N/Th/Sp,
@@ -72,6 +76,7 @@ def main():
     ap.add_argument('--mask', required=True, help='tibia-mask.npy from tibia_frame.py')
     ap.add_argument('--hu-json', required=True, help='hu.json of the scan: the lab threshold in HU comes from its calibration')
     ap.add_argument('--annotations', required=True)
+    ap.add_argument('--proximal-face', required=True, help='growth-plate-proximal-face.npy from iioc.py: the distal face must lie below it')
     ap.add_argument('--out', required=True)
     ap.add_argument('--threshold', type=float, help='bone threshold in HU (default: the lab threshold, 2.16/cm, from --hu-json)')
     ap.add_argument('--start-um', type=float, default=50.0, help='ROI-3 starts this far below the growth plate')
@@ -92,6 +97,13 @@ def main():
         )
     a.threshold = sidecar.bone_threshold_hu(a.hu_json, a.threshold)
     gd = traced_surface(ann['growth_plate_distal_curves'], 'growth_plate_distal_curves', h.shape)[0].astype(np.float32)
+    prox = np.load(a.proximal_face)
+    if prox.shape != gd.shape:
+        sidecar.fail(f'--proximal-face is {prox.shape} but the distal face is {gd.shape}: pass the face of the same tibia frame')
+    above = int((gd <= prox).sum())
+    if above:
+        sidecar.fail(f'the traced distal face lies at or above the proximal face on {above} of {gd.size} (V, U) positions '
+                     f'(worst {float((prox - gd).max()) * vox * 1000:.0f} um): retrace it lower on those sections')
     w = np.arange(h.shape[0])[:, None, None]
     rel = (w - gd[None]) * vox * 1000  # um below the distal face
     w0 = max(int(np.floor(gd.min())), 0)
@@ -113,7 +125,7 @@ def main():
     meta = {'distal_face': 'traced distal curves', 'cortex_estimate_mm': est, 'cortex_mm_used': cortex_mm, 'threshold': a.threshold}
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    inputs = [a.hu_aligned, a.mask, a.annotations]
+    inputs = [a.hu_aligned, a.mask, a.annotations, a.proximal_face]
     params = dict(
         meta,
         start_um=a.start_um,
