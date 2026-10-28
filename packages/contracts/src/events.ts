@@ -190,6 +190,11 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
       z.object({
         role: z.literal("assistant"),
         text: z.string(),
+        /**
+         * The reply's reasoning (thinking), its blocks joined with a blank line; absent when
+         * the model showed none. The same string the reply's `reasoning.delta` frames add up to.
+         */
+        reasoning: z.string().optional(),
         /** The reply's model usage; absent on a reply that never reached the model. */
         usage: modelUsageSchema.optional(),
       }),

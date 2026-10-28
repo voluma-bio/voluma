@@ -40,14 +40,15 @@ const nonNegInt = z.number().int().nonnegative();
 /**
  * `offset` is the index in `text`'s accumulated string (UTF-16 code units, as
  * JS counts) where this delta starts; the first delta of a reply or a call is
- * 0. The hub and the browser append a delta only when its `offset` equals the
+ * 0. The browser appends a delta only when its `offset` equals the
  * length they hold, so a lost, repeated or reordered frame is dropped instead
  * of corrupting the partial.
  *
  * `messageId` is the `id` of the durable `message` event that will complete
  * the reply, picked before streaming starts. A thread streams one reply at a
  * time. A frame's text is appended to what the client holds for its key; the durable
- * `message` event with that `messageId` replaces the partial.
+ * `message` event with that `messageId` replaces the partial (its `text` and `reasoning` are
+ * the final strings).
  */
 const frame = <T extends string, P extends z.ZodRawShape>(type: T, payload: P) =>
   z.object({ type: z.literal(type), runId: runIdSchema, threadId: nonEmpty, ...payload });
@@ -56,8 +57,10 @@ export const liveFrameSchema = z.discriminatedUnion("type", [
   /** More of the reply's text. */
   frame("text.delta", { messageId: nonEmpty, offset: nonNegInt, text: z.string() }),
   /**
-   * More of the reply's reasoning (the model's thinking), as one string per reply: the
-   * runner joins a reply's thinking blocks, and `offset` counts across them.
+   * More of the reply's reasoning (the model's thinking), as one string per reply: its
+   * thinking blocks joined with a blank line (`\n\n`, sent in the first delta of the next
+   * block), and `offset` counts across them. The durable `message`'s `reasoning` is the same
+   * string.
    */
   frame("reasoning.delta", { messageId: nonEmpty, offset: nonNegInt, text: z.string() }),
   /** More of a tool call's JSON arguments, as the model writes them. */
