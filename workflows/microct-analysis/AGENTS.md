@@ -27,5 +27,8 @@ its scripts). Design: `design/microct-skillset.md` in the docs repo.
   script each, so a recipe change touches one file.
 - Verify a script on a real scan. The one kept test is `skills/bone-morphometry/resources/test_measure.py` (unit conversions);
   `tests/test_environment.py` guards the pinned environment.
+- **Anatomy keys the generic checks read** (a workflow's `references/anatomy.json`, per label): `volume_mm3`, `components`, `must_touch`
+  (ids of labels it must come within `touch_mm` of, default 0.05 mm).
+  `label_stats.py` reads them; a new animal or workflow fills them in rather than changing the script.
 - Open facts, not to be settled in a skill: the identity of the small structures (OA6-1RK labels 5 to 12) is not anatomically checked;
   the workflow's anatomy reference says what is known. The vision rules in `visual-check` are n=1.
