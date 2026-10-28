@@ -23,6 +23,7 @@ import { inputPrefix, referencePrefix, workflowSnapshotPrefix } from "@voluma/co
 import type { Claim, ReportRequest } from "@voluma/contracts/runner";
 import { runClient } from "@voluma/harness/adapters/http/run-client";
 import { runLayout } from "@voluma/harness/layout";
+import { type LiveBatcher, liveBatcher } from "@voluma/harness/live";
 import { llmMainThread, mainSystem, runBrief } from "@voluma/harness/main-thread";
 import { usageOf } from "@voluma/harness/model-usage";
 import { type Recorder, recorder } from "@voluma/harness/recorder";
@@ -132,6 +133,7 @@ export async function runClaim(
   );
   let lease: ReturnType<typeof holdLease> | undefined;
   let events: Recorder | undefined;
+  let live: LiveBatcher | undefined;
   let session: SandboxSession | undefined;
   let error: string | undefined;
   try {
@@ -173,6 +175,7 @@ export async function runClaim(
       },
     });
     const stored = await client.storedEvents();
+    live = liveBatcher((frames) => client.live(frames));
     events = recorder(
       {
         async append(event) {
@@ -184,6 +187,7 @@ export async function runClaim(
       () => stop("lease-lost"),
       undefined,
       stored,
+      live,
     );
     session = sandboxSession(
       () =>
@@ -226,8 +230,13 @@ export async function runClaim(
     const main = llmMainThread(
       mainModel,
       mainSystem(runBrief(run.selectedOutputs, computed.tasks)),
-      async (context, signal) => {
-        const reply = await callModel(mainModel, context, { signal }).result();
+      async (context, signal, onEvent) => {
+        const stream = callModel(mainModel, context, { signal });
+        // The stream's events and its result are independent: draining one leaves the other.
+        const drained = (async () => {
+          if (onEvent) for await (const event of stream) onEvent(event);
+        })();
+        const [reply] = await Promise.all([stream.result(), drained]);
         meter.addModelCall("main", usageOf(reply));
         return reply;
       },
@@ -293,6 +302,10 @@ export async function runClaim(
         .report(report)
         .catch((e) => log(`report failed: ${e instanceof Error ? e.message : e}`));
       log(`reported ${report.kind}${report.kind === "ended" ? ` ${report.outcome}` : ""}`);
+      if (live) {
+        const { frames, requests, dropped } = live.stats();
+        log(`live frames this claim: ${frames} in ${requests} requests, ${dropped} dropped`);
+      }
       log(`model cost this claim: $${meter.totalModelCostUsd().toFixed(4)}`);
       for (const line of meter.cacheSummary()) log(`model usage this claim, ${line}`);
     } else {

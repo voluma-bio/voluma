@@ -94,6 +94,10 @@ export function pgEventLog(db: PostgresJsDatabase, notifier: Notifier) {
         return readAfter(runId, after, limit, tx);
       }),
 
+    /** Throws `LeaseLost` unless the token holds the running run's lease. */
+    checkLease: (runId: string, leaseToken: string) =>
+      db.transaction((tx) => assertLease(tx, runId, leaseToken)),
+
     /** Throws `LeaseLost`, or `EventIdTaken` for an id stored under another run. */
     async append(event: EventInput, leaseToken: string) {
       await db.transaction(async (tx) => {
