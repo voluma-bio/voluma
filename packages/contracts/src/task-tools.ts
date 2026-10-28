@@ -45,7 +45,7 @@
  *   runtime sets the status (`check-result`) to `checkResult(task)` (`fold.ts`)
  *   with a reason, but only if the task is still under review: `done` only for
  *   a `passed` verdict with no open item (a worker's doubt, a `toCheck`
- *   checkpoint, a fix), otherwise `to-check`.
+ *   checkpoint, a fix) and no required output missing, otherwise `to-check`.
  *
  * Staleness. A correction is one `checklist stale` call by the supervisor on
  * the corrected task, which has an attempt. The runtime appends

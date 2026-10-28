@@ -153,8 +153,8 @@ export const structureSchema = z.object({
   /**
    * Whether the workflow declared this structure; null when the producer
    * doesn't say. A declared structure the run didn't report is listed here with
-   * status `missing`. The Review lane reads this, not `ReviewTask.undeclared`
-   * (which lists structures too, for the fold's own use).
+   * status `missing`. Structures are not listed in `ReviewTask.undeclared` or
+   * `ReviewTask.missing`; this field is the one place.
    */
   declared: z.boolean().nullable(),
   /** Null when the producer doesn't say. */
@@ -299,7 +299,7 @@ export const taskSchema = z.object({
       required: z.boolean(),
     }),
   ),
-  /** Ids (`taskId/outputId`, as in the blocks) of the outputs the workflow didn't declare, of any kind. */
+  /** Ids (`taskId/outputId`, as in the blocks) of the outputs the workflow didn't declare. Structures say it on their own block (`Structure.declared`). */
   undeclared: z.array(z.string()),
   checks: z.array(
     z.object({

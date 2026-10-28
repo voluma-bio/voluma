@@ -221,7 +221,8 @@ export function fold(events: readonly RunEvent[]): Folded {
         const id = `${a.taskId}/${outputId}`;
         const decl = plan.get(a.taskId)?.get(outputId);
         const declared = decl !== undefined && fills(decl, o);
-        if (!declared) undeclared.push(id);
+        // A structure records this as `declared` on its block; listing it here too would be a second copy.
+        if (!declared && o.kind !== "structure") undeclared.push(id);
         const key = (sha: string) => evidenceKey(v.runId, sha);
         const evidenceIds = p.evidence.map((r) => r.sha256);
         const source = { threadId: v.threadId, eventId: v.id };
