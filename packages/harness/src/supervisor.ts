@@ -35,6 +35,7 @@ import { type By, WAKE_ERROR_MAX } from "@voluma/contracts/events";
 import { checkResult, type Folded, type FoldedTask } from "@voluma/contracts/fold";
 import type { ThreadMessageResult } from "@voluma/contracts/thread-message";
 import { readyTasks } from "@voluma/workflow";
+import { replyFrames } from "./live";
 import { decisionSchema, type MainThread, pointOf, type WakePoint } from "./main-thread";
 import type { PayloadOf, Recorder } from "./recorder";
 import type { PlanTask, TaskRuntime } from "./task-runtime";
@@ -438,10 +439,14 @@ export function supervisor(options: SupervisorOptions) {
         once: true,
       }),
     );
+    const wakeId = `${key}${WAKE_SUFFIX}`;
     const past = [...derive().wakes.values()];
     let answer: Awaited<ReturnType<MainThread["ask"]>> | { error: string };
     try {
-      answer = await Promise.race([main.ask(point, past, limit), expired]);
+      answer = await Promise.race([
+        main.ask(point, past, limit, replyFrames(root, wakeId, recorder.live)),
+        expired,
+      ]);
     } catch (error) {
       answer = { error: String(error) };
     }
@@ -457,11 +462,12 @@ export function supervisor(options: SupervisorOptions) {
           ...("error" in answer
             ? { error: answer.error.slice(0, WAKE_ERROR_MAX) }
             : {
+                ...(answer.usage && { usage: answer.usage }),
                 ...(answer.note !== undefined && { note: answer.note }),
                 ...(answer.decision && { decision: answer.decision }),
               }),
         },
-        `${key}${WAKE_SUFFIX}`,
+        wakeId,
       );
     });
   }

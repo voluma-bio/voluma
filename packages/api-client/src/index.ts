@@ -15,6 +15,7 @@ import {
   type StartRunRequest,
   type VisitorKeys,
 } from "@voluma/contracts/run";
+import { LIVE_EVENT, type LiveFrame, liveFrameSchema } from "@voluma/contracts/stream";
 
 /** A non-OK API response. Branch on `status` (403, 415, 5xx) rather than parsing the message. */
 export class ApiError extends Error {
@@ -120,7 +121,9 @@ export async function listInputs(): Promise<Input[]> {
  * Opens a run's event stream (`@voluma/contracts/stream`): `onEvent` gets each durable event
  * in order, once. `EventSource` reconnects by itself and resumes from the last event's `id`.
  * `after` is the highest `seq` the caller already holds, for the first connect only. `onError`
- * is told of a message that fails to parse; a dropped connection is not an error.
+ * is told of a message that fails to parse; a dropped connection is not an error. `onLive` gets
+ * each live frame (token-level text, reasoning, tool arguments, tool output): unstored, no
+ * cursor, not replayed on reconnect; see the contract for how to fold them.
  * `onClosed` fires when the stream is over for good (`EventSource` hides the status): refetch the
  * run to tell an ended run from a 404, or call `getMe` to catch a sign-out. Returns the
  * function that closes the stream.
@@ -129,6 +132,7 @@ export function subscribe(
   runId: string,
   handlers: {
     onEvent: (event: RunEvent) => void;
+    onLive?: (frame: LiveFrame) => void;
     onError?: (error: unknown) => void;
     /** The stream will not reconnect: the run has ended, or the server refused it (404, 401). */
     onClosed?: () => void;
@@ -145,6 +149,16 @@ export function subscribe(
       handlers.onError?.(error);
     }
   };
+  if (handlers.onLive) {
+    const onLive = handlers.onLive;
+    source.addEventListener(LIVE_EVENT, (e) => {
+      try {
+        onLive(liveFrameSchema.parse(JSON.parse((e as MessageEvent<string>).data)));
+      } catch (error) {
+        handlers.onError?.(error);
+      }
+    });
+  }
   source.onerror = () => {
     if (source.readyState === EventSource.CLOSED) handlers.onClosed?.();
   };

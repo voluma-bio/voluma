@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 from scipy import ndimage as ndi
-from skimage.segmentation import watershed
+from skimage.segmentation._watershed_cy import watershed_raveled
 
 HERE = Path(__file__).resolve().parent
 # `python -I` puts no script directory on sys.path, so every directory a script imports from is added here.
@@ -33,6 +33,8 @@ except ModuleNotFoundError as e:
 
 
 MARGIN = 10
+SLAB = 64  # z-slab depth of the chunked gradient and distance
+GRADIENT_RADIUS = 4  # a Gaussian of sigma 1 voxel reaches 4 voxels: the halo a slab needs for the whole-volume values
 
 
 def crop_box(mask, margin=MARGIN):
@@ -41,20 +43,61 @@ def crop_box(mask, margin=MARGIN):
 
 
 def cores(lab, core_vox, bone):
-    seeds = np.zeros(lab.shape, np.int32)
+    """Seeds (uint8, the label's id) at each label's eroded core, eroded inside the label's own box: no full-size temporary."""
+    seeds = np.zeros(lab.shape, np.uint8)
     n_fallback = []
-    for lv in (int(i) for i in np.unique(lab) if i > 0):
-        m = lab == lv
+    for lv, sl in enumerate(ndi.find_objects(lab), 1):
+        if sl is None:
+            continue
+        m = lab[sl] == lv
         core = ndi.binary_erosion(m, iterations=core_vox)
         if not core.any():
-            core = m & bone
+            core = m & bone[sl]
             n_fallback.append(lv)
-        seeds[core] = lv
+        seeds[sl][core] = lv
     return seeds, n_fallback
 
 
-def grow(elevation, seeds, mask):
-    return watershed(elevation, markers=seeds, mask=mask, connectivity=1).astype(np.uint8)
+def gradient_into(view, h):
+    """Gaussian gradient magnitude (sigma 1 voxel) of the HU array `h`, written into `view` a z-slab at a time."""
+    for z0 in range(0, h.shape[0], SLAB):
+        z1 = min(z0 + SLAB, h.shape[0])
+        lo, hi = max(0, z0 - GRADIENT_RADIUS), min(h.shape[0], z1 + GRADIENT_RADIUS)
+        g = ndi.gaussian_gradient_magnitude(np.asarray(h[lo:hi], np.float32), sigma=1.0)
+        view[z0:z1] = g[z0 - lo : z1 - lo]
+
+
+def edt_into(view, inside):
+    """Minus the distance (voxels) to the nearest voxel outside `inside`, written into `view` a z-slab at a time. scipy's
+    `distance_transform_edt` allocates about 60 bytes per voxel; this keeps the 12 of its nearest-voxel indices."""
+    nearest = ndi.distance_transform_edt(inside, return_distances=False, return_indices=True)
+    yy, xx = np.ogrid[: inside.shape[1], : inside.shape[2]]
+    for z0 in range(0, inside.shape[0], SLAB):
+        z1 = min(z0 + SLAB, inside.shape[0])
+        zz = np.arange(z0, z1)[:, None, None]
+        d2 = (nearest[0, z0:z1] - zz).astype(np.int64) ** 2 + (nearest[1, z0:z1] - yy) ** 2 + (nearest[2, z0:z1] - xx) ** 2
+        np.negative(np.sqrt(d2), out=view[z0:z1])
+
+
+def grow(shape, build, fill_elevation):
+    """Seeded watershed, 6-connected: the basins of the seeds flood the mask over the elevation. `build(seeds, mask)` fills an
+    int32 seed view and an int8 mask view, `fill_elevation(view)` a float64 view.
+    skimage's `watershed` casts every input to float64/int32 and pads again: about 26 bytes per voxel, 7 GB on a whole scan
+    against a 4 GiB sandbox. This builds the padded arrays once (13 bytes per voxel), builders' temporaries freed before the
+    float64 image exists, and calls skimage's raveled core, which is private: re-check it when skimage is bumped in requirements.txt."""
+    padded = tuple(n + 2 for n in shape)
+    inner = (slice(1, -1),) * 3
+    out = np.zeros(padded, np.int32)
+    flood = np.zeros(padded, np.int8)
+    build(out[inner], flood[inner])
+    out[flood == 0] = 0  # a seed outside the mask would never be flooded from
+    image = np.zeros(padded, np.float64)
+    fill_elevation(image[inner])
+    strides = np.array(image.strides, dtype=np.intp) // image.itemsize
+    neighbours = np.array([strides[0], -strides[0], strides[1], -strides[1], strides[2], -strides[2]], dtype=np.intp)
+    watershed_raveled(image.ravel(), np.flatnonzero(out), neighbours, flood.ravel(), strides, 0.0, out.ravel(), False)
+    del image, flood
+    return out[inner].astype(np.uint8)
 
 
 if __name__ == '__main__':
@@ -75,16 +118,19 @@ if __name__ == '__main__':
     if (a.within is None) != (a.seeds is None):
         sidecar.fail('--within and --seeds go together')
     box = crop_box(np.asarray(labels) == a.within if a.within else np.asarray(labels) > 0)
-    h = np.asarray(hu[box])
-    lab = np.asarray(labels[box])
-    bone = h >= a.threshold_hu
+    h = hu[box]
     out = np.zeros(hu.shape, np.uint8)
     info = {}
     if a.within is None:
-        seeds, info['core_fallback_labels'] = cores(lab, max(1, round(a.core_mm / sp[0])), bone)
-        out[box] = grow(ndi.gaussian_gradient_magnitude(h.astype(np.float32), sigma=1.0), seeds, bone)
+        def build(seeds, mask):
+            bone = h >= a.threshold_hu
+            seeds[...], info['core_fallback_labels'] = cores(np.asarray(labels[box]), max(1, round(a.core_mm / sp[0])), bone)
+            mask[...] = bone
+
+        out[box] = grow(h.shape, build, lambda view: gradient_into(view, h))
     else:
         spec = json.loads(Path(a.seeds).read_text())
+        lab = np.asarray(labels[box])
         seeds = np.zeros(lab.shape, np.int32)
         for k, pts in spec.items():
             for p in pts:
@@ -94,8 +140,13 @@ if __name__ == '__main__':
                 seeds[tuple(q)] = int(k)
         seeds = np.where(ndi.binary_dilation(seeds > 0, iterations=3),
                          ndi.maximum_filter(seeds, size=7), 0) * (lab == a.within)
-        inside = (lab == a.within) & bone
-        out[box] = np.where(inside, grow(-ndi.distance_transform_edt(inside), seeds, inside), 0)
+        inside = (lab == a.within) & (h >= a.threshold_hu)
+
+        def build(sd, mask):
+            sd[...] = seeds
+            mask[...] = inside
+
+        out[box] = grow(h.shape, build, lambda view: edt_into(view, inside))
         merged = np.asarray(labels).copy()
         merged[out > 0] = out[out > 0]
         out = merged

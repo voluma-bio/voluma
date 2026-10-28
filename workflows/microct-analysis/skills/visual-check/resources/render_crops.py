@@ -1,7 +1,7 @@
 """Crop sheet for one small component: three orthogonal cuts through its centre, with the labels outlined. For "what is this small unlabelled thing?" and "is it on the right bone?".
 
   python render_crops.py --hu hu.npy --labels labels.npy --out crop.jpg (--component-at z,y,x | --label 5)
-        [--pad-mm 1.5] [--window 1000,8000] [--header hu.json]
+        [--pad-mm 1.5] [--window 1000,8000] [--header hu.json] [--names 1=femur,2=tibia | anatomy.json]
 
 `--component-at` picks the 3D piece of bone (labelled or not) that contains the voxel; `--label` picks the largest piece
 of that label. The crop is a cube of the piece's bounding box plus `--pad-mm`, with the piece itself drawn in white.
@@ -49,6 +49,7 @@ if __name__ == '__main__':
     ap.add_argument('--header', help='hu.json, for spacing (default: from the labels sidecar)')
     ap.add_argument('--pad-mm', type=float, default=1.5)
     ap.add_argument('--window')
+    ap.add_argument('--names', help='1=femur,2=tibia, or the anatomy.json path for every label name')
     a = ap.parse_args()
     if a.component_at is not None and a.bone_hu is None:
         sl.fail('--component-at needs --bone-hu: the HU threshold that defines a piece of bone')
@@ -87,6 +88,7 @@ if __name__ == '__main__':
         vl.show_slice(ax, f(img), window, grid=False, title=f'{nm} = {c[i]} (crop origin {lo})')
         vl.draw_labels(ax, f(lab))
         ax.contour(f(mm).astype(float), levels=[0.5], colors=['white'], linewidths=1.0, linestyles='dashed')
+    vl.draw_legend(fig, [int(k) for k in np.unique(lab[lab > 0])], vl.parse_names(a.names), loc='upper left')
     sl.save_image(fig, a.out)
     sl.emit(image=a.out, centre_zyx=centre, bbox_zyx=[lo, hi], voxels=int(m.sum()),
             volume_mm3=round(float(m.sum()) * float(np.prod(sp)), 4),

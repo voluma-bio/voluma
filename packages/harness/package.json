@@ -11,11 +11,13 @@
     "./ports/lease-lost": "./src/ports/lease-lost.ts",
     "./layout": "./src/layout.ts",
     "./recorder": "./src/recorder.ts",
+    "./live": "./src/live.ts",
     "./sandbox-session": "./src/sandbox-session.ts",
     "./adapters/http/hand-off": "./src/adapters/http/hand-off.ts",
     "./ports/evidence": "./src/ports/evidence.ts",
     "./adapters/local/evidence": "./src/adapters/local/evidence.ts",
     "./main-thread": "./src/main-thread.ts",
+    "./model-usage": "./src/model-usage.ts",
     "./adapters/http/run-client": "./src/adapters/http/run-client.ts",
     "./supervise-run": "./src/supervise-run.ts",
     "./tools": "./src/tools/registry.ts"

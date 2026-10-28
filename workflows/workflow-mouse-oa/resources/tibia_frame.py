@@ -31,6 +31,7 @@ if CORE is None:
              'directory above it (<workflows>/workflow-mouse-oa/resources/ with <workflows>/microct-analysis/ beside it)')
 sys.path[:0] = [str(HERE), str(CORE)]
 import sidecar
+from envelope import close_and_fill
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -50,7 +51,7 @@ def zrange(frac, lo, hi, joint_end):
 def fit_frame(mask, shaft_z, epi_z, joint_end):
     centers = []
     for z in range(shaft_z[0], shaft_z[1], 10):
-        yy, xx = np.where(ndi.binary_fill_holes(mask[z]))
+        yy, xx = np.where(close_and_fill(mask[z]))
         if len(yy) == 0:
             sidecar.fail(f'label has no voxels at slice {z}: widen --shaft-frac or check --label and --joint-end')
         centers.append([xx.mean(), yy.mean(), z])

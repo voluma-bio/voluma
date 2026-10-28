@@ -161,6 +161,9 @@ the joint space or floating, and the script warns.
   be separated from it, so the lab measures meniscus and spurs together as one volume per side. On OA6-1RK, **#3 medial is label 5
   and #2 lateral is label 6** (the lab's working reading; not anatomically checked). Both volumes come from `measure.py`
   (step 10). Still open: whether label 9's pieces and the tibial margin fragments (labels 10, 11) count toward a side.
+- #1 to #3 count **label voxels**, and a label holds bone at the segmentation threshold (2500 HU on OA6-1RK), not at the measurement
+  threshold (about 2460 HU) that gates BV in `microct-core`. The deck volumes are therefore a little smaller than a count at the
+  measurement threshold (about 0.6% of the label on OA6-1RK). This does not change the rule that BV of a region is never gated by a label: these three are label volumes, not BV.
 - ROI-1 is the IIOC from growth plate to articular surface. ROI-2 is what remains after removing the subchondral
   bone plate and the cortical line next to the growth plate. ROI-3 starts 50 um below the growth plate, runs 200 um,
   and stays 20 um beyond the cortex from the outer edge (the estimated cortex depth plus 20 um, measured in the ROI-3 slices).
