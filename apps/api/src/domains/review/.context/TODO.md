@@ -1,0 +1,5 @@
+# Review domain TODO
+
+- **The scan is not a volume in the review data yet.** `fold` leaves an annotation on the scan with `volumeId` null for the API to fill, and the contract needs the scan as a `Volume` (`shapeZyx`, `affine` from its DICOM headers, `data` of format `dicom`). The API reads no DICOM headers, so `review-run.ts` leaves those annotations out, with every measurement, score and To check `focus` reference to them. Fill it from the input: the intake task's `hu.json` (spacing and shape on the scan grid), or headers read once at upload and stored with the input.
+- **Task titles are the task ids** until the plan carries `title` ([#86](https://github.com/voluma-bio/voluma/pull/86)); then `titleOf` in `review-run.ts` reads it.
+- **Evidence and run files are R2 keys only.** The reference scan adapter (`r2-reference-archive.ts`) and authorized input download routes (`inputs.ts`) exist, but do not serve evidence or run files. Add scoped delivery for those assets by reusing the same-origin download descriptor (`@voluma/contracts/download`), ETag-pinned reads and streaming pattern; authorize each asset through its run before accessing storage.

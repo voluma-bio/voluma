@@ -21,7 +21,7 @@ packages/
                 adapter; runtime-neutral (no Node types)
   workflow      a workflow skill directory: snapshot it into the run's R2 prefix and read it (`load.ts`), build the plan from the selected outputs (`plan.ts`), task graph, stale tasks
   api-client    typed commands and event stream; the only way web features reach the API
-  viewer        local DICOM ZIP intake, Cornerstone acquired slices, persistent imaging slots
+  viewer        in-browser DICOM ZIP parsing, Cornerstone acquired slices, persistent imaging slots
   ui            shared React components, styled from tokens
   design-tokens tokens.css (raw values, two themes) and theme.css (Tailwind mapping)
 workflows/      Workflow skill directories (`SKILL.md`, `outputs.json`, `tasks.json`, `references/`, `resources/`) and their Python skill resources
@@ -337,3 +337,24 @@ Nothing they run shares mutable state:
 
 The pre-commit hook lives in the shared `.git`, so every worktree runs the
 same hook.
+
+## Amp orb preview
+
+`.agents/setup` installs and enables native Postgres on loopback port 5432,
+with a local-only `voluma` role that can create each worktree's database.
+`.amp/services.yaml` declares the guest-only Review preview through `pnpm dev`;
+Amp supervises it across restarts and pause/resume. `amp orb services ensure`
+starts it explicitly; opening its Portal link also starts it when needed.
+
+In a managed portal, `tools/dev.mjs` uses Amp's allocated `PORT` for Vite and
+`PUBLIC_URL` for the API's strict Origin check and secure session cookie. The
+API keeps its own free port. `/api` and `/health` proxy through Vite to the API;
+the service health check waits for the API, not just the frontend. Outside a
+portal, both ports remain dynamically allocated as before.
+
+The preview mints guest sessions locally; its WorkOS placeholders cannot sign
+in members. The cookie key is generated at service start, never saved in a
+snapshot. R2 values come from Amp project secrets and environment variables,
+never the service manifest. Missing R2 configuration blocks scan opening with a
+setup error; there is no local-file fallback. No runner, model calls or analysis
+jobs start with the preview.

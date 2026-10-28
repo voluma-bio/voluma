@@ -1,10 +1,12 @@
-# Local DICOM viewer specification
+# DICOM viewer specification
 
-The viewer opens a local ZIP of DICOM Part 10 images for acquired-slice viewing
+The viewer parses a ZIP of DICOM Part 10 images for acquired-slice viewing
 and an on-demand raw 3D volume preview. It supports slice navigation, window/level,
 camera rotation, zoom/reset and volume intensity/opacity controls. It does not
 upload data, reconstruct orthogonal planes, produce meshes, segment anatomy or
 calculate scientific measurements. It is not a validated diagnostic viewer.
+Review supplies only ZIPs downloaded from authorized R2 inputs; there is no
+local-file picker. The parser still takes a `File`, produced by the downloader.
 
 ## ZIP → validated series → decoded slice
 
@@ -54,7 +56,11 @@ skipped files. A `.dcm`/`.dicom` entry without a valid Part 10 header rejects th
 archive. Extensionless Part 10 files work. A malformed or unsupported DICOM
 rejects the whole archive rather than silently dropping slices from an otherwise
 plausible scan. Pixel boundary validation rejects truncated native data and
-invalid fragment tables before decoding. Codec/render errors replace the image
+invalid fragment tables before decoding. For native images, parsing stops at
+Pixel Data and checks its declared length against dimensions and available bytes.
+Only metadata and the declared pixels are passed to the decoder: trailing scanner
+block padding (present in OA6-1RK) is not image data. Compressed images retain
+full fragment-table parsing. Codec/render errors replace the image
 with an error and retry action; they never leave a prior slice presented as the
 requested one.
 
@@ -62,7 +68,7 @@ requested one.
 
 | Resource | Current limit |
 |---|---:|
-| Compressed ZIP | none (a disk-backed `File`) |
+| Compressed ZIP | 2 GiB at Review's downloader; parser accepts a `File` |
 | Entries, including directories | 4,096 |
 | Expanded entry | 64 MiB |
 | Total expanded content | 2 GiB |
@@ -140,42 +146,13 @@ all decoder scratch memory, browser overhead or GPU allocations. GPU format and
 driver copies vary. These limits do not guarantee that any micro-CT scan fits;
 the existing ZIP intake limits still apply before downsampling.
 
-### Measuring on a researcher's workstation
-
-Open `/runs/local` on the preview or local web app in Chrome with hardware
-acceleration enabled. Files stay in that browser, even when the app is served
-from an orb. Use a de-identified real scan within the intake caps:
-
-1. Open the ZIP and select the intended series. Keep Full resolution and build 3D.
-2. Drag to rotate, use arrow keys, zoom/reset and adjust intensity/opacity.
-   Maximize/restore both viewports; check slice navigation still works.
-3. Expand **Performance**, choose **Measure rotation**, then **Save timings**.
-   Repeat maximized. Release 3D and repeat with Standard and Compact, then repeat from a
-   fresh page three times to separate cold starts from warm runs.
-4. Record scan dimensions and compressed/expanded sizes, browser/OS, GPU,
-   display scaling and any visible stutter. Do not send patient identifiers.
-   Use Chrome Task Manager and the OS GPU monitor to record baseline, peak and
-   post-close memory; repeat replacement/close five times. Allocators may retain
-   reserved memory even after application references have been released.
-
-The JSON contains dimensions, spacing, renderer, canvas pixels, DPR, build time,
-first render time, 24 sequential 15° rotation render latencies (p50/p95 and mean
-throughput) at full and at drag sampling, cache peak and a sampled JS heap peak where Chrome exposes it.
-It contains no image pixels, filenames, patient identifiers or DICOM UIDs.
-First-visible time starts at Build, excludes ZIP intake, and ends at Cornerstone's
-render-complete event; it is not a GPU fence or a guarantee of compositor display.
-Heap sampling runs every 100 ms during builds and rotation measurements only,
-and can miss peaks. No portable browser API here
-measures GPU/process memory. Keep the canvas visible while measuring; save the
-normal and maximized results separately because their pixel workloads differ.
-
 ## Library choices and integration constraints
 
 Cornerstone core and DICOM image loader are pinned together at **4.22.13**.
 It supplies DICOM decoding, modality/VOI transforms, geometry, stack and VOLUME_3D
 viewports. `createLocalVolume` receives the bounded resampled buffer rather than
 streaming the unrestricted source grid. Three.js remains available for future
-meshes; volume timings say nothing about 18-structure mesh-rendering performance.
+meshes.
 
 The attempted 5.13.2 integration had a browser EventEmitter dependency failure
 and then a local-file metadata path that returned no compressed frame data. The

@@ -8,10 +8,13 @@ const MiB = 1024 * 1024;
 const maxExpanded = 2048 * MiB;
 const maxEntry = 64 * MiB;
 const maxEntries = 4096;
-const syntaxes = new Set([
+const nativeSyntaxes = new Set([
   "1.2.840.10008.1.2", // Implicit VR little endian
   "1.2.840.10008.1.2.1", // Explicit VR little endian
   "1.2.840.10008.1.2.2", // Explicit VR big endian
+]);
+const syntaxes = new Set([
+  ...nativeSyntaxes,
   "1.2.840.10008.1.2.4.50", // JPEG baseline
   "1.2.840.10008.1.2.4.51", // JPEG extended
   "1.2.840.10008.1.2.4.57", // JPEG lossless
@@ -104,9 +107,13 @@ async function readArchive(file: File): Promise<DicomArchive> {
         } else {
           let data: dicomParser.DataSet;
           try {
-            // Parse pixel element boundaries too, so truncated native data and
-            // corrupt fragment tables fail before entering a decoder.
-            data = dicomParser.parseDicom(bytes);
+            // Native pixel boundaries are checked below. Parsing past them can
+            // mistake scanner block padding for tags; compressed images still
+            // need a full parse to validate their fragment tables.
+            data = dicomParser.parseDicom(bytes, { untilTag: "x7fe00010" });
+            if (!nativeSyntaxes.has(data.string("x00020010") ?? "")) {
+              data = dicomParser.parseDicom(bytes);
+            }
           } catch {
             fail(
               "A DICOM header could not be read. Corrupt and deflated DICOM files are not supported.",
@@ -203,7 +210,11 @@ async function readArchive(file: File): Promise<DicomArchive> {
               );
             }
             stack.slices.push({
-              file: blob,
+              // The decoder must not parse scanner padding after native pixels either.
+              file:
+                pixels && !pixels.encapsulatedPixelData
+                  ? blob.slice(0, pixels.dataOffset + pixels.length)
+                  : blob,
               position,
               frameOfReferenceUID: data.string("x00200052"),
               stored: {
