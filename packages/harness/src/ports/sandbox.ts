@@ -31,7 +31,7 @@ export interface SandboxSpec {
    * gets its own name, so a sandbox a dead process left behind never blocks a resume.
    */
   name: string;
-  /** A published image name; sandbox start never builds an image. */
+  /** A pinned registry image reference, e.g. `ghcr.io/org/name@sha256:...`. */
   image: string;
   cpu: number;
   memoryMiB: number;

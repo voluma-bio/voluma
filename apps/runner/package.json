@@ -6,8 +6,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "start": "tsx src/main.ts",
-    "sandboxes:clean": "tsx src/sandboxes-clean.ts",
-    "publish-image": "tsx src/publish-image.ts"
+    "sandboxes:clean": "tsx src/sandboxes-clean.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1158.0",

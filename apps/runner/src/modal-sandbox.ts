@@ -1,7 +1,8 @@
 /**
  * The Modal adapter for the Sandbox port, and the only file that imports `modal`.
  * Rules it follows (research/modal-poc.md in the docs repo):
- * - Sandboxes start from a published image; nothing is built at start.
+ * - Sandboxes start from a public registry image pinned by digest, which Modal pulls and
+ *   caches per workspace; the runner builds nothing.
  * - R2 prefixes are mounted with `cloudBucketMounts`. Each mount gets its own temporary
  *   R2 credential limited to its prefix and access and to the sandbox's lifetime, so there
  *   is nothing to refresh and no credential in the sandbox's env.
@@ -84,7 +85,7 @@ export function createModalSandbox(config: ModalSandboxConfig): CreateSandbox {
     validate(spec);
     const [app, image] = await Promise.all([
       client.apps.fromName(config.appName, { createIfMissing: true }),
-      client.images.fromName(spec.image),
+      client.images.fromRegistry(spec.image),
     ]);
     const cloudBucketMounts: Record<
       string,

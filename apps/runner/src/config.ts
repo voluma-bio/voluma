@@ -81,6 +81,12 @@ export function modalToken(): { tokenId: string; tokenSecret: string } | undefin
   return tokenId && tokenSecret ? { tokenId, tokenSecret } : undefined;
 }
 
+/**
+ * The public sandbox image every run uses, pinned by digest (built from
+ * sandbox/Dockerfile by the "Sandbox image" workflow, which prints the new digest).
+ */
+const SANDBOX_IMAGE = "ghcr.io/voluma-bio/voluma-sandbox@sha256:TODO";
+
 export type Config = ReturnType<typeof runnerConfig>;
 
 export function runnerConfig() {
@@ -119,7 +125,7 @@ export function runnerConfig() {
       modal?.tokenSecret,
     ].filter((s): s is string => s !== undefined),
     sandbox: {
-      image: optional("VOLUMA_SANDBOX_IMAGE") ?? "voluma-microct",
+      image: SANDBOX_IMAGE,
       lifetimeSeconds: positiveInt("VOLUMA_SANDBOX_LIFETIME_SECONDS", 3600),
       // The floor keeps a sandbox from idling out before its inputs finish staging.
       idleSeconds: positiveInt("VOLUMA_SANDBOX_IDLE_SECONDS", 300, 30),
