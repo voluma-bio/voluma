@@ -32,7 +32,13 @@
  * derives it.
  */
 import { z } from "zod";
-import { outputKindSchema, runIdSchema, taskIdSchema, taskStatusSchema } from "./ids";
+import {
+  modelRefSchema,
+  outputKindSchema,
+  runIdSchema,
+  taskIdSchema,
+  taskStatusSchema,
+} from "./ids";
 import { sha256Schema as sha256, storedKeySchema, storedPrefixSchema } from "./r2";
 import { workflowPinSchema } from "./workflow";
 
@@ -313,6 +319,8 @@ export const taskSchema = z.object({
     check: z.string().min(1).nullable(),
     chat: z.string().min(1).nullable(),
   }),
+  /** The model each thread called, `provider/id`; null where the thread is null or its start recorded none. */
+  models: z.object({ worker: modelRefSchema.nullable(), check: modelRefSchema.nullable() }),
   measurements: z.array(measurementSchema),
   scores: z.array(scoreSchema),
   /**
