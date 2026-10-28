@@ -9,7 +9,6 @@
  */
 import { z } from "zod";
 import { segmentSchema } from "./ids";
-import { type WorkflowPin, workflowPinSchema } from "./workflow";
 
 /** A relative path under a prefix; every segment is validated. */
 export const relativePathSchema = z
@@ -23,15 +22,6 @@ export const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 
 const seg = (s: string) => segmentSchema.parse(s);
 const rel = (p: string) => relativePathSchema.parse(p);
-
-/** Not used by a run: it mounts its own snapshot (`workflowSnapshotPrefix`), not all workflows. */
-export const workflowsPrefix = () => "workflows/";
-
-export const workflowPrefix = (pin: WorkflowPin) => {
-  const { repo, commit, path } = workflowPinSchema.parse(pin);
-  // `root/` and `sub/<path>/` never nest, so a subpackage's files can't land in the root package's.
-  return `workflows/${repo}/${commit}/${path ? `sub/${path}` : "root"}/`;
-};
 
 export const inputPrefix = (inputId: string) => `inputs/${seg(inputId)}/`;
 export const runPrefix = (runId: string) => `runs/${seg(runId)}/`;
