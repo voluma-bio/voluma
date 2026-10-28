@@ -39,8 +39,7 @@ Visitor runs use `RUNNER_VISITOR_MODEL` (default `meta/muse-spark-1.3`) with the
 `sandbox/Dockerfile` is the one definition of the image. The "Sandbox image" workflow
 (`.github/workflows/sandbox-image.yml`) builds it for linux/amd64 on a change to the Dockerfile
 or by hand, pushes `ghcr.io/voluma-bio/voluma-sandbox:<commit>` and prints the digest. Put
-that digest in `SANDBOX_IMAGE` (`src/config.ts`). A rebuild gives a new digest even for an
-unchanged Dockerfile (image timestamps), so rebuild only when the contents change. The package
+that digest in `SANDBOX_IMAGE` (`src/config.ts`). Every run of the workflow gives a new digest, even for the same contents (image timestamps), and it also runs when the workflow file or `requirements.txt` changes, so bump `SANDBOX_IMAGE` only when the contents changed. The package
 must be **public**, or a visitor's Modal workspace cannot pull it: GitHub, the org's Packages,
 `voluma-sandbox`, Package settings, Danger Zone, Change visibility.
 
