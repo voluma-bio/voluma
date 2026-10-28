@@ -4,11 +4,11 @@
  * `?after=`. Reads are scoped by `readerOf` like any run read, so another org's run is 404.
  *
  * Each connection loops: read the log from its cursor in `seq` order, send, then wait for
- * `eventLog.onAppend` or `POLL_MS`, whichever is first. The log is the only source of what
+ * a `notifier` wake-up or `POLL_MS`, whichever is first. The log is the only source of what
  * is sent, so a wake-up never carries data and a missed one is caught by the poll; that
- * also makes ordering, no gaps and no repeats a property of the cursor. The run's end is
- * read *before* each read of the log: events cannot be appended after a run ends, so
- * "ended, then drained" means everything was sent, and the stream closes.
+ * also makes ordering, no gaps and no repeats a property of the cursor. Each read says
+ * whether the run had ended in the same snapshot as its events (`eventLog.stream`), so a
+ * short page from an ended run is the rest of the log and the stream closes.
  *
  * Keep-alive: a comment every `KEEPALIVE_MS`, and one at once on connect, since Railway's
  * proxy closes a response that has sent no byte and an idle one (its documented limits are
@@ -16,75 +16,73 @@
  * `Last-Event-ID`). `shutdown` aborts when the API drains, so streams don't hold the drain.
  */
 
+import { setTimeout as sleep } from "node:timers/promises";
 import { Hono } from "hono";
-import { HTTPException } from "hono/http-exception";
 import { streamSSE } from "hono/streaming";
 import { readerOf, requireUser, type UserEnv } from "../../domain";
 import type { RunDeps } from ".";
+import { afterParam, EVENTS_PAGE } from "./cursor";
 
-const PAGE = 500;
+/** A promise and the call that resolves it. */
+function latch() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
 const POLL_MS = 5_000;
 const KEEPALIVE_MS = 15_000;
 
-function cursorOf(header: string | undefined, query: string | undefined): number {
-  const raw = header ?? query ?? "0";
-  if (!/^\d{1,9}$/.test(raw)) throw new HTTPException(400, { message: "bad cursor" });
-  return Number(raw);
-}
-
-export function streamRoutes({ reads, eventLog, shutdown }: RunDeps) {
+export function streamRoutes({ eventLog, notifier, shutdown }: RunDeps) {
   const app = new Hono<UserEnv>();
   app.use("/runs/:id/stream", requireUser);
 
   app.get("/runs/:id/stream", async (c) => {
     const runId = c.req.param("id");
     const reader = readerOf(c.var.user);
-    let cursor = cursorOf(c.req.header("Last-Event-ID"), c.req.query("after"));
+    let cursor = afterParam(c.req.header("Last-Event-ID") ?? c.req.query("after"));
 
-    const ended = await reads.hasEnded(reader, runId);
-    if (ended === null) return c.json({ error: "not found" }, 404);
-    if (ended && (await eventLog.after(runId, cursor, 1)).length === 0) return c.body(null, 204);
+    const first = await eventLog.stream(reader, runId, cursor, 1);
+    if (!first) return c.json({ error: "not found" }, 404);
+    if (first.ended && first.events.length === 0) return c.body(null, 204);
 
     return streamSSE(c, async (stream) => {
-      let wake: (() => void) | null = null;
-      let pending = false;
-      const poke = () => {
-        pending = true;
-        wake?.();
+      // Renewed before each read, so a wake-up during the read ends the next wait at once.
+      let kick = latch();
+      const poke = () => kick.resolve();
+      const nap = async () => {
+        const timer = new AbortController();
+        const timeout = sleep(POLL_MS, undefined, { signal: timer.signal }).catch(() => {});
+        await Promise.race([kick.promise, timeout]);
+        timer.abort();
       };
-      const wait = (ms: number) =>
-        new Promise<void>((resolve) => {
-          if (pending) return resolve();
-          const done = () => {
-            clearTimeout(timer);
-            wake = null;
-            resolve();
-          };
-          const timer = setTimeout(done, ms);
-          wake = done;
-        });
 
       stream.onAbort(poke);
       shutdown.addEventListener("abort", poke, { once: true });
-      const off = eventLog.onAppend(runId, poke);
+      const off = notifier.watch(runId, poke);
       try {
         await stream.write(": connected\n\n");
         let lastWrite = Date.now();
-        while (!stream.aborted && !shutdown.aborted) {
-          const isEnded = await reads.hasEnded(reader, runId);
-          if (isEnded === null) break;
-          pending = false;
+        let ended = false;
+        while (!ended && !stream.aborted && !shutdown.aborted) {
+          kick = latch();
           for (;;) {
-            const page = await eventLog.after(runId, cursor, PAGE);
-            for (const event of page) {
+            const read = await eventLog.stream(reader, runId, cursor, EVENTS_PAGE);
+            if (!read) return;
+            for (const event of read.events) {
               await stream.writeSSE({ id: String(event.seq), data: JSON.stringify(event) });
               cursor = event.seq;
             }
-            if (page.length > 0) lastWrite = Date.now();
-            if (page.length < PAGE) break;
+            if (read.events.length > 0) lastWrite = Date.now();
+            if (read.events.length < EVENTS_PAGE) {
+              ended = read.ended;
+              break;
+            }
           }
-          if (isEnded) break;
-          await wait(POLL_MS);
+          if (ended) break;
+          await nap();
           if (Date.now() - lastWrite >= KEEPALIVE_MS) {
             await stream.write(": keep-alive\n\n");
             lastWrite = Date.now();

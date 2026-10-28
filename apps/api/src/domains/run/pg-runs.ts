@@ -127,15 +127,6 @@ export function pgRunReads(db: PostgresJsDatabase) {
         await db.transaction((tx) => loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId))))
       )[0] ?? null,
 
-    /** Whether the run has ended, or null when this caller can't read it. A lean `get` for the stream's polling. */
-    async hasEnded(reader: Reader, runId: string) {
-      const [row] = await db
-        .select({ state: runs.state })
-        .from(runs)
-        .where(and(readableRuns(reader), eq(runs.id, runId)));
-      return row ? row.state === "ended" : null;
-    },
-
     async listInputs({ labId, ownerId }: Reader) {
       const rows = await db
         .select()

@@ -29,6 +29,7 @@ import { HTTPException } from "hono/http-exception";
 import type { z } from "zod";
 import { type AppEnv, parseJson, requireService } from "../../domain";
 import type { RunDeps } from ".";
+import { afterParam, EVENTS_PAGE } from "./cursor";
 import { LeaseLost } from "./lease";
 import { EventIdTaken } from "./pg-event-log";
 import { RunEnded } from "./pg-queue";
@@ -44,15 +45,6 @@ const storableRow = historyRowSchema.refine(
 /** A thread id carries its run's id, so one run can't write another's threads. */
 const inRun = (runId: string, threadId: string) => threadId.startsWith(`${runId}.`);
 const NOT_IN_RUN = "thread id must begin with <runId>.";
-
-const PAGE = 1000;
-
-function intParam(raw: string | undefined, fallback: number, name: string): number {
-  if (raw === undefined) return fallback;
-  if (!/^\d{1,9}$/.test(raw))
-    throw new HTTPException(400, { message: `${name} must be a non-negative integer` });
-  return Number(raw);
-}
 
 export function ingestRoutes({ queue, eventLog, history, catalog }: RunDeps) {
   const app = new Hono<IngestEnv>();
@@ -125,11 +117,16 @@ export function ingestRoutes({ queue, eventLog, history, catalog }: RunDeps) {
   });
 
   app.get("/ingest/runs/:runId/events", async (c) => {
-    const after = intParam(c.req.query("after"), 0, "after");
-    const page = await eventLog.readLeased(c.req.param("runId"), c.var.leaseToken, after, PAGE + 1);
+    const after = afterParam(c.req.query("after"));
+    const page = await eventLog.readLeased(
+      c.req.param("runId"),
+      c.var.leaseToken,
+      after,
+      EVENTS_PAGE + 1,
+    );
     return c.json({
-      events: page.slice(0, PAGE),
-      more: page.length > PAGE,
+      events: page.slice(0, EVENTS_PAGE),
+      more: page.length > EVENTS_PAGE,
     } satisfies RunEventsResponse);
   });
 

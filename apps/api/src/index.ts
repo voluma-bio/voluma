@@ -29,6 +29,7 @@ import { createRun } from "./domains/run";
 import type { Limits } from "./domains/run/admission";
 import { catalog } from "./domains/run/catalog";
 import { KeyVault } from "./domains/run/key-vault";
+import { createNotifier } from "./domains/run/notifier";
 import { pgEventLog } from "./domains/run/pg-event-log";
 import { pgHistory } from "./domains/run/pg-history";
 import { pgRunQueue } from "./domains/run/pg-queue";
@@ -109,7 +110,8 @@ const auth = createAuth({
 /** Aborts at SIGTERM so open event streams end and the drain isn't held. */
 const draining = new AbortController();
 const reads = pgRunReads(db);
-const queue = pgRunQueue(db, limits, new KeyVault());
+const notifier = createNotifier();
+const queue = pgRunQueue(db, limits, new KeyVault(), notifier);
 
 const app = new Hono();
 app.get("/health", (c) => c.text("ok"));
@@ -133,7 +135,8 @@ app.route(
   createRun({
     reads,
     queue,
-    eventLog: pgEventLog(db),
+    eventLog: pgEventLog(db, notifier),
+    notifier,
     history: pgHistory(db),
     catalog,
     shutdown: draining.signal,

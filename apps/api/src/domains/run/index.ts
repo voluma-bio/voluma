@@ -12,6 +12,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../../domain";
 import type { Catalog } from "./catalog";
 import { ingestRoutes } from "./ingest";
+import type { Notifier } from "./notifier";
 import type { LeasedEventLog } from "./pg-event-log";
 import type { LeasedHistory } from "./pg-history";
 import type { RunQueue } from "./pg-queue";
@@ -24,6 +25,8 @@ export interface RunDeps {
   queue: RunQueue;
   eventLog: LeasedEventLog;
   history: LeasedHistory;
+  /** Wakes open streams when a run's events or state change. */
+  notifier: Notifier;
   catalog: Catalog;
   /** Aborts when the API starts draining; open streams end so the drain isn't held. */
   shutdown: AbortSignal;
