@@ -27,7 +27,6 @@ import { runLayout } from "@voluma/harness/layout";
 import { type Recorder, recorder } from "@voluma/harness/recorder";
 import { type SandboxSession, sandboxSession } from "@voluma/harness/sandbox-session";
 import { type RunRole, superviseRun } from "@voluma/harness/supervise-run";
-import { checkToolNames } from "@voluma/harness/tools";
 import { loadWorkflow } from "@voluma/workflow/load";
 import { adaptPlan, computePlan } from "@voluma/workflow/plan";
 import type { Config } from "./config.ts";
@@ -124,24 +123,32 @@ export async function runClaim(
     lease = holdLease({ client, meter, onStop: stop, log });
     log(`claimed (${visitor ? "visitor" : "voluma"} keys, model ${model.provider}/${model.id})`);
 
-    // Before any sandbox: an unreadable workflow or an unknown tool fails the run here, with its message.
-    // The run's pin names the workflow directory; its files are snapshotted from this
-    // runner's checkout once, so a resume reads what the run began with.
+    // Before any sandbox: an unreadable workflow or a bad selection fails the run here, with its
+    // message. The run's pin names the workflow directory; its files are snapshotted from this
+    // runner's checkout once (at `config.commit`), so a resume reads what the run began with.
     const workflowDir = run.workflows[0]?.path;
     if (!workflowDir) throw new Error("the run pins no workflow directory");
     const definition = await loadWorkflow(workflowDir, {
       store: r2Workflows(config.r2),
       prefix: workflowSnapshotPrefix(runId),
       root: REPO_ROOT,
+      commit: config.commit,
     });
-    // The tasks that produce the selected outputs and what they need, adapted to the run's notes.
-    const computed = await adaptPlan(computePlan(definition.files, run.selectedOutputs), {
-      notes: run.notes,
-      files: definition.files,
-    });
+    const stored = await client.storedEvents();
+    // A resumed run keeps the plan its first event recorded. Only a new run computes one: the
+    // tasks that produce the selected outputs and what they need, adapted to the run's notes.
+    const recorded = stored.find(
+      (e) => e.type === "revision.started" && e.payload.reason === "run",
+    );
+    const plan =
+      recorded?.type === "revision.started" && recorded.payload.reason === "run"
+        ? recorded.payload.plan
+        : await adaptPlan(computePlan(definition.files, run.selectedOutputs), {
+            notes: run.notes,
+            files: definition.files,
+          });
     // Every role's tools come from here, not from the workflow.
     const roleTools = ["view_image", ...(metaKey ? ["segment_sam"] : [])];
-    checkToolNames(roleTools, "runner");
 
     const layout = runLayout(
       runId,
@@ -158,15 +165,6 @@ export async function runClaim(
         cloudflareApiToken: config.r2.cloudflareApiToken,
       },
     });
-    const stored = await client.storedEvents();
-    // A resumed run keeps the plan its first event recorded; only a new run takes the parsed one.
-    const recorded = stored.find(
-      (e) => e.type === "revision.started" && e.payload.reason === "run",
-    );
-    const plan =
-      recorded?.type === "revision.started" && recorded.payload.reason === "run"
-        ? recorded.payload.plan
-        : computed;
     events = recorder(
       {
         async append(event) {
@@ -220,7 +218,8 @@ export async function runClaim(
     const supervised = superviseRun({
       runId,
       plan: plan.tasks,
-      workflows: run.workflows,
+      // The commit the files came from: the snapshot's, which a resume keeps.
+      workflows: run.workflows.map((pin) => ({ ...pin, commit: definition.commit })),
       layout,
       recorder: events,
       history: client,
@@ -235,14 +234,14 @@ export async function runClaim(
         model,
         streamFn,
         systemPrompt: workerSystem(definition),
-        prompt: workerPrompt(definition, task),
+        prompt: workerPrompt(task),
         tools: roleTools,
       }),
       check: (task) => ({
         model,
         streamFn,
         systemPrompt: checkSystem(definition),
-        prompt: checkPrompt(definition, task),
+        prompt: checkPrompt(task),
         tools: roleTools,
       }),
       signal: abort.signal,

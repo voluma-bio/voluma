@@ -51,8 +51,8 @@
  * same way: a `voluma` run goes back to `queued`, ahead of newer runs; a
  * `visitor` run goes to `awaiting-keys`, because its keys are gone. The runner
  * keeps its `events` already written, and the next claim resumes the thread
- * from them. The claim carries no plan: the runner imports the run's pinned
- * packages and parses their plan itself (`packages/workflow`), and a resumed run
+ * from them. The claim carries no plan: the runner snapshots the run's
+ * workflow directory and builds the plan itself (`packages/workflow`), and a resumed run
  * keeps the plan its first `revision.started` recorded (`task-tools.ts`). A run
  * whose lease expired three times with no `released` ends `failed` instead, so
  * one that crashes the runner doesn't loop. A `released` run is not counted,

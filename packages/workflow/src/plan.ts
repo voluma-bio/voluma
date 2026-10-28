@@ -41,9 +41,8 @@ function declared(entry: OutputEntry, required: boolean): DeclaredOutput {
 }
 
 /**
- * `selected` absent means every output. A task that produces a selected output reports it as
- * required and its other outputs as optional; a task included only as a dependency reports all
- * of its outputs as required, since something downstream builds on them.
+ * `selected` absent means every output. An output is required when it is selected or when a
+ * task of the plan builds on its task (something downstream needs it); otherwise it is optional.
  */
 export function computePlan(files: WorkflowFiles, selected?: readonly string[]): WorkflowPlan {
   const byId = new Map(files.outputs.map((o) => [o.id, o]));
@@ -65,6 +64,7 @@ export function computePlan(files: WorkflowFiles, selected?: readonly string[]):
     for (const d of tasks.get(id)?.dependsOn ?? []) add(d);
   };
   for (const id of direct) add(id);
+  const needed = new Set(files.tasks.filter((t) => included.has(t.id)).flatMap((t) => t.dependsOn));
 
   const plan = workflowPlanSchema.safeParse({
     tasks: files.tasks
@@ -72,9 +72,10 @@ export function computePlan(files: WorkflowFiles, selected?: readonly string[]):
       .map((t) => ({
         id: t.id,
         dependsOn: t.dependsOn,
+        instructions: t.instructions,
         ...(t.doneWhen.length && { doneWhen: t.doneWhen }),
         outputs: t.outputs.map((id) =>
-          declared(byId.get(id) as OutputEntry, !direct.has(t.id) || wanted.has(id)),
+          declared(byId.get(id) as OutputEntry, wanted.has(id) || needed.has(t.id)),
         ),
       })),
   });

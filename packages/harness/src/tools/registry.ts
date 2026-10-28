@@ -1,9 +1,7 @@
 /**
- * The tools an agent definition grants by name (`tools:` in its frontmatter), on top of the
- * always-on bash, task and thread-message tools. This is the only way an optional tool
- * reaches a thread: a tool is a factory over the run's dependencies, registered here, and
- * `superviseRun` builds the ones a role's agent lists. A name that is not registered fails
- * the run at start (`checkToolNames`), not mid-run.
+ * The optional tools a role can be given by name, on top of the always-on bash, task and
+ * thread-message tools. A tool is a factory over the run's dependencies, registered here;
+ * `superviseRun` builds the ones the host grants a role (`RunRole.tools`).
  */
 import type { RunLayout } from "../layout";
 import type { Files } from "../ports/files";
@@ -33,18 +31,6 @@ export const optionalTools: Readonly<Record<string, ToolFactory>> = {
 };
 
 const isRegistered = (name: string) => Object.hasOwn(optionalTools, name);
-
-/** Throws, naming the agent and the tool, for a name the harness does not have. */
-export function checkToolNames(names: readonly string[], agent: string): void {
-  for (const name of names) {
-    if (!isRegistered(name)) {
-      const known = Object.keys(optionalTools).join(", ") || "none";
-      throw new Error(
-        `agent "${agent}" enables tool "${name}", which the harness does not have (available: ${known})`,
-      );
-    }
-  }
-}
 
 export function buildTools(names: readonly string[], deps: ToolDeps): Tool[] {
   return names.map((name) => {

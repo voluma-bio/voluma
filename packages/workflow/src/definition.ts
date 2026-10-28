@@ -15,6 +15,8 @@ export interface Skill {
 export interface WorkflowDefinition {
   /** The workflow skill's directory, `workflows/workflow-<name>`. */
   dir: string;
+  /** The commit of the checkout the snapshot was cut from (kept on a resume). */
+  commit: string;
   /** Its `outputs.json` and `tasks.json`, validated together. */
   files: WorkflowFiles;
   /** The workflow's own skill first, then the skills of each directory it `uses`. */
