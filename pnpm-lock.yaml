@@ -27,6 +27,9 @@ catalogs:
     lucide-react:
       specifier: ^1.16.0
       version: 1.62.0
+    postgres:
+      specifier: ^3.4.9
+      version: 3.4.9
     react:
       specifier: ^19.2.7
       version: 19.3.1
@@ -74,7 +77,7 @@ importers:
         specifier: ^23.0.1
         version: 23.3.1
       postgres:
-        specifier: ^3.4.9
+        specifier: 'catalog:'
         version: 3.4.9
       typescript:
         specifier: 'catalog:'
@@ -104,7 +107,7 @@ importers:
         specifier: ^4.13.14
         version: 4.13.14
       postgres:
-        specifier: ^3.4.9
+        specifier: 'catalog:'
         version: 3.4.9
       zod:
         specifier: 'catalog:'
