@@ -262,6 +262,8 @@ function paste(
         boxH <= 0 ||
         x1 < 0 ||
         y1 < 0 ||
+        !Number.isInteger(x1) ||
+        !Number.isInteger(y1) ||
         x1 + boxW > paddedWidth ||
         y1 + boxH > paddedHeight
       ) {
@@ -280,10 +282,10 @@ function paste(
       const bits = decodeMask(encoded, boxW, boxH);
       for (let i = 0; i < boxH; i++) {
         const y = y1 + i;
-        if (y < 0 || y >= height) continue;
+        if (y >= height) continue;
         for (let j = 0; j < boxW; j++) {
           const x = x1 + j;
-          if (x < 0 || x >= width) continue;
+          if (x >= width) continue;
           const at = base + y * width + x;
           if (bits[i * boxW + j] && labels[at] === 0) labels[at] = label;
         }
