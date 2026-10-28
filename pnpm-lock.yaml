@@ -55,6 +55,11 @@ catalogs:
       specifier: ^4.6.7
       version: 4.6.7
 
+patchedDependencies:
+  '@cornerstonejs/dicom-image-loader@4.22.13':
+    hash: d36b22c60f68b5c6e5df4b4470ed501e06d3ae289f46ccc768f2b5c1299b1f20
+    path: patches/@cornerstonejs__dicom-image-loader@4.22.13.patch
+
 importers:
 
   .:
@@ -260,7 +265,7 @@ importers:
         version: 4.22.13(@babel/preset-env@7.29.7(@babel/core@7.29.7))(autoprefixer@10.6.2(postcss@8.5.32))(webpack@5.112.2(esbuild@0.28.2)(postcss@8.5.32))(wslink@2.5.0)
       '@cornerstonejs/dicom-image-loader':
         specifier: 4.22.13
-        version: 4.22.13(@cornerstonejs/core@4.22.13(@babel/preset-env@7.29.7(@babel/core@7.29.7))(autoprefixer@10.6.2(postcss@8.5.32))(webpack@5.112.2(esbuild@0.28.2)(postcss@8.5.32))(wslink@2.5.0))(dicom-parser@1.8.21)
+        version: 4.22.13(patch_hash=d36b22c60f68b5c6e5df4b4470ed501e06d3ae289f46ccc768f2b5c1299b1f20)(@cornerstonejs/core@4.22.13(@babel/preset-env@7.29.7(@babel/core@7.29.7))(autoprefixer@10.6.2(postcss@8.5.32))(webpack@5.112.2(esbuild@0.28.2)(postcss@8.5.32))(wslink@2.5.0))(dicom-parser@1.8.21)
       '@zip.js/zip.js':
         specifier: 2.24.0
         version: 2.24.0
@@ -5494,7 +5499,7 @@ snapshots:
       - webpack
       - wslink
 
-  '@cornerstonejs/dicom-image-loader@4.22.13(@cornerstonejs/core@4.22.13(@babel/preset-env@7.29.7(@babel/core@7.29.7))(autoprefixer@10.6.2(postcss@8.5.32))(webpack@5.112.2(esbuild@0.28.2)(postcss@8.5.32))(wslink@2.5.0))(dicom-parser@1.8.21)':
+  '@cornerstonejs/dicom-image-loader@4.22.13(patch_hash=d36b22c60f68b5c6e5df4b4470ed501e06d3ae289f46ccc768f2b5c1299b1f20)(@cornerstonejs/core@4.22.13(@babel/preset-env@7.29.7(@babel/core@7.29.7))(autoprefixer@10.6.2(postcss@8.5.32))(webpack@5.112.2(esbuild@0.28.2)(postcss@8.5.32))(wslink@2.5.0))(dicom-parser@1.8.21)':
     dependencies:
       '@cornerstonejs/codec-charls': 1.2.3
       '@cornerstonejs/codec-libjpeg-turbo-8bit': 1.2.2
