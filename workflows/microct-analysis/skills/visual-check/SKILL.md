@@ -24,10 +24,10 @@ a side and 1 MiB (the `view_image` limit); a 6-view 3D sheet of OA6-1RK is about
 | Is each label on the right bone, and is any bone unlabelled? | Overlay: label tint plus outline on the keyframe and two orthogonal cuts | `render_overlay.py --hu hu.npy --labels labels.npy --frame frame.json` |
 | Does one label cover two bones? Are there loose fragments? | 3D sheet: six views around the long axis, one colour per label | `render_surfaces.py --labels labels.npy --frame frame.json` |
 | What is this small thing, and which label is it under? | Crop sheet: three orthogonal cuts through the piece, labels outlined | `render_crops.py --hu hu.npy --labels labels.npy --component-at z,y,x` (or `--label N`) |
-| Which segmentation is right here? | Disagreement panel: CT beside both outlines with the disagreeing voxels filled | `segmentation-check`: `disagree.py` |
+| Which segmentation is right here? | Disagreement panel: CT, your labels and the classic labels side by side, disagreeing voxels filled | `segmentation-check`: `disagree.py` |
 
 Open up to four images in one `view_image` call: for example, the overlay and the 3D sheet together. **Only the images of your last two `view_image` calls stay visible**; older ones are a line of text. To compare before and after a fix, open both in one call. Pass `--names
-1=femur,2=tibia` to put a legend on a sheet, and `--window lo,hi` (the workflow's anatomy reference gives the HU window) to make bone
+<the anatomy reference's anatomy.json>` (or `1=femur,2=tibia`) to name every label in the legend, and `--window lo,hi` (the workflow's anatomy reference gives the HU window) to make bone
 readable.
 
 **Coordinates on every image:** x is the column (numbers along the top), y is the row (numbers down the left), both in

@@ -88,5 +88,5 @@
   "window_hu": [1000, 8000],
   "source": "review-07-separated of the OA6-1RK reference run, spacing 0.0105 mm isotropic; n=1 scan",
   "segmentation_threshold_hu": 2500,
-  "threshold_note": "2500 HU builds masks (orientation, box snapping, envelopes, candidates). It is not the BV threshold: measurement scripts derive the lab's 2.16/cm from hu.json."
+  "threshold_note": "2500 HU builds masks (orientation, box snapping, clipping to bone, candidates). It is not the BV threshold: measurement scripts derive the lab's 2.16/cm from hu.json."
 }

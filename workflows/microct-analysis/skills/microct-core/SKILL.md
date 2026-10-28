@@ -69,7 +69,7 @@ unnamed and ask.
 
 ## Two thresholds
 
-- **Segmentation threshold:** builds masks (orientation, box snapping, envelopes, candidates). The workflow's anatomy
+- **Segmentation threshold:** builds masks (orientation, box snapping, clipping to bone, candidates). The workflow's anatomy
   reference gives it, and each script takes it as `--threshold-hu`.
 - **Measurement threshold:** decides bone volume. It is the lab's 2.16/cm converted to this scan's HU from the calibration block
   in `hu.json` (about 2460 HU on OA6-1RK), and the measurement scripts compute it themselves; a flag overrides it. BV is always
