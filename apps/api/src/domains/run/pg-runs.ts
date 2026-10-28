@@ -76,6 +76,8 @@ function toRun({ run, input, position }: Row): Run {
     forkedFrom: run.forkedFrom,
     createdAt: run.createdAt.toISOString(),
     state,
+    usage: { modelCostUsd: run.modelCostUsd, sandboxSeconds: run.sandboxSeconds },
+    toCheck: run.toCheck,
   };
 }
 

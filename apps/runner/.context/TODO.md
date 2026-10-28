@@ -12,3 +12,8 @@ From the skillset move (`workflows/` in this repo):
 
 - **Models per role** are config (`RUNNER_MODEL` worker, `RUNNER_CHECK_MODEL`, `RUNNER_MAIN_MODEL`), not an alias table in `apps/api` as the format doc says, because the runner holds the keys. The per-workflow or per-org override is not built.
 - **The main thread has no tools or sandbox.** At run start it sees the plan, the selection and the user's notes, not the workflow skill's text; the skillset's `microct-lead` names `view_image` and skills it would read, which needs the thread to have a sandbox. The `review` role is not started.
+
+From the run-costs review (#103):
+
+- **A paid tool reports its charge twice.** `meta-segmenter.ts` calls the run meter's `addCost` and the call's `bill` with the same amount. Have `ToolContext.bill` also feed the meter (a run-level `onBill` through `superviseRun` to `startThread`) and drop `addCost`, so a new paid tool calls one thing.
+- **Heartbeats timed out during `segment_sam` on a loaded dev box** (load ~47, 2026-10-28): the run was released and reclaimed four times, and no SAM call completed. The local API also restarted six times under `tsx watch`, on changes it saw under `node_modules`. Not diagnosed: find out whether the API restarts or a blocked runner event loop (the in-process volume work above) loses the lease.

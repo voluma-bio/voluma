@@ -128,7 +128,7 @@ export function segmentSamTool(deps: SegmentSamDeps): Tool<typeof inputSchema> {
         return { label, frame: f, box };
       });
       const stack = { data: moveAxis(data, shape, axis, "to-front"), count, height, width };
-      const result = await segmenter.segment(stack, objects, ctx.signal);
+      const result = await segmenter.segment(stack, objects, ctx.signal, ctx.bill);
       const volume = moveAxis(result.labels, shape, axis, "to-place");
       await files.write(writeKey, writeU8(volume, shape), ctx.signal);
       const sidecar = {

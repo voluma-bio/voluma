@@ -30,7 +30,10 @@ const REQUEST_TIMEOUT_MS = 30 * 60_000;
 export function metaSegmenter(options: {
   apiKey: string;
   log(line: string): void;
-  /** Called with what Meta billed, as soon as it reports the frames (even if the call then fails). */
+  /**
+   * The run's meter, called with what Meta billed as soon as it reports the frames (even if
+   * the call then fails); the call's own `bill` gets the same amount for its `tool.result`.
+   */
   addCost(usd: number): void;
   /**
    * Stores a response that could not be pasted, since Meta bills it and the sandbox's local
@@ -41,7 +44,7 @@ export function metaSegmenter(options: {
   const { apiKey, log, addCost, keepFailed } = options;
   const auth = { Authorization: `Bearer ${apiKey}` };
   return {
-    async segment(stack, objects, signal) {
+    async segment(stack, objects, signal, bill) {
       const dir = await mkdtemp(join(tmpdir(), "sam-"));
       let fileId: string | undefined;
       try {
@@ -68,7 +71,7 @@ export function metaSegmenter(options: {
           throw new Error("Meta's upload reply had no file id");
         }
         signal.throwIfAborted();
-        const text = await track(prompt, fileId, signal);
+        const text = await track(prompt, fileId, signal, bill);
         try {
           return { ...paste(text, stack, objects, width, height), prompt };
         } catch (error) {
@@ -95,7 +98,12 @@ export function metaSegmenter(options: {
     }
   }
 
-  async function track(prompt: string, fileId: string, signal: AbortSignal) {
+  async function track(
+    prompt: string,
+    fileId: string,
+    signal: AbortSignal,
+    bill: (usd: number) => void,
+  ) {
     const started = Date.now();
     const res = await fetch(`${BASE}/responses`, {
       method: "POST",
@@ -133,6 +141,7 @@ export function metaSegmenter(options: {
           const frames: number = event.response?.usage?.video_frames_processed ?? 0;
           const usd = Math.max(frames, MIN_FRAMES) * USD_PER_FRAME;
           addCost(usd);
+          bill(usd);
           log(
             `SAM call: ${frames} frames, $${usd.toFixed(4)} added to the run's cost, ${Math.round((Date.now() - started) / 1000)} s`,
           );
