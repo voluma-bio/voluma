@@ -6,7 +6,7 @@
 import type { WorkflowPlan } from "@voluma/contracts/workflow";
 
 /** Roles a workflow may assign an agent definition to. `worker` is required. */
-export const ROLES = ["worker", "reviewer", "chat", "main"] as const;
+export const ROLES = ["worker", "checker", "main", "review"] as const;
 export type Role = (typeof ROLES)[number];
 
 export interface Agent {

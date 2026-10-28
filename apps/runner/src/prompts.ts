@@ -41,7 +41,7 @@ function system(def: WorkflowDefinition, agent: Agent | undefined, fallback: str
 }
 
 export const workerSystem = (def: WorkflowDefinition) => system(def, def.roles.worker, WORKER);
-export const checkSystem = (def: WorkflowDefinition) => system(def, def.roles.reviewer, CHECK);
+export const checkSystem = (def: WorkflowDefinition) => system(def, def.roles.checker, CHECK);
 
 function taskBrief(def: WorkflowDefinition, task: PlanTask): string {
   const prose = def.instructions[task.id];

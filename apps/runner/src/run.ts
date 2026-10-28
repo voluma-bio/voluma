@@ -123,9 +123,9 @@ export async function runClaim(
     });
     const { plan } = definition;
     const workerAgent = definition.roles.worker;
-    const reviewerAgent = definition.roles.reviewer;
+    const checkerAgent = definition.roles.checker;
     const workerTools = workerAgent ? resolveTools(workerAgent.tools, workerAgent.name) : [];
-    const checkTools = reviewerAgent ? resolveTools(reviewerAgent.tools, reviewerAgent.name) : [];
+    const checkTools = checkerAgent ? resolveTools(checkerAgent.tools, checkerAgent.name) : [];
 
     const layout = runLayout(
       runId,
