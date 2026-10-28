@@ -18,13 +18,7 @@ import {
   type AgentTool,
   type StreamFn,
 } from "@earendil-works/pi-agent-core";
-import {
-  type Api,
-  type AssistantMessage,
-  type Model,
-  type ToolResultMessage,
-  Type,
-} from "@earendil-works/pi-ai";
+import { type Api, type Model, type ToolResultMessage, Type } from "@earendil-works/pi-ai";
 import type { EventType } from "@voluma/contracts/events";
 import { z } from "zod";
 import { replyFrames } from "../../live";
