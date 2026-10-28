@@ -19,6 +19,7 @@ export interface RunsDeps {
   vault: KeyVault;
 }
 
+const visitorCapped = { error: "Too many runs with your own keys are active." };
 const tooManyKeys = { error: "Too many runs are waiting with keys; try again shortly." };
 
 export function runsRoutes({ store, catalog, vault }: RunsDeps) {
@@ -55,7 +56,7 @@ export function runsRoutes({ store, catalog, vault }: RunsDeps) {
           case "per-caller":
             return c.json({ error: "You already have a run in progress." }, 409);
           case "visitor-active":
-            return c.json({ error: "Too many runs with your own keys are active." }, 429);
+            return c.json(visitorCapped, 429);
           case "daily":
             return c.json({ error: "The daily run limit is reached." }, 429);
           case "dollar":
@@ -103,6 +104,7 @@ export function runsRoutes({ store, catalog, vault }: RunsDeps) {
       if (result === "forbidden")
         return c.json({ error: "Only the run's starter can resend keys." }, 403);
       if (result === "conflict") return c.json({ error: "The run is not waiting for keys." }, 409);
+      if (result === "visitor-active") return c.json(visitorCapped, 429);
       return c.json(result);
     } catch (error) {
       vault.drop(runId);

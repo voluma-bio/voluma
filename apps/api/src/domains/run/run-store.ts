@@ -16,7 +16,7 @@ export type Limits = {
   concurrent: number | null;
   perDay: number | null;
   usdPerDay: number | null;
-  /** Visitor runs that haven't ended, per org: the cap at start; running at once, at the claim. */
+  /** Visitor runs queued or running, per org: the cap at start and `/keys`. */
   visitorActive: number | null;
 };
 
@@ -73,7 +73,7 @@ export interface RunStore {
   cancel(reader: Reader, runId: string): Promise<Run | "not-found" | "example">;
   /**
    * `awaiting-keys` → `queued`, for the run's own starter. Once the run qualifies, and
-   * before it is queued, calls `holdKeys`; if that returns false the run stays as it was
+   * before it is queued, checks the visitor cap, then calls `holdKeys`; if that returns false the run stays as it was
    * and the answer is "full".
    */
   resume(
@@ -81,7 +81,7 @@ export interface RunStore {
     userId: string,
     runId: string,
     holdKeys: () => boolean,
-  ): Promise<Run | "not-found" | "forbidden" | "conflict" | "full">;
+  ): Promise<Run | "not-found" | "forbidden" | "conflict" | "visitor-active" | "full">;
   /** One reference-scan input per org, so a lab member can start a run on it. */
   ensureReferenceInputs(labIds: string[]): Promise<void>;
 }

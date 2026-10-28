@@ -4,7 +4,7 @@
  * database's clock. A `voluma` run counts toward the day once, from its first claim
  * (`started_at`), so a recovered run isn't refused for a limit it passed.
  */
-import { and, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { countRuns, type Tx } from "./run-rows";
 import { runs } from "./schema";
 
@@ -16,13 +16,13 @@ const inLastDay = gt(runs.startedAt, sql`now() - interval '1 day'`);
 export const runningCount = (tx: Tx, labId: string) =>
   countRuns(tx, and(voluma(labId), eq(runs.state, "running")));
 
-/** The org's visitor runs that haven't ended (`limits.visitorActive` caps these at start). */
+/**
+ * The org's visitor runs that are queued or running (`limits.visitorActive` caps these at
+ * start and `/keys`, the only calls that add to it). An `awaiting-keys` run holds neither
+ * keys nor a runner, so it isn't counted.
+ */
 export const visitorActiveCount = (tx: Tx, labId: string) =>
-  countRuns(tx, and(kind(labId, "visitor"), sql`${runs.state} <> 'ended'`));
-
-/** The org's visitor runs now running (`limits.visitorActive` caps these at the claim). */
-export const visitorRunningCount = (tx: Tx, labId: string) =>
-  countRuns(tx, and(kind(labId, "visitor"), eq(runs.state, "running")));
+  countRuns(tx, and(kind(labId, "visitor"), inArray(runs.state, ["queued", "running"])));
 
 export const startedToday = (tx: Tx, labId: string) => countRuns(tx, and(voluma(labId), inLastDay));
 

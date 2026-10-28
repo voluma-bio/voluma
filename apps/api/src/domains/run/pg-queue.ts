@@ -9,7 +9,7 @@ import { randomBytes } from "node:crypto";
 import { LEASE_SECONDS } from "@voluma/contracts/runner";
 import { and, asc, eq, notInArray, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { runningCount, spentToday, startedToday, visitorRunningCount } from "./pg-limits";
+import { runningCount, spentToday, startedToday } from "./pg-limits";
 import { loadRun, QUEUE_LOCK, type Tx } from "./run-rows";
 import { type Claimed, LeaseLost, type LimitsOf, RunEnded, type RunQueue } from "./run-store";
 import { runs } from "./schema";
@@ -89,16 +89,9 @@ export function pgRunQueue(db: PostgresJsDatabase, limitsOf: LimitsOf): RunQueue
             await fail(tx, run.id, "This organization can no longer run work.");
             continue;
           }
-          if (run.credentials === "visitor") {
-            // A visitor run skips the runs-at-once count; this cap keeps one org's
-            // visitors from holding every runner.
-            if (
-              limits.visitorActive !== null &&
-              (await visitorRunningCount(tx, run.labId)) >= limits.visitorActive
-            ) {
-              continue;
-            }
-          } else {
+          // A visitor run skips the runs-at-once count, and the visitor cap was checked
+          // when it was started or resumed.
+          if (run.credentials === "voluma") {
             if (
               limits.concurrent !== null &&
               (await runningCount(tx, run.labId)) >= limits.concurrent

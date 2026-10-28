@@ -120,6 +120,13 @@ export function pgRunStore(db: PostgresJsDatabase, limitsOf: LimitsOf): RunStore
         if (!run) return "not-found";
         if (run.startedBy !== userId) return "forbidden";
         if (run.state.status !== "awaiting-keys") return "conflict";
+        const limits = limitsOf(reader.labId);
+        if (
+          limits?.visitorActive != null &&
+          (await visitorActiveCount(tx, reader.labId)) >= limits.visitorActive
+        ) {
+          return "visitor-active";
+        }
         if (!holdKeys()) return "full";
         await tx
           .update(runs)
