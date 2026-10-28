@@ -14,9 +14,20 @@ export const segmentSchema = z
     message: "must be one path segment (no '/', '.' or '..')",
   });
 
-export const runIdSchema = segmentSchema;
+/**
+ * Run and task ids also hold no '.', so a thread id built as
+ * `<runId>.<taskId>.<role>` reads back one way: with a '.' allowed,
+ * run `a.b` + task `c` and run `a` + task `b.c` would build the same id. Thread ids
+ * are global keys (events, history rows) and URL segments (`/ingest/threads/:threadId/messages`),
+ * and '.' is URL-safe. A root thread's id is `<runId>.<role>`.
+ */
+const dotFreeSegmentSchema = segmentSchema.refine((s) => !s.includes("."), {
+  message: "must not contain '.' (thread ids are '<runId>.<taskId>.<role>')",
+});
+
+export const runIdSchema = dotFreeSegmentSchema;
 export const inputIdSchema = segmentSchema;
-export const taskIdSchema = segmentSchema;
+export const taskIdSchema = dotFreeSegmentSchema;
 export const toolCallIdSchema = segmentSchema;
 
 /** Checklist statuses (requirements, Vocabulary). */

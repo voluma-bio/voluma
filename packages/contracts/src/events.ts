@@ -2,8 +2,10 @@
  * The run event log: what an agent thread did, in order. The envelope is the
  * same for every kind; `type` selects the payload. The runner appends events
  * (`eventInputSchema`; `id` is chosen by the client so a retried POST is a
- * no-op); the server stamps `seq`, unique and increasing per run, which is
- * also the stream cursor the UI resumes from.
+ * no-op, and the POST carries the run's lease token, `LEASE_TOKEN_HEADER` in
+ * `runner.ts`, whose 409 means the runner stops); the server stamps `seq`,
+ * unique and increasing per run, which is also the stream cursor the UI
+ * resumes from.
  *
  * These are the durable events. Live output (text and tool deltas, tool output
  * chunks) is not stored and has no `seq`: see `stream.ts`.
@@ -228,6 +230,28 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     outputReportSchema.extend({ taskId: taskIdSchema, attemptId: nonEmpty }),
   );
 
+  /**
+   * One judgment point and what came of it, written by the runtime so the
+   * judgment experiment's data comes from the record. `point` is what the arm
+   * was given; `decision` is its raw answer (absent when it threw); `applied`
+   * is the action the runtime took, which differs from `decision` on a
+   * fallback. `fold` ignores it for results.
+   */
+  const judgment = event(
+    "judgment",
+    z.object({
+      point: z.object({ kind: nonEmpty, input: z.unknown() }),
+      arm: nonEmpty,
+      taskId: taskIdSchema.optional(),
+      decision: z.unknown().optional(),
+      applied: z.object({
+        action: nonEmpty,
+        /** Why `applied` is not `decision`: the arm threw (taken as accept), or the redo cap was reached. */
+        fallback: z.enum(["error", "redo-cap"]).optional(),
+      }),
+    }),
+  );
+
   return z.discriminatedUnion("type", [
     threadStarted,
     threadEnded,
@@ -240,6 +264,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     task,
     checkpoint,
     output,
+    judgment,
   ]);
 };
 

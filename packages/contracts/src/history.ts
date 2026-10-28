@@ -7,6 +7,10 @@
  *   POST → 204 with a `historyRowSchema` body. Appending the same `idx` with
  *          the same `message` is a no-op; a different `message` at an `idx`
  *          already stored is 409.
+ *
+ * Both carry the run's lease token (`LEASE_TOKEN_HEADER`, `runner.ts`); a stale
+ * one is a 409 whose body is `leaseLostSchema`, which the runner tells apart
+ * from the `idx` conflict and answers by stopping the run.
  */
 import { z } from "zod";
 

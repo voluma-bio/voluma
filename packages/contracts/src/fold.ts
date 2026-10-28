@@ -410,7 +410,8 @@ export function fold(events: readonly RunEvent[]): Folded {
       }
       return {
         id: a.taskId,
-        dependsOn: dependsOn.get(a.taskId) ?? [],
+        // Only dependencies that have a row: a worker can open a task before its dependency.
+        dependsOn: (dependsOn.get(a.taskId) ?? []).filter((d) => current.has(d)),
         attemptId: a.id,
         status: a.status,
         reason: a.reason,
@@ -436,7 +437,8 @@ export function fold(events: readonly RunEvent[]): Folded {
       case "thread.started": {
         threadKind.set(e.threadId, e.payload.kind);
         const checked = e.payload.attemptId && attempts.get(e.payload.attemptId);
-        if (e.payload.kind === "check" && checked) {
+        // A wake re-emits `thread.started` for the same thread: only a new check thread resets the verdict.
+        if (e.payload.kind === "check" && checked && checked.checkThread !== e.threadId) {
           checked.checkThread = e.threadId;
           checked.checker = null; // the verdict shown is this check's
         }

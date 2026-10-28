@@ -11,6 +11,10 @@
  * check thread sets `verdict`. Only a worker thread opens an attempt: a
  * supervisor's `checklist` call that would need a new attempt is refused.
  *
+ * Write scope. A thread whose `thread.started` names a `task` (worker and
+ * check threads) writes only to that task; a write to another is refused. The
+ * supervisor names none and writes to any task, through `checklist`.
+ *
  * Decisions. The runtime decides from `fold` of the log (`fold.ts`), refolded
  * for each decision; it keeps no second record. It takes each decision and its
  * appends inside one per-run critical section, whichever thread asks, so a
@@ -50,8 +54,8 @@
  * Staleness. A correction is one `checklist stale` call by the supervisor on
  * the corrected task, which has an attempt. The runtime appends
  * `revision.started` (`correction`), the call's own stale event, and a stale
- * mark (`stale`) on each transitive dependent in the workflow's
- * graph that has an attempt and isn't stale already. A stale mark on a task under review stops its check
+ * mark (`stale`) on each transitive dependent in the plan's
+ * `dependsOn` graph (`workflow.ts`, read from `revision.started`) that has an attempt and isn't stale already. A stale mark on a task under review stops its check
  * thread, so no `check-result` follows. When a worker thread ends with tasks
  * still in progress, the stuck guard marks each `to-check` (`stuck`).
  *

@@ -1,6 +1,6 @@
 /**
- * Live traffic for the run screen, and the protocol between a browser and a
- * run's stream hub. Two kinds of traffic share one connection:
+ * Live traffic for the run screen: what a browser reads from a run's stream
+ * hub, and what the runner posts to it. Two kinds of traffic share one stream:
  *
  * - Durable events (`events.ts`) are stored and carry a `seq`.
  * - Live frames (here) are never stored and have no `seq`. They show a reply
@@ -10,8 +10,21 @@
  *   longer starts at the partial's length, so it is dropped (see `offset`) and
  *   the partial stays as it was until the durable event replaces it.
  *
- * The runner sends frames to the hub (`liveFrameSchema`); the hub forwards
- * them to subscribed browsers (`streamMessageSchema`).
+ * Runner → hub: `POST /api/run/ingest/runs/:runId/live` with a `liveBatchSchema`
+ * (`runner.ts`; lease token and fire-and-forget rules there). The rule that a
+ * frame never outlives its durable event: the runner stops sending a reply's
+ * or call's frames once it appends the event that replaces them, and a batch
+ * that lands late is dropped by the rules below.
+ *
+ * Hub → browser: `GET /api/run/runs/:runId/stream`, a `text/event-stream`
+ * (cookie-authenticated; the read is scoped like any run read, `run.ts`, so
+ * another org's run is 404). Each SSE message's `data` is one
+ * `streamMessageSchema` JSON. An `event` message carries the SSE `id:` equal to
+ * its `seq`; `snapshot` and `frame` messages carry none, so frames never move
+ * the resume point. The browser's cursor is the `id` of the last event it
+ * has. On a reconnect `EventSource` sends it as `Last-Event-ID`; the first
+ * connect may pass `?after=<seq>` instead (0 or absent for none; `seq` starts
+ * at 1), and the header wins when both are present.
  */
 import { z } from "zod";
 import { runEventSchema } from "./events";
@@ -59,14 +72,6 @@ export const liveFrameSchema = z.discriminatedUnion("type", [
 ]);
 export type LiveFrame = z.infer<typeof liveFrameSchema>;
 
-/** Browser → hub: the first message on the connection, sent once. The hub is addressed per run. */
-export const subscribeSchema = z.object({
-  type: z.literal("subscribe"),
-  /** Cursor: the highest `seq` the browser already has, or 0 for none (`seq` starts at 1). */
-  after: nonNegInt,
-});
-export type Subscribe = z.infer<typeof subscribeSchema>;
-
 /**
  * What the hub holds for one thread. Threads with nothing in progress are left
  * out, and so is a `message` with empty text and no tool arguments (a reply
@@ -100,31 +105,27 @@ export const threadSnapshotSchema = z.object({
 export type ThreadSnapshot = z.infer<typeof threadSnapshotSchema>;
 
 /**
- * Hub → browser. After `subscribe`, the hub sends, in order:
+ * The stream's messages, in order, on each connection:
  *
- * 1. `event` for every durable event with `seq > after`, oldest first.
- * 2. One `snapshot` of every thread's in-progress state. It is taken when it
- *    is sent and includes every frame the hub received before then; those
- *    frames are never sent separately.
- * 3. Then `frame` and new `event` messages as they happen.
+ * 1. One `snapshot` of every thread's in-progress state, taken when the
+ *    connection opens. It includes every frame the hub received before then;
+ *    those frames are never sent separately. It replaces all live state the
+ *    browser holds, so partials from before a disconnect are discarded.
+ * 2. `event` for every durable event with `seq > after`, oldest first, then
+ *    new events as they happen. Events on one connection are in strictly
+ *    increasing `seq` with no gap and no repeat: the hub holds back events that
+ *    arrive while it reads the stored ones. So `Last-Event-ID` is always a
+ *    cursor with nothing missing below it.
+ * 3. `frame` messages as they happen, interleaved with the events in any order.
  *
- * Events and frames may arrive in any order, and an event may arrive twice.
- * `seq` is gapless per run, so the browser's cursor is the highest `seq` it
- * holds with no gap below it. If it sees a gap, it resubscribes from that
- * cursor. The hub reads stored events asynchronously while live ones keep
- * arriving, so it may send an event twice but never skips one.
+ * The snapshot can hold a partial whose replacing event is among the stored
+ * events the browser reads next; the clearing rules below take care of it.
  *
- * What the browser must do (the hub applies the same rules to its own state):
- * - An `event` whose `seq` it already holds is not appended again, but still
- *   runs through the clearing rules below.
- * - A `snapshot` replaces all live state it holds, so partials from before a
- *   disconnect are discarded. The clearing and drop rules then run on the
- *   snapshot against the events it holds, because the hub may not have seen an
- *   event yet that the browser read in step 1.
- *
- * Every rule below is keyed by an id, so order does not matter. Frames of one
- * thread arrive in the order the runner sent them, and the drop rules run
- * before the others.
+ * What the browser does with them (the hub applies the same rules to its own
+ * state): the clearing and drop rules run on the snapshot against the events it
+ * holds, and on every later event and frame. Every rule below is keyed by an
+ * id, so order does not matter. Frames of one thread arrive in the order the runner sent them, and the drop
+ * rules run before the others.
  * - Clearing: a `message` with `id === messageId` clears the partial text (tool
  *   arguments are not in a `message`; they stay until `tool.call`). A
  *   `thread.ended` with a `messageId` clears that reply's partial. A `tool.call`
@@ -146,7 +147,10 @@ export type ThreadSnapshot = z.infer<typeof threadSnapshotSchema>;
  * thread's latest reply and its recent calls: the hub needs to keep only each
  * thread's latest ids.
  *
- * If the hub restarts mid-reply the partial is lost, but the stored events still arrive.
+ * If the hub restarts mid-reply the partial is lost, but the stored events still
+ * arrive. A dropped connection needs no special handling: `EventSource`
+ * reconnects with `Last-Event-ID`, and the new snapshot replaces the old live
+ * state.
  */
 export const streamMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("event"), event: runEventSchema }),

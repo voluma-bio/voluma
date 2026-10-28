@@ -14,6 +14,7 @@ import {
   type StartRunRequest,
   type VisitorKeys,
 } from "@voluma/contracts/run";
+import { type StreamMessage, streamMessageSchema } from "@voluma/contracts/stream";
 
 /** A non-OK API response. Branch on `status` (403, 415, 5xx) rather than parsing the message. */
 export class ApiError extends Error {
@@ -75,7 +76,7 @@ export async function signOut(): Promise<void> {
   location.href = logoutUrl;
 }
 
-/** Starts a run on an input the caller can read. With `keys` it runs on the caller's own credentials at once; otherwise it may queue. 409 and 429: the org's limits (see `@voluma/contracts/run`). */
+/** Starts a run on an input the caller can read. With `keys` it runs on the caller's own credentials and skips the org's runs-at-once count; either way it waits for the runner to claim it. 409 and 429: the org's limits (see `@voluma/contracts/run`). */
 export async function startRun(req: StartRunRequest): Promise<Run> {
   return runSchema.parse(await json(await request("/run/runs", { method: "POST", body: req })));
 }
@@ -106,4 +107,30 @@ export async function resendKeys(id: string, keys: VisitorKeys): Promise<Run> {
 /** Inputs the caller may start a run on, newest first. */
 export async function listInputs(): Promise<Input[]> {
   return listInputsResponseSchema.parse(await json(await request("/run/inputs"))).inputs;
+}
+
+/**
+ * Opens a run's live stream (`@voluma/contracts/stream`): `onMessage` gets each message
+ * in order. `EventSource` reconnects by itself and resumes from the last event's `id`; the
+ * new snapshot replaces live state. `after` is the highest `seq` the caller already holds,
+ * for the first connect only. `onError` is told of a message that fails to parse; a dropped
+ * connection is not an error, and neither is a 401, which `EventSource` cannot report.
+ * Returns the function that closes the stream.
+ */
+export function subscribe(
+  runId: string,
+  handlers: { onMessage: (message: StreamMessage) => void; onError?: (error: unknown) => void },
+  after = 0,
+): () => void {
+  const source = new EventSource(
+    `/api/run/runs/${encodeURIComponent(runId)}/stream?after=${after}`,
+  );
+  source.onmessage = (e) => {
+    try {
+      handlers.onMessage(streamMessageSchema.parse(JSON.parse(e.data)));
+    } catch (error) {
+      handlers.onError?.(error);
+    }
+  };
+  return () => source.close();
 }
