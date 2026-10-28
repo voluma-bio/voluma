@@ -63,6 +63,13 @@ export async function getMe(): Promise<Me | null> {
   return meResponseSchema.parse(await json(res));
 }
 
+/** The caller's guest identity, made on first call; null when the server lets no guests in (404). */
+export async function startGuest(): Promise<Me | null> {
+  const res = await request("/auth/guest", { method: "POST" });
+  if (res.status === 404) return null;
+  return meResponseSchema.parse(await json(res));
+}
+
 /** Starts sign-in: navigates to the identity provider, then back to `returnTo`. The server validates `returnTo`. */
 export function signIn(returnTo = location.pathname + location.search): void {
   location.href = `/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`;
