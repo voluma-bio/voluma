@@ -21,22 +21,43 @@ python <this skill>/resources/orient_joint.py --in hu.npy --header hu.json --out
 It writes `frame.json` (the frame), `oriented.npy` (float32 HU stack, axis 0 = slices, its own `grid_id`) and
 `keyframe.jpg`, and prints the keyframe index, the bend angle between the shafts and `skew_vox`.
 
-How it chooses: a threshold; the two bones are one 3D piece because they touch at the joint; each end of that piece
-seeds a shaft axis, refit on its shaft only (35-95% of its length from the joint); the plane spanned by the two axes
-is the bending plane; slices stack along its normal; the keyframe is the slice through the joint. "Bone A" is the shaft
-passing nearer the reference object (at the knee, the femur: the patella sits on it). Voxels must be isotropic. The
-three lengths (`--shaft-radius-mm`, `--ref-radius-mm`, `--min-object-mm3`) default to a mouse knee; rescale them for
-another animal or joint. Without `--threshold-hu` it uses Otsu on the volume; the workflow's anatomy reference gives the
-segmentation threshold to use.
+How it chooses: a threshold; the bones are the largest 3D piece plus the largest other piece near it that is at least
+`--second-bone-frac` (default a quarter) of its size (femur and tibia touching, or two pieces across a healthy joint
+space: both work); the largest smaller piece near the joint (the patella) is the reference object. Each end of the bones seeds a shaft axis, refit on its shaft only (35-95% of its
+length from the joint); the plane spanned by the two axes is the bending plane; slices stack along its normal; the
+keyframe is the slice through the joint. "Bone A" is the shaft passing nearer the reference object (at the knee, the
+femur: the patella sits on it). Voxels must be isotropic. The lengths (`--shaft-radius-mm`, `--ref-radius-mm`,
+`--min-object-mm3`) default to a mouse knee; rescale them for another animal or joint. Without `--threshold-hu` it uses
+Otsu on the volume; the workflow's anatomy reference gives the segmentation threshold to use.
+
+**Fields that hold only the ends of the bones.** A shaft needs a field long enough: each shaft must reach 3 shaft
+radii from the joint, and the bones together must be elongated (spread along the main axis at least twice the spread
+across). On OA6-1RK the pair measures 2.38 and the femur shaft reaches 3.6 radii; cropped to z 120:877 the femur shaft
+is 1.0 radii and the bend reads 45 degrees instead of 64, cropped to z 80:877 (2.9 radii) 75 degrees. A healthy knee
+imaged as the ends only (Zanjani-Pour 2020, the largest piece measures 1.24) has no shaft at all. Then:
+
+- Two separate bone pieces: the leg axis is the line through their two centroids, the joint is half way across the gap,
+  `shafts_found` is false and `bend_deg` and `skew_vox` are `null`. The bend is not measured; do not report one. The
+  plane holds that axis and the reference object (or, with none, the widest spread of the bones), and bone A is the bigger
+  bone. The plane rule ignores which bone the reference object sits on here; it sets only the plane and the side of the slice.
+- One piece, or a second piece under `--second-bone-frac` of the largest: it stops with "No shaft in the field", naming
+  which test failed. When it says a smaller piece is near (the Zanjani-Pour tibia is 50% of the femur, the OA6-1RK
+  patella 8%; a tibia cut to a short stub can fall under 25%), lower `--second-bone-frac` (0.15 oriented the 19% stub of
+  Zanjani-Pour, `hu[110:]`) and then check that the keyframe holds the tibia, not the patella. Otherwise scan more of
+  the leg. Cropped OA6-1RK (z 180:400, 200:380, :500, 300:) stops here.
 
 ## Look before you go on
 
-Open `keyframe.jpg` (`visual-check`). It must cut **both long bones and the reference object through the joint**: for a
-knee, femur, tibia and patella. If a bone is missing, cut off, or the joint space is not in the slice, do not run SAM:
-check `bend_deg` (about 64 degrees on OA6-1RK), `skew_vox` (axes far apart out of plane: one slice cannot cut both
-shafts), and try another `--threshold-hu`. Where it fails: a joint inside either 30% end portion, a nearly straight joint
-(under 10 degrees, it falls back to the plane through bone A and the reference object), a large non-bone object near the
-joint taken for the reference object (it then stops with a sentence).
+Open `keyframe.jpg` (`visual-check`). It must cut **both long bones through the joint** (and the reference object when
+there is one): for a knee, femur, tibia and patella. The script already stops when one bone has under 5% of the other's
+voxels in the keyframe (`keyframe_bone_vox` in its output); that does not prove the right pieces are the bones, so look.
+If a bone is missing, cut off, or the joint space is not in the slice, do not run SAM: check `bend_deg` (64 degrees on
+OA6-1RK; `null` when there is no shaft), `skew_vox` (axes far apart out of plane: one slice cannot cut both shafts),
+and try another `--threshold-hu`. A small piece taken for the reference object is harmless to the cut (on Zanjani-Pour
+2020 a 311k-voxel piece, probably the fibula head, took that role; the keyframe still cuts both bones) but it sets the
+side of the slice, and, when shafts are found, which bone is A.
+Where it fails: a joint inside either 30% end portion, a non-bone piece taken for the second bone (a patella or
+fragment at least a quarter of the largest piece) or for the reference object, and the cases above that stop.
 
 A wrong frame makes everything after it stale: orientation is its own task, and a corrected frame reruns the rest.
 
