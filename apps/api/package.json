@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
+    "db:migrate": "node --import tsx src/migrate.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
@@ -16,12 +16,12 @@
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.14",
     "postgres": "catalog:",
+    "tsx": "^4.23.15",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",
     "drizzle-kit": "^0.31.11",
-    "tsx": "^4.23.15",
     "typescript": "catalog:"
   }
 }

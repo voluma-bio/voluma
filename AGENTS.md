@@ -26,6 +26,9 @@ reasons behind the setup: [.context/CONTEXT.md](.context/CONTEXT.md).
 
 An agent that starts sandboxes runs `pnpm --filter @voluma/runner sandboxes:clean --run <id>` for each of its runs before it finishes (without `--run` it ends every agent's sandboxes).
 
+Merging to `main` deploys the API (which serves the web app) to Railway staging; see
+[apps/api/.context/deploy.md](apps/api/.context/deploy.md).
+
 Pre-commit runs Biome on staged files. Nothing runs on push. Use pnpm, never npm.
 
 ## Ownership

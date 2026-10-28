@@ -87,7 +87,7 @@ checklist, check threads, and review chat threads.
   publish after commit and treat a gap as "backfill". `pi_messages.message` is `text`
   because `jsonb` would reorder keys and break byte-for-byte history. Migrations are
   generated Drizzle `.sql` files in `apps/api/drizzle/`, run from one place
-  (`pnpm db:migrate` locally, the deploy's pre-deploy step later), never at server start
+  (`apps/api/src/migrate.ts`: `pnpm db:migrate` locally, Railway's pre-deploy step in production), never at server start
   because `migrate()` takes no lock and never with `push`.
 - **Where the runner lives.** For now it's a Node process (`apps/runner`)
   that talks to the API. Whether it moves into a Durable Object per run is
@@ -95,6 +95,12 @@ checklist, check threads, and review chat threads.
 
 The design, the evidence behind it and the order of work are in the
 voluma-bio/docs work item `mvp-contracts-and-data` (`design/harness-v0.md`).
+
+## Deployment
+
+Staging is one Railway service, `@voluma/api`, plus Railway Postgres: the API serves the
+built web app and `/api/*`, and a merge to `main` deploys it. Setup, variables, secret
+rotation: [apps/api/.context/deploy.md](../apps/api/.context/deploy.md).
 
 ## Packages export source
 
