@@ -1,11 +1,7 @@
 [
   {
     "case": "base",
-    "dimensions": [
-      75,
-      76,
-      128
-    ],
+    "dimensions": [75, 76, 128],
     "dirtyBeforeRender": 0,
     "frames": [
       {
@@ -21,11 +17,7 @@
   },
   {
     "case": "invalidate",
-    "dimensions": [
-      75,
-      76,
-      128
-    ],
+    "dimensions": [75, 76, 128],
     "dirtyBeforeRender": 128,
     "frames": [
       {
@@ -41,11 +33,7 @@
   },
   {
     "case": "base",
-    "dimensions": [
-      75,
-      76,
-      128
-    ],
+    "dimensions": [75, 76, 128],
     "dirtyBeforeRender": 0,
     "frames": [
       {
@@ -61,11 +49,7 @@
   },
   {
     "case": "invalidate",
-    "dimensions": [
-      75,
-      76,
-      128
-    ],
+    "dimensions": [75, 76, 128],
     "dirtyBeforeRender": 128,
     "frames": [
       {
@@ -81,11 +65,7 @@
   },
   {
     "case": "invalidate",
-    "dimensions": [
-      75,
-      76,
-      128
-    ],
+    "dimensions": [75, 76, 128],
     "dirtyBeforeRender": 128,
     "frames": [
       {
@@ -101,11 +81,7 @@
   },
   {
     "case": "source-fix-128",
-    "dimensions": [
-      75,
-      76,
-      128
-    ],
+    "dimensions": [75, 76, 128],
     "dirtyBeforeRender": 128,
     "frames": [
       {
@@ -121,11 +97,7 @@
   },
   {
     "case": "source-fix-256",
-    "dimensions": [
-      151,
-      152,
-      256
-    ],
+    "dimensions": [151, 152, 256],
     "dirtyBeforeRender": 256,
     "frames": [
       {
@@ -141,11 +113,7 @@
   },
   {
     "case": "source-fix-full",
-    "dimensions": [
-      517,
-      520,
-      877
-    ],
+    "dimensions": [517, 520, 877],
     "dirtyBeforeRender": 877,
     "frames": [
       {
