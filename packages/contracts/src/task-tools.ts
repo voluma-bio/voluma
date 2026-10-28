@@ -120,6 +120,7 @@
 import { z } from "zod";
 import { taskIdSchema } from "./ids";
 import { fileRefInputSchema, outputReportInputSchema } from "./output";
+import { focusSchema } from "./review";
 
 const nonEmpty = z.string().min(1);
 
@@ -152,7 +153,14 @@ export const checkpointInputSchema = z.object({
     .optional()
     .describe("Check threads only: your verdict on the task. Put it on one line."),
   toCheck: z
-    .object({ title: nonEmpty.describe("What the reviewer should look at, in a few words.") })
+    .object({
+      title: nonEmpty.describe("What the reviewer should look at, in a few words."),
+      focus: focusSchema
+        .optional()
+        .describe(
+          "What to outline for the reviewer; absent means the whole task. Ids are output ids (`taskId/outputId`, or this task's `outputId`); `volumeId` is a labels volume output, `label` one region of it. `box` and `point` are voxel indices [z, y, x] on the scan's grid.",
+        ),
+    })
     .optional()
     .describe("Set when you are unsure of something; `text` explains it. The run doesn't stop."),
 });

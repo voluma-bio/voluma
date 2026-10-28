@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { fold } from "./fold";
 import { expectParses, log, need, rev, SHA, SUP, twoDone, W } from "./fold-test-log";
 import type { Output } from "./output";
+import type { Focus } from "./review";
 import type { WorkflowPlan } from "./workflow";
 
 describe("fold outputs", () => {
@@ -330,5 +331,115 @@ describe("fold outputs", () => {
     expect(r2.structures[0]?.voxels).toBeNull();
     expect(r2.annotations.map((a) => a.volumeId)).toEqual(["seg/labels", null]);
     expectParses(f);
+  });
+  describe("To check focus", () => {
+    const focused = { structureIds: ["seg/femur", "gone"], annotationIds: ["a"] };
+    /** Task seg reports a labels volume and a structure; task m, a landmark and a To check item carrying `focus`. */
+    function raised(focus: Focus, redo?: (l: ReturnType<typeof log>) => void) {
+      const l = log();
+      l.run();
+      l.open("s:1:open", W, "seg");
+      l.output("s:2", W, "seg", "s:1:open", "labels", labelsVolume(5));
+      l.output("s:3", W, "seg", "s:1:open", "femur", structure("labels"));
+      l.status("s:4", W, "seg", "s:1:open", "done");
+      l.open("m:1:open", W, "m");
+      l.output("m:2", W, "m", "m:1:open", "a", {
+        kind: "annotation",
+        annotation: { kind: "point", position: [1, 1, 1] },
+      });
+      l.checkpoint("m:3", W, "m", "m:1:open", { toCheck: { title: "Femur edge", focus } });
+      l.status("m:4", W, "m", "m:1:open", "done");
+      if (redo) {
+        l.revision("sup:1:revision", SUP, { reason: "correction", taskId: "seg" });
+        l.status("sup:1", SUP, "seg", "s:1:open", "stale");
+        l.open("s:5:open", W, "seg");
+        redo(l);
+      }
+      return fold(l.events);
+    }
+    const checks = (f: ReturnType<typeof fold>, n: number) => need(rev(f, n).tasks, "m").checks;
+
+    it("ids resolve across tasks, a same-task id too; one that doesn't is dropped", () => {
+      const f = raised(focused);
+      expect(checks(f, 0)).toMatchObject([
+        { focus: { structureIds: ["seg/femur"], annotationIds: ["m/a"] } },
+      ]);
+      expectParses(f);
+    });
+
+    it("a redo of the other task drops what it no longer reports", () => {
+      const f = raised(focused, (l) =>
+        l.output("s:6", W, "seg", "s:5:open", "labels", labelsVolume(6)),
+      );
+      expect(checks(f, 0)[0]?.focus?.structureIds).toEqual(["seg/femur"]);
+      expect(checks(f, 1)[0]?.focus).toEqual({ structureIds: [], annotationIds: ["m/a"] });
+      expectParses(f);
+    });
+
+    it("a region of a labels volume, a box and a point are kept; a focus left empty is absent", () => {
+      const region: Focus = {
+        structureIds: [],
+        annotationIds: [],
+        volumeId: "seg/labels",
+        label: 2,
+        box: { min: [0, 0, 0], max: [1, 1, 1] },
+        point: [1, 0, 1],
+      };
+      const f = raised(region, (l) =>
+        l.output("s:6", W, "seg", "s:5:open", "labels", imageVolume(6)),
+      );
+      expect(checks(f, 0)[0]?.focus).toEqual(region);
+      // Redone as an image volume: no longer a labels volume, so the region goes, the box and point stay.
+      expect(checks(f, 1)[0]?.focus).toEqual({
+        structureIds: [],
+        annotationIds: [],
+        box: region.box,
+        point: region.point,
+      });
+      expectParses(f);
+      const gone = raised({
+        structureIds: ["nope"],
+        annotationIds: [],
+        volumeId: "nope",
+        label: 1,
+      });
+      expect(checks(gone, 0)[0]?.focus).toBeUndefined();
+      expectParses(gone);
+    });
+
+    it("a fix item focuses on what the fix changed; a flag has none", () => {
+      const l = oneOfEach();
+      l.status("w:8", W, "seg", "w:1:open", "done");
+      l.thread("chk", "check", "w:1:open");
+      l.status("chk:start", "chk", "seg", "w:1:open", "under-review", l.rule("check-start"));
+      l.revision("chk:2:revision", "chk", { reason: "fix", taskId: "seg" });
+      l.output("chk:2", "chk", "seg", "w:1:open", "femur", structure("labels", { volumeMm3: 9 }), {
+        title: "Femur",
+      });
+      l.measurement("chk:3", "chk", "seg", "w:1:open", "width", 3.1, {
+        structureIds: ["femur"],
+        annotationIds: ["landmark"],
+      });
+      l.status("flag", W, "seg", "w:1:open", "to-check");
+      const f = fold(l.events);
+      const items = need(f, "seg").checks;
+      expect(items.find((c) => c.title === "Changed by the second agent")?.focus).toEqual({
+        structureIds: ["seg/femur"],
+        annotationIds: ["seg/landmark"],
+      });
+      expect(items.find((c) => c.title === "Marked to check")?.focus).toBeUndefined();
+      expectParses(f);
+    });
+
+    it("a fix that changed nothing with a structure or annotation has no focus", () => {
+      const l = oneOfEach();
+      l.status("w:8", W, "seg", "w:1:open", "done");
+      l.thread("chk", "check", "w:1:open");
+      l.revision("chk:2:revision", "chk", { reason: "fix", taskId: "seg" });
+      l.output("chk:2", "chk", "seg", "w:1:open", "labels", labelsVolume(9));
+      const f = fold(l.events);
+      expect(need(f, "seg").checks[0]?.focus).toBeUndefined();
+      expectParses(f);
+    });
   });
 });

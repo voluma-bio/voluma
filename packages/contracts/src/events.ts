@@ -18,6 +18,7 @@
 import { z } from "zod";
 import { runIdSchema, taskIdSchema, taskStatusSchema, toolCallIdSchema } from "./ids";
 import { evidenceRefSchema, outputReportSchema } from "./output";
+import { focusSchema } from "./review";
 import { workflowPinSchema, workflowPlanSchema } from "./workflow";
 
 const nonEmpty = z.string().min(1);
@@ -212,8 +213,8 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
       evidence: z.array(evidenceRefSchema),
       /** The check thread's verdict line; only check threads may set it. */
       verdict: z.enum(["passed", "needs-review"]).optional(),
-      /** Raises a To check item: `text` is its detail. */
-      toCheck: z.object({ title: nonEmpty }).optional(),
+      /** Raises a To check item: `text` is its detail; the fold resolves `focus` ids (`fold.ts`). */
+      toCheck: z.object({ title: nonEmpty, focus: focusSchema.optional() }).optional(),
     }),
   );
 

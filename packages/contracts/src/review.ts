@@ -264,6 +264,34 @@ export const scoreSchema = z.object({
 });
 export type Score = z.infer<typeof scoreSchema>;
 
+const voxel = z.tuple([z.int().min(0), z.int().min(0), z.int().min(0)]);
+
+/**
+ * What a To check item points at, so the review can outline it. Absent on an
+ * item means the whole task. All coordinates are voxel indices on the scan's
+ * grid, in [z, y, x] order, never world mm. `volumeId` is a labels volume (a
+ * disagreement mask); `label` picks one region in it, so it needs `volumeId`.
+ * `box` is inclusive; `point` is where the crosshair centres.
+ */
+export const focusSchema = z
+  .object({
+    structureIds: z.array(z.string()),
+    annotationIds: z.array(z.string()),
+    volumeId: z.string().optional(),
+    label: z.int().min(1).optional(),
+    box: z.object({ min: voxel, max: voxel }).optional(),
+    point: voxel.optional(),
+  })
+  .refine((f) => f.label === undefined || f.volumeId !== undefined, {
+    path: ["label"],
+    message: "label needs volumeId",
+  })
+  .refine((f) => !f.box || f.box.min.every((lo, i) => lo <= (f.box?.max[i] ?? lo)), {
+    path: ["box"],
+    message: "box.min must not exceed box.max on any axis",
+  });
+export type Focus = z.infer<typeof focusSchema>;
+
 export const taskSchema = z.object({
   /** The r2 task segment (`outputKey`). */
   id: taskIdSchema,
@@ -307,6 +335,7 @@ export const taskSchema = z.object({
       title: z.string(),
       detail: z.string(),
       status: z.enum(["open", "accepted"]),
+      focus: focusSchema.optional(),
     }),
   ),
   evidence: z.array(assetSchema),
@@ -395,6 +424,20 @@ export const revisionSchema = z
         needAll(structures, sc.structureIds, [...at, "structureIds"], "structure");
         needAll(annotations, sc.annotationIds, [...at, "annotationIds"], "annotation");
         needAll(own, sc.evidenceIds, [...at, "evidenceIds"], "evidence in this task");
+      });
+      t.checks.forEach((c, ci) => {
+        const f = c.focus;
+        if (!f) return;
+        const at = [...task, "checks", ci, "focus"];
+        needAll(structures, f.structureIds, [...at, "structureIds"], "structure");
+        needAll(annotations, f.annotationIds, [...at, "annotationIds"], "annotation");
+        needAll(volumes, [f.volumeId], [...at, "volumeId"], "volume");
+        if (
+          f.volumeId !== undefined &&
+          kindOf.has(f.volumeId) &&
+          kindOf.get(f.volumeId) !== "labels"
+        )
+          bad([...at, "volumeId"], `volume "${f.volumeId}" is not a labels volume`);
       });
       t.measurements.forEach((m, mi) => {
         const at = [...task, "measurements", mi];

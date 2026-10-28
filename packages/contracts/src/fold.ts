@@ -40,6 +40,11 @@
  *   `check-result` sets and a later `in-progress`, `done`, `stale` or `failed`
  *   clears (`under-review` and `check-result` leave it), its id that event's;
  *   and "Changed by the second agent" for each fix revision on the attempt.
+ *   A `toCheck` may carry a `focus`: its ids go through the reference resolver
+ *   and are dropped if they don't resolve (a `label` goes with its `volumeId`);
+ *   one left pointing at nothing is absent. A fix's focus is the structures and
+ *   annotations of the outputs it changed (those outputs, and what a changed
+ *   measurement or score cites); "Marked to check" has none.
  *   `checkResult` turns a folded task into the status `check-result` gives.
  * - Not from these events (the API adds them): `title`, `ask`, `dependsOn`,
  *   `structureIds`, `threads.chat`, revision labels, the scan's volume; the API
@@ -52,6 +57,7 @@ import { evidenceKey } from "./r2";
 import type {
   Annotation,
   Asset,
+  Focus,
   Measurement,
   ReviewTask,
   Score,
@@ -161,7 +167,8 @@ type Attempt = {
   resultRevisionId: string;
   milestones: Milestone[];
   toChecks: Check[];
-  fixes: string[];
+  /** Fix revision id → ids of the outputs it changed. */
+  fixes: Map<string, Set<string>>;
   checker: ReviewTask["checker"];
   outputs: Map<string, OutputEvent>;
   evidence: Map<string, Asset>;
@@ -206,6 +213,44 @@ export function fold(events: readonly RunEvent[]): Folded {
     };
     const refs = (a: Attempt, ids: string[], kind: RefKind) =>
       ids.flatMap((id) => ref(a, id, kind) ?? []);
+    // Ids that resolve stay; `label` goes with a `volumeId` that doesn't. A focus
+    // left pointing at nothing is absent: the whole task.
+    const resolveFocus = (a: Attempt, f: Focus): Focus | undefined => {
+      const volumeId = ref(a, f.volumeId, "volume:labels");
+      const { volumeId: _v, label, ...rest } = f;
+      const resolved = {
+        ...rest,
+        structureIds: refs(a, f.structureIds, "structure"),
+        annotationIds: refs(a, f.annotationIds, "annotation"),
+        ...(volumeId !== undefined && { volumeId, ...(label !== undefined && { label }) }),
+      };
+      const points =
+        resolved.structureIds.length + resolved.annotationIds.length > 0 ||
+        volumeId !== undefined ||
+        resolved.box ||
+        resolved.point;
+      return points ? resolved : undefined;
+    };
+    // A fix points at the structures and annotations of the outputs it changed:
+    // those outputs themselves and what a changed measurement or score cites.
+    const fixFocus = (a: Attempt, changed: Set<string>): Focus | undefined => {
+      const structureIds = new Set<string>();
+      const annotationIds = new Set<string>();
+      for (const outputId of changed) {
+        const o = a.outputs.get(outputId)?.payload.output;
+        if (!o) continue;
+        const own = `${a.taskId}/${outputId}`;
+        if (kinds.get(own) === "structure") structureIds.add(own);
+        if (kinds.get(own) === "annotation") annotationIds.add(own);
+        if (o.kind === "measurement" || o.kind === "score") {
+          for (const id of refs(a, o.structureIds, "structure")) structureIds.add(id);
+          for (const id of refs(a, o.annotationIds, "annotation")) annotationIds.add(id);
+        }
+      }
+      return structureIds.size + annotationIds.size === 0
+        ? undefined
+        : { structureIds: [...structureIds], annotationIds: [...annotationIds] };
+    };
     const volumes: Volume[] = [];
     const structures: Structure[] = [];
     const annotations: FoldedAnnotation[] = [];
@@ -340,7 +385,10 @@ export function fold(events: readonly RunEvent[]): Folded {
         d.kind === "structure" ? [] : [{ outputId: d.id, kind: d.kind, required: d.required }],
       );
       const missingRequired = unreported.filter((d) => d.required).map((d) => d.id);
-      const checks: Check[] = a.toChecks.map((c) => ({ ...c }));
+      const checks: Check[] = a.toChecks.map(({ focus, ...c }) => {
+        const f = focus && resolveFocus(a, focus);
+        return { ...c, ...(f && { focus: f }) };
+      });
       if (a.flag)
         checks.push({
           id: a.flag.id,
@@ -348,13 +396,16 @@ export function fold(events: readonly RunEvent[]): Folded {
           detail: a.flag.reason,
           status: "open",
         });
-      for (const id of a.fixes)
+      for (const [id, changed] of a.fixes) {
+        const focus = fixFocus(a, changed);
         checks.push({
           id,
           title: "Changed by the second agent",
           detail: "The check changed this result. Its checkpoints say what and why.",
           status: "open",
+          ...(focus && { focus }),
         });
+      }
       return {
         id: a.taskId,
         attemptId: a.id,
@@ -398,7 +449,7 @@ export function fold(events: readonly RunEvent[]): Folded {
           p.reason === "run"
             ? { id: e.id, createdAt: e.createdAt, reason: p.reason }
             : { id: e.id, createdAt: e.createdAt, reason: p.reason, taskId: p.taskId };
-        if (p.reason === "fix") current.get(p.taskId)?.fixes.push(e.id);
+        if (p.reason === "fix") current.get(p.taskId)?.fixes.set(e.id, new Set());
         break;
       }
       case "attempt.opened": {
@@ -413,7 +464,7 @@ export function fold(events: readonly RunEvent[]): Folded {
           resultRevisionId: revisionId,
           milestones: [],
           toChecks: [],
-          fixes: [],
+          fixes: new Map(),
           checker: null,
           outputs: new Map(),
           evidence: new Map(),
@@ -448,7 +499,13 @@ export function fold(events: readonly RunEvent[]): Folded {
         });
         if (byCheck && verdict) a.checker = { verdict, text };
         if (toCheck)
-          a.toChecks.push({ id: e.id, title: toCheck.title, detail: text, status: "open" });
+          a.toChecks.push({
+            id: e.id,
+            title: toCheck.title,
+            detail: text,
+            status: "open",
+            ...(toCheck.focus && { focus: toCheck.focus }),
+          });
         a.resultRevisionId = revisionId;
         break;
       }
@@ -457,6 +514,7 @@ export function fold(events: readonly RunEvent[]): Folded {
         if (!a) break;
         addEvidence(a, e.runId, e.payload.evidence);
         a.outputs.set(e.payload.outputId, e);
+        a.fixes.get(revisionId)?.add(e.payload.outputId);
         a.resultRevisionId = revisionId;
         break;
       }
