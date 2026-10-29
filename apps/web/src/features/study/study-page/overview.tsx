@@ -128,8 +128,9 @@ function MeasureCard({
   const grouped = detail.scans.some((s) => s.scan.group !== null);
   const groups = groupNames(detail).map((group) => ({
     name: group,
+    // A scan whose run failed or stopped has no value coming, so it isn't counted "to come".
     points: detail.scans
-      .filter((s) => groupOf(s, grouped) === group)
+      .filter((s) => groupOf(s, grouped) === group && (s.resultRunId !== null || !hasEnded(s)))
       .map((s) => {
         const f = far.get(s.scan.inputId);
         return {
@@ -161,6 +162,8 @@ function MeasureCard({
     </div>
   );
 }
+
+const hasEnded = (scan: StudyScanDetail) => scan.runs[0]?.state.status === "ended";
 
 /** Who a far scan is compared with: its group's other scans. */
 const others = (scan: StudyScanDetail) =>

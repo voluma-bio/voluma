@@ -64,11 +64,19 @@ export function studyCounts(detail: StudyDetail): StudyCounts {
   };
 }
 
-/** What the model spent on every run so far: the gateway's settled calls, else the heartbeats' sum. */
+/**
+ * What every run of the study has spent so far: the gateway's settled calls when it recorded any
+ * (runs before the gateway have none), else the sum the runner's heartbeats reported.
+ */
 export const studySpend = (detail: StudyDetail) =>
   detail.scans
     .flatMap((s) => s.runs)
-    .reduce((usd, run) => usd + (run.providerCalls?.costUsd ?? run.usage?.modelCostUsd ?? 0), 0);
+    .reduce(
+      (usd, run) =>
+        usd +
+        (run.providerCalls?.calls ? run.providerCalls.costUsd : (run.usage?.modelCostUsd ?? 0)),
+      0,
+    );
 
 /** The row a scan sits on: its group, or one shared row when no scan of the study has one. */
 export const NO_GROUP = "No group";

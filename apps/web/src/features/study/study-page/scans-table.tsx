@@ -27,11 +27,12 @@ export function ScansTable({
     return {
       key: output.id,
       align: "end",
+      // Long names wrap in a fixed width so the column stays narrow on a phone.
       header: (
-        <>
+        <span className="inline-block w-40 whitespace-normal">
           {output.name}
           {unit && <span className="whitespace-nowrap">, {unit}</span>}
-        </>
+        </span>
       ),
       cell: (s) => {
         const value = scanValue(s, output.id);
@@ -87,7 +88,7 @@ export function ScansTable({
         const path = runPath(s);
         if (path) navigate(path);
       }}
-      className="[&_td]:align-middle [&_th]:align-bottom"
+      className="[&_td]:align-middle [&_td]:whitespace-nowrap [&_th]:align-bottom [&_th]:whitespace-nowrap"
     />
   );
 }
@@ -101,23 +102,25 @@ function ScanStatusCell({ detail, scan }: { detail: StudyDetail; scan: StudyScan
   const { label, tone } = scanStatus(scan);
   if (scan.runs.length > 0) return <StatusBadge tone={tone}>{label}</StatusBadge>;
   return (
-    <span className="flex flex-wrap items-center gap-2">
-      <StatusBadge tone={tone}>{label}</StatusBadge>
-      <Button
-        size="sm"
-        className="-my-1 h-7 px-2.5"
-        disabled={start.isPending || start.isSuccess || detail.study.example}
-        onClick={(event) => {
-          // The row opens the run; this cell's button starts one.
-          event.stopPropagation();
-          start.mutate();
-        }}
-        onKeyDown={(event) => event.stopPropagation()}
-      >
-        {start.isPending || start.isSuccess ? "Starting…" : "Start"}
-      </Button>
+    <span className="grid gap-1">
+      <span className="flex items-center gap-2">
+        <StatusBadge tone={tone}>{label}</StatusBadge>
+        <Button
+          size="sm"
+          className="-my-1 h-7 px-2.5"
+          disabled={start.isPending || start.isSuccess || detail.study.example}
+          onClick={(event) => {
+            // The row opens the run; this cell's button starts one.
+            event.stopPropagation();
+            start.mutate();
+          }}
+          onKeyDown={(event) => event.stopPropagation()}
+        >
+          {start.isPending || start.isSuccess ? "Starting…" : "Start"}
+        </Button>
+      </span>
       {start.isError && (
-        <span role="alert" className="basis-full text-meta text-destructive">
+        <span role="alert" className="text-meta whitespace-normal text-destructive">
           {startError(start.error)}
         </span>
       )}
