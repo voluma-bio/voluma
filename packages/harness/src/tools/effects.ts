@@ -14,6 +14,10 @@ const SUFFIX = {
   start_worker: ":start_worker",
   message: ":message:open",
   stop_worker: ":stop_worker:end",
+  /** The task going back to pending when a stopped worker was working on it. */
+  stop_status: ":stop_worker",
+  /** The attempt a worker's or main's own write opens. */
+  open: ":open",
   answer: ":answer",
   accept: ":accept",
   change_plan: ":change_plan",
@@ -95,7 +99,9 @@ export function interruptedResult(
     return `\`${tool}\` completed before the run was cut off.${what}`;
   }
   if (tool !== "message") return undefined;
-  const call = events.find((e) => e.type === "tool.call" && e.payload.toolCallId === toolCallId);
+  const call = events.find(
+    (e) => e.type === "tool.call" && e.threadId === threadId && e.payload.toolCallId === toolCallId,
+  );
   const input =
     call?.type === "tool.call"
       ? (call.payload.input as { threadId?: string; text?: string })

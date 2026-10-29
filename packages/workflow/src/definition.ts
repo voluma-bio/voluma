@@ -29,7 +29,7 @@ export interface AgentDefinition {
   model: string;
   /** Every tool the role holds, base tools included (names in the harness's tool registry). */
   tools: string[];
-  /** The roles this role may start; each exists. */
+  /** The roles this role may start; each exists. `start_worker` starts `worker`, so a role holding it lists it. */
   subagents: string[];
   /** The skills named in the role's prompt: names of the workflow's `skills`, its own first. */
   skills: string[];

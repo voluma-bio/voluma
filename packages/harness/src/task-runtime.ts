@@ -31,6 +31,7 @@ import { declarationProblem, placementProblem, referenceProblem } from "./output
 import type { Evidence } from "./ports/evidence";
 import type { PayloadOf, Recorder } from "./recorder";
 import { startedFor, threadLog } from "./thread-log";
+import { effectId } from "./tools/effects";
 
 /** A check thread may ask the main agent this many questions. */
 export const MAX_ASKS = 3;
@@ -174,31 +175,30 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     by: By,
   ) => recorder.append(threadId, "task", { taskId, attemptId, status, reason, by }, id);
 
-  const attempted = (taskId: string) =>
-    transitiveDependents(planNow(), taskId).filter((dep) => {
-      const t = taskOf(dep);
-      return t?.attemptId && t.status !== "stale";
-    });
+  /** Whether a dependent has a result a correction of what it builds on would invalidate. */
+  const attempted = (dep: string) => {
+    const t = taskOf(dep);
+    return !!t?.attemptId && t.status !== "stale";
+  };
 
   /**
    * The one way an attempt opens: `attempt.opened` under `holderThreadId`, id `eventId`. A task
-   * that already had a result and has dependents with an attempt first starts a correction
-   * revision and marks them stale (stopping their live threads). Call inside `section`.
+   * that already had a result stops the live threads of every dependent (they may have read
+   * its old files); if a dependent has an attempt, a correction revision first marks it stale.
+   * Call inside `section`.
    */
   async function openAttempt(taskId: string, holderThreadId: string, eventId: string) {
-    if (taskOf(taskId)?.attemptId && attempted(taskId).length > 0) {
-      await recorder.append(
-        holderThreadId,
-        "revision.started",
-        { reason: "correction", taskId },
-        `${eventId}:revision`,
-      );
-      await staleDependents(
-        holderThreadId,
-        eventId,
-        taskId,
-        `${taskId} was corrected, so this result may no longer hold.`,
-      );
+    if (taskOf(taskId)?.attemptId) {
+      const dependents = transitiveDependents(planNow(), taskId);
+      if (dependents.some(attempted)) {
+        await recorder.append(
+          holderThreadId,
+          "revision.started",
+          { reason: "correction", taskId },
+          `${eventId}:revision`,
+        );
+      }
+      await staleDependents(holderThreadId, eventId, taskId, dependents);
     }
     await recorder.append(holderThreadId, "attempt.opened", { taskId }, eventId);
     return eventId;
@@ -207,12 +207,18 @@ export function taskRuntime(options: TaskRuntimeOptions) {
   /**
    * Stores the thread's end as cancelled, then aborts it without waiting: it is stopped from
    * this moment, and its own later end is dropped. A thread already stopped is left alone.
-   * Call inside `section`; `eventId` derives from what stops it.
+   * Call inside `section`; `eventId` derives from what stops it. A `reason` is a stop the main
+   * agent did not ask for and must be told of.
    */
-  async function stop(threadId: string, eventId: string) {
+  async function stop(threadId: string, eventId: string, reason?: string) {
     const record = threadLog(recorder.events()).threads.get(threadId);
     if (record && record.end?.status !== "cancelled") {
-      await recorder.append(threadId, "thread.ended", { status: "cancelled" }, eventId);
+      await recorder.append(
+        threadId,
+        "thread.ended",
+        { status: "cancelled", ...(reason && { summary: reason }) },
+        eventId,
+      );
     }
     abortThread(threadId);
   }
@@ -295,7 +301,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
       );
     }
     return {
-      attempt: () => openAttempt(taskId, c.threadId, `${c.threadId}:${c.toolCallId}:open`),
+      attempt: () => openAttempt(taskId, c.threadId, effectId("open", c.threadId, c.toolCallId)),
       fresh: true,
     };
   }
@@ -315,28 +321,45 @@ export function taskRuntime(options: TaskRuntimeOptions) {
   }
 
   /**
-   * Stale marks on each transitive dependent that has an attempt and isn't stale yet. Its live
-   * threads are stopped first, append-first, whatever the task's status: a worker (idle ones too,
-   * which would otherwise block `start_worker` on the stale task) must not redo the task ahead of
-   * what it builds on, and a check has no result to write.
+   * The correction of `taskId` reaches each of its dependents: its live threads are stopped
+   * first, append-first, whatever the task's status and whether or not it has an attempt (a
+   * worker may have read the old files; idle ones too, which would otherwise block
+   * `start_worker` on the stale task; a check has no result to write). A dependent with an
+   * attempt that isn't stale yet is then marked stale, and that mark tells the main agent; the
+   * stop of a dependent without one says why itself.
    */
-  async function staleDependents(threadId: string, prefix: string, taskId: string, why: string) {
-    const marked: string[] = [];
-    for (const dep of attempted(taskId)) {
+  async function staleDependents(
+    threadId: string,
+    prefix: string,
+    taskId: string,
+    dependents: readonly string[],
+  ) {
+    for (const dep of dependents) {
       const t = taskOf(dep);
-      if (!t?.attemptId) continue;
+      const mark = attempted(dep);
       const log = threadLog(recorder.events());
       const holders = [...startedFor(log, dep, "worker"), ...startedFor(log, dep, "check")];
       for (const h of holders) {
-        if (h.end?.status !== "cancelled") await stop(h.id, `${prefix}:stale:${dep}:end:${h.id}`);
+        if (h.end?.status !== "cancelled") {
+          await stop(
+            h.id,
+            `${prefix}:stale:${dep}:end:${h.id}`,
+            mark ? undefined : `${taskId} was corrected, so it may have read files that changed.`,
+          );
+        }
       }
-      await setStatus(threadId, `${prefix}:stale:${dep}`, dep, t.attemptId, "stale", why, {
-        kind: "rule",
-        rule: "stale",
-      });
-      marked.push(dep);
+      if (mark && t?.attemptId) {
+        await setStatus(
+          threadId,
+          `${prefix}:stale:${dep}`,
+          dep,
+          t.attemptId,
+          "stale",
+          `${taskId} was corrected, so this result may no longer hold.`,
+          { kind: "rule", rule: "stale" },
+        );
+      }
     }
-    return marked;
   }
 
   /** Keeps a file the calling thread named, if its own layout lets it read that path. */
@@ -367,7 +390,6 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     cites,
     section,
     setStatus,
-    staleDependents,
     openAttempt,
     stop,
     keep,
@@ -408,7 +430,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
             `${taskId} cannot be submitted: required outputs not reported: ${missing.join(", ")}. Report them with report_output, or report them missing with the reason.`,
           );
         }
-        const id = `${c.threadId}:${c.toolCallId}`;
+        const id = effectId("submit_task", c.threadId, c.toolCallId);
         await setStatus(
           c.threadId,
           id,
@@ -431,7 +453,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
         if (asked >= MAX_ASKS) {
           throw new Refusal(`You have asked ${MAX_ASKS} questions; give your verdict now.`);
         }
-        const id = `${c.threadId}:${c.toolCallId}:ask`;
+        const id = effectId("ask", c.threadId, c.toolCallId);
         await recorder.append(c.threadId, "ask", { question: input.question }, id);
         return done("Question sent. Your turn ends here; the answer resumes you.", id);
       }),
@@ -446,7 +468,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
           }),
         () => Promise.all(input.evidence.map((f) => keep(c, taskId, f))),
         async (target, refs) => {
-          const id = `${c.threadId}:${c.toolCallId}`;
+          const id = effectId("checkpoint", c.threadId, c.toolCallId);
           await recorder.append(
             c.threadId,
             "checkpoint",
@@ -492,7 +514,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
       });
       return write(target, prepare, async (t, prepared) => {
         const attemptId = await t.attempt();
-        const id = `${c.threadId}:${c.toolCallId}`;
+        const id = effectId("report_output", c.threadId, c.toolCallId);
         await recorder.append(
           c.threadId,
           "output",

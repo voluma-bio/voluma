@@ -25,7 +25,14 @@ import { checkResult, type Folded, type FoldedTask, fold } from "@voluma/contrac
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { UserSender } from "./adapters/pi/start-thread";
 import type { RunLayout, ThreadLayout } from "./layout";
-import { agentsList, changedTasks, noticeLine, stateBlock, taskRows, taskTable } from "./main-view";
+import {
+  agentsList,
+  changedTasks,
+  noticeLine,
+  stateBlock,
+  taskTable,
+  unfinished,
+} from "./main-view";
 import type { Recorder } from "./recorder";
 import type { PlanTask, TaskRuntime } from "./task-runtime";
 import { mainThreadId, threadId } from "./thread-id";
@@ -178,12 +185,16 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
 
   /** The brief the main agent gave a worker, read back from its `start_worker` call. */
   function workerBrief(events: readonly RunEvent[], r: ThreadRecord): string {
-    const spawnedBy = events.find(
+    const spawned = events.find(
       (e) => e.type === "thread.started" && e.threadId === r.id && e.payload.spawnedBy,
     );
-    const toolCallId =
-      spawnedBy?.type === "thread.started" ? spawnedBy.payload.spawnedBy : undefined;
-    const call = events.find((e) => e.type === "tool.call" && e.payload.toolCallId === toolCallId);
+    if (spawned?.type !== "thread.started") return "";
+    const call = events.find(
+      (e) =>
+        e.type === "tool.call" &&
+        e.threadId === spawned.payload.parentThreadId &&
+        e.payload.toolCallId === spawned.payload.spawnedBy,
+    );
     const input =
       call?.type === "tool.call" ? (call.payload.input as { brief?: string }) : undefined;
     return input?.brief ?? "";
@@ -246,20 +257,13 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     } satisfies ThreadSpec;
   }
 
-  /** Runs the thread; the loop steps again when it settles and its end is stored. */
-  function begin(spec: ThreadSpec) {
-    threads.start(spec);
-    void threads
-      .idle(spec.threadId)
-      .then(() => recorder.flush())
-      .then(nudge, nudge);
-  }
-
   /**
-   * Starts a thread that has no history: its `thread.started` is stored first (id given), so
-   * the log counts it at once and its id is never reused; the thread's own emit is a no-op.
+   * Starts or resumes a thread. Its `thread.started` is stored first (id given), so the log
+   * counts it at once, a stop's `cancelled` lands after it, and a new thread's id is never
+   * reused; the thread's own emit is a no-op. The loop steps again when the thread settles and
+   * its end is stored. Call inside `section`: a stop cannot come between the append and the start.
    */
-  async function startNew(spec: ThreadSpec, startedEventId: string, spawnedBy?: string) {
+  async function begin(spec: ThreadSpec, startedEventId: string, spawnedBy?: string) {
     await recorder.append(
       spec.threadId,
       "thread.started",
@@ -273,16 +277,21 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       },
       startedEventId,
     );
-    begin({ ...spec, startedEventId, ...(spawnedBy && { spawnedBy }) });
+    threads.start({ ...spec, startedEventId, ...(spawnedBy && { spawnedBy }) });
+    void threads
+      .idle(spec.threadId)
+      .then(() => recorder.flush())
+      .then(nudge, nudge);
   }
 
-  /** Resumes a thread that is not running, from its History, with a message. */
-  function resume(r: ThreadRecord, text: string, sender: UserSender) {
+  /** Resumes a thread that is not running, from its History, with a message. Never a stopped one. */
+  async function resume(r: ThreadRecord, text: string, sender: UserSender) {
+    if (stateOf(r) === "stopped") throw new Error(`${r.id} was stopped and is never resumed`);
     const spec =
       r.role === "main"
         ? specFor({ id: r.id, kind: "main" })
         : specFor({ id: r.id, kind: r.role, taskId: r.taskId });
-    begin({ ...spec, input: { text, sender } });
+    await begin({ ...spec, input: { text, sender } }, `${r.id}:started:${r.starts + 1}`);
   }
 
   /** The next id of a task's thread; an id this process found unresumable is used up. */
@@ -300,12 +309,12 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
 
   const startMain = (d: ThreadLog) => {
     const id = nextMainId(d);
-    return startNew(specFor({ id, kind: "main" }), `${id}:started`);
+    return begin(specFor({ id, kind: "main" }), `${id}:started`);
   };
 
   const startCheck = (d: ThreadLog, taskId: string) => {
     const id = nextId(d, taskId, "check");
-    return startNew(specFor({ id, kind: "check", taskId }), `${id}:started`);
+    return begin(specFor({ id, kind: "check", taskId }), `${id}:started`);
   };
 
   const agents: Agents = {
@@ -321,7 +330,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     }) => {
       const spec = specFor({ id, kind: "worker", taskId });
       const task = planTask(runtime.view(), taskId);
-      await startNew(
+      await begin(
         { ...spec, parentThreadId: main, prompt: o.briefs.worker(task, brief) },
         startedEventId,
         spawnedBy,
@@ -329,10 +338,10 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     },
     steer: (id, text, sender) => threads.send(id, text, sender),
     settled: (id) => threads.idle(id),
-    resume: (id, text, sender) => {
+    resume: async (id, text, sender) => {
       const r = derive().threads.get(id);
       if (!r) throw new Error(`no thread ${id} to resume`);
-      resume(r, text, sender);
+      await resume(r, text, sender);
     },
     changed: nudge,
   };
@@ -343,7 +352,11 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
   const anyRunning = (d: ThreadLog) =>
     [...d.threads.values()].some((r) => r.role !== "main" && threads.running(r.id));
 
-  /** The thread a crash cut off is still the one in charge of its work. */
+  /**
+   * The thread a crash cut off is still the one in charge of its work. A worker is, whatever its
+   * task's status (main may have resumed it on a finished task), unless a newer worker holds the
+   * task, it handed the task over in this invocation, or the task is under review, stale or skipped.
+   */
   function inCharge(d: ThreadLog, r: ThreadRecord): boolean {
     if (r.role === "main") return d.main === r.id;
     const t = runtime.taskOf(r.taskId);
@@ -354,8 +367,10 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       .at(-1);
     return (
       latest?.id === r.id &&
+      !r.submitted &&
       !t?.skipped &&
-      (t?.status === undefined || t.status === "pending" || t.status === "in-progress")
+      t?.status !== "under-review" &&
+      t?.status !== "stale"
     );
   }
 
@@ -370,7 +385,13 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
           return true;
         }
       } else {
-        await runtime.stop(r.id, `${r.id}:unresumable`);
+        await runtime.stop(
+          r.id,
+          `${r.id}:unresumable`,
+          r.role === "check"
+            ? "its record cannot be resumed (the run's prompts, tools or model changed); a new check takes over"
+            : `its record cannot be resumed (the run's prompts, tools or model changed); start a new worker on ${r.taskId} if it is not done`,
+        );
         if (r.role === "check" && runtime.taskOf(r.taskId)?.threads.check === r.id) {
           await startCheck(derive(), r.taskId);
         }
@@ -380,11 +401,11 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     return false;
   }
 
-  function resumeCutOff(d: ThreadLog): boolean {
+  async function resumeCutOff(d: ThreadLog): Promise<boolean> {
     for (const r of d.threads.values()) {
       if (stateOf(r) !== "cut-off" || threads.stale(r.id) || !inCharge(d, r)) continue;
       const tool = [...r.openCalls.values()].at(-1);
-      resume(r, cutOffText(d.after, tool), RUNTIME);
+      await resume(r, cutOffText(d.after, tool), RUNTIME);
       return true;
     }
     return false;
@@ -394,14 +415,14 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
    * An idle worker that holds an open attempt `message` opened but whose feedback never reached
    * it (a cut between the two writes): resume it with the stored text.
    */
-  function resumeFeedback(d: ThreadLog): boolean {
+  async function resumeFeedback(d: ThreadLog): Promise<boolean> {
     for (const r of d.threads.values()) {
       if (r.role !== "worker" || stateOf(r) !== "idle" || d.holders.get(r.taskId) !== r.id)
         continue;
       if (runtime.taskOf(r.taskId)?.status !== "in-progress") continue;
       const feedback = undeliveredFeedback(recorder.events(), r.id, r.taskId);
       if (!feedback) continue;
-      resume(r, feedback.text, { kind: "thread", threadId: feedback.from });
+      await resume(r, feedback.text, { kind: "thread", threadId: feedback.from });
       return true;
     }
     return false;
@@ -496,7 +517,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       const last = c.asks.at(-1);
       if (!verdict && last?.answer && (c.answeredAt ?? -1) > c.startedAt && state === "idle") {
         const files = last.answer.files.map((f) => `${f.root}:${f.path}`).join(", ");
-        resume(
+        await resume(
           c,
           `The main agent answers: ${last.answer.text}${files ? `\nFiles for you: ${files} (root "scratch" is /scratch/<path>, "outputs" is /outputs/${t.id}/<path>).` : ""}`,
           { kind: "thread", threadId: d.main ?? root },
@@ -517,7 +538,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
         }
       }
       if (c.end?.status === "completed" && c.wakes < 1) {
-        resume(
+        await resume(
           c,
           `You stopped before giving a verdict. Write a checkpoint on ${t.id} with verdict "passed" if you agree or "needs-review" if you do not or cannot tell, and one plain line of why.`,
           RUNTIME,
@@ -584,23 +605,16 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     }
     if (d.undelivered.length > 0) {
       const { text, covers } = delivery(d);
-      resume(m, text, { kind: "runtime", ...(covers && { covers }) });
+      await resume(m, text, { kind: "runtime", ...(covers && { covers }) });
       return true;
     }
     if (anyRunning(d)) return false;
     const covers = events.at(-1)?.id;
     if (d.emptyDeliveries < config.stuckLimit) {
-      const asks = [...d.threads.values()].flatMap((r) => {
-        const ask = r.role === "check" ? openAsk(r) : undefined;
-        return ask ? [`- ${ask.id} (${r.taskId}): "${ask.question}"`] : [];
-      });
-      const unanswered =
-        asks.length > 0
-          ? `A checker waits for your answer, and nothing else can move until you give it with \`answer\`:\n${asks.join("\n")}\n\n`
-          : "";
-      resume(
+      const asking = [...d.threads.values()].some((r) => r.role === "check" && openAsk(r));
+      await resume(
         m,
-        `Nothing is running and the run is not finished: ${asks.length > 0 ? "answer the checker, then " : ""}start the next workers, or finish the run.\n\n${unanswered}${stateBlock(d, events, view, stateOf)}`,
+        `Nothing is running and the run is not finished: ${asking ? "answer the checker (nothing else can move until you do), then " : ""}start the next workers, or finish the run.\n\n${stateBlock(d, events, view, stateOf)}`,
         { kind: "runtime", ...(covers && { covers }) },
       );
       return true;
@@ -611,16 +625,14 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
 
   /** The main agent stopped moving: skip every unfinished task and end the run. */
   async function endStuckRun(view: Folded) {
-    const unfinished = taskRows(view).filter(
-      (t) => !t.skipped && t.status !== "done" && t.status !== "to-check",
-    );
-    if (unfinished.length > 0) {
+    const left = unfinished(view);
+    if (left.length > 0) {
       await recorder.append(
         root,
         "plan.changed",
         {
           reason: "The main agent stopped before every task was done, so the run ended.",
-          skip: unfinished.map((t) => ({
+          skip: left.map((t) => ({
             taskId: t.id,
             reason: "The run stopped before this task was done",
           })),
@@ -633,8 +645,8 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       "thread.ended",
       {
         status: "completed",
-        summary: unfinished.length
-          ? `The run stopped before every task was done: ${unfinished.map((t) => t.id).join(", ")} ${unfinished.length === 1 ? "was" : "were"} skipped.`
+        summary: left.length
+          ? `The run stopped before every task was done: ${left.map((t) => t.id).join(", ")} ${left.length === 1 ? "was" : "were"} skipped.`
           : "The run stopped with every task finished.",
       },
       `${root}:liveness:end`,
@@ -653,8 +665,8 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       return "acted";
     }
     if (await unresumable(d)) return "acted";
-    if (resumeFeedback(d)) return "acted";
-    if (resumeCutOff(d)) return "acted";
+    if (await resumeFeedback(d)) return "acted";
+    if (await resumeCutOff(d)) return "acted";
     if (await startChecks(d, view)) return "acted";
     const deadline: { next?: number } = {};
     if (await checks(d, view, deadline)) return "acted";

@@ -29,7 +29,7 @@ after it.
   has to say it does not redo the task, since bash can run the classic segmentation).
   `segment_sam` is granted only when the runner has a gateway, and only to a role with a sandbox.
 - `subagents`: the roles this role may start (`main`: `[worker]`). The checker is started by code on
-  every `submit_task` and is never listed.
+  every `submit_task` and is never listed. A role that holds `start_worker` must list `worker` (the loader refuses it otherwise).
 - `skills`: optional; the skills named in the role's prompt. Default: the workflow's whole skill list,
   the workflow's own skill first.
 - `status: planned`: nothing uses the role yet, so its tools are not checked against the registry.

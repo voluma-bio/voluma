@@ -2,7 +2,7 @@
  * What the main agent is told about the run, in plain text built from the log: the notices of
  * a delivery, the list of its agents, and the task table. A delivery carries the notices, the
  * live agents and the tasks whose row changed; `main.<n>`'s first message and a liveness wake
- * carry the full lists.
+ * carry the full lists and what is still open.
  */
 import type { RunEvent } from "@voluma/contracts/events";
 import type { Folded } from "@voluma/contracts/fold";
@@ -33,6 +33,8 @@ export function noticeLine(n: Notice): string {
       return `- ${who} asks (askId ${n.eventId}): "${n.question}" Reply with \`answer\`.`;
     case "stale":
       return `- ${n.taskId} is stale: ${n.reason}`;
+    case "stopped":
+      return `- ${who} was stopped: ${n.reason}`;
     case "check-result": {
       const detail = [n.summary, n.text].filter(Boolean).join("\n  ");
       switch (n.rule) {
@@ -73,6 +75,10 @@ export const taskRows = (view: Folded): TaskRow[] =>
       skipped: t?.skipped?.reason,
     };
   });
+
+/** The tasks the run cannot end with: not skipped, and neither done nor left to check. */
+export const unfinished = (view: Folded): TaskRow[] =>
+  taskRows(view).filter((t) => !t.skipped && t.status !== "done" && t.status !== "to-check");
 
 /** The task rows: id, status, and the reason when there is one. */
 export function taskTable(rows: readonly TaskRow[]): string {
@@ -125,6 +131,31 @@ export function agentsList(
   return lines.length > 0 ? lines.join("\n") : "(none)";
 }
 
+/**
+ * What a main agent that starts from the record must be told besides the lists: the notices it
+ * never got, every question still open (with its askId), and the verdict of each task its
+ * check rejected, which only the notice holds.
+ */
+function carriedNotices(d: ThreadLog, view: Folded): Notice[] {
+  const rejected = new Set(view.tasks.flatMap((t) => (t.rejected ? [t.id] : [])));
+  const openAsks = new Set(
+    [...d.threads.values()].flatMap((r) => {
+      const ask = r.role === "check" ? openAsk(r) : undefined;
+      return ask ? [ask.id] : [];
+    }),
+  );
+  const latestResult = new Map<string, Notice>();
+  for (const n of d.notices) {
+    if (n.kind === "check-result" && n.taskId) latestResult.set(n.taskId, n);
+  }
+  return d.notices.filter((n) =>
+    n.kind === "ask"
+      ? openAsks.has(n.eventId)
+      : d.undelivered.includes(n) ||
+        (!!n.taskId && rejected.has(n.taskId) && latestResult.get(n.taskId) === n),
+  );
+}
+
 /** The full state block: `main.<n>`'s first message and a liveness wake carry it. */
 export function stateBlock(
   d: ThreadLog,
@@ -132,5 +163,14 @@ export function stateBlock(
   view: Folded,
   stateOf: (r: ThreadRecord) => ThreadState | undefined,
 ): string {
-  return `Agents:\n${agentsList(d, events, stateOf)}\n\nTasks:\n${taskTable(taskRows(view))}`;
+  const carried = carriedNotices(d, view);
+  return [
+    carried.length > 0
+      ? `Still open, or not yet told to you:\n${carried.map(noticeLine).join("\n")}`
+      : "",
+    `Agents:\n${agentsList(d, events, stateOf)}`,
+    `Tasks:\n${taskTable(taskRows(view))}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }

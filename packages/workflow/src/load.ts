@@ -275,6 +275,12 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
     const path = `${AGENTS_DIR}/${agent.name}.md`;
     const missing = agent.subagents.find((n) => !found[n]);
     if (missing) throw new WorkflowParseError(path, `subagent "${missing}" is not a role file`);
+    if (agent.tools.includes("start_worker") && !agent.subagents.includes("worker")) {
+      throw new WorkflowParseError(
+        path,
+        `a role with start_worker lists "worker" in its subagents`,
+      );
+    }
     const unknown = agent.skills?.find((n) => !skillNames.includes(n));
     if (unknown)
       throw new WorkflowParseError(path, `skill "${unknown}" is not a skill of this workflow`);

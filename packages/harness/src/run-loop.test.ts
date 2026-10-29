@@ -6,6 +6,7 @@
 import type { RunEvent } from "@voluma/contracts/events";
 import { describe, expect, it } from "vitest";
 import {
+  askFirst,
   call,
   checker,
   first,
@@ -505,7 +506,7 @@ describe("run loop", () => {
     const [refused] = of(w.stored, "tool.result", "main");
     expect(refused?.type === "tool.result" && refused.payload.isError).toBe(true);
     expect(refused?.type === "tool.result" && refused.payload.output).toMatch(
-      /t1 has not run: required outputs not reported: m1/,
+      /t1 has not run: start a worker/,
     );
     // The refused call ended nothing; the run finished only after both tasks were done.
     const finishAt = w.stored.findIndex((e) => e.id.endsWith(":finish_run"));
@@ -569,5 +570,211 @@ describe("run loop", () => {
     expect(of(w.stored, "thread.started", "t1.check")).toHaveLength(1);
     expect(of(w.stored, "thread.started", "t1.worker")).toHaveLength(0);
     expect(taskEvents(w.stored, "t1")).toEqual(["under-review:agent", "done:check-result"]);
+  });
+
+  // The four scenarios below are the guarantees a log that runs behind the process would break.
+  describe("what the log says is what the loop acts on", () => {
+    const userTexts = (events: readonly RunEvent[], thread: string) =>
+      of(events, "message", thread).flatMap((e) =>
+        e.type === "message" && e.payload.role === "user" ? [e.payload.text] : [],
+      );
+    /** Main sends `text` to t1's worker once t1 passed, then finishes when told nothing more. */
+    const nudgeAfterPass =
+      (extra: (t: Turn) => ReturnType<Script>): Script =>
+      (t) => {
+        if (!t.fresh) return "Waiting.";
+        if (!started(t, "t1")) return call("start_worker", { taskId: "t1", brief: "Measure t1." });
+        return extra(t) ?? call("wait");
+      };
+
+    it("a stop is not undone by a resume that was still starting up", async () => {
+      // The worker's history takes 100 ms to load; main resumes it and stops it in one batch.
+      let loads = 0;
+      const main = nudgeAfterPass((t) => {
+        const batch = t.calls.some((c) => c.name === "stop_worker");
+        if (passed(t, "t1") && !batch)
+          return [
+            call("message", { threadId: `${R}t1.worker`, text: "Look at it once more." }),
+            call("stop_worker", { threadId: `${R}t1.worker`, reason: "Not needed." }),
+          ];
+        return batch ? call("finish_run", { summary: "Done." }) : undefined;
+      });
+      const w = world({
+        plan: [task("t1")],
+        main,
+        worker: first((t) => (t.lastUser.includes("Look at it") ? "Noted." : undefined), worker),
+        delayLoad: (id) => (id === `${R}t1.worker` && ++loads > 1 ? 100 : 0),
+      });
+      const folded = await w.run();
+      expect(
+        folded.tasks.map((t) => `${t.id}:${t.status}`),
+        w.text(),
+      ).toEqual(["t1:done"]);
+      // Its first turn completed; the stop is the last word on it, and nothing is stored after.
+      expect(ended(w.stored, "t1.worker"), w.text()).toEqual(["completed", "cancelled"]);
+      const lastEnd = w.stored
+        .map((e) => e.type === "thread.ended" && e.threadId === `${R}t1.worker`)
+        .lastIndexOf(true);
+      expect(w.stored.slice(lastEnd + 1).filter((e) => e.threadId === `${R}t1.worker`)).toEqual([]);
+      expect(userTexts(w.stored, "main").some((u) => /stopped without submitting/.test(u))).toBe(
+        false,
+      );
+      expect(duplicates(w.stored)).toEqual([]);
+    });
+
+    it("a worker main resumed on a finished task is resumed again after a cut-off", async () => {
+      const main = nudgeAfterPass((t) => {
+        const sent = t.calls.some((c) => c.name === "message");
+        if (passed(t, "t1") && !sent)
+          return call("message", { threadId: `${R}t1.worker`, text: "Look at it once more." });
+        return sent && !t.results.some((r) => /run is finished/.test(r))
+          ? call("finish_run", { summary: "Done." })
+          : undefined;
+      });
+      const w = world({
+        plan: [task("t1")],
+        main,
+        worker: first((t) => (t.lastUser.includes("Look at it") ? "Noted." : undefined), worker),
+        // Cut as the resumed worker's start is stored: it is then a cut-off thread on a done task.
+        cutAfter: (e) => e.id === `${R}t1.worker:started:2`,
+      });
+      const folded = await w.run();
+      expect(w.wasCut).toBe(true);
+      expect(
+        folded.tasks.map((t) => `${t.id}:${t.status}`),
+        w.text(),
+      ).toEqual(["t1:done"]);
+      expect(of(w.stored, "thread.started", "t1.worker")).toHaveLength(3);
+      expect(ended(w.stored, "t1.worker").at(-1), w.text()).toBe("completed");
+      expect(ended(w.stored, "supervisor").at(-1)).toBe("completed");
+      expect(duplicates(w.stored)).toEqual([]);
+    });
+
+    // main.1 fails on the provider right after it hears of the submission, while the check is
+    // still running; whatever the check stores after that, main.2 must hear of.
+    const restartedRun = (check: Script) => {
+      const main: Script = async (t) => {
+        if (t.thread === `${R}main`) {
+          if (t.calls.length === 0) return call("start_worker", { taskId: "t1", brief: "t1." });
+          if (told(t, /submitted t1/)) {
+            await sleep(300);
+            throw new Error("provider down");
+          }
+          return "Waiting.";
+        }
+        const [askId] = openAskIds(t);
+        if (t.fresh && askId) return call("answer", { askId, text: "Yes." });
+        const accepted = t.calls.some((c) => c.name === "accept");
+        if (t.fresh && accepted) return call("finish_run", { summary: "Done." });
+        if (t.fresh && told(t, /found problems/) && !accepted)
+          return call("accept", { taskId: "t1", reason: "Good enough." });
+        return t.fresh ? call("wait") : "Waiting.";
+      };
+      return world({
+        plan: [task("t1")],
+        main,
+        check,
+        providerError: (e) => /provider down/.test(e),
+      });
+    };
+
+    it("main.<n> hears the verdict the main agent before it never got", async () => {
+      const w = restartedRun(checker(() => "needs-review"));
+      const folded = await w.run();
+      expect(
+        folded.tasks.map((t) => `${t.id}:${t.status}`),
+        w.text(),
+      ).toEqual(["t1:to-check"]);
+      // The verdict's text is only in its notice, not in the task table.
+      expect(userTexts(w.stored, "main.2")[0]).toMatch(/t1 looks needs-review/);
+      expect(duplicates(w.stored)).toEqual([]);
+    });
+
+    it("main.<n> hears the question the main agent before it never answered, with its askId", async () => {
+      const w = restartedRun(
+        askFirst(
+          "Is the scan isotropic?",
+          checker(() => "needs-review"),
+        ),
+      );
+      const folded = await w.run();
+      expect(
+        folded.tasks.map((t) => `${t.id}:${t.status}`),
+        w.text(),
+      ).toEqual(["t1:to-check"]);
+      const [ask] = of(w.stored, "ask", "t1.check");
+      expect(userTexts(w.stored, "main.2")[0]).toContain(`askId ${ask?.id})`);
+      expect(of(w.stored, "answer")).toHaveLength(1);
+      expect(duplicates(w.stored)).toEqual([]);
+    });
+
+    it("finish_run refuses a stale task and a running worker, and the liveness end agrees", async () => {
+      // t2 passes, then main has t1's worker redo t1 (t2 goes stale); main finishes too early.
+      const main: Script = (t) => {
+        const passes = (id: string) =>
+          t.users.filter((u) => new RegExp(`The check of ${id} passed`).test(u)).length;
+        const redo = t.calls.some((c) => c.name === "message");
+        const refused = t.results.some((r) => /cannot finish yet/.test(r));
+        if (!t.fresh)
+          return refused && !started2(t)
+            ? call("start_worker", { taskId: "t2", brief: "Redo t2." })
+            : "Waiting.";
+        if (!started(t, "t1")) return call("start_worker", { taskId: "t1", brief: "t1." });
+        if (!started(t, "t2") && passes("t1") === 1)
+          return call("start_worker", { taskId: "t2", brief: "t2." });
+        if (passes("t2") === 1 && !redo)
+          return call("message", { threadId: `${R}t1.worker`, text: "Redo t1." });
+        if (redo && passes("t1") === 2 && passes("t2") === 1 && !refused)
+          return call("finish_run", { summary: "Too early." });
+        if (passes("t2") === 2) return call("finish_run", { summary: "Done." });
+        return call("wait");
+      };
+      const started2 = (t: Turn) =>
+        t.calls.filter((c) => c.name === "start_worker" && c.input.taskId === "t2").length > 1;
+      const w = world({ plan: T1, main });
+      const folded = await w.run();
+      expect(
+        folded.tasks.map((t) => `${t.id}:${t.status}`),
+        w.text(),
+      ).toEqual(["t1:done", "t2:done"]);
+      const refusals = of(w.stored, "tool.result", "main").flatMap((e) =>
+        e.type === "tool.result" && e.payload.isError ? [e.payload.output] : [],
+      );
+      expect(refusals.filter((r) => /t2 is stale/.test(r))).toHaveLength(1);
+      // The run ended only after t2 was done again.
+      const endAt = w.stored.findIndex((e) => e.id.endsWith(":finish_run"));
+      const t2Done = w.stored
+        .map((e) => e.type === "task" && e.payload.taskId === "t2" && e.payload.status === "done")
+        .lastIndexOf(true);
+      expect(endAt).toBeGreaterThan(t2Done);
+    });
+
+    it("finish_run refuses while a worker runs", async () => {
+      const main: Script = (t) => {
+        const names = t.calls.map((c) => c.name);
+        if (names.length === 0)
+          return [
+            call("start_worker", { taskId: "t1", brief: "t1." }),
+            call("finish_run", { summary: "Too early." }),
+          ];
+        if (!names.includes("change_plan"))
+          return call("change_plan", {
+            reason: "Not needed.",
+            skip: [{ taskId: "t1", reason: "No." }],
+          });
+        return call("finish_run", { summary: "Done." });
+      };
+      const w = world({ plan: [task("t1", [], { required: false })], main, worker: hang });
+      await w.run();
+      const refusals = of(w.stored, "tool.result", "main").flatMap((e) =>
+        e.type === "tool.result" && e.payload.isError ? [e.payload.output] : [],
+      );
+      expect(
+        refusals.filter((r) => /is still running/.test(r)),
+        w.text(),
+      ).toHaveLength(1);
+      expect(ended(w.stored, "t1.worker")).toEqual(["cancelled"]);
+      expect(ended(w.stored, "supervisor").at(-1)).toBe("completed");
+    });
   });
 });

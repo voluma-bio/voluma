@@ -84,6 +84,8 @@ export type Notice = {
     }
   | { kind: "ask"; question: string }
   | { kind: "stale"; reason: string }
+  /** The loop stopped a thread the main agent did not ask to stop; `reason` says why. */
+  | { kind: "stopped"; reason: string }
 );
 
 type NoticeBody = Notice extends infer N ? (N extends unknown ? Omit<N, "at"> : never) : never;
@@ -222,6 +224,8 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
             !record.submitted
           ) {
             notice({ ...base, kind: "worker-idle", reply: record.reply }, at);
+          } else if (e.payload.status === "cancelled" && e.payload.summary) {
+            notice({ ...base, kind: "stopped", reason: e.payload.summary }, at);
           }
         }
         break;

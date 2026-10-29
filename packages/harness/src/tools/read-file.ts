@@ -22,7 +22,8 @@ export function readFileTool({
 }): Tool<typeof inputSchema> {
   return {
     name: "read_file",
-    description: `Read a text file of the run (at most 1 MiB): a worker's notes, a script, a JSON result. ${layout.description}`,
+    description:
+      "Read a text file of the run (at most 1 MiB): a worker's notes, a script, a JSON result, a skill's SKILL.md. Paths: /inputs (the scan), /workflow (the skills, under their repo paths), /outputs/<task id>/ (the workers' result files), /scratch/<thread name>/ (a thread's working folder).",
     input: inputSchema,
     async execute({ path }, ctx) {
       const key = layout.keyOf(path, "read");

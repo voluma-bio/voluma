@@ -188,6 +188,10 @@ export interface WorldOptions {
   cutAfter?: (e: RunEvent) => boolean;
   /** Milliseconds the store takes to accept an event (to hold a runtime section open at a chosen moment). */
   delayStore?: (e: RunEvent) => number;
+  /** Milliseconds a thread's history takes to load (to hold a resume in its start-up at a chosen moment). */
+  delayLoad?: (threadId: string) => number;
+  /** Whether a failed thread's error text says the model provider failed. */
+  providerError?: (error: string) => boolean;
   /** Runs for every event the store accepts (for tests that need something to happen at that moment). */
   onStored?: (e: RunEvent) => void;
 }
@@ -292,7 +296,11 @@ export function world(o: WorldOptions) {
       layout: runLayout(RUN, "inputs/", []),
       recorder: rec,
       history: {
-        load: async (t) => history.get(t) ?? [],
+        load: async (t) => {
+          const ms = o.delayLoad?.(t) ?? 0;
+          if (ms > 0) await sleep(ms);
+          return history.get(t) ?? [];
+        },
         appendMessage: async (t, idx, m) => {
           const rows = history.get(t) ?? history.set(t, []).get(t)!;
           if (rows[idx] === undefined) rows.push(m);
@@ -317,6 +325,7 @@ export function world(o: WorldOptions) {
         check: (t) => `Check task "${t.id}".`,
       },
       config: o.config,
+      providerError: o.providerError,
       ...(stored.length > 0 && { previousClaim: "shutdown" as const }),
       signal: abort.signal,
     });

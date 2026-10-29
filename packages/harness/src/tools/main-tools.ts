@@ -16,6 +16,7 @@ import { isSatisfied, transitiveDependents } from "@voluma/workflow";
 import { planTask } from "@voluma/workflow/plan";
 import { z } from "zod";
 import type { UserSender } from "../adapters/pi/start-thread";
+import { unfinished } from "../main-view";
 import type { Recorder } from "../recorder";
 import { Refusal, type TaskRuntime } from "../task-runtime";
 import { runEnded, startedFor, type ThreadLog, type ThreadState, threadLog } from "../thread-log";
@@ -45,8 +46,8 @@ export interface Agents {
   steer(threadId: string, text: string, sender: UserSender): boolean;
   /** Resolves once the thread is not running here. Never call it inside `section`. */
   settled(threadId: string): Promise<void>;
-  /** Resumes a thread that is not running, with a message. Call inside `section`. */
-  resume(threadId: string, text: string, sender: UserSender): void;
+  /** Resumes a thread that is not running, with a message; its start is stored first. Call inside `section`. */
+  resume(threadId: string, text: string, sender: UserSender): Promise<void>;
   /** The run changed: the loop takes its next step. */
   changed(): void;
 }
@@ -200,7 +201,11 @@ export function mainTools(deps: MainDeps) {
               effectId("message", ctx.threadId, ctx.toolCallId),
             );
           }
-          agents.resume(threadId, feedback ? feedbackText(w.taskId, text) : fromMain(text), sender);
+          await agents.resume(
+            threadId,
+            feedback ? feedbackText(w.taskId, text) : fromMain(text),
+            sender,
+          );
           return {
             message: feedback
               ? `Feedback sent: ${threadId} resumed on a new attempt of ${w.taskId}.`
@@ -255,7 +260,7 @@ export function mainTools(deps: MainDeps) {
       if (working && t?.attemptId) {
         await runtime.setStatus(
           ctx.threadId,
-          `${ctx.threadId}:${ctx.toolCallId}:stop_worker`,
+          effectId("stop_status", ctx.threadId, ctx.toolCallId),
           w.taskId,
           t.attemptId,
           "pending",
@@ -486,36 +491,36 @@ export function mainTools(deps: MainDeps) {
   const finish_run: Tool<z.ZodObject<{ summary: z.ZodString }>> = {
     name: "finish_run",
     description:
-      "End the run. Refused while a task is in progress or under review, while a task's check rejected it and you have not sent feedback or accepted it, and while a selected output is neither reported nor skipped with a reason. `summary` is one or two plain sentences for the researcher.",
+      "End the run. Refused while a worker or checker is running, while a task is neither done, left to check nor skipped (pending, in progress, under review, stale), while a task's check rejected it and you have not sent feedback or accepted it, and while a selected output is neither reported nor skipped with a reason. `summary` is one or two plain sentences for the researcher.",
     input: z.object({ summary: nonEmpty }),
     sequential: true,
     execute: async (input, ctx) => {
       const out = await inSection(async ({ summary }: { summary: string }, c: ToolContext) => {
         const view = runtime.view();
-        const problems = view.plan.tasks.flatMap((p) => {
-          const t = view.tasks.find((x) => x.id === p.id);
-          if (t?.skipped) return [];
-          if (!t) {
-            const required = p.outputs.filter((o) => o.required).map((o) => o.id);
-            return required.length > 0
+        const d = log();
+        const running = [...d.threads.values()].filter(
+          (r) => r.role !== "main" && agents.state(d, r.id) === "running",
+        );
+        const problems = [
+          ...running.map((r) => `${r.id} (${r.role}, ${r.taskId}) is still running.`),
+          ...unfinished(view).map((t) =>
+            t.status === "pending"
+              ? `${t.id} has not run: start a worker on it, or skip it with a reason.`
+              : `${t.id} is ${t.status}: get it done, or skip it with a reason.`,
+          ),
+          ...view.tasks.flatMap((t) => {
+            if (t.skipped) return [];
+            if (t.rejected)
+              return [
+                `${t.id} was rejected by its check: send feedback with \`message\` or \`accept\` it.`,
+              ];
+            return t.missingRequired.length > 0
               ? [
-                  `${p.id} has not run: required outputs not reported: ${required.join(", ")} (get them reported, or skip the task with a reason).`,
+                  `${t.id}: required outputs not reported: ${t.missingRequired.join(", ")} (get them reported, or skip the task with a reason).`,
                 ]
               : [];
-          }
-          if (t.status === "in-progress" || t.status === "under-review")
-            return [`${t.id} is ${t.status}.`];
-          if (t.rejected)
-            return [
-              `${t.id} was rejected by its check: send feedback with \`message\` or \`accept\` it.`,
-            ];
-          if (t.missingRequired.length > 0) {
-            return [
-              `${t.id}: required outputs not reported: ${t.missingRequired.join(", ")} (get them reported, or skip the task with a reason).`,
-            ];
-          }
-          return [];
-        });
+          }),
+        ];
         if (problems.length > 0)
           throw new Refusal(`The run cannot finish yet:\n${problems.join("\n")}`);
         await recorder.append(

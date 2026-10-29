@@ -203,7 +203,10 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     z.object({
       status: z.enum(["completed", "failed", "cancelled"]),
       error: z.string().optional(),
-      /** The root's, from `finish_run`: one or two plain sentences for the researcher. */
+      /**
+       * The root's, from `finish_run`: one or two plain sentences for the researcher. On a
+       * `cancelled` end of a worker or check: why the run loop stopped it, which the main agent is told.
+       */
       summary: nonEmpty.optional(),
     }),
   );

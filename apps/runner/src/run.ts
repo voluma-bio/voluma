@@ -431,7 +431,7 @@ async function claimBody(
         mainRestart: (view, state) =>
           mainRestartPrompt(view, state, run.selectedOutputs, definition.files, run.notes),
         worker: (task, brief) => workerPrompt(task, brief, run.notes),
-        check: checkPrompt,
+        check: (task, state) => checkPrompt(task, state, run.notes),
       },
       config: config.loop,
       signal: abort.signal,

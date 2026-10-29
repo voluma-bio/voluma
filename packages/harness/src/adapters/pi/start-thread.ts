@@ -336,7 +336,9 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
         }
       });
 
+      let prompted = false;
       if (!historyError && !signal?.aborted) {
+        prompted = true;
         accepting = true;
         for (const { text, sender } of early.splice(0)) agent.steer(userMessage(text, sender));
         if (message !== undefined) await agent.prompt(message);
@@ -347,9 +349,13 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
         }
       }
       accepting = false;
+      // Stopped before its first prompt, it did nothing this invocation: its turn from before
+      // must not read as this invocation completing.
       outcome = historyError
         ? historyFailure(historyError)
-        : outcomeOf(agent.state.messages, signal?.aborted === true);
+        : signal?.aborted && !prompted
+          ? { status: "cancelled" }
+          : outcomeOf(agent.state.messages, signal?.aborted === true);
     } catch (error) {
       outcome = {
         status: "failed",

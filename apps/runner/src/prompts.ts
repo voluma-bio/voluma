@@ -15,7 +15,7 @@ import type { ThreadLayout } from "@voluma/harness/layout";
 import type { PlanTask } from "@voluma/harness/supervise-run";
 import type { AgentDefinition, WorkflowDefinition } from "@voluma/workflow/definition";
 
-function common(role: ThreadLayout["role"], thread: ThreadLayout): string {
+function common(role: "worker" | "checker", thread: ThreadLayout): string {
   const dir = thread.dir;
   const files =
     role === "worker"
@@ -33,33 +33,38 @@ Check what you report against the files themselves, and say which file or header
 
 /**
  * The role's skills, progressively disclosed: name, description and path here, the skill and its
- * references and resources read with bash when needed. The workflow's own skill comes first and
- * is read first.
+ * references and resources read with bash (or `read_file`, for a role without a shell) when
+ * needed. The workflow's own skill comes first and is read first.
  */
-function skillList(def: WorkflowDefinition, role: AgentDefinition): string {
+function skillList(def: WorkflowDefinition, role: AgentDefinition, shell: boolean): string {
   const lines = def.skills
     .filter((s) => role.skills.includes(s.name))
     .map(
       (s) =>
         `- ${s.name}: ${s.description} (${s.path}/SKILL.md)${s === def.skills[0] ? " [read first]" : ""}`,
     );
-  return `Skills: read a skill's SKILL.md with bash before you rely on it; its other files sit beside it in the same directory.\n${lines.join("\n")}`;
+  return `Skills: read a skill's SKILL.md with ${shell ? "bash" : "`read_file`"} before you rely on it; its other files sit beside it in the same directory.\n${lines.join("\n")}`;
 }
 
 /** One line per script of the role's skills, from its docstring. */
-function toolIndex(def: WorkflowDefinition, role: AgentDefinition): string {
+function toolIndex(def: WorkflowDefinition, role: AgentDefinition, shell: boolean): string {
   const lines = def.toolIndex
     .filter((t) => role.skills.includes(t.skill))
     .map((t) => `- ${t.skill}/${t.script}: ${t.summary}`);
-  return `Scripts of those skills, at <skill dir>/resources/<script> (skill dirs are listed above). Run \`python <skill dir>/resources/<script> --help\` before you use one.\n${lines.join("\n")}`;
+  const use = shell
+    ? "Run `python <skill dir>/resources/<script> --help` before you use one."
+    : "Workers run them; read one with `read_file` to know what a worker's result rests on.";
+  return `Scripts of those skills, at <skill dir>/resources/<script> (skill dirs are listed above). ${use}\n${lines.join("\n")}`;
 }
 
 /** The role file's body, then the generated environment text, skill list and tool index. */
 export function systemPrompt(def: WorkflowDefinition, thread: ThreadLayout): string {
   const role = def.agents[thread.role];
-  // The main agent has no shell unless its file grants bash; its text is its file's body.
-  if (thread.role === "main" && !role.tools.includes("bash")) return role.body;
-  return `${role.body}\n\n${common(thread.role, thread)}\n\n${skillList(def, role)}\n\n${toolIndex(def, role)}`;
+  // The main agent has a shell only if its file grants bash, and then works as a worker does.
+  const shell = thread.role !== "main" || role.tools.includes("bash");
+  const skills = `${skillList(def, role, shell)}\n\n${toolIndex(def, role, shell)}`;
+  if (!shell) return `${role.body}\n\n${skills}`;
+  return `${role.body}\n\n${common(thread.role === "checker" ? "checker" : "worker", thread)}\n\n${skills}`;
 }
 
 function taskBrief(task: PlanTask): string {
@@ -94,23 +99,25 @@ const list = (items: string[]) => (items.length ? items.join("\n") : "(none)");
 
 /**
  * The check thread's first message: the task as planned, each output the worker reported with
- * its value, and the evidence files it cited. Never a checkpoint's text or the worker's messages.
+ * its value, and the evidence files it cited, then the researcher's notes. Never a checkpoint's
+ * text, the worker's messages or its notes on a value (only the reason a value is missing).
  */
-export function checkPrompt(task: PlanTask, state: FoldedTask): string {
+export function checkPrompt(task: PlanTask, state: FoldedTask, notes: string | undefined): string {
   const evidenceName = new Map(state.evidence.map((a) => [a.id, a.name]));
   const evidenceOf = (ids: string[]) => {
     const names = ids.flatMap((id) => evidenceName.get(id) ?? []);
     return names.length ? `; evidence: ${names.join(", ")}` : "";
   };
-  const note = (n: string | undefined) => (n ? `; the worker's note: ${n}` : "");
+  // The worker's free note is its own account; only the reason a value is missing is a fact.
+  const why = (n: string | undefined) => (n ? `; reason given: ${n}` : "");
   const reported = [
     ...state.measurements.map(
       (m) =>
-        `- ${m.id}: ${m.value === null ? "no value" : `${m.value} ${m.unit}`}${m.confidence ? ` (${m.confidence})` : ""}${note(m.note)}${evidenceOf(m.evidenceIds)}`,
+        `- ${m.id}: ${m.value === null ? "no value" : `${m.value} ${m.unit}`}${m.confidence ? ` (${m.confidence})` : ""}${m.value === null ? why(m.note) : ""}${evidenceOf(m.evidenceIds)}`,
     ),
     ...state.scores.map(
       (c) =>
-        `- ${c.id}: level "${c.level}"${c.scale ? ` of ${c.scale.join(" < ")}` : ""}${note(c.note)}${evidenceOf(c.evidenceIds)}`,
+        `- ${c.id}: level "${c.level}"${c.scale ? ` of ${c.scale.join(" < ")}` : ""}${evidenceOf(c.evidenceIds)}`,
     ),
     ...state.files.map((f) => `- ${f.id}: file ${f.name}`),
     ...state.missing.flatMap((m) =>
@@ -131,7 +138,7 @@ Outputs the worker reported (other structures, volumes and annotations are in it
 ${list(reported)}
 
 Evidence files the worker cited (open them with view_image):
-${list(cited)}`;
+${list(cited)}${notesBlock(notes)}`;
 }
 
 /** The plan as the main agent reads it: each task with what it builds on, what it does and the outputs it reports. */
