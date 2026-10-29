@@ -35,6 +35,8 @@ export interface BundledWorkflow {
   tasks: TaskEntry[];
   /** Every output a run can produce, in file order. */
   outputs: OutputEntry[];
+  /** The outputs a summary leads with (`headline` in `outputs.json`), in file order. */
+  headline: OutputEntry[];
   /** A task's title; a task without one shows its id. */
   taskTitle: (id: string) => string;
   /** An output's name; one the workflow doesn't list shows its id. */
@@ -53,6 +55,8 @@ function bundle(
     ...meta,
     tasks,
     outputs,
+    // `headline` is optional in the schema; an output without it is not a headline.
+    headline: outputs.filter((o) => "headline" in o && o.headline === true),
     taskTitle: (id) => titles.get(id) ?? id,
     outputName: (id) => names.get(id) ?? id,
   };

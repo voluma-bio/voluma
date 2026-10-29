@@ -261,7 +261,12 @@ function derive(log: RunRecord["events"]): Derived {
     }
     for (const check of task.checks) {
       if (check.status === "open") {
-        toCheck.push({ taskId: task.id, checkId: check.id, title: check.title });
+        toCheck.push({
+          taskId: task.id,
+          checkId: check.id,
+          title: check.title,
+          detail: check.detail,
+        });
       }
     }
   }
@@ -278,7 +283,7 @@ type RunResult = { run: Run } & Derived;
 interface LoadOptions {
   cache?: SummaryCache;
   /**
-   * The list: a completed run whose events no longer parse is left out rather than failing
+   * The lists and the study read: a completed run whose events no longer parse is left out rather than failing
    * every run listed with it. Without it (one run's read) it throws: the run's own page must
    * fail loudly, not read as "no plan" (a 409 the web polls forever).
    */
@@ -482,7 +487,7 @@ export function pgRunReads(db: PostgresJsDatabase) {
           const results = await loadResults(
             tx,
             and(readableRuns(reader), eq(runs.studyId, studyId)),
-            { cache: summaries, progress: true },
+            { cache: summaries, skipUnreadable: true, progress: true },
           );
           const newest = newestCompleted(results);
           return {

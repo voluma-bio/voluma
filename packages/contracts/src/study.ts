@@ -107,6 +107,8 @@ export const toCheckItemSchema = z.object({
   taskId: taskIdSchema,
   checkId: z.string().min(1),
   title: z.string(),
+  /** The text the review shows under the title: why the check was raised. */
+  detail: z.string(),
 });
 export type ToCheckItem = z.infer<typeof toCheckItemSchema>;
 
