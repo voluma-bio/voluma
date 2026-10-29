@@ -172,9 +172,11 @@ class ModalSandboxAdapter implements Sandbox {
   readonly #modal: ModalSandbox;
   readonly #mounts: SandboxMount[];
   readonly #lifetimeSeconds: number;
+  readonly #workdir: string | undefined;
 
   constructor(modal: ModalSandbox, spec: SandboxSpec) {
     this.#modal = modal;
+    this.#workdir = spec.workdir;
     this.#lifetimeSeconds = spec.lifetimeSeconds;
     this.#mounts = spec.mounts;
   }
@@ -229,7 +231,12 @@ class ModalSandboxAdapter implements Sandbox {
     signal?.addEventListener("abort", kill);
     let finished = false;
     try {
-      for await (const chunk of this.#run(argv, timeoutSeconds + KILL_GRACE_SECONDS, request.env)) {
+      for await (const chunk of this.#run(
+        argv,
+        timeoutSeconds + KILL_GRACE_SECONDS,
+        request.env,
+        this.#workdir,
+      )) {
         finished = chunk.type === "exit";
         // The caller knows it aborted, so say so whatever the signal made the exit code.
         yield finished && signal?.aborted ? { type: "exit", code: 143 } : chunk;
@@ -279,10 +286,12 @@ class ModalSandboxAdapter implements Sandbox {
     argv: string[],
     deadlineSeconds: number,
     env?: Record<string, string>,
+    workdir?: string,
   ): AsyncGenerator<ExecChunk> {
     const process = await this.#modal
       .exec(argv, {
         env,
+        workdir,
         timeoutMs: (deadlineSeconds + EXEC_DEADLINE_MARGIN_SECONDS) * 1000,
       })
       .catch((error: unknown) => {

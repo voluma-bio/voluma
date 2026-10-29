@@ -18,8 +18,9 @@ import type { Sandbox } from "./ports/sandbox";
 import type { Segmenter } from "./ports/segmenter";
 import type { Recorder } from "./recorder";
 import { runStartPlan } from "./run-start";
-import { type RoleSpec, supervisor, supervisorThreadId } from "./supervisor";
+import { type RoleSpec, supervisor } from "./supervisor";
 import { type PlanTask, taskRuntime } from "./task-runtime";
+import { supervisorThreadId } from "./thread-id";
 import { threadLog } from "./thread-log";
 import { threads } from "./threads";
 import { bashTool } from "./tools/bash";
@@ -123,6 +124,7 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
     recorder,
     evidence: options.evidence,
     runId,
+    layoutOf: layout.forThread,
     rootThreadId,
     plan,
     stopThread: (id) => {

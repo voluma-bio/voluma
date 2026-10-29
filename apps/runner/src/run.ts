@@ -212,9 +212,12 @@ export async function runClaim(
     // The tasks that produce the selected outputs and what they need. The main thread may adapt
     // them to the run's notes when the run starts (`superviseRun`).
     const computed = computePlan(definition.files, run.selectedOutputs);
-    // Each role's optional tools are the ones its file lists; `segment_sam` also needs a key.
+    // Each role's optional tools are the ones its file lists. `segment_sam` needs a key, and only
+    // workers hold it: it calls out to Meta and `keepFailed` writes the run-wide scratch.
     const grant = (role: "worker" | "checker") =>
-      definition.agents[role].tools.filter((t) => t !== "segment_sam" || metaKey);
+      definition.agents[role].tools.filter(
+        (t) => t !== "segment_sam" || (role === "worker" && metaKey),
+      );
 
     const layout = runLayout(
       runId,
@@ -247,8 +250,6 @@ export async function runClaim(
       stored,
       live,
     );
-    // A sandbox is named by its thread without the run id: `<taskId>.worker[.n]`, `<taskId>.check[.n]`.
-    const sandboxName = (threadId: string) => threadId.slice(runId.length + 1);
     session = sandboxSession(
       (threadId) => {
         const thread = layout.forThread(threadId);
@@ -258,7 +259,8 @@ export async function runClaim(
           image: config.sandbox.image,
           lifetimeSeconds: config.sandbox.lifetimeSeconds,
           idleSeconds: config.sandbox.idleSeconds,
-          env: layout.env,
+          env: thread.env,
+          workdir: thread.scratch.path,
         };
         return createSandbox(
           thread.role === "worker"
@@ -275,7 +277,7 @@ export async function runClaim(
         // Metered from the start of creation, the sweep included: a conservative upper bound.
         if (state === "starting") meter.sandboxUp();
         else if (state === "stopped" || state === "failed") meter.sandboxDown();
-        events?.emit(id, "sandbox", { name: sandboxName(id), state, detail });
+        events?.emit(id, "sandbox", { name: layout.forThread(id).name, state, detail });
       },
       (threadId) => layout.forThread(threadId).restartNote,
     );
@@ -363,7 +365,7 @@ export async function runClaim(
       history: client,
       sandbox: (id) => opened.get(id),
       releaseSandbox: (id) =>
-        opened.release(id).catch((e) => log(`releasing ${sandboxName(id)} failed: ${e}`)),
+        opened.release(id).catch((e) => log(`releasing ${layout.forThread(id).name} failed: ${e}`)),
       evidence: r2Evidence(config.r2),
       files,
       segmenter: metaKey
@@ -388,14 +390,14 @@ export async function runClaim(
       worker: (task, thread, notes, recorded) => ({
         model: threadModel(workerModel, recorded),
         streamFn: streamFor("worker"),
-        systemPrompt: systemPrompt(definition, thread),
+        systemPrompt: systemPrompt(definition, "worker", thread),
         prompt: workerPrompt(task, { user: run.notes, main: notes }),
         tools: grant("worker"),
       }),
       check: (task, thread, notes, recorded) => ({
         model: threadModel(checkModel, recorded),
         streamFn: streamFor("check"),
-        systemPrompt: systemPrompt(definition, thread),
+        systemPrompt: systemPrompt(definition, "checker", thread),
         prompt: checkPrompt(task, { user: run.notes, main: notes }),
         tools: grant("checker"),
       }),

@@ -20,14 +20,28 @@ named by the thread id without the run id). `RunLayout.forThread(threadId)`
   `/outputs` read-write.
 - A checker mounts `/inputs`, `/workflow` and `/outputs` read-only and one writable folder,
   `/scratch/<its name>/` (the name is the sandbox name, e.g. `t1.check`), which is the R2 prefix
-  `scratch/<name>/` under the run. It does not see the worker's scratch; what it needs from the
-  worker is in `/outputs`. Its bash spill lands in `/scratch/<name>/.tool-output/`.
-- The path namespace is the same for both: `/scratch/<name>/x.png` is the key
+  `scratch/<name>/` under the run. Its bash does not see the rest of `/scratch`. Host-side tools
+  (`keyOf`, so `view_image`) do read the run's whole `/scratch`, read-only: that is how a checker
+  opens the images the worker cited. The main agent (`<runId>.main[.n]`) has the same shape; it has
+  no sandbox today.
+- Every thread spills a truncated bash output to `/scratch/<name>/.tool-output/<id>`
+  (`toolOutputKey(runId, threadName, toolCallId)`), a worker too.
+- Every sandbox has env `SCRATCH` (the worker's `/scratch`, a checker's `/scratch/<name>`) and runs
+  its commands there (`SandboxSpec.workdir`); the prompt tells the model to write working files
+  under `$SCRATCH`.
+- The path namespace is the same for every thread: `/scratch/<name>/x.png` is the key
   `scratchKey(runId, "<name>/x.png")`, so a checkpoint's evidence `{root: "scratch", path:
-  "<name>/x.png"}` resolves the same way (`r2Evidence`, the local evidence adapter) for either role.
-- The sandbox's own `/scratch` directory exists in the container; a write outside `/scratch/<name>/`
-  (say `/scratch/v1.jpg`) succeeds but is local, lost on restart and invisible to `view_image` and to
-  evidence. The checker's system prompt and tool descriptions name its folder to prevent this.
+  "<name>/x.png"}` resolves the same way (`r2Evidence`, the local evidence adapter). Before
+  `evidence.keep`, `taskRuntime` checks each evidence path with the calling thread's
+  `keyOf(..., "read")`, so a thread cites only what it can read.
+- The sandbox's own `/scratch` directory exists in the container. A write outside
+  `/scratch/<name>/` (say `/scratch/v1.jpg`) succeeds but is local and lost on restart. Nothing
+  stops it: sandboxes run as root without `CAP_SYS_ADMIN` (`chmod a-w` does not bind root, no
+  `chattr`, no remount), and a mount over `/scratch` would be the worker's scratch. The fence is
+  `$SCRATCH` as the working directory and in the prompt. Residual: a checker that writes
+  `/scratch/v1.jpg` locally and cites `v1.jpg` is read as the worker's `scratch/v1.jpg` if the
+  worker wrote one.
+- Thread ids are built and parsed in `packages/harness/src/thread-id.ts`.
 
 Spend and the usage meter sum sandbox seconds over all sandboxes.
 
@@ -51,6 +65,9 @@ Spend and the usage meter sum sandbox seconds over all sandboxes.
   read-only `/outputs` (run p470): a write under `/scratch/<name>/` reached R2 at
   `runs/<run>/scratch/<name>/`; a write to `/outputs` failed with `Read-only file system`; DNS
   failed (no network); no gateway variable. `/scratch` itself is a container directory, not a mount.
+- Same sandbox shape (run p483): commands run as uid 0 with `CapEff` lacking `CAP_SYS_ADMIN` and
+  `CAP_LINUX_IMMUTABLE`; `SCRATCH` and the exec `workdir` (`/scratch/t1.check`) take effect;
+  `touch /scratch/outside.txt` succeeds, also after `chmod a-w /scratch`; `chattr` is absent.
 
 # Runner: how sandboxes end
 
@@ -198,8 +215,8 @@ lifetime) and once more 23 min into the replacement, before the exit code was lo
 # Runner: role text and tool grants come from `workflows/core/agents/`
 
 The worker's and checker's system prompts are `workflows/core/agents/<role>.md`'s body, then `COMMON`
-(sandbox text, `prompts.ts`), then the skill list. Their optional tools are the file's `tools`
-(`run.ts` `grant`); `segment_sam` is also dropped when the run has no Meta key. `loadWorkflow`
+(sandbox text per role, `prompts.ts` `systemPrompt`), then the skill list. Their optional tools are the file's `tools`
+(`run.ts` `grant`); `segment_sam` is also dropped when the run has no Meta key, and always for the checker (it calls out to Meta; `keepFailed` writes the run-wide scratch). `loadWorkflow`
 snapshots the role files with the workflow and reads them from the snapshot, so a resumed thread
 composes byte-identical text and an edited file reaches only new threads (a thread whose prompt
 changed is still `ThreadStale`). The main thread still uses `MAIN_SYSTEM`; `lead.md` and
