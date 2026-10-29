@@ -331,7 +331,7 @@ function OpenReview({ runId, primary }: { runId: string; primary?: boolean }) {
   );
 }
 
-/** Open review while it runs or once completed; Stop, with a confirm, while the run is not over. */
+/** Open review once the run has started, or once completed; Stop, with a confirm, while the run is not over. */
 function RunActions({ run, onChange }: { run: Run; onChange: (run: Run) => void }) {
   const [confirming, setConfirming] = useState(false);
   const cancel = useMutation({ mutationFn: () => cancelRun(run.id), onSuccess: onChange });
@@ -340,7 +340,7 @@ function RunActions({ run, onChange }: { run: Run; onChange: (run: Run) => void 
     return state.outcome === "completed" ? <OpenReview runId={run.id} primary /> : null;
   return (
     <>
-      {state.status === "running" && <OpenReview runId={run.id} />}
+      {state.status !== "queued" && state.startedAt && <OpenReview runId={run.id} />}
       {cancel.isError && (
         <span role="alert" className="text-ui text-destructive">
           Couldn't stop the run. Try again.
