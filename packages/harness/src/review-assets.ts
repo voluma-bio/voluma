@@ -22,7 +22,7 @@ import { evidencePrefix, reviewAssetPrefix, workflowSnapshotPrefix } from "@volu
 import { reviewAssetsManifestSchema } from "@voluma/contracts/review";
 import { type Sandbox, SandboxEndedError, type SandboxMount } from "./ports/sandbox";
 import type { Recorder } from "./recorder";
-import { supervisorThreadId } from "./supervisor";
+import { supervisorThreadId } from "./thread-id";
 
 const EVIDENCE = "/evidence";
 const WORKFLOW = "/workflow";
