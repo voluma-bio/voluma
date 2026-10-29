@@ -1,8 +1,8 @@
 # Deploying the gateway (Railway staging)
 
-## Temporary state (p536 staging plumbing probe)
+## Temporary state (p540 staging plumbing run 3)
 
-`GATEWAY_META_BASE_URL` is being set to a temporary Modal stub tunnel; it was unset before the probe.
+`GATEWAY_META_BASE_URL` is being set to a temporary Modal stub tunnel; it was unset before the run.
 Unset it and terminate the stub sandbox in this session, even on failure.
 
 ## Staging plumbing probe (2026-10-29)
