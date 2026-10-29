@@ -3,6 +3,9 @@
 From the structural review of PR #62 (`review-pr62` p231, structure) and the correctness re-check (p230). The round-2 fixes there
 (one curve schema and interpolator, one BV owner, one result record) landed; these did not.
 
+- **`frame.to_scan` is slower than the mapping it replaced.** On OA6-1RK's tibia frame it takes 17.7 s against 4.9 s for the
+  old `affine_transform` path (`iioc.py` 38.6 s against 18.8 s), with identical output. The bounding-box crop barely helps when the
+  frame's box covers most of the scan. Try `ndi.affine_transform(..., order=0)` and check half-voxel rounding still matches.
 - **A generic `orient_bone` (left from p231 B2).** The frame module landed (`microct-core/resources/frame.py`); `tibia_frame.py` now only fits
   the axes and crop and calls it. It stayed in `workflow-mouse-oa` because its +U medial / +V anterior sign rule, crop defaults and
   `envelope.close_and_fill` are the mouse tibia protocol's: moving it to `orient-joint` needs `envelope` in a generic skill and the sign
