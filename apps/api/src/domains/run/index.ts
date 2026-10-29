@@ -2,6 +2,7 @@
  * Run lane's API domain, mounted at /api/run/ (paths are relative to the mount). A short
  * mount list: each file owns its routes and its guard.
  *   runs.ts    the run routes (users and guests; the reads also take the debug token)
+ *   studies.ts the browser's study routes: create (with its first runs), list, get
  *   inputs.ts  the browser's scans: list, and upload (members); `upload-scan.ts` is the CLI for it
  *   stream.ts  the server-sent event stream of a run's stored events (users, debug token)
  *   ingest.ts  the runner's claim, heartbeat, report, events and history (bearer token)
@@ -23,6 +24,7 @@ import type { PgUploads } from "./pg-uploads";
 import type { Uploads } from "./r2-uploads";
 import { runsRoutes } from "./runs";
 import { streamRoutes } from "./stream";
+import { studiesRoutes } from "./studies";
 
 export interface RunDeps {
   reads: RunReads;
@@ -45,6 +47,7 @@ export interface RunDeps {
 export function createRun(deps: RunDeps) {
   const app = new Hono<AppEnv>();
   app.route("/", runsRoutes(deps));
+  app.route("/", studiesRoutes(deps));
   app.route("/", inputsRoutes(deps));
   app.route("/", streamRoutes(deps));
   app.route("/", ingestRoutes(deps));

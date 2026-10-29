@@ -17,6 +17,7 @@ const run: Run = {
   id: "review-111",
   labId: "review-tests",
   startedBy: "review-tests",
+  studyId: "review-study",
   workflows,
   input: {
     id: "reference-review-tests",

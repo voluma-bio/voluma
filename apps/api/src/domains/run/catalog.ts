@@ -9,6 +9,8 @@
  *
  * `smoke` is a two-task workflow that checks the runner end to end.
  */
+import type { WorkflowPin } from "@voluma/contracts/workflow";
+
 export interface CatalogEntry {
   workflow: string;
 }
@@ -20,3 +22,13 @@ export const catalog: Catalog = {
   // A starter for the lab to edit (`workflows/mouse-oa/skills/mouse-oa/SKILL.md`).
   "mouse-oa": { workflow: "workflows/mouse-oa" },
 };
+
+/** The pins a run of catalog workflow `workflowId` records, or undefined for an id the catalog lacks. */
+export function pinsOf(
+  catalog: Catalog,
+  repo: string,
+  workflowId: string,
+): WorkflowPin[] | undefined {
+  const entry = Object.hasOwn(catalog, workflowId) ? catalog[workflowId] : undefined;
+  return entry && [{ repo, path: entry.workflow }];
+}
