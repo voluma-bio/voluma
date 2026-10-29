@@ -1,12 +1,13 @@
-"""Render one slice with a pixel grid, and optional boxes and points drawn on it: the keyframe sheet and the check
-that a box or pick is where you meant.
+"""Render one slice of a stack or image as a JPEG, with an optional pixel grid, boxes and points drawn on it.
 
-  python render_slices.py --in oriented.npy --index 159 --out /outputs/orient/keyframe.jpg [--grid]
-        [--window lo,hi] [--boxes r0,c0,r1,c1[:name] ...] [--points r,c[:name] ...]
+Used for the keyframe sheet and to check that a box or a pick is where you meant. `--in` is a 3D stack (slice `--index`
+along axis 0) or a 2D image. x is the column (top labels), y the row (left labels); boxes and points are in pixels.
 
-`--in` is a 3D stack (slice `--index` along axis 0) or a 2D image. x is the column (top labels), y the row (left labels).
+Writes: <out>  the JPEG, one pixel per array element (at most 2000 px, 1 MiB)
+Prints: one JSON line {image, shape_rc, index, boxes, points}
+Example: python render_slices.py --in oriented.npy --index 159 --out keyframe.jpg --grid --points 120,300:landmark
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
-import argparse
 import sys
 from pathlib import Path
 
@@ -50,14 +51,14 @@ def render(img, out, window=None, grid=True, boxes=(), points=(), title=None):
 
 
 if __name__ == '__main__':
-    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--in', dest='src', required=True)
-    ap.add_argument('--index', type=int, help='slice along axis 0 of a 3D stack')
-    ap.add_argument('--out', required=True)
-    ap.add_argument('--window', help='lo,hi in the volume units (HU); default: from the data')
+    ap = sl.parser(__doc__)
+    ap.add_argument('--in', dest='src', required=True, help='a 3D stack or a 2D image, .npy')
+    ap.add_argument('--index', type=int, help='slice along axis 0 of a 3D stack (required for a 3D stack)')
+    ap.add_argument('--out', required=True, help='the image to write (.jpg)')
+    ap.add_argument('--window', metavar='lo,hi', help='display window in the volume\'s units, HU (default: from the data)')
     ap.add_argument('--grid', action='store_true', help='draw a 100 px grid with coordinates')
-    ap.add_argument('--boxes', nargs='*', help='r0,c0,r1,c1[:name]')
-    ap.add_argument('--points', nargs='*', help='r,c[:name]')
+    ap.add_argument('--boxes', nargs='*', metavar='BOX', help='boxes as r0,c0,r1,c1[:name], in pixels, row then column')
+    ap.add_argument('--points', nargs='*', metavar='POINT', help='points as r,c[:name], in pixels, row then column')
     a = ap.parse_args()
     v = np.load(a.src, mmap_mode='r')
     if v.ndim == 3:

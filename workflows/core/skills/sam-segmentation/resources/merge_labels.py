@@ -1,17 +1,20 @@
-"""Put the pieces of a small-structure request back under their real labels and merge them into the big-bone labels.
-
-  python merge_labels.py --big labels_big.npy --small small_trimmed.npy --map 61:6 62:6 5:5 --out labels_merged.npy
+"""Merge a small-structure request back under its real labels into the big-bone labels; big bones win overlaps.
 
 `segment_sam` rejects duplicate labels, so a structure in several 3D pieces was sent with one temporary label per piece
-(61 and 62 for the two pieces of label 6). `--map temp:final` renames each; several temps may map to one final label. The two
-volumes must be on the same grid (map the small request to the scan grid with `to_scan.py` first).
+(61 and 62 for the two pieces of label 6). `--map temp:final` renames each; several temps may map to one final label, and
+`temp:0` drops one. The two volumes must be on the same grid (map the small request to the scan grid with `to_scan.py` first).
 
 One rule, **not validated** (the bake-off that set the other rules did not test it): the big bones win overlaps. A small
 voxel is written only where `--big` is 0; the voxels it would have taken from a big bone are counted in the output and left
-with the big bone. A temp label that is also a label in `--big` is refused. A small-structure label that loses much of its
-volume to a big bone is a To check item, not something to merge past.
+with the big bone. Refused: a temp label that is also a label in `--big`, a label in `--small` that `--map` does not
+mention, volumes of different shape or grid id. A small-structure label that loses much of its volume to a big bone is a
+To check item, not something to merge past.
+
+Writes: <out>  the merged labels (.npy, the grid of --big), with its sidecar (the map)
+Prints: one JSON line {labels, merged: {temp label: {final, voxels, written, lost_to_big_bones}}, volume_mm3: {label id: volume of the result}}
+Example: python merge_labels.py --big labels_big.npy --small small_trimmed.npy --map 61:6 62:6 5:5 --out labels_merged.npy
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
-import argparse
 import sys
 from pathlib import Path
 
@@ -30,11 +33,11 @@ except ModuleNotFoundError as e:
     sys.exit(2)
 
 if __name__ == '__main__':
-    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
+    ap = sidecar.parser(__doc__)
     ap.add_argument('--big', required=True, help='scan-grid labels of the big bones (clipped)')
     ap.add_argument('--small', required=True, help='scan-grid labels of the small request (trimmed, mapped back)')
-    ap.add_argument('--map', nargs='+', required=True, metavar='temp:final', help='temporary label : label it goes back to')
-    ap.add_argument('--out', required=True)
+    ap.add_argument('--map', nargs='+', required=True, metavar='temp:final', help='temporary label : label it goes back to (0 drops it)')
+    ap.add_argument('--out', required=True, help='merged labels .npy to write')
     a = ap.parse_args()
     try:
         mapping = {int(t): int(f) for t, f in (m.split(':') for m in a.map)}
