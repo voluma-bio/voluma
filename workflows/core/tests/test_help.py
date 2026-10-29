@@ -1,0 +1,89 @@
+"""Every resource script's `--help` is its contract: it runs, and no option lacks help text.
+
+The planned tool index in the agent's prompt is the first docstring line of each script, so that line must be there and short.
+Options are checked on the parser the script builds, captured at the `parse_args` call when the script runs as `__main__`, not on
+the printed text: a missing help string is then a fact, not a layout guess.
+"""
+import argparse
+import ast
+import runpy
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]  # workflows/
+RESOURCES = ROOT.glob('*/skills/*/resources')  # core and each workflow
+# Libraries have no CLI by design; sidecar.py also has one, but its docstring is the library's reference.
+LIBRARIES = {'frame.py', 'viewlib.py', 'envelope.py', 'annotations.py', 'sidecar.py'}
+# Every other resources/*.py is a script: a new file is checked without anyone listing it.
+SCRIPTS = sorted(
+    p for d in RESOURCES for p in d.glob('*.py') if not p.name.startswith('test_') and p.name not in LIBRARIES
+)
+INDEX_LINE_MAX = 110
+
+
+def ids(paths):
+    return [str(p.relative_to(ROOT)) for p in paths]
+
+
+def test_all_scripts_found():
+    assert len(SCRIPTS) >= 27
+
+
+@pytest.mark.parametrize('script', SCRIPTS, ids=ids(SCRIPTS))
+def test_help_exits_0(script):
+    r = subprocess.run([sys.executable, '-I', str(script), '--help'], check=False, capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.startswith('usage:')
+
+
+@pytest.mark.parametrize('script', SCRIPTS, ids=ids(SCRIPTS))
+def test_index_line(script):
+    doc = ast.get_docstring(ast.parse(script.read_text())) or ''
+    first = doc.split('\n')[0]
+    assert first, 'the first docstring line is the tool index entry: a sentence saying what the script does'
+    assert len(first) <= INDEX_LINE_MAX, f'index line is {len(first)} characters, over {INDEX_LINE_MAX}'
+
+
+class _Captured(Exception):
+    pass
+
+
+def build_parser(script, monkeypatch):
+    """The script's parser: run it as __main__ up to its parse_args call and keep the parser."""
+
+    def capture(self, *args, **kwargs):
+        raise _Captured(self)
+
+    monkeypatch.setattr(argparse.ArgumentParser, 'parse_args', capture)
+    monkeypatch.setattr(sys, 'argv', [str(script)])
+    monkeypatch.setattr(sys, 'path', list(sys.path))  # the script's own sys.path setup must not leak between cases
+    with pytest.raises(_Captured) as e:
+        runpy.run_path(str(script), run_name='__main__')
+    return e.value.args[0]
+
+
+def undocumented(parser, prefix=''):
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            for name, sub in action.choices.items():
+                yield from undocumented(sub, f'{prefix}{name} ')
+        elif not action.help or action.help == argparse.SUPPRESS:
+            yield prefix + '/'.join(action.option_strings or [action.dest])
+
+
+@pytest.mark.parametrize('script', SCRIPTS, ids=ids(SCRIPTS))
+def test_every_option_has_help(script, monkeypatch):
+    assert not list(undocumented(build_parser(script, monkeypatch)))
+
+
+@pytest.mark.parametrize('script', SCRIPTS, ids=ids(SCRIPTS))
+def test_docstring_is_the_help(script, monkeypatch):
+    """The parser prints the whole docstring, and the docstring has the contract's lines."""
+    doc = ast.get_docstring(ast.parse(script.read_text()), clean=False)
+    parser = build_parser(script, monkeypatch)
+    assert parser.description == doc, 'build the parser with sidecar.parser(__doc__)'
+    for line in ('Writes:', 'Prints:', 'Example:'):
+        assert f'\n{line}' in doc, f'the docstring has no {line} line (a script that writes nothing says "Writes: nothing")'
