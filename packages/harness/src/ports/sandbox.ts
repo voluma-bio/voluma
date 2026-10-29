@@ -24,8 +24,19 @@ export interface SandboxMount {
   stage?: boolean;
 }
 
+/**
+ * What a sandbox is for. The role fixes its size, its network and the mounts it may hold:
+ * the builders in `sandbox-specs.ts` are the only places that write them.
+ */
+export type SandboxRole = "worker" | "checker" | "convert";
+
+/** `none`: no network at all. `hosts`: HTTPS to these hosts only; everything else is refused. */
+export type SandboxNetwork = { kind: "none" } | { kind: "hosts"; hosts: string[] };
+
 export interface SandboxSpec {
   runId: string;
+  role: SandboxRole;
+  network: SandboxNetwork;
   /**
    * Unique within the run. The sandbox is named `<runId>.<name>.<random>`: each creation
    * gets its own name, so a sandbox a dead process left behind never blocks a resume.
@@ -38,8 +49,10 @@ export interface SandboxSpec {
   /** e.g. `T4`. Absent: CPU only. */
   gpu?: string;
   mounts: SandboxMount[];
-  /** Set on every command; secrets do not belong here. */
+  /** Set on every command. The worker's gateway token is the one secret that belongs here. */
   env?: Record<string, string>;
+  /** The working directory of every command. Absent: the image's. */
+  workdir?: string;
   /**
    * Safety net: the provider ends the sandbox about this long after creation, give or
    * take (Modal enforces it loosely). The real limits are the supervisor's budget and

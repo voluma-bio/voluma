@@ -3,7 +3,7 @@
  * `getReviewRun`. Display helpers leave scientific task status unchanged.
  */
 import type { TaskStatus } from "@voluma/contracts/ids";
-import type { ReviewTask } from "@voluma/contracts/review";
+import type { ReviewTask, Revision } from "@voluma/contracts/review";
 import type { StatusTone } from "@voluma/ui";
 
 export type {
@@ -30,4 +30,14 @@ export function taskStatus(task: ReviewTask): { label: string; tone: StatusTone 
   return task.status === "pending" && task.threads.worker
     ? { label: "No result recorded", tone: "neutral" }
     : statuses[task.status];
+}
+
+/** The structures a task reported, and those its numbers are shown with. */
+export function structuresOf(revision: Revision, task: ReviewTask) {
+  const shownWith = new Set(
+    [...task.measurements, ...task.scores].flatMap((m) => [...m.on, ...m.context]),
+  );
+  return revision.structures.filter(
+    (item) => item.id.startsWith(`${task.id}/`) || shownWith.has(item.id),
+  );
 }

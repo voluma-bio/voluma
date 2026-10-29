@@ -35,8 +35,10 @@ function positiveInt(name: string, fallback: number, min = 1): number {
   return value;
 }
 
-function positiveNumber(name: string, fallback: number): number {
-  const value = Number(optional(name) ?? fallback);
+function optionalPositiveNumber(name: string): number | undefined {
+  const raw = optional(name);
+  if (raw === undefined) return undefined;
+  const value = Number(raw);
   if (!Number.isFinite(value) || value <= 0) throw new Error(`${name} must be a positive number`);
   return value;
 }
@@ -107,7 +109,7 @@ export function modalToken(): { tokenId: string; tokenSecret: string } | undefin
  * sandbox/Dockerfile by the "Sandbox image" workflow, which prints the new digest).
  */
 const SANDBOX_IMAGE =
-  "ghcr.io/voluma-bio/voluma-sandbox@sha256:e6f41b0386216d31c44f39c42a8406785186d53f4c29e95bf6c28abb99d929fe";
+  "ghcr.io/voluma-bio/voluma-sandbox@sha256:00ee4e57a712f19b44e4ead17572083f558e31c229d396778dbbe04d33d525d1";
 
 /**
  * The commit this runner's checkout is at, which a run records as the source of its workflow
@@ -164,8 +166,12 @@ export function runnerConfig() {
     api,
     /** Runs at once. */
     concurrency: positiveInt("RUNNER_CONCURRENCY", 2),
-    /** A run whose model and SAM spend (all claims) reaches this is stopped and ends `failed`. */
-    maxRunCostUsd: positiveNumber("RUNNER_MAX_RUN_COST_USD", 5),
+    /**
+     * A run whose spend (all claims, gateway calls included) reaches this is stopped and ends
+     * `failed`. Unset: no cap (test runs have none). Sent with every claim when set: the gateway
+     * checks the same cap. A SAM call reserves $3 there, so the cap must leave room for it.
+     */
+    maxRunCostUsd: optionalPositiveNumber("RUNNER_MAX_RUN_COST_USD"),
     /**
      * The model of each role of a `voluma` run: `RUNNER_MODEL` (worker), `RUNNER_CHECK_MODEL`
      * (the check threads; default the worker's) and `RUNNER_MAIN_MODEL` (the main thread;

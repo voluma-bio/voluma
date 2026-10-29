@@ -3,11 +3,13 @@
  * queue shares. Reads apply the caller's `Reader` (domain.ts) once, so another org's run
  * is just absent. Every state change is in pg-queue.ts.
  */
+
 import { runEventSchema } from "@voluma/contracts/events";
 import type { ReviewSummary } from "@voluma/contracts/review";
 import { reviewState } from "@voluma/contracts/review-state";
 import { type Input, type Run, runSchema } from "@voluma/contracts/run";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
+import { callsOfRuns, type RunCalls } from "@voluma/provider-calls";
 import { and, asc, desc, eq, inArray, or, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { EVERY_LAB, type Reader, type ReadScope } from "../../domain";
@@ -40,6 +42,8 @@ type Row = {
   run: typeof runs.$inferSelect;
   input: typeof inputs.$inferSelect;
   position: number | null;
+  /** The run's gateway calls that are no longer in flight. */
+  calls: RunCalls;
 };
 
 export const toInput = (row: typeof inputs.$inferSelect): Input => ({
@@ -53,7 +57,7 @@ export const toInput = (row: typeof inputs.$inferSelect): Input => ({
 export const toRunEvent = (row: typeof events.$inferSelect) =>
   runEventSchema.parse({ ...row, createdAt: row.createdAt.toISOString() });
 
-function toRun({ run, input, position }: Row, summary: ReviewSummary | null): Run {
+function toRun({ run, input, position, calls }: Row, summary: ReviewSummary | null): Run {
   const iso = (d: Date | null) => d?.toISOString() ?? null;
   const startedAt = iso(run.startedAt);
   const state = ((): Run["state"] => {
@@ -88,6 +92,7 @@ function toRun({ run, input, position }: Row, summary: ReviewSummary | null): Ru
     createdAt: run.createdAt.toISOString(),
     state,
     usage: { modelCostUsd: run.modelCostUsd, sandboxSeconds: run.sandboxSeconds },
+    providerCalls: calls,
     review: run.state === "ended" && run.outcome === "completed" ? summary : null,
   });
 }
@@ -110,7 +115,7 @@ async function loadRows(tx: Tx, where: SQL | undefined): Promise<Row[]> {
       .from(runs)
       .where(and(eq(runs.state, "queued"), eq(runs.credentials, "voluma"))),
   );
-  return tx
+  const rows = await tx
     .with(place)
     .select({ run: runs, input: inputs, position: place.position })
     .from(runs)
@@ -118,6 +123,14 @@ async function loadRows(tx: Tx, where: SQL | undefined): Promise<Row[]> {
     .leftJoin(place, eq(place.id, runs.id))
     .where(where)
     .orderBy(desc(runs.createdAt), desc(runs.id));
+  const calls = await callsOfRuns(
+    tx,
+    rows.map(({ run }) => run.id),
+  );
+  return rows.map((row) => ({
+    ...row,
+    calls: calls.get(row.run.id) ?? { costUsd: 0, calls: 0, bySandbox: [] },
+  }));
 }
 
 async function loadLogs(tx: Tx, ids: string[], summaryOnly = false) {
@@ -135,6 +148,7 @@ async function loadLogs(tx: Tx, ids: string[], summaryOnly = false) {
                 "revision.started",
                 "attempt.opened",
                 "task",
+                "plan.changed",
                 "checkpoint",
                 "output",
                 "check.accepted",
@@ -144,10 +158,23 @@ async function loadLogs(tx: Tx, ids: string[], summaryOnly = false) {
         ),
       )
       .orderBy(asc(events.seq));
+    // Rows an older build wrote cross a trust boundary. On the list path (`summaryOnly`)
+    // a run whose events no longer parse is left out, its summary null, instead of failing
+    // every run listed with it. A single run's load throws: its own page and API must
+    // fail loudly, not read as "no plan" (a 409 the web polls forever).
+    const unreadable = new Set<string>();
     for (const row of stored) {
-      const log = logs.get(row.runId) ?? [];
-      log.push(toRunEvent(row));
-      logs.set(row.runId, log);
+      if (unreadable.has(row.runId)) continue;
+      try {
+        const log = logs.get(row.runId) ?? [];
+        log.push(toRunEvent(row));
+        logs.set(row.runId, log);
+      } catch (error) {
+        if (!summaryOnly) throw error;
+        unreadable.add(row.runId);
+        logs.delete(row.runId);
+        console.error(`run ${row.runId}: event ${row.id} (${row.type}) does not parse:`, error);
+      }
     }
   }
   return logs;

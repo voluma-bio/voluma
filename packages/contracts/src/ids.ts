@@ -27,7 +27,10 @@ const dotFreeSegmentSchema = segmentSchema.refine((s) => !s.includes("."), {
 
 export const runIdSchema = dotFreeSegmentSchema;
 export const inputIdSchema = segmentSchema;
-export const taskIdSchema = dotFreeSegmentSchema;
+/** `main` and `supervisor` are thread roles in ids (`<runId>.main`, `<runId>.supervisor`), so no task takes them. */
+export const taskIdSchema = dotFreeSegmentSchema.refine((s) => s !== "main" && s !== "supervisor", {
+  message: "'main' and 'supervisor' are reserved",
+});
 export const toolCallIdSchema = segmentSchema;
 
 /** Checklist statuses (requirements, Vocabulary). */
@@ -47,11 +50,16 @@ export const outputKindSchema = z.enum([
   "measurement",
   "score",
   "structure",
+  "surface",
   "annotation",
   "volume",
   "file",
 ]);
 export type OutputKind = z.infer<typeof outputKindSchema>;
+
+/** The kinds review places in a view (blocks a measurement is shown on); the rest are values and files. */
+export const isObjectKind = (kind: OutputKind) =>
+  kind === "volume" || kind === "structure" || kind === "surface" || kind === "annotation";
 
 /** A model as the runner names it: `provider/id`, e.g. `meta/muse-spark-1.3`. */
 export const modelRefSchema = z

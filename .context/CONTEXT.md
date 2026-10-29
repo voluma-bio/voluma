@@ -106,7 +106,7 @@ checklist, check threads, and review chat threads.
   evidence happen outside the section. A thread writes only to its own task, and a worker
   opens an attempt only when every task it builds on is done. `tools/task-tools.ts` wraps it
   as the model's `checklist`, `checkpoint` and `report_output`. `output-checks.ts` holds the
-  declared-output and reference checks. Files named as evidence go through the `Evidence` port.
+  declared-output, reference, grid-placement and ruler-length checks. Files named as evidence go through the `Evidence` port.
 - **The supervisor** (`supervisor.ts`) is code, not a thread with a model, and keeps no state
   of its own. Each step, inside the runtime's `section`, is a function of `fold` of the log, the
   thread records read from the same log (started, ended, wakes, judgments) and which threads

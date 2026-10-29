@@ -22,8 +22,8 @@
  *   own latest event.
  * - Sandbox time is the time from a `bash` call to its result, `bash` being the one tool
  *   that runs in the sandbox; a call cut off by a restart counts nothing. The sandbox's
- *   bill is its uptime (`Run.usage.sandboxSeconds`), which is longer: one sandbox serves
- *   every thread and idles between calls.
+ *   bill is the uptime of all the run's sandboxes (`Run.usage.sandboxSeconds`), which is longer:
+ *   each thread's sandbox idles between its calls.
  *
  * The runner's end-of-run log line sums the same model and tool costs over the run's
  * threads, so without provider calls `total.costUsd` matches it for a run that didn't lose
@@ -101,7 +101,8 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
       open.delete(threadId);
       const wall = seconds(span.since, at ?? (threadId === root ? latest : span.last));
       const s = owner.get(threadId);
-      if (s) s.wallSeconds += wall;
+      // The main agent's calls charge `main`, but its wall time is the root's, which spans the run.
+      if (s && (s !== main || threadId === root)) s.wallSeconds += wall;
       if (threadId === root) total.wallSeconds += wall;
     }
     for (const [id, call] of bash) if (call.threadId === threadId) bash.delete(id);
@@ -119,7 +120,7 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
         } else close(e.threadId);
         if (!owner.has(e.threadId)) {
           let s: Spend | null = null;
-          if (kind === "supervisor") s = main;
+          if (kind === "supervisor" || kind === "main") s = main;
           else if (task !== undefined && (kind === "worker" || kind === "check")) {
             s = tasks.get(task) ?? empty();
             tasks.set(task, s);

@@ -1,54 +1,52 @@
-"""Metaphyseal regions under the tibial growth plate: ROI-3 (deck #16-23) and the cortex for Ct.Th (deck #24, #25).
-
-  python metaphysis_roi.py --hu-aligned tibia-hu.npy --mask tibia-mask.npy --hu-json hu.json --annotations annotations.json
-         --proximal-face growth-plate-proximal-face.npy --proximal-valid growth-plate-proximal-valid.npy --out <dir> [--threshold HU] [--start-um 50] [--length-um 200] [--cortex-clearance-um 20] [--cortex-mm X]
-         [--cortex-search-factor 2]
+"""Cut the tibial metaphyseal regions under the growth plate: ROI-3 (deck #16-23) and the cortex for Ct.Th.
 
 The growth plate's distal face is the reference surface (one face for the whole run: `cortical` reads this script's output,
-it does not trace its own), and it must be traced (`growth_plate_distal_curves` in the
-annotations): ROI-3 starts 50 um below it, so a guessed band thickness (100-200 um on OA6-1RK) moves BV/TV from 23% to
-15% and is not a measurement. The bone threshold (default: the lab's 2.16/cm in this scan's HU, from hu.json's calibration)
+it does not trace its own), and it must be traced (`growth_plate_distal_curves`): ROI-3 starts `--start-um` below it, and
+there is no thickness fallback. The bone threshold (default: the lab's 2.16/cm in this scan's HU, from hu.json's calibration)
 is used here only to estimate the cortex and to build the cortex mask; no label gates it.
-ROI-3 is the slab between `start` and `start + length` below that face (measured along W), inside the filled tibial
+ROI-3 is the slab between `--start-um` and `--start-um` + `--length-um` below that face (measured along W), inside the filled tibial
 cross-section, at least `cortex + clearance` from its outer edge. The cortex thickness used for that edge is the
 depth at which the bone fraction of the outer layers first drops below one half (estimated in the ROI-3 slices,
-reported as cortex_estimate_mm), or --cortex-mm. The cortex mask for Ct.Th is the bone within `search factor` times
+reported as cortex_estimate_mm), or --cortex-mm. The cortex mask for Ct.Th is the bone within `--cortex-search-factor` times
 that depth of the outer edge, over 1.3 mm of shaft below the plate: it can include trabeculae that join the cortex.
+It writes regions only: TV, BV and BV/TV of ROI-3 (deck #16-18) and Tb.N/Th/Sp, nodes/ends (deck #19-23) are
+`morphometry.py trabecular` on roi3-tissue.npy, and Ct.Th is `morphometry.py cortical` on cortex.npy with the distal face as --surface.
+
+--annotations is a JSON file of indices on the aligned grid. It needs "grid_id" (the grid_id of tibia-frame.json; a file without it
+or from another grid is refused). This script reads one key; any other key is refused, and so is a value of the wrong form or an index outside the grid:
+  growth_plate_distal_curves  required: the distal face of the growth-plate band (the side facing the shaft), curves (below),
+                              traced on the coronal sections of tibia-hu.npy
+Curves (every traced surface): {"axis": 1, "height": "row", "slices": {"<v>": [[w, u], ...]}}: the coronal section at
+V = <v> (array axis 1 of the aligned grid), each point [row, column] = [W, U] read off that section's pixel grid ("height"
+is "row" or omitted). A surface is linear in U along a curve (points in any order, constant past the ends) and linear in
+V between traced sections (constant past the first and last). A point is [w, u], not [u, w]. At least two sections;
+anything but axis 1 and height row is refused.
 
 The script stops when the distal trace does not cover the V range of the proximal one (`--proximal-valid`, from iioc.py,
 marks where its proximal face was traced), or when the distal face lies at or above the proximal face (`--proximal-face`)
 inside the tibia: the band between them cannot be thinner than nothing. Where both faces are traced that means a point is
 wrong; where either is held constant past its curves' ends it means the curves must reach further, and the message says
-which face and sections.
+which face and sections. It also stops on an empty ROI-3.
 
-Writes roi3-tissue.npy, cortex.npy, growth-plate-distal-face.npy (2D W index per V,U), roi3.json (the
-parameters used and the cortex estimate), a QC image. It writes regions only: TV, BV and BV/TV of ROI-3 (deck #16-18) and Tb.N/Th/Sp,
-nodes/ends (deck #19-23) are `morphometry.py trabecular` on roi3-tissue.npy, and Ct.Th is `morphometry.py cortical` on
-cortex.npy with the distal face as --surface. The annotation schema is in ../references/oa-protocol.md.
+Writes: <out>/roi3-tissue.npy  ROI-3, bool, on the aligned grid, with its sidecar
+        <out>/cortex.npy  the cortex mask for Ct.Th, bool, with its sidecar
+        <out>/growth-plate-distal-face.npy  W index of the distal face per (V,U), float32, with its sidecar
+        <out>/roi3.json  the parameters used and the cortex estimate (cortex_estimate_mm, cortex_mm_used, threshold)
+        <out>/qc-roi3.jpg  coronal and axial sections: ROI-3 cyan, cortex orange
+Prints: one JSON line {params, qc, roi3_tissue, cortex, distal_face, cortex_estimate_mm, roi3_voxels}
+Example: python metaphysis_roi.py --hu-aligned tibia-hu.npy --mask tibia-mask.npy --hu-json hu.json --annotations annotations.json --proximal-face iioc/growth-plate-proximal-face.npy --proximal-valid iioc/growth-plate-proximal-valid.npy --out roi3/
+Exits 2 with one sentence on bad input, before writing anything.
 """
 
-import argparse
 import json
-import sys
 from pathlib import Path
 
 import matplotlib
 import numpy as np
+import sidecar
+from annotations import load_annotations, need, traced_surface
+from envelope import close_and_fill
 from scipy import ndimage as ndi
-
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
-# only missing directories are added, so a script imported by another leaves the importer's order alone.
-SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources'), str(SKILLS / 'regions-and-landmarks/resources')) if d not in sys.path]
-try:
-    import sidecar
-    from annotations import load_annotations, traced_surface
-    from envelope import close_and_fill
-except ModuleNotFoundError as e:
-    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
-          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
-    sys.exit(2)
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -114,38 +112,39 @@ def cortex_depth(bone, dist, roi_slices, max_layers=40):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--hu-aligned', required=True)
-    ap.add_argument('--mask', required=True, help='tibia-mask.npy from tibia_frame.py')
-    ap.add_argument('--hu-json', required=True, help='hu.json of the scan: the lab threshold in HU comes from its calibration')
-    ap.add_argument('--annotations', required=True)
-    ap.add_argument('--proximal-face', required=True, help='growth-plate-proximal-face.npy from iioc.py: the distal face must lie below it')
-    ap.add_argument('--proximal-valid', required=True, help='growth-plate-proximal-valid.npy from iioc.py: where the proximal face was traced')
-    ap.add_argument('--out', required=True)
+    ap = sidecar.parser(__doc__)
+    ap.add_argument('--hu-aligned', type=sidecar.existing, required=True, help='tibia-hu.npy from tibia_frame.py')
+    ap.add_argument('--mask', type=sidecar.existing, required=True, help='tibia-mask.npy from tibia_frame.py')
+    ap.add_argument('--hu-json', type=sidecar.existing, required=True, help='hu.json of the scan: the lab threshold in HU comes from its calibration')
+    ap.add_argument('--annotations', type=sidecar.existing, required=True, help='annotations JSON on the aligned grid, described above')
+    ap.add_argument('--proximal-face', type=sidecar.existing, required=True, help='growth-plate-proximal-face.npy from iioc.py: the distal face must lie below it')
+    ap.add_argument('--proximal-valid', type=sidecar.existing, required=True, help='growth-plate-proximal-valid.npy from iioc.py: where the proximal face was traced')
+    ap.add_argument('--out', required=True, help='output directory (created)')
     ap.add_argument('--threshold', type=float, help='bone threshold in HU (default: the lab threshold, 2.16/cm, from --hu-json)')
-    ap.add_argument('--start-um', type=float, default=50.0, help='ROI-3 starts this far below the growth plate')
-    ap.add_argument('--length-um', type=float, default=200.0, help='ROI-3 length along the shaft')
-    ap.add_argument('--cortex-clearance-um', type=float, default=20.0)
-    ap.add_argument('--cortex-mm', type=float, help='cortex thickness for the clearance (default: estimated)')
-    ap.add_argument('--cortex-search-factor', type=float, default=2.0)
+    ap.add_argument('--start-um', type=float, default=50.0, help='um: ROI-3 starts this far below the distal growth-plate face')
+    ap.add_argument('--length-um', type=float, default=200.0, help='um: ROI-3 length along the shaft')
+    ap.add_argument('--cortex-clearance-um', type=float, default=20.0, help='um: ROI-3 stays this far beyond the cortex from the outer edge')
+    ap.add_argument('--cortex-mm', type=float, help='mm: cortex thickness for the clearance (default: estimated)')
+    ap.add_argument('--cortex-search-factor', type=float, default=2.0, help='the cortex mask reaches this multiple of the cortex depth in from the outer edge')
     a = ap.parse_args()
     g = sidecar.grid(sidecar.sidecar_path(a.mask))
-    ann = load_annotations(a.annotations, g['grid_id'])
+    ann = load_annotations(a.annotations, g)
     vox = g['spacing_zyx_mm'][0]
     h = np.load(a.hu_aligned, mmap_mode='r')
     tib = np.load(a.mask)
-    if 'growth_plate_distal_curves' not in ann:
-        sidecar.fail(
-            'annotations.json has no "growth_plate_distal_curves": trace the distal face of the growth-plate band on coronal '
-            'sections of tibia-hu.npy (the side facing the shaft, like the proximal face in section A) and run again'
-        )
     a.threshold = sidecar.bone_threshold_hu(a.hu_json, a.threshold)
-    gd = traced_surface(ann['growth_plate_distal_curves'], 'growth_plate_distal_curves', h.shape)[0].astype(np.float32)
+    gd_spec = need(
+        ann,
+        'growth_plate_distal_curves',
+        'trace the distal face of the growth-plate band on coronal sections of tibia-hu.npy (the side facing the shaft, '
+        'like the proximal face in section A) and run again',
+    )
+    gd, dv = traced_surface(gd_spec, 'growth_plate_distal_curves', h.shape)
+    gd = gd.astype(np.float32)
     prox = np.load(a.proximal_face)
     if prox.shape != gd.shape:
         sidecar.fail(f'--proximal-face is {prox.shape} but the distal face is {gd.shape}: pass the face of the same tibia frame')
-    dv = traced_surface(ann['growth_plate_distal_curves'], 'growth_plate_distal_curves', h.shape)[1]
-    dlo, dhi = (f(int(k) for k in ann['growth_plate_distal_curves']['slices']) for f in (min, max))
+    dlo, dhi = (f(int(k) for k in gd_spec['slices']) for f in (min, max))
     check_below_proximal(gd, dv, dlo, dhi, prox, np.load(a.proximal_valid), tib, vox)
     w = np.arange(h.shape[0])[:, None, None]
     rel = (w - gd[None]) * vox * 1000  # um below the distal face
@@ -189,6 +188,7 @@ def main():
             inputs=inputs,
             params=params,
             script='metaphysis_roi.py',
+            surface_axis=0 if name == 'growth-plate-distal-face.npy' else None,
         )
     (out / 'roi3.json').write_text(json.dumps(params, indent=1) + '\n')
     vs = np.linspace(*np.flatnonzero(roi.any(axis=(0, 2)))[[0, -1]], 4).astype(int)

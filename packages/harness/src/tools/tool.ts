@@ -15,7 +15,7 @@ export interface ToolContext {
   toolCallId: string;
   /** Aborts when the run is cancelled; tools must stop what they started. */
   signal: AbortSignal;
-  /** The run's sandbox, created on first use. */
+  /** The calling thread's sandbox, created on first use. */
   sandbox(): Promise<Sandbox>;
   /** Live output for people watching: queued, best effort, may be dropped. */
   output(stream: "stdout" | "stderr", text: string): void;
@@ -27,7 +27,8 @@ export interface ToolResult {
   /** What the model sees. */
   output: string;
   isError: boolean;
-  /** The model saw a cut, and the full output is stored at `toolOutputKey(runId, toolCallId)`. */
+  /** The model saw a cut, and the full output is stored at
+   * `toolOutputKey(runId, threadName, toolCallId)`, in the calling thread's own scratch folder. */
   truncated: boolean;
   /**
    * Images the model sees with the text (base64). They go to the model and the thread's

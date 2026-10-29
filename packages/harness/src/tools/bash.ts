@@ -1,11 +1,11 @@
 /**
- * The `bash` tool: runs a command in the run's sandbox. The model sees the combined
+ * The `bash` tool: runs a command in the thread's sandbox. The model sees the combined
  * output capped to its head and tail; when that cuts something, the full text is
  * written to `toolOutputKey` through the sandbox (the harness has no R2 client) and
  * the result says so. Live chunks go to `ctx.output`, coalesced.
  */
 import { z } from "zod";
-import type { RunLayout } from "../layout";
+import type { ThreadLayout } from "../layout";
 import type { Sandbox } from "../ports/sandbox";
 import type { Tool, ToolContext, ToolResult } from "./tool";
 
@@ -28,7 +28,7 @@ const inputSchema = z.object({
     .describe("Seconds before the command and everything it started is killed."),
 });
 
-export function bashTool(layout: RunLayout): Tool<typeof inputSchema> {
+export function bashTool(layout: ThreadLayout): Tool<typeof inputSchema> {
   return {
     name: "bash",
     description:

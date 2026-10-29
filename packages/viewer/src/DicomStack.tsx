@@ -1,12 +1,30 @@
 /** Acquired-slice viewport. Cornerstone owns pixel decoding, modality/VOI transforms and pixel aspect ratio. */
 import { Enums, RenderingEngine, type Types } from "@cornerstonejs/core";
+import type { Focus, Structure } from "@voluma/contracts/review";
 import { useEffect, useRef, useState } from "react";
 import type { DicomSeries } from "./dicom";
 import { acquireDicomSession, type DicomSession, initializeDicom } from "./dicomSession";
+import { drawLabels } from "./labelOverlay";
+import { type LabelVolume, type StructureDisplay, scanWorld } from "./labels";
 import { ZoomControls } from "./ZoomControls";
 
-export default function DicomStack({ series }: { series: DicomSeries }) {
+export default function DicomStack({
+  series,
+  layers,
+  structures,
+  display,
+  focus,
+  labels,
+}: {
+  series: DicomSeries;
+  layers: LabelVolume[];
+  structures: Structure[];
+  display: StructureDisplay;
+  focus?: Focus;
+  labels: boolean;
+}) {
   const element = useRef<HTMLDivElement>(null);
+  const overlay = useRef<HTMLCanvasElement>(null);
   const controls = useRef<{
     viewport: Types.IStackViewport;
     seek(index: number): void;
@@ -17,6 +35,56 @@ export default function DicomStack({ series }: { series: DicomSeries }) {
   const [ready, setReady] = useState(false);
   const [window, setWindow] = useState({ width: "1", center: "0" });
   const [retry, setRetry] = useState(0);
+
+  useEffect(() => {
+    if (!ready || !focus?.point) return;
+    controls.current?.seek(focus.point[0]);
+    const view = controls.current?.viewport;
+    if (view) {
+      const target = scanWorld(series, focus.point);
+      const camera = view.getCamera();
+      if (camera.position && camera.focalPoint)
+        view.setCamera({
+          focalPoint: target,
+          position: camera.position.map((n, i) => n + target[i]! - camera.focalPoint![i]!) as [
+            number,
+            number,
+            number,
+          ],
+        });
+      view.render();
+    }
+  }, [focus, ready, series]);
+
+  useEffect(() => {
+    const canvas = overlay.current;
+    const host = element.current;
+    if (!canvas || !host || !ready) return;
+    const draw = () => {
+      const view = controls.current?.viewport;
+      if (view && !status)
+        drawLabels(
+          canvas,
+          view,
+          series,
+          view.getCurrentImageIdIndex(),
+          layers,
+          structures,
+          display,
+          focus,
+          labels,
+        );
+      else canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+    };
+    host.addEventListener(Enums.Events.IMAGE_RENDERED, draw);
+    const resize = new ResizeObserver(draw);
+    resize.observe(host);
+    draw();
+    return () => {
+      resize.disconnect();
+      host.removeEventListener(Enums.Events.IMAGE_RENDERED, draw);
+    };
+  }, [series, layers, structures, display, focus, labels, ready, status]);
 
   useEffect(() => {
     const host = element.current;
@@ -133,6 +201,11 @@ export default function DicomStack({ series }: { series: DicomSeries }) {
           className="dicom-canvas"
           role="img"
           aria-label={`Acquired DICOM image, slice ${index + 1} of ${series.slices.length}`}
+        />
+        <canvas
+          ref={overlay}
+          className="dicom-label-overlay"
+          aria-label="Segmentation labels and focused check region"
         />
         {status && (
           <div className="dicom-status" role={error ? "alert" : "status"}>

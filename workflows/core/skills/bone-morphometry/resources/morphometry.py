@@ -1,4 +1,4 @@
-"""Volumes and morphometry of a region of interest: the one owner of TV, BV and BV/TV.
+"""Measure a region of interest: the one owner of TV, BV and BV/TV, plus trabecular and cortical thickness.
 
   volumes      TV, BV, BV/TV of a region
   trabecular   the same three, plus Tb.Th, Tb.Sp, Tb.N (and with --skeleton, Tb.Nd and Tb.Tm), a QC image, thickness maps
@@ -6,32 +6,30 @@
 
 Bone is the region and `--hu` above the bone threshold, with no label gate: `--threshold` in HU, else the lab's 2.16/cm
 converted with the calibration in `--hu-json` (the scan's hu.json). `--roi`, `--hu` and `--grid` (default: the region's own
-sidecar) must be on one grid; the volumes are counted on it. Lengths in mm, volumes in mm³, BV/TV in %, densities in 1/mm³.
-Each value is written under the output id the caller gives with `--id KEY=output-id` (repeatable; the keys are
-printed by `--help`), else under KEY. The record format is in `microct-core/resources/sidecar.py`. Methods: ../SKILL.md.
+sidecar) must be on one grid; the volumes are counted on it. Lengths in mm (cortical depth, slab and context in um), volumes
+in mm³, BV/TV in %, densities in 1/mm³. Thickness needs isotropic voxels. Each value is written under the output id the
+caller gives with `--id KEY=output-id` (repeatable; the keys are printed by `<command> --help`), else under KEY. The record
+format is in `microct-core/resources/sidecar.py`. Methods: ../SKILL.md. Refused: a mask that is not bool, an empty ROI, an ROI
+holding only bone or only marrow, HU on another grid than the region, anisotropic voxels (thickness).
+
+Writes: volumes: <out>/volumes.json; trabecular: <out>/morphometry.json, qc.jpg, thickness-mm.npy and separation-mm.npy
+        (the ROI's bounding box on the region's grid, `offset_zyx` in their sidecars, mm); cortical: <out>/<name>.json,
+        qc-<name>.jpg and slab-<name>.npy (the slab measured, cropped, as an object: see `microct-core/resources/objects.py`).
+        The json is the result record {values: {id: {value, unit, definition, kind}}, grid_id, inputs, ...}; cortical adds `objects` (the slab)
+Prints: one JSON line {out, values: {id: {value, unit, definition, kind}}}; trabecular adds {qc, thickness, separation}, cortical {qc}
+Example: python morphometry.py trabecular --roi roi.npy --hu hu.npy --hu-json hu.json --out out/roi2 --id BV/TV=BVTV-roi2
+Exits 2 with one sentence on bad input, before writing anything.
 """
 
 import argparse
-import sys
 import warnings
 from pathlib import Path
 
 import matplotlib
 import numpy as np
+import objects
+import sidecar
 from scipy import ndimage as ndi
-
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
-# only missing directories are added, so a script imported by another leaves the importer's order alone.
-SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources')) if d not in sys.path]
-try:
-    import sidecar
-except ModuleNotFoundError as e:
-    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
-          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
-    sys.exit(2)
-
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -111,13 +109,13 @@ def crop_box(mask, pad=0):
 
 def write_crop_map(path, arr, parent_grid, spacing, box, inputs, params):
     np.save(path, arr)
-    origin = [s.start for s in box]
     sidecar.write(
         path,
-        grid_id=sidecar.derived_grid_id(parent_grid, {'crop_origin_zyx': origin}),
+        grid_id=parent_grid,
         spacing_zyx_mm=spacing,
         inputs=inputs,
-        params=dict(params, crop_origin_zyx=origin, unit='mm'),
+        params=dict(params, unit='mm'),
+        offset_zyx=[s.start for s in box],
     )
 
 
@@ -376,6 +374,7 @@ def cortical(a):
     fig.tight_layout()
     sidecar.save_image(fig, qc)
     plt.close(fig)
+    slab_entry = objects.mask(out / f'slab-{a.name}.npy', slab, like=a.grid, crop=True)
     sidecar.emit_values(
         out / f'{a.name}.json',
         values,
@@ -385,48 +384,55 @@ def cortical(a):
             'inputs': {str(q): sidecar.sha256_file(q) for q in (a.cortex, a.surface, a.grid)},
         },
         qc=str(qc),
+        objects={f'{a.name}-slab': slab_entry},
     )
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
+    ap = sidecar.parser(__doc__)
     sub = ap.add_subparsers(dest='cmd', required=True)
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument('--roi', required=True, help='bool .npy: the region measured')
-    common.add_argument('--hu', required=True, help='HU array on the region\'s grid (hu.npy for a scan-grid region, the aligned stack\'s HU otherwise): bone = HU above the threshold')
-    common.add_argument('--hu-json', help='the scan\'s hu.json: the lab threshold in HU comes from its calibration (not needed with --threshold)')
+    common.add_argument('--roi', type=sidecar.existing, required=True, help='bool .npy: the region measured')
+    common.add_argument('--hu', type=sidecar.existing, required=True, help='HU array on the region\'s grid (hu.npy for a scan-grid region, the aligned stack\'s HU otherwise): bone = HU above the threshold')
+    common.add_argument('--hu-json', type=sidecar.existing, help='the scan\'s hu.json: the lab threshold in HU comes from its calibration (not needed with --threshold)')
     common.add_argument('--threshold', type=float, help='bone threshold in HU (default: the lab threshold, 2.16/cm, from --hu-json)')
-    common.add_argument('--grid', help='sidecar of the grid the region and --hu are on (default: the region\'s own)')
+    common.add_argument('--grid', type=sidecar.existing, help='sidecar of the grid the region and --hu are on (default: the region\'s own)')
     common.add_argument('--region', default='ROI', help='name of the region in the value definitions')
-    common.add_argument('--out', required=True, help='output directory')
-    v = sub.add_parser('volumes', parents=[common], help='TV, BV, BV/TV of a region')
-    v.add_argument('--id', action='append', metavar='KEY=ID', help=f'output id for KEY in {list(VOLUME_KEYS)}')
+    common.add_argument('--out', required=True, help='output directory (created)')
+    fmt = sidecar.HelpFormatter
+    v = sub.add_parser('volumes', parents=[common], formatter_class=fmt, help='TV, BV, BV/TV of a region',
+                       description='TV, BV and BV/TV of a region (mm³, mm³, %). Writes <out>/volumes.json.')
+    v.add_argument('--id', action='append', metavar='KEY=ID', help=f'output id for KEY in {list(VOLUME_KEYS)} (repeatable)')
     v.set_defaults(fn=volumes)
-    t = sub.add_parser('trabecular', parents=[common], help='TV, BV, BV/TV, Tb.Th, Tb.Sp, Tb.N [, Tb.Nd, Tb.Tm] in an ROI')
-    t.add_argument('--id', action='append', metavar='KEY=ID', help=f'output id for KEY in {list(TRAB_KEYS)}')
+    t = sub.add_parser('trabecular', parents=[common], formatter_class=fmt, help='TV, BV, BV/TV, Tb.Th, Tb.Sp, Tb.N [, Tb.Nd, Tb.Tm] in an ROI',
+                       description='TV, BV, BV/TV, Tb.Th, Tb.Sp, Tb.N [, Tb.Nd, Tb.Tm] of an ROI, a QC image and the thickness and separation maps. '
+                       'Writes <out>/morphometry.json, qc.jpg, thickness-mm.npy, separation-mm.npy.')
+    t.add_argument('--id', action='append', metavar='KEY=ID', help=f'output id for KEY in {list(TRAB_KEYS)} (repeatable)')
     t.add_argument('--skeleton', action='store_true', help='also count nodes (Tb.Nd) and ends (Tb.Tm)')
     t.add_argument(
-        '--edge-margin-mm', type=float, default=0.0315, help='skeleton points this close to the ROI edge are not counted'
+        '--edge-margin-mm', type=float, default=0.0315, help='mm: skeleton points this close to the ROI edge are not counted'
     )
     t.add_argument('--qc-axis', type=int, default=1, choices=[0, 1, 2], help='axis the QC slices are cut across')
     t.set_defaults(fn=trabecular)
-    c = sub.add_parser('cortical', help='Ct.Th in a slab at a depth below a reference surface')
-    c.add_argument('--cortex', required=True, help='bool .npy of the cortical bone (not trabeculae)')
+    c = sub.add_parser('cortical', formatter_class=fmt, help='Ct.Th in a slab at a depth below a reference surface',
+                       description='Ct.Th: mean largest-contained-sphere diameter over the cortical voxels of a slab at a depth below a '
+                       'reference surface. Writes <out>/<name>.json and qc-<name>.jpg.')
+    c.add_argument('--cortex', type=sidecar.existing, required=True, help='bool .npy of the cortical bone (not trabeculae)')
     c.add_argument(
-        '--surface', required=True, help='2D .npy: index along --axis of the reference surface, per position'
+        '--surface', type=sidecar.existing, required=True, help='2D .npy: index along --axis of the reference surface, per position (the mask shape without --axis)'
     )
-    c.add_argument('--axis', type=int, default=0, choices=[0, 1, 2])
+    c.add_argument('--axis', type=int, default=0, choices=[0, 1, 2], help='axis the depth is measured along')
     c.add_argument(
         '--direction', type=int, default=1, choices=[-1, 1], help='+1 if depth grows with the index along --axis'
     )
-    c.add_argument('--depth-um', type=float, required=True)
-    c.add_argument('--slab-um', type=float, default=50, help='thickness of the slab centred on the depth')
+    c.add_argument('--depth-um', type=float, required=True, help='um: depth of the slab centre below the surface')
+    c.add_argument('--slab-um', type=float, default=50, help='um: thickness of the slab centred on the depth')
     c.add_argument(
-        '--context-um', type=float, default=400, help='cortex kept above and below the slab when measuring spheres'
+        '--context-um', type=float, default=400, help='um: cortex kept above and below the slab when measuring spheres'
     )
-    c.add_argument('--name', default='Ct.Th', help='the output id of the value')
-    c.add_argument('--grid', required=True)
-    c.add_argument('--out', required=True)
+    c.add_argument('--name', default='Ct.Th', help='the output id of the value (and the output file name)')
+    c.add_argument('--grid', type=sidecar.existing, required=True, help='hu.json or a sidecar of the grid the cortex is on')
+    c.add_argument('--out', required=True, help='output directory (created)')
     c.set_defaults(fn=cortical)
     a = ap.parse_args()
     a.fn(a)

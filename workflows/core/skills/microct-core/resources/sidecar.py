@@ -6,7 +6,10 @@ Every `.npy` a resource writes has `<name>.json` beside it:
   spacing_zyx_mm   voxel size in mm, axes in array order
   inputs           {path: sha256} of every file the array was computed from
   params           the parameters that produced it
-A sidecar that already exists keeps its other keys (`segment_sam` puts its prompts and per-object confidence in the same file).
+  offset_zyx       only on a cropped array: the index on the grid of its [0, 0, 0] (`objects.mask`, the morphometry maps)
+  surface_axis     only on a surface: the array axis its heights are measured along (`objects.surface`)
+`write` owns the keys above: it writes `offset_zyx` and `surface_axis` when given and removes a stale one when not. A sidecar that
+already exists keeps its other keys (`segment_sam` puts its prompts, per-object confidence and its own `axis`, the one it sliced along, in the same file).
 
 Library use (other resources import this file):
   import sidecar
@@ -16,13 +19,18 @@ Library use (other resources import this file):
   sidecar.bone_threshold_hu(header, override)   # the lab's measurement threshold in this scan's HU, or the override
   sidecar.emit(**fields)   # print the one JSON line a resource prints to stdout (fails on NaN)
   sidecar.value(v, unit, definition, kind='measurement', **provenance)   # one entry of a result record
-  sidecar.emit_values(out_json, values, meta=None, **fields)   # write the result record, print it (below)
+  sidecar.emit_values(out_json, values, meta=None, objects=None, **fields)   # write the result record, print it (below)
   sidecar.save_image(fig, path)  # the image limits below, JPEG
   sidecar.load_points(paths, grid_id)   # {name: [z, y, x]} merged from points files (`pick.py` writes one per view); refuses another grid
   sidecar.fail(sentence)   # print a sentence the agent can act on to stderr and exit 2
+  sidecar.parser(__doc__)  # the argparse parser every resource uses: the docstring is the `--help` text, defaults appended;
+                           # any argument error is one sentence on stderr and exit 2
+  ap.add_argument('--hu', type=sidecar.existing)   # an input file or directory: refused after parsing, before anything is written
 
 Result record: every script that reports numbers writes `{"values": {id: {value, unit, definition, kind, ...}}, ...meta}`
 to its JSON file and prints `{"out": path, "values": {id: {value, unit, definition, kind}}, ...}` (values rounded to 6 decimals).
+A script that places something (`objects.py`) adds `"objects": {id: entry}` to the record and to what it prints; `quad_view.py
+--objects` takes the record.
 `id` is the output id the caller asks for (a flag or a spec key; the workflow's `outputs.json` binds to it), `kind` is
 `measurement` or `diagnostic` (a number that helps judge a measurement but is not one), and `value` may be null.
 
@@ -40,6 +48,32 @@ import numpy as np
 MAX_IMAGE_PX = 2000  # view_image's limit; larger images may be rejected or resized
 MAX_IMAGE_BYTES = 1 << 20  # view_image refuses files over 1 MiB, and every image is resent with later requests
 JPEG_QUALITIES = (85, 75, 65)  # `save_image` tries each until the file is under the limit
+
+
+class HelpFormatter(argparse.RawDescriptionHelpFormatter, argparse.ArgumentDefaultsHelpFormatter):
+    """Keeps the docstring's layout and appends `(default: X)` to an option that has a real default."""
+
+    def _get_help_string(self, action):
+        if action.default is None or action.default is False:
+            return action.help
+        return super()._get_help_string(action)
+
+
+class _Parser(argparse.ArgumentParser):
+    def error(self, message):
+        fail(message)  # one sentence, not argparse's usage text and prog prefix
+
+
+def existing(path):
+    """`type=` of an argument that names an input: a path that must exist (a file or a directory)."""
+    if not Path(path).exists():
+        raise argparse.ArgumentTypeError(f'{path} does not exist')
+    return path
+
+
+def parser(doc, **kwargs):
+    """The parser of a resource: `doc` is its module docstring, printed whole by `--help`."""
+    return _Parser(description=doc, formatter_class=HelpFormatter, **kwargs)
 
 
 def sha256_file(path):
@@ -92,7 +126,9 @@ def derived_grid_id(parent_grid_id, frame):
     return hashlib.sha256(blob.encode()).hexdigest()
 
 
-def write(array_path, *, like=None, grid_id=None, spacing_zyx_mm=None, inputs=(), params=None, script=None):
+def write(array_path, *, like=None, grid_id=None, spacing_zyx_mm=None, inputs=(), params=None, script=None, offset_zyx=None,
+          surface_axis=None):
+    """Write the sidecar of `array_path`, beside the keys of an existing one that this function does not own."""
     if like is not None:
         g = grid(like)
         grid_id, spacing_zyx_mm = g['grid_id'], g['spacing_zyx_mm']
@@ -103,10 +139,13 @@ def write(array_path, *, like=None, grid_id=None, spacing_zyx_mm=None, inputs=()
         'grid_id': grid_id, 'shape': list(a.shape), 'dtype': str(a.dtype), 'spacing_zyx_mm': spacing_zyx_mm,
         'inputs': {str(p): sha256_file(p) for p in inputs}, 'params': params or {},
         'script': script or Path(sys.argv[0]).name,
+        **({'offset_zyx': [int(i) for i in offset_zyx]} if offset_zyx is not None else {}),
+        **({'surface_axis': int(surface_axis)} if surface_axis is not None else {}),
     }
     out = sidecar_path(array_path)
-    if out.exists():  # segment_sam writes its own <labels>.json (axis, prompt, per-object confidence): keep its keys
-        meta = {**json.loads(out.read_text()), **meta}
+    if out.exists():  # segment_sam writes its own <labels>.json (prompt, per-object confidence): keep its keys
+        old = {k: v for k, v in json.loads(out.read_text()).items() if k not in ('offset_zyx', 'surface_axis')}  # positional: never stale
+        meta = {**old, **meta}
     out.write_text(json.dumps(meta, indent=1, default=float) + '\n')
     return out
 
@@ -156,9 +195,11 @@ def value(v, unit, definition, kind='measurement', **provenance):
     return dict(value=None if v is None else float(v), unit=unit, definition=definition, kind=kind, **provenance)
 
 
-def emit_values(out_json, values, meta=None, **fields):
-    """Write the result record to `out_json` and print it, with `fields` (paths of what the script wrote) beside it."""
-    record = {'values': values, **(meta or {})}
+def emit_values(out_json, values, meta=None, objects=None, **fields):
+    """Write the result record to `out_json` and print it, with `fields` (paths of what the script wrote) beside it.
+
+    `objects` ({id: entry} from `objects.py`) goes in the record and on stdout, so a caller passes the record, never retypes it."""
+    record = {'values': values, **(meta or {}), **({'objects': objects} if objects else {})}
     try:
         text = json.dumps(record, indent=1, default=float, allow_nan=False)
     except ValueError:
@@ -167,7 +208,7 @@ def emit_values(out_json, values, meta=None, **fields):
     Path(out_json).write_text(text + '\n')
     brief = {k: {'value': None if v['value'] is None else round(v['value'], 6), 'unit': v['unit'], 'definition': v['definition'],
                  'kind': v['kind']} for k, v in values.items()}
-    emit(out=str(out_json), **fields, values=brief)
+    emit(out=str(out_json), **fields, values=brief, **({'objects': objects} if objects else {}))
 
 
 def _has_nonfinite(v):

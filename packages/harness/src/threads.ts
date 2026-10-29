@@ -15,19 +15,24 @@ import {
 } from "./adapters/pi/start-thread";
 
 /** What differs per thread; the run-wide dependencies come from `Threads`' `shared`. */
-type PerRun = "runId" | "recorder" | "history" | "sandbox" | "signal";
+type PerRun = "runId" | "recorder" | "history" | "sandbox" | "signal" | "runSignal";
 // Distributes over the kind union; a plain `Omit` would collapse it.
 export type ThreadSpec = StartThreadOptions extends infer O
   ? O extends unknown
     ? Omit<O, PerRun>
     : never
   : never;
-type Shared = Pick<StartThreadOptions, "runId" | "recorder" | "history" | "sandbox">;
+type Shared = Pick<StartThreadOptions, "runId" | "recorder" | "history" | "sandbox"> & {
+  /** Called when a thread ends, whatever the outcome; its sandbox is no longer needed. */
+  release(threadId: string): void;
+};
 
 export interface Threads {
   /** Starts a thread, or resumes one of the same id from its History (give it an `input`). */
   start(spec: ThreadSpec): ThreadHandle;
   running(threadId: string): boolean;
+  /** Whether this process has started the thread (it may have ended, its end not yet stored). */
+  started(threadId: string): boolean;
   /** Whether any thread is running. */
   active(): boolean;
   /** Steers a message into a running thread; false if it is not running or has ended. */
@@ -64,7 +69,13 @@ export function threads(shared: Shared, signal?: AbortSignal): Threads {
     const stop = () => abort.abort();
     signal?.addEventListener("abort", stop);
     if (signal?.aborted) stop();
-    const handle = startThread({ ...shared, ...spec, signal: abort.signal });
+    const { release: _, ...startOptions } = shared;
+    const handle = startThread({
+      ...startOptions,
+      ...spec,
+      signal: abort.signal,
+      runSignal: signal,
+    });
     const entry: Entry = { abort, handle, running: true, settled: Promise.resolve() };
     // `running` clears in the same tick `done` resolves: `send` refuses a moment before.
     entry.settled = handle.done
@@ -83,6 +94,7 @@ export function threads(shared: Shared, signal?: AbortSignal): Threads {
       )
       .finally(() => {
         entry.running = false;
+        shared.release(spec.threadId);
         signal?.removeEventListener("abort", stop);
       });
     entries.set(spec.threadId, entry);
@@ -99,6 +111,7 @@ export function threads(shared: Shared, signal?: AbortSignal): Threads {
       return launch(spec).handle;
     },
     running: (threadId) => entries.get(threadId)?.running === true,
+    started: (threadId) => entries.has(threadId),
     active: () => live().length > 0,
     send: (threadId, text, sender) => {
       const entry = entries.get(threadId);

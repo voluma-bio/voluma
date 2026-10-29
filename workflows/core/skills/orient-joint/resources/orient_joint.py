@@ -1,17 +1,8 @@
-"""Coarse frame for a joint between two long bones, from a bone threshold alone (no segmentation): shaft axes, the
-plane they span, a stack of slices along that plane's normal, and the keyframe slice through the joint.
+"""Orient a joint: find both bones' shaft axes from a bone threshold and stack slices along their plane.
 
 Run this BEFORE `segment_sam`: SAM tracks through a stack of slices, so each slice must show the bones it should
-follow, and the scanner's own axes often do not do that.
-
-  python orient_joint.py --in hu.npy --header hu.json --out <outdir> [--threshold-hu <T>]
-        --shaft-radius-mm R --ref-radius-mm R --min-object-mm3 V [--margin-mm 0.126]
-        [--second-bone-frac 0.25]
-      Writes <outdir>/frame.json (the frame: `microct-core/resources/frame.py` has its schema and the maps to and from the scan,
-      plus this script's diagnostics and `keyframe`), oriented.npy (float32 HU stack, axis 0 = slices) with its sidecar,
-      and keyframe.jpg (the sheet to look at before going on). Prints the keyframe index and the bend angle.
-
-  from orient_joint import joint_frame     # frame = joint_frame(hu, spacing_mm): R_zyx, origin_zyx, shape and diagnostics
+follow, and the scanner's own axes often do not do that. Writes the frame, the oriented stack and the keyframe slice
+through the joint (the sheet to look at before going on). No segmentation is needed.
 
 Needs isotropic voxels (the stack is cut on the scan's voxel size), HU in, ZYX order. The three sizes are required and in mm,
 converted to voxels with the scan's spacing: they say how big this animal's bones are, so the workflow's anatomy
@@ -40,29 +31,22 @@ piece taken for the second bone or the reference object when size cannot tell (a
 check splits voxels by side of the joint, so with one touching piece it cannot tell two bones from one bone's shaft and
 condyles; the 3-radius shaft check covers that case.
 A fused neighbouring bone (the fibula) pulls bone B's axis slightly.
+
+Writes: <out>/frame.json  the frame (`microct-core/resources/frame.py` has its schema and the maps to and from the scan, plus this script's diagnostics and `keyframe`)
+        <out>/oriented.npy  float32 HU stack, axis 0 = slices, with its sidecar (its own grid)
+        <out>/keyframe.jpg  the keyframe slice
+Prints: one JSON line {frame, oriented, keyframe_image, keyframe, slices, bend_deg, skew_vox, shafts_found, keyframe_bone_vox, threshold_hu, plane_rule, ref_object_frames, oriented_shape}
+Example: python orient_joint.py --in hu.npy --header hu.json --out orient --shaft-radius-mm 0.9 --ref-radius-mm 3 --min-object-mm3 0.5
+Exits 2 with one sentence on bad input, before writing anything.
 """
-import argparse
-import sys
 from pathlib import Path
 
+import frame as fr
 import numpy as np
+import render_slices
+import sidecar
 from scipy import ndimage as ndi
 from scipy.spatial import cKDTree
-
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
-# only missing directories are added, so a script imported by another leaves the importer's order alone.
-SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources'), str(SKILLS / 'visual-check/resources')) if d not in sys.path]
-try:
-    import frame as fr
-    import render_slices
-    import sidecar
-except ModuleNotFoundError as e:
-    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
-          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
-    sys.exit(2)
-
 
 END_FRAC = 0.30
 SHAFT_RANGE = (0.35, 0.95)
@@ -184,6 +168,8 @@ def joint_frame(hu, spacing_mm, shaft_radius_mm, ref_radius_mm, min_object_mm3, 
     fg = sub > T
     closed = ndi.binary_closing(fg, ndi.generate_binary_structure(3, 1), iterations=1) | fg
     lab, n = ndi.label(closed)
+    if n == 0:
+        sidecar.fail(f'No bone found above {T:.0f} HU: check the volume and --threshold-hu')
     sizes = ndi.sum_labels(fg, lab, range(1, n + 1)) * 8
     order = np.argsort(-sizes)
     cents = np.array(ndi.center_of_mass(fg, lab, range(1, n + 1))) * 2 + 0.5
@@ -296,30 +282,30 @@ def joint_frame(hu, spacing_mm, shaft_radius_mm, ref_radius_mm, min_object_mm3, 
 
 
 if __name__ == '__main__':
-    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--in', dest='src', required=True, help='hu.npy')
-    ap.add_argument('--header', required=True, help='hu.json from scan-intake')
-    ap.add_argument('--out', required=True, help='output directory')
-    ap.add_argument('--threshold-hu', type=float, help='bone threshold; default Otsu on the volume')
-    ap.add_argument('--shaft-radius-mm', type=float, required=True)
-    ap.add_argument('--ref-radius-mm', type=float, required=True)
-    ap.add_argument('--min-object-mm3', type=float, required=True)
+    ap = sidecar.parser(__doc__)
+    ap.add_argument('--in', type=sidecar.existing, dest='src', required=True, help='hu.npy of the scan')
+    ap.add_argument('--header', type=sidecar.existing, required=True, help='hu.json from scan-intake')
+    ap.add_argument('--out', required=True, help='output directory (created)')
+    ap.add_argument('--threshold-hu', type=float, help='bone threshold in HU (default: Otsu on the volume)')
+    ap.add_argument('--shaft-radius-mm', type=float, required=True, help='mm: the widest a shaft gets')
+    ap.add_argument('--ref-radius-mm', type=float, required=True, help='mm: how near the joint the reference object sits')
+    ap.add_argument('--min-object-mm3', type=float, required=True, help='mm3: the smallest 3D piece worth considering')
     ap.add_argument('--second-bone-frac', type=float, default=0.25, help='smallest second bone piece, as a fraction '
                     'of the largest; smaller pieces are reference object candidates')
-    ap.add_argument('--margin-mm', type=float, default=0.126)
-    ap.add_argument('--window', help='lo,hi HU for the keyframe sheet (default: automatic)')
+    ap.add_argument('--margin-mm', type=float, default=0.126, help='mm of margin around the bones in the oriented stack')
+    ap.add_argument('--window', metavar='lo,hi', help='display window in HU for the keyframe sheet (default: automatic)')
     a = ap.parse_args()
     g = sidecar.grid(a.header)
     sp = g['spacing_zyx_mm']
     if not np.allclose(sp, sp[0], rtol=1e-3):
         sidecar.fail(f'Voxels are not isotropic ({sp} mm): resample the volume before orienting')
-    out = Path(a.out)
-    out.mkdir(parents=True, exist_ok=True)
     hu = np.load(a.src, mmap_mode='r')
     params = {'threshold_hu': a.threshold_hu, 'shaft_radius_mm': a.shaft_radius_mm, 'ref_radius_mm': a.ref_radius_mm,
                   'min_object_mm3': a.min_object_mm3, 'margin_mm': a.margin_mm,
                   'second_bone_frac': a.second_bone_frac}
     frame = fr.make(g['grid_id'], sp, parent_affine_xyz=g['affine_xyz_to_world_mm'], **joint_frame(hu, sp[0], **params))
+    out = Path(a.out)
+    out.mkdir(parents=True, exist_ok=True)
     stack = fr.resample(hu, frame, cval=frame['background_hu'])
     np.save(out / 'oriented.npy', stack)
     fr.save(frame, out / 'frame.json')
