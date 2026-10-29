@@ -6,7 +6,16 @@
 import { logoutResponseSchema, type Me, meResponseSchema } from "@voluma/contracts/auth";
 import { type DownloadDescriptor, downloadDescriptorSchema } from "@voluma/contracts/download";
 import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
-import { type ReviewRun, reviewRunSchema } from "@voluma/contracts/review";
+import {
+  type AcceptCheckRequest,
+  acceptCheckRequestSchema,
+  type MarkReviewedRequest,
+  markReviewedRequestSchema,
+  type ReviewDecisionResponse,
+  type ReviewRun,
+  reviewDecisionResponseSchema,
+  reviewRunSchema,
+} from "@voluma/contracts/review";
 import {
   type CreateUploadRequest,
   type CreateUploadResponse,
@@ -235,6 +244,37 @@ export async function resendKeys(id: string, keys: VisitorKeys): Promise<Run> {
 export async function getReviewRun(runId: string): Promise<ReviewRun> {
   return reviewRunSchema.parse(
     await json(await request(`/review/runs/${encodeURIComponent(runId)}`)),
+  );
+}
+
+/** Accepts one current-result check; never marks the run reviewed. API handlers follow this contract PR. */
+export async function acceptCheck(
+  runId: string,
+  checkId: string,
+  body: AcceptCheckRequest,
+): Promise<ReviewDecisionResponse> {
+  return reviewDecisionResponseSchema.parse(
+    await json(
+      await request(
+        `/review/runs/${encodeURIComponent(runId)}/checks/${encodeURIComponent(checkId)}/accept`,
+        { method: "POST", body: acceptCheckRequestSchema.parse(body) },
+      ),
+    ),
+  );
+}
+
+/** Explicitly completes review of a revision with no open checks. API handlers follow this contract PR. */
+export async function markReviewed(
+  runId: string,
+  body: MarkReviewedRequest,
+): Promise<ReviewDecisionResponse> {
+  return reviewDecisionResponseSchema.parse(
+    await json(
+      await request(`/review/runs/${encodeURIComponent(runId)}/mark-reviewed`, {
+        method: "POST",
+        body: markReviewedRequestSchema.parse(body),
+      }),
+    ),
   );
 }
 

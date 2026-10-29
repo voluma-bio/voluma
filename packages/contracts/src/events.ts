@@ -1,5 +1,5 @@
 /**
- * The run event log: what an agent thread did, in order. The envelope is the
+ * The run event log: agent activity and human review decisions, in order. The envelope is the
  * same for every kind; `type` selects the payload. The runner appends events
  * (`eventInputSchema`; `id` is chosen by the client so a retried POST is a
  * no-op, and the POST carries the run's lease token, `LEASE_TOKEN_HEADER` in
@@ -26,6 +26,9 @@
  *
  * `task`, `checkpoint` and `output` are what the run screen and the review are
  * folded from (see below).
+ * `check.accepted` and `review.completed` are server-authored human decisions:
+ * readable in runEventSchema, rejected by the runner's eventInputSchema, and ignored
+ * by the scientific fold. Their payloads and command rules live in review.ts.
  */
 import { z } from "zod";
 import {
@@ -36,7 +39,7 @@ import {
   toolCallIdSchema,
 } from "./ids";
 import { evidenceRefSchema, outputReportSchema } from "./output";
-import { focusSchema } from "./review";
+import { checkAcceptedSchema, focusSchema, reviewCompletedSchema } from "./review";
 import { recordedPinSchema, workflowPlanSchema } from "./workflow";
 
 const nonEmpty = z.string().min(1);
@@ -94,14 +97,14 @@ export type By = z.infer<typeof bySchema>;
  */
 
 const envelope = {
-  /** Chosen by the client; appending the same id twice stores one event. */
+  /** Chosen by the writer (runner or API); appending the same id twice stores one event. */
   id: nonEmpty,
   runId: runIdSchema,
   threadId: nonEmpty,
   createdAt: z.iso.datetime(),
 };
 
-/** The union of all kinds; `extra` adds fields to every envelope. */
+/** Runner-authored kinds only; `extra` adds fields to every envelope. */
 const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
   const event = <T extends string, P extends z.ZodType>(type: T, payload: P) =>
     z.object({ ...envelope, ...extra, type: z.literal(type), payload });
@@ -398,12 +401,35 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
   ]);
 };
 
-/** What a client appends: an event without `seq`. */
+/** What a runner appends: an event without `seq`, never a human review decision. */
 export const eventInputSchema = eventUnion({});
 export type EventInput = z.infer<typeof eventInputSchema>;
 
-/** A stored event, with its server-assigned `seq`. */
-export const runEventSchema = eventUnion({ seq: z.number().int().nonnegative() });
+const stored = { seq: z.number().int().nonnegative() };
+
+/** A stored event: runner events reuse their definitions; only reads include human decisions. */
+export const runEventSchema = z
+  .discriminatedUnion("type", [
+    eventUnion(stored),
+    z.object({
+      ...envelope,
+      ...stored,
+      type: z.literal("check.accepted"),
+      payload: checkAcceptedSchema,
+    }),
+    z.object({
+      ...envelope,
+      ...stored,
+      type: z.literal("review.completed"),
+      payload: reviewCompletedSchema,
+    }),
+  ])
+  .refine(
+    (e) =>
+      (e.type !== "check.accepted" && e.type !== "review.completed") ||
+      e.threadId === `${e.runId}.reviewer`,
+    { path: ["threadId"], message: "human review decisions belong to <runId>.reviewer" },
+  );
 export type RunEvent = z.infer<typeof runEventSchema>;
 export type EventType = RunEvent["type"];
 
