@@ -9,8 +9,8 @@
  *
  * What a step does for a task, by its status (the first applicable):
  * - a thread of the task is running: nothing, wait for it;
- * - a thread of the task was cut off (its latest `thread.started` has no `thread.ended`: the
- *   runtime aborted a claim, or a crash): resume it with a message saying what it was cut off
+ * - the thread in charge of the task was cut off (its latest `thread.started` has no
+ *   `thread.ended`: the runtime aborted a claim, or a crash): resume it with a message saying what it was cut off
  *   in. That is no wake and no redo; infrastructure's limit bounds restarts (`cutOffText`);
  * - `pending` or `stale`, every dependency done (or to check with its outputs in): start a worker, named by how many the log
  *   has started for the task (a redo gets a fresh thread, never the old one);
@@ -22,8 +22,9 @@
  * - `under-review`: a check that failed is a judgment point; one that ended without a verdict is
  *   woken once; otherwise its result is written,
  *   and a verdict that is not `passed` is a judgment point (`check-disagreed`).
- * Every `thread.ended` is deliberate (a stale dependent stopped, a check's time limit): a
- * thread that ended `cancelled` is never resumed.
+ * A thread that ended `cancelled` was stopped on purpose (a stale dependent, a run failing
+ * through `abortAll`; a stop aimed at a cut-off thread writes that end itself) and is never
+ * resumed. Only the thread in charge of its task is resumed after a cut-off.
  * A wake (a boundary or a judgment point) is asked of the main thread outside the section,
  * then recorded as a `wake` event with the id `<thread>@<starts>:wake` (the notes it wrote, and at a
  * judgment point its decision) before anything uses it: workers and checks started later get
@@ -445,8 +446,12 @@ export function supervisor(options: SupervisorOptions) {
     const t = f.tasks.find((x) => x.id === taskId);
     // A cut-off thread goes on where it was. A thread this process started is not one: it ended
     // here, its end not stored yet, or it was refused as unresumable (handled below).
+    const inCharge = (r: ThreadRecord) =>
+      r.role === "worker"
+        ? !t?.threads.worker || t.threads.worker === r.id
+        : t?.status === "under-review" && t.threads.check === r.id;
     const cutOff = [...startedFor(d, taskId, "worker"), ...startedFor(d, taskId, "check")].find(
-      (r) => !r.end && !threads.started(r.id),
+      (r) => !r.end && !threads.started(r.id) && inCharge(r),
     );
     if (cutOff) {
       const tool = [...cutOff.openCalls.values()].at(-1);
@@ -462,13 +467,15 @@ export function supervisor(options: SupervisorOptions) {
     // or left it in progress, stalls: wake it, then a judgment point.
     const worker = startedFor(d, taskId, "worker").at(-1);
     // A worker that was stopped on purpose (`cancelled`) is not woken; its task starts again.
+    const stopped = worker?.end?.status === "cancelled";
     if (
       worker &&
-      worker.end?.status !== "cancelled" &&
+      !stopped &&
       (!t || t.status === "in-progress" || (t.status === "stale" && t.threads.worker !== worker.id))
     ) {
       return stalled(d, worker, t);
     }
+    if (stopped && t?.status === "in-progress") return startWorker(taskId);
     if (!t) return ready.has(taskId) ? startWorker(taskId) : "idle";
     const workerId = worker?.id ?? "";
     switch (t.status) {
@@ -520,6 +527,10 @@ export function supervisor(options: SupervisorOptions) {
         }
         // A check that stopped without a verdict (it wrote "Passed" in the text only) is
         // woken once, as a worker is, before its task is left with no verdict.
+        if (c.end?.status === "cancelled") {
+          launch("check", taskId, nextThreadId(d, taskId, "check"), { attemptId: t.attemptId });
+          return "acted";
+        }
         if (t.checker?.verdict === undefined && c.wakes < 1) {
           const text = `You stopped before giving a verdict. Write a checkpoint on ${taskId} with verdict "passed" if you agree or "needs-review" if you do not or cannot tell, and one plain line of why.`;
           wake(c, { text, sender: { kind: "runtime" } }, t.attemptId);
@@ -693,7 +704,7 @@ export function supervisor(options: SupervisorOptions) {
       failed();
       if (failure !== undefined) {
         const error = failure instanceof Error ? failure.message : String(failure);
-        recorder.emit(root, "thread.ended", { status: "failed", error });
+        if (!signal?.aborted) recorder.emit(root, "thread.ended", { status: "failed", error });
         throw failure;
       }
       // A runtime abort writes no end, like a crash: the next claim resumes the root as well.

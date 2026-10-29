@@ -152,18 +152,24 @@ config (`RUNNER_MODEL`, `RUNNER_CHECK_MODEL`, `RUNNER_MAIN_MODEL`).
 A stop the runtime chooses (shutdown, a heartbeat that wasn't acknowledged for 45 s, a lost
 lease, the server ending the run) aborts the run's signal. Threads see it as `runSignal`
 (`start-thread.ts`): from that moment they store nothing more and write no `thread.ended`,
-exactly as after a crash, and the supervisor writes none for the root. So every
-`thread.ended` is a stop someone chose (a stale dependent stopped, a check's time limit) and
-is never resumed. A self-stop reports `released` with reason `self-stop`; a signal, `shutdown`.
+exactly as after a crash, and the supervisor writes none for the root, even if a step threw
+while the signal was aborting. So a `thread.ended {cancelled}` is a stop someone chose and is
+never resumed: a stale dependent's thread stopped (`task-runtime.ts` `staleDependents`), or a
+failing run aborting its threads (`abortAll`). A stop aimed at a thread this process has not
+started (cut off by an earlier claim) writes that `cancelled` end itself (`supervise-run.ts`
+`stopThread`), so "open" always means "cut off". A self-stop reports `released` with reason `self-stop`; a signal, `shutdown`.
 
 The next claim learns why from `claim.previousClaim` (the API records `lease-expired` itself)
 and writes `claim.started {resumed, after}` right after the root's `thread.started`. The
-supervisor then resumes every worker or check thread whose latest `thread.started` has no
-`thread.ended` (and that this process hasn't started) with the message of
+supervisor then resumes the thread in charge of each task, if its latest `thread.started` has
+no `thread.ended` and this process hasn't started it: the worker only when it is the task's
+current worker (or the task has no attempt yet), the check only when the task is
+`under-review` and it is the current check. It resumes with the message of
 `supervisor.ts` `cutOffText`, naming the tool the log shows with no result, or the no-tool
 form. A cut-off resume is not a wake, so it spends none of the stuck guard's two and counts
 no redo; the main thread isn't asked. The "You stopped, but ... is not finished" wake is for a
-thread that ended `completed` with its task unfinished. A tool whose `tool.call` event was
+thread that ended `completed` with its task unfinished. A worker that ended `cancelled` with
+its task `in-progress` gets a fresh worker; a check that ended `cancelled` gets a new check. A tool whose `tool.call` event was
 still queued when the runner died isn't named (the log lacks it), so a runner killed within
 milliseconds of a call gets the no-tool form.
 

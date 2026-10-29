@@ -1,5 +1,5 @@
 {
-  "id": "2aa90a2f-c880-449f-8d6e-2d892ecbc9b0",
+  "id": "54c56190-f206-4149-b15d-f66dac6aedbe",
   "prevId": "afc49913-9d2c-4523-83c3-bfc3a0c4951e",
   "version": "7",
   "dialect": "postgresql",
@@ -346,6 +346,13 @@
         },
         "stalled_claims": {
           "name": "stalled_claims",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "recoveries": {
+          "name": "recoveries",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,

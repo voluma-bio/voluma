@@ -20,6 +20,7 @@ import type { Recorder } from "./recorder";
 import { runStartPlan } from "./run-start";
 import { type RoleSpec, supervisor, supervisorThreadId } from "./supervisor";
 import { type PlanTask, taskRuntime } from "./task-runtime";
+import { threadLog } from "./thread-log";
 import { threads } from "./threads";
 import { bashTool } from "./tools/bash";
 import { buildTools } from "./tools/registry";
@@ -71,6 +72,9 @@ export interface SuperviseRunOptions {
 export async function superviseRun(options: SuperviseRunOptions): Promise<Folded> {
   const { runId, layout, recorder, signal } = options;
   const rootThreadId = supervisorThreadId(runId);
+  // A stored log means an earlier claim ran. `previousClaim` says why it ended; a run claimed
+  // before the API recorded reasons has none, and its resume says only "restarted".
+  const resumed = recorder.events().length > 0;
   // Not a derived id: each invocation of the root is a thread start of its own.
   recorder.emit(rootThreadId, "thread.started", {
     parentThreadId: null,
@@ -78,7 +82,7 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
     workflows: options.workflows,
   });
   recorder.emit(rootThreadId, "claim.started", {
-    resumed: options.previousClaim !== undefined,
+    resumed,
     ...(options.previousClaim && { after: options.previousClaim }),
   });
   const plan = await runStartPlan({
@@ -103,7 +107,13 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
     runId,
     rootThreadId,
     plan,
-    stopThread: (id) => pool.abort(id),
+    stopThread: (id) => {
+      if (pool.started(id)) return pool.abort(id);
+      // Cut off by an earlier claim and not resumed here: nothing runs to abort, so the stop is
+      // stored as its end, or the next claim would resume a thread nobody wants (`supervisor.ts`).
+      const open = threadLog(recorder.events()).threads.get(id);
+      if (open && !open.end) recorder.emit(id, "thread.ended", { status: "cancelled" });
+    },
   });
   const task = (id: string): PlanTask => {
     const found = plan.find((t) => t.id === id);
