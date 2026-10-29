@@ -39,11 +39,43 @@ import {
   toolCallIdSchema,
 } from "./ids";
 import { evidenceRefSchema, outputReportSchema } from "./output";
+import { relativePathSchema, sha256Schema } from "./r2";
 import { checkAcceptedSchema, focusSchema, reviewCompletedSchema } from "./review";
 import { claimEndReasonSchema } from "./runner";
 import { recordedPinSchema, workflowPlanSchema } from "./workflow";
 
 const nonEmpty = z.string().min(1);
+
+const zyx = z.tuple([
+  z.number().int().positive(),
+  z.number().int().positive(),
+  z.number().int().positive(),
+]);
+
+/**
+ * What the converter (`workflows/core/convert/review_assets.py`) prints and writes as
+ * `manifest.json`; the runner parses it and builds `assets.ready` from it. Paths are relative
+ * to the asset prefix (`reviewAssetKey`). It carries no `sourceSha256`: the runner knows which
+ * file it converted, and identity is never taken from subprocess output. Other keys in the
+ * printed JSON are ignored.
+ */
+export const reviewAssetsManifestSchema = z.object({
+  /** OME-Zarr levels, finest first; `scaleZyx` is source voxels per level voxel on each axis. */
+  levels: z.array(z.object({ path: relativePathSchema, shapeZyx: zyx, scaleZyx: zyx })),
+  /**
+   * Surface meshes: float32 vertices (x, y, z) in voxels of the source grid at full resolution,
+   * then uint32 triangle indices, little-endian. `label` is set for a labels volume's mesh.
+   */
+  meshes: z.array(
+    z.object({
+      label: z.number().int().positive().optional(),
+      path: relativePathSchema,
+      vertices: z.number().int().nonnegative(),
+      indices: z.number().int().nonnegative(),
+    }),
+  ),
+});
+export type ReviewAssetsManifest = z.infer<typeof reviewAssetsManifestSchema>;
 
 /** Bounds on what a `wake` stores, in UTF-16 code units: the notes block goes into every later worker's prompt. */
 export const WAKE_NOTE_MAX = 6000;
@@ -423,6 +455,29 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
       }),
   );
 
+  /**
+   * Review assets (OME-Zarr levels, meshes) for one reported file were converted: the
+   * manifest plus the `sourceSha256` of the file. Written by the runner's conversion worker
+   * on the run's root thread (`<runId>.supervisor`); id `<runId>:assets:<sha256>`, so a retry
+   * or a resumed worker stores one event. The files are under `reviewAssetKey(runId,
+   * sourceSha256, path)`. The assets are a function of the source bytes and the converter
+   * version, so a rerun of a task that reports the same bytes reuses them. The server serves
+   * them at `GET /api/review/runs/:runId/assets/:sha256/*`: a read check on the run, the tail
+   * checked as a `relativePathSchema`, then a 302 to a presigned GET with `Cache-Control:
+   * no-store` on the 302 (the presigned URL expires; the file does not change).
+   * Not in a review summary: `reviewState` ignores it.
+   */
+  const assetsReady = event(
+    "assets.ready",
+    reviewAssetsManifestSchema.extend({ sourceSha256: sha256Schema }),
+  );
+
+  /** Conversion of the file with this `sourceSha256` failed (or timed out at the end of the run); same id as `assets.ready`. Permanent for the run. */
+  const assetsFailed = event(
+    "assets.failed",
+    z.object({ sourceSha256: sha256Schema, error: nonEmpty }),
+  );
+
   return z.discriminatedUnion("type", [
     claimStarted,
     threadStarted,
@@ -438,6 +493,8 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     output,
     judgment,
     wake,
+    assetsReady,
+    assetsFailed,
   ]);
 };
 
