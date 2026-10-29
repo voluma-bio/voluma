@@ -19,7 +19,7 @@ import type {
   Message,
   Model,
 } from "@earendil-works/pi-ai";
-import { WAKE_ERROR_MAX, WAKE_NOTE_MAX } from "@voluma/contracts/events";
+import { type ModelUsage, WAKE_ERROR_MAX, WAKE_NOTE_MAX } from "@voluma/contracts/events";
 import type { WorkflowPlan } from "@voluma/contracts/workflow";
 import type { PlanChange } from "@voluma/workflow/plan";
 import { z } from "zod";
@@ -211,6 +211,31 @@ function parseAnswer(text: string, judged: boolean) {
   return answer;
 }
 
+/** Several replies' usage as one; the wake records the cost of every call it made. */
+function addUsage(a: ModelUsage | undefined, b: ModelUsage | undefined): ModelUsage | undefined {
+  if (!a || !b) return a ?? b;
+  return {
+    input: a.input + b.input,
+    output: a.output + b.output,
+    cacheRead: a.cacheRead + b.cacheRead,
+    cacheWrite: a.cacheWrite + b.cacheWrite,
+    ...(a.reasoning !== undefined || b.reasoning !== undefined
+      ? { reasoning: (a.reasoning ?? 0) + (b.reasoning ?? 0) }
+      : {}),
+    costUsd: a.costUsd + b.costUsd,
+  };
+}
+
+/** `ask` failed after the model answered: `usage` is what its replies cost, for the `wake` that records the error. */
+export class UnusableReplyError extends Error {
+  constructor(
+    message: string,
+    readonly usage: ModelUsage | undefined,
+  ) {
+    super(message);
+  }
+}
+
 /**
  * `complete` is one model call, e.g. `(c, signal) => models.completeSimple(model, c, { apiKey, signal })`.
  * `system` is fixed for the run: a changed one would miss the cache and change what resume asks.
@@ -233,16 +258,18 @@ export function llmMainThread(
       const messages = conversation(model, past, pointOf(point));
       const judged = point.kind === "check-disagreed" || point.kind === "thread-failed";
       let firstError: string | undefined;
+      let usage: ModelUsage | undefined;
       for (;;) {
         const reply = await complete({ systemPrompt: system, messages }, signal, onEvent);
         // A call that failed has no content; its error is the cause, not "answered without JSON".
         if (reply.stopReason === "error")
           throw new Error(reply.errorMessage ?? "the model request failed");
+        usage = addUsage(usage, usageOf(reply));
         const text = reply.content.flatMap((c) => (c.type === "text" ? [c.text] : [])).join("");
         try {
           const answer = parseAnswer(text, judged);
           return {
-            usage: usageOf(reply),
+            usage,
             note: answer.note?.slice(0, WAKE_NOTE_MAX),
             decision: judged ? answer.decision : undefined,
             change: point.kind === "run-started" ? answer.change : undefined,
@@ -254,8 +281,11 @@ export function llmMainThread(
               : error instanceof Error
                 ? error.message
                 : String(error);
-          if (firstError !== undefined) throw new Error(`${why} (the first reply: ${firstError})`);
+          if (firstError !== undefined) {
+            throw new UnusableReplyError(`${why} (the first reply: ${firstError})`, usage);
+          }
           firstError = why;
+          signal.throwIfAborted();
           messages.push(reply, {
             role: "user",
             content: `Your reply could not be used: ${why}\nReply again to the same message with one JSON object and nothing else.`,

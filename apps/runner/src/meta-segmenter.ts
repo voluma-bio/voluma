@@ -139,11 +139,12 @@ export function metaSegmenter(options: {
         .map((o) => `"${o.name}" (label ${o.label}, frame ${o.frame}, box [${o.box}])`)
         .join("; ");
       throw new Error(
-        `Meta answered 404 model_not_found twice to this request. It does this for some inputs, ` +
-          `not only when the service is down, and bills nothing for it. Asked for: ${asked}. ` +
-          `Likely one object's box prompt is the cause (a small box often is); try fewer objects ` +
-          `per call, or change or drop the one that keeps failing. A failing call costs nothing; ` +
-          `a call that succeeds costs about $0.07-0.10.`,
+        `Meta answered 404 twice to this request: ${await failure(res)}. It bills nothing for a failed ` +
+          `call. Either this input is the cause (seen once: a small box prompt failed on every call ` +
+          `while the other objects succeeded) or Meta is down. Asked for: ${asked}. To tell which: ` +
+          `try once more with the smallest or least certain object left out or given a larger box ` +
+          `(a call that succeeds costs about $0.07-0.10). If that also gets a 404, stop calling ` +
+          `segment_sam and report the outage.`,
       );
     }
     if (!res.ok || !res.body) throw new Error(`Meta request failed: ${await failure(res)}`);
