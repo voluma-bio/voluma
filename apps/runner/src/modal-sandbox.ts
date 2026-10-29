@@ -10,9 +10,11 @@
  *   command therefore runs under `timeout -k` (which leads its own process group and
  *   signals all of it) and records that group;
  *   an abort kills that group with a second exec, or terminates the sandbox if that fails.
- * - Read-only inputs flagged `stage` are copied to local disk at their path at create, 32
- *   files at a time (the copy is writable: commands run as root, and a sandbox cannot
- *   remount or `chattr` a path or run as another user and still write the mounts); the bucket is mounted at a private path under /staged for the copy.
+ * - Read-only inputs flagged `stage` are copied to local disk at their path at create: every
+ *   directory first, then 32 parallel workers of 16 files, then re-copies of only the files still
+ *   missing or the wrong size, up to three more passes (`STAGE_SCRIPT`; the copy is writable: commands run as root, and a
+ *   sandbox cannot remount or `chattr` a path or run as another user and still write the mounts);
+ *   the bucket is mounted at a private path under /staged for the copy.
  * - Network follows the spec: none (`blockNetwork`), or HTTPS to the listed hosts only
  *   (`outboundDomainAllowlist`; probed on 0.11.1: plain HTTP, other hosts and IPs are refused,
  *   but DNS lookups of any name still resolve).
@@ -61,6 +63,30 @@ export interface ModalSandboxConfig {
 
 const MAX_MODAL_NAME = 64;
 const STAGE_PARALLELISM = 32;
+// Copy passes after the first, over the files still missing or the wrong size.
+const STAGE_RETRIES = 3;
+// Tail of the stage command's stderr kept in the error.
+const STAGE_STDERR_CHARS = 4000;
+// Copies the files under "$1" to "$2". Every directory is made first: parallel
+// `cp --parents` calls racing to create one parent fail with "File exists". Each later pass
+// re-copies only files whose destination is missing or a different size, found by comparing one
+// sorted "size path" listing per side. Paths are positional arguments, never spliced in.
+const STAGE_SCRIPT = `export LC_ALL=C; set -o pipefail
+mkdir -p "$2" || exit 1; cd "$1" || exit 1
+src=$(mktemp) && todo=$(mktemp) || exit 1; trap 'rm -f "$src" "$todo"' EXIT
+find . -type d -print0 | (cd "$2" && xargs -0 -r mkdir -p --) || exit 1
+list() { (cd "$1" && find . -type f -printf '%s %p\\0' | sort -z); }
+# The source is listed once, checked: a listing that fails partway must not pass as complete.
+list . > "$src" || { echo "listing $1 failed" >&2; exit 1; }
+sed -z 's/^[0-9]* //' "$src" > "$todo"
+for pass in $(seq 0 ${STAGE_RETRIES}); do
+  xargs -0 -r -P ${STAGE_PARALLELISM} -n 16 cp --parents -t "$2" < "$todo"
+  # A partial destination listing only causes extra re-copies, never a false pass.
+  comm -z -23 "$src" <(list "$2") | sed -z 's/^[0-9]* //' > "$todo"
+  [ -s "$todo" ] || exit 0
+done
+printf 'could not copy %s files: %.1000s\\n' "$(tr -cd '\\0' < "$todo" | wc -c)" "$(tr '\\0' ' ' < "$todo")" >&2
+exit 1`;
 const STAGE_ROOT = "/staged";
 const GROUP_DIR = "/tmp/voluma-exec";
 const KILL_GRACE_SECONDS = 5;
@@ -203,20 +229,21 @@ class ModalSandboxAdapter implements Sandbox {
 
   async stage(): Promise<void> {
     for (const mount of this.#mounts.filter((m) => m.stage)) {
-      // Paths are positional arguments, never spliced into the script.
-      const script =
-        'set -eo pipefail; mkdir -p "$2"; cd "$1"; find . -type f -print0 | ' +
-        `xargs -0 -r -P ${STAGE_PARALLELISM} -n 16 cp --parents -t "$2"; ` +
-        // A partial listing must not pass as a complete copy.
-        'test "$(find . -type f | wc -l)" = "$(cd "$2" && find . -type f | wc -l)"';
       let code = -1;
+      let stderr = "";
       for await (const chunk of this.#run(
-        ["bash", "-c", script, "_", mountedAt(mount), mount.path],
+        ["bash", "-c", STAGE_SCRIPT, "_", mountedAt(mount), mount.path],
         3600,
       )) {
         if (chunk.type === "exit") code = chunk.code;
+        else if (chunk.type === "stderr") stderr = (stderr + chunk.data).slice(-STAGE_STDERR_CHARS);
       }
-      if (code !== 0) throw new Error(`staging ${mount.path} failed with exit code ${code}`);
+      if (code !== 0) {
+        const detail = stderr.trim();
+        throw new Error(
+          `staging ${mount.path} failed (exit ${code})${detail ? `: ${detail}` : ""}`,
+        );
+      }
     }
   }
 
