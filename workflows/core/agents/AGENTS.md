@@ -45,7 +45,7 @@ All keys are required except `status`; any other key fails the load.
   exist) are not checked against the registry.
 
 Models are runner config (`RUNNER_MODEL`, `RUNNER_CHECK_MODEL`, `RUNNER_MAIN_MODEL`), and every
-role is told the same skill list: the workflow's skill, then each skill of the directories it `uses`.
+role is told the same skill list: the workflow's own skill, its other skills, then core's.
 
 ## What stays in the harness
 

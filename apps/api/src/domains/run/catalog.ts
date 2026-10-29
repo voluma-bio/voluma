@@ -2,7 +2,7 @@
  * The workflow catalog: server config mapping a `workflowId` to the workflow directory
  * (`workflows/<name>`) a run uses. A request names an id from here, never a path, so a caller
  * can't point the runner at another directory. A run pins the deployed commit and that path;
- * the runner snapshots the directory (and the ones its `SKILL.md` lists in `uses`) into the
+ * the runner snapshots the directory (and `workflows/core`) into the
  * run's R2 prefix when it starts. The plan and skills come from those files
  * (`@voluma/workflow`). A workflow's text reaches a prompt only through a commit of this
  * repo, which is the trust boundary.

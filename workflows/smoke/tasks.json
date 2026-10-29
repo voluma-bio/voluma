@@ -3,7 +3,7 @@
     "id": "count-files",
     "dependsOn": [],
     "outputs": ["file-count"],
-    "instructions": "Count the regular files under /inputs, following the scan-notes skill. Report the count.",
+    "instructions": "Count the regular files under /inputs, following the smoke-skills skill. Report the count.",
     "doneWhen": ["file-count is reported as a whole number."]
   },
   {

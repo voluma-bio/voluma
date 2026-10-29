@@ -164,29 +164,40 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
       texts.set(path, await store.get(key));
   }
 
+  // The workflow's own skill (named for its directory) first, then its others, then core's, each
+  // group sorted: the order must not depend on how the store lists keys.
+  const own = `${dir}/skills/${dir.slice(dir.lastIndexOf("/") + 1)}/SKILL.md`;
+  if (!texts.has(own))
+    throw new WorkflowParseError(
+      own,
+      "not found: a workflow needs a skill named for its directory",
+    );
+  const skillPaths = (d: string) =>
+    [...texts.keys()]
+      .filter(
+        (p) => p.startsWith(`${d}/skills/`) && /^[^/]+\/SKILL\.md$/.test(p.slice(d.length + 8)),
+      )
+      .sort();
   const skills: Skill[] = [];
-  for (const d of [dir, CORE]) {
-    for (const [path, text] of texts) {
-      if (!(path.startsWith(`${d}/skills/`) && /^[^/]+\/SKILL\.md$/.test(path.slice(d.length + 8))))
-        continue;
-      const skillDir = path.slice(0, -"/SKILL.md".length);
-      const fm = frontmatter(path, text);
-      const expected = skillDir.slice(skillDir.lastIndexOf("/") + 1);
-      if (fm.name !== expected) {
-        throw new WorkflowParseError(
-          path,
-          `name "${fm.name}" must match its directory "${expected}"`,
-        );
-      }
-      if (skills.some((s) => s.name === fm.name)) {
-        throw new WorkflowParseError(path, `skill "${fm.name}" is defined twice`);
-      }
-      skills.push({
-        name: fm.name,
-        description: fm.description.replace(/\s+/g, " ").trim(),
-        path: `/workflow/${skillDir}`,
-      });
+  for (const path of [own, ...skillPaths(dir).filter((p) => p !== own), ...skillPaths(CORE)]) {
+    const text = texts.get(path) as string;
+    const skillDir = path.slice(0, -"/SKILL.md".length);
+    const fm = frontmatter(path, text);
+    const expected = skillDir.slice(skillDir.lastIndexOf("/") + 1);
+    if (fm.name !== expected) {
+      throw new WorkflowParseError(
+        path,
+        `name "${fm.name}" must match its directory "${expected}"`,
+      );
     }
+    if (skills.some((s) => s.name === fm.name)) {
+      throw new WorkflowParseError(path, `skill "${fm.name}" is defined twice`);
+    }
+    skills.push({
+      name: fm.name,
+      description: fm.description.replace(/\s+/g, " ").trim(),
+      path: `/workflow/${skillDir}`,
+    });
   }
 
   const json = (name: string) => {
