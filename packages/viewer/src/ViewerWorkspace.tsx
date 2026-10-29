@@ -39,15 +39,7 @@ const views = [
   },
 ];
 
-export function ViewerWorkspace({
-  selected,
-  display,
-  series,
-}: {
-  selected: { id: string; name: string }[];
-  display: StructureDisplay;
-  series?: DicomSeries;
-}) {
+export function ViewerWorkspace({ series }: { series?: DicomSeries }) {
   const [maximized, setMaximized] = useState<string | null>(null);
   return (
     <section
@@ -56,9 +48,6 @@ export function ViewerWorkspace({
     >
       <div className="viewer-heading">
         <h2 className="font-medium">Imaging workspace</h2>
-        <span className="text-xs text-muted-foreground">
-          {series ? "Acquired images · not an analysis" : "Open a scan to view images"}
-        </span>
       </div>
       <div className="viewer-grid">
         <Group orientation="vertical" id="viewer-rows">
@@ -92,22 +81,6 @@ export function ViewerWorkspace({
             </Group>
           </Panel>
         </Group>
-      </div>
-      <div className="viewer-selection">
-        <span className="text-xs text-muted-foreground">Task structures</span>
-        <div className="flex flex-wrap gap-2 mt-2">
-          {selected.map((s) => (
-            <span className="structure-chip" key={s.id}>
-              {s.name}
-              <span className="text-muted-foreground">
-                {display[s.id]?.visible === false ? "Hidden" : `${display[s.id]?.opacity ?? 100}%`}
-              </span>
-            </span>
-          ))}
-          {selected.length === 0 && (
-            <p className="text-sm text-muted-foreground">No structures selected.</p>
-          )}
-        </div>
       </div>
     </section>
   );
@@ -179,24 +152,6 @@ function ViewSlot({
               </p>
             </div>
           )}
-          <footer>
-            {view.id === "acquired" && series ? (
-              <>
-                <span>
-                  {series.columns} × {series.rows}
-                </span>
-                <span>{series.spacing.join(" × ")} mm / pixel</span>
-              </>
-            ) : view.id === "surface" && series ? (
-              <>
-                Display only<span>No anatomical meshes</span>
-              </>
-            ) : (
-              <>
-                No image<span>Not loaded</span>
-              </>
-            )}
-          </footer>
         </section>
       </Panel>
     </>

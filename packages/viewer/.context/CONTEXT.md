@@ -1,7 +1,7 @@
 # DICOM viewer specification
 
 The viewer parses a ZIP of DICOM Part 10 images for acquired-slice viewing
-and an on-demand raw 3D volume preview. It supports slice navigation, window/level,
+and automatic full-resolution raw 3D viewing. It supports slice navigation, window/level,
 camera rotation, zoom/reset and volume intensity/opacity controls. It does not
 upload data, reconstruct orthogonal planes, produce meshes, segment anatomy or
 calculate scientific measurements. It is not a validated diagnostic viewer.
@@ -91,14 +91,14 @@ Each viewport owns its engine and resize observer. Resize/maximize preserve
 engines and cameras. Nothing purges another viewer's global cache. The two-worker
 decoder pool remains for the page lifetime.
 
-## Raw volume preview and its limits
+## Raw volume and its limits
 
-The researcher chooses **Build 3D preview**; importing a ZIP does not allocate
-the volume automatically. **Release 3D** leaves acquired slices open. Cancel,
-close, replacement and route changes abort sampling, wait for active decoding,
-destroy the engine and volume texture, then remove local preview images.
-Replacement previews wait for the previous preview's cleanup. There is one
-preview slot per page, not a concurrent multi-volume API.
+Selecting a series automatically builds its full-resolution 3D volume alongside
+the acquired slices. There is no resolution picker or separate build step.
+Close, replacement and route changes abort copying, wait for active decoding,
+destroy the engine and volume texture, then remove local volume images.
+Replacement volumes wait for the previous volume's cleanup. There is one
+volume slot per page, not a concurrent multi-volume API.
 
 `volume.ts` requires at least two pixels per axis and two slices, matching
 Frame of Reference UIDs, and regular positions along the orientation normal.
@@ -109,49 +109,41 @@ grid. Missing slices, uneven gaps, mixed frames and in-plane drift/gantry tilt
 disable 3D without disabling acquired slices. This does not establish acquisition
 completeness: a regularly subsampled series cannot reveal omitted source slices.
 
-**Full resolution** (the default) keeps the acquired grid, every voxel, with no
+The volume keeps the acquired grid, every voxel, with no
 interpolation. When every slice shares one increasing linear rescale (and the
 modality is not PT or RTDOSE), voxels hold the stored integers (Uint8/Uint16/Int16) rather
 than Float32: a half or a quarter of the bytes, and display maps intensities by range so the
-affine offset does not show. Otherwise voxels are Float32 modality values. Before
-allocation the panel shows dimensions, voxel bytes and type. Build is refused
+affine offset does not show. Otherwise voxels are Float32 modality values. Allocation is refused
 when WebGL2 is missing, an axis exceeds the browser's `MAX_3D_TEXTURE_SIZE`, or
 the estimated texture exceeds 2 GiB. The Cornerstone cache cap is raised to 256 MiB of slices **plus** the
-admitted volume while it exists, and restored on release.
-
-**Standard/Compact previews** cap every axis at 256/128 (Float32, at most
-64/8 MiB) and are labelled **Downsampled**. Trilinear interpolation preserves the
-first and last voxel centres in patient space, row/column spacing, orientation
-and modality rescale. This is display resampling, not an anti-aliased scientific
-reconstruction: small structures may disappear. There are no structure IDs,
-femur/tibia meshes or derived measurements.
+admitted volume while it exists, and restored on close. A 3D failure leaves
+acquired slices available. There are no structure IDs, femur/tibia meshes or
+derived measurements in the volume.
 
 While dragging, ray sampling distance doubles and returns to full on release; the
 voxel grid never changes. Cornerstone 4.22 disables vtk.js half float, so 16-bit
 voxels upload as norm16 only where Cornerstone detects support, and otherwise as
 an R32F texture, converted one slice at a time. Admission therefore assumes 4 GPU
-bytes per 16-bit or Float32 voxel and refuses textures over 2 GiB; the panel shows
-that estimate when it exceeds the voxel bytes. vtk's `allocatedGPUMemoryInBytes`
+bytes per 16-bit or Float32 voxel and refuses textures over 2 GiB. vtk's `allocatedGPUMemoryInBytes`
 under-reports the R32F case. Prescale reversal is checked per voxel and the build
 fails rather than store a wrong integer.
 
 One voxel buffer backs the volume's local-image subarrays and GPU
 texture upload. The original DICOM Blobs remain available for slices. A displayed
 source slice plus a transient decoded slice and parsed dataset can also be live.
-Sampling consumes each contributing source slice once, in order, accumulating
-its weights into adjacent output planes before eviction. Unused slices are not
-decoded. Completed output planes yield for progress, cancellation and navigation.
-The 256 MiB cache includes preview image subarrays, but **not** ZIP/Blob storage,
+Copying consumes every source slice once, in order, before eviction.
+Completed planes yield for progress, cancellation and navigation.
+The expanded cache budget includes local image subarrays, but **not** ZIP/Blob storage,
 all decoder scratch memory, browser overhead or GPU allocations. GPU format and
 driver copies vary. These limits do not guarantee that any micro-CT scan fits;
-the existing ZIP intake limits still apply before downsampling.
+the existing ZIP intake limits still apply.
 
 ## Library choices and integration constraints
 
 Cornerstone core and DICOM image loader are pinned together at **4.22.13**.
 It supplies DICOM decoding, modality/VOI transforms, geometry, stack and VOLUME_3D
-viewports. `createLocalVolume` receives the bounded resampled buffer rather than
-streaming the unrestricted source grid. Three.js remains available for future
+viewports. `createLocalVolume` receives the native-grid buffer after the
+resource checks above. Three.js remains available for future
 meshes.
 
 The attempted 5.13.2 integration had a browser EventEmitter dependency failure
@@ -167,7 +159,7 @@ This patches the ESM decoder's default-buffer path used by local DICOM decoding;
 it does not change caller-specified target buffers. Fractional source slices now
 use four bytes per pixel within the same cache cap; integer transforms retain
 their existing storage. On a loader upgrade, reassess the patch and compare
-decoded slices, GPU input, native volume and downsampled samples against independent
+decoded slices, GPU input and native volume against independent
 rescaling, including integral extrema with fractional interiors and signed pixels.
 
 Two behaviors in 4.22.13 require explicit handling: GPU `setStack` can resolve
@@ -180,9 +172,9 @@ object's dataset-release callback remains.
 
 Additional 4.22 constraints: `removeVolumeLoadObject` does not release the volume
 GL texture, so cleanup also calls `volume.destroy()`. The local-image generic
-metadata provider has no per-ID removal; the single preview slot reuses a bounded
-set of IDs (at most 256), not an accumulating random namespace. Supply the middle
-preview image's VOI metadata to avoid the default volume VOI helper attempting
+metadata provider has no per-ID removal; the single volume slot reuses slice-index
+IDs, not an accumulating random namespace. Supply the middle
+volume image's VOI metadata to avoid the default volume VOI helper attempting
 to load a synthetic image ID through the DICOM loader. Obtain the render window
 through `getOffscreenMultiRenderWindow(viewportId)`; the declared public
 `offscreenMultiRenderWindow` property is absent on the runtime wrapper.

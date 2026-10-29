@@ -15,7 +15,6 @@
   separately. The raw volume preview is not anatomy segmentation. If accessible,
   use OA6-1RK's existing 18-structure web-review export for a separate mesh
   benchmark; volume ray-casting timings do not measure mesh performance.
-- Downsampling is bounded trilinear display interpolation, not anti-aliased
-  reconstruction. Validate small-structure visibility and tune ray sampling /
-  interactive render resolution using workstation evidence before increasing
-  preview or intake limits. Nonlinear modality LUTs remain unsupported in 3D.
+- Validate small-structure visibility and tune ray sampling / interactive render
+  resolution using workstation evidence before increasing resource or intake
+  limits. Nonlinear modality LUTs remain unsupported in 3D.
