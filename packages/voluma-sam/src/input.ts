@@ -94,6 +94,18 @@ export type SamInput = z.infer<typeof samInput>;
 /** `[z0, z1, r0, r1, c0, c1]`, ends inclusive. */
 export type Crop = [number, number, number, number, number, number];
 
+/** How Meta's reply arrived, in ms from the request's start (`bytes` and `events` are counts). */
+export interface StreamStats {
+  /** The first `data:` event; keepalive comments do not count. Undefined if none came. */
+  firstEventMs: number | undefined;
+  /** The longest time without a byte, the wait for the first byte included. */
+  longestGapMs: number;
+  /** When that gap ended. */
+  longestGapAtMs: number;
+  bytes: number;
+  events: number;
+}
+
 export interface SamResult {
   output: string;
   shape: [number, number, number];
@@ -108,4 +120,6 @@ export interface SamResult {
   crop: Crop;
   /** Wall milliseconds per stage. */
   timings: Record<string, number>;
+  /** How Meta's reply arrived: the data for the gateway's time limits. */
+  stream: StreamStats;
 }

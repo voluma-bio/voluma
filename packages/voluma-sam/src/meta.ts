@@ -10,6 +10,7 @@
 import { once } from "node:events";
 import { createWriteStream, openAsBlob } from "node:fs";
 import { Agent, FormData, fetch, type Response } from "undici";
+import type { StreamStats } from "./input";
 
 export class Failure extends Error {
   constructor(
@@ -106,7 +107,12 @@ export function metaClient(options: { url: string; token: string; log(line: stri
       fileId: string,
       out: string,
       asked: string,
-    ): Promise<{ requestId: string | undefined; waitMs: number; receiveMs: number }> {
+    ): Promise<{
+      requestId: string | undefined;
+      waitMs: number;
+      receiveMs: number;
+      stream: StreamStats;
+    }> {
       const request = () =>
         send(
           () =>
@@ -154,9 +160,11 @@ export function metaClient(options: { url: string; token: string; log(line: stri
       if (!res.body) throw new Failure("Meta request: the reply had no body", true);
       const file = createWriteStream(out);
       let first: number | undefined;
+      const watch = streamWatch(started);
       try {
         for await (const chunk of res.body) {
           first ??= Date.now();
+          watch.add(chunk);
           if (!file.write(chunk)) await once(file, "drain");
         }
       } catch (error) {
@@ -170,7 +178,41 @@ export function metaClient(options: { url: string; token: string; log(line: stri
         requestId: res.headers.get("x-request-id") ?? undefined,
         waitMs: (first ?? end) - started,
         receiveMs: end - (first ?? end),
+        stream: watch.stats,
       };
+    },
+  };
+}
+
+/** Measures the reply chunk by chunk: cost per chunk is its length, however long the stream. */
+function streamWatch(started: number) {
+  const LINE = Buffer.from("\ndata: ");
+  const stats: StreamStats = {
+    firstEventMs: undefined,
+    longestGapMs: 0,
+    longestGapAtMs: 0,
+    bytes: 0,
+    events: 0,
+  };
+  let last = started;
+  // The last 6 bytes (one short of LINE) join the next chunk, so a match across chunks is seen once.
+  let tail: Buffer = Buffer.from("\n");
+  return {
+    stats,
+    add(chunk: Buffer) {
+      const now = Date.now();
+      if (now - last > stats.longestGapMs) {
+        stats.longestGapMs = now - last;
+        stats.longestGapAtMs = now - started;
+      }
+      last = now;
+      stats.bytes += chunk.length;
+      const joined = Buffer.concat([tail, chunk]);
+      let seen = 0;
+      for (let at = joined.indexOf(LINE); at >= 0; at = joined.indexOf(LINE, at + 1)) seen++;
+      if (seen) stats.firstEventMs ??= now - started;
+      stats.events += seen;
+      tail = joined.subarray(Math.max(joined.length - (LINE.length - 1), 0));
     },
   };
 }
