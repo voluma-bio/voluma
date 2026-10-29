@@ -10,8 +10,11 @@ ticks are voxel indices on axis-aligned panes and mm from the crosshair on the o
 The first call takes `--hu` (and layers); later calls take `--from <earlier>.view.json` and change it, in this order:
 --plane, --center, --move, --rotate, --zoom, --show/--hide. A call that takes `--from` cannot also take `--hu`. The
 crosshair is a whole voxel on every scan axis that has an axis-aligned pane, so a pane named `axis 0 = N` is slice N.
-Layers (`--show` / `--hide NAME` toggles any layer, plus `labels`, `ruler` and `planes`): --hu, --labels, --mask NAME=...,
---face NAME=..., --points NAME=..., --ruler. The 3D pane needs a bone surface: --labels or --bone-hu.
+Objects are the placed things a script saved with `microct-core/resources/objects.py` (a mask, a surface, a point, a line, each on
+its own grid; `--frame` registers the grids that are not the scan's): `--objects F.json` takes the `objects` a script printed,
+any number of lines among them. Layers (`--show` / `--hide NAME` toggles any layer, plus `labels` and `planes`): --hu, --labels,
+every object id, and the shortcuts --mask NAME=..., --face NAME=..., --points NAME=..., --ruler, which build the same objects.
+The 3D pane needs a bone surface: --labels or --bone-hu.
 
 Writes: <out>  the JPEG (at most 2000 px, 1 MiB)
         <out minus extension>.view.json  the full state (scan voxels and mm), each pane's pixel rectangle and
@@ -34,6 +37,7 @@ from pathlib import Path
 import frame as fr
 import matplotlib.patheffects as pe
 import numpy as np
+import objects as ob
 import viewlib as vl
 from scipy import ndimage as ndi
 
@@ -50,9 +54,14 @@ E = np.eye(3)
 AXIS_PANES = [(E[0], E[1]), (-E[1], E[0]), (E[2], E[0])]
 
 
+def overlays(s, kind=None):
+    """Names of the masks and surfaces (of one `kind`, or both) in the order they were added."""
+    return [n for n, e in s['objects'].items() if ob.kind_of(e) in ((kind,) if kind else (ob.MASK, ob.SURFACE))]
+
+
 def overlay_colour(s, name):
-    """A colour per mask or face that stays with it whether or not its neighbours are shown."""
-    return OVERLAY[(list(s['masks']) + list(s['faces'])).index(name) % len(OVERLAY)]
+    """A colour per mask or surface that stays with it whether or not its neighbours are shown."""
+    return OVERLAY[overlays(s).index(name) % len(OVERLAY)]
 
 
 # ---- state ----------------------------------------------------------------------------------------------------------
@@ -77,7 +86,7 @@ def new_state(a):
     shape = np.load(hu, mmap_mode='r').shape
     return {'version': 1, 'scan': {'hu': str(hu), 'grid_id': g['grid_id'], 'spacing_zyx_mm': g['spacing_zyx_mm'],
                                    'shape': list(shape)},
-            'frames': [], 'labels': None, 'names': {}, 'masks': {}, 'faces': {}, 'points': {}, 'ruler': None,
+            'frames': [], 'labels': None, 'names': {}, 'objects': {},
             'bone_hu': None, 'shown': ['planes'], 'window': None, 'center_zyx': [(n - 1) / 2 for n in shape], 'zoom': 1.0,
             'panes': [make_pane(n, up, axis=k) for k, (n, up) in enumerate(AXIS_PANES)],
             'camera': {'azimuth': 35.0, 'elevation': 20.0}, 'pane_px': 800, 'mesh_step': None}
@@ -93,20 +102,41 @@ def named_paths(items, what):
     return out
 
 
+def points_file_entries(path):
+    """{name: point entry} of a points file (what `pick.py` writes): each point keeps the file's grid."""
+    d = json.loads(Path(path).read_text())
+    if not isinstance(d, dict) or 'grid_id' not in d:
+        sl.fail(f'{path} is not a points file with a "grid_id": {{"grid_id": "<grid>", "points": [{{"name": "a", "zyx": [z, y, x]}}]}}')
+    return {n: ob.point(zyx, d['grid_id']) for n, zyx in sl.load_points(path, d['grid_id']).items()}
+
+
 def add_layers(s, a):
-    for key, items in (('masks', a.mask), ('faces', a.face), ('points', a.points)):
-        new = named_paths(items, {'masks': 'mask', 'faces': 'face', 'points': 'points'}[key])
-        s[key].update(new)
-        s['shown'] += [n for n in new if n not in s['shown']]
+    """Every way of naming an object builds entries in `s['objects']`: --objects files, then the --mask/--face/--points/--ruler shortcuts."""
+    new = {}
+    for path in a.objects or []:
+        new.update(ob.read_file(path))
+    for name, path in named_paths(a.mask, 'mask').items():
+        new[name] = ob.of_array(path, ob.MASK)
+    for name, path in named_paths(a.face, 'face').items():
+        new[name] = ob.of_array(path, ob.SURFACE)
+    for path in named_paths(a.points, 'points').values():
+        new.update(points_file_entries(path))
+    if a.ruler:
+        ends = [(n, {**s['objects'], **new}.get(n)) for n in a.ruler.split(',')]
+        for n, e in ends:
+            if not e or ob.kind_of(e) != ob.POINT:
+                sl.fail(f'ruler end {n!r} is not a point (give it with --points or --objects)')
+        if ends[0][1][ob.GRID] != ends[1][1][ob.GRID]:
+            sl.fail(f'ruler ends {ends[0][0]!r} and {ends[1][0]!r} are on different grids: a line is on one grid')
+        new[a.ruler.replace(',', '-')] = ob.line(ends[0][1][ob.ZYX], ends[1][1][ob.ZYX], ends[0][1][ob.GRID])
+    s['objects'].update(new)
+    s['shown'] += [n for n in new if n not in s['shown']]
     if a.labels:
         s['labels'] = str(Path(a.labels).resolve())
         s['shown'] += [] if 'labels' in s['shown'] else ['labels']
     if a.names:
         s['names'] = {str(k): v for k, v in vl.parse_names(a.names).items()}
     s['frames'] += [str(Path(f).resolve()) for f in a.frame or [] if str(Path(f).resolve()) not in s['frames']]
-    if a.ruler:
-        s['ruler'] = a.ruler.split(',')
-        s['shown'] += [] if 'ruler' in s['shown'] else ['ruler']
     for key, val in (('bone_hu', a.bone_hu), ('pane_px', a.pane_px), ('mesh_step', a.mesh_step)):
         if val is not None:
             s[key] = val
@@ -122,7 +152,7 @@ def require_isotropic(sp, why):
 
 
 class Scene:
-    """The state's inputs opened: memmapped volumes with the maps from mm to their own index space, and the points."""
+    """The state's inputs opened: the scan, and every object loaded and mapped onto the scan's voxel indices through its grid."""
 
     def __init__(self, s):
         self.s = s
@@ -134,37 +164,44 @@ class Scene:
             f = fr.load(p)
             self.frames[f['grid_id']] = f
         self.hu = np.load(s['scan']['hu'], mmap_mode='r')
-        self.points, self.visible = {}, {}
-        for name, p in s['points'].items():
-            pts = {k: np.array(v, float) for k, v in sl.load_points(p, self.gid).items()}
-            if self.points.keys() & pts.keys():
-                sl.fail(f'point set {name!r} reuses a point name from another set: rename it so a name means one point')
-            self.points.update(pts)
-            if name in s['shown']:
-                self.visible.update(pts)
-        for name in s['ruler'] or []:
-            if name not in self.points:
-                sl.fail(f'ruler point {name!r} is not in any --points file (have: {", ".join(sorted(self.points)) or "none"})')
+        self.objs = {n: ob.load(e) for n, e in s['objects'].items()}
+        self.points = {n: self.maps(o['grid_id'], n)[1](o['zyx']) for n, o in self.objs.items() if o[ob.KIND] == ob.POINT}
+        self.lines = {n: [self.maps(o['grid_id'], n)[1](o[k]) for k in ('a_zyx', 'b_zyx')]
+                      for n, o in self.objs.items() if o[ob.KIND] == ob.LINE}
+
+    def visible(self, items):
+        return {n: v for n, v in items.items() if n in self.s['shown']}
+
+    def maps(self, gid, what):
+        """(to_index, to_scan) for the grid `gid`: `to_index` maps mm points (..., 3) to its index space, `to_scan` its
+        indices to scan voxel indices."""
+        if gid == self.gid:
+            return (lambda p: p / self.sp), (lambda p: p)
+        f = self.frames.get(gid)
+        if f is None:
+            sl.fail(f'{what} is on grid {gid[:12]}..., which is not the scan\'s and has no frame: pass its frame.json with --frame')
+        require_isotropic(self.sp, f'{what} on a frame is not a rigid motion in mm')
+        return (lambda p: fr.from_scan_points(p / self.sp, f)), (lambda p: fr.to_scan_points(p, f))
 
     def open(self, path):
-        """(volume, to_index, to_scan): `to_index` maps mm points (..., 3) to the volume's index space, `to_scan` its
-        indices to scan voxel indices."""
+        """(volume, to_index, to_scan) of a volume `.npy` on any registered grid (the scan's labels, say)."""
         vol = np.load(path, mmap_mode='r')
         if vol.dtype == bool:
             vol = vol.view(np.uint8)
-        gid = sl.grid(sl.sidecar_path(path))['grid_id']
-        if gid == self.gid:
-            return vol, lambda p: p / self.sp, lambda p: p
-        f = self.frames.get(gid)
-        if f is None:
-            sl.fail(f'{path} is on grid {gid[:12]}..., which is not the scan\'s and has no frame: pass its frame.json with --frame')
-        require_isotropic(self.sp, f'{path} on a frame is not a rigid motion in mm')
-        return vol, lambda p: fr.from_scan_points(p / self.sp, f), lambda p: fr.to_scan_points(p, f)
+        return (vol, *self.maps(sl.grid(sl.sidecar_path(path))['grid_id'], path))
+
+    def mask(self, name):
+        """(volume, to_index, to_scan) of a mask object: the cropped array, indices shifted by its offset on the grid."""
+        o = self.objs[name]
+        to_index, to_scan = self.maps(o['grid_id'], name)
+        return o['array'], (lambda p: to_index(p) - o['offset_zyx']), (lambda p: to_scan(p + o['offset_zyx']))
 
     def centre_of(self, name):
         s = self.s
         if name in self.points:
             return self.points[name]
+        if name in self.lines:
+            return np.mean(self.lines[name], axis=0)
         if s['labels']:
             ids = [int(k) for k, v in s['names'].items() if v == name]
             if ids:
@@ -173,14 +210,14 @@ class Scene:
                 if len(idx):
                     return to_scan(idx.mean(axis=0))
                 sl.fail(f'label {name!r} (id {ids[0]}) has no voxels')
-        if name in s['masks']:
-            m, _, to_scan = self.open(s['masks'][name])
+        if name in overlays(s, ob.MASK):
+            m, _, to_scan = self.mask(name)
             idx = np.argwhere(m)
             if len(idx):
                 return to_scan(idx.mean(axis=0))
             sl.fail(f'mask {name!r} is empty')
-        known = sorted(self.points) + sorted(s['names'].values()) + sorted(s['masks'])
-        sl.fail(f'--center {name!r} is not a point, label or mask name or z,y,x (have: {", ".join(known) or "none"})')
+        known = sorted({*self.points, *self.lines, *s['names'].values(), *overlays(s, ob.MASK)})
+        sl.fail(f'--center {name!r} is not a point, line, label or mask name or z,y,x (have: {", ".join(known) or "none"})')
 
 
 def parse_axis(txt, spec):
@@ -224,7 +261,7 @@ def apply_plane(s, scene, spec):
     elif 'contains' in toks:
         names = toks['contains'].split(',')
         if len(names) != 2 or any(n not in scene.points for n in names):
-            sl.fail(f'contains={toks["contains"]}: name two points from --points (have: {", ".join(sorted(scene.points)) or "none"})')
+            sl.fail(f'contains={toks["contains"]}: name two points from --points or --objects (have: {", ".join(sorted(scene.points)) or "none"})')
         up = vl.unit((scene.points[names[1]] - scene.points[names[0]]) * scene.sp)
         n = np.array(old['normal'])
         n = n - (n @ up) * up
@@ -263,15 +300,14 @@ def apply_changes(s, scene, a):
         cam['elevation'] = max(-89.0, min(89.0, cam['elevation'] + el))
     if a.zoom is not None:
         s['zoom'] = a.zoom
-    known = {'labels', 'ruler', 'planes', *s['masks'], *s['faces'], *s['points']}
+    known = {'labels', 'planes', *s['objects']}
     for names, on in ((a.show, True), (a.hide, False)):
         for n in names or []:
             if n not in known:
                 sl.fail(f'--{"show" if on else "hide"} {n!r}: layers are {", ".join(sorted(known))}')
             s['shown'] = [x for x in s['shown'] if x != n] + ([n] if on else [])
-    for key, need in (('labels', 'labels'), ('ruler', 'ruler')):
-        if key in s['shown'] and not s[need]:
-            s['shown'].remove(key)
+    if 'labels' in s['shown'] and not s['labels']:
+        s['shown'].remove('labels')
     for pane in s['panes']:  # a pane named `axis K = N` is slice N, not a blend of two
         if pane['axis'] is not None:
             s['center_zyx'][pane['axis']] = float(np.rint(s['center_zyx'][pane['axis']]))
@@ -350,17 +386,22 @@ def set_ticks(ax, s, scene, k, g):
 
 # ---- meshes ---------------------------------------------------------------------------------------------------------
 
-def of_face(meshes, scene, path):
-    """Surface of a frame's face array (axis-0 index over axes 1, 2), mapped onto the scan."""
-    key = (str(path), Path(path).stat().st_mtime_ns, 'face', scene.gid)
+def of_face(meshes, scene, name):
+    """Mesh of a surface object: its heights along `axis` over the other two axes of its grid, mapped onto the scan."""
+    o = scene.objs[name]
+    path = scene.s['objects'][name][ob.HEIGHTS]
+    key = (path, Path(path).stat().st_mtime_ns, 'surface', o['axis'], o['grid_id'], scene.gid)
 
     def build():
         import pyvista as pv
-        face = np.load(path).astype(float)
-        _, _, to_scan = scene.open(path)
+        face, axis = o['heights'], o['axis']
+        o0, o1 = (i for i in range(3) if i != axis)
+        _, to_scan = scene.maps(o['grid_id'], name)
         n0, n1 = face.shape
         r, c = np.mgrid[0:n0, 0:n1]
-        pts = to_scan(np.stack([face, r, c], axis=-1)).reshape(-1, 3) * scene.sp
+        idx = np.empty((n0, n1, 3))
+        idx[..., axis], idx[..., o0], idx[..., o1] = face, r, c
+        pts = to_scan(idx).reshape(-1, 3) * scene.sp
         ok = np.isfinite(face)
         quad = ok[:-1, :-1] & ok[1:, :-1] & ok[:-1, 1:] & ok[1:, 1:]
         i = (r[:-1, :-1] * n1 + c[:-1, :-1])[quad]
@@ -373,6 +414,13 @@ def surface(meshes, scene, path, select, kind):
     """Cached surface of `select(volume)` for the array at `path`, on its own grid mapped onto the scan."""
     vol, _, to_scan = scene.open(path)
     return meshes.surface(path, vol, select, kind, scene.sp, to_scan, scene.s['mesh_step'], scene.gid)
+
+
+def scene_mask_mesh(meshes, scene, name, vol, to_scan, o):
+    """Cached surface of a mask object; the offset is in the key because the same file can sit at another place."""
+    path = scene.s['objects'][name][ob.MASK]
+    kind = f'mask{o["offset_zyx"].tolist()}'
+    return meshes.surface(path, vol, lambda a: a > 0, kind, scene.sp, to_scan, scene.s['mesh_step'], o['grid_id'])
 
 
 def label_ids(meshes, scene):
@@ -412,23 +460,25 @@ def render_3d(s, scene, meshes, geoms):
     shown = set(s['shown'])
     p = pv.Plotter(off_screen=True, window_size=(P, P))
     p.set_background('black')
-    overlays = [n for n in list(s['masks']) + list(s['faces']) if n in shown]
+    drawn = [n for n in overlays(s) if n in shown]
     ext = scene.sp[::-1] * scene.shape[::-1]
     bounds = [0, ext[0], 0, ext[1], 0, ext[2]]
     if 'labels' in shown and s['labels']:
         for k in label_ids(meshes, scene):
             m = surface(meshes, scene, s['labels'], lambda a, k=k: a == k, f'label{k}')
             if m.n_points:
-                p.add_mesh(m, color=vl.colour(k), smooth_shading=True, opacity=0.5 if overlays else 1.0)
+                p.add_mesh(m, color=vl.colour(k), smooth_shading=True, opacity=0.5 if drawn else 1.0)
     else:
         bone = bone_mesh(s, scene, meshes)
-        p.add_mesh(bone, color=IVORY, smooth_shading=True, opacity=0.25 if overlays else 1.0)
-    for name in (n for n in s['masks'] if n in shown):
-        m = surface(meshes, scene, s['masks'][name], lambda a: a > 0, 'mask')
+        p.add_mesh(bone, color=IVORY, smooth_shading=True, opacity=0.25 if drawn else 1.0)
+    for name in (n for n in overlays(s, ob.MASK) if n in shown):
+        o = scene.objs[name]
+        vol, _, to_scan = scene.mask(name)
+        m = scene_mask_mesh(meshes, scene, name, vol, to_scan, o)
         if m.n_points:
             p.add_mesh(m, color=overlay_colour(s, name), smooth_shading=True, opacity=0.85)
-    for name in (n for n in s['faces'] if n in shown):
-        m = of_face(meshes, scene, s['faces'][name])
+    for name in (n for n in overlays(s, ob.SURFACE) if n in shown):
+        m = of_face(meshes, scene, name)
         if m.n_points:
             p.add_mesh(m, color=overlay_colour(s, name), opacity=0.7)
     diag = float(np.linalg.norm(np.array(bounds[1::2]) - np.array(bounds[0::2])))
@@ -437,11 +487,10 @@ def render_3d(s, scene, meshes, geoms):
             h = g['fov_mm'] / 2
             ring = [g['centre_mm'] + a * h * g['u'] + b * h * g['v'] for a, b in ((-1, -1), (-1, 1), (1, 1), (1, -1), (-1, -1))]
             p.add_mesh(pv.lines_from_points(np.array(ring)[:, ::-1]), color=PANE_COLOURS[k], line_width=3)
-    for zyx in scene.visible.values():
+    for zyx in scene.visible(scene.points).values():
         p.add_mesh(pv.Sphere(radius=diag * 0.008, center=(zyx * scene.sp)[::-1]), color=POINT_COLOUR)
-    if s['ruler'] and 'ruler' in shown:
-        a, b = (scene.points[n] * scene.sp for n in s['ruler'])
-        p.add_mesh(pv.Line(a[::-1], b[::-1]), color=RULER_COLOUR, line_width=4)
+    for a, b in scene.visible(scene.lines).values():
+        p.add_mesh(pv.Line((a * scene.sp)[::-1], (b * scene.sp)[::-1]), color=RULER_COLOUR, line_width=4)
     cam = camera_for(s, scene, bounds)
     p.camera.position, p.camera.focal_point, p.camera.up, p.camera.view_angle = (
         cam['position'], cam['focal_point'], cam['view_up'], cam['view_angle'])
@@ -471,17 +520,19 @@ def draw_slice(ax, s, scene, k, g):
         vol, to_index, _ = scene.open(s['labels'])
         lab = cut(vol, to_index, 0).astype(np.int32)
         vl.draw_labels(ax, lab, alpha=0.15)
-    for name in (n for n in s['masks'] if n in shown):
-        vol, to_index, _ = scene.open(s['masks'][name])
+    for name in (n for n in overlays(s, ob.MASK) if n in shown):
+        vol, to_index, _ = scene.mask(name)
         m = cut(vol, to_index, 0) > 0
         if m.any():
             vl.draw_mask(ax, m, overlay_colour(s, name), alpha=0.15)
-    for name in (n for n in s['faces'] if n in shown):
-        face = np.load(s['faces'][name]).astype(float)
-        _, to_index, _ = scene.open(s['faces'][name])
+    for name in (n for n in overlays(s, ob.SURFACE) if n in shown):
+        o = scene.objs[name]
+        axis = o['axis']
+        o0, o1 = (i for i in range(3) if i != axis)
+        to_index, _ = scene.maps(o['grid_id'], name)
         idx = to_index(fr.plane_points(g['centre_mm'], g['u'], g['v'], g['px'], (P, P)))
-        h = ndi.map_coordinates(face, [idx[..., 1], idx[..., 2]], order=1, mode='constant', cval=np.nan)
-        d = np.ma.masked_invalid(idx[..., 0] - h)
+        h = ndi.map_coordinates(o['heights'], [idx[..., o0], idx[..., o1]], order=1, mode='constant', cval=np.nan)
+        d = np.ma.masked_invalid(idx[..., axis] - h)
         if d.count() and d.min() < 0 < d.max():
             ax.contour(d, levels=[0], colors=[overlay_colour(s, name)], linewidths=2)
     mid = (P - 1) / 2
@@ -497,19 +548,18 @@ def draw_slice(ax, s, scene, k, g):
                 lw=1.0, alpha=0.85)
     to_px = lambda zyx: ((zyx * sp - g['centre_mm']) @ g['v'] / g['px'] + mid, (zyx * sp - g['centre_mm']) @ g['u'] / g['px'] + mid)
     depth = lambda zyx: (zyx * sp - g['centre_mm']) @ g['n']
-    for pn, zyx in scene.visible.items():
+    for pn, zyx in scene.visible(scene.points).items():
         if abs(depth(zyx)) <= TOL_PX * g['px']:
             x, y = to_px(zyx)
             if 0 <= x < P and 0 <= y < P:
                 ax.plot([x], [y], marker='+', color=POINT_COLOUR, ms=13, mew=2)
                 text(ax, x + 8, y - 6, pn, POINT_COLOUR)
-    if s['ruler'] and 'ruler' in shown:
-        a, b = (scene.points[n] for n in s['ruler'])
+    for name, (a, b) in scene.visible(scene.lines).items():
         (xa, ya), (xb, yb) = to_px(a), to_px(b)
         inside = abs(depth(a)) <= TOL_PX * g['px'] and abs(depth(b)) <= TOL_PX * g['px']
         ax.plot([xa, xb], [ya, yb], color=RULER_COLOUR, lw=1.5, ls='-' if inside else ':')
         length = float(np.linalg.norm((a - b) * sp))
-        text(ax, (xa + xb) / 2 + 6, (ya + yb) / 2 - 6, f'{length:.3f} mm' + ('' if inside else ' (not in this plane)'), RULER_COLOUR)
+        text(ax, (xa + xb) / 2 + 6, (ya + yb) / 2 - 6, f'{name} {length:.3f} mm' + ('' if inside else ' (not in this plane)'), RULER_COLOUR)
     ax.set_xlim(-0.5, P - 0.5)
     ax.set_ylim(P - 0.5, -0.5)
     set_ticks(ax, s, scene, k, g)
@@ -520,8 +570,8 @@ def legend_lines(s, scene, meshes):
     out = []
     if s['labels'] and 'labels' in shown:
         out += [(vl.colour(i), f'{i} {s["names"].get(str(i), "(unnamed)")}') for i in label_ids(meshes, scene)]
-    out += [(overlay_colour(s, n), n) for n in s['masks'] if n in shown]
-    out += [(overlay_colour(s, n), n + ' (face)') for n in s['faces'] if n in shown]
+    out += [(overlay_colour(s, n), n) for n in overlays(s, ob.MASK) if n in shown]
+    out += [(overlay_colour(s, n), n + ' (surface)') for n in overlays(s, ob.SURFACE) if n in shown]
     return out
 
 
@@ -532,16 +582,15 @@ def draw_3d_pane(ax, s, scene, meshes, img3d, cam):
     ax.set_xticks([])
     ax.set_yticks([])
     view = vl.View(vl.camera_zyx(cam, scene.sp), (P, P), scene.sp)
-    for pn, zyx in scene.visible.items():
+    for pn, zyx in scene.visible(scene.points).items():
         xy = view.project(zyx)
         if xy and 0 <= xy[0] < P and 0 <= xy[1] < P:
             text(ax, xy[0] + 8, xy[1] - 6, pn, POINT_COLOUR)
-    if s['ruler'] and 'ruler' in s['shown']:
-        a, b = (scene.points[n] for n in s['ruler'])
+    for name, (a, b) in scene.visible(scene.lines).items():
         xa, xb = view.project(a), view.project(b)
         if xa and xb:
             length = float(np.linalg.norm((a - b) * scene.sp))
-            text(ax, (xa[0] + xb[0]) / 2 + 6, (xa[1] + xb[1]) / 2 - 6, f'{length:.3f} mm', RULER_COLOUR)
+            text(ax, (xa[0] + xb[0]) / 2 + 6, (xa[1] + xb[1]) / 2 - 6, f'{name} {length:.3f} mm', RULER_COLOUR)
     for n, (c, label) in enumerate(legend_lines(s, scene, meshes)):
         text(ax, 8, P - 10 - 14 * n, label, c, size=8)
 
@@ -656,11 +705,12 @@ def parse_args(argv):
     ap.add_argument('--window', help='display window lo,hi in HU (default: automatic from the middle slice); a negative low end as is: --window -500,6000')
     ap.add_argument('--labels', type=sl.existing, help='label volume .npy: outlines on slices, colours in 3D (bone is ivory without it, and while the labels layer is hidden)')
     ap.add_argument('--names', help='label names, 1=femur,2=tibia or an anatomy.json')
-    ap.add_argument('--mask', action='append', metavar='NAME=M.npy', help='bool volume on any registered grid: outline on slices, translucent surface in 3D (repeatable)')
-    ap.add_argument('--face', action='append', metavar='NAME=F.npy', help='2D array of a frame\'s axis-0 index over its axes 1, 2 (NaN = none; iioc\'s growth-plate face): drawn as a line (repeatable)')
-    ap.add_argument('--points', action='append', metavar='NAME=P.json', help='a named set of points, each with a grid_id (what pick.py writes): markers and names, a sphere in 3D. NAME is the layer --show / --hide toggles; the points keep the names inside the file (repeatable)')
+    ap.add_argument('--objects', action='append', type=sl.existing, metavar='F.json', help='a file of {id: entry}, the `objects` a script printed (masks, surfaces, points, lines): each id is a layer --show / --hide toggles, any number (repeatable)')
+    ap.add_argument('--mask', action='append', metavar='NAME=M.npy', help='shortcut for an object: a bool volume on any registered grid, cropped (offset_zyx in its sidecar) or whole: outline on slices, translucent surface in 3D (repeatable)')
+    ap.add_argument('--face', action='append', metavar='NAME=F.npy', help='shortcut for an object: a 2D height array, its axis from its sidecar (`axis`, default 0; NaN = none; iioc\'s growth-plate face): drawn as a line on slices, a sheet in 3D (repeatable)')
+    ap.add_argument('--points', action='append', metavar='NAME=P.json', help='shortcut for objects: the points of a file with a grid_id (what pick.py writes), one layer per point name: markers and names, a sphere in 3D. NAME is not used (repeatable)')
     ap.add_argument('--frame', action='append', type=sl.existing, metavar='frame.json', help='register the frame of a grid that is not the scan\'s (repeatable)')
-    ap.add_argument('--ruler', metavar='A,B', help='a line between two named points, labelled with its length in mm')
+    ap.add_argument('--ruler', metavar='A,B', help='shortcut for an object: a line between two named points of --points or --objects, labelled with its length in mm; the layer is named A-B (more lines: --objects)')
     ap.add_argument('--bone-hu', type=float, help='HU above which a voxel is bone in 3D when there are no labels')
     ap.add_argument('--pane-px', type=int, help='pixels per pane side (default: 800; at most 940)')
     ap.add_argument('--mesh-step', type=int, help='voxels per step of the surface grid (default: the longest scan side / 200, rounded, at least 1)')
@@ -713,7 +763,8 @@ def main():
     else:
         s = new_state(a)
     add_layers(s, a)
-    for path in [s['scan']['hu'], s['labels'], *s['masks'].values(), *s['faces'].values(), *s['frames']]:
+    entry_files = [e[k] for e in s['objects'].values() for k in (ob.MASK, ob.HEIGHTS) if k in e]
+    for path in [s['scan']['hu'], s['labels'], *entry_files, *s['frames']]:
         if path:
             need_file(path, 'the view\'s input file')
     apply_changes(s, Scene(s), a)

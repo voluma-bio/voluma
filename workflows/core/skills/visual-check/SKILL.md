@@ -39,6 +39,8 @@ so to compare before and after a fix, open both in one call.
   not a voxel: never type voxel coordinates read off an image.
 - **Never estimate an angle, a length or a volume by eye.** Code measures; you confirm that the measured thing is
   the right thing. A ruler's number on a quad view is code's.
+- **Draw what a script saved, not a picture it made.** A script that places a mask, a surface, a point or a line prints it as
+  `objects`; save that to a file and `quad_view.py --objects F.json` draws every entry on its own grid, with any number of rulers.
 - **A model's name for a small structure is a guess.** Name what the data and the anatomy reference support, and
   ask about the rest.
 

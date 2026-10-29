@@ -6,6 +6,7 @@ Every `.npy` a resource writes has `<name>.json` beside it:
   spacing_zyx_mm   voxel size in mm, axes in array order
   inputs           {path: sha256} of every file the array was computed from
   params           the parameters that produced it
+  offset_zyx       only on a cropped array: the index on the grid of its [0, 0, 0] (`objects.mask`, the morphometry maps)
 A sidecar that already exists keeps its other keys (`segment_sam` puts its prompts and per-object confidence in the same file).
 
 Library use (other resources import this file):
@@ -121,7 +122,8 @@ def derived_grid_id(parent_grid_id, frame):
     return hashlib.sha256(blob.encode()).hexdigest()
 
 
-def write(array_path, *, like=None, grid_id=None, spacing_zyx_mm=None, inputs=(), params=None, script=None):
+def write(array_path, *, like=None, grid_id=None, spacing_zyx_mm=None, inputs=(), params=None, script=None, **extra):
+    """Write the sidecar of `array_path`; `extra` keys (offset_zyx, axis) go in beside the standard ones."""
     if like is not None:
         g = grid(like)
         grid_id, spacing_zyx_mm = g['grid_id'], g['spacing_zyx_mm']
@@ -131,7 +133,7 @@ def write(array_path, *, like=None, grid_id=None, spacing_zyx_mm=None, inputs=()
     meta = {
         'grid_id': grid_id, 'shape': list(a.shape), 'dtype': str(a.dtype), 'spacing_zyx_mm': spacing_zyx_mm,
         'inputs': {str(p): sha256_file(p) for p in inputs}, 'params': params or {},
-        'script': script or Path(sys.argv[0]).name,
+        'script': script or Path(sys.argv[0]).name, **extra,
     }
     out = sidecar_path(array_path)
     if out.exists():  # segment_sam writes its own <labels>.json (axis, prompt, per-object confidence): keep its keys
