@@ -8,6 +8,7 @@ import {
   type VolumeViewport3D,
   volumeLoader,
 } from "@cornerstonejs/core";
+import type { Focus } from "@voluma/contracts/review";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DicomSeries } from "./dicom";
 import {
@@ -16,6 +17,7 @@ import {
   initializeDicom,
   sliceCacheBytes,
 } from "./dicomSession";
+import { scanWorld } from "./labels";
 import { planVolume, sampleVolume, type VolumePlan } from "./volume";
 import { ZoomControls } from "./ZoomControls";
 
@@ -54,7 +56,7 @@ function admission(plan: VolumePlan) {
     return "Full-resolution 3D needs more than 2 GiB of graphics memory. Acquired slices remain available.";
 }
 
-export default function DicomVolume({ series }: { series: DicomSeries }) {
+export default function DicomVolume({ series, focus }: { series: DicomSeries; focus?: Focus }) {
   const plan = useMemo(() => {
     try {
       const planned = planVolume(series);
@@ -70,14 +72,23 @@ export default function DicomVolume({ series }: { series: DicomSeries }) {
           {plan}
         </div>
       ) : (
-        <VolumeView series={series} plan={plan} />
+        <VolumeView series={series} plan={plan} focus={focus} />
       )}
     </section>
   );
 }
 
-function VolumeView({ series, plan }: { series: DicomSeries; plan: VolumePlan }) {
+function VolumeView({
+  series,
+  plan,
+  focus,
+}: {
+  series: DicomSeries;
+  plan: VolumePlan;
+  focus?: Focus;
+}) {
   const element = useRef<HTMLDivElement>(null);
+  const outline = useRef<HTMLCanvasElement>(null);
   const controls = useRef<{
     view: VolumeViewport3D;
     rotate(x: number, y: number): void;
@@ -91,6 +102,73 @@ function VolumeView({ series, plan }: { series: DicomSeries; plan: VolumePlan })
   const [ready, setReady] = useState(false);
   const [threshold, setThreshold] = useState(20);
   const [opacity, setOpacity] = useState(35);
+
+  useEffect(() => {
+    const view = controls.current?.view;
+    if (!ready || !view || !focus?.point) return;
+    const target = scanWorld(series, focus.point);
+    const camera = view.getCamera();
+    if (camera.position && camera.focalPoint)
+      view.setCamera({
+        focalPoint: target,
+        position: camera.position.map((n, i) => n + target[i]! - camera.focalPoint![i]!) as [
+          number,
+          number,
+          number,
+        ],
+      });
+    view.render();
+  }, [series, focus, ready]);
+
+  useEffect(() => {
+    const host = element.current;
+    const canvas = outline.current;
+    if (!host || !canvas || !ready) return;
+    const draw = () => {
+      canvas.width = Math.round(host.clientWidth * devicePixelRatio);
+      canvas.height = Math.round(host.clientHeight * devicePixelRatio);
+      const ctx = canvas.getContext("2d")!;
+      const view = controls.current?.view;
+      if (!view || !focus?.point) return;
+      ctx.scale(devicePixelRatio, devicePixelRatio);
+      ctx.strokeStyle = getComputedStyle(canvas).getPropertyValue("--check-outline").trim();
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      if (focus.box) {
+        const corners = Array.from({ length: 8 }, (_, bits) =>
+          view.worldToCanvas(
+            scanWorld(
+              series,
+              focus.box!.min.map((n, a) => (bits & (1 << a) ? focus.box!.max[a]! : n)),
+            ),
+          ),
+        );
+        for (let i = 0; i < 8; i++)
+          for (let a = 0; a < 3; a++) {
+            if (i & (1 << a)) continue;
+            const from = corners[i]!;
+            const to = corners[i | (1 << a)]!;
+            ctx.moveTo(from[0], from[1]);
+            ctx.lineTo(to[0], to[1]);
+          }
+      } else {
+        const p = view.worldToCanvas(scanWorld(series, focus.point));
+        ctx.moveTo(p[0] - 8, p[1]);
+        ctx.lineTo(p[0] + 8, p[1]);
+        ctx.moveTo(p[0], p[1] - 8);
+        ctx.lineTo(p[0], p[1] + 8);
+      }
+      ctx.stroke();
+    };
+    host.addEventListener(Enums.Events.IMAGE_RENDERED, draw);
+    const observer = new ResizeObserver(draw);
+    observer.observe(host);
+    draw();
+    return () => {
+      observer.disconnect();
+      host.removeEventListener(Enums.Events.IMAGE_RENDERED, draw);
+    };
+  }, [series, focus, ready]);
 
   useEffect(() => {
     const host = element.current;
@@ -311,6 +389,11 @@ function VolumeView({ series, plan }: { series: DicomSeries; plan: VolumePlan })
               e.key === "ArrowUp" ? -10 : e.key === "ArrowDown" ? 10 : 0,
             );
           }}
+        />
+        <canvas
+          ref={outline}
+          className="dicom-label-overlay"
+          aria-label="Focused check region in 3D"
         />
         {status && (
           <div className="dicom-status" role={error ? "alert" : "status"}>

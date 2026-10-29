@@ -1,12 +1,11 @@
-"""Per-label checks on a labels volume: voxels, volume in mm3, 3D pieces and their sizes, bounding box, neighbours, and,
-with a ranges file, whether each label is inside the expected volume range and piece count.
+"""Per-label checks on a labels volume: voxels, volume, 3D pieces, bounding box, neighbours, and range flags.
 
-  python label_stats.py --labels labels.npy --out stats.json [--ranges anatomy.json] [--header hu.json] [--min-piece-mm3 0.01]
+Per label: voxels, volume in mm3, 3D pieces and their sizes, bounding box, neighbours and, with a ranges file, whether the
+label is inside the expected volume range and piece count.
 
-Pieces smaller than `--min-piece-mm3` are specks, not pieces: clipping a SAM mask to bone leaves hundreds of
-them (a clipped, unmerged SAM volume on OA6-1RK: 64 to 915 pieces per label, almost all under 0.01 mm3), and counting them
-would flag every label. They are reported as `specks` (count and volume) and left out of `pieces`. 0.01 mm3 is the size
-`unlabelled.py` uses for a candidate, a fifth of the smallest labelled structure on OA6-1RK (0.051 mm3).
+Pieces smaller than `--min-piece-mm3` are specks, not pieces: clipping a SAM mask to bone leaves hundreds of them, and
+counting them would flag every label. They are reported as `specks` (count and volume) and left out of `pieces`. The default
+is the size `unlabelled.py` uses for a candidate.
 
 `--ranges` is the anatomy reference's anatomy.json: {"labels": [{"id": 1, "name": "femur", "volume_mm3": [lo, hi], "components": 1}]}.
 `piece_mm3` lists the largest pieces and `piece_voxel_zyx` a voxel inside each, in the same order; `piece_touches_edge` says,
@@ -17,29 +16,20 @@ wrong bone, which touches only background, does. `within_mm` lists the labels fo
 A label whose volume is under the range's low end divided by `--far-factor` is not a slightly-off version of that structure:
 the piece is something else, or a sliver of it. It gets `identity_unsupported: true` and a flag that says to remove the label
 and look for the real structure (`segmentation-check`, section 2); the ids are also in `unsupported`. Above the range stays
-an ordinary range flag: that label usually took bone from a neighbour.
-Prints a one-line summary with the labels that fail; the full table is in `--out`.
+an ordinary range flag: that label usually took bone from a neighbour. A label in the ranges file but absent, and a label
+the file does not list, are flagged.
+
+Writes: <out>  the full per-label table (JSON, keyed by label id)
+Prints: one JSON line {stats, labels, volume_mm3, pieces, specks, unsupported, flags}; flags is the sentences for the labels that fail
+Example: python label_stats.py --labels labels.npy --out stats.json --ranges anatomy.json
+Exits 2 with one sentence on bad input, before writing anything.
 """
-import argparse
 import json
-import sys
 from pathlib import Path
 
 import numpy as np
+import sidecar
 from scipy import ndimage as ndi
-
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
-# only missing directories are added, so a script imported by another leaves the importer's order alone.
-SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources')) if d not in sys.path]
-try:
-    import sidecar
-except ModuleNotFoundError as e:
-    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
-          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
-    sys.exit(2)
-
 
 CONN26 = np.ones((3, 3, 3))
 DEFAULT_TOUCH_MM = 0.05  # closes a joint gap or a clip that opened a voxel or two, not a wrong bone; scale with voxel size for another scanner
@@ -92,14 +82,14 @@ def stats_for(labels, label, sp, min_piece_mm3, reach_mm=None):
 
 
 if __name__ == '__main__':
-    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--labels', required=True)
-    ap.add_argument('--out', required=True)
-    ap.add_argument('--ranges')
-    ap.add_argument('--header', help='hu.json (default: the labels sidecar)')
+    ap = sidecar.parser(__doc__)
+    ap.add_argument('--labels', type=sidecar.existing, required=True, help='label volume .npy, with its sidecar beside it')
+    ap.add_argument('--out', required=True, help='JSON file to write')
+    ap.add_argument('--ranges', type=sidecar.existing, help='the anatomy reference\'s anatomy.json: expected volume range, pieces and neighbours per label')
+    ap.add_argument('--header', type=sidecar.existing, help='hu.json, for the spacing (default: the labels sidecar)')
     ap.add_argument('--far-factor', type=float, default=10,
                     help='a volume under the range low end divided by this is not that structure')
-    ap.add_argument('--min-piece-mm3', type=float, default=0.01, help='smaller pieces are specks, not counted as pieces')
+    ap.add_argument('--min-piece-mm3', type=float, default=0.01, help='mm3: smaller pieces are specks, not counted as pieces')
     a = ap.parse_args()
     labels = np.load(a.labels)
     sp = sidecar.grid(a.header or str(sidecar.sidecar_path(a.labels)))['spacing_zyx_mm']

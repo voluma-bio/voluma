@@ -2,7 +2,9 @@
 
 import { useMutation } from "@tanstack/react-query";
 import { markReviewed } from "@voluma/api-client";
+import type { Focus, Revision, Structure } from "@voluma/contracts/review";
 import { StatusBadge } from "@voluma/ui";
+import type { StructureDisplay } from "@voluma/viewer";
 import { ArrowLeft, Download, History, Layers, ListChecks } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
@@ -29,7 +31,12 @@ export function ReviewWorkspace({
   revisionId?: string;
   navigate(selection: { task?: string; revision?: string }): void;
   backLink: ReactNode;
-  viewer: ReactNode;
+  viewer: (
+    selected: Structure[],
+    display: StructureDisplay,
+    revision?: Revision,
+    focus?: Focus,
+  ) => ReactNode;
   /** Loading/unavailable state, or an actionable refresh failure above retained results. */
   notice?: ReactNode;
   onRefresh(): Promise<void>;
@@ -37,6 +44,11 @@ export function ReviewWorkspace({
   const [tab, setTab] = useState<"tasks" | "structures">("tasks");
   const [display, setDisplay] = useState<Record<string, { visible: boolean; opacity: number }>>({});
   const [filter, setFilter] = useState("");
+  const [focusedCheck, setFocusedCheck] = useState<{
+    revisionId: string;
+    taskId: string;
+    focus: Focus;
+  }>();
   const latest = run?.revisions.at(-1);
   const revision = revisionId ? run?.revisions.find((item) => item.id === revisionId) : latest;
   const task = taskId ? revision?.tasks.find((item) => item.id === taskId) : revision?.tasks[0];
@@ -46,6 +58,8 @@ export function ReviewWorkspace({
     onSuccess: onRefresh,
     onError: onRefresh,
   });
+  const selected =
+    revision?.structures.filter((item) => task?.structureIds.includes(item.id)) ?? [];
   return (
     <div className="review-shell" data-theme="light">
       <header className="app-header">
@@ -225,6 +239,14 @@ export function ReviewWorkspace({
                               })
                             }
                           />
+                          {item.voxels?.label && (
+                            <span
+                              className="inline-block h-2 w-2 self-center"
+                              style={{
+                                background: `var(--label-${((item.voxels.label - 1) % 12) + 1})`,
+                              }}
+                            />
+                          )}
                           {item.name}
                         </label>
                         <p className="mt-2 text-muted-foreground">
@@ -275,6 +297,11 @@ export function ReviewWorkspace({
                     runId={run.id}
                     revisionId={revision.id}
                     readOnly={readOnly}
+                    onFocus={(focus) =>
+                      setFocusedCheck(
+                        focus ? { revisionId: revision.id, taskId: task.id, focus } : undefined,
+                      )
+                    }
                     onRefresh={onRefresh}
                   />
                 ) : (
@@ -317,7 +344,16 @@ export function ReviewWorkspace({
               aria-label="Resize report and viewers"
             />
             <Panel id="imaging" minSize="28%">
-              {viewer}
+              {viewer(
+                selected,
+                display,
+                revision,
+                focusedCheck &&
+                  focusedCheck.revisionId === revision?.id &&
+                  focusedCheck.taskId === task?.id
+                  ? focusedCheck.focus
+                  : undefined,
+              )}
             </Panel>
           </Group>
         </div>

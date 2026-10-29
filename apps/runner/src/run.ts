@@ -1,7 +1,7 @@
 /**
  * One claimed run, start to report: the same path for a fresh run and a recovered one. It
- * reads the run's stored events over HTTP, builds the recorder on them and one sandbox
- * session, and hands the harness its adapters (`superviseRun`). Alongside, it holds the lease
+ * reads the run's stored events over HTTP, builds the recorder on them and the sandbox
+ * session (one sandbox per thread), and hands the harness its adapters (`superviseRun`). Alongside, it holds the lease
  * (`lease.ts`) and stops at once on any of: the server ending the run, a lost lease, a
  * self-stop, or the service shutting down. Then it reports.
  *
@@ -28,6 +28,7 @@ import { llmMainThread, mainSystem, runBrief } from "@voluma/harness/main-thread
 import { usageOf } from "@voluma/harness/model-usage";
 import { type Recorder, recorder } from "@voluma/harness/recorder";
 import { type SandboxSession, sandboxSession } from "@voluma/harness/sandbox-session";
+import { workerSandboxSpec } from "@voluma/harness/sandbox-specs";
 import { type RunRole, superviseRun } from "@voluma/harness/supervise-run";
 import { optionalTools } from "@voluma/harness/tools";
 import { loadWorkflow } from "@voluma/workflow/load";
@@ -36,7 +37,12 @@ import { type Config, isVisitorSafe, providerKey } from "./config.ts";
 import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
 import { metaSegmenter } from "./meta-segmenter.ts";
-import { createModalSandbox, RUNS_APP, terminateClaim } from "./modal-sandbox.ts";
+import {
+  createModalSandbox,
+  RUNS_APP,
+  terminateClaim,
+  terminateOtherClaims,
+} from "./modal-sandbox.ts";
 import type { ModelFallback } from "./model-fallback.ts";
 import { retryTransient } from "./model-retry.ts";
 import { checkPrompt, checkSystem, workerPrompt, workerSystem } from "./prompts.ts";
@@ -158,6 +164,20 @@ export async function runClaim(
       `claimed (${visitor ? "visitor" : "voluma"} keys, model ${workerModel.provider}/${workerModel.id})`,
     );
 
+    // What an earlier claim of this run left running must not keep writing or spending.
+    // Cleanup only: it never decides the run's outcome, and idle timeouts back it up.
+    for (let attempt = 1; attempt <= 2 && !abort.signal.aborted; attempt++) {
+      try {
+        const orphans = await terminateOtherClaims(modal, runId, claimId, abort.signal);
+        if (orphans > 0)
+          log(`ended ${orphans} sandbox${orphans === 1 ? "" : "es"} of an earlier claim`);
+        break;
+      } catch (e) {
+        log(`ending an earlier claim's sandboxes failed (attempt ${attempt}): ${e}`);
+        if (attempt < 2) await new Promise((r) => setTimeout(r, 2000));
+      }
+    }
+
     // Before any sandbox: an unreadable workflow or a bad selection fails the run here, with its
     // message. The run's pin names the workflow directory; its files are snapshotted from this
     // runner's checkout once (at `config.commit`), so a resume reads what the run began with.
@@ -180,6 +200,7 @@ export async function runClaim(
     const layout = runLayout(
       runId,
       run.input.source === "reference" ? referencePrefix("scan") : inputPrefix(run.input.id),
+      definition.skills,
     );
     const createSandbox = createModalSandbox({
       appName: RUNS_APP,
@@ -207,26 +228,29 @@ export async function runClaim(
       stored,
       live,
     );
+    // A sandbox is named by its thread without the run id: `<taskId>.worker[.n]`, `<taskId>.check[.n]`.
+    const sandboxName = (threadId: string) => threadId.slice(runId.length + 1);
     session = sandboxSession(
-      () =>
+      // Check threads use the worker role too: the check skills and the host-side scratch
+      // paths (`RunLayout`, `r2Evidence`) assume one run-wide `/scratch` (apps/runner/.context).
+      (threadId) =>
         createSandbox(
-          {
+          workerSandboxSpec({
             runId,
-            name: "main",
+            name: sandboxName(threadId),
             image: config.sandbox.image,
-            cpu: 2,
-            memoryMiB: 8192,
             lifetimeSeconds: config.sandbox.lifetimeSeconds,
             idleSeconds: config.sandbox.idleSeconds,
             mounts: layout.mounts,
-          },
+            env: layout.env,
+          }),
           abort.signal,
         ),
       (id, state, detail) => {
         // Metered from the start of creation, the sweep included: a conservative upper bound.
         if (state === "starting") meter.sandboxUp();
         else if (state === "stopped" || state === "failed") meter.sandboxDown();
-        events?.emit(id, "sandbox", { name: "main", state, detail });
+        events?.emit(id, "sandbox", { name: sandboxName(id), state, detail });
       },
       layout.restartNote,
     );
@@ -312,6 +336,8 @@ export async function runClaim(
       recorder: events,
       history: client,
       sandbox: (id) => opened.get(id),
+      releaseSandbox: (id) =>
+        opened.release(id).catch((e) => log(`releasing ${sandboxName(id)} failed: ${e}`)),
       evidence: r2Evidence(config.r2),
       files,
       segmenter: metaKey

@@ -1,48 +1,57 @@
-"""Tibial secondary ossification centre (IIOC, ROI-1): the tissue region, heights, width and plate columns.
-
-  python iioc.py --hu-aligned tibia-hu.npy --mask tibia-mask.npy --frame tibia-frame.json
-         --hu-json hu.json --annotations annotations.json --out <dir> [--threshold HU] [--gp-shift-mm 0]
+"""Cut the tibial secondary ossification centre (IIOC, ROI-1) from traced curves; measure heights and width.
 
 ROI-1 is the tibial bone between the articular surface and the proximal face of the growth plate (growth-plate
 band and metaphysis excluded; marrow and cortical shell included), cut along growth-plate curves the agent traced
-on coronal sections of the aligned stack. The annotation schema and the whole protocol are in ../references/oa-protocol.md.
-This script writes regions and heights only: TV, BV and BV/TV of ROI-1 (deck #4-6) come from `morphometry.py volumes`.
+on coronal sections of the aligned stack (`tibia_frame.py`). This script writes regions and heights only: TV, BV and BV/TV of
+ROI-1 (deck #4-6) come from `morphometry.py volumes`. Heights #7-9 are reported two ways until the lab chooses: along W, the
+tibial shaft axis (the deck values), and perpendicular to the plane fitted to the traced growth-plate face (diagnostics
+`*-normal`). The plane's rms residual says how far the traced face is from planar; where it is large, the two differ in size
+and in sign from one height to the next. Plate-run bone is the ROI and aligned HU above the threshold (default: the lab's
+2.16/cm in this scan's HU, from hu.json's calibration); no label gates it.
 
-Writes (aligned grid, array axes W,V,U) iioc-tissue.npy, growth-plate-proximal-face.npy, growth-plate-proximal-valid.npy (2D bool: where the face is traced,
-not held constant past its first and last section or its curves' ends), articular-top-surface.npy (2D, W index per V,U), <side>-plate-run.npy, and on the scan grid iioc-tissue-scan.npy and width-points-scan.json (the two
-width points as a points file on the scan grid, for `amira_landmarks.py`); plus iioc.json (every value, with its definition) and QC
-images. Prints the result record (`microct-core/resources/sidecar.py`) with the paths.
+--annotations is a JSON file of indices on the aligned grid. It needs "grid_id" (the grid_id of tibia-frame.json; a file without it
+or from another grid is refused). This script reads these keys, other sections of the file are ignored:
+  growth_plate_curves     required: the proximal face of the growth plate, curves (below) on at least two V sections
+  articular_corrections   optional list of {"u_range": [lo, hi], "v_range": [lo, hi], "curves": curves}: where part of the
+                          tibia label is really femur or fibula above the articular surface, `curves` mark the true
+                          articular surface inside the U and V ranges; ROI-1 keeps only what lies below it
+  compartment_midpoint_u  required: {"lateral": U, "medial": U}, the U index at the middle of each plateau compartment. A height
+                          point outside the ROI-1 footprint (or within 3 voxels of its edge) stops the script: move the point
+  width_points_uvw        required: two [u, v, w] points (deck #10): the centre of the fibula-tibia junction on the tibial
+                          surface, and the most prominent point on the other side
+  growth_plate_mid_u      optional: U of "the middle of the growth plate" for height #7 (default: the mean U of the two width points)
+  height_section_v        optional: the coronal section the heights are measured on (default: where the footprint's
+                          growth-plate-to-top distance is largest)
+  plate_patches           optional: {"medial": {"u": [lo, hi], "v": [lo, hi]}, "lateral": {...}}, U and V ranges (hi excluded)
+                          of the subchondral-plate patch per compartment (default: 0.5 mm wide around the compartment
+                          midpoint and height_section_v)
+Curves (every traced surface): {"axis": 1, "height": "row", "slices": {"<v>": [[w, u], ...]}}: the coronal section at
+V = <v> (array axis 1 of the aligned grid), each point [row, column] = [W, U] read off that section's pixel grid ("height"
+is "row" or omitted). A surface is linear in U along a curve (points in any order, constant past the ends) and linear in
+V between traced sections (constant past the first and last). A point is [w, u], not [u, w]. At least two sections;
+anything but axis 1 and height row is refused.
 
-Heights #7-9 are reported two ways until the lab chooses: along W, the tibial shaft axis (the deck values), and
-perpendicular to the plane fitted to the traced growth-plate face (diagnostics `*-normal`). The plane's rms residual says
-how far the traced face is from planar; where it is large, the two differ in size and in sign from one height to the next.
-Plate-run bone is the ROI and aligned HU above the threshold (default: the lab's 2.16/cm in this scan's HU, from hu.json's
-calibration); no label gates it.
+Writes: in <out>, on the aligned grid (array axes W,V,U), each .npy with its sidecar:
+  iioc-tissue.npy  ROI-1, bool                         growth-plate-proximal-face.npy  W index per (V,U), float32
+  growth-plate-proximal-valid.npy  2D bool: where the face is traced, not held constant past its first and last section or its curves' ends
+  articular-top-surface.npy  W index of the ROI-1 top per (V,U)        <side>-plate-run.npy  bool, the first bone run of each compartment's patch
+  iioc-tissue-scan.npy  ROI-1 on the scan grid (the scan's sidecar)    width-points-scan.json  the two width points as a points file on the scan grid, for amira_landmarks.py
+  iioc.json  the result record (every value with its definition: heights, width, diagnostics)   qc-coronal.jpg, qc-heights.jpg  QC images
+Prints: the result record {out, values: {id: {value, unit, definition, kind}}} with the paths of the files above (qc, tissue, tissue_scan, width_points_scan, growth_plate_face, growth_plate_traced, articular_top, plate_runs, removed_disconnected_voxels)
+Example: python iioc.py --hu-aligned tibia-hu.npy --mask tibia-mask.npy --frame tibia-frame.json --hu-json hu.json --annotations annotations.json --out iioc/
+Exits 2 with one sentence on bad input, before writing anything.
 """
 
-import argparse
 import json
-import sys
 from pathlib import Path
 
+import frame as fr
 import matplotlib
 import numpy as np
+import sidecar
+from annotations import load_annotations, need, traced_surface
+from envelope import close_and_fill
 from scipy import ndimage as ndi
-
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
-# only missing directories are added, so a script imported by another leaves the importer's order alone.
-SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources'), str(SKILLS / 'regions-and-landmarks/resources')) if d not in sys.path]
-try:
-    import frame as fr
-    import sidecar
-    from annotations import load_annotations, need, traced_surface
-    from envelope import close_and_fill
-except ModuleNotFoundError as e:
-    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
-          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
-    sys.exit(2)
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -112,19 +121,19 @@ def first_run(bone, v, u):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--hu-aligned', required=True, help='tibia-hu.npy from tibia_frame.py')
-    ap.add_argument('--mask', required=True, help='tibia-mask.npy from tibia_frame.py')
-    ap.add_argument('--frame', required=True, help='tibia-frame.json from tibia_frame.py')
-    ap.add_argument('--hu-json', required=True, help='hu.json of the scan: its grid, and the calibration the lab threshold in HU comes from')
-    ap.add_argument('--annotations', required=True)
-    ap.add_argument('--out', required=True)
+    ap = sidecar.parser(__doc__)
+    ap.add_argument('--hu-aligned', type=sidecar.existing, required=True, help='tibia-hu.npy from tibia_frame.py')
+    ap.add_argument('--mask', type=sidecar.existing, required=True, help='tibia-mask.npy from tibia_frame.py')
+    ap.add_argument('--frame', type=sidecar.existing, required=True, help='tibia-frame.json from tibia_frame.py')
+    ap.add_argument('--hu-json', type=sidecar.existing, required=True, help='hu.json of the scan: its grid, and the calibration the lab threshold in HU comes from')
+    ap.add_argument('--annotations', type=sidecar.existing, required=True, help='annotations JSON on the aligned grid, described above')
+    ap.add_argument('--out', required=True, help='output directory (created)')
     ap.add_argument('--threshold', type=float, help='bone threshold in HU (default: the lab threshold, 2.16/cm, from --hu-json)')
     ap.add_argument(
         '--gp-shift-mm',
         type=float,
         default=0.0,
-        help='move the traced growth-plate face by this many mm (+ = toward the shaft): sensitivity run',
+        help='mm: move the traced growth-plate face by this much (+ = toward the shaft): sensitivity run',
     )
     a = ap.parse_args()
     frame = fr.load(a.frame)
