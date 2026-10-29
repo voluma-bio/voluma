@@ -120,10 +120,12 @@ thread's sandbox, with the run's abort signal and a 30-minute timeout; the runne
 volume and does none of the work. The program reads the `.npy` by position (never whole), crops it (`subVolume`, else
 the tissue plus a margin, always including the boxes), encodes lossless H.264, sends it to Meta
 through the gateway (`$VOLUMA_GATEWAY_URL/meta/v1/...`, the sandbox's token as the bearer; the
-sandbox's network is that host only), decodes the masks (`sam-mask.ts`, a port of Meta's
+sandbox's network is that host only; only a sandbox whose role is granted `segment_sam` gets the
+network and the token, so a check sandbox stays `network: none` with no token), decodes the masks (`sam-mask.ts`, a port of Meta's
 decoder, because `meta-sam-parser` takes minutes per response) and writes the labels on the
-full grid and the sidecar `<labels>.json`: built in `/tmp`, then `cp`ed, labels first and the
-sidecar last, because an R2 mount takes whole files only. The sidecar marks a complete result.
+full grid and the sidecar `<labels>.json`: built in `/tmp`, then `cp`ed, because an R2 mount takes
+whole files only. An old sidecar is deleted first and the new one, written last, carries the call's
+`requestId` (the result repeats it): the labels are complete when the sidecar exists with that id.
 The tool returns its one JSON line; a gateway or network failure comes back as an error result
 with `infrastructure: true`. Nothing in the runner meters SAM: its spend is the gateway's
 `provider_calls` rows. The tool is offered when `VOLUMA_GATEWAY_URL` is set. How agents should
@@ -135,8 +137,9 @@ Why TypeScript: the decoder takes seconds there and minutes in Python.
 
 # Runner: `dev-sandbox` drives the real sandbox, tools and gateway without a model
 
-`pnpm --filter @voluma/runner dev-sandbox [--role worker]` (`src/dev-sandbox.ts`) claims the next
-queued run (start one in the web app, or insert one in the local database), holds its lease with
+`pnpm --filter @voluma/runner dev-sandbox --run <id> [--role worker]` (`src/dev-sandbox.ts`) claims the next
+queued run and gives it back unless it is `<id>` (start one in the web app, or insert one in the
+local database); it refuses an API that is not on this machine unless `--allow-remote` is given, holds its lease with
 the real heartbeat, opens the role's sandbox through the real adapter and reads commands from
 stdin: `exec <command>`, `segment <json>` (the real `segment_sam` tool) and `close` (ends the
 run `failed` with "closed by dev-sandbox", terminates the claim's sandboxes by tag). It needs the
