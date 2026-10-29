@@ -1,5 +1,12 @@
 # Deploying the gateway (Railway staging)
 
+## Temporary state (p510 staging plumbing probe)
+
+The probe sets `GATEWAY_META_BASE_URL` to a Modal stub tunnel; it was unset before the probe.
+Unset it and terminate the stub sandbox in the same session.
+
+## Setup
+
 Set up on staging (2026-10-29): service `@voluma/gateway`, id `9d59dc78-573e-4892-9a25-3c21ddb81912`,
 domain `https://volumagateway-staging.up.railway.app`. Same project and environment as the API
 ([../../api/.context/deploy.md](../../api/.context/deploy.md) has the project and the `gql` helper).

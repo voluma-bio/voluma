@@ -5,6 +5,14 @@ Railway's private network and runs them (sandboxes on Modal, files in R2). It se
 nothing. Project, environment and the `gql` helper are in
 [../../api/.context/deploy.md](../../api/.context/deploy.md); this file holds only what differs.
 
+## Temporary state (p510 staging plumbing probe)
+
+Before overriding, runner variables were: `RUNNER_MODEL=anthropic/claude-sonnet-5`,
+`RUNNER_CHECK_MODEL=anthropic/claude-sonnet-5`, `RUNNER_MAIN_MODEL=anthropic/claude-sonnet-5`,
+`RUNNER_FALLBACK_MODEL` unset, and `VOLUMA_DEEPSEEK_API_KEY` unset. The probe sets the first three
+to `deepseek/deepseek-flash`, leaves fallback unset, and adds the DeepSeek key. Restore the four
+model variables exactly as listed and remove the DeepSeek key in the same session.
+
 ## How it is set up
 
 Service `@voluma/runner` (id `ad12b6ff-b9c8-45cb-b9c1-af444e398749`), same project and
