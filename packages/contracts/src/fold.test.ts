@@ -4,10 +4,39 @@
  * any error. Outputs and references are in `fold-outputs.test.ts`.
  */
 import { describe, expect, it } from "vitest";
+import { eventInputSchema, runEventSchema, runEventsResponseSchema } from "./events";
 import { fold } from "./fold";
 import { expectParses, log, need, rev, SHA, SUP, twoDone, W } from "./fold-test-log";
 
 describe("fold", () => {
+  it("event boundaries accept runs and corrections, but reject obsolete checker revisions", () => {
+    const event = {
+      id: "root:revision",
+      runId: "run1",
+      threadId: "root",
+      seq: 1,
+      createdAt: "2026-10-28T00:00:00.000Z",
+      type: "revision.started",
+    };
+    for (const payload of [
+      { reason: "run", plan: { tasks: [] } },
+      { reason: "correction", taskId: "a" },
+    ]) {
+      const stored = { ...event, payload };
+      expect(eventInputSchema.parse(stored).payload).toEqual(payload);
+      expect(runEventSchema.parse(stored).payload).toEqual(payload);
+      expect(runEventsResponseSchema.parse({ events: [stored], more: false }).events).toEqual([
+        stored,
+      ]);
+    }
+    const obsolete = { ...event, payload: { reason: "fix", taskId: "a" } };
+    expect(eventInputSchema.safeParse(obsolete).success).toBe(false);
+    expect(runEventSchema.safeParse(obsolete).success).toBe(false);
+    expect(runEventsResponseSchema.safeParse({ events: [obsolete], more: false }).success).toBe(
+      false,
+    );
+  });
+
   it("normal run: one revision holding every task", () => {
     const f = fold(twoDone().events);
     expect(f.revisions).toHaveLength(1);
@@ -64,7 +93,7 @@ describe("fold", () => {
     });
   }
 
-  it("a check without a fix stays in the worker's attempt and one revision", () => {
+  it("a check stays in the worker's attempt and one revision without changing outputs", () => {
     const l = twoDone();
     l.thread("chk", "check", "w:1:open");
     l.status("chk:start", "chk", "a", "w:1:open", "under-review", l.rule("check-start"));
@@ -78,46 +107,9 @@ describe("fold", () => {
     expect(a.threads).toEqual({ worker: W, check: "chk" });
     expect(a.checks).toEqual([]);
     expect(a.resultRevisionId).toBe("root:revision");
-    expectParses(f);
-  });
-
-  it("a check with a fix: the earlier revision keeps the worker's result, the new one has the fix", () => {
-    const l = twoDone();
-    l.thread("chk", "check", "w:1:open");
-    l.status("chk:start", "chk", "a", "w:1:open", "under-review", l.rule("check-start"));
-    l.checkpoint("chk:1", "chk", "a", "w:1:open", { verdict: "passed", text: "Fixed the plane." });
-    l.revision("chk:2:revision", "chk", { reason: "fix", taskId: "a" });
-    l.status("chk:2:stale:b", "chk", "b", "w:4:open", "stale", l.rule("stale"));
-    l.measurement("chk:2", "chk", "a", "w:1:open", "width", 3.39);
-    l.measurement("chk:3", "chk", "a", "w:1:open", "area", 12, {
-      evidence: [{ root: "scratch", path: "r.py", sha256: SHA(2) }],
-    });
-    l.result("chk", "a", "w:1:open");
-    const f = fold(l.events);
-    const [r1, r2] = f.revisions;
-    expect(f.revisions.map((r) => r.reason)).toEqual(["run", "fix"]);
-    const before = need(r1?.tasks ?? [], "a");
-    expect(before.status).toBe("under-review"); // its status at that point in the log
-    expect(before.measurements.map((m) => m.value)).toEqual([3.4]);
-    expect(before.checks).toEqual([]);
-    const after = need(r2?.tasks ?? [], "a");
-    expect(after.status).toBe("to-check");
-    expect(after.measurements.map((m) => [m.id, m.value])).toEqual([
-      ["a/width", 3.39],
-      ["a/area", 12],
-    ]);
-    expect(after.evidence.map((e) => e.sha256)).toEqual([SHA(1), SHA(2)]);
-    expect(after.threads).toEqual({ worker: W, check: "chk" });
-    expect(after.checker?.verdict).toBe("passed");
-    expect(after.checks.map((c) => [c.id, c.title])).toEqual([
-      ["chk:2:revision", "Changed by the second agent"],
-    ]);
-    expect(need(r1?.tasks ?? [], "b").resultRevisionId).toBe("root:revision");
-    expect(need(r2?.tasks ?? [], "b")).toMatchObject({
-      status: "stale",
-      resultRevisionId: "chk:2:revision",
-    });
-    expect(after.resultRevisionId).toBe("chk:2:revision");
+    expect(a.measurements.map((m) => [m.id, m.value])).toEqual([["a/width", 3.4]]);
+    expect(a.evidence.map((e) => e.sha256)).toEqual([SHA(1)]);
+    expect(need(f, "b")).toMatchObject({ status: "done", checks: [], checker: null });
     expectParses(f);
   });
 
@@ -231,10 +223,10 @@ describe("fold", () => {
     expectParses(f);
   });
 
-  it("B: a second passing check on a fixed attempt stays to-check with the fix item open", () => {
-    const l = checked(() => {});
-    l.revision("chk:2:revision", "chk", { reason: "fix", taskId: "a" });
-    l.measurement("chk:2", "chk", "a", "w:1:open", "width", 3.39);
+  it("a second passing check leaves an explicit To check item open", () => {
+    const l = checked((l) =>
+      l.checkpoint("w:7", W, "a", "w:1:open", { toCheck: { title: "Plane" } }),
+    );
     l.result("chk", "a", "w:1:open");
     l.thread("chk2", "check", "w:1:open");
     l.status("chk2:start", "chk2", "a", "w:1:open", "under-review", l.rule("check-start"));
@@ -243,7 +235,7 @@ describe("fold", () => {
     const f = fold(l.events);
     const a = need(f, "a");
     expect(a.status).toBe("to-check");
-    expect(a.checks.map((c) => c.id)).toEqual(["chk:2:revision"]);
+    expect(a.checks.map((c) => c.id)).toEqual(["w:7"]);
     // The shown verdict and thread are the second check's.
     expect(a.checker).toEqual({ verdict: "passed", text: "Agreed." });
     expect(a.threads.check).toBe("chk2");
@@ -261,31 +253,21 @@ describe("fold", () => {
     expectParses(f);
   });
 
-  it("C: the worker's doubt shows in the revision before a fix and again after it, with the same id", () => {
+  it("the worker's doubt keeps its id across a correction to an unrelated task", () => {
     const l = checked((l) => l.status("w:7", W, "a", "w:1:open", "to-check"));
-    l.revision("chk:2:revision", "chk", { reason: "fix", taskId: "a" });
-    l.measurement("chk:2", "chk", "a", "w:1:open", "width", 3.39);
     l.result("chk", "a", "w:1:open");
+    l.revision("sup:1:revision", SUP, { reason: "correction", taskId: "b" });
+    l.status("sup:1", SUP, "b", "w:4:open", "stale");
+    l.open("w:8:open", W, "b");
     const f = fold(l.events);
     expect(need(rev(f, 0).tasks, "a").checks.map((c) => [c.id, c.title])).toEqual([
       ["w:7", "Marked to check"],
     ]);
     expect(need(rev(f, 1).tasks, "a").checks.map((c) => [c.id, c.title])).toEqual([
       ["w:7", "Marked to check"],
-      ["chk:2:revision", "Changed by the second agent"],
     ]);
+    expect(need(f, "a").resultRevisionId).toBe("root:revision");
     expectParses(f);
-  });
-
-  it("D: a fix on the checked task leaves an unrelated done task alone", () => {
-    const l = checked(() => {});
-    l.revision("chk:2:revision", "chk", { reason: "fix", taskId: "a" });
-    l.measurement("chk:2", "chk", "a", "w:1:open", "width", 3.39);
-    l.result("chk", "a", "w:1:open");
-    const b = need(fold(l.events), "b");
-    expect(b).toMatchObject({ status: "done", checks: [], checker: null });
-    expect(b.threads.check).toBeNull();
-    expectParses(fold(l.events));
   });
 
   it("a check that passed, then a correction: the old revision keeps the check, the redo starts clean", () => {
