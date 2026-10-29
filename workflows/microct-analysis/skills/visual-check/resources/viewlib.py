@@ -111,8 +111,7 @@ def sample_plane(vol, to_index, centre_zyx, u, v, px, size, order=1, cval=0):
 
     Pixel (i, j) of a `size` = (H, W) image is at centre + (i - (H-1)/2) px u + (j - (W-1)/2) px v: rows run along `u`, columns
     along `v`, both unit vectors (z, y, x). Positions are in whatever unit `to_index` takes, which maps an array of points
-    (..., 3) to `vol`'s index space: mm with `p / spacing` for views of a scan-grid volume; scan voxels with `lambda p: p` (as
-    `frame_cut` does, since a frame is defined in voxel indices). Orders 0 (labels) and 1 (HU); outside `vol`: `cval`.
+    (..., 3) to `vol`'s index space: mm with `p / spacing` for views of a scan-grid volume; scan voxels with `lambda p: p`. Orders 0 (labels) and 1 (HU); outside `vol`: `cval`.
     """
     pts = fr.plane_points(centre_zyx, u, v, px, size)
     return ndi.map_coordinates(vol, np.moveaxis(to_index(pts), -1, 0), order=order, mode='constant', cval=cval)
@@ -124,9 +123,5 @@ def frame_cut(vol, frame, axis, index, order=1, cval=0):
     axis 0 = slice `index` (rows x columns), axis 1 = row `index` (slices x columns), axis 2 = column `index`
     (slices x rows). order 0 for labels, 1 for HU. The pixels are the frame's voxels.
     """
-    a, b = (i for i in range(3) if i != axis)
-    n = frame['shape']
-    c = np.zeros(3)
-    c[axis], c[a], c[b] = index, (n[a] - 1) / 2, (n[b] - 1) / 2
-    R = np.array(frame['R_zyx'])
-    return sample_plane(vol, lambda p: p, fr.to_scan_points(c, frame), R[a], R[b], 1.0, (n[a], n[b]), order, cval)
+    pts = fr.slice_points(frame, axis, index)
+    return ndi.map_coordinates(vol, np.moveaxis(pts, -1, 0), order=order, mode='constant', cval=cval)

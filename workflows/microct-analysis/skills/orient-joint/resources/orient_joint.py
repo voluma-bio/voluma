@@ -277,8 +277,7 @@ def joint_frame(hu, spacing_mm, threshold_hu=None, shaft_radius_mm=1.2, ref_radi
              'R_zyx': R, 'normal_zyx': nrm.tolist(), 'origin_zyx': origin, 'shape': shape,
              'keyframe': key, 'background_hu': float(np.median(sub[~closed]))}
     # The keyframe must cut both bones: count each bone's voxels in it (a bone is the side of the joint it lies on)
-    g = np.moveaxis(fr.plane_points(fr.to_scan_points([key, (shape[1] - 1) / 2, (shape[2] - 1) / 2], frame), R[1], R[2], 1.0,
-                                    shape[1:]), -1, 0)
+    g = np.moveaxis(fr.slice_points(frame, 0, key), -1, 0)
     idx = np.round((g - 0.5) / 2).astype(int)
     ok = np.all((idx >= 0) & (idx < np.array(lab.shape)[:, None, None]), axis=0)
     ok[ok] = np.isin(lab[tuple(idx[:, ok])], np.array(ids) + 1)

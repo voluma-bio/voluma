@@ -18,7 +18,7 @@ Library use (other resources import this file):
   sidecar.value(v, unit, definition, kind='measurement', **provenance)   # one entry of a result record
   sidecar.emit_values(out_json, values, meta=None, **fields)   # write the result record, print it (below)
   sidecar.save_image(fig, path)  # the image limits below, JPEG
-  sidecar.load_points(path, grid_id)   # {name: [z, y, x]} from a points file (`pick.py` writes one); refuses another grid
+  sidecar.load_points(paths, grid_id)   # {name: [z, y, x]} merged from points files (`pick.py` writes one per view); refuses another grid
   sidecar.fail(sentence)   # print a sentence the agent can act on to stderr and exit 2
 
 Result record: every script that reports numbers writes `{"values": {id: {value, unit, definition, kind, ...}}, ...meta}`
@@ -109,19 +109,34 @@ def write(array_path, *, like=None, grid_id=None, spacing_zyx_mm=None, inputs=()
     return out
 
 
-def load_points(path, grid_id):
-    """{name: [z, y, x]} from a points file: `{"grid_id": ..., "points": [{"name": ..., "zyx": [z, y, x]}, ...]}` (what `pick.py`
-    writes; more keys per point are fine). Indices mean nothing on another grid, so a file without a `grid_id`, or made on a grid
-    other than `grid_id` (the one the caller is working on), is refused."""
-    d = json.loads(Path(path).read_text())
-    if not isinstance(d, dict) or 'points' not in d:
-        fail(f'{path} is not a points file: it is {{"grid_id": "<grid>", "points": [{{"name": "a", "zyx": [z, y, x]}}, ...]}}')
-    if 'grid_id' not in d:
-        fail(f'{path} has no "grid_id": add the grid_id of the grid the indices are on (the scan\'s is in hu.json)')
-    if d['grid_id'] != grid_id:
-        fail(f'{path} is on another grid than {grid_id[:12]}... (its grid_id is {str(d["grid_id"])[:12]}...): its indices do not '
-             'apply here; map the points to this grid or pick them again')
-    return {p['name']: p['zyx'] for p in d['points']}
+def load_points(paths, grid_id):
+    """{name: [z, y, x]} merged from points files (a path, or a list of them: `pick.py` writes one per view).
+
+    A file is `{"grid_id": ..., "points": [{"name": ..., "zyx": [z, y, x]}, ...]}` (more keys per point are fine). Indices mean
+    nothing on another grid, so a file without a `grid_id`, or made on a grid other than `grid_id` (the one the caller is working
+    on), is refused; so is a name that two files both hold."""
+    point = '{"name": "a", "zyx": [z, y, x]}'
+    shape = f'{{"grid_id": "<grid>", "points": [{point}, ...]}}'
+    merged, source = {}, {}
+    for path in [paths] if isinstance(paths, (str, Path)) else paths:
+        d = json.loads(Path(path).read_text())
+        if not isinstance(d, dict) or not isinstance(d.get('points'), list):
+            fail(f'{path} is not a points file: it is {shape}')
+        if 'grid_id' not in d:
+            fail(f'{path} has no "grid_id": add the grid_id of the grid the indices are on (the scan\'s is in hu.json)')
+        if d['grid_id'] != grid_id:
+            fail(f'{path} is on another grid than {grid_id[:12]}... (its grid_id is {str(d["grid_id"])[:12]}...): its indices do not '
+                 'apply here. Map it with `python <orient-joint>/resources/map_points.py --frame frame.json --points-file '
+                 f'{path} --out <new>.json` when the frame links the two grids, or pick the points again')
+        for p in d['points']:
+            zyx = p.get('zyx') if isinstance(p, dict) else None
+            if not (isinstance(p, dict) and isinstance(p.get('name'), str) and isinstance(zyx, list) and len(zyx) == 3
+                    and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in zyx)):
+                fail(f'{path} has a malformed point, {json.dumps(p)[:80]}: each is {point}, with three numbers in zyx')
+            if p['name'] in merged:
+                fail(f'point "{p["name"]}" is in both {source[p["name"]]} and {path}: give each point one name')
+            merged[p['name']], source[p['name']] = zyx, path
+    return merged
 
 
 def emit(**fields):

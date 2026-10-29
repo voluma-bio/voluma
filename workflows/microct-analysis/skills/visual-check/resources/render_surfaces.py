@@ -27,6 +27,7 @@ HERE = Path(__file__).resolve().parent
 # `python -I` puts no script directory on sys.path, so every directory a script imports from is added here.
 sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'microct-core/resources')]
 try:
+    import frame as fr
     import viewlib as vl
 except ModuleNotFoundError as e:
     sys.exit(f'{e}: this script expects <workflows>/microct-analysis/skills/<skill>/resources/ with '
@@ -106,7 +107,7 @@ if __name__ == '__main__':
     if not present:
         sl.fail('the labels volume is empty: nothing to render')
     ms = meshes(lab, [s * step for s in sp], present)
-    frame = vl.fr.load(a.frame) if a.frame else None
+    frame = fr.load(a.frame) if a.frame else None
     look, up = view_vectors(frame)
     if a.azimuth is not None:
         img, cam = render_view(ms, look, up, a.azimuth, a.size)

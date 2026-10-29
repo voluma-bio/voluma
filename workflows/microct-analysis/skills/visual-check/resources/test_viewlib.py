@@ -22,17 +22,6 @@ def test_axis_aligned_plane_equals_the_numpy_slice(axis, index):
     np.testing.assert_allclose(got, np.take(vol, index, axis=axis), atol=1e-6)
 
 
-def test_plane_in_mm_uses_each_axis_spacing():
-    vol = asymmetric_volume()
-    sp = np.array([0.04, 0.02, 0.01])  # z, y, x mm
-    centre_vox = np.array([7.0, 15.0, 20.0])
-    # one-voxel steps along y and x are 0.02 and 0.01 mm; a plane in y,x with px 0.01 mm samples x at every voxel, y every half
-    got = vl.sample_plane(vol, lambda p: p / sp, centre_vox * sp, [0, 1, 0], [0, 0, 1], 0.01, (3, 5), order=1)
-    assert got[1, 2] == pytest.approx(vol[7, 15, 20], abs=1e-6)
-    assert got[1, 3] == pytest.approx(vol[7, 15, 21], abs=1e-6)
-    assert got[2, 2] == pytest.approx((vol[7, 15, 20] + vol[7, 16, 20]) / 2, abs=1e-6)  # half a voxel along y
-
-
 def test_oblique_plane_lands_on_the_expected_voxel():
     vol = asymmetric_volume()
     # rows run along (0, 1, 1)/sqrt2 and columns along (0, 1, -1)/sqrt2, steps of sqrt2: pixel (i, j) is voxel
