@@ -147,16 +147,10 @@ export function ReviewWorkspace({
                       <span>
                         {item.title}
                         <span className="task-meta">
-                          <StatusBadge tone={taskStatus(item).tone}>
-                            {taskStatus(item).label}
-                          </StatusBadge>
-                          {item.status !== "pending" && (
-                            <>
-                              {" "}
-                              {item.checks.filter((check) => check.status === "open").length} to
-                              check
-                            </>
-                          )}
+                          <StatusBadge tone={taskStatus[item.status].tone}>
+                            {taskStatus[item.status].label}
+                          </StatusBadge>{" "}
+                          {item.checks.filter((check) => check.status === "open").length} to check
                         </span>
                       </span>
                     </button>

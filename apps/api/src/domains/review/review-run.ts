@@ -1,6 +1,6 @@
 /**
- * A run's review data (`@voluma/contracts/review`) from its recorded plan, overlaid with
- * `fold`'s attempts and blocks. Planned tasks without an attempt remain visible as pending.
+ * A run's review data (`@voluma/contracts/review`) from its event log: `fold` decides the
+ * tasks and blocks; this adds what the events don't carry (`fold.ts`'s header lists it).
  * Pure, so the route only loads and serves.
  */
 import type { RunEvent } from "@voluma/contracts/events";
@@ -13,14 +13,18 @@ import {
   reviewRunSchema,
 } from "@voluma/contracts/review";
 import type { Run } from "@voluma/contracts/run";
+import type { WorkflowPlan } from "@voluma/contracts/workflow";
 
 /** Null until the run's first `revision.started`: a run with no plan has nothing to review. */
 export function reviewRun(run: Run, events: readonly RunEvent[]): ReviewRun | null {
   const { revisions } = fold(events);
+  if (revisions.length === 0) return null;
   // Not `events[0]`: the supervisor's `thread.started` and the run-start `wake` come first.
-  const start = events.find((e) => e.type === "revision.started" && e.payload.reason === "run");
-  if (start?.type !== "revision.started" || start.payload.reason !== "run") return null;
-  const plan = start.payload.plan.tasks;
+  const start = events.find((e) => e.type === "revision.started");
+  const plan: WorkflowPlan["tasks"] =
+    start?.type === "revision.started" && start.payload.reason === "run"
+      ? start.payload.plan.tasks
+      : [];
   const planned = new Map(plan.map((t) => [t.id, t]));
   const titleOf = (taskId: string) => planned.get(taskId)?.title ?? taskId;
 
@@ -75,56 +79,17 @@ export function reviewRun(run: Run, events: readonly RunEvent[]): ReviewRun | nu
       ? "Run"
       : `${rev.reason === "correction" ? "Correction" : "Check fix"}: ${titleOf(rev.taskId ?? "")}`;
 
-  const workers = new Map<string, Extract<RunEvent, { type: "thread.started" }>>();
-  let cursor = 0;
   return reviewRunSchema.parse({
     id: run.id,
     sample: run.input.name,
     workflows: run.workflows,
-    revisions: revisions.map((rev, index) => {
-      // Thread starts can precede the first task-tool write (and hence the attempt).
-      // Stop at this snapshot's boundary so later starts never change an earlier revision.
-      const nextRevisionId = revisions[index + 1]?.id;
-      while (events[cursor] && events[cursor]?.id !== nextRevisionId) {
-        const event = events[cursor++];
-        if (
-          event?.type === "thread.started" &&
-          event.payload.kind === "worker" &&
-          event.payload.task
-        )
-          workers.set(event.payload.task, event);
-      }
-      const attempted = new Map(rev.tasks.map((t) => [t.id, t]));
+    revisions: revisions.map((rev) => {
       const onScan = new Set(rev.annotations.filter((a) => a.volumeId === null).map((a) => a.id));
       return {
         id: rev.id,
         label: label(rev),
         createdAt: rev.createdAt,
-        tasks: plan.map((p): ReviewTask => {
-          const t = attempted.get(p.id);
-          if (t) return { ...task(t, rev, onScan), dependsOn: p.dependsOn };
-          const worker = workers.get(p.id);
-          return {
-            id: p.id,
-            title: titleOf(p.id),
-            ask: p.instructions ?? "",
-            dependsOn: p.dependsOn,
-            status: "pending",
-            // There is no result yet; the required revision reference anchors the planned row.
-            resultRevisionId: start.id,
-            checker: null,
-            threads: { worker: worker?.threadId ?? null, check: null, chat: null },
-            models: { worker: worker?.payload.model ?? null, check: null, chat: null },
-            structureIds: [],
-            measurements: [],
-            scores: [],
-            missing: [],
-            undeclared: [],
-            checks: [],
-            evidence: [],
-            files: [],
-          };
-        }),
+        tasks: rev.tasks.map((t) => task(t, rev, onScan)),
         volumes: rev.volumes,
         structures: rev.structures,
         annotations: rev.annotations.filter((a): a is Annotation => a.volumeId !== null),

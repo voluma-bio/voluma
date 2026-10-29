@@ -132,45 +132,29 @@ export function TaskReport({
   const references = task.measurements.flatMap((m) =>
     m.references.map((reference) => ({ m, reference })),
   );
-  const status = taskStatus(task);
-  const header = (
-    <header>
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <span className="font-mono">{String(taskNumber).padStart(2, "0")}</span>
-        <span>Task report</span>
-        {task.status !== "pending" && <span className="ml-auto">Result {resultLabel}</span>}
-        <span className={task.status === "pending" ? "ml-auto" : undefined}>
-          <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
-        </span>
-      </div>
-      <h1 className="text-2xl font-semibold mt-3">{task.title}</h1>
-      {task.ask && <p className="text-muted-foreground mt-3 leading-relaxed">{task.ask}</p>}
-      {(task.models.worker || task.models.check) && (
-        <p className="text-xs text-muted-foreground mt-3">
-          {task.models.worker && <>Worker: {task.models.worker}</>}
-          {task.models.worker && task.models.check && " · "}
-          {task.models.check && <>Check: {task.models.check}</>}
-        </p>
-      )}
-    </header>
-  );
-  if (task.status === "pending")
-    return (
-      <article className="task-report" aria-label={`${task.title} report`}>
-        {header}
-        <section role="status">
-          <h2>{task.threads.worker ? "Started; no task result recorded" : "Not started"}</h2>
-          <p className="text-muted-foreground mt-3 leading-relaxed">
-            {task.threads.worker
-              ? "A worker started this task, but no task result was recorded in this revision."
-              : "This task is part of the run's plan, but it has not started in this revision."}
-          </p>
-        </section>
-      </article>
-    );
   return (
     <article className="task-report" aria-label={`${task.title} report`}>
-      {header}
+      <header>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <span className="font-mono">{String(taskNumber).padStart(2, "0")}</span>
+          <span>Task report</span>
+          <span className="ml-auto">Result {resultLabel}</span>
+          <span>
+            <StatusBadge tone={taskStatus[task.status].tone}>
+              {taskStatus[task.status].label}
+            </StatusBadge>
+          </span>
+        </div>
+        <h1 className="text-2xl font-semibold mt-3">{task.title}</h1>
+        {task.ask && <p className="text-muted-foreground mt-3 leading-relaxed">{task.ask}</p>}
+        {(task.models.worker || task.models.check) && (
+          <p className="text-xs text-muted-foreground mt-3">
+            {task.models.worker && <>Worker: {task.models.worker}</>}
+            {task.models.worker && task.models.check && " · "}
+            {task.models.check && <>Check: {task.models.check}</>}
+          </p>
+        )}
+      </header>
       <section>
         <div className="section-heading">
           <h2>Measurements</h2>
