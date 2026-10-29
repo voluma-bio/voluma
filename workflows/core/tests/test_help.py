@@ -13,15 +13,13 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]  # workflows/
 RESOURCES = ROOT.glob('*/skills/*/resources')  # core and each workflow
-# sidecar.py is a library first; its CLI is the odd one out and its docstring is the library's reference
-LIBRARY_CLIS = {'sidecar.py'}
+# Libraries have no CLI by design; sidecar.py also has one, but its docstring is the library's reference.
+LIBRARIES = {'frame.py', 'viewlib.py', 'envelope.py', 'annotations.py', 'sidecar.py'}
+# Every other resources/*.py is a script: a new file is checked without anyone listing it.
 SCRIPTS = sorted(
-    p
-    for d in RESOURCES
-    for p in d.glob('*.py')
-    if not p.name.startswith('test_') and p.name not in LIBRARY_CLIS and "if __name__ == '__main__'" in p.read_text()
+    p for d in RESOURCES for p in d.glob('*.py') if not p.name.startswith('test_') and p.name not in LIBRARIES
 )
 INDEX_LINE_MAX = 110
 
@@ -61,6 +59,7 @@ def build_parser(script, monkeypatch):
 
     monkeypatch.setattr(argparse.ArgumentParser, 'parse_args', capture)
     monkeypatch.setattr(sys, 'argv', [str(script)])
+    monkeypatch.setattr(sys, 'path', list(sys.path))  # the script's own sys.path setup must not leak between cases
     with pytest.raises(_Captured) as e:
         runpy.run_path(str(script), run_name='__main__')
     return e.value.args[0]
@@ -78,3 +77,13 @@ def undocumented(parser, prefix=''):
 @pytest.mark.parametrize('script', SCRIPTS, ids=ids(SCRIPTS))
 def test_every_option_has_help(script, monkeypatch):
     assert not list(undocumented(build_parser(script, monkeypatch)))
+
+
+@pytest.mark.parametrize('script', SCRIPTS, ids=ids(SCRIPTS))
+def test_docstring_is_the_help(script, monkeypatch):
+    """The parser prints the whole docstring, and the docstring has the contract's lines."""
+    doc = ast.get_docstring(ast.parse(script.read_text()), clean=False)
+    parser = build_parser(script, monkeypatch)
+    assert parser.description == doc, 'build the parser with sidecar.parser(__doc__)'
+    for line in ('Writes:', 'Prints:', 'Example:'):
+        assert f'\n{line}' in doc, f'the docstring has no {line} line (a script that writes nothing says "Writes: nothing")'

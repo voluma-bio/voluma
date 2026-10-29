@@ -15,7 +15,7 @@ Writes: <out>/femoral.json  the result record of `microct-core/resources/sidecar
         distal-femoral-width-dfw, width-length-ratio; mm, mm, 1), plus landmarks_zyx, frame (ml, si, normal vectors, zyx) and checks
 Prints: one JSON line {out, values: {id: {value, unit, definition, kind}}}
 Example: python femoral_frame.py --landmarks points-ab.json points-cd.json --hu-json hu.json --labels labels.npy --out femoral/
-Exits 2 with one sentence on bad input, before writing anything.
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
 
 import sys

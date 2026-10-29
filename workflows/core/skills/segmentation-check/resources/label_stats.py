@@ -22,7 +22,7 @@ the file does not list, are flagged.
 Writes: <out>  the full per-label table (JSON, keyed by label id)
 Prints: one JSON line {stats, labels, volume_mm3, pieces, specks, unsupported, flags}; flags is the sentences for the labels that fail
 Example: python label_stats.py --labels labels.npy --out stats.json --ranges anatomy.json
-Exits 2 with one sentence on bad input, before writing anything.
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
 import json
 import sys

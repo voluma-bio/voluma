@@ -10,7 +10,7 @@ Writes: <out>  the Amira ASCII landmark file, physical mm (x, y, z)
         <out>.names.json  the point names in file order, because the format has no names
 Prints: one JSON line {landmarks, names, world_mm_xyz}
 Example: python amira_landmarks.py --points points.json more.json --header hu.json --out landmarks.landmarkAscii
-Exits 2 with one sentence on bad input, before writing anything.
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
 import json
 import sys

@@ -21,7 +21,7 @@ Writes: <out>/iioc-trab-tissue.npy  ROI-2, bool, on the aligned grid, with its s
         <out>/qc-coronal.jpg  six coronal sections: ROI-2 (cyan) inside ROI-1 (green)
 Prints: one JSON line {qc, tissue, upper_boundary}
 Example: python tibial_trabecular.py --iioc-tissue iioc/iioc-tissue.npy --growth-plate-face iioc/growth-plate-proximal-face.npy --hu-aligned tibia-hu.npy --annotations annotations.json --out roi2/
-Exits 2 with one sentence on bad input, before writing anything.
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
 
 import sys

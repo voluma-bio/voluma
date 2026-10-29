@@ -35,7 +35,7 @@ Writes: <out>/roi3-tissue.npy  ROI-3, bool, on the aligned grid, with its sideca
         <out>/qc-roi3.jpg  coronal and axial sections: ROI-3 cyan, cortex orange
 Prints: one JSON line {params, qc, roi3_tissue, cortex, distal_face, cortex_estimate_mm, roi3_voxels}
 Example: python metaphysis_roi.py --hu-aligned tibia-hu.npy --mask tibia-mask.npy --hu-json hu.json --annotations annotations.json --proximal-face iioc/growth-plate-proximal-face.npy --proximal-valid iioc/growth-plate-proximal-valid.npy --out roi3/
-Exits 2 with one sentence on bad input, before writing anything.
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
 
 import json

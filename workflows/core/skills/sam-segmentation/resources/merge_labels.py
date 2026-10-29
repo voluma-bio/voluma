@@ -13,7 +13,7 @@ To check item, not something to merge past.
 Writes: <out>  the merged labels (.npy, the grid of --big), with its sidecar (the map)
 Prints: one JSON line {labels, merged: {temp label: {final, voxels, written, lost_to_big_bones}}, volume_mm3: {label id: volume of the result}}
 Example: python merge_labels.py --big labels_big.npy --small small_trimmed.npy --map 61:6 62:6 5:5 --out labels_merged.npy
-Exits 2 with one sentence on bad input, before writing anything.
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
 import sys
 from pathlib import Path

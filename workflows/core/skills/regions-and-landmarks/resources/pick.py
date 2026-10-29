@@ -24,7 +24,7 @@ Writes: <out>/points.json  {points: [{name, zyx, snap_distance_mm, method, pick_
         <out>/pick-check.jpg  the pane with the mask outlined (cyan), each pick (red x) and where it snapped (green circle)
 Prints: one JSON line {points, check, snapped: [{name, zyx, snap_distance_mm}]}
 Example: python pick.py --picks picks.json --labels labels.npy --ids 2 --grid hu.json --out picks/A
-Exits 2 with one sentence on bad input, before writing anything.
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
 
 import json

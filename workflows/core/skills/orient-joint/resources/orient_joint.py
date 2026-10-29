@@ -37,7 +37,7 @@ Writes: <out>/frame.json  the frame (`microct-core/resources/frame.py` has its s
         <out>/keyframe.jpg  the keyframe slice
 Prints: one JSON line {frame, oriented, keyframe_image, keyframe, slices, bend_deg, skew_vox, shafts_found, keyframe_bone_vox, threshold_hu, plane_rule, ref_object_frames, oriented_shape}
 Example: python orient_joint.py --in hu.npy --header hu.json --out orient --shaft-radius-mm 0.9 --ref-radius-mm 3 --min-object-mm3 0.5
-Exits 2 with one sentence on bad input (the output directory is created first). Library use: `from orient_joint import joint_frame`.
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
 import sys
 from pathlib import Path

@@ -8,7 +8,7 @@ output, not with the mask. Never refill the clipped voxels with the nearest labe
 Writes: <out>  the clipped labels (.npy, the shape of --labels), with its sidecar (the labels' grid, the threshold)
 Prints: one JSON line {labels, volume_mm3: {label id: clipped volume}, removed_mm3: {label id: volume removed}}
 Example: python clip_to_bone.py --hu hu.npy --labels labels.npy --out clipped.npy --threshold-hu 2500
-Exits 2 with one sentence on bad input, before writing anything.
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
 import sys
 from pathlib import Path

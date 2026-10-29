@@ -5,7 +5,7 @@ Nearest neighbour. Refuses a frame made on another scan grid than `--header`, an
 Writes: <out>  the labels on the scan grid (.npy, the scan's shape), with its sidecar (the scan's grid, inputs, `mapped_from`)
 Prints: one JSON line {labels, shape_zyx, voxels: {label id: voxel count}}
 Example: python to_scan.py --in labels_big_oriented.npy --frame frame.json --header hu.json --out labels_big.npy
-Exits 2 with one sentence on bad input, before writing anything.
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
 import json
 import sys

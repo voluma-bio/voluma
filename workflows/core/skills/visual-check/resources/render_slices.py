@@ -6,7 +6,7 @@ along axis 0) or a 2D image. x is the column (top labels), y the row (left label
 Writes: <out>  the JPEG, one pixel per array element (at most 2000 px, 1 MiB)
 Prints: one JSON line {image, shape_rc, index, boxes, points}
 Example: python render_slices.py --in oriented.npy --index 159 --out keyframe.jpg --grid --points 120,300:landmark
-Exits 2 with one sentence on bad input, before writing anything.
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
 import sys
 from pathlib import Path

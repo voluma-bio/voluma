@@ -12,7 +12,7 @@ labels whose `grid_id` is not `--like`'s, so labels from another orientation of 
 Writes: <out>  the trimmed labels (.npy, the shape of --labels), with its sidecar (the grid of --like, min_conf, only)
 Prints: one JSON line {labels, trimmed: {label: {kept_slices, slices, voxels_before, voxels_after}}}
 Example: python trim_tracks.py --labels small_oriented.npy --out small_trimmed_oriented.npy --like oriented.json --only 61 62 5
-Exits 2 with one sentence on bad input, before writing anything.
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
 import json
 import sys

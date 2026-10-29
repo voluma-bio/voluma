@@ -8,7 +8,7 @@ each candidate with `render_crops.py --component-at <centre>`, name it from the 
 Writes: <out>  uint16 volume on the grid of --labels, each candidate its id (1 = largest), with its sidecar
 Prints: one JSON line {candidates, count, top}; top is the 12 largest, each {id, voxels, volume_mm3, centre_zyx, bbox_zyx}
 Example: python unlabelled.py --hu hu.npy --labels labels.npy --out cand.npy --threshold-hu 2500
-Exits 2 with one sentence on bad input, before writing anything.
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
 import sys
 from pathlib import Path

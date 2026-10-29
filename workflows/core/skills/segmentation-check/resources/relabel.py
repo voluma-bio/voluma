@@ -7,7 +7,7 @@ candidate); it overwrites whatever label those voxels had, and the previous labe
 Writes: <out>  the labels with the piece relabelled (.npy, the grid of --labels), with its sidecar
 Prints: one JSON line {labels, voxels, previous_labels: {label id: voxels}, now}
 Example: python relabel.py --labels labels.npy --out fixed.npy --at 410,220,130 --to 5 --pieces cand.npy
-Exits 2 with one sentence on bad input, before writing anything.
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
 import sys
 from pathlib import Path

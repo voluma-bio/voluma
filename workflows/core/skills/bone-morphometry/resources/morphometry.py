@@ -17,7 +17,7 @@ Writes: volumes: <out>/volumes.json; trabecular: <out>/morphometry.json, qc.jpg,
         The json is the result record {values: {id: {value, unit, definition, kind}}, grid_id, inputs, ...}
 Prints: one JSON line {out, values: {id: {value, unit, definition, kind}}}; trabecular adds {qc, thickness, separation}, cortical {qc}
 Example: python morphometry.py trabecular --roi roi.npy --hu hu.npy --hu-json hu.json --out out/roi2 --id BV/TV=BVTV-roi2
-Exits 2 with one sentence on bad input, before writing anything.
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
 
 import argparse

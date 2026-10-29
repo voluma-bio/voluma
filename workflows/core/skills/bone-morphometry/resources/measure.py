@@ -13,7 +13,7 @@ before it, a zero denominator. The record format is in `microct-core/resources/s
 Writes: <out>  the result record {values: {id: {value, unit, definition, kind, ...}}, grid_id, spacing_zyx_mm, inputs}
 Prints: one JSON line {out, values: {id: {value, unit, definition, kind}}}
 Example: python measure.py --spec spec.json --grid hu.json --out measurements.json
-Exits 2 with one sentence on bad input, before writing anything.
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
 
 import json

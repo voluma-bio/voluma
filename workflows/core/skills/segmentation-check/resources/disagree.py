@@ -15,7 +15,7 @@ Writes: <out>/disagreement.npy  uint16 region id by rank, on the grid of --label
         <out>/panel_<id>.jpg  the three-cut panel of each rendered region
 Prints: one JSON line {regions, disagreement, panels, flagged_voxels, flagged_pct_of_classic_bone, regions_over_floor, regions_total, top}; top is the 8 largest regions
 Example: python disagree.py --hu hu.npy --labels labels.npy --classic classic.npy --threshold-hu 2500 --out disagree/
-Exits 2 with one sentence on bad input, before writing anything.
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
 import json
 import sys

@@ -17,7 +17,7 @@ Writes: <out>  uint8 labels on the grid of --labels, with its sidecar
 Prints: one JSON line {labels, volume_mm3: {label id: volume}, core_fallback_labels (default mode only)}
 Example: python classic_segment.py --hu hu.npy --labels labels.npy --out classic.npy --threshold-hu 2500
          python classic_segment.py --hu hu.npy --labels labels.npy --out split.npy --threshold-hu 2500 --within 2 --seeds seeds.json
-Exits 2 with one sentence on bad input, before writing anything.
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
 import json
 import sys
@@ -114,7 +114,7 @@ if __name__ == '__main__':
     ap.add_argument('--labels', required=True, help='label volume .npy on the scan grid, with its sidecar beside it')
     ap.add_argument('--out', required=True, help='labels .npy to write')
     ap.add_argument('--threshold-hu', type=float, required=True, help='HU: voxels at or above this are bone (the segmentation threshold)')
-    ap.add_argument('--core-mm', type=float, default=0.05, help='mm: how deep each label is eroded to make its seed (default mode)')
+    ap.add_argument('--core-mm', type=float, default=0.05, help='mm: how deep each label is eroded to make its seed, in the default segmentation mode')
     ap.add_argument('--within', type=int, help='label id to split between the parts in --seeds')
     ap.add_argument('--seeds', help='JSON {"<label>": [[z,y,x], ...]}: the parts of label --within')
     a = ap.parse_args()

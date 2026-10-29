@@ -8,7 +8,7 @@ white (dashed) and each label in the `visual-check` label colours with a legend.
 Writes: <out>  the JPEG sheet (axis 0, 1, 2 cuts through the piece's centre; titles give the crop origin)
 Prints: one JSON line {image, centre_zyx, bbox_zyx, voxels, volume_mm3, labels_under}; labels_under is the voxel count of each label under the piece
 Example: python render_crops.py --hu hu.npy --labels labels.npy --component-at 410,220,130 --bone-hu 2500 --out crop.jpg
-Exits 2 with one sentence on bad input, before writing anything.
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
 import sys
 from pathlib import Path

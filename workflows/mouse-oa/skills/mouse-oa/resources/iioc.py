@@ -31,7 +31,7 @@ is "row" or omitted). A surface is linear in U along a curve (points in any orde
 V between traced sections (constant past the first and last). A point is [w, u], not [u, w]. At least two sections;
 anything but axis 1 and height row is refused.
 
-Writes (aligned grid, array axes W,V,U, each .npy with its sidecar) in <out>:
+Writes: in <out>, on the aligned grid (array axes W,V,U), each .npy with its sidecar:
   iioc-tissue.npy  ROI-1, bool                         growth-plate-proximal-face.npy  W index per (V,U), float32
   growth-plate-proximal-valid.npy  2D bool: where the face is traced, not held constant past its first and last section or its curves' ends
   articular-top-surface.npy  W index of the ROI-1 top per (V,U)        <side>-plate-run.npy  bool, the first bone run of each compartment's patch
@@ -39,7 +39,7 @@ Writes (aligned grid, array axes W,V,U, each .npy with its sidecar) in <out>:
   iioc.json  the result record (every value with its definition: heights, width, diagnostics)   qc-coronal.jpg, qc-heights.jpg  QC images
 Prints: the result record {out, values: {id: {value, unit, definition, kind}}} with the paths of the files above (qc, tissue, tissue_scan, width_points_scan, growth_plate_face, growth_plate_traced, articular_top, plate_runs, removed_disconnected_voxels)
 Example: python iioc.py --hu-aligned tibia-hu.npy --mask tibia-mask.npy --frame tibia-frame.json --hu-json hu.json --annotations annotations.json --out iioc/
-Exits 2 with one sentence on bad input (a missing required key, a height point off the footprint, a frame from another scan), before writing anything.
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
 
 import json

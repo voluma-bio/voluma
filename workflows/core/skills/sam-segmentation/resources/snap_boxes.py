@@ -9,7 +9,7 @@ Refused: a 3D stack without `--index`, a missing sidecar, a malformed box.
 Writes: <out>  with --out: the snapped boxes as a JSON list, in the order given
 Prints: one JSON line {snapped: [[r0, c0, r1, c1], ...], grew: [bool per box], index, out}
 Example: python snap_boxes.py --in oriented.npy --index 159 --threshold-hu 2500 --boxes 100,80,180,200 --out boxes.json
-Exits 2 with one sentence on bad input, before writing anything.
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
 import json
 import sys

@@ -10,7 +10,7 @@ Writes: <out>/hu.npy  float32 HU, axis order Z,Y,X, slices sorted along the seri
         indices), calibration, grid_id, and the sha256 of every source slice
 Prints: one JSON line {hu, header, shape_zyx, spacing_zyx_mm, grid_id, calibration, hu_min, hu_max}
 Example: python intake.py --in dicom/ --out scan/
-Exits 2 with one sentence on bad input, before writing a volume.
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
 import hashlib
 import json

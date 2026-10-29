@@ -18,7 +18,7 @@ Writes: <out>  with --points-file: {grid_id, points: [{name, zyx}]} on the other
 Prints: --to-oriented: one JSON line {oriented_srs: [[s, r, c], ...]}; --to-scan: {scan_zyx: [[z, y, x], ...]};
         --points-file: {points, grid_id}; --pieces: {boxes, pieces: {id: prompt}, cut_by_stack: [ids]}
 Example: python map_points.py --frame frame.json --pieces cand.npy --ids 1 3 --out boxes.json
-Exits 2 with one sentence on bad input, before writing anything.
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
 import json
 import sys

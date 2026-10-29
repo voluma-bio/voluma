@@ -12,7 +12,7 @@ Writes: <out>/region.npy  bool, the grid of --grid, with its sidecar
 Prints: one JSON line {region, check, voxels, volume_mm3, bbox_zyx}; bbox_zyx is [[min z, y, x], [max z, y, x + 1]]
 Example: python region_from_curves.py between --surface-a A.json --surface-b B.json --grid hu.json --bone bone.npy --out DIR
          python region_from_curves.py polygon --polygons poly.json --grid hu.json --bone bone.npy --out DIR
-Exits 2 with one sentence on bad input, before writing anything.
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
 
 import json

@@ -10,7 +10,7 @@ sandbox).
 Writes: <out>  the JPEG sheet (3 x 2 views, a legend of the labels present); .mesh-cache/ beside it
 Prints: one JSON line {image, labels_drawn, step, triangles}
 Example: python render_surfaces.py --labels labels.npy --out sheet.jpg --frame frame.json --names anatomy.json
-Exits 2 with one sentence on bad input, before writing anything.
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
 import sys
 from pathlib import Path
