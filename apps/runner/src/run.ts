@@ -265,7 +265,7 @@ export async function runClaim(
           lifetimeSeconds: config.sandbox.lifetimeSeconds,
           idleSeconds: config.sandbox.idleSeconds,
           env: thread.env,
-          workdir: thread.scratch.path,
+          workdir: thread.dir,
         };
         return createSandbox(
           thread.role === "worker"

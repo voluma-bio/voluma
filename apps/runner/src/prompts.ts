@@ -11,14 +11,14 @@ import type { PlanTask } from "@voluma/harness/supervise-run";
 import type { AgentDefinition, WorkflowDefinition } from "@voluma/workflow/definition";
 
 function common(role: ThreadLayout["role"], thread: ThreadLayout): string {
-  const dir = thread.scratch.path;
+  const dir = thread.dir;
   const files =
     role === "worker"
-      ? `/outputs/<task id>/ holds each task's result files, and /scratch is for intermediate files; both are kept if the sandbox restarts. /outputs and /scratch are network-backed mounts`
-      : `/outputs/<task id>/ holds the worker's result files (read-only), and ${dir}/ is your own folder for intermediate files, kept if the sandbox restarts; the rest of /scratch is not available to you. ${dir} is a network-backed mount`;
+      ? `/outputs/<task id>/ holds each task's result files, and ${dir}/ is your own folder for intermediate files (the other threads' folders are beside it under /scratch); both are kept if the sandbox restarts. /outputs and /scratch are network-backed mounts`
+      : `/outputs/<task id>/ holds the worker's result files (read-only), and ${dir}/ is your own folder for intermediate files, kept if the sandbox restarts; the rest of /scratch is not available to your shell, and view_image opens only the scratch files the worker cited as evidence. ${dir} is a network-backed mount`;
   const evidence =
     role === "worker"
-      ? `{root: "outputs", path} relative to /outputs/<task id>/, or {root: "scratch", path} relative to /scratch`
+      ? `{root: "outputs", path} relative to /outputs/<task id>/, or {root: "scratch", path} relative to /scratch (a file ${dir}/x.png is "${thread.name}/x.png")`
       : `{root: "scratch", path} relative to /scratch (a file ${dir}/x.png is "${thread.name}/x.png"), or {root: "outputs", path} relative to /outputs/<task id>/ for a worker's file you inspected`;
   return `You work in a sandbox with one shell tool, bash. Python 3.12 with numpy, scipy, scikit-image, pydicom, nibabel, SimpleITK, matplotlib and pyvista (offscreen) is installed. There is no network.
 /inputs holds the scan (a local copy), ${files}: write each file whole, once. They do not support rename within them (\`sed -i\`, editors), append (\`>>\`), in-place edits or memory-mapped writes (\`np.lib.format.open_memmap\` in write mode, \`np.memmap\`). Build a file under /tmp (local disk, lost on restart), then \`cp\` it in.

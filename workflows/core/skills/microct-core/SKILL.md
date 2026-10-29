@@ -27,7 +27,7 @@ description: >
   place something write it as `objects` in their result record; `quad_view.py --objects <record>.json` draws it.
 - The names later tasks look for in `/outputs/<task>/`: `hu.npy`, `hu.json`, `scan-notes.md` (intake);
   `frame.json`, `oriented.npy`, `keyframe.jpg` (orientation); `labels.npy`, the final labels on the scan grid
-  (segmentation). Working files go in `/scratch/`.
+  (segmentation). Working files go in `$SCRATCH`.
 
 ## Scripts
 

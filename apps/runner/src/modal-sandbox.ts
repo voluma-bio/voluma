@@ -212,8 +212,9 @@ class ModalSandboxAdapter implements Sandbox {
     // A command must not outlive the sandbox that Modal ends at its lifetime.
     const timeoutSeconds = Math.min(request.timeoutSeconds, this.#lifetimeSeconds);
     const id = randomUUID();
-    // The inner shell records its process group, then becomes the command.
-    const script = `mkdir -p ${GROUP_DIR}; awk '{print $5}' /proc/$$/stat > ${GROUP_DIR}/${id}; exec bash -c "$0"`;
+    // The inner shell records its process group, enters the working folder (made first: on a
+    // bucket mount an empty prefix is no directory), then becomes the command.
+    const script = `mkdir -p ${GROUP_DIR}; awk '{print $5}' /proc/$$/stat > ${GROUP_DIR}/${id}; mkdir -p -- "$1" && cd -- "$1" || exit 1; exec bash -c "$0"`;
     const argv = [
       "timeout",
       "-k",
@@ -223,6 +224,7 @@ class ModalSandboxAdapter implements Sandbox {
       "-c",
       script,
       request.command,
+      this.#workdir ?? ".",
     ];
     let killing: Promise<void> | undefined;
     const kill = () => {
@@ -231,12 +233,7 @@ class ModalSandboxAdapter implements Sandbox {
     signal?.addEventListener("abort", kill);
     let finished = false;
     try {
-      for await (const chunk of this.#run(
-        argv,
-        timeoutSeconds + KILL_GRACE_SECONDS,
-        request.env,
-        this.#workdir,
-      )) {
+      for await (const chunk of this.#run(argv, timeoutSeconds + KILL_GRACE_SECONDS, request.env)) {
         finished = chunk.type === "exit";
         // The caller knows it aborted, so say so whatever the signal made the exit code.
         yield finished && signal?.aborted ? { type: "exit", code: 143 } : chunk;
@@ -286,12 +283,10 @@ class ModalSandboxAdapter implements Sandbox {
     argv: string[],
     deadlineSeconds: number,
     env?: Record<string, string>,
-    workdir?: string,
   ): AsyncGenerator<ExecChunk> {
     const process = await this.#modal
       .exec(argv, {
         env,
-        workdir,
         timeoutMs: (deadlineSeconds + EXEC_DEADLINE_MARGIN_SECONDS) * 1000,
       })
       .catch((error: unknown) => {

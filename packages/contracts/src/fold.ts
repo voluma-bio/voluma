@@ -59,7 +59,7 @@
  */
 import type { RunEvent, ThreadKind } from "./events";
 import type { TaskStatus } from "./ids";
-import type { EvidenceRef, Output } from "./output";
+import { type EvidenceRef, fileRefsOf, type Output } from "./output";
 import { evidenceKey } from "./r2";
 import type {
   Annotation,
@@ -609,6 +609,9 @@ export function fold(events: readonly RunEvent[]): Folded {
         const a = attempts.get(e.payload.attemptId);
         if (!a) break;
         addEvidence(a, e.runId, e.payload.evidence);
+        // The output's own files are the checker's to inspect, though they are not evidence.
+        for (const r of fileRefsOf(e.payload.output))
+          if (r.root === "scratch") a.citedScratch.add(r.path);
         a.outputs.set(e.payload.outputId, e);
         a.resultRevisionId = revisionId;
         break;
