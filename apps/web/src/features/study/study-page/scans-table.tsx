@@ -67,7 +67,7 @@ export function ScansTable({
           <span className="grid justify-items-end">
             <span className="font-mono font-medium text-check">{value.toFixed(digits)}</span>
             <span className="text-meta text-check">
-              Far from group ({rangeText(f.others, digits)})
+              Far from group, others {rangeText(f.others, digits)}
             </span>
           </span>
         );
