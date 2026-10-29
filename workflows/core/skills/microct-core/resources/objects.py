@@ -6,8 +6,8 @@ An object is an entry in the contract's output blocks (`packages/contracts`, out
                                                                                            bounding box; its [0,0,0] is at offsetZyx
   surface   {kind: 'surface', surface: {heights: <.npy>, gridId, axis}}                   float32 heights along array `axis` over the
                                                                                            grid's other two axes; NaN = none
-  point     {kind: 'annotation', gridId, annotation: {kind: 'point', zyx}}                voxel coordinates (>= 0), fractional allowed
-  line      {kind: 'annotation', gridId, annotation: {kind: 'line', aZyx, bZyx}}
+  point     {kind: 'annotation', annotation: {gridId, kind: 'point', zyx}}                voxel coordinates (>= 0), fractional allowed
+  line      {kind: 'annotation', annotation: {gridId, kind: 'line', aZyx, bZyx}}
 `gridId` is the `grid_id` in a sidecar (`sidecar.py`, `frame.py`). Every field name and the mask dtype are constants below: a
 change in the contract is one edit here. Paths in an entry are absolute.
 
@@ -77,11 +77,11 @@ def mask(path, m, like, crop=True):
 
 
 def point(zyx, grid_id):
-    return {KIND: ANNOTATION, GRID: grid_id, ANNOTATION: {KIND: POINT, ZYX: _coords(zyx, 'point')}}
+    return {KIND: ANNOTATION, ANNOTATION: {GRID: grid_id, KIND: POINT, ZYX: _coords(zyx, 'point')}}
 
 
 def line(a_zyx, b_zyx, grid_id):
-    return {KIND: ANNOTATION, GRID: grid_id, ANNOTATION: {KIND: LINE, A: _coords(a_zyx, 'line end'), B: _coords(b_zyx, 'line end')}}
+    return {KIND: ANNOTATION, ANNOTATION: {GRID: grid_id, KIND: LINE, A: _coords(a_zyx, 'line end'), B: _coords(b_zyx, 'line end')}}
 
 
 def of_array(path, kind):
@@ -146,8 +146,8 @@ def load(entry, grid_shapes=None):
         return {KIND: kind, 'grid_id': b[GRID], 'path': b[HEIGHTS], 'heights': np.load(b[HEIGHTS]).astype(float), 'axis': int(b[AXIS])}
     b = entry[ANNOTATION]
     if kind == POINT:
-        return {KIND: kind, 'grid_id': entry[GRID], 'zyx': np.array(b[ZYX], float)}
-    return {KIND: kind, 'grid_id': entry[GRID], 'a_zyx': np.array(b[A], float), 'b_zyx': np.array(b[B], float)}
+        return {KIND: kind, 'grid_id': b[GRID], 'zyx': np.array(b[ZYX], float)}
+    return {KIND: kind, 'grid_id': b[GRID], 'a_zyx': np.array(b[A], float), 'b_zyx': np.array(b[B], float)}
 
 
 def read_file(path):

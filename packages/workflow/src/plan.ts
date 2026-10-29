@@ -9,49 +9,35 @@ import {
   type WorkflowPlan,
   workflowPlanSchema,
 } from "@voluma/contracts/workflow";
-import type { OutputEntry, WorkflowFiles } from "@voluma/contracts/workflow-files";
+import {
+  isSelectable,
+  type OutputEntry,
+  type WorkflowFiles,
+} from "@voluma/contracts/workflow-files";
 import { WorkflowParseError } from "./definition";
 
+/** The entry less what only the file keeps (`declaredOutputSchema`). */
 function declared(entry: OutputEntry, required: boolean): DeclaredOutput {
-  const base = { id: entry.id, required };
-  switch (entry.kind) {
-    case "measurement":
-      return {
-        ...base,
-        kind: "measurement",
-        unit: entry.unit,
-        ...(entry.range && { range: entry.range }),
-      };
-    case "score":
-      return { ...base, kind: "score", levels: entry.levels };
-    case "structure":
-      return {
-        ...base,
-        kind: "structure",
-        name: entry.name,
-        ...(entry.label && { label: entry.label }),
-      };
-    case "annotation":
-      return { ...base, kind: "annotation", shape: entry.shape };
-    case "volume":
-      return { ...base, kind: "volume", volumeKind: entry.volumeKind };
-    case "file":
-      return { ...base, kind: "file", mediaType: entry.mediaType };
-  }
+  const { task: _task, region: _region, sourceRef: _sourceRef, ...rest } = entry;
+  return { ...rest, required };
 }
 
 /**
- * `selected` absent means every output. An output is required when it is selected or when a
- * task of the plan builds on its task (something downstream needs it); otherwise it is optional.
+ * `selected` absent means every measurement and score. A measurement or score is required when
+ * it is selected or when a task of the plan builds on its task (something downstream needs
+ * it); otherwise it is optional. A file is required whenever its task is in the plan, and an
+ * object never is: a run that can't produce one (no patella in the field) must not stall the
+ * tasks that build on its task.
  */
 export function computePlan(files: WorkflowFiles, selected?: readonly string[]): WorkflowPlan {
   const byId = new Map(files.outputs.map((o) => [o.id, o]));
-  const wanted = new Set(selected ?? files.outputs.map((o) => o.id));
+  const wanted = new Set(selected ?? files.outputs.filter(isSelectable).map((o) => o.id));
   for (const id of wanted) {
-    if (!byId.has(id)) {
+    const entry = byId.get(id);
+    if (!entry || !isSelectable(entry)) {
       throw new WorkflowParseError(
         "outputs.json",
-        `the run selects "${id}", which is not an output`,
+        `the run selects "${id}", which is not a measurement or score`,
       );
     }
   }
@@ -75,9 +61,12 @@ export function computePlan(files: WorkflowFiles, selected?: readonly string[]):
         dependsOn: t.dependsOn,
         instructions: t.instructions,
         ...(t.doneWhen.length && { doneWhen: t.doneWhen }),
-        outputs: t.outputs.map((id) =>
-          declared(byId.get(id) as OutputEntry, wanted.has(id) || needed.has(t.id)),
-        ),
+        outputs: t.outputs.map((id) => {
+          const entry = byId.get(id) as OutputEntry;
+          const required =
+            entry.kind === "file" || (isSelectable(entry) && (wanted.has(id) || needed.has(t.id)));
+          return declared(entry, required);
+        }),
       })),
   });
   if (!plan.success) {
@@ -91,7 +80,7 @@ export function computePlan(files: WorkflowFiles, selected?: readonly string[]):
 export interface PlanChange {
   /** Lines appended to a task's done-when, by task id. */
   doneWhen?: Record<string, string[]>;
-  /** Tasks of `tasks.json` to add (with what they depend on); their outputs become selected. */
+  /** Tasks of `tasks.json` to add (with what they depend on); their measurements and scores become selected. */
   add?: string[];
 }
 
@@ -99,7 +88,7 @@ export interface PlanChange {
  * The run's plan with a change applied. Code builds it from the workflow files, so a change
  * can never alter an output, its unit, range or whether it is required, and cannot drop a
  * task that produces a selected output. It throws on a change it cannot apply: a task that is
- * not in `tasks.json`, already in the plan, or without outputs to select it by, and done-when
+ * not in `tasks.json`, already in the plan, or without a measurement or score to select it by, and done-when
  * lines for a task not in the plan.
  */
 export function adaptPlan(
@@ -108,6 +97,7 @@ export function adaptPlan(
   change: PlanChange,
 ): WorkflowPlan {
   const byTask = new Map(files.tasks.map((t) => [t.id, t]));
+  const byOutput = new Map(files.outputs.map((o) => [o.id, o]));
   const inPlan = new Set(computePlan(files, selected).tasks.map((t) => t.id));
   const added = (change.add ?? []).flatMap((id) => {
     const task = byTask.get(id);
@@ -115,10 +105,14 @@ export function adaptPlan(
     if (inPlan.has(id)) {
       throw new WorkflowParseError("tasks.json", `the change adds "${id}", already in the plan`);
     }
-    if (!task.outputs.length) {
-      throw new WorkflowParseError("tasks.json", `the change adds "${id}", which has no outputs`);
+    const selectable = task.outputs.filter((o) => isSelectable(byOutput.get(o) as OutputEntry));
+    if (!selectable.length) {
+      throw new WorkflowParseError(
+        "tasks.json",
+        `the change adds "${id}", which has no measurement or score to select it by`,
+      );
     }
-    return task.outputs;
+    return selectable;
   });
   const base = computePlan(files, selected && [...selected, ...added]);
   const known = new Set(base.tasks.map((t) => t.id));

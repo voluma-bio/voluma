@@ -128,10 +128,11 @@ def add_layers(s, a):
         for n, e in ends:
             if not e or ob.kind_of(e) != ob.POINT:
                 sl.fail(f'ruler end {n!r} is not a point (give it with --points or --objects)')
-        if ends[0][1][ob.GRID] != ends[1][1][ob.GRID]:
+        grids = [e[ob.ANNOTATION][ob.GRID] for _, e in ends]
+        if grids[0] != grids[1]:
             sl.fail(f'ruler ends {ends[0][0]!r} and {ends[1][0]!r} are on different grids: a line is on one grid')
         ruler = [e[ob.ANNOTATION][ob.ZYX] for _, e in ends]
-        put(a.ruler.replace(',', '-'), ob.line(*ruler, ends[0][1][ob.GRID]), '--ruler')
+        put(a.ruler.replace(',', '-'), ob.line(*ruler, grids[0]), '--ruler')
     s['objects'].update(new)
     s['shown'] += [n for n in new if n not in s['shown']]
     if a.labels:

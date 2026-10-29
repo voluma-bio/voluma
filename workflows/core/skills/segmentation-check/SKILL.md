@@ -72,7 +72,7 @@ checks, the quad view and the 3D sheet again.
 
 ## 5. A To check item that points at the region
 
-`checkpoint` with `toCheck: {title, focus: {structureIds, annotationIds, volumeId, label}}` (both arrays required):
+`checkpoint` with `toCheck: {title, focus: {on: [block ids], volumeId?, label?}}` (`on` required):
 the title gives the place and the question ("Joint face, slices 140-170: bone A or bone B?"), the text both methods'
 labels and the one kept. The focus resolves only when the task that made `disagreement.npy` reports it as a
 `volume` output of kind `labels`.

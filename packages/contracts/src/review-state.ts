@@ -45,5 +45,5 @@ export function reviewState(events: readonly RunEvent[]) {
         reviewedAt: completed?.createdAt ?? null,
       }
     : null;
-  return { revisions, summary };
+  return { revisions, summary, assets: folded.assets };
 }
