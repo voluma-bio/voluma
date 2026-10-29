@@ -36,7 +36,7 @@ is the resampling effect, known and left in; state which grid a number was count
 | 6 | Trace the growth-plate distal face (section C), then ROI-3 and the cortex under the plate | `metaphysis_roi.py --hu-aligned /outputs/iioc/frame/tibia-hu.npy --mask /outputs/iioc/frame/tibia-mask.npy --hu-json hu.json --annotations annotations.json --proximal-face /outputs/iioc/iioc/growth-plate-proximal-face.npy --proximal-valid /outputs/iioc/iioc/growth-plate-proximal-valid.npy --out meta` | `meta/qc-roi3.jpg`: ROI-3 sits in marrow below the plate and clear of the cortex outline |
 | 7 | TV, BV, BV/TV of ROI-1 and ROI-2 (deck #4-6, #13-15); TV, BV, BV/TV, Tb.N, Tb.Th, Tb.Sp, nodes and ends of ROI-3 (deck #16-23) | `morphometry.py` (commands below), one per region | the QC image `trabecular` writes |
 | 8 | Ct.Th at 100 and 1000 um; plate thickness | `morphometry.py cortical` (commands below) | its QC image |
-| 9 | Femoral landmarks: place four points on a 3D render of the femur (`regions-and-landmarks`, `pick.py` with picks named `a`, `b`, `c`, `d`), then compute | `femoral_frame.py --landmarks points.json --hu-json hu.json --labels labels.npy --out femoral` | `pick-check.jpg` of each point, and `femoral.json` (the script fails on a bad landmark, see D). There is no image with the four points and the two lines drawn |
+| 9 | Femoral landmarks: place four points on a 3D render of the femur (`regions-and-landmarks`, `pick.py` with picks named `a`, `b`, `c`, `d`), then compute | `femoral_frame.py --landmarks points-ab.json points-cd.json --hu-json hu.json --labels labels.npy --out femoral` (the `points.json` of each `pick.py` run, one per view; one file works when all four are in it) | `pick-check.jpg` of each point, and `femoral.json` (the script fails on a bad landmark, see D). There is no image with the four points and the two lines drawn |
 | 10 | Volumes of labels 3, 5 and 6 (deck #1 to #3) | `measure.py --spec <this workflow>/resources/deck_volumes_spec.json --grid hu.json --out volumes.json` (the spec names `labels.npy` relative to where you run it) | the 3D sheet (`visual-check`) |
 | 11 | Hand the points to the lab (below) | `amira_landmarks.py` | the lab opens it in Amira |
 
@@ -84,7 +84,7 @@ linear in U along a curve (points in any order, constant past the ends) and line
 first and last). Trace across the whole width and expect edge guesses to be wrong. A point is `[w, u]`, not `[u, w]`.
 
 `oa6-1rk-annotations.json` in this directory is the OA6-1RK annotation set (sections A and B) in that schema, with the `grid_id`
-of its aligned frame: a worked example of the keys and the point order. It has no section C (no distal face was traced), and
+of the aligned frame it was traced on (no other scan's frame has that id, so `iioc.py` refuses the file on another scan): a worked example of the keys and the point order. It has no section C (no distal face was traced), and
 it is a record of what was traced on that scan, not a starting point for another one.
 
 One `annotations.json` can hold all three sections. Each script reads only its own keys. Every file needs the
@@ -134,10 +134,9 @@ measurement. OA6-1RK has a thin perforated mineralized band, not a clean cartila
 at it drawn on the sections before you run. Trace it over at least the V range of the proximal face (section A); the script
 refuses a shorter trace, and a face at or above the proximal one inside that range, and says which V range to fix.
 
-**D, `landmarks.json`** (scan grid, `[z, y, x]`): `a` midpoint of the upper line of the intercondylar groove, `b`
+**D, the landmark points files** (points files on the scan grid, `{"grid_id": <hu.json's>, "points": [{"name": "a", "zyx": [z, y, x]}, ...]}`; each name once across the files): `a` midpoint of the upper line of the intercondylar groove, `b`
 intercondylar notch, `c` midpoint of the ridge on the lateral condyle, `d` vertex of the medial condyle (deck figure,
-slide 7). `femoral_frame.py` takes either this file or the `points.json` `pick.py` writes for picks named `a` to `d`, so
-nothing needs converting by hand. Place `a` and `b` on a long view of the femur that shows the shaft and the groove side-on;
+slide 7). `femoral_frame.py --landmarks` takes the `points.json` of each `pick.py` run (picks named `a` to `d`) as they are: do not copy coordinates into a new file. Place `a` and `b` on a long view of the femur that shows the shaft and the groove side-on;
 `c` and `d` can go on the joint-face view. The script fails (exit 2, nothing written) when a landmark is more than 0.05 mm from
 femur bone, when DFL is under 0.4 of DFW (the sign of `a` and `b` placed end-on, as on the first full run: 0.824 mm against
 2.42), or when SI points away from the femur: re-place the points; the failure is not a warning to explain.
@@ -226,7 +225,7 @@ The lab checks the width points (#10) and the femoral landmarks (#26, #27) in Am
 
 ```
 python <regions-and-landmarks>/resources/amira_landmarks.py --points /outputs/iioc/iioc/width-points-scan.json --header hu.json --out width.landmarkAscii
-python <regions-and-landmarks>/resources/amira_landmarks.py --points landmarks.json --header hu.json --out femoral.landmarkAscii
+python <regions-and-landmarks>/resources/amira_landmarks.py --points points-ab.json points-cd.json --header hu.json --out femoral.landmarkAscii
 ```
 
 Both are scan-grid points moved to physical millimetres with the DICOM affine. Report the files with the measurements they check.
