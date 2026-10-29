@@ -18,8 +18,8 @@
  *   own latest event.
  * - Sandbox time is the time from a `bash` call to its result, `bash` being the one tool
  *   that runs in the sandbox; a call cut off by a restart counts nothing. The sandbox's
- *   bill is its uptime (`Run.usage.sandboxSeconds`), which is longer: one sandbox serves
- *   every thread and idles between calls.
+ *   bill is the uptime of all the run's sandboxes (`Run.usage.sandboxSeconds`), which is longer:
+ *   each thread's sandbox idles between its calls.
  *
  * The runner's end-of-run log line sums the same model and tool costs over the run's
  * threads, so `total.costUsd` matches it for a run that didn't lose events (a review chat

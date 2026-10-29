@@ -13,6 +13,9 @@
  * - Read-only inputs flagged `stage` are copied to local disk at their path at create, 32
  *   files at a time (the copy is writable: commands run as root, and a sandbox cannot
  *   remount or `chattr` a path or run as another user and still write the mounts); the bucket is mounted at a private path under /staged for the copy.
+ * - Network follows the spec: none (`blockNetwork`), or HTTPS to the listed hosts only
+ *   (`outboundDomainAllowlist`; probed on 0.11.1: plain HTTP, other hosts and IPs are refused,
+ *   but DNS lookups of any name still resolve).
  * - Each sandbox gets a fresh name and the tags `{run, name, claim, startedAt}` (`startedAt` is epoch
  *   ms; the SDK exposes no creation time, and `sandboxes:clean` reports age from it). Creating one first
  *   terminates any live sandbox with the same tags: one a dead process left behind would
@@ -33,7 +36,7 @@ import {
   type SandboxMount,
   type SandboxSpec,
 } from "@voluma/harness/ports/sandbox";
-import { ModalClient, type Sandbox as ModalSandbox } from "modal";
+import { ModalClient, type Sandbox as ModalSandbox, NotFoundError } from "modal";
 
 export interface ModalSandboxConfig {
   /** Modal API credentials; absent: the SDK uses ~/.modal.toml. */
@@ -80,6 +83,33 @@ export async function terminateClaim(
   for await (const sandbox of live) await sandbox.terminate();
 }
 
+/**
+ * Asks Modal to terminate every live sandbox of the run that another claim started, without
+ * waiting for it to stop; returns how many. Called right after a claim succeeds: the claim holds
+ * the lease, so what an earlier claim left running (a crashed or lost runner) must not keep
+ * writing the run's mounts or spending. The app is created by the first sandbox, so none yet
+ * means nothing to end.
+ */
+export async function terminateOtherClaims(
+  modal: ModalSandboxConfig["modal"],
+  runId: string,
+  claim: string,
+): Promise<number> {
+  const client = new ModalClient(modal);
+  const app = await client.apps.fromName(RUNS_APP).catch((error) => {
+    if (error instanceof NotFoundError) return undefined;
+    throw error;
+  });
+  if (!app) return 0;
+  let ended = 0;
+  for await (const sandbox of client.sandboxes.list({ appId: app.appId, tags: { run: runId } })) {
+    if ((await sandbox.getTags()).claim === claim) continue;
+    await sandbox.terminate();
+    ended++;
+  }
+  return ended;
+}
+
 export function createModalSandbox(config: ModalSandboxConfig): CreateSandbox {
   const client = new ModalClient(config.modal);
   return async (spec, signal) => {
@@ -121,8 +151,11 @@ export function createModalSandbox(config: ModalSandboxConfig): CreateSandbox {
       cloudBucketMounts,
       timeoutMs: spec.lifetimeSeconds * 1000,
       idleTimeoutMs: spec.idleSeconds === undefined ? undefined : spec.idleSeconds * 1000,
-      // Mounts are set up outside the sandbox; analysis code needs no network.
-      blockNetwork: true,
+      // Mounts are set up outside the sandbox, so they work with either policy (probed:
+      // writes too). Modal then refuses everything but HTTPS to the listed hosts.
+      ...(spec.network.kind === "none"
+        ? { blockNetwork: true }
+        : { outboundDomainAllowlist: spec.network.hosts }),
     });
     const sandbox = new ModalSandboxAdapter(modal, spec);
     try {
@@ -328,6 +361,13 @@ function validate(spec: SandboxSpec): void {
     if (seconds !== undefined && !(Number.isInteger(seconds) && seconds > 0)) {
       throw new Error(`${name} must be a positive integer`);
     }
+  }
+  // The role fixes the network: only a worker may reach out, and only to hosts.
+  if (
+    spec.network.kind === "hosts" &&
+    (spec.role !== "worker" || spec.network.hosts.length === 0)
+  ) {
+    throw new Error(`a ${spec.role} sandbox cannot have network access`);
   }
   for (const { path, prefix, access, stage } of spec.mounts) {
     if (prefix === "" || prefix.startsWith("/") || !prefix.endsWith("/")) {

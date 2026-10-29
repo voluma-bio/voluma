@@ -46,7 +46,7 @@ export interface SuperviseRunOptions {
   layout: RunLayout;
   recorder: Recorder;
   history: History;
-  /** The run's sandbox for a thread (`sandboxSession.get`). */
+  /** A thread's own sandbox (`sandboxSession.get`). */
   sandbox(threadId: string): Promise<Sandbox>;
   evidence: Evidence;
   /** Offers `segment_sam` to threads when set (the host has a Segmenter and a key for it). */
