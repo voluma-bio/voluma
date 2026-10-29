@@ -7,7 +7,6 @@
     "./ports/sandbox": "./src/ports/sandbox.ts",
     "./ports/history": "./src/ports/history.ts",
     "./ports/files": "./src/ports/files.ts",
-    "./ports/segmenter": "./src/ports/segmenter.ts",
     "./ports/lease-lost": "./src/ports/lease-lost.ts",
     "./layout": "./src/layout.ts",
     "./recorder": "./src/recorder.ts",
@@ -22,7 +21,8 @@
     "./adapters/http/run-client": "./src/adapters/http/run-client.ts",
     "./supervise-run": "./src/supervise-run.ts",
     "./review-assets": "./src/review-assets.ts",
-    "./tools": "./src/tools/registry.ts"
+    "./tools": "./src/tools/registry.ts",
+    "./tools/segment-sam": "./src/tools/segment-sam.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"
@@ -36,6 +36,7 @@
     "typebox": "^1.4.3",
     "zod": "catalog:",
     "@voluma/contracts": "workspace:*",
-    "@voluma/workflow": "workspace:*"
+    "@voluma/workflow": "workspace:*",
+    "@voluma/sam": "workspace:*"
   }
 }
