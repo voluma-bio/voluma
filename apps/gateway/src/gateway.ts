@@ -42,7 +42,7 @@ import {
 import { and, eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Agent, fetch } from "undici";
-import { readBodyFields } from "./body.ts";
+import { BodyScanner } from "./body.ts";
 import { replyScanner } from "./scan.ts";
 
 /** How much of a model call's body is read for its model name and `max_tokens`. */
@@ -165,11 +165,13 @@ export function createGateway(deps: GatewayDeps) {
     const matched = matchRoute(provider, method, upstreamPath);
     if (!matched) throw new Refused(403, `${method} ${upstreamPath} is not allowed`);
 
-    const peek = matched.route.kind === "model" ? await peekBody(req, PEEK_BYTES) : undefined;
+    const scanner = new BodyScanner();
+    const peek =
+      matched.route.kind === "model" ? await peekBody(req, PEEK_BYTES, scanner) : undefined;
     let model: string | null = null;
     let reservedUsd = 0;
     if (peek) {
-      const fields = readBodyFields(peek.head);
+      const fields = scanner.fields();
       if (typeof fields === "string") throw new Refused(403, fields);
       model = fields.model;
       if (matched.route.models && !matched.route.models.includes(model)) {
@@ -272,7 +274,7 @@ export function createGateway(deps: GatewayDeps) {
       await end(unbilled ? { status: "failed", costUsd: 0 } : { status: "cut", costUsd: null });
       if (abort.signal.aborted) return res.destroy();
       log(
-        `${id} ${provider} unreachable: ${code || (error instanceof Error ? error.message : error)}`,
+        `${id} ${provider} unreachable: ${code || (error as { cause?: Error }).cause?.message || (error instanceof Error ? error.message : error)}`,
       );
       throw new Refused(502, `${provider} is unreachable`);
     }
@@ -372,8 +374,12 @@ function bearerOf(req: IncomingMessage): string | undefined {
 /** The request body as a web stream (an upload, never held in memory). */
 const streamOf = (req: IncomingMessage) => Readable.toWeb(req) as ReadableStream<Uint8Array>;
 
-/** Reads up to `limit` bytes of the body for inspection; `body` replays them, then the rest. */
-async function peekBody(req: IncomingMessage, limit: number) {
+/**
+ * Reads up to `limit` bytes of the body for the scanner's admission decision; `body` replays
+ * them, then the rest. The scanner sees every byte as it passes; a violation after the window
+ * errors the stream, which aborts the upstream request.
+ */
+async function peekBody(req: IncomingMessage, limit: number, scanner: BodyScanner) {
   const chunks: Buffer[] = [];
   let size = 0;
   let ended = false;
@@ -388,20 +394,30 @@ async function peekBody(req: IncomingMessage, limit: number) {
     size += (next.value as Buffer).length;
   }
   const head = Buffer.concat(chunks);
-  const body = new ReadableStream<Uint8Array>({
-    start(controller) {
-      if (head.length) controller.enqueue(head);
-      if (ended) controller.close();
-    },
-    async pull(controller) {
-      if (ended) return;
-      const next = await iterator.next();
-      if (next.done) controller.close();
-      else controller.enqueue(next.value as Buffer);
-    },
-    cancel() {
-      req.destroy();
-    },
-  });
-  return { head: head.subarray(0, limit).toString("latin1"), body };
+  scanner.push(head.subarray(0, limit));
+  const refuse = (controller: ReadableStreamDefaultController<Uint8Array>, reason: string) => {
+    controller.error(new Error(`request body refused: ${reason}`));
+    req.destroy();
+  };
+  return {
+    body: new ReadableStream<Uint8Array>({
+      start(controller) {
+        const reason = scanner.push(head.subarray(limit));
+        if (reason) return refuse(controller, reason);
+        if (head.length) controller.enqueue(head);
+        if (ended) controller.close();
+      },
+      async pull(controller) {
+        if (ended) return;
+        const next = await iterator.next();
+        if (next.done) return controller.close();
+        const reason = scanner.push(next.value as Buffer);
+        if (reason) return refuse(controller, reason);
+        controller.enqueue(next.value as Buffer);
+      },
+      cancel() {
+        req.destroy();
+      },
+    }),
+  };
 }

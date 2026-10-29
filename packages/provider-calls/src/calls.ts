@@ -47,7 +47,7 @@ type RunRow = {
   lease_ok: boolean;
   lease_live: boolean;
   model_cost_usd: number;
-  cost_cap_usd: number;
+  cost_cap_usd: number | null;
 };
 
 /**
@@ -88,12 +88,14 @@ export function admitCall(db: PostgresJsDatabase, call: NewCall): Promise<Refusa
     if ((open?.n ?? 0) >= MAX_IN_FLIGHT) {
       return { status: 429, reason: `${MAX_IN_FLIGHT} calls are already in flight` };
     }
-    const spentUsd = run.model_cost_usd + (await heldUsdOfRun(tx, call.runId, true));
-    if (!fits(spentUsd, call.reservedUsd, run.cost_cap_usd)) {
-      return {
-        status: 402,
-        reason: `the run's spend cap of $${run.cost_cap_usd} would be exceeded`,
-      };
+    if (run.cost_cap_usd !== null) {
+      const spentUsd = run.model_cost_usd + (await heldUsdOfRun(tx, call.runId, true));
+      if (!fits(spentUsd, call.reservedUsd, run.cost_cap_usd)) {
+        return {
+          status: 402,
+          reason: `the run's spend cap of $${run.cost_cap_usd} would be exceeded`,
+        };
+      }
     }
     await tx.insert(providerCalls).values({
       id: call.id,
@@ -202,7 +204,7 @@ export async function callsOfRuns(db: Db, runIds: string[]): Promise<Map<string,
 
 /** SQL for one run's settled provider spend, to add to a query over `runs` (the org's daily total). */
 export const settledUsdOf = (runId: SQL): SQL =>
-  sql`(SELECT coalesce(sum(coalesce(cost_usd, reserved_usd)), 0) FROM provider_calls WHERE run_id = ${runId} AND status <> 'open')`;
+  sql`(SELECT coalesce(sum(${heldUsd}), 0) FROM ${providerCalls} WHERE ${providerCalls.runId} = ${runId} AND ${providerCalls.status} <> 'open')`;
 
 /** One run's calls in dollars: each one's cost, else its reservation; `open` calls only when asked. */
 export async function heldUsdOfRun(db: Db, runId: string, withOpen = false): Promise<number> {

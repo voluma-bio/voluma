@@ -9,7 +9,7 @@ import { type Endpoint, postJson } from "./request";
 export async function claimRun(
   endpoint: Endpoint,
   runnerId: string,
-  costCapUsd: number,
+  costCapUsd: number | undefined,
 ): Promise<Claim | null> {
   const response = await postJson(endpoint, "/api/run/ingest/claim", { runnerId, costCapUsd });
   return claimResponseSchema.parse(await response.json()).claim;

@@ -143,7 +143,7 @@ export async function runClaim(
   let capError: string | undefined;
   const checkCap = () => {
     const total = acknowledgedUsd + meter.pendingModelCostUsd();
-    if (capError || total < config.maxRunCostUsd) return;
+    if (capError || config.maxRunCostUsd === undefined || total < config.maxRunCostUsd) return;
     capError = `spend cap $${config.maxRunCostUsd} reached at $${total.toFixed(2)}`;
     log(capError);
     stop("spend-cap");

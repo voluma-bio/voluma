@@ -31,9 +31,13 @@ change it safely.
   from the usage seen so far; it keeps the reservation.
 - **Only Meta is enabled** (`ProviderDef.enabled`); Anthropic and OpenAI have definitions but
   every route is a 403 until the gate in [TODO.md](TODO.md) is met.
-- **The body is the caller's.** `body.ts` reads `model` and `max_tokens` as top-level keys only
-  and refuses a repeated key, an escaped key or no model in 4 KB. Never read a price-relevant
-  field from a body by regex.
+- **The body is the caller's.** `body.ts` reads `model` and `max_tokens` as top-level keys only,
+  and one scanner runs over the whole body as it is forwarded, in constant memory. The first 4 KB
+  must hold a top-level `model` (else 403); a repeated `model` or token key anywhere, or an
+  escaped top-level key, refuses at admission or, past 4 KB, errors the upstream stream so the
+  call settles `cut`. Never read a price-relevant field from a body by regex.
+- **A null `runs.cost_cap_usd` is no spend cap.** Admission skips the spend check; the in-flight
+  limit, exact routes and model allowlist still apply, and every call is still recorded.
 - **Reservations gate admission only.** Admission counts `open` rows at their reservation; the
   heartbeat's `spentUsd`, `providerCalls` and the org's daily total count settled rows only, so
   the runner never stops a run for a reservation the gateway already holds against the cap.
@@ -62,8 +66,9 @@ change it safely.
 
 ## Known limits
 
-- The model name is read from the first 4 KB, as designed. A `model` key repeated after
-  byte 4096 is not seen; SAM is billed by the frames Meta reports, so its cost is right either way.
+- The model name must appear in the first 4 KB. A `model` repeated after that cuts the call
+  mid-upload, so the provider has seen part of the body and may have billed it (the row keeps
+  its reservation).
 - The row for a call exists once admitted; if the database is down the call is refused (503).
   A settle that still fails after its retries leaves the row `open` (counting its reservation)
   until the stale sweep.

@@ -71,8 +71,9 @@
  * sandbox time. The server adds them up per run, and that sum is what the org's
  * dollar ceiling counts. A heartbeat the server did not acknowledge is resent
  * with its usage added to the next one. The runner sends `costCapUsd` (its
- * `RUNNER_MAX_RUN_COST_USD`) with the claim, which stores it as the run's spend
- * cap for the provider gateway to check. The heartbeat answers with `spentUsd`,
+ * `RUNNER_MAX_RUN_COST_USD`) with the claim only when that is set, and the claim
+ * stores it as the run's spend cap for the provider gateway to check. Unset, the
+ * run has no cap. The heartbeat answers with `spentUsd`,
  * the run's settled spend including its provider calls, so the runner's own cap
  * sees spend that did not come through its heartbeats.
  *
@@ -121,7 +122,7 @@ export const claimRequestSchema = z.object({
   runnerId: runnerIdSchema,
   /**
    * The runner's `RUNNER_MAX_RUN_COST_USD`; the claim stores it as the run's spend cap, which
-   * the provider gateway checks. Absent: the API stores its default, $10.
+   * the provider gateway checks. Absent: no cap (spend is still recorded).
    */
   costCapUsd: z.number().positive().optional(),
 });

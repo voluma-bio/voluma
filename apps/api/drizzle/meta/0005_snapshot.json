@@ -1,5 +1,5 @@
 {
-  "id": "b18ab2d5-22e7-4762-be93-1ac4a1bc330d",
+  "id": "a195232b-bc62-422a-8b71-610b80df50eb",
   "prevId": "afc49913-9d2c-4523-83c3-bfc3a0c4951e",
   "version": "7",
   "dialect": "postgresql",
@@ -349,8 +349,7 @@
           "name": "cost_cap_usd",
           "type": "double precision",
           "primaryKey": false,
-          "notNull": true,
-          "default": 10
+          "notNull": false
         },
         "to_check": {
           "name": "to_check",

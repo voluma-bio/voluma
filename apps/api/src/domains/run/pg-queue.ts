@@ -22,7 +22,7 @@ import type { KeyVault } from "./key-vault";
 import { LeaseLost } from "./lease";
 import type { Notifier } from "./notifier";
 import { loadRun, loadRuns, readableInputs, readableRuns, type Tx } from "./pg-runs";
-import { DEFAULT_COST_CAP_USD, inputs, runs } from "./schema";
+import { inputs, runs } from "./schema";
 
 /** Serializes every transaction that changes a run, so the limit counts can't race a claim. */
 const QUEUE_LOCK = 0x76_6f_6c_71;
@@ -285,7 +285,7 @@ export function pgRunQueue(
               leaseHolder: runnerId,
               leaseToken,
               leaseExpiresAt: leaseUntil,
-              costCapUsd: costCapUsd ?? DEFAULT_COST_CAP_USD,
+              costCapUsd: costCapUsd ?? null,
             })
             .where(eq(runs.id, run.id));
           const keys = run.credentials === "visitor" ? vault.take(run.id) : undefined;

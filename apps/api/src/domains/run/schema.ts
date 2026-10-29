@@ -31,9 +31,6 @@ import {
   unique,
 } from "drizzle-orm/pg-core";
 
-/** The cap a run has until a claim sets one. */
-export const DEFAULT_COST_CAP_USD = 10;
-
 const timestamptz = () => timestamp({ withTimezone: true });
 
 export const threads = pgTable(
@@ -143,8 +140,8 @@ export const runs = pgTable(
     recoveries: integer().notNull().default(0),
     modelCostUsd: doublePrecision().notNull().default(0),
     sandboxSeconds: doublePrecision().notNull().default(0),
-    /** The run's spend cap in dollars, set by each claim; the provider gateway checks it (`provider_calls`). */
-    costCapUsd: doublePrecision().notNull().default(DEFAULT_COST_CAP_USD),
+    /** The run's spend cap in dollars, set by each claim when the runner sends one; null: no cap. The provider gateway checks it. */
+    costCapUsd: doublePrecision(),
     /** Retired, never read or written. Drop after servers using the old count are drained. */
     toCheck: integer(),
   },

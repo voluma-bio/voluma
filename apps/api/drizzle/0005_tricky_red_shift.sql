@@ -19,6 +19,6 @@ CREATE TABLE "provider_calls" (
 	"duration_ms" integer
 );
 --> statement-breakpoint
-ALTER TABLE "runs" ADD COLUMN "cost_cap_usd" double precision DEFAULT 10 NOT NULL;--> statement-breakpoint
+ALTER TABLE "runs" ADD COLUMN "cost_cap_usd" double precision;--> statement-breakpoint
 CREATE INDEX "provider_calls_run" ON "provider_calls" USING btree ("run_id");--> statement-breakpoint
 CREATE INDEX "provider_calls_open" ON "provider_calls" USING btree ("status","instance");
