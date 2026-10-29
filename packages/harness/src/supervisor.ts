@@ -64,8 +64,8 @@ import {
   JUDGMENT_SUFFIX,
   type Role,
   startedFor,
+  type TaskThread,
   type ThreadLog,
-  type ThreadRecord,
   threadLog,
   WAKE_SUFFIX,
 } from "./thread-log";
@@ -149,17 +149,27 @@ export function supervisor(options: SupervisorOptions) {
   const derive = () => threadLog(recorder.events());
 
   /** A thread's record; a thread whose `thread.started` the store lacks counts as not ended. */
-  const recordOf = (d: ThreadLog, id: string, role: Role, taskId: string): ThreadRecord =>
-    d.threads.get(id) ?? {
-      id,
-      role,
-      taskId,
-      end: undefined,
-      wakes: 0,
-      starts: 0,
-      model: undefined,
-      openCalls: new Map(),
-    };
+  const recordOf = (d: ThreadLog, id: string, role: Role, taskId: string): TaskThread => {
+    const found = d.threads.get(id);
+    return found && found.role !== "main"
+      ? found
+      : {
+          id,
+          role,
+          taskId,
+          end: undefined,
+          wakes: 0,
+          starts: 0,
+          model: undefined,
+          openCalls: new Map(),
+          asks: [],
+          closedMs: 0,
+          startedMs: undefined,
+          waitingMs: undefined,
+          reply: "",
+          submitted: false,
+        };
+  };
 
   /**
    * A wake's key: the thread whose end raised it and how many times the log shows it started,
@@ -210,7 +220,7 @@ export function supervisor(options: SupervisorOptions) {
   }
 
   /** Starts the thread again with a message: it resumes from its History. A cut-off resume is not a wake (`thread-log.ts`). */
-  function wake(r: ThreadRecord, input: NonNullable<ThreadSpec["input"]>, attemptId?: string) {
+  function wake(r: TaskThread, input: NonNullable<ThreadSpec["input"]>, attemptId?: string) {
     launch(r.role, r.taskId, r.id, { ...(attemptId && { attemptId }), input });
   }
 
@@ -312,7 +322,7 @@ export function supervisor(options: SupervisorOptions) {
    * thread's judgment, so a resume applies it and a restart does not try the thread again.
    */
   async function redoByCode(
-    r: ThreadRecord,
+    r: TaskThread,
     arm: "code:unresumable-thread" | "code:provider-error",
     error: string,
     reason: string,
@@ -337,7 +347,7 @@ export function supervisor(options: SupervisorOptions) {
    * `maxProviderRedos` times per task and role; then the run fails naming the error, rather than
    * ending `completed` with tasks that never ran. Undefined: `error` is not a provider error.
    */
-  function providerRetry(d: ThreadLog, r: ThreadRecord, error: string): "redo" | undefined {
+  function providerRetry(d: ThreadLog, r: TaskThread, error: string): "redo" | undefined {
     if (!options.providerError?.(error)) return undefined;
     if (options.providerFatal?.(error)) {
       throw new Error(`${r.taskId}: its ${r.role} failed on a model provider error: ${error}`);
@@ -354,7 +364,7 @@ export function supervisor(options: SupervisorOptions) {
   }
 
   /** A worker that is not running and did not finish its task. */
-  async function stalled(d: ThreadLog, w: ThreadRecord, t: FoldedTask | undefined): Promise<Next> {
+  async function stalled(d: ThreadLog, w: TaskThread, t: FoldedTask | undefined): Promise<Next> {
     const j = d.judgments.get(w.id);
     if (j) return apply(d, w.id, j, t);
     const { taskId } = w;
@@ -408,7 +418,7 @@ export function supervisor(options: SupervisorOptions) {
   }
 
   /** The result of a check thread that is over: the task takes `checkResult` of its fold. */
-  async function finishCheck(t: FoldedTask, c: ThreadRecord): Promise<Next> {
+  async function finishCheck(t: FoldedTask, c: TaskThread): Promise<Next> {
     const status = checkResult(t);
     const verdict = t.checker?.verdict;
     const reason =
@@ -458,7 +468,7 @@ export function supervisor(options: SupervisorOptions) {
     const t = f.tasks.find((x) => x.id === taskId);
     // A cut-off thread goes on where it was. A thread this process started is not one: it ended
     // here, its end not stored yet, or it was refused as unresumable (handled below).
-    const inCharge = (r: ThreadRecord) =>
+    const inCharge = (r: TaskThread) =>
       r.role === "worker"
         ? !t?.threads.worker || t.threads.worker === r.id
         : t?.status === "under-review" && t.threads.check === r.id;
@@ -736,7 +746,7 @@ export function supervisor(options: SupervisorOptions) {
       await runtime.section(async () => {
         const d = derive();
         const r = d.threads.get(to);
-        if (!r) throw new Error(`no worker or check thread ${to} in this run`);
+        if (!r || r.role === "main") throw new Error(`no worker or check thread ${to} in this run`);
         const t = runtime.taskOf(r.taskId);
         const waiting =
           r.role === "worker"
