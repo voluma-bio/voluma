@@ -62,6 +62,8 @@ type RoleParts = Pick<ThreadLayout, "mounts" | "scratch" | "description" | "rest
 };
 
 export interface RunLayout {
+  /** The run's `PYTHONPATH`, for a sandbox outside the threads (the convert sandbox). */
+  pythonPath: string;
   /**
    * The layout of a thread id as `thread-id.ts` builds it. `cited` says whether the attempt a
    * checker reviews cites a scratch file (the path after `/scratch/`); it gates the checker's
@@ -131,6 +133,7 @@ export function runLayout(runId: string, inputPrefix: string, skills: readonly S
   };
 
   return {
+    pythonPath,
     forThread(threadId, cited = () => false) {
       const { name, kind } = parseThreadId(runId, threadId);
       const role = kind === "worker" ? "worker" : kind === "check" ? "checker" : "main";
