@@ -27,9 +27,9 @@ CORE = next((p / 'core/skills/microct-core/resources' for p in HERE.parents
 if CORE is None:
     sys.exit('Cannot find microct-core: this script expects core/skills/microct-core/resources/ in a '
              'directory above it (<workflows>/mouse-oa/skills/mouse-oa/resources/ with <workflows>/core/ beside it)')
-sys.path[:0] = [str(HERE), str(CORE)]
+sys.path[:0] = [str(HERE), str(CORE), str(CORE.parents[1] / 'regions-and-landmarks/resources')]
 import sidecar
-from iioc import load_annotations, need, traced_surface
+from annotations import load_annotations, need, traced_surface
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt

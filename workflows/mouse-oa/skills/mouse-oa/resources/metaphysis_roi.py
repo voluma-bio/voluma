@@ -43,10 +43,10 @@ CORE = next((p / 'core/skills/microct-core/resources' for p in HERE.parents
 if CORE is None:
     sys.exit('Cannot find microct-core: this script expects core/skills/microct-core/resources/ in a '
              'directory above it (<workflows>/mouse-oa/skills/mouse-oa/resources/ with <workflows>/core/ beside it)')
-sys.path[:0] = [str(HERE), str(CORE)]
+sys.path[:0] = [str(HERE), str(CORE), str(CORE.parents[1] / 'regions-and-landmarks/resources')]
 import sidecar
+from annotations import load_annotations, traced_surface
 from envelope import close_and_fill
-from iioc import load_annotations, traced_surface
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -151,7 +151,7 @@ def main():
     w1 = min(int(np.ceil(gd.max() + CORTEX_SPAN_MM / vox)) + 1, h.shape[0])
     filled = np.zeros(h.shape, bool)
     for k in range(w0, w1):
-        filled[k] = close_and_fill(tib[k])
+        filled[k] = close_and_fill(tib[k], vox)
     dist = edge_distance(filled, w0, w1)
     bone_all = np.asarray(h) > a.threshold  # HU alone; `filled` (from the tibia label) only limits where it is looked at
     slab = (rel >= a.start_um) & (rel < a.start_um + a.length_um)

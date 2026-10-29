@@ -12,7 +12,7 @@ patches) is indexed on this aligned grid: array axes (W, V, U), W running from t
 Writes <out>/<name>-hu.npy (float32, linear), <name>-mask.npy (bool, nearest), <name>-frame.json, and a QC
 montage. The frame.json (schema and maps in `microct-core/resources/frame.py`) maps aligned indices back to the scan grid, which
 `iioc.py` uses to measure on the scan. This script only fits the axes and the crop; it stays here, not in `orient-joint`,
-because its sign rule (+U medial, +V anterior), its crop defaults and `envelope.close_and_fill` are the mouse tibia protocol's.
+because its sign rule (+U medial, +V anterior), its crop defaults are the mouse tibia protocol's.
 """
 
 import argparse
@@ -49,10 +49,10 @@ def zrange(frac, lo, hi, joint_end):
     return round(lo + a * n), round(lo + b * n)
 
 
-def fit_frame(mask, shaft_z, epi_z, joint_end):
+def fit_frame(mask, shaft_z, epi_z, joint_end, vox):
     centers = []
     for z in range(shaft_z[0], shaft_z[1], 10):
-        yy, xx = np.where(close_and_fill(mask[z]))
+        yy, xx = np.where(close_and_fill(mask[z], vox))
         if len(yy) == 0:
             sidecar.fail(f'label has no voxels at slice {z}: widen --shaft-frac or check --label and --joint-end')
         centers.append([xx.mean(), yy.mean(), z])
@@ -133,7 +133,7 @@ def main():
     zs = np.flatnonzero(mask.any(axis=(1, 2)))
     shaft_z = a.shaft_z or zrange(a.shaft_frac, zs[0], zs[-1], a.joint_end)
     epi_z = a.epiphysis_z or zrange(a.epiphysis_frac, zs[0], zs[-1], a.joint_end)
-    basis, origin = fit_frame(mask, shaft_z, epi_z, a.joint_end)
+    basis, origin = fit_frame(mask, shaft_z, epi_z, a.joint_end, sp[0])
     depth_vox = round(a.depth_mm / sp[0])
     if a.crop_lower_uvw and a.crop_shape_uvw:
         low, shape_xyz = np.array(a.crop_lower_uvw), np.array(a.crop_shape_uvw)

@@ -7,9 +7,8 @@ From the structural review of PR #62 (`review-pr62` p231, structure) and the cor
   old `affine_transform` path (`iioc.py` 38.6 s against 18.8 s), with identical output. The bounding-box crop barely helps when the
   frame's box covers most of the scan. Try `ndi.affine_transform(..., order=0)` and check half-voxel rounding still matches.
 - **A generic `orient_bone` (left from p231 B2).** The frame module landed (`microct-core/resources/frame.py`); `tibia_frame.py` now only fits
-  the axes and crop and calls it. It stayed in `mouse-oa` because its +U medial / +V anterior sign rule, crop defaults and
-  `envelope.close_and_fill` are the mouse tibia protocol's: moving it to `orient-joint` needs `envelope` in a generic skill and the sign
-  rule behind an argument.
+  the axes and crop and calls it (and `microct-core`'s `envelope.close_and_fill`). It stayed in `mouse-oa` because its +U medial / +V anterior
+  sign rule and crop defaults are the mouse tibia protocol's: moving it to `orient-joint` needs the sign rule behind an argument.
 - **Fold the other slice renderers into `quad_view` (left from the quad-view PR).** Boxes as a layer would let `render_slices` (`--boxes`, `--points`; `orient_joint.py` imports its `render()`) and `render_crops` go, with `sam-segmentation` taking its keyframe from a quad pane. The 6-view sheet stays (4 of 4 catches). Also open: `quad_view` draws a point's name in 3D even where the surface hides it; a new mask's surface costs ~9 s cold (marching cubes and smoothing on the aligned grid), later calls reuse the cache.
 - **One `--anatomy` profile (p231 M1).** `references/anatomy.json` holds label names, `window_hu` and `segmentation_threshold_hu`, but the
   generic scripts take them as flags: `--names 1=femur,...` (`quad_view`, `render_surfaces`), `--window` in five scripts, the required
@@ -39,7 +38,6 @@ From the structural review of PR #62 (`review-pr62` p231, structure) and the cor
   `plate_patches` are `[u, v, w]`. Documented, but a hand-writing agent holds two orders.
 
 ## Lengths still in voxels or um (left by the skills cleanup)
-- Internal, not flags: `classic_segment.py` `MARGIN`, `SLAB`, `GRADIENT_RADIUS` (compute halos), `envelope.py` `CLOSE_ITERATIONS = 8`
-  (84 um at 10.5 um voxels: a length in voxels; `close_and_fill` needs the voxel size to take mm), `snap_boxes.py` `min_px=50`.
+- Internal, not flags: `classic_segment.py` `MARGIN`, `SLAB`, `GRADIENT_RADIUS` (compute halos), `snap_boxes.py` `min_px=50`.
 - `morphometry.py cortical` and the protocol's commands take `--depth-um`, `--slab-um`, `--context-um`; mm would match the rule
   "every length is in mm" but changes every cortical command in `oa-protocol.md`.
