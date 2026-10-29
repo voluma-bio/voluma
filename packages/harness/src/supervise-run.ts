@@ -6,6 +6,7 @@
  * first run are the same call; the recorder is built on the stored events by the host.
  */
 import type { Folded } from "@voluma/contracts/fold";
+import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { RecordedPin } from "@voluma/contracts/workflow";
 import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
 import type { RunLayout } from "./layout";
@@ -41,6 +42,8 @@ export interface SuperviseRunOptions {
   selectedOutputs?: readonly string[];
   /** The user's notes for the run. */
   notes?: string;
+  /** Why the previous claim ended; absent on the run's first claim. Recorded as `claim.started`. */
+  previousClaim?: ClaimEndReason;
   /** The workflow packages the run starts from, as recorded on the root's first event. */
   workflows: RecordedPin[];
   layout: RunLayout;
@@ -68,6 +71,10 @@ export interface SuperviseRunOptions {
 export async function superviseRun(options: SuperviseRunOptions): Promise<Folded> {
   const { runId, layout, recorder, signal } = options;
   const rootThreadId = supervisorThreadId(runId);
+  recorder.emit(rootThreadId, "claim.started", {
+    resumed: options.previousClaim !== undefined,
+    ...(options.previousClaim && { after: options.previousClaim }),
+  });
   // Not a derived id: each invocation of the root is a thread start of its own.
   recorder.emit(rootThreadId, "thread.started", {
     parentThreadId: null,

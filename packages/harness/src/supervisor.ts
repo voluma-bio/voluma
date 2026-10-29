@@ -9,6 +9,9 @@
  *
  * What a step does for a task, by its status (the first applicable):
  * - a thread of the task is running: nothing, wait for it;
+ * - a thread of the task was cut off (its latest `thread.started` has no `thread.ended`: the
+ *   runtime aborted a claim, or a crash): resume it with a message saying what it was cut off
+ *   in. That is no wake and no redo; infrastructure's limit bounds restarts (`cutOffText`);
  * - `pending` or `stale`, every dependency done (or to check with its outputs in): start a worker, named by how many the log
  *   has started for the task (a redo gets a fresh thread, never the old one);
  * - `in-progress`, or `pending` with a worker that ended: a failed worker is a judgment point;
@@ -19,6 +22,8 @@
  * - `under-review`: a check that failed is a judgment point; one that ended without a verdict is
  *   woken once; otherwise its result is written,
  *   and a verdict that is not `passed` is a judgment point (`check-disagreed`).
+ * Every `thread.ended` is deliberate (a stale dependent stopped, a check's time limit): a
+ * thread that ended `cancelled` is never resumed.
  * A wake (a boundary or a judgment point) is asked of the main thread outside the section,
  * then recorded as a `wake` event with the id `<thread>@<starts>:wake` (the notes it wrote, and at a
  * judgment point its decision) before anything uses it: workers and checks started later get
@@ -40,6 +45,7 @@
  */
 import { type By, type ModelUsage, WAKE_ERROR_MAX } from "@voluma/contracts/events";
 import { checkResult, type Folded, type FoldedTask } from "@voluma/contracts/fold";
+import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { ThreadMessageResult } from "@voluma/contracts/thread-message";
 import { readyTasks } from "@voluma/workflow";
 import { replyFrames } from "./live";
@@ -106,6 +112,21 @@ type Next = "idle" | "acted" | { point: WakePoint; key: string };
 /** The supervisor's own thread: the root, and the envelope of a run's first events. */
 export const supervisorThreadId = (runId: string) => `${runId}.supervisor`;
 
+const PLAIN_REASON: Record<ClaimEndReason, string> = {
+  shutdown: "the runner restarted",
+  "self-stop": "the runner lost contact with the server",
+  "lease-expired": "the server lost contact with the runner",
+  "keys-lost": "the run's keys had to be sent again",
+};
+
+/** What a cut-off thread is told on resume: the tool it was in, if any, and why, in plain words. */
+function cutOffText(after: ClaimEndReason | undefined, tool: string | undefined): string {
+  const when = after ? `when ${PLAIN_REASON[after]}` : "when the run was restarted";
+  return tool
+    ? `Your last call (\`${tool}\`) was cut off ${when}. It may or may not have finished: check its output, then continue.`
+    : `You were cut off ${when}; continue.`;
+}
+
 const rule = (r: Extract<By, { kind: "rule" }>["rule"]): By => ({ kind: "rule", rule: r });
 
 export function supervisor(options: SupervisorOptions) {
@@ -129,6 +150,7 @@ export function supervisor(options: SupervisorOptions) {
       wakes: 0,
       starts: 0,
       model: undefined,
+      openCalls: new Map(),
     };
 
   /**
@@ -181,7 +203,7 @@ export function supervisor(options: SupervisorOptions) {
     });
   }
 
-  /** Starts the thread again with a message: it resumes from its History. */
+  /** Starts the thread again with a message: it resumes from its History. A cut-off resume is not a wake (`thread-log.ts`). */
   function wake(r: ThreadRecord, input: NonNullable<ThreadSpec["input"]>, attemptId?: string) {
     launch(r.role, r.taskId, r.id, { ...(attemptId && { attemptId }), input });
   }
@@ -422,12 +444,28 @@ export function supervisor(options: SupervisorOptions) {
   ): Promise<Next> {
     if (liveThread(d, taskId)) return "idle";
     const t = f.tasks.find((x) => x.id === taskId);
+    // A cut-off thread goes on where it was. A thread this process started is not one: it ended
+    // here, its end not stored yet, or it was refused as unresumable (handled below).
+    const cutOff = [...startedFor(d, taskId, "worker"), ...startedFor(d, taskId, "check")].find(
+      (r) => !r.end && !threads.started(r.id),
+    );
+    if (cutOff) {
+      const tool = [...cutOff.openCalls.values()].at(-1);
+      wake(
+        cutOff,
+        { text: cutOffText(d.after, tool), sender: { kind: "runtime" } },
+        cutOff.role === "check" ? t?.attemptId : undefined,
+      );
+      return "acted";
+    }
     // The latest started worker is in charge of the task. One that is not running and has
     // not written to the current attempt (none yet, or a stale one an earlier worker wrote),
     // or left it in progress, stalls: wake it, then a judgment point.
     const worker = startedFor(d, taskId, "worker").at(-1);
+    // A worker that was stopped on purpose (`cancelled`) is not woken; its task starts again.
     if (
       worker &&
+      worker.end?.status !== "cancelled" &&
       (!t || t.status === "in-progress" || (t.status === "stale" && t.threads.worker !== worker.id))
     ) {
       return stalled(d, worker, t);
@@ -659,7 +697,8 @@ export function supervisor(options: SupervisorOptions) {
         recorder.emit(root, "thread.ended", { status: "failed", error });
         throw failure;
       }
-      recorder.emit(root, "thread.ended", { status: signal?.aborted ? "cancelled" : "completed" });
+      // A runtime abort writes no end, like a crash: the next claim resumes the root as well.
+      if (!signal?.aborted) recorder.emit(root, "thread.ended", { status: "completed" });
       return runtime.view();
     },
 

@@ -30,7 +30,7 @@
  *
  * Lease. A claim is a lease on the run for `LEASE_SECONDS` from the server's
  * last heartbeat for it. The holder (`runnerId`), the lease token, the expiry
- * and the count of recoveries are columns of the run row. The expiry is judged
+ * and why the claim ended are columns of the run row. The expiry is judged
  * by the database's `now()` inside the claim's transaction, which is also where
  * expired leases are swept, so no API process's clock or memory decides it.
  * Every claim issues a new lease token (`leaseToken`). Every ingest call on
@@ -52,12 +52,15 @@
  * `visitor` run goes to `awaiting-keys`, because its keys are gone. The runner
  * keeps its `events` already written, and the next claim resumes the thread
  * from them. That claim carries `previousClaim.reason`, why the claim before it ended
- * (`claimEndReasonSchema`); the API records `lease-expired` itself when it sweeps a lease. The claim carries no plan: the runner snapshots the run's
- * workflow directory and builds the plan itself (`packages/workflow`), and a resumed run
- * keeps the plan its first `revision.started` recorded (`task-tools.ts`). A run
- * whose lease expired three times with no `released` ends `failed` instead, so
- * one that crashes the runner doesn't loop. A `released` run is not counted,
- * so deploys don't fail a long run.
+ * (`claimEndReasonSchema`); the API records `lease-expired` itself when it sweeps a lease. The
+ * claim carries no plan: the runner snapshots the run's workflow directory and builds the plan
+ * itself (`packages/workflow`), and a resumed run keeps the plan its first `revision.started`
+ * recorded (`task-tools.ts`). One limit stops a run that keeps costing its runner: the API
+ * counts consecutive claims that end `self-stop` or `lease-expired` without run-state
+ * progress (a `task`, `checkpoint`, `output`, `attempt.opened` or `revision.started` event;
+ * `judgment` while the old supervisor runs), and the run ends `failed` at 3, naming the call
+ * that was in flight. Progress resets the count. `shutdown` and `keys-lost` never count, so
+ * deploys don't fail a long run.
  *
  * There is no tokenless call: the runner service is the only claimer.
  *
@@ -177,8 +180,7 @@ export const reportRequestSchema = z.object({
     /** The runner stops the run and gives up its lease: a shutdown, a self-stop, or lost keys. */
     z.object({
       kind: z.literal("released"),
-      /** Optional until the runner sends it. */
-      reason: releaseReasonSchema.optional(),
+      reason: releaseReasonSchema,
     }),
   ]),
 });

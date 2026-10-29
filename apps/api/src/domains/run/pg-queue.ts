@@ -11,23 +11,27 @@
  */
 import { randomBytes } from "node:crypto";
 import type { Run, VisitorKeys } from "@voluma/contracts/run";
-import { LEASE_SECONDS, type Usage as RunnerUsage } from "@voluma/contracts/runner";
+import {
+  type ClaimEndReason,
+  LEASE_SECONDS,
+  type ReleaseReason,
+  type Usage as RunnerUsage,
+} from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
-import { and, asc, eq, notInArray, type SQL, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, notInArray, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { Reader } from "../../domain";
 import { admit, type Limits, type Refusal, refusalMessage, type Usage, usage } from "./admission";
+import { endClaim, stalledError } from "./claim-progress";
 import type { KeyVault } from "./key-vault";
 import { LeaseLost } from "./lease";
 import type { Notifier } from "./notifier";
 import { loadRun, loadRuns, readableInputs, readableRuns, type Tx } from "./pg-runs";
-import { inputs, runs } from "./schema";
+import { events, inputs, runs } from "./schema";
 
 /** Serializes every transaction that changes a run, so the limit counts can't race a claim. */
 const QUEUE_LOCK = 0x76_6f_6c_71;
 
-/** Lease expiries with no `released` before a run ends `failed` (so a run that crashes the runner doesn't loop). */
-const MAX_RECOVERIES = 3;
 /** How long a visitor run waits for its keys. */
 const KEYS_WAIT = sql`interval '24 hours'`;
 
@@ -42,36 +46,82 @@ export class RunEnded extends Error {
 
 export type RunnerReport =
   | { kind: "ended"; outcome: "completed" | "failed"; error?: string }
-  | { kind: "released" };
+  | { kind: "released"; reason: ReleaseReason };
 
 export type Claimed = {
   run: Run;
   leaseToken: string;
   /** The visitor run's keys, handed out once. */
   keys?: VisitorKeys;
+  /** Present on every claim after the run's first. */
+  previousClaim?: { reason: ClaimEndReason };
 };
 
 /**
- * Takes the matching running runs back: a `voluma` run to `queued`, a `visitor` run to
- * `awaiting-keys` (its keys are gone). A counted recovery (an expired lease) is one more
- * toward `MAX_RECOVERIES`; a `released` run isn't counted.
+ * Ends the matching running claims for `reason` and takes their runs back: a `voluma` run to
+ * `queued`, a `visitor` run to `awaiting-keys` (its keys are gone). A claim that ended
+ * without progress counts toward the no-progress limit (`claim-progress.ts`); at the limit
+ * the run ends `failed`, naming the call that was in flight.
  */
-async function recover(tx: Tx, where: SQL, counted: boolean) {
-  const exhausted = counted ? sql`recoveries + 1 >= ${MAX_RECOVERIES}` : sql`false`;
-  await tx.execute(sql`
-    UPDATE runs SET
-      state = CASE WHEN ${exhausted} THEN 'ended' WHEN credentials = 'visitor' THEN 'awaiting-keys' ELSE 'queued' END,
-      ended_at = CASE WHEN ${exhausted} THEN now() END,
-      outcome = CASE WHEN ${exhausted} THEN 'failed' END,
-      error = CASE WHEN ${exhausted} THEN 'The runner lost this run three times.' END,
-      awaiting_since = CASE WHEN NOT (${exhausted}) AND credentials = 'visitor' THEN now() END,
-      recoveries = recoveries + ${counted ? 1 : 0},
-      lease_holder = NULL, lease_token = NULL, lease_expires_at = NULL
-    WHERE state = 'running' AND ${where}`);
+async function recover(tx: Tx, where: SQL, reason: ClaimEndReason) {
+  const held = await tx
+    .select()
+    .from(runs)
+    .where(and(eq(runs.state, "running"), where))
+    .for("update");
+  for (const run of held) {
+    const { stalledClaims, exhausted } = endClaim(run, reason);
+    const base = {
+      lastClaimEnd: reason,
+      stalledClaims,
+      leaseHolder: null,
+      leaseToken: null,
+      leaseExpiresAt: null,
+    };
+    if (exhausted) {
+      await tx
+        .update(runs)
+        .set({
+          ...base,
+          state: "ended",
+          outcome: "failed",
+          endedAt: sql`now()`,
+          error: stalledError(reason, await inFlightTool(tx, run.id, run.claimStartSeq)),
+        })
+        .where(eq(runs.id, run.id));
+    } else {
+      await tx
+        .update(runs)
+        .set({
+          ...base,
+          state: run.credentials === "visitor" ? "awaiting-keys" : "queued",
+          awaitingSince: run.credentials === "visitor" ? sql`now()` : null,
+        })
+        .where(eq(runs.id, run.id));
+    }
+  }
+}
+
+/** The tool of the latest call this claim made that has no result: what the claim was cut off in. */
+async function inFlightTool(tx: Tx, runId: string, sinceSeq: number): Promise<string | undefined> {
+  const [row] = await tx
+    .select({ name: sql<string>`${events.payload}->>'name'` })
+    .from(events)
+    .where(
+      and(
+        eq(events.runId, runId),
+        eq(events.type, "tool.call"),
+        gt(events.seq, sinceSeq),
+        sql`NOT EXISTS (SELECT 1 FROM events r WHERE r.run_id = ${events.runId} AND r.type = 'tool.result' AND r.payload->>'toolCallId' = ${events.payload}->>'toolCallId')`,
+      ),
+    )
+    .orderBy(desc(events.seq))
+    .limit(1);
+  return row?.name;
 }
 
 async function sweep(tx: Tx) {
-  await recover(tx, sql`lease_expires_at <= now()`, true);
+  await recover(tx, sql`lease_expires_at <= now()`, "lease-expired");
   await tx.execute(sql`
     UPDATE runs SET state = 'ended', outcome = 'failed', ended_at = now(),
       error = 'The keys were not resent within 24 hours.'
@@ -281,6 +331,7 @@ export function pgRunQueue(
               state: "running",
               startedAt: sql`coalesce(${runs.startedAt}, now())`,
               claimedAt: sql`now()`,
+              claimStartSeq: sql`coalesce((SELECT max(seq) FROM events WHERE run_id = ${run.id}), 0)`,
               leaseHolder: runnerId,
               leaseToken,
               leaseExpiresAt: leaseUntil,
@@ -291,6 +342,7 @@ export function pgRunQueue(
             run: await loadRun(tx, run.id),
             leaseToken,
             ...(keys && { keys }),
+            ...(run.lastClaimEnd && { previousClaim: { reason: run.lastClaimEnd } }),
           };
         }
         return null;
@@ -340,7 +392,7 @@ export function pgRunQueue(
         if (!run) throw new LeaseLost();
         if (run.state !== "running") throw new RunEnded();
         if (report.kind === "released") {
-          await recover(tx, sql`id = ${runId}`, false);
+          await recover(tx, sql`id = ${runId}`, report.reason);
           return;
         }
         await tx
