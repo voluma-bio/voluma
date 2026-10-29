@@ -13,8 +13,11 @@ import {
   SplitPanel,
   StatusBadge,
   type StatusTone,
+  type StripGroup,
+  StripPlot,
   Table,
   type TableColumn,
+  Tabs,
 } from "@voluma/ui";
 import { type ReactNode, useState } from "react";
 
@@ -24,7 +27,7 @@ const THEME_LABELS = { light: "Light theme", dark: "Dark theme" };
 
 export function DevUiPage() {
   return (
-    <div className="grid min-h-dvh lg:grid-cols-2">
+    <div className="grid min-h-dvh grid-cols-1 lg:grid-cols-2">
       {THEMES.map((theme) => (
         <ThemeColumn key={theme} theme={theme} />
       ))}
@@ -34,7 +37,11 @@ export function DevUiPage() {
 
 function ThemeColumn({ theme }: { theme: (typeof THEMES)[number] }) {
   return (
-    <div id={`theme-${theme}`} data-theme={theme} className="grid content-start gap-10 p-8">
+    <div
+      id={`theme-${theme}`}
+      data-theme={theme}
+      className="grid grid-cols-1 content-start gap-10 p-8"
+    >
       <header>
         <h1 className="text-2xl font-semibold">{THEME_LABELS[theme]}</h1>
         <p className="text-ui text-muted-foreground">
@@ -68,6 +75,12 @@ function ThemeColumn({ theme }: { theme: (typeof THEMES)[number] }) {
             </StatusBadge>
           ))}
         </div>
+      </Section>
+      <Section title="Tabs">
+        <TabsDemo theme={theme} />
+      </Section>
+      <Section title="Strip plot">
+        <StripDemo />
       </Section>
       <Section title="Card">
         <div className="grid gap-3 sm:grid-cols-2">
@@ -143,7 +156,7 @@ function ThemeColumn({ theme }: { theme: (typeof THEMES)[number] }) {
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="grid gap-3">
+    <section className="grid grid-cols-1 gap-3">
       <h2 className="text-sm font-semibold text-muted-foreground">{title}</h2>
       {children}
     </section>
@@ -151,14 +164,138 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 }
 
 const BADGES: Array<[StatusTone, string]> = [
-  ["neutral", "Pending"],
+  ["neutral", "Waiting"],
   ["info", "Running"],
-  ["primary", "Done"],
   ["check", "2 to check"],
+  ["primary", "Checked"],
   ["info", "Corrected"],
+  ["destructive", "Paused"],
   ["destructive", "Failed"],
-  ["neutral", "Stopped"],
+  ["neutral", "Older version"],
 ];
+
+const STUDY_TABS = [
+  { id: "overview", label: "Overview" },
+  { id: "check", label: "To check", count: 7, alert: true },
+  { id: "scans", label: "Scans", count: "4/8", countLabel: "4 of 8 done, 1 running, 3 waiting" },
+] as const;
+
+function TabsDemo({ theme }: { theme: string }) {
+  const [tab, setTab] = useState<(typeof STUDY_TABS)[number]["id"]>("overview");
+  return (
+    <div className="grid grid-cols-1 gap-3">
+      <div className="flex h-13 items-stretch gap-6 border-b border-border bg-card px-4">
+        <h3 className="self-center font-semibold whitespace-nowrap">DMM knee study</h3>
+        <Tabs
+          tabs={[...STUDY_TABS]}
+          value={tab}
+          onChange={setTab}
+          label="Study"
+          controls={`study-panel-${theme}`}
+        />
+      </div>
+      <p id={`study-panel-${theme}`} role="tabpanel" className="text-ui text-muted-foreground">
+        {STUDY_TABS.find((t) => t.id === tab)?.label} panel
+      </p>
+    </div>
+  );
+}
+
+/* OA6-1RK is the real run (its DFL came out at 0.82 mm with landmarks a and b swapped); the
+   other scans are the prototype's made-up study. Hollow = ran on the older workflow version. */
+const DFL: StripGroup[] = [
+  {
+    name: "DMM",
+    points: [
+      { id: "OA6-1RK", label: "OA6-1RK", value: 0.824, far: true },
+      { id: "OA6-2RK", label: "OA6-2RK", value: 2.51, hollow: true },
+      { id: "OA6-3RK", label: "OA6-3RK", value: null },
+      { id: "OA6-4RK", label: "OA6-4RK", value: 2.47 },
+    ],
+  },
+  {
+    name: "Sham",
+    points: [
+      { id: "OA6-1LK", label: "OA6-1LK", value: 2.39, hollow: true },
+      { id: "OA6-2LK", label: "OA6-2LK", value: null },
+      { id: "OA6-3LK", label: "OA6-3LK", value: null },
+      { id: "OA6-4LK", label: "OA6-4LK", value: null },
+    ],
+  },
+];
+
+const EIGHT = [2.47, 2.51, 2.49, 2.53, 2.48, 2.5, 2.46, 2.52];
+
+const DFL_FULL: StripGroup[] = [
+  {
+    name: "DMM",
+    points: EIGHT.map((value, i) => ({ id: `OA7-${i + 1}RK`, label: `OA7-${i + 1}RK`, value })),
+  },
+  { name: "Sham", points: [{ id: "OA7-1LK", label: "OA7-1LK", value: 2.41 }] },
+];
+
+const EQUAL: StripGroup[] = [
+  {
+    name: "Pilot knees",
+    points: ["OA5-1RK", "OA5-1LK", "OA5-2RK", "OA5-2LK"].map((id) => ({
+      id,
+      label: id,
+      value: 0.148,
+    })),
+  },
+];
+
+function StripDemo() {
+  const [opened, setOpened] = useState<string | null>(null);
+  const open = (point: { label: string }) => setOpened(point.label);
+  return (
+    <div className="grid gap-2">
+      <StripCard title="Distal femoral length" unit="mm">
+        <StripPlot
+          groups={DFL}
+          unit="mm"
+          label="Distal femoral length"
+          digits={2}
+          onSelect={open}
+        />
+      </StripCard>
+      <StripCard title="Distal femoral length, 8 against 1" unit="mm">
+        <StripPlot
+          groups={DFL_FULL}
+          unit="mm"
+          label="Distal femoral length"
+          digits={2}
+          onSelect={open}
+        />
+      </StripCard>
+      <StripCard title="Ct.Th at 1000 µm, all equal" unit="mm">
+        <StripPlot groups={EQUAL} unit="mm" label="Ct.Th at 1000 µm" digits={3} onSelect={open} />
+      </StripCard>
+      <p className="text-ui text-muted-foreground" role="status">
+        {opened ? `Opened ${opened}` : "Select a dot"}
+      </p>
+    </div>
+  );
+}
+
+function StripCard({
+  title,
+  unit,
+  children,
+}: {
+  title: string;
+  unit: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="rounded-xl border border-border bg-card px-4 pt-2 pb-1">
+      <p className="mb-1 text-sm">
+        <b className="font-semibold">{title}</b> <span className="text-fg-subtle">{unit}</span>
+      </p>
+      {children}
+    </div>
+  );
+}
 
 type RunRow = { scan: string; workflow: string; status: [StatusTone, string]; finished: string };
 
@@ -178,7 +315,7 @@ const RUNS: RunRow[] = [
   {
     scan: "OA6-2LK",
     workflow: "Mouse OA v1",
-    status: ["primary", "Reviewed"],
+    status: ["primary", "Checked"],
     finished: "21 Oct, 09:40",
   },
 ];

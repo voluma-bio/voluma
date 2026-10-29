@@ -26,6 +26,13 @@ both in each theme.
 - Amber always means To check; blue means running or corrected; pine means
   done. Don't reuse them for decoration.
 
+## Comparing scans
+
+- **Groups of scans compare as strip plots, not bars** (`StripPlot`): every scan a dot, a tick for the
+  group mean. Groups hold 1 to 8 scans, and a bar or box hides them.
+- Dots are ink; only a scan far from its group turns amber, with its name beside it. Nothing else
+  in a chart gets colour.
+
 ## The review
 
 - **One selection drives the report, the 3D view and the slices.** Selecting

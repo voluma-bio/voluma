@@ -15,4 +15,11 @@ export {
 export { Lightbox, type LightboxProps } from "./lightbox";
 export { SplitPanel, type SplitPanelProps } from "./split-panel";
 export { StatusBadge, type StatusBadgeProps, type StatusTone } from "./status-badge";
+export {
+  type StripGroup,
+  StripPlot,
+  type StripPlotProps,
+  type StripPoint,
+} from "./strip-plot";
 export { Table, type TableColumn, type TableProps } from "./table";
+export { type TabItem, Tabs, type TabsProps } from "./tabs";
