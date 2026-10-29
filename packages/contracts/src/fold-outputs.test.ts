@@ -134,7 +134,8 @@ describe("fold outputs", () => {
   }
 
   it("one output of each kind goes to its review block", () => {
-    const f = fold(oneOfEach().events);
+    const l = oneOfEach();
+    const f = fold(l.events);
     const r = rev(f, 0);
     const t = need(f, "seg");
     expect(t.measurements[0]).toMatchObject({
@@ -169,6 +170,25 @@ describe("fold outputs", () => {
       { id: "seg/fig", name: "Figure", mediaType: "image/png", sha256: SHA(8) },
     ]);
     expectParses(f);
+
+    l.measurement("w:8", W, "seg", "w:1:open", "width", 3.2, {
+      note: "Initial plane",
+      evidence: [file(1)],
+    });
+    l.measurement("w:9", W, "seg", "w:1:open", "width", 3.1, { evidence: [file(2)] });
+    l.output("w:10", W, "seg", "w:1:open", "femur", structure("labels", { volumeMm3: 9 }));
+    const replaced = fold(l.events);
+    const updated = need(replaced, "seg");
+    expect(updated.measurements[0]).toMatchObject({
+      value: 3.1,
+      evidenceIds: [SHA(2)],
+      source: { threadId: W, eventId: "w:9" },
+    });
+    expect(updated.measurements[0]?.note).toBeUndefined();
+    expect(updated.evidence.map((e) => e.sha256)).toEqual([SHA(1), SHA(2)]);
+    expect(rev(replaced, 0).structures[0]).toMatchObject({ volumeMm3: 9 });
+    expect(rev(replaced, 0).structures[0]?.mesh).toBeUndefined();
+    expectParses(replaced);
   });
 
   it("a declared output that is missing is listed until it is reported; an undeclared one is marked", () => {
@@ -214,16 +234,17 @@ describe("fold outputs", () => {
     expectParses(f);
   });
 
-  it("a fix overlays a structure: the earlier revision keeps the worker's, the next has the fix", () => {
+  it("a correction replaces a structure without changing the earlier revision", () => {
     const l = oneOfEach();
     l.status("w:8", W, "seg", "w:1:open", "done");
-    l.thread("chk", "check", "w:1:open");
-    l.status("chk:start", "chk", "seg", "w:1:open", "under-review", l.rule("check-start"));
-    l.checkpoint("chk:1", "chk", "seg", "w:1:open", { verdict: "passed", text: "Fixed." });
-    l.revision("chk:2:revision", "chk", { reason: "fix", taskId: "seg" });
-    l.output("chk:2", "chk", "seg", "w:1:open", "femur", structure("labels", { volumeMm3: 9 }), {
+    l.revision("sup:1:revision", SUP, { reason: "correction", taskId: "seg" });
+    l.status("sup:1", SUP, "seg", "w:1:open", "stale");
+    l.open("w:9:open", W, "seg");
+    l.output("w:10", W, "seg", "w:9:open", "labels", labelsVolume(9));
+    l.output("w:11", W, "seg", "w:9:open", "femur", structure("labels", { volumeMm3: 9 }), {
       title: "Femur",
     });
+    l.measurement("w:12", W, "seg", "w:9:open", "width", 3.1, { structureIds: ["femur"] });
     const f = fold(l.events);
     const [r1, r2] = f.revisions;
     expect(r1?.structures).toMatchObject([{ volumeMm3: 7, mesh: { sha256: SHA(6) } }]);
@@ -231,6 +252,8 @@ describe("fold outputs", () => {
     expect(r2?.structures[0]).toMatchObject({ id: "seg/femur", volumeMm3: 9 });
     expect(r2?.structures[0]?.mesh).toBeUndefined();
     expect(need(r2?.tasks ?? [], "seg").measurements[0]?.structureIds).toEqual(["seg/femur"]);
+    expect(need(r1?.tasks ?? [], "seg").measurements[0]?.value).toBe(3.4);
+    expect(need(r2?.tasks ?? [], "seg").measurements[0]?.value).toBe(3.1);
     expectParses(f);
   });
 
@@ -416,41 +439,6 @@ describe("fold outputs", () => {
       });
       expect(checks(gone, 0)[0]?.focus).toBeUndefined();
       expectParses(gone);
-    });
-
-    it("a fix item focuses on what the fix changed; a flag has none", () => {
-      const l = oneOfEach();
-      l.status("w:8", W, "seg", "w:1:open", "done");
-      l.thread("chk", "check", "w:1:open");
-      l.status("chk:start", "chk", "seg", "w:1:open", "under-review", l.rule("check-start"));
-      l.revision("chk:2:revision", "chk", { reason: "fix", taskId: "seg" });
-      l.output("chk:2", "chk", "seg", "w:1:open", "femur", structure("labels", { volumeMm3: 9 }), {
-        title: "Femur",
-      });
-      l.measurement("chk:3", "chk", "seg", "w:1:open", "width", 3.1, {
-        structureIds: ["femur"],
-        annotationIds: ["landmark"],
-      });
-      l.status("flag", W, "seg", "w:1:open", "to-check");
-      const f = fold(l.events);
-      const items = need(f, "seg").checks;
-      expect(items.find((c) => c.title === "Changed by the second agent")?.focus).toEqual({
-        structureIds: ["seg/femur"],
-        annotationIds: ["seg/landmark"],
-      });
-      expect(items.find((c) => c.title === "Marked to check")?.focus).toBeUndefined();
-      expectParses(f);
-    });
-
-    it("a fix that changed nothing with a structure or annotation has no focus", () => {
-      const l = oneOfEach();
-      l.status("w:8", W, "seg", "w:1:open", "done");
-      l.thread("chk", "check", "w:1:open");
-      l.revision("chk:2:revision", "chk", { reason: "fix", taskId: "seg" });
-      l.output("chk:2", "chk", "seg", "w:1:open", "labels", labelsVolume(9));
-      const f = fold(l.events);
-      expect(need(f, "seg").checks[0]?.focus).toBeUndefined();
-      expectParses(f);
     });
   });
 });

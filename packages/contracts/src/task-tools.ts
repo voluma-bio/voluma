@@ -3,8 +3,7 @@
  * and the rules the runtime enforces when they run. `fold` (`fold.ts`) relies
  * on these; the schemas below only shape the calls.
  *
- * Who sets what. `checklist` and `report_output` are the worker's (the
- * supervisor's own checklist calls use `checklist` too); `checkpoint` is the
+ * Who sets what. `checklist` and `report_output` are the worker's; `checkpoint` is the
  * worker's and a check thread's. A worker sets only `in-progress`, `done`,
  * `failed` and `to-check`; `under-review` is the runtime's, `stale` the
  * runtime's and the supervisor's, and `to-check` also the supervisor's. Only a
@@ -38,18 +37,16 @@
  * Checks. The runtime starts a check thread only on a `done` or `to-check`
  * task. Its `thread.started` carries the attempt it checks, and the runtime
  * appends `task under-review` (`check-start`) with the same `attemptId` before
- * the thread runs. The check thread's events join that attempt,
+ * the thread runs. The check thread's checkpoints join that attempt,
  * and it writes only to the task it checks (a write to another task is
- * refused).
- * - A check thread's first `output` is a fix of the task it checks: the
- *   runtime appends `revision.started` (`fix`, with that `taskId`), then a
- *   stale mark (`stale`) on each transitive dependent of the task that has an
- *   attempt and isn't stale already, then the output. Later outputs add nothing.
+ * refused). Its only task tool is `checkpoint`: it neither changes outputs
+ * nor sets task status. Re-derived values go in its checkpoint text next to
+ * the worker's values and its verdict.
  * - A check never clears an open To check item. When the check thread ends the
  *   runtime sets the status (`check-result`) to `checkResult(task)` (`fold.ts`)
  *   with a reason, but only if the task is still under review: `done` only for
  *   a `passed` verdict with no open item (a worker's doubt, a `toCheck`
- *   checkpoint, a fix) and no required output missing, otherwise `to-check`.
+ *   checkpoint) and no required output missing, otherwise `to-check`.
  *
  * Staleness. A correction is one `checklist stale` call by the supervisor on
  * the corrected task, which has an attempt. The runtime appends
