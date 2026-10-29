@@ -1,6 +1,7 @@
 /**
  * The browser's run routes (`@voluma/contracts/run`), for signed-in users and guests:
- * start, list, get, cancel and resend keys. Each handler parses, calls the
+ * start, list, get, cancel and resend keys. The reads (list, get) also answer the runner's
+ * bearer token across labs, so an agent can debug a run with it; the writes need a user. Each handler parses, calls the
  * queue or the reads, and maps the answer. Every read goes through the caller's
  * `readerOf(user)`, so another org's run is a 404. Visitor keys go straight to the queue,
  * which holds them in memory; no handler logs a body.
@@ -8,7 +9,14 @@
 import { randomUUID } from "node:crypto";
 import { type Run, resendKeysRequestSchema, startRunRequestSchema } from "@voluma/contracts/run";
 import { type Context, Hono } from "hono";
-import { parseJson, readerOf, requireUser, type UserEnv } from "../../domain";
+import {
+  parseJson,
+  type ReaderEnv,
+  readerOf,
+  requireReader,
+  requireUser,
+  type UserEnv,
+} from "../../domain";
 import type { RunDeps } from ".";
 import { type Refusal, refusalMessage } from "./admission";
 
@@ -23,9 +31,11 @@ function refusal(c: Context, refused: Refusal | "no-input" | "input-not-ready" |
 }
 
 export function runsRoutes({ reads, queue, catalog, repo }: RunDeps) {
-  const app = new Hono<UserEnv>();
-  app.use("/runs", requireUser);
-  app.use("/runs/*", requireUser);
+  const app = new Hono<UserEnv & ReaderEnv>();
+  for (const path of ["/runs", "/runs/*"]) {
+    app.on("GET", path, requireReader);
+    app.on(["POST", "PUT", "PATCH", "DELETE"], path, requireUser);
+  }
 
   app.post("/runs", async (c) => {
     const { workflowId, inputId, selectedOutputs, notes, keys } = await parseJson(
@@ -51,10 +61,10 @@ export function runsRoutes({ reads, queue, catalog, repo }: RunDeps) {
     return "refused" in result ? refusal(c, result.refused) : c.json(result.run satisfies Run);
   });
 
-  app.get("/runs", async (c) => c.json({ runs: await reads.list(readerOf(c.var.user)) }));
+  app.get("/runs", async (c) => c.json({ runs: await reads.list(c.var.reader) }));
 
   app.get("/runs/:id", async (c) => {
-    const run = await reads.get(readerOf(c.var.user), c.req.param("id"));
+    const run = await reads.get(c.var.reader, c.req.param("id"));
     return run ? c.json(run) : c.json({ error: "not found" }, 404);
   });
 

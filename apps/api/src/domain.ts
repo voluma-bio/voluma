@@ -44,6 +44,23 @@ export function readerOf(user: UserPrincipal): Reader {
   return { labId: user.labId, ownerId: user.scope === "self" ? user.userId : null };
 }
 
+/**
+ * Every lab's records: what the runner's bearer token reads on a run `GET`, so an agent can
+ * debug a run with the token. Writes never take it; they take a `Reader`.
+ */
+export const EVERY_LAB = "every-lab" as const;
+export type ReadScope = Reader | typeof EVERY_LAB;
+
+/** The environment of a read subtree behind `requireReader`. */
+export type ReaderEnv = { Variables: { principal: Principal; reader: ReadScope } };
+
+/** Guard a read for a user (their `readerOf`) or the runner's bearer token (`EVERY_LAB`). */
+export const requireReader = createMiddleware<ReaderEnv>(async (c, next) => {
+  const principal = c.get("principal");
+  c.set("reader", principal.kind === "user" ? readerOf(principal) : EVERY_LAB);
+  return next();
+});
+
 /** Guard a subtree for the runner's bearer token (run ingest). */
 export const requireService = createMiddleware<AppEnv>(async (c, next) =>
   c.get("principal").kind === "service" ? next() : c.json({ error: "forbidden" }, 403),
