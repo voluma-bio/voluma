@@ -14,7 +14,11 @@
  * JSON imports (`with { type: "json" }`) work in Vite, Node (tsx) and `tsc` alike.
  */
 import type { WorkflowPin } from "@voluma/contracts/workflow";
-import { type OutputEntry, workflowFilesSchema } from "@voluma/contracts/workflow-files";
+import {
+  type OutputEntry,
+  type TaskEntry,
+  workflowFilesSchema,
+} from "@voluma/contracts/workflow-files";
 import mouseOaOutputs from "../../../workflows/mouse-oa/outputs.json" with { type: "json" };
 import mouseOaTasks from "../../../workflows/mouse-oa/tasks.json" with { type: "json" };
 import smokeOutputs from "../../../workflows/smoke/outputs.json" with { type: "json" };
@@ -31,8 +35,8 @@ export interface BundledWorkflow {
   outputs: OutputEntry[];
   /** The outputs a summary leads with (`headline` in `outputs.json`), in file order. */
   headline: OutputEntry[];
-  /** Every task's id, in file order. */
-  taskIds: string[];
+  /** Every task, in file order. */
+  tasks: TaskEntry[];
   /** A task's title; a task without one shows its id. */
   taskTitle: (id: string) => string;
   /** An output's name; one the workflow doesn't list shows its id. */
@@ -52,7 +56,7 @@ function bundle(
     outputs,
     // `headline` is optional in the schema; an output without it is not a headline.
     headline: outputs.filter((o) => "headline" in o && o.headline === true),
-    taskIds: tasks.map((t) => t.id),
+    tasks,
     taskTitle: (id) => titles.get(id) ?? id,
     outputName: (id) => names.get(id) ?? id,
   };

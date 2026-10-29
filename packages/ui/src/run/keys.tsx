@@ -1,11 +1,11 @@
 /**
- * A visitor's own keys (`VisitorKeys`): asked on the start screen and again when a run is
+ * A visitor's own keys (`VisitorKeys`): asked on Run on new scans and again when a run is
  * waiting for them. They stay in this browser's localStorage, under the user's id so another
  * user of the browser never sees them; the server holds them in memory only.
  */
 import { type VisitorKeys, visitorKeysSchema } from "@voluma/contracts/run";
-import { Button } from "@voluma/ui";
 import { type FormEvent, useState } from "react";
+import { Button } from "../button";
 
 const storageKey = (userId: string) => `voluma.visitor-keys.${userId}`;
 

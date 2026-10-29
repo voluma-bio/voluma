@@ -18,6 +18,7 @@
 import type { StudyDetail, StudyScanDetail, ToCheckItem } from "@voluma/contracts/study";
 import type { OutputEntry } from "@voluma/contracts/workflow-files";
 import type { StatusTone } from "@voluma/ui";
+import { runHref, runStatus } from "@voluma/ui/run";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 
 /** Where "Open in 3D" lands: a To check item, or a run's task (a scan far from its group). */
@@ -26,26 +27,21 @@ export type CheckStop = ToCheckItem | Pick<ToCheckItem, "runId" | "taskId">;
 /** Opens the check panel on `queue` at `start`; the one mount point of every "Open in 3D". */
 export type OpenChecks = (queue: CheckStop[], start: number) => void;
 
-export type ScanStatus = { label: string; tone: StatusTone };
-
-/** The scan's newest run, which its status shows; values may come from an older completed one. */
-export function scanStatus({ runs, toCheck }: StudyScanDetail): ScanStatus {
+/**
+ * A scan's status: its newest run's chip (`@voluma/ui/run`), with "N of M tasks" while it runs;
+ * "Not started" without a run. Its values may come from an older completed run.
+ */
+export function scanStatus({ runs }: StudyScanDetail): {
+  label: string;
+  tone: StatusTone;
+  progress?: string;
+} {
   const run = runs[0];
   if (!run) return { label: "Not started", tone: "neutral" };
-  const { state, review } = run;
-  switch (state.status) {
-    case "queued":
-      return { label: "Waiting", tone: "neutral" };
-    case "running":
-      return { label: "Running", tone: "info" };
-    case "awaiting-keys":
-      return { label: "Needs your keys", tone: "check" };
-    case "ended":
-      if (state.outcome === "failed") return { label: "Failed", tone: "destructive" };
-      if (state.outcome === "cancelled") return { label: "Stopped", tone: "neutral" };
-      if (toCheck.length > 0) return { label: `${toCheck.length} to check`, tone: "check" };
-      return { label: review?.reviewedAt ? "Checked" : "Done", tone: "primary" };
-  }
+  const { label, tone } = runStatus(run);
+  return run.tasks
+    ? { label, tone, progress: `${run.tasks.done} of ${run.tasks.total} tasks` }
+    : { label, tone };
 }
 
 /** A run the API or the runner is still moving: the page refetches while one is in view. */
@@ -196,22 +192,23 @@ export function checkKinds(detail: StudyDetail, workflow: BundledWorkflow): Chec
       kinds.set(key, kind);
     }
   }
-  const order = new Map(workflow.taskIds.map((id, i) => [id, i]));
-  const rank = (k: CheckKind) => order.get(k.taskId) ?? workflow.taskIds.length;
+  const order = new Map(workflow.tasks.map((t, i) => [t.id, i]));
+  const rank = (k: CheckKind) => order.get(k.taskId) ?? workflow.tasks.length;
   return [...kinds.values()].sort((a, b) => rank(a) - rank(b) || a.title.localeCompare(b.title));
 }
 
-/** A scan's side and group, as its row's second line. */
-export function scanMeta(scan: StudyScanDetail): string[] {
-  const side = scan.scan.attributes.side;
-  return [typeof side === "string" ? side : null, scan.scan.group].filter(
-    (x): x is string => x !== null,
-  );
+/** A scan's knee (`attributes.knee`, as `/new`'s intake stores it), or null. */
+export function kneeOf(scan: StudyScanDetail): string | null {
+  const knee = scan.scan.attributes.knee;
+  return typeof knee === "string" && knee ? knee : null;
 }
 
-/** The run page a scan links to: its newest run's live page. */
-export const runPath = (scan: StudyScanDetail) =>
-  scan.runs[0] ? `/runs/${scan.runs[0].id}/live` : null;
+/** A scan's knee and group, as its row's second line. */
+export const scanMeta = (scan: StudyScanDetail) =>
+  [kneeOf(scan), scan.scan.group].filter((x): x is string => x !== null);
+
+/** Where a scan links: its newest run's review once completed, else its live page. */
+export const scanHref = (scan: StudyScanDetail) => (scan.runs[0] ? runHref(scan.runs[0]) : null);
 
 /**
  * Why a scan's run failed, in the researcher's words; the raw error stays on the run page. The
@@ -225,7 +222,7 @@ export function failureText(
 ): { what: string; why?: string } {
   const taskId = error?.match(/^([\w-]+): /)?.[1];
   const what =
-    taskId && workflow.taskIds.includes(taskId)
+    taskId && workflow.tasks.some((t) => t.id === taskId)
       ? `${subject}'s run stopped during ${workflow.taskTitle(taskId)}.`
       : `${subject}'s run stopped before it finished.`;
   return error?.includes("failed on a model provider error")

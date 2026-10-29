@@ -16,7 +16,7 @@ const router = createBrowserRouter([
   { path: "/dev/ui", element: <DevUiPage /> },
   {
     element: <SignedIn />,
-    children: [...runRoutes, ...studyRoutes, ...reviewRoutes, { path: "*", element: <NotFound /> }],
+    children: [...studyRoutes, ...runRoutes, ...reviewRoutes, { path: "*", element: <NotFound /> }],
   },
 ]);
 

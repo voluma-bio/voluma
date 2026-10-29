@@ -19,6 +19,7 @@
     "@voluma/ui": "workspace:*",
     "@voluma/viewer": "workspace:*",
     "@voluma/workflow": "workspace:*",
+    "fflate": "^0.8.3",
     "lucide-react": "catalog:",
     "radix-ui": "1.8.1",
     "react": "catalog:",

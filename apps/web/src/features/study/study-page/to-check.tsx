@@ -11,7 +11,7 @@ import type { StudyDetail, StudyScanDetail, ToCheckItem } from "@voluma/contract
 import { Button } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import { Link } from "react-router";
-import { checkKinds, type OpenChecks, runPath, scanMeta } from "./study-model";
+import { checkKinds, type OpenChecks, scanHref, scanMeta } from "./study-model";
 
 export function ToCheck({
   detail,
@@ -95,7 +95,7 @@ function CheckRow({
       }),
     onSettled: () => client.invalidateQueries({ queryKey: ["study"] }),
   });
-  const path = runPath(scan);
+  const path = scanHref(scan);
   return (
     <li className="grid grid-cols-[8rem_minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 border-b border-line-subtle py-2.5 max-[760px]:grid-cols-[minmax(0,1fr)_auto]">
       {path ? (

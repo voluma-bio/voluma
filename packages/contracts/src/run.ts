@@ -265,6 +265,14 @@ export const runSchema = z
     providerCalls: providerCallsSchema.optional(),
     /** Latest successfully completed results and their human review progress; null otherwise. */
     review: reviewSummarySchema.nullable(),
+    /**
+     * While the run is live (queued, running, awaiting keys): the tasks of its current plan
+     * that are finished (done or to check) out of all of them. Null before the plan is
+     * written and once the run has ended (its state and `review` say the rest).
+     */
+    tasks: z
+      .object({ done: z.number().int().nonnegative(), total: z.number().int().nonnegative() })
+      .nullable(),
   })
   .refine(
     (run) =>

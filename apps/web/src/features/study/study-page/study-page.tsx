@@ -15,6 +15,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ApiError, getStudy } from "@voluma/api-client";
 import type { StudyDetail } from "@voluma/contracts/study";
 import { Button, Tabs } from "@voluma/ui";
+import { formatUsd } from "@voluma/ui/run";
 import { type BundledWorkflow, catalog, workflowById } from "@voluma/workflow/bundled";
 import { ChevronDown } from "lucide-react";
 import { Popover } from "radix-ui";
@@ -22,7 +23,7 @@ import { useCallback } from "react";
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router";
 import { Overview } from "./overview";
 import { ScansTable } from "./scans-table";
-import { isLive, type OpenChecks, runPath, studyCounts, studySpend } from "./study-model";
+import { isLive, type OpenChecks, scanHref, studyCounts, studySpend } from "./study-model";
 import { ToCheck } from "./to-check";
 
 const TAB_IDS = ["overview", "check", "scans"] as const;
@@ -65,7 +66,7 @@ export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
 
   const detail = study.data;
   const only = detail.scans.length === 1 ? detail.scans[0] : undefined;
-  const onlyRun = only && runPath(only);
+  const onlyRun = only && scanHref(only);
   if (onlyRun) return <Navigate to={onlyRun} replace />;
 
   const workflow = workflowById(detail.study.workflowId);
@@ -190,7 +191,7 @@ function StudyDetails({ detail, workflow }: { detail: StudyDetail; workflow: Bun
   const rows: [string, string][] = [
     ["Workflow", workflow.name],
     ["Scans", String(detail.scans.length)],
-    ["Spent so far", `${usd(spent)}${budget === null ? "" : ` of ${usd(budget)}`}`],
+    ["Spent so far", `${formatUsd(spent)}${budget === null ? "" : ` of ${formatUsd(budget)}`}`],
     [
       "Started",
       new Date(detail.study.createdAt).toLocaleDateString(undefined, {
@@ -227,8 +228,6 @@ function StudyDetails({ detail, workflow }: { detail: StudyDetail; workflow: Bun
     </Popover.Root>
   );
 }
-
-const usd = (n: number) => `$${n.toFixed(2)}`;
 
 function Loading() {
   return (

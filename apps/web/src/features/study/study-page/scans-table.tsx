@@ -15,9 +15,10 @@ import {
   farFromGroup,
   groupNames,
   groupOf,
+  kneeOf,
   otherUnit,
   rangeText,
-  runPath,
+  scanHref,
   scanStatus,
   scanValue,
   unitOf,
@@ -80,14 +81,9 @@ export function ScansTable({
       cell: (s) => <span className="font-mono">{s.scan.subject}</span>,
     },
     {
-      key: "side",
+      key: "knee",
       header: "Knee",
-      cell: (s) =>
-        typeof s.scan.attributes.side === "string" ? (
-          s.scan.attributes.side
-        ) : (
-          <span className="text-fg-subtle">–</span>
-        ),
+      cell: (s) => kneeOf(s) ?? <span className="text-fg-subtle">–</span>,
     },
     { key: "status", header: "Status", cell: (s) => <ScanStatusCell detail={detail} scan={s} /> },
     ...valueColumns,
@@ -108,7 +104,7 @@ export function ScansTable({
           : undefined
       }
       onRowClick={(s) => {
-        const path = runPath(s);
+        const path = scanHref(s);
         if (path) navigate(path);
       }}
       className="[&_td]:align-middle [&_td]:whitespace-nowrap [&_th]:align-bottom [&_th]:whitespace-nowrap"
@@ -122,8 +118,14 @@ function ScanStatusCell({ detail, scan }: { detail: StudyDetail; scan: StudyScan
     mutationFn: () => startRun({ studyId: detail.study.id, inputId: scan.scan.inputId }),
     onSuccess: () => client.invalidateQueries({ queryKey: ["study"] }),
   });
-  const { label, tone } = scanStatus(scan);
-  if (scan.runs.length > 0) return <StatusBadge tone={tone}>{label}</StatusBadge>;
+  const { label, tone, progress } = scanStatus(scan);
+  if (scan.runs.length > 0)
+    return (
+      <span className="flex items-center gap-2">
+        <StatusBadge tone={tone}>{label}</StatusBadge>
+        {progress && <span className="text-meta text-fg-subtle tabular-nums">{progress}</span>}
+      </span>
+    );
   return (
     <span className="grid gap-1">
       <span className="flex items-center gap-2">

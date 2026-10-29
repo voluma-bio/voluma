@@ -18,10 +18,11 @@ import {
   farFromGroup,
   groupNames,
   groupOf,
+  kneeOf,
   type OpenChecks,
   otherUnit,
   rangeText,
-  runPath,
+  scanHref,
   scanStatus,
   scanValue,
   unitOf,
@@ -231,7 +232,7 @@ function NeedsYourEye({
   }
   for (const scan of detail.scans) {
     const run = scan.runs[0];
-    const path = runPath(scan);
+    const path = scanHref(scan);
     if (!run || !path) continue;
     if (run.state.status === "awaiting-keys")
       alerts.push(
@@ -354,18 +355,21 @@ function ScanTiles({ detail }: { detail: StudyDetail }) {
 }
 
 function ScanTile({ scan }: { scan: StudyScanDetail }) {
-  const { label, tone } = scanStatus(scan);
-  const side = scan.scan.attributes.side;
+  const { label, tone, progress } = scanStatus(scan);
+  const knee = kneeOf(scan);
   const body = (
     <>
       <span className="flex items-baseline justify-between gap-2">
         <span className="truncate font-mono text-ui">{scan.scan.subject}</span>
-        {typeof side === "string" && <span className="text-meta text-fg-subtle">{side}</span>}
+        {knee && <span className="text-meta text-fg-subtle">{knee}</span>}
       </span>
-      <StatusBadge tone={tone}>{label}</StatusBadge>
+      <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <StatusBadge tone={tone}>{label}</StatusBadge>
+        {progress && <span className="text-meta text-fg-subtle tabular-nums">{progress}</span>}
+      </span>
     </>
   );
-  const path = runPath(scan);
+  const path = scanHref(scan);
   const tile = "grid h-full gap-1.5 rounded-lg border border-border bg-card px-3 py-2";
   return path ? (
     <Link to={path} className={`${tile} hover:bg-accent`}>
