@@ -11,8 +11,8 @@ threads get the text. `lead.md` and `review-chat.md` are marked `status: planned
 validated, used by nothing yet. The main thread still runs on `MAIN_SYSTEM` in
 `packages/harness/src/main-thread.ts`, and has no tools and does not choose what runs; `lead.md`
 is the target (the main thread as a lead that owns the plan). Moving it onto these files, with the
-lead's tools, fix tasks and label versions, is Run lane work in `packages/harness` and
-`apps/runner`.
+lead's tools, fix tasks and label versions, is harness behaviour work in `packages/harness`
+and `apps/runner` (the run model, [#134](https://github.com/voluma-bio/voluma/issues/134)).
 
 A run snapshots the files with its workflow (`packages/workflow/src/load.ts`) and reads them from
 the snapshot, so a resumed thread gets the text it began with; a changed file reaches only threads
