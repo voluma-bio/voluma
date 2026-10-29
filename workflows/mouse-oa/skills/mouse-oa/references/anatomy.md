@@ -17,8 +17,8 @@ not proof of a wrong label. `anatomy.json` beside this file is the machine-reada
 
 ## Orienting the knee
 
-In `orient-joint` terms the reference object is the patella and bone A is the femur (the patella sits on it). The keyframe must
-cut femur, tibia and patella. A field of the bone ends only has no shaft, and a tibia cut to a short stub can fall under
+In `orient-joint` terms the reference object is the patella and bone A is the femur (the patella sits on it). The keyframe cuts
+femur and tibia through the joint, and the patella when it is in the field (`../examples/README.md`, orientation). A field of the bone ends only has no shaft, and a tibia cut to a short stub can fall under
 `--second-bone-frac`. When the notes put the patella outside the field, a piece taken for the reference object is something
 else (the fibula head, say): it is harmless to the cut but sets the side of the slice.
 

@@ -18,13 +18,13 @@ holds the label table, the expected volumes and pieces, and which labels must to
 
 `label_stats.py --ranges anatomy.json` flags, per label:
 
-| Flag | It means | Do |
+| Flag | It means | The correction |
 |---|---|---|
-| volume above range | the label took bone from a neighbour | a piece wholly the neighbour's: `relabel.py --to <neighbour>`; two bones joined at a contact: `classic_segment.py --within <label> --seeds`, one seed per connected piece of each part, the contact piece included |
-| volume below range | it lost bone to a neighbour that is above | fix the pair together |
-| `identity_unsupported` (far below range) | the box found a different piece, or a sliver | not that structure: remove the label (`relabel.py --to 0`) and look for the real one (section 2) |
-| extra pieces | bone that is not this structure | look at it on the 3D sheet; clear it so `unlabelled.py` finds it, or give it its own label when you can name it |
-| touches none of its required neighbours | the label is on the wrong bone, however good its volume | re-box or re-seed it on the right bone |
+| volume above range | the label took bone from a neighbour | a piece wholly the neighbour's goes to it (`relabel.py`); two bones joined at a contact are split (`classic_segment.py --within <label> --seeds`, one seed per connected piece of each part, the contact piece included) |
+| volume below range | it lost bone to a neighbour that is above | the pair is corrected together |
+| `identity_unsupported` (far below range) | the box found a different piece, or a sliver | not that structure: the label is removed (`relabel.py --to 0`) and the real one looked for (section 2) |
+| extra pieces | bone that is not this structure | seen on the 3D sheet; cleared so `unlabelled.py` finds it, or given its own label when it can be named |
+| touches none of its required neighbours | the label is on the wrong bone, however good its volume | re-boxed or re-seeded on the right bone |
 
 Pieces under `--min-piece-mm3` are specks, not pieces: a clipped SAM label carries hundreds. The ranges come from
 one scan, so a value just outside is a question, not an error. On the quad view, each joint face's boundary should
@@ -34,12 +34,12 @@ candidate small structure or other anatomy (one touching the scan border is usua
 ## 2. Find, name, or declare absent
 
 Small structures (sesamoids, ossicles, fragments) decide measurements, and one merged into a big bone inflates it.
-For each candidate from `unlabelled.py` or piece `label_stats.py` flags: render its crop sheet (`render_crops.py`),
-name it from the anatomy table or call it unknown, and label it (`relabel.py`, or a small-structure SAM request,
-`sam-segmentation`). A structure in two pieces is two components, each labelled. One you cannot name stays
-unlabelled, with a To check item asking what it is: a model's name for it is a guess.
+A finished labels volume accounts for each candidate from `unlabelled.py` and each piece `label_stats.py` flags:
+seen on its crop sheet (`render_crops.py`), named from the anatomy table and labelled (`relabel.py`, or a
+small-structure SAM request, `sam-segmentation`), or left unlabelled with a To check item asking what it is. A
+structure in two pieces is two components, each labelled. A model's name for a piece is a guess.
 
-Read `/outputs/intake/scan-notes.md` before you name anything. A structure is **absent** when the notes put it
+The scan's notes come before any naming. A structure is **absent** when the notes put it
 outside the field or cut off (overrule them only with a render you cite), or when no candidate sits where the
 anatomy puts it after you looked; write the structure and the reason in the checkpoint. Its outputs: `null` with the
 reason when nothing could be measured (outside the field, cut off); `0` with a note when its region is in the field
