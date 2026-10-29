@@ -1,7 +1,8 @@
 /**
  * The live run page's run-level data, derived with no React from the run's events and state:
  * the threads (main, workers, checkers) with what each is doing now, the attention list, the
- * plan, where each task stands, and what the run spent. Transcripts are in `transcript.ts`.
+ * plan, where each task stands and how it ended, the values reported so far, and what the run
+ * spent. Transcripts are in `transcript.ts`.
  */
 import type { RunEvent } from "@voluma/contracts/events";
 import type { Folded, FoldedTask } from "@voluma/contracts/fold";
@@ -9,7 +10,7 @@ import type { RunState } from "@voluma/contracts/run";
 import { type RunSpend, type Spend, spend } from "@voluma/contracts/spend";
 import type { WorkflowPlan } from "@voluma/contracts/workflow";
 import { type Halt, type Live, toolTitle } from "./transcript";
-import { taskTitle } from "./workflows";
+import { outputName, taskTitle } from "./workflows";
 
 /** `paused`: open while the run waits for a runner or keys; it resumes with a `thread.started`. */
 export type ThreadStatus = "running" | "paused" | "completed" | "failed" | "cancelled";
@@ -242,7 +243,7 @@ const planOf = (events: RunEvent[]): WorkflowPlan | undefined => {
 };
 
 /** The newest thread working on each task: the one a task row opens. */
-export function latestThreadByTask(threads: Thread[]): Map<string, Thread> {
+function latestThreadByTask(threads: Thread[]): Map<string, Thread> {
   const byTask = new Map<string, Thread>();
   for (const t of threads) if (t.taskId) byTask.set(t.taskId, t);
   return byTask;
@@ -272,15 +273,14 @@ export type TaskState =
 function taskStates(
   plan: WorkflowPlan,
   tasks: FoldedTask[],
-  threads: Thread[],
+  /** As logged, before `halted`: a worker the halt cut off still counts as working, then stopped. */
+  logged: Thread[],
   halt: Halt | undefined,
 ): Map<string, TaskState> {
   const statuses = new Map(tasks.map((t) => [t.id, t.status]));
   const working = new Set(
-    threads.flatMap((t) =>
-      t.kind === "worker" && (t.status === "running" || t.status === "paused") && t.taskId
-        ? [t.taskId]
-        : [],
+    logged.flatMap((t) =>
+      t.kind === "worker" && t.status === "running" && t.taskId ? [t.taskId] : [],
     ),
   );
   const states = new Map<string, TaskState>();
@@ -310,12 +310,124 @@ function taskStates(
   return states;
 }
 
+/** A task's row in the Tasks list, in plan order. */
+export type TaskRow = {
+  id: string;
+  state: TaskState;
+  /** Its newest thread: the row opens it, and a working row shows its clock. */
+  thread?: Thread;
+  /** How it ended, once it has (`outcomes`). */
+  outcome?: string;
+  /** Its worker, check and any redo together, once it has spent anything. */
+  spend?: Spend;
+};
+
+const ENDED: ReadonlySet<TaskState> = new Set(["done", "to-check", "failed", "stopped"]);
+
+/**
+ * Each ended task's outcome line: its current attempt's last checkpoint from the worker (the
+ * result in the worker's words, with its numbers), else the checker's; a failed task says why it
+ * failed. Not the main thread's wake note, which is the whole notes block for every task so far,
+ * nor the closing `task` reason, a rule's stock sentence ("The second agent checked this task and
+ * agrees"); a judgment's reason is about the check, not the result.
+ */
+function outcomes(
+  events: RunEvent[],
+  tasks: FoldedTask[],
+  states: Map<string, TaskState>,
+  latest: Map<string, Thread>,
+): Map<string, string> {
+  const byAttempt = new Map(tasks.map((t) => [t.attemptId, t]));
+  const worker = new Map<string, string>();
+  const checker = new Map<string, string>();
+  for (const e of events) {
+    if (e.type !== "checkpoint") continue;
+    const t = byAttempt.get(e.payload.attemptId);
+    if (t) (e.threadId === t.threads.worker ? worker : checker).set(t.id, e.payload.text);
+  }
+  const lines = new Map<string, string>();
+  for (const t of tasks) {
+    const state = states.get(t.id);
+    if (!state || !ENDED.has(state)) continue;
+    const line =
+      state === "failed"
+        ? (t.reason ?? latest.get(t.id)?.error)
+        : (worker.get(t.id) ?? checker.get(t.id));
+    if (line) lines.set(t.id, line);
+  }
+  return lines;
+}
+
+/** One reported value in "Outputs so far". */
+export type OutputRow = {
+  /** `taskId/outputId`. */
+  id: string;
+  title: string;
+  /** "4.93 mm³", a score's level; null when there is none. */
+  value: string | null;
+  /** Why there is no value: the worker's note, or that the task ended without reporting it. */
+  reason?: string;
+};
+
+const SUPERSCRIPT: Record<string, string> = { "^2": "²", "^3": "³", "^-1": "⁻¹" };
+
+/** Three significant digits (whole numbers from 1,000), then the unit: "4.93 mm³", "67.3%", "3.63". */
+export function formatValue(value: number, unit: string): string {
+  const n = new Intl.NumberFormat("en-US", {
+    ...(Math.abs(value) >= 1000 ? { maximumFractionDigits: 0 } : { maximumSignificantDigits: 3 }),
+  }).format(value);
+  if (unit === "1" || unit === "") return n;
+  if (unit === "%") return `${n}%`;
+  return `${n} ${unit.replace(/\^-?\d/g, (p) => SUPERSCRIPT[p] ?? p)}`;
+}
+
+/**
+ * The values reported so far, by task in plan order: each measurement and score of the task's
+ * current attempt (files, volumes, structures and annotations carry no value to read here; the
+ * review shows them), then, once the task has finished (done, to check or failed), each required
+ * one it never reported.
+ */
+function outputRows(
+  plan: WorkflowPlan,
+  tasks: FoldedTask[],
+  states: Map<string, TaskState>,
+): OutputRow[] {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  return plan.tasks.flatMap((p) => {
+    const t = byId.get(p.id);
+    if (!t) return [];
+    const rows: OutputRow[] = [
+      ...t.measurements.map((m) => ({
+        id: m.id,
+        title: m.title ?? m.id,
+        value: m.value === null ? null : formatValue(m.value, m.unit),
+        ...(m.value === null && { reason: m.note ?? "No value given" }),
+      })),
+      ...t.scores.map((s) => ({ id: s.id, title: s.title ?? s.id, value: s.level })),
+    ];
+    // A stopped task's row says so; only a task that finished its work left an output out.
+    const state = states.get(p.id);
+    if (state === "done" || state === "to-check" || state === "failed")
+      for (const d of p.outputs)
+        if ((d.kind === "measurement" || d.kind === "score") && t.missingRequired.includes(d.id))
+          rows.push({
+            id: `${p.id}/${d.id}`,
+            title: outputName(d.id),
+            value: null,
+            reason: "Not reported",
+          });
+    return rows;
+  });
+}
+
 export type RunView = {
   /** Without the tool calls still being written: `withLiveCalls` adds those per frame. */
   threads: Thread[];
   attention: Attention[];
   plan?: WorkflowPlan;
-  states: Map<string, TaskState>;
+  /** One per plan task, in plan order; empty until the run has a plan. */
+  tasks: TaskRow[];
+  outputs: OutputRow[];
   /** "3 of 7 finished, 1 to check". */
   progress: string;
   /** Cost and time per task, for the main thread and in total. */
@@ -327,40 +439,30 @@ export function runView(events: RunEvent[], folded: Folded, halt: Halt | undefin
   const logged = threadsOf(events);
   const threads = halt ? halted(logged.threads, logged.lastAt, halt) : logged.threads;
   const plan = planOf(events);
-  const states = plan ? taskStates(plan, folded.tasks, threads, halt) : new Map();
+  const attention = attentionOf(folded.tasks, logged.threads, events);
+  const spent = spend(events);
+  if (!plan) return { threads, attention, tasks: [], outputs: [], progress: "", spend: spent };
+  const states = taskStates(plan, folded.tasks, logged.threads, halt);
+  const latest = latestThreadByTask(threads);
+  const lines = outcomes(events, folded.tasks, states, latest);
+  const taskSpend = new Map(spent.tasks.map((t) => [t.taskId, t.spend]));
+  const tasks = plan.tasks.map((t) => ({
+    id: t.id,
+    state: states.get(t.id) ?? "waiting",
+    thread: latest.get(t.id),
+    outcome: lines.get(t.id),
+    spend: taskSpend.get(t.id),
+  }));
   // To check is finished too: the work is done and a person has items to look at.
-  const done = [...states.values()].filter((s) => s === "done" || s === "to-check").length;
-  const toCheck = [...states.values()].filter((s) => s === "to-check").length;
+  const done = tasks.filter((t) => t.state === "done" || t.state === "to-check").length;
+  const toCheck = tasks.filter((t) => t.state === "to-check").length;
   return {
     threads,
-    attention: attentionOf(folded.tasks, logged.threads, events),
+    attention,
     plan,
-    states,
-    progress: plan
-      ? `${done} of ${plan.tasks.length} finished${toCheck > 0 ? `, ${toCheck} to check` : ""}`
-      : "",
-    spend: spend(events),
+    tasks,
+    outputs: outputRows(plan, folded.tasks, states),
+    progress: `${done} of ${tasks.length} finished${toCheck > 0 ? `, ${toCheck} to check` : ""}`,
+    spend: spent,
   };
-}
-
-export type GraphNode = { id: string; level: number; row: number; dependsOn: string[] };
-
-/** Plan tasks placed in columns by dependency depth, rows in plan order. */
-export function layoutPlan(plan: WorkflowPlan): GraphNode[] {
-  const level = new Map<string, number>();
-  const depth = (id: string): number => {
-    const known = level.get(id);
-    if (known !== undefined) return known;
-    const task = plan.tasks.find((t) => t.id === id);
-    const d = task && task.dependsOn.length > 0 ? 1 + Math.max(...task.dependsOn.map(depth)) : 0;
-    level.set(id, d);
-    return d;
-  };
-  const rows = new Map<number, number>();
-  return plan.tasks.map((t) => {
-    const l = depth(t.id);
-    const row = rows.get(l) ?? 0;
-    rows.set(l, row + 1);
-    return { id: t.id, level: l, row, dependsOn: t.dependsOn };
-  });
 }

@@ -41,6 +41,11 @@ export const OUTPUT_GROUPS: OutputGroup[] = (() => {
 
 export const ALL_OUTPUT_IDS = outputs.map((o) => o.id);
 
+const outputNames = new Map(outputs.map((o) => [o.id, o.name]));
+
+/** An output's name in the workflow; one it doesn't list shows its id. */
+export const outputName = (id: string) => outputNames.get(id) ?? id;
+
 /** The workflow's display name for a run's pin; an unknown path shows its directory name. */
 export function workflowName(path: string | undefined): string {
   if (path === WORKFLOW.path) return WORKFLOW.name;
