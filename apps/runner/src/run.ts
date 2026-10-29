@@ -39,6 +39,7 @@ import { createModalSandbox, RUNS_APP, terminateClaim } from "./modal-sandbox.ts
 import type { ModelFallback } from "./model-fallback.ts";
 import { retryTransient } from "./model-retry.ts";
 import { checkPrompt, checkSystem, workerPrompt, workerSystem } from "./prompts.ts";
+import { isProviderError } from "./provider-error.ts";
 import { r2Evidence } from "./r2-evidence.ts";
 import { r2Files } from "./r2-files.ts";
 import { r2Workflows } from "./r2-workflows.ts";
@@ -287,6 +288,7 @@ export async function runClaim(
       plan: computed.tasks,
       selectedOutputs: run.selectedOutputs,
       notes: run.notes,
+      providerError: isProviderError,
       workflow: definition.files,
       // The commit the files came from: the snapshot's, which a resume keeps.
       workflows: run.workflows.map((pin) => ({ ...pin, commit: definition.commit })),

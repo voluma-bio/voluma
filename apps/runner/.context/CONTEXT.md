@@ -68,6 +68,15 @@ logged with its role and attempt and reported to the fallback breaker. The run's
 wait. Any other error, or the spent budget, ends the call. A main-thread wake is also bounded
 by the supervisor's `wakeTimeoutMs`. Anthropic errors carry no status in their text, so they
 are not retried. `provider-error.ts` holds the error classification.
+
+**A worker or check that dies on a provider error** (`provider-error.ts`, after the retries above
+gave up) is started again by the supervisor with no main-thread call, since the main thread uses
+the same provider: a worker's task on a fresh thread (a code-made `redo` judgment, arm
+`code:provider-error`), a check as a new check. Twice per task and role; the third failure fails
+the run, with the error in `state.error`, instead of leaving it `completed` with tasks that never
+started. A main-thread call that fails is recorded as that call's error in the `wake` and in the
+judgment's reason.
+
 Cost is Pi's per-reply price, summed per claim; the log prints it
 when a claim reports (`model cost this claim`), and the API stores it as `runs.model_cost_usd`.
 On 2026-10-28 the claims' lines summed to the run's `model_cost_usd` and to `spend(events).total`
