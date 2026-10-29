@@ -1,13 +1,15 @@
 """Find bone no label covers: candidate small structures (sesamoids, mineralizations, fragments) for you to name.
 
-  python unlabelled.py --hu hu.npy --labels labels.npy --out cand.npy --threshold-hu <T> [--min-mm3 0.01] [--rim-mm 0.02]
+Candidates are the 26-connected pieces of (bone at or above `--threshold-hu`, with no label within `--rim-mm` of it) at
+least `--min-mm3` big. The rim keeps the partial-volume skin around a labelled bone from joining them into one piece. Open
+each candidate with `render_crops.py --component-at <centre>`, name it from the anatomy reference, then label it
+(`relabel.py`) or raise a To check item.
 
-Candidates are the 26-connected pieces of (bone >= threshold, with no label within `--rim-mm` of it) at least `--min-mm3`
-big. The rim keeps the partial-volume skin around a labelled bone from joining them into one piece. Writes `--out`, a uint16
-volume where each candidate has an id (1 = largest), with its sidecar, and prints the list. Open each one with
-`render_crops.py --component-at <centre>`, name it from the anatomy reference, then label it (`relabel.py`) or raise a To check item.
+Writes: <out>  uint16 volume on the grid of --labels, each candidate its id (1 = largest), with its sidecar
+Prints: one JSON line {candidates, count, top}; top is the 12 largest, each {id, voxels, volume_mm3, centre_zyx, bbox_zyx}
+Example: python unlabelled.py --hu hu.npy --labels labels.npy --out cand.npy --threshold-hu 2500
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
-import argparse
 import sys
 from pathlib import Path
 
@@ -28,13 +30,13 @@ except ModuleNotFoundError as e:
 
 
 if __name__ == '__main__':
-    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--hu', required=True)
-    ap.add_argument('--labels', required=True)
-    ap.add_argument('--out', required=True)
-    ap.add_argument('--threshold-hu', type=float, required=True)
-    ap.add_argument('--min-mm3', type=float, default=0.01)
-    ap.add_argument('--rim-mm', type=float, default=0.02)
+    ap = sidecar.parser(__doc__)
+    ap.add_argument('--hu', required=True, help='hu.npy of the scan')
+    ap.add_argument('--labels', required=True, help='label volume .npy on the scan grid, with its sidecar beside it')
+    ap.add_argument('--out', required=True, help='candidate volume .npy to write')
+    ap.add_argument('--threshold-hu', type=float, required=True, help='HU: voxels at or above this are bone')
+    ap.add_argument('--min-mm3', type=float, default=0.01, help='mm3: smallest candidate kept')
+    ap.add_argument('--rim-mm', type=float, default=0.02, help='mm: bone this close to any label is not a candidate (at least 1 voxel)')
     a = ap.parse_args()
     hu = np.load(a.hu, mmap_mode='r')
     labels = np.load(a.labels, mmap_mode='r')
