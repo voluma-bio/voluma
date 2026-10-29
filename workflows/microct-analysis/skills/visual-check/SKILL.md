@@ -15,7 +15,7 @@ what you saw.
 ## Pick the view for the question
 
 All renderers are in `<this skill>/resources/`, take paths, write one JPEG and print a JSON line with its path. Every image is at most 2000 px
-a side and 1 MiB (the `view_image` limit); a 6-view 3D sheet of OA6-1RK is about 190 KB.
+a side and 1 MiB (the `view_image` limit).
 
 | Question | View | Resource |
 |---|---|---|
@@ -27,7 +27,7 @@ a side and 1 MiB (the `view_image` limit); a 6-view 3D sheet of OA6-1RK is about
 | Which segmentation is right here? | Disagreement panel: CT, your labels and the classic labels side by side, disagreeing voxels filled | `segmentation-check`: `disagree.py` |
 
 Open up to four images in one `view_image` call: for example, two quad views to compare before and after. **Only the images of your last two `view_image` calls stay visible**; older ones are a line of text. To compare before and after a fix, open both in one call. Pass `--names
-<the anatomy reference's anatomy.json>` (or `1=femur,2=tibia`) to name every label in the legend, and `--window lo,hi` (the workflow's anatomy reference gives the HU window; a negative low end works as is: `--window -500,6000`) to make bone
+<the anatomy reference's anatomy.json>` (or `1=name,2=name`) to name every label in the legend, and `--window lo,hi` (the workflow's anatomy reference gives the HU window; a negative low end works as is: `--window -500,6000`) to make bone
 readable.
 
 **Coordinates on a slice image (`render_slices`, `render_crops`):** x is the column (numbers along the top), y is the row (numbers down the left), both in
@@ -47,7 +47,7 @@ inputs, which may be read-only). The first call builds surfaces (tens of seconds
 ```
 Q=<this skill>/resources/quad_view.py
 python $Q --hu hu.npy --labels labels.npy --names anatomy.json --out v/1.jpg                    # first look
-python $Q --from v/1.view.json --center tibia --zoom 3 --out v/2.jpg                            # look closely at a label, a point or z,y,x
+python $Q --from v/1.view.json --center <label name> --zoom 3 --out v/2.jpg                            # look closely at a label, a point or z,y,x
 python $Q --from v/2.view.json --move axis0+10 --out v/3.jpg                                    # step 10 slices along scan axis 0
 python $Q --from v/3.view.json --rotate 60,0 --out v/4.jpg                                      # turn the 3D camera (azimuth, elevation)
 python $Q --from v/4.view.json --points shaft=pts.json --ruler a,b --plane 1:contains=a,b --out v/5.jpg   # reslice side-on along a bone
@@ -67,38 +67,29 @@ python $Q --from v/5.view.json --frame f.json --mask roi=roi.npy --face plate=fa
 
 ## What your eyes are good for
 
-These rules come from 16 model calls on one scan (OA6-1RK, 2026-10-28; `design/microct-skillset.md`, "What the model's
-eyes can do"). Every result is n=1 on one scan: treat the rules as defaults, and say when a look contradicts one.
+These rules are defaults from a small test on one scan: say when a look contradicts one.
 
-- **Code checks gate, and your eyes confirm.** Component counts, volume ranges and unlabelled pieces run first
-  (`segmentation-check`); then look at what they flag, plus the 3D sheet. Looking alone missed a subtle error in 2D.
-- **The 3D sheet is your best check.** It caught a tibia label covering the fibula, and small fragments merged into
-  the femur, in every case tried (4 of 4). Look at it after every change to the labels.
-- **2D overlays catch gross errors and can miss small ones.** A leak across the joint and an unlabelled patella were
-  caught (2 of 3 overlay tests). A small fragment carrying the wrong label was reported as "unlabelled", at the wrong
-  place (about 150 px off) by one of the two models tested. When an overlay shows something small, check it in code
-  (`label_stats.py`, or the label value at that voxel) before acting.
-- **Name bones only on the keyframe through the joint, or on the 3D sheet.** On a single slice away from the joint, the
-  tibia was called the femur and the fibula the tibia (both models). When you need a bone's identity elsewhere, follow
-  its label or component from the keyframe. Do not rename it from the new slice.
-- **Coordinates you read off an image are approximate.** Boxes read by eye were off by up to ~55 px at the joint on a
-  928 px slice (one model; the other was within 5 px on big bones and worse on the patella). Draw boxes and picks
-  roughly, let the snapping resource fit them to the bone (`snap_boxes.py`, `pick.py`), and look at the snapped result.
-- **Never estimate an angle, a length or a volume by eye.** Flexion read off renders came out 10-38 degrees against a
-  measured 64. Measure in code, then look to confirm that the measured thing is the right thing. (The renders were not
-  true lateral views, so this partly measures projection; the rule stands.)
-- **Prefer stills to video.** A model once described a bone rotating into view in a video whose frames were
-  identical. Take a model's account of what changed across frames as unverified. The sheet shows the same views and is
-  also the evidence the reviewer sees.
-- **A model's name for a small structure is a guess.** In the evidence run, one model called a small posterior piece a fabella on every
-  overlay and the other on the keyframe. That is unconfirmed (see the anatomy reference): name what the data and the protocol
-  support, and ask for the rest.
+- **Run the code checks first** (`segmentation-check`), then look at what they flag, plus the 3D sheet.
+- **The 3D sheet is your best check.** It catches a label covering a neighbouring bone and small fragments merged into a big
+  bone. Look at it after every change to the labels.
+- **2D overlays catch gross errors and can miss small ones**, and can report a small fragment at the wrong place. When an
+  overlay shows something small, check it in code (`label_stats.py`, or the label value at that voxel) before acting.
+- **Name bones only on the keyframe through the joint, or on the 3D sheet.** On a single slice away from the joint, bones get
+  swapped. When you need a bone's identity elsewhere, follow its label or component from the keyframe. Do not rename it from
+  the new slice.
+- **Coordinates you read off an image are approximate**, by tens of pixels at the joint. Draw boxes and picks roughly, let the
+  snapping resource fit them to the bone (`snap_boxes.py`, `pick.py`), and look at the snapped result.
+- **Never estimate an angle, a length or a volume by eye.** Measure in code, then look to confirm that the measured thing is
+  the right thing.
+- **Prefer stills to video.** A model's account of what changed across frames is unverified. The sheet shows the same views and
+  is also the evidence the reviewer sees.
+- **A model's name for a small structure is a guess:** name what the data and the protocol support, and ask for the rest.
 
 ## How to look
 
 1. Before you open the image, write down what you expect to see and what would mean failure.
-2. Open it. Describe what you see in terms of anatomy ("the red label continues below the
-   femoral condyle onto the tibial plateau, around x 300-420, y 480-560"), not colours alone.
+2. Open it. Describe what you see in terms of anatomy ("the red label continues past the
+   joint line onto the other bone, around x 300-420, y 480-560"), not colours alone.
 3. Decide: accept, fix and look again, or raise a To check item (see `segmentation-check`). Say which in your
    checkpoint, with the image as evidence.
 4. Once you have fixed a problem, render the same view again and look again before you move on.

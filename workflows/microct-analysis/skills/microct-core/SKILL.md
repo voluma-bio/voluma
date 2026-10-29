@@ -7,9 +7,6 @@ description: >
 
 # Micro-CT core
 
-A researcher will trust a number only if they can trace it to the scan. Work so every
-number you report can be traced.
-
 ## Files and grids
 
 - The **scan grid** is the truth: the HU volume from `scan-intake` (`hu.npy`), with its spacing in mm from
@@ -17,7 +14,7 @@ number you report can be traced.
   mapped back to the scan grid before you measure.
 - Arrays are `.npy`, axes in Z,Y,X order. The scripts take paths and write paths. Do not load a volume
   just to print it: tool output is your context.
-- A **frame** is a rigid, resampled copy of the scan grid with its own `grid_id` (the oriented stack, the aligned tibia grid). Its
+- A **frame** is a rigid, resampled copy of the scan grid with its own `grid_id` (the oriented stack, an aligned bone grid). Its
   `frame.json` has `parent_grid_id`, `grid_id`, `R_zyx`, `origin_zyx`, `shape`, `spacing_zyx_mm` and
   `affine_xyz_to_world_mm` (the frame's own placement in world mm, in `hu.json`'s convention; `frame.make` composes it from the
   scan's affine and refuses a frame that is not a rotation times the voxel size); scan index `x` and frame index `p`
@@ -32,8 +29,9 @@ number you report can be traced.
 - Put what you report in `/outputs/<task>/`, and working files in `/scratch/`. Anything else
   is lost if the sandbox restarts. The names later tasks look for: `hu.npy`, `hu.json` and `scan-notes.md` (intake: what the
   researcher's notes say is in the field, what is absent, and other facts such as a measurement threshold), `frame.json`,
-  `oriented.npy` and `keyframe.jpg` (orient), `labels.npy` (the final labels, **on the scan grid only**; SAM's output on the
-  oriented stack is `labels_oriented.npy`), `qc/*.jpg` (every check).
+  `oriented.npy` and `keyframe.jpg` (orient), `labels.npy` (the final labels, **on the scan grid only**), `qc/*.jpg` (every
+  check). An array on the oriented stack has `oriented` in its name (`labels_big_oriented.npy`, `small_oriented.npy`); one
+  without it is on the scan grid.
 
 ## Running a resource
 
@@ -53,20 +51,19 @@ The prompt lists each skill with its directory. A resource is a script in that d
 
 ## Reporting
 
-- Report each declared output with `report_output`. Attach as evidence the files it came
-  from and the QC image that shows it.
+- Attach as evidence the files a value came from and the QC image that shows it.
 - A structure that is absent gets `null` or `0` with a note, never the nearest look-alike (`segmentation-check`, section 2).
 - Measurements carry units, a definition, and the structures they were measured on.
 - A value outside the plan's range is still reported. Say why in the checkpoint.
-- Never adjust a number after the fact to match an expectation. If the result looks wrong,
-  find the cause in the data or the method.
+- Never adjust a number to match an expectation. A result that looks wrong has its cause in the data, the mask, the
+  threshold or the method.
 
 ## Render, look, decide
 
 Before you accept any segmentation, frame, region or landmark, render it and look at it
 (`visual-check`). Geometry comes from code: axes, boxes, angles, distances, volumes.
 Judgment comes from looking: which bone, whether a boundary is right, whether a thing
-belongs. Do not swap the two.
+belongs.
 
 ## Read the scan's notes before you name anything
 
@@ -79,31 +76,18 @@ outranks your expectation of the anatomy; the CT can overrule it only with evide
 A To check item is how you ask the researcher. Raise one when the data cannot settle a
 choice that changes a number: a disagreement region you could not resolve, an unnamed
 structure, a boundary the protocol leaves open. Point it at the region (`focus`), and
-say what you chose meanwhile. Do not raise one for a choice you could settle by looking
-harder. Do not name a structure the data, the scan's notes and the anatomy reference do not
-support (`segmentation-check`, section 2, says when to remove a label, call it absent, and ask).
+say what you chose meanwhile. A choice you could settle by looking harder is not one.
+`segmentation-check`, section 2, says when a structure is unnamed or absent.
 
 ## Two thresholds
 
 - **Segmentation threshold:** builds masks (orientation, box snapping, clipping to bone, candidates). The workflow's anatomy
   reference gives it, and each script takes it as `--threshold-hu`.
 - **Measurement threshold:** decides bone volume. It is the lab's 2.16/cm converted to this scan's HU from the calibration block
-  in `hu.json` (about 2460 HU on OA6-1RK), and the measurement scripts compute it themselves; a flag overrides it. BV is always
-  the region and HU above the threshold, never gated by a label; BV/TV is in %. The protocol's threshold wins whenever the
-  calibration exists; a different value in `scan-notes.md` is reported beside the measurement, not used. When there is no
-  calibration (the scripts stop asking for `--threshold`), use the threshold the notes give, name them as its source, and
-  raise a To check item.
-
-## Skills in this package
-
-- `scan-intake`: turns the DICOM series into the HU volume and its header.
-- `orient-joint`: the coarse frame and keyframe for a joint between two long bones; moving labels, points and pieces between
-  grids.
-- `sam-segmentation`: running `segment_sam`, including the small-structure request.
-- `segmentation-check`: owning the labels, and checking a finished task.
-- `regions-and-landmarks`: regions and landmarks SAM cannot make, and the Amira hand-off for points.
-- `bone-morphometry`: how each measurement is defined and computed.
-- `visual-check`: rendering and looking.
+  in `hu.json`, and the measurement scripts compute it themselves; a flag overrides it. BV is always the region and HU above
+  the threshold, never gated by a label; BV/TV is in %. The protocol's threshold wins whenever the calibration exists; a
+  different value in `scan-notes.md` is reported beside the measurement, not used. When `hu.json` has no calibration the
+  scripts fail until you pass `--threshold`: use the threshold the notes give, name them as its source, and raise a To check item.
 
 The workflow's own references (the anatomy and the protocol) say what to look for in this animal. Read a reference when its
 step comes up, not all at the start.

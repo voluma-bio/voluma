@@ -1,7 +1,7 @@
 """Tibial secondary ossification centre (IIOC, ROI-1): the tissue region, heights, width and plate columns.
 
   python iioc.py --hu-aligned tibia-hu.npy --mask tibia-mask.npy --frame tibia-frame.json
-         --hu-json hu.json --annotations annotations.json --out <dir> [--threshold HU] [--gp-shift-voxels 0]
+         --hu-json hu.json --annotations annotations.json --out <dir> [--threshold HU] [--gp-shift-mm 0]
 
 ROI-1 is the tibial bone between the articular surface and the proximal face of the growth plate (growth-plate
 band and metaphysis excluded; marrow and cortical shell included), cut along growth-plate curves the agent traced
@@ -146,10 +146,10 @@ def main():
     ap.add_argument('--out', required=True)
     ap.add_argument('--threshold', type=float, help='bone threshold in HU (default: the lab threshold, 2.16/cm, from --hu-json)')
     ap.add_argument(
-        '--gp-shift-voxels',
+        '--gp-shift-mm',
         type=float,
         default=0.0,
-        help='move the traced growth-plate face by this many voxels (+ = toward the shaft): sensitivity run',
+        help='move the traced growth-plate face by this many mm (+ = toward the shaft): sensitivity run',
     )
     a = ap.parse_args()
     frame = fr.load(a.frame)
@@ -163,7 +163,7 @@ def main():
         sidecar.fail('the frame was made on another scan grid than hu.json: rerun tibia_frame.py on this scan')
     gp_spec = need(ann, 'growth_plate_curves', 'trace the proximal face of the growth plate')
     gp, gp_traced = traced_surface(gp_spec, 'growth_plate_curves', h.shape)
-    gp = gp + a.gp_shift_voxels
+    gp = gp + a.gp_shift_mm / vox
     v_traced = sorted(int(k) for k in gp_spec['slices'])
     gp_traced = gp_traced & (np.arange(gp.shape[0])[:, None] >= v_traced[0]) & (np.arange(gp.shape[0])[:, None] <= v_traced[-1])
     env = envelope(tib, gp)
@@ -296,7 +296,7 @@ def main():
     meta = {
         'removed_disconnected_voxels': removed,
         'threshold_hu': a.threshold,
-        'gp_shift_voxels': a.gp_shift_voxels,
+        'gp_shift_mm': a.gp_shift_mm,
         'height_section_v': v_star,
         'growth_plate_mid_u': u_mid,
         'grid_id': frame['grid_id'],
@@ -304,7 +304,7 @@ def main():
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     inputs = [a.hu_aligned, a.mask, a.frame, a.annotations]
-    params = {'threshold': a.threshold, 'gp_shift_voxels': a.gp_shift_voxels}
+    params = {'threshold': a.threshold, 'gp_shift_mm': a.gp_shift_mm}
     arrays = {
         'iioc-tissue.npy': roi,
         'growth-plate-proximal-face.npy': gp.astype(np.float32),

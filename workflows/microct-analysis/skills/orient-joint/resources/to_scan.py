@@ -1,6 +1,6 @@
 """Map a labels stack made on the oriented grid back to the scan grid (nearest neighbour), so measurements use the scan.
 
-  python to_scan.py --in labels_oriented.npy --frame frame.json --header hu.json --out labels.npy
+  python to_scan.py --in labels_big_oriented.npy --frame frame.json --header hu.json --out labels_big.npy
 """
 import argparse
 import json

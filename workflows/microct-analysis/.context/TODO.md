@@ -13,8 +13,7 @@ From the structural review of PR #62 (`review-pr62` p231, structure) and the cor
 - **Fold the other slice renderers into `quad_view` (left from the quad-view PR).** Boxes as a layer would let `render_slices` (`--boxes`, `--points`; `orient_joint.py` imports its `render()`) and `render_crops` go, with `sam-segmentation` taking its keyframe from a quad pane. The 6-view sheet stays (4 of 4 catches). Also open: `quad_view` draws a point's name in 3D even where the surface hides it; a new mask's surface costs ~9 s cold (marching cubes and smoothing on the aligned grid), later calls reuse the cache.
 - **One `--anatomy` profile (p231 M1).** `references/anatomy.json` holds label names, `window_hu` and `segmentation_threshold_hu`, but the
   generic scripts take them as flags: `--names 1=femur,...` (`quad_view`, `render_surfaces`), `--window` in five scripts, the required
-  `--threshold-hu` in five. Speck size is 0.01 mm³ in `unlabelled` and `label_stats` and 0.005 in `disagree`; `orient_joint`'s default
-  lengths are a mouse's. The mouse QC figures bypass `viewlib` and hard-code windows (`vmin=0, vmax=5000` in `iioc`, `metaphysis_roi`,
+  `--threshold-hu` in five. Speck size is 0.01 mm³ in `unlabelled` and `label_stats` and 0.005 in `disagree`; `orient_joint`'s lengths are now required flags (the anatomy reference gives them). The mouse QC figures bypass `viewlib` and hard-code windows (`vmin=0, vmax=5000` in `iioc`, `metaphysis_roi`,
   `tibial_trabecular`; -500..6000 in `tibia_frame`). Direction: one `--anatomy` argument read through a `sidecar` helper supplies these
   defaults (flags only override), so a rat knee needs one new `anatomy.json`; `label_stats --ranges` already reads this file; route the mouse
   QC figures through `viewlib`.
@@ -38,3 +37,9 @@ From the structural review of PR #62 (`review-pr62` p231, structure) and the cor
 - `sidecar.py:78-80`: read the calibration after the `if not header: fail`, drop the ternary.
 - `annotations.json` mixes point orders: curves are `[w, u]`, `width_points_uvw` and
   `plate_patches` are `[u, v, w]`. Documented, but a hand-writing agent holds two orders.
+
+## Lengths still in voxels or um (left by the skills cleanup)
+- Internal, not flags: `classic_segment.py` `MARGIN`, `SLAB`, `GRADIENT_RADIUS` (compute halos), `envelope.py` `CLOSE_ITERATIONS = 8`
+  (84 um at 10.5 um voxels: a length in voxels; `close_and_fill` needs the voxel size to take mm), `snap_boxes.py` `min_px=50`.
+- `morphometry.py cortical` and the protocol's commands take `--depth-um`, `--slab-um`, `--context-um`; mm would match the rule
+  "every length is in mm" but changes every cortical command in `oa-protocol.md`.

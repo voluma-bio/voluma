@@ -1,11 +1,10 @@
 """Snap hand-drawn boxes to the bone they contain, so a prompt box does not cut off bone edges.
 
-  python snap_boxes.py --in oriented.npy --index 159 --threshold-hu <T> --boxes r0,c0,r1,c1 [r0,c0,r1,c1 ...] [--out boxes.json]
+  python snap_boxes.py --in oriented.npy --index 159 --threshold-hu <T> --boxes r0,c0,r1,c1 [r0,c0,r1,c1 ...] [--pad-mm 0.0315] [--out boxes.json]
 
-Prints the snapped boxes, in the [row0, col0, row1, col1] inclusive form `segment_sam` takes, in the same order. Boxes drawn
-by eye cut 14-20 px off bone edges (patella front, tibia); snapped boxes land within 3 px of the bone. Each box grows to the
+Prints the snapped boxes, in the [row0, col0, row1, col1] inclusive form `segment_sam` takes, in the same order. Each box grows to the
 bounding box of the bone components (pixels >= threshold, 8-connected) that lie mostly (>= 50% of their pixels) inside it,
-plus 3 px. It never shrinks a box. Look at the result on the slice (`render_slices.py --boxes`) before using it.
+plus `--pad-mm` (the pixel size comes from the sidecar beside `--in`). It never shrinks a box. Look at the result on the slice (`render_slices.py --boxes`) before using it.
 """
 import argparse
 import json
@@ -46,6 +45,7 @@ if __name__ == '__main__':
     ap.add_argument('--index', type=int, help='slice of the stack (axis 0)')
     ap.add_argument('--threshold-hu', type=float, required=True, help='bone threshold in the volume units')
     ap.add_argument('--boxes', nargs='+', required=True, help='r0,c0,r1,c1 (row/column pixels, ends inclusive)')
+    ap.add_argument('--pad-mm', type=float, default=0.0315, help='margin added around the bone, in mm')
     ap.add_argument('--out')
     a = ap.parse_args()
     v = np.load(a.src, mmap_mode='r')
@@ -56,7 +56,9 @@ if __name__ == '__main__':
     for b in boxes:
         if len(b) != 4 or b[0] > b[2] or b[1] > b[3]:
             sidecar.fail(f'box {b} is not r0,c0,r1,c1 with r0<=r1 and c0<=c1')
-    snapped = [snap_box(img, b, a.threshold_hu) for b in boxes]
+    pixel_mm = sidecar.grid(sidecar.sidecar_path(a.src))['spacing_zyx_mm'][-1]
+    pad = round(a.pad_mm / pixel_mm)
+    snapped = [snap_box(img, b, a.threshold_hu, pad) for b in boxes]
     if a.out:
         Path(a.out).write_text(json.dumps(snapped) + '\n')
     sidecar.emit(snapped=snapped, grew=[s != b for s, b in zip(snapped, boxes)], index=a.index, out=a.out)

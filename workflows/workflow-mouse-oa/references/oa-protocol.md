@@ -13,11 +13,8 @@ record (`microct-core`): `{output id: {value, unit, definition, kind}}`, with th
 
 **One owner per concept.** Region scripts (`iioc.py`, `tibial_trabecular.py`, `metaphysis_roi.py`) write regions and, for `iioc.py`, the
 geometry that needs the protocol's own steps (heights, width, plate columns). All TV, BV and BV/TV, and the thickness and node
-measures, come from `morphometry.py` (`bone-morphometry`). Every curve you trace uses the one schema of `region_from_curves.py`.
-
-**Bone threshold.** BV is always the region and HU above the lab's 2.16/cm, converted to this scan's HU from the calibration in
-`hu.json` (2459.875 HU on OA6-1RK). `morphometry.py` takes `--hu-json` for it (kept apart from `--grid`, the grid the region is on);
-`--threshold` overrides. No label gates BV. BV/TV is in %.
+measures, come from `morphometry.py` (`bone-morphometry`). BV uses the measurement threshold (`microct-core`; 2459.875 HU on
+OA6-1RK); `morphometry.py` takes `--hu-json` for it, kept apart from `--grid`, the grid the region is on.
 
 **Grid rule.** A volume is counted where the region is defined: a region traced on the aligned stack is counted on the aligned
 stack, on `tibia-hu.npy`, a linear resampling of the scan. `iioc.py` also writes `iioc-tissue-scan.npy` (nearest-neighbour onto the
@@ -65,8 +62,8 @@ morphometry.py cortical --cortex /outputs/iioc/iioc/medial-plate-run.npy --surfa
       # and lateral-plate-run.npy with --name subchondral-bone-plate-thickness-lateral
 ```
 
-Rerun with the changed trace to test how much a boundary matters: `iioc.py --gp-shift-voxels 2` and
-`tibial_trabecular.py --upper-shift-voxels 2` exist for that. A shift is a sensitivity check, not an error bar.
+Rerun with the changed trace to test how much a boundary matters: `iioc.py --gp-shift-mm 0.021` and
+`tibial_trabecular.py --upper-shift-mm 0.021` exist for that. A shift is a sensitivity check, not an error bar.
 
 ## Aligned grid and annotations
 
@@ -79,7 +76,7 @@ the exception: they are `[z, y, x]` indices on the scan grid.
 
 **One curve schema.** Every traced surface is `{"axis": 1, "height": "row", "slices": {"<v>": [[w, u], ...]}}`: the coronal section
 at V = `<v>` (array axis 1), and each point `[row, column]` = `[W, U]` read off that section's pixel grid. This is the schema
-`region_from_curves.py` documents, and its `surface_from_curves` is the one interpolator the three scripts import: a surface is
+`region_from_curves.py` documents (`regions-and-landmarks`): a surface is
 linear in U along a curve (points in any order, constant past the ends) and linear in V between traced sections (constant past the
 first and last). Trace across the whole width and expect edge guesses to be wrong. A point is `[w, u]`, not `[u, w]`.
 
@@ -228,8 +225,7 @@ python <regions-and-landmarks>/resources/amira_landmarks.py --points /outputs/ii
 python <regions-and-landmarks>/resources/amira_landmarks.py --points points-ab.json points-cd.json --header hu.json --out femoral.landmarkAscii
 ```
 
-Both are scan-grid points moved to physical millimetres with the DICOM affine. Report the files with the measurements they check.
-`regions-and-landmarks` says what is and is not verified about the format.
+Report the files with the measurements they check.
 
 ## Limits to state in every report
 

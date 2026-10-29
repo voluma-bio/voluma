@@ -213,13 +213,13 @@ def trabecular(a):
 
     sk, counts = None, {}
     if a.skeleton:
-        c = skeleton_counts(bone[box], roi[box], a.edge_margin_voxels)
+        c = skeleton_counts(bone[box], roi[box], round(a.edge_margin_mm / vox, 6))
         sk = c.pop('skeleton')
         n_in = c['nodes_interior']
         e_in = c['ends_interior']
         tv_in = c['interior_voxels'] * vox**3
         where = (
-            f'counted in the part of the ROI farther than {a.edge_margin_voxels:g} voxels from its edge '
+            f'counted in the part of the ROI farther than {a.edge_margin_mm:g} mm from its edge '
             f'({tv_in:.5f} mm³ of {tv:.5f}), per mm³ of that tissue volume; not validated against Scanco'
         )
         values[ids['Tb.Nd']] = sidecar.value(
@@ -390,7 +390,7 @@ def main():
     sub = ap.add_subparsers(dest='cmd', required=True)
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument('--roi', required=True, help='bool .npy: the region measured')
-    common.add_argument('--hu', required=True, help='HU array on the region\'s grid (tibia-hu.npy, or hu.npy for a scan-grid region): bone = HU above the threshold')
+    common.add_argument('--hu', required=True, help='HU array on the region\'s grid (hu.npy for a scan-grid region, the aligned stack\'s HU otherwise): bone = HU above the threshold')
     common.add_argument('--hu-json', help='the scan\'s hu.json: the lab threshold in HU comes from its calibration (not needed with --threshold)')
     common.add_argument('--threshold', type=float, help='bone threshold in HU (default: the lab threshold, 2.16/cm, from --hu-json)')
     common.add_argument('--grid', help='sidecar of the grid the region and --hu are on (default: the region\'s own)')
@@ -403,7 +403,7 @@ def main():
     t.add_argument('--id', action='append', metavar='KEY=ID', help=f'output id for KEY in {list(TRAB_KEYS)}')
     t.add_argument('--skeleton', action='store_true', help='also count nodes (Tb.Nd) and ends (Tb.Tm)')
     t.add_argument(
-        '--edge-margin-voxels', type=float, default=3, help='skeleton points this close to the ROI edge are not counted'
+        '--edge-margin-mm', type=float, default=0.0315, help='skeleton points this close to the ROI edge are not counted'
     )
     t.add_argument('--qc-axis', type=int, default=1, choices=[0, 1, 2], help='axis the QC slices are cut across')
     t.set_defaults(fn=trabecular)

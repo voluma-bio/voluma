@@ -5,7 +5,7 @@ Run this BEFORE `segment_sam`: SAM tracks through a stack of slices, so each sli
 follow, and the scanner's own axes often do not do that.
 
   python orient_joint.py --in hu.npy --header hu.json --out <outdir> [--threshold-hu <T>]
-        [--shaft-radius-mm 1.2] [--ref-radius-mm 3.15] [--min-object-mm3 0.0035] [--margin-mm 0.126]
+        --shaft-radius-mm R --ref-radius-mm R --min-object-mm3 V [--margin-mm 0.126]
         [--second-bone-frac 0.25]
       Writes <outdir>/frame.json (the frame: `microct-core/resources/frame.py` has its schema and the maps to and from the scan,
       plus this script's diagnostics and `keyframe`), oriented.npy (float32 HU stack, axis 0 = slices) with its sidecar,
@@ -13,9 +13,10 @@ follow, and the scanner's own axes often do not do that.
 
   from orient_joint import joint_frame     # frame = joint_frame(hu, spacing_mm): R_zyx, origin_zyx, shape and diagnostics
 
-Needs isotropic voxels (the stack is cut on the scan's voxel size), HU in, ZYX order. The three lengths are in mm and
-convert to voxels with the scan's spacing; the defaults suit a mouse knee (a mouse femur shaft is under 1.2 mm in
-radius; the reference object, the patella, sits within 3.15 mm of the joint). Rescale them for another animal or joint.
+Needs isotropic voxels (the stack is cut on the scan's voxel size), HU in, ZYX order. The three sizes are required and in mm,
+converted to voxels with the scan's spacing: they say how big this animal's bones are, so the workflow's anatomy
+reference gives them (the shaft radius is the widest a shaft gets, the reference radius how near the joint the reference
+object sits, the minimum object volume the smallest piece worth considering).
 
 How it chooses (details in the comments of joint_frame):
  1. A threshold (Otsu unless given) and 3D pieces. The bones are the largest piece plus, if there is one, the largest
@@ -169,7 +170,7 @@ def _gap_axis(PA, PB):
     return [(joint, u), (joint, -u)], joint
 
 
-def joint_frame(hu, spacing_mm, threshold_hu=None, shaft_radius_mm=1.2, ref_radius_mm=3.15, min_object_mm3=0.0035,
+def joint_frame(hu, spacing_mm, shaft_radius_mm, ref_radius_mm, min_object_mm3, threshold_hu=None,
                 margin_mm=0.126, second_bone_frac=0.25):
     cyl_radius = shaft_radius_mm / spacing_mm
     ref_radius = ref_radius_mm / spacing_mm
@@ -297,13 +298,13 @@ if __name__ == '__main__':
     ap.add_argument('--header', required=True, help='hu.json from scan-intake')
     ap.add_argument('--out', required=True, help='output directory')
     ap.add_argument('--threshold-hu', type=float, help='bone threshold; default Otsu on the volume')
-    ap.add_argument('--shaft-radius-mm', type=float, default=1.2)
-    ap.add_argument('--ref-radius-mm', type=float, default=3.15)
-    ap.add_argument('--min-object-mm3', type=float, default=0.0035)
+    ap.add_argument('--shaft-radius-mm', type=float, required=True)
+    ap.add_argument('--ref-radius-mm', type=float, required=True)
+    ap.add_argument('--min-object-mm3', type=float, required=True)
     ap.add_argument('--second-bone-frac', type=float, default=0.25, help='smallest second bone piece, as a fraction '
                     'of the largest; smaller pieces are reference object candidates')
     ap.add_argument('--margin-mm', type=float, default=0.126)
-    ap.add_argument('--window', help='lo,hi for the keyframe sheet, e.g. 1000,8000')
+    ap.add_argument('--window', help='lo,hi HU for the keyframe sheet (default: automatic)')
     a = ap.parse_args()
     g = sidecar.grid(a.header)
     sp = g['spacing_zyx_mm']

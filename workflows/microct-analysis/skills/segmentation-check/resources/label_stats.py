@@ -39,7 +39,7 @@ except ModuleNotFoundError as e:
 
 
 CONN26 = np.ones((3, 3, 3))
-DEFAULT_TOUCH_MM = 0.05  # 5 voxels at 0.0105 mm: closes a joint gap or a clip that opened one voxel, not a wrong bone
+DEFAULT_TOUCH_MM = 0.05  # closes a joint gap or a clip that opened a voxel or two, not a wrong bone; scale with voxel size for another scanner
 
 
 def neighbours(lab, mask, label):

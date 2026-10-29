@@ -1,7 +1,7 @@
 """Shaft-aligned frame and cropped stack for one long bone (the tibia for the IIOC protocol).
 
   python tibia_frame.py --hu hu.npy --hu-json hu.json --labels labels.npy --label 2 --out <dir> [--name tibia]
-         [--joint-end low|high] [--shaft-frac 0.5 0.95] [--epiphysis-frac 0 0.2] [--depth-mm 3.15] [--pad 10]
+         [--joint-end low|high] [--shaft-frac 0.5 0.95] [--epiphysis-frac 0 0.2] [--depth-mm 3.15] [--pad-mm 0.105]
 
 Fits the bone's shaft axis (centroid regression over the shaft part), takes the epiphyseal long cross-axis as U
 (+U medial and +V anterior come from a sign rule on scan y and `--joint-end` that assumes one knee and one scan orientation:
@@ -115,7 +115,7 @@ def main():
     ap.add_argument('--crop-lower-uvw', type=int, nargs=3, help='explicit crop corner in aligned (U, V, W) voxels')
     ap.add_argument('--crop-shape-uvw', type=int, nargs=3, help='explicit crop size (U, V, W) with --crop-lower-uvw')
     ap.add_argument('--depth-mm', type=float, default=3.15, help='how far from the joint end the crop reaches')
-    ap.add_argument('--pad', type=int, default=10, help='voxels of margin around the bone in the crop')
+    ap.add_argument('--pad-mm', type=float, default=0.105, help='margin around the bone in the crop')
     a = ap.parse_args()
     g = sidecar.grid(a.hu_json)
     sp = g['spacing_zyx_mm']
@@ -138,7 +138,7 @@ def main():
     if a.crop_lower_uvw and a.crop_shape_uvw:
         low, shape_xyz = np.array(a.crop_lower_uvw), np.array(a.crop_shape_uvw)
     else:
-        low, shape_xyz = crop_for(mask, basis, origin, a.joint_end, depth_vox, a.pad)
+        low, shape_xyz = crop_for(mask, basis, origin, a.joint_end, depth_vox, round(a.pad_mm / sp[0]))
     shape_zyx = tuple(int(i) for i in shape_xyz[::-1])
     frame = fr.make(
         g['grid_id'],
@@ -160,7 +160,7 @@ def main():
         'shaft_z': list(shaft_z),
         'epiphysis_z': list(epi_z),
         'depth_mm': a.depth_mm,
-        'pad': a.pad,
+        'pad_mm': a.pad_mm,
         'crop_lower_uvw': low.tolist(),
         'crop_shape_uvw': shape_xyz.tolist(),
     }
