@@ -104,6 +104,8 @@ export const taskEntrySchema = z.strictObject({
   id: taskIdSchema,
   /** Short plain-language name for people ("Scan intake"); the id stays the identity. */
   title: nonEmpty.optional(),
+  /** One sentence for the researcher choosing a workflow: what the task does, in the lab's words. Not part of the plan; a task without one shows its title and measurements only. */
+  summary: nonEmpty.optional(),
   /** Tasks this one builds on; a redo of one of them makes this one stale. */
   dependsOn: z.array(taskIdSchema),
   /** Ids from `outputs.json` this task produces. */

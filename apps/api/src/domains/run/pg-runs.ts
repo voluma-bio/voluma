@@ -157,6 +157,19 @@ async function loadRows(tx: Tx, where: SQL | undefined): Promise<Row[]> {
   }));
 }
 
+/** The event types `reviewState` reads: the summary, a study's values and a live run's progress. */
+const SUMMARY_TYPES = [
+  "thread.started",
+  "revision.started",
+  "attempt.opened",
+  "task",
+  "plan.changed",
+  "checkpoint",
+  "output",
+  "check.accepted",
+  "review.completed",
+] as const;
+
 async function loadLogs(tx: Tx, ids: string[], summaryOnly = false) {
   const logs = new Map<string, RunRecord["events"]>();
   const unreadable = new Set<string>();
@@ -167,19 +180,7 @@ async function loadLogs(tx: Tx, ids: string[], summaryOnly = false) {
       .where(
         and(
           inArray(events.runId, ids),
-          summaryOnly
-            ? inArray(events.type, [
-                "thread.started",
-                "revision.started",
-                "attempt.opened",
-                "task",
-                "plan.changed",
-                "checkpoint",
-                "output",
-                "check.accepted",
-                "review.completed",
-              ])
-            : undefined,
+          summaryOnly ? inArray(events.type, [...SUMMARY_TYPES]) : undefined,
         ),
       )
       .orderBy(asc(events.seq));
@@ -274,27 +275,35 @@ const CACHE_CAP = 2048;
 
 type RunResult = { run: Run } & Derived;
 
-/**
- * With `skipUnreadable` (the list), a completed run whose events no longer parse is left out
- * rather than failing every run listed with it. Without it (one run's read) it throws: the
- * run's own page must fail loudly, not read as "no plan" (a 409 the web polls forever).
- */
+interface LoadOptions {
+  cache?: SummaryCache;
+  /**
+   * The list: a completed run whose events no longer parse is left out rather than failing
+   * every run listed with it. Without it (one run's read) it throws: the run's own page must
+   * fail loudly, not read as "no plan" (a 409 the web polls forever).
+   */
+  skipUnreadable?: boolean;
+  /** Derive a live run's `tasks` (Home and the study page show them); else it reads null. */
+  progress?: boolean;
+}
+
 async function loadResults(
   tx: Tx,
   where: SQL | undefined,
-  cache: SummaryCache = new Map(),
-  skipUnreadable = false,
+  { cache = new Map(), skipUnreadable = false, progress = false }: LoadOptions = {},
 ): Promise<RunResult[]> {
   const rows = await loadRows(tx, where);
-  // A failed or cancelled run has nothing derived; a live one has its progress.
+  // A failed or cancelled run has nothing derived; a live one only its progress.
   const ids = rows
-    .filter(({ run }) => run.state !== "ended" || run.outcome === "completed")
+    .filter(({ run }) => (run.state === "ended" ? run.outcome === "completed" : progress))
     .map(({ run }) => run.id);
+  // The newest event `reviewState` reads, so a live run misses the cache only when a task
+  // changes, not on every log line it writes.
   const watermarks = ids.length
     ? await tx
         .selectDistinctOn([events.runId], { runId: events.runId, id: events.id })
         .from(events)
-        .where(inArray(events.runId, ids))
+        .where(and(inArray(events.runId, ids), inArray(events.type, [...SUMMARY_TYPES])))
         .orderBy(events.runId, desc(events.seq))
     : [];
   // Event identity also changes when the seeder replaces a history at the same sequence.
@@ -325,10 +334,9 @@ async function loadResults(
 export async function loadRuns(
   tx: Tx,
   where: SQL | undefined,
-  cache?: SummaryCache,
-  skipUnreadable = false,
+  options?: LoadOptions,
 ): Promise<Run[]> {
-  return (await loadResults(tx, where, cache, skipUnreadable)).map(({ run }) => run);
+  return (await loadResults(tx, where, options)).map(({ run }) => run);
 }
 
 /** The run just written, which must exist. */
@@ -403,14 +411,22 @@ export function pgRunReads(db: PostgresJsDatabase) {
   const summaries: SummaryCache = new Map();
   return {
     list: (reader: ReadScope) =>
-      db.transaction((tx) => loadRuns(tx, readableRuns(reader), summaries, true), {
-        isolationLevel: "repeatable read",
-      }),
+      db.transaction(
+        (tx) =>
+          loadRuns(tx, readableRuns(reader), {
+            cache: summaries,
+            skipUnreadable: true,
+            progress: true,
+          }),
+        {
+          isolationLevel: "repeatable read",
+        },
+      ),
 
     get: async (reader: ReadScope, runId: string) =>
       (
         await db.transaction(
-          (tx) => loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId)), summaries),
+          (tx) => loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId)), { cache: summaries }),
           {
             isolationLevel: "repeatable read",
           },
@@ -433,8 +449,7 @@ export function pgRunReads(db: PostgresJsDatabase) {
           const results = await loadResults(
             tx,
             and(readableRuns(reader), inArray(runs.studyId, ids)),
-            summaries,
-            true,
+            { cache: summaries, skipUnreadable: true },
           );
           return rows
             .map((row) =>
@@ -467,7 +482,7 @@ export function pgRunReads(db: PostgresJsDatabase) {
           const results = await loadResults(
             tx,
             and(readableRuns(reader), eq(runs.studyId, studyId)),
-            summaries,
+            { cache: summaries, progress: true },
           );
           const newest = newestCompleted(results);
           return {

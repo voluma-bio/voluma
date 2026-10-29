@@ -88,7 +88,7 @@ export function ReviewWorkspace({
                   ? "Reviewed"
                   : run.review.remainingToCheck
                     ? `${run.review.remainingToCheck} to check`
-                    : "Completed"}
+                    : "Checked"}
               </StatusBadge>
             )}
           </div>

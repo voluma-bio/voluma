@@ -8,7 +8,10 @@ shown as its scan and linked straight to its run.
 
 - **Home's data** is `listStudies` plus `listRuns`. The summary has no run ids, so the runs say
   which run a study of one opens, which runs failed or wait for keys, and a live run's tasks done
-  (`Run.tasks`, counted by the API from the plan). Both refetch every 5 s while a run is live.
+  (`Run.tasks`, counted by the API from the plan; only the list and the study read derive it).
+  Each refetches every 5 s while its own last answer shows a live run, and `studies` also while
+  `runs` does: the two polls are independent, so stopping on the other's answer left a stale
+  to-check count once the last run ended.
   Needs you has one row per study with one action; example studies are read-only and ask nothing.
   "Last activity" is a relative day, never a time.
 - **Run on new scans** keeps no outputs checklist and no notes: a study runs every output (the
@@ -16,6 +19,13 @@ shown as its scan and linked straight to its run.
   rule is its header); intake (mouse, knee, group from names and the sample sheet, no AI) is
   `intake.ts`, mouse-OA specific: the knee is stored as `attributes.knee`. With several scans,
   every row needs mouse, knee and group before Start; one scan needs none.
+- **No page state at frame rate on `/new`**: intake is memoized on the scan names and the sheet,
+  and upload bytes live in `uploads.ts`'s progress store, read only by each scan's `UploadBar`.
+  A study-sized drop re-ran intake for every row on every progress frame before.
+- **Task text** for researchers is each task's `summary` in `tasks.json`, shown in See tasks and
+  on Workflows; a task without one shows its title and measurements. Never show `instructions`:
+  they are the agent's (paths, skill names). See tasks links to Workflows in a new tab, since
+  leaving `/new` drops its uploads.
 - **Uploads** (`uploads.ts`) run one scan at a time under the server's open-upload limit, so a
   study of many never hits its 429; the old single-scan panel's machinery (4 PUTs at once, 3
   tries, Retry of the failed files, complete, cancel) lives there. Start pressed during uploads
@@ -24,9 +34,11 @@ shown as its scan and linked straight to its run.
 - **Pilot**: with more than two scans the default is "Run 2 first": the first scan of each of the
   first two groups, else the first two. The rest wait with no run; the study page starts them.
 - **Time and cost** shown before Start come only from the lab's newest completed run of the
-  workflow (its wall time and `usage.modelCostUsd`); with none, nothing is shown. There is no
+  workflow, not a seeded example (its wall time and `usage.modelCostUsd`); with none, nothing is shown. There is no
   budget cap, so the page never says a run stops at one.
 - **Excel sample sheets**: `xlsx.ts` reads the first worksheet with `fflate` (unzip) and
   `DOMParser`, loaded only when an `.xlsx` is dropped.
-- **Shared with `features/run`** through `@voluma/ui/run`: the run status chip and link
-  (`RunBadge`, `runStatus`, `runHref`), the formatters, and visitor keys.
+- **Shared with `features/run`** through `@voluma/ui/run`: the run and study status words
+  (`runStatus`, `RunBadge`, `studyStatus`: Running, N to check, Checked, Reviewed, Failed,
+  Waiting, Needs your keys, Not started), the run link, the formatters, and visitor keys. The
+  study page uses the same mapping; don't add another.

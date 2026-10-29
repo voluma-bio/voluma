@@ -19,11 +19,11 @@ import { catalog } from "@voluma/workflow/bundled";
 import { FolderOpen, Upload, X } from "lucide-react";
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router";
-import { intake, type Knee, readSheet, type Sample, type Sheet } from "./intake";
+import { intake, type Knee, readSheet, type Sample, type Sheet, sheetRecognised } from "./intake";
 import { Delayed, LoadError } from "./parts";
 import { type Dropped, fromDataTransfer, fromFileList, groupDropped } from "./scan-files";
-import { formatBytes, type UploadState, useUploads } from "./uploads";
-import { measurementsOf, WorkflowPanel } from "./workflow-tasks";
+import { formatBytes, type Progress, type UploadState, useSent, useUploads } from "./uploads";
+import { measuredBy, measurementsOf, WorkflowPanel } from "./workflow-tasks";
 
 /** The one workflow a study can use today, listed as a list of one. */
 const WORKFLOWS = [catalog["mouse-oa"]];
@@ -55,11 +55,12 @@ function startError(error: unknown): string {
   return "Couldn't start. Try again.";
 }
 
-/** The lab's newest completed run of `path`, for a time and cost it actually took. */
+/** The lab's newest completed run of `path` (not a seeded example), for a time and cost it actually took. */
 function lastCompleted(runs: Run[] | undefined, path: string) {
   for (const run of runs ?? []) {
     const { state } = run;
     if (
+      !run.example &&
       state.status === "ended" &&
       state.outcome === "completed" &&
       state.startedAt &&
@@ -153,16 +154,20 @@ export function NewPage() {
     setRows((prev) => prev.filter((r) => r.id !== id));
   }
 
-  // Each row as the study will store it.
-  const table = useMemo(
-    () =>
-      rows.map((row) => {
-        const upload: UploadState | undefined = row.input ? undefined : uploads.states[row.id];
-        const input = row.input ?? (upload?.kind === "ready" ? upload.input : undefined);
-        return { ...row, input, upload, sample: { ...intake(row.name, read), ...row.edits } };
-      }),
-    [rows, uploads.states, read],
+  // What the name and sheet give each scan, before the researcher's edits: recomputed only
+  // when the scans or the sheet change, not on an edit or an upload's state. Keyed on the
+  // names joined by NUL, which no file name holds.
+  const nameKey = rows.map((r) => r.name).join("\0");
+  const parsed = useMemo(
+    () => new Map(nameKey.split("\0").map((name) => [name, intake(name, read)])),
+    [nameKey, read],
   );
+  // Each row as the study will store it.
+  const table = rows.map((row) => {
+    const upload: UploadState | undefined = row.input ? undefined : uploads.states[row.id];
+    const input = row.input ?? (upload?.kind === "ready" ? upload.input : undefined);
+    return { ...row, input, upload, sample: { ...(parsed.get(row.name) as Sample), ...row.edits } };
+  });
   const several = table.length > 1;
   const missing = several
     ? table.reduce(
@@ -256,7 +261,7 @@ export function NewPage() {
         )}
         <SheetLine
           sheet={sheet}
-          matched={read ? table.filter((r) => intake(r.name, read).group).length : 0}
+          matched={read ? rows.filter((r) => parsed.get(r.name)?.group).length : 0}
           total={table.length}
           onRemove={() => setSheet({ kind: "none" })}
         />
@@ -271,6 +276,7 @@ export function NewPage() {
             }
             onRemove={removeRow}
             onRetry={uploads.retry}
+            progress={uploads.progress}
           />
         )}
         <Earlier
@@ -303,6 +309,7 @@ export function NewPage() {
                   <span className="block text-ui text-muted-foreground">
                     {w.tasks.length} tasks, {measurementsOf(w).length} measurements
                   </span>
+                  <span className="block text-ui text-muted-foreground">{measuredBy(w)}</span>
                 </span>
               </label>
               <button
@@ -488,6 +495,7 @@ function Choice({
 
 function DropZone({ compact, onFiles }: { compact: boolean; onFiles: (d: Dropped[]) => void }) {
   const [over, setOver] = useState(false);
+  const [unreadable, setUnreadable] = useState(false);
   const files = useRef<HTMLInputElement>(null);
   const folder = useRef<HTMLInputElement>(null);
   const pick = (list: FileList | null) => {
@@ -504,7 +512,8 @@ function DropZone({ compact, onFiles }: { compact: boolean; onFiles: (d: Dropped
       onDrop={(e) => {
         e.preventDefault();
         setOver(false);
-        void fromDataTransfer(e.dataTransfer).then(onFiles);
+        setUnreadable(false);
+        void fromDataTransfer(e.dataTransfer).then(onFiles, () => setUnreadable(true));
       }}
       className={`grid justify-items-center gap-3 rounded-xl border-[1.5px] border-dashed text-center transition-colors ${
         over ? "border-primary bg-primary-tint" : "border-line-strong"
@@ -525,6 +534,11 @@ function DropZone({ compact, onFiles }: { compact: boolean; onFiles: (d: Dropped
           Choose a folder
         </Button>
       </div>
+      {unreadable && (
+        <p role="alert" className="text-ui text-destructive">
+          Couldn't read what was dropped. Try Choose a folder instead.
+        </p>
+      )}
       <input
         ref={files}
         type="file"
@@ -569,6 +583,18 @@ function SheetLine({
         Couldn't read {sheet.name}. Save it as CSV and drop it again.
       </p>
     );
+  if (!sheetRecognised(sheet.sheet))
+    return (
+      <p role="alert" className="text-ui">
+        Sample sheet <span className="font-medium">{sheet.sheet.name}</span>
+        <span className="text-destructive">
+          : no columns recognised. Its first row needs headers such as Mouse, Knee and Group.
+        </span>{" "}
+        <button type="button" className="text-primary-text hover:underline" onClick={onRemove}>
+          Remove
+        </button>
+      </p>
+    );
   return (
     <p className="text-ui">
       Sample sheet <span className="font-medium">{sheet.sheet.name}</span>
@@ -590,12 +616,14 @@ function IntakeTable({
   onEdit,
   onRemove,
   onRetry,
+  progress,
 }: {
   rows: TableRow[];
   several: boolean;
   onEdit: (id: string, edit: Partial<Sample>) => void;
   onRemove: (id: string) => void;
   onRetry: (id: string) => void;
+  progress: Progress;
 }) {
   const groups = [...new Set(rows.map((r) => r.sample.group.trim()).filter(Boolean))];
   const listId = useId();
@@ -643,7 +671,13 @@ function IntakeTable({
                   <p className="truncate font-mono text-ui" title={r.name}>
                     {r.name}
                   </p>
-                  <UploadLine upload={r.upload} files={r.files} onRetry={() => onRetry(r.id)} />
+                  <UploadLine
+                    id={r.id}
+                    upload={r.upload}
+                    files={r.files}
+                    progress={progress}
+                    onRetry={() => onRetry(r.id)}
+                  />
                 </div>
                 <label className="grid min-w-0 gap-0.5">
                   {label("Mouse")}
@@ -706,12 +740,16 @@ function IntakeTable({
 }
 
 function UploadLine({
+  id,
   upload,
   files,
+  progress,
   onRetry,
 }: {
+  id: string;
   upload: UploadState | undefined;
   files: Row["files"];
+  progress: Progress;
   onRetry: () => void;
 }) {
   const size =
@@ -721,29 +759,8 @@ function UploadLine({
   switch (upload.kind) {
     case "waiting":
       return <p className="text-meta text-muted-foreground">{size}, waiting to upload</p>;
-    case "uploading": {
-      const percent = upload.total > 0 ? Math.floor((upload.sent / upload.total) * 100) : 0;
-      return (
-        <div className="mt-1 grid max-w-64 gap-1">
-          <span
-            role="progressbar"
-            aria-label="Upload progress"
-            aria-valuenow={percent}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            className="block h-1.5 overflow-hidden rounded-full bg-muted"
-          >
-            <span
-              className="block h-full bg-info transition-[width]"
-              style={{ width: `${percent}%` }}
-            />
-          </span>
-          <span className="text-meta text-muted-foreground tabular-nums">
-            Uploading, {formatBytes(upload.sent)} of {formatBytes(upload.total)}
-          </span>
-        </div>
-      );
-    }
+    case "uploading":
+      return <UploadBar progress={progress} id={id} total={upload.total} />;
     case "finishing":
       return <p className="text-meta text-muted-foreground">Finishing the upload…</p>;
     case "ready":
@@ -769,6 +786,32 @@ function UploadLine({
         </p>
       );
   }
+}
+
+/** The one part of the page that re-renders as bytes go out. */
+function UploadBar({ progress, id, total }: { progress: Progress; id: string; total: number }) {
+  const sent = useSent(progress, id);
+  const percent = total > 0 ? Math.floor((sent / total) * 100) : 0;
+  return (
+    <div className="mt-1 grid max-w-64 gap-1">
+      <span
+        role="progressbar"
+        aria-label="Upload progress"
+        aria-valuenow={percent}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        className="block h-1.5 overflow-hidden rounded-full bg-muted"
+      >
+        <span
+          className="block h-full bg-info transition-[width]"
+          style={{ width: `${percent}%` }}
+        />
+      </span>
+      <span className="text-meta text-muted-foreground tabular-nums">
+        Uploading, {formatBytes(sent)} of {formatBytes(total)}
+      </span>
+    </div>
+  );
 }
 
 function Earlier({
