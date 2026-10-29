@@ -94,8 +94,22 @@ Why not in the runner: its one Node thread receiving and decoding Meta's 100+ MB
 the heartbeat and the run stopped itself (design `infrastructure.md` §6 and `evidence/findings.md` in voluma-bio/docs).
 Why TypeScript: the decoder takes seconds there and minutes in Python.
 
-`pnpm --filter @voluma/runner dev-sandbox` drives the real sandbox, `voluma-sam` and the gateway
-without a model (see below).
+# Runner: `dev-sandbox` drives the real sandbox, tools and gateway without a model
+
+`pnpm --filter @voluma/runner dev-sandbox [--role worker]` (`src/dev-sandbox.ts`) claims the next
+queued run (start one in the web app, or insert one in the local database), holds its lease with
+the real heartbeat, opens the role's sandbox through the real adapter and reads commands from
+stdin: `exec <command>`, `segment <json>` (the real `segment_sam` tool) and `close` (ends the
+run `failed` with "closed by dev-sandbox", terminates the claim's sandboxes by tag). It needs the
+runner's `.env` plus `VOLUMA_GATEWAY_URL`. After each command it prints this process's event-loop
+delay and the heartbeat count and slowest round trip: that is how to check that a call leaves the
+runner's thread alone. Sandbox seconds are metered like a run's, the gateway counts the provider
+calls against the run's cap. Run `sandboxes:clean --run <id>` after, as for any sandbox.
+
+To try `voluma-sam` without a live Meta call, point `VOLUMA_GATEWAY_URL` at a stub gateway in front
+of a stub Meta that replays a saved response. Modal must reach it over HTTPS (its host is the
+worker's allowlist), so host it in a Modal sandbox on an encrypted tunnel. The reference scan's
+input is DICOM: put the `.npy` under the run's `scratch/` prefix first.
 
 # Runner: `view_image` shows the model files the sandbox wrote
 
