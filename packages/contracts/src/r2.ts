@@ -48,9 +48,12 @@ export const scratchKey = (runId: string, path: string) => `${scratchPrefix(runI
 export const outputKey = (runId: string, task: string, path: string) =>
   `${taskOutputPrefix(runId, task)}${rel(path)}`;
 
-/** Full output of a `bash` call that was truncated for the model. */
-export const toolOutputKey = (runId: string, toolCallId: string) =>
-  `${scratchPrefix(runId)}.tool-output/${seg(toolCallId)}`;
+/**
+ * Full output of a `bash` call that was truncated for the model. `dir` is the calling
+ * thread's folder under the run's scratch (`"<name>/"` for a checker), empty for a worker.
+ */
+export const toolOutputKey = (runId: string, toolCallId: string, dir = "") =>
+  `${scratchPrefix(runId)}${dir}.tool-output/${seg(toolCallId)}`;
 
 /**
  * Content-addressed evidence: a file that backs a stored number, copied here

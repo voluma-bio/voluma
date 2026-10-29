@@ -6,18 +6,29 @@ its size (2 CPUs, 8192 MiB), its network and which mounts it holds. Tags on ever
 
 | Role | Mounts | Network | Name |
 |---|---|---|---|
-| `worker` | as the caller says (today `RunLayout.mounts`) | the gateway host over HTTPS (`outboundDomainAllowlist`), if the spec has a `gateway`; else none | `<taskId>.worker[.n]` |
+| `worker` | as the caller says (today the worker `ThreadLayout.mounts`) | the gateway host over HTTPS (`outboundDomainAllowlist`), if the spec has a `gateway`; else none | `<taskId>.worker[.n]` |
 | `checker` | `readOnly` mounts read-only, one writable `scratch` prefix | none | `<taskId>.check[.n]` |
 | `convert` | `evidence` read-only, `review` writable | none | the job's |
 
 The builder sets the access of each mount, and the Modal adapter refuses a network on a
 non-worker role. The runner makes one sandbox per thread (`sandboxSession.get(threadId)`,
-named by the thread id without the run id). **Check threads still run on a worker-role
-sandbox**: the checker spec exists, but the run-wide `/scratch` is assumed by the check skills
-(`/scratch/recheck/`), by checkpoint evidence `{root: "scratch", path}` (`r2Evidence`), by the
-`bash` spill (`toolOutputPath`) and by `view_image`/`segment_sam` (`RunLayout.keyOf`). Moving them
-to `/scratch/<check thread>/` needs those four to take the thread, and the skill text to change.
-The checker's other writes: none (`workflows/core/agents/checker.md` says it changes nothing).
+named by the thread id without the run id). `RunLayout.forThread(threadId)`
+(`packages/harness/src/layout.ts`) gives each thread its role, mounts, tool description, restart note,
+`keyOf` and bash-spill path, so a worker and a checker each see their own files:
+
+- A worker mounts `/inputs` and `/workflow` read-only and `/scratch` (the run's whole scratch) and
+  `/outputs` read-write.
+- A checker mounts `/inputs`, `/workflow` and `/outputs` read-only and one writable folder,
+  `/scratch/<its name>/` (the name is the sandbox name, e.g. `t1.check`), which is the R2 prefix
+  `scratch/<name>/` under the run. It does not see the worker's scratch; what it needs from the
+  worker is in `/outputs`. Its bash spill lands in `/scratch/<name>/.tool-output/`.
+- The path namespace is the same for both: `/scratch/<name>/x.png` is the key
+  `scratchKey(runId, "<name>/x.png")`, so a checkpoint's evidence `{root: "scratch", path:
+  "<name>/x.png"}` resolves the same way (`r2Evidence`, the local evidence adapter) for either role.
+- The sandbox's own `/scratch` directory exists in the container; a write outside `/scratch/<name>/`
+  (say `/scratch/v1.jpg`) succeeds but is local, lost on restart and invisible to `view_image` and to
+  evidence. The checker's system prompt and tool descriptions name its folder to prevent this.
+
 Spend and the usage meter sum sandbox seconds over all sandboxes.
 
 **Probed 2026-10-29 (Modal SDK 0.11.1, run p414), the facts the design relied on:**
@@ -36,6 +47,10 @@ Spend and the usage meter sum sandbox seconds over all sandboxes.
   mounts as readable by anything the worker's code does.
 - The sandbox's `/proc/meminfo` shows the host, not the 8 GiB request; the limit is not
   observable from inside.
+- A checker sandbox with a read-write mount at `/scratch/<name>` (prefix `scratch/<name>/`) beside
+  read-only `/outputs` (run p470): a write under `/scratch/<name>/` reached R2 at
+  `runs/<run>/scratch/<name>/`; a write to `/outputs` failed with `Read-only file system`; DNS
+  failed (no network); no gateway variable. `/scratch` itself is a container directory, not a mount.
 
 # Runner: how sandboxes end
 
@@ -78,7 +93,7 @@ Run `sandboxes:clean --run <your run>` before finishing any work that started sa
 The tool (`packages/harness/src/tools/segment-sam.ts`) runs in the runner process, never in
 the sandbox: the sandbox has no network and Meta's key must not enter it. It reads the
 volume and writes the labels straight to the run's bucket (`Files` port, `r2-files.ts`;
-`RunLayout.keyOf` maps the sandbox path the model names to its key), so a file the
+`ThreadLayout.keyOf` maps the sandbox path the model names to its key), so a file the
 sandbox just wrote is visible to it and the labels are visible to the sandbox after the call.
 The Meta adapter (`meta-segmenter.ts`) shells out to `ffmpeg` for the lossless H.264 stack, so
 the runner host needs it on PATH; it deletes its upload from Meta's file store when the call

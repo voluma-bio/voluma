@@ -21,7 +21,12 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import type { Api, Model, Models } from "@earendil-works/pi-ai";
-import { inputPrefix, referencePrefix, workflowSnapshotPrefix } from "@voluma/contracts/r2";
+import {
+  inputPrefix,
+  referencePrefix,
+  scratchKey,
+  workflowSnapshotPrefix,
+} from "@voluma/contracts/r2";
 import type { Claim, ReportRequest } from "@voluma/contracts/runner";
 import { runClient } from "@voluma/harness/adapters/http/run-client";
 import { runLayout } from "@voluma/harness/layout";
@@ -30,7 +35,7 @@ import { llmMainThread, mainSystem, runBrief } from "@voluma/harness/main-thread
 import { usageOf } from "@voluma/harness/model-usage";
 import { type Recorder, recorder } from "@voluma/harness/recorder";
 import { type SandboxSession, sandboxSession } from "@voluma/harness/sandbox-session";
-import { workerSandboxSpec } from "@voluma/harness/sandbox-specs";
+import { checkerSandboxSpec, workerSandboxSpec } from "@voluma/harness/sandbox-specs";
 import { type RunRole, superviseRun } from "@voluma/harness/supervise-run";
 import { optionalTools } from "@voluma/harness/tools";
 import { loadWorkflow } from "@voluma/workflow/load";
@@ -47,7 +52,7 @@ import {
 } from "./modal-sandbox.ts";
 import type { ModelFallback } from "./model-fallback.ts";
 import { retryTransient } from "./model-retry.ts";
-import { checkPrompt, checkSystem, workerPrompt, workerSystem } from "./prompts.ts";
+import { checkPrompt, systemPrompt, workerPrompt } from "./prompts.ts";
 import { isFatalProviderError, isProviderError } from "./provider-error.ts";
 import { r2Evidence } from "./r2-evidence.ts";
 import { r2Files } from "./r2-files.ts";
@@ -245,28 +250,34 @@ export async function runClaim(
     // A sandbox is named by its thread without the run id: `<taskId>.worker[.n]`, `<taskId>.check[.n]`.
     const sandboxName = (threadId: string) => threadId.slice(runId.length + 1);
     session = sandboxSession(
-      // Check threads use the worker role too: the check skills and the host-side scratch
-      // paths (`RunLayout`, `r2Evidence`) assume one run-wide `/scratch` (apps/runner/.context).
-      (threadId) =>
-        createSandbox(
-          workerSandboxSpec({
-            runId,
-            name: sandboxName(threadId),
-            image: config.sandbox.image,
-            lifetimeSeconds: config.sandbox.lifetimeSeconds,
-            idleSeconds: config.sandbox.idleSeconds,
-            mounts: layout.mounts,
-            env: layout.env,
-          }),
+      (threadId) => {
+        const thread = layout.forThread(threadId);
+        const common = {
+          runId,
+          name: thread.name,
+          image: config.sandbox.image,
+          lifetimeSeconds: config.sandbox.lifetimeSeconds,
+          idleSeconds: config.sandbox.idleSeconds,
+          env: layout.env,
+        };
+        return createSandbox(
+          thread.role === "worker"
+            ? workerSandboxSpec({ ...common, mounts: thread.mounts })
+            : checkerSandboxSpec({
+                ...common,
+                readOnly: thread.mounts.filter((m) => m !== thread.scratch),
+                scratch: thread.scratch,
+              }),
           abort.signal,
-        ),
+        );
+      },
       (id, state, detail) => {
         // Metered from the start of creation, the sweep included: a conservative upper bound.
         if (state === "starting") meter.sandboxUp();
         else if (state === "stopped" || state === "failed") meter.sandboxDown();
         events?.emit(id, "sandbox", { name: sandboxName(id), state, detail });
       },
-      layout.restartNote,
+      (threadId) => layout.forThread(threadId).restartNote,
     );
     const opened = session;
 
@@ -361,9 +372,11 @@ export async function runClaim(
             log,
             addCost: meter.addModelCost,
             keepFailed: async (text) => {
-              const path = `/scratch/failed-sam-response-${new Date().toISOString().replaceAll(":", "-")}.txt`;
+              // Only workers hold segment_sam, so the run-wide scratch is theirs.
+              const name = `failed-sam-response-${new Date().toISOString().replaceAll(":", "-")}.txt`;
+              const path = `/scratch/${name}`;
               await files.write(
-                layout.keyOf(path, "write"),
+                scratchKey(runId, name),
                 new TextEncoder().encode(text),
                 AbortSignal.timeout(60_000),
               );
@@ -372,17 +385,17 @@ export async function runClaim(
           })
         : undefined,
       main,
-      worker: (task, notes, recorded) => ({
+      worker: (task, thread, notes, recorded) => ({
         model: threadModel(workerModel, recorded),
         streamFn: streamFor("worker"),
-        systemPrompt: workerSystem(definition),
+        systemPrompt: systemPrompt(definition, thread),
         prompt: workerPrompt(task, { user: run.notes, main: notes }),
         tools: grant("worker"),
       }),
-      check: (task, notes, recorded) => ({
+      check: (task, thread, notes, recorded) => ({
         model: threadModel(checkModel, recorded),
         streamFn: streamFor("check"),
-        systemPrompt: checkSystem(definition),
+        systemPrompt: systemPrompt(definition, thread),
         prompt: checkPrompt(task, { user: run.notes, main: notes }),
         tools: grant("checker"),
       }),

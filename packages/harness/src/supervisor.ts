@@ -87,8 +87,18 @@ export interface SupervisorOptions {
    * `notes` are the main thread's notes in force when the thread starts (none yet at the first
    * task). `model` is the one a resumed thread started on, which it must keep.
    */
-  worker(taskId: string, notes: string | undefined, model: string | undefined): RoleSpec;
-  check(taskId: string, notes: string | undefined, model: string | undefined): RoleSpec;
+  worker(
+    taskId: string,
+    threadId: string,
+    notes: string | undefined,
+    model: string | undefined,
+  ): RoleSpec;
+  check(
+    taskId: string,
+    threadId: string,
+    notes: string | undefined,
+    model: string | undefined,
+  ): RoleSpec;
   /** Wakes of a worker that stopped with its task unfinished before the stuck guard marks it. */
   stuckLimit?: number;
   /** Redos a judgment may order for one task. */
@@ -193,8 +203,8 @@ export function supervisor(options: SupervisorOptions) {
     const model = known.get(id)?.model;
     threads.start({
       ...(role === "worker"
-        ? options.worker(taskId, notes, model)
-        : options.check(taskId, notes, model)),
+        ? options.worker(taskId, id, notes, model)
+        : options.check(taskId, id, notes, model)),
       threadId: id,
       kind: role,
       parentThreadId: root,

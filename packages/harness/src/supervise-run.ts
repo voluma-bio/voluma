@@ -9,7 +9,7 @@ import type { Folded } from "@voluma/contracts/fold";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { RecordedPin } from "@voluma/contracts/workflow";
 import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
-import type { RunLayout } from "./layout";
+import type { RunLayout, ThreadLayout } from "./layout";
 import type { MainThread } from "./main-thread";
 import type { Evidence } from "./ports/evidence";
 import type { Files } from "./ports/files";
@@ -62,8 +62,18 @@ export interface SuperviseRunOptions {
   main: MainThread;
   /** `notes`: the main thread's notes in force when the thread starts. */
   /** `model`: the one a resumed thread started on (`provider/id`), which it must keep. */
-  worker(task: PlanTask, notes: string | undefined, model: string | undefined): RunRole;
-  check(task: PlanTask, notes: string | undefined, model: string | undefined): RunRole;
+  worker(
+    task: PlanTask,
+    thread: ThreadLayout,
+    notes: string | undefined,
+    model: string | undefined,
+  ): RunRole;
+  check(
+    task: PlanTask,
+    thread: ThreadLayout,
+    notes: string | undefined,
+    model: string | undefined,
+  ): RunRole;
   /** Whether a failed thread's error text says the model provider failed; see `SupervisorOptions`. */
   providerError?(error: string): boolean;
   /** Whether such an error means no redo can succeed: the run then fails at once; see `SupervisorOptions`. */
@@ -128,11 +138,15 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
     if (!found) throw new Error(`${id} is not a task of the plan`);
     return found;
   };
-  const tools = (kind: "worker" | "check", granted: readonly string[] = []) => [
-    bashTool(layout),
+  const tools = (
+    kind: "worker" | "check",
+    thread: ThreadLayout,
+    granted: readonly string[] = [],
+  ) => [
+    bashTool(thread),
     ...taskTools(runtime, kind),
     threadMessageTool((from, to, text) => sup.message(from, to, text)),
-    ...buildTools(granted, { layout, files: options.files, segmenter: options.segmenter }),
+    ...buildTools(granted, { layout: thread, files: options.files, segmenter: options.segmenter }),
   ];
   const sup = supervisor({
     runId,
@@ -141,13 +155,15 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
     recorder,
     threads: pool,
     main: options.main,
-    worker: (id, notes, model) => {
-      const role = options.worker(task(id), notes, model);
-      return { ...role, tools: tools("worker", role.tools) };
+    worker: (id, threadId, notes, model) => {
+      const thread = layout.forThread(threadId);
+      const role = options.worker(task(id), thread, notes, model);
+      return { ...role, tools: tools("worker", thread, role.tools) };
     },
-    check: (id, notes, model) => {
-      const role = options.check(task(id), notes, model);
-      return { ...role, tools: tools("check", role.tools) };
+    check: (id, threadId, notes, model) => {
+      const thread = layout.forThread(threadId);
+      const role = options.check(task(id), thread, notes, model);
+      return { ...role, tools: tools("check", thread, role.tools) };
     },
     providerError: options.providerError,
     providerFatal: options.providerFatal,
