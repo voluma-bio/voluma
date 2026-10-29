@@ -1,6 +1,6 @@
 # Runner TODO
 
-- **Measure the live `/inputs` staging rate after #198.** Run a before/after A/B on the staging OA6-1RK prefix with the staging runner environment, recording `cp` stderr and elapsed time. The parent-directory race is reproduced and fixed locally; a real-Modal count confirms it was the only cause. Do not lower `-P 32` without that measurement.
+- **Measure the live `/inputs` staging rate after #198.** Run a before/after A/B on the staging OA6-1RK prefix with the staging runner environment, recording `cp` stderr and elapsed time. The parent-directory race is reproduced and fixed locally; a real-Modal count would confirm it was the only cause. Do not lower `-P 32` without that measurement.
 
 From the round-2 review of #40 (`voluma-bio/docs` `work/mvp-contracts-and-data/research/review-pr40-round2.md`):
 
@@ -23,3 +23,4 @@ From the skillset move (`workflows/` in this repo):
   it closed the queue and rebuild the report only when it didn't. (p528)
 - An output appended after the drain's final scan (a thread stuck past the 5 s wind-down) gets no
   `assets.*` event. Narrow. (p529)
+- **A hung read on the mount blocks thread start for up to an hour.** `stage()` runs through `#run` with a 3600 s deadline and no `timeout -k`; a `cp` stuck in the R2 mount isn't killed and retries can't help. Wrap staging like `exec()` (process group under `timeout -k`) or run each `cp` under `timeout`.
