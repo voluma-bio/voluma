@@ -15,5 +15,8 @@
       "ids": [5],
       "definition": "deck #3: label 5, the lab's working reading of meniscus plus spurs on the medial side (not anatomically checked)"
     }
+  },
+  "objects": {
+    "bone-labels": { "labels": "labels.npy" }
   }
 }
