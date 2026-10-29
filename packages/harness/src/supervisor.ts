@@ -81,6 +81,8 @@ export interface SupervisorOptions {
   maxRedos?: number;
   /** Whether a failed thread's error text says the model provider failed (the host knows its texts). */
   providerError?(error: string): boolean;
+  /** Whether such an error is fatal for the account (key refused, billing, usage limit): no retry can succeed. */
+  providerFatal?(error: string): boolean;
   /**
    * Times a task's worker, and separately its check, is started again after a provider error
    * before the run fails.
@@ -302,6 +304,9 @@ export function supervisor(options: SupervisorOptions) {
    */
   function providerRetry(d: ThreadLog, r: ThreadRecord, error: string): "redo" | undefined {
     if (!options.providerError?.(error)) return undefined;
+    if (options.providerFatal?.(error)) {
+      throw new Error(`${r.taskId}: its ${r.role} failed on a model provider error: ${error}`);
+    }
     const failures = startedFor(d, r.taskId, r.role).filter(
       (x) => x.end?.status === "failed" && options.providerError?.(x.end.error ?? ""),
     ).length;
