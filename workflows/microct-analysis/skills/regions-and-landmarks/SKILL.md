@@ -99,10 +99,10 @@ region gives a coarse surface: add slices where the curve bends.
 ## Hand the points to the lab: Amira
 
 ```
-python amira_landmarks.py --points points.json --header hu.json --out landmarks.landmarkAscii
+python amira_landmarks.py --points points.json [more.json ...] --header hu.json --out landmarks.landmarkAscii
 ```
 
-`--points` is a points file on the scan grid, the `points.json` `pick.py` writes (`{"grid_id", "points": [{"name", "zyx"}]}`; a file without a `grid_id` or from another grid is refused). Each point is moved to physical millimetres with
+`--points` takes points files on the scan grid, the `points.json` `pick.py` writes (several are merged; a name in two files is refused) (`{"grid_id", "points": [{"name", "zyx"}]}`; a file without a `grid_id` or from another grid is refused). Each point is moved to physical millimetres with
 the DICOM affine in `hu.json` and written as one Amira landmark set (`# AmiraMesh 3D ASCII 2.0`, `ContentType "LandmarkSet"`);
 `<out>.names.json` lists the order, because the format has no names. The lab loads it in Amira on the same series to check the
 points. The file layout follows the open-source writer in R's `nat` package and has not been opened in Amira itself: if Amira

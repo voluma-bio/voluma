@@ -86,6 +86,7 @@ A candidate found on the scan grid (`unlabelled.py`) needs a box on the stack be
 python <this skill>/resources/map_points.py --frame frame.json --pieces qc/cand.npy --ids 3 5 --out qc/boxes.json
 python <this skill>/resources/map_points.py --frame frame.json --to-oriented z,y,x [z,y,x ...]
 python <this skill>/resources/map_points.py --frame frame.json --to-scan s,r,c [s,r,c ...]
+python <this skill>/resources/map_points.py --frame frame.json --points-file points.json --out mapped.json   # a points file to the frame's other grid
 ```
 
 `--pieces` gives each candidate piece a `promptFrame` (the slice that cuts most of it) and a `box` on that slice, ready for

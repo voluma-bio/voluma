@@ -21,8 +21,8 @@ number you report can be traced.
   `frame.json` has `parent_grid_id`, `grid_id`, `R_zyx`, `origin_zyx`, `shape` and `spacing_zyx_mm`; scan index `x` and frame index `p`
   relate by `x = p @ R_zyx + origin_zyx`. `resources/frame.py` resamples a scan volume onto a frame and maps points and
   stacks both ways: use it, do not rebuild the maths. Anything on a frame is mapped to the scan grid before you measure.
-- A **points file** is `{"grid_id": ..., "points": [{"name": "a", "zyx": [z, y, x]}, ...]}`; a script that draws or maps points
-  refuses one without a `grid_id` or from another grid, because indices mean nothing on another grid.
+- A **points file** is `{"grid_id": ..., "points": [{"name": "a", "zyx": [z, y, x]}, ...]}`; `femoral_frame.py` and `amira_landmarks.py` (both take several points files and merge them) refuse one without a
+  `grid_id` or from another grid; `map_points.py --points-file` moves a file to the other grid of a frame, because indices mean nothing on another grid.
 - Every `.npy` a resource writes has a JSON sidecar beside it (`labels.npy` gives `labels.json`) with its grid id,
   voxel size, its inputs' sha256 and its parameters. If you make an array yourself, give it one:
   `python <this skill>/resources/sidecar.py --array out.npy --like hu.json --input a.npy --param key=value`.

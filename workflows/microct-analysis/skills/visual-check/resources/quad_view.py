@@ -45,12 +45,13 @@ HERE = Path(__file__).resolve().parent
 # `python -I` puts no script directory on sys.path, so every directory a script imports from is added here.
 sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'microct-core/resources')]
 try:
+    import frame as fr
     import viewlib as vl
 except ModuleNotFoundError as e:
     sys.exit(f'{e}: this script expects <workflows>/microct-analysis/skills/<skill>/resources/ with '
              '<workflows>/microct-analysis/skills/microct-core/resources/sidecar.py beside it')
 
-fr, sl, plt = vl.fr, vl.sidecar, vl.plt
+sl, plt = vl.sidecar, vl.plt
 PANE_COLOURS = ['#ff3b30', '#34c759', '#4f8dff']  # pane 0, 1, 2: its border, its plane in 3D, its line in the other panes
 IVORY, POINT_COLOUR, RULER_COLOUR = '#e8dcc0', '#ffd60a', '#00e5ff'
 OVERLAY = ['#ff9f0a', '#bf5af2', '#b6f23c', '#ff4fd8', '#1fa89a', '#c8864b']  # masks, then faces, in the order they were added

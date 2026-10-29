@@ -3,7 +3,11 @@ gets a SAM box on the stack.
 
   python map_points.py --frame frame.json --to-oriented z,y,x [z,y,x ...]      scan voxel -> (slice, row, col) on the stack
   python map_points.py --frame frame.json --to-scan s,r,c [s,r,c ...]         stack (slice, row, col) -> scan voxel
+  python map_points.py --frame frame.json --points-file points.json --out mapped.json      a points file, to the other grid
   python map_points.py --frame frame.json --pieces cand.npy [--ids 1 3 4] --out boxes.json
+
+`--points-file` takes a points file (`pick.py` writes one) made on the frame's grid or on its parent scan grid and writes the same
+points on the other, with that grid's `grid_id`, so a script that refuses a file from the wrong grid accepts the new one. Fractional.
 
 `--pieces` takes the candidate volume `unlabelled.py` wrote (scan grid, one id per 3D piece) and gives each piece the SAM
 prompt for the stack: `promptFrame` (the slice that cuts most of the piece), `box` ([row0, col0, row1, col1], ends inclusive,
@@ -63,19 +67,35 @@ if __name__ == '__main__':
     ap.add_argument('--frame', required=True, help='frame.json from orient_joint.py')
     ap.add_argument('--to-oriented', nargs='+', metavar='z,y,x')
     ap.add_argument('--to-scan', nargs='+', metavar='s,r,c')
+    ap.add_argument('--points-file', help='points file on the frame grid or the scan grid: written to --out on the other')
     ap.add_argument('--pieces', help='candidate volume from unlabelled.py (scan grid)')
     ap.add_argument('--ids', type=int, nargs='+', help='candidate ids to map (default: all)')
-    ap.add_argument('--out', help='JSON file for --pieces')
+    ap.add_argument('--out', help='JSON file for --pieces or --points-file')
     a = ap.parse_args()
-    if sum(x is not None for x in (a.to_oriented, a.to_scan, a.pieces)) != 1:
-        sidecar.fail('give exactly one of --to-oriented, --to-scan, --pieces')
-    if a.pieces and not a.out:
-        sidecar.fail('--pieces needs --out boxes.json')
+    if sum(x is not None for x in (a.to_oriented, a.to_scan, a.points_file, a.pieces)) != 1:
+        sidecar.fail('give exactly one of --to-oriented, --to-scan, --points-file, --pieces')
+    if (a.pieces or a.points_file) and not a.out:
+        sidecar.fail('--pieces and --points-file need --out')
     frame = fr.load(a.frame)
     if a.to_oriented:
         sidecar.emit(oriented_srs=fr.from_scan_points(parse_points(a.to_oriented), frame).round(2).tolist())
     elif a.to_scan:
         sidecar.emit(scan_zyx=fr.to_scan_points(parse_points(a.to_scan), frame).round(2).tolist())
+    elif a.points_file:
+        d = json.loads(Path(a.points_file).read_text())
+        if d.get('grid_id') == frame['parent_grid_id']:
+            target, move = frame['grid_id'], fr.from_scan_points
+        elif d.get('grid_id') == frame['grid_id']:
+            target, move = frame['parent_grid_id'], fr.to_scan_points
+        else:
+            sidecar.fail(f'{a.points_file} is on neither grid of this frame (scan {frame["parent_grid_id"][:12]}..., frame '
+                         f'{frame["grid_id"][:12]}...): it needs the frame.json of the grid it was picked on')
+        points = sidecar.load_points(a.points_file, d['grid_id'])
+        if not points:
+            sidecar.fail(f'{a.points_file} holds no points')
+        names, pts = list(points), move(list(points.values()), frame)
+        Path(a.out).write_text(json.dumps({'grid_id': target, 'points': [{'name': n, 'zyx': p.tolist()} for n, p in zip(names, pts, strict=True)]}, indent=1) + '\n')
+        sidecar.emit(points=a.out, grid_id=target)
     else:
         grid = sidecar.grid(sidecar.sidecar_path(a.pieces))['grid_id']
         if grid != frame['parent_grid_id']:

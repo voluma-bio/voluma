@@ -16,6 +16,7 @@ both fractional. Voxel centres are at integer indices.
   fr.resample(scan_vol, f, order=1, cval=0)       # the scan cut onto the frame (order 0 for labels)
   fr.to_scan(stack, f, scan_shape)                 # nearest-neighbour map of a frame-grid stack back onto the scan
   fr.from_scan_points(zyx, f), fr.to_scan_points(p, f)   # points, either way, shape (..., 3)
+  fr.slice_points(f, axis, index)                 # (A, B, 3) scan indices of the voxels of one frame slice (axis 0: slice `index`)
   fr.plane_points(centre, u, v, px, size)         # the points a plane of pixels samples (viewlib.sample_plane uses this)
 """
 import json
@@ -68,28 +69,43 @@ def plane_points(centre, u, v, px, size):
             + j[None, :, None] * np.asarray(v, float))
 
 
+def slice_points(frame, axis, index):
+    """(A, B, 3) scan voxel indices of the voxels of one slice of the frame: axis 0 = slice `index` (rows x columns), axis 1 = row
+    `index` (slices x columns), axis 2 = column `index` (slices x rows). The one place a frame slice is centred and its axes ordered."""
+    a, b = (i for i in range(3) if i != axis)
+    n = frame['shape']
+    c = np.zeros(3)
+    c[axis], c[a], c[b] = index, (n[a] - 1) / 2, (n[b] - 1) / 2
+    R = np.array(frame['R_zyx'])
+    return plane_points(to_scan_points(c, frame), R[a], R[b], 1.0, (n[a], n[b]))
+
+
 def resample(vol, frame, order=1, cval=0, dtype=np.float32):
     """The scan-grid volume `vol` (Z, Y, X; a memmap is fine) cut onto the frame, one slice at a time. Outside the scan: `cval`."""
-    S, H, W = frame['shape']
-    R = np.array(frame['R_zyx'])
-    out = np.empty((S, H, W), dtype)
-    for s in range(S):
-        centre = to_scan_points([s, (H - 1) / 2, (W - 1) / 2], frame)
-        pts = np.moveaxis(plane_points(centre, R[1], R[2], 1.0, (H, W)), -1, 0)
-        ndi.map_coordinates(vol, pts, output=out[s], order=order, mode='constant', cval=cval)
+    out = np.empty(frame['shape'], dtype)
+    for s in range(len(out)):
+        ndi.map_coordinates(vol, np.moveaxis(slice_points(frame, 0, s), -1, 0), output=out[s], order=order, mode='constant', cval=cval)
     return out
 
 
 def to_scan(stack, frame, scan_shape):
-    """Nearest-neighbour map of a frame-grid stack (S, H, W) back onto the scan grid (Z, Y, X); voxels outside it are 0."""
+    """Nearest-neighbour map of a frame-grid stack (S, H, W) back onto the scan grid (Z, Y, X); voxels outside it are 0.
+
+    Only the box of the scan that the frame's corners map to (plus one voxel) is visited, so a small frame costs in proportion to its size."""
     R = np.array(frame['R_zyx'])
     o = np.array(frame['origin_zyx'])
     S, H, W = stack.shape
     out = np.zeros(scan_shape, stack.dtype)
-    yy, xx = np.mgrid[0:scan_shape[1], 0:scan_shape[2]].astype(np.float64)
-    for z in range(scan_shape[0]):
+    corners = np.array([[i, j, k] for i in (-0.5, S - 0.5) for j in (-0.5, H - 0.5) for k in (-0.5, W - 0.5)])
+    sc = to_scan_points(corners, frame)
+    lo = np.maximum(np.floor(sc.min(0)).astype(int) - 1, 0)
+    hi = np.minimum(np.ceil(sc.max(0)).astype(int) + 2, scan_shape)
+    if (hi <= lo).any():
+        return out
+    yy, xx = np.mgrid[lo[1]:hi[1], lo[2]:hi[2]].astype(np.float64)
+    for z in range(lo[0], hi[0]):
         d = np.stack([np.full_like(yy, z), yy, xx]) - o[:, None, None]
         idx = [np.rint(np.tensordot(R[i], d, 1)).astype(np.int64) for i in range(3)]
         ok = (idx[0] >= 0) & (idx[0] < S) & (idx[1] >= 0) & (idx[1] < H) & (idx[2] >= 0) & (idx[2] < W)
-        out[z][ok] = stack[idx[0][ok], idx[1][ok], idx[2][ok]]
+        out[z, lo[1]:hi[1], lo[2]:hi[2]][ok] = stack[idx[0][ok], idx[1][ok], idx[2][ok]]
     return out
