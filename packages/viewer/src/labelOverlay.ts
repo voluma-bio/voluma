@@ -2,7 +2,7 @@
 import type { Types } from "@cornerstonejs/core";
 import type { Focus, Structure } from "@voluma/contracts/review";
 import type { DicomSeries } from "./dicom";
-import { type LabelVolume, type StructureDisplay, scanWorld, voxelWorld } from "./labels";
+import { type LabelVolume, type StructureDisplay, scanWorld } from "./labels";
 
 export function labelColor(style: CSSStyleDeclaration, label: number) {
   return style.getPropertyValue(`--label-${((label - 1) % 12) + 1}`).trim();
@@ -86,9 +86,9 @@ export function drawLabels(
         );
       }
     pixels.putImageData(image, 0, 0);
-    const p = viewport.worldToCanvas(voxelWorld(layer.volume, [z, -0.5, -0.5]));
-    const x = viewport.worldToCanvas(voxelWorld(layer.volume, [z, -0.5, 0.5]));
-    const y = viewport.worldToCanvas(voxelWorld(layer.volume, [z, 0.5, -0.5]));
+    const p = viewport.worldToCanvas(scanWorld(series, [z, -0.5, -0.5]));
+    const x = viewport.worldToCanvas(scanWorld(series, [z, -0.5, 0.5]));
+    const y = viewport.worldToCanvas(scanWorld(series, [z, 0.5, -0.5]));
     ctx.setTransform(
       (x[0] - p[0]) * dpr,
       (x[1] - p[1]) * dpr,

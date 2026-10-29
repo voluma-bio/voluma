@@ -9,7 +9,7 @@ export function useLabelVolumes(
   revisionId?: string,
 ) {
   const key = `${revisionId}:${series?.id}`;
-  const cache = useRef({ key, layers: new Map<string, LabelVolume>() });
+  const cache = useRef({ key, layers: new Map<string, Pick<LabelVolume, "values" | "bounds">>() });
   if (cache.current.key !== key) cache.current = { key, layers: new Map() };
   const [state, setState] = useState<{
     key: string;
@@ -31,13 +31,21 @@ export function useLabelVolumes(
     }
     const publish = (error?: string) => {
       if (stopped) return;
-      const layers = sources.flatMap((s) => {
-        const v = local.get(s.url);
-        return v ? [v] : [];
-      });
+      const layers = error
+        ? []
+        : sources.flatMap((s) => {
+            const v = local.get(s.url);
+            if (
+              v &&
+              (v.values.length !== s.volume.shapeZyx.reduce((a, b) => a * b, 1) ||
+                v.values.BYTES_PER_ELEMENT !==
+                  (s.volume.data?.format === "npy" && s.volume.data.dtype === "uint16" ? 2 : 1))
+            )
+              throw new Error("Cached NPY dtype or shape differs from the declared labels.");
+            return v ? [{ ...s, ...v }] : [];
+          });
       setState({ key, layers, error, loading: !error && layers.length < sources.length });
     };
-    publish();
     void (async () => {
       try {
         const total = sources.reduce(
@@ -51,6 +59,9 @@ export function useLabelVolumes(
           throw new Error("Selected label volumes exceed the 1 GiB combined limit.");
         for (const source of sources) {
           assertLabelGrid(source.volume, series);
+        }
+        publish();
+        for (const source of sources) {
           if (local.has(source.url)) continue;
           const layer = await new Promise<LabelVolume>((resolve, reject) => {
             const worker = new Worker(new URL("./labels.worker.ts", import.meta.url), {
@@ -73,7 +84,7 @@ export function useLabelVolumes(
             worker.postMessage(source);
           });
           if (stopped) return;
-          local.set(source.url, layer);
+          local.set(source.url, { values: layer.values, bounds: layer.bounds });
           publish();
         }
       } catch (error) {

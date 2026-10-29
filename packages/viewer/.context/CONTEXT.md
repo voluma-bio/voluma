@@ -201,14 +201,17 @@ uint8/uint16 labels, verifies the SHA-256, dtype, shape and payload size, and fi
 each nonzero label's bounds. Each file is capped at 512 MiB; selected files
 together are capped at 1 GiB. Those are payload limits, not total browser memory.
 Labels must match the acquired scan's dimensions and affine; mismatches fail
-instead of being resampled. Workers stop on replacement, close and unmount;
-unselected volumes are evicted.
+instead of being resampled. Each slice's corners must agree within 1% of the
+smallest voxel spacing; accepted labels render through the scan's transform.
+Workers stop on replacement, close and unmount; unselected volumes are evicted.
+Files share decoded values and bounds, never a volume's revision-specific identity.
 
 The acquired viewport paints native label pixels through Cornerstone's
 world-to-canvas transform. Visibility, opacity and the Labels toggle change
 display only. Focused labels retain an amber outline even when fills are hidden.
 Explicit voxel points/boxes, label regions, structures and annotation landmarks
-can set the acquired slice and camera target. An open raw 3D preview targets the
+can set the acquired slice and camera target. Explicit points, then box centres,
+take priority over inferred annotation or label targets. An open raw 3D preview targets the
 same world point and projects an amber box or crosshair; it does not render label
 surfaces. Clearing focus removes outlines without resetting either camera.
 Orthogonal reformats, surfaces and run-persistent snapshots remain separate work.

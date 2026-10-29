@@ -26,15 +26,17 @@ export function assertLabelGrid(volume: Volume, series: DicomSeries) {
   const plan = planVolume(series);
   if (volume.shapeZyx.some((n, i) => n !== plan.dimensions[2 - i]))
     throw new Error(`${volume.name}: label dimensions do not match this scan.`);
-  const spacing = [series.spacing[1]!, series.spacing[0]!, plan.spacing[2]];
-  for (let a = 0; a < 3; a++) {
-    const row = volume.affine[a]!;
-    if (
-      Math.abs(row[3]! - plan.origin[a]!) > 0.0001 ||
-      [0, 1, 2].some((j) => Math.abs(row[j]! - plan.direction[j * 3 + a]! * spacing[j]!) > 0.0001)
-    )
-      throw new Error(`${volume.name}: label geometry does not match this scan.`);
-  }
+  // Coefficient tolerances accumulate across large grids. Check each slice's
+  // corners in world mm, including internal slice drift, within 1% of a voxel.
+  const tolerance = Math.min(...plan.spacing) * 0.01;
+  for (let z = 0; z < series.slices.length; z++)
+    for (const y of [0, series.rows - 1])
+      for (const x of [0, series.columns - 1]) {
+        const actual = voxelWorld(volume, [z, y, x]);
+        const expected = scanWorld(series, [z, y, x]);
+        if (Math.hypot(...actual.map((n, i) => n - expected[i]!)) > tolerance)
+          throw new Error(`${volume.name}: label geometry does not match this scan.`);
+      }
 }
 
 export function focusTarget(
@@ -46,7 +48,9 @@ export function focusTarget(
 ) {
   if (!focus) return;
   let box = focus.box;
-  let point = focus.point;
+  let point =
+    focus.point ??
+    (box?.min.map((n, i) => Math.round((n + box!.max[i]!) / 2)) as Point3 | undefined);
   if (!point && series) {
     const positions = annotations
       .filter((a) => focus.annotationIds.includes(a.id))
