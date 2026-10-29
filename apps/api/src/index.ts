@@ -31,7 +31,6 @@ import { r2ReferenceArchive } from "./domains/review/r2-reference-archive";
 import { r2RunFiles } from "./domains/review/r2-run-files";
 import { createRun } from "./domains/run";
 import type { Limits } from "./domains/run/admission";
-import { catalog } from "./domains/run/catalog";
 import { KeyVault } from "./domains/run/key-vault";
 import { createNotifier } from "./domains/run/notifier";
 import { pgEventLog } from "./domains/run/pg-event-log";
@@ -181,7 +180,6 @@ app.route(
     eventLog,
     notifier,
     history: pgHistory(db),
-    catalog,
     uploadStore: pgUploads(db),
     objects: r2 && r2Uploads(r2),
     // A prepared scan is a few hundred files and a few hundred MB; a raw one, a few thousand.
