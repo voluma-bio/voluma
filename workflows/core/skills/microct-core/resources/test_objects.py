@@ -10,6 +10,6 @@ def test_cropped_mask_round_trips_to_its_place(tmp_path):
     m = np.zeros((20, 30, 40), bool)
     m[3:7, 11:19, 25] = True
     m[5, 12, 30] = True
-    entry = objects.mask(tmp_path / 'm.npy', m, like=tmp_path / 'hu.json')
+    entry = objects.mask(tmp_path / 'm.npy', m, like=tmp_path / 'hu.json')['structure']
     assert entry['offsetZyx'] == [3, 11, 25] and entry['shapeZyx'] == [4, 8, 6] and entry['gridId'] == 'g'
-    assert np.array_equal(objects.dense(objects.load(entry), m.shape), m)
+    assert np.array_equal(objects.dense(objects.load({'kind': 'structure', 'structure': entry}), m.shape), m)

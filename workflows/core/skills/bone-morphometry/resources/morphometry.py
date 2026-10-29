@@ -15,7 +15,7 @@ holding only bone or only marrow, HU on another grid than the region, anisotropi
 Writes: volumes: <out>/volumes.json; trabecular: <out>/morphometry.json, qc.jpg, thickness-mm.npy and separation-mm.npy
         (the ROI's bounding box on the region's grid, `offset_zyx` in their sidecars, mm); cortical: <out>/<name>.json,
         qc-<name>.jpg and slab-<name>.npy (the slab measured, cropped, as an object: see `microct-core/resources/objects.py`).
-        The json is the result record {values: {id: {value, unit, definition, kind}}, grid_id, inputs, ...}
+        The json is the result record {values: {id: {value, unit, definition, kind}}, grid_id, inputs, ...}; cortical adds `objects` (the slab)
 Prints: one JSON line {out, values: {id: {value, unit, definition, kind}}}; trabecular adds {qc, thickness, separation}, cortical {qc}
 Example: python morphometry.py trabecular --roi roi.npy --hu hu.npy --hu-json hu.json --out out/roi2 --id BV/TV=BVTV-roi2
 Exits 2 with one sentence on bad input, before writing anything.

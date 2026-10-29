@@ -24,7 +24,7 @@ description: >
   grid, so scripts refuse a file without one.
 - A thing you place in 3D (a slab mask, a surface, a point, a ruler) is saved with `objects.py` (this skill's resources, a
   library): its writer makes the file and returns the entry that `report_output` takes, on a named grid. Scripts that
-  place something print it as `objects`; `quad_view.py --objects F.json` draws it.
+  place something write it as `objects` in their result record; `quad_view.py --objects <record>.json` draws it.
 - The names later tasks look for in `/outputs/<task>/`: `hu.npy`, `hu.json`, `scan-notes.md` (intake);
   `frame.json`, `oriented.npy`, `keyframe.jpg` (orientation); `labels.npy`, the final labels on the scan grid
   (segmentation). Working files go in `/scratch/`.
