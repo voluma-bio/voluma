@@ -39,7 +39,13 @@ import {
   toolCallIdSchema,
 } from "./ids";
 import { evidenceRefSchema, outputReportSchema } from "./output";
-import { checkAcceptedSchema, focusSchema, reviewCompletedSchema } from "./review";
+import { sha256Schema } from "./r2";
+import {
+  checkAcceptedSchema,
+  focusSchema,
+  reviewAssetsManifestSchema,
+  reviewCompletedSchema,
+} from "./review";
 import { claimEndReasonSchema } from "./runner";
 import { recordedPinSchema, workflowPlanSchema } from "./workflow";
 
@@ -423,6 +429,29 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
       }),
   );
 
+  /**
+   * Review assets (OME-Zarr levels, meshes) for one reported file were converted: the
+   * manifest plus the `sourceSha256` of the file. Written by the runner's conversion worker
+   * on the run's root thread (`<runId>.supervisor`); id `<runId>:assets:<sha256>`, so a retry
+   * or a resumed worker stores one event. The files are under `reviewAssetKey(runId,
+   * sourceSha256, path)`. The assets are a function of the source bytes and the converter
+   * version, so a rerun of a task that reports the same bytes reuses them. The server serves
+   * them at `GET /api/review/runs/:runId/assets/:sha256/*`: a read check on the run, the tail
+   * checked as a `relativePathSchema`, then a 302 to a presigned GET with `Cache-Control:
+   * no-store` on the 302 (the presigned URL expires; the file does not change).
+   * Not in a review summary: `reviewState` ignores it.
+   */
+  const assetsReady = event(
+    "assets.ready",
+    reviewAssetsManifestSchema.extend({ sourceSha256: sha256Schema }),
+  );
+
+  /** Conversion of the file with this `sourceSha256` failed (or timed out at the end of the run); same id as `assets.ready`. Permanent for the run. The writer truncates `error` to `WAKE_ERROR_MAX`. */
+  const assetsFailed = event(
+    "assets.failed",
+    z.object({ sourceSha256: sha256Schema, error: z.string().min(1).max(WAKE_ERROR_MAX) }),
+  );
+
   return z.discriminatedUnion("type", [
     claimStarted,
     threadStarted,
@@ -438,6 +467,8 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     output,
     judgment,
     wake,
+    assetsReady,
+    assetsFailed,
   ]);
 };
 

@@ -60,6 +60,15 @@ export const toolOutputKey = (runId: string, toolCallId: string) =>
 export const evidenceKey = (runId: string, sha256: string) =>
   `${runPrefix(runId)}evidence/${sha256Schema.parse(sha256)}`;
 
+/**
+ * What the review converter made from one reported file (`events.ts`, `assets.ready`): zarr
+ * levels and meshes, keyed by the file's sha256. Per run, inside the run prefix; the convert
+ * sandbox mounts `evidence/` read-only and `review/` read-write, which do not overlap.
+ */
+export const reviewAssetPrefix = (runId: string) => `${runPrefix(runId)}review/`;
+export const reviewAssetKey = (runId: string, sha256: string, path: string) =>
+  `${reviewAssetPrefix(runId)}${sha256Schema.parse(sha256)}/${rel(path)}`;
+
 /** Reference data for the OA6-1RK sample: the raw scan and the reference run. */
 export const referencePrefix = (part: "scan" | "run") => `reference/OA6-1RK/${part}/`;
 export const referenceKey = (part: "scan" | "run", path: string) =>
