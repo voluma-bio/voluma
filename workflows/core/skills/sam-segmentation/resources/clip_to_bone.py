@@ -8,7 +8,7 @@ output, not with the mask. Never refill the clipped voxels with the nearest labe
 Writes: <out>  the clipped labels (.npy, the shape of --labels), with its sidecar (the labels' grid, the threshold)
 Prints: one JSON line {labels, volume_mm3: {label id: clipped volume}, removed_mm3: {label id: volume removed}}
 Example: python clip_to_bone.py --hu hu.npy --labels labels.npy --out clipped.npy --threshold-hu 2500
-Exits 2 with one sentence on the input it checks; a missing file is a Python error.
+Exits 2 with one sentence on bad input, before writing anything.
 """
 
 import numpy as np
@@ -16,8 +16,8 @@ import sidecar
 
 if __name__ == '__main__':
     ap = sidecar.parser(__doc__)
-    ap.add_argument('--hu', required=True, help='hu.npy of the scan')
-    ap.add_argument('--labels', required=True, help='label volume .npy on the scan grid, with its sidecar beside it')
+    ap.add_argument('--hu', type=sidecar.existing, required=True, help='hu.npy of the scan')
+    ap.add_argument('--labels', type=sidecar.existing, required=True, help='label volume .npy on the scan grid, with its sidecar beside it')
     ap.add_argument('--out', required=True, help='clipped labels .npy to write')
     ap.add_argument('--threshold-hu', type=float, required=True, help='HU: voxels below this are cleared (the segmentation threshold of the workflow\'s anatomy reference)')
     a = ap.parse_args()

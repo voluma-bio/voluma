@@ -10,7 +10,7 @@ Writes: <out>/hu.npy  float32 HU, axis order Z,Y,X, slices sorted along the seri
         indices), calibration, grid_id, and the sha256 of every source slice
 Prints: one JSON line {hu, header, shape_zyx, spacing_zyx_mm, grid_id, calibration, hu_min, hu_max}
 Example: python intake.py --in dicom/ --out scan/
-Exits 2 with one sentence on the input it checks; a missing file is a Python error.
+Exits 2 with one sentence on bad input, before writing anything.
 """
 import hashlib
 import json
@@ -110,7 +110,7 @@ def load_series(source, out):
 
 if __name__ == '__main__':
     ap = sidecar.parser(__doc__)
-    ap.add_argument('--in', dest='src', required=True, help='directory holding the DICOM series (.dcm files, searched recursively)')
+    ap.add_argument('--in', type=sidecar.existing, dest='src', required=True, help='directory holding the DICOM series (.dcm files, searched recursively)')
     ap.add_argument('--out', required=True, help='output directory (created; must not already hold hu.npy)')
     a = ap.parse_args()
     m, hu_min, hu_max = load_series(a.src, Path(a.out))

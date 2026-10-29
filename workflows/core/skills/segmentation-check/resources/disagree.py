@@ -15,7 +15,7 @@ Writes: <out>/disagreement.npy  uint16 region id by rank, on the grid of --label
         <out>/panel_<id>.jpg  the three-cut panel of each rendered region
 Prints: one JSON line {regions, disagreement, panels, flagged_voxels, flagged_pct_of_classic_bone, regions_over_floor, regions_total, top}; top is the 8 largest regions
 Example: python disagree.py --hu hu.npy --labels labels.npy --classic classic.npy --threshold-hu 2500 --out disagree/
-Exits 2 with one sentence on the input it checks; a missing file is a Python error.
+Exits 2 with one sentence on bad input, before writing anything.
 """
 import json
 from pathlib import Path
@@ -92,11 +92,11 @@ def region_panel(hu, labels, classic, region_mask, region, frame, window, path, 
 
 if __name__ == '__main__':
     ap = sidecar.parser(__doc__)
-    ap.add_argument('--hu', required=True, help='hu.npy of the scan')
-    ap.add_argument('--labels', required=True, help='your label volume .npy on the scan grid, with its sidecar beside it')
-    ap.add_argument('--classic', required=True, help='the classic method\'s labels .npy (classic_segment.py), same grid')
+    ap.add_argument('--hu', type=sidecar.existing, required=True, help='hu.npy of the scan')
+    ap.add_argument('--labels', type=sidecar.existing, required=True, help='your label volume .npy on the scan grid, with its sidecar beside it')
+    ap.add_argument('--classic', type=sidecar.existing, required=True, help='the classic method\'s labels .npy (classic_segment.py), same grid')
     ap.add_argument('--out', required=True, help='output directory (created)')
-    ap.add_argument('--frame', help='frame.json from orient_joint.py: cut the panels along its slices')
+    ap.add_argument('--frame', type=sidecar.existing, help='frame.json from orient_joint.py: cut the panels along its slices')
     ap.add_argument('--threshold-hu', type=float, required=True, help='HU: only voxels at or above it can disagree')
     ap.add_argument('--ids', help='classic label ids that count, e.g. 1,2,3 (default: all)')
     ap.add_argument('--min-mm3', type=float, default=0.005, help='mm3: regions under this volume are not numbered')

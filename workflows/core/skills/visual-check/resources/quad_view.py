@@ -21,7 +21,7 @@ Prints: one JSON line {image, view, crosshair_zyx, zoom, camera, panes, shown, w
 Example: python quad_view.py --hu hu.npy --labels labels.npy --names anatomy.json --out /scratch/v1.jpg
          python quad_view.py --from /scratch/v1.view.json --center tibia --move axis0+5 --out /scratch/v2.jpg
          python quad_view.py --from v2.view.json --rotate 40,0 --plane 1:contains=shaft_a,shaft_b --out v3.jpg
-Exits 2 with one sentence on the input it checks; a missing file is a Python error.
+Exits 2 with one sentence on bad input, before writing anything.
 """
 import json
 import math
@@ -651,10 +651,10 @@ def parse_args(argv):
     """Parse and check every option, so a bad one is refused in one sentence before any work: ranges, syntax, files."""
     ap = sl.parser(__doc__, allow_abbrev=False)
     ap.add_argument('--out', required=True, help='the image to write (.jpg); the view.json goes beside it')
-    ap.add_argument('--from', dest='from_', help='an earlier .view.json: take its state and apply the changes below')
-    ap.add_argument('--hu', help='the scan, hu.npy (first call; later calls take it from --from)')
+    ap.add_argument('--from', type=sl.existing, dest='from_', help='an earlier .view.json: take its state and apply the changes below')
+    ap.add_argument('--hu', type=sl.existing, help='the scan, hu.npy (first call; later calls take it from --from)')
     ap.add_argument('--window', help='display window lo,hi in HU (default: automatic from the middle slice); a negative low end as is: --window -500,6000')
-    ap.add_argument('--labels', help='label volume .npy: outlines on slices, colours in 3D (bone is ivory without it, and while the labels layer is hidden)')
+    ap.add_argument('--labels', type=sl.existing, help='label volume .npy: outlines on slices, colours in 3D (bone is ivory without it, and while the labels layer is hidden)')
     ap.add_argument('--names', help='label names, 1=femur,2=tibia or an anatomy.json')
     ap.add_argument('--mask', action='append', metavar='NAME=M.npy', help='bool volume on any registered grid: outline on slices, translucent surface in 3D (repeatable)')
     ap.add_argument('--face', action='append', metavar='NAME=F.npy', help='2D array of a frame\'s axis-0 index over its axes 1, 2 (NaN = none; iioc\'s growth-plate face): drawn as a line (repeatable)')

@@ -10,7 +10,7 @@ sandbox).
 Writes: <out>  the JPEG sheet (3 x 2 views, a legend of the labels present); .mesh-cache/ beside it
 Prints: one JSON line {image, labels_drawn, step, triangles}
 Example: python render_surfaces.py --labels labels.npy --out sheet.jpg --frame frame.json --names anatomy.json
-Exits 2 with one sentence on the input it checks; a missing file is a Python error.
+Exits 2 with one sentence on bad input, before writing anything.
 """
 from pathlib import Path
 
@@ -51,10 +51,10 @@ def render_view(ms, look, up, azimuth, size):
 
 if __name__ == '__main__':
     ap = sl.parser(__doc__)
-    ap.add_argument('--labels', required=True, help='label volume .npy')
+    ap.add_argument('--labels', type=sl.existing, required=True, help='label volume .npy')
     ap.add_argument('--out', required=True, help='the image to write (.jpg)')
-    ap.add_argument('--frame', help='frame.json from orient_joint.py: orients the views by the bones')
-    ap.add_argument('--header', help='hu.json for the spacing (default: the labels sidecar)')
+    ap.add_argument('--frame', type=sl.existing, help='frame.json from orient_joint.py: orients the views by the bones')
+    ap.add_argument('--header', type=sl.existing, help='hu.json for the spacing (default: the labels sidecar)')
     ap.add_argument('--names', help='label names, 1=femur,2=tibia or an anatomy.json')
     ap.add_argument('--step', type=int, help='downsampling step in voxels (default: the longest axis / 300, rounded, at least 1)')
     a = ap.parse_args()

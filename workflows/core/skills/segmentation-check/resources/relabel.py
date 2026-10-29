@@ -7,7 +7,7 @@ candidate); it overwrites whatever label those voxels had, and the previous labe
 Writes: <out>  the labels with the piece relabelled (.npy, the grid of --labels), with its sidecar
 Prints: one JSON line {labels, voxels, previous_labels: {label id: voxels}, now}
 Example: python relabel.py --labels labels.npy --out fixed.npy --at 410,220,130 --to 5 --pieces cand.npy
-Exits 2 with one sentence on the input it checks; a missing file is a Python error.
+Exits 2 with one sentence on bad input, before writing anything.
 """
 
 import numpy as np
@@ -16,11 +16,11 @@ from scipy import ndimage as ndi
 
 if __name__ == '__main__':
     ap = sidecar.parser(__doc__)
-    ap.add_argument('--labels', required=True, help='label volume .npy on the scan grid, with its sidecar beside it')
+    ap.add_argument('--labels', type=sidecar.existing, required=True, help='label volume .npy on the scan grid, with its sidecar beside it')
     ap.add_argument('--out', required=True, help='relabelled labels .npy to write')
     ap.add_argument('--at', required=True, metavar='z,y,x', help='scan voxel indices of a voxel in the piece')
     ap.add_argument('--to', type=int, required=True, help='the label id to give the piece (0 clears it)')
-    ap.add_argument('--pieces', help='candidate volume .npy from unlabelled.py: the piece is the candidate containing --at')
+    ap.add_argument('--pieces', type=sidecar.existing, help='candidate volume .npy from unlabelled.py: the piece is the candidate containing --at')
     a = ap.parse_args()
     labels = np.load(a.labels)
     z, y, x = (int(v) for v in a.at.split(','))

@@ -15,7 +15,7 @@ Writes: <out>/femoral.json  the result record of `microct-core/resources/sidecar
         distal-femoral-width-dfw, width-length-ratio; mm, mm, 1), plus landmarks_zyx, frame (ml, si, normal vectors, zyx) and checks
 Prints: one JSON line {out, values: {id: {value, unit, definition, kind}}}
 Example: python femoral_frame.py --landmarks points-ab.json points-cd.json --hu-json hu.json --labels labels.npy --out femoral/
-Exits 2 with one sentence on the input it checks; a missing file is a Python error.
+Exits 2 with one sentence on bad input, before writing anything.
 """
 
 from pathlib import Path
@@ -50,10 +50,10 @@ def off_bone_mm(point, femur, vox):
 
 def main():
     ap = sidecar.parser(__doc__)
-    ap.add_argument('--landmarks', required=True, nargs='+', help='points files on the scan grid that together hold points named a, b, c, d (the points.json files pick.py writes)')
-    ap.add_argument('--hu-json', required=True, help='hu.json: spacing and grid')
+    ap.add_argument('--landmarks', type=sidecar.existing, required=True, nargs='+', help='points files on the scan grid that together hold points named a, b, c, d (the points.json files pick.py writes)')
+    ap.add_argument('--hu-json', type=sidecar.existing, required=True, help='hu.json: spacing and grid')
     ap.add_argument('--out', required=True, help='output directory (created)')
-    ap.add_argument('--labels', required=True, help='labels.npy on the scan grid: the landmarks are checked against the femur')
+    ap.add_argument('--labels', type=sidecar.existing, required=True, help='labels.npy on the scan grid: the landmarks are checked against the femur')
     ap.add_argument('--label', type=int, default=1, help='femur label id')
     a = ap.parse_args()
     grid = sidecar.grid(a.hu_json)

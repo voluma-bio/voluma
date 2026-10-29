@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from sidecar import existing as sidecar_existing
 
 ROOT = Path(__file__).resolve().parents[2]  # workflows/
 RESOURCES = sorted(ROOT.glob('*/skills/*/resources'))  # core and each workflow
@@ -67,6 +68,19 @@ def build_parser(script, monkeypatch):
     return e.value.args[0]
 
 
+def first_input(parser, argv=()):
+    """(argv prefix, flag) of an argument that names an input file: the first one the parser, or a subcommand's, declares."""
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            for name, sub in action.choices.items():
+                found = first_input(sub, (*argv, name))
+                if found:
+                    return found
+        elif action.type is sidecar_existing and action.option_strings:
+            return argv, action.option_strings[0]
+    return None
+
+
 def undocumented(parser, prefix=''):
     for action in parser._actions:
         if isinstance(action, argparse._SubParsersAction):
@@ -89,3 +103,16 @@ def test_docstring_is_the_help(script, monkeypatch):
     assert parser.description == doc, 'build the parser with sidecar.parser(__doc__)'
     for line in ('Writes:', 'Prints:', 'Example:'):
         assert f'\n{line}' in doc, f'the docstring has no {line} line (a script that writes nothing says "Writes: nothing")'
+
+
+@pytest.mark.parametrize('script', SCRIPTS, ids=ids(SCRIPTS))
+def test_missing_input_is_one_sentence(script, monkeypatch, tmp_path):
+    """A path argument that must exist is refused right after parsing: exit 2, one stderr line naming the flag and path."""
+    found = first_input(build_parser(script, monkeypatch), ())
+    assert found, 'no argument declares type=sidecar.existing: an input path is checked by the parser'
+    prefix, flag = found
+    missing = str(tmp_path / 'missing.npy')
+    r = subprocess.run([sys.executable, str(script), *prefix, flag, missing], check=False, capture_output=True, text=True, timeout=120, cwd='/', env=ENV)
+    assert r.returncode == 2, r.stderr
+    assert r.stdout == '' and len(r.stderr.strip().splitlines()) == 1, r.stderr
+    assert flag in r.stderr and missing in r.stderr

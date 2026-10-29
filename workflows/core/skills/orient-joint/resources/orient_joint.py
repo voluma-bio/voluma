@@ -37,7 +37,7 @@ Writes: <out>/frame.json  the frame (`microct-core/resources/frame.py` has its s
         <out>/keyframe.jpg  the keyframe slice
 Prints: one JSON line {frame, oriented, keyframe_image, keyframe, slices, bend_deg, skew_vox, shafts_found, keyframe_bone_vox, threshold_hu, plane_rule, ref_object_frames, oriented_shape}
 Example: python orient_joint.py --in hu.npy --header hu.json --out orient --shaft-radius-mm 0.9 --ref-radius-mm 3 --min-object-mm3 0.5
-Exits 2 with one sentence on the input it checks; a missing file is a Python error.
+Exits 2 with one sentence on bad input, before writing anything.
 """
 from pathlib import Path
 
@@ -281,8 +281,8 @@ def joint_frame(hu, spacing_mm, shaft_radius_mm, ref_radius_mm, min_object_mm3, 
 
 if __name__ == '__main__':
     ap = sidecar.parser(__doc__)
-    ap.add_argument('--in', dest='src', required=True, help='hu.npy of the scan')
-    ap.add_argument('--header', required=True, help='hu.json from scan-intake')
+    ap.add_argument('--in', type=sidecar.existing, dest='src', required=True, help='hu.npy of the scan')
+    ap.add_argument('--header', type=sidecar.existing, required=True, help='hu.json from scan-intake')
     ap.add_argument('--out', required=True, help='output directory (created)')
     ap.add_argument('--threshold-hu', type=float, help='bone threshold in HU (default: Otsu on the volume)')
     ap.add_argument('--shaft-radius-mm', type=float, required=True, help='mm: the widest a shaft gets')

@@ -39,7 +39,7 @@ Writes: in <out>, on the aligned grid (array axes W,V,U), each .npy with its sid
   iioc.json  the result record (every value with its definition: heights, width, diagnostics)   qc-coronal.jpg, qc-heights.jpg  QC images
 Prints: the result record {out, values: {id: {value, unit, definition, kind}}} with the paths of the files above (qc, tissue, tissue_scan, width_points_scan, growth_plate_face, growth_plate_traced, articular_top, plate_runs, removed_disconnected_voxels)
 Example: python iioc.py --hu-aligned tibia-hu.npy --mask tibia-mask.npy --frame tibia-frame.json --hu-json hu.json --annotations annotations.json --out iioc/
-Exits 2 with one sentence on the input it checks; a missing file is a Python error.
+Exits 2 with one sentence on bad input, before writing anything.
 """
 
 import json
@@ -122,11 +122,11 @@ def first_run(bone, v, u):
 
 def main():
     ap = sidecar.parser(__doc__)
-    ap.add_argument('--hu-aligned', required=True, help='tibia-hu.npy from tibia_frame.py')
-    ap.add_argument('--mask', required=True, help='tibia-mask.npy from tibia_frame.py')
-    ap.add_argument('--frame', required=True, help='tibia-frame.json from tibia_frame.py')
-    ap.add_argument('--hu-json', required=True, help='hu.json of the scan: its grid, and the calibration the lab threshold in HU comes from')
-    ap.add_argument('--annotations', required=True, help='annotations JSON on the aligned grid, described above')
+    ap.add_argument('--hu-aligned', type=sidecar.existing, required=True, help='tibia-hu.npy from tibia_frame.py')
+    ap.add_argument('--mask', type=sidecar.existing, required=True, help='tibia-mask.npy from tibia_frame.py')
+    ap.add_argument('--frame', type=sidecar.existing, required=True, help='tibia-frame.json from tibia_frame.py')
+    ap.add_argument('--hu-json', type=sidecar.existing, required=True, help='hu.json of the scan: its grid, and the calibration the lab threshold in HU comes from')
+    ap.add_argument('--annotations', type=sidecar.existing, required=True, help='annotations JSON on the aligned grid, described above')
     ap.add_argument('--out', required=True, help='output directory (created)')
     ap.add_argument('--threshold', type=float, help='bone threshold in HU (default: the lab threshold, 2.16/cm, from --hu-json)')
     ap.add_argument(

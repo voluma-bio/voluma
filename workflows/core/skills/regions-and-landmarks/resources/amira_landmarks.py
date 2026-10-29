@@ -10,7 +10,7 @@ Writes: <out>  the Amira ASCII landmark file, physical mm (x, y, z)
         <out>.names.json  the point names in file order, because the format has no names
 Prints: one JSON line {landmarks, names, world_mm_xyz}
 Example: python amira_landmarks.py --points points.json more.json --header hu.json --out landmarks.landmarkAscii
-Exits 2 with one sentence on the input it checks; a missing file is a Python error.
+Exits 2 with one sentence on bad input, before writing anything.
 """
 import json
 from pathlib import Path
@@ -39,8 +39,8 @@ def amira_text(world_mm):
 
 if __name__ == '__main__':
     ap = sidecar.parser(__doc__)
-    ap.add_argument('--points', required=True, nargs='+', help='points files on the scan grid, merged; a name may appear once')
-    ap.add_argument('--header', required=True, help='hu.json of the scan the points are on (has the affine)')
+    ap.add_argument('--points', type=sidecar.existing, required=True, nargs='+', help='points files on the scan grid, merged; a name may appear once')
+    ap.add_argument('--header', type=sidecar.existing, required=True, help='hu.json of the scan the points are on (has the affine)')
     ap.add_argument('--out', required=True, help='the landmark file to write')
     a = ap.parse_args()
     header = json.loads(Path(a.header).read_text())

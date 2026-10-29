@@ -6,7 +6,7 @@ along axis 0) or a 2D image. x is the column (top labels), y the row (left label
 Writes: <out>  the JPEG, one pixel per array element (at most 2000 px, 1 MiB)
 Prints: one JSON line {image, shape_rc, index, boxes, points}
 Example: python render_slices.py --in oriented.npy --index 159 --out keyframe.jpg --grid --points 120,300:landmark
-Exits 2 with one sentence on the input it checks; a missing file is a Python error.
+Exits 2 with one sentence on bad input, before writing anything.
 """
 from pathlib import Path
 
@@ -40,7 +40,7 @@ def render(img, out, window=None, grid=True, boxes=(), points=(), title=None):
 
 if __name__ == '__main__':
     ap = sl.parser(__doc__)
-    ap.add_argument('--in', dest='src', required=True, help='a 3D stack or a 2D image, .npy')
+    ap.add_argument('--in', type=sl.existing, dest='src', required=True, help='a 3D stack or a 2D image, .npy')
     ap.add_argument('--index', type=int, help='slice along axis 0 of a 3D stack (required for a 3D stack)')
     ap.add_argument('--out', required=True, help='the image to write (.jpg)')
     ap.add_argument('--window', metavar='lo,hi', help='display window in the volume\'s units, HU (default: from the data)')

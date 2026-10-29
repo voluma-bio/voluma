@@ -13,7 +13,7 @@ before it, a zero denominator. The record format is in `microct-core/resources/s
 Writes: <out>  the result record {values: {id: {value, unit, definition, kind, ...}}, grid_id, spacing_zyx_mm, inputs}
 Prints: one JSON line {out, values: {id: {value, unit, definition, kind}}}
 Example: python measure.py --spec spec.json --grid hu.json --out measurements.json
-Exits 2 with one sentence on the input it checks; a missing file is a Python error.
+Exits 2 with one sentence on bad input, before writing anything.
 """
 
 import json
@@ -81,8 +81,8 @@ def measure(spec, grid):
 
 def main():
     ap = sidecar.parser(__doc__)
-    ap.add_argument('--spec', required=True, help='JSON spec, described above')
-    ap.add_argument('--grid', required=True, help='hu.json (or any sidecar): the grid the points and labels are on')
+    ap.add_argument('--spec', type=sidecar.existing, required=True, help='JSON spec, described above')
+    ap.add_argument('--grid', type=sidecar.existing, required=True, help='hu.json (or any sidecar): the grid the points and labels are on')
     ap.add_argument('--out', required=True, help='JSON file to write')
     a = ap.parse_args()
     grid = sidecar.grid(a.grid)
