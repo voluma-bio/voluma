@@ -24,12 +24,12 @@ Moving them to `.railway/railway.ts` is in [TODO.md](TODO.md).
 |---|---|
 | Build | Railpack. Install is Railpack's; build command `pnpm --filter @voluma/web build`. Railpack prunes dev dependencies afterwards, so anything the server runs must be in `dependencies` (tsx, drizzle-orm) |
 | Pre-deploy | `pnpm --filter @voluma/api db:migrate` (`src/migrate.ts`). The only place migrations run in production; a failure stops the deploy and prints the error |
-| Start | `cd apps/api && exec node --import tsx src/index.ts`. `exec` makes node the container's process, so it gets SIGTERM; run from `apps/api` because that is where tsx resolves. Never `pnpm start` |
+| Start | `cd apps/api && exec node --import tsx src/index.ts`. `exec` makes node the container's process, so it gets SIGTERM; run from `apps/api` because that is where tsx resolves. Never `pnpm start`. A bundled `tasks.json` or `outputs.json` that fails its schema stops the API from starting (the healthcheck fails and the old deployment stays); `pnpm check` parses them first (`packages/workflow/src/bundled.test.ts`) |
 | Healthcheck | `/health` (liveness only; the deploy gate, not monitoring) |
 | Draining | 30 s, above the API's `DRAIN_MS` (10 s) in `src/index.ts` |
 | Restart | on failure, 10 retries |
 | App Sleeping | off |
-| Watch paths | `/apps/api/**`, `/apps/web/**`, `/packages/**`, `/pnpm-lock.yaml`, `/package.json`, `/.tool-versions`, `/tsconfig.base.json`, `/pnpm-workspace.yaml` (root files that change the build or Node). `/workflows/*/outputs.json` and `/workflows/*/tasks.json` (the web build bundles them: the start screen's outputs, the task titles). No other `/workflows/**`: the API never reads the workflow files; the runner snapshots them and records its own commit (`RAILWAY_GIT_COMMIT_SHA`) in each run. Set on the service |
+| Watch paths | `/apps/api/**`, `/apps/web/**`, `/packages/**`, `/pnpm-lock.yaml`, `/package.json`, `/.tool-versions`, `/tsconfig.base.json`, `/pnpm-workspace.yaml` (root files that change the build or Node). `/workflows/*/outputs.json` and `/workflows/*/tasks.json` (`@voluma/workflow/bundled` imports them, for the API's workflow catalog and the web build's outputs and task titles). No other `/workflows/**`: the API reads no other workflow file; the runner snapshots them and records its own commit (`RAILWAY_GIT_COMMIT_SHA`) in each run. Set on the service |
 
 Variables on `@voluma/api`:
 

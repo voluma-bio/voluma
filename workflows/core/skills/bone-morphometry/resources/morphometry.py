@@ -15,7 +15,7 @@ holding only bone or only marrow, HU on another grid than the region, anisotropi
 Writes: volumes: <out>/volumes.json; trabecular: <out>/morphometry.json, qc.jpg, thickness-mm.npy and separation-mm.npy
         (the ROI's bounding box on the region's grid, `offset_zyx` in their sidecars, mm); cortical: <out>/<name>.json,
         qc-<name>.jpg and slab-<name>.npy (the slab measured, cropped, as an object: see `microct-core/resources/objects.py`).
-        The json is the result record {values: {id: {value, unit, definition, kind}}, grid_id, inputs, ...}; cortical adds `objects` (the slab)
+        The json is the result record {values: {id: {value, unit, definition, kind}}, grid_id, inputs, ...}; cortical adds `objects` (the slab, under `--object-id`)
 Prints: one JSON line {out, values: {id: {value, unit, definition, kind}}}; trabecular adds {qc, thickness, separation}, cortical {qc}
 Example: python morphometry.py trabecular --roi roi.npy --hu hu.npy --hu-json hu.json --out out/roi2 --id BV/TV=BVTV-roi2
 Exits 2 with one sentence on bad input, before writing anything.
@@ -370,11 +370,11 @@ def cortical(a):
         proj = np.nanmean(tslab, axis=ax) * 1000
     im = axs[1].imshow(proj, cmap='viridis', vmin=0)
     fig.colorbar(im, ax=axs[1], label='um')
-    axs[1].set_title(f'{a.name} = {values[a.name]["value"] * 1000:.1f} um (slab mean; map = mean along axis {ax})')
+    axs[1].set_title(f'{a.name} = {values[a.name]["value"] * 1000:.1f} um (slab mean; map = mean along axis {ax}); object {a.object_id}')
     fig.tight_layout()
     sidecar.save_image(fig, qc)
     plt.close(fig)
-    slab_entry = objects.mask(out / f'slab-{a.name}.npy', slab, like=a.grid, crop=True)
+    slab_entry = objects.mask(out / f'slab-{a.name}.npy', slab, like=a.grid, crop=True)  # the voxels the thickness was read from
     sidecar.emit_values(
         out / f'{a.name}.json',
         values,
@@ -384,7 +384,7 @@ def cortical(a):
             'inputs': {str(q): sidecar.sha256_file(q) for q in (a.cortex, a.surface, a.grid)},
         },
         qc=str(qc),
-        objects={f'{a.name}-slab': slab_entry},
+        objects={a.object_id: slab_entry},
     )
 
 
@@ -431,6 +431,7 @@ def main():
         '--context-um', type=float, default=400, help='um: cortex kept above and below the slab when measuring spheres'
     )
     c.add_argument('--name', default='Ct.Th', help='the output id of the value (and the output file name)')
+    c.add_argument('--object-id', required=True, help='the output id the workflow declares for the slab measured (its mask is reported under it)')
     c.add_argument('--grid', type=sidecar.existing, required=True, help='hu.json or a sidecar of the grid the cortex is on')
     c.add_argument('--out', required=True, help='output directory (created)')
     c.set_defaults(fn=cortical)

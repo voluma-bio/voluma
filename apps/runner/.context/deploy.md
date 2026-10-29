@@ -5,13 +5,26 @@ Railway's private network and runs them (sandboxes on Modal, files in R2). It se
 nothing. Project, environment and the `gql` helper are in
 [../../api/.context/deploy.md](../../api/.context/deploy.md); this file holds only what differs.
 
-## Temporary state (p510 staging plumbing probe)
+## Staging plumbing run 3 (2026-10-29, p540)
 
-Before overriding, runner variables were: `RUNNER_MODEL=anthropic/claude-sonnet-5`,
-`RUNNER_CHECK_MODEL=anthropic/claude-sonnet-5`, `RUNNER_MAIN_MODEL=anthropic/claude-sonnet-5`,
-`RUNNER_FALLBACK_MODEL` unset, and `VOLUMA_DEEPSEEK_API_KEY` unset. The probe sets the first three
-to `deepseek/deepseek-flash`, leaves fallback unset, and adds the DeepSeek key. Restore the four
-model variables exactly as listed and remove the DeepSeek key in the same session.
+The runner was stopped (`deploymentStop` on its active deployment, 22:37:46 to 22:57:43 UTC) so it did
+not claim the test run, then restored with `deploymentRedeploy` once `dev-sandbox` held the run's
+lease; the log showed `up:` and the replica count was 1 throughout. Railway refuses `numReplicas`
+0 on both `serviceInstanceUpdate` and `environmentPatchCommit` (minimum 1). A commit to `main` that
+touches `apps/runner/**` (including this file) redeploys the runner, so a docs commit during a pause
+would restart it. Results of the run: [../../gateway/.context/deploy.md](../../gateway/.context/deploy.md).
+
+## Staging plumbing probe (2026-10-29)
+
+Runner deployment `4a38210`'s source pins the sandbox image `sha256:b3ea9afc…`; actual image use
+was not independently confirmed. Its Railway manifest confirms 2 vCPU and 2,000,000,000 bytes
+memory, and its `/packages/**` watch path covers
+`voluma-sam`. `RAILPACK_DEPLOY_APT_PACKAGES` was removed. A stub-SAM and DeepSeek run
+(`68eb632f-44ac-4a80-9fa3-8b16bc4e1f03`) was stopped after 17 minutes while still in scan intake;
+segmentation and restart recovery were not checked. Its checker hit `staging /inputs failed with
+exit code 123` twice before a retry succeeded. During this intake-only interval the largest logged
+event-loop delay was 96 ms. The DeepSeek key and model overrides were removed or restored, and
+all probe sandboxes were terminated. Stub masks are not results.
 
 ## How it is set up
 
