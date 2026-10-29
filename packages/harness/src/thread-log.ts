@@ -1,8 +1,10 @@
 /**
- * What the run loop reads from the stored events besides `fold`: every thread's state, who
- * holds each task, the asks and their answers, fix rounds, and what main has been told
- * (delivery cursor, notices after it). A pure function of the events, so a resumed run derives
- * what the first one did. It changes with the event schema; the policy lives in the run loop.
+ * The one place the run loop reads the stored events besides `fold`, which it runs once and
+ * hands on as `view`: every thread's state, brief, summary and unsent feedback, who holds each
+ * task (the fold's current attempt), the asks and their answers, fix rounds, the calls a
+ * rebuilt result needs, and what main has been told (delivery cursor, notices after it). A
+ * pure function of the events, so a resumed run derives what the first one did. It changes
+ * with the event schema; the policy lives in the run loop.
  *
  * A thread is in one state (`threadState`): running (the caller says so: only it knows the
  * process), idle (its latest invocation ended completed or failed; a message resumes it),
@@ -10,8 +12,10 @@
  * no end and it is not running). A stop appends the end first, so the log shows it at once.
  */
 import type { RunEvent } from "@voluma/contracts/events";
+import { type Folded, fold } from "@voluma/contracts/fold";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { PayloadOf } from "./recorder";
+import { callKey, effectId } from "./tools/effects";
 
 /** The part of a verdict's checkpoint the main agent is told (`text` cut to this many characters). */
 const VERDICT_TEXT_MAX = 1500;
@@ -37,7 +41,13 @@ interface ThreadFields {
   /** How its latest invocation ended; undefined while the log shows it started and not ended. */
   end: PayloadOf<"thread.ended"> | undefined;
   /** Messages the runtime sent it to get it moving again (its brief, the first, is not one). */
-  wakes: number;
+  nudges: number;
+  /** The main agent's `start_worker` brief, for a worker. */
+  brief: string;
+  /** The latest checkpoint summary it wrote. */
+  lastSummary: string | undefined;
+  /** Feedback that opened its latest attempt and has not reached it yet (a cut between the two writes). */
+  pendingFeedback: { text: string; from: string } | undefined;
   /** How many times the log shows it started: the first run and each resume. */
   starts: number;
   /** The model it started on (`provider/id`); a resume keeps it. Absent: not recorded. */
@@ -90,11 +100,29 @@ export type Notice = {
 
 type NoticeBody = Notice extends infer N ? (N extends unknown ? Omit<N, "at"> : never) : never;
 
+/** A call of the main agent that a rebuilt result reads back (`calls`). */
+export type MainCall =
+  | { name: "start_worker"; brief: string }
+  | { name: "message"; threadId: string; text: string };
+
+/** The stored input of a main-agent call; undefined for other tools or an input of another shape. */
+function mainCall(name: string, input: unknown): MainCall | undefined {
+  if (typeof input !== "object" || input === null) return undefined;
+  const i = input as Record<string, unknown>;
+  if (name === "start_worker" && typeof i.brief === "string") return { name, brief: i.brief };
+  if (name === "message" && typeof i.threadId === "string" && typeof i.text === "string") {
+    return { name, threadId: i.threadId, text: i.text };
+  }
+  return undefined;
+}
+
 export interface ThreadLog {
+  /** `fold` of the same events. */
+  view: Folded;
   threads: Map<string, ThreadRecord>;
   /** The latest main thread. */
   main: string | undefined;
-  /** The thread that opened each task's current attempt, unless that thread is stopped. */
+  /** The thread that opened each task's current attempt (the fold's worker), unless that thread is stopped. */
   holders: Map<string, string>;
   /** Per task: `needs-review` check results on its attempts since its latest stale mark. */
   fixRounds: Map<string, number>;
@@ -108,7 +136,33 @@ export interface ThreadLog {
   emptyDeliveries: number;
   /** Why the previous claim ended, from the latest `claim.started`; undefined on a run's first claim. */
   after: ClaimEndReason | undefined;
-  ids: Set<string>;
+  /** Scratch paths the main agent attached to answers, by the task of the check that asked. */
+  answeredScratch: Map<string, Set<string>>;
+  /** Every stored event by id: what it is, where it sits in the log, its thread, and the task of an attempt. */
+  written: Map<string, { at: number; type: RunEvent["type"]; threadId: string; taskId?: string }>;
+  /** The main agent's `start_worker` and `message` calls, by `callKey`. */
+  calls: Map<string, MainCall>;
+  /** Messages one thread sent another, as the target's user messages show them. */
+  relayed: { from: string; to: string; text: string }[];
+  /** The root thread (kind `supervisor`) and whether it has a completed end, ever and since its latest start. */
+  root: { id: string | undefined; ended: boolean; endedThisClaim: boolean };
+}
+
+/**
+ * Whether a task has used its fix rounds: no more feedback or workers, unless an upstream
+ * correction reset it. `pending` counts a `needs-review` result about to be written.
+ */
+export const fixLimitReached = (d: ThreadLog, taskId: string, max: number, pending = 0) =>
+  (d.fixRounds.get(taskId) ?? 0) + pending >= max &&
+  d.view.tasks.find((t) => t.id === taskId)?.status !== "stale";
+
+/** The brief the main agent gave a worker, read back from its `start_worker` call. */
+function briefOf(started: PayloadOf<"thread.started">, calls: ThreadLog["calls"]): string {
+  const call =
+    started.spawnedBy && started.parentThreadId
+      ? calls.get(callKey(started.parentThreadId, started.spawnedBy))
+      : undefined;
+  return call?.name === "start_worker" ? call.brief : "";
 }
 
 /** The state of a thread; undefined for an id the log has not seen start. */
@@ -145,6 +199,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
   const cached = memo.get(events);
   if (cached?.length === events.length) return cached.value;
   const value: ThreadLog = {
+    view: fold(events),
     threads: new Map(),
     main: undefined,
     holders: new Map(),
@@ -154,14 +209,17 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
     undelivered: [],
     emptyDeliveries: 0,
     after: undefined,
-    ids: new Set(),
+    answeredScratch: new Map(),
+    written: new Map(),
+    calls: new Map(),
+    relayed: [],
+    root: { id: undefined, ended: false, endedThisClaim: false },
   };
   const briefed = new Set<string>(); // threads whose brief (first user message) the log holds
   // Threads started again while their latest start had no end: the message that follows is a
-  // cut-off resume, not a wake (a wake is the runtime asking a thread that stopped).
+  // cut-off resume, not a nudge (a nudge is the runtime asking a thread that stopped).
   const resumedCutOff = new Set<string>();
-  const index = new Map<string, number>(); // event id -> position in the log
-  const openers = new Map<string, string>(); // task -> thread that opened its current attempt
+  const feedbackOpens = new Map<string, { text: string; from: string }>(); // attempt id -> the `message` call that opens it
   const verdicts = new Map<
     string,
     { verdict: "passed" | "needs-review"; summary?: string; text: string }
@@ -169,8 +227,12 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
   const deliveries: { at: number }[] = []; // positions of the events each delivery covered
   const notice = (n: NoticeBody, at: number) => value.notices.push({ ...n, at } as Notice);
   for (const [at, e] of events.entries()) {
-    value.ids.add(e.id);
-    index.set(e.id, at);
+    value.written.set(e.id, {
+      at,
+      type: e.type,
+      threadId: e.threadId,
+      ...(e.type === "attempt.opened" && { taskId: e.payload.taskId }),
+    });
     const record = value.threads.get(e.threadId);
     const ms = Date.parse(e.createdAt);
     switch (e.type) {
@@ -179,6 +241,10 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         break;
       case "thread.started": {
         const { kind, task } = e.payload;
+        if (kind === "supervisor") {
+          value.root = { id: e.threadId, ended: value.root.ended, endedThisClaim: false };
+          break;
+        }
         const known =
           kind === "main" ? kind : (kind === "worker" || kind === "check") && task && kind;
         if (!known) break;
@@ -186,7 +252,10 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         const fields: ThreadFields = {
           id: e.threadId,
           end: undefined,
-          wakes: record?.wakes ?? 0,
+          nudges: record?.nudges ?? 0,
+          brief: record?.brief ?? briefOf(e.payload, value.calls),
+          lastSummary: record?.lastSummary,
+          pendingFeedback: record?.pendingFeedback,
           starts: (record?.starts ?? 0) + 1,
           model: record?.model ?? e.payload.model,
           openCalls: record?.openCalls ?? new Map(),
@@ -209,6 +278,10 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         break;
       }
       case "thread.ended": {
+        if (e.threadId === value.root.id) {
+          value.root.endedThisClaim = true;
+          if (e.payload.status === "completed") value.root.ended = true;
+        }
         if (!record) break;
         const first = !record.end;
         record.end = e.payload;
@@ -230,9 +303,21 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         }
         break;
       }
-      case "tool.call":
-        record?.openCalls.set(e.payload.toolCallId, e.payload.name);
+      case "tool.call": {
+        const { toolCallId, name, input } = e.payload;
+        record?.openCalls.set(toolCallId, name);
+        const call = mainCall(name, input);
+        if (call) {
+          value.calls.set(callKey(e.threadId, toolCallId), call);
+          if (call.name === "message") {
+            feedbackOpens.set(effectId("message", e.threadId, toolCallId), {
+              text: call.text,
+              from: e.threadId,
+            });
+          }
+        }
         break;
+      }
       case "tool.result":
         record?.openCalls.delete(e.payload.toolCallId);
         break;
@@ -241,21 +326,27 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         if (record && e.payload.role === "user" && e.payload.sender.kind === "runtime") {
           const afterCutOff = resumedCutOff.delete(e.threadId);
           const first = !briefed.has(e.threadId);
-          if (!first && !afterCutOff) record.wakes++;
+          if (!first && !afterCutOff) record.nudges++;
           briefed.add(e.threadId);
           const { covers } = e.payload.sender;
           if (record.role === "main" && covers !== undefined) {
             value.cursor = covers;
             // A thread's first message is its brief, not a delivery: it does not count toward liveness.
-            if (!first) deliveries.push({ at: index.get(covers) ?? -1 });
+            if (!first) deliveries.push({ at: value.written.get(covers)?.at ?? -1 });
           }
+        }
+        if (record && e.payload.role === "user" && e.payload.sender.kind === "thread") {
+          const { threadId: from } = e.payload.sender;
+          value.relayed.push({ from, to: e.threadId, text: e.payload.text });
+          if (record.pendingFeedback?.from === from) record.pendingFeedback = undefined;
         }
         break;
       case "attempt.opened":
-        openers.set(e.payload.taskId, e.threadId);
+        if (record) record.pendingFeedback = feedbackOpens.get(e.id);
         break;
       case "checkpoint": {
         const { verdict, summary, text } = e.payload;
+        if (record && summary) record.lastSummary = summary;
         if (verdict && record?.role === "check") {
           verdicts.set(e.payload.attemptId, { verdict, ...(summary && { summary }), text });
         }
@@ -315,6 +406,11 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
       }
       case "answer": {
         const target = value.threads.get(e.payload.checkThreadId);
+        if (target?.taskId) {
+          const scratch = value.answeredScratch.get(target.taskId) ?? new Set<string>();
+          for (const f of e.payload.files ?? []) if (f.root === "scratch") scratch.add(f.path);
+          value.answeredScratch.set(target.taskId, scratch);
+        }
         const ask = target?.asks.find((a) => a.id === e.payload.askId);
         if (target && ask && !ask.answer) {
           ask.answer = { id: e.id, text: e.payload.text, files: e.payload.files ?? [] };
@@ -327,10 +423,13 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
       }
     }
   }
-  for (const [taskId, thread] of openers) {
-    if (value.threads.get(thread)?.end?.status !== "cancelled") value.holders.set(taskId, thread);
+  for (const t of value.view.tasks) {
+    const worker = t.threads.worker;
+    if (worker && value.threads.get(worker)?.end?.status !== "cancelled") {
+      value.holders.set(t.id, worker);
+    }
   }
-  const cursorAt = value.cursor === undefined ? -1 : (index.get(value.cursor) ?? -1);
+  const cursorAt = value.cursor === undefined ? -1 : (value.written.get(value.cursor)?.at ?? -1);
   value.undelivered = value.notices.filter((n) => n.at > cursorAt);
   let from = -1;
   const sizes = deliveries.map(({ at }) => {
@@ -346,14 +445,4 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
 export const startedFor = (d: ThreadLog, taskId: string, role: Role) =>
   [...d.threads.values()].filter(
     (r): r is TaskThread => r.role !== "main" && r.taskId === taskId && r.role === role,
-  );
-
-/**
- * Whether the run has ended: the root has a completed `thread.ended` (`finish_run` or the
- * liveness rule wrote it). A failed end is the run's failure and is never read back.
- */
-export const runEnded = (events: readonly RunEvent[], rootThreadId: string): boolean =>
-  events.some(
-    (e) =>
-      e.threadId === rootThreadId && e.type === "thread.ended" && e.payload.status === "completed",
   );

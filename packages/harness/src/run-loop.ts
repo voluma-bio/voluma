@@ -8,7 +8,8 @@
  * plus which threads run in this process, so a resumed run and a first run are the same code.
  *
  * Workers are started by the main agent's `start_worker`, not here. The main agent hears
- * about the run only through delivery messages that resume it (`main-view.ts`); a delivery's
+ * about the run only through delivery messages that resume it (`messages.ts`, which holds every
+ * string an agent is told); a delivery's
  * `covers` is the last event it accounted for, so notices after it are still undelivered.
  * The run ends when the root thread has a completed `thread.ended` (`finish_run`, or the
  * liveness rule); then every thread without an end is stopped.
@@ -20,27 +21,39 @@
  */
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import type { By, RunEvent } from "@voluma/contracts/events";
+import type { By } from "@voluma/contracts/events";
 import { checkResult, type Folded, type FoldedTask, fold } from "@voluma/contracts/fold";
-import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { UserSender } from "./adapters/pi/start-thread";
 import type { RunLayout, ThreadLayout } from "./layout";
 import {
   agentsList,
+  answerText,
+  CHECK_STOPPED,
+  CHECK_TIMED_OUT,
   changedTasks,
-  noticeLine,
+  checkReason,
+  cutOffText,
+  deliveryText,
+  feedbackText,
+  fixLimitReason,
+  interruptedResult,
+  livenessNudge,
+  STUCK_PLAN_REASON,
+  STUCK_SKIP_REASON,
   stateBlock,
-  taskTable,
+  stuckSummary,
   unfinished,
-} from "./main-view";
+  unresumableReason,
+  verdictNudge,
+} from "./messages";
 import type { Recorder } from "./recorder";
 import type { PlanTask, TaskRuntime } from "./task-runtime";
 import { mainThreadId, threadId } from "./thread-id";
 import {
   activeMs,
+  fixLimitReached,
   openAsk,
   type Role,
-  runEnded,
   startedFor,
   type ThreadLog,
   type ThreadRecord,
@@ -49,7 +62,7 @@ import {
   threadState,
 } from "./thread-log";
 import type { ThreadSpec, Threads } from "./threads";
-import { interruptedResult, undeliveredFeedback } from "./tools/effects";
+
 import type { Agents } from "./tools/main-tools";
 import type { Tool } from "./tools/tool";
 
@@ -117,20 +130,6 @@ export interface RunLoopOptions {
   signal?: AbortSignal;
 }
 
-const PLAIN_REASON: Record<ClaimEndReason, string> = {
-  shutdown: "the runner restarted",
-  "self-stop": "the runner lost contact with the server",
-  "lease-expired": "the server lost contact with the runner",
-};
-
-/** What a cut-off thread is told on resume: the tool it was in, if any, and why, in plain words. */
-function cutOffText(after: ClaimEndReason | undefined, tool: string | undefined): string {
-  const when = after ? `when ${PLAIN_REASON[after]}` : "when the run was restarted";
-  return tool
-    ? `Your last call (\`${tool}\`) was cut off ${when}. It may or may not have finished: check its output, then continue.`
-    : `You were cut off ${when}; continue.`;
-}
-
 /** How long the main agent gets to end its turn after the run ended. */
 const MAIN_GRACE_MS = 15_000;
 
@@ -183,29 +182,11 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     return found;
   };
 
-  /** The brief the main agent gave a worker, read back from its `start_worker` call. */
-  function workerBrief(events: readonly RunEvent[], r: ThreadRecord): string {
-    const spawned = events.find(
-      (e) => e.type === "thread.started" && e.threadId === r.id && e.payload.spawnedBy,
-    );
-    if (spawned?.type !== "thread.started") return "";
-    const call = events.find(
-      (e) =>
-        e.type === "tool.call" &&
-        e.threadId === spawned.payload.parentThreadId &&
-        e.payload.toolCallId === spawned.payload.spawnedBy,
-    );
-    const input =
-      call?.type === "tool.call" ? (call.payload.input as { brief?: string }) : undefined;
-    return input?.brief ?? "";
-  }
-
   function mainFirstMessage(view: Folded, n: number, d: ThreadLog) {
     if (n === 1) return { prompt: o.briefs.main(view) };
-    const events = recorder.events();
     return {
-      prompt: o.briefs.mainRestart(view, stateBlock(d, events, view, stateOf)),
-      promptCovers: events.at(-1)?.id,
+      prompt: o.briefs.mainRestart(view, stateBlock(d, view, stateOf)),
+      promptCovers: recorder.events().at(-1)?.id,
     };
   }
 
@@ -223,7 +204,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       streamFn: role.streamFn,
       tools: o.tools(thread, role.tools, agents),
       interrupted: (tool: string, toolCallId: string) =>
-        interruptedResult(recorder.events(), r.id, tool, toolCallId),
+        interruptedResult(derive(), r.id, tool, toolCallId),
     };
     if (r.kind === "main") {
       const n = Number(/\.main(?:\.(\d+))?$/.exec(r.id)?.[1] ?? 1);
@@ -242,7 +223,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
         kind: "worker" as const,
         taskId: r.taskId,
         parentThreadId: d.main ?? root,
-        prompt: o.briefs.worker(task, record ? workerBrief(recorder.events(), record) : ""),
+        prompt: o.briefs.worker(task, record?.brief ?? ""),
       } satisfies ThreadSpec;
     }
     const folded = runtime.taskOf(r.taskId);
@@ -319,15 +300,9 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
 
   const agents: Agents = {
     state: (d, id) => threadState(d.threads.get(id), threads.running(id)),
-    nextWorkerId: (taskId) => nextId(derive(), taskId, "worker"),
-    startWorker: async ({
-      threadId: id,
-      taskId,
-      brief,
-      mainThreadId: main,
-      spawnedBy,
-      startedEventId,
-    }) => {
+    fixLimitReached: (d, taskId) => fixLimitReached(d, taskId, config.maxFixRounds),
+    startWorker: async ({ taskId, brief, mainThreadId: main, spawnedBy, startedEventId }) => {
+      const id = nextId(derive(), taskId, "worker");
       const spec = specFor({ id, kind: "worker", taskId });
       const task = planTask(runtime.view(), taskId);
       await begin(
@@ -335,6 +310,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
         startedEventId,
         spawnedBy,
       );
+      return id;
     },
     steer: (id, text, sender) => threads.send(id, text, sender),
     settled: (id) => threads.idle(id),
@@ -385,13 +361,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
           return true;
         }
       } else {
-        await runtime.stop(
-          r.id,
-          `${r.id}:unresumable`,
-          r.role === "check"
-            ? "its record cannot be resumed (the run's prompts, tools or model changed); a new check takes over"
-            : `its record cannot be resumed (the run's prompts, tools or model changed); start a new worker on ${r.taskId} if it is not done`,
-        );
+        await runtime.stop(r.id, `${r.id}:unresumable`, unresumableReason(r.role, r.taskId));
         if (r.role === "check" && runtime.taskOf(r.taskId)?.threads.check === r.id) {
           await startCheck(derive(), r.taskId);
         }
@@ -420,9 +390,9 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       if (r.role !== "worker" || stateOf(r) !== "idle" || d.holders.get(r.taskId) !== r.id)
         continue;
       if (runtime.taskOf(r.taskId)?.status !== "in-progress") continue;
-      const feedback = undeliveredFeedback(recorder.events(), r.id, r.taskId);
-      if (!feedback) continue;
-      await resume(r, feedback.text, { kind: "thread", threadId: feedback.from });
+      if (!r.pendingFeedback) continue;
+      const { text, from } = r.pendingFeedback;
+      await resume(r, feedbackText(r.taskId, text), { kind: "thread", threadId: from });
       return true;
     }
     return false;
@@ -438,16 +408,6 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     }
     return false;
   }
-
-  const checkReason = (t: FoldedTask, status: "done" | "to-check") => {
-    if (status === "done") return "The second agent checked this task and agrees.";
-    if (t.checker?.verdict === undefined) return "The check ended without a verdict.";
-    if (t.checker.verdict === "needs-review")
-      return "The second agent found problems with this task.";
-    return t.missingRequired.length > 0
-      ? `Required outputs are missing: ${t.missingRequired.join(", ")}.`
-      : "The check passed, but items are still open for a person.";
-  };
 
   /** Provider failures among a task's checks (the current one included). */
   const checkFailures = (d: ThreadLog, taskId: string) =>
@@ -468,7 +428,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     const limit =
       ruleName === "check-result" &&
       t.checker?.verdict === "needs-review" &&
-      (d.fixRounds.get(t.id) ?? 0) + 1 >= config.maxFixRounds;
+      fixLimitReached(d, t.id, config.maxFixRounds, 1);
     const used = limit ? "fix-limit" : ruleName;
     await runtime.setStatus(
       c.id,
@@ -477,9 +437,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       t.attemptId,
       status,
       reason ??
-        (used === "fix-limit"
-          ? `The second agent still found problems after ${config.maxFixRounds} rounds of fixes; this task is left for a person.`
-          : checkReason(t, status)),
+        (used === "fix-limit" ? fixLimitReason(config.maxFixRounds) : checkReason(t, status)),
       rule(used),
     );
   }
@@ -494,20 +452,14 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       const verdict = t.checker?.verdict;
       const waiting = openAsk(c) !== undefined;
       if (state === "stopped" && !verdict) {
-        await writeResult(
-          d,
-          t,
-          c,
-          "check-result",
-          "The check was stopped before it gave a verdict.",
-        );
+        await writeResult(d, t, c, "check-result", CHECK_STOPPED);
         return true;
       }
       if (state === "running" || waiting || (state === "cut-off" && !verdict)) {
         const left = config.checkTimeoutMs - activeMs(c, Date.now(), state === "running");
         if (left <= 0) {
           await runtime.stop(c.id, `${c.id}:limit`);
-          await writeResult(d, t, c, "check-limit", "The check ran past its time limit.");
+          await writeResult(d, t, c, "check-limit", CHECK_TIMED_OUT);
           return true;
         }
         deadline.next = Math.min(deadline.next ?? left, left);
@@ -516,12 +468,10 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       // Idle, or stopped/cut off with a verdict: the check is over.
       const last = c.asks.at(-1);
       if (!verdict && last?.answer && (c.answeredAt ?? -1) > c.startedAt && state === "idle") {
-        const files = last.answer.files.map((f) => `${f.root}:${f.path}`).join(", ");
-        await resume(
-          c,
-          `The main agent answers: ${last.answer.text}${files ? `\nFiles for you: ${files} (root "scratch" is /scratch/<path>, "outputs" is /outputs/${t.id}/<path>).` : ""}`,
-          { kind: "thread", threadId: d.main ?? root },
-        );
+        await resume(c, answerText(last.answer, t.id), {
+          kind: "thread",
+          threadId: d.main ?? root,
+        });
         return true;
       }
       if (verdict) {
@@ -537,12 +487,8 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
           return true;
         }
       }
-      if (c.end?.status === "completed" && c.wakes < 1) {
-        await resume(
-          c,
-          `You stopped before giving a verdict. Write a checkpoint on ${t.id} with verdict "passed" if you agree or "needs-review" if you do not or cannot tell, and one plain line of why.`,
-          RUNTIME,
-        );
+      if (c.end?.status === "completed" && c.nudges < 1) {
+        await resume(c, verdictNudge(t.id), RUNTIME);
         return true;
       }
       await writeResult(d, t, c, "check-result");
@@ -566,28 +512,21 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     }
   }
 
-  /** The delivery message: the notices, the live agents and the tasks whose row changed. */
+  /** The delivery message and the last event it covers. */
   function delivery(d: ThreadLog) {
     const events = recorder.events();
-    const view = runtime.view();
-    const covers = events.at(-1)?.id;
     const cut = d.cursor ? events.findIndex((e) => e.id === d.cursor) + 1 : 0;
-    const rows = changedTasks(fold(events.slice(0, cut)), view);
-    const text = [
-      d.undelivered.map(noticeLine).join("\n"),
-      `Agents:\n${agentsList(d, events, stateOf)}`,
-      rows.length > 0 ? `Tasks that changed:\n${taskTable(rows)}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n\n");
-    return { text, covers };
+    const changed = changedTasks(fold(events.slice(0, cut)), d.view);
+    return {
+      text: deliveryText(d.undelivered, agentsList(d, stateOf), changed),
+      covers: events.at(-1)?.id,
+    };
   }
 
   /** Main is idle: tell it what happened, restart it, or end a run it stopped moving. */
   async function main(d: ThreadLog, view: Folded): Promise<boolean> {
     const m = d.main ? d.threads.get(d.main) : undefined;
     if (!m || stateOf(m) !== "idle") return false;
-    const events = recorder.events();
     if (m.end?.status === "failed" && providerError(m.end.error ?? "")) {
       const error = m.end.error ?? "";
       if (o.providerFatal?.(error))
@@ -609,14 +548,13 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       return true;
     }
     if (anyRunning(d)) return false;
-    const covers = events.at(-1)?.id;
+    const covers = recorder.events().at(-1)?.id;
     if (d.emptyDeliveries < config.stuckLimit) {
       const asking = [...d.threads.values()].some((r) => r.role === "check" && openAsk(r));
-      await resume(
-        m,
-        `Nothing is running and the run is not finished: ${asking ? "answer the checker (nothing else can move until you do), then " : ""}start the next workers, or finish the run.\n\n${stateBlock(d, events, view, stateOf)}`,
-        { kind: "runtime", ...(covers && { covers }) },
-      );
+      await resume(m, livenessNudge(asking, stateBlock(d, view, stateOf)), {
+        kind: "runtime",
+        ...(covers && { covers }),
+      });
       return true;
     }
     await endStuckRun(view);
@@ -631,11 +569,8 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
         root,
         "plan.changed",
         {
-          reason: "The main agent stopped before every task was done, so the run ended.",
-          skip: left.map((t) => ({
-            taskId: t.id,
-            reason: "The run stopped before this task was done",
-          })),
+          reason: STUCK_PLAN_REASON,
+          skip: left.map((t) => ({ taskId: t.id, reason: STUCK_SKIP_REASON })),
         },
         `${root}:liveness:plan`,
       );
@@ -643,12 +578,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     await recorder.append(
       root,
       "thread.ended",
-      {
-        status: "completed",
-        summary: left.length
-          ? `The run stopped before every task was done: ${left.map((t) => t.id).join(", ")} ${left.length === 1 ? "was" : "were"} skipped.`
-          : "The run stopped with every task finished.",
-      },
+      { status: "completed", summary: stuckSummary(left) },
       `${root}:liveness:end`,
     );
   }
@@ -656,9 +586,9 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
   /** One decision, inside the section: the first thing that applies. */
   async function step(): Promise<Step> {
     await recorder.flush(); // a thread's end is stored before it is read
-    if (runEnded(recorder.events(), root)) return "done";
     const d = derive();
-    const view = runtime.view();
+    if (d.root.ended) return "done";
+    const view = d.view;
     checkFatal(d);
     if (!d.main) {
       await startMain(d);
@@ -711,18 +641,6 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     }
   }
 
-  /** The root's latest end, and whether it came after the root's latest start: an earlier claim's end does not count. */
-  function rootEnd(events: readonly RunEvent[]) {
-    let end: RunEvent | undefined;
-    for (let i = events.length - 1; i >= 0; i--) {
-      const e = events[i];
-      if (e?.threadId !== root) continue;
-      if (e.type === "thread.ended") end ??= e;
-      if (e.type === "thread.started") return { end, thisClaim: end !== undefined };
-    }
-    return { end, thisClaim: false };
-  }
-
   try {
     if (!signal?.aborted) await runtime.start();
     while (!signal?.aborted && !failed()) {
@@ -745,10 +663,8 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     throw failure;
   }
   // A runtime abort writes no end, like a crash: the next claim resumes the root as well.
-  const { end, thisClaim } = rootEnd(recorder.events());
-  if (!signal?.aborted && !thisClaim) {
-    const summary = end?.type === "thread.ended" ? end.payload.summary : undefined;
-    recorder.emit(root, "thread.ended", { status: "completed", ...(summary && { summary }) });
+  if (!signal?.aborted && !derive().root.endedThisClaim) {
+    recorder.emit(root, "thread.ended", { status: "completed" });
   }
   return runtime.view();
 }

@@ -25,8 +25,6 @@ export interface ToolDeps {
   main: MainDeps;
 }
 
-export type ToolFactory = (deps: ToolDeps) => Tool;
-
 /** Every tool name a role file may list. */
 export const TOOL_NAMES = [
   "bash",
@@ -49,29 +47,27 @@ export const TOOL_NAMES = [
 
 export type ToolName = (typeof TOOL_NAMES)[number];
 
-const factories: Record<ToolName, ToolFactory> = {
+/** The tools that need only the thread's own layout and the run's files. */
+const factories: Record<string, (deps: ToolDeps) => Tool> = {
   bash: ({ layout }) => bashTool(layout),
-  checkpoint: ({ runtime }) => taskTools(runtime).checkpoint,
-  report_output: ({ runtime }) => taskTools(runtime).report_output,
-  submit_task: ({ runtime }) => taskTools(runtime).submit_task,
-  ask: ({ runtime }) => taskTools(runtime).ask,
   view_image: ({ layout, files }) => viewImageTool({ layout, files }),
   segment_sam: ({ layout }) => segmentSamTool(layout),
   read_file: ({ layout, files }) => readFileTool({ layout, files }),
-  start_worker: ({ main }) => mainTools(main).start_worker,
-  message: ({ main }) => mainTools(main).message,
-  wait: ({ main }) => mainTools(main).wait,
-  stop_worker: ({ main }) => mainTools(main).stop_worker,
-  answer: ({ main }) => mainTools(main).answer,
-  accept: ({ main }) => mainTools(main).accept,
-  change_plan: ({ main }) => mainTools(main).change_plan,
-  finish_run: ({ main }) => mainTools(main).finish_run,
 };
 
 export function buildTools(names: readonly string[], deps: ToolDeps): Tool[] {
+  // The task and main tools are built once for the thread, not once per name.
+  const coordination: Record<string, Tool> = {
+    ...taskTools(deps.runtime),
+    ...mainTools(deps.main),
+  };
   return names.map((name) => {
-    const factory = Object.hasOwn(factories, name) ? factories[name as ToolName] : undefined;
-    if (!factory) throw new Error(`tool "${name}" is not registered`);
-    return factory(deps);
+    const tool = Object.hasOwn(coordination, name)
+      ? coordination[name]
+      : Object.hasOwn(factories, name)
+        ? factories[name]?.(deps)
+        : undefined;
+    if (!tool) throw new Error(`tool "${name}" is not registered`);
+    return tool;
   });
 }

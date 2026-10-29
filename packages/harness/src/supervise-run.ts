@@ -14,7 +14,7 @@ import type { Files } from "./ports/files";
 import type { History } from "./ports/history";
 import type { Sandbox } from "./ports/sandbox";
 import type { Recorder } from "./recorder";
-import { type Briefs, LOOP_DEFAULTS, type LoopConfig, type RoleOf, runLoop } from "./run-loop";
+import { type Briefs, type LoopConfig, type RoleOf, runLoop } from "./run-loop";
 import { type PlanTask, taskRuntime } from "./task-runtime";
 import { supervisorThreadId } from "./thread-id";
 import { threads } from "./threads";
@@ -90,7 +90,6 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
       if (pool.started(id)) pool.abort(id);
     },
   });
-  const maxFixRounds = options.config?.maxFixRounds ?? LOOP_DEFAULTS.maxFixRounds;
   return runLoop({
     runId,
     rootThreadId,
@@ -113,7 +112,6 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
           runtime,
           agents,
           workflow: options.workflow,
-          maxFixRounds,
         },
       }),
     providerError: options.providerError,

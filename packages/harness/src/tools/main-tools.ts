@@ -16,32 +16,31 @@ import { isSatisfied, transitiveDependents } from "@voluma/workflow";
 import { planTask } from "@voluma/workflow/plan";
 import { z } from "zod";
 import type { UserSender } from "../adapters/pi/start-thread";
-import { unfinished } from "../main-view";
+import { feedbackText, fromMain, unfinished } from "../messages";
 import type { Recorder } from "../recorder";
 import { Refusal, type TaskRuntime } from "../task-runtime";
-import { runEnded, startedFor, type ThreadLog, type ThreadState, threadLog } from "../thread-log";
-import { effectId, feedbackText, fromMain } from "./effects";
-import { result } from "./task-tools";
+import { startedFor, type ThreadLog, type ThreadState, threadLog } from "../thread-log";
+import { effectId } from "./effects";
+import { finish, result } from "./task-tools";
 import type { Tool, ToolContext } from "./tool";
 
 /** What the run loop gives the main agent's tools to act on threads; it owns the thread pool. */
 export interface Agents {
   /** A thread's state, as the loop sees it (`running` is known only to this process). */
   state(log: ThreadLog, threadId: string): ThreadState | undefined;
-  /** The id the next worker of the task gets. */
-  nextWorkerId(taskId: string): string;
+  /** Whether the task has used its fix rounds, by the loop's limit. */
+  fixLimitReached(log: ThreadLog, taskId: string): boolean;
   /**
-   * Appends the worker's `thread.started` under `startedEventId`, then starts it with the
-   * main agent's brief. Call inside `section`.
+   * Picks the task's next worker id, appends its `thread.started` under `startedEventId`, then
+   * starts it with the main agent's brief; returns the id. Call inside `section`.
    */
   startWorker(o: {
-    threadId: string;
     taskId: string;
     brief: string;
     mainThreadId: string;
     spawnedBy: string;
     startedEventId: string;
-  }): Promise<void>;
+  }): Promise<string>;
   /** Steers a message into a running thread; false if it is not running. */
   steer(threadId: string, text: string, sender: UserSender): boolean;
   /** Resolves once the thread is not running here. Never call it inside `section`. */
@@ -60,20 +59,19 @@ export interface MainDeps {
   agents: Agents;
   /** The workflow's tasks, which `change_plan` adds from. */
   workflow: WorkflowFiles;
-  maxFixRounds: number;
 }
 
 const nonEmpty = z.string().min(1);
 const AGENT: By = { kind: "agent" };
 
 export function mainTools(deps: MainDeps) {
-  const { recorder, runtime, agents, rootThreadId, workflow, maxFixRounds } = deps;
+  const { recorder, runtime, agents, rootThreadId, workflow } = deps;
   const log = () => threadLog(recorder.events());
 
   /** The main agent calls while the run is going. */
   function main(ctx: ToolContext) {
     if (ctx.kind !== "main") throw new Refusal("Only the main agent uses this tool.");
-    if (runEnded(recorder.events(), rootThreadId)) throw new Refusal("The run has ended.");
+    if (log().root.ended) throw new Refusal("The run has ended.");
   }
 
   /** A tool that decides and writes inside the section, then wakes the loop. */
@@ -91,10 +89,6 @@ export function mainTools(deps: MainDeps) {
         return done;
       });
   }
-
-  /** Whether a task has used its fix rounds: no more feedback or workers, unless an upstream correction reset it. */
-  const fixLimitReached = (d: ThreadLog, taskId: string) =>
-    (d.fixRounds.get(taskId) ?? 0) >= maxFixRounds && runtime.taskOf(taskId)?.status !== "stale";
 
   const workerOf = (d: ThreadLog, threadId: string) => {
     const r = d.threads.get(threadId);
@@ -137,14 +131,12 @@ export function mainTools(deps: MainDeps) {
         );
       }
       if (t?.status === "under-review") throw new Refusal(`${taskId} is under review.`);
-      if (fixLimitReached(d, taskId)) {
+      if (agents.fixLimitReached(d, taskId)) {
         throw new Refusal(
           `${taskId} has used its fix rounds; it stays as it is for the researcher.`,
         );
       }
-      const threadId = agents.nextWorkerId(taskId);
-      await agents.startWorker({
-        threadId,
+      const threadId = await agents.startWorker({
         taskId,
         brief,
         mainThreadId: ctx.threadId,
@@ -171,7 +163,7 @@ export function mainTools(deps: MainDeps) {
         if (agents.state(before, threadId) === "stopped") {
           throw new Refusal(`${threadId} was stopped; start a new worker for ${w.taskId}.`);
         }
-        if (fixLimitReached(before, w.taskId)) {
+        if (agents.fixLimitReached(before, w.taskId)) {
           throw new Refusal(`${w.taskId} has used its fix rounds; it stays as it is.`);
         }
         if (
@@ -223,21 +215,13 @@ export function mainTools(deps: MainDeps) {
       "End your turn and wait. You are resumed with one message when something changes: a worker submits or stops, a check finishes or asks, a task goes stale. Ending your turn without calling a tool waits the same way.",
     input: z.object({}),
     sequential: true,
-    execute: async (_input, ctx) => {
-      try {
-        main(ctx);
-      } catch (error) {
-        if (error instanceof Refusal)
-          return { output: error.message, isError: true, truncated: false };
-        throw error;
-      }
-      return {
-        output: "Your turn ends; you will be resumed with what changes.",
-        isError: false,
-        truncated: false,
-        terminate: true,
-      };
-    },
+    execute: async (_input, ctx) =>
+      finish(
+        await result(async () => {
+          main(ctx);
+          return { message: "Your turn ends; you will be resumed with what changes." };
+        }),
+      ),
   };
 
   const stop_worker: Tool<z.ZodObject<{ threadId: z.ZodString; reason: z.ZodString }>> = {
@@ -494,45 +478,45 @@ export function mainTools(deps: MainDeps) {
       "End the run. Refused while a worker or checker is running, while a task is neither done, left to check nor skipped (pending, in progress, under review, stale), while a task's check rejected it and you have not sent feedback or accepted it, and while a selected output is neither reported nor skipped with a reason. `summary` is one or two plain sentences for the researcher.",
     input: z.object({ summary: nonEmpty }),
     sequential: true,
-    execute: async (input, ctx) => {
-      const out = await inSection(async ({ summary }: { summary: string }, c: ToolContext) => {
-        const view = runtime.view();
-        const d = log();
-        const running = [...d.threads.values()].filter(
-          (r) => r.role !== "main" && agents.state(d, r.id) === "running",
-        );
-        const problems = [
-          ...running.map((r) => `${r.id} (${r.role}, ${r.taskId}) is still running.`),
-          ...unfinished(view).map((t) =>
-            t.status === "pending"
-              ? `${t.id} has not run: start a worker on it, or skip it with a reason.`
-              : `${t.id} is ${t.status}: get it done, or skip it with a reason.`,
-          ),
-          ...view.tasks.flatMap((t) => {
-            if (t.skipped) return [];
-            if (t.rejected)
-              return [
-                `${t.id} was rejected by its check: send feedback with \`message\` or \`accept\` it.`,
-              ];
-            return t.missingRequired.length > 0
-              ? [
-                  `${t.id}: required outputs not reported: ${t.missingRequired.join(", ")} (get them reported, or skip the task with a reason).`,
-                ]
-              : [];
-          }),
-        ];
-        if (problems.length > 0)
-          throw new Refusal(`The run cannot finish yet:\n${problems.join("\n")}`);
-        await recorder.append(
-          rootThreadId,
-          "thread.ended",
-          { status: "completed", summary },
-          effectId("finish_run", c.threadId, c.toolCallId),
-        );
-        return { message: "The run is finished." };
-      })(input, ctx);
-      return out.isError ? out : { ...out, terminate: true };
-    },
+    execute: async (input, ctx) =>
+      finish(
+        await inSection(async ({ summary }: { summary: string }, c: ToolContext) => {
+          const view = runtime.view();
+          const d = log();
+          const running = [...d.threads.values()].filter(
+            (r) => r.role !== "main" && agents.state(d, r.id) === "running",
+          );
+          const problems = [
+            ...running.map((r) => `${r.id} (${r.role}, ${r.taskId}) is still running.`),
+            ...unfinished(view).map((t) =>
+              t.status === "pending"
+                ? `${t.id} has not run: start a worker on it, or skip it with a reason.`
+                : `${t.id} is ${t.status}: get it done, or skip it with a reason.`,
+            ),
+            ...view.tasks.flatMap((t) => {
+              if (t.skipped) return [];
+              if (t.rejected)
+                return [
+                  `${t.id} was rejected by its check: send feedback with \`message\` or \`accept\` it.`,
+                ];
+              return t.missingRequired.length > 0
+                ? [
+                    `${t.id}: required outputs not reported: ${t.missingRequired.join(", ")} (get them reported, or skip the task with a reason).`,
+                  ]
+                : [];
+            }),
+          ];
+          if (problems.length > 0)
+            throw new Refusal(`The run cannot finish yet:\n${problems.join("\n")}`);
+          await recorder.append(
+            rootThreadId,
+            "thread.ended",
+            { status: "completed", summary },
+            effectId("finish_run", c.threadId, c.toolCallId),
+          );
+          return { message: "The run is finished." };
+        })(input, ctx),
+      ),
   };
 
   return { start_worker, message, wait, stop_worker, answer, accept, change_plan, finish_run };

@@ -3,7 +3,7 @@
  * `attempt.opened` or `revision.started` event by a thread's tool call, under the rules in
  * `@voluma/contracts/task-tools`. The run loop and the main agent's tools write their own
  * events through `setStatus`, `openAttempt` and `stop`, inside the same `section`. Its only view of the run is
- * `fold` of the recorder's events, folded once per change of the log; it keeps no second
+ * `threadLog` of the recorder's events (the fold and the thread facts), derived once per change of the log; it keeps no second
  * record. Each decision and its appends run inside one per-run critical section (`section`),
  * whichever thread asks, and the recorder adds an event to the view only once it is stored.
  * Slow work (hashing and copying evidence) happens outside the section, and the decision is
@@ -14,8 +14,8 @@
  * append hits one.
  */
 
-import type { By, RunEvent, ThreadKind } from "@voluma/contracts/events";
-import { type Folded, type FoldedTask, fold } from "@voluma/contracts/fold";
+import type { By, ThreadKind } from "@voluma/contracts/events";
+import type { Folded, FoldedTask } from "@voluma/contracts/fold";
 import type { EvidenceRef } from "@voluma/contracts/output";
 import type {
   AskInput,
@@ -110,24 +110,6 @@ async function storedOutput(
   }
 }
 
-/** Scratch files (after `/scratch/`) the main agent attached to answers for the check threads of `taskId`. */
-function answeredFiles(events: readonly RunEvent[], taskId: string): Set<string> {
-  const checks = new Set(
-    events.flatMap((e) =>
-      e.type === "thread.started" && e.payload.kind === "check" && e.payload.task === taskId
-        ? [e.threadId]
-        : [],
-    ),
-  );
-  return new Set(
-    events.flatMap((e) =>
-      e.type === "answer" && checks.has(e.payload.checkThreadId)
-        ? (e.payload.files ?? []).flatMap((f) => (f.root === "scratch" ? [f.path] : []))
-        : [],
-    ),
-  );
-}
-
 export function taskRuntime(options: TaskRuntimeOptions) {
   const { recorder, evidence, runId, layoutOf, rootThreadId, abortThread } = options;
 
@@ -139,13 +121,8 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     return result;
   };
 
-  // The log only grows, so its length says whether the fold is current.
-  let folded: { length: number; value: Folded } | undefined;
-  const view = (): Folded => {
-    const events = recorder.events();
-    if (folded?.length !== events.length) folded = { length: events.length, value: fold(events) };
-    return folded.value;
-  };
+  const log = () => threadLog(recorder.events());
+  const view = (): Folded => log().view;
   const taskOf = (id: string): FoldedTask | undefined => view().tasks.find((t) => t.id === id);
   /** The plan now, with every `plan.changed` applied. */
   const planNow = () => view().plan.tasks;
@@ -155,8 +132,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
    * checkpoint or output of it, or a file the main agent attached to an answer for its check.
    */
   const cites = (taskId: string, path: string) =>
-    !!taskOf(taskId)?.citedScratch.includes(path) ||
-    answeredFiles(recorder.events(), taskId).has(path);
+    !!taskOf(taskId)?.citedScratch.includes(path) || !!log().answeredScratch.get(taskId)?.has(path);
 
   const known = (taskId: string) => {
     const t = planNow().find((p) => p.id === taskId);
@@ -211,7 +187,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
    * agent did not ask for and must be told of.
    */
   async function stop(threadId: string, eventId: string, reason?: string) {
-    const record = threadLog(recorder.events()).threads.get(threadId);
+    const record = log().threads.get(threadId);
     if (record && record.end?.status !== "cancelled") {
       await recorder.append(
         threadId,
@@ -238,8 +214,8 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     { verdict, what }: { verdict: boolean; what: string },
   ): Target {
     known(taskId);
-    const log = threadLog(recorder.events());
-    if (log.threads.get(c.threadId)?.end?.status === "cancelled") {
+    const d = log();
+    if (d.threads.get(c.threadId)?.end?.status === "cancelled") {
       throw new Refusal("You were stopped; stop here.");
     }
     if (c.kind === "check") {
@@ -273,14 +249,14 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     const attemptId = t?.attemptId;
     if (
       attemptId &&
-      log.holders.get(taskId) === c.threadId &&
+      d.holders.get(taskId) === c.threadId &&
       !t.checker &&
       status !== "stale" &&
       status !== "failed"
     ) {
       return { attempt: async () => attemptId, fresh: false };
     }
-    const workers = startedFor(log, taskId, "worker").filter((r) => r.end?.status !== "cancelled");
+    const workers = startedFor(d, taskId, "worker").filter((r) => r.end?.status !== "cancelled");
     if (c.kind === "main") {
       if (workers.length > 0) {
         throw new Refusal(
@@ -290,7 +266,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     } else {
       // Its own `thread.started` may not be stored yet: a thread not in the log is the newest.
       const latest = workers.at(-1);
-      if (latest && latest.id !== c.threadId && log.threads.has(c.threadId)) {
+      if (latest && latest.id !== c.threadId && d.threads.has(c.threadId)) {
         throw new Refusal(`${taskId} is held by a newer worker (${latest.id}); stop here.`);
       }
     }
@@ -337,8 +313,8 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     for (const dep of dependents) {
       const t = taskOf(dep);
       const mark = attempted(dep);
-      const log = threadLog(recorder.events());
-      const holders = [...startedFor(log, dep, "worker"), ...startedFor(log, dep, "check")];
+      const d = log();
+      const holders = [...startedFor(d, dep, "worker"), ...startedFor(d, dep, "check")];
       for (const h of holders) {
         if (h.end?.status !== "cancelled") {
           await stop(
@@ -449,7 +425,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
         if (c.kind !== "check" || !c.taskId) throw new Refusal("Only a check thread asks.");
         if (c.batchSize > 1) throw new Refusal("Call ask alone, not with other tools.");
         writeTarget(c, c.taskId, { verdict: false, what: "asks" });
-        const asked = threadLog(recorder.events()).threads.get(c.threadId)?.asks.length ?? 0;
+        const asked = log().threads.get(c.threadId)?.asks.length ?? 0;
         if (asked >= MAX_ASKS) {
           throw new Refusal(`You have asked ${MAX_ASKS} questions; give your verdict now.`);
         }

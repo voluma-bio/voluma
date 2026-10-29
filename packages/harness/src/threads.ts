@@ -1,11 +1,11 @@
 /**
  * The run's threads in one process: which are running and how to stop or steer them. It
  * keeps no run state beyond that. `start` launches a thread, or resumes one of the same id
- * from its History when given an `input`; the supervisor decides what to start and when,
- * from the stored log plus `running` (`supervisor.ts`). A thread that throws, or is refused
+ * from its History when given an `input`; the run loop decides what to start and when,
+ * from the stored log plus `running` (`run-loop.ts`). A thread that throws, or is refused
  * before it starts (`ran` false), is a failure of the run: `failure()` holds the first. One
  * refused because its stored History cannot be resumed (`stale`: a deploy changed its prompt,
- * tools or model) is not: `stale(threadId)` says why, and the supervisor restarts the work.
+ * tools or model) is not: `stale(threadId)` says why, and the run loop restarts the work.
  */
 import {
   type StartThreadOptions,
