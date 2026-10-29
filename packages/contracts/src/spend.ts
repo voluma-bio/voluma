@@ -7,10 +7,10 @@
  *   `tool.result`'s `costUsd` (a `segment_sam` call's Meta charge). Each counts for the
  *   thread that wrote the event; an event from a thread with no `thread.started` before it
  *   counts only in `total`.
- * - Provider calls (the gateway's, `Run.providerCalls`) are passed in separately: each
- *   `bySandbox` entry's cost and calls go to the task whose thread wrote the `sandbox` event
- *   with that `name`, added to `costUsd` and `toolCostUsd`. A name no event names counts only in
- *   `total`. They are not model calls, so `calls` stays the model calls that reported usage.
+ * - Provider calls (the gateway's, `Run.providerCalls`) are passed in separately and added
+ *   to `costUsd` and `toolCostUsd`: `total` takes their `costUsd`, and each `bySandbox`
+ *   entry's cost also goes to the task (or `main`) whose thread wrote the `sandbox` event with
+ *   that `name`. They are not model calls, so `calls` stays the model calls that reported usage.
  * - A worker or check thread belongs to the task its `thread.started` names, so a task's
  *   spend covers all its attempts: worker, check and any redo. The root thread (the main
  *   thread's wakes) belongs to no task: that is `main`. A chat thread counts only in `total`.
@@ -26,8 +26,8 @@
  *   every thread and idles between calls.
  *
  * The runner's end-of-run log line sums the same model and tool costs over the run's
- * threads, so `total.costUsd` matches it for a run that didn't lose events (a review chat
- * thread is not the runner's).
+ * threads, so without provider calls `total.costUsd` matches it for a run that didn't lose
+ * events (a review chat thread is not the runner's).
  */
 import type { RunEvent } from "./events";
 import type { ProviderCalls } from "./run";
@@ -176,12 +176,16 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
     latest = Math.max(latest, at);
   }
   for (const threadId of [...open.keys()]) close(threadId);
-  for (const { sandbox, costUsd } of providerCalls?.bySandbox ?? []) {
-    const threadId = sandboxOwner.get(sandbox);
-    add(threadId ?? "", (s) => {
-      s.costUsd += costUsd;
-      s.toolCostUsd += costUsd;
-    });
+  if (providerCalls) {
+    total.costUsd += providerCalls.costUsd;
+    total.toolCostUsd += providerCalls.costUsd;
+    for (const { sandbox, costUsd } of providerCalls.bySandbox) {
+      const s = owner.get(sandboxOwner.get(sandbox) ?? "");
+      if (s) {
+        s.costUsd += costUsd;
+        s.toolCostUsd += costUsd;
+      }
+    }
   }
   return { tasks: [...tasks].map(([taskId, s]) => ({ taskId, spend: s })), main, total };
 }

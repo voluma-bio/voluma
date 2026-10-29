@@ -163,7 +163,8 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
   );
 
   /**
-   * The first event a claim writes, on the run's root thread. `resumed` is false on the run's
+   * Written by every claim on the run's root thread, right after that thread's
+   * `thread.started` and before anything else the claim writes. `resumed` is false on the run's
    * first claim. On a resume, threads whose latest `thread.started` has no `thread.ended`
    * were cut off by infrastructure; the run page shows that as "Voluma restarted the run".
    * `after` is why the previous claim ended, present exactly when `resumed`.
@@ -237,27 +238,32 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
    */
   const toolResult = event(
     "tool.result",
-    z.object({
-      toolCallId: toolCallIdSchema,
-      isError: z.boolean(),
-      /** What the model saw: head and tail only when `truncated`. */
-      output: z.string(),
-      /** When true the full output is at `toolOutputKey(runId, toolCallId)`. */
-      truncated: z.boolean(),
-      /**
-       * What the call was billed in US dollars, for a tool that pays a provider, even when it
-       * then failed; absent for a free tool. The run's model cost includes it (`Run.usage`).
-       * Not written for `segment_sam` once SAM runs in the sandbox: its spend is the run's
-       * provider calls (`Run.providerCalls`).
-       */
-      costUsd: z.number().nonnegative().optional(),
-      /**
-       * True when the call failed because of Voluma's infrastructure (gateway or provider 5xx,
-       * a cut stream, a revoked token, the in-flight limit), not the agent's input. Absent
-       * means false.
-       */
-      infrastructure: z.boolean().optional(),
-    }),
+    z
+      .object({
+        toolCallId: toolCallIdSchema,
+        isError: z.boolean(),
+        /** What the model saw: head and tail only when `truncated`. */
+        output: z.string(),
+        /** When true the full output is at `toolOutputKey(runId, toolCallId)`. */
+        truncated: z.boolean(),
+        /**
+         * What the call was billed in US dollars, for a tool that pays a provider, even when it
+         * then failed; absent for a free tool. The run's model cost includes it (`Run.usage`).
+         * Not written for `segment_sam` once SAM runs in the sandbox: its spend is the run's
+         * provider calls (`Run.providerCalls`).
+         */
+        costUsd: z.number().nonnegative().optional(),
+        /**
+         * True when the call failed because of Voluma's infrastructure (gateway or provider 5xx,
+         * a cut stream, a revoked token, the in-flight limit), not the agent's input; only on
+         * an error result. Absent otherwise.
+         */
+        infrastructure: z.literal(true).optional(),
+      })
+      .refine((p) => p.infrastructure === undefined || p.isError, {
+        path: ["infrastructure"],
+        message: "an infrastructure failure is an error result",
+      }),
   );
 
   /**
@@ -267,6 +273,11 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
   const sandbox = event(
     "sandbox",
     z.object({
+      /**
+       * The sandbox's name within the run (`<taskId>.worker[.n]`), the same string the gateway
+       * token minted for it carries, so `spend` attributes its provider calls by it. The
+       * thread that uses the sandbox writes the event.
+       */
       name: nonEmpty,
       state: z.enum(["starting", "ready", "stopped", "failed"]),
       detail: z.string().optional(),
@@ -280,7 +291,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
   const revisionStarted = event(
     "revision.started",
     z.discriminatedUnion("reason", [
-      /** The run's first event; `plan` is the declared outputs of every task, copied from the workflow. */
+      /** The run's first state event; `plan` is the declared outputs of every task, copied from the workflow. */
       z.object({ reason: z.literal("run"), plan: workflowPlanSchema }),
       z.object({ reason: z.literal("correction"), taskId: taskIdSchema }),
     ]),
