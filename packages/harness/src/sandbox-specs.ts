@@ -24,6 +24,8 @@ interface Common {
   image: string;
   lifetimeSeconds: number;
   idleSeconds: number;
+  /** Set on every command, e.g. the run layout's `PYTHONPATH`; secrets do not belong here. */
+  env?: Record<string, string>;
 }
 
 const base = (c: Common) => ({
@@ -34,6 +36,7 @@ const base = (c: Common) => ({
   memoryMiB: MEMORY_MIB,
   lifetimeSeconds: c.lifetimeSeconds,
   idleSeconds: c.idleSeconds,
+  env: c.env,
 });
 
 const withAccess = (mounts: SandboxMount[], access: SandboxMount["access"]): SandboxMount[] =>
@@ -53,8 +56,8 @@ export function workerSandboxSpec(
     mounts: options.mounts,
     network: gateway ? { kind: "hosts", hosts: [gatewayHost(gateway.url)] } : { kind: "none" },
     env: gateway
-      ? { VOLUMA_GATEWAY_URL: gateway.url, VOLUMA_GATEWAY_TOKEN: gateway.token }
-      : undefined,
+      ? { ...options.env, VOLUMA_GATEWAY_URL: gateway.url, VOLUMA_GATEWAY_TOKEN: gateway.token }
+      : options.env,
   };
 }
 
