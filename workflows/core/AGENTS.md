@@ -6,9 +6,11 @@ its scripts). Design: `design/microct-skillset.md` in the docs repo. The measure
 holds rules, not experiment logs.
 
 - A skill is `skills/<name>/SKILL.md` (frontmatter `name`, `description` only) plus `resources/`. The run agent reads
-  SKILL.md and runs the resources as `python <skill dir>/resources/<x>.py`; so SKILL.md names resources relative to its own
-  directory and holds no commit or mount path. There are no per-workflow agent definitions: the roles shared by every workflow are in
-  `agents/`; `segmentation-check` ("When you check a task") holds only what a checker re-derives for labels.
+  SKILL.md and runs the resources as `python <skill dir>/resources/<x>.py`; so SKILL.md names a resource by file name,
+  says when to reach for it and what its result means, and leaves flags, schemas and outputs to the script's `--help`
+  (the tool index in the agent's prompt lists every script from its first docstring line). There are no per-workflow agent definitions: the roles shared by every workflow are in
+  `agents/`, and a skill never addresses one role; what a workflow wants checked per task is in its `tasks.json` and
+  `skills/<workflow>/examples/`.
 - **Resource contract:** CLI scripts that take and return paths. `.npy` outputs get a JSON sidecar
   (`microct-core/resources/sidecar.py`: grid id, spacing, input sha256, params; it keeps the keys `segment_sam` wrote). One JSON line
   on stdout, never arrays, never NaN (`sidecar.emit` fails on it). A script that reports numbers uses one result record,

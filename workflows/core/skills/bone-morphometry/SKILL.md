@@ -1,96 +1,45 @@
 ---
 name: bone-morphometry
 description: >
-  Load when a task asks for volumes, BV/TV, Tb.Th, Tb.Sp, Tb.N, trabecular nodes and ends, cortical thickness, distances
-  or ratios: the definitions, the method behind each number, and the QC image it needs. Which region and which parameters
-  a protocol wants is in the workflow's protocol reference.
+  Load when a task asks for volumes, BV/TV, Tb.Th, Tb.Sp, Tb.N, trabecular nodes and ends, cortical thickness,
+  distances or ratios: each measurement's definition and method, its known bias, and what its QC image must show.
 ---
 
 # Bone morphometry
 
-Names and definitions follow Bouxsein et al. 2010 (ASBMR guidelines). Lengths are in mm, volumes in mm³, BV/TV in %.
-Code computes every number from a mask; you choose the region, and you look at the QC image before you report. Which
-region a parameter uses, and which script makes it, is the protocol's call (the workflow's protocol reference): this skill
-defines the measurements and does not build regions.
-
-## Resources
-
-All take paths and print the result record (`microct-core`: `{id: {value, unit, definition, kind}}`). `morphometry.py` is the one
-owner of TV, BV and BV/TV: a region script builds the region, this computes its volumes, so a deck number is produced once.
-
-| Script | Does |
-|---|---|
-| `morphometry.py volumes` | TV, BV, BV/TV of a region. Writes `volumes.json` |
-| `morphometry.py trabecular` | the same three, plus Tb.Th, Tb.Sp, Tb.N; with `--skeleton`, Tb.Nd and Tb.Tm. Writes `morphometry.json`, `thickness-mm.npy`, `separation-mm.npy`, `qc.jpg` |
-| `morphometry.py cortical` | Ct.Th in a slab at a depth below a reference surface. Writes `<name>.json`, `qc-<name>.jpg` |
-| `measure.py` | Distances between two points, label volumes (voxels of a label, not BV), ratios of named values, each with unit, definition and input hashes |
-
-```
-python morphometry.py volumes --roi roi.npy --hu hu.npy --hu-json hu.json --out DIR [--id TV=my-tv --id BV=my-bv --id BV/TV=my-bv-tv]
-python morphometry.py trabecular --roi roi.npy --hu hu.npy --hu-json hu.json --out DIR [--skeleton] [--id Tb.Th=my-id ...]
-python morphometry.py cortical --cortex cortex.npy --surface surface.npy --axis 0 --direction 1 --depth-um 100 --grid hu.json --out DIR --name my-ct-th-id
-python measure.py --spec spec.json --grid hu.json --out measurements.json
-```
-
-`--roi` and `--cortex` are boolean `.npy`. `volumes` and `trabecular` take the region (`--roi`), the HU on its grid (`--hu`: `hu.npy` for a
-scan-grid region, the aligned stack's HU for a region traced on it, and they must share a `grid_id`; `--grid` defaults to the region's own
-sidecar) and, separately, `--hu-json`, the scan's `hu.json`, for the calibration the default threshold needs (not needed with
-`--threshold`). The volumes are counted on that grid. `--id KEY=output-id` names each value (keys are in `--help`; the default id is the key,
-for example `Tb.Th`), and `--name` is the id of a cortical value. A diagnostic (`voxel-size`, node and end counts, the counted volume) comes in the
-same record. `--surface`
-is a 2D `.npy`: for each position across `--axis`, the voxel index of the reference surface along it. `--direction 1` if
-depth grows with the index.
-
-`measure.py` spec (points are `[z, y, x]` voxel indices, fractions allowed):
-
-```json
-{"distances": {"bone_length": {"points_zyx": [[170, 330, 128], [258, 292, 338]], "definition": "straight line A to C"}},
- "volumes":   {"bone_volume": {"labels": "labels.npy", "ids": [1], "definition": "label 1"}},
- "ratios":    {"width_to_length": {"num": "bone_width", "den": "bone_length", "definition": "W/L"}}}
-```
-
-A ratio may use any distance or volume in the spec and earlier ratios. Its unit is `1` when both share a unit.
+Names and definitions follow Bouxsein et al. 2010 (ASBMR). Lengths in mm, volumes in mm³, BV/TV in %.
+`morphometry.py` is the one owner of TV, BV and BV/TV and of the thickness and skeleton measures; `measure.py`
+gives distances between points, label volumes (voxels of a label, not BV) and ratios. You choose the region: the
+workflow's protocol says which region each parameter uses, and this skill builds none.
 
 ## Definitions and methods
 
-| Name | Definition here | Method |
+| Name | Definition | Method and caveat |
 |---|---|---|
-| TV | ROI voxel count x voxel volume | trabeculae plus marrow |
-| BV | bone voxels in the ROI x voxel volume | bone = ROI and HU above the measurement threshold (`microct-core`, two thresholds: computed from `--hu-json`'s calibration unless you pass `--threshold`). No label gates it |
+| TV | ROI voxels × voxel volume | trabeculae plus marrow |
+| BV | bone voxels in the ROI × voxel volume | bone = ROI and HU above the measurement threshold (`microct-core`); no label gates it |
 | BV/TV | BV / TV, in % | |
-| Tb.Th | mean diameter of the largest sphere inside bone that covers each bone voxel | sphere `local_thickness` (Hildebrand and Ruegsegger). Not twice the distance transform, which reads thin struts low. Every thickness record carries a `voxel-size` diagnostic |
-| Tb.Sp | the same on marrow (ROI minus bone) | space outside the ROI is not marrow, so struts cut by the ROI edge read thin and gaps there read small |
-| Tb.N | (BV/TV) / Tb.Th, in 1/mm | model-derived (Bouxsein 2010), not a count of struts. State "model-derived" when you report it |
-| Tb.Nd | nodes per mm³ of the tissue volume that was counted | 3D skeleton (`skimage.morphology.skeletonize`); a node is a connected cluster of skeleton voxels with 3 or more neighbours (26-connectivity) |
-| Tb.Tm | ends per mm³ of the tissue volume that was counted | skeleton voxels with exactly 1 neighbour |
-| Ct.Th | mean sphere diameter over cortical voxels in a slab | sphere thickness of the cortical mask, sampled in a slab centred `--depth-um` below the reference surface, `--slab-um` thick (default 50) |
+| Tb.Th | mean diameter of the largest sphere inside bone that covers each bone voxel | sphere thickness (Hildebrand and Rüegsegger), not twice the distance transform, which reads thin struts low |
+| Tb.Sp | the same on marrow (ROI minus bone) | space outside the ROI is not marrow: struts and gaps cut by the ROI edge read thin and small |
+| Tb.N | (BV/TV) / Tb.Th, in 1/mm | model-derived, not a strut count: say "model-derived" when you report it |
+| Tb.Nd, Tb.Tm | skeleton nodes (3 or more neighbours) and ends (1 neighbour) per mm³ of the tissue counted | 3D skeleton. Voxels within an edge margin of the ROI are left out, because the ROI cuts struts and makes false ends, so the density divides by the counted part, which the record carries. **Unvalidated against any reference tool**; plate-like bone skeletonises to a surface and gives many nodes. Report them as exploratory |
+| Ct.Th | mean sphere diameter over cortical voxels in a slab | a slab centred at a depth below a reference surface. **Needs a cortical mask, not a bone mask**: near a growth plate a bone mask's slab averages in trabeculae and plate. Say which mask you used. The record also gives the median and standard deviation, since thick blobs where the wall meets a ridge lift the mean |
 
-Radii are quantised at half a voxel, so a diameter is a whole number of voxels: **a structure an odd number of voxels
-wide reads one voxel high** (a 1-voxel plate reads 2, 3 reads 4; even widths read exactly). The bias is a larger share of a
-thinner structure, and Tb.N = (BV/TV)/Tb.Th inherits the opposite bias. Compare thicknesses only between scans of the same voxel
-size, and state the voxel size with them. Whether Scanco uses the same convention is open. Voxels must be isotropic; the script
-fails with a sentence if they are not.
-
-**Tb.Nd and Tb.Tm are not validated against Scanco or any reference tool.** Both are counts per tissue volume (1/mm³, the
-lab's definition). Skeleton voxels within `--edge-margin-mm` (default 0.0315) of the ROI edge are left out of the counts, because the ROI cuts struts and makes false ends,
-so the density divides by the part of the ROI those counts come from: the values carry `counted_volume_mm3`, and
-`morphometry.json` holds the counts with and without the edge voxels. In a thin ROI that interior can be under half of it. Plate-like bone skeletonises to a surface, so a dense, plate-rich ROI gives many nodes and tracks the shape of the
-plates as much as the lattice. A count of a few dozen nodes or ends is too small for a ratio. Report them as exploratory and
-give the ratio only as a comparison between groups.
-
-**Ct.Th needs a cortical mask, not a bone mask.** Near a growth plate the slab also holds trabeculae and plate; the
-sphere thickness there averages them in. Make the cortical mask first (`regions-and-landmarks`), look at it, and report
-which mask you used. The mean is lifted by thick blobs where the wall meets a ridge: `morphometry.json` also gives the
-median and standard deviation.
+Radii are quantised at half a voxel, so **a structure an odd number of voxels wide reads one voxel high** (a
+1-voxel plate reads 2; even widths read exactly), a larger share of a thinner structure, and Tb.N inherits the
+opposite bias. Compare thicknesses only between scans of the same voxel size and state the voxel size with them
+(every thickness record carries it). Whether Scanco uses the same convention is open. Voxels must be isotropic; the
+script stops when they are not.
 
 ## The QC image each number needs
 
 Open it with `view_image` before you report.
 
-- **Trabecular:** `qc.jpg` shows the ROI (cyan) and bone (orange) on three slices, the Tb.Th and Tb.Sp maps, and the
-  skeleton. Check that the ROI holds the structure you mean and leaves out the cortex, plate and growth plate, that the
-  bone outline follows the struts (a wrong threshold shows here), and that Tb.Th colours match strut width.
-- **Cortical:** `qc-<name>.jpg` shows the slab (red) on the cortical mask and the thickness along the slab. Check
-  that the slab sits where you mean (depth below the right surface) and covers the wall all round.
-- **Distances:** render the two points on the slice or surface (`regions-and-landmarks` `pick-check.jpg`), and look.
-
+- **Trabecular** (`qc.jpg`): the ROI and bone on three slices, the Tb.Th and Tb.Sp maps, the skeleton. The ROI must
+  hold the structure you mean and leave out cortex, plate and growth plate; the bone outline must follow the struts
+  (a wrong threshold shows here); Tb.Th colours must match strut width.
+- **Cortical** (`qc-<name>.jpg`): the slab on the cortical mask and the thickness along it. The slab must sit at
+  the depth below the surface you mean and cover the wall all round. The image projects along the slab's axis, so
+  it cannot show the depth itself: read the depth and slab parameters back from the record.
+- **Distances:** the two points drawn on the view they were placed on (`regions-and-landmarks`, `pick-check.jpg`,
+  or a quad view with `--ruler`).

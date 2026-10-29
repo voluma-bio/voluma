@@ -15,7 +15,9 @@
     "dependsOn": ["intake"],
     "outputs": ["frame"],
     "instructions": "Orient the stack so the later tasks share one frame (a labels-ready volume with known axes), with the orient-joint skill.",
-    "doneWhen": ["The orientation is checked on a render you looked at."]
+    "doneWhen": [
+      "The keyframe cuts the femur, the tibia and the patella through the joint, as examples/README.md (orientation) describes."
+    ]
   },
   {
     "id": "segmentation",
@@ -28,7 +30,7 @@
     ],
     "instructions": "Segment the bones and joint structures and settle the final labels; a piece the data do not support is not named, and whether its structure is absent is decided by the segmentation-check skill, section 2.",
     "doneWhen": [
-      "Every label is one structure, checked on renders and component counts.",
+      "Every label is one structure, checked on the 3D sheet and the label checks, as examples/README.md (segmentation) describes.",
       "The volumes of #1-3 follow from the final labels."
     ]
   },
@@ -47,7 +49,7 @@
     ],
     "instructions": "Define the IIOC region (ROI-1) and report its volumes, heights and the tibial width.",
     "doneWhen": [
-      "ROI-1 runs from the growth plate to the articular surface and was checked on a render."
+      "ROI-1 runs from the growth plate to the articular surface, as examples/README.md (iioc) describes, and was checked on a render."
     ]
   },
   {
@@ -59,7 +61,9 @@
       "subchondral-bone-plate-thickness-lateral"
     ],
     "instructions": "Measure the subchondral bone plate thickness, medial and lateral.",
-    "doneWhen": ["Each thickness is reported with the render it was read from."]
+    "doneWhen": [
+      "Each slab sits inside the plate under the articular surface, as examples/README.md (subchondral-plate) describes, and each thickness is reported with the render it was read from."
+    ]
   },
   {
     "id": "trabecular-roi",
@@ -67,7 +71,9 @@
     "dependsOn": ["iioc", "subchondral-plate"],
     "outputs": ["tv-iioc-trab", "bv-iioc-trab", "bv-tv-iioc-trab"],
     "instructions": "Define ROI-2 (ROI-1 without the plate and the cortical line) and report its volumes.",
-    "doneWhen": ["ROI-2 excludes the subchondral plate and the cortical line."]
+    "doneWhen": [
+      "ROI-2 excludes the subchondral plate and the cortical line, as examples/README.md (trabecular-roi) describes."
+    ]
   },
   {
     "id": "metaphyseal-roi",
@@ -85,7 +91,7 @@
     ],
     "instructions": "Define ROI-3 below the growth plate and report its trabecular parameters.",
     "doneWhen": [
-      "ROI-3 starts 50 um below the growth plate, is 200 um long and 20 um clear of cortical bone."
+      "ROI-3 starts 50 um below the growth plate, is 200 um long and 20 um clear of cortical bone, as examples/README.md (metaphyseal-roi) describes."
     ]
   },
   {
@@ -97,7 +103,9 @@
       "cortical-thickness-1000-um-below-the-growth-plate"
     ],
     "instructions": "Measure the cortical thickness 100 um and 1000 um below the growth plate. Use the cortex mask and distal growth-plate face that metaphyseal-roi wrote (/outputs/metaphyseal-roi/meta/cortex.npy and /outputs/metaphyseal-roi/meta/growth-plate-distal-face.npy); do not trace the face again.",
-    "doneWhen": ["Both levels are measured on the cortex mask and distal face of metaphyseal-roi."]
+    "doneWhen": [
+      "Both levels are measured on the cortex mask and distal face of metaphyseal-roi, as examples/README.md (cortical) describes."
+    ]
   },
   {
     "id": "femoral-geometry",
@@ -105,6 +113,8 @@
     "dependsOn": ["segmentation"],
     "outputs": ["distal-femoral-length-dfl", "distal-femoral-width-dfw", "width-length-ratio"],
     "instructions": "Place the femoral points and report the distal femoral length, width and their ratio.",
-    "doneWhen": ["Points a-d are placed on renders and the lengths follow from them."]
+    "doneWhen": [
+      "Points a-d sit where examples/README.md (femoral-geometry) puts them, each checked on a second view, and the lengths follow from them."
+    ]
   }
 ]
