@@ -140,7 +140,7 @@ export const runs = pgTable(
     recoveries: integer().notNull().default(0),
     modelCostUsd: doublePrecision().notNull().default(0),
     sandboxSeconds: doublePrecision().notNull().default(0),
-    /** Open To check items when the run completed (`runSchema.toCheck`); null otherwise. */
+    /** Retired, never read or written. Drop after servers using the old count are drained. */
     toCheck: integer(),
   },
   (t) => [

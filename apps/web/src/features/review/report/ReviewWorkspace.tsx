@@ -1,51 +1,51 @@
 /** Review layout consumes real result snapshots; opening images never invents analysis results. */
 
+import { useMutation } from "@tanstack/react-query";
+import { markReviewed } from "@voluma/api-client";
 import { StatusBadge } from "@voluma/ui";
 import { ArrowLeft, Download, History, Layers, ListChecks } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
-import { CorrectionDialog } from "./CorrectionDialog";
 import { downloadCsv } from "./export";
-import { type ReviewRun, type ReviewTask, taskStatus } from "./model";
-import type { ReviewService } from "./service";
+import { type ReviewRun, taskStatus } from "./model";
 import { TaskReport } from "./TaskReport";
 
 export function ReviewWorkspace({
   runId,
   run,
-  service,
+  canReview = false,
   taskId,
   revisionId,
   navigate,
   backLink,
   viewer,
   notice,
-  onResult,
+  onRefresh,
 }: {
   runId: string;
   run?: ReviewRun;
-  service?: ReviewService;
+  canReview?: boolean;
   taskId?: string;
   revisionId?: string;
   navigate(selection: { task?: string; revision?: string }): void;
   backLink: ReactNode;
   viewer: ReactNode;
-  /** Why there are no results, when `run` is absent: loading, no plan yet, unavailable. */
-  notice?: string;
-  onResult(run: ReviewRun): void;
+  /** Loading/unavailable state, or an actionable refresh failure above retained results. */
+  notice?: ReactNode;
+  onRefresh(): Promise<void>;
 }) {
   const [tab, setTab] = useState<"tasks" | "structures">("tasks");
   const [display, setDisplay] = useState<Record<string, { visible: boolean; opacity: number }>>({});
   const [filter, setFilter] = useState("");
-  const [correction, setCorrection] = useState<{
-    task: ReviewTask;
-    text: string;
-    focus: HTMLElement | null;
-  } | null>(null);
   const latest = run?.revisions.at(-1);
   const revision = revisionId ? run?.revisions.find((item) => item.id === revisionId) : latest;
   const task = taskId ? revision?.tasks.find((item) => item.id === taskId) : revision?.tasks[0];
-  const readOnly = !service || revision !== latest;
+  const readOnly = !canReview || !run?.review || revision !== latest;
+  const complete = useMutation({
+    mutationFn: () => markReviewed(runId, { baseRevisionId: latest?.id ?? "" }),
+    onSuccess: onRefresh,
+    onError: onRefresh,
+  });
   return (
     <div className="review-shell" data-theme="light">
       <header className="app-header">
@@ -65,9 +65,20 @@ export function ReviewWorkspace({
             <ArrowLeft size={14} />
             {backLink}
           </div>
-          <h1 className="text-xl font-semibold mt-2">
-            {run?.sample ?? (runId === "local" ? "Scan viewer" : runId)}
-          </h1>
+          <div className="run-title">
+            <h1 className="text-xl font-semibold">
+              {run?.sample ?? (runId === "local" ? "Scan viewer" : runId)}
+            </h1>
+            {run?.review && (
+              <StatusBadge tone={run.review.remainingToCheck ? "check" : "primary"}>
+                {run.review.reviewedAt
+                  ? "Reviewed"
+                  : run.review.remainingToCheck
+                    ? `${run.review.remainingToCheck} to check`
+                    : "Completed"}
+              </StatusBadge>
+            )}
+          </div>
           {run && (
             <p className="text-sm text-muted-foreground">
               {run.workflows
@@ -81,6 +92,16 @@ export function ReviewWorkspace({
           )}
         </div>
         <div className="run-actions">
+          {run?.review && !run.review.reviewedAt && (
+            <button
+              type="button"
+              className="button primary"
+              disabled={readOnly || run.review.remainingToCheck !== 0 || complete.isPending}
+              onClick={() => complete.mutate()}
+            >
+              {complete.isPending ? "Marking reviewed…" : "Mark reviewed"}
+            </button>
+          )}
           {run && revision && (
             <>
               <label className="revision-select">
@@ -106,6 +127,16 @@ export function ReviewWorkspace({
           )}
         </div>
       </div>
+      {run && notice && (
+        <div className="revision-notice" role="alert">
+          {notice}
+        </div>
+      )}
+      {complete.error && !run?.review?.reviewedAt && (
+        <p className="error-message" role="alert">
+          {complete.error.message}
+        </p>
+      )}
       {revision && revision !== latest && (
         <div className="revision-notice">Earlier results are read-only.</div>
       )}
@@ -244,18 +275,7 @@ export function ReviewWorkspace({
                     runId={run.id}
                     revisionId={revision.id}
                     readOnly={readOnly}
-                    service={service}
-                    onResult={onResult}
-                    onCorrect={(text) =>
-                      setCorrection({
-                        task,
-                        text,
-                        focus:
-                          document.activeElement instanceof HTMLElement
-                            ? document.activeElement
-                            : null,
-                      })
-                    }
+                    onRefresh={onRefresh}
                   />
                 ) : (
                   <article className="task-report">
@@ -306,23 +326,6 @@ export function ReviewWorkspace({
         <span>Research review</span>
         <span>Display settings do not change scientific results</span>
       </footer>
-      {correction && revision && run && service && (
-        <CorrectionDialog
-          service={service}
-          runId={run.id}
-          revisionId={revision.id}
-          task={correction.task}
-          tasks={revision.tasks}
-          initialText={correction.text}
-          returnFocus={correction.focus}
-          onClose={() => setCorrection(null)}
-          onResult={(updated) => {
-            onResult(updated);
-            setCorrection(null);
-            navigate({ task: correction.task.id });
-          }}
-        />
-      )}
     </div>
   );
 }
