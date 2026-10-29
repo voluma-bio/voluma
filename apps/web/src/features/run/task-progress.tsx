@@ -39,7 +39,8 @@ function TaskItem({ task }: { task: TaskRow }) {
   const { state, thread, outcome, spend } = task;
   const s = STATE[state];
   const title = taskTitle(task.id);
-  const live = (state === "running" || state === "checking") && thread;
+  // Until the check thread starts, the newest thread is the finished worker: no clock then.
+  const live = (state === "running" || state === "checking") && thread?.status === "running";
   // A working row's clock is on its second line: spend's wall time stops at the last event. A
   // run logged before model usage was recorded has times but no cost.
   const spent = [
@@ -55,6 +56,7 @@ function TaskItem({ task }: { task: TaskRow }) {
         {thread ? (
           <button
             type="button"
+            title={title}
             onClick={() => open(thread.id)}
             className="min-w-0 truncate text-left text-ui font-medium hover:text-primary-text hover:underline"
           >
@@ -62,6 +64,7 @@ function TaskItem({ task }: { task: TaskRow }) {
           </button>
         ) : (
           <span
+            title={title}
             className={`min-w-0 truncate text-ui ${state === "waiting" ? "text-muted-foreground" : "font-medium"}`}
           >
             {title}
@@ -82,7 +85,7 @@ function TaskItem({ task }: { task: TaskRow }) {
         title={outcome}
         className="mt-0.5 line-clamp-2 pl-4 text-meta text-muted-foreground [overflow-wrap:anywhere]"
       >
-        {live ? (
+        {live && thread ? (
           <>
             {s.label} · <Elapsed thread={thread} />
           </>
@@ -91,6 +94,8 @@ function TaskItem({ task }: { task: TaskRow }) {
             <span className={s.text ? `font-medium ${s.text}` : "sr-only"}>{s.label}: </span>
             {outcome}
           </>
+        ) : task.waitingOn?.length ? (
+          `Waiting on ${task.waitingOn.map(taskTitle).join(", ")}`
         ) : (
           <span className={s.text}>{s.label}</span>
         )}

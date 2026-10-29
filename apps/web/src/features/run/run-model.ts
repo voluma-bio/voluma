@@ -9,6 +9,7 @@ import type { Folded, FoldedTask } from "@voluma/contracts/fold";
 import type { RunState } from "@voluma/contracts/run";
 import { type RunSpend, type Spend, spend } from "@voluma/contracts/spend";
 import type { WorkflowPlan } from "@voluma/contracts/workflow";
+import { isSatisfied } from "@voluma/workflow";
 import { type Halt, type Live, toolTitle } from "./transcript";
 import { outputName, taskTitle } from "./workflows";
 
@@ -259,9 +260,9 @@ export type TaskState =
   | "stopped"
   /** Working or being checked while the run waits for a runner or keys. */
   | "paused"
-  /** Not started, and every task it builds on is done. */
+  /** Not started, and every task it builds on has a usable result (`isSatisfied`). */
   | "ready"
-  /** Not started, and a task it builds on is not done. */
+  /** Not started, and a task it builds on has no usable result yet. */
   | "waiting";
 
 /**
@@ -277,7 +278,7 @@ function taskStates(
   logged: Thread[],
   halt: Halt | undefined,
 ): Map<string, TaskState> {
-  const statuses = new Map(tasks.map((t) => [t.id, t.status]));
+  const byId = new Map(tasks.map((t) => [t.id, t]));
   const working = new Set(
     logged.flatMap((t) =>
       t.kind === "worker" && t.status === "running" && t.taskId ? [t.taskId] : [],
@@ -285,8 +286,8 @@ function taskStates(
   );
   const states = new Map<string, TaskState>();
   for (const t of plan.tasks) {
-    const status = statuses.get(t.id);
-    const blocked = t.dependsOn.some((d) => statuses.get(d) !== "done");
+    const status = byId.get(t.id)?.status;
+    const blocked = t.dependsOn.some((d) => !isSatisfied(byId.get(d)));
     const state: TaskState =
       status === "in-progress" ||
       ((status === undefined || status === "pending" || status === "stale") && working.has(t.id))
@@ -318,6 +319,8 @@ export type TaskRow = {
   thread?: Thread;
   /** How it ended, once it has (`outcomes`). */
   outcome?: string;
+  /** While waiting: the tasks it builds on that have no usable result yet. */
+  waitingOn?: string[];
   /** Its worker, check and any redo together, once it has spent anything. */
   spend?: Spend;
 };
@@ -326,24 +329,31 @@ const ENDED: ReadonlySet<TaskState> = new Set(["done", "to-check", "failed", "st
 
 /**
  * Each ended task's outcome line: its current attempt's last checkpoint from the worker (the
- * result in the worker's words, with its numbers), else the checker's; a failed task says why it
- * failed. Not the main thread's wake note, which is the whole notes block for every task so far,
- * nor the closing `task` reason, a rule's stock sentence ("The second agent checked this task and
- * agrees"); a judgment's reason is about the check, not the result.
+ * result in the worker's words, with its numbers), else the checker's; if the checker changed the
+ * result (a `fix` revision), its last checkpoint, so the line never quotes a replaced number. A
+ * failed task says why it failed. Not the main thread's wake note, which is the whole notes block
+ * for every task so far, nor the closing `task` reason, a rule's stock sentence ("The second agent
+ * checked this task and agrees"); a judgment's reason is about the check, not the result.
  */
 function outcomes(
   events: RunEvent[],
   tasks: FoldedTask[],
   states: Map<string, TaskState>,
-  latest: Map<string, Thread>,
 ): Map<string, string> {
   const byAttempt = new Map(tasks.map((t) => [t.attemptId, t]));
+  const opened = new Set<string>();
+  const fixed = new Set<string>();
   const worker = new Map<string, string>();
   const checker = new Map<string, string>();
   for (const e of events) {
-    if (e.type !== "checkpoint") continue;
-    const t = byAttempt.get(e.payload.attemptId);
-    if (t) (e.threadId === t.threads.worker ? worker : checker).set(t.id, e.payload.text);
+    if (e.type === "attempt.opened" && byAttempt.has(e.id)) opened.add(e.payload.taskId);
+    else if (e.type === "revision.started" && e.payload.reason === "fix") {
+      // A fix during the current attempt; one on an earlier attempt changed nothing shown now.
+      if (opened.has(e.payload.taskId)) fixed.add(e.payload.taskId);
+    } else if (e.type === "checkpoint") {
+      const t = byAttempt.get(e.payload.attemptId);
+      if (t) (e.threadId === t.threads.worker ? worker : checker).set(t.id, e.payload.text);
+    }
   }
   const lines = new Map<string, string>();
   for (const t of tasks) {
@@ -351,8 +361,10 @@ function outcomes(
     if (!state || !ENDED.has(state)) continue;
     const line =
       state === "failed"
-        ? (t.reason ?? latest.get(t.id)?.error)
-        : (worker.get(t.id) ?? checker.get(t.id));
+        ? t.reason
+        : fixed.has(t.id)
+          ? (checker.get(t.id) ?? worker.get(t.id))
+          : (worker.get(t.id) ?? checker.get(t.id));
     if (line) lines.set(t.id, line);
   }
   return lines;
@@ -365,14 +377,17 @@ export type OutputRow = {
   title: string;
   /** "4.93 mm³", a score's level; null when there is none. */
   value: string | null;
-  /** Why there is no value: the worker's note, or that the task ended without reporting it. */
+  /**
+   * Why there is no value (the worker's note, or that the task finished without reporting it),
+   * or why a shown value may no longer hold (its task is stale).
+   */
   reason?: string;
 };
 
 const SUPERSCRIPT: Record<string, string> = { "^2": "²", "^3": "³", "^-1": "⁻¹" };
 
-/** Three significant digits (whole numbers from 1,000), then the unit: "4.93 mm³", "67.3%", "3.63". */
-export function formatValue(value: number, unit: string): string {
+/** Up to three significant digits (whole numbers from 1,000), then the unit: "4.93 mm³", "67.3%". */
+function formatValue(value: number, unit: string): string {
   const n = new Intl.NumberFormat("en-US", {
     ...(Math.abs(value) >= 1000 ? { maximumFractionDigits: 0 } : { maximumSignificantDigits: 3 }),
   }).format(value);
@@ -405,6 +420,10 @@ function outputRows(
       })),
       ...t.scores.map((s) => ({ id: s.id, title: s.title ?? s.id, value: s.level })),
     ];
+    // A task made stale by a change upstream keeps its old attempt until it is redone.
+    if (t.status === "stale")
+      for (const r of rows)
+        if (r.value !== null) r.reason = `May no longer hold${t.reason ? `: ${t.reason}` : ""}`;
     // A stopped task's row says so; only a task that finished its work left an output out.
     const state = states.get(p.id);
     if (state === "done" || state === "to-check" || state === "failed")
@@ -444,13 +463,18 @@ export function runView(events: RunEvent[], folded: Folded, halt: Halt | undefin
   if (!plan) return { threads, attention, tasks: [], outputs: [], progress: "", spend: spent };
   const states = taskStates(plan, folded.tasks, logged.threads, halt);
   const latest = latestThreadByTask(threads);
-  const lines = outcomes(events, folded.tasks, states, latest);
+  const lines = outcomes(events, folded.tasks, states);
   const taskSpend = new Map(spent.tasks.map((t) => [t.taskId, t.spend]));
+  const folds = new Map(folded.tasks.map((t) => [t.id, t]));
   const tasks = plan.tasks.map((t) => ({
     id: t.id,
     state: states.get(t.id) ?? "waiting",
     thread: latest.get(t.id),
     outcome: lines.get(t.id),
+    waitingOn:
+      states.get(t.id) === "waiting"
+        ? t.dependsOn.filter((d) => !isSatisfied(folds.get(d)))
+        : undefined,
     spend: taskSpend.get(t.id),
   }));
   // To check is finished too: the work is done and a person has items to look at.
