@@ -294,6 +294,17 @@ export async function markReviewed(
 export const reviewFileUrl = (runId: string, sha256: string) =>
   `/api/review/runs/${encodeURIComponent(runId)}/files/${encodeURIComponent(sha256)}`;
 
+/**
+ * Where the browser reads a converted asset (zarr level or mesh file) of a run: `path` is
+ * relative to the asset prefix, as `assets.ready` lists it (`reviewAssetKey`). 302 to a
+ * presigned GET; 404: unreadable run or bad path.
+ */
+export const reviewAssetUrl = (runId: string, sha256: string, path: string) =>
+  `/api/review/runs/${encodeURIComponent(runId)}/assets/${encodeURIComponent(sha256)}/${path
+    .split("/")
+    .map(encodeURIComponent)
+    .join("/")}`;
+
 /** Prepared snapshot API: keep body.id unchanged when retrying a failed or interrupted save. */
 export async function createReviewSnapshot(
   runId: string,
