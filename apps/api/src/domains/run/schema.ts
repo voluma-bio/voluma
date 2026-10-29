@@ -9,7 +9,7 @@
  * `tool.output` and `message` text (a binary file's first bytes), so the event would
  * be lost; `json` stores any string verbatim.
  *
- * `runs` carries the lease (holder, token, expiry, recoveries) and the summed heartbeat
+ * `runs` carries the lease (holder, token, expiry) and the claim history the no-progress limit reads (`claim-progress.ts`) and the summed heartbeat
  * usage: the claim, the sweep and every ingest write judge them in one transaction by the
  * database's `now()` (pg-queue.ts). `inputs` and `runs` have no foreign keys to the
  * event tables: events are written under the run lock and must never fail on a projection.
@@ -137,6 +137,14 @@ export const runs = pgTable(
     leaseHolder: text(),
     leaseToken: text(),
     leaseExpiresAt: timestamptz(),
+    /** Why the last claim ended (`claimEndReasonSchema`); the next claim carries it. Null before the first end. */
+    lastClaimEnd: text({ enum: ["shutdown", "self-stop", "lease-expired"] }),
+    /** Seq of the latest progress event (`claim-progress.ts`), and the log's last seq when the current claim began. */
+    lastProgressSeq: integer().notNull().default(0),
+    claimStartSeq: integer().notNull().default(0),
+    /** Consecutive claims that ended in infrastructure trouble without progress. */
+    stalledClaims: integer().notNull().default(0),
+    /** Retired, never read or written (`stalledClaims` replaced it). Dropped in a later PR, once the code that read it is drained. */
     recoveries: integer().notNull().default(0),
     modelCostUsd: doublePrecision().notNull().default(0),
     sandboxSeconds: doublePrecision().notNull().default(0),

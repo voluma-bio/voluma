@@ -5,6 +5,7 @@
  * supervisor's policy lives in `supervisor.ts`.
  */
 import type { RunEvent } from "@voluma/contracts/events";
+import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { PayloadOf } from "./recorder";
 
 export type Role = "worker" | "check";
@@ -22,6 +23,8 @@ export interface ThreadRecord {
   starts: number;
   /** The model it started on (`provider/id`); a resume keeps it. Absent: not recorded. */
   model: string | undefined;
+  /** Tool calls the log shows without a result, by tool call id; after a cut-off, what it was cut off in. */
+  openCalls: Map<string, string>;
 }
 
 export interface ThreadLog {
@@ -30,6 +33,8 @@ export interface ThreadLog {
   judgments: Map<string, PayloadOf<"judgment">>;
   /** The main thread's wakes by `<thread id>@<starts>` of the thread whose end raised them, in log order. */
   wakes: Map<string, PayloadOf<"wake">>;
+  /** Why the previous claim ended, from the latest `claim.started`; undefined on a run's first claim. */
+  after: ClaimEndReason | undefined;
   /** The notes block in force: the latest wake's `note`. */
   notes: string | undefined;
   ids: Set<string>;
@@ -48,17 +53,25 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
     threads: new Map(),
     judgments: new Map(),
     wakes: new Map(),
+    after: undefined,
     notes: undefined,
     ids: new Set(),
   };
   const briefed = new Set<string>(); // threads whose brief (first user message) the log holds
+  // Threads started again while their latest start had no end: the message that follows is a
+  // cut-off resume, not a wake (a wake is the runtime asking a thread that stopped).
+  const resumedCutOff = new Set<string>();
   for (const e of events) {
     value.ids.add(e.id);
     const record = value.threads.get(e.threadId);
     switch (e.type) {
+      case "claim.started":
+        value.after = e.payload.after;
+        break;
       case "thread.started": {
         const { kind, task } = e.payload;
         if ((kind === "worker" || kind === "check") && task) {
+          if (record && !record.end) resumedCutOff.add(e.threadId);
           value.threads.set(e.threadId, {
             id: e.threadId,
             role: kind,
@@ -67,6 +80,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
             wakes: record?.wakes ?? 0,
             starts: (record?.starts ?? 0) + 1,
             model: record?.model ?? e.payload.model,
+            openCalls: record?.openCalls ?? new Map(),
           });
         }
         break;
@@ -74,9 +88,16 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
       case "thread.ended":
         if (record) record.end = e.payload;
         break;
+      case "tool.call":
+        record?.openCalls.set(e.payload.toolCallId, e.payload.name);
+        break;
+      case "tool.result":
+        record?.openCalls.delete(e.payload.toolCallId);
+        break;
       case "message":
         if (record && e.payload.role === "user" && e.payload.sender.kind === "runtime") {
-          if (briefed.has(e.threadId)) record.wakes++;
+          const afterCutOff = resumedCutOff.delete(e.threadId);
+          if (briefed.has(e.threadId) && !afterCutOff) record.wakes++;
           briefed.add(e.threadId);
         }
         break;
