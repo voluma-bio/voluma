@@ -67,8 +67,8 @@ attempt (Pi's own tries count against it; an attempt in flight is not cut short)
 logged with its role and attempt and reported to the fallback breaker. The run's abort ends the
 wait. Any other error, or the spent budget, ends the call. A main-thread wake is also bounded
 by the supervisor's `wakeTimeoutMs`. `provider-error.ts` holds the one error classification (retry, redo and breaker):
-it reads the status Pi puts in the text (`<provider> API error (<status>)`, or Anthropic's
-`<status> {"type":"error","error":{"type":...}}`) and, for an Anthropic error sent mid-stream
+it reads the status in the text (Pi's `<provider> API error (<status>)`, or the Anthropic SDK's
+`<status> {...}`, `<status> <html>` or `<status> status code (no body)`) and, for an Anthropic error sent mid-stream
 with no status, its documented `error.type` (`overloaded_error` is 529, `rate_limit_error` 429).
 
 **A worker or check that dies on a provider error** (`provider-error.ts`, after the retries above
