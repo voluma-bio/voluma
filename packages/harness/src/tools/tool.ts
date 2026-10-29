@@ -19,14 +19,14 @@ export interface ToolContext {
   sandbox(): Promise<Sandbox>;
   /** Live output for people watching: queued, best effort, may be dropped. */
   output(stream: "stdout" | "stderr", text: string): void;
-  /** Charges this call what a provider billed for it, in US dollars; its `tool.result` records the sum (`costUsd`). */
-  bill(usd: number): void;
 }
 
 export interface ToolResult {
   /** What the model sees. */
   output: string;
   isError: boolean;
+  /** The call failed because of Voluma's infrastructure, not the agent's input (error results only). */
+  infrastructure?: true;
   /** The model saw a cut, and the full output is stored at
    * `toolOutputKey(runId, threadName, toolCallId)`, in the calling thread's own scratch folder. */
   truncated: boolean;
