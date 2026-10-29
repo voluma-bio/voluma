@@ -12,10 +12,9 @@
  * - A task has no row until it has an attempt (`attempt.opened`). Its current
  *   attempt is the latest one; events join the attempt they are stamped with.
  *   Attempt status: the latest stamped `task` event, otherwise `in-progress`.
- * - A check thread's events join the attempt it checks, so a fix lands in the
- *   worker's attempt: the earlier revision holds the result as the check found
- *   it. Outputs are the latest `output` per `outputId`; evidence is unique by
- *   sha256. A `verdict` counts only from a check thread.
+ * - A check thread's checkpoints join the attempt it checks without changing
+ *   its outputs. Outputs are the latest `output` per `outputId`; evidence is
+ *   unique by sha256. A `verdict` counts only from a check thread.
  * - The last step sends each output to its review block, with the id
  *   `${taskId}/${outputId}`: `measurement` to `measurements`, `score` to
  *   `scores`, `file` to `files` (its `title` is its name), and `structure`, `annotation` and `volume` to
@@ -38,13 +37,10 @@
  *   never clears one): each `toCheck` checkpoint; "Marked to check", an
  *   attempt-level flag that the latest `to-check` event not written by
  *   `check-result` sets and a later `in-progress`, `done`, `stale` or `failed`
- *   clears (`under-review` and `check-result` leave it), its id that event's;
- *   and "Changed by the second agent" for each fix revision on the attempt.
+ *   clears (`under-review` and `check-result` leave it), its id that event's.
  *   A `toCheck` may carry a `focus`: its ids go through the reference resolver
  *   and are dropped if they don't resolve (a `label` goes with its `volumeId`);
- *   one left pointing at nothing is absent. A fix's focus is the structures and
- *   annotations of the outputs it changed (those outputs, and what a changed
- *   measurement or score cites); "Marked to check" has none.
+ *   one left pointing at nothing is absent. "Marked to check" has no focus.
  *   `checkResult` turns a folded task into the status `check-result` gives.
  * - Not from these events (the API adds them): `title`, `ask`,
  *   `structureIds`, `threads.chat`, revision labels, the scan's volume; the API
@@ -122,7 +118,7 @@ export type FoldedTask = Pick<
 export type FoldedRevision = {
   id: string;
   createdAt: string;
-  reason: "run" | "correction" | "fix";
+  reason: "run" | "correction";
   taskId?: string;
   tasks: FoldedTask[];
   volumes: Volume[];
@@ -169,8 +165,6 @@ type Attempt = {
   resultRevisionId: string;
   milestones: Milestone[];
   toChecks: Check[];
-  /** Fix revision id → ids of the outputs it changed. */
-  fixes: Map<string, Set<string>>;
   checker: ReviewTask["checker"];
   outputs: Map<string, OutputEvent>;
   evidence: Map<string, Asset>;
@@ -234,26 +228,6 @@ export function fold(events: readonly RunEvent[]): Folded {
         resolved.box ||
         resolved.point;
       return points ? resolved : undefined;
-    };
-    // A fix points at the structures and annotations of the outputs it changed:
-    // those outputs themselves and what a changed measurement or score cites.
-    const fixFocus = (a: Attempt, changed: Set<string>): Focus | undefined => {
-      const structureIds = new Set<string>();
-      const annotationIds = new Set<string>();
-      for (const outputId of changed) {
-        const o = a.outputs.get(outputId)?.payload.output;
-        if (!o) continue;
-        const own = `${a.taskId}/${outputId}`;
-        if (kinds.get(own) === "structure") structureIds.add(own);
-        if (kinds.get(own) === "annotation") annotationIds.add(own);
-        if (o.kind === "measurement" || o.kind === "score") {
-          for (const id of refs(a, o.structureIds, "structure")) structureIds.add(id);
-          for (const id of refs(a, o.annotationIds, "annotation")) annotationIds.add(id);
-        }
-      }
-      return structureIds.size + annotationIds.size === 0
-        ? undefined
-        : { structureIds: [...structureIds], annotationIds: [...annotationIds] };
     };
     const volumes: Volume[] = [];
     const structures: Structure[] = [];
@@ -400,16 +374,6 @@ export function fold(events: readonly RunEvent[]): Folded {
           detail: a.flag.reason,
           status: "open",
         });
-      for (const [id, changed] of a.fixes) {
-        const focus = fixFocus(a, changed);
-        checks.push({
-          id,
-          title: "Changed by the second agent",
-          detail: "The check changed this result. Its checkpoints say what and why.",
-          status: "open",
-          ...(focus && { focus }),
-        });
-      }
       return {
         id: a.taskId,
         // Only dependencies that have a row: a worker can open a task before its dependency.
@@ -464,7 +428,6 @@ export function fold(events: readonly RunEvent[]): Folded {
           p.reason === "run"
             ? { id: e.id, createdAt: e.createdAt, reason: p.reason }
             : { id: e.id, createdAt: e.createdAt, reason: p.reason, taskId: p.taskId };
-        if (p.reason === "fix") current.get(p.taskId)?.fixes.set(e.id, new Set());
         break;
       }
       case "attempt.opened": {
@@ -479,7 +442,6 @@ export function fold(events: readonly RunEvent[]): Folded {
           resultRevisionId: revisionId,
           milestones: [],
           toChecks: [],
-          fixes: new Map(),
           checker: null,
           outputs: new Map(),
           evidence: new Map(),
@@ -529,7 +491,6 @@ export function fold(events: readonly RunEvent[]): Folded {
         if (!a) break;
         addEvidence(a, e.runId, e.payload.evidence);
         a.outputs.set(e.payload.outputId, e);
-        a.fixes.get(revisionId)?.add(e.payload.outputId);
         a.resultRevisionId = revisionId;
         break;
       }

@@ -244,8 +244,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
 
   /**
    * A revision starts: the first at the run's start, then one per correction
-   * (`taskId` is the corrected task) and one per fix (`taskId` is the task the
-   * check thread is fixing). Written by the runtime before the writes it covers.
+   * (`taskId` is the corrected task). Written by the runtime before the writes it covers.
    */
   const revisionStarted = event(
     "revision.started",
@@ -253,7 +252,6 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
       /** The run's first event; `plan` is the declared outputs of every task, copied from the workflow. */
       z.object({ reason: z.literal("run"), plan: workflowPlanSchema }),
       z.object({ reason: z.literal("correction"), taskId: taskIdSchema }),
-      z.object({ reason: z.literal("fix"), taskId: taskIdSchema }),
     ]),
   );
 
@@ -299,8 +297,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
 
   /**
    * A result from `report_output` (`output.ts`). A new attempt reports the same
-   * `outputId` again; within an attempt the latest wins, a check thread's fix
-   * included.
+   * `outputId` again; within an attempt the latest wins.
    */
   const output = event(
     "output",
