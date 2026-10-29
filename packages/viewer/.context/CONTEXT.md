@@ -2,7 +2,7 @@
 
 The viewer parses a ZIP of DICOM Part 10 images for acquired-slice viewing
 and automatic full-resolution raw 3D viewing. It supports slice navigation, window/level,
-camera rotation, zoom/reset and volume intensity/opacity controls. It does not
+camera rotation, zoom/reset, scan-aligned label overlays and volume intensity/opacity controls. It does not
 upload data, reconstruct orthogonal planes, produce meshes, segment anatomy or
 calculate scientific measurements. It is not a validated diagnostic viewer.
 Review supplies only ZIPs downloaded from authorized R2 inputs; there is no
@@ -192,3 +192,23 @@ a valid series. The production decoder assets are served by the app, not a CDN.
 Compatibility and capacity limits still need real micro-CT and workstation
 validation; this viewer does not establish clinical correctness. Deferred work
 is scoped in [TODO.md](TODO.md). Run-specific evidence belongs in the PR body.
+
+## Label overlays and check navigation
+
+Review supplies the revision, selected structures, display settings, a check's
+optional focus and an authorized file-URL resolver. A worker reads C-order NPY
+uint8/uint16 labels, verifies the SHA-256, dtype, shape and payload size, and finds
+each nonzero label's bounds. Each file is capped at 512 MiB; selected files
+together are capped at 1 GiB. Those are payload limits, not total browser memory.
+Labels must match the acquired scan's dimensions and affine; mismatches fail
+instead of being resampled. Workers stop on replacement, close and unmount;
+unselected volumes are evicted.
+
+The acquired viewport paints native label pixels through Cornerstone's
+world-to-canvas transform. Visibility, opacity and the Labels toggle change
+display only. Focused labels retain an amber outline even when fills are hidden.
+Explicit voxel points/boxes, label regions, structures and annotation landmarks
+can set the acquired slice and camera target. An open raw 3D preview targets the
+same world point and projects an amber box or crosshair; it does not render label
+surfaces. Clearing focus removes outlines without resetting either camera.
+Orthogonal reformats, surfaces and run-persistent snapshots remain separate work.

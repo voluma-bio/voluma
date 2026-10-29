@@ -1,6 +1,7 @@
 /** Task-scoped report and questions. Acceptance never changes scientific confidence. */
 import { useMutation } from "@tanstack/react-query";
 import { reviewFileUrl } from "@voluma/api-client";
+import type { Focus } from "@voluma/contracts/review";
 import { StatusBadge } from "@voluma/ui";
 import {
   ArrowUpRight,
@@ -97,6 +98,7 @@ export function TaskReport({
   service,
   onResult,
   onCorrect,
+  onFocus,
 }: {
   task: ReviewTask;
   /** A structure id to its name, for To check items that point at structures. */
@@ -110,6 +112,7 @@ export function TaskReport({
   service?: ReviewService;
   onResult(run: ReviewRun): void;
   onCorrect(text: string): void;
+  onFocus(focus?: Focus): void;
 }) {
   const [question, setQuestion] = useState("");
   const accept = useMutation({
@@ -251,6 +254,9 @@ export function TaskReport({
       <section>
         <div className="section-heading">
           <h2>To check</h2>
+          <button type="button" className="text-button" onClick={() => onFocus()}>
+            Clear viewer focus
+          </button>
           <span className="text-sm text-muted-foreground">
             {task.checks.filter((c) => c.status === "open").length} open
           </span>
@@ -267,7 +273,19 @@ export function TaskReport({
               ) : (
                 <CircleAlert size={17} className="shrink-0 mt-0.5" />
               )}
-              <h3 className="font-medium">{check.title}</h3>
+              <h3 className="font-medium">
+                {check.focus ? (
+                  <button
+                    type="button"
+                    className="text-left underline decoration-dotted underline-offset-4"
+                    onClick={() => onFocus({ ...check.focus! })}
+                  >
+                    {check.title}
+                  </button>
+                ) : (
+                  check.title
+                )}
+              </h3>
             </div>
             <p className="mt-2 leading-relaxed">{check.detail}</p>
             {check.focus && check.focus.structureIds.length > 0 && (
@@ -276,6 +294,15 @@ export function TaskReport({
               </p>
             )}
             <div className="flex flex-wrap items-center gap-2 mt-4">
+              {check.focus && (
+                <button
+                  type="button"
+                  className="button compact"
+                  onClick={() => onFocus({ ...check.focus! })}
+                >
+                  Show in viewer
+                </button>
+              )}
               {check.status === "accepted" ? (
                 <span className="font-medium text-primary-text">
                   Accepted · values remain provisional

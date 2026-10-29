@@ -295,6 +295,9 @@
   .dicom-canvas {
     @apply absolute inset-0;
   }
+  .dicom-label-overlay {
+    @apply pointer-events-none absolute inset-0 h-full w-full;
+  }
   .dicom-status {
     @apply absolute inset-0 flex flex-col items-center justify-center overflow-auto p-3 text-center text-xs;
     background: var(--viewer-well);
