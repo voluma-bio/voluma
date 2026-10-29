@@ -164,12 +164,12 @@ The lab checks the width points (#10) and the femoral landmarks (#26, #27) in Am
 `amira_landmarks.py` (`regions-and-landmarks`, which also holds the caveat on the format) and report the files with
 the measurements they check.
 
-## Limits to state in every report
+## Limits to state with the measurements they qualify
 
-- Every region follows traces made on one scan; the old run labelled its values provisional and so do we.
-- The aligned grid is a linear resampling of HU, and every region traced on it is counted on it (grid rule above).
-- ROI-3 depends on the traced distal face, and its cortex edge uses an estimated cortex depth (reported as
-  `cortex_estimate_mm`): a wrong depth moves ROI-3.
-- Medial/lateral follows the aligned frame (+U medial). Confirm it on the render before you name a compartment.
-- Tb.Nd and Tb.Tm are exploratory, and Tb.Th, Tb.Sp, Tb.N and Ct.Th carry the sphere-method bias with the voxel
-  size.
+- Every tibial region (#4–25) follows traces made on one scan; the old run labelled its values provisional and so
+  do we. They are counted on the aligned grid, a linear resampling of HU (grid rule above).
+- ROI-3 (#16–23) depends on the traced distal face, and its cortex edge uses an estimated cortex depth (reported
+  as `cortex_estimate_mm`): a wrong depth moves ROI-3.
+- A medial or lateral value (#8, #9, #11, #12) follows the aligned frame's +U medial, confirmed on the render.
+- Tb.Nd and Tb.Tm (#22, #23) are exploratory; Tb.Th, Tb.Sp, Tb.N and Ct.Th (#19–21, #24, #25) carry the
+  sphere-method bias with the voxel size.

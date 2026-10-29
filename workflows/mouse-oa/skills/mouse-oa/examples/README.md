@@ -54,7 +54,8 @@ following it, each covering the wall all round.
 
 ## femoral-geometry
 
-`femoral-geometry/deck-points-a-d.jpg`: `a` and `b` on the front and back views, `c` and `d` on the joint-face view, with DFL (4) and DFW (5) drawn. Four points: `a` the midpoint of the upper line of the intercondylar groove, `b` the intercondylar
-notch, `c` the midpoint of the ridge on the lateral condyle, `d` the vertex of the medial condyle. `a` and `b` show on
-the front view of the femur with the shaft and the groove, `b` also from the back; `c` and `d` on the joint-face
-view. DFL is `a` to `b`, DFW is `c` to `d`.
+`femoral-geometry/deck-points-a-d.jpg`: four points. `a` is the midpoint of the upper line of the intercondylar
+groove and `b` the intercondylar notch, both on the front view of the femur with the shaft and the groove, DFL (4)
+drawn between them; `b` again from the back. `c` is the midpoint of the ridge on the lateral condyle, shown on the
+lateral side view; `d` the vertex of the medial condyle, shown with `c` on the front view, DFW (5) drawn across the
+condyles. DFL is `a` to `b`, DFW is `c` to `d`.

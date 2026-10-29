@@ -2,13 +2,14 @@
 
 The generic micro-CT skills every micro-CT workflow uses (`skills/`). A workflow that needs animal-specific
 knowledge is a sibling directory (`../mouse-oa/`: `skills/mouse-oa/references/` for the anatomy and protocol text, `resources/` for
-its scripts). Design: `design/microct-skillset.md` in the docs repo. The measurements behind the skills' rules are in `.context/evidence.md`: SKILL.md
+its scripts). Design: `work/iterate-and-review/design/workflow-behavior/tool-contracts.md` in the docs repo (which text lives in a role
+file, a method skill, a workflow skill and a script's `--help`). The measurements behind the skills' rules are in `.context/evidence.md`: SKILL.md
 holds rules, not experiment logs.
 
 - A skill is `skills/<name>/SKILL.md` (frontmatter `name`, `description` only) plus `resources/`. The run agent reads
   SKILL.md and runs the resources as `python <skill dir>/resources/<x>.py`; so SKILL.md names a resource by file name,
   says when to reach for it and what its result means, and leaves flags, schemas and outputs to the script's `--help`
-  (the tool index in the agent's prompt lists every script from its first docstring line). There are no per-workflow agent definitions: the roles shared by every workflow are in
+  (the planned tool index in the agent's prompt will list every script by its first docstring line). There are no per-workflow agent definitions: the roles shared by every workflow are in
   `agents/`, and a skill never addresses one role; what a workflow wants checked per task is in its `tasks.json` and
   `skills/<workflow>/examples/`.
 - **Resource contract:** CLI scripts that take and return paths. `.npy` outputs get a JSON sidecar
@@ -16,23 +17,20 @@ holds rules, not experiment logs.
   on stdout, never arrays, never NaN (`sidecar.emit` fails on it). A script that reports numbers uses one result record,
   `sidecar.emit_values`: `{id: {value, unit, definition, kind}}`, ids from the caller. A sentence on stderr and exit 2 for what the agent can fix; argument
   checks come before any work or write. Images are JPEG, at most 2000 px and 1 MiB (`view_image`'s limit): use
-  `sidecar.save_image`. Every parameter that is a length is in mm; voxels come from `hu.json`.
+  `sidecar.save_image`. A length flag takes a physical unit named in the flag (`--pad-mm`, `--depth-um`), never voxels or pixels; the
+  voxel size comes from `hu.json`.
 - **Imports:** every script works under `python -I` from any directory, and the same few lines at its top do it: walk up its
   ancestors to the directory holding `core/skills/microct-core`, put its own directory, `microct-core/resources` and any sibling skill's
   `resources` it imports from on `sys.path` (first, but only those not already there: a script that another script imports must not reorder the importer's path; a library never touches it), and exit with a sentence naming the layout when the import misses. That works in the
   repository and in a run's snapshot alike (`workflows/core/skills/<skill>/resources/`, a workflow's `skills/<skill>/resources/` beside
-  `core/`). Installing `microct-core` as a package in the sandbox image would delete these lines; it needs an image rebuild, so it waits.
+  `core/`). These lines go when the runner sets `PYTHONPATH` in the sandbox (`.context/TODO.md`).
 - **Thresholds:** two, and they are not interchangeable. The segmentation threshold (mask building) is a flag the caller passes,
   from the workflow's anatomy reference. The measurement threshold (BV, BV/TV) is the lab's 2.16/cm converted with the calibration
   block of `hu.json` (`sidecar.bone_threshold_hu`); no script holds a literal HU value for it. BV is the region and HU above the
   threshold, never gated by a label; BV/TV is in %.
 - Python dependencies: `requirements.in` / `requirements.txt` in this directory (compiled with `uv`; the sandbox image installs
-  it). Everything is numpy-first; 3D renders need pyvista on an off-screen VTK. Keep recipe numbers (box padding, trim rule) in one
+  it). 3D renders need pyvista on an off-screen VTK. Keep recipe numbers (box padding, trim rule) in one
   script each, so a recipe change touches one file.
-- Verify a script on a real scan. The one kept test is `skills/bone-morphometry/resources/test_measure.py` (unit conversions);
-  `tests/test_environment.py` guards the pinned environment.
 - **Anatomy keys the generic checks read** (a workflow's `skills/<skill>/references/anatomy.json`, per label): `volume_mm3`, `components`, `must_touch`
   (ids of labels it must come within `touch_mm` of, default 0.05 mm).
   `label_stats.py` reads them; a new animal or workflow fills them in rather than changing the script.
-- Open facts, not to be settled in a skill: the identity of the small structures (OA6-1RK labels 5 to 12) is not anatomically checked;
-  the workflow's anatomy reference says what is known. The vision rules in `visual-check` are n=1.
