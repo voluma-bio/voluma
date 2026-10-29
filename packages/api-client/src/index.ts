@@ -247,7 +247,7 @@ export async function getReviewRun(runId: string): Promise<ReviewRun> {
   );
 }
 
-/** Accepts one current-result check; never marks the run reviewed. API handlers follow this contract PR. */
+/** Accepts one current-result check; never marks the run reviewed. */
 export async function acceptCheck(
   runId: string,
   checkId: string,
@@ -263,7 +263,7 @@ export async function acceptCheck(
   );
 }
 
-/** Explicitly completes review of a revision with no open checks. API handlers follow this contract PR. */
+/** Explicitly completes review of a revision with no open checks. */
 export async function markReviewed(
   runId: string,
   body: MarkReviewedRequest,

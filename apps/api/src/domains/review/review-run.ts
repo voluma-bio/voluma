@@ -4,7 +4,7 @@
  * Pure, so the route only loads and serves.
  */
 import type { RunEvent } from "@voluma/contracts/events";
-import { type FoldedRevision, type FoldedTask, fold } from "@voluma/contracts/fold";
+import type { FoldedRevision, FoldedTask } from "@voluma/contracts/fold";
 import {
   type Annotation,
   type Focus,
@@ -12,11 +12,10 @@ import {
   type ReviewTask,
   reviewRunSchema,
 } from "@voluma/contracts/review";
-import type { Run } from "@voluma/contracts/run";
+import type { RunRecord } from "../../ports";
 
 /** Null until the run's first `revision.started`: a run with no plan has nothing to review. */
-export function reviewRun(run: Run, events: readonly RunEvent[]): ReviewRun | null {
-  const { revisions } = fold(events);
+export function reviewRun({ run, events, results: { revisions } }: RunRecord): ReviewRun | null {
   // Not `events[0]`: the supervisor's `thread.started` and the run-start `wake` come first.
   const start = events.find((e) => e.type === "revision.started" && e.payload.reason === "run");
   if (start?.type !== "revision.started" || start.payload.reason !== "run") return null;
@@ -82,6 +81,7 @@ export function reviewRun(run: Run, events: readonly RunEvent[]): ReviewRun | nu
     id: run.id,
     sample: run.input.name,
     workflows: run.workflows,
+    review: run.review,
     revisions: revisions.map((rev, index) => {
       // Thread starts can precede the first task-tool write (and hence the attempt).
       // Stop at this snapshot's boundary so later starts never change an earlier revision.

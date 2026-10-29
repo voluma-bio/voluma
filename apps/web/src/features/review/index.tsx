@@ -34,6 +34,11 @@ function ReviewPage() {
 function ScanReview({ runId }: { runId: string }) {
   const [search, setSearch] = useSearchParams();
   const fileUrl = useCallback((sha256: string) => reviewFileUrl(runId, sha256), [runId]);
+  const execution = useQuery({
+    queryKey: ["run", runId],
+    queryFn: () => getRun(runId),
+    enabled: runId !== "local",
+  });
   // `/runs/local` is the reference scan alone: no run, so no results.
   const review = useQuery({
     queryKey: ["review-run", runId],
@@ -50,15 +55,27 @@ function ScanReview({ runId }: { runId: string }) {
   const status = review.error instanceof ApiError ? review.error.status : undefined;
   // Loaded data stays on screen when a background refetch fails.
   const notice =
-    runId === "local" || review.data
-      ? undefined
-      : review.isPending
-        ? "Loading results…"
-        : status === 409
-          ? "This run has no plan yet. Results appear here once it starts."
-          : status === 404
-            ? "This run is unavailable or you do not have access to it."
-            : "Could not load this run's results.";
+    review.data && review.isError ? (
+      <>
+        Could not refresh results. Decisions are disabled until results refresh.
+        <button
+          type="button"
+          className="button"
+          disabled={review.isFetching}
+          onClick={() => void review.refetch()}
+        >
+          {review.isFetching ? "Retrying…" : "Retry"}
+        </button>
+      </>
+    ) : runId === "local" || review.data ? undefined : review.isPending ? (
+      "Loading results…"
+    ) : status === 409 ? (
+      "This run has no plan yet. Results appear here once it starts."
+    ) : status === 404 ? (
+      "This run is unavailable or you do not have access to it."
+    ) : (
+      "Could not load this run's results."
+    );
   const [archive, setArchive] = useState<DicomArchive>();
   const [selectedSeries, setSelectedSeries] = useState("");
   const [progress, setProgress] = useState<string>();
@@ -131,6 +148,7 @@ function ScanReview({ runId }: { runId: string }) {
     <ReviewWorkspace
       runId={runId}
       run={review.data}
+      canReview={execution.data?.example === false && !review.isError}
       notice={notice}
       taskId={search.get("task") ?? undefined}
       revisionId={search.get("revision") ?? undefined}
@@ -204,7 +222,9 @@ function ScanReview({ runId }: { runId: string }) {
           </div>
         </ViewerWorkspace>
       )}
-      onResult={(updated) => queryClient.setQueryData(["review-run", runId], updated)}
+      onRefresh={() =>
+        queryClient.invalidateQueries({ queryKey: ["review-run", runId] }, { throwOnError: true })
+      }
     />
   );
 }

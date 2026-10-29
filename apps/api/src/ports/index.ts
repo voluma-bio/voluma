@@ -8,6 +8,7 @@
  * Owned by both lanes; change in small PRs.
  */
 import type { RunEvent } from "@voluma/contracts/events";
+import type { reviewState } from "@voluma/contracts/review-state";
 import type { Input, Run } from "@voluma/contracts/run";
 import type { Reader } from "../domain";
 
@@ -23,10 +24,26 @@ export type ReferenceArchive = {
   ): Promise<{ body: ReadableStream<Uint8Array>; byteLength: number }>;
 };
 
-/** The run domain's record of a run, for the review: the run and its whole event log. */
+export type RunRecord = {
+  run: Run;
+  events: RunEvent[];
+  results: ReturnType<typeof reviewState>;
+};
+/** Only authenticated human decisions can cross the review write port. */
+export type ReviewDecision =
+  | Pick<Extract<RunEvent, { type: "check.accepted" }>, "type" | "payload">
+  | Pick<Extract<RunEvent, { type: "review.completed" }>, "type" | "payload">;
+
+/** Run-owned coherent reads and serialized human writes; Review owns decision policy. */
 export type RunRecords = {
   /** The run and every stored event, in `seq` order; null when `reader` can't read the run. */
-  load(reader: Reader, runId: string): Promise<{ run: Run; events: RunEvent[] } | null>;
+  load(reader: Reader, runId: string): Promise<RunRecord | null>;
+  /** Validate against the locked current record; append one decision or return it unchanged. */
+  decide(
+    reader: Reader,
+    runId: string,
+    decision: (record: RunRecord) => ReviewDecision | null,
+  ): Promise<RunRecord | null>;
   /** Whether `reader` can read the run, without reading its log. */
   readable(reader: Reader, runId: string): Promise<boolean>;
 };

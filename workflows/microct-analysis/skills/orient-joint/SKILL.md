@@ -76,7 +76,7 @@ python <this skill>/resources/to_scan.py --in labels_oriented.npy --frame frame.
 
 Nearest neighbour, so ids survive. It refuses a frame made on another scan (`parent_grid_id` against `hu.json`). A round trip
 through the stack costs about 1% Dice on OA6-1RK (0.990-0.995 per bone). Cuts in the oriented frame can also be taken
-straight from the scan-grid volume: `render_overlay.py --frame frame.json`.
+straight from the scan-grid volume: `quad_view.py --plane 0:frame=frame.json:axis=0` (`visual-check`).
 
 ## Points and pieces between the grids
 

@@ -10,8 +10,9 @@ From the structural review of PR #62 (`review-pr62` p231, structure) and the cor
   the axes and crop and calls it. It stayed in `workflow-mouse-oa` because its +U medial / +V anterior sign rule, crop defaults and
   `envelope.close_and_fill` are the mouse tibia protocol's: moving it to `orient-joint` needs `envelope` in a generic skill and the sign
   rule behind an argument.
+- **Fold the other slice renderers into `quad_view` (left from the quad-view PR).** Boxes as a layer would let `render_slices` (`--boxes`, `--points`; `orient_joint.py` imports its `render()`) and `render_crops` go, with `sam-segmentation` taking its keyframe from a quad pane. The 6-view sheet stays (4 of 4 catches). Also open: `quad_view` draws a point's name in 3D even where the surface hides it; a new mask's surface costs ~9 s cold (marching cubes and smoothing on the aligned grid), later calls reuse the cache.
 - **One `--anatomy` profile (p231 M1).** `references/anatomy.json` holds label names, `window_hu` and `segmentation_threshold_hu`, but the
-  generic scripts take them as flags: `--names 1=femur,...` (`render_overlay`, `render_surfaces`), `--window` in five scripts, the required
+  generic scripts take them as flags: `--names 1=femur,...` (`quad_view`, `render_surfaces`), `--window` in five scripts, the required
   `--threshold-hu` in five. Speck size is 0.01 mm³ in `unlabelled` and `label_stats` and 0.005 in `disagree`; `orient_joint`'s default
   lengths are a mouse's. The mouse QC figures bypass `viewlib` and hard-code windows (`vmin=0, vmax=5000` in `iioc`, `metaphysis_roi`,
   `tibial_trabecular`; -500..6000 in `tibia_frame`). Direction: one `--anatomy` argument read through a `sidecar` helper supplies these

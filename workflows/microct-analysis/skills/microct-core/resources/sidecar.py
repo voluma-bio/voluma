@@ -55,12 +55,14 @@ def sidecar_path(array_path):
 
 
 def grid(path):
-    """grid_id and spacing_zyx_mm from a sidecar or an intake header."""
+    """grid_id and spacing_zyx_mm (and the shape and `affine_xyz_to_world_mm`, when the file has them) from a sidecar or an intake header."""
     d = json.loads(Path(path).read_text())
     if 'grid_id' not in d or 'spacing_zyx_mm' not in d:
         fail(f'{path} has no grid_id/spacing_zyx_mm: pass the hu.json that scan-intake wrote, or an array sidecar')
     shape = d.get('shape', d.get('shape_zyx'))
-    return {'grid_id': d['grid_id'], 'spacing_zyx_mm': d['spacing_zyx_mm'], **({'shape': shape} if shape else {})}
+    affine = d.get('affine_xyz_to_world_mm')
+    return {'grid_id': d['grid_id'], 'spacing_zyx_mm': d['spacing_zyx_mm'], **({'shape': shape} if shape else {}),
+            **({'affine_xyz_to_world_mm': affine} if affine else {})}
 
 
 LAB_BONE_MU_PER_CM = 2.16  # the lab's bone threshold, as a Scanco linear attenuation coefficient
@@ -207,6 +209,7 @@ def save_checked(path):
     w, h = Image.open(path).size
     size = Path(path).stat().st_size
     if max(w, h) > MAX_IMAGE_PX or size > MAX_IMAGE_BYTES:
+        Path(path).unlink()  # an over-limit image is no output: leave none behind
         fail(f'{path} is {w}x{h}, {size} bytes: over the {MAX_IMAGE_PX} px / 1 MiB limit; render fewer or smaller panels')
 
 

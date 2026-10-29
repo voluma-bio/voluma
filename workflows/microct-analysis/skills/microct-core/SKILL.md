@@ -18,7 +18,9 @@ number you report can be traced.
 - Arrays are `.npy`, axes in Z,Y,X order. The scripts take paths and write paths. Do not load a volume
   just to print it: tool output is your context.
 - A **frame** is a rigid, resampled copy of the scan grid with its own `grid_id` (the oriented stack, the aligned tibia grid). Its
-  `frame.json` has `parent_grid_id`, `grid_id`, `R_zyx`, `origin_zyx`, `shape` and `spacing_zyx_mm`; scan index `x` and frame index `p`
+  `frame.json` has `parent_grid_id`, `grid_id`, `R_zyx`, `origin_zyx`, `shape`, `spacing_zyx_mm` and
+  `affine_xyz_to_world_mm` (the frame's own placement in world mm, in `hu.json`'s convention; `frame.make` composes it from the
+  scan's affine and refuses a frame that is not a rotation times the voxel size); scan index `x` and frame index `p`
   relate by `x = p @ R_zyx + origin_zyx`. `resources/frame.py` resamples a scan volume onto a frame and maps points and
   stacks both ways: use it, do not rebuild the maths. Anything on a frame is mapped to the scan grid before you measure.
 - A **points file** is `{"grid_id": ..., "points": [{"name": "a", "zyx": [z, y, x]}, ...]}`; `femoral_frame.py` and `amira_landmarks.py` (both take several points files and merge them) refuse one without a

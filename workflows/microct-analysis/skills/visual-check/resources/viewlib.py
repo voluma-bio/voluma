@@ -3,7 +3,10 @@
 Coordinates on every image the agent reads: x is the column (labelled along the top), y is the row (labelled down the
 left side), both in pixels of the slice. A box is [row0, col0, row1, col1] = [y0, x0, y1, x1], ends inclusive.
 """
+import hashlib
 import json
+import math
+import os
 import sys
 from pathlib import Path
 
@@ -83,14 +86,16 @@ def show_slice(ax, img, window, grid=True, step=100, title=None):
     ax.set_axis_off()
 
 
+def draw_mask(ax, m, c, alpha=0.18):
+    """Tint plus outline of the boolean 2D array `m`, in colour `c`."""
+    ax.contour(m.astype(float), levels=[0.5], colors=[c], linewidths=1.2)
+    ax.imshow(np.ma.masked_where(~m, m), cmap=matplotlib.colors.ListedColormap([c]), alpha=alpha, interpolation='nearest')
+
+
 def draw_labels(ax, lab, alpha=0.18):
     """Tint plus outline for every label present in the 2D array `lab`."""
     for lv in np.unique(lab[lab > 0]):
-        m = lab == lv
-        c = colour(lv)
-        ax.contour(m.astype(float), levels=[0.5], colors=[c], linewidths=1.2)
-        ax.imshow(np.ma.masked_where(~m, m), cmap=matplotlib.colors.ListedColormap([c]), alpha=alpha,
-                  interpolation='nearest')
+        draw_mask(ax, lab == lv, colour(lv), alpha)
 
 
 def draw_box(ax, box, name=None, color='#ff9f0a'):
@@ -125,3 +130,107 @@ def frame_cut(vol, frame, axis, index, order=1, cval=0):
     """
     pts = fr.slice_points(frame, axis, index)
     return ndi.map_coordinates(vol, np.moveaxis(pts, -1, 0), order=order, mode='constant', cval=cval)
+
+
+def unit(v):
+    n = np.linalg.norm(v)
+    return v / n if n else v
+
+
+class View:
+    """A pinhole camera on a rendered image (a 3D pane of `quad_view`). `camera` holds position, focal_point and view_up as
+    zyx voxel indices (`camera_zyx`) and view_angle, the vertical field of view in degrees. Maths is done in mm, in xyz order
+    (a zyx cross product has the opposite handedness to the renderer's)."""
+
+    def __init__(self, camera, size, spacing_zyx_mm):
+        self.sp = np.asarray(spacing_zyx_mm, float)
+        self.w, self.h = size
+        pos = np.asarray(camera['position'], float) * self.sp
+        focal = np.asarray(camera['focal_point'], float) * self.sp
+        up = np.asarray(camera['view_up'], float) * self.sp
+        self.pos = pos[::-1]
+        self.dir = unit(focal[::-1] - self.pos)
+        self.right = unit(np.cross(self.dir, up[::-1]))
+        self.up = np.cross(self.right, self.dir)
+        self.tan = math.tan(math.radians(float(camera['view_angle']) / 2))
+        self.aspect = self.w / self.h
+
+    def ray(self, col, row):
+        nx = (2 * col / self.w - 1) * self.tan * self.aspect
+        ny = (1 - 2 * row / self.h) * self.tan
+        return unit(self.dir + nx * self.right + ny * self.up)
+
+    def project(self, zyx_idx):
+        """Pixel (col, row) of a voxel index, or None if it is behind the camera."""
+        v = np.asarray(zyx_idx, float)[::-1] * self.sp[::-1] - self.pos
+        depth = v @ self.dir
+        if depth <= 0:
+            return None
+        nx = (v @ self.right) / depth / (self.tan * self.aspect)
+        ny = (v @ self.up) / depth / self.tan
+        return (nx + 1) / 2 * self.w, (1 - ny) / 2 * self.h
+
+
+def camera_zyx(cam, spacing):
+    """Camera vectors from mesh coordinates (mm, x,y,z) to scan voxel indices z,y,x. view_up is a direction, so it is
+    scaled the same way (`View` rescales it by the spacing again)."""
+    sp = np.array(spacing)
+    return {k: (np.array(v)[::-1] / sp).tolist() if k != 'view_angle' else v for k, v in cam.items()}
+
+
+MESH_TARGET = 200  # voxels along the longest axis of a surface's grid: a 3D pane has 800 px, and 2M triangles take 5 s to draw
+MIN_VOXELS = 50  # smaller pieces are not drawn in 3D
+
+
+class Meshes:
+    """Display surfaces in mm (x, y, z), cut from an array downsampled by a step and cached as .vtp files in `cache_dir`.
+
+    A cache file is named by a hash of the array's path and mtime, the step and what was cut, and written to a temporary name
+    and renamed, so a reader never sees half a file. The downsampled array is read once per Meshes, however many labels
+    are cut from it."""
+
+    def __init__(self, cache_dir):
+        self.dir = Path(cache_dir)
+        self._small = {}
+
+    def step_for(self, vol, step=None):
+        return step or max(1, round(max(vol.shape) / MESH_TARGET))
+
+    def small(self, path, vol, step):
+        if (str(path), step) not in self._small:
+            self._small[str(path), step] = np.asarray(vol[::step, ::step, ::step])
+        return self._small[str(path), step]
+
+    def label_ids(self, path, vol, step=None):
+        return [int(v) for v in np.unique(self.small(path, vol, self.step_for(vol, step))) if v]
+
+    def cached(self, key, build):
+        import pyvista as pv
+        f = self.dir / (hashlib.sha1(json.dumps(key, default=str).encode()).hexdigest()[:20] + '.vtp')
+        if f.exists():
+            return pv.read(f)
+        mesh = build()
+        if mesh.n_points:
+            mesh = mesh.compute_normals(split_vertices=False)  # drawing computes them otherwise, on every call
+        self.dir.mkdir(parents=True, exist_ok=True)
+        tmp = f.with_name(f'{f.stem}.{os.getpid()}.tmp.vtp')
+        mesh.save(tmp)
+        os.replace(tmp, f)
+        return mesh
+
+    def surface(self, path, vol, select, kind, spacing, to_scan=lambda p: p, step=None, grid_id=None):
+        """Surface of `select(volume at step)` for the array at `path`; `to_scan` maps its voxel indices to scan voxel indices."""
+        step = self.step_for(vol, step)
+        key = (str(path), Path(path).stat().st_mtime_ns, step, kind, grid_id, list(spacing))
+
+        def build():
+            import pyvista as pv
+            from skimage.measure import marching_cubes
+            small = select(self.small(path, vol, step))
+            if small.sum() < MIN_VOXELS:
+                return pv.PolyData()
+            v, f, _, _ = marching_cubes(np.pad(small, 1).astype(np.float32), 0.5)
+            mm = to_scan((v - 1) * step) * np.asarray(spacing)
+            faces = np.hstack([np.full((len(f), 1), 3), f]).astype(np.int64).ravel()
+            return pv.PolyData(mm[:, ::-1].copy(), faces).smooth(n_iter=20)
+        return self.cached(key, build)

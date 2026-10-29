@@ -1,6 +1,6 @@
 /** Task-scoped report and questions. Acceptance never changes scientific confidence. */
 import { useMutation } from "@tanstack/react-query";
-import { reviewFileUrl } from "@voluma/api-client";
+import { acceptCheck, reviewFileUrl } from "@voluma/api-client";
 import type { Focus } from "@voluma/contracts/review";
 import { StatusBadge } from "@voluma/ui";
 import {
@@ -16,8 +16,7 @@ import {
 } from "lucide-react";
 import { Dialog } from "radix-ui";
 import { useState } from "react";
-import { type Asset, type ReviewRun, type ReviewTask, taskStatus } from "./model";
-import type { ReviewService } from "./service";
+import { type Asset, type ReviewTask, taskStatus } from "./model";
 
 /** The file name to save as: the last segment of the path the task gave it. */
 const fileName = (asset: Asset) => asset.name.split("/").at(-1) ?? asset.name;
@@ -95,10 +94,8 @@ export function TaskReport({
   runId,
   revisionId,
   readOnly,
-  service,
-  onResult,
-  onCorrect,
   onFocus,
+  onRefresh,
 }: {
   task: ReviewTask;
   /** A structure id to its name, for To check items that point at structures. */
@@ -109,28 +106,14 @@ export function TaskReport({
   runId: string;
   revisionId: string;
   readOnly: boolean;
-  service?: ReviewService;
-  onResult(run: ReviewRun): void;
-  onCorrect(text: string): void;
   onFocus(focus?: Focus): void;
+  onRefresh(): Promise<void>;
 }) {
-  const [question, setQuestion] = useState("");
   const accept = useMutation({
-    mutationFn: (checkId: string) => {
-      if (!service) throw new Error("Review commands are not connected.");
-      return service.acceptCheck(runId, revisionId, task.id, checkId);
-    },
-    onSuccess: onResult,
-  });
-  const ask = useMutation({
-    mutationFn: () => {
-      if (!service) throw new Error("Review commands are not connected.");
-      return service.ask(runId, revisionId, task.id, question);
-    },
-    onSuccess: (run) => {
-      onResult(run);
-      setQuestion("");
-    },
+    mutationFn: (checkId: string) =>
+      acceptCheck(runId, checkId, { baseRevisionId: revisionId, taskId: task.id }),
+    onSuccess: onRefresh,
+    onError: onRefresh,
   });
   const references = task.measurements.flatMap((m) =>
     m.references.map((reference) => ({ m, reference })),
@@ -320,23 +303,19 @@ export function TaskReport({
                     : "Accept check"}
                 </button>
               )}
-              <button
-                type="button"
-                className="button compact"
-                disabled={readOnly || accept.isPending}
-                onClick={() => onCorrect(`Review and correct: ${check.title}.`)}
-              >
+              <button type="button" className="button compact" disabled>
                 Request correction
                 <ArrowUpRight size={14} />
               </button>
             </div>
           </div>
         ))}
-        {accept.error && (
-          <p className="error-message" role="alert">
-            {accept.error.message}
-          </p>
-        )}
+        {accept.error &&
+          task.checks.some((check) => check.id === accept.variables && check.status === "open") && (
+            <p className="error-message" role="alert">
+              {accept.error.message}
+            </p>
+          )}
       </section>
       <section>
         <div className="section-heading">
@@ -426,13 +405,7 @@ export function TaskReport({
           <MessageSquare size={17} />
         </div>
         <p className="text-xs text-muted-foreground mb-4">A question never starts a rerun.</p>
-        <form
-          className="mt-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            ask.mutate();
-          }}
-        >
+        <form className="mt-4" onSubmit={(event) => event.preventDefault()}>
           <label className="sr-only" htmlFor="task-question">
             Question about {task.title}
           </label>
@@ -441,32 +414,16 @@ export function TaskReport({
             className="text-input"
             placeholder="What needs checking in this result?"
             rows={3}
-            value={question}
             maxLength={2000}
             required
-            disabled={readOnly || ask.isPending}
-            onChange={(event) => setQuestion(event.target.value)}
+            disabled
           />
-          {ask.error && (
-            <p role="alert" className="error-message">
-              {ask.error.message}
-            </p>
-          )}
           <div className="flex justify-between items-center mt-3 gap-2">
-            <button
-              type="button"
-              className="text-button text-sm"
-              disabled={readOnly}
-              onClick={() => setQuestion("Why is this result provisional?")}
-            >
+            <button type="button" className="text-button text-sm" disabled>
               Why provisional?
             </button>
-            <button
-              type="submit"
-              className="button primary compact"
-              disabled={readOnly || ask.isPending || !question.trim()}
-            >
-              {ask.isPending ? "Answering…" : "Ask question"}
+            <button type="submit" className="button primary compact" disabled>
+              Ask question
               <Send size={14} />
             </button>
           </div>
