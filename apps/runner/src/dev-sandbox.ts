@@ -31,6 +31,7 @@ import { holdLease } from "./lease.ts";
 import { claimSandboxes, terminateClaim } from "./modal-sandbox.ts";
 import { redactor } from "./redact.ts";
 import { layoutOf } from "./run.ts";
+import { sandboxGateway } from "./sandbox-gateway.ts";
 import { usageMeter } from "./usage.ts";
 
 const { values } = parseArgs({ options: { role: { type: "string", default: "worker" } } });
@@ -39,7 +40,7 @@ if (values.role !== "worker") throw new Error("only --role worker exists so far"
 const config = runnerConfig();
 const redact = redactor(config.secrets);
 const log = (line: string) => console.log(`${new Date().toISOString()} ${redact(line)}`);
-if (!config.gatewayUrl)
+if (!config.gateway)
   throw new Error("set VOLUMA_GATEWAY_URL: the sandbox reaches providers only through it");
 
 const claim = await claimRun(config.api, "dev-sandbox");
@@ -86,8 +87,6 @@ const stats = () => {
 
 const layout = layoutOf(run);
 const sandboxName = "dev.worker";
-const token = process.env.VOLUMA_GATEWAY_TOKEN;
-if (!token) throw new Error("set VOLUMA_GATEWAY_TOKEN");
 meter.sandboxUp();
 const sandbox = await claimSandboxes(
   config,
@@ -101,7 +100,12 @@ const sandbox = await claimSandboxes(
     lifetimeSeconds: config.sandbox.lifetimeSeconds,
     idleSeconds: config.sandbox.idleSeconds,
     mounts: layout.mounts,
-    gateway: { url: config.gatewayUrl, token },
+    gateway: sandboxGateway(
+      config,
+      { runId: run.id, leaseToken, visitorMetaKey: claim.keys?.metaApiKey },
+      sandboxName,
+      redact,
+    ),
   }),
   abort.signal,
 );

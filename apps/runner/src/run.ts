@@ -45,6 +45,7 @@ import { r2Evidence } from "./r2-evidence.ts";
 import { r2Files } from "./r2-files.ts";
 import { r2Workflows } from "./r2-workflows.ts";
 import { type Redact, redactor } from "./redact.ts";
+import { sandboxGateway } from "./sandbox-gateway.ts";
 import { type ModelRole, usageMeter } from "./usage.ts";
 
 /**
@@ -195,7 +196,7 @@ export async function runClaim(
     const computed = computePlan(definition.files, run.selectedOutputs);
     // Each role's optional tools are the ones its file lists; `segment_sam` also needs the gateway.
     const grant = (role: "worker" | "checker") =>
-      definition.agents[role].tools.filter((t) => t !== "segment_sam" || config.gatewayUrl);
+      definition.agents[role].tools.filter((t) => t !== "segment_sam" || config.gateway);
 
     const layout = layoutOf(run);
     const createSandbox = claimSandboxes(config, modal, claimId);
@@ -228,6 +229,12 @@ export async function runClaim(
             lifetimeSeconds: config.sandbox.lifetimeSeconds,
             idleSeconds: config.sandbox.idleSeconds,
             mounts: layout.mounts,
+            gateway: sandboxGateway(
+              config,
+              { runId, leaseToken, visitorMetaKey: keys?.metaApiKey },
+              sandboxName(threadId),
+              redact,
+            ),
           }),
           abort.signal,
         ),

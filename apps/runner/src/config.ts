@@ -183,8 +183,11 @@ export function runnerConfig() {
     modal,
     /** Our Meta key, for the main thread's Muse Wonder (SAM goes through the gateway). */
     metaApiKey,
-    /** The gateway sandboxes reach providers through; absent: `segment_sam` is not offered. */
-    gatewayUrl: optional("VOLUMA_GATEWAY_URL"),
+    /**
+     * The gateway sandboxes reach providers through; absent: sandboxes have no network and
+     * `segment_sam` is not offered.
+     */
+    gateway: optional("VOLUMA_GATEWAY_URL") ? { url: required("VOLUMA_GATEWAY_URL") } : undefined,
     r2,
     commit: checkoutCommit(),
     /** Every secret of ours, to redact from anything that leaves the process. */
