@@ -13,15 +13,17 @@ import type { Evidence } from "../../ports/evidence";
 
 export function localEvidence(dir: string): Evidence {
   return {
-    async keep(runId, taskId, file) {
+    async keep(runId, taskId, file, hash) {
       const key =
         file.root === "outputs"
           ? outputKey(runId, taskId, file.path)
           : scratchKey(runId, file.path);
       const source = join(dir, key);
-      const sha256 = createHash("sha256")
-        .update(await readFile(source))
-        .digest("hex");
+      const sha256 =
+        (await hash?.()) ??
+        createHash("sha256")
+          .update(await readFile(source))
+          .digest("hex");
       const target = join(dir, evidenceKey(runId, sha256));
       await mkdir(dirname(target), { recursive: true });
       // COPYFILE_EXCL: content-addressed and never overwritten.

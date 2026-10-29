@@ -28,6 +28,7 @@ import { isSatisfied, transitiveDependents } from "@voluma/workflow";
 import type { ThreadLayout } from "./layout";
 import { declarationProblem, placementProblem, referenceProblem } from "./output-checks";
 import type { Evidence } from "./ports/evidence";
+import type { Sandbox } from "./ports/sandbox";
 import type { PayloadOf, Recorder } from "./recorder";
 
 /** A plan task as the workflow declares it (`workflowPlanSchema`). */
@@ -53,6 +54,8 @@ export interface TaskRuntimeOptions {
    * layout asks `cited` for a checker's reads of the worker's scratch.
    */
   layoutOf(threadId: string, cited: (path: string) => boolean): ThreadLayout;
+  /** A thread's own sandbox (`sandboxSession.get`): evidence is hashed in it. */
+  sandbox(threadId: string): Promise<Sandbox>;
   /** The thread under which the run's first event is written. */
   rootThreadId: string;
   plan: readonly PlanTask[];
@@ -97,7 +100,7 @@ async function storedOutput(
 }
 
 export function taskRuntime(options: TaskRuntimeOptions) {
-  const { recorder, evidence, runId, layoutOf, rootThreadId, plan, stopThread } = options;
+  const { recorder, evidence, runId, layoutOf, sandbox, rootThreadId, plan, stopThread } = options;
   const planned = new Map(plan.map((t) => [t.id, t]));
 
   let tail: Promise<unknown> = Promise.resolve();
@@ -234,6 +237,20 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     return marked;
   }
 
+  /** The sha256 of a file, computed by the thread's sandbox: a scan-sized file stays off the host. */
+  const sandboxHash = async (threadId: string, path: string): Promise<string> => {
+    let out = "";
+    let code = -1;
+    const command = `sha256sum -- '${path.replaceAll("'", "'\\''")}'`;
+    for await (const chunk of (await sandbox(threadId)).exec({ command, timeoutSeconds: 900 })) {
+      if (chunk.type === "exit") code = chunk.code;
+      else if (chunk.type === "stdout") out += chunk.data;
+    }
+    const sha256 = /^[0-9a-f]{64}(?= )/.exec(out)?.[0];
+    if (code !== 0 || !sha256) throw new Error(`could not hash ${path} (exit ${code})`);
+    return sha256;
+  };
+
   /** Keeps a file the calling thread named, if its own layout lets it read that path. */
   const keep = async (
     c: Caller,
@@ -241,14 +258,18 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     f: Pick<EvidenceRef, "root" | "path">,
   ): Promise<EvidenceRef> => {
     const path = f.root === "scratch" ? `/scratch/${f.path}` : `/outputs/${taskId}/${f.path}`;
+    const layout = layoutOf(c.threadId, (p) => cites(taskId, p));
     try {
-      layoutOf(c.threadId, (p) => cites(taskId, p)).keyOf(path, "read");
+      layout.keyOf(path, "read");
     } catch (error) {
       throw new Refusal(
         `Evidence ${path} is not a file you can read: ${error instanceof Error ? error.message : error}`,
       );
     }
-    return { root: f.root, path: f.path, sha256: await evidence.keep(runId, taskId, f) };
+    // Only a path the thread's sandbox mounts can be hashed there.
+    const mounted = layout.mounts.some((m) => path.startsWith(`${m.path}/`));
+    const hash = mounted ? () => sandboxHash(c.threadId, path) : undefined;
+    return { root: f.root, path: f.path, sha256: await evidence.keep(runId, taskId, f, hash) };
   };
 
   const done = (message: string, eventId?: string): TaskToolResult => ({

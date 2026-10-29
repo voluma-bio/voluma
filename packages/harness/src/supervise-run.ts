@@ -122,6 +122,7 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
     evidence: options.evidence,
     runId,
     layoutOf: layout.forThread,
+    sandbox: options.sandbox,
     rootThreadId,
     plan,
     stopThread: (id) => {
