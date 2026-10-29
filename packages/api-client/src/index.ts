@@ -39,6 +39,13 @@ import {
   reviewSnapshotSchema,
 } from "@voluma/contracts/snapshot";
 import { LIVE_EVENT, type LiveFrame, liveFrameSchema } from "@voluma/contracts/stream";
+import {
+  type CreateStudyRequest,
+  listStudiesResponseSchema,
+  type StudyDetail,
+  type StudySummary,
+  studyDetailSchema,
+} from "@voluma/contracts/study";
 
 /** A non-OK API response. Branch on `status` (403, 415, 5xx) rather than parsing the message. */
 export class ApiError extends Error {
@@ -219,9 +226,29 @@ export async function signOut(): Promise<void> {
   location.href = logoutUrl;
 }
 
-/** Starts a run on an input the caller can read. With `keys` it runs on the caller's own credentials and skips the org's runs-at-once count; either way it waits for the runner to claim it. 409 and 429: the org's limits (see `@voluma/contracts/run`). */
+/** Starts a run on a scan of one of the caller's studies (`req.studyId`, `req.inputId`). With `keys` it runs on the caller's own credentials and skips the org's runs-at-once count; either way it waits for the runner to claim it. 409 and 429: the org's limits (see `@voluma/contracts/run`). */
 export async function startRun(req: StartRunRequest): Promise<Run> {
   return runSchema.parse(await json(await request("/run/runs", { method: "POST", body: req })));
+}
+
+/** Creates a study and starts the runs for `req.start` in one call; a refusal (409, 429) leaves no study. See `@voluma/contracts/study`. */
+export async function createStudy(req: CreateStudyRequest): Promise<StudyDetail> {
+  return studyDetailSchema.parse(
+    await json(await request("/run/studies", { method: "POST", body: req })),
+  );
+}
+
+/** The caller's readable studies, newest activity first. */
+export async function listStudies(): Promise<StudySummary[]> {
+  return listStudiesResponseSchema.parse(await json(await request("/run/studies"))).studies;
+}
+
+/** A study with its scans and runs; `outputs` are the output ids whose values to include (the bundle's `headline` ids). */
+export async function getStudy(id: string, outputs: readonly string[] = []): Promise<StudyDetail> {
+  const query = outputs.length ? `?outputs=${outputs.map(encodeURIComponent).join(",")}` : "";
+  return studyDetailSchema.parse(
+    await json(await request(`/run/studies/${encodeURIComponent(id)}${query}`)),
+  );
 }
 
 export async function getRun(id: string): Promise<Run> {
