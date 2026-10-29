@@ -10,8 +10,10 @@ import type { ProviderCalls, RunState } from "@voluma/contracts/run";
 import { type RunSpend, type Spend, spend } from "@voluma/contracts/spend";
 import type { WorkflowPlan } from "@voluma/contracts/workflow";
 import { isSatisfied } from "@voluma/workflow";
+import { catalog } from "@voluma/workflow/bundled";
 import { type Halt, type Live, toolTitle } from "./transcript";
-import { outputName, taskTitle } from "./workflows";
+
+const { outputName, taskTitle } = catalog["mouse-oa"];
 
 /** `paused`: open while the run waits for a runner or keys; it resumes with a `thread.started`. */
 export type ThreadStatus = "running" | "paused" | "completed" | "failed" | "cancelled";

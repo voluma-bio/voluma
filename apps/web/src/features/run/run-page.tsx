@@ -14,6 +14,7 @@ import type { RunEvent } from "@voluma/contracts/events";
 import { fold } from "@voluma/contracts/fold";
 import type { Run } from "@voluma/contracts/run";
 import { Button } from "@voluma/ui";
+import { workflowName } from "@voluma/workflow/bundled";
 import { ArrowLeft } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useOutletContext, useParams, useSearchParams } from "react-router";
@@ -43,7 +44,6 @@ import {
   threadRows,
 } from "./transcript";
 import { TranscriptView } from "./transcript-view";
-import { workflowName } from "./workflows";
 
 /**
  * The run's stream as it arrives: durable events, and live frames folded until their durable
@@ -151,8 +151,8 @@ export function RunPage() {
         {run.error instanceof ApiError && run.error.status === 404
           ? "This run doesn't exist, or you can't open it."
           : "Couldn't load this run."}{" "}
-        <Link to="/runs" className="text-primary-text hover:underline">
-          Back to runs
+        <Link to="/" className="text-primary-text hover:underline">
+          Go to Home
         </Link>
       </Message>
     );
@@ -175,12 +175,6 @@ export function RunPage() {
       <ThreadNavigationProvider onOpenThread={openThread}>
         <main className="flex min-h-0 flex-1 flex-col max-[1100px]:h-[calc(100dvh-3.5rem)] max-[1100px]:flex-none">
           <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-6 py-3 max-[1100px]:px-4">
-            <Link to="/runs" className="text-ui text-primary-text hover:underline">
-              Runs
-            </Link>
-            <span className="text-fg-subtle" aria-hidden>
-              /
-            </span>
             <h1 className="text-lg font-semibold">{data.input.name}</h1>
             <RunBadge run={data} />
             <span className="min-w-0 truncate text-ui text-muted-foreground">
