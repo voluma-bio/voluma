@@ -1,16 +1,19 @@
 /**
  * The study page (`/studies/:id`): a dashboard for the scans of one study, run through one
- * workflow. One header row (Home, the study's name, the tabs, Study details, Add scans) over
+ * workflow. One header row (Home, the study's name, the tabs, Study details) over
  * Overview (groups compared per headline measurement, what needs the researcher, scan tiles),
  * To check (every open check across scans, by kind) and Scans (a table of every scan). The
  * selected tab lives in `?tab=`. A study of one has no dashboard: it opens its run.
  *
- * "Open in 3D" calls `openChecks` with the queue of To check items in display order. The check
- * panel (a later lane) passes its own; until then the default opens the run's review at the task.
+ * Every "Open in 3D" (To check rows, Needs your eye, a plot's dot) calls `openChecks`. The check
+ * panel (a later lane) passes its own; until then the default opens the first stop's run review
+ * at its task, and "Go through all N" stays hidden since the default can't walk a queue.
+ *
+ * "Add scans" waits: adding scans to an existing study isn't designed, and `/new` makes a new one.
  */
 import { useQuery } from "@tanstack/react-query";
 import { ApiError, getStudy } from "@voluma/api-client";
-import type { StudyDetail, ToCheckItem } from "@voluma/contracts/study";
+import type { StudyDetail } from "@voluma/contracts/study";
 import { Button, Tabs } from "@voluma/ui";
 import { type BundledWorkflow, catalog, workflowById } from "@voluma/workflow/bundled";
 import { ChevronDown } from "lucide-react";
@@ -19,11 +22,8 @@ import { useCallback } from "react";
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router";
 import { Overview } from "./overview";
 import { ScansTable } from "./scans-table";
-import { isLive, runPath, studyCounts, studySpend } from "./study-model";
+import { isLive, type OpenChecks, runPath, studyCounts, studySpend } from "./study-model";
 import { ToCheck } from "./to-check";
-
-/** Opens the check queue at `start`; the check panel's mount point. */
-export type OpenChecks = (queue: ToCheckItem[], start: number) => void;
 
 const TAB_IDS = ["overview", "check", "scans"] as const;
 type TabId = (typeof TAB_IDS)[number];
@@ -60,7 +60,8 @@ export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
     setSearch(next === "overview" ? {} : { tab: next }, { preventScrollReset: true });
 
   if (study.isPending) return <Loading />;
-  if (study.isError) return <LoadError error={study.error} retry={() => void study.refetch()} />;
+  // A failed background refetch keeps its data (status "error"): the page stays, with a notice.
+  if (!study.data) return <LoadError error={study.error} retry={() => void study.refetch()} />;
 
   const detail = study.data;
   const only = detail.scans.length === 1 ? detail.scans[0] : undefined;
@@ -73,6 +74,26 @@ export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <StudyHeader detail={detail} workflow={workflow} tab={tab} onTab={setTab} />
+      {study.isError && (
+        <p
+          role="status"
+          className="m-0 flex shrink-0 flex-wrap items-baseline gap-x-3 border-b border-border bg-muted px-6 py-1.5 text-meta text-muted-foreground max-[760px]:px-3"
+        >
+          Couldn't refresh. This is the study as of{" "}
+          {new Date(study.dataUpdatedAt).toLocaleTimeString(undefined, {
+            hour: "numeric",
+            minute: "2-digit",
+          })}
+          .
+          <button
+            type="button"
+            onClick={() => void study.refetch()}
+            className="cursor-pointer text-primary-text hover:underline"
+          >
+            Try again
+          </button>
+        </p>
+      )}
       <div
         id={PANEL_ID}
         role="tabpanel"
@@ -80,9 +101,21 @@ export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
         className="min-h-0 flex-1 overflow-y-auto"
       >
         <div className="mx-auto w-full max-w-[90rem] px-6 py-5 max-[760px]:px-3 max-[760px]:py-4">
-          {tab === "overview" && <Overview detail={detail} workflow={workflow} onTab={setTab} />}
+          {tab === "overview" && (
+            <Overview
+              detail={detail}
+              workflow={workflow}
+              onTab={setTab}
+              openChecks={openChecks ?? openReview}
+            />
+          )}
           {tab === "check" && (
-            <ToCheck detail={detail} workflow={workflow} openChecks={openChecks ?? openReview} />
+            <ToCheck
+              detail={detail}
+              workflow={workflow}
+              openChecks={openChecks ?? openReview}
+              walkthrough={openChecks !== undefined}
+            />
           )}
           {tab === "scans" && <ScansTable detail={detail} workflow={workflow} />}
         </div>
@@ -144,14 +177,8 @@ function StudyHeader({
           },
         ]}
       />
-      <div className="ml-auto flex items-center gap-2">
+      <div className="ml-auto flex items-center">
         <StudyDetails detail={detail} workflow={workflow} />
-        <Link
-          to="/new"
-          className="inline-flex h-8 items-center rounded-lg border border-border bg-card px-3.5 text-ui font-medium whitespace-nowrap hover:bg-accent"
-        >
-          Add scans
-        </Link>
       </div>
     </header>
   );

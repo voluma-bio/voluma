@@ -1,8 +1,9 @@
 /**
  * The study's To check tab: every open check of each scan's latest result, one heading per kind
  * (task and check title, `checkKinds`), one aligned row per item. "Looks right" accepts the check
- * against that result's revision; "Open in 3D" hands the whole list, in this order, to
- * `openChecks`. There are no fix actions: corrections have no backend yet.
+ * against that result's revision; "Open in 3D" hands the row's kind, in this order, to
+ * `openChecks`, and "Go through all N" (only with a real check panel, `walkthrough`) the same
+ * queue from its start. There are no fix actions: corrections have no backend yet.
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, acceptCheck } from "@voluma/api-client";
@@ -10,20 +11,21 @@ import type { StudyDetail, StudyScanDetail, ToCheckItem } from "@voluma/contract
 import { Button } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import { Link } from "react-router";
-import { checkKinds, runPath, scanMeta } from "./study-model";
-import type { OpenChecks } from "./study-page";
+import { checkKinds, type OpenChecks, runPath, scanMeta } from "./study-model";
 
 export function ToCheck({
   detail,
   workflow,
   openChecks,
+  walkthrough,
 }: {
   detail: StudyDetail;
   workflow: BundledWorkflow;
   openChecks: OpenChecks;
+  /** Whether `openChecks` walks a queue, so "Go through all N" does what it says. */
+  walkthrough: boolean;
 }) {
   const kinds = checkKinds(detail, workflow);
-  const queue = kinds.flatMap((k) => k.items.map(({ item }) => item));
   if (kinds.length === 0)
     return (
       <p className="mx-auto max-w-3xl text-ui text-muted-foreground">
@@ -35,7 +37,7 @@ export function ToCheck({
   return (
     <div className="mx-auto grid max-w-3xl gap-6">
       {kinds.map((kind) => {
-        const first = queue.indexOf(kind.items[0]?.item as ToCheckItem);
+        const queue = kind.items.map(({ item }) => item);
         const scans = new Set(kind.items.map((i) => i.scan.scan.inputId)).size;
         return (
           <section key={kind.key} aria-label={`${kind.taskTitle}, ${kind.title}`}>
@@ -45,19 +47,20 @@ export function ToCheck({
               <span className="text-meta text-fg-subtle tabular-nums">
                 {scans} {scans === 1 ? "scan" : "scans"}
               </span>
-              {kind.items.length > 1 && (
-                <Button size="sm" className="ml-auto" onClick={() => openChecks(queue, first)}>
+              {walkthrough && queue.length > 1 && (
+                <Button size="sm" className="ml-auto" onClick={() => openChecks(queue, 0)}>
                   Go through all {kind.items.length} in 3D
                 </Button>
               )}
             </div>
             <ul className="m-0 list-none p-0">
-              {kind.items.map(({ scan, item }) => (
+              {kind.items.map(({ scan, item }, i) => (
                 <CheckRow
                   key={`${item.runId}/${item.checkId}`}
                   scan={scan}
                   item={item}
-                  onOpen={() => openChecks(queue, queue.indexOf(item))}
+                  readOnly={detail.study.example}
+                  onOpen={() => openChecks(queue, i)}
                 />
               ))}
             </ul>
@@ -71,10 +74,13 @@ export function ToCheck({
 function CheckRow({
   scan,
   item,
+  readOnly,
   onOpen,
 }: {
   scan: StudyScanDetail;
   item: ToCheckItem;
+  /** The seeded example: accepting answers 403, so the button starts disabled. */
+  readOnly: boolean;
   onOpen: () => void;
 }) {
   const client = useQueryClient();
@@ -110,7 +116,7 @@ function CheckRow({
       <span className="flex justify-end gap-2">
         <Button
           size="sm"
-          disabled={!revision || accept.isPending || accept.isSuccess}
+          disabled={readOnly || !revision || accept.isPending || accept.isSuccess}
           onClick={() => accept.mutate()}
         >
           {accept.isPending || accept.isSuccess ? "Saving…" : "Looks right"}
@@ -125,7 +131,6 @@ function CheckRow({
 
 function acceptError(error: Error): string {
   if (error instanceof ApiError) {
-    if (error.status === 403) return "This is a read-only example.";
     if (error.status === 409) return "The result changed since this loaded. It's up to date now.";
   }
   return "Couldn't save that. Try again.";

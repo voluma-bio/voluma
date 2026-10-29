@@ -1,7 +1,8 @@
 /**
- * The study's Scans tab: every scan in study order with its status and the workflow's headline
- * values (units in the column heads). A row opens the scan's run; a scan with no run yet starts
- * one from here (`POST /api/run/runs`).
+ * The study's Scans tab: every scan under its group's header row, with its status and the
+ * workflow's headline values (units in the column heads; a value far from its group says so with
+ * its group's range; one in another unit says which). A row opens the scan's run; a scan with no
+ * run yet starts one from here (`POST /api/run/runs`).
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, startRun } from "@voluma/api-client";
@@ -9,7 +10,19 @@ import type { StudyDetail, StudyScanDetail } from "@voluma/contracts/study";
 import { Button, StatusBadge, Table, type TableColumn } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import { useNavigate } from "react-router";
-import { digitsFor, farFromGroup, runPath, scanStatus, scanValue, valuesOf } from "./study-model";
+import {
+  digitsFor,
+  farFromGroup,
+  groupNames,
+  groupOf,
+  otherUnit,
+  rangeText,
+  runPath,
+  scanStatus,
+  scanValue,
+  unitOf,
+  valuesOf,
+} from "./study-model";
 
 export function ScansTable({
   detail,
@@ -20,10 +33,13 @@ export function ScansTable({
 }) {
   const navigate = useNavigate();
   const grouped = detail.scans.some((s) => s.scan.group !== null);
+  const rows = groupNames(detail).flatMap((g) =>
+    detail.scans.filter((s) => groupOf(s, grouped) === g),
+  );
   const valueColumns = workflow.headline.map((output): TableColumn<StudyScanDetail> => {
-    const digits = digitsFor(valuesOf(detail, output.id));
-    const far = farFromGroup(detail, output.id);
-    const unit = "unit" in output && typeof output.unit === "string" ? output.unit : "";
+    const digits = digitsFor(valuesOf(detail, output));
+    const far = farFromGroup(detail, output);
+    const unit = unitOf(output);
     return {
       key: output.id,
       align: "end",
@@ -35,16 +51,23 @@ export function ScansTable({
         </span>
       ),
       cell: (s) => {
-        const value = scanValue(s, output.id);
+        const other = otherUnit(s, output);
+        if (other)
+          return (
+            <span className="text-meta text-muted-foreground">
+              <span className="font-mono">{s.values[output.id]?.value}</span> reported in {other}
+            </span>
+          );
+        const value = scanValue(s, output);
         if (value === null) return <span className="text-fg-subtle">–</span>;
-        const isFar = far.has(s.scan.inputId);
+        const f = far.get(s.scan.inputId);
+        if (!f) return <span className="font-mono">{value.toFixed(digits)}</span>;
         return (
-          <span
-            className={`font-mono ${isFar ? "font-medium text-check" : ""}`}
-            title={isFar ? "Far from its group" : undefined}
-          >
-            {value.toFixed(digits)}
-            {isFar && <span className="sr-only">, far from its group</span>}
+          <span className="grid justify-items-end">
+            <span className="font-mono font-medium text-check">{value.toFixed(digits)}</span>
+            <span className="text-meta text-check">
+              Far from group ({rangeText(f.others, digits)})
+            </span>
           </span>
         );
       },
@@ -58,7 +81,7 @@ export function ScansTable({
     },
     {
       key: "side",
-      header: "Side",
+      header: "Knee",
       cell: (s) =>
         typeof s.scan.attributes.side === "string" ? (
           s.scan.attributes.side
@@ -66,15 +89,6 @@ export function ScansTable({
           <span className="text-fg-subtle">–</span>
         ),
     },
-    ...(grouped
-      ? [
-          {
-            key: "group",
-            header: "Group",
-            cell: (s: StudyScanDetail) => s.scan.group ?? <span className="text-fg-subtle">–</span>,
-          },
-        ]
-      : []),
     { key: "status", header: "Status", cell: (s) => <ScanStatusCell detail={detail} scan={s} /> },
     ...valueColumns,
   ];
@@ -82,8 +96,17 @@ export function ScansTable({
     <Table
       label="Scans"
       columns={columns}
-      rows={detail.scans}
+      rows={rows}
       rowKey={(s) => s.scan.inputId}
+      groupOf={
+        grouped
+          ? (s) => {
+              const g = groupOf(s, grouped);
+              const n = rows.filter((r) => groupOf(r, grouped) === g).length;
+              return `${g}, ${n} ${n === 1 ? "scan" : "scans"}`;
+            }
+          : undefined
+      }
       onRowClick={(s) => {
         const path = runPath(s);
         if (path) navigate(path);

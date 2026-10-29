@@ -5,20 +5,26 @@
  * On a phone, Needs your eye comes first.
  */
 import type { StudyDetail, StudyScanDetail } from "@voluma/contracts/study";
+import type { OutputEntry } from "@voluma/contracts/workflow-files";
 import { StatusBadge, StripPlot } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import type { ReactNode } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link } from "react-router";
 import {
   checkKinds,
   digitsFor,
   type Far,
+  failureText,
   farFromGroup,
   groupNames,
   groupOf,
+  type OpenChecks,
+  otherUnit,
+  rangeText,
   runPath,
   scanStatus,
   scanValue,
+  unitOf,
   valuesOf,
 } from "./study-model";
 
@@ -26,13 +32,17 @@ type Props = {
   detail: StudyDetail;
   workflow: BundledWorkflow;
   onTab: (tab: "check" | "scans") => void;
+  openChecks: OpenChecks;
 };
 
-export function Overview({ detail, workflow, onTab }: Props) {
-  const measures = workflow.headline.map((output) => {
-    const values = valuesOf(detail, output.id);
-    return { output, digits: digitsFor(values), far: farFromGroup(detail, output.id) };
-  });
+type Measure = { output: OutputEntry & { task: string }; digits: number; far: Map<string, Far> };
+
+export function Overview({ detail, workflow, onTab, openChecks }: Props) {
+  const measures: Measure[] = workflow.headline.map((output) => ({
+    output,
+    digits: digitsFor(valuesOf(detail, output)),
+    far: farFromGroup(detail, output),
+  }));
   const hasValues = detail.scans.some((s) => s.resultRunId !== null);
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_22rem] items-start gap-x-8 gap-y-6 max-[1100px]:grid-cols-1">
@@ -48,16 +58,12 @@ export function Overview({ detail, workflow, onTab }: Props) {
             Values appear here as each scan finishes.
           </p>
         ) : (
-          measures.map(({ output, digits, far }) => (
+          measures.map((measure) => (
             <MeasureCard
-              key={output.id}
+              key={measure.output.id}
               detail={detail}
-              outputId={output.id}
-              name={output.name}
-              unit={unitOf(output)}
-              digits={digits}
-              far={far}
-              task={output.task}
+              measure={measure}
+              openChecks={openChecks}
             />
           ))
         )}
@@ -72,15 +78,18 @@ export function Overview({ detail, workflow, onTab }: Props) {
         )}
       </section>
       <aside className="grid min-w-0 gap-6 max-[1100px]:order-1">
-        <NeedsYourEye detail={detail} workflow={workflow} measures={measures} onTab={onTab} />
+        <NeedsYourEye
+          detail={detail}
+          workflow={workflow}
+          measures={measures}
+          onTab={onTab}
+          openChecks={openChecks}
+        />
         <ScanTiles detail={detail} />
       </aside>
     </div>
   );
 }
-
-const unitOf = (output: BundledWorkflow["headline"][number]) =>
-  "unit" in output && typeof output.unit === "string" ? output.unit : "";
 
 function Legend() {
   return (
@@ -109,68 +118,73 @@ function Legend() {
 
 function MeasureCard({
   detail,
-  outputId,
-  name,
-  unit,
-  digits,
-  far,
-  task,
+  measure: { output, digits, far },
+  openChecks,
 }: {
   detail: StudyDetail;
-  outputId: string;
-  name: string;
-  unit: string;
-  digits: number;
-  far: Map<string, Far>;
-  task: string;
+  measure: Measure;
+  openChecks: OpenChecks;
 }) {
-  const navigate = useNavigate();
+  const unit = unitOf(output);
   const grouped = detail.scans.some((s) => s.scan.group !== null);
   const groups = groupNames(detail).map((group) => ({
     name: group,
-    // A scan whose run failed or stopped has no value coming, so it isn't counted "to come".
     points: detail.scans
-      .filter((s) => groupOf(s, grouped) === group && (s.resultRunId !== null || !hasEnded(s)))
+      .filter((s) => groupOf(s, grouped) === group && onPlot(s, output))
       .map((s) => {
         const f = far.get(s.scan.inputId);
         return {
           id: s.scan.inputId,
           label: s.scan.subject,
-          value: scanValue(s, outputId),
+          value: scanValue(s, output),
           far: f !== undefined,
-          farReason: f && `The ${others(s)} measure ${range(f.others, digits)} ${unit}`,
+          farReason: f && `The ${others(s)} measure ${rangeText(f.others, digits)} ${unit}`,
         };
       }),
   }));
   const byId = new Map(detail.scans.map((s) => [s.scan.inputId, s]));
+  const elsewhere = detail.scans.flatMap((s) => {
+    const other = otherUnit(s, output);
+    return other ? [`${s.scan.subject} reported in ${other}`] : [];
+  });
   return (
     <div className="rounded-xl border border-border bg-card px-4 pt-2.5 pb-1">
       <p className="mb-1 text-sm">
-        <span className="font-semibold">{name}</span> <span className="text-fg-subtle">{unit}</span>
+        <span className="font-semibold">{output.name}</span>{" "}
+        <span className="text-fg-subtle">{unit}</span>
       </p>
       <StripPlot
         groups={groups}
         unit={unit}
-        label={name}
+        label={output.name}
         digits={digits}
         onSelect={(point) => {
-          const scan = byId.get(point.id);
-          if (scan?.resultRunId)
-            navigate(`/runs/${scan.resultRunId}?task=${encodeURIComponent(task)}`);
+          const runId = byId.get(point.id)?.resultRunId;
+          if (runId) openChecks([{ runId, taskId: output.task }], 0);
         }}
       />
+      {elsewhere.length > 0 && (
+        <p className="mb-1.5 text-meta text-muted-foreground">
+          Not plotted: {elsewhere.join(", ")}.
+        </p>
+      )}
     </div>
   );
 }
 
-const hasEnded = (scan: StudyScanDetail) => scan.runs[0]?.state.status === "ended";
+/**
+ * A scan has a dot when its value is in the declared unit, or "to come" while its run can still
+ * report one. A failed or stopped run, an output its result skipped and a value in another unit
+ * have none.
+ */
+const onPlot = (scan: StudyScanDetail, output: OutputEntry) =>
+  scan.resultRunId !== null
+    ? scanValue(scan, output) !== null
+    : scan.runs[0]?.state.status !== "ended";
 
 /** Who a far scan is compared with: its group's other scans. */
 const others = (scan: StudyScanDetail) =>
   scan.scan.group ? `other ${scan.scan.group} scans` : "other scans";
-
-const range = ([lo, hi]: [number, number], digits: number) =>
-  lo === hi ? lo.toFixed(digits) : `${lo.toFixed(digits)}–${hi.toFixed(digits)}`;
 
 function NeedsYourEye({
   detail,
@@ -180,37 +194,36 @@ function NeedsYourEye({
 }: {
   detail: StudyDetail;
   workflow: BundledWorkflow;
-  measures: {
-    output: BundledWorkflow["headline"][number];
-    digits: number;
-    far: Map<string, Far>;
-  }[];
+  measures: Measure[];
   onTab: (tab: "check" | "scans") => void;
+  openChecks: OpenChecks;
 }) {
-  const byId = new Map(detail.scans.map((s) => [s.scan.inputId, s]));
   const alerts: ReactNode[] = [];
   for (const { output, digits, far } of measures) {
-    for (const [inputId, f] of far) {
-      const scan = byId.get(inputId);
-      if (!scan?.resultRunId) continue;
-      const value = scanValue(scan, output.id);
+    for (const scan of detail.scans) {
+      const f = far.get(scan.scan.inputId);
+      const runId = scan.resultRunId;
+      // A far value is a reported one, so it always has a result run; this narrows the type.
+      if (!f || !runId) continue;
+      const value = scanValue(scan, output);
       const unit = unitOf(output);
       alerts.push(
         <Alert
-          key={`far-${output.id}-${inputId}`}
+          key={`far-${output.id}-${scan.scan.inputId}`}
           action={
-            <Link
-              to={`/runs/${scan.resultRunId}?task=${encodeURIComponent(output.task)}`}
+            <button
+              type="button"
               className={smallButton}
+              onClick={() => openChecks([{ runId, taskId: output.task }], 0)}
             >
               Open in 3D
-            </Link>
+            </button>
           }
         >
           <b className="font-semibold">{scan.scan.subject} is far from its group.</b> {output.name}{" "}
           <span className="font-mono tabular-nums">{value?.toFixed(digits)}</span> {unit}; the{" "}
           {others(scan)} measure{" "}
-          <span className="font-mono tabular-nums">{range(f.others, digits)}</span> {unit}.
+          <span className="font-mono tabular-nums">{rangeText(f.others, digits)}</span> {unit}.
         </Alert>,
       );
     }
@@ -232,7 +245,8 @@ function NeedsYourEye({
           <b className="font-semibold">{scan.scan.subject} needs your keys</b> to carry on.
         </Alert>,
       );
-    if (run.state.status === "ended" && run.state.outcome === "failed")
+    if (run.state.status === "ended" && run.state.outcome === "failed") {
+      const { what, why } = failureText(scan.scan.subject, run.state.error, workflow);
       alerts.push(
         <Alert
           key={`failed-${scan.scan.inputId}`}
@@ -243,12 +257,11 @@ function NeedsYourEye({
             </Link>
           }
         >
-          <b className="font-semibold">{scan.scan.subject}'s run failed.</b>{" "}
-          <span className="line-clamp-2 text-muted-foreground [overflow-wrap:anywhere]">
-            {failure(run.state.error)}
-          </span>
+          <b className="font-semibold">{what}</b>
+          {why && <span className="text-muted-foreground"> {why}</span>}
         </Alert>,
       );
+    }
   }
   const kinds = checkKinds(detail, workflow);
   const anyDone = detail.scans.some((s) => s.resultRunId !== null);
@@ -288,10 +301,6 @@ function NeedsYourEye({
     </section>
   );
 }
-
-/** A failed run's reason without the provider's raw response body, which the run page shows. */
-const failure = (error: string | undefined) =>
-  error?.split("{")[0]?.replace(/[\s:]+$/, "") || "It stopped before it finished.";
 
 const smallButton =
   "inline-flex h-8 shrink-0 items-center rounded-lg border border-border bg-card px-3 text-ui font-medium whitespace-nowrap hover:bg-accent";

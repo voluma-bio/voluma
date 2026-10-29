@@ -9,11 +9,22 @@
  * two never flags. With n = 3-8 per group a standard deviation is unstable; the range reads in
  * one sentence ("the other DMM scans measure 2.47-2.51 mm").
  *
+ * Units: a value counts only in the unit `outputs.json` declares. One the agent reported in another
+ * unit (210 µm beside 0.21 mm) stays out of the plot and the far rule and shows as "reported in
+ * µm", since nothing upstream converts or rejects it.
+ *
  * To check kinds: items group by task and check title, in workflow task order, then title.
  */
 import type { StudyDetail, StudyScanDetail, ToCheckItem } from "@voluma/contracts/study";
+import type { OutputEntry } from "@voluma/contracts/workflow-files";
 import type { StatusTone } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
+
+/** Where "Open in 3D" lands: a To check item, or a run's task (a scan far from its group). */
+export type CheckStop = ToCheckItem | Pick<ToCheckItem, "runId" | "taskId">;
+
+/** Opens the check panel on `queue` at `start`; the one mount point of every "Open in 3D". */
+export type OpenChecks = (queue: CheckStop[], start: number) => void;
 
 export type ScanStatus = { label: string; tone: StatusTone };
 
@@ -65,16 +76,14 @@ export function studyCounts(detail: StudyDetail): StudyCounts {
 }
 
 /**
- * What every run of the study has spent so far: the gateway's settled calls when it recorded any
- * (runs before the gateway have none), else the sum the runner's heartbeats reported.
+ * What every run of the study has spent so far: the runner's own model calls (heartbeats) plus
+ * the sandbox's provider calls through the gateway, two separate amounts, as the run page adds them.
  */
 export const studySpend = (detail: StudyDetail) =>
   detail.scans
     .flatMap((s) => s.runs)
     .reduce(
-      (usd, run) =>
-        usd +
-        (run.providerCalls?.calls ? run.providerCalls.costUsd : (run.usage?.modelCostUsd ?? 0)),
+      (usd, run) => usd + (run.usage?.modelCostUsd ?? 0) + (run.providerCalls?.costUsd ?? 0),
       0,
     );
 
@@ -89,26 +98,47 @@ export function groupNames(detail: StudyDetail): string[] {
   return [...new Set(detail.scans.map((s) => groupOf(s, grouped)))];
 }
 
-/** A scan's reported value for an output; null when it has none (not reported, or no number). */
-export const scanValue = (scan: StudyScanDetail, outputId: string): number | null =>
-  scan.values[outputId]?.value ?? null;
+/** An output's declared unit; "" for one without. */
+export const unitOf = (output: OutputEntry) =>
+  "unit" in output && typeof output.unit === "string" ? output.unit : "";
 
-/** Every valued scan's value for an output. */
-export const valuesOf = (detail: StudyDetail, outputId: string) =>
-  detail.scans.flatMap((s) => scanValue(s, outputId) ?? []);
+/**
+ * A scan's value for an output in its declared unit; null when it has none (not reported, no
+ * number, or reported in another unit: `otherUnit`).
+ */
+export function scanValue(scan: StudyScanDetail, output: OutputEntry): number | null {
+  const reported = scan.values[output.id];
+  return reported && reported.unit === unitOf(output) ? reported.value : null;
+}
+
+/** The unit a scan reported an output's number in when it isn't the declared one, else null. */
+export function otherUnit(scan: StudyScanDetail, output: OutputEntry): string | null {
+  const reported = scan.values[output.id];
+  return reported && reported.value !== null && reported.unit !== unitOf(output)
+    ? reported.unit
+    : null;
+}
+
+/** Every scan's value for an output, in its declared unit. */
+export const valuesOf = (detail: StudyDetail, output: OutputEntry) =>
+  detail.scans.flatMap((s) => scanValue(s, output) ?? []);
 
 export type Far = {
   /** The other values of the group, low and high. */
   others: [number, number];
 };
 
-/** Each scan's far-from-group verdict for one output, keyed by input id; see the header for the rule. */
-export function farFromGroup(detail: StudyDetail, outputId: string): Map<string, Far> {
+/**
+ * Each scan's far-from-group verdict for one output, keyed by input id; see the header for the
+ * rule. Each value is compared with the range of the rest, so two similar outliers in one group
+ * widen each other's range and neither flags.
+ */
+export function farFromGroup(detail: StudyDetail, output: OutputEntry): Map<string, Far> {
   const grouped = detail.scans.some((s) => s.scan.group !== null);
   const far = new Map<string, Far>();
   for (const group of groupNames(detail)) {
     const valued = detail.scans.flatMap((s) => {
-      const v = scanValue(s, outputId);
+      const v = scanValue(s, output);
       return groupOf(s, grouped) === group && v !== null ? [{ id: s.scan.inputId, v }] : [];
     });
     for (const { id, v } of valued) {
@@ -130,6 +160,10 @@ function median(values: number[]): number {
     ? (sorted[mid] as number)
     : ((sorted[mid - 1] as number) + (sorted[mid] as number)) / 2;
 }
+
+/** A group's other values as "2.47–2.51", or one number when they agree. */
+export const rangeText = ([lo, hi]: [number, number], digits: number) =>
+  lo === hi ? lo.toFixed(digits) : `${lo.toFixed(digits)}–${hi.toFixed(digits)}`;
 
 /** Decimals for a measurement's values: about three significant figures at their largest. */
 export function digitsFor(values: number[]): number {
@@ -178,3 +212,23 @@ export function scanMeta(scan: StudyScanDetail): string[] {
 /** The run page a scan links to: its newest run's live page. */
 export const runPath = (scan: StudyScanDetail) =>
   scan.runs[0] ? `/runs/${scan.runs[0].id}/live` : null;
+
+/**
+ * Why a scan's run failed, in the researcher's words; the raw error stays on the run page. The
+ * harness starts a task's failure with its id (`<taskId>: its worker failed on a model provider
+ * error…`, `supervisor.ts`), which names the task by its title here.
+ */
+export function failureText(
+  subject: string,
+  error: string | undefined,
+  workflow: BundledWorkflow,
+): { what: string; why?: string } {
+  const taskId = error?.match(/^([\w-]+): /)?.[1];
+  const task = taskId && workflow.tasks.find((t) => t.id === taskId);
+  const what = task
+    ? `${subject}'s run stopped during ${workflow.taskTitle(task.id)}.`
+    : `${subject}'s run stopped before it finished.`;
+  return error?.includes("failed on a model provider error")
+    ? { what, why: "The AI couldn't reach its provider." }
+    : { what };
+}

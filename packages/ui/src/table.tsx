@@ -1,9 +1,10 @@
 /**
  * Data table for lists like the runs list and a task's values. Columns
  * declare how to render a cell; rows become clickable when `onRowClick` is
- * set (Enter works too). An empty `rows` shows `empty` across the table.
+ * set (Enter works too). An empty `rows` shows `empty` across the table. With `groupOf`, a
+ * header row names each run of rows sharing a group; the caller orders rows by group.
  */
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { cx } from "./cx";
 
 export type TableColumn<Row> = {
@@ -19,6 +20,8 @@ export type TableProps<Row> = {
   rows: Row[];
   rowKey: (row: Row) => string;
   onRowClick?: (row: Row) => void;
+  /** The group header a row sits under, e.g. "DMM, 4 knees". */
+  groupOf?: (row: Row) => string;
   empty?: ReactNode;
   /** Accessible name for the table. */
   label: string;
@@ -30,6 +33,7 @@ export function Table<Row>({
   rows,
   rowKey,
   onRowClick,
+  groupOf,
   empty,
   label,
   className,
@@ -61,35 +65,47 @@ export function Table<Row>({
               </td>
             </tr>
           ) : (
-            rows.map((row) => (
-              <tr
-                key={rowKey(row)}
-                tabIndex={onRowClick ? 0 : undefined}
-                onClick={onRowClick ? () => onRowClick(row) : undefined}
-                onKeyDown={
-                  onRowClick
-                    ? (event) => {
-                        if (event.key === "Enter") onRowClick(row);
-                      }
-                    : undefined
-                }
-                className={cx(
-                  onRowClick &&
-                    "cursor-pointer hover:bg-background focus-visible:bg-background focus-visible:outline-none",
+            rows.map((row, i) => (
+              <Fragment key={rowKey(row)}>
+                {groupOf && (i === 0 || groupOf(rows[i - 1] as Row) !== groupOf(row)) && (
+                  <tr>
+                    <th
+                      scope="colgroup"
+                      colSpan={columns.length}
+                      className="border-b border-line-subtle bg-muted px-4 py-1.5 text-left text-meta font-medium text-fg-subtle"
+                    >
+                      {groupOf(row)}
+                    </th>
+                  </tr>
                 )}
-              >
-                {columns.map((column) => (
-                  <td
-                    key={column.key}
-                    className={cx(
-                      "border-b border-line-subtle px-4 py-3 align-top text-foreground",
-                      column.align === "end" && "text-right tabular-nums",
-                    )}
-                  >
-                    {column.cell(row)}
-                  </td>
-                ))}
-              </tr>
+                <tr
+                  tabIndex={onRowClick ? 0 : undefined}
+                  onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  onKeyDown={
+                    onRowClick
+                      ? (event) => {
+                          if (event.key === "Enter") onRowClick(row);
+                        }
+                      : undefined
+                  }
+                  className={cx(
+                    onRowClick &&
+                      "cursor-pointer hover:bg-background focus-visible:bg-background focus-visible:outline-none",
+                  )}
+                >
+                  {columns.map((column) => (
+                    <td
+                      key={column.key}
+                      className={cx(
+                        "border-b border-line-subtle px-4 py-3 align-top text-foreground",
+                        column.align === "end" && "text-right tabular-nums",
+                      )}
+                    >
+                      {column.cell(row)}
+                    </td>
+                  ))}
+                </tr>
+              </Fragment>
             ))
           )}
         </tbody>
