@@ -17,7 +17,7 @@
  * - `missing`: the output could not be made. It fills whatever the declaration for its
  *   `outputId` is, of any kind, and `reason` says why. It counts as reported (the task did its
  *   job and said so); the review shows the output missing with the reason. A measurement
- *   keeps its own `value: null`; use `missing` for every other kind.
+ *   keeps its own `value: null` with a reason; `missing` on a measurement declaration is refused.
  *
  * `annotation` and `volume` nest their block under the same key because the
  * block has its own `kind`. A reference to another output is its `outputId` in
