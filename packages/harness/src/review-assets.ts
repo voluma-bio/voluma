@@ -14,12 +14,14 @@
  *
  * `signal` ends the worker (a stop, a lost lease, shutdown); it records nothing then, and the
  * next claim finds the unfinished files again. `drain` is for a run that has ended: it waits
- * for the queue, up to a bound, and records what is left as failed (permanent for the run).
+ * for the queue, up to a bound, and leaves no output without an event (failed is permanent
+ * for the run). Events go through `recorder.emit` (retried, ids fixed by the file's sha), and a
+ * file counts as done only once its event is stored.
  */
 
-import type { RunEvent } from "@voluma/contracts/events";
+import { type RunEvent, WAKE_ERROR_MAX } from "@voluma/contracts/events";
 import { evidencePrefix, reviewAssetPrefix, workflowSnapshotPrefix } from "@voluma/contracts/r2";
-import { reviewAssetsManifestSchema } from "@voluma/contracts/review";
+import { type ReviewAssetsManifest, reviewAssetsManifestSchema } from "@voluma/contracts/review";
 import { type Sandbox, SandboxEndedError, type SandboxMount } from "./ports/sandbox";
 import type { Recorder } from "./recorder";
 import { supervisorThreadId } from "./thread-id";
@@ -30,7 +32,8 @@ const REVIEW = "/review";
 /** One conversion; a 1.25 GB scan is minutes. The drain bounds the end of the run, not this. */
 const CONVERT_TIMEOUT_SECONDS = 1200;
 const POLL_MS = 1000;
-const ERROR_MAX = 500;
+/** How long `drain` waits for a halted loop (a sandbox call that ignores abort) before it moves on. */
+const HALT_GRACE_MS = 5000;
 
 /** The mounts of the run's convert sandbox, for `convertSandboxSpec`. */
 export function convertMounts(runId: string): {
@@ -79,9 +82,10 @@ export function convertJob(event: RunEvent): Job | undefined {
 
 export interface ReviewAssetsWorker {
   /**
-   * Resolves once nothing is queued or running, or after `timeoutMs`: the files left are then
-   * recorded as `assets.failed` ("timed out"). Returns at once, recording nothing, when
-   * `signal` fires.
+   * For a run that has ended: waits until every output has an `assets.*` event, up to
+   * `timeoutMs`, then stops the worker and stores `assets.failed` for each output still without
+   * one ("timed out", or "the run ended before the file was converted"). When `signal` fires
+   * it returns at once, recording nothing.
    */
   drain(timeoutMs: number): Promise<void>;
   /** Stops the worker, ending a conversion in flight, and destroys the sandbox. */
@@ -104,8 +108,8 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
   const signal = AbortSignal.any([options.signal, halt.signal]);
 
   let scanned = 0;
-  const finished = new Set<string>(); // has an assets.* event, or was given up on
-  const known = new Set<string>(); // queued once
+  const finished = new Set<string>(); // has a stored assets.* event
+  const known = new Map<string, Job>(); // queued once
   const queue: Job[] = [];
   let running: Job | undefined;
   let sandbox: Sandbox | undefined;
@@ -121,12 +125,13 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
       }
       const job = convertJob(event);
       if (job && !known.has(job.sha256)) {
-        known.add(job.sha256);
+        known.set(job.sha256, job);
         queue.push(job);
       }
     }
   }
-  const pending = () => queue.filter((job) => !finished.has(job.sha256));
+  /** Every output seen so far without a stored `assets.*` event. */
+  const pending = () => [...known.values()].filter((job) => !finished.has(job.sha256));
 
   const sleep = (ms: number) =>
     new Promise<void>((resolve) => {
@@ -139,20 +144,17 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
       signal.addEventListener("abort", done);
     });
 
-  async function record(job: Job, result: { manifest: unknown } | { error: string }) {
-    finished.add(job.sha256);
+  /**
+   * Queues the job's `assets.*` event; `scan` marks it finished once it is stored. `emit`
+   * retries, and its id is the job's, so a repeat is a no-op.
+   */
+  function record(job: Job, result: { manifest: ReviewAssetsManifest } | { error: string }) {
     const id = `${runId}:assets:${job.sha256}`;
-    try {
-      if ("manifest" in result) {
-        const manifest = reviewAssetsManifestSchema.parse(result.manifest);
-        await recorder.append(root, "assets.ready", { ...manifest, sourceSha256: job.sha256 }, id);
-      } else {
-        const error = result.error.slice(-ERROR_MAX) || "conversion failed";
-        await recorder.append(root, "assets.failed", { sourceSha256: job.sha256, error }, id);
-      }
-    } catch (e) {
-      // Not stored: the next claim finds the file again (the converter skips what is done).
-      log(`review assets: recording ${job.sha256} failed: ${e instanceof Error ? e.message : e}`);
+    if ("manifest" in result)
+      recorder.emit(root, "assets.ready", { ...result.manifest, sourceSha256: job.sha256 }, id);
+    else {
+      const error = result.error.slice(-WAKE_ERROR_MAX) || "conversion failed";
+      recorder.emit(root, "assets.failed", { sourceSha256: job.sha256, error }, id);
     }
   }
 
@@ -169,7 +171,9 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
   }
 
   /** One conversion's result, or a throw when the sandbox failed. */
-  async function convert(job: Job): Promise<{ manifest: unknown } | { error: string }> {
+  async function convert(
+    job: Job,
+  ): Promise<{ manifest: ReviewAssetsManifest } | { error: string }> {
     const box = await liveSandbox();
     const command =
       `python ${WORKFLOW}/workflows/core/convert/review_assets.py --source ${EVIDENCE}/${job.sha256} ` +
@@ -183,10 +187,13 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
     )) {
       if (chunk.type === "exit") code = chunk.code;
       else if (chunk.type === "stdout") stdout += chunk.data;
-      else stderr = (stderr + chunk.data).slice(-ERROR_MAX * 2);
+      else stderr = (stderr + chunk.data).slice(-WAKE_ERROR_MAX * 2);
     }
     if (signal.aborted) throw signal.reason;
     if (code === undefined) throw new SandboxEndedError("the command stream ended without an exit");
+    // A command whose sandbox died may report an exit code instead of throwing.
+    if (code !== 0 && (await box.exitCode()) !== null)
+      throw new SandboxEndedError(`the sandbox ended during the command (exit ${code})`);
     if (code === 124) return { error: `conversion timed out after ${CONVERT_TIMEOUT_SECONDS}s` };
     if (code !== 0) return { error: stderr.trim() || `the converter exited ${code}` };
     const last = stdout.trim().split("\n").at(-1) ?? "";
@@ -212,7 +219,7 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         const result = await convert(job);
-        await record(job, result);
+        record(job, result);
         const seconds = Math.round((Date.now() - started) / 1000);
         log(
           `review assets: ${job.sha256.slice(0, 8)} ${"manifest" in result ? "ready" : "failed"} in ${seconds}s`,
@@ -225,7 +232,7 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
         await dropSandbox();
       }
     }
-    await record(job, { error: `the convert sandbox failed twice: ${failure}` });
+    record(job, { error: `the convert sandbox failed twice: ${failure}` });
   }
 
   const nextJob = () => {
@@ -254,18 +261,26 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
   return {
     async drain(timeoutMs) {
       const deadline = Date.now() + timeoutMs;
-      for (;;) {
+      while (!signal.aborted && Date.now() < deadline) {
         scan();
-        if (!running && pending().length === 0) return;
-        if (signal.aborted) return;
-        if (Date.now() >= deadline) break;
+        if (!running && pending().length === 0) break;
         await sleep(250);
       }
-      const left = [...(running ? [running] : []), ...pending()];
+      if (signal.aborted) return;
+      const timedOut = Date.now() >= deadline;
       halt.abort();
-      await loop.catch(() => {});
-      for (const job of left)
-        if (!finished.has(job.sha256)) await record(job, { error: "timed out" });
+      // A call that ignores the abort (creating a sandbox) must not hold the end of the run.
+      await Promise.race([loop.catch(() => {}), new Promise((r) => setTimeout(r, HALT_GRACE_MS))]);
+      // Everything queued so far is stored before the last scan, so what is still without an
+      // event is final: an ended run is never claimed again.
+      await recorder.flush();
+      scan();
+      if (options.signal.aborted) return; // a stop in the meantime: the run is resumed, not ended
+      for (const job of pending())
+        record(job, {
+          error: timedOut ? "timed out" : "the run ended before the file was converted",
+        });
+      await recorder.flush();
     },
     async close() {
       halt.abort();

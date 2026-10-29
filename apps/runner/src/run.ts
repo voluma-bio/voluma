@@ -12,13 +12,13 @@
  * logged through it.
  *
  * Beside the supervisor runs the conversion worker (`@voluma/harness/review-assets`): it turns
- * the files tasks report into review assets in a `convert` sandbox as they appear. It stops on
- * any stop, but not on the internal abort at the end of the run, which it must outlive.
+ * the files tasks report into review assets in a `convert` sandbox as they appear. It stops when a stop will
+ * not end the run, not on the internal abort at the end of the run, which it must outlive.
  *
- * End of the run, in order. A normal end closes the sandbox first, so its `stopped` event
- * and last seconds go out under the live lease, then waits for the conversion queue to drain
- * (bounded by `DRAIN_MS`, the lease heartbeating meanwhile; what is left is recorded as
- * failed; a stop during the wait ends it and the run is released instead), then reports. A stop
+ * End of the run, in order. A normal end (a spend cap and an uncaught error included) waits for
+ * the conversion queue to drain (bounded by `DRAIN_MS`, the lease heartbeating meanwhile; every
+ * output left without an `assets.*` event is recorded as failed; a stop during the wait ends it
+ * and the run is released instead), then closes the sandboxes, then reports. A stop
  * (shutdown, self-stop) reports `released` with its reason first, so the run is recovered within
  * the platform's grace period, then closes the sandboxes; it does not drain, the next claim
  * resumes the queue. A stop by the server or a lost lease reports nothing.
@@ -164,9 +164,10 @@ async function claimBody(
   scope.log = log;
 
   const abort = new AbortController();
-  // The conversion worker's own signal: every stop but the spend cap (which still drains), and
-  // not the abort `finally` does to close the run.
+  // The conversion worker's own signal: it ends when a stop will not end the run, not with the
+  // abort `finally` does to close it. `haltedBy` is the stop that did.
   const halt = new AbortController();
+  let haltedBy: Stopped | undefined;
   // An object, so TypeScript does not narrow what the callbacks set.
   const why: { stopped?: Stopped } = {};
   // The first reason decides the report; every reason is logged, since a later one (a spend
@@ -174,7 +175,10 @@ async function claimBody(
   const reasons = new Set<Stopped>();
   const stop = (reason: Stopped) => {
     why.stopped ??= reason;
-    if (reason !== "spend-cap") halt.abort();
+    if (reportFor(reason)?.kind !== "ended") {
+      haltedBy ??= reason;
+      halt.abort();
+    }
     if (!reasons.has(reason)) {
       reasons.add(reason);
       log(`stop: ${reason}${reason === why.stopped ? "" : ` (first was ${why.stopped})`}`);
@@ -470,8 +474,8 @@ async function claimBody(
               image: config.sandbox.image,
               lifetimeSeconds: config.sandbox.lifetimeSeconds,
               idleSeconds: config.sandbox.idleSeconds,
-              // The converter imports `sidecar` through the run's PYTHONPATH, which every thread shares.
-              env: layout.forThread(`${runId}.main`).env,
+              // The converter imports `sidecar` through the run's PYTHONPATH.
+              env: { PYTHONPATH: layout.pythonPath },
               ...convertMounts(runId),
             }),
             signal,
@@ -507,19 +511,15 @@ async function claimBody(
     reportFixed = true;
     let report = reportFor(stopped, stopped === "spend-cap" ? capError : (uncaught ?? error));
     abort.abort();
-    // An ended run closes its sandbox while the lease is live and waits for the review assets
-    // meanwhile; a released one reports first.
-    let closing: Promise<void> | undefined;
     if (report?.kind === "ended") {
-      // Closing a sandbox takes ~30 s: the run's closes while the queue drains.
-      closing = closeSandbox(CLOSE_BUDGET_MS.ended, session?.close.bind(session));
+      // Every output gets an `assets.*` event, or the run is released to be resumed.
       await convert?.drain(DRAIN_MS);
-      // A stop during the drain (it ends it at once) wins: the run is released, not ended, so
-      // the next claim resumes the queue.
-      if (why.stopped && why.stopped !== "spend-cap") report = reportFor(why.stopped);
+      // A stop during the drain ends it at once: the run is released (nothing, for a server stop
+      // or a lost lease), so the next claim resumes the queue.
+      if (haltedBy) report = reportFor(haltedBy);
       if (report?.kind === "ended") {
         await Promise.all([
-          closing,
+          closeSandbox(CLOSE_BUDGET_MS.ended, session?.close.bind(session)),
           closeSandbox(CLOSE_BUDGET_MS.ended, convert?.close.bind(convert)),
         ]);
       }
@@ -552,7 +552,6 @@ async function claimBody(
     }
     if (report?.kind !== "ended") {
       await Promise.all([
-        closing,
         closeSandbox(CLOSE_BUDGET_MS.stopped, session?.close.bind(session)),
         closeSandbox(CLOSE_BUDGET_MS.stopped, convert?.close.bind(convert)),
       ]);

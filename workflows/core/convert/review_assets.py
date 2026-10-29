@@ -19,7 +19,6 @@ then uint32 indices, little-endian. A cropped mask's levels and meshes are in it
 """
 import json
 import shutil
-import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -217,8 +216,10 @@ def main():
 
     shutil.rmtree(final, ignore_errors=True)  # an interrupted conversion has no manifest: start clean
     # Built on local disk and copied: zarr writes by renaming, which a cloud-bucket mount (--out in a run) cannot do.
-    work = tempfile.TemporaryDirectory()
-    out = Path(work.name)
+    # A fixed path, cleared at the start: a conversion killed on timeout leaves no temp dir to pile up on the reused sandbox.
+    out = Path('/tmp/review-assets-work')
+    shutil.rmtree(out, ignore_errors=True)
+    out.mkdir()
     if a.kind == 'surface':
         step = 2 if np.isfinite(arr).sum() > BIG else 1
         verts, faces = height_mesh(np.asarray(arr), a.axis, step)
@@ -242,7 +243,7 @@ def main():
     text = json.dumps(manifest, allow_nan=False)
     (out / 'manifest.json').write_text(text + '\n')
     publish(out, final)  # manifest.json last: a reader never sees half a manifest
-    work.cleanup()
+    shutil.rmtree(out)
     print(text)
 
 

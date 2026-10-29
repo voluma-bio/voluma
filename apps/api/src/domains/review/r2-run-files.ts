@@ -5,7 +5,8 @@ import { evidenceKey, reviewAssetKey } from "@voluma/contracts/r2";
 import { HTTPException } from "hono/http-exception";
 import type { RunFiles } from "../../ports";
 
-/** Long enough to follow the redirect, short enough that a leaked URL is of no use. */
+/** A URL is signed at the start of a window and valid for `ASSET_URL_SECONDS` from there, so a request gets one with at least the difference left. */
+const ASSET_WINDOW_SECONDS = 240;
 const ASSET_URL_SECONDS = 300;
 
 export function r2RunFiles(config: {
@@ -20,16 +21,25 @@ export function r2RunFiles(config: {
     credentials: { accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey },
   });
   return {
-    assetUrl: (runId, sha256, path) =>
-      getSignedUrl(
+    async assetUrl(runId, sha256, path) {
+      const now = Date.now();
+      const windowMs = ASSET_WINDOW_SECONDS * 1000;
+      const signingDate = new Date(Math.floor(now / windowMs) * windowMs);
+      const url = await getSignedUrl(
         client,
         new GetObjectCommand({
           Bucket: config.bucket,
           Key: reviewAssetKey(runId, sha256, path),
-          ResponseCacheControl: "private, max-age=31536000, immutable",
+          // Content-addressed: the bytes never change. A day, like the files route.
+          ResponseCacheControl: "private, max-age=86400, immutable",
         }),
-        { expiresIn: ASSET_URL_SECONDS },
-      ),
+        { expiresIn: ASSET_URL_SECONDS, signingDate },
+      );
+      return {
+        url,
+        validSeconds: Math.floor((signingDate.getTime() + ASSET_URL_SECONDS * 1000 - now) / 1000),
+      };
+    },
     async open(runId, sha256, signal) {
       try {
         const result = await client.send(

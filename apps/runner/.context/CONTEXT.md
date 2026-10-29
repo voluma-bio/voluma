@@ -91,16 +91,23 @@ records `assets.ready` / `assets.failed` on the root thread (id `<runId>:assets:
   is the queue item's; a converter that prints another one has failed.
 - **Mounts.** `/evidence` (the run's evidence prefix) and `/workflow` read-only, `/review`
   (`reviewAssetPrefix`) read-write, no network. The snapshot keeps repo paths and includes
-  `core/convert/`, so the command is `python -I /workflow/workflows/core/convert/review_assets.py`.
+  `core/convert/`, so the command is `python /workflow/workflows/core/convert/review_assets.py` (not `-I`, which drops the `PYTHONPATH`
+  the converter imports `sidecar` through; the sandbox gets `RunLayout.pythonPath` alone).
   A cloud-bucket mount cannot rename, which zarr's local store does for every file: the converter
-  builds on local disk and copies, `manifest.json` last.
-- **Signal.** The worker stops on every stop (server, lost lease, self-stop, shutdown) but not
-  on the spend cap (the run still ends and drains) nor on `finally`'s own `abort`, which it must
-  outlive. A stopped worker records nothing; the next claim finds the files again and the
+  builds in a fixed `/tmp` path it clears at the start, and copies, `manifest.json` last. A
+  non-zero exit from a sandbox that is gone counts as a sandbox failure (the one retry), not a
+  failed file.
+- **Signal.** One rule: the worker halts exactly when the stop will not end the run (server stop,
+  lost lease, self-stop, shutdown; `reportFor` is not `ended`). A spend cap and an uncaught
+  `error` end the run, so they drain, as does `finally`'s own `abort`, which the worker outlives.
+  `run.ts` remembers which stop halted it (`haltedBy`) and rebuilds the report from that one,
+  never from the first stop. A stopped worker records nothing; the next claim finds the files again and the
   converter skips what has a `manifest.json` of its version and mode.
 - **Drain.** An `ended` report waits for the queue (`DRAIN_MS`, 10 minutes, the lease
-  heartbeating meanwhile), while the main sandbox closes; what is left is recorded
-  `assets.failed {error: "timed out"}`, which is **permanent for the run**: the next claim
+  heartbeating meanwhile), before the sandboxes close. Then every output still without an
+  `assets.*` event is recorded `assets.failed` ("timed out", or "the run ended before the file
+  was converted" for an output stored late), so an ended run leaves no file "preparing". Events go
+  through `emit` (retried) and count as done once stored. This is **permanent for the run**: the next claim
   skips it and review shows the object without assets. A stop during the drain ends it at once and the run is reported `released` (nothing, for a server stop or a lost lease) instead of `ended`, so the next claim resumes the queue.
   A `released` report does not drain.
 - **Not built.** Conversions run one at a time in one 2-CPU sandbox; the scan (about 1 GB of

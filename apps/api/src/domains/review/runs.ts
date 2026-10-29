@@ -138,9 +138,11 @@ export function runRoutes({ runs, files }: ReviewDeps) {
     if (!(await runs.readable(readerOf(c.var.user), runId)))
       return c.json({ error: "not found" }, 404);
     if (!files) throw new HTTPException(503, { message: "File storage is not configured." });
-    // The URL expires and the file does not change: the browser must ask again, not cache the redirect.
-    c.header("Cache-Control", "no-store");
-    return c.redirect(await files.assetUrl(runId, sha256, tail), 302);
+    const { url, validSeconds } = await files.assetUrl(runId, sha256, tail);
+    // The browser may reuse the redirect while its URL is still good (the same file asked for
+    // again gets the same URL), with a margin to follow it.
+    c.header("Cache-Control", `private, max-age=${Math.max(0, validSeconds - 30)}`);
+    return c.redirect(url, 302);
   });
 
   return app;

@@ -114,8 +114,10 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   a 405 before storage is opened.
 - `runs.ts` serves `GET /runs/:runId/assets/:sha256/*`: a converted review asset
   (`reviewAssetKey`, written by the runner's conversion worker) as a 302 to a presigned R2 GET
-  (`RunFiles.assetUrl`, 5 minutes; `ResponseCacheControl` makes R2's own response `immutable`).
-  The 302 itself is `no-store`: the URL expires, the file does not change. Assets live under the
+  (`RunFiles.assetUrl`: signed at the start of a 4-minute window and valid 5 minutes, so repeat
+  requests get the same URL; `ResponseCacheControl` makes R2's own response `immutable`, capped
+  at a day like the files route). The 302 is `private` with a `max-age` 30 s below the URL's
+  remaining validity, so the browser's cache serves the repeats (a viewer asks per chunk). Assets live under the
   run's own prefix, so the read check on the run is the whole scope check, and the route reads
   no event log (a viewer sends one request per chunk). The tail goes through `relativePathSchema`;
   the route does not check the object exists, so a missing chunk is R2's 404 on the redirect.
