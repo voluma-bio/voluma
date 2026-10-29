@@ -310,6 +310,7 @@ export function fold(events: readonly RunEvent[]): Folded {
           checker: null,
           outputs: new Map(),
           evidence: new Map(),
+          citedScratch: new Set(),
         });
     const tasks = rows.map((a) => {
       const skip = skipped.get(a.taskId);
