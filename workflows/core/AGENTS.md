@@ -2,7 +2,8 @@
 
 The generic micro-CT skills every micro-CT workflow uses (`skills/`). A workflow that needs animal-specific
 knowledge is a sibling directory (`../mouse-oa/`: `skills/mouse-oa/references/` for the anatomy and protocol text, `resources/` for
-its scripts). Design: `design/microct-skillset.md` in the docs repo.
+its scripts). Design: `design/microct-skillset.md` in the docs repo. The measurements behind the skills' rules are in `.context/evidence.md`: SKILL.md
+holds rules, not experiment logs.
 
 - A skill is `skills/<name>/SKILL.md` (frontmatter `name`, `description` only) plus `resources/`. The run agent reads
   SKILL.md and runs the resources as `python <skill dir>/resources/<x>.py`; so SKILL.md names resources relative to its own

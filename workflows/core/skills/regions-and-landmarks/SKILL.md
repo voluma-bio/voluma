@@ -10,9 +10,8 @@ description: >
 A pick is a pixel you point at on an image. Code turns it into a voxel on the scan grid; you look at the result before
 you keep it. Never type voxel coordinates you read off an image: a pixel on a render is not a voxel.
 
-Generic: any bone, any joint. The protocol that says which point or region you need (growth plate, ROI, landmarks) is in
-the workflow's protocol reference, which also names the script that builds a protocol region when the protocol has one (use it
-instead of assembling the region here).
+The workflow's protocol reference says which point or region you need, and names the script that builds a protocol region when
+it has one (use it instead of assembling the region here).
 
 ## Loop
 
@@ -102,14 +101,8 @@ region gives a coarse surface: add slices where the curve bends.
 python amira_landmarks.py --points points.json [more.json ...] --header hu.json --out landmarks.landmarkAscii
 ```
 
-`--points` takes points files on the scan grid, the `points.json` `pick.py` writes (several are merged; a name in two files is refused) (`{"grid_id", "points": [{"name", "zyx"}]}`; a file without a `grid_id` or from another grid is refused). Each point is moved to physical millimetres with
+`--points` takes points files on the scan grid (`microct-core`, points file), such as the `points.json` `pick.py` writes; several are merged and a name in two files is refused. Each point is moved to physical millimetres with
 the DICOM affine in `hu.json` and written as one Amira landmark set (`# AmiraMesh 3D ASCII 2.0`, `ContentType "LandmarkSet"`);
 `<out>.names.json` lists the order, because the format has no names. The lab loads it in Amira on the same series to check the
 points. The file layout follows the open-source writer in R's `nat` package and has not been opened in Amira itself: if Amira
 rejects it, report that. Report the file as evidence with the `pick-check.jpg` of each point.
-
-## Checked on
-
-OA6-1RK. `pick.py` surface picks agree with a VTK cell picker on the same render to within 1 to 2 voxels. `between`, fed the
-old run's growth-plate face and traced boundary, rebuilds the old tibial trabecular ROI: 1,130,584 voxels against 1,129,591
-(0.09% more, all extra).

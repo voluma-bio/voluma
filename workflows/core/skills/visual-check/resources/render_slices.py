@@ -2,7 +2,7 @@
 that a box or pick is where you meant.
 
   python render_slices.py --in oriented.npy --index 159 --out /outputs/orient/keyframe.jpg [--grid]
-        [--window 1000,8000] [--boxes r0,c0,r1,c1[:name] ...] [--points r,c[:name] ...]
+        [--window lo,hi] [--boxes r0,c0,r1,c1[:name] ...] [--points r,c[:name] ...]
 
 `--in` is a 3D stack (slice `--index` along axis 0) or a 2D image. x is the column (top labels), y the row (left labels).
 """

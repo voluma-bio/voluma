@@ -27,7 +27,7 @@ With `--ranges` it flags a volume outside the range and a piece count that diffe
 flag every label. Look at the specks total if it is large. Then:
 
 - **Read the flags literally.** With the workflow's `anatomy.json`, `label_stats.py` also flags a label that touches none of the
-  neighbours the anatomy requires, within a small reach (`must_touch` and `touch_mm`: a fibula that is nowhere near the tibia is on
+  neighbours the anatomy requires, within a small reach (`must_touch` and `touch_mm`: a label nowhere near the bone it must touch is on
   the wrong bone, however good its volume). Treat it as a wrong seed or box and fix it (section 4); raise it as a To check item
   only if the CT leaves it open. The table's `piece_touches_edge` says which pieces reach the scan edge: data to read, not a flag.
 - **A flag that says "not a <name>" (`identity_unsupported`) is a verdict on the piece, not on the structure.** Remove the
@@ -41,22 +41,19 @@ flag every label. Look at the specks total if it is large. Then:
   through bone.
 - **Nothing left over.** `unlabelled.py --hu hu.npy --labels labels.npy --out qc/cand.npy --threshold-hu <T>` lists bone pieces
   that no label covers (with a 0.02 mm rim around labels ignored, so the partial-volume skin does not join them). Each is a
-  candidate small structure, or other anatomy: on OA6-1RK the four biggest candidates sit at the edge of the scan and are not
-  part of the knee labels. A candidate touching the scan border is usually that.
+  candidate small structure, or other anatomy. A candidate touching the scan border is usually other anatomy.
 
 ## 2. Find and name the small structures
 
-Sesamoids, joint mineralizations, ossicles and margin fragments decide measurements. A fragment merged into the femur inflates
-the femur. For each candidate from `unlabelled.py`, or each piece `label_stats.py` flags:
+Small structures (sesamoids, ossicles, fragments) decide measurements, and a fragment merged into a big bone inflates it. For each candidate from `unlabelled.py`, or each piece `label_stats.py` flags:
 
-1. Render its crop sheet and look: `render_crops.py --hu hu.npy --labels labels.npy --component-at <centre_zyx>`. Name it from
+1. Render its crop sheet and look: `render_crops.py --hu hu.npy --labels labels.npy --component-at <centre_zyx> --bone-hu <T>`. Name it from
    the anatomy reference's table, or call it unknown.
 2. Treat each 3D piece as its own component: a structure in two pieces needs one SAM box and one temporary label per piece (`sam-segmentation`).
 3. Label it, either by relabelling the piece (`relabel.py --labels labels.npy --out fixed.npy --at z,y,x --to N --pieces
    qc/cand.npy`) or with a small-structure SAM request (`sam-segmentation`, steps 6-9, which starts from these candidates).
    Then look at the quad view again.
-4. If you cannot name it, leave it unlabelled and raise a To check item that asks what it is. Do not borrow a name because
-   a model offered one.
+4. If you cannot name it, leave it unlabelled and raise a To check item that asks what it is. A model's name for it is a guess.
 
 **Absent, or just not found.** Read `/outputs/intake/scan-notes.md` (`scan-intake`) before you name anything. A piece the data
 does not support (`identity_unsupported`, or a position the anatomy table does not give) is not that structure: remove its label
@@ -77,12 +74,10 @@ notes say nothing. Not when the notes settle it.
 ## 3. Read SAM against a classic segmentation
 
 `classic_segment.py --hu hu.npy --labels labels.npy --out qc/classic.npy --threshold-hu <T>` runs a seeded watershed inside
-bone, seeded from the eroded core (0.05 mm) of each label, on the Gaussian gradient. It shares SAM's idea of which bone is
+bone, seeded from the eroded core (`--core-mm`, default 0.05) of each label, on the Gaussian gradient. It shares SAM's idea of which bone is
 which, so it checks where boundaries run, **not identity**: a label on two bones stays on two bones. Identity errors are
-caught by section 1 and the 3D sheet. It floods every bone voxel connected to a seed, so a bone that has no label (a fibula you did
-not box, an unlabelled fragment) is absorbed by its neighbour: label every bone you want kept apart before you run it (on OA6-1RK,
-classic labels grown from SAM's femur, tibia and patella alone agreed with the reference at Dice 0.92 / 0.90 / 0.92, against SAM's
-0.97 / 0.95 / 0.94, for that reason). Then:
+caught by section 1 and the 3D sheet. It floods every bone voxel connected to a seed, so a bone that has no label (a neighbouring bone you did
+not box, an unlabelled fragment) is absorbed by its neighbour: label every bone you want kept apart before you run it. Then:
 
 ```
 python disagree.py --hu hu.npy --labels labels.npy --classic qc/classic.npy --threshold-hu <T> --frame frame.json --names <anatomy.json> --out qc/disagree
@@ -100,25 +95,20 @@ at its panel and decide:
 | A fragment that is its own bone in one method and part of a big bone in the other | Treat it as a small structure (section 2): name it from the anatomy table, then give it its own label. |
 | You cannot tell from the CT | Keep neither by default: raise a To check item, and say in it which label you kept meanwhile and why. |
 
-Do not keep your label because it is yours, and do not take the classic one because it is the check. Use evidence that does not
-come from either method. Each panel prints the region's assignment and size at the top ("region 2 (0.0056 mm3): yours = 1 femur,
-classic = 8 lateral-sesamoid"): read that line first, then the tinted region in each half, which is the colour of the label that
+Use evidence that does not come from either method. Each panel prints the region's assignment and size at the top ("region 2 (0.0056 mm3): yours = 1 <name>,
+classic = 8 <name>"): read that line first, then the tinted region in each half, which is the colour of the label that
 side gave it. For a zoom on the region, use the panel, or `quad_view.py --center <region centre z,y,x> --names <anatomy.json> --zoom 4`;
 `render_crops.py` takes a whole connected piece of bone, so on a region that touches a big bone it shows the big bone. Then the
 3D sheet and the anatomy table.
 
 **Compare volumes only when the region is a sizeable share of the smaller structure's range.** If the classic label is a structure
-the table lists (a sesamoid) and the region is a large part of that structure's range, or would move the big bone's volume across
-the edge of its range, the volume check decides it. A region far smaller than both ranges cannot: on OA6-1RK, region 2 (4,849 voxels,
-0.006 mm³) is 0.1% of the femur's range width and 1.5% of the sesamoid's, so neither volume tells you anything, and the call
-rests on the CT (the panel shows a separate bone beside the femur) and the anatomy table. Region 1 in the same run runs the other way
-(yours = lateral-sesamoid, classic = femur, 0.01 mm³). A region you keep as it was, against the other method, needs the
-reason written in the checkpoint; if the reason is only "the panel was unclear", it is the last row of the
-table, and the region goes to the researcher as a To check item with `focus` on it.
+the table lists and the region is a large part of that structure's range, or would move the big bone's volume across the edge of
+its range, the volume check decides it. A region far smaller than both ranges cannot: neither volume tells you anything, and the
+call rests on the CT (does the panel show a separate bone beside the big one?) and the anatomy table. A region you keep as it
+was, against the other method, needs the reason written in the checkpoint; if the reason is only "the panel was unclear", it is the
+last row of the table, and the region goes to the researcher as a To check item with `focus` on it.
 
-Never average or vote. Settle a region on the anatomy, or hand it on. How much to expect: on OA6-1RK, an earlier validator
-flagged 5.4% of the watershed's bone for SAM's labels (its own definition); `disagree.py` on the same run, big bones only,
-flags 2.6%. So a large region is worth a To check item even when you keep
+Never average or vote. Settle a region on the anatomy, or hand it on. A large region is worth a To check item even when you keep
 your label.
 
 ## 4. Fix
@@ -130,8 +120,7 @@ Choose the cheapest fix that addresses the cause:
 - A whole piece carries the wrong label: `relabel.py`.
 - Two bones share one label across a contact: split them with a watershed restricted to that label,
   `classic_segment.py ... --within <label> --seeds seeds.json` (`{"<label>": [[z,y,x], ...]}`, one entry per part, a seed
-  anywhere inside its part). The cut falls where the label pinches. On OA6-1RK it split a tibia label that had swallowed the
-  fibula back to Dice 0.998 (tibia) and 0.987 (fibula).
+  anywhere inside its part). The cut falls where the label pinches.
 
 After any fix, run the label checks and the quad view and 3D sheet looks again.
 
@@ -139,18 +128,15 @@ After any fix, run the label checks and the quad view and 3D sheet looks again.
 
 Raise one To check item per region with `checkpoint`: `toCheck: {title, focus: {structureIds: [], annotationIds: [], volumeId:
 <the disagreement labels volume output>, label: <region>}}` (both arrays are required). In the title, give the place and the
-question ("Medial joint face, slices 140-170: femur or tibia?"). In the text, give both methods' labels and the one you kept.
+question ("Joint face, slices 140-170: bone A or bone B?"). In the text, give both methods' labels and the one you kept.
 Report `disagreement.npy` as a `volume` output of kind `labels` so the focus resolves.
 
 ## When you check a task
 
-What a checker re-derives and opens for a task that made or used labels:
+What a checker re-derives and opens for a task that made or used labels (the checker's own duties are in its role):
 
 - Re-derive under `/scratch/recheck/`: `label_stats.py` and `unlabelled.py` on the worker's labels, and any distance or
   volume with `measure.py`.
 - Open the 3D sheet, a quad view centred on the keyframe, and the crop of anything `unlabelled.py` found (`visual-check`).
 - Causes to name for `needs-review`: a wrong box, a missing neighbour, a merged fragment, a label on two bones, a number out of
   range with no explanation, a result that cannot be traced to a file.
-
-Your eyes are fallible on small things and on bone names away from the joint: confirm in code before you reject, and say
-which of the two you relied on.

@@ -2,7 +2,7 @@
 
   python tibial_trabecular.py --iioc-tissue iioc-tissue.npy --growth-plate-face growth-plate-proximal-face.npy
          --hu-aligned tibia-hu.npy --annotations annotations.json --out <dir>
-         [--shell-clearance-mm 0.021] [--growth-clearance-mm 0.021] [--upper-shift-voxels 0]
+         [--shell-clearance-mm 0.021] [--growth-clearance-mm 0.021] [--upper-shift-mm 0]
 
 ROI-2 is ROI-1 (from iioc.py) minus the subchondral plate above a traced under-plate boundary, minus a shell of the
 outer surface, minus a clearance under the growth-plate face, limited laterally by the boundary's end points and by
@@ -66,7 +66,7 @@ def main():
         '--growth-clearance-mm', type=float, default=0.021, help='stay this far above the growth-plate face'
     )
     ap.add_argument(
-        '--upper-shift-voxels', type=float, default=0.0, help='move the under-plate boundary: sensitivity run'
+        '--upper-shift-mm', type=float, default=0.0, help='move the under-plate boundary by this many mm: sensitivity run'
     )
     a = ap.parse_args()
     g = sidecar.grid(sidecar.sidecar_path(a.iioc_tissue))
@@ -75,7 +75,7 @@ def main():
     parent = np.load(a.iioc_tissue)
     gp = np.load(a.growth_plate_face)
     hu = np.load(a.hu_aligned, mmap_mode='r')
-    roi, upper = compartment(parent, gp, ann, vox, a.shell_clearance_mm, a.growth_clearance_mm, a.upper_shift_voxels)
+    roi, upper = compartment(parent, gp, ann, vox, a.shell_clearance_mm, a.growth_clearance_mm, a.upper_shift_mm / vox)
     if not roi.any():
         sidecar.fail('ROI-2 is empty: the under-plate curves lie outside ROI-1 or the clearances are too large')
     out = Path(a.out)
@@ -83,7 +83,7 @@ def main():
     params = {
         'shell_clearance_mm': a.shell_clearance_mm,
         'growth_clearance_mm': a.growth_clearance_mm,
-        'upper_shift_voxels': a.upper_shift_voxels,
+        'upper_shift_mm': a.upper_shift_mm,
     }
     for name, arr in (
         ('iioc-trab-tissue.npy', roi),

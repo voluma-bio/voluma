@@ -33,5 +33,3 @@ Every later step takes `hu.json` for the voxel size and the grid.
     orientation was worked out, anything that changes how a number is read.
 
   Do not infer what the notes do not say, and do not add what you saw on the scan: intake has not looked at the bones.
-  `scan-notes.md` is the one file every later task reads for the researcher's account of the scan.
-- Looks: none needed. Orientation is the next step (`orient-joint`).

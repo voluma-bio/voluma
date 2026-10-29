@@ -1,9 +1,9 @@
 """Crop sheet for one small component: three orthogonal cuts through its centre, with the labels outlined. For "what is this small unlabelled thing?" and "is it on the right bone?".
 
-  python render_crops.py --hu hu.npy --labels labels.npy --out crop.jpg (--component-at z,y,x | --label 5)
-        [--pad-mm 1.5] [--window 1000,8000] [--header hu.json] [--names 1=femur,2=tibia | anatomy.json]
+  python render_crops.py --hu hu.npy --labels labels.npy --out crop.jpg (--component-at z,y,x --bone-hu T | --label 5)
+        [--pad-mm 1.5] [--window lo,hi] [--header hu.json] [--names 1=femur,2=tibia | anatomy.json]
 
-`--component-at` picks the 3D piece of bone (labelled or not) that contains the voxel; `--label` picks the largest piece
+`--component-at` picks the 3D piece of bone (labelled or not: voxels at or above `--bone-hu`) that contains the voxel; `--label` picks the largest piece
 of that label. The crop is a cube of the piece's bounding box plus `--pad-mm`, with the piece itself drawn in white.
 """
 import argparse
