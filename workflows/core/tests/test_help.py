@@ -1,6 +1,6 @@
 """Every resource script's `--help` is its contract: it runs, and no option lacks help text.
 
-The runner's tool index is the first docstring line of each script, so that line must be there and short.
+The planned tool index in the agent's prompt is the first docstring line of each script, so that line must be there and short.
 Options are checked on the parser the script builds, captured at the `parse_args` call when the script runs as `__main__`, not on
 the printed text: a missing help string is then a fact, not a layout guess.
 """
