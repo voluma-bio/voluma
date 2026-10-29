@@ -66,8 +66,10 @@ any content: backoff from 1 s doubling to a 30 s cap, until 4 minutes have passe
 attempt (Pi's own tries count against it; an attempt in flight is not cut short), each retry
 logged with its role and attempt and reported to the fallback breaker. The run's abort ends the
 wait. Any other error, or the spent budget, ends the call. A main-thread wake is also bounded
-by the supervisor's `wakeTimeoutMs`. Anthropic errors carry no status in their text, so they
-are not retried. `provider-error.ts` holds the error classification.
+by the supervisor's `wakeTimeoutMs`. `provider-error.ts` holds the one error classification (retry, redo and breaker):
+it reads the status Pi puts in the text (`<provider> API error (<status>)`, or Anthropic's
+`<status> {"type":"error","error":{"type":...}}`) and, for an Anthropic error sent mid-stream
+with no status, its documented `error.type` (`overloaded_error` is 529, `rate_limit_error` 429).
 
 **A worker or check that dies on a provider error** (`provider-error.ts`, after the retries above
 gave up) is started again by the supervisor with no main-thread call, since the main thread uses
