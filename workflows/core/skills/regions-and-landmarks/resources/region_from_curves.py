@@ -12,30 +12,17 @@ Writes: <out>/region.npy  bool, the grid of --grid, with its sidecar
 Prints: one JSON line {region, check, voxels, volume_mm3, bbox_zyx}; bbox_zyx is [[min z, y, x], [max z, y, x + 1]]
 Example: python region_from_curves.py between --surface-a A.json --surface-b B.json --grid hu.json --bone bone.npy --out DIR
          python region_from_curves.py polygon --polygons poly.json --grid hu.json --bone bone.npy --out DIR
-Exits 2 with one sentence on the input it checks; a missing file is a Python error.
+Exits 2 with one sentence on bad input, before writing anything.
 """
 
 import json
-import sys
 from pathlib import Path
 
 import matplotlib
 import numpy as np
+import sidecar
 from scipy import ndimage as ndi
 from skimage.draw import polygon as draw_polygon
-
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
-# only missing directories are added, so a script imported by another leaves the importer's order alone.
-SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources')) if d not in sys.path]
-try:
-    import sidecar
-except ModuleNotFoundError as e:
-    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
-          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
-    sys.exit(2)
-
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -167,8 +154,8 @@ slab at a set distance from a surface. Both surfaces must use the same slice and
 three points) per traced slice, at least two slices. Slices between are interpolated by signed distance, so the outline
 morphs smoothly; it is not an extrusion. Trace slices where the shape changes, and at the ends of the region."""
     b = sub.add_parser('between', help='the region between two traced surfaces', description=between_doc, formatter_class=sidecar.HelpFormatter)
-    b.add_argument('--surface-a', required=True, help='curves JSON, or a 2D height map .npy (axis-length by other-axis-length)')
-    b.add_argument('--surface-b', required=True, help='the second surface, same form and same axes as --surface-a')
+    b.add_argument('--surface-a', type=sidecar.existing, required=True, help='curves JSON, or a 2D height map .npy (axis-length by other-axis-length)')
+    b.add_argument('--surface-b', type=sidecar.existing, required=True, help='the second surface, same form and same axes as --surface-a')
     b.add_argument('--axis', type=int, help='slice axis (0-2), needed with a .npy height map')
     b.add_argument('--height-axis', type=int, help='axis (0-2) the surface heights are indices of, needed with a .npy map')
     b.add_argument(
@@ -177,16 +164,16 @@ morphs smoothly; it is not an extrusion. Trace slices where the shape changes, a
     b.add_argument('--offset-b-mm', type=float, default=0, help='mm: move surface B along the height axis (+ = higher index)')
     b.add_argument('--slice-range', type=int, nargs=2, metavar=('FIRST', 'LAST'), help='limit the region to these slices (inclusive; default: the slices both surfaces were traced on)')
     p = sub.add_parser('polygon', help='a polygon traced on slices, swept between them', description=polygon_doc, formatter_class=sidecar.HelpFormatter)
-    p.add_argument('--polygons', required=True, help='JSON file, described above')
+    p.add_argument('--polygons', type=sidecar.existing, required=True, help='JSON file, described above')
     for q in (b, p):
-        q.add_argument('--grid', required=True, help='hu.json or a sidecar of the grid the curves and masks are on')
-        q.add_argument('--bone', help='bool .npy: keep only the region inside this mask')
-        q.add_argument('--labels', help='label .npy, with --ids, instead of --bone')
+        q.add_argument('--grid', type=sidecar.existing, required=True, help='hu.json or a sidecar of the grid the curves and masks are on')
+        q.add_argument('--bone', type=sidecar.existing, help='bool .npy: keep only the region inside this mask')
+        q.add_argument('--labels', type=sidecar.existing, help='label .npy, with --ids, instead of --bone')
         q.add_argument('--ids', type=int, nargs='+', help='label ids that make up the bone, with --labels')
         q.add_argument(
             '--clearance-mm', type=float, default=0, help='mm: also drop voxels closer than this to the outer surface of the bone mask you pass (periosteum for a filled bone, not the inner surface of the cortex)'
         )
-        q.add_argument('--hu', help='hu.npy: background for the check image, and the grid shape')
+        q.add_argument('--hu', type=sidecar.existing, help='hu.npy: background for the check image, and the grid shape')
         q.add_argument('--out', required=True, help='output directory (created)')
     a = ap.parse_args()
 

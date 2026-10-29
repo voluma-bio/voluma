@@ -21,7 +21,7 @@ Prints: one JSON line {image, view, crosshair_zyx, zoom, camera, panes, shown, w
 Example: python quad_view.py --hu hu.npy --labels labels.npy --names anatomy.json --out /scratch/v1.jpg
          python quad_view.py --from /scratch/v1.view.json --center tibia --move axis0+5 --out /scratch/v2.jpg
          python quad_view.py --from v2.view.json --rotate 40,0 --plane 1:contains=shaft_a,shaft_b --out v3.jpg
-Exits 2 with one sentence on the input it checks; a missing file is a Python error.
+Exits 2 with one sentence on bad input, before writing anything.
 """
 import json
 import math
@@ -31,22 +31,11 @@ import sys
 import time
 from pathlib import Path
 
+import frame as fr
 import matplotlib.patheffects as pe
 import numpy as np
+import viewlib as vl
 from scipy import ndimage as ndi
-
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
-# only missing directories are added, so a script imported by another leaves the importer's order alone.
-SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources')) if d not in sys.path]
-try:
-    import frame as fr
-    import viewlib as vl
-except ModuleNotFoundError as e:
-    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
-          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
-    sys.exit(2)
 
 sl, plt = vl.sidecar, vl.plt
 PANE_COLOURS = ['#ff3b30', '#34c759', '#4f8dff']  # pane 0, 1, 2: its border, its plane in 3D, its line in the other panes
@@ -662,15 +651,15 @@ def parse_args(argv):
     """Parse and check every option, so a bad one is refused in one sentence before any work: ranges, syntax, files."""
     ap = sl.parser(__doc__, allow_abbrev=False)
     ap.add_argument('--out', required=True, help='the image to write (.jpg); the view.json goes beside it')
-    ap.add_argument('--from', dest='from_', help='an earlier .view.json: take its state and apply the changes below')
-    ap.add_argument('--hu', help='the scan, hu.npy (first call; later calls take it from --from)')
+    ap.add_argument('--from', type=sl.existing, dest='from_', help='an earlier .view.json: take its state and apply the changes below')
+    ap.add_argument('--hu', type=sl.existing, help='the scan, hu.npy (first call; later calls take it from --from)')
     ap.add_argument('--window', help='display window lo,hi in HU (default: automatic from the middle slice); a negative low end as is: --window -500,6000')
-    ap.add_argument('--labels', help='label volume .npy: outlines on slices, colours in 3D (bone is ivory without it, and while the labels layer is hidden)')
+    ap.add_argument('--labels', type=sl.existing, help='label volume .npy: outlines on slices, colours in 3D (bone is ivory without it, and while the labels layer is hidden)')
     ap.add_argument('--names', help='label names, 1=femur,2=tibia or an anatomy.json')
     ap.add_argument('--mask', action='append', metavar='NAME=M.npy', help='bool volume on any registered grid: outline on slices, translucent surface in 3D (repeatable)')
     ap.add_argument('--face', action='append', metavar='NAME=F.npy', help='2D array of a frame\'s axis-0 index over its axes 1, 2 (NaN = none; iioc\'s growth-plate face): drawn as a line (repeatable)')
     ap.add_argument('--points', action='append', metavar='NAME=P.json', help='a named set of points, each with a grid_id (what pick.py writes): markers and names, a sphere in 3D. NAME is the layer --show / --hide toggles; the points keep the names inside the file (repeatable)')
-    ap.add_argument('--frame', action='append', metavar='frame.json', help='register the frame of a grid that is not the scan\'s (repeatable)')
+    ap.add_argument('--frame', action='append', type=sl.existing, metavar='frame.json', help='register the frame of a grid that is not the scan\'s (repeatable)')
     ap.add_argument('--ruler', metavar='A,B', help='a line between two named points, labelled with its length in mm')
     ap.add_argument('--bone-hu', type=float, help='HU above which a voxel is bone in 3D when there are no labels')
     ap.add_argument('--pane-px', type=int, help='pixels per pane side (default: 800; at most 940)')
@@ -694,8 +683,7 @@ def parse_args(argv):
     a = ap.parse_args(joined)
     if bool(a.from_) == bool(a.hu):
         sl.fail('pass --hu hu.npy for a first view, or --from <earlier>.view.json to change one (not both)')
-    for opt, path in [('--from', a.from_), ('--hu', a.hu), ('--labels', a.labels), ('--names', a.names if a.names and a.names.endswith('.json') else None),
-                      *[('--frame', f) for f in a.frame or []],
+    for opt, path in [('--names', a.names if a.names and a.names.endswith('.json') else None),
                       *[(f'--{o}', i.partition('=')[2]) for o in ('mask', 'face', 'points') for i in getattr(a, o) or [] if '=' in i]]:
         if path:
             need_file(path, f'{opt}')

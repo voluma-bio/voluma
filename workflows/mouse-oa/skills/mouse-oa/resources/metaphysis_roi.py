@@ -35,30 +35,18 @@ Writes: <out>/roi3-tissue.npy  ROI-3, bool, on the aligned grid, with its sideca
         <out>/qc-roi3.jpg  coronal and axial sections: ROI-3 cyan, cortex orange
 Prints: one JSON line {params, qc, roi3_tissue, cortex, distal_face, cortex_estimate_mm, roi3_voxels}
 Example: python metaphysis_roi.py --hu-aligned tibia-hu.npy --mask tibia-mask.npy --hu-json hu.json --annotations annotations.json --proximal-face iioc/growth-plate-proximal-face.npy --proximal-valid iioc/growth-plate-proximal-valid.npy --out roi3/
-Exits 2 with one sentence on the input it checks; a missing file is a Python error.
+Exits 2 with one sentence on bad input, before writing anything.
 """
 
 import json
-import sys
 from pathlib import Path
 
 import matplotlib
 import numpy as np
+import sidecar
+from annotations import load_annotations, traced_surface
+from envelope import close_and_fill
 from scipy import ndimage as ndi
-
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
-# only missing directories are added, so a script imported by another leaves the importer's order alone.
-SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources'), str(SKILLS / 'regions-and-landmarks/resources')) if d not in sys.path]
-try:
-    import sidecar
-    from annotations import load_annotations, traced_surface
-    from envelope import close_and_fill
-except ModuleNotFoundError as e:
-    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
-          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
-    sys.exit(2)
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -125,12 +113,12 @@ def cortex_depth(bone, dist, roi_slices, max_layers=40):
 
 def main():
     ap = sidecar.parser(__doc__)
-    ap.add_argument('--hu-aligned', required=True, help='tibia-hu.npy from tibia_frame.py')
-    ap.add_argument('--mask', required=True, help='tibia-mask.npy from tibia_frame.py')
-    ap.add_argument('--hu-json', required=True, help='hu.json of the scan: the lab threshold in HU comes from its calibration')
-    ap.add_argument('--annotations', required=True, help='annotations JSON on the aligned grid, described above')
-    ap.add_argument('--proximal-face', required=True, help='growth-plate-proximal-face.npy from iioc.py: the distal face must lie below it')
-    ap.add_argument('--proximal-valid', required=True, help='growth-plate-proximal-valid.npy from iioc.py: where the proximal face was traced')
+    ap.add_argument('--hu-aligned', type=sidecar.existing, required=True, help='tibia-hu.npy from tibia_frame.py')
+    ap.add_argument('--mask', type=sidecar.existing, required=True, help='tibia-mask.npy from tibia_frame.py')
+    ap.add_argument('--hu-json', type=sidecar.existing, required=True, help='hu.json of the scan: the lab threshold in HU comes from its calibration')
+    ap.add_argument('--annotations', type=sidecar.existing, required=True, help='annotations JSON on the aligned grid, described above')
+    ap.add_argument('--proximal-face', type=sidecar.existing, required=True, help='growth-plate-proximal-face.npy from iioc.py: the distal face must lie below it')
+    ap.add_argument('--proximal-valid', type=sidecar.existing, required=True, help='growth-plate-proximal-valid.npy from iioc.py: where the proximal face was traced')
     ap.add_argument('--out', required=True, help='output directory (created)')
     ap.add_argument('--threshold', type=float, help='bone threshold in HU (default: the lab threshold, 2.16/cm, from --hu-json)')
     ap.add_argument('--start-um', type=float, default=50.0, help='um: ROI-3 starts this far below the distal growth-plate face')

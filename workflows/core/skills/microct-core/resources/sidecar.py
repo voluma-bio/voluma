@@ -20,7 +20,9 @@ Library use (other resources import this file):
   sidecar.save_image(fig, path)  # the image limits below, JPEG
   sidecar.load_points(paths, grid_id)   # {name: [z, y, x]} merged from points files (`pick.py` writes one per view); refuses another grid
   sidecar.fail(sentence)   # print a sentence the agent can act on to stderr and exit 2
-  sidecar.parser(__doc__)  # the argparse parser every resource uses: the docstring is the `--help` text, defaults appended
+  sidecar.parser(__doc__)  # the argparse parser every resource uses: the docstring is the `--help` text, defaults appended;
+                           # any argument error is one sentence on stderr and exit 2
+  ap.add_argument('--hu', type=sidecar.existing)   # an input file or directory: refused after parsing, before anything is written
 
 Result record: every script that reports numbers writes `{"values": {id: {value, unit, definition, kind, ...}}, ...meta}`
 to its JSON file and prints `{"out": path, "values": {id: {value, unit, definition, kind}}, ...}` (values rounded to 6 decimals).
@@ -52,9 +54,21 @@ class HelpFormatter(argparse.RawDescriptionHelpFormatter, argparse.ArgumentDefau
         return super()._get_help_string(action)
 
 
+class _Parser(argparse.ArgumentParser):
+    def error(self, message):
+        fail(message)  # one sentence, not argparse's usage text and prog prefix
+
+
+def existing(path):
+    """`type=` of an argument that names an input: a path that must exist (a file or a directory)."""
+    if not Path(path).exists():
+        raise argparse.ArgumentTypeError(f'{path} does not exist')
+    return path
+
+
 def parser(doc, **kwargs):
     """The parser of a resource: `doc` is its module docstring, printed whole by `--help`."""
-    return argparse.ArgumentParser(description=doc, formatter_class=HelpFormatter, **kwargs)
+    return _Parser(description=doc, formatter_class=HelpFormatter, **kwargs)
 
 
 def sha256_file(path):

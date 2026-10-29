@@ -6,24 +6,12 @@ along axis 0) or a 2D image. x is the column (top labels), y the row (left label
 Writes: <out>  the JPEG, one pixel per array element (at most 2000 px, 1 MiB)
 Prints: one JSON line {image, shape_rc, index, boxes, points}
 Example: python render_slices.py --in oriented.npy --index 159 --out keyframe.jpg --grid --points 120,300:landmark
-Exits 2 with one sentence on the input it checks; a missing file is a Python error.
+Exits 2 with one sentence on bad input, before writing anything.
 """
-import sys
 from pathlib import Path
 
 import numpy as np
-
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
-# only missing directories are added, so a script imported by another leaves the importer's order alone.
-SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources')) if d not in sys.path]
-try:
-    import viewlib as vl
-except ModuleNotFoundError as e:
-    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
-          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
-    sys.exit(2)
+import viewlib as vl
 
 sl = vl.sidecar
 
@@ -52,7 +40,7 @@ def render(img, out, window=None, grid=True, boxes=(), points=(), title=None):
 
 if __name__ == '__main__':
     ap = sl.parser(__doc__)
-    ap.add_argument('--in', dest='src', required=True, help='a 3D stack or a 2D image, .npy')
+    ap.add_argument('--in', type=sl.existing, dest='src', required=True, help='a 3D stack or a 2D image, .npy')
     ap.add_argument('--index', type=int, help='slice along axis 0 of a 3D stack (required for a 3D stack)')
     ap.add_argument('--out', required=True, help='the image to write (.jpg)')
     ap.add_argument('--window', metavar='lo,hi', help='display window in the volume\'s units, HU (default: from the data)')
