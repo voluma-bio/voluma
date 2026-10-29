@@ -24,8 +24,8 @@ interface Common {
   image: string;
   lifetimeSeconds: number;
   idleSeconds: number;
-  /** Set on every command, e.g. the run layout's `PYTHONPATH`; secrets do not belong here. */
-  env?: Record<string, string>;
+  /** Set on every command: the run layout's `env` (`PYTHONPATH`); secrets do not belong here. */
+  env: Record<string, string>;
 }
 
 const base = (c: Common) => ({

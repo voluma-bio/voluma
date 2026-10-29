@@ -659,7 +659,7 @@ def parse_args(argv):
     ap.add_argument('--mask', action='append', metavar='NAME=M.npy', help='bool volume on any registered grid: outline on slices, translucent surface in 3D (repeatable)')
     ap.add_argument('--face', action='append', metavar='NAME=F.npy', help='2D array of a frame\'s axis-0 index over its axes 1, 2 (NaN = none; iioc\'s growth-plate face): drawn as a line (repeatable)')
     ap.add_argument('--points', action='append', metavar='NAME=P.json', help='a named set of points, each with a grid_id (what pick.py writes): markers and names, a sphere in 3D. NAME is the layer --show / --hide toggles; the points keep the names inside the file (repeatable)')
-    ap.add_argument('--frame', action='append', metavar='frame.json', help='register the frame of a grid that is not the scan\'s (repeatable)')
+    ap.add_argument('--frame', action='append', type=sl.existing, metavar='frame.json', help='register the frame of a grid that is not the scan\'s (repeatable)')
     ap.add_argument('--ruler', metavar='A,B', help='a line between two named points, labelled with its length in mm')
     ap.add_argument('--bone-hu', type=float, help='HU above which a voxel is bone in 3D when there are no labels')
     ap.add_argument('--pane-px', type=int, help='pixels per pane side (default: 800; at most 940)')
@@ -683,8 +683,7 @@ def parse_args(argv):
     a = ap.parse_args(joined)
     if bool(a.from_) == bool(a.hu):
         sl.fail('pass --hu hu.npy for a first view, or --from <earlier>.view.json to change one (not both)')
-    for opt, path in [('--from', a.from_), ('--hu', a.hu), ('--labels', a.labels), ('--names', a.names if a.names and a.names.endswith('.json') else None),
-                      *[('--frame', f) for f in a.frame or []],
+    for opt, path in [('--names', a.names if a.names and a.names.endswith('.json') else None),
                       *[(f'--{o}', i.partition('=')[2]) for o in ('mask', 'face', 'points') for i in getattr(a, o) or [] if '=' in i]]:
         if path:
             need_file(path, f'{opt}')

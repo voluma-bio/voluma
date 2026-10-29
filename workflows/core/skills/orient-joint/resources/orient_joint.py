@@ -168,6 +168,8 @@ def joint_frame(hu, spacing_mm, shaft_radius_mm, ref_radius_mm, min_object_mm3, 
     fg = sub > T
     closed = ndi.binary_closing(fg, ndi.generate_binary_structure(3, 1), iterations=1) | fg
     lab, n = ndi.label(closed)
+    if n == 0:
+        sidecar.fail(f'No bone found above {T:.0f} HU: check the volume and --threshold-hu')
     sizes = ndi.sum_labels(fg, lab, range(1, n + 1)) * 8
     order = np.argsort(-sizes)
     cents = np.array(ndi.center_of_mass(fg, lab, range(1, n + 1))) * 2 + 0.5
@@ -297,13 +299,13 @@ if __name__ == '__main__':
     sp = g['spacing_zyx_mm']
     if not np.allclose(sp, sp[0], rtol=1e-3):
         sidecar.fail(f'Voxels are not isotropic ({sp} mm): resample the volume before orienting')
-    out = Path(a.out)
-    out.mkdir(parents=True, exist_ok=True)
     hu = np.load(a.src, mmap_mode='r')
     params = {'threshold_hu': a.threshold_hu, 'shaft_radius_mm': a.shaft_radius_mm, 'ref_radius_mm': a.ref_radius_mm,
                   'min_object_mm3': a.min_object_mm3, 'margin_mm': a.margin_mm,
                   'second_bone_frac': a.second_bone_frac}
     frame = fr.make(g['grid_id'], sp, parent_affine_xyz=g['affine_xyz_to_world_mm'], **joint_frame(hu, sp[0], **params))
+    out = Path(a.out)
+    out.mkdir(parents=True, exist_ok=True)
     stack = fr.resample(hu, frame, cval=frame['background_hu'])
     np.save(out / 'oriented.npy', stack)
     fr.save(frame, out / 'frame.json')

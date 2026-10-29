@@ -5,6 +5,8 @@ Also: skills' modules share one import path, so a file name used in two skills' 
 """
 
 import importlib
+import importlib.metadata
+import sys
 from collections import Counter
 from pathlib import Path
 
@@ -29,7 +31,10 @@ def test_pyvista_renders_offscreen(tmp_path):
     assert out.stat().st_size > 0
 
 
-def test_module_names_are_unique_across_skills():
-    names = Counter(p.name for p in Path(__file__).parents[2].glob("*/skills/*/resources/*.py"))
-    duplicates = [n for n, c in names.items() if c > 1]
+def test_module_names_are_unique_and_shadow_nothing():
+    """PYTHONPATH precedes the standard library and site-packages for every Python process in the sandbox."""
+    stems = Counter(p.stem for p in Path(__file__).parents[2].glob("*/skills/*/resources/*.py"))
+    duplicates = [n for n, c in stems.items() if c > 1]
     assert not duplicates, f"{duplicates} named in two skills' resources/: the runner puts them all on one PYTHONPATH"
+    taken = set(sys.stdlib_module_names) | set(importlib.metadata.packages_distributions())
+    assert not set(stems) & taken, f"{sorted(set(stems) & taken)} in resources/ would shadow a stdlib or installed module"

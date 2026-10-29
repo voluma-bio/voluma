@@ -22,8 +22,8 @@ export interface RunLayout {
   mounts: SandboxMount[];
   /**
    * The environment of every sandbox of the run, whatever its role or thread. `PYTHONPATH` lets
-   * one skill's script import another skill's module; `skills` is `WorkflowDefinition.skills`,
-   * so the workflow's own skill comes first.
+   * one skill's script import another skill's module; `skills` is `WorkflowDefinition.skills`.
+   * Module names are unique across skills (a test enforces it), so the order does not matter.
    */
   env: Record<string, string>;
   /** The mounts, as bullet lines for the tool description. */

@@ -17,8 +17,15 @@ from sidecar import existing as sidecar_existing
 
 ROOT = Path(__file__).resolve().parents[2]  # workflows/
 RESOURCES = sorted(ROOT.glob('*/skills/*/resources'))  # core and each workflow
-# What the runner sets in the sandbox (runLayout): every skill's resources/, so scripts import one another by name.
-ENV = {**os.environ, 'PYTHONPATH': os.pathsep.join(map(str, RESOURCES))}
+
+
+def env_of(script):
+    """What a run of the script's workflow sets (runLayout): core's resources/ and the workflow's own."""
+    workflow = script.relative_to(ROOT).parts[0]
+    dirs = [d for d in RESOURCES if d.relative_to(ROOT).parts[0] in ('core', workflow)]
+    return {**os.environ, 'PYTHONPATH': os.pathsep.join(map(str, dirs))}
+
+
 # Libraries have no CLI by design; sidecar.py also has one, but its docstring is the library's reference.
 LIBRARIES = {'frame.py', 'viewlib.py', 'envelope.py', 'annotations.py', 'sidecar.py'}
 # Every other resources/*.py is a script: a new file is checked without anyone listing it.
@@ -38,7 +45,7 @@ def test_all_scripts_found():
 
 @pytest.mark.parametrize('script', SCRIPTS, ids=ids(SCRIPTS))
 def test_help_exits_0(script):
-    r = subprocess.run([sys.executable, str(script), '--help'], check=False, capture_output=True, text=True, timeout=120, cwd='/', env=ENV)
+    r = subprocess.run([sys.executable, str(script), '--help'], check=False, capture_output=True, text=True, timeout=120, cwd='/', env=env_of(script))
     assert r.returncode == 0, r.stderr
     assert r.stdout.startswith('usage:')
 
@@ -112,7 +119,7 @@ def test_missing_input_is_one_sentence(script, monkeypatch, tmp_path):
     assert found, 'no argument declares type=sidecar.existing: an input path is checked by the parser'
     prefix, flag = found
     missing = str(tmp_path / 'missing.npy')
-    r = subprocess.run([sys.executable, str(script), *prefix, flag, missing], check=False, capture_output=True, text=True, timeout=120, cwd='/', env=ENV)
+    r = subprocess.run([sys.executable, str(script), *prefix, flag, missing], check=False, capture_output=True, text=True, timeout=120, cwd='/', env=env_of(script))
     assert r.returncode == 2, r.stderr
     assert r.stdout == '' and len(r.stderr.strip().splitlines()) == 1, r.stderr
     assert flag in r.stderr and missing in r.stderr
