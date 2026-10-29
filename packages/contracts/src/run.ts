@@ -246,7 +246,8 @@ export const runSchema = z
     /**
      * What the run has spent so far: the sum of the usage its heartbeats reported (`runner.ts`).
      * `modelCostUsd` is model calls and paid tool calls (`tool.result.costUsd`), in US dollars;
-     * `sandboxSeconds` is how long its sandbox was up. Per task: `spend` in `spend.ts`.
+     * `sandboxSeconds` is sandbox time summed over its sandboxes (one per thread, so concurrent
+     * threads add up and it can exceed wall time). Per task: `spend` in `spend.ts`.
      * Optional until the API writes it.
      */
     usage: z

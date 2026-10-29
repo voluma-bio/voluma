@@ -15,7 +15,7 @@ export interface ToolContext {
   toolCallId: string;
   /** Aborts when the run is cancelled; tools must stop what they started. */
   signal: AbortSignal;
-  /** The run's sandbox, created on first use. */
+  /** The calling thread's sandbox, created on first use. */
   sandbox(): Promise<Sandbox>;
   /** Live output for people watching: queued, best effort, may be dropped. */
   output(stream: "stdout" | "stderr", text: string): void;

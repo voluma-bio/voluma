@@ -45,8 +45,10 @@ export interface SuperviseRunOptions {
   layout: RunLayout;
   recorder: Recorder;
   history: History;
-  /** The run's sandbox for a thread (`sandboxSession.get`). */
+  /** A thread's own sandbox (`sandboxSession.get`). */
   sandbox(threadId: string): Promise<Sandbox>;
+  /** Called when a thread ends: destroys its sandbox (`sandboxSession.release`). */
+  releaseSandbox(threadId: string): void;
   evidence: Evidence;
   /** The run's bucket, read and written host-side by `view_image` and `segment_sam`. */
   files: Files;
@@ -84,7 +86,13 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
     signal,
   });
   const pool = threads(
-    { runId, recorder, history: options.history, sandbox: options.sandbox },
+    {
+      runId,
+      recorder,
+      history: options.history,
+      sandbox: options.sandbox,
+      release: options.releaseSandbox,
+    },
     signal,
   );
   const runtime = taskRuntime({

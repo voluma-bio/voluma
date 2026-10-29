@@ -10,7 +10,7 @@
  * message into it (Pi's steering queue: delivered after the current tool calls); one sent
  * before the loop starts is queued for it. Once the thread has ended, `send` answers false, and the way to wake it is another `startThread` with the same
  * thread id and an `input`, which resumes from History (`threads.ts` does this). Several
- * threads share one process, and one sandbox through `sandbox`.
+ * threads share one process; each gets its own sandbox through `sandbox`.
  */
 import {
   Agent,
@@ -62,7 +62,7 @@ export type StartThreadOptions = ThreadIdentity & {
   tools: Tool[];
   recorder: Recorder;
   history: History;
-  /** The run's sandbox for the calling thread, created on first use. */
+  /** The calling thread's own sandbox, created on first use. */
   sandbox: (threadId: string) => Promise<Sandbox>;
   /** Aborting ends the thread as cancelled and kills a running command. */
   signal?: AbortSignal;

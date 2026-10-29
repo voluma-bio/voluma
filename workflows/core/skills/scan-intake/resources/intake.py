@@ -1,11 +1,17 @@
-"""DICOM series to a calibrated HU volume: hu.npy (float32, Z,Y,X) and hu.json (grid, spacing, calibration, sources).
-
-  python intake.py --in <dicom dir> --out <outdir>
+"""Convert a DICOM series to a calibrated HU volume (hu.npy) and its grid header (hu.json).
 
 HU comes from the rescale tags (and Scanco's private calibration where present), never from a histogram peak.
-Refuses a series with missing or uneven slices, mixed geometry, or no valid HU mapping, and says which.
+Refuses, and says which: a series with fewer than two .dcm slices, missing, duplicate or unevenly spaced slices, slices
+shifted in plane, mixed series, geometry or calibration, no valid positive-slope HU mapping, a DICOM mapping that
+contradicts Scanco's private calibration, or an `--out` that already holds hu.npy. Slices are found recursively under `--in`.
+
+Writes: <out>/hu.npy  float32 HU, axis order Z,Y,X, slices sorted along the series normal
+        <out>/hu.json  the scan's grid: shape_zyx, spacing_zyx_mm, affine_xyz_to_world_mm (consumes x,y,z voxel-centre
+        indices), calibration, grid_id, and the sha256 of every source slice
+Prints: one JSON line {hu, header, shape_zyx, spacing_zyx_mm, grid_id, calibration, hu_min, hu_max}
+Example: python intake.py --in dicom/ --out scan/
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
-import argparse
 import hashlib
 import json
 import sys
@@ -116,9 +122,9 @@ def load_series(source, out):
 
 
 if __name__ == '__main__':
-    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--in', dest='src', required=True, help='directory holding the DICOM series')
-    ap.add_argument('--out', required=True, help='new output directory')
+    ap = sidecar.parser(__doc__)
+    ap.add_argument('--in', dest='src', required=True, help='directory holding the DICOM series (.dcm files, searched recursively)')
+    ap.add_argument('--out', required=True, help='output directory (created; must not already hold hu.npy)')
     a = ap.parse_args()
     m, hu_min, hu_max = load_series(a.src, Path(a.out))
     sidecar.emit(hu=str(Path(a.out) / 'hu.npy'), header=str(Path(a.out) / 'hu.json'), shape_zyx=m['shape_zyx'],

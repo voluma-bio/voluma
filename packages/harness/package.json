@@ -12,6 +12,7 @@
     "./recorder": "./src/recorder.ts",
     "./live": "./src/live.ts",
     "./sandbox-session": "./src/sandbox-session.ts",
+    "./sandbox-specs": "./src/sandbox-specs.ts",
     "./adapters/http/hand-off": "./src/adapters/http/hand-off.ts",
     "./ports/evidence": "./src/ports/evidence.ts",
     "./adapters/local/evidence": "./src/adapters/local/evidence.ts",
