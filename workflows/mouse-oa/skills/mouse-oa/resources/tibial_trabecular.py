@@ -5,7 +5,7 @@ outer surface, minus a clearance under the growth-plate face, limited laterally 
 V limits. It writes the region only: its TV, BV and BV/TV (deck #13-15) come from `morphometry.py volumes`. An empty ROI-2 is refused.
 
 --annotations is a JSON file of indices on the aligned grid. It needs "grid_id" (the grid_id of tibia-frame.json; a file without it
-or from another grid is refused). This script reads two keys, other sections of the file are ignored:
+or from another grid is refused). This script reads two keys; any other key is refused, and so is a value of the wrong form or an index outside the grid:
   under_plate_curves  required: curves (below) for the boundary between the subchondral plate and the trabecular compartment,
                       with the end points on the inner side of the cortex: the first and last point of each curve limit ROI-2
                       laterally (it exists only where the curves reach)
@@ -71,7 +71,7 @@ def main():
     )
     a = ap.parse_args()
     g = sidecar.grid(sidecar.sidecar_path(a.iioc_tissue))
-    ann = load_annotations(a.annotations, g['grid_id'])
+    ann = load_annotations(a.annotations, g)
     vox = g['spacing_zyx_mm'][0]
     parent = np.load(a.iioc_tissue)
     gp = np.load(a.growth_plate_face)
