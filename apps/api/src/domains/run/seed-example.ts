@@ -1,13 +1,14 @@
 /**
  * Operator script: copy a finished run into an example run in the Demo organization.
- *   pnpm --filter @voluma/api seed:example --from <runId> [--id <exampleRunId>]
+ *   pnpm --filter @voluma/api seed:example --from <runId> [--id <exampleRunId>] [--backfill <dir>]
  * Reads DATABASE_URL, GUEST_ORGANIZATION_ID (the Demo organization) and the R2 settings (the repo .env, or the host's variables).
  *
  * The example gets the source's events, threads and history under its own run id (thread
  * ids are `<runId>.…`, so they are renamed), `startedBy: "voluma-examples"`, `example: true`,
  * and the Demo org's reference-scan input. The source's evidence objects in R2 are copied
  * under the example's own prefix (`evidenceKey` builds a key from the run being read, so an
- * example can't point at another run's files). Re-seeding the same `--id` replaces the
+ * example can't point at another run's files). `--backfill` adds the objects a run recorded before
+ * they existed (`backfill.ts`). Re-seeding the same `--id` replaces the
  * example, and nothing else: an existing run that isn't an example is refused. The source must be a completed `voluma` run on a reference scan: a visitor run's
  * outputs are untrusted (`@voluma/contracts/run`), and an example's scan is shown to everyone.
  */
@@ -18,6 +19,7 @@ import { evidenceKey, runPrefix } from "@voluma/contracts/r2";
 import { asc, eq, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
+import { backfillRows, readBackfill, uploadBackfill } from "./backfill";
 import {
   EXAMPLES_OPERATOR,
   events,
@@ -28,16 +30,22 @@ import {
   threads,
 } from "./schema";
 
-const { values } = parseArgs({ options: { from: { type: "string" }, id: { type: "string" } } });
+const { values } = parseArgs({
+  options: { from: { type: "string" }, id: { type: "string" }, backfill: { type: "string" } },
+});
 const required = (name: string) => {
   const value = process.env[name];
   if (!value) throw new Error(`${name} is not set`);
   return value;
 };
-if (!values.from) throw new Error("usage: seed:example --from <runId> [--id <exampleRunId>]");
+if (!values.from)
+  throw new Error("usage: seed:example --from <runId> [--id <exampleRunId>] [--backfill <dir>]");
 const source = runIdSchema.parse(values.from);
 const exampleId = runIdSchema.parse(values.id ?? `example-${source}`);
 const demoLabId = required("GUEST_ORGANIZATION_ID");
+
+const backfillDir = values.backfill;
+const backfill = backfillDir ? await readBackfill(backfillDir) : undefined;
 
 const client = postgres(required("DATABASE_URL"));
 const db = drizzle(client, { casing: "snake_case" });
@@ -136,21 +144,32 @@ await db.transaction(async (tx) => {
     .from(events)
     .where(eq(events.runId, source))
     .orderBy(asc(events.seq));
-  for (const event of sourceEvents) {
+  // The attempt ids in payloads and the ids of the events that open them stay equal under renaming.
+  const renamed = sourceEvents.map(({ seq: _seq, ...event }) => {
     const payload = JSON.parse(
       JSON.stringify(event.payload).replaceAll(`"${source}.`, `"${exampleId}.`),
     );
     for (const field of ["attemptId", "revisionId", "resultRevisionId", "checkId"]) {
       if (typeof payload[field] === "string") payload[field] = `${exampleId}:${payload[field]}`;
     }
-    await tx.insert(events).values({
+    return {
       ...event,
-      id: `${exampleId}:${event.id}`,
+      id: `${exampleId}:${event.id.replaceAll(`${source}.`, `${exampleId}.`)}`,
       runId: exampleId,
       threadId: `${exampleId}${event.threadId.slice(source.length)}`,
       payload,
-    });
-  }
+    };
+  });
+  const rows =
+    backfill && backfillDir
+      ? backfillRows(
+          exampleId,
+          renamed,
+          backfill,
+          await uploadBackfill(r2, bucket, exampleId, backfillDir),
+        )
+      : renamed;
+  for (const [i, row] of rows.entries()) await tx.insert(events).values({ ...row, seq: i + 1 });
   await tx.execute(sql`
     INSERT INTO threads (id, run_id, parent_thread_id, kind, task, status, created_at, ended_at)
     SELECT ${rename(sql`id`)}, ${exampleId},
