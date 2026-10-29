@@ -109,8 +109,6 @@ export const measurement = (value: number) => ({
   value,
   unit: "mm",
   confidence: null,
-  structureIds: [],
-  annotationIds: [],
 });
 
 /** A worker: report `m1`, submit, then say it is done. A worker re-asked reports a new value. */
@@ -202,7 +200,9 @@ export const task = (
   id,
   dependsOn,
   instructions: "do it",
-  outputs: [{ id: "m1", required: output.required ?? true, kind: "measurement", unit: "mm" }],
+  outputs: [
+    { id: "m1", required: output.required ?? true, kind: "measurement", unit: "mm", on: [] },
+  ],
 });
 
 export function world(o: WorldOptions) {

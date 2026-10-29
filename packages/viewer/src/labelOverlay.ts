@@ -44,13 +44,15 @@ export function drawLabels(
       const value = Number(label);
       const structure = structures.find(
         (s) =>
-          s.voxels?.volumeId === layer.volume.id &&
-          (s.voxels.label === undefined || s.voxels.label === value),
+          s.volumeId === layer.volume.id &&
+          s.voxels !== null &&
+          "label" in s.voxels &&
+          s.voxels.label === value,
       );
       const focused =
         (focus?.volumeId === layer.volume.id &&
           (focus.label === undefined || focus.label === value)) ||
-        !!(structure && focus?.structureIds.includes(structure.id));
+        !!(structure && focus?.on.includes(structure.id));
       const settings = structure ? display[structure.id] : undefined;
       if ((enabled && structure && settings?.visible !== false) || focused)
         colors.set(value, {

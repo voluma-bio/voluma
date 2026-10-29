@@ -21,9 +21,11 @@ export function holdLease(options: {
   onStop(reason: StopReason): void;
   /** The run's total spend as of an acknowledged heartbeat (model and gateway calls, all claims). */
   onSpent(usd: number): void;
+  /** Milliseconds of each acknowledged heartbeat, send to answer (`telemetry.ts`). */
+  onRoundTrip(ms: number): void;
   log(line: string): void;
 }) {
-  const { client, meter, onStop, onSpent, log } = options;
+  const { client, meter, onStop, onSpent, onRoundTrip, log } = options;
   let inFlight: Promise<void> | undefined;
   let deadline = setTimeout(() => onStop("self-stop"), SELF_STOP_MS);
 
@@ -32,6 +34,7 @@ export function holdLease(options: {
     const usage = meter.take();
     try {
       const { stop, spentUsd } = await client.heartbeat(usage);
+      onRoundTrip(Date.now() - sentAt);
       if (spentUsd !== undefined) onSpent(spentUsd);
       clearTimeout(deadline);
       deadline = setTimeout(() => onStop("self-stop"), sentAt + SELF_STOP_MS - Date.now());

@@ -88,7 +88,7 @@ const format = (value: number) =>
 
 export function TaskReport({
   task,
-  structureName,
+  blockName,
   resultLabel,
   taskNumber,
   runId,
@@ -99,7 +99,7 @@ export function TaskReport({
 }: {
   task: ReviewTask;
   /** A structure id to its name, for To check items that point at structures. */
-  structureName(id: string): string;
+  blockName(id: string): string;
   /** The revision the task's result is from, as the revision picker names it ("R2"). */
   resultLabel: string;
   taskNumber: number;
@@ -273,9 +273,9 @@ export function TaskReport({
               </h3>
             </div>
             <p className="mt-2 leading-relaxed">{check.detail}</p>
-            {check.focus && check.focus.structureIds.length > 0 && (
+            {check.focus && check.focus.on.length > 0 && (
               <p className="text-xs text-muted-foreground mt-2">
-                About: {check.focus.structureIds.map((id) => structureName(id)).join(", ")}
+                About: {check.focus.on.map((id) => blockName(id)).join(", ")}
               </p>
             )}
             <div className="flex flex-wrap items-center gap-2 mt-4">

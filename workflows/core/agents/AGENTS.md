@@ -27,7 +27,7 @@ after it.
 - `tools`: every tool the role holds, base tools included, from the harness registry. A tool not
   listed is not granted: that, not prose, is how the checker holds no `segment_sam` (its role still
   has to say it does not redo the task, since bash can run the classic segmentation).
-  `segment_sam` is granted only when the run has a key for it.
+  `segment_sam` is granted only when the runner has a gateway, and only to a role with a sandbox.
 - `subagents`: the roles this role may start (`main`: `[worker]`). The checker is started by code on
   every `submit_task` and is never listed.
 - `skills`: optional; the skills named in the role's prompt. Default: the workflow's whole skill list,

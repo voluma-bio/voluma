@@ -13,7 +13,6 @@ import type { Evidence } from "./ports/evidence";
 import type { Files } from "./ports/files";
 import type { History } from "./ports/history";
 import type { Sandbox } from "./ports/sandbox";
-import type { Segmenter } from "./ports/segmenter";
 import type { Recorder } from "./recorder";
 import { type Briefs, LOOP_DEFAULTS, type LoopConfig, type RoleOf, runLoop } from "./run-loop";
 import { type PlanTask, taskRuntime } from "./task-runtime";
@@ -42,9 +41,7 @@ export interface SuperviseRunOptions {
   /** Called when a thread ends: destroys its sandbox (`sandboxSession.release`). */
   releaseSandbox(threadId: string): void;
   evidence: Evidence;
-  /** Offers `segment_sam` to the roles whose file lists it when set (the host has a Segmenter and a key for it). */
-  segmenter?: Segmenter;
-  /** The run's bucket, read and written host-side by `view_image`, `read_file` and `segment_sam`. */
+  /** The run's bucket, read and written host-side by `view_image` and `read_file`. */
   files: Files;
   roles: { main: RoleOf; worker: RoleOf; check: RoleOf };
   briefs: Briefs;
@@ -108,7 +105,6 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
       buildTools(names, {
         layout: thread,
         files: options.files,
-        segmenter: options.segmenter,
         runtime,
         main: {
           runId,

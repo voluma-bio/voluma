@@ -10,42 +10,27 @@ import {
   type WorkflowPlan,
   workflowPlanSchema,
 } from "@voluma/contracts/workflow";
-import type { OutputEntry, WorkflowFiles } from "@voluma/contracts/workflow-files";
+import {
+  isSelectable,
+  type OutputEntry,
+  type WorkflowFiles,
+} from "@voluma/contracts/workflow-files";
 import { WorkflowParseError } from "./definition";
 
+/** The entry less what only the file keeps (`declaredOutputSchema`). */
 function declared(entry: OutputEntry, required: boolean): DeclaredOutput {
-  const base = { id: entry.id, required };
-  switch (entry.kind) {
-    case "measurement":
-      return {
-        ...base,
-        kind: "measurement",
-        unit: entry.unit,
-        ...(entry.range && { range: entry.range }),
-      };
-    case "score":
-      return { ...base, kind: "score", levels: entry.levels };
-    case "structure":
-      return {
-        ...base,
-        kind: "structure",
-        name: entry.name,
-        ...(entry.label && { label: entry.label }),
-      };
-    case "annotation":
-      return { ...base, kind: "annotation", shape: entry.shape };
-    case "volume":
-      return { ...base, kind: "volume", volumeKind: entry.volumeKind };
-    case "file":
-      return { ...base, kind: "file", mediaType: entry.mediaType };
-  }
+  const { task: _task, region: _region, sourceRef: _sourceRef, ...rest } = entry;
+  return { ...rest, required };
 }
 
-/** One task of `tasks.json` as a plan task: its declared outputs copied from `outputs.json`. */
+/**
+ * One task of `tasks.json` as a plan task: its declared outputs copied from `outputs.json`.
+ * `wanted(outputId)` says a measurement or score is required; a file always is, an object never.
+ */
 export function planTask(
   files: WorkflowFiles,
   task: WorkflowFiles["tasks"][number],
-  required: (outputId: string) => boolean,
+  wanted: (outputId: string) => boolean,
 ): PlanTask {
   const byId = new Map(files.outputs.map((o) => [o.id, o]));
   return {
@@ -54,22 +39,29 @@ export function planTask(
     dependsOn: task.dependsOn,
     instructions: task.instructions,
     ...(task.doneWhen.length && { doneWhen: task.doneWhen }),
-    outputs: task.outputs.map((id) => declared(byId.get(id) as OutputEntry, required(id))),
+    outputs: task.outputs.map((id) => {
+      const entry = byId.get(id) as OutputEntry;
+      return declared(entry, entry.kind === "file" || (isSelectable(entry) && wanted(id)));
+    }),
   };
 }
 
 /**
- * `selected` absent means every output. An output is required when it is selected or when a
- * task of the plan builds on its task (something downstream needs it); otherwise it is optional.
+ * `selected` absent means every measurement and score. A measurement or score is required when
+ * it is selected or when a task of the plan builds on its task (something downstream needs
+ * it); otherwise it is optional. A file is required whenever its task is in the plan, and an
+ * object never is: a run that can't produce one (no patella in the field) must not stall the
+ * tasks that build on its task.
  */
 export function computePlan(files: WorkflowFiles, selected?: readonly string[]): WorkflowPlan {
   const byId = new Map(files.outputs.map((o) => [o.id, o]));
-  const wanted = new Set(selected ?? files.outputs.map((o) => o.id));
+  const wanted = new Set(selected ?? files.outputs.filter(isSelectable).map((o) => o.id));
   for (const id of wanted) {
-    if (!byId.has(id)) {
+    const entry = byId.get(id);
+    if (!entry || !isSelectable(entry)) {
       throw new WorkflowParseError(
         "outputs.json",
-        `the run selects "${id}", which is not an output`,
+        `the run selects "${id}", which is not a measurement or score`,
       );
     }
   }

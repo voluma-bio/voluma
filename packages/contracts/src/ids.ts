@@ -50,11 +50,16 @@ export const outputKindSchema = z.enum([
   "measurement",
   "score",
   "structure",
+  "surface",
   "annotation",
   "volume",
   "file",
 ]);
 export type OutputKind = z.infer<typeof outputKindSchema>;
+
+/** The kinds review places in a view (blocks a measurement is shown on); the rest are values and files. */
+export const isObjectKind = (kind: OutputKind) =>
+  kind === "volume" || kind === "structure" || kind === "surface" || kind === "annotation";
 
 /** A model as the runner names it: `provider/id`, e.g. `meta/muse-spark-1.3`. */
 export const modelRefSchema = z

@@ -6,7 +6,6 @@
  * a sandbox it leaves is ended by Modal's idle timeout, or by `sandboxes:clean`.
  * Settings: config.ts and `.env.example`.
  */
-import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { createModels } from "@earendil-works/pi-ai";
@@ -17,19 +16,12 @@ import { modelFallback } from "./model-fallback.ts";
 import { PROVIDERS } from "./providers.ts";
 import { redactor } from "./redact.ts";
 import { type RunnerContext, runClaim } from "./run.ts";
+import { startTelemetry } from "./telemetry.ts";
 
 /** How long a shutdown waits for runs to report before it exits anyway. */
 const SHUTDOWN_BUDGET_MS = 30_000;
 
 const config = runnerConfig();
-// `segment_sam` encodes with ffmpeg: a host without it should fail here, not in a run.
-if (config.metaApiKey) {
-  const probe = spawnSync("ffmpeg", ["-version"], { stdio: "ignore" });
-  if (probe.status !== 0)
-    throw new Error(
-      "VOLUMA_META_API_KEY is set, but `ffmpeg -version` failed: install ffmpeg on this host",
-    );
-}
 const redact = redactor(config.secrets);
 const log = (line: string) => console.log(`${new Date().toISOString()} ${redact(line)}`);
 
@@ -78,26 +70,35 @@ log(
       ", ",
     )}${config.fallbackModel ? `, fallback ${config.fallbackModel.provider}/${config.fallbackModel.id}` : ""}, api ${config.api.baseUrl}`,
 );
-while (!shutdown.signal.aborted) {
-  if (active.size >= config.concurrency) {
-    await Promise.race([...active, shuttingDown]);
-    continue;
+// After startup: a failure above must still kill the process, not be logged and survived.
+startTelemetry(log);
+// The process handlers (`telemetry.ts`) keep the process alive past a stray error, so a loop
+// that dies must exit non-zero itself, or a restart-on-failure policy never sees it.
+try {
+  while (!shutdown.signal.aborted) {
+    if (active.size >= config.concurrency) {
+      await Promise.race([...active, shuttingDown]);
+      continue;
+    }
+    let claim: Awaited<ReturnType<typeof claimRun>>;
+    try {
+      claim = await claimRun(config.api, runnerId, config.maxRunCostUsd);
+    } catch (error) {
+      log(`claim failed: ${error instanceof Error ? error.message : error}`);
+      await sleep(CLAIM_POLL_SECONDS * 1000);
+      continue;
+    }
+    if (!claim) {
+      await sleep(CLAIM_POLL_SECONDS * 1000);
+      continue;
+    }
+    // `runClaim` never rejects: it logs its own failures through the run's redaction.
+    const done = runClaim(ctx, claim, shutdown.signal).finally(() => active.delete(done));
+    active.add(done);
   }
-  let claim: Awaited<ReturnType<typeof claimRun>>;
-  try {
-    claim = await claimRun(config.api, runnerId, config.maxRunCostUsd);
-  } catch (error) {
-    log(`claim failed: ${error instanceof Error ? error.message : error}`);
-    await sleep(CLAIM_POLL_SECONDS * 1000);
-    continue;
-  }
-  if (!claim) {
-    await sleep(CLAIM_POLL_SECONDS * 1000);
-    continue;
-  }
-  // `runClaim` never rejects: it logs its own failures through the run's redaction.
-  const done = runClaim(ctx, claim, shutdown.signal).finally(() => active.delete(done));
-  active.add(done);
+} catch (error) {
+  log(`claim loop died: ${error instanceof Error ? (error.stack ?? error.message) : error}`);
+  process.exit(1);
 }
 
 await Promise.race([

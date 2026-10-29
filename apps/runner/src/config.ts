@@ -9,6 +9,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseEnv } from "node:util";
 import { modelRefSchema } from "@voluma/contracts/ids";
+import { parseTokenSecrets } from "@voluma/provider-calls/token";
 import { PROVIDERS } from "./providers.ts";
 
 const file = process.env.VOLUMA_ENV_FILE ?? resolve(import.meta.dirname, "../../../.env");
@@ -132,7 +133,7 @@ export function modalToken(): { tokenId: string; tokenSecret: string } | undefin
  * sandbox/Dockerfile by the "Sandbox image" workflow, which prints the new digest).
  */
 const SANDBOX_IMAGE =
-  "ghcr.io/voluma-bio/voluma-sandbox@sha256:00ee4e57a712f19b44e4ead17572083f558e31c229d396778dbbe04d33d525d1";
+  "ghcr.io/voluma-bio/voluma-sandbox@sha256:b3ea9afcce0c839725afbea9dd15c4064f3d3a291665257be324d2b6c2c3f716";
 
 /**
  * The commit this runner's checkout is at, which a run records as the source of its workflow
@@ -169,6 +170,14 @@ export function runnerConfig() {
     required(`VOLUMA_${provider.toUpperCase()}_API_KEY`);
   const api = apiEndpoint();
   const metaApiKey = optional("VOLUMA_META_API_KEY");
+  const gatewayUrl = optional("VOLUMA_GATEWAY_URL");
+  const gatewaySecret = optional("GATEWAY_TOKEN_SECRET");
+  if (!gatewayUrl !== !gatewaySecret)
+    throw new Error("set VOLUMA_GATEWAY_URL and GATEWAY_TOKEN_SECRET together, or neither");
+  const gateway =
+    gatewayUrl && gatewaySecret
+      ? { url: gatewayUrl, secrets: parseTokenSecrets(gatewaySecret) }
+      : undefined;
   const r2 = {
     accountId: required("R2_ACCOUNT_ID"),
     bucket: required("R2_BUCKET"),
@@ -204,8 +213,14 @@ export function runnerConfig() {
      */
     visitorModel: visitorModel(),
     modal,
-    /** Meta's key for SAM (`segment_sam`) on a `voluma` run; absent: the tool is not offered. A visitor's run uses the visitor's own key. */
+    /** Our Meta key, for the main thread's Muse Wonder (SAM goes through the gateway). */
     metaApiKey,
+    /**
+     * The gateway sandboxes reach providers through, and the secrets their tokens are minted
+     * with (`GATEWAY_TOKEN_SECRET`, the gateway's own; the first mints); absent: sandboxes have
+     * no network and `segment_sam` is not offered.
+     */
+    gateway,
     r2,
     commit: checkoutCommit(),
     /** Every secret of ours, to redact from anything that leaves the process. */
@@ -216,6 +231,7 @@ export function runnerConfig() {
       r2.secretAccessKey,
       r2.cloudflareApiToken,
       metaApiKey,
+      gatewaySecret,
       modal?.tokenId,
       modal?.tokenSecret,
     ].filter((s): s is string => s !== undefined),

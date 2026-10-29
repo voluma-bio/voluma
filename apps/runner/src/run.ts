@@ -37,18 +37,13 @@ import { type SandboxSession, sandboxSession } from "@voluma/harness/sandbox-ses
 import { checkerSandboxSpec, workerSandboxSpec } from "@voluma/harness/sandbox-specs";
 import { type RoleOf, type RoleSetup, superviseRun } from "@voluma/harness/supervise-run";
 import { TOOL_NAMES } from "@voluma/harness/tools";
+import type { Skill } from "@voluma/workflow/definition";
 import { loadWorkflow } from "@voluma/workflow/load";
 import { computePlan } from "@voluma/workflow/plan";
 import { type Config, isVisitorSafe, providerKey } from "./config.ts";
 import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
-import { metaSegmenter } from "./meta-segmenter.ts";
-import {
-  createModalSandbox,
-  RUNS_APP,
-  terminateClaim,
-  terminateOtherClaims,
-} from "./modal-sandbox.ts";
+import { claimSandboxes, terminateClaim, terminateOtherClaims } from "./modal-sandbox.ts";
 import type { ModelFallback } from "./model-fallback.ts";
 import { retryTransient } from "./model-retry.ts";
 import {
@@ -63,6 +58,8 @@ import { r2Evidence } from "./r2-evidence.ts";
 import { r2Files } from "./r2-files.ts";
 import { r2Workflows } from "./r2-workflows.ts";
 import { type Redact, redactor } from "./redact.ts";
+import { sandboxGateway } from "./sandbox-gateway.ts";
+import { heartbeatRoundTrip, inRunScope, type RunScope } from "./telemetry.ts";
 import { type ModelRole, usageMeter } from "./usage.ts";
 
 /**
@@ -90,7 +87,17 @@ export interface RunnerContext {
   log(line: string): void;
 }
 
-type Stopped = StopReason | "shutdown" | "spend-cap";
+/** Where a run's files are: its scan (a reference scan or an upload), outputs and scratch. */
+export const layoutOf = (run: Claim["run"], skills: readonly Skill[], mainWorks: boolean) =>
+  runLayout(
+    run.id,
+    run.input.source === "reference" ? referencePrefix("scan") : inputPrefix(run.input.id),
+    skills,
+    mainWorks,
+  );
+
+/** "error": an error nobody caught reached the process handler while this run was working (`telemetry.ts`). */
+type Stopped = StopReason | "shutdown" | "spend-cap" | "error";
 
 /** Which report a stop reason, a clean end or a failure becomes; undefined: say nothing more. */
 export function reportFor(
@@ -105,10 +112,17 @@ export function reportFor(
     : { kind: "ended", outcome: "failed", error };
 }
 
-export async function runClaim(
+/** Runs the claim inside its `RunScope`, so an uncaught error in its work fails this run alone. */
+export function runClaim(ctx: RunnerContext, claim: Claim, shutdown: AbortSignal): Promise<void> {
+  const scope: RunScope = { runId: claim.run.id, log: () => {}, inFlight: new Map() };
+  return inRunScope(scope, () => claimBody(ctx, claim, shutdown, scope));
+}
+
+async function claimBody(
   ctx: RunnerContext,
   claim: Claim,
   shutdown: AbortSignal,
+  scope: RunScope,
 ): Promise<void> {
   const { config, models } = ctx;
   const { run, leaseToken, keys } = claim;
@@ -119,18 +133,25 @@ export async function runClaim(
   const keyFor = (provider: string) =>
     visitor ? (provider === "meta" ? keys.metaApiKey : undefined) : providerKey(provider);
   const modal = visitor ? keys.modal : config.modal;
-  const metaKey = visitor ? keys.metaApiKey : config.metaApiKey;
   const redact: Redact = redactor([
     ...config.secrets,
     ...(visitor ? [keys.metaApiKey, keys.modal.tokenId, keys.modal.tokenSecret] : []),
   ]);
   const log = (line: string) => ctx.log(`[${runId}] ${redact(line)}`);
+  scope.log = log;
 
   const abort = new AbortController();
   // An object, so TypeScript does not narrow what the callbacks set.
   const why: { stopped?: Stopped } = {};
+  // The first reason decides the report; every reason is logged, since a later one (a spend
+  // cap, an error) is what a self-stop would otherwise hide.
+  const reasons = new Set<Stopped>();
   const stop = (reason: Stopped) => {
     why.stopped ??= reason;
+    if (!reasons.has(reason)) {
+      reasons.add(reason);
+      log(`stop: ${reason}${reason === why.stopped ? "" : ` (first was ${why.stopped})`}`);
+    }
     abort.abort();
   };
   // The shutdown signal outlives this run: the listener is removed in `finally`.
@@ -162,6 +183,16 @@ export async function runClaim(
   let live: LiveBatcher | undefined;
   let session: SandboxSession | undefined;
   let error: string | undefined;
+  // An error nobody caught (`telemetry.ts`) is kept apart from `error`, so a later throw does
+  // not replace it. Once `finally` fixes the report it can change nothing.
+  let uncaught: string | undefined;
+  let reportFixed = false;
+  scope.fail = (e) => {
+    if (reportFixed) return false;
+    uncaught ??= redact(e instanceof Error ? e.message : String(e));
+    stop("error");
+    return true;
+  };
   try {
     lease = holdLease({
       client,
@@ -171,6 +202,7 @@ export async function runClaim(
         acknowledgedUsd = usd;
         checkCap();
       },
+      onRoundTrip: heartbeatRoundTrip,
       log,
     });
     log(`claimed (${visitor ? "visitor" : "voluma"} keys)`);
@@ -220,33 +252,20 @@ export async function runClaim(
     // The tasks that produce the selected outputs and what they need. The main thread may adapt
     // them to the run's notes when the run starts (`superviseRun`).
     const computed = computePlan(definition.files, run.selectedOutputs);
-    // Each role gets the tools its file lists. `segment_sam` needs a key, and only workers hold
-    // it: it calls out to Meta and `keepFailed` writes the run-wide scratch.
-    const grant = (role: "main" | "worker" | "checker") =>
-      definition.agents[role].tools.filter(
-        (t) => t !== "segment_sam" || (role === "worker" && metaKey),
-      );
+    // Each role gets the tools its file lists. `segment_sam` also needs the gateway, and a
+    // sandbox to run in: workers have one, main only when its role holds `bash`; the checker
+    // never holds it (it does not redo the task).
+    const grant = (role: "main" | "worker" | "checker") => {
+      const { tools } = definition.agents[role];
+      const sandboxed = role === "worker" || (role === "main" && tools.includes("bash"));
+      return tools.filter((t) => t !== "segment_sam" || (config.gateway && sandboxed));
+    };
 
-    const layout = runLayout(
-      runId,
-      run.input.source === "reference" ? referencePrefix("scan") : inputPrefix(run.input.id),
-      definition.skills,
-      definition.agents.main.tools.includes("bash"),
-    );
-    const createSandbox = createModalSandbox({
-      appName: RUNS_APP,
-      claim: claimId,
-      modal,
-      r2: {
-        accountId: config.r2.accountId,
-        bucket: config.r2.bucket,
-        parentAccessKeyId: config.r2.accessKeyId,
-        cloudflareApiToken: config.r2.cloudflareApiToken,
-      },
-    });
+    const layout = layoutOf(run, definition.skills, grant("main").includes("bash"));
+    const createSandbox = claimSandboxes(config, modal, claimId);
     const stored = await client.storedEvents();
     live = liveBatcher((frames) => client.live(frames));
-    events = recorder(
+    const recorded = recorder(
       {
         async append(event) {
           await client.append(event);
@@ -259,6 +278,25 @@ export async function runClaim(
       stored,
       live,
     );
+    // The in-flight tool calls (`telemetry.ts`) follow the events as they are emitted, not as
+    // the queue delivers them: a stall must name the call that caused it.
+    const track = (threadId: string, type: string, payload: unknown) => {
+      const { toolCallId, name } = payload as { toolCallId: string; name?: string };
+      if (type === "tool.call")
+        scope.inFlight.set(toolCallId, `${threadId.slice(runId.length + 1)} ${name}`);
+      else if (type === "tool.result") scope.inFlight.delete(toolCallId);
+    };
+    events = {
+      ...recorded,
+      emit(threadId, type, payload, id) {
+        track(threadId, type, payload);
+        recorded.emit(threadId, type, payload, id);
+      },
+      append(threadId, type, payload, id) {
+        track(threadId, type, payload);
+        return recorded.append(threadId, type, payload, id);
+      },
+    };
     session = sandboxSession(
       (threadId) => {
         const thread = layout.forThread(threadId);
@@ -274,7 +312,20 @@ export async function runClaim(
         return createSandbox(
           thread.role === "worker" ||
             thread.mounts.some((m) => m.path === "/outputs" && m.access === "read-write")
-            ? workerSandboxSpec({ ...common, mounts: thread.mounts })
+            ? workerSandboxSpec({
+                ...common,
+                mounts: thread.mounts,
+                // The network and the token follow the tool grant: a sandbox whose role cannot
+                // call `segment_sam` gets neither, since `voluma-sam` is on every sandbox's PATH.
+                gateway: grant(thread.role).includes("segment_sam")
+                  ? sandboxGateway(
+                      config,
+                      { runId, leaseToken, visitorMetaKey: keys?.metaApiKey },
+                      thread.name,
+                      redact,
+                    )
+                  : undefined,
+              })
             : checkerSandboxSpec({
                 ...common,
                 readOnly: thread.mounts.filter((m) => m !== thread.scratch),
@@ -370,24 +421,6 @@ export async function runClaim(
         opened.release(id).catch((e) => log(`releasing ${layout.forThread(id).name} failed: ${e}`)),
       evidence: r2Evidence(config.r2),
       files,
-      segmenter: metaKey
-        ? metaSegmenter({
-            apiKey: metaKey,
-            log,
-            addCost: meter.addModelCost,
-            keepFailed: async (text) => {
-              // Only workers hold segment_sam, so the run-wide scratch is theirs.
-              const name = `failed-sam-response-${new Date().toISOString().replaceAll(":", "-")}.txt`;
-              const path = `/scratch/${name}`;
-              await files.write(
-                scratchKey(runId, name),
-                new TextEncoder().encode(text),
-                AbortSignal.timeout(60_000),
-              );
-              return `kept at ${path}`;
-            },
-          })
-        : undefined,
       roles: {
         main: role(mainModel, "main", "main"),
         worker: role(workerModel, "worker", "worker"),
@@ -419,7 +452,8 @@ export async function runClaim(
     shutdown.removeEventListener("abort", onShutdown);
     // Frozen here: a stop that lands while the run is being closed does not change its report.
     const stopped = why.stopped;
-    const report = reportFor(stopped, stopped === "spend-cap" ? capError : error);
+    reportFixed = true;
+    const report = reportFor(stopped, stopped === "spend-cap" ? capError : (uncaught ?? error));
     abort.abort();
     // An ended run closes its sandbox while the lease is live; a released one reports first.
     if (report?.kind === "ended") await closeSandbox(CLOSE_BUDGET_MS.ended);
@@ -427,10 +461,18 @@ export async function runClaim(
     await events?.flush();
     await lease?.end(report !== undefined);
     if (report) {
-      await client
-        .report(report)
-        .catch((e) => log(`report failed: ${e instanceof Error ? e.message : e}`));
-      log(`reported ${report.kind}${report.kind === "ended" ? ` ${report.outcome}` : ""}`);
+      const stored = await client.report(report).catch((e) => {
+        log(`report failed: ${e instanceof Error ? e.message : e}`);
+        return undefined;
+      });
+      if (stored === false)
+        log(
+          `${report.kind === "released" ? "release" : "end"} not stored: the server answered 409 (the run ended first or the lease is gone); ${
+            report.kind === "released" ? `reason ${report.reason}` : `outcome ${report.outcome}`
+          }`,
+        );
+      else if (stored)
+        log(`reported ${report.kind}${report.kind === "ended" ? ` ${report.outcome}` : ""}`);
       if (live) {
         const { frames, requests, dropped } = live.stats();
         log(`live frames this claim: ${frames} in ${requests} requests, ${dropped} dropped`);
@@ -438,7 +480,7 @@ export async function runClaim(
       log(`model cost this claim: $${meter.totalModelCostUsd().toFixed(4)}`);
       for (const line of meter.cacheSummary()) log(`model usage this claim, ${line}`);
     } else {
-      log(`stopped (${stopped}); nothing more to report`);
+      log(`stopped (${[...reasons].join(", ")}); nothing more to report`);
     }
     if (report?.kind !== "ended") await closeSandbox(CLOSE_BUDGET_MS.stopped);
   }

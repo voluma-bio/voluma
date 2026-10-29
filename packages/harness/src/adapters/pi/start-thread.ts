@@ -109,10 +109,6 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
   const cutOff = () => runSignal?.aborted === true;
   const emit = <T extends EventType>(type: T, payload: PayloadOf<T>, id?: string) =>
     recorder.emit(threadId, type, payload, id);
-  // What each running tool call has been billed (`ToolContext.bill`), until its result is emitted.
-  const billed = new Map<string, number>();
-  const bill = (toolCallId: string, usd: number) =>
-    billed.set(toolCallId, (billed.get(toolCallId) ?? 0) + usd);
 
   // The reply holding the call is in the agent's messages before any of its tools runs.
   const batchSize = (toolCallId: string): number => {
@@ -128,7 +124,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     initialState: {
       systemPrompt: options.systemPrompt,
       model: options.model,
-      tools: options.tools.map((tool) => toAgentTool(tool, options, bill, batchSize)),
+      tools: options.tools.map((tool) => toAgentTool(tool, options, batchSize)),
       messages: [],
     },
     streamFn: options.streamFn,
@@ -156,14 +152,13 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     }
   };
   const emitToolResult = (result: ToolResultMessage) => {
-    const costUsd = billed.get(result.toolCallId);
-    billed.delete(result.toolCallId);
+    const details = result.details as { truncated?: boolean; infrastructure?: true } | undefined;
     emit("tool.result", {
       toolCallId: result.toolCallId,
       isError: result.isError,
       output: textOf(result),
-      truncated: (result.details as { truncated?: boolean } | undefined)?.truncated === true,
-      ...(costUsd !== undefined && { costUsd }),
+      truncated: details?.truncated === true,
+      ...(details?.infrastructure && { infrastructure: true as const }),
     });
   };
 
@@ -409,7 +404,6 @@ const historyFailure = (error: unknown): Omit<ThreadOutcome, "ran" | "reply"> =>
 function toAgentTool(
   tool: Tool,
   { runId, threadId, kind, taskId, sandbox, recorder }: StartThreadOptions,
-  bill: (toolCallId: string, usd: number) => void,
   batchSize: (toolCallId: string) => number,
 ): AgentTool {
   const { $schema: _, ...jsonSchema } = z.toJSONSchema(tool.input, { io: "input" });
@@ -432,7 +426,6 @@ function toAgentTool(
         sandbox: () => sandbox(threadId),
         output: (stream, text) =>
           recorder.live({ type: "tool.output", threadId, toolCallId, stream, text }),
-        bill: (usd) => bill(toolCallId, usd),
       });
       return {
         content: [
@@ -440,7 +433,11 @@ function toAgentTool(
           ...(result.images ?? []).map((i) => ({ type: "image" as const, ...i })),
         ],
         // `details` is stored with the message: a terminating batch is told from it on resume (`isFinished`).
-        details: { truncated: result.truncated, terminate: result.terminate === true },
+        details: {
+          truncated: result.truncated,
+          terminate: result.terminate === true,
+          ...(result.infrastructure && { infrastructure: true }),
+        },
         isError: result.isError,
         ...(result.terminate && { terminate: true }),
       };

@@ -3,7 +3,7 @@
     "id": "intake",
     "title": "Scan intake",
     "dependsOn": [],
-    "outputs": ["header"],
+    "outputs": ["header", "scan"],
     "instructions": "Read the scan header and the files in /inputs: voxel spacing, size, orientation, and any problem with the data. Write what you found for the later tasks, and the notes' account of the field in /outputs/intake/scan-notes.md (scan-intake skill).",
     "doneWhen": [
       "The spacing and size come from the files themselves, with the file or header each came from."
@@ -26,7 +26,15 @@
     "outputs": [
       "patella-volume",
       "lateral-meniscus-osteophyte-volume",
-      "medial-meniscus-osteophyte-volume"
+      "medial-meniscus-osteophyte-volume",
+      "bone-labels",
+      "femur",
+      "tibia",
+      "patella",
+      "fibula",
+      "medial-meniscus-osteophyte",
+      "lateral-meniscus-osteophyte",
+      "bone-threshold"
     ],
     "instructions": "Segment the bones and joint structures and settle the final labels; a piece the data do not support is not named, and whether its structure is absent is decided by the segmentation-check skill, section 2.",
     "doneWhen": [
@@ -45,7 +53,15 @@
       "iioc-height",
       "iioc-height-medial-compartment",
       "iioc-height-lateral-compartment",
-      "tibial-width-at-the-growth-plate"
+      "tibial-width-at-the-growth-plate",
+      "tibia-grid",
+      "roi-iioc",
+      "articular-surface",
+      "growth-plate-proximal-face",
+      "iioc-height-ruler",
+      "iioc-medial-ruler",
+      "iioc-lateral-ruler",
+      "tibial-width-ruler"
     ],
     "instructions": "Define the IIOC region (ROI-1) and report its volumes, heights and the tibial width. Write the aligned frame to /outputs/iioc/frame/ and the ROI-1 files to /outputs/iioc/iioc/: the later tibial tasks read them there.",
     "doneWhen": [
@@ -58,7 +74,9 @@
     "dependsOn": ["iioc"],
     "outputs": [
       "subchondral-bone-plate-thickness-medial",
-      "subchondral-bone-plate-thickness-lateral"
+      "subchondral-bone-plate-thickness-lateral",
+      "roi-subchondral-plate-medial",
+      "roi-subchondral-plate-lateral"
     ],
     "instructions": "Measure the subchondral bone plate thickness, medial and lateral.",
     "doneWhen": [
@@ -69,7 +87,13 @@
     "id": "trabecular-roi",
     "title": "IIOC trabecular bone",
     "dependsOn": ["iioc", "subchondral-plate"],
-    "outputs": ["tv-iioc-trab", "bv-iioc-trab", "bv-tv-iioc-trab"],
+    "outputs": [
+      "tv-iioc-trab",
+      "bv-iioc-trab",
+      "bv-tv-iioc-trab",
+      "roi-iioc-trabecular",
+      "under-plate-boundary"
+    ],
     "instructions": "Define ROI-2 (ROI-1 without the plate and the cortical line) and report its volumes.",
     "doneWhen": [
       "ROI-2 excludes the subchondral plate and the cortical line, as examples/README.md (trabecular-roi) describes."
@@ -87,7 +111,10 @@
       "metaphyseal-tb-th",
       "metaphyseal-tb-sp",
       "metaphyseal-tb-nd",
-      "metaphyseal-tb-tm"
+      "metaphyseal-tb-tm",
+      "roi-metaphyseal",
+      "cortex",
+      "growth-plate-distal-face"
     ],
     "instructions": "Define ROI-3 below the growth plate and report its trabecular parameters. Write them to /outputs/metaphyseal-roi/meta/: the cortical task reads cortex.npy and growth-plate-distal-face.npy there.",
     "doneWhen": [
@@ -100,7 +127,9 @@
     "dependsOn": ["metaphyseal-roi"],
     "outputs": [
       "cortical-thickness-100-um-below-the-growth-plate",
-      "cortical-thickness-1000-um-below-the-growth-plate"
+      "cortical-thickness-1000-um-below-the-growth-plate",
+      "roi-cortex-100um",
+      "roi-cortex-1000um"
     ],
     "instructions": "Measure the cortical thickness 100 um and 1000 um below the growth plate. Use the cortex mask and distal growth-plate face that metaphyseal-roi wrote (/outputs/metaphyseal-roi/meta/cortex.npy and /outputs/metaphyseal-roi/meta/growth-plate-distal-face.npy); do not trace the face again.",
     "doneWhen": [
@@ -111,7 +140,13 @@
     "id": "femoral-geometry",
     "title": "Distal femur",
     "dependsOn": ["segmentation"],
-    "outputs": ["distal-femoral-length-dfl", "distal-femoral-width-dfw", "width-length-ratio"],
+    "outputs": [
+      "distal-femoral-length-dfl",
+      "distal-femoral-width-dfw",
+      "width-length-ratio",
+      "dfl-ruler",
+      "dfw-ruler"
+    ],
     "instructions": "Place the femoral points and report the distal femoral length, width and their ratio.",
     "doneWhen": [
       "Points a-d sit where examples/README.md (femoral-geometry) puts them, each checked on a second view, and the lengths follow from them."

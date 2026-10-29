@@ -6,7 +6,6 @@
  */
 import type { ThreadLayout } from "../layout";
 import type { Files } from "../ports/files";
-import type { Segmenter } from "../ports/segmenter";
 import type { TaskRuntime } from "../task-runtime";
 import { bashTool } from "./bash";
 import { type MainDeps, mainTools } from "./main-tools";
@@ -21,8 +20,6 @@ export interface ToolDeps {
   layout: ThreadLayout;
   /** The run's bucket, read and written host-side. */
   files: Files;
-  /** Absent when the host has no key for one; `segment_sam` is then not offered. */
-  segmenter?: Segmenter;
   runtime: TaskRuntime;
   /** What the main agent's tools act through. */
   main: MainDeps;
@@ -59,11 +56,7 @@ const factories: Record<ToolName, ToolFactory> = {
   submit_task: ({ runtime }) => taskTools(runtime).submit_task,
   ask: ({ runtime }) => taskTools(runtime).ask,
   view_image: ({ layout, files }) => viewImageTool({ layout, files }),
-  segment_sam: ({ layout, files, segmenter }) => {
-    if (!segmenter)
-      throw new Error("segment_sam needs a segmenter, which this host has no key for");
-    return segmentSamTool({ layout, files, segmenter });
-  },
+  segment_sam: ({ layout }) => segmentSamTool(layout),
   read_file: ({ layout, files }) => readFileTool({ layout, files }),
   start_worker: ({ main }) => mainTools(main).start_worker,
   message: ({ main }) => mainTools(main).message,

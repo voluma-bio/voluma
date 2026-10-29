@@ -45,35 +45,35 @@
  * - the `kind` equals the declared kind;
  * - a measurement's `unit` equals the declared unit;
  * - a score's `level` is one of the declared `levels`;
- * - a structure's `label` and its `title` equal the declared `label` and
- *   `name`, where set;
+ * - a structure reports its declared `label` (or a mask when none is declared), and its
+ *   `title` equals the declared `name`, where set;
  * - an annotation's shape equals the declared `shape`;
  * - a volume's `kind` equals the declared `volumeKind`;
  * - a file's `mediaType` equals the declared one.
- * An output the plan doesn't declare is accepted if its kind's payload is valid;
+ * A measurement, score or file the plan doesn't declare is accepted if its payload is valid;
  * the fold lists it as undeclared. A score without a declaration has no scale.
  * A required declared output the attempt hasn't reported keeps the task from
  * `done`: `submit_task` is refused, naming the missing outputs
- * (`missingRequired`, structures included). `checkResult` checks it too, so a check never makes a task `done`
+ * (`missingRequired`; only measurements, scores and files are ever required). `checkResult` checks it too, so a check never makes a task `done`
  * while a required output is missing, whatever else changed. A required output
  * reported with `value: null` (a measurement that could not be made) counts as
  * reported: the task did its job and said so, and the `note` says why. The
  * reviewer sees the null and the note; making the task fail is the worker's
  * choice, with `failed`.
  *
- * References. `report_output` refuses a reference its target hasn't reported in
- * the named task's latest attempt: a measurement's `numeratorId` and
- * `denominatorId` (measurements), `structureIds` of a measurement or score
- * (structures), `annotationIds` (annotations), a structure's `volume` (a
- * `volume` output of kind `labels`) and an annotation's `volume` (any `volume`
- * output; absent means the scan). A volume's `dtype` must fit its kind
- * (`uint8`/`uint16` for `labels`, `int16`/`uint16`/`float32` for `image`). This
- * is a write-time check only: a later attempt of another task may stop
- * reporting a target, and the fold's resolver (`fold.ts`) alone guarantees that
- * the review has no dangling reference.
+ * Declarations and references. An object (structure, surface, annotation, volume) the plan
+ * doesn't declare is refused: review places it by its declaration's grid. A structure, surface
+ * or annotation is refused until its declared grid is reported in the latest attempt of the
+ * grid's task, and a line annotation and the length measurement that names it (the one
+ * measurement in mm whose `on` holds exactly that line) are checked against each other, by
+ * the second of the pair to arrive (`rulerLengthProblem`). A ratio's `numeratorId` and
+ * `denominatorId` must be measurements already reported. A volume's `dtype` must fit its kind
+ * (`uint8`/`uint16` for `labels`, `int16`/`uint16`/`float32` for `image`). These are
+ * write-time checks only: a later attempt of another task may stop reporting a target, and
+ * the fold's resolvers (`fold.ts`) alone guarantee that the review has no dangling reference.
  *
- * Evidence, and the files inside an output (a mesh, a volume's voxels, a
- * file output), are named by `{root, path}` (`evidenceRefSchema`). On success
+ * Evidence, and the files inside an output (a structure's mask, a surface's heights, a
+ * volume's voxels, a file output), are named by `{root, path}` (`evidenceRefSchema`). On success
  * the runtime copies each file to its `evidenceKey` and appends the event with
  * the sha256; a missing file fails the call and appends nothing. The runtime scopes
  * paths to this run; `outputs` paths are under the call's `taskId`.
