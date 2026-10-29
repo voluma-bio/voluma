@@ -9,20 +9,27 @@ import { createHash } from "node:crypto";
 import { copyFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { evidenceKey, outputKey, scratchKey } from "@voluma/contracts/r2";
-import type { Evidence } from "../../ports/evidence";
+import { type Evidence, EvidenceRefused } from "../../ports/evidence";
 
 export function localEvidence(dir: string): Evidence {
   return {
-    async keep(runId, taskId, file, hash) {
+    async keep(runId, taskId, file, options) {
       const key =
         file.root === "outputs"
           ? outputKey(runId, taskId, file.path)
           : scratchKey(runId, file.path);
       const source = join(dir, key);
       const sha256 =
-        (await hash?.()) ??
+        (await options?.hash?.()) ??
         createHash("sha256")
-          .update(await readFile(source))
+          .update(
+            await readFile(source).catch((error) => {
+              if (error?.code === "ENOENT") {
+                throw new EvidenceRefused(`Evidence ${file.path} does not exist`);
+              }
+              throw error;
+            }),
+          )
           .digest("hex");
       const target = join(dir, evidenceKey(runId, sha256));
       await mkdir(dirname(target), { recursive: true });

@@ -27,7 +27,7 @@ import type { WorkflowPlan } from "@voluma/contracts/workflow";
 import { isSatisfied, transitiveDependents } from "@voluma/workflow";
 import type { ThreadLayout } from "./layout";
 import { declarationProblem, placementProblem, referenceProblem } from "./output-checks";
-import type { Evidence } from "./ports/evidence";
+import { type Evidence, EvidenceRefused } from "./ports/evidence";
 import type { Sandbox } from "./ports/sandbox";
 import type { PayloadOf, Recorder } from "./recorder";
 
@@ -40,6 +40,8 @@ export interface Caller {
   toolCallId: string;
   kind: ThreadKind;
   taskId?: string;
+  /** Aborts when the call is cancelled. */
+  signal: AbortSignal;
 }
 
 /** The call broke a rule; the message is what the model reads. */
@@ -55,7 +57,7 @@ export interface TaskRuntimeOptions {
    */
   layoutOf(threadId: string, cited: (path: string) => boolean): ThreadLayout;
   /** A thread's own sandbox (`sandboxSession.get`): evidence is hashed in it. */
-  sandbox(threadId: string): Promise<Sandbox>;
+  sandbox(threadId: string, options?: { note?: boolean }): Promise<Sandbox>;
   /** The thread under which the run's first event is written. */
   rootThreadId: string;
   plan: readonly PlanTask[];
@@ -252,17 +254,31 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     return marked;
   }
 
-  /** The sha256 of a file, computed by the thread's sandbox: a scan-sized file stays off the host. */
-  const sandboxHash = async (threadId: string, path: string): Promise<string> => {
+  /**
+   * The sha256 of a file, computed by the thread's sandbox: a scan-sized file stays off the
+   * host. The file goes in on stdin so the output never carries its name (GNU `sha256sum`
+   * escapes `\` and newline in names). `note: false`: this exec is the host's, so the restart
+   * note stays owed to the model's next command.
+   */
+  const sandboxHash = async (
+    threadId: string,
+    path: string,
+    signal: AbortSignal,
+  ): Promise<string> => {
     let out = "";
+    let err = "";
     let code = -1;
-    const command = `sha256sum -- '${path.replaceAll("'", "'\\''")}'`;
-    for await (const chunk of (await sandbox(threadId)).exec({ command, timeoutSeconds: 900 })) {
+    const command = `sha256sum < '${path.replaceAll("'", "'\\''")}'`;
+    const box = await sandbox(threadId, { note: false });
+    for await (const chunk of box.exec({ command, timeoutSeconds: 900 }, signal)) {
       if (chunk.type === "exit") code = chunk.code;
       else if (chunk.type === "stdout") out += chunk.data;
+      else if (chunk.type === "stderr") err += chunk.data;
     }
     const sha256 = /^[0-9a-f]{64}(?= )/.exec(out)?.[0];
-    if (code !== 0 || !sha256) throw new Error(`could not hash ${path} (exit ${code})`);
+    if (code !== 0 || !sha256) {
+      throw new Error(`could not hash ${path} (exit ${code}): ${err.trim() || out.trim()}`);
+    }
     return sha256;
   };
 
@@ -283,8 +299,13 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     }
     // Only a path the thread's sandbox mounts can be hashed there.
     const mounted = layout.mounts.some((m) => path.startsWith(`${m.path}/`));
-    const hash = mounted ? () => sandboxHash(c.threadId, path) : undefined;
-    return { root: f.root, path: f.path, sha256: await evidence.keep(runId, taskId, f, hash) };
+    const hash = mounted ? () => sandboxHash(c.threadId, path, c.signal) : undefined;
+    const sha256 = await evidence
+      .keep(runId, taskId, f, { hash, signal: c.signal })
+      .catch((error) => {
+        throw error instanceof EvidenceRefused ? new Refusal(error.message) : error;
+      });
+    return { root: f.root, path: f.path, sha256 };
   };
 
   const done = (message: string, eventId?: string): TaskToolResult => ({

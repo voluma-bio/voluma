@@ -44,11 +44,13 @@ named by the thread id without the run id). `RunLayout.forThread(threadId)`
 - **Evidence is hashed in the sandbox, not the runner.** The runner holds and moves no
   scan-sized data (a run reports a ~943 MB scan and ~224 MB grid). For a path the calling
   thread's sandbox mounts, `taskRuntime` runs `sha256sum` there (`bash`-style, through
-  `sandboxSession.get`) and passes the hash to `keep` as a callback; `r2Evidence` HEADs the
+  `sandboxSession.get(id, { note: false })`, so the hash exec never consumes the restart note
+  owed to the model; the file goes in on stdin) and passes the hash to `keep` as a callback; `r2Evidence` HEADs the
   source, calls it only on an ETag it has not seen for that key in this claim, then HEADs the
   target and does the server-side `CopyObject`. It never GETs the body, except for a path the
-  caller's sandbox does not mount (a checker citing the worker's scratch: small images), which
-  it hashes by streaming. Content addressing, not tamper-proofing: the agent writes the bytes
+  caller's sandbox does not mount (a checker citing the worker's scratch), which it hashes by
+  streaming up to 64 MiB and refuses above that. The copy carries `CopySourceIfMatch: etag`, so
+  a file rewritten after the hash fails the call. A missing file is a `Refusal`. Content addressing, not tamper-proofing: the agent writes the bytes
   anyway. Measured on 940 MB: host network in 1 GB per keep before, 8 MB on the first keep and
   0.1 MB on a repeat after.
 - The sandbox's own `/scratch` directory exists in the container. A write outside
@@ -269,12 +271,11 @@ Both are R2 bucket mounts (`modal-sandbox.ts`), so a file is written whole, once
 (local disk, lost on a sandbox restart) and `cp`s it in. The worker and check prompts
 (`prompts.ts`) and the bash tool description (`layout.ts`) say so.
 
-**`/scratch` stays an R2 mount**, though it is only intermediate files. Three things read it
-from the host, not from the sandbox: `segment_sam` reads its volume and writes its labels
-there (`RunLayout.keyOf`), a long bash output is stored there for the model to open
-(`toolOutputPath`), and a checkpoint's evidence may be a `scratch` file, which the host copies
-into the run's evidence (`r2-evidence.ts`, a server-side copy). The restart note also promises it survives a restart.
-A local `/scratch` would break all three.
+**`/scratch` stays an R2 mount**, though it is only intermediate files. Two things need it to
+outlive a sandbox: a long bash output is stored there for the model to open (`toolOutputPath`),
+and a checkpoint's evidence may be a `scratch` file, which the host copies into the run's
+evidence (`r2-evidence.ts`, a server-side copy). The restart note also promises it survives a
+restart. A local `/scratch` would break all three.
 
 # Runner: who gets which task tools
 
