@@ -245,9 +245,10 @@ lease, the server ending the run) aborts the run's signal. Threads see it as `ru
 exactly as after a crash, and the supervisor writes none for the root, even if a step threw
 while the signal was aborting. So a `thread.ended {cancelled}` is a stop someone chose and is
 never resumed: a stale dependent's thread stopped (`task-runtime.ts` `staleDependents`), or a
-failing run aborting its threads (`abortAll`). A stop aimed at a thread this process has not
-started (cut off by an earlier claim) writes that `cancelled` end itself (`supervise-run.ts`
-`stopThread`), so "open" always means "cut off". A self-stop reports `released` with reason `self-stop`; a signal, `shutdown`.
+failing run aborting its threads (`abortAll`). A stop stores that `cancelled` end first
+(`task-runtime.ts` `stop`, inside `section`) and then aborts without waiting; the thread's own
+later end is dropped (`start-thread.ts`). So a stopped thread's next write is refused at once,
+and "open" always means "cut off". A self-stop reports `released` with reason `self-stop`; a signal, `shutdown`.
 
 The next claim learns why from `claim.previousClaim` (the API records `lease-expired` itself)
 and writes `claim.started {resumed, after}` right after the root's `thread.started`. The
