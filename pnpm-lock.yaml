@@ -201,6 +201,9 @@ importers:
       '@voluma/harness':
         specifier: workspace:*
         version: link:../../packages/harness
+      '@voluma/provider-calls':
+        specifier: workspace:*
+        version: link:../../packages/provider-calls
       '@voluma/workflow':
         specifier: workspace:*
         version: link:../../packages/workflow

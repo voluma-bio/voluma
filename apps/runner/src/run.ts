@@ -39,7 +39,7 @@ import { computePlan } from "@voluma/workflow/plan";
 import { type Config, isVisitorSafe, providerKey } from "./config.ts";
 import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
-import { claimSandboxes, RUNS_APP, terminateClaim, terminateOtherClaims } from "./modal-sandbox.ts";
+import { claimSandboxes, terminateClaim, terminateOtherClaims } from "./modal-sandbox.ts";
 import type { ModelFallback } from "./model-fallback.ts";
 import { retryTransient } from "./model-retry.ts";
 import { checkPrompt, checkSystem, workerPrompt, workerSystem } from "./prompts.ts";

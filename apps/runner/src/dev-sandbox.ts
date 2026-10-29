@@ -41,9 +41,11 @@ const config = runnerConfig();
 const redact = redactor(config.secrets);
 const log = (line: string) => console.log(`${new Date().toISOString()} ${redact(line)}`);
 if (!config.gateway)
-  throw new Error("set VOLUMA_GATEWAY_URL: the sandbox reaches providers only through it");
+  throw new Error(
+    "set VOLUMA_GATEWAY_URL and GATEWAY_TOKEN_SECRET: sandboxes reach providers only through the gateway",
+  );
 
-const claim = await claimRun(config.api, "dev-sandbox");
+const claim = await claimRun(config.api, "dev-sandbox", config.maxRunCostUsd);
 if (!claim) throw new Error("no queued run: start one in the web app (pnpm dev) first");
 const { run, leaseToken } = claim;
 const claimId = randomUUID();
@@ -59,6 +61,7 @@ const client = runClient(
 const meter = usageMeter();
 const beats = { count: 0, maxRoundTripMs: 0 };
 const lease = holdLease({
+  onSpent: (usd) => log(`run spend $${usd.toFixed(4)}`),
   client: {
     async heartbeat(usage) {
       const start = performance.now();

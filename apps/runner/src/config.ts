@@ -9,6 +9,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseEnv } from "node:util";
 import { modelRefSchema } from "@voluma/contracts/ids";
+import { parseTokenSecrets } from "@voluma/provider-calls/token";
 import { PROVIDERS } from "./providers.ts";
 
 const file = process.env.VOLUMA_ENV_FILE ?? resolve(import.meta.dirname, "../../../.env");
@@ -155,6 +156,14 @@ export function runnerConfig() {
     required(`VOLUMA_${provider.toUpperCase()}_API_KEY`);
   const api = apiEndpoint();
   const metaApiKey = optional("VOLUMA_META_API_KEY");
+  const gatewayUrl = optional("VOLUMA_GATEWAY_URL");
+  const gatewaySecret = optional("GATEWAY_TOKEN_SECRET");
+  if (!gatewayUrl !== !gatewaySecret)
+    throw new Error("set VOLUMA_GATEWAY_URL and GATEWAY_TOKEN_SECRET together, or neither");
+  const gateway =
+    gatewayUrl && gatewaySecret
+      ? { url: gatewayUrl, secrets: parseTokenSecrets(gatewaySecret) }
+      : undefined;
   const r2 = {
     accountId: required("R2_ACCOUNT_ID"),
     bucket: required("R2_BUCKET"),
@@ -190,10 +199,11 @@ export function runnerConfig() {
     /** Our Meta key, for the main thread's Muse Wonder (SAM goes through the gateway). */
     metaApiKey,
     /**
-     * The gateway sandboxes reach providers through; absent: sandboxes have no network and
-     * `segment_sam` is not offered.
+     * The gateway sandboxes reach providers through, and the secrets their tokens are minted
+     * with (`GATEWAY_TOKEN_SECRET`, the gateway's own; the first mints); absent: sandboxes have
+     * no network and `segment_sam` is not offered.
      */
-    gateway: optional("VOLUMA_GATEWAY_URL") ? { url: required("VOLUMA_GATEWAY_URL") } : undefined,
+    gateway,
     r2,
     commit: checkoutCommit(),
     /** Every secret of ours, to redact from anything that leaves the process. */
@@ -204,6 +214,7 @@ export function runnerConfig() {
       r2.secretAccessKey,
       r2.cloudflareApiToken,
       metaApiKey,
+      gatewaySecret,
       modal?.tokenId,
       modal?.tokenSecret,
     ].filter((s): s is string => s !== undefined),
