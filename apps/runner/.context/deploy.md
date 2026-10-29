@@ -19,6 +19,7 @@ cannot `serviceConnect`, but `environmentPatchCommit` (config as a patch) create
 | Start | `cd apps/runner && exec node --import tsx src/main.ts`. `exec` makes node the container's process, so it gets SIGTERM |
 | Draining | 60 s: above the runner's `SHUTDOWN_BUDGET_MS` (30 s), which is how long it waits for runs to report `released` |
 | Restart | on failure, 10 retries |
+| Limits | 2 vCPU / 2 GB (set in the service's settings). The runner is one Node thread and holds no volumes: `segment_sam` and the other data work run in the sandbox, so heavy work creeping back into it hits the limit and fails loudly instead of slowing heartbeats quietly. Railway's default for the service is its 8 vCPU / 8 GB ceiling |
 | Healthcheck | none: the runner serves nothing, so a healthcheck would fail every deploy |
 | Watch paths | `/apps/runner/**`, `/packages/harness/**`, `/packages/workflow/**`, `/packages/contracts/**`, `/workflows/**` (the runner reads `workflows/` from its own checkout, so editing a workflow must redeploy it), `/pnpm-lock.yaml`, `/package.json`, `/.tool-versions`, `/tsconfig.base.json`, `/pnpm-workspace.yaml` |
 
@@ -30,16 +31,17 @@ Variables (names only; values never go in the repo):
 | `VOLUMA_API_TOKEN` | reference `${{@voluma/api.VOLUMA_API_TOKEN}}`: rotating it on the API reaches the runner at its next deploy |
 | `VOLUMA_META_API_KEY`, `RUNNER_MODEL`, `RUNNER_CONCURRENCY` | the model key; `RUNNER_MODEL=meta/muse-spark-1.3` (Standard mode: never a `-contributor` model on a deployed runner, Meta may train on what it is sent); 2 slots |
 | `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` | the Modal profile in `~/.modal.toml` |
-| `RAILPACK_DEPLOY_APT_PACKAGES` | `ffmpeg`: installed in the runner's container (segment_sam needs it) |
 | `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `CLOUDFLARE_API_TOKEN` | as in `.env` |
 
 `RUNNER_FALLBACK_MODEL` (unset: no fallback) is Jimmy's per-deploy choice, since it sends lab data to another provider. It covers worker and check threads only, not the main thread; see `src/model-fallback.ts`. Visitor runs use `RUNNER_VISITOR_MODEL` (default `meta/muse-spark-1.3`) with the visitor's key.
 
 ## The sandbox image
 
-`sandbox/Dockerfile` is the one definition of the image. The "Sandbox image" workflow
-(`.github/workflows/sandbox-image.yml`) builds it for linux/amd64 on a change to the Dockerfile
-or by hand, pushes `ghcr.io/voluma-bio/voluma-sandbox:<commit>` and prints the digest. Put
+`sandbox/Dockerfile` is the one definition of the image: Python and its packages, `ffmpeg`, Node 24
+and `voluma-sam` (the bundle of `packages/voluma-sam`, which the workflow builds first and passes as the
+build context `sam`). The "Sandbox image" workflow
+(`.github/workflows/sandbox-image.yml`) builds it for linux/amd64 on a change to the Dockerfile,
+`packages/voluma-sam` or by hand, pushes `ghcr.io/voluma-bio/voluma-sandbox:<commit>` and prints the digest. Put
 that digest in `SANDBOX_IMAGE` (`src/config.ts`). Every run of the workflow gives a new digest, even for the same contents (image timestamps), and it also runs when the workflow file or `requirements.txt` changes, so bump `SANDBOX_IMAGE` only when the contents changed. The package
 must be **public**, or a visitor's Modal workspace cannot pull it: GitHub, the org's Packages,
 `voluma-sandbox`, Package settings, Danger Zone, Change visibility.

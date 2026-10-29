@@ -73,20 +73,29 @@ who ends it:
 
 Run `sandboxes:clean --run <your run>` before finishing any work that started sandboxes.
 
-# Runner: `segment_sam` runs on the host
+# Runner: `segment_sam` runs in the worker's sandbox
 
-The tool (`packages/harness/src/tools/segment-sam.ts`) runs in the runner process, never in
-the sandbox: the sandbox has no network and Meta's key must not enter it. It reads the
-volume and writes the labels straight to the run's bucket (`Files` port, `r2-files.ts`;
-`RunLayout.keyOf` maps the sandbox path the model names to its key), so a file the
-sandbox just wrote is visible to it and the labels are visible to the sandbox after the call.
-The Meta adapter (`meta-segmenter.ts`) shells out to `ffmpeg` for the lossless H.264 stack, so
-the runner host needs it on PATH; it deletes its upload from Meta's file store when the call
-ends (a failed delete is logged). Its response masks (`!` one_bit and `~` lossless) decode in `sam-mask.ts`, a port of
-Meta's decoder, because `meta-sam-parser` takes minutes per response. The tool is offered only
-when a Meta key exists (`VOLUMA_META_API_KEY`, or the visitor's key on a visitor run). What a
-call costs goes to the run's usage meter and to the call's own `bill`, which the harness records as the `tool.result`'s `costUsd` so `spend` can charge the task (the adapter reports it as soon as Meta gives the frame count, so a failed call is still billed). The tool also writes a sidecar `<labels>.json` (prompt frames and per-slice confidence per object). The runner checks `ffmpeg -version` at start when a Meta key is set. How agents should use it (orientation, boxes,
-which structures share a call) is the `sam-segmentation` skill's job, not the tool's.
+The tool (`packages/harness/src/tools/segment-sam.ts`) checks the paths and runs `voluma-sam`
+(`packages/voluma-sam`, baked into the sandbox image with Node 24 and `ffmpeg`) in the calling
+thread's sandbox, with the run's abort signal and a 30-minute timeout; the runner holds no
+volume and does none of the work. The program memory-reads the `.npy`, crops it (`subVolume`, else
+the tissue plus a margin, always including the boxes), encodes lossless H.264, sends it to Meta
+through the gateway (`$VOLUMA_GATEWAY_URL/meta/v1/...`, the sandbox's token as the bearer; the
+sandbox's network is that host only), decodes the masks (`sam-mask.ts`, a port of Meta's
+decoder, because `meta-sam-parser` takes minutes per response) and writes the labels on the
+full grid and the sidecar `<labels>.json`: built in `/tmp`, then `cp`ed, labels first and the
+sidecar last, because an R2 mount takes whole files only. The sidecar marks a complete result.
+The tool returns its one JSON line; a gateway or network failure comes back as an error result
+with `infrastructure: true`. Nothing in the runner meters SAM: its spend is the gateway's
+`provider_calls` rows. The tool is offered when `VOLUMA_GATEWAY_URL` is set. How agents should
+use it (orientation, boxes, which structures share a call) is the `sam-segmentation` skill's job.
+
+Why not in the runner: its one Node thread receiving and decoding Meta's 100+ MB reply starved
+the heartbeat and the run stopped itself (design `infrastructure.md` §6 and `evidence/findings.md` in voluma-bio/docs).
+Why TypeScript: the decoder takes seconds there and minutes in Python.
+
+`pnpm --filter @voluma/runner dev-sandbox` drives the real sandbox, `voluma-sam` and the gateway
+without a model (see below).
 
 # Runner: `view_image` shows the model files the sandbox wrote
 
