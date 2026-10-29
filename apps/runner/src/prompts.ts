@@ -1,7 +1,7 @@
 /**
  * The prompts of a run's worker and check threads: the role files plus the sandbox text and the
  * workflow's skills and task text (`@voluma/workflow`). The role's own text is its file in
- * `workflows/agents/`, from the run's snapshot. A thread's system prompt is fixed for
+ * `workflows/core/agents/`, from the run's snapshot. A thread's system prompt is fixed for
  * its life (a resumed thread that differs fails), so it takes only the role's rules and the
  * skill list, both fixed by the run's snapshot. What varies by task goes in the thread's
  * first message.

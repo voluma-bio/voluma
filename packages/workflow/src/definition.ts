@@ -12,7 +12,7 @@ export interface Skill {
   path: string;
 }
 
-/** One role file of `workflows/agents/`, read from the run's snapshot. */
+/** One role file of `workflows/core/agents/`, read from the run's snapshot. */
 export interface AgentDefinition {
   /** The file's name without `.md`. */
   name: string;
@@ -26,16 +26,16 @@ export interface AgentDefinition {
 }
 
 export interface WorkflowDefinition {
-  /** The workflow skill's directory, `workflows/workflow-<name>`. */
+  /** The workflow skill's directory, `workflows/<name>`. */
   dir: string;
   /** The commit of the checkout the snapshot was cut from (kept on a resume). */
   commit: string;
   /** Its `outputs.json` and `tasks.json`, validated together. */
   files: WorkflowFiles;
-  /** The workflow's own skill first, then the skills of each directory it `uses`. */
+  /** The workflow's own skills first, then those of `workflows/core/skills/`. */
   skills: Skill[];
   /**
-   * The role files of `workflows/agents/`, the same for every workflow. A run starts the worker and
+   * The role files of `workflows/core/agents/`, the same for every workflow. A run starts the worker and
    * the checker, so the loader requires both; `others` holds the rest by name.
    */
   agents: {
