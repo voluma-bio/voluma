@@ -25,7 +25,7 @@ holds rules, not experiment logs.
   block of `hu.json` (`sidecar.bone_threshold_hu`); no script holds a literal HU value for it. BV is the region and HU above the
   threshold, never gated by a label; BV/TV is in %.
 - `convert/review_assets.py` is not a skill the run agent sees: the harness runs it in a `convert` sandbox to turn a reported file into
-  review assets (OME-Zarr levels, meshes; the header says how). It imports `scan-intake`'s `intake.read_series` for the scan, and
+  review assets (OME-Zarr levels, meshes; the header says how). The scan is the intake task's `hu.npy`, converted with `--as image --int16`. It
   needs `zarr` (not yet in `requirements.txt`; `test_review_assets.py` skips without it).
 - Python dependencies: `requirements.in` / `requirements.txt` in this directory (compiled with `uv`; the sandbox image installs
   it). Everything is numpy-first; 3D renders need pyvista on an off-screen VTK. Keep recipe numbers (box padding, trim rule) in one

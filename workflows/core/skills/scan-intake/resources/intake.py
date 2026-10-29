@@ -81,8 +81,7 @@ def check_geometry(headers):
     return orient, normal, order, positions, dz, cal
 
 
-def read_series(source):
-    """The series under `source` as a calibrated float32 (Z, Y, X) volume and its hu.json record."""
+def load_series(source, out):
     paths = sorted(p for p in Path(source).rglob('*') if p.suffix.lower() == '.dcm')
     if len(paths) < 2:
         sidecar.fail(f'Need at least two .dcm slices under {source}')
@@ -93,6 +92,11 @@ def read_series(source):
     affine = np.eye(4)
     affine[:3, :3] = np.column_stack([orient[0], orient[1], normal]) @ np.diag(spacing_xyz)
     affine[:3, 3] = positions[0]
+    out.mkdir(parents=True, exist_ok=True)
+    dest = out / 'hu.npy'
+    if dest.exists():
+        sidecar.fail(f'{dest} exists: write to a fresh output directory')
+    # Built in memory and written once: /outputs is a bucket mount, which cannot take a memory-mapped or piecemeal write.
     volume = np.empty((len(paths), first.Rows, first.Columns), np.float32)
     sources = []
     for z, idx in enumerate(order):
@@ -100,23 +104,13 @@ def read_series(source):
         d = pydicom.dcmread(p)
         volume[z] = d.pixel_array.astype(np.float32) * cal['slope'] + cal['intercept']
         sources.append({'path': str(p.resolve()), 'sha256': sidecar.sha256_file(p)})
+    np.save(dest, volume)
     meta = {'shape_zyx': list(volume.shape), 'spacing_zyx_mm': spacing_xyz[::-1], 'spacing_xyz_mm': spacing_xyz,
                 'affine_xyz_to_world_mm': affine.tolist(), 'calibration': cal, 'sources': sources,
                 'coordinate_note': 'Array indices are Z,Y,X; the affine consumes X,Y,Z voxel-center indices',
                 'status': 'Calibrated from header metadata; no independent phantom validation'}
     ident = {k: meta[k] for k in ('shape_zyx', 'affine_xyz_to_world_mm', 'sources')}
     meta['grid_id'] = hashlib.sha256(json.dumps(ident, sort_keys=True).encode()).hexdigest()
-    return volume, meta
-
-
-def load_series(source, out):
-    dest = out / 'hu.npy'
-    if dest.exists():
-        sidecar.fail(f'{dest} exists: write to a fresh output directory')
-    volume, meta = read_series(source)
-    out.mkdir(parents=True, exist_ok=True)
-    # Written once: /outputs is a bucket mount, which cannot take a memory-mapped or piecemeal write.
-    np.save(dest, volume)
     (out / 'hu.json').write_text(json.dumps(meta, indent=1) + '\n')
     return meta, float(volume.min()), float(volume.max())
 
