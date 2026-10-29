@@ -116,7 +116,7 @@ if __name__ == '__main__':
             s['identity_unsupported'] = s['volume_mm3'] < lo / a.far_factor
             if s['identity_unsupported']:
                 unsupported.append(lv)
-                flags.append(f'{lv} {e["name"]}: {s["volume_mm3"]} mm3 is under {lo}/{a.far_factor:g}: this piece is not a {e["name"]}. '
+                flags.append(f'{lv} {e["name"]}: {s["volume_mm3"]} mm3 is under {lo}/{a.far_factor:g}: this label is not the {e["name"]} (another piece, or a sliver of it). '
                              'Remove the label, then look for the real one (unlabelled.py candidates, the keyframe)')
             elif not s['volume_in_range']:
                 flags.append(f'{lv} {e["name"]}: {s["volume_mm3"]} mm3 outside {lo}-{hi}')

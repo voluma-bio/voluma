@@ -69,7 +69,7 @@ the workflow's anatomy reference gives, not the measurement threshold.
      two labels are off: femur and tibia were right.
    - **Below its range:** it lost bone to a neighbour that is above: fix the pair together.
    - **Far below its range (`identity_unsupported`):** the box found a different piece, or a sliver of the structure. On a field
-     with no patella, the box on a small anterior piece returned a 0.06 mm³ sesamoid under the name "patella" (range 0.96-1.66).
+     with no patella, the box on a small anterior piece returned a 0.06 mm³ sesamoid under the name "patella", far below the patella's range in the anatomy reference.
      Do not keep the name: remove the label and look for the real structure (`segmentation-check`, section 2).
    - **Not near any neighbour the anatomy requires:** the label is on the wrong bone (for the fibula, bone that is not the tibia's
      neighbour). Do not accept it for being in range: re-box or re-seed it on the right bone.

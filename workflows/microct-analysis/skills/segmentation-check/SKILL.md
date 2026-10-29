@@ -60,7 +60,7 @@ the femur. For each candidate from `unlabelled.py`, or each piece `label_stats.p
 
 **Absent, or just not found.** Read `/outputs/intake/scan-notes.md` (`scan-intake`) before you name anything. A piece the data
 does not support (`identity_unsupported`, or a position the anatomy table does not give) is not that structure: remove its label
-(`relabel.py --at <its voxel> --to 0`; the piece then shows up in `unlabelled.py`; name it from the anatomy table if you can,
+(`relabel.py --at <its voxel> --to 0`, once for each piece; the piece then shows up in `unlabelled.py`; name it from the anatomy table if you can,
 otherwise leave it unnamed) and look for the real one among the candidates and on the keyframe. Then:
 - **Absent** when the notes say the structure is outside the field or cut off (overrule them only with a render that shows it,
   and say so in the checkpoint), or when you looked and no candidate sits where the anatomy puts it. Write the structure and

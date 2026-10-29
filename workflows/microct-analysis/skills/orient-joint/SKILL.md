@@ -50,7 +50,8 @@ has no shaft at all. Then:
 
 Open `keyframe.jpg` (`visual-check`). It must cut **both long bones through the joint** (and the reference object when
 there is one): for a knee, femur, tibia and patella. Read `/outputs/intake/scan-notes.md` first (`scan-intake`): when it
-says a structure is outside the field, the piece taken for the reference object is something else (`segmentation-check`,
+says the structure the reference object stands for is outside the field, the piece taken for the reference object is
+something else (`segmentation-check`,
 section 2). The script already stops when one bone has under 5% of the other's
 voxels in the keyframe (`keyframe_bone_vox` in its output); that does not prove the right pieces are the bones, so look.
 If a bone is missing, cut off, or the joint space is not in the slice, do not run SAM: check `bend_deg` (64 degrees on
