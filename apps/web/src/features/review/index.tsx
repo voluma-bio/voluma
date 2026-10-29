@@ -36,7 +36,9 @@ function ScanReview({ runId }: { runId: string }) {
     queryKey: ["run", runId],
     queryFn: () => getRun(runId),
     enabled: runId !== "local",
+    refetchInterval: (query) => (query.state.data?.state.status === "ended" ? false : 3000),
   });
+  const live = execution.data !== undefined && execution.data.state.status !== "ended";
   // `/runs/local` is the reference scan alone: no run, so no results.
   const review = useQuery({
     queryKey: ["review-run", runId],
@@ -44,10 +46,11 @@ function ScanReview({ runId }: { runId: string }) {
     enabled: runId !== "local",
     // Only a server error may pass on retry; a 404, a 409 or data the contract rejects won't.
     retry: (count, cause) => cause instanceof ApiError && cause.status >= 500 && count < 2,
-    // A run with no plan yet gets one once the runner starts it.
+    // A run with no plan yet gets one once the runner starts it; a live run's results fill in
+    // as tasks report. One last refetch happens when `live` turns false and the run ends.
     refetchInterval: (query) => {
       const cause = query.state.error;
-      return cause instanceof ApiError && cause.status === 409 ? 5000 : false;
+      return (cause instanceof ApiError && cause.status === 409) || live ? 5000 : false;
     },
   });
   const status = review.error instanceof ApiError ? review.error.status : undefined;
@@ -65,6 +68,8 @@ function ScanReview({ runId }: { runId: string }) {
           {review.isFetching ? "Retrying…" : "Retry"}
         </button>
       </>
+    ) : review.data && live ? (
+      "This run is still going. Results fill in as tasks report, and decisions open when it completes."
     ) : runId === "local" || review.data ? undefined : review.isPending ? (
       "Loading results…"
     ) : status === 409 ? (
@@ -146,7 +151,7 @@ function ScanReview({ runId }: { runId: string }) {
     <ReviewWorkspace
       runId={runId}
       run={review.data}
-      canReview={execution.data?.example === false && !review.isError}
+      canReview={execution.data?.example === false && !live && !review.isError}
       notice={notice}
       taskId={search.get("task") ?? undefined}
       revisionId={search.get("revision") ?? undefined}
