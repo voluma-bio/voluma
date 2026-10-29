@@ -12,7 +12,8 @@
  *   reads it from the log and never from the workflow.
  */
 import { z } from "zod";
-import { segmentSchema, taskIdSchema } from "./ids";
+import { isObjectKind, taskIdSchema } from "./ids";
+import { outputEntrySchema } from "./workflow-files";
 
 // Lowercase and exactly 40 hex characters, so one commit has one key.
 const part = z.string().regex(/^(?!\.+$)[a-z0-9._-]+$/);
@@ -53,82 +54,57 @@ export const recordedPinSchema = workflowPinSchema.extend({
 export type RecordedPin = z.infer<typeof recordedPinSchema>;
 
 const nonEmpty = z.string().min(1);
-const declaredBase = { id: segmentSchema, required: z.boolean() };
-/**
- * Where a measurement or score is shown (`workflow-files.ts`): output ids of the plan, resolved
- * by the fold. A plan recorded before these existed reads as no links.
- */
-const links = {
-  on: z.array(segmentSchema).default([]),
-  context: z.array(segmentSchema).default([]),
-};
-/** The `volume` output a structure, surface or annotation sits on. */
-const grid = { grid: segmentSchema };
+
+/** What only the file keeps (`task`, `region`, `sourceRef`) is out of the plan; `name` is optional there. */
+const out = { task: true, region: true, sourceRef: true } as const;
+const plus = { name: nonEmpty.optional(), required: z.boolean() };
+const [measurement, score, structure, surface, annotation, volume, file] =
+  outputEntrySchema.options;
 
 /**
- * An output a task must (or may) report, by its `outputId`. The constraints
- * are what a reported output is checked against (`task-tools.ts`).
+ * An output a task must (or may) report, by its `outputId`: its entry in `outputs.json`
+ * (`workflow-files.ts` has the fields of each kind) plus `required`. The constraints are what a
+ * reported output is checked against (`task-tools.ts`). `name` is the structure's title, which
+ * a reported structure must match when set. A plan recorded before `on` existed reads as no links.
  */
-export const declaredOutputSchema = z.discriminatedUnion("kind", [
-  z.object({
-    ...declaredBase,
-    kind: z.literal("measurement"),
-    ...links,
-    unit: nonEmpty,
-    /** Acceptance range `[min, max]` in `unit`: advice for the reviewer and the review screen, never a refusal. */
-    range: z.tuple([z.number(), z.number()]).optional(),
-  }),
-  /** The scale, lowest first: a reported level must be one of these. */
-  z.object({
-    ...declaredBase,
-    kind: z.literal("score"),
-    ...links,
-    levels: z.array(nonEmpty).min(2),
-  }),
-  /**
-   * `label` is the value in the grid, a labels volume, and `name` the structure's title; each,
-   * when set, must match. Without `label` the structure is reported as a cropped mask on the grid.
-   */
-  z.object({
-    ...declaredBase,
-    kind: z.literal("structure"),
-    ...grid,
-    label: z.number().int().positive().optional(),
-    name: nonEmpty.optional(),
-  }),
-  z.object({ ...declaredBase, kind: z.literal("surface"), ...grid }),
-  z.object({
-    ...declaredBase,
-    kind: z.literal("annotation"),
-    ...grid,
-    shape: z.enum(["point", "line"]),
-  }),
-  /** `labels` holds structures' label values; a grid with `label` structures must be one. */
-  z.object({
-    ...declaredBase,
-    kind: z.literal("volume"),
-    volumeKind: z.enum(["image", "labels"]),
-  }),
-  z.object({ ...declaredBase, kind: z.literal("file"), mediaType: nonEmpty }),
-]);
+export const declaredOutputSchema = z.preprocess(
+  (v) =>
+    typeof v === "object" &&
+    v !== null &&
+    "kind" in v &&
+    (v.kind === "measurement" || v.kind === "score")
+      ? { on: [], ...v }
+      : v,
+  z.discriminatedUnion("kind", [
+    measurement.omit(out).extend(plus),
+    score.omit(out).extend(plus),
+    structure.omit(out).extend(plus),
+    surface.omit(out).extend(plus),
+    annotation.omit(out).extend(plus),
+    volume.omit(out).extend(plus),
+    file.omit(out).extend(plus),
+  ]),
+);
 export type DeclaredOutput = z.infer<typeof declaredOutputSchema>;
+
+/** One task of the plan: from the workflow's `tasks.json`, or ad hoc (no outputs). */
+export const planTaskSchema = z.object({
+  id: taskIdSchema,
+  /** Short plain-language name from the workflow's `tasks.json`; shown instead of the id when present. */
+  title: nonEmpty.optional(),
+  /** Tasks this one builds on; a redo of one of them makes this one stale. */
+  dependsOn: z.array(taskIdSchema),
+  /** The workflow's done criteria in its own words, shown to the worker and the check. */
+  doneWhen: z.array(nonEmpty).optional(),
+  /** What the worker is told to do for this task; may point at files in the workflow skill. */
+  instructions: nonEmpty.optional(),
+  outputs: z.array(declaredOutputSchema),
+});
+export type PlanTask = z.infer<typeof planTaskSchema>;
 
 export const workflowPlanSchema = z
   .object({
-    tasks: z.array(
-      z.object({
-        id: taskIdSchema,
-        /** Short plain-language name from the workflow's `tasks.json`; shown instead of the id when present. */
-        title: nonEmpty.optional(),
-        /** Tasks this one builds on; a redo of one of them makes this one stale. */
-        dependsOn: z.array(taskIdSchema),
-        /** The workflow's done criteria in its own words, shown to the worker and the check. */
-        doneWhen: z.array(nonEmpty).optional(),
-        /** What the worker is told to do for this task; may point at files in the workflow skill. */
-        instructions: nonEmpty.optional(),
-        outputs: z.array(declaredOutputSchema),
-      }),
-    ),
+    tasks: z.array(planTaskSchema),
   })
   .superRefine((plan, ctx) => {
     const dup = (path: (string | number)[], what: string) =>
@@ -141,7 +117,7 @@ export const workflowPlanSchema = z
       tasks.add(t.id);
       const outputs = new Set<string>();
       t.outputs.forEach((o, oi) => {
-        if (o.kind !== "measurement" && o.kind !== "score" && o.kind !== "file") {
+        if (isObjectKind(o.kind)) {
           if (objects.has(o.id)) dup(["tasks", ti, "outputs", oi, "id"], `object id "${o.id}"`);
           objects.add(o.id);
         }

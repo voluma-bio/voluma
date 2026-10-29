@@ -28,14 +28,24 @@
  *   affine, after the revision's volumes are known. A ratio's operands and a focus's
  *   ids go through one resolver keyed by block kind (`volume:labels` is not
  *   `volume:image`); one that doesn't resolve is dropped. So no later attempt of
- *   another task can leave a dangling id.
- * - The plan is the first `revision.started`'s. An output fills a declaration
- *   of its kind (a volume, also of its volume kind). Per task, `undeclared` is
- *   the ids of the outputs that fill none; `missing` the declared outputs the
- *   current attempt hasn't reported, except structures, and `missingRequired`
- *   the required ones among all of them. A declared structure not reported is
- *   emitted as a `Structure` with status `missing`; one reported as missing is too,
- *   and counts as reported.
+ *   another task can leave a dangling id. A block on a grid names that volume block as
+ *   `volumeId`.
+ * - The plan is the first `revision.started`'s, changed by each `plan.changed` after it
+ *   (added and ad-hoc tasks join it unless their id is already in the plan, the first wins;
+ *   done-when lines and instructions are appended). Each revision carries the plan as it
+ *   stood at its end. `ask` and `answer` are ignored. An output fills a declaration
+ *   of its kind (a volume, also of its volume kind); a `missing` output fills any declaration
+ *   and counts as reported. Per task, `undeclared` is the ids of the outputs that fill none;
+ *   `missing` the declared outputs the current attempt hasn't reported or reported `missing`
+ *   (with the reason), and `missingRequired` the required ones among those not reported. A
+ *   structure reported `missing` is a `Structure` with `missing` set and counts as reported.
+ * - A skipped task (`plan.changed.skip`, kept across revisions) and every task that
+ *   transitively depends on it in the plan folds as `to-check`, with every declared output
+ *   missing with the reason (the dependents' reason names the skipped task), one open To check
+ *   item and `skipped` set. It needs no attempt: without one it has a row with a null
+ *   `attemptId`. With one, reported outputs stay and only unreported ones are missing.
+ *   `rejected` is true when the task's latest `task` event is `check-result`'s `to-check` on a
+ *   `needs-review` verdict; `isSatisfied` (`@voluma/workflow`) is false for it and for a skipped task.
  * - `assets` is the whole log's: the latest `assets.ready` or `assets.failed` per
  *   source sha256, whatever the revision.
  * - `resultRevisionId` is the revision in which the task's latest event so far
@@ -45,17 +55,17 @@
  *   attempt-level flag that the latest `to-check` event not written by
  *   `check-result` sets and a later `in-progress`, `done`, `stale` or `failed`
  *   clears (`under-review` and `check-result` leave it), its id that event's.
- *   A `toCheck` may carry a `focus`: its ids go through the reference resolver
+ *   A `toCheck` may carry a `focus`: its ids (`on`, any block kind) go through the reference resolver
  *   and are dropped if they don't resolve (a `label` goes with its `volumeId`);
  *   one left pointing at nothing is absent. "Marked to check" has no focus.
  *   `checkResult` turns a folded task into the status `check-result` gives.
  * - Not from these events (the API adds them): `title`, `ask`,
- *   `structureIds`, `threads.chat`, revision labels; the API
+ *   `threads.chat`, revision labels; the API
  *   also sets each asset's `stage` to the task title (here the task id).
  */
 import type { RunEvent, ThreadKind } from "./events";
 import type { TaskStatus } from "./ids";
-import type { EvidenceRef, Output } from "./output";
+import { type EvidenceRef, fileRefsOf, type Output } from "./output";
 import { evidenceKey } from "./r2";
 import type {
   Annotation,
@@ -69,7 +79,8 @@ import type {
   Surface,
   Volume,
 } from "./review";
-import type { DeclaredOutput } from "./workflow";
+import { toWorld } from "./ruler";
+import type { DeclaredOutput, PlanTask, WorkflowPlan } from "./workflow";
 
 type OutputEvent = Extract<RunEvent, { type: "output" }>;
 
@@ -82,16 +93,20 @@ type RefKind =
   | "volume:image"
   | "volume:labels";
 
-/** A grid voxel `[z, y, x]` in world mm through the grid's affine (voxel index (x, y, z) to world). */
-const toWorld = (m: Volume["affine"], [z, y, x]: readonly [number, number, number]) => {
-  const row = (r: Volume["affine"][number]) => r[0] * x + r[1] * y + r[2] * z + r[3];
-  return [row(m[0]), row(m[1]), row(m[2])] satisfies [number, number, number];
-};
+/** Every kind of block a measurement is shown on or a focus points at. */
+const BLOCK_KINDS: RefKind[] = [
+  "volume:image",
+  "volume:labels",
+  "structure",
+  "surface",
+  "annotation",
+];
 
 /** Whether a reported output fills a declaration: the same kind, and for a volume the same volume kind. */
 const fills = (d: DeclaredOutput, o: Output) =>
-  d.kind === o.kind &&
-  (d.kind !== "volume" || (o.kind === "volume" && d.volumeKind === o.volume.kind));
+  o.kind === "missing" ||
+  (d.kind === o.kind &&
+    (d.kind !== "volume" || (o.kind === "volume" && d.volumeKind === o.volume.kind)));
 type Check = ReviewTask["checks"][number];
 
 export type Milestone = {
@@ -119,7 +134,12 @@ export type FoldedTask = Pick<
   | "checks"
   | "evidence"
 > & {
-  attemptId: string;
+  /** Null for a skipped task that never had an attempt. */
+  attemptId: string | null;
+  /** Set when the task was skipped, or depends on one that was; `reason` is the same text. */
+  skipped?: { reason: string };
+  /** The latest `task` event is the check's `to-check` on a `needs-review` verdict: the result was rejected, and a dependent must not build on it. */
+  rejected: boolean;
   /** Ids of the required declared outputs, of any kind (structures too), the attempt hasn't reported. */
   missingRequired: string[];
   /** The latest `task` event's reason; null while the attempt has none. */
@@ -127,6 +147,8 @@ export type FoldedTask = Pick<
   threads: Pick<ReviewTask["threads"], "worker" | "check">;
   models: Pick<ReviewTask["models"], "worker" | "check">;
   milestones: Milestone[];
+  /** Paths (the part after `/scratch/`) of the scratch files its checkpoints and outputs cite. */
+  citedScratch: string[];
 };
 
 export type FoldedRevision = {
@@ -139,6 +161,8 @@ export type FoldedRevision = {
   structures: Structure[];
   surfaces: Surface[];
   annotations: Annotation[];
+  /** The plan at the end of the revision: the run's, with every `plan.changed` so far applied. */
+  plan: WorkflowPlan;
 };
 
 /**
@@ -157,19 +181,24 @@ export function checkResult(
 export type Folded = {
   /** The run now: the last revision's tasks. */
   tasks: FoldedTask[];
+  /** The run's plan now. */
+  plan: WorkflowPlan;
   /** Oldest first. Empty until the run's first `revision.started`. */
   revisions: FoldedRevision[];
   /** Converted assets by source sha256, from the whole log. */
   assets: Record<string, ReviewAssets>;
 };
 
+type Skip = { reason: string; revisionId: string };
+
 type Attempt = {
-  id: string;
+  id: string | null;
   taskId: string;
-  workerThread: string;
+  workerThread: string | null;
   checkThread: string | null;
   status: TaskStatus;
   reason: string | null;
+  rejected: boolean;
   /** "Marked to check": the event that set it and its reason. */
   flag: { id: string; reason: string } | null;
   resultRevisionId: string;
@@ -178,6 +207,7 @@ type Attempt = {
   checker: ReviewTask["checker"];
   outputs: Map<string, OutputEvent>;
   evidence: Map<string, Asset>;
+  citedScratch: Set<string>;
 };
 
 export function fold(events: readonly RunEvent[]): Folded {
@@ -193,11 +223,25 @@ export function fold(events: readonly RunEvent[]): Folded {
   // output id → the task that declares it; ids are unique in a plan, so links name bare ids.
   const owner = new Map<string, string>();
   const dependsOn = new Map<string, string[]>();
+  // The plan's tasks in order, with every change applied.
+  const planTasks = new Map<string, PlanTask>();
+  const planNow = (): WorkflowPlan => ({
+    tasks: [...planTasks.values()].map((t) => structuredClone(t)),
+  });
+  // taskId → the `plan.changed.skip` that named it, across revisions.
+  const skips = new Map<string, Skip>();
+  const setPlanTask = (t: PlanTask) => {
+    planTasks.set(t.id, t);
+    plan.set(t.id, new Map(t.outputs.map((o) => [o.id, o])));
+    for (const o of t.outputs) owner.set(o.id, t.id);
+    dependsOn.set(t.id, t.dependsOn);
+  };
   // The run's first event is `revision.started` (`task-tools.ts`).
   let revisionId = "";
 
   const addEvidence = (a: Attempt, runId: string, refs: EvidenceRef[]) => {
-    for (const r of refs)
+    for (const r of refs) {
+      if (r.root === "scratch") a.citedScratch.add(r.path);
       a.evidence.set(r.sha256, {
         id: r.sha256,
         name: r.path,
@@ -205,6 +249,7 @@ export function fold(events: readonly RunEvent[]): Folded {
         key: evidenceKey(runId, r.sha256),
         sha256: r.sha256,
       });
+    }
   };
 
   const snapshot = (): Pick<
@@ -224,8 +269,6 @@ export function fold(events: readonly RunEvent[]): Folded {
       const k = kinds.get(full);
       return k && accept.includes(k) ? full : undefined;
     };
-    const refs = (a: Attempt, ids: string[], kind: RefKind) =>
-      ids.flatMap((id) => ref(a, id, kind) ?? []);
     // A declared link: a plan output id to the block it names, when the revision has one.
     const linked = (id: string, ...accept: RefKind[]): string | undefined => {
       const task = owner.get(id);
@@ -233,11 +276,7 @@ export function fold(events: readonly RunEvent[]): Folded {
       const k = kinds.get(full);
       return task !== undefined && k && accept.includes(k) ? full : undefined;
     };
-    const shown = (ids: string[]) =>
-      ids.flatMap(
-        (id) =>
-          linked(id, "volume:image", "volume:labels", "structure", "surface", "annotation") ?? [],
-      );
+    const shown = (ids: string[]) => ids.flatMap((id) => linked(id, ...BLOCK_KINDS) ?? []);
     // Ids that resolve stay; `label` goes with a `volumeId` that doesn't. A focus
     // left pointing at nothing is absent: the whole task.
     const resolveFocus = (a: Attempt, f: Focus): Focus | undefined => {
@@ -245,22 +284,13 @@ export function fold(events: readonly RunEvent[]): Folded {
       const { volumeId: _v, label, ...rest } = f;
       const resolved = {
         ...rest,
-        structureIds: refs(a, f.structureIds, "structure"),
-        annotationIds: refs(a, f.annotationIds, "annotation"),
+        on: f.on.flatMap((id) => ref(a, id, ...BLOCK_KINDS) ?? []),
         ...(volumeId !== undefined && { volumeId, ...(label !== undefined && { label }) }),
       };
       const points =
-        resolved.structureIds.length + resolved.annotationIds.length > 0 ||
-        volumeId !== undefined ||
-        resolved.box ||
-        resolved.point;
+        resolved.on.length > 0 || volumeId !== undefined || resolved.box || resolved.point;
       return points ? resolved : undefined;
     };
-    const unreportedOf = (a: Attempt) =>
-      [...(plan.get(a.taskId)?.values() ?? [])].filter((d) => {
-        const o = a.outputs.get(d.id)?.payload.output;
-        return !(o && fills(d, o));
-      });
 
     // Volumes first: every other block sits on one.
     const volumes: Volume[] = [];
@@ -288,9 +318,8 @@ export function fold(events: readonly RunEvent[]): Folded {
         const { output: o } = p;
         const id = `${a.taskId}/${outputId}`;
         const decl = plan.get(a.taskId)?.get(outputId);
-        const declared = decl !== undefined && fills(decl, o);
         const gridId =
-          declared && "grid" in decl
+          decl && fills(decl, o) && "grid" in decl
             ? linked(decl.grid, "volume:image", "volume:labels")
             : undefined;
         const grid = gridId === undefined ? undefined : volumeById.get(gridId);
@@ -299,32 +328,42 @@ export function fold(events: readonly RunEvent[]): Folded {
           case "structure": {
             const s = o.structure;
             let voxels: Structure["voxels"] = null;
-            if ("label" in s && grid) voxels = { volumeId: grid.id, label: s.label };
+            if ("label" in s && grid) voxels = { label: s.label };
             else if ("mask" in s && grid)
               voxels = {
-                gridId: grid.id,
                 mask: { key: key(s.mask.sha256), sha256: s.mask.sha256, shapeZyx: s.shapeZyx },
                 offsetZyx: s.offsetZyx,
               };
             structures.push({
               id,
               name: p.title,
+              volumeId: grid?.id ?? null,
               voxels,
-              declared,
-              status: "status" in s ? s.status : null,
-              reason: "status" in s ? s.reason : null,
+              missing: null,
               ...(o.definition !== undefined && { definition: o.definition }),
               ...(o.volumeMm3 !== undefined && { volumeMm3: o.volumeMm3 }),
             });
             kinds.set(id, "structure");
             break;
           }
+          case "missing":
+            // Of a structure declaration: the object itself shows as missing, with the reason.
+            if (decl?.kind !== "structure") break;
+            structures.push({
+              id,
+              name: p.title,
+              volumeId: null,
+              voxels: null,
+              missing: { reason: o.reason },
+            });
+            kinds.set(id, "structure");
+            break;
           case "surface":
             if (!grid) break;
             surfaces.push({
               id,
               name: p.title,
-              gridId: grid.id,
+              volumeId: grid.id,
               axis: o.surface.axis,
               heights: { key: key(o.surface.heights.sha256), sha256: o.surface.heights.sha256 },
             });
@@ -357,39 +396,64 @@ export function fold(events: readonly RunEvent[]): Folded {
             break;
         }
       }
-      // A declared structure never reported is a `missing` structure, so the
-      // Structures panel is complete; `missing` lists the kinds with no such slot.
-      for (const d of unreportedOf(a))
-        if (d.kind === "structure") {
-          const id = `${a.taskId}/${d.id}`;
-          structures.push({
-            id,
-            name: d.name ?? d.id,
-            voxels: null,
-            declared: true,
-            status: "missing",
-            reason: `The workflow declares it${d.required ? " as required" : ""}; the task has not reported it.`,
-          });
-          kinds.set(id, "structure");
-        }
     }
 
-    const tasks = [...current.values()].map((a) => {
+    // Skipped tasks and, in plan order, every task that depends on one (reason names the skipped task).
+    const skipped = new Map<string, Skip & { origin?: string }>();
+    for (const [id, s] of skips) if (planTasks.has(id)) skipped.set(id, s);
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const t of planTasks.values()) {
+        const dep = t.dependsOn.find((d) => skipped.has(d));
+        const from = dep === undefined ? undefined : skipped.get(dep);
+        if (skipped.has(t.id) || !from) continue;
+        const origin = from.origin ?? (dep as string);
+        const root = skips.get(origin);
+        skipped.set(t.id, {
+          reason: `${origin} was skipped: ${root?.reason}`,
+          revisionId: from.revisionId,
+          origin,
+        });
+        grew = true;
+      }
+    }
+    const rows = [...current.values()];
+    for (const id of skipped.keys())
+      if (!current.has(id))
+        rows.push({
+          id: null,
+          taskId: id,
+          workerThread: null,
+          checkThread: null,
+          status: "to-check",
+          reason: null,
+          rejected: false,
+          flag: null,
+          resultRevisionId: revisionId,
+          milestones: [],
+          toChecks: [],
+          checker: null,
+          outputs: new Map(),
+          evidence: new Map(),
+          citedScratch: new Set(),
+        });
+    const tasks = rows.map((a) => {
+      const skip = skipped.get(a.taskId);
       const measurements: Measurement[] = [];
       const scores: Score[] = [];
       const files: Asset[] = [];
       const undeclared: string[] = [];
+      const declaredOutputs = [...(plan.get(a.taskId)?.values() ?? [])];
       for (const [outputId, v] of a.outputs) {
         const { payload: p } = v;
         const { output: o } = p;
         const id = `${a.taskId}/${outputId}`;
         const decl = plan.get(a.taskId)?.get(outputId);
-        // A structure records this as `declared` on its block; listing it here too would be a second copy.
-        if (!(decl !== undefined && fills(decl, o)) && o.kind !== "structure") undeclared.push(id);
+        if (!(decl !== undefined && fills(decl, o))) undeclared.push(id);
         const evidenceIds = p.evidence.map((r) => r.sha256);
         const source = { threadId: v.threadId, eventId: v.id };
         const on = shown(decl && "on" in decl ? decl.on : []);
-        const context = shown(decl && "context" in decl ? decl.context : []);
+        const context = shown(decl && "context" in decl ? (decl.context ?? []) : []);
         switch (o.kind) {
           case "measurement": {
             const numeratorId = ref(a, o.numeratorId, "measurement");
@@ -441,16 +505,42 @@ export function fold(events: readonly RunEvent[]): Folded {
             break;
         }
       }
-      const unreported = unreportedOf(a);
-      const missing = unreported.flatMap((d) =>
-        d.kind === "structure" ? [] : [{ outputId: d.id, kind: d.kind, required: d.required }],
-      );
-      const missingRequired = unreported.filter((d) => d.required).map((d) => d.id);
+      // Declared outputs with no result: not reported, or reported `missing`. A `missing` report
+      // and a skip account for the output, so neither counts toward `missingRequired`.
+      const reportedOf = (d: DeclaredOutput) => {
+        const o = a.outputs.get(d.id)?.payload.output;
+        return o && fills(d, o) ? o : undefined;
+      };
+      const reasonOf = (d: DeclaredOutput) => {
+        const o = reportedOf(d);
+        return o?.kind === "missing" ? o.reason : skip?.reason;
+      };
+      const missing = declaredOutputs
+        .filter((d) => {
+          const o = reportedOf(d);
+          return !o || (o.kind === "missing" && d.kind !== "structure");
+        })
+        .map((d) => ({
+          outputId: d.id,
+          kind: d.kind,
+          required: d.required,
+          ...(reasonOf(d) !== undefined && { reason: reasonOf(d) }),
+        }));
+      const missingRequired = skip
+        ? []
+        : declaredOutputs.filter((d) => d.required && !reportedOf(d)).map((d) => d.id);
       const checks: Check[] = a.toChecks.map(({ focus, ...c }) => {
         const f = focus && resolveFocus(a, focus);
         return { ...c, ...(f && { focus: f }) };
       });
-      if (a.flag)
+      if (skip)
+        checks.push({
+          id: `${a.taskId}/skipped`,
+          title: "Skipped",
+          detail: skip.reason,
+          status: "open",
+        });
+      else if (a.flag)
         checks.push({
           id: a.flag.id,
           title: "Marked to check",
@@ -460,15 +550,17 @@ export function fold(events: readonly RunEvent[]): Folded {
       return {
         id: a.taskId,
         // Only dependencies that have a row: a worker can open a task before its dependency.
-        dependsOn: (dependsOn.get(a.taskId) ?? []).filter((d) => current.has(d)),
+        dependsOn: (dependsOn.get(a.taskId) ?? []).filter((d) => current.has(d) || skipped.has(d)),
         attemptId: a.id,
-        status: a.status,
-        reason: a.reason,
-        resultRevisionId: a.resultRevisionId,
+        status: skip ? "to-check" : a.status,
+        reason: skip ? skip.reason : a.reason,
+        ...(skip && { skipped: { reason: skip.reason } }),
+        rejected: !skip && a.rejected,
+        resultRevisionId: skip ? skip.revisionId : a.resultRevisionId,
         checker: a.checker && { ...a.checker },
         threads: { worker: a.workerThread, check: a.checkThread },
         models: {
-          worker: threadModel.get(a.workerThread) ?? null,
+          worker: a.workerThread ? (threadModel.get(a.workerThread) ?? null) : null,
           check: a.checkThread ? (threadModel.get(a.checkThread) ?? null) : null,
         },
         milestones: a.milestones.map((m) => ({ ...m, evidenceIds: [...m.evidenceIds] })),
@@ -480,6 +572,7 @@ export function fold(events: readonly RunEvent[]): Folded {
         undeclared,
         checks,
         evidence: [...a.evidence.values()],
+        citedScratch: [...a.citedScratch],
       };
     });
     return { tasks, volumes, structures, surfaces, annotations };
@@ -499,15 +592,10 @@ export function fold(events: readonly RunEvent[]): Folded {
         break;
       }
       case "revision.started": {
-        if (header) revisions.push({ ...header, ...snapshot() });
+        if (header) revisions.push({ ...header, ...snapshot(), plan: planNow() });
         revisionId = e.id;
         const { payload: p } = e;
-        if (p.reason === "run")
-          for (const t of p.plan.tasks) {
-            plan.set(t.id, new Map(t.outputs.map((o) => [o.id, o])));
-            for (const o of t.outputs) owner.set(o.id, t.id);
-            dependsOn.set(t.id, t.dependsOn);
-          }
+        if (p.reason === "run") for (const t of p.plan.tasks) setPlanTask(structuredClone(t));
         header =
           p.reason === "run"
             ? { id: e.id, createdAt: e.createdAt, reason: p.reason }
@@ -522,6 +610,7 @@ export function fold(events: readonly RunEvent[]): Folded {
           checkThread: null,
           status: "in-progress",
           reason: null,
+          rejected: false,
           flag: null,
           resultRevisionId: revisionId,
           milestones: [],
@@ -529,6 +618,7 @@ export function fold(events: readonly RunEvent[]): Folded {
           checker: null,
           outputs: new Map(),
           evidence: new Map(),
+          citedScratch: new Set(),
         };
         attempts.set(e.id, a);
         current.set(a.taskId, a);
@@ -540,6 +630,11 @@ export function fold(events: readonly RunEvent[]): Folded {
         const { status, reason, by } = e.payload;
         a.status = status;
         a.reason = reason;
+        a.rejected =
+          status === "to-check" &&
+          by.kind === "rule" &&
+          by.rule === "check-result" &&
+          a.checker?.verdict === "needs-review";
         if (status === "to-check") {
           if (!(by.kind === "rule" && by.rule === "check-result")) a.flag = { id: e.id, reason };
         } else if (status !== "under-review") a.flag = null;
@@ -574,8 +669,36 @@ export function fold(events: readonly RunEvent[]): Folded {
         const a = attempts.get(e.payload.attemptId);
         if (!a) break;
         addEvidence(a, e.runId, e.payload.evidence);
+        // The output's own files are the checker's to inspect, though they are not evidence.
+        for (const r of fileRefsOf(e.payload.output))
+          if (r.root === "scratch") a.citedScratch.add(r.path);
         a.outputs.set(e.payload.outputId, e);
         a.resultRevisionId = revisionId;
+        break;
+      }
+      case "plan.changed": {
+        const { add, adHoc, doneWhen, instructions, skip } = e.payload;
+        // An id already in the plan keeps its entry: a collision must not replace a task's outputs.
+        for (const t of add ?? []) if (!planTasks.has(t.id)) setPlanTask(structuredClone(t));
+        for (const t of adHoc ?? [])
+          if (!planTasks.has(t.id))
+            setPlanTask({
+              id: t.id,
+              title: t.title,
+              dependsOn: t.dependsOn,
+              instructions: t.instructions,
+              outputs: [],
+            });
+        for (const d of doneWhen ?? []) {
+          const t = planTasks.get(d.taskId);
+          if (t) t.doneWhen = [...(t.doneWhen ?? []), ...d.lines];
+        }
+        for (const i of instructions ?? []) {
+          const t = planTasks.get(i.taskId);
+          if (t) t.instructions = t.instructions ? `${t.instructions}\n\n${i.text}` : i.text;
+        }
+        for (const s of skip ?? [])
+          if (!skips.has(s.taskId)) skips.set(s.taskId, { reason: s.reason, revisionId });
         break;
       }
       case "assets.ready": {
@@ -592,6 +715,7 @@ export function fold(events: readonly RunEvent[]): Folded {
   }
 
   const last = snapshot();
-  if (header) revisions.push({ ...header, ...last });
-  return { tasks: last.tasks, revisions, assets };
+  const planEnd = planNow();
+  if (header) revisions.push({ ...header, ...last, plan: planEnd });
+  return { tasks: last.tasks, plan: planEnd, revisions, assets };
 }

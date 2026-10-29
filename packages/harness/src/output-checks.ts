@@ -5,13 +5,12 @@
  * text, or nothing.
  */
 import type { Folded } from "@voluma/contracts/fold";
-import { rulerLengthProblem } from "@voluma/contracts/ruler";
+import { isObjectKind } from "@voluma/contracts/ids";
+import { distanceMm, rulerLengthProblem, toWorld } from "@voluma/contracts/ruler";
 import type { ReportOutputInput } from "@voluma/contracts/task-tools";
 import type { DeclaredOutput, WorkflowPlan } from "@voluma/contracts/workflow";
 
 type Out = ReportOutputInput["output"];
-
-const OBJECTS = new Set(["structure", "surface", "annotation", "volume"]);
 
 /** `title` is the report's; a declared structure names its `title` by `name`. */
 export function declarationProblem(
@@ -20,12 +19,18 @@ export function declarationProblem(
 ): string | undefined {
   if (!declared) {
     // Review places an object by its declaration's grid; a value or file needs no place.
-    return OBJECTS.has(output.kind)
+    return output.kind !== "missing" && isObjectKind(output.kind)
       ? `This ${output.kind} is not in the plan. Only declared objects (structures, surfaces, annotations, volumes) can be reported: review cannot place others.`
       : undefined;
   }
   const quote = `The plan declares: ${JSON.stringify(declared)}.`;
   const mismatch = (what: string) => `${what}. ${quote}`;
+  if (output.kind === "missing") {
+    // A measurement says it is missing with `value: null` and a reason, so it has one shape.
+    return declared.kind === "measurement"
+      ? mismatch("A measurement declaration takes `value: null` with a reason, not `missing`")
+      : undefined;
+  }
   if (declared.kind !== output.kind) return mismatch(`This output is a ${output.kind}`);
   switch (declared.kind) {
     case "measurement":
@@ -90,9 +95,9 @@ export function referenceProblem(view: Folded, taskId: string, output: Out): str
 
 /**
  * Where an object sits and whether a ruler agrees with its number. A structure, surface or
- * annotation needs its declared grid reported before it (a missing structure has no voxels);
- * a line annotation and the length measurement that names it are checked against each other
- * when the second of the pair arrives (`rulerLengthProblem`).
+ * annotation needs its declared grid reported before it, and must lie inside it (a missing
+ * structure has no voxels); a line annotation and the length measurement that names it are
+ * checked against each other when the second of the pair arrives (`rulerLengthProblem`).
  */
 export function placementProblem(
   view: Folded,
@@ -120,27 +125,15 @@ export function placementProblem(
       lineId && last?.annotations.find((a) => a.id === `${declared.get(lineId)?.task}/${lineId}`);
     if (lines.length !== 1 || !line || line.kind !== "line" || output.value === null)
       return undefined;
-    // The block holds world mm already, so measure it through the identity.
-    const zyx = (p: readonly number[]): [number, number, number] => [
-      p[2] ?? 0,
-      p[1] ?? 0,
-      p[0] ?? 0,
-    ];
-    const problem = rulerLengthProblem(
-      { aZyx: zyx(line.a), bZyx: zyx(line.b) },
-      [
-        [1, 0, 0, 0],
-        [0, 1, 0, 0],
-        [0, 0, 1, 0],
-        [0, 0, 0, 1],
-      ],
-      { value: output.value, unit: output.unit },
-    );
+    const problem = rulerLengthProblem(distanceMm(line.a, line.b), {
+      value: output.value,
+      unit: output.unit,
+    });
     return problem && `Ruler "${lineId}": ${problem}.`;
   }
 
   if (!self || !("grid" in self)) return undefined;
-  if (output.kind === "structure" && "status" in output.structure) return undefined;
+  if (output.kind === "missing") return undefined;
   const gridTask = declared.get(self.grid)?.task;
   const grid = volumes.get(`${gridTask}/${self.grid}`);
   if (!grid)
@@ -148,7 +141,7 @@ export function placementProblem(
 
   const reportedGrid =
     output.kind === "annotation"
-      ? output.gridId
+      ? output.annotation.gridId
       : output.kind === "surface"
         ? output.surface.gridId
         : output.kind === "structure" && "mask" in output.structure
@@ -157,19 +150,28 @@ export function placementProblem(
   if (reportedGrid !== undefined && reportedGrid !== grid.gridId)
     return `This was made on grid "${reportedGrid}", but "${self.grid}" was reported as grid "${grid.gridId}". Redo it on that grid.`;
 
-  if (output.kind !== "annotation" || output.annotation.kind !== "line") return undefined;
-  const line = { aZyx: output.annotation.aZyx, bZyx: output.annotation.bZyx };
-  for (const m of plan.flatMap((t) => t.outputs.map((d) => [t.id, d] as const))) {
-    const [mTask, d] = m;
+  // A voxel index i covers [i - 0.5, i + 0.5], so a fractional position fits up to shape - 0.5.
+  const outside = (zyx: readonly number[]) => zyx.some((v, i) => v > (grid.shapeZyx[i] ?? 0) - 0.5);
+  const tooBig = `It does not fit in grid "${self.grid}", whose shape [z, y, x] is [${grid.shapeZyx.join(", ")}].`;
+  if (output.kind === "structure" && "mask" in output.structure) {
+    const { offsetZyx, shapeZyx } = output.structure;
+    if (outside(offsetZyx.map((o, i) => o + (shapeZyx[i] ?? 0) - 1))) return tooBig;
+  }
+  if (output.kind !== "annotation") return undefined;
+  const { annotation } = output;
+  if (annotation.kind === "point") return outside(annotation.zyx) ? tooBig : undefined;
+  if (outside(annotation.aZyx) || outside(annotation.bZyx)) return tooBig;
+  const length = distanceMm(
+    toWorld(grid.affine, annotation.aZyx),
+    toWorld(grid.affine, annotation.bZyx),
+  );
+  for (const [mTask, d] of plan.flatMap((t) => t.outputs.map((d) => [t.id, d] as const))) {
     if (d.kind !== "measurement" || rulerOf(d).length !== 1 || !d.on.includes(outputId)) continue;
     const measured = view.tasks
       .find((t) => t.id === mTask)
       ?.measurements.find((x) => x.id === `${mTask}/${d.id}`);
     if (measured?.value == null) continue;
-    const problem = rulerLengthProblem(line, grid.affine, {
-      value: measured.value,
-      unit: measured.unit,
-    });
+    const problem = rulerLengthProblem(length, { value: measured.value, unit: measured.unit });
     if (problem) return `Measurement "${d.id}": ${problem}.`;
   }
   return undefined;

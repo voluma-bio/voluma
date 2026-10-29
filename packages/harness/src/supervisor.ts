@@ -59,6 +59,7 @@ import {
 } from "./main-thread";
 import type { PayloadOf, Recorder } from "./recorder";
 import type { PlanTask, TaskRuntime } from "./task-runtime";
+import { supervisorThreadId, threadId } from "./thread-id";
 import {
   JUDGMENT_SUFFIX,
   type Role,
@@ -87,8 +88,18 @@ export interface SupervisorOptions {
    * `notes` are the main thread's notes in force when the thread starts (none yet at the first
    * task). `model` is the one a resumed thread started on, which it must keep.
    */
-  worker(taskId: string, notes: string | undefined, model: string | undefined): RoleSpec;
-  check(taskId: string, notes: string | undefined, model: string | undefined): RoleSpec;
+  worker(
+    taskId: string,
+    threadId: string,
+    notes: string | undefined,
+    model: string | undefined,
+  ): RoleSpec;
+  check(
+    taskId: string,
+    threadId: string,
+    notes: string | undefined,
+    model: string | undefined,
+  ): RoleSpec;
   /** Wakes of a worker that stopped with its task unfinished before the stuck guard marks it. */
   stuckLimit?: number;
   /** Redos a judgment may order for one task. */
@@ -109,9 +120,6 @@ export interface SupervisorOptions {
 
 /** What `step` found: nothing to do, something done, or a wake to ask, under the key its answer is stored by. */
 type Next = "idle" | "acted" | { point: WakePoint; key: string };
-
-/** The supervisor's own thread: the root, and the envelope of a run's first events. */
-export const supervisorThreadId = (runId: string) => `${runId}.supervisor`;
 
 const PLAIN_REASON: Record<ClaimEndReason, string> = {
   shutdown: "the runner restarted",
@@ -160,14 +168,12 @@ export function supervisor(options: SupervisorOptions) {
   const wakeKey = (d: ThreadLog, threadId: string) =>
     `${threadId}@${d.threads.get(threadId)?.starts ?? 0}`;
 
-  /** `<runId>.<taskId>.<role>`, plus `.<n>` for the n-th (ids.ts: run and task ids hold no '.'). */
-  const threadId = (taskId: string, role: Role, n: number) =>
-    `${options.runId}.${taskId}.${role}${n === 1 ? "" : `.${n}`}`;
+  const idOf = (taskId: string, role: Role, n: number) => threadId(options.runId, taskId, role, n);
   /** An id this process refused as unresumable counts as used, even if its `thread.started` never landed. */
   const nextThreadId = (d: ThreadLog, taskId: string, role: Role) => {
     let n = startedFor(d, taskId, role).length + 1;
-    while (threads.stale(threadId(taskId, role, n))) n++;
-    return threadId(taskId, role, n);
+    while (threads.stale(idOf(taskId, role, n))) n++;
+    return idOf(taskId, role, n);
   };
 
   /**
@@ -193,8 +199,8 @@ export function supervisor(options: SupervisorOptions) {
     const model = known.get(id)?.model;
     threads.start({
       ...(role === "worker"
-        ? options.worker(taskId, notes, model)
-        : options.check(taskId, notes, model)),
+        ? options.worker(taskId, id, notes, model)
+        : options.check(taskId, id, notes, model)),
       threadId: id,
       kind: role,
       parentThreadId: root,
@@ -272,10 +278,10 @@ export function supervisor(options: SupervisorOptions) {
         taskId,
         `${taskId} was corrected, so this result may no longer hold.`,
       );
-      await runtime.setStatus(root, eventId, taskId, t.attemptId, "stale", reason, arm);
+      await runtime.setStatus(root, eventId, taskId, attemptOf(t), "stale", reason, arm);
       return "acted";
     }
-    let attemptId = t?.attemptId;
+    let attemptId = t?.attemptId ?? null;
     if (!attemptId) {
       attemptId = `${id}:judgment:open`;
       await recorder.append(id, "attempt.opened", { taskId }, attemptId);
@@ -387,12 +393,18 @@ export function supervisor(options: SupervisorOptions) {
       w.id,
       `${w.id}:stuck:${taskId}`,
       taskId,
-      t.attemptId,
+      attemptOf(t),
       "to-check",
       "The worker stopped before finishing this task.",
       rule("stuck"),
     );
     return "acted";
+  }
+
+  /** A task a thread works on has an attempt; only a skipped task lacks one, and `stepTask` leaves those. */
+  function attemptOf(t: FoldedTask): string {
+    if (!t.attemptId) throw new Error(`${t.id} has no attempt.`);
+    return t.attemptId;
   }
 
   /** The result of a check thread that is over: the task takes `checkResult` of its fold. */
@@ -413,7 +425,7 @@ export function supervisor(options: SupervisorOptions) {
       c.id,
       `${c.id}:result`,
       t.id,
-      t.attemptId,
+      attemptOf(t),
       status,
       reason,
       rule("check-result"),
@@ -427,12 +439,12 @@ export function supervisor(options: SupervisorOptions) {
       id,
       `${id}:start`,
       t.id,
-      t.attemptId,
+      attemptOf(t),
       "under-review",
       "A second agent is checking this task.",
       rule("check-start"),
     );
-    launch("check", t.id, id, { attemptId: t.attemptId });
+    launch("check", t.id, id, { attemptId: attemptOf(t) });
     return "acted";
   }
 
@@ -458,7 +470,7 @@ export function supervisor(options: SupervisorOptions) {
       wake(
         cutOff,
         { text: cutOffText(d.after, tool), sender: { kind: "runtime" } },
-        cutOff.role === "check" ? t?.attemptId : undefined,
+        cutOff.role === "check" ? (t?.attemptId ?? undefined) : undefined,
       );
       return "acted";
     }
@@ -477,6 +489,7 @@ export function supervisor(options: SupervisorOptions) {
     }
     if (stopped && t?.status === "in-progress") return startWorker(taskId);
     if (!t) return ready.has(taskId) ? startWorker(taskId) : "idle";
+    if (t.skipped) return "idle"; // Skipped by the plan: no worker, no check.
     const workerId = worker?.id ?? "";
     switch (t.status) {
       case "stale":
@@ -501,7 +514,7 @@ export function supervisor(options: SupervisorOptions) {
       case "under-review": {
         // The task went under review but its check thread has no stored start: start it.
         if (!t.threads.check) {
-          launch("check", taskId, nextThreadId(d, taskId, "check"), { attemptId: t.attemptId });
+          launch("check", taskId, nextThreadId(d, taskId, "check"), { attemptId: attemptOf(t) });
           return "acted";
         }
         const c = recordOf(d, t.threads.check, "check", taskId);
@@ -509,14 +522,14 @@ export function supervisor(options: SupervisorOptions) {
         if (j) return apply(d, c.id, j, t);
         // A check that cannot resume is checked again by a new thread; the worker's result stands.
         if (threads.stale(c.id)) {
-          launch("check", taskId, nextThreadId(d, taskId, "check"), { attemptId: t.attemptId });
+          launch("check", taskId, nextThreadId(d, taskId, "check"), { attemptId: attemptOf(t) });
           return "acted";
         }
         if (c.end?.status === "failed") {
           const error = c.end.error ?? "failed";
           // The worker's result stands; a new check replaces the one the provider cut short.
           if (providerRetry(d, c, error)) {
-            launch("check", taskId, nextThreadId(d, taskId, "check"), { attemptId: t.attemptId });
+            launch("check", taskId, nextThreadId(d, taskId, "check"), { attemptId: attemptOf(t) });
             return "acted";
           }
           return judgmentFor(
@@ -528,12 +541,12 @@ export function supervisor(options: SupervisorOptions) {
         // A check that stopped without a verdict (it wrote "Passed" in the text only) is
         // woken once, as a worker is, before its task is left with no verdict.
         if (c.end?.status === "cancelled") {
-          launch("check", taskId, nextThreadId(d, taskId, "check"), { attemptId: t.attemptId });
+          launch("check", taskId, nextThreadId(d, taskId, "check"), { attemptId: attemptOf(t) });
           return "acted";
         }
         if (t.checker?.verdict === undefined && c.wakes < 1) {
           const text = `You stopped before giving a verdict. Write a checkpoint on ${taskId} with verdict "passed" if you agree or "needs-review" if you do not or cannot tell, and one plain line of why.`;
-          wake(c, { text, sender: { kind: "runtime" } }, t.attemptId);
+          wake(c, { text, sender: { kind: "runtime" } }, attemptOf(t));
           return "acted";
         }
         return finishCheck(t, c);
@@ -732,7 +745,7 @@ export function supervisor(options: SupervisorOptions) {
         if (!waiting || liveThread(d, r.taskId)) {
           throw new Error(`${to} is not waiting: its task ${r.taskId} is not being worked on.`);
         }
-        wake(r, { text, sender }, r.role === "check" ? t?.attemptId : undefined);
+        wake(r, { text, sender }, r.role === "check" ? (t?.attemptId ?? undefined) : undefined);
       });
       return { delivery: "queued" };
     },

@@ -173,7 +173,6 @@ export function expectParses(f: Folded) {
         ...t,
         title: t.id,
         ask: "",
-        structureIds: [],
         threads: { ...t.threads, chat: null },
         models: { ...t.models, chat: null },
       })),

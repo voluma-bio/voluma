@@ -10,7 +10,7 @@ and in sign from one height to the next. Plate-run bone is the ROI and aligned H
 2.16/cm in this scan's HU, from hu.json's calibration); no label gates it.
 
 --annotations is a JSON file of indices on the aligned grid. It needs "grid_id" (the grid_id of tibia-frame.json; a file without it
-or from another grid is refused). This script reads these keys, other sections of the file are ignored:
+or from another grid is refused). This script reads these keys; any other key is refused, and so is a value of the wrong form or an index outside the grid:
   growth_plate_curves     required: the proximal face of the growth plate, curves (below) on at least two V sections
   articular_corrections   optional list of {"u_range": [lo, hi], "v_range": [lo, hi], "curves": curves}: where part of the
                           tibia label is really femur or fibula above the articular surface, `curves` mark the true
@@ -57,6 +57,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 MIN_COMPONENT = 50  # coronal fragments below this many pixels are segmentation specks, not bone
+HEIGHT_FIELDS = ('growth-plate-proximal-face.npy', 'articular-top-surface.npy')  # 2D height arrays; the other .npy are volumes
 EDGE_ERODE = 3  # footprint erosion for the local-height search: avoids tangential edge extrema
 
 
@@ -137,7 +138,7 @@ def main():
     )
     a = ap.parse_args()
     frame = fr.load(a.frame)
-    ann = load_annotations(a.annotations, frame['grid_id'])
+    ann = load_annotations(a.annotations, frame)
     g = sidecar.grid(a.hu_json)
     a.threshold = sidecar.bone_threshold_hu(a.hu_json, a.threshold)
     vox = frame['spacing_zyx_mm'][0]
@@ -252,6 +253,9 @@ def main():
         if patch is None:
             c = int(mids[side])
             patch = {'u': [c - half, c + half], 'v': [v_star - half, v_star + half]}
+            for key, n, axis in (('u', h.shape[2], 'U'), ('v', h.shape[1], 'V')):
+                if patch[key][0] < 0 or patch[key][1] > n:
+                    sidecar.fail(f'the default {side} plate patch ({key} {patch[key][0]} to {patch[key][1]}, from the midpoint and height section) leaves the grid ({n} {axis} indices, 0 to {n}): set "plate_patches" or move the midpoint inside the grid')
         run = np.zeros(h.shape, bool)
         th = []
         for vi in range(*patch['v']):
@@ -296,7 +300,7 @@ def main():
         'articular-top-surface.npy': np.where(valid, top, np.nan).astype(np.float32),
     }
     arrays.update({f'{s}-plate-run.npy': m for s, m in plates.items()})
-    for name, arr in arrays.items():
+    for name, arr in arrays.items():  # HEIGHT_FIELDS are heights along axis 0 of the tibia frame
         np.save(out / name, arr)
         sidecar.write(
             out / name,
@@ -305,6 +309,7 @@ def main():
             inputs=inputs,
             params=params,
             script='iioc.py',
+            surface_axis=0 if name in HEIGHT_FIELDS else None,
         )
     (out / 'width-points-scan.json').write_text(json.dumps(width_points, indent=1) + '\n')
     np.save(out / 'iioc-tissue-scan.npy', scan_roi)

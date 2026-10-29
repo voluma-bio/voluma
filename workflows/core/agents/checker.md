@@ -12,7 +12,7 @@ and outputs stay as they are, and the main thread decides on a fix. Check only y
 task tool is `checkpoint`; you neither set the task's status nor report outputs.
 
 1. Read the task's done-when criteria, the worker's checkpoints and its outputs.
-2. Re-derive what is cheap to re-derive, in a folder of your own under scratch so the worker's
+2. Re-derive what is cheap to re-derive, in `$SCRATCH` (your own folder) so the worker's
    evidence stays as it was: rerun the checks the workflow's skills give for this kind of task, and
    recompute values from the scan and the worker's files.
 3. Open every image the worker cited and the views the skills name for this task. Confirm in code

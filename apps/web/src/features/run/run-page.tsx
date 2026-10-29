@@ -122,7 +122,11 @@ export function RunPage() {
   // Query's structural sharing keeps `state` the same object across polls that change nothing.
   const halt = useMemo(() => state && haltOf(state, closed), [state, closed]);
   const folded = useMemo(() => fold(events), [events]);
-  const view = useMemo(() => runView(events, folded, halt), [events, folded, halt]);
+  const providerCalls = run.data?.providerCalls;
+  const view = useMemo(
+    () => runView(events, folded, halt, providerCalls),
+    [events, folded, halt, providerCalls],
+  );
   const threads = useMemo(() => withLiveCalls(view.threads, live), [view.threads, live]);
   const threadById = useMemo(() => new Map(threads.map((t) => [t.id, t])), [threads]);
   const main = threads.find((t) => t.kind === "supervisor");
@@ -316,22 +320,31 @@ function AttentionStrip({ items }: { items: Attention[] }) {
   );
 }
 
-/** Open review once completed; Stop, with a confirm, while the run is not over. */
+function OpenReview({ runId, primary }: { runId: string; primary?: boolean }) {
+  return (
+    <Link
+      to={`/runs/${runId}`}
+      className={`inline-flex h-8 items-center rounded-lg px-3.5 text-ui font-medium ${
+        primary
+          ? "bg-primary text-primary-foreground hover:bg-primary-strong"
+          : "border border-border hover:bg-muted"
+      }`}
+    >
+      Open review
+    </Link>
+  );
+}
+
+/** Open review once the run has started, or once completed; Stop, with a confirm, while the run is not over. */
 function RunActions({ run, onChange }: { run: Run; onChange: (run: Run) => void }) {
   const [confirming, setConfirming] = useState(false);
   const cancel = useMutation({ mutationFn: () => cancelRun(run.id), onSuccess: onChange });
   const { state } = run;
   if (state.status === "ended")
-    return state.outcome === "completed" ? (
-      <Link
-        to={`/runs/${run.id}`}
-        className="inline-flex h-8 items-center rounded-lg bg-primary px-3.5 text-ui font-medium text-primary-foreground hover:bg-primary-strong"
-      >
-        Open review
-      </Link>
-    ) : null;
+    return state.outcome === "completed" ? <OpenReview runId={run.id} primary /> : null;
   return (
     <>
+      {state.status !== "queued" && state.startedAt && <OpenReview runId={run.id} />}
       {cancel.isError && (
         <span role="alert" className="text-ui text-destructive">
           Couldn't stop the run. Try again.

@@ -6,18 +6,50 @@ its size (2 CPUs, 8192 MiB), its network and which mounts it holds. Tags on ever
 
 | Role | Mounts | Network | Name |
 |---|---|---|---|
-| `worker` | as the caller says (today `RunLayout.mounts`) | the gateway host over HTTPS (`outboundDomainAllowlist`), if the spec has a `gateway`; else none | `<taskId>.worker[.n]` |
+| `worker` | as the caller says (today the worker `ThreadLayout.mounts`) | the gateway host over HTTPS (`outboundDomainAllowlist`), if the spec has a `gateway`; else none | `<taskId>.worker[.n]` |
 | `checker` | `readOnly` mounts read-only, one writable `scratch` prefix | none | `<taskId>.check[.n]` |
 | `convert` | `evidence` read-only, `review` writable | none | the job's |
 
 The builder sets the access of each mount, and the Modal adapter refuses a network on a
 non-worker role. The runner makes one sandbox per thread (`sandboxSession.get(threadId)`,
-named by the thread id without the run id). **Check threads still run on a worker-role
-sandbox**: the checker spec exists, but the run-wide `/scratch` is assumed by the check skills
-(`/scratch/recheck/`), by checkpoint evidence `{root: "scratch", path}` (`r2Evidence`), by the
-`bash` spill (`toolOutputPath`) and by `view_image`/`segment_sam` (`RunLayout.keyOf`). Moving them
-to `/scratch/<check thread>/` needs those four to take the thread, and the skill text to change.
-The checker's other writes: none (`workflows/core/agents/checker.md` says it changes nothing).
+named by the thread id without the run id). `RunLayout.forThread(threadId)`
+(`packages/harness/src/layout.ts`) gives each thread its role, mounts, tool description, restart note,
+`keyOf` and bash-spill path, so a worker and a checker each see their own files:
+
+- A worker mounts `/inputs` and `/workflow` read-only and `/scratch` (the run's whole scratch) and
+  `/outputs` read-write, and works in `/scratch/<its name>/` like every role, so parallel workers
+  don't overwrite each other's fixed-name files.
+- A checker mounts `/inputs`, `/workflow` and `/outputs` read-only and one writable folder,
+  `/scratch/<its name>/` (the name is the sandbox name, e.g. `t1.check`), which is the R2 prefix
+  `scratch/<name>/` under the run. Its bash does not see the rest of `/scratch`. Host-side
+  (`keyOf`, so `view_image`) it also reads, read-only, the files in the run's `/scratch` that the
+  attempt under review cites (`{root: "scratch"}` refs on its checkpoints and outputs, and the
+  `root: "scratch"` files in an output's own payload, `fileRefsOf`), and no others: the worker's
+  scripts, logs and notes stay unread. Cited means the path, not the bytes. `keyOf` asks the
+  `(path) => boolean` that `forThread(threadId, cited)` takes; callers pass
+  `(p) => runtime.cites(taskId, p)`, answered from the fold (`FoldedTask.citedScratch`).
+  The same `keyOf` check validates the evidence a checker names. The main agent
+  (`<runId>.main[.n]`) has the same mounts and reads the run's whole `/scratch` host-side; it has
+  no sandbox today.
+- Every thread spills a truncated bash output to `/scratch/<name>/.tool-output/<id>`
+  (`toolOutputKey(runId, threadName, toolCallId)`), a worker too.
+- Every sandbox has env `SCRATCH` (`/scratch/<name>` for every role) and runs
+  its commands there (`SandboxSpec.workdir`); the prompt tells the model to write working files
+  under `$SCRATCH`.
+- The path namespace is the same for every thread: `/scratch/<name>/x.png` is the key
+  `scratchKey(runId, "<name>/x.png")`, so a checkpoint's evidence `{root: "scratch", path:
+  "<name>/x.png"}` resolves the same way (`r2Evidence`, the local evidence adapter). Before
+  `evidence.keep`, `taskRuntime` checks each evidence path with the calling thread's
+  `keyOf(..., "read")`, so a thread cites only what it can read.
+- The sandbox's own `/scratch` directory exists in the container. A write outside
+  `/scratch/<name>/` (say `/scratch/v1.jpg`) succeeds but is local and lost on restart. Nothing
+  stops it: sandboxes run as root without `CAP_SYS_ADMIN` (`chmod a-w` does not bind root, no
+  `chattr`, no remount), and a mount over `/scratch` would be the worker's scratch. The fence is
+  `$SCRATCH` as the working directory and in the prompt. A checker that writes `/scratch/v1.jpg`
+  locally and cites `v1.jpg` is refused unless the worker cited `v1.jpg`, in which case the
+  citation resolves to the worker's file.
+- Thread ids are built and parsed in `packages/harness/src/thread-id.ts`.
+
 Spend and the usage meter sum sandbox seconds over all sandboxes.
 
 **Probed 2026-10-29 (Modal SDK 0.11.1, run p414), the facts the design relied on:**
@@ -36,6 +68,13 @@ Spend and the usage meter sum sandbox seconds over all sandboxes.
   mounts as readable by anything the worker's code does.
 - The sandbox's `/proc/meminfo` shows the host, not the 8 GiB request; the limit is not
   observable from inside.
+- A checker sandbox with a read-write mount at `/scratch/<name>` (prefix `scratch/<name>/`) beside
+  read-only `/outputs` (run p470): a write under `/scratch/<name>/` reached R2 at
+  `runs/<run>/scratch/<name>/`; a write to `/outputs` failed with `Read-only file system`; DNS
+  failed (no network); no gateway variable. `/scratch` itself is a container directory, not a mount.
+- Same sandbox shape (run p483): commands run as uid 0 with `CapEff` lacking `CAP_SYS_ADMIN` and
+  `CAP_LINUX_IMMUTABLE`; `SCRATCH` and the exec `workdir` (`/scratch/t1.check`) take effect;
+  `touch /scratch/outside.txt` succeeds, also after `chmod a-w /scratch`; `chattr` is absent.
 
 # Runner: review assets
 
@@ -108,7 +147,7 @@ Run `sandboxes:clean --run <your run>` before finishing any work that started sa
 The tool (`packages/harness/src/tools/segment-sam.ts`) runs in the runner process, never in
 the sandbox: the sandbox has no network and Meta's key must not enter it. It reads the
 volume and writes the labels straight to the run's bucket (`Files` port, `r2-files.ts`;
-`RunLayout.keyOf` maps the sandbox path the model names to its key), so a file the
+`ThreadLayout.keyOf` maps the sandbox path the model names to its key), so a file the
 sandbox just wrote is visible to it and the labels are visible to the sandbox after the call.
 The Meta adapter (`meta-segmenter.ts`) shells out to `ffmpeg` for the lossless H.264 stack, so
 the runner host needs it on PATH; it deletes its upload from Meta's file store when the call
@@ -153,9 +192,14 @@ when a claim reports (`model cost this claim`), and the API stores it as `runs.m
 On 2026-10-28 the claims' lines summed to the run's `model_cost_usd` and to `spend(events).total`
 ($0.9763 over five claims of one run).
 
-**Spend cap.** `RUNNER_MAX_RUN_COST_USD` (default 5) caps a run's model and SAM dollars across all
-its claims (the claim's `run.usage` plus this claim's meter; sandbox time is not counted). The meter
-calls back on each addition; at the cap `run.ts` stops the run and reports `ended failed` with
+**Spend cap.** `RUNNER_MAX_RUN_COST_USD` caps a run's dollars across all its claims (sandbox time
+is not counted). Unset, the default, there is no cap: test runs have none, so leave it unset on
+staging and locally (spend is still recorded and shown). When set it goes to the API with each
+claim and becomes `runs.cost_cap_usd` (null: no cap),
+which the provider gateway checks too ([apps/gateway](../../gateway/.context/CONTEXT.md)). The runner's
+total is the last heartbeat's `spentUsd` (model cost plus settled gateway calls; an open call
+counts nothing, the gateway holds its reservation itself) plus the model cost not yet sent, checked on each model cost and each acknowledged
+heartbeat; at the cap `run.ts` stops the run and reports `ended failed` with
 `spend cap $X reached at $Y`. Calls in flight are aborted, not waited for. A claim of a run already over the cap stops before its first call. It applies to visitor runs too. The supervisor ends the root thread `cancelled` in the event log while the run row says `failed` with the cap text.
 
 **A main-thread reply that does not parse.** `llmMainThread` escapes raw control characters inside
@@ -208,8 +252,8 @@ lifetime) and once more 23 min into the replacement, before the exit code was lo
 # Runner: role text and tool grants come from `workflows/core/agents/`
 
 The worker's and checker's system prompts are `workflows/core/agents/<role>.md`'s body, then `COMMON`
-(sandbox text, `prompts.ts`), then the skill list. Their optional tools are the file's `tools`
-(`run.ts` `grant`); `segment_sam` is also dropped when the run has no Meta key. `loadWorkflow`
+(sandbox text per role, `prompts.ts` `systemPrompt`), then the skill list. Their optional tools are the file's `tools`
+(`run.ts` `grant`); `segment_sam` is also dropped when the run has no Meta key, and always for the checker (it calls out to Meta; `keepFailed` writes the run-wide scratch). `loadWorkflow`
 snapshots the role files with the workflow and reads them from the snapshot, so a resumed thread
 composes byte-identical text and an edited file reaches only new threads (a thread whose prompt
 changed is still `ThreadStale`). The main thread still uses `MAIN_SYSTEM`; `lead.md` and
@@ -244,3 +288,23 @@ milliseconds of a call gets the no-tool form.
 
 The API bounds restarts with one limit (`apps/api/.context/deploy.md`); the runner has no
 restart counter of its own.
+
+# Runner: telemetry, and what an uncaught error does
+
+`telemetry.ts` starts after startup (a failure before it still kills the process). Every line starts
+with `telemetry`; on Railway search the deploy logs for these:
+
+| grep | Line | Means |
+|---|---|---|
+| `telemetry loop-delay` | once a minute: `p99=…ms max=…ms` | event-loop delay over the last minute; p99 includes the 10 ms sampling interval (an idle loop reads about 11 ms). A healthy runner stays well under 1 s; the heartbeat deadline is `LEASE_SECONDS - HEARTBEAT_SECONDS` |
+| `telemetry heartbeat-rtt` | once a minute: `p50`, `max`, `n` | send-to-answer time of the acknowledged heartbeats (absent when none were acknowledged) |
+| `telemetry loop-block` | when a 100 ms timer fires over 1 s late: `…ms; in flight: <run> <thread> <tool>; …` | the loop was held that long, and the tool calls recorded as started and not yet resulted at that moment (`no tool`: none) |
+| `[<run>] telemetry unhandledRejection in this run` / `uncaughtException in this run` | on the error | an error nobody caught, tied to its run and logged through its redacting log: that run stops (`stop: error`) and ends `failed` with the error's message; other runs go on. After the run's report is fixed the line says `after its report was fixed` and nothing changes |
+| `telemetry … outside any run` | on the error | tied to no run; logged and the process stays up |
+| `stop: <reason>` | per run, once per reason | every stop reason (the console is the only record of the later ones), with the first (the one that decides the report) named when it differs |
+| `release not stored` / `end not stored` | after a `report` | the server answered 409: the run ended first or the lease is gone |
+
+An error is tied to its run by `AsyncLocalStorage` (`runScope`), set around each `runClaim`: the
+async context an error was raised in survives into the process handler, so it names the run
+without parsing messages. An error raised from a timer or callback created inside a run's work
+belongs to that run; one raised by the main loop's own code (claiming) belongs to none.

@@ -106,7 +106,6 @@ describe("reviewRun", () => {
       checks: [],
       evidence: [],
       files: [],
-      structureIds: [],
     });
     expect(pending?.ask).toBe(tasks.find((t) => t.id === "segmentation")?.instructions);
     expect(result?.revisions[0]?.structures).toEqual([]);

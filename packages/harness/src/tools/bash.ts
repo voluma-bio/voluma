@@ -5,7 +5,7 @@
  * the result says so. Live chunks go to `ctx.output`, coalesced.
  */
 import { z } from "zod";
-import type { RunLayout } from "../layout";
+import type { ThreadLayout } from "../layout";
 import type { Sandbox } from "../ports/sandbox";
 import type { Tool, ToolContext, ToolResult } from "./tool";
 
@@ -28,7 +28,7 @@ const inputSchema = z.object({
     .describe("Seconds before the command and everything it started is killed."),
 });
 
-export function bashTool(layout: RunLayout): Tool<typeof inputSchema> {
+export function bashTool(layout: ThreadLayout): Tool<typeof inputSchema> {
   return {
     name: "bash",
     description:

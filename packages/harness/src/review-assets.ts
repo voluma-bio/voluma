@@ -172,7 +172,7 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
   async function convert(job: Job): Promise<{ manifest: unknown } | { error: string }> {
     const box = await liveSandbox();
     const command =
-      `python -I ${WORKFLOW}/workflows/core/convert/review_assets.py --source ${EVIDENCE}/${job.sha256} ` +
+      `python ${WORKFLOW}/workflows/core/convert/review_assets.py --source ${EVIDENCE}/${job.sha256} ` +
       `${job.flags} --out ${REVIEW}`;
     let stdout = "";
     let stderr = "";
