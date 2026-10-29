@@ -27,6 +27,7 @@ import { endClaim, stalledError } from "./claim-progress";
 import type { KeyVault } from "./key-vault";
 import { LeaseLost } from "./lease";
 import type { Notifier } from "./notifier";
+import { cancelOpenThreads } from "./pg-event-log";
 import { loadRun, loadRuns, readableInputs, readableRuns, type Tx } from "./pg-runs";
 import { events, inputs, runs } from "./schema";
 
@@ -230,6 +231,7 @@ export function pgRunQueue(
         if (run.example) return "example" as const;
         vault.drop(runId);
         if (run.state.status === "ended") return run;
+        await cancelOpenThreads(tx, runId);
         await tx
           .update(runs)
           .set({ state: "ended", outcome: "cancelled", endedAt: sql`now()` })

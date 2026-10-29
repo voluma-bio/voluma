@@ -16,7 +16,9 @@
  * reports `released` with its reason first, so the run is recovered within the platform's
  * grace period, then closes the sandbox. A stop by the server or a lost lease reports nothing.
  * None of these stops writes a `thread.ended`: the threads are cut off, and the next claim
- * (which learns why from `claim.previousClaim`) resumes them (`run-loop.ts`).
+ * (which learns why from `claim.previousClaim`) resumes them (`run-loop.ts`). The exception
+ * is a user's cancel, which the runner learns as `stop`: the API has already ended every
+ * thread `cancelled` with the run, and an ended run is never claimed again.
  */
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";

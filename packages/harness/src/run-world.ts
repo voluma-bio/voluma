@@ -17,6 +17,7 @@ import {
 } from "@earendil-works/pi-ai";
 import type { RunEvent } from "@voluma/contracts/events";
 import type { Folded } from "@voluma/contracts/fold";
+import { cancelEnds } from "@voluma/contracts/threads";
 import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
 import { runLayout } from "./layout";
 import { recorder } from "./recorder";
@@ -186,6 +187,8 @@ export interface WorldOptions {
   config?: Partial<LoopConfig>;
   /** Once, the first time this holds for a newly stored event: the claim is cut off (aborted) there, and later events are not stored. */
   cutAfter?: (e: RunEvent) => boolean;
+  /** Once, like `cutAfter`, but a user's cancel: the server then stores the ends (`cancelEnds`) and the run is never claimed again. */
+  cancelAfter?: (e: RunEvent) => boolean;
   /** Milliseconds the store takes to accept an event (to hold a runtime section open at a chosen moment). */
   delayStore?: (e: RunEvent) => number;
   /** Milliseconds a thread's history takes to load (to hold a resume in its start-up at a chosen moment). */
@@ -214,6 +217,7 @@ export function world(o: WorldOptions) {
   const history = new Map<string, string[]>();
   let abort = new AbortController();
   let cut = false;
+  let cancelled = false;
   let frozen = false;
   let n = 0;
   const callId = () => `c${++n}`;
@@ -281,6 +285,13 @@ export function world(o: WorldOptions) {
         frozen = true;
         abort.abort();
       }
+      if (!cancelled && o.cancelAfter?.(event)) {
+        cancelled = cut = frozen = true;
+        abort.abort();
+        for (const ended of cancelEnds(RUN, stored, new Date())) {
+          stored.push({ ...ended, seq: stored.length + 1 } as unknown as RunEvent);
+        }
+      }
     },
   };
 
@@ -340,7 +351,7 @@ export function world(o: WorldOptions) {
     /** Runs claims until one is not cut off; returns the fold of the last. */
     async run(): Promise<Folded> {
       let folded = await claim();
-      while (cut && abort.signal.aborted) {
+      while (cut && !cancelled && abort.signal.aborted) {
         abort = new AbortController();
         frozen = false;
         folded = await claim();

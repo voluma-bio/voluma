@@ -4,6 +4,7 @@
  * of the runtime spec's Verification list and asserts on the stored event log.
  */
 import type { RunEvent } from "@voluma/contracts/events";
+import { openThreads, runningThreads } from "@voluma/contracts/threads";
 import { describe, expect, it } from "vitest";
 import {
   askFirst,
@@ -73,6 +74,30 @@ describe("run loop", () => {
     expect(duplicates(w.stored)).toEqual([]);
     expect(of(w.stored, "thread.started", "t1.worker")).toHaveLength(1);
     expect(of(w.stored, "thread.started", "t1.check")).toHaveLength(1);
+  });
+
+  it("a user's cancel mid-run ends every thread and the root cancelled; nothing is open or running", async () => {
+    const w = world({
+      plan: T1,
+      main: chain(["t1", "t2"]),
+      // The worker is running when the user cancels.
+      cancelAfter: (e) => e.type === "thread.started" && e.threadId === `${R}t1.worker`,
+    });
+    await w.run();
+    expect(
+      w.stored.some((e) => e.type === "thread.started" && e.threadId === `${R}t1.worker`),
+    ).toBe(true);
+    expect(openThreads(w.stored)).toEqual([]);
+    for (const thread of ["supervisor", "main", "t1.worker"]) {
+      expect(ended(w.stored, thread)).toEqual(["cancelled"]);
+    }
+    // The root's end is the last event: nothing is written after it.
+    expect(w.stored.at(-1)?.threadId).toBe(`${R}supervisor`);
+    expect(duplicates(w.stored)).toEqual([]);
+    // Nothing is left to resume, and the contract says nothing runs, even for a stale `running` state.
+    expect(
+      runningThreads(w.stored, { status: "running", startedAt: new Date().toISOString() }),
+    ).toEqual(new Set());
   });
 
   it("needs-review: main's feedback resumes the same worker, whose new attempt passes", async () => {
