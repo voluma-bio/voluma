@@ -35,6 +35,12 @@ function positiveInt(name: string, fallback: number, min = 1): number {
   return value;
 }
 
+function positiveNumber(name: string, fallback: number): number {
+  const value = Number(optional(name) ?? fallback);
+  if (!Number.isFinite(value) || value <= 0) throw new Error(`${name} must be a positive number`);
+  return value;
+}
+
 /**
  * The API to claim from: `VOLUMA_API_URL` and `VOLUMA_API_TOKEN`, else the local API
  * `pnpm dev` started in this worktree (tools/dev.mjs writes `.dev/env.json`).
@@ -158,6 +164,8 @@ export function runnerConfig() {
     api,
     /** Runs at once. */
     concurrency: positiveInt("RUNNER_CONCURRENCY", 2),
+    /** A run whose model and SAM spend (all claims) reaches this is stopped and ends `failed`. */
+    maxRunCostUsd: positiveNumber("RUNNER_MAX_RUN_COST_USD", 5),
     /**
      * The model of each role of a `voluma` run: `RUNNER_MODEL` (worker), `RUNNER_CHECK_MODEL`
      * (the check threads; default the worker's) and `RUNNER_MAIN_MODEL` (the main thread;
