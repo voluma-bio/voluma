@@ -7,12 +7,13 @@
  */
 import { StatusBadge } from "@voluma/ui";
 import { Bot, ChevronDown, ShieldCheck } from "lucide-react";
-import { useEffect, useState } from "react";
 import { useDisclosure } from "./chat/disclosure-store";
-import { InfoButton, usageRows } from "./chat/info-button";
+import { InfoButton } from "./chat/info-button";
 import { Markdown } from "./chat/markdown";
 import { useOpenThread } from "./chat/thread-navigation";
 import { type Thread, threadName } from "./run-model";
+import { spendRows } from "./spend";
+import { formatUsd, useNow } from "./status";
 
 /** A duration as the reader says it: "45 s", "4 min 10 s", "2 h 5 min". */
 function duration(ms: number): string {
@@ -23,16 +24,6 @@ function duration(ms: number): string {
   return `${Math.floor(m / 60)} h ${m % 60} min`;
 }
 
-function useNow(active: boolean): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!active) return;
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [active]);
-  return now;
-}
-
 export function Elapsed({ thread }: { thread: Thread }) {
   const now = useNow(thread.status === "running");
   const end = thread.endedAt ? new Date(thread.endedAt).getTime() : now;
@@ -40,6 +31,32 @@ export function Elapsed({ thread }: { thread: Thread }) {
     <span className="shrink-0 text-meta text-muted-foreground tabular-nums">
       {duration(end - new Date(thread.startedAt).getTime())}
     </span>
+  );
+}
+
+/** A worker's or checker's own cost so far, once a model call reports one. */
+export function ThreadCost({ thread }: { thread: Thread }) {
+  if (!thread.spend?.calls) return null;
+  return (
+    <span className="shrink-0 text-meta text-muted-foreground tabular-nums">
+      {formatUsd(thread.spend.costUsd)}
+    </span>
+  );
+}
+
+/** Its cost, time, tokens and cache share behind an info button. */
+export function ThreadSpendInfo({ thread }: { thread: Thread }) {
+  if (!thread.spend?.calls) return null;
+  return (
+    <InfoButton
+      label="Cost and usage"
+      sections={[
+        {
+          title: thread.model ? `This thread, ${thread.model}` : "This thread",
+          rows: spendRows(thread.spend),
+        },
+      ]}
+    />
   );
 }
 
@@ -125,6 +142,7 @@ export function AgentCard({ thread }: { thread: Thread }) {
         <AgentName thread={thread} className="text-ui" />
         <span className="sr-only">{STATUS_WORD[thread.status]}</span>
         <span className="ml-auto" />
+        <ThreadCost thread={thread} />
         <Elapsed thread={thread} />
         {expandable && (
           <>
@@ -157,17 +175,7 @@ export function AgentCard({ thread }: { thread: Thread }) {
               {thread.toolCalls} tool {thread.toolCalls === 1 ? "call" : "calls"}
               {thread.toolErrors > 0 && `, ${thread.toolErrors} failed`}
             </span>
-            {thread.usage && (
-              <InfoButton
-                label="Usage"
-                sections={[
-                  {
-                    title: `${thread.calls} model calls`,
-                    rows: usageRows(thread.usage, thread.model),
-                  },
-                ]}
-              />
-            )}
+            <ThreadSpendInfo thread={thread} />
           </div>
         </div>
       )}

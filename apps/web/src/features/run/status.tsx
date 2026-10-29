@@ -1,6 +1,7 @@
-/** Run status as the list badge (the caller's statuses mapped to `StatusBadge` tones), and how a run's spend reads. */
+/** Run status as the list badge (the caller's statuses mapped to `StatusBadge` tones), how a run's spend and time read, and a ticking clock. */
 import type { Run } from "@voluma/contracts/run";
 import { StatusBadge, type StatusTone } from "@voluma/ui";
+import { useEffect, useState } from "react";
 
 export function formatTime(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {
@@ -22,6 +23,17 @@ export function formatDuration(seconds: number): string {
   if (s < 60) return `${s} s`;
   if (s < 3600) return `${Math.floor(s / 60)} min ${s % 60} s`;
   return `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min`;
+}
+
+/** The time now, ticking each second while `active`. */
+export function useNow(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [active]);
+  return now;
 }
 
 /** From the first claim to the end, or to now while it runs; null while it waits (queued, or for keys). */

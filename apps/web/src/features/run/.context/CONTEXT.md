@@ -85,11 +85,11 @@ Three screens under `RunLayout` (top bar and query client): `/` start (`start-pa
   since a failed task raises no item. Time is first claim to end; cost is `Run.usage.modelCostUsd`
   (models and SAM) with sandbox uptime under it. Formatters (`formatUsd`, `formatDuration`) are in `status.tsx`.
 - **Live page cost and time** come only from `spend(events)` (`@voluma/contracts/spend`), run in
-  `runView` on durable events, never per live frame (`spend.tsx`): the run's total in the header with
-  the main thread's share in its popover, and one row per task under the plan, labelled by the run's
-  own plan titles (a task's row is its worker, check and any redo together). Agent cards and an opened
-  thread keep their own thread's model usage (`Thread.usage`), which has no per-task or tool cost:
-  a card is one thread, and showing the task's sum on both the worker's and the checker's card would
-  count it twice. Times move when an event lands, not every second.
+  `runView` on durable events, never per live frame (`spend.tsx`). The header shows the run's total,
+  with the main thread's share in its popover; under the plan, one row per task covers its worker,
+  check and any redo together. Each worker and checker card, and an opened thread's bar, shows that
+  thread's own cost: `spend` over just that thread's events (`Thread.spend`), so a card never repeats
+  its task's sum. Wall times move when an event lands; only the header clock and the cards' `Elapsed`
+  tick each second.
 
 Gaps: "Reviewed" needs review state, which the review lane doesn't expose yet ([#102](https://github.com/voluma-bio/voluma/issues/102)). Workflow versions are not shown (no versions yet).

@@ -16,9 +16,8 @@ import { Button } from "@voluma/ui";
 import { ArrowLeft } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useOutletContext, useParams, useSearchParams } from "react-router";
-import { AgentMark, Elapsed, RunningStrip } from "./agents";
+import { AgentMark, Elapsed, RunningStrip, ThreadCost, ThreadSpendInfo } from "./agents";
 import { DisclosureProvider } from "./chat/disclosure-store";
-import { InfoButton, usageRows } from "./chat/info-button";
 import { ProcessDisclosure } from "./chat/process-disclosure";
 import { ThreadNavigationProvider, useOpenThread } from "./chat/thread-navigation";
 import { KeysForm } from "./keys";
@@ -162,7 +161,7 @@ export function RunPage() {
   const graph = plan && (
     <>
       <TaskGraph plan={plan} states={states} threadByTask={latestThreadByTask(threads)} />
-      <TaskSpendList spend={spend} plan={plan} />
+      <TaskSpendList spend={spend} />
     </>
   );
   const tasksLabel = plan ? `Tasks: ${progress}` : "Tasks";
@@ -185,7 +184,10 @@ export function RunPage() {
               {runStatus(data).detail ? `, ${runStatus(data).detail}` : ""}
             </span>
             <span className="ml-auto flex items-center gap-2">
-              <RunSpendSummary spend={spend} />
+              <RunSpendSummary
+                spend={spend}
+                since={main?.status === "running" ? events.at(-1)?.createdAt : undefined}
+              />
               <RunActions run={data} onChange={setRun} />
             </span>
           </header>
@@ -280,15 +282,9 @@ function ThreadBar({ thread }: { thread: Thread }) {
       <AgentMark thread={thread} />
       <h2 className="min-w-0 truncate text-ui font-medium">{threadName(thread)}</h2>
       <span className="ml-auto" />
+      <ThreadCost thread={thread} />
       <Elapsed thread={thread} />
-      {thread.usage && (
-        <InfoButton
-          label="Thread usage"
-          sections={[
-            { title: `${thread.calls} model calls`, rows: usageRows(thread.usage, thread.model) },
-          ]}
-        />
-      )}
+      <ThreadSpendInfo thread={thread} />
     </div>
   );
 }
