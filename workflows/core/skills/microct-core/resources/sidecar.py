@@ -7,9 +7,9 @@ Every `.npy` a resource writes has `<name>.json` beside it:
   inputs           {path: sha256} of every file the array was computed from
   params           the parameters that produced it
   offset_zyx       only on a cropped array: the index on the grid of its [0, 0, 0] (`objects.mask`, the morphometry maps)
-  axis             only on a surface: the array axis its heights are measured along (`objects.surface`)
-`write` owns the keys above: it writes `offset_zyx` and `axis` when given and removes a stale one when not. A sidecar that
-already exists keeps its other keys (`segment_sam` puts its prompts and per-object confidence in the same file).
+  surface_axis     only on a surface: the array axis its heights are measured along (`objects.surface`)
+`write` owns the keys above: it writes `offset_zyx` and `surface_axis` when given and removes a stale one when not. A sidecar that
+already exists keeps its other keys (`segment_sam` puts its prompts, per-object confidence and its own `axis`, the one it sliced along, in the same file).
 
 Library use (other resources import this file):
   import sidecar
@@ -127,7 +127,7 @@ def derived_grid_id(parent_grid_id, frame):
 
 
 def write(array_path, *, like=None, grid_id=None, spacing_zyx_mm=None, inputs=(), params=None, script=None, offset_zyx=None,
-          axis=None):
+          surface_axis=None):
     """Write the sidecar of `array_path`, beside the keys of an existing one that this function does not own."""
     if like is not None:
         g = grid(like)
@@ -140,11 +140,11 @@ def write(array_path, *, like=None, grid_id=None, spacing_zyx_mm=None, inputs=()
         'inputs': {str(p): sha256_file(p) for p in inputs}, 'params': params or {},
         'script': script or Path(sys.argv[0]).name,
         **({'offset_zyx': [int(i) for i in offset_zyx]} if offset_zyx is not None else {}),
-        **({'axis': int(axis)} if axis is not None else {}),
+        **({'surface_axis': int(surface_axis)} if surface_axis is not None else {}),
     }
     out = sidecar_path(array_path)
     if out.exists():  # segment_sam writes its own <labels>.json (prompt, per-object confidence): keep its keys
-        old = {k: v for k, v in json.loads(out.read_text()).items() if k not in ('offset_zyx', 'axis')}  # positional: never stale
+        old = {k: v for k, v in json.loads(out.read_text()).items() if k not in ('offset_zyx', 'surface_axis')}  # positional: never stale
         meta = {**old, **meta}
     out.write_text(json.dumps(meta, indent=1, default=float) + '\n')
     return out

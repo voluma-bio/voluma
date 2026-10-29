@@ -56,7 +56,7 @@ def surface(path, heights, axis, like):
     """Save `heights` (float32, NaN where there is no surface) and return its entry. Pass the array the computation used."""
     path = _abs(path)
     np.save(path, np.asarray(heights, np.float32))
-    sidecar.write(path, like=like, axis=int(axis))
+    sidecar.write(path, like=like, surface_axis=int(axis))
     return {KIND: SURFACE, SURFACE: {HEIGHTS: path, GRID: sidecar.grid(like)['grid_id'], AXIS: int(axis)}}
 
 
@@ -91,7 +91,9 @@ def of_array(path, kind):
     if 'grid_id' not in side:
         sidecar.fail(f'{sidecar.sidecar_path(path)} has no grid_id: write the array with sidecar.write')
     if kind == SURFACE:
-        return {KIND: SURFACE, SURFACE: {HEIGHTS: path, GRID: side['grid_id'], AXIS: int(side.get('axis', 0))}}
+        if 'surface_axis' not in side:
+            sidecar.fail(f'{sidecar.sidecar_path(path)} has no surface_axis: write the surface with objects.surface')
+        return {KIND: SURFACE, SURFACE: {HEIGHTS: path, GRID: side['grid_id'], AXIS: int(side['surface_axis'])}}
     return {KIND: STRUCTURE, STRUCTURE: {MASK: path, GRID: side['grid_id'], SHAPE: _ints(side['shape']),
                                          OFFSET: _ints(side.get('offset_zyx', [0, 0, 0]))}}
 
