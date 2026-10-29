@@ -12,6 +12,19 @@ export interface Skill {
   path: string;
 }
 
+/** One role file of `workflows/agents/`, read from the run's snapshot. */
+export interface AgentDefinition {
+  /** The file's name without `.md`. */
+  name: string;
+  description: string;
+  /** The optional tools the role is granted (names in the harness's tool registry). */
+  tools: string[];
+  /** `planned`: nothing uses the role yet, so its tools are not checked against the registry. */
+  planned: boolean;
+  /** The role's job: the file after its frontmatter, trimmed. */
+  body: string;
+}
+
 export interface WorkflowDefinition {
   /** The workflow skill's directory, `workflows/workflow-<name>`. */
   dir: string;
@@ -21,6 +34,8 @@ export interface WorkflowDefinition {
   files: WorkflowFiles;
   /** The workflow's own skill first, then the skills of each directory it `uses`. */
   skills: Skill[];
+  /** Every role file of `workflows/agents/`, by name. They are the same for every workflow. */
+  agents: Record<string, AgentDefinition>;
 }
 
 /** A file that could not be read into a definition; names where. */

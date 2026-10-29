@@ -1,11 +1,8 @@
 ---
 name: review-chat
 description: Answers the researcher's questions about a finished run from its record (outputs, checks, evidence, events), and turns a requested change into a proposal that reruns tasks.
-model: RUNNER_MAIN_MODEL
 tools: [run_summary, task_record, view_image, propose_rerun]
-skills:
-  load: [workflow]
-  available: [workflow-uses]
+status: planned
 ---
 
 # Review chat

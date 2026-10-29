@@ -1,16 +1,22 @@
 # Run agents
 
-The roles every workflow run uses, one file each. A file's frontmatter says which model config it
-runs on, which tools it holds and which skills it loads; its body is that role's job, read by the
-role on every run. They are the same for every workflow: what a workflow adds is its own skill
-(`workflows/workflow-<name>/SKILL.md`) and the skill directories it `uses`.
+The roles every workflow run uses, one file each. A file's frontmatter says which optional tools the
+role holds; its body is that role's job, read by the role on every run. They are the same for every
+workflow: what a workflow adds is its own skill (`workflows/workflow-<name>/SKILL.md`) and the skill
+directories it `uses`.
 
-**Status: mockup, not wired.** The runner still builds role prompts in code
-(`apps/runner/src/prompts.ts` for worker and checker, `MAIN_SYSTEM` in
-`packages/harness/src/main-thread.ts` for the main thread), and the main thread has no tools and
-does not choose what runs. These files are the target: the main thread as a lead that owns the
-plan. Wiring them in (loading these files, the lead's tools, fix tasks, label versions) is Run
-lane work in `packages/harness` and `apps/runner`.
+**Status.** The runner builds the worker's and checker's system prompts and tool grants from
+`worker.md` and `checker.md` (`apps/runner/src/prompts.ts`): edit a file and the next run's new
+threads get the text. `lead.md` and `review-chat.md` are marked `status: planned`: loaded and
+validated, used by nothing yet. The main thread still runs on `MAIN_SYSTEM` in
+`packages/harness/src/main-thread.ts`, and has no tools and does not choose what runs; `lead.md`
+is the target (the main thread as a lead that owns the plan). Moving it onto these files, with the
+lead's tools, fix tasks and label versions, is Run lane work in `packages/harness` and
+`apps/runner`.
+
+A run snapshots the files with its workflow (`packages/workflow/src/load.ts`) and reads them from
+the snapshot, so a resumed thread gets the text it began with; a changed file reaches only threads
+started after it.
 
 | File | Role |
 |---|---|
@@ -21,13 +27,21 @@ lane work in `packages/harness` and `apps/runner`.
 
 ## Frontmatter
 
-- `name`, `description`: what the role is, for whoever starts it.
-- `model`: the runner config key that picks its model (`RUNNER_MAIN_MODEL` and so on), never a model id.
-- `tools`: the tools the role holds. A tool not listed is not granted; this is how a rule like
-  "the checker does not rerun SAM" is enforced, not prose in a skill.
-- `skills.load`: skills put in the role's prompt in full. `skills.available`: listed with their
-  descriptions, read when a step needs one. `workflow` means the run's workflow skill;
-  `workflow-uses` means every skill of the directories it `uses`.
+All keys are required except `status`; any other key fails the load.
+
+- `name`: the file name without `.md`.
+- `description`: what the role is, for whoever starts it.
+- `tools`: the optional tools the role is granted, from `packages/harness/src/tools/registry.ts`
+  (today `view_image`, `segment_sam`). A name not there fails the load; a tool not listed is not
+  granted. This is how "the checker does not rerun SAM" is enforced, not prose in a skill.
+  `segment_sam` is also granted only when the run has a Meta key. The harness's own tools (`bash`,
+  task tools, `thread_message`) are not listed and not configurable; code keeps their refusals (a
+  checker cannot report outputs or set status).
+- `status: planned`: nothing uses the role yet, so its `tools` (which may name tools that do not
+  exist) are not checked against the registry.
+
+Models are runner config (`RUNNER_MODEL`, `RUNNER_CHECK_MODEL`, `RUNNER_MAIN_MODEL`), and every
+role is told the same skill list: the workflow's skill, then each skill of the directories it `uses`.
 
 ## What stays in the harness
 

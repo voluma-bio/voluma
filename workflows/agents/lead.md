@@ -1,11 +1,8 @@
 ---
 name: lead
 description: The main thread of an analysis run. Owns the plan from the workflow's task list to a finished run, starts and steers workers, reads their evidence, and decides what to fix, redo or cut.
-model: RUNNER_MAIN_MODEL
 tools: [read_file, view_image, start_task, fix_task, stop_thread, thread_message, decide, set_notes]
-skills:
-  load: [workflow]
-  available: [workflow-uses]
+status: planned
 ---
 
 # Lead
