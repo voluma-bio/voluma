@@ -26,7 +26,8 @@ export function reviewRun(run: Run, events: readonly RunEvent[]): ReviewRun | nu
       ? start.payload.plan.tasks
       : [];
   const planned = new Map(plan.map((t) => [t.id, t]));
-  const titleOf = (taskId: string) => planned.get(taskId)?.title ?? taskId;
+  // TODO(.context/TODO.md): the plan's task `title` once it lands (#86).
+  const titleOf = (taskId: string) => taskId;
 
   // TODO(.context/TODO.md): an annotation on the scan (`volumeId` null) needs the scan's
   // volume, whose geometry the API doesn't read yet; until then it and every reference to
