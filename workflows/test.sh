@@ -10,11 +10,11 @@ PYTEST="pytest==9.2.0 pluggy==1.7.0 iniconfig==2.3.1"
 uvx --quiet ruff@$RUFF check .
 if [ "$(uname -s)-$(uname -m)" != "Linux-x86_64" ]; then
   exec docker run --rm --platform linux/amd64 -v "$PWD:/w:ro" -w /tmp python:3.12-slim sh -ec "
-    pip install -q --disable-pip-version-check --no-deps -r /w/microct-analysis/requirements.txt $PYTEST
+    pip install -q --disable-pip-version-check --no-deps -r /w/core/requirements.txt $PYTEST
     python -m pytest -q -c /w/pyproject.toml --rootdir /w /w"
 fi
 uv venv --quiet --allow-existing --python 3.12 .venv
-printf '%s\n' $PYTEST | cat microct-analysis/requirements.txt - >.venv/requirements.sync.txt
+printf '%s\n' $PYTEST | cat core/requirements.txt - >.venv/requirements.sync.txt
 uv pip sync --quiet --python .venv .venv/requirements.sync.txt
 # --no-deps leaves nothing to resolve a missing transitive package; pyvista's own `vtk`
 # requirement is the one expected gap.

@@ -10,13 +10,13 @@ import {
   outputsFileSchema,
   tasksFileSchema,
 } from "@voluma/contracts/workflow-files";
-import outputsJson from "../../../../../workflows/workflow-mouse-oa/outputs.json?raw";
-import tasksJson from "../../../../../workflows/workflow-mouse-oa/tasks.json?raw";
+import outputsJson from "../../../../../workflows/mouse-oa/outputs.json?raw";
+import tasksJson from "../../../../../workflows/mouse-oa/tasks.json?raw";
 
 export const WORKFLOW = {
   /** The catalog id `startRun` takes (`apps/api/src/domains/run/catalog.ts`). */
   id: "mouse-oa",
-  path: "workflows/workflow-mouse-oa",
+  path: "workflows/mouse-oa",
   name: "Mouse OA knee",
   description: "Measures the proximal tibia, the distal femur and the knee's bone structures.",
 };

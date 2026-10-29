@@ -1,4 +1,4 @@
-# Tool settings only; the dependencies are microct-analysis/requirements.txt.
+# Tool settings only; the dependencies are core/requirements.txt.
 [tool.ruff]
 line-length = 100
 extend-exclude = [".venv"]

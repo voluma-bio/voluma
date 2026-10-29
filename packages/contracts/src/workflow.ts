@@ -2,7 +2,7 @@
  * What a run takes from its workflow packages, for both lanes:
  *
  * - Identity: a run pins this repo and the workflow's directory (`path`, e.g.
- *   `workflows/workflow-mouse-oa`); the runner adds the commit its checkout was at to the
+ *   `workflows/mouse-oa`); the runner adds the commit its checkout was at to the
  *   pins in the run's first event. `r2.ts` has the keys of a run's snapshot of it.
  * - The plan: each task's instructions, declared outputs (a measurement's acceptance
  *   range), the workflow's own definition of "done", and the tasks each depends on, the
@@ -36,7 +36,7 @@ export const workflowPinSchema = z.object({
     .string()
     .regex(/^[0-9a-f]{40}$/)
     .optional(),
-  /** The package's root inside the repo when it is not the repo root (e.g. `workflows/workflow-mouse-oa`): lowercase segments, as in `repo`. */
+  /** The package's root inside the repo when it is not the repo root (e.g. `workflows/mouse-oa`): lowercase segments, as in `repo`. */
   path: z
     .string()
     .refine((p) => p.split("/").every((s) => part.safeParse(s).success), {

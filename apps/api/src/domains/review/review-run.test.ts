@@ -7,8 +7,8 @@ import type { WorkflowPlan } from "@voluma/contracts/workflow";
 import { workflowFilesSchema } from "@voluma/contracts/workflow-files";
 import { computePlan } from "@voluma/workflow/plan";
 import { describe, expect, it } from "vitest";
-import outputs from "../../../../../workflows/workflow-mouse-oa/outputs.json";
-import tasks from "../../../../../workflows/workflow-mouse-oa/tasks.json";
+import outputs from "../../../../../workflows/mouse-oa/outputs.json";
+import tasks from "../../../../../workflows/mouse-oa/tasks.json";
 import { reviewRun } from "./review-run";
 
 const at = "2026-10-28T00:00:00.000Z";

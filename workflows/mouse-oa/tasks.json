@@ -1,0 +1,110 @@
+[
+  {
+    "id": "intake",
+    "title": "Scan intake",
+    "dependsOn": [],
+    "outputs": ["header"],
+    "instructions": "Read the scan header and the files in /inputs: voxel spacing, size, orientation, and any problem with the data. Write what you found for the later tasks, and the notes' account of the field in /outputs/intake/scan-notes.md (scan-intake skill).",
+    "doneWhen": [
+      "The spacing and size come from the files themselves, with the file or header each came from."
+    ]
+  },
+  {
+    "id": "orientation",
+    "title": "Orientation",
+    "dependsOn": ["intake"],
+    "outputs": ["frame"],
+    "instructions": "Orient the stack so the later tasks share one frame (a labels-ready volume with known axes). Follow the mouse-oa skill's references/oa-protocol.md and the orient-joint skill; the anatomy is in its references/anatomy.md.",
+    "doneWhen": ["The orientation is checked on a render you looked at."]
+  },
+  {
+    "id": "segmentation",
+    "title": "Segmentation",
+    "dependsOn": ["orientation"],
+    "outputs": [
+      "patella-volume",
+      "lateral-meniscus-osteophyte-volume",
+      "medial-meniscus-osteophyte-volume"
+    ],
+    "instructions": "Segment the bones and joint structures and settle the final labels; a piece the data do not support is not named, and whether its structure is absent is decided by the segmentation-check skill, section 2. Follow the mouse-oa skill's references/oa-protocol.md and the orient-joint skill; the anatomy is in its references/anatomy.md.",
+    "doneWhen": [
+      "Every label is one structure, checked on renders and component counts.",
+      "The volumes of #1-3 follow from the final labels."
+    ]
+  },
+  {
+    "id": "iioc",
+    "title": "Tibial IIOC",
+    "dependsOn": ["segmentation"],
+    "outputs": [
+      "tv-tibial-iioc",
+      "bv-tibial-iioc",
+      "bv-tv-tibial-iioc",
+      "iioc-height",
+      "iioc-height-medial-compartment",
+      "iioc-height-lateral-compartment",
+      "tibial-width-at-the-growth-plate"
+    ],
+    "instructions": "Define the IIOC region (ROI-1) and report its volumes, heights and the tibial width. Follow the mouse-oa skill's references/oa-protocol.md and the orient-joint skill; the anatomy is in its references/anatomy.md.",
+    "doneWhen": [
+      "ROI-1 runs from the growth plate to the articular surface and was checked on a render."
+    ]
+  },
+  {
+    "id": "subchondral-plate",
+    "title": "Subchondral bone plate",
+    "dependsOn": ["iioc"],
+    "outputs": [
+      "subchondral-bone-plate-thickness-medial",
+      "subchondral-bone-plate-thickness-lateral"
+    ],
+    "instructions": "Measure the subchondral bone plate thickness, medial and lateral. Follow the mouse-oa skill's references/oa-protocol.md and the orient-joint skill; the anatomy is in its references/anatomy.md.",
+    "doneWhen": ["Each thickness is reported with the render it was read from."]
+  },
+  {
+    "id": "trabecular-roi",
+    "title": "IIOC trabecular bone",
+    "dependsOn": ["iioc", "subchondral-plate"],
+    "outputs": ["tv-iioc-trab", "bv-iioc-trab", "bv-tv-iioc-trab"],
+    "instructions": "Define ROI-2 (ROI-1 without the plate and the cortical line) and report its volumes. Follow the mouse-oa skill's references/oa-protocol.md and the orient-joint skill; the anatomy is in its references/anatomy.md.",
+    "doneWhen": ["ROI-2 excludes the subchondral plate and the cortical line."]
+  },
+  {
+    "id": "metaphyseal-roi",
+    "title": "Proximal tibial metaphysis",
+    "dependsOn": ["iioc"],
+    "outputs": [
+      "metaphyseal-tv",
+      "metaphyseal-bv",
+      "metaphyseal-bv-tv",
+      "metaphyseal-tb-n",
+      "metaphyseal-tb-th",
+      "metaphyseal-tb-sp",
+      "metaphyseal-tb-nd",
+      "metaphyseal-tb-tm"
+    ],
+    "instructions": "Define ROI-3 below the growth plate and report its trabecular parameters. Follow the mouse-oa skill's references/oa-protocol.md and the orient-joint skill; the anatomy is in its references/anatomy.md.",
+    "doneWhen": [
+      "ROI-3 starts 50 um below the growth plate, is 200 um long and 20 um clear of cortical bone."
+    ]
+  },
+  {
+    "id": "cortical",
+    "title": "Tibial cortical thickness",
+    "dependsOn": ["metaphyseal-roi"],
+    "outputs": [
+      "cortical-thickness-100-um-below-the-growth-plate",
+      "cortical-thickness-1000-um-below-the-growth-plate"
+    ],
+    "instructions": "Measure the cortical thickness 100 um and 1000 um below the growth plate. Use the cortex mask and distal growth-plate face that metaphyseal-roi wrote (/outputs/metaphyseal-roi/meta/cortex.npy and /outputs/metaphyseal-roi/meta/growth-plate-distal-face.npy); do not trace the face again. Follow the mouse-oa skill's references/oa-protocol.md and the orient-joint skill; the anatomy is in its references/anatomy.md.",
+    "doneWhen": ["Both levels are measured on the cortex mask and distal face of metaphyseal-roi."]
+  },
+  {
+    "id": "femoral-geometry",
+    "title": "Distal femur",
+    "dependsOn": ["segmentation"],
+    "outputs": ["distal-femoral-length-dfl", "distal-femoral-width-dfw", "width-length-ratio"],
+    "instructions": "Place the femoral points and report the distal femoral length, width and their ratio. Follow the mouse-oa skill's references/oa-protocol.md and the orient-joint skill; the anatomy is in its references/anatomy.md.",
+    "doneWhen": ["Points a-d are placed on renders and the lengths follow from them."]
+  }
+]
