@@ -164,7 +164,9 @@ export function taskRuntime(options: TaskRuntimeOptions) {
       if (t?.status !== "under-review" || (t.threads.check && t.threads.check !== c.threadId)) {
         throw new Refusal(`${taskId} is no longer under review; stop here.`);
       }
-      return { attempt: async () => t.attemptId };
+      const attemptId = t.attemptId;
+      if (!attemptId) throw new Refusal(`${taskId} has no attempt to check.`);
+      return { attempt: async () => attemptId };
     }
     if (c.kind !== "worker") throw new Refusal(`Only a worker or a check thread ${what}.`);
     if (verdict) throw new Refusal("Only a check thread sets a verdict.");
@@ -181,8 +183,10 @@ export function taskRuntime(options: TaskRuntimeOptions) {
         `${taskId} is ${status}${t?.reason ? ` (${t.reason})` : ""}: call checklist in-progress to redo it, then write to it.`,
       );
     }
-    if (t && status !== "stale" && status !== "failed") {
-      return { attempt: async () => t.attemptId };
+    if (t?.skipped) throw new Refusal(`${taskId} was skipped: ${t.skipped.reason}`);
+    if (t?.attemptId && status !== "stale" && status !== "failed") {
+      const attemptId = t.attemptId;
+      return { attempt: async () => attemptId };
     }
     const waiting = known(taskId).dependsOn.filter((d) => !isSatisfied(taskOf(d)));
     if (waiting.length > 0) {
@@ -213,7 +217,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     const marked: string[] = [];
     for (const dep of transitiveDependents(plan, taskId)) {
       const t = current.find((x) => x.id === dep);
-      if (!t || t.status === "stale") continue;
+      if (!t?.attemptId || t.status === "stale") continue;
       await setStatus(threadId, `${prefix}:stale:${dep}`, dep, t.attemptId, "stale", why, {
         kind: "rule",
         rule: "stale",

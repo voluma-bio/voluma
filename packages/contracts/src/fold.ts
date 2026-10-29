@@ -117,8 +117,8 @@ export type FoldedTask = Pick<
   | "checks"
   | "evidence"
 > & {
-  /** Empty for a skipped task that never had an attempt. */
-  attemptId: string;
+  /** Null for a skipped task that never had an attempt. */
+  attemptId: string | null;
   /** Set when the task was skipped, or depends on one that was; `reason` is the same text. */
   skipped?: { reason: string };
   /** The latest `task` event is the check's `to-check` on a `needs-review` verdict: the result was rejected, and a dependent must not build on it. */
@@ -179,7 +179,7 @@ export type Folded = {
 type Skip = { reason: string; revisionId: string };
 
 type Attempt = {
-  id: string;
+  id: string | null;
   taskId: string;
   workerThread: string | null;
   checkThread: string | null;
@@ -296,7 +296,7 @@ export function fold(events: readonly RunEvent[]): Folded {
     for (const id of skipped.keys())
       if (!current.has(id))
         rows.push({
-          id: "",
+          id: null,
           taskId: id,
           workerThread: null,
           checkThread: null,

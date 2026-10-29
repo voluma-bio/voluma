@@ -93,8 +93,6 @@ export const bySchema = z.discriminatedUnion("kind", [
       "fix-limit",
       // The main agent stopped with work unfinished and code ended it.
       "liveness",
-      // The main agent skipped the task by `change_plan`.
-      "skip",
     ]),
   }),
   z.object({ kind: z.literal("judgment"), arm: nonEmpty }),

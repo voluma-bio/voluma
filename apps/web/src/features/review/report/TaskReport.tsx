@@ -221,11 +221,13 @@ export function TaskReport({
                       : o.kind === "score"
                         ? "Score"
                         : "Output"}{" "}
-                    not reported{o.required ? " · required" : ""}
+                    {o.reason ? "missing" : "not reported"}
+                    {o.required ? " · required" : ""}
+                    {o.reason ? ` · ${o.reason}` : ""}
                   </span>
                 </th>
                 <td className="font-mono">—</td>
-                <td className="text-muted-foreground">{o.reason}</td>
+                <td className="text-muted-foreground" />
               </tr>
             ))}
           </tbody>

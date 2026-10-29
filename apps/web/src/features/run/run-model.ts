@@ -332,7 +332,7 @@ function outcomes(
   tasks: FoldedTask[],
   states: Map<string, TaskState>,
 ): Map<string, string> {
-  const byAttempt = new Map(tasks.map((t) => [t.attemptId, t]));
+  const byAttempt = new Map(tasks.flatMap((t) => (t.attemptId ? [[t.attemptId, t] as const] : [])));
   const worker = new Map<string, string>();
   const checker = new Map<string, string>();
   for (const e of events) {
@@ -408,13 +408,13 @@ function outputRows(
     // A stopped task's row says so; only a task that finished its work left an output out.
     const state = states.get(p.id);
     if (state === "done" || state === "to-check" || state === "failed")
-      for (const d of p.outputs)
-        if ((d.kind === "measurement" || d.kind === "score") && t.missingRequired.includes(d.id))
+      for (const m of t.missing)
+        if (m.kind === "measurement" || m.kind === "score")
           rows.push({
-            id: `${p.id}/${d.id}`,
-            title: outputName(d.id),
+            id: `${p.id}/${m.outputId}`,
+            title: outputName(m.outputId),
             value: null,
-            reason: "Not reported",
+            reason: m.reason ?? "Not reported",
           });
     return rows;
   });

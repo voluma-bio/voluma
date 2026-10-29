@@ -389,7 +389,7 @@ describe("fold", () => {
       ["c", "to-check", "a was skipped: no sample"],
     ]);
     const a = need(f, "a");
-    expect(a).toMatchObject({ attemptId: "", missingRequired: [], rejected: false });
+    expect(a).toMatchObject({ attemptId: null, missingRequired: [], rejected: false });
     expect(a.missing).toEqual([
       { outputId: "x", kind: "measurement", required: true, reason: "no sample" },
     ]);
