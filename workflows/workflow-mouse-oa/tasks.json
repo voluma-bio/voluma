@@ -4,7 +4,7 @@
     "title": "Scan intake",
     "dependsOn": [],
     "outputs": ["header"],
-    "instructions": "Read the scan header and the files in /inputs: voxel spacing, size, orientation, and any problem with the data. Write what you found for the later tasks.",
+    "instructions": "Read the scan header and the files in /inputs: voxel spacing, size, orientation, and any problem with the data. Write what you found for the later tasks, and the notes' account of the field in /outputs/intake/scan-notes.md (scan-intake skill).",
     "doneWhen": [
       "The spacing and size come from the files themselves, with the file or header each came from."
     ]
@@ -26,7 +26,7 @@
       "lateral-meniscus-osteophyte-volume",
       "medial-meniscus-osteophyte-volume"
     ],
-    "instructions": "Segment the bones and joint structures and settle the final labels. Follow references/oa-protocol.md and the orient-joint skill; the anatomy is in references/anatomy.md.",
+    "instructions": "Segment the bones and joint structures and settle the final labels; a piece the data do not support is not named, and whether its structure is absent is decided by the segmentation-check skill, section 2. Follow references/oa-protocol.md and the orient-joint skill; the anatomy is in references/anatomy.md.",
     "doneWhen": [
       "Every label is one structure, checked on renders and component counts.",
       "The volumes of #1-3 follow from the final labels."

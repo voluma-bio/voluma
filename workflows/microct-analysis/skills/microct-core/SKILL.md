@@ -22,7 +22,8 @@ number you report can be traced.
   `python <this skill>/resources/sidecar.py --array out.npy --like hu.json --input a.npy --param key=value`.
   `segment_sam` writes its own `labels.json` (prompts, per-object confidence); the command above adds to it.
 - Put what you report in `/outputs/<task>/`, and working files in `/scratch/`. Anything else
-  is lost if the sandbox restarts. The names later tasks look for: `hu.npy` and `hu.json` (intake), `frame.json`,
+  is lost if the sandbox restarts. The names later tasks look for: `hu.npy`, `hu.json` and `scan-notes.md` (intake: what the
+  researcher's notes say is in the field, what is absent, and other facts such as a measurement threshold), `frame.json`,
   `oriented.npy` and `keyframe.jpg` (orient), `labels.npy` (the final labels, **on the scan grid only**; SAM's output on the
   oriented stack is `labels_oriented.npy`), `qc/*.jpg` (every check).
 
@@ -46,6 +47,7 @@ The prompt lists each skill with its directory. A resource is a script in that d
 
 - Report each declared output with `report_output`. Attach as evidence the files it came
   from and the QC image that shows it.
+- A structure that is absent gets `null` or `0` with a note, never the nearest look-alike (`segmentation-check`, section 2).
 - Measurements carry units, a definition, and the structures they were measured on.
 - A value outside the plan's range is still reported. Say why in the checkpoint.
 - Never adjust a number after the fact to match an expectation. If the result looks wrong,
@@ -58,14 +60,20 @@ Before you accept any segmentation, frame, region or landmark, render it and loo
 Judgment comes from looking: which bone, whether a boundary is right, whether a thing
 belongs. Do not swap the two.
 
+## Read the scan's notes before you name anything
+
+`/outputs/intake/scan-notes.md` is the researcher's account of the scan, written by intake: what is in the field, what is
+absent or cut off, and other facts. Read it at the start of every task that names a structure or picks a threshold. It
+outranks your expectation of the anatomy; the CT can overrule it only with evidence you cite.
+
 ## Hand on what you cannot settle
 
 A To check item is how you ask the researcher. Raise one when the data cannot settle a
 choice that changes a number: a disagreement region you could not resolve, an unnamed
 structure, a boundary the protocol leaves open. Point it at the region (`focus`), and
 say what you chose meanwhile. Do not raise one for a choice you could settle by looking
-harder. Do not name a structure the data and the anatomy reference do not support: leave it
-unnamed and ask.
+harder. Do not name a structure the data, the scan's notes and the anatomy reference do not
+support (`segmentation-check`, section 2, says when to remove a label, call it absent, and ask).
 
 ## Two thresholds
 
@@ -73,7 +81,10 @@ unnamed and ask.
   reference gives it, and each script takes it as `--threshold-hu`.
 - **Measurement threshold:** decides bone volume. It is the lab's 2.16/cm converted to this scan's HU from the calibration block
   in `hu.json` (about 2460 HU on OA6-1RK), and the measurement scripts compute it themselves; a flag overrides it. BV is always
-  the region and HU above the threshold, never gated by a label; BV/TV is in %.
+  the region and HU above the threshold, never gated by a label; BV/TV is in %. The protocol's threshold wins whenever the
+  calibration exists; a different value in `scan-notes.md` is reported beside the measurement, not used. When there is no
+  calibration (the scripts stop asking for `--threshold`), use the threshold the notes give, name them as its source, and
+  raise a To check item.
 
 ## By role
 
