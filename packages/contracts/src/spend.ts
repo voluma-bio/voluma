@@ -7,6 +7,10 @@
  *   `tool.result`'s `costUsd` (a `segment_sam` call's Meta charge). Each counts for the
  *   thread that wrote the event; an event from a thread with no `thread.started` before it
  *   counts only in `total`.
+ * - Provider calls (the gateway's, `Run.providerCalls`) are passed in separately: each
+ *   `bySandbox` entry's cost and calls go to the task whose thread wrote the `sandbox` event
+ *   with that `name`, added to `costUsd` and `toolCostUsd`. A name no event names counts only in
+ *   `total`. They are not model calls, so `calls` stays the model calls that reported usage.
  * - A worker or check thread belongs to the task its `thread.started` names, so a task's
  *   spend covers all its attempts: worker, check and any redo. The root thread (the main
  *   thread's wakes) belongs to no task: that is `main`. A chat thread counts only in `total`.
@@ -26,6 +30,7 @@
  * thread is not the runner's).
  */
 import type { RunEvent } from "./events";
+import type { ProviderCalls } from "./run";
 
 export type Spend = {
   /** Model calls plus paid tool calls, in US dollars. */
@@ -66,7 +71,7 @@ const empty = (): Spend => ({
 export const cacheHitShare = (s: Spend): number | null =>
   s.input + s.cacheRead > 0 ? s.cacheRead / (s.input + s.cacheRead) : null;
 
-export function spend(events: readonly RunEvent[]): RunSpend {
+export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls): RunSpend {
   const tasks = new Map<string, Spend>();
   const main = empty();
   const total = empty();
@@ -75,6 +80,8 @@ export function spend(events: readonly RunEvent[]): RunSpend {
   const open = new Map<string, { since: number; last: number }>();
   // toolCallId → the `bash` call's thread and start.
   const bash = new Map<string, { threadId: string; at: number }>();
+  // sandbox name → the thread that wrote its `sandbox` event.
+  const sandboxOwner = new Map<string, string>();
   let root: string | undefined;
   // The log's latest event time so far: the root thread's span ends there, since the root is
   // quiet while its workers run.
@@ -144,6 +151,9 @@ export function spend(events: readonly RunEvent[]): RunSpend {
         });
         break;
       }
+      case "sandbox":
+        sandboxOwner.set(e.payload.name, e.threadId);
+        break;
       case "tool.call":
         if (e.payload.name === "bash") bash.set(e.payload.toolCallId, { threadId: e.threadId, at });
         break;
@@ -166,5 +176,12 @@ export function spend(events: readonly RunEvent[]): RunSpend {
     latest = Math.max(latest, at);
   }
   for (const threadId of [...open.keys()]) close(threadId);
+  for (const { sandbox, costUsd } of providerCalls?.bySandbox ?? []) {
+    const threadId = sandboxOwner.get(sandbox);
+    add(threadId ?? "", (s) => {
+      s.costUsd += costUsd;
+      s.toolCostUsd += costUsd;
+    });
+  }
   return { tasks: [...tasks].map(([taskId, s]) => ({ taskId, spend: s })), main, total };
 }
