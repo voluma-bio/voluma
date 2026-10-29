@@ -7,7 +7,8 @@
  * 2. check the lease token against the run row (`LeaseLost` rolls the append back);
  * 3. insert with `seq = MAX(seq) + 1`; a repeated event `id` inserts nothing, and is
  *    `EventIdTaken` if the stored event belongs to another run;
- * 4. apply the `threads` projection, only if the event was new.
+ * 4. apply the `threads` projection, only if the event was new, and move the run's
+ *    `last_progress_seq` if the event is run-state progress (`claim-progress.ts`).
  *
  * So `seq` is gapless and in commit order per run: a reader that has seen `seq` n has seen
  * every event below it. The stream (stream.ts) relies on that: the notifier fires after a
@@ -19,6 +20,7 @@ import type { EventInput, RunEvent } from "@voluma/contracts/events";
 import { and, asc, eq, gt, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { ReadScope } from "../../domain";
+import { isProgress } from "./claim-progress";
 import { assertLease } from "./lease";
 import type { Notifier } from "./notifier";
 import { readableRuns, type Tx, toRunEvent } from "./pg-runs";
@@ -44,7 +46,7 @@ export async function insertEvent(tx: Tx, event: Omit<RunEvent, "seq">) {
       seq: sql`(SELECT COALESCE(MAX(${events.seq}), 0) + 1 FROM ${events} WHERE ${events.runId} = ${event.runId})`,
     })
     .onConflictDoNothing({ target: events.id })
-    .returning({ id: events.id });
+    .returning({ id: events.id, seq: events.seq });
 }
 
 export function pgEventLog(db: PostgresJsDatabase, notifier: Notifier) {
@@ -127,6 +129,10 @@ export function pgEventLog(db: PostgresJsDatabase, notifier: Notifier) {
           return;
         }
         await projectThread(tx, event, createdAt);
+        const [row] = inserted;
+        if (row && isProgress(event)) {
+          await tx.update(runs).set({ lastProgressSeq: row.seq }).where(eq(runs.id, event.runId));
+        }
       });
       notifier.notify(event.runId);
     },

@@ -66,6 +66,12 @@ export type StartThreadOptions = ThreadIdentity & {
   sandbox: (threadId: string) => Promise<Sandbox>;
   /** Aborting ends the thread as cancelled and kills a running command. */
   signal?: AbortSignal;
+  /**
+   * The run's own signal. When it aborts (shutdown, self-stop, lost lease), the thread is cut
+   * off, not stopped: nothing more is stored or emitted for it, not even a `thread.ended`,
+   * exactly as after a crash. The next claim resumes it from what was stored.
+   */
+  runSignal?: AbortSignal;
 };
 
 export interface ThreadHandle {
@@ -86,7 +92,8 @@ export interface ThreadOutcome {
 }
 
 export function startThread(options: StartThreadOptions): ThreadHandle {
-  const { threadId, recorder, history, signal } = options;
+  const { threadId, recorder, history, signal, runSignal } = options;
+  const cutOff = () => runSignal?.aborted === true;
   const emit = <T extends EventType>(type: T, payload: PayloadOf<T>) =>
     recorder.emit(threadId, type, payload);
   // What each running tool call has been billed (`ToolContext.bill`), until its result is emitted.
@@ -114,7 +121,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
   let nextIdx = 0;
   let historyError: unknown;
   const persist = async (message: AgentMessage): Promise<boolean> => {
-    if (historyError) return false;
+    if (historyError || cutOff()) return false;
     try {
       await history.appendMessage(threadId, nextIdx, JSON.stringify(message));
       nextIdx++;
@@ -282,7 +289,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
           }
           case "tool_execution_start":
             // The call is in History (its assistant message was stored first) unless a write failed.
-            if (historyError) break;
+            if (historyError || cutOff()) break;
             emit("tool.call", {
               toolCallId: event.toolCallId,
               name: event.toolName,
@@ -319,7 +326,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       signal?.removeEventListener("abort", abort);
     }
     // The caller owns the recorder and flushes it.
-    if (started) emit("thread.ended", outcome);
+    if (started && !cutOff()) emit("thread.ended", outcome);
     if (unexpected) throw unexpected;
     return { ...outcome, ran: started, reply };
   }
