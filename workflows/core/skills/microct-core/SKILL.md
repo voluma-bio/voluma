@@ -26,6 +26,7 @@ description: >
   voxel size, its inputs' sha256 and its parameters. If you make an array yourself, give it one:
   `python <this skill>/resources/sidecar.py --array out.npy --like hu.json --input a.npy --param key=value`.
   `segment_sam` writes its own `labels.json` (prompts, per-object confidence); the command above adds to it.
+- `resources/envelope.py` (`close_and_fill`) gives the filled outline of a bone section, with the closing set as a length in mm.
 - Put what you report in `/outputs/<task>/`, and working files in `/scratch/`. Anything else
   is lost if the sandbox restarts. The names later tasks look for: `hu.npy`, `hu.json` and `scan-notes.md` (intake: what the
   researcher's notes say is in the field, what is absent, and other facts such as a measurement threshold), `frame.json`,

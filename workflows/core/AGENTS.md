@@ -17,7 +17,7 @@ holds rules, not experiment logs.
   `sidecar.save_image`. Every parameter that is a length is in mm; voxels come from `hu.json`.
 - **Imports:** every script works under `python -I` from any directory, and the same few lines at its top do it: walk up its
   ancestors to the directory holding `core/skills/microct-core`, put its own directory, `microct-core/resources` and any sibling skill's
-  `resources` it imports from on `sys.path`, and exit with a sentence naming the layout when the import misses. That works in the
+  `resources` it imports from on `sys.path` (first, but only those not already there: a script that another script imports must not reorder the importer's path; a library never touches it), and exit with a sentence naming the layout when the import misses. That works in the
   repository and in a run's snapshot alike (`workflows/core/skills/<skill>/resources/`, a workflow's `skills/<skill>/resources/` beside
   `core/`). Installing `microct-core` as a package in the sandbox image would delete these lines; it needs an image rebuild, so it waits.
 - **Thresholds:** two, and they are not interchangeable. The segmentation threshold (mask building) is a flag the caller passes,

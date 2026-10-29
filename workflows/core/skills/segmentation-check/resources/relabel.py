@@ -16,14 +16,16 @@ import numpy as np
 from scipy import ndimage as ndi
 
 HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/.
+# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
+# only missing directories are added, so a script imported by another leaves the importer's order alone.
 SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [str(HERE), str(SKILLS / 'microct-core/resources')]
+sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources')) if d not in sys.path]
 try:
     import sidecar
 except ModuleNotFoundError as e:
-    sys.exit(f'{e}: this script expects core/skills/microct-core/resources/ in a directory above it '
-             '(<workflows>/core/skills/<skill>/resources/, or <workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it)')
+    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
+          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
+    sys.exit(2)
 
 
 if __name__ == '__main__':

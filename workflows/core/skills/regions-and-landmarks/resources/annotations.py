@@ -1,23 +1,15 @@
 """Reading an annotations file: the curves an agent traced on slices of one aligned grid, as the scripts that cut regions need them.
 
-Library, not a script. A file carries the `grid_id` of the grid it was traced on (indices mean nothing on another grid);
+Library, not a script: the calling script puts `microct-core/resources` and this directory on `sys.path`.
+A file carries the `grid_id` of the grid it was traced on (indices mean nothing on another grid);
 curves use the schema of `region_from_curves.py` (../SKILL.md).
 """
 
 import json
-import sys
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/.
-SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [str(HERE), str(SKILLS / 'microct-core/resources')]
-try:
-    import sidecar
-    from region_from_curves import surface_from_curves
-except ModuleNotFoundError as e:
-    sys.exit(f'{e}: this script expects core/skills/microct-core/resources/ in a directory above it '
-             '(<workflows>/core/skills/<skill>/resources/, or <workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it)')
+import sidecar
+from region_from_curves import surface_from_curves
 
 
 def load_annotations(path, grid_id):
