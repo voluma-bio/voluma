@@ -46,12 +46,13 @@
  * HEARTBEAT_SECONDS`, measured from when it sent the last acknowledged
  * heartbeat. That is earlier than the server's expiry whatever the network
  * delay, and uses no shared clock. Once it can reach the API again it sends
- * `released`, so the run is recovered without waiting out the lease.
+ * `released` with its reason, so the run is recovered without waiting out the lease.
  * When a lease expires, or the runner releases it, the run is recovered the
  * same way: a `voluma` run goes back to `queued`, ahead of newer runs; a
  * `visitor` run goes to `awaiting-keys`, because its keys are gone. The runner
  * keeps its `events` already written, and the next claim resumes the thread
- * from them. The claim carries no plan: the runner snapshots the run's
+ * from them. That claim carries `previousClaim.reason`, why the claim before it ended
+ * (`claimEndReasonSchema`); the API records `lease-expired` itself when it sweeps a lease. The claim carries no plan: the runner snapshots the run's
  * workflow directory and builds the plan itself (`packages/workflow`), and a resumed run
  * keeps the plan its first `revision.started` recorded (`task-tools.ts`). A run
  * whose lease expired three times with no `released` ends `failed` instead, so
@@ -69,10 +70,14 @@
  * heartbeat (`usageSchema`): the dollars of model calls and the seconds of
  * sandbox time. The server adds them up per run, and that sum is what the org's
  * dollar ceiling counts. A heartbeat the server did not acknowledge is resent
- * with its usage added to the next one.
+ * with its usage added to the next one. The runner sends `costCapUsd` (its
+ * `RUNNER_MAX_RUN_COST_USD`) with the claim, which stores it as the run's spend
+ * cap for the provider gateway to check. The heartbeat answers with `spentUsd`,
+ * the run's total spend including its provider calls, so the runner's own cap
+ * sees spend that did not come through its heartbeats.
  *
  * Reports. The runner ends the run with `ended`, or gives it up with
- * `released` (a shutdown, a self-stop, or lost keys). Either one ends the
+ * `released` (a shutdown or a self-stop: its `reason`). Either one ends the
  * lease, and a `released` run is recovered as above, at once. The runner's
  * `ended` never says `cancelled`, which is the server's to record. The first
  * end wins: a report on a run that has ended, or that this lease no longer
@@ -104,7 +109,22 @@ export const leaseLostSchema = z.object({ code: z.literal("lease-lost") });
  */
 export const runnerIdSchema = z.string().min(1);
 
-export const claimRequestSchema = z.object({ runnerId: runnerIdSchema });
+/** Why the runner gave up a lease. */
+export const releaseReasonSchema = z.enum(["shutdown", "self-stop"]);
+export type ReleaseReason = z.infer<typeof releaseReasonSchema>;
+
+/** Why a claim ended: a release reason, or the API swept its expired lease. */
+export const claimEndReasonSchema = z.enum([...releaseReasonSchema.options, "lease-expired"]);
+export type ClaimEndReason = z.infer<typeof claimEndReasonSchema>;
+
+export const claimRequestSchema = z.object({
+  runnerId: runnerIdSchema,
+  /**
+   * The runner's `RUNNER_MAX_RUN_COST_USD`; the claim stores it as the run's spend cap, which
+   * the provider gateway checks. Absent: the API stores its default, $10.
+   */
+  costCapUsd: z.number().positive().optional(),
+});
 export type ClaimRequest = z.infer<typeof claimRequestSchema>;
 
 export const claimSchema = z
@@ -115,6 +135,8 @@ export const claimSchema = z
     leaseToken: z.string().min(1),
     /** Present exactly for a `visitor` run; returned once. */
     keys: visitorKeysSchema.optional(),
+    /** Present on every claim after the run's first: why the previous claim ended. */
+    previousClaim: z.object({ reason: claimEndReasonSchema }).optional(),
   })
   .refine((c) => (c.run.credentials === "visitor") === (c.keys !== undefined), {
     path: ["keys"],
@@ -139,6 +161,13 @@ export type HeartbeatRequest = z.infer<typeof heartbeatRequestSchema>;
 export const heartbeatResponseSchema = z.object({
   /** The server has ended the run; stop it. */
   stop: z.boolean(),
+  /**
+   * The run's spend in US dollars as the gateway's cap counts it: heartbeat-reported model
+   * cost, plus each provider call's cost, or its reservation while the call is open or was
+   * cut off. Higher than `Run.providerCalls` while a call is open. Optional until the API
+   * sends it.
+   */
+  spentUsd: z.number().nonnegative().optional(),
 });
 export type HeartbeatResponse = z.infer<typeof heartbeatResponseSchema>;
 
@@ -150,8 +179,12 @@ export const reportRequestSchema = z.object({
       /** Why a `failed` run failed, redacted of key values; absent otherwise. */
       error: z.string().optional(),
     }),
-    /** The runner stops the run and gives up its lease: a shutdown, a self-stop, or lost keys. */
-    z.object({ kind: z.literal("released") }),
+    /** The runner stops the run and gives up its lease: a shutdown or a self-stop. */
+    z.object({
+      kind: z.literal("released"),
+      /** Optional until the runner sends it. */
+      reason: releaseReasonSchema.optional(),
+    }),
   ]),
 });
 export type ReportRequest = z.infer<typeof reportRequestSchema>;
