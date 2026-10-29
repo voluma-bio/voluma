@@ -8,13 +8,21 @@ import { runEventSchema } from "@voluma/contracts/events";
 import type { ReviewSummary } from "@voluma/contracts/review";
 import { reviewState } from "@voluma/contracts/review-state";
 import { type Input, type Run, runSchema } from "@voluma/contracts/run";
+import type {
+  Study,
+  StudyDetail,
+  StudyScan,
+  StudySummary,
+  StudyValue,
+  ToCheckItem,
+} from "@voluma/contracts/study";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { callsOfRuns, type RunCalls } from "@voluma/provider-calls";
 import { and, asc, desc, eq, inArray, or, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { EVERY_LAB, type Reader, type ReadScope } from "../../domain";
 import type { RunRecord } from "../../ports";
-import { events, inputs, referenceInput, runs } from "./schema";
+import { events, inputs, referenceInput, runs, studies, studyScans } from "./schema";
 
 export type Tx = Parameters<Parameters<PostgresJsDatabase["transaction"]>[0]>[0];
 
@@ -27,6 +35,17 @@ export const readableRuns = (scope: ReadScope): SQL | undefined =>
         scope.ownerId === null
           ? undefined
           : or(eq(runs.startedBy, scope.ownerId), eq(runs.example, true)),
+      );
+
+/** The same rule on a study: `lab_id = labId AND (ownerId IS NULL OR created_by = ownerId OR example)`. */
+export const readableStudies = (scope: ReadScope): SQL | undefined =>
+  scope === EVERY_LAB
+    ? undefined
+    : and(
+        eq(studies.labId, scope.labId),
+        scope.ownerId === null
+          ? undefined
+          : or(eq(studies.createdBy, scope.ownerId), eq(studies.example, true)),
       );
 
 /** The input rule: the caller's upload, or the org's reference scan. */
@@ -82,6 +101,7 @@ function toRun({ run, input, position, calls }: Row, summary: ReviewSummary | nu
     id: run.id,
     labId: run.labId,
     startedBy: run.startedBy,
+    studyId: run.studyId,
     workflows: run.workflows as WorkflowPin[],
     ...(run.selectedOutputs !== null && { selectedOutputs: run.selectedOutputs as string[] }),
     ...(run.notes !== null && { notes: run.notes }),
@@ -200,19 +220,56 @@ export async function loadRecords(
   });
 }
 
-type SummaryCache = Map<string, { lastEventId: string | null; summary: ReviewSummary | null }>;
+/** What one `reviewState(log)` of a completed run gives the reads: the summary, and for studies its measurement values and open checks. */
+type Derived = {
+  summary: ReviewSummary | null;
+  /** Output id (`outputs.json`) → value, from the latest revision's tasks. */
+  values: Record<string, StudyValue>;
+  toCheck: Omit<ToCheckItem, "runId">[];
+};
+
+const NOTHING: Derived = { summary: null, values: {}, toCheck: [] };
+
+function derive(log: RunRecord["events"]): Derived {
+  const { summary, revisions } = reviewState(log);
+  const values: Derived["values"] = {};
+  const toCheck: Derived["toCheck"] = [];
+  for (const task of revisions.at(-1)?.tasks ?? []) {
+    for (const m of task.measurements) {
+      // The fold names a measurement `taskId/outputId`; the workflow files know the output id.
+      values[m.id.slice(task.id.length + 1)] = {
+        value: m.value,
+        unit: m.unit,
+        confidence: m.confidence,
+      };
+    }
+    for (const check of task.checks) {
+      if (check.status === "open") {
+        toCheck.push({ taskId: task.id, checkId: check.id, title: check.title });
+      }
+    }
+  }
+  return { summary, values, toCheck };
+}
+
+type SummaryCache = Map<string, { lastEventId: string | null; derived: Derived }>;
+
+/** The most derived results kept; evicted ones are derived again from the event log. */
+const CACHE_CAP = 2048;
+
+type RunResult = { run: Run } & Derived;
 
 /**
  * With `skipUnreadable` (the list), a completed run whose events no longer parse is left out
  * rather than failing every run listed with it. Without it (one run's read) it throws: the
  * run's own page must fail loudly, not read as "no plan" (a 409 the web polls forever).
  */
-export async function loadRuns(
+async function loadResults(
   tx: Tx,
   where: SQL | undefined,
   cache: SummaryCache = new Map(),
   skipUnreadable = false,
-): Promise<Run[]> {
+): Promise<RunResult[]> {
   const rows = await loadRows(tx, where);
   const ids = rows
     .filter(({ run }) => run.state === "ended" && run.outcome === "completed")
@@ -226,30 +283,36 @@ export async function loadRuns(
     : [];
   // Event identity also changes when the seeder replaces a history at the same sequence.
   const versions = new Map(watermarks.map(({ runId, id }) => [runId, id]));
-  const cachedSummaries = new Map(ids.map((id) => [id, cache.get(id)]));
-  const missing = ids.filter(
-    (id) => cachedSummaries.get(id)?.lastEventId !== (versions.get(id) ?? null),
-  );
+  const cached = new Map(ids.map((id) => [id, cache.get(id)]));
+  const missing = ids.filter((id) => cached.get(id)?.lastEventId !== (versions.get(id) ?? null));
   const { logs, unreadable } = await loadLogs(tx, missing, true);
   if (!skipUnreadable && unreadable.size)
     throw new Error(`run ${[...unreadable].join(", ")}: stored events can't be read`);
-  const summaries = new Map<string, ReviewSummary | null>();
+  const derivedOf = new Map<string, Derived>();
   for (const id of ids) {
     if (unreadable.has(id)) continue;
     const lastEventId = versions.get(id) ?? null;
-    const cached = cachedSummaries.get(id);
-    const summary =
-      cached?.lastEventId === lastEventId
-        ? cached.summary
-        : reviewState(logs.get(id) ?? []).summary;
-    summaries.set(id, summary);
-    cache.set(id, { lastEventId, summary });
-    // Bound retained summaries; evicted entries are derived again from the event log.
-    if (cache.size > 256) cache.delete(cache.keys().next().value as string);
+    const hit = cached.get(id);
+    const derived = hit?.lastEventId === lastEventId ? hit.derived : derive(logs.get(id) ?? []);
+    derivedOf.set(id, derived);
+    cache.set(id, { lastEventId, derived });
+    if (cache.size > CACHE_CAP) cache.delete(cache.keys().next().value as string);
   }
   return rows
     .filter(({ run }) => !unreadable.has(run.id))
-    .map((row) => toRun(row, summaries.get(row.run.id) ?? null));
+    .map((row) => {
+      const derived = derivedOf.get(row.run.id) ?? NOTHING;
+      return { run: toRun(row, derived.summary), ...derived };
+    });
+}
+
+export async function loadRuns(
+  tx: Tx,
+  where: SQL | undefined,
+  cache?: SummaryCache,
+  skipUnreadable = false,
+): Promise<Run[]> {
+  return (await loadResults(tx, where, cache, skipUnreadable)).map(({ run }) => run);
 }
 
 /** The run just written, which must exist. */
@@ -257,6 +320,66 @@ export async function loadRun(tx: Tx, runId: string): Promise<Run> {
   const [run] = await loadRuns(tx, eq(runs.id, runId));
   if (!run) throw new Error(`run ${runId} vanished inside its transaction`);
   return run;
+}
+
+const toStudy = (row: typeof studies.$inferSelect): Study => ({
+  id: row.id,
+  labId: row.labId,
+  name: row.name,
+  workflowId: row.workflowId,
+  budgetUsd: row.budgetUsd,
+  createdBy: row.createdBy,
+  example: row.example,
+  createdAt: row.createdAt.toISOString(),
+});
+
+function pickValues(values: Derived["values"] = {}, outputs: readonly string[]): Derived["values"] {
+  const picked: Derived["values"] = {};
+  for (const id of outputs) {
+    const value = values[id];
+    if (value) picked[id] = value;
+  }
+  return picked;
+}
+
+/** Each scan's newest completed run: `results` is newest first, so the first completed one seen. */
+function newestCompleted(results: RunResult[]): Map<string, RunResult> {
+  const newest = new Map<string, RunResult>();
+  for (const result of results) {
+    const { state, input } = result.run;
+    if (state.status === "ended" && state.outcome === "completed" && !newest.has(input.id)) {
+      newest.set(input.id, result);
+    }
+  }
+  return newest;
+}
+
+function summarize(study: Study, scanCount: number, results: RunResult[]): StudySummary {
+  const runCounts = {
+    queued: 0,
+    running: 0,
+    awaitingKeys: 0,
+    completed: 0,
+    failed: 0,
+    cancelled: 0,
+  };
+  let lastActivity = study.createdAt;
+  for (const { run } of results) {
+    const { state } = run;
+    if (state.status === "ended") runCounts[state.outcome]++;
+    else if (state.status === "awaiting-keys") runCounts.awaitingKeys++;
+    else runCounts[state.status]++;
+    for (const at of [
+      run.createdAt,
+      "startedAt" in state && state.startedAt,
+      "endedAt" in state && state.endedAt,
+    ]) {
+      if (at && at > lastActivity) lastActivity = at;
+    }
+  }
+  let toCheck = 0;
+  for (const { toCheck: items } of newestCompleted(results).values()) toCheck += items.length;
+  return { ...study, scanCount, runCounts, toCheck, lastActivityAt: lastActivity };
 }
 
 export function pgRunReads(db: PostgresJsDatabase) {
@@ -277,6 +400,88 @@ export function pgRunReads(db: PostgresJsDatabase) {
           },
         )
       )[0] ?? null,
+
+    /** The caller's readable studies, newest activity first. */
+    studies: (reader: ReadScope) =>
+      db.transaction(
+        async (tx): Promise<StudySummary[]> => {
+          const rows = await tx.select().from(studies).where(readableStudies(reader));
+          if (rows.length === 0) return [];
+          const ids = rows.map((row) => row.id);
+          const counts = await tx
+            .select({ studyId: studyScans.studyId, n: sql<number>`count(*)::int` })
+            .from(studyScans)
+            .where(inArray(studyScans.studyId, ids))
+            .groupBy(studyScans.studyId);
+          const scanCount = new Map(counts.map(({ studyId, n }) => [studyId, n]));
+          const results = await loadResults(
+            tx,
+            and(readableRuns(reader), inArray(runs.studyId, ids)),
+            summaries,
+            true,
+          );
+          return rows
+            .map((row) =>
+              summarize(
+                toStudy(row),
+                scanCount.get(row.id) ?? 0,
+                results.filter(({ run }) => run.studyId === row.id),
+              ),
+            )
+            .sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt));
+        },
+        { isolationLevel: "repeatable read" },
+      ),
+
+    /** One study with its scans and runs; `outputs` picks the values to include. Null when absent or unreadable. */
+    study: (reader: ReadScope, studyId: string, outputs: readonly string[]) =>
+      db.transaction(
+        async (tx): Promise<StudyDetail | null> => {
+          const [row] = await tx
+            .select()
+            .from(studies)
+            .where(and(readableStudies(reader), eq(studies.id, studyId)));
+          if (!row) return null;
+          const scans = await tx
+            .select({ scan: studyScans, input: inputs })
+            .from(studyScans)
+            .innerJoin(inputs, eq(studyScans.inputId, inputs.id))
+            .where(eq(studyScans.studyId, studyId))
+            .orderBy(asc(studyScans.position));
+          const results = await loadResults(
+            tx,
+            and(readableRuns(reader), eq(runs.studyId, studyId)),
+            summaries,
+          );
+          const newest = newestCompleted(results);
+          return {
+            study: toStudy(row),
+            scans: scans.map(({ scan, input }) => {
+              const result = newest.get(scan.inputId);
+              return {
+                scan: {
+                  inputId: scan.inputId,
+                  subject: scan.subject,
+                  group: scan.group,
+                  attributes: scan.attributes,
+                  position: scan.position,
+                } satisfies StudyScan,
+                input: toInput(input),
+                runs: results
+                  .filter(({ run }) => run.input.id === scan.inputId)
+                  .map(({ run }) => run),
+                resultRunId: result?.run.id ?? null,
+                values: pickValues(result?.values, outputs),
+                toCheck: (result?.toCheck ?? []).map((item) => ({
+                  ...item,
+                  runId: result?.run.id as string,
+                })),
+              };
+            }),
+          };
+        },
+        { isolationLevel: "repeatable read" },
+      ),
 
     /** Inputs a run can start on: an upload only once completed. */
     async listInputs({ labId, ownerId }: Reader) {

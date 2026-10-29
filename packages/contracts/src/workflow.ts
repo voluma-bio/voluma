@@ -55,7 +55,7 @@ export type RecordedPin = z.infer<typeof recordedPinSchema>;
 
 const nonEmpty = z.string().min(1);
 
-/** What only the file keeps (`task`, `region`, `sourceRef`) is out of the plan; `name` is optional there. */
+/** What only the file keeps (`task`, `region`, `sourceRef`, a measurement's `headline`) is out of the plan; `name` is optional there. */
 const out = { task: true, region: true, sourceRef: true } as const;
 const plus = { name: nonEmpty.optional(), required: z.boolean() };
 const [measurement, score, structure, surface, annotation, volume, file] =
@@ -76,7 +76,7 @@ export const declaredOutputSchema = z.preprocess(
       ? { on: [], ...v }
       : v,
   z.discriminatedUnion("kind", [
-    measurement.omit(out).extend(plus),
+    measurement.omit({ ...out, headline: true }).extend(plus),
     score.omit(out).extend(plus),
     structure.omit(out).extend(plus),
     surface.omit(out).extend(plus),
