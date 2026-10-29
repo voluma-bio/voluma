@@ -1,23 +1,27 @@
 /**
  * Operator script: copy a finished run into an example run in the Demo organization.
- *   pnpm --filter @voluma/api seed:example --from <runId> [--id <exampleRunId>]
- * Reads DATABASE_URL, GUEST_ORGANIZATION_ID (the Demo organization) and the R2 settings (the repo .env, or the host's variables).
+ *   pnpm --filter @voluma/api seed:example --from <runId> [--id <exampleRunId>] [--backfill <dir|r2:prefix>] [--remote]
+ * Reads DATABASE_URL (else this worktree's `pnpm dev` database), GUEST_ORGANIZATION_ID (the Demo organization) and the R2 settings (the repo .env, or the host's variables).
  *
  * The example gets the source's events, threads and history under its own run id (thread
  * ids are `<runId>.…`, so they are renamed), `startedBy: "voluma-examples"`, `example: true`,
  * and the Demo org's reference-scan input. The source's evidence objects in R2 are copied
  * under the example's own prefix (`evidenceKey` builds a key from the run being read, so an
- * example can't point at another run's files). Re-seeding the same `--id` replaces the
+ * example can't point at another run's files). `--backfill` adds the objects a run recorded before
+ * they existed (`backfill.ts`). Re-seeding the same `--id` replaces the
  * example, and nothing else: an existing run that isn't an example is refused. The source must be a completed `voluma` run on a reference scan: a visitor run's
  * outputs are untrusted (`@voluma/contracts/run`), and an example's scan is shown to everyone.
  */
 import { parseArgs } from "node:util";
-import { CopyObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
+import { CopyObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { runIdSchema } from "@voluma/contracts/ids";
 import { evidenceKey, runPrefix } from "@voluma/contracts/r2";
 import { asc, eq, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
+import { backfillRows, readBackfill, uploadBackfill } from "./backfill";
+import { databaseUrl } from "./operator";
+import { r2FromEnv, required, withLocalDir } from "./r2-dir";
 import {
   EXAMPLES_OPERATOR,
   events,
@@ -28,30 +32,34 @@ import {
   threads,
 } from "./schema";
 
-const { values } = parseArgs({ options: { from: { type: "string" }, id: { type: "string" } } });
-const required = (name: string) => {
-  const value = process.env[name];
-  if (!value) throw new Error(`${name} is not set`);
-  return value;
-};
-if (!values.from) throw new Error("usage: seed:example --from <runId> [--id <exampleRunId>]");
-const source = runIdSchema.parse(values.from);
-const exampleId = runIdSchema.parse(values.id ?? `example-${source}`);
-const demoLabId = required("GUEST_ORGANIZATION_ID");
-
-const client = postgres(required("DATABASE_URL"));
-const db = drizzle(client, { casing: "snake_case" });
-
-// Objects are content-addressed and never overwritten, so a repeat copy is harmless.
-const bucket = required("R2_BUCKET");
-const r2 = new S3Client({
-  region: "auto",
-  endpoint: `https://${required("R2_ACCOUNT_ID")}.r2.cloudflarestorage.com`,
-  credentials: {
-    accessKeyId: required("R2_ACCESS_KEY_ID"),
-    secretAccessKey: required("R2_SECRET_ACCESS_KEY"),
+const { values } = parseArgs({
+  options: {
+    from: { type: "string" },
+    id: { type: "string" },
+    backfill: { type: "string" },
+    remote: { type: "boolean" },
   },
 });
+if (!values.from)
+  throw new Error(
+    "usage: seed:example --from <runId> [--id <exampleRunId>] [--backfill <dir|r2:prefix>] [--remote]",
+  );
+const source = runIdSchema.parse(values.from);
+const stagingId = `example-${source}`;
+if (!values.remote && values.id === stagingId) {
+  throw new Error(`${stagingId} is the example staging reads; pass --remote to seed it`);
+}
+const exampleId = runIdSchema.parse(
+  values.id ?? (values.remote ? stagingId : `example-local-${source}`),
+);
+const demoLabId = required("GUEST_ORGANIZATION_ID");
+
+const client = postgres(databaseUrl({ writes: true, remote: values.remote }));
+const db = drizzle(client, { casing: "snake_case" });
+const { r2, bucket } = r2FromEnv();
+console.log(`example ${exampleId} -> bucket ${bucket}, prefix ${runPrefix(exampleId)}`);
+
+// Objects are content-addressed and never overwritten, so a repeat copy is harmless.
 async function copyEvidence(): Promise<number> {
   let copied = 0;
   const evidencePrefix = `${runPrefix(source)}evidence/`;
@@ -80,28 +88,64 @@ async function copyEvidence(): Promise<number> {
   return copied;
 }
 
-let copied = 0;
+// Read and check everything, then upload to R2, then write the database in one short transaction.
+const [src] = await db
+  .select({ run: runs, input: inputs })
+  .from(runs)
+  .innerJoin(inputs, eq(runs.inputId, inputs.id))
+  .where(eq(runs.id, source));
+if (!src) throw new Error(`run ${source} not found`);
+if (src.run.state !== "ended" || src.run.outcome !== "completed") {
+  throw new Error(`run ${source} has not completed`);
+}
+if (src.run.credentials !== "voluma") throw new Error("never seed an example from a visitor run");
+if (src.input.source !== "reference") throw new Error("an example reads the reference scan");
+if (src.run.example) throw new Error(`run ${source} is itself an example`);
+
+// Replace an earlier seeding of this example, and nothing else.
+const [existing] = await db.select().from(runs).where(eq(runs.id, exampleId));
+if (existing && !(existing.example && existing.startedBy === EXAMPLES_OPERATOR)) {
+  throw new Error(`run ${exampleId} exists and is not an example; pick another --id`);
+}
+
+// Ids of events that payloads point at (`attemptId`, `askId`, …) are prefixed along with the events.
+const sourceEvents = await db
+  .select()
+  .from(events)
+  .where(eq(events.runId, source))
+  .orderBy(asc(events.seq));
+const eventIds = new Set(sourceEvents.map((e) => e.id.replaceAll(`${source}.`, `${exampleId}.`)));
+const renameIds = (value: unknown): unknown => {
+  if (typeof value === "string") return eventIds.has(value) ? `${exampleId}:${value}` : value;
+  if (Array.isArray(value)) return value.map(renameIds);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, renameIds(v)]));
+  }
+  return value;
+};
+const renamed = sourceEvents.map(({ seq: _seq, ...event }) => ({
+  ...event,
+  id: `${exampleId}:${event.id.replaceAll(`${source}.`, `${exampleId}.`)}`,
+  runId: exampleId,
+  threadId: `${exampleId}${event.threadId.slice(source.length)}`,
+  payload: renameIds(
+    JSON.parse(JSON.stringify(event.payload).replaceAll(`"${source}.`, `"${exampleId}.`)),
+  ) as typeof event.payload,
+}));
+
+const copied = await copyEvidence();
+const rows = values.backfill
+  ? await withLocalDir(values.backfill, async (dir) =>
+      backfillRows(
+        exampleId,
+        renamed,
+        await readBackfill(dir),
+        await uploadBackfill(r2, bucket, exampleId, dir),
+      ),
+    )
+  : renamed;
+
 await db.transaction(async (tx) => {
-  const [src] = await tx
-    .select({ run: runs, input: inputs })
-    .from(runs)
-    .innerJoin(inputs, eq(runs.inputId, inputs.id))
-    .where(eq(runs.id, source));
-  if (!src) throw new Error(`run ${source} not found`);
-  if (src.run.state !== "ended" || src.run.outcome !== "completed") {
-    throw new Error(`run ${source} has not completed`);
-  }
-  if (src.run.credentials !== "voluma") throw new Error("never seed an example from a visitor run");
-  if (src.input.source !== "reference") throw new Error("an example reads the reference scan");
-  if (src.run.example) throw new Error(`run ${source} is itself an example`);
-
-  // Replace an earlier seeding of this example, and nothing else.
-  const [existing] = await tx.select().from(runs).where(eq(runs.id, exampleId));
-  if (existing && !(existing.example && existing.startedBy === EXAMPLES_OPERATOR)) {
-    throw new Error(`run ${exampleId} exists and is not an example; pick another --id`);
-  }
-
-  copied = await copyEvidence(); // after every check, so a refused seed copies nothing
   await tx.delete(piMessages).where(sql`starts_with(${piMessages.threadId}, ${`${exampleId}.`})`);
   await tx.delete(threads).where(eq(threads.runId, exampleId));
   await tx.delete(events).where(eq(events.runId, exampleId));
@@ -129,28 +173,12 @@ await db.transaction(async (tx) => {
     sandboxSeconds: src.run.sandboxSeconds,
   });
 
-  // Preserve human decisions and attempt identity under the copied event ids.
-  const rename = (text: SQL) => sql`${exampleId} || substr(${text}, ${source.length + 1})`;
-  const sourceEvents = await tx
-    .select()
-    .from(events)
-    .where(eq(events.runId, source))
-    .orderBy(asc(events.seq));
-  for (const event of sourceEvents) {
-    const payload = JSON.parse(
-      JSON.stringify(event.payload).replaceAll(`"${source}.`, `"${exampleId}.`),
-    );
-    for (const field of ["attemptId", "revisionId", "resultRevisionId", "checkId"]) {
-      if (typeof payload[field] === "string") payload[field] = `${exampleId}:${payload[field]}`;
-    }
-    await tx.insert(events).values({
-      ...event,
-      id: `${exampleId}:${event.id}`,
-      runId: exampleId,
-      threadId: `${exampleId}${event.threadId.slice(source.length)}`,
-      payload,
-    });
+  // Postgres caps a statement's parameters, so insert in batches.
+  const numbered = rows.map((row, i) => ({ ...row, seq: i + 1 }));
+  for (let i = 0; i < numbered.length; i += 500) {
+    await tx.insert(events).values(numbered.slice(i, i + 500));
   }
+  const rename = (text: SQL) => sql`${exampleId} || substr(${text}, ${source.length + 1})`;
   await tx.execute(sql`
     INSERT INTO threads (id, run_id, parent_thread_id, kind, task, status, created_at, ended_at)
     SELECT ${rename(sql`id`)}, ${exampleId},
