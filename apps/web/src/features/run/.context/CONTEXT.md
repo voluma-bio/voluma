@@ -21,7 +21,21 @@ Three screens under `RunLayout` (top bar and query client): `/` start (`start-pa
   thread), and the supervisor's code (task statuses set by a rule, judgments, revisions) folded like
   tool calls. `?thread=<threadId>` shows that thread's transcript in its place. Running workers and
   checkers are listed above the main transcript; failures and To check items sit at the top; the
-  plan is a compact graph in a right rail (a closed "Tasks" fold under 1100 px).
+  run's progress is a right rail (a closed "Tasks" fold under 1100 px, which scrolls on its own).
+- **The progress rail** (`task-progress.tsx`) reads without opening any agent: one row per plan
+  task in plan order (state dot, title opening its newest thread, cost and time), and a second
+  line: the clock while working or being checked, the outcome once it ends, else the state. It
+  replaced a dependency graph plus a separate per-task spend list (three lists of the same tasks).
+  A waiting row names the tasks it waits on. The outcome (`outcomes` in `run-model.ts`) is the
+  current attempt's last worker checkpoint, else the checker's (the checker's first when it changed
+  the result in a `fix` revision); a failed task's `task` reason.
+  Not the wake `note` (the whole notes block, every task so far), not the closing `task` reason (a
+  rule's stock sentence), not a judgment's reason (about the check). Under the tasks, "Outputs so
+  far" (`outputRows`): each measurement's and score's value from `fold`, by task in plan order; a
+  null value shows the worker's note; once a task is done, to check or failed, a required output it
+  never reported reads "Not reported" (a stopped task's row already says it stopped); a stale
+  task's values say they may no longer hold. Files,
+  volumes, structures and annotations have no value to show here.
 - **The log is not complete when the runner stops.** Stop ends the run in the API at once, and a
   lost runner writes nothing more (its lease expires and the run goes back to queued or awaiting
   keys), so threads can have a `thread.started` and no `thread.ended`. `haltOf(Run.state, closed)`
@@ -68,7 +82,7 @@ Three screens under `RunLayout` (top bar and query client): `/` start (`start-pa
   is `react-markdown` + `remark-gfm`, with `remend` closing open constructs while text streams (the
   same tail repair Flow uses); raw HTML is skipped and images show as their alt text.
 - **Live tasks** are `fold(events)` over the run's stream (`subscribe`), published at most once per
-  animation frame. "Finished" counts To check tasks: their work is done. The task list comes from the `revision.started` plan; a task not started yet is Ready when every task it builds on is done, else Waiting.
+  animation frame. "Finished" counts To check tasks: their work is done. The task list comes from the `revision.started` plan; a task not started yet is Ready when every task it builds on has a usable result (`isSatisfied` from `@voluma/workflow`, the supervisor's own rule: done, or To check with every required output), else "Waiting on" those tasks.
   Queue position and run state are not events, so `getRun` is polled every 3 s until the run ends.
 - **Visitor keys** (`keys.tsx`) live in localStorage under `voluma.visitor-keys.<userId>` and are parsed
   with `visitorKeysSchema`; another user of the browser never sees them (a guest has no sign-out, and
@@ -86,8 +100,8 @@ Three screens under `RunLayout` (top bar and query client): `/` start (`start-pa
   (models and SAM) with sandbox uptime under it. Formatters (`formatUsd`, `formatDuration`) are in `status.tsx`.
 - **Live page cost and time** come only from `spend(events)` (`@voluma/contracts/spend`), run in
   `runView` on durable events, never per live frame (`spend.tsx`). The header shows the run's total,
-  with the main thread's share in its popover; under the plan, one row per task covers its worker,
-  check and any redo together. Each worker and checker card, and an opened thread's bar, shows that
+  with the main thread's share in its popover; each task's row in the progress rail covers its
+  worker, check and any redo together (cost only while it works: its clock is the thread's). Each worker and checker card, and an opened thread's bar, shows that
   thread's own cost: `spend` over just that thread's events (`Thread.spend`), so a card never repeats
   its task's sum; its popover has no wall time, since the card's `Elapsed` is the thread's clock. Wall times move when an event lands; only the header clock and the cards' `Elapsed`
   tick each second.

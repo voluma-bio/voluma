@@ -13,4 +13,4 @@
 - **Label tasks with the run's own plan titles.** Every label on the page (`taskTitle`) reads the
   bundled `tasks.json`, so an older run shows today's titles. The plan in the run's first
   `revision.started` carries the titles it ran with. Build the title lookup from it in `runView` and
-  pass it to the graph, attention, `threadName`, the transcript rows and the spend list.
+  pass it to the progress rail, attention, `threadName` and the transcript rows.

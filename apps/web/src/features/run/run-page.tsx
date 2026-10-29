@@ -1,8 +1,9 @@
 /**
  * The live run (`/runs/:id/live`): the run's status with Stop, what needs attention, the main
  * thread's transcript (the run's orchestration, with each worker and checker as a card), the
- * workers and checkers running now, and the plan as a compact graph. `?thread=<id>` shows that
- * thread's own transcript in place of the main one. Everything is derived from the run's stream:
+ * workers and checkers running now, and the run's progress in a rail: each task's state and
+ * outcome, and the values reported so far. `?thread=<id>` shows that thread's own transcript in
+ * place of the main one. Everything is derived from the run's stream:
  * durable events (`run-model.ts`, `transcript.ts`, and `@voluma/contracts/fold` for task status)
  * plus live frames for the reply being written.
  */
@@ -24,15 +25,14 @@ import { KeysForm } from "./keys";
 import {
   type Attention,
   haltOf,
-  latestThreadByTask,
   runView,
   type Thread,
   threadName,
   withLiveCalls,
 } from "./run-model";
-import { RunSpendSummary, TaskSpendList } from "./spend";
+import { RunSpendSummary } from "./spend";
 import { RunBadge, runStatus } from "./status";
-import { TaskGraph } from "./task-graph";
+import { OutputList, TaskList } from "./task-progress";
 import {
   applyFrame,
   type Live,
@@ -156,12 +156,12 @@ export function RunPage() {
 
   const data = run.data;
   const ended = halt?.kind === "ended";
-  const { attention, plan, states, progress, spend } = view;
+  const { attention, plan, tasks, outputs, progress, spend } = view;
   const setRun = (next: Run) => queryClient.setQueryData(["run", id], next);
-  const graph = plan && (
+  const progressPanel = plan && (
     <>
-      <TaskGraph plan={plan} states={states} threadByTask={latestThreadByTask(threads)} />
-      <TaskSpendList spend={spend} />
+      <TaskList tasks={tasks} />
+      <OutputList outputs={outputs} />
     </>
   );
   const tasksLabel = plan ? `Tasks: ${progress}` : "Tasks";
@@ -199,7 +199,7 @@ export function RunPage() {
               {plan && (
                 <div className="hidden border-b border-border px-4 py-1 max-[1100px]:block">
                   <ProcessDisclosure label={tasksLabel}>
-                    <div className="overflow-x-auto pb-2">{graph}</div>
+                    <div className="max-h-[50dvh] overflow-y-auto pr-1 pb-2">{progressPanel}</div>
                   </ProcessDisclosure>
                 </div>
               )}
@@ -248,7 +248,7 @@ export function RunPage() {
                 Tasks
                 {plan && <span className="ml-2 font-normal text-muted-foreground">{progress}</span>}
               </h2>
-              {graph ?? (
+              {progressPanel ?? (
                 <p className="text-ui text-muted-foreground">
                   {ended
                     ? "This run ended before it made a plan."
