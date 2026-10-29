@@ -75,10 +75,11 @@ export function reviewRun(run: Run, events: readonly RunEvent[]): ReviewRun | nu
     };
   };
 
-  const label = (rev: FoldedRevision) =>
-    rev.reason === "run"
-      ? "Run"
-      : `${rev.reason === "correction" ? "Correction" : "Check fix"}: ${titleOf(rev.taskId ?? "")}`;
+  const label = (rev: FoldedRevision) => {
+    if (rev.reason === "run") return "Run";
+    if (rev.reason === "correction") return `Correction: ${titleOf(rev.taskId ?? "")}`;
+    throw new Error("Unsupported revision reason");
+  };
 
   return reviewRunSchema.parse({
     id: run.id,

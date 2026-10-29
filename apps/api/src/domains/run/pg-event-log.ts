@@ -12,9 +12,10 @@
  * So `seq` is gapless and in commit order per run: a reader that has seen `seq` n has seen
  * every event below it. The stream (stream.ts) relies on that: the notifier fires after a
  * commit, and the stream then reads the log from its cursor, so a missed or early wake-up
- * costs a read, never an event.
+ * costs a read, never an event. Stored rows are parsed against the current event schema:
+ * an unsupported historical event fails the read rather than being reinterpreted.
  */
-import type { EventInput, RunEvent } from "@voluma/contracts/events";
+import { type EventInput, runEventSchema } from "@voluma/contracts/events";
 import { fold } from "@voluma/contracts/fold";
 import { and, asc, eq, gt, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
@@ -35,7 +36,7 @@ export class EventIdTaken extends Error {
 const EVENT_SEQ_LOCK = 0x76_6f_6c_75;
 
 export const toRunEvent = (row: typeof events.$inferSelect) =>
-  ({ ...row, createdAt: row.createdAt.toISOString() }) as RunEvent;
+  runEventSchema.parse({ ...row, createdAt: row.createdAt.toISOString() });
 
 /** The open To check items `fold` gives the run's whole log: `Run.toCheck` when the run completes. */
 export async function openChecks(db: Tx | PostgresJsDatabase, runId: string): Promise<number> {

@@ -119,8 +119,8 @@ A local `/scratch` would break all three.
 A worker has `checklist`, `checkpoint` and `report_output`; a check thread only `checkpoint`
 (`supervise-run.ts`). A check re-derives values to compare and gives them in its checkpoint's
 text with its verdict (the review shows the checker's verdict and text); it never replaces the
-worker's outputs, so the runtime refuses its `report_output` and never opens a `fix` revision.
-`fix` stays in the event schema and `fold` for now (removing it is a contract change).
+worker's outputs, so the runtime refuses its `report_output`. Only a worker redo after a
+supervisor correction opens another revision.
 `checkpoint`'s arguments go through `prepareCheckpoint` before validation, so the habits of
 models (a top-level `title`, `toCheck` as a string or with `text`, a nested `{root, path}`)
 don't cost a turn.

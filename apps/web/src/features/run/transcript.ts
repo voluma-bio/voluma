@@ -483,14 +483,11 @@ export function mainRows(events: RunEvent[], live: Live = noLive): Row[] {
         }
         break;
       case "revision.started":
-        if (e.payload.reason !== "run")
+        if (e.payload.reason === "correction")
           b.step({
             kind: "note",
             id: e.id,
-            text:
-              e.payload.reason === "fix"
-                ? `The checker fixed ${taskTitle(e.payload.taskId)}: a new revision of its results`
-                : `${taskTitle(e.payload.taskId)} was corrected: a new revision of its results`,
+            text: `${taskTitle(e.payload.taskId)} was corrected: a new revision of its results`,
           });
         break;
       case "task":
