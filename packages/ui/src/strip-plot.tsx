@@ -2,11 +2,20 @@
  * Strip plot: one measurement compared across groups of scans, for the small
  * groups a study has (n = 1-8), where a bar would hide the scans. Each scan is
  * a dot on its group's row, a tick marks the group mean, and dots that share a
- * value spread vertically so none hides another. A dot is a button: hover or
+ * value spread around it so none hides another. A dot is a button: hover or
  * focus names the scan and its value, and `onSelect` decides what it opens.
- * Scans without a value yet are counted beside their group, not drawn.
+ * The plot is one tab stop: arrow keys move between dots (left and right in
+ * value order, up and down between groups). Scans without a value yet are
+ * counted beside their group, not drawn.
  */
-import { type KeyboardEvent, type ReactNode, useLayoutEffect, useRef, useState } from "react";
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { cx } from "./cx";
 
 export type StripPoint = {
@@ -30,10 +39,8 @@ export type StripPlotProps = {
   /** Accessible name, usually the measurement's name. */
   label: string;
   onSelect: (point: StripPoint) => void;
-  /** Axis range; defaults to the values' range with a margin. */
-  domain?: [number, number];
-  /** Decimals for values in the tooltip; defaults to one more than the axis ticks. */
-  digits?: number;
+  /** Decimals for values in the tooltip and spoken names: the measurement's precision. */
+  digits: number;
   className?: string;
 };
 
@@ -42,23 +49,24 @@ const R = 5.5;
 const HIT = 11;
 const MIN_GAP = 2 * R - 2;
 const SPREAD = 7;
+// Dots stack at most this many SPREADs above and below the axis line, then move sideways.
+const MAX_LEVEL = 3;
 const ROW = 32;
 const LABEL_ROOM = 16;
+// Within this many pixels of an end, tooltips and far labels align to that end.
+const EDGE = 70;
 
 type Placed = StripPoint & { value: number; x: number; y: number };
 
-export function StripPlot({
-  groups,
-  unit,
-  label,
-  onSelect,
-  domain,
-  digits,
-  className,
-}: StripPlotProps) {
+export function StripPlot({ groups, unit, label, onSelect, digits, className }: StripPlotProps) {
   const axisRef = useRef<HTMLDivElement>(null);
+  const dotRefs = useRef(new Map<string, SVGGElement>());
   const [width, setWidth] = useState(0);
-  const [active, setActive] = useState<string | null>(null);
+  // The dot that holds the plot's one tab stop, and what the tooltip follows.
+  const [current, setCurrent] = useState<string | null>(null);
+  const [focused, setFocused] = useState(false);
+  const [hovered, setHovered] = useState<string | null>(null);
+  const [dismissed, setDismissed] = useState(false);
 
   useLayoutEffect(() => {
     const node = axisRef.current;
@@ -70,90 +78,146 @@ export function StripPlot({
   }, []);
 
   const values = groups.flatMap((g) => g.points.flatMap((p) => (p.value === null ? [] : p.value)));
-  const [lo, hi] = domain ?? paddedRange(values);
   // About one tick per 64 px, at least three so a phone's narrow axis still reads.
-  const { ticks, step } = niceTicks(lo, hi, Math.max(3, Math.min(6, Math.floor(width / 64))));
+  const { lo, hi, step } = niceDomain(values, Math.max(3, Math.min(6, Math.floor(width / 64))));
+  const ticks = Array.from({ length: Math.round((hi - lo) / step) + 1 }, (_, i) =>
+    Number((lo + i * step).toPrecision(12)),
+  );
   const tickDigits = decimalsOf(step);
-  const valueDigits = digits ?? tickDigits + 1;
   // Dots at the domain's ends stay inside the svg.
-  const inset = HIT;
-  const x = (v: number) => inset + ((v - lo) / (hi - lo)) * Math.max(0, width - 2 * inset);
-  const hasAxis = values.length > 0 || domain !== undefined;
+  const x = (v: number) => HIT + ((v - lo) / (hi - lo)) * Math.max(0, width - 2 * HIT);
+
+  const rows = groups.map((group) => {
+    const placed = width > 0 ? swarm(group.points, x) : [];
+    const reach = Math.max(0, ...placed.map((p) => Math.abs(p.y)));
+    const top = placed.some((p) => p.far) ? LABEL_ROOM : 0;
+    const height = Math.max(ROW, 2 * reach + 2 * HIT) + top;
+    const mean = placed.length > 1 ? placed.reduce((s, p) => s + p.value, 0) / placed.length : null;
+    return { group, placed, reach, top, height, mid: top + (height - top) / 2, mean };
+  });
+  const all = rows.flatMap((row) => row.placed);
+  const stop = all.some((p) => p.id === current) ? current : (all[0]?.id ?? null);
+  const tip = dismissed ? null : (hovered ?? (focused ? stop : null));
+
+  // Escape hides the tooltip wherever focus is, so a hovered tooltip can be dismissed too.
+  useEffect(() => {
+    if (tip === null) return;
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setDismissed(true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [tip]);
+
+  const move = (id: string) => {
+    setCurrent(id);
+    setDismissed(false);
+    dotRefs.current.get(id)?.focus();
+  };
+
+  const onKeyDown = (event: KeyboardEvent) => {
+    const r = rows.findIndex((row) => row.placed.some((p) => p.id === stop));
+    const row = rows[r];
+    if (!row) return;
+    const i = row.placed.findIndex((p) => p.id === stop);
+    const here = row.placed[i];
+    if (!here) return;
+    let next: Placed | undefined;
+    if (event.key === "ArrowRight") next = row.placed[i + 1];
+    else if (event.key === "ArrowLeft") next = row.placed[i - 1];
+    else if (event.key === "Home") next = row.placed[0];
+    else if (event.key === "End") next = row.placed.at(-1);
+    else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      // The dot nearest in value in the next group, above or below, that has any.
+      const onward = event.key === "ArrowDown" ? rows.slice(r + 1) : rows.slice(0, r).reverse();
+      const target = onward.find((q) => q.placed.length > 0);
+      next = target?.placed.reduce((a, b) =>
+        Math.abs(b.value - here.value) < Math.abs(a.value - here.value) ? b : a,
+      );
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onSelect(here);
+      return;
+    } else return;
+    event.preventDefault();
+    if (next) move(next.id);
+  };
 
   return (
     <figure
       aria-label={`${label}, ${unit}`}
       className={cx("m-0 grid grid-cols-[fit-content(9rem)_minmax(0,1fr)] gap-x-4", className)}
+      onKeyDown={onKeyDown}
     >
-      {groups.map((group) => {
-        const placed = width > 0 ? swarm(group.points, x) : [];
-        const missing = group.points.filter((p) => p.value === null).length;
-        const reach = Math.max(0, ...placed.map((p) => Math.abs(p.y)));
-        const top = placed.some((p) => p.far) ? LABEL_ROOM : 0;
-        const height = Math.max(ROW, 2 * reach + 2 * HIT) + top;
-        const mid = top + (height - top) / 2;
-        const mean =
-          placed.length > 1 ? placed.reduce((s, p) => s + p.value, 0) / placed.length : null;
-        return (
-          <Row
-            key={group.name}
-            name={group.name}
-            missing={missing}
-            mean={mean === null ? undefined : `${mean.toFixed(valueDigits)} ${unit}`}
-            height={height}
-            top={top}
-          >
-            {/* Measured width, not 100%: a percentage svg adds 300 px to the min-content width. */}
-            <svg width={width} height={height} className="block overflow-visible">
-              <title>{`${group.name}, ${label}`}</title>
-              {ticks.map((t) => (
-                <line
-                  key={t}
-                  x1={x(t)}
-                  x2={x(t)}
-                  y1={0}
-                  y2={height}
-                  className="stroke-line-subtle"
-                />
-              ))}
-              {mean !== null && (
-                <line
-                  x1={x(mean)}
-                  x2={x(mean)}
-                  y1={mid - (reach + 10)}
-                  y2={mid + reach + 10}
-                  strokeWidth={2}
-                  className="stroke-muted-foreground"
-                />
-              )}
-              {placed.map((p) => (
-                <Dot
-                  key={p.id}
-                  point={p}
-                  cy={mid + p.y}
-                  name={`${p.label}, ${p.value.toFixed(valueDigits)} ${unit}${p.far ? `, far from its group${p.farReason ? `: ${p.farReason}` : ""}` : ""}`}
-                  onSelect={() => onSelect(p)}
-                  onActive={(on) => setActive(on ? p.id : null)}
-                />
-              ))}
-            </svg>
-            {placed
-              .filter((p) => p.id === active)
-              .map((p) => (
-                <Tooltip key={p.id} x={p.x} y={mid + p.y} width={width}>
-                  <span className="font-medium">{p.label}</span>{" "}
-                  <span className="font-mono tabular-nums">{p.value.toFixed(valueDigits)}</span>{" "}
-                  {unit}
-                  {p.far && <span className="block text-check-solid">Far from its group</span>}
-                  {p.far && p.farReason && <span className="block">{p.farReason}</span>}
-                </Tooltip>
-              ))}
-          </Row>
-        );
-      })}
-      <div className="self-start pt-1 text-meta text-fg-subtle">{hasAxis && unit}</div>
+      {rows.map(({ group, placed, reach, top, height, mid, mean }, index) => (
+        <Row
+          // Names need not be unique; the order is the identity.
+          // biome-ignore lint/suspicious/noArrayIndexKey: groups have no id and keep their order.
+          key={index}
+          name={group.name}
+          missing={group.points.filter((p) => p.value === null).length}
+          mean={mean === null ? undefined : `${mean.toFixed(digits)} ${unit}`}
+          height={height}
+          top={top}
+        >
+          {/* Measured width, not 100%: a percentage svg adds 300 px to the min-content width. */}
+          <svg width={width} height={height} className="block overflow-visible">
+            <title>{`${group.name}, ${label}`}</title>
+            {ticks.map((t) => (
+              <line key={t} x1={x(t)} x2={x(t)} y1={0} y2={height} className="stroke-line-subtle" />
+            ))}
+            {mean !== null && (
+              <line
+                x1={x(mean)}
+                x2={x(mean)}
+                y1={mid - (reach + 10)}
+                y2={mid + reach + 10}
+                strokeWidth={2}
+                className="stroke-muted-foreground"
+              />
+            )}
+            {placed.map((p) => (
+              <Dot
+                key={p.id}
+                ref={(node) => {
+                  if (node) dotRefs.current.set(p.id, node);
+                  else dotRefs.current.delete(p.id);
+                }}
+                point={p}
+                cy={mid + p.y}
+                anchor={edge(p.x, width)}
+                tabStop={p.id === stop}
+                name={`${p.label}, ${p.value.toFixed(digits)} ${unit}${p.far ? `, far from its group${p.farReason ? `: ${p.farReason}` : ""}` : ""}`}
+                onSelect={() => onSelect(p)}
+                onHover={(on) => {
+                  setHovered(on ? p.id : null);
+                  setDismissed(false);
+                }}
+                onFocus={(on) => {
+                  setFocused(on);
+                  if (on) {
+                    setCurrent(p.id);
+                    setDismissed(false);
+                  }
+                }}
+              />
+            ))}
+          </svg>
+          {placed
+            .filter((p) => p.id === tip)
+            .map((p) => (
+              <Tooltip key={p.id} x={p.x} y={mid + p.y} anchor={edge(p.x, width)}>
+                <span className="font-medium">{p.label}</span>{" "}
+                <span className="font-mono tabular-nums">{p.value.toFixed(digits)}</span> {unit}
+                {p.far && <span className="block text-check-solid">Far from its group</span>}
+                {p.far && p.farReason && <span className="block">{p.farReason}</span>}
+              </Tooltip>
+            ))}
+        </Row>
+      ))}
+      <div className="self-start pt-1 text-meta text-fg-subtle">{values.length > 0 && unit}</div>
       <div ref={axisRef} className="relative h-6">
-        {hasAxis &&
+        {values.length > 0 &&
           width > 0 &&
           ticks.map((t) => (
             <span
@@ -168,6 +232,18 @@ export function StripPlot({
     </figure>
   );
 }
+
+type Anchor = "start" | "middle" | "end";
+
+const SHIFT: Record<Anchor, string> = {
+  start: "translate-x-0",
+  middle: "-translate-x-1/2",
+  end: "-translate-x-full",
+};
+
+/** Near an end of the axis, text aligns to that end instead of centring past it. */
+const edge = (x: number, width: number): Anchor =>
+  x < EDGE ? "start" : x > width - EDGE ? "end" : "middle";
 
 function Row({
   name,
@@ -207,37 +283,39 @@ function Row({
 }
 
 function Dot({
+  ref,
   point,
   cy,
+  anchor,
+  tabStop,
   name,
   onSelect,
-  onActive,
+  onHover,
+  onFocus,
 }: {
+  ref: (node: SVGGElement | null) => void;
   point: Placed;
   cy: number;
+  anchor: Anchor;
+  tabStop: boolean;
   name: string;
   onSelect: () => void;
-  onActive: (on: boolean) => void;
+  onHover: (on: boolean) => void;
+  onFocus: (on: boolean) => void;
 }) {
-  const onKeyDown = (event: KeyboardEvent) => {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      onSelect();
-    }
-  };
   return (
     // biome-ignore lint/a11y/useSemanticElements: an svg mark can't be a <button>; role and keys make it one.
     <g
+      ref={ref}
       role="button"
-      tabIndex={0}
+      tabIndex={tabStop ? 0 : -1}
       aria-label={name}
       className="group cursor-pointer outline-none"
       onClick={onSelect}
-      onKeyDown={onKeyDown}
-      onPointerEnter={() => onActive(true)}
-      onPointerLeave={() => onActive(false)}
-      onFocus={() => onActive(true)}
-      onBlur={() => onActive(false)}
+      onPointerEnter={() => onHover(true)}
+      onPointerLeave={() => onHover(false)}
+      onFocus={() => onFocus(true)}
+      onBlur={() => onFocus(false)}
     >
       <circle cx={point.x} cy={cy} r={HIT} className="fill-transparent" />
       <circle
@@ -265,9 +343,9 @@ function Dot({
       />
       {point.far && (
         <text
-          x={point.x}
+          x={point.x + { start: -R, middle: 0, end: R }[anchor]}
           y={cy - R - 5}
-          textAnchor="middle"
+          textAnchor={anchor}
           className="fill-check text-meta font-semibold"
         >
           {point.label}
@@ -280,23 +358,20 @@ function Dot({
 function Tooltip({
   x,
   y,
-  width,
+  anchor,
   children,
 }: {
   x: number;
   y: number;
-  width: number;
+  anchor: Anchor;
   children: ReactNode;
 }) {
-  // Near an edge the tooltip aligns to that edge instead of centring past it.
-  const align =
-    x < 70 ? "translate-x-0" : x > width - 70 ? "-translate-x-full" : "-translate-x-1/2";
   return (
     <div
       role="tooltip"
       className={cx(
         "pointer-events-none absolute z-10 -translate-y-full whitespace-nowrap rounded-md bg-inverse px-2 py-1 text-sm text-inverse-fg shadow-md",
-        align,
+        SHIFT[anchor],
       )}
       style={{ left: x, top: y - HIT - 2 }}
     >
@@ -305,40 +380,64 @@ function Tooltip({
   );
 }
 
-/** Places a group's valued dots, lowest first: each at its value, moved up or down until it clears the dots already placed. */
+/**
+ * Places a group's valued dots, lowest first: each at its value, moved up or
+ * down until it clears the dots already placed. Past MAX_LEVEL it moves a
+ * dot's width sideways instead, so many equal values (integer grades) make a
+ * short, wide cluster rather than a tall column.
+ */
 function swarm(points: StripPoint[], x: (v: number) => number): Placed[] {
   const placed: Placed[] = [];
   const valued = points.flatMap((p) => (p.value === null ? [] : { ...p, value: p.value }));
+  const offsets = (n: number) =>
+    Array.from({ length: 2 * n + 1 }, (_, i) => Math.ceil(i / 2) * (i % 2 ? -1 : 1));
+  const levels = offsets(MAX_LEVEL).map((l) => l * SPREAD);
   for (const point of valued.sort((a, b) => a.value - b.value)) {
     const px = x(point.value);
-    let y = 0;
-    for (let step = 1; placed.some((q) => Math.hypot(q.x - px, q.y - y) < MIN_GAP); step++) {
-      y = Math.ceil(step / 2) * SPREAD * (step % 2 ? -1 : 1);
+    const free = (dx: number, y: number) =>
+      !placed.some((q) => Math.hypot(q.x - (px + dx), q.y - y) < MIN_GAP);
+    let spot: { dx: number; y: number } | undefined;
+    for (let ring = 0; !spot; ring++) {
+      for (const dx of offsets(ring)
+        .slice(-2)
+        .map((c) => c * MIN_GAP)) {
+        const y = levels.find((l) => free(dx, l));
+        if (y !== undefined) {
+          spot = { dx, y };
+          break;
+        }
+      }
     }
-    placed.push({ ...point, x: px, y });
+    placed.push({ ...point, x: px + spot.dx, y: spot.y });
   }
   return placed;
 }
 
-/** The values' range with a 12% margin; a single value (or all equal) gets a range around it. */
-function paddedRange(values: number[]): [number, number] {
-  if (values.length === 0) return [0, 1];
-  const lo = Math.min(...values);
-  const hi = Math.max(...values);
-  const pad = (hi - lo || Math.abs(hi) * 0.1 || 1) * 0.12;
-  return [lo - pad, hi + pad];
-}
-
-/** Round-number ticks inside [lo, hi], about `count` of them, and their step. */
-function niceTicks(lo: number, hi: number, count: number): { ticks: number[]; step: number } {
-  const raw = (hi - lo) / count;
-  const magnitude = 10 ** Math.floor(Math.log10(raw));
-  const step = ([1, 2, 5, 10].find((m) => m * magnitude >= raw) ?? 10) * magnitude;
-  const ticks: number[] = [];
-  for (let t = Math.ceil(lo / step) * step; t <= hi + step * 1e-9; t += step) {
-    ticks.push(Number(t.toPrecision(12)));
+/**
+ * The axis: the values' range widened outward to whole multiples of a round
+ * step (1, 2 or 5 × a power of ten) giving about `count` intervals, as d3's
+ * `nice()` does, so both ends carry a tick. A single value gets a range around it.
+ */
+function niceDomain(values: number[], count: number): { lo: number; hi: number; step: number } {
+  let lo = values.length ? Math.min(...values) : 0;
+  let hi = values.length ? Math.max(...values) : 1;
+  if (lo === hi) {
+    const pad = Math.abs(lo) * 0.1 || 1;
+    lo -= pad;
+    hi += pad;
   }
-  return { ticks, step };
+  let step = 0;
+  // Widening can change the step; d3 settles within a few rounds too.
+  for (let round = 0; round < 10; round++) {
+    const raw = (hi - lo) / count;
+    const magnitude = 10 ** Math.floor(Math.log10(raw));
+    const next = ([1, 2, 5, 10].find((m) => m * magnitude >= raw) ?? 10) * magnitude;
+    if (next === step) break;
+    step = next;
+    lo = Math.floor(lo / step + 1e-9) * step;
+    hi = Math.ceil(hi / step - 1e-9) * step;
+  }
+  return { lo, hi, step };
 }
 
 /** Decimals that show a tick step exactly: 0.05 needs 2, 0.25 needs 2, 20 needs 0. */

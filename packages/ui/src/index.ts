@@ -22,4 +22,4 @@ export {
   type StripPoint,
 } from "./strip-plot";
 export { Table, type TableColumn, type TableProps } from "./table";
-export { type TabItem, Tabs, type TabsProps } from "./tabs";
+export { type TabItem, Tabs, type TabsProps, tabId } from "./tabs";
