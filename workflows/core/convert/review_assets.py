@@ -6,16 +6,19 @@
 array axis `--axis`. `--int16` (image only) rounds a float image, such as the scan's HU, to int16 at level 0; values outside int16 are an error.
 The sha256 is of the `.npy` bytes. A finished conversion has `manifest.json` (written last), which records the converter
 version and the mode (`--as`, `--axis`, `--int16`); asked again with the same version and mode, the script prints it and does
-nothing else, otherwise it converts again. Paths in the manifest are relative to `<out>/<sha256>/`.
+nothing else; with the same version but another mode it exits 2 (use another `--out`), and with an older version or an
+unreadable manifest it converts again. Paths in the manifest are relative to `<out>/<sha256>/`.
 
 Levels (OME-Zarr 0.4 on Zarr v2, Blosc zstd, 64-cubed chunks): level 0 is the source; each next level halves every axis
 (rounding up) until every axis is at most ceil(level 0 / 8); the last is one chunk. Images are averaged, labels and masks take the
-mode. A level voxel covers `scaleZyx` source voxels per axis. Meshes: marching cubes per nonzero label (or one for a mask), or the
-height field triangulated over its finite cells. `mesh*.bin` is float32 vertices as full-resolution source voxel (x, y, z),
+mode. A level voxel covers `scaleZyx` source voxels per axis. Integer coordinates are voxel centres: voxel i of level k has its
+centre at source coordinate i*2^k + (2^k-1)/2, which is the translation in each dataset's OME `coordinateTransformations`. Meshes: marching cubes per nonzero label (or one for a mask), or the
+height field triangulated over its finite cells, wound so each normal points toward +axis. `mesh*.bin` is float32 vertices as full-resolution source voxel (x, y, z),
 then uint32 indices, little-endian. A cropped mask's levels and meshes are in its crop's voxels; the reader adds the crop's offset.
 """
 import argparse
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -78,19 +81,24 @@ def down_mode(slab):
     return np.take_along_axis(v, score.argmax(axis=0)[None], axis=0)[0]
 
 
-def write_levels(src, group, mode):
-    """Level arrays 0..n of `src` (a (Z, Y, X) array) in the zarr `group`; returns their shapes."""
+def write_levels(src, group, mode, dtype=None):
+    """Level arrays 0..n of `src` (a (Z, Y, X) array) in the zarr `group`; returns their shapes. A `dtype` other than the
+    source's rounds level 0 to it."""
     shapes = level_shapes(src.shape)
     down = down_mean if mode == 'mean' else down_mode
-    dtype = stored_dtype(src)
+    dtype = np.dtype(dtype or stored_dtype(src))
     for k, shape in enumerate(shapes):
         last = k == len(shapes) - 1 and k > 0
         arr = group.create_array(str(k), shape=tuple(shape), dtype=dtype, compressors=COMPRESSOR,
+                                 chunk_key_encoding={'name': 'v2', 'separator': '/'},
                                  chunks=tuple(shape) if last else tuple(min(CHUNK, n) for n in shape))
         prev = src if k == 0 else group[str(k - 1)]
         step = CHUNK if k == 0 else SLAB
         for z in range(0, prev.shape[0], step):
-            slab = np.asarray(prev[z:z + step]).astype(dtype, copy=False)
+            slab = np.asarray(prev[z:z + step])
+            if k == 0 and slab.dtype.kind == 'f' and dtype.kind == 'i':
+                slab = np.rint(slab)
+            slab = slab.astype(dtype, copy=False)
             if k:
                 slab = down(slab)
             z //= 1 if k == 0 else 2
@@ -118,6 +126,13 @@ def height_mesh(face, axis, step):
     ids[ok] = np.arange(ok.sum())
     a, b, cc, d = ids[:-1, :-1], ids[1:, :-1], ids[1:, 1:], ids[:-1, 1:]
     tris = np.concatenate([np.stack([a, b, cc], -1).reshape(-1, 3), np.stack([a, cc, d], -1).reshape(-1, 3)])
+    # (a, b, cc) turns from +row toward +col, so its normal is +height when (row, col, height) is a right-handed frame in
+    # (x, y, z) = reversed zyx; otherwise swap two corners.
+    order = [i for i in range(3) if i != axis] + [axis]
+    frame = np.zeros((3, 3))
+    frame[[2 - i for i in order], range(3)] = 1
+    if np.linalg.det(frame) < 0:
+        tris = tris[:, [0, 2, 1]]
     zyx = np.empty((ok.sum(), 3), np.float64)
     zyx[:, [i for i in range(3) if i != axis]] = np.stack([r[ok], c[ok]], 1)
     zyx[:, axis] = h[ok]
@@ -177,17 +192,23 @@ def main():
     out = Path(a.out) / digest
     mode = {'as': a.kind, 'axis': a.axis, 'int16': a.int16}
     manifest_path = out / 'manifest.json'
-    if manifest_path.exists():
+    try:
         done = json.loads(manifest_path.read_text())
-        if done.get('converterVersion') == VERSION and done.get('mode') == mode:
-            print(manifest_path.read_text().strip())
-            return
+    except (OSError, ValueError):  # none yet, or unreadable: convert
+        done = {}
+    if done.get('converterVersion') == VERSION:
+        if done.get('mode') != mode:
+            sidecar.fail(f'{out} already holds {src} converted as {done.get("mode")}; give --out another directory for {mode}')
+        print(manifest_path.read_text().strip())
+        return
     if a.int16:
-        lo, hi = float(arr.min()), float(arr.max())
+        lo, hi = np.float64(np.inf), np.float64(-np.inf)
+        for z in range(0, arr.shape[0], SLAB):
+            slab = arr[z:z + SLAB]
+            lo, hi = np.minimum(lo, slab.min()), np.maximum(hi, slab.max())  # propagate NaN
         info = np.iinfo(np.int16)
         if not (info.min <= lo and hi <= info.max):  # NaN fails both
             sidecar.fail(f'values run from {lo:g} to {hi:g} (or hold NaN): {src} cannot be stored as int16')
-        arr = np.rint(arr).astype(np.int16)
     manifest = {'sourceSha256': digest, 'converterVersion': VERSION, 'mode': mode, 'levels': [], 'meshes': []}
 
     shutil.rmtree(out, ignore_errors=True)  # an interrupted conversion has no manifest: start clean
@@ -198,19 +219,24 @@ def main():
         manifest['meshes'].append({'path': 'mesh.bin'} | write_mesh(out / 'mesh.bin', verts, faces))
     else:
         group = zarr.open_group(out / 'image.zarr', mode='w', zarr_format=2)
-        shapes = write_levels(arr, group, 'mode' if a.kind in ('labels', 'mask') else 'mean')
+        shapes = write_levels(arr, group, 'mode' if a.kind in ('labels', 'mask') else 'mean',
+                              np.int16 if a.int16 else None)
         scales = [[2 ** k] * 3 for k in range(len(shapes))]
         group.attrs['multiscales'] = [{
             'version': '0.4', 'name': a.kind,
             'axes': [{'name': n, 'type': 'space'} for n in 'zyx'],
-            'datasets': [{'path': str(k), 'coordinateTransformations': [{'type': 'scale', 'scale': [float(s) for s in sc]}]}
+            'datasets': [{'path': str(k), 'coordinateTransformations': [
+                {'type': 'scale', 'scale': [float(s) for s in sc]},
+                {'type': 'translation', 'translation': [(s - 1) / 2 for s in sc]}]}
                          for k, sc in enumerate(scales)]}]
         manifest['levels'] = [{'path': f'image.zarr/{k}', 'shapeZyx': shapes[k], 'scaleZyx': scales[k]} for k in range(len(shapes))]
         if a.kind in ('labels', 'mask'):
             manifest['meshes'] = write_meshes(arr, a.kind, out)
 
     text = json.dumps(manifest, allow_nan=False)
-    (out / 'manifest.json').write_text(text + '\n')
+    tmp = out / 'manifest.json.tmp'
+    tmp.write_text(text + '\n')
+    os.replace(tmp, manifest_path)  # a reader never sees half a manifest
     print(text)
 
 
