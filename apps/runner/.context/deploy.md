@@ -21,7 +21,7 @@ cannot `serviceConnect`, but `environmentPatchCommit` (config as a patch) create
 | Restart | on failure, 10 retries |
 | Limits | 2 vCPU / 2 GB (set in the service's settings). The runner is one Node thread and holds no volumes: `segment_sam` and the other data work run in the sandbox, so heavy work creeping back into it hits the limit and fails loudly instead of slowing heartbeats quietly. Railway's default for the service is its 8 vCPU / 8 GB ceiling |
 | Healthcheck | none: the runner serves nothing, so a healthcheck would fail every deploy |
-| Watch paths | `/apps/runner/**`, `/packages/harness/**`, `/packages/workflow/**`, `/packages/contracts/**`, `/workflows/**` (the runner reads `workflows/` from its own checkout, so editing a workflow must redeploy it), `/pnpm-lock.yaml`, `/package.json`, `/.tool-versions`, `/tsconfig.base.json`, `/pnpm-workspace.yaml` |
+| Watch paths | `/apps/runner/**`, `/packages/harness/**`, `/packages/workflow/**`, `/packages/contracts/**`, `/packages/provider-calls/**` (the runner imports it), `/workflows/**` (the runner reads `workflows/` from its own checkout, so editing a workflow must redeploy it), `/pnpm-lock.yaml`, `/package.json`, `/.tool-versions`, `/tsconfig.base.json`, `/pnpm-workspace.yaml` |
 
 Variables (names only; values never go in the repo):
 
@@ -30,6 +30,7 @@ Variables (names only; values never go in the repo):
 | `VOLUMA_API_URL` | `http://${{@voluma/api.RAILWAY_PRIVATE_DOMAIN}}:${{@voluma/api.PORT}}` (the API's `PORT` is set to 8080 explicitly, since a private URL needs a known port) |
 | `VOLUMA_API_TOKEN` | reference `${{@voluma/api.VOLUMA_API_TOKEN}}`: rotating it on the API reaches the runner at its next deploy |
 | `VOLUMA_META_API_KEY`, `RUNNER_MODEL`, `RUNNER_CONCURRENCY` | the model key; `RUNNER_MODEL=meta/muse-spark-1.3` (Standard mode: never a `-contributor` model on a deployed runner, Meta may train on what it is sent); 2 slots |
+| `GATEWAY_TOKEN_SECRET`, `VOLUMA_GATEWAY_URL` | the same secret as `@voluma/gateway`; the gateway's public domain (`https://volumagateway-staging.up.railway.app`). `RUNNER_MAX_RUN_COST_USD` is unset on staging: no spend cap on test runs |
 | `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` | the Modal profile in `~/.modal.toml` |
 | `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `CLOUDFLARE_API_TOKEN` | as in `.env` |
 
