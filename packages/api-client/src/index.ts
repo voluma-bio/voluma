@@ -31,6 +31,13 @@ import {
   type StartRunRequest,
   type VisitorKeys,
 } from "@voluma/contracts/run";
+import {
+  type CreateReviewSnapshotRequest,
+  createReviewSnapshotRequestSchema,
+  listReviewSnapshotsResponseSchema,
+  type ReviewSnapshot,
+  reviewSnapshotSchema,
+} from "@voluma/contracts/snapshot";
 import { LIVE_EVENT, type LiveFrame, liveFrameSchema } from "@voluma/contracts/stream";
 
 /** A non-OK API response. Branch on `status` (403, 415, 5xx) rather than parsing the message. */
@@ -286,6 +293,42 @@ export async function markReviewed(
  */
 export const reviewFileUrl = (runId: string, sha256: string) =>
   `/api/review/runs/${encodeURIComponent(runId)}/files/${encodeURIComponent(sha256)}`;
+
+/**
+ * Where the browser reads a converted asset (zarr level or mesh file) of a run: `path` is
+ * relative to the asset prefix, as `assets.ready` lists it (`reviewAssetKey`). 302 to a
+ * presigned GET; 404: unreadable run or bad path.
+ */
+export const reviewAssetUrl = (runId: string, sha256: string, path: string) =>
+  `/api/review/runs/${encodeURIComponent(runId)}/assets/${encodeURIComponent(sha256)}/${path
+    .split("/")
+    .map(encodeURIComponent)
+    .join("/")}`;
+
+/** Prepared snapshot API: keep body.id unchanged when retrying a failed or interrupted save. */
+export async function createReviewSnapshot(
+  runId: string,
+  body: CreateReviewSnapshotRequest,
+): Promise<ReviewSnapshot> {
+  return reviewSnapshotSchema.parse(
+    await json(
+      await request(`/review/runs/${encodeURIComponent(runId)}/snapshots`, {
+        method: "POST",
+        body: createReviewSnapshotRequestSchema.parse(body),
+      }),
+    ),
+  );
+}
+
+/** Prepared snapshot API: returns the run's immutable screenshot records, oldest first. */
+export async function listReviewSnapshots(
+  runId: string,
+  signal?: AbortSignal,
+): Promise<ReviewSnapshot[]> {
+  return listReviewSnapshotsResponseSchema.parse(
+    await json(await request(`/review/runs/${encodeURIComponent(runId)}/snapshots`, { signal })),
+  ).snapshots;
+}
 
 /** Inputs the caller may start a run on, newest first. */
 export async function listInputs(): Promise<Input[]> {

@@ -1,19 +1,58 @@
+# Runner: sandbox roles
+
+A sandbox is created from a spec with a role (`packages/harness/src/sandbox-specs.ts`), which fixes
+its size (2 CPUs, 8192 MiB), its network and which mounts it holds. Tags on every sandbox:
+`{run, name, claim, startedAt}`; `sandboxes:clean --run` ends all roles.
+
+| Role | Mounts | Network | Name |
+|---|---|---|---|
+| `worker` | as the caller says (today `RunLayout.mounts`) | the gateway host over HTTPS (`outboundDomainAllowlist`), if the spec has a `gateway`; else none | `<taskId>.worker[.n]` |
+| `checker` | `readOnly` mounts read-only, one writable `scratch` prefix | none | `<taskId>.check[.n]` |
+| `convert` | `evidence` read-only, `review` writable | none | the job's |
+
+The builder sets the access of each mount, and the Modal adapter refuses a network on a
+non-worker role. The runner makes one sandbox per thread (`sandboxSession.get(threadId)`,
+named by the thread id without the run id). **Check threads still run on a worker-role
+sandbox**: the checker spec exists, but the run-wide `/scratch` is assumed by the check skills
+(`/scratch/recheck/`), by checkpoint evidence `{root: "scratch", path}` (`r2Evidence`), by the
+`bash` spill (`toolOutputPath`) and by `view_image`/`segment_sam` (`RunLayout.keyOf`). Moving them
+to `/scratch/<check thread>/` needs those four to take the thread, and the skill text to change.
+The checker's other writes: none (`workflows/core/agents/checker.md` says it changes nothing).
+Spend and the usage meter sum sandbox seconds over all sandboxes.
+
+**Probed 2026-10-29 (Modal SDK 0.11.1, run p414), the facts the design relied on:**
+
+- R2 mount writes work with `outboundDomainAllowlist` set and with `blockNetwork: true`: read,
+  write and `ls` all succeeded on a read-write mount in both. A read-only mount refuses writes
+  (`Read-only file system`).
+- A mount does not cache listings for long: sandbox B had listed `/shared` (one file), sandbox A
+  then wrote `late.txt`, and B's next `ls` and `cat` (an exec round trip, about 0.6 s later) saw
+  it; a sandbox created afterwards listed it too. So a checker sees a file a worker just wrote.
+- With an allowlist, HTTPS to the listed host works, and another host (`www.google.com`, by name),
+  an IP (`1.1.1.1`) and plain HTTP (even to the listed host) fail. **DNS queries still leave**:
+  `www.google.com` resolved to an address, and a name that does not exist got NXDOMAIN, while a
+  `blockNetwork` sandbox cannot resolve anything. The allowlist therefore needs `https://` gateway
+  URLs, and the worker sandbox can encode data in lookups of names it picks: treat the token and
+  mounts as readable by anything the worker's code does.
+- The sandbox's `/proc/meminfo` shows the host, not the 8 GiB request; the limit is not
+  observable from inside.
+
 # Runner: how sandboxes end
 
 Sandboxes cost money while up (a GPU one a lot), so every one must end. In order of
 who ends it:
 
-1. **The runner, normally.** `run.ts` closes the run's sandbox when the supervisor ends,
+1. **The runner, normally.** `run.ts` closes the run's sandboxes (one per thread) when the supervisor ends,
    before it flushes events and reports, so the `stopped` event and the last sandbox seconds
    are stored under the live lease. If the close takes over 60 s (15 s after a stop) it asks Modal to terminate
    the sandboxes of this claim, by their `{run, claim}` tags (the claim is a per-claim id: a
    released run's old runner must not kill the sandbox of the runner that reclaimed it).
 2. **A signal.** SIGINT and SIGTERM stop every run (the running command is killed), each
-   reports `released` first, so the run is recovered within the platform's grace period,
+   reports `released` with reason `shutdown` first, so the run is recovered within the platform's grace period,
    then closes its sandbox (no `stopped` event is stored); the service waits up to 30 s. A second signal
    exits 130 at once and leaves the sandboxes (use `sandboxes:clean`). Signal the process
    group (Ctrl-C does); `kill <pid of pnpm>` alone leaves the runner running.
-3. **A resume.** `create` terminates live sandboxes tagged with the same `{run, name}`. A creation is aborted with the run's signal (checked before that sweep, between terminations and before `create`), so a released run's creation cannot end the sandbox of the runner that reclaimed it. A process frozen past its lease (a sleeping laptop) can still act late.
+3. **A resume.** Right after a claim succeeds, `run.ts` terminates every live sandbox tagged with the run but not this claim (`terminateOtherClaims`: one list call, then each sandbox's tags; no wait). The claim holds the lease, so nothing an earlier claim started keeps writing or spending. The sweep is cleanup and never decides the run's outcome: an error is logged and retried once, and the idle timeout backs it up. A creation is aborted with the run's signal, so a released run's creation cannot start a sandbox beside the runner that reclaimed it. A process frozen past its lease (a sleeping laptop) can still act late.
 4. **Modal ends it.** After 300 s with no command running (`VOLUMA_SANDBOX_IDLE_SECONDS` in
    `.env`, at least 30) or at a hard lifetime of 14400 s (`VOLUMA_SANDBOX_LIFETIME_SECONDS`).
    Before each call the session asks Modal whether a sandbox it handed out earlier still
@@ -84,9 +123,14 @@ when a claim reports (`model cost this claim`), and the API stores it as `runs.m
 On 2026-10-28 the claims' lines summed to the run's `model_cost_usd` and to `spend(events).total`
 ($0.9763 over five claims of one run).
 
-**Spend cap.** `RUNNER_MAX_RUN_COST_USD` (default 5) caps a run's model and SAM dollars across all
-its claims (the claim's `run.usage` plus this claim's meter; sandbox time is not counted). The meter
-calls back on each addition; at the cap `run.ts` stops the run and reports `ended failed` with
+**Spend cap.** `RUNNER_MAX_RUN_COST_USD` caps a run's dollars across all its claims (sandbox time
+is not counted). Unset, the default, there is no cap: test runs have none, so leave it unset on
+staging and locally (spend is still recorded and shown). When set it goes to the API with each
+claim and becomes `runs.cost_cap_usd` (null: no cap),
+which the provider gateway checks too ([apps/gateway](../../gateway/.context/CONTEXT.md)). The runner's
+total is the last heartbeat's `spentUsd` (model cost plus settled gateway calls; an open call
+counts nothing, the gateway holds its reservation itself) plus the model cost not yet sent, checked on each model cost and each acknowledged
+heartbeat; at the cap `run.ts` stops the run and reports `ended failed` with
 `spend cap $X reached at $Y`. Calls in flight are aborted, not waited for. A claim of a run already over the cap stops before its first call. It applies to visitor runs too. The supervisor ends the root thread `cancelled` in the event log while the run row says `failed` with the cap text.
 
 **A main-thread reply that does not parse.** `llmMainThread` escapes raw control characters inside
@@ -127,11 +171,11 @@ don't cost a turn.
 
 # Runner: sandbox memory
 
-One sandbox serves the whole run (name `main`), so tasks that run in parallel share its memory
-and 2 CPUs. A sandbox has 8192 MiB (`run.ts`). `classic_segment` measured 2.8-3.1 GB anonymous memory and
+Each thread has its own sandbox (`sandboxSession`), destroyed when the supervisor sees the thread end (`release`; a resumed thread gets a fresh one and the restart note), so only the heavy steps of one thread share
+its memory and 2 CPUs. Every role's sandbox has 8192 MiB (`sandbox-specs.ts`). `classic_segment` measured 2.8-3.1 GB anonymous memory and
 about 4.0-4.25 GB RSS with the memory-mapped scan, so 4096 MiB risked an OOM kill in a
 full run.
-Two concurrent heavy steps fit: their anonymous memory adds up (about 6 GB) and the mapped scan
+Two heavy steps of one thread running at once fit: their anonymous memory adds up (about 6 GB) and the mapped scan
 file is shared page cache, not counted twice. The `stopped` event of a sandbox Modal ended carries its exit code (Modal's SDK: 124 a timeout, 137 any terminated
 sandbox, so an out-of-memory kill or a terminate call), so a restart's cause is in the run's record. In the 2026-10-28 local run the sandbox ended at 1 h 0 min (the
 lifetime) and once more 23 min into the replacement, before the exit code was logged.
@@ -146,3 +190,32 @@ composes byte-identical text and an edited file reaches only new threads (a thre
 changed is still `ThreadStale`). The main thread still uses `MAIN_SYSTEM`; `lead.md` and
 `review-chat.md` are `status: planned` and unused. Format: `workflows/core/agents/AGENTS.md`. Models stay
 config (`RUNNER_MODEL`, `RUNNER_CHECK_MODEL`, `RUNNER_MAIN_MODEL`).
+
+# Runner: a claim that ends is a cut-off, not a stop
+
+A stop the runtime chooses (shutdown, a heartbeat that wasn't acknowledged for 45 s, a lost
+lease, the server ending the run) aborts the run's signal. Threads see it as `runSignal`
+(`start-thread.ts`): from that moment they store nothing more and write no `thread.ended`,
+exactly as after a crash, and the supervisor writes none for the root, even if a step threw
+while the signal was aborting. So a `thread.ended {cancelled}` is a stop someone chose and is
+never resumed: a stale dependent's thread stopped (`task-runtime.ts` `staleDependents`), or a
+failing run aborting its threads (`abortAll`). A stop aimed at a thread this process has not
+started (cut off by an earlier claim) writes that `cancelled` end itself (`supervise-run.ts`
+`stopThread`), so "open" always means "cut off". A self-stop reports `released` with reason `self-stop`; a signal, `shutdown`.
+
+The next claim learns why from `claim.previousClaim` (the API records `lease-expired` itself)
+and writes `claim.started {resumed, after}` right after the root's `thread.started`. The
+supervisor then resumes the thread in charge of each task, if its latest `thread.started` has
+no `thread.ended` and this process hasn't started it: the worker only when it is the task's
+current worker (or the task has no attempt yet), the check only when the task is
+`under-review` and it is the current check. It resumes with the message of
+`supervisor.ts` `cutOffText`, naming the tool the log shows with no result, or the no-tool
+form. A cut-off resume is not a wake, so it spends none of the stuck guard's two and counts
+no redo; the main thread isn't asked. The "You stopped, but ... is not finished" wake is for a
+thread that ended `completed` with its task unfinished. A worker that ended `cancelled` with
+its task `in-progress` gets a fresh worker; a check that ended `cancelled` gets a new check. A tool whose `tool.call` event was
+still queued when the runner died isn't named (the log lacks it), so a runner killed within
+milliseconds of a call gets the no-tool form.
+
+The API bounds restarts with one limit (`apps/api/.context/deploy.md`); the runner has no
+restart counter of its own.

@@ -8,11 +8,19 @@ import type { Usage } from "@voluma/contracts/runner";
 
 export type ModelRole = "main" | "worker" | "check";
 
-/** `onCost` gets the claim's running model total after each addition. */
-export function usageMeter(onCost?: (totalUsd: number) => void) {
+/** `onCost` is called after each model cost is added. */
+export function usageMeter(onCost?: () => void) {
   let modelCostUsd = 0;
   let sandboxSeconds = 0;
-  let upSince: number | undefined;
+  // Sandbox seconds are summed over the sandboxes (each thread holds one): `settle` books
+  // the time since the last change at the count then.
+  let up = 0;
+  let settledAt = Date.now();
+  const settle = () => {
+    const now = Date.now();
+    sandboxSeconds += (up * (now - settledAt)) / 1000;
+    settledAt = now;
+  };
   // Everything accumulated over the run, for the log; `take` only drains the heartbeat's share.
   let totalCostUsd = 0;
   const tokens = new Map<ModelRole, { calls: number; input: number; cacheRead: number }>();
@@ -37,25 +45,23 @@ export function usageMeter(onCost?: (totalUsd: number) => void) {
     addModelCost(usd: number) {
       modelCostUsd += usd;
       totalCostUsd += usd;
-      onCost?.(totalCostUsd);
+      onCost?.();
     },
     totalModelCostUsd: () => totalCostUsd,
+    /** Model dollars the server has not yet acknowledged in a heartbeat. */
+    pendingModelCostUsd: () => modelCostUsd,
     sandboxUp() {
-      upSince ??= Date.now();
+      settle();
+      up++;
     },
     sandboxDown() {
-      if (upSince === undefined) return;
-      sandboxSeconds += (Date.now() - upSince) / 1000;
-      upSince = undefined;
+      if (up === 0) return;
+      settle();
+      up--;
     },
     take(): Usage {
-      const now = Date.now();
-      let seconds = sandboxSeconds;
-      if (upSince !== undefined) {
-        seconds += (now - upSince) / 1000;
-        upSince = now;
-      }
-      const taken = { modelCostUsd, sandboxSeconds: seconds };
+      settle();
+      const taken = { modelCostUsd, sandboxSeconds };
       modelCostUsd = 0;
       sandboxSeconds = 0;
       return taken;

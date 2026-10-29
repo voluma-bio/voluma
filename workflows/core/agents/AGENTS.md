@@ -58,7 +58,7 @@ message. These files state the job only, so they survive a change of sandbox or 
 The lead is told these limits but does not police them; code does:
 
 - every choice the lead makes is recorded as an event before it applies, so a resumed run replays it;
-- the run's spend cap (`RUNNER_MAX_RUN_COST_USD`);
+- the run's spend cap (`RUNNER_MAX_RUN_COST_USD`), when one is set;
 - a third fix round on one concern ends patching and goes to the researcher as a To check item;
 - a run cannot end with a selected output unreported: each is reported, or null with a reason;
 - every task that reports a measurement is checked.

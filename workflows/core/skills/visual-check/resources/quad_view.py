@@ -1,44 +1,28 @@
-"""Four panes of one place: a 3D view and three slices through one crosshair, the review screen's layout, driven call by call.
+"""Render four panes of one place (a 3D view and three slices through a crosshair) to one JPEG, call by call.
 
-  python quad_view.py --hu hu.npy --labels labels.npy --names anatomy.json --out /scratch/v1.jpg
-  python quad_view.py --from /scratch/v1.view.json --center tibia --move axis0+5 --out /scratch/v2.jpg
-  python quad_view.py --from v2.view.json --rotate 40,0 --plane 1:contains=shaft_a,shaft_b --out v3.jpg
+The review screen's layout, driven by an agent: each call renders a view, and the next call is `--from` that view plus
+changes. Every pane is a plane through the crosshair, sampled in mm with `viewlib.sample_plane`, each layer from its own
+grid through its frame (the `grid_id` in its sidecar; register frames with `--frame frame.json`). Top left: 3D. The slice
+panes are the scan's axis 0, 1 and 2 until `--plane` changes one. Pane titles name the scan axis and index (`axis 0 = 412`);
+ticks are voxel indices on axis-aligned panes and mm from the crosshair on the others. Panes are centred on the crosshair:
+`--center` and `--move` choose what you look at, `--zoom` how closely. The image is for looking, not measuring.
 
-Every pane is a plane through the crosshair, sampled in mm with `viewlib.sample_plane`, each layer from its own grid through
-its frame (the `grid_id` in its sidecar; register frames with `--frame frame.json`). Top left: 3D. The slice panes are the
-scan's axis 0, 1 and 2 until `--plane` changes one. Pane titles name the scan axis and index (`axis 0 = 412`); ticks are voxel
-indices on axis-aligned panes and mm from the crosshair on the others. Panes are centred on the crosshair: `--center` and
-`--move` choose what you look at, `--zoom` how closely. The image is for looking, not measuring.
+The first call takes `--hu` (and layers); later calls take `--from <earlier>.view.json` and change it, in this order:
+--plane, --center, --move, --rotate, --zoom, --show/--hide. A call that takes `--from` cannot also take `--hu`. The
+crosshair is a whole voxel on every scan axis that has an axis-aligned pane, so a pane named `axis 0 = N` is slice N.
+Layers (`--show` / `--hide NAME` toggles any layer, plus `labels`, `ruler` and `planes`): --hu, --labels, --mask NAME=...,
+--face NAME=..., --points NAME=..., --ruler. The 3D pane needs a bone surface: --labels or --bone-hu.
 
-Each call writes `<out>.view.json` beside the image: the full state (scan voxels and mm), each pane's pixel rectangle and
-pixel -> zyx map, and the 3D camera. It never rewrites an earlier view: the next call is `--from a.view.json` plus changes. Writes
-only beside `--out` (the image, its view.json, a mesh cache in `.quad-view-cache/`); inputs may be read-only.
-
-Layers (each added layer is shown; `--show` / `--hide NAME` toggles any layer, plus `labels`, `ruler` and `planes`):
-  --hu hu.npy            the scan (first call; later calls take it from --from)
-  --labels L.npy [--names 1=femur,.. | anatomy.json]   label volume: outlines on slices, colours in 3D (hidden: bone is ivory)
-  --mask NAME=M.npy      bool volume on any registered grid: outline on slices, translucent surface in 3D (repeatable)
-  --face NAME=F.npy      2D array of a frame's axis-0 index over its axes 1, 2 (NaN = none; iioc's growth-plate face): a line
-  --points NAME=P.json   a named set of points, each with a grid_id (what pick.py writes): markers and names; sphere in 3D.
-                         NAME is the layer `--show` / `--hide` toggles; the points keep the names inside the file
-  --ruler A,B            line between two named points with its length in mm
-  --frame frame.json     register the frame of a grid that is not the scan's (repeatable)
-  --bone-hu HU           bone surface from HU when there are no labels
-  --window lo,hi         display window in HU (default: the scan's bone range); write a negative low end as is: --window -500,6000
-  --pane-px N            pixels per pane side (default 800; at most 940)      --mesh-step N   voxels per surface grid step
-Changes, applied in this order:
-  --plane K:axis=J | K:normal=z,y,x[:up=z,y,x] | K:contains=A,B | K:frame=frame.json[:axis=J]    pane K (0-2), J (0-2);
-        vectors in mm; `contains` cuts along the line through two named points (reslice along a bone); `up` is the screen-up
-        direction; a frame pane needs an isotropic scan (repeatable)
-  --center NAME|z,y,x    NAME is a point, a label name or a mask; z,y,x are scan voxel indices
-  --move axisK+N | paneK-N[mm]   step the crosshair N voxels along scan axis K, or along pane K's normal (voxels, or mm with `mm`; repeatable)
-  --rotate az,el         turn the 3D camera by degrees, e.g. --rotate 60,0 or --rotate 0,-30
-  --zoom Z               slice panes' field of view = whole scan / Z, Z > 0 (3D always fits the bone)
-  --show NAME / --hide NAME   toggle a layer by name (repeatable)
-The crosshair is a whole voxel on every scan axis that has an axis-aligned pane, so a pane named `axis 0 = N` is slice N.
-Bad input is refused with one sentence and exit 2 before anything is written.
+Writes: <out>  the JPEG (at most 2000 px, 1 MiB)
+        <out minus extension>.view.json  the full state (scan voxels and mm), each pane's pixel rectangle and
+        pixel -> zyx map, and the 3D camera; an earlier view.json is never rewritten
+        .quad-view-cache/  beside <out>: a mesh cache. Inputs may be read-only.
+Prints: one JSON line {image, view, crosshair_zyx, zoom, camera, panes, shown, window_hu, timings_s, jpeg_kib}
+Example: python quad_view.py --hu hu.npy --labels labels.npy --names anatomy.json --out /scratch/v1.jpg
+         python quad_view.py --from /scratch/v1.view.json --center tibia --move axis0+5 --out /scratch/v2.jpg
+         python quad_view.py --from v2.view.json --rotate 40,0 --plane 1:contains=shaft_a,shaft_b --out v3.jpg
+Exits 2 with one sentence on bad input, before writing anything.
 """
-import argparse
 import json
 import math
 import os
@@ -47,22 +31,11 @@ import sys
 import time
 from pathlib import Path
 
+import frame as fr
 import matplotlib.patheffects as pe
 import numpy as np
+import viewlib as vl
 from scipy import ndimage as ndi
-
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
-# only missing directories are added, so a script imported by another leaves the importer's order alone.
-SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources')) if d not in sys.path]
-try:
-    import frame as fr
-    import viewlib as vl
-except ModuleNotFoundError as e:
-    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
-          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
-    sys.exit(2)
 
 sl, plt = vl.sidecar, vl.plt
 PANE_COLOURS = ['#ff3b30', '#34c759', '#4f8dff']  # pane 0, 1, 2: its border, its plane in 3D, its line in the other panes
@@ -676,28 +649,28 @@ def numbers(txt, n, what):
 
 def parse_args(argv):
     """Parse and check every option, so a bad one is refused in one sentence before any work: ranges, syntax, files."""
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter, allow_abbrev=False)
-    ap.add_argument('--out', required=True)
-    ap.add_argument('--from', dest='from_')
-    ap.add_argument('--hu')
-    ap.add_argument('--window')
-    ap.add_argument('--labels')
-    ap.add_argument('--names')
-    ap.add_argument('--mask', action='append')
-    ap.add_argument('--face', action='append')
-    ap.add_argument('--points', action='append')
-    ap.add_argument('--frame', action='append')
-    ap.add_argument('--ruler')
-    ap.add_argument('--bone-hu', type=float)
-    ap.add_argument('--pane-px', type=int)
-    ap.add_argument('--mesh-step', type=int)
-    ap.add_argument('--plane', action='append')
-    ap.add_argument('--center')
-    ap.add_argument('--move', action='append')
-    ap.add_argument('--rotate')
-    ap.add_argument('--zoom', type=float)
-    ap.add_argument('--show', action='append')
-    ap.add_argument('--hide', action='append')
+    ap = sl.parser(__doc__, allow_abbrev=False)
+    ap.add_argument('--out', required=True, help='the image to write (.jpg); the view.json goes beside it')
+    ap.add_argument('--from', type=sl.existing, dest='from_', help='an earlier .view.json: take its state and apply the changes below')
+    ap.add_argument('--hu', type=sl.existing, help='the scan, hu.npy (first call; later calls take it from --from)')
+    ap.add_argument('--window', help='display window lo,hi in HU (default: automatic from the middle slice); a negative low end as is: --window -500,6000')
+    ap.add_argument('--labels', type=sl.existing, help='label volume .npy: outlines on slices, colours in 3D (bone is ivory without it, and while the labels layer is hidden)')
+    ap.add_argument('--names', help='label names, 1=femur,2=tibia or an anatomy.json')
+    ap.add_argument('--mask', action='append', metavar='NAME=M.npy', help='bool volume on any registered grid: outline on slices, translucent surface in 3D (repeatable)')
+    ap.add_argument('--face', action='append', metavar='NAME=F.npy', help='2D array of a frame\'s axis-0 index over its axes 1, 2 (NaN = none; iioc\'s growth-plate face): drawn as a line (repeatable)')
+    ap.add_argument('--points', action='append', metavar='NAME=P.json', help='a named set of points, each with a grid_id (what pick.py writes): markers and names, a sphere in 3D. NAME is the layer --show / --hide toggles; the points keep the names inside the file (repeatable)')
+    ap.add_argument('--frame', action='append', type=sl.existing, metavar='frame.json', help='register the frame of a grid that is not the scan\'s (repeatable)')
+    ap.add_argument('--ruler', metavar='A,B', help='a line between two named points, labelled with its length in mm')
+    ap.add_argument('--bone-hu', type=float, help='HU above which a voxel is bone in 3D when there are no labels')
+    ap.add_argument('--pane-px', type=int, help='pixels per pane side (default: 800; at most 940)')
+    ap.add_argument('--mesh-step', type=int, help='voxels per step of the surface grid (default: the longest scan side / 200, rounded, at least 1)')
+    ap.add_argument('--plane', action='append', metavar='K:SPEC', help='change pane K (0-2): K:axis=J | K:normal=z,y,x[:up=z,y,x] | K:contains=A,B | K:frame=frame.json[:axis=J], J in 0-2, vectors in mm; `contains` cuts along the line through two named points (reslice along a bone); `up` is the screen-up direction; a frame pane needs an isotropic scan (repeatable)')
+    ap.add_argument('--center', metavar='NAME|z,y,x', help='put the crosshair on NAME (a point, a label name or a mask) or on z,y,x scan voxel indices')
+    ap.add_argument('--move', action='append', metavar='axisK+N|paneK-N[mm]', help='step the crosshair N voxels along scan axis K, or along pane K\'s normal (voxels, or mm with `mm`; repeatable)')
+    ap.add_argument('--rotate', metavar='az,el', help='turn the 3D camera by degrees, e.g. --rotate 60,0 or --rotate 0,-30')
+    ap.add_argument('--zoom', type=float, help='slice panes\' field of view = whole scan / Z, Z > 0 (3D always fits the bone)')
+    ap.add_argument('--show', action='append', metavar='NAME', help='show a layer by name (repeatable)')
+    ap.add_argument('--hide', action='append', metavar='NAME', help='hide a layer by name (repeatable)')
     takes_value = {o for act in ap._actions if act.nargs != 0 for o in act.option_strings}
     joined, i = [], 0
     while i < len(argv):  # `--window -500,6000` would be read as a flag followed by another flag: join them as --window=-500,6000
@@ -710,8 +683,7 @@ def parse_args(argv):
     a = ap.parse_args(joined)
     if bool(a.from_) == bool(a.hu):
         sl.fail('pass --hu hu.npy for a first view, or --from <earlier>.view.json to change one (not both)')
-    for opt, path in [('--from', a.from_), ('--hu', a.hu), ('--labels', a.labels), ('--names', a.names if a.names and a.names.endswith('.json') else None),
-                      *[('--frame', f) for f in a.frame or []],
+    for opt, path in [('--names', a.names if a.names and a.names.endswith('.json') else None),
                       *[(f'--{o}', i.partition('=')[2]) for o in ('mask', 'face', 'points') for i in getattr(a, o) or [] if '=' in i]]:
         if path:
             need_file(path, f'{opt}')

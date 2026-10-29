@@ -79,6 +79,13 @@ Its rotation, zoom, intensity and opacity controls affect display only. A 3D
 failure leaves acquired slices available; maximize/restore preserves both engines
 and camera state. There is no benchmark
 panel, timer sampling, automated rotation measurement or timing export.
+The revision's label volumes overlay acquired slices with the Structures
+sidebar's visibility and opacity. A spatial To check title or **Show in viewer**
+sets display-only focus for that task and revision, independent of mutation
+permissions. **Clear viewer focus** removes the target. Focus does not carry
+across tasks or revisions. Both acquired slices and an open raw 3D preview target
+the check; this does not produce segmented surfaces. Snapshot persistence needs
+a separate contract and API before its UI can be connected.
 Coronal and sagittal slots remain unavailable. At narrow widths the existing
 layout stacks report and imaging areas; desktop panel sizes and image state
 remain independent.

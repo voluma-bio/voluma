@@ -11,9 +11,10 @@ import {
   getReviewRun,
   getRun,
   listInputs,
+  reviewFileUrl,
 } from "@voluma/api-client";
 import { type DicomArchive, openDicomZip, ViewerWorkspace } from "@voluma/viewer";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, type RouteObject, useParams, useSearchParams } from "react-router";
 import { ReviewWorkspace } from "./report/ReviewWorkspace";
 
@@ -32,6 +33,7 @@ function ReviewPage() {
 
 function ScanReview({ runId }: { runId: string }) {
   const [search, setSearch] = useSearchParams();
+  const fileUrl = useCallback((sha256: string) => reviewFileUrl(runId, sha256), [runId]);
   const execution = useQuery({
     queryKey: ["run", runId],
     queryFn: () => getRun(runId),
@@ -174,8 +176,15 @@ function ScanReview({ runId }: { runId: string }) {
         setSearch(next);
       }}
       backLink={<Link to="/runs">Back to runs</Link>}
-      viewer={
-        <ViewerWorkspace series={series}>
+      viewer={(selected, display, revision, focus) => (
+        <ViewerWorkspace
+          series={series}
+          selected={selected}
+          display={display}
+          revision={revision}
+          focus={focus}
+          fileUrl={fileUrl}
+        >
           <div className="dicom-intake">
             <div className="flex flex-wrap items-center gap-3">
               <button type="button" className="button" onClick={() => void open()}>
@@ -229,7 +238,7 @@ function ScanReview({ runId }: { runId: string }) {
             )}
           </div>
         </ViewerWorkspace>
-      }
+      )}
       onRefresh={() =>
         queryClient.invalidateQueries({ queryKey: ["review-run", runId] }, { throwOnError: true })
       }

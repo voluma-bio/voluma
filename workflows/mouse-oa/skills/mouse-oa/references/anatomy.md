@@ -17,8 +17,8 @@ not proof of a wrong label. `anatomy.json` beside this file is the machine-reada
 
 ## Orienting the knee
 
-In `orient-joint` terms the reference object is the patella and bone A is the femur (the patella sits on it). The keyframe must
-cut femur, tibia and patella. A field of the bone ends only has no shaft, and a tibia cut to a short stub can fall under
+In `orient-joint` terms the reference object is the patella and bone A is the femur (the patella sits on it). The keyframe cuts
+femur and tibia through the joint, and the patella when it is in the field (`../examples/README.md`, orientation). A field of the bone ends only has no shaft, and a tibia cut to a short stub can fall under
 `--second-bone-frac`. When the notes put the patella outside the field, a piece taken for the reference object is something
 else (the fibula head, say): it is harmless to the cut but sets the side of the slice.
 
@@ -104,5 +104,5 @@ a merged one shows on the 3D sheet as a bump or a disconnected piece. How to loo
   separate from the tibia: on OA6-1RK, oriented-stack slice 340 (a tibia plus fibula slice with no patella). That slice is not
   the keyframe, so name the fibula from the 3D sheet or from the component tracked from the keyframe. On another scan, scroll
   the oriented stack toward the shaft until the fibula separates.
-- **Request 2, the small structures on their own** (`sam-segmentation`, steps 6 to 9): labels 5 to 12, found as candidates, with
+- **Request 2, the small structures on their own** (`sam-segmentation`, small structures): labels 5 to 12, found as candidates, with
   one temporary label per 3D piece (label 6 has two pieces, label 9 three).

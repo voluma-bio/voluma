@@ -196,6 +196,26 @@ const selectedOutputsSchema = z
   .max(200)
   .refine((ids) => new Set(ids).size === ids.length, "duplicate output id");
 
+/**
+ * The provider gateway's per-call rows summed for one run. A finished call counts its cost,
+ * a call cut off counts its reservation (the provider may still bill), an open call counts
+ * nothing here (only the gateway's admission counts its reservation). `costUsd` and
+ * `calls` cover every row; `bySandbox` covers the rows whose token was minted for a sandbox,
+ * by that sandbox's name (`<taskId>.worker[.n]`, as in its `sandbox` event).
+ */
+export const providerCallsSchema = z.object({
+  costUsd: z.number().nonnegative(),
+  calls: z.number().int().nonnegative(),
+  bySandbox: z.array(
+    z.object({
+      sandbox: z.string().min(1),
+      costUsd: z.number().nonnegative(),
+      calls: z.number().int().nonnegative(),
+    }),
+  ),
+});
+export type ProviderCalls = z.infer<typeof providerCallsSchema>;
+
 export const runSchema = z
   .object({
     id: runIdSchema,
@@ -226,7 +246,8 @@ export const runSchema = z
     /**
      * What the run has spent so far: the sum of the usage its heartbeats reported (`runner.ts`).
      * `modelCostUsd` is model calls and paid tool calls (`tool.result.costUsd`), in US dollars;
-     * `sandboxSeconds` is how long its sandbox was up. Per task: `spend` in `spend.ts`.
+     * `sandboxSeconds` is sandbox time summed over its sandboxes (one per thread, so concurrent
+     * threads add up and it can exceed wall time). Per task: `spend` in `spend.ts`.
      * Optional until the API writes it.
      */
     usage: z
@@ -235,6 +256,8 @@ export const runSchema = z
         sandboxSeconds: z.number().nonnegative(),
       })
       .optional(),
+    /** What the run's provider calls cost, from the gateway; optional until the API writes it. */
+    providerCalls: providerCallsSchema.optional(),
     /** Latest successfully completed results and their human review progress; null otherwise. */
     review: reviewSummarySchema.nullable(),
   })

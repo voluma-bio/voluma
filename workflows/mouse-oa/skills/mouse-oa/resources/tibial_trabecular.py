@@ -1,37 +1,36 @@
-"""Trabecular compartment of the tibial IIOC (ROI-2): the region under the subchondral plate, inside the cortex.
-
-  python tibial_trabecular.py --iioc-tissue iioc-tissue.npy --growth-plate-face growth-plate-proximal-face.npy
-         --hu-aligned tibia-hu.npy --annotations annotations.json --out <dir>
-         [--shell-clearance-mm 0.021] [--growth-clearance-mm 0.021] [--upper-shift-mm 0]
+"""Cut the trabecular compartment of the tibial IIOC (ROI-2): under the subchondral plate, inside the cortex.
 
 ROI-2 is ROI-1 (from iioc.py) minus the subchondral plate above a traced under-plate boundary, minus a shell of the
 outer surface, minus a clearance under the growth-plate face, limited laterally by the boundary's end points and by
-V limits. It writes the region only: its TV, BV and BV/TV (deck #13-15) come from `morphometry.py volumes`.
+V limits. It writes the region only: its TV, BV and BV/TV (deck #13-15) come from `morphometry.py volumes`. An empty ROI-2 is refused.
 
-Writes iioc-trab-tissue.npy, under-plate-boundary.npy (2D W index per V,U), QC images; prints one JSON line.
-The annotation schema is in ../references/oa-protocol.md.
+--annotations is a JSON file of indices on the aligned grid. It needs "grid_id" (the grid_id of tibia-frame.json; a file without it
+or from another grid is refused). This script reads two keys, other sections of the file are ignored:
+  under_plate_curves  required: curves (below) for the boundary between the subchondral plate and the trabecular compartment,
+                      with the end points on the inner side of the cortex: the first and last point of each curve limit ROI-2
+                      laterally (it exists only where the curves reach)
+  v_limits            required: [first V, last V], inclusive, the sections ROI-2 spans
+Curves (every traced surface): {"axis": 1, "height": "row", "slices": {"<v>": [[w, u], ...]}}: the coronal section at
+V = <v> (array axis 1 of the aligned grid), each point [row, column] = [W, U] read off that section's pixel grid ("height"
+is "row" or omitted). A surface is linear in U along a curve (points in any order, constant past the ends) and linear in
+V between traced sections (constant past the first and last). A point is [w, u], not [u, w]. At least two sections;
+anything but axis 1 and height row is refused.
+
+Writes: <out>/iioc-trab-tissue.npy  ROI-2, bool, on the aligned grid, with its sidecar
+        <out>/under-plate-boundary.npy  W index of the under-plate boundary per (V,U), float32, with its sidecar
+        <out>/qc-coronal.jpg  six coronal sections: ROI-2 (cyan) inside ROI-1 (green)
+Prints: one JSON line {qc, tissue, upper_boundary}
+Example: python tibial_trabecular.py --iioc-tissue iioc/iioc-tissue.npy --growth-plate-face iioc/growth-plate-proximal-face.npy --hu-aligned tibia-hu.npy --annotations annotations.json --out roi2/
+Exits 2 with one sentence on bad input, before writing anything.
 """
 
-import argparse
-import sys
 from pathlib import Path
 
 import matplotlib
 import numpy as np
+import sidecar
+from annotations import load_annotations, need, traced_surface
 from scipy import ndimage as ndi
-
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
-# only missing directories are added, so a script imported by another leaves the importer's order alone.
-SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources'), str(SKILLS / 'regions-and-landmarks/resources')) if d not in sys.path]
-try:
-    import sidecar
-    from annotations import load_annotations, need, traced_surface
-except ModuleNotFoundError as e:
-    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
-          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
-    sys.exit(2)
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -57,18 +56,18 @@ def compartment(parent, gp, ann, vox, shell_mm, growth_mm, upper_shift=0.0):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--iioc-tissue', required=True)
-    ap.add_argument('--growth-plate-face', required=True)
-    ap.add_argument('--hu-aligned', required=True)
-    ap.add_argument('--annotations', required=True)
-    ap.add_argument('--out', required=True)
-    ap.add_argument('--shell-clearance-mm', type=float, default=0.021, help='stay this far inside the outer surface')
+    ap = sidecar.parser(__doc__)
+    ap.add_argument('--iioc-tissue', type=sidecar.existing, required=True, help='iioc-tissue.npy from iioc.py (ROI-1), with its sidecar beside it')
+    ap.add_argument('--growth-plate-face', type=sidecar.existing, required=True, help='growth-plate-proximal-face.npy from iioc.py')
+    ap.add_argument('--hu-aligned', type=sidecar.existing, required=True, help='tibia-hu.npy from tibia_frame.py (for the QC image)')
+    ap.add_argument('--annotations', type=sidecar.existing, required=True, help='annotations JSON on the aligned grid, described above')
+    ap.add_argument('--out', required=True, help='output directory (created)')
+    ap.add_argument('--shell-clearance-mm', type=float, default=0.021, help='mm: stay this far inside the outer surface of ROI-1')
     ap.add_argument(
-        '--growth-clearance-mm', type=float, default=0.021, help='stay this far above the growth-plate face'
+        '--growth-clearance-mm', type=float, default=0.021, help='mm: stay this far above the growth-plate face'
     )
     ap.add_argument(
-        '--upper-shift-mm', type=float, default=0.0, help='move the under-plate boundary by this many mm: sensitivity run'
+        '--upper-shift-mm', type=float, default=0.0, help='mm: move the under-plate boundary by this much: sensitivity run'
     )
     a = ap.parse_args()
     g = sidecar.grid(sidecar.sidecar_path(a.iioc_tissue))
