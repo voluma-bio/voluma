@@ -20,7 +20,8 @@
     "./model-usage": "./src/model-usage.ts",
     "./adapters/http/run-client": "./src/adapters/http/run-client.ts",
     "./supervise-run": "./src/supervise-run.ts",
-    "./tools": "./src/tools/registry.ts"
+    "./tools": "./src/tools/registry.ts",
+    "./tools/segment-sam": "./src/tools/segment-sam.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"

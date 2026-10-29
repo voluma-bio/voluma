@@ -107,7 +107,7 @@ export function modalToken(): { tokenId: string; tokenSecret: string } | undefin
  * sandbox/Dockerfile by the "Sandbox image" workflow, which prints the new digest).
  */
 const SANDBOX_IMAGE =
-  "ghcr.io/voluma-bio/voluma-sandbox@sha256:e6f41b0386216d31c44f39c42a8406785186d53f4c29e95bf6c28abb99d929fe";
+  "ghcr.io/voluma-bio/voluma-sandbox@sha256:1da990ca63d4076a4a01a6e38515ffe805af6e49b1dfd117742140cc802aa7db";
 
 /**
  * The commit this runner's checkout is at, which a run records as the source of its workflow

@@ -36,6 +36,7 @@ import {
   type SandboxSpec,
 } from "@voluma/harness/ports/sandbox";
 import { ModalClient, type Sandbox as ModalSandbox, NotFoundError } from "modal";
+import type { Config } from "./config.ts";
 
 export interface ModalSandboxConfig {
   /** Modal API credentials; absent: the SDK uses ~/.modal.toml. */
@@ -110,6 +111,25 @@ export async function terminateOtherClaims(
     ended++;
   }
   return ended;
+}
+
+/** The sandbox factory of one claim of a run: `run.ts` and `dev-sandbox.ts` build theirs here. */
+export function claimSandboxes(
+  config: Config,
+  modal: ModalSandboxConfig["modal"],
+  claim: string,
+): CreateSandbox {
+  return createModalSandbox({
+    appName: RUNS_APP,
+    claim,
+    modal,
+    r2: {
+      accountId: config.r2.accountId,
+      bucket: config.r2.bucket,
+      parentAccessKeyId: config.r2.accessKeyId,
+      cloudflareApiToken: config.r2.cloudflareApiToken,
+    },
+  });
 }
 
 export function createModalSandbox(config: ModalSandboxConfig): CreateSandbox {

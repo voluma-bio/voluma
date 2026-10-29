@@ -124,7 +124,13 @@ export async function run(
     const prompt = promptText(sent, width, height);
     lap("encode");
 
-    fileId = await meta.upload(video);
+    const id = await meta.upload(video);
+    fileId = id;
+    // The sandbox ends a stopped call with SIGTERM, then SIGKILL 5 s later: the scan must not
+    // stay in Meta's file store.
+    process.once("SIGTERM", () => {
+      meta.remove(id, 4_000).finally(() => process.exit(143));
+    });
     lap("upload");
     response = join(dir, "response.sse");
     const asked = sent

@@ -36,12 +36,7 @@ import { computePlan } from "@voluma/workflow/plan";
 import { type Config, isVisitorSafe, providerKey } from "./config.ts";
 import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
-import {
-  createModalSandbox,
-  RUNS_APP,
-  terminateClaim,
-  terminateOtherClaims,
-} from "./modal-sandbox.ts";
+import { claimSandboxes, RUNS_APP, terminateClaim, terminateOtherClaims } from "./modal-sandbox.ts";
 import type { ModelFallback } from "./model-fallback.ts";
 import { retryTransient } from "./model-retry.ts";
 import { checkPrompt, checkSystem, workerPrompt, workerSystem } from "./prompts.ts";
@@ -76,6 +71,13 @@ export interface RunnerContext {
   fallback: ModelFallback;
   log(line: string): void;
 }
+
+/** Where a run's files are: its scan (a reference scan or an upload), outputs and scratch. */
+export const layoutOf = (run: Claim["run"]) =>
+  runLayout(
+    run.id,
+    run.input.source === "reference" ? referencePrefix("scan") : inputPrefix(run.input.id),
+  );
 
 type Stopped = StopReason | "shutdown" | "spend-cap";
 
@@ -195,21 +197,8 @@ export async function runClaim(
     const grant = (role: "worker" | "checker") =>
       definition.agents[role].tools.filter((t) => t !== "segment_sam" || config.gatewayUrl);
 
-    const layout = runLayout(
-      runId,
-      run.input.source === "reference" ? referencePrefix("scan") : inputPrefix(run.input.id),
-    );
-    const createSandbox = createModalSandbox({
-      appName: RUNS_APP,
-      claim: claimId,
-      modal,
-      r2: {
-        accountId: config.r2.accountId,
-        bucket: config.r2.bucket,
-        parentAccessKeyId: config.r2.accessKeyId,
-        cloudflareApiToken: config.r2.cloudflareApiToken,
-      },
-    });
+    const layout = layoutOf(run);
+    const createSandbox = claimSandboxes(config, modal, claimId);
     const stored = await client.storedEvents();
     live = liveBatcher((frames) => client.live(frames));
     events = recorder(

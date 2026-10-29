@@ -85,12 +85,12 @@ export function metaClient(options: { url: string; token: string; log(line: stri
     },
 
     /** The user's scan must not stay in Meta's file store: a failed delete is loud, not fatal. */
-    async remove(id: string): Promise<void> {
+    async remove(id: string, timeoutMs = 60_000): Promise<void> {
       const res = await fetch(`${base}/files/${id}`, {
         method: "DELETE",
         headers: auth,
         dispatcher,
-        signal: AbortSignal.timeout(60_000),
+        signal: AbortSignal.timeout(timeoutMs),
       }).catch((e: Error) => e);
       if (res instanceof Error || !res.ok) {
         log(`Meta file ${id} was NOT deleted: ${res instanceof Error ? res.message : res.status}`);
