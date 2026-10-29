@@ -239,7 +239,7 @@ export function ReviewWorkspace({
                               })
                             }
                           />
-                          {item.voxels?.label && (
+                          {item.voxels && "label" in item.voxels && (
                             <span
                               className="inline-block h-2 w-2 self-center"
                               style={{

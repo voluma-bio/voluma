@@ -6,7 +6,7 @@ import { expect } from "vitest";
 import type { RunEvent } from "./events";
 import { checkResult, type Folded, type FoldedRevision, fold } from "./fold";
 import type { Output } from "./output";
-import { reviewRunSchema, type Volume } from "./review";
+import { reviewRunSchema } from "./review";
 import type { WorkflowPlan } from "./workflow";
 
 export type Payload<T extends RunEvent["type"]> = Extract<RunEvent, { type: T }>["payload"];
@@ -122,8 +122,6 @@ export function log() {
           value,
           unit: "mm",
           confidence: null,
-          structureIds: [],
-          annotationIds: [],
           ...extra,
         },
         { evidence },
@@ -155,22 +153,6 @@ export const rev = (f: Folded, n: number): FoldedRevision => {
   return r;
 };
 
-/** The scan's volume, which the API adds. */
-const SCAN: Volume = {
-  id: "scan",
-  name: "Scan",
-  kind: "image",
-  shapeZyx: [2, 2, 2],
-  affine: [
-    [1, 0, 0, 0],
-    [0, 1, 0, 0],
-    [0, 0, 1, 0],
-    [0, 0, 0, 1],
-  ],
-  unit: "HU",
-  data: null,
-};
-
 /** Every revision, with the parts the API adds, must be a valid `ReviewRun`. */
 export function expectParses(f: Folded) {
   const run = {
@@ -178,14 +160,15 @@ export function expectParses(f: Folded) {
     sample: "s",
     workflows: [{ repo: "o/w", commit: "a".repeat(40) }],
     review: null,
+    assets: f.assets,
     revisions: f.revisions.map((r) => ({
       id: r.id,
       label: r.reason,
       createdAt: r.createdAt,
-      volumes: [SCAN, ...r.volumes],
+      volumes: r.volumes,
       structures: r.structures,
-      // A null `volumeId` is the scan, whose id the API fills.
-      annotations: r.annotations.map((a) => ({ ...a, volumeId: a.volumeId ?? SCAN.id })),
+      surfaces: r.surfaces,
+      annotations: r.annotations,
       tasks: r.tasks.map((t) => ({
         ...t,
         title: t.id,

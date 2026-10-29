@@ -14,13 +14,19 @@
  * - A generic core: the run, its revisions, and per revision the tasks with
  *   their measurements, scores, checks and evidence files.
  * - Building blocks on each revision, a closed set the shell knows how to
- *   render: `volumes`, `structures` and `annotations`. A workflow fills them
- *   with what it has; it cannot invent a new kind. A kind the shell cannot
- *   draw is a small contract PR that adds a block, not a field on an old one.
+ *   render: `volumes`, `structures`, `surfaces` and `annotations`. A workflow
+ *   fills them with what it has; it cannot invent a new kind. A kind the shell
+ *   cannot draw is a small contract PR that adds a block, not a field on an old one.
+ *   A measurement or score names the blocks it is shown with (`on`, `context`) by
+ *   id; the links come from the workflow's declaration, not from the report.
  *
- * Coordinates: every position is world mm (the volume affines' output). The UI
- * converts to voxels through the volume's `affine`. The one exception is mesh
- * vertices, whose binary files are centred on `mesh.centerWorldMm`.
+ * Coordinates: annotations are world mm (the fold maps the voxels an agent reports
+ * through the grid's `affine`); the UI converts to voxels through the volume's
+ * `affine`. Structures and surfaces are voxels on their grid.
+ *
+ * Converted assets (`ReviewRun.assets`) are one map for the run, keyed by the
+ * sha256 of the file a block points at: absent means still preparing. Revisions
+ * stay snapshots of the outputs; the map is of the whole log.
  *
  * Size: each revision repeats every block. That is fine for one revision; the
  * API may serve one revision at a time rather than the whole run.
@@ -45,7 +51,12 @@ import {
   taskIdSchema,
   taskStatusSchema,
 } from "./ids";
-import { sha256Schema as sha256, storedKeySchema, storedPrefixSchema } from "./r2";
+import {
+  relativePathSchema,
+  sha256Schema as sha256,
+  storedKeySchema,
+  storedPrefixSchema,
+} from "./r2";
 import { workflowPinSchema } from "./workflow";
 
 /**
@@ -139,6 +150,44 @@ type R4 = z.infer<typeof row4>;
 
 // ── Building blocks ──────────────────────────────────────────────────────────
 
+const zyx = z.tuple([
+  z.number().int().positive(),
+  z.number().int().positive(),
+  z.number().int().positive(),
+]);
+
+/**
+ * What the converter (`workflows/core/convert/review_assets.py`) prints and writes as
+ * `manifest.json`; the runner parses it and builds `assets.ready` from it. Paths are relative
+ * to the asset prefix (`reviewAssetKey`). It carries no `sourceSha256`: the runner knows which
+ * file it converted, and identity is never taken from subprocess output. Other keys in the
+ * printed JSON are ignored.
+ */
+export const reviewAssetsManifestSchema = z.object({
+  /** OME-Zarr levels, finest first; `scaleZyx` is source voxels per level voxel on each axis. */
+  levels: z.array(z.object({ path: relativePathSchema, shapeZyx: zyx, scaleZyx: zyx })),
+  /**
+   * Surface meshes: float32 vertices (x, y, z) in voxels of the source grid at full resolution,
+   * then uint32 triangle indices, little-endian. `label` is set for a labels volume's mesh.
+   */
+  meshes: z.array(
+    z.object({
+      label: z.number().int().positive().optional(),
+      path: relativePathSchema,
+      vertices: z.number().int().nonnegative(),
+      indices: z.number().int().nonnegative(),
+    }),
+  ),
+});
+export type ReviewAssetsManifest = z.infer<typeof reviewAssetsManifestSchema>;
+
+/** The converted assets of one reported file, or why there are none. */
+export const reviewAssetsSchema = z.discriminatedUnion("state", [
+  z.object({ state: z.literal("ready"), ...reviewAssetsManifestSchema.shape }),
+  z.object({ state: z.literal("failed"), error: z.string().min(1) }),
+]);
+export type ReviewAssets = z.infer<typeof reviewAssetsSchema>;
+
 /** Voxel types the viewer loads: intensities for `image` volumes, label values for `labels` volumes. */
 const imageDtype = z.enum(["int16", "uint16", "float32"]);
 const labelDtype = z.enum(["uint8", "uint16"]);
@@ -209,42 +258,37 @@ export const volumeSchema = z.object({
     .refine(isSpacedRigid, "affine needs orthogonal, nonzero columns and a bottom row of 0,0,0,1"),
   /** What the values are: `"HU"`, `"mm"`; null for raw or unitless. */
   unit: z.string().nullable(),
+  /**
+   * The grid id the producer wrote beside the array (the `.npy` sidecar's `grid_id`). A
+   * structure mask, surface or annotation reports the id of the grid it was made on, and
+   * is refused when it differs: frames share spacing, so a wrong grid's voxels would pass.
+   */
+  gridId: z.string().min(1),
   /** Null when the producer ships the volume in no loadable format. */
   data: volumeDataSchema.nullable(),
 });
 export type Volume = z.infer<typeof volumeSchema>;
 
-/**
- * Surface mesh in a binary file: `vertices` positions (3 float32 each: mm,
- * relative to `centerWorldMm`, little-endian), then `indices` uint32 triangle
- * corners (little-endian). World position = vertex + `centerWorldMm`. File size
- * is `vertices * 12 + indices * 4` bytes.
- */
-export const meshSchema = z.object({
-  key: storedKeySchema,
-  /** Vertex count (not float count). */
-  vertices: z.number().int().nonnegative(),
-  /** Index count: three per triangle. */
-  indices: z
-    .number()
-    .int()
-    .nonnegative()
-    .refine((n) => n % 3 === 0, "indices must be a multiple of 3"),
-  sha256,
-  centerWorldMm: vec3,
-});
+const offset = z.tuple([z.int().min(0), z.int().min(0), z.int().min(0)]);
 
-/** A segmented object: a label in a `labels` volume, usually with a surface. */
+/** A segmented object: a label in a `labels` volume, or a cropped mask on a grid. */
 export const structureSchema = z.object({
   id: z.string(),
   name: z.string(),
   /**
-   * Where its voxels are: a `labels` volume, and the value in it. An absent
-   * `label` means every nonzero voxel (a binary mask). Null when the
-   * segmentation is missing or the producer doesn't say.
+   * Where its voxels are: a value in a `labels` volume; or a uint8 mask cropped to its
+   * bounding box, placed on the grid at `offsetZyx` (its levels and mesh are in crop voxels:
+   * add the offset). Null when the structure is missing or its grid isn't reported.
    */
   voxels: z
-    .object({ volumeId: z.string(), label: z.number().int().positive().optional() })
+    .union([
+      z.object({ volumeId: z.string(), label: z.number().int().positive() }),
+      z.object({
+        gridId: z.string(),
+        mask: z.object({ key: storedKeySchema, sha256, shapeZyx: zyx }),
+        offsetZyx: offset,
+      }),
+    ])
     .nullable(),
   /**
    * Whether the workflow declared this structure; null when the producer
@@ -259,10 +303,20 @@ export const structureSchema = z.object({
   reason: z.string().nullable(),
   definition: z.string().optional(),
   volumeMm3: z.number().optional(),
-  /** Absent when `status` is `missing`. */
-  mesh: meshSchema.optional(),
 });
 export type Structure = z.infer<typeof structureSchema>;
+
+/** A traced face as a height field on a grid, drawn as a line in the slices and a mesh in 3D. */
+export const surfaceSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  gridId: z.string(),
+  /** The array axis the heights are measured along. */
+  axis: z.literal([0, 1, 2]),
+  /** float32, the grid's shape without `axis`; NaN where the surface leaves the bone. */
+  heights: z.object({ key: storedKeySchema, sha256 }),
+});
+export type Surface = z.infer<typeof surfaceSchema>;
 
 const annotationBase = {
   id: z.string(),
@@ -330,10 +384,10 @@ export const measurementSchema = z.object({
   evidenceIds: z.array(z.string()),
   /** Values other readers got for the same quantity. */
   references: z.array(z.object({ reader: z.string(), value: z.number() })),
-  /** Structures it was counted from or drawn on. */
-  structureIds: z.array(z.string()),
-  /** Annotations that show it: the ruler of a distance, the landmarks it bounds. The only link between the two; annotations don't point back. */
-  annotationIds: z.array(z.string()),
+  /** Blocks (volume, structure, surface, annotation ids) it was measured on: highlighted with the value. From the declaration. */
+  on: z.array(z.string()),
+  /** Blocks drawn around it. From the declaration. */
+  context: z.array(z.string()),
   /** Ratios: ids of the measurements divided. */
   numeratorId: z.string().optional(),
   denominatorId: z.string().optional(),
@@ -354,8 +408,8 @@ export const scoreSchema = z.object({
   definition: z.string().optional(),
   evidenceIds: z.array(z.string()),
   /** What was graded: the medial plateau, the lesion a QC fail is about. */
-  structureIds: measurementSchema.shape.structureIds,
-  annotationIds: measurementSchema.shape.annotationIds,
+  on: measurementSchema.shape.on,
+  context: measurementSchema.shape.context,
   source: measurementSchema.shape.source,
 });
 export type Score = z.infer<typeof scoreSchema>;
@@ -453,6 +507,7 @@ export const revisionSchema = z
     tasks: z.array(taskSchema),
     volumes: z.array(volumeSchema),
     structures: z.array(structureSchema),
+    surfaces: z.array(surfaceSchema),
     annotations: z.array(annotationSchema),
   })
   .superRefine((rev, ctx) => {
@@ -470,6 +525,7 @@ export const revisionSchema = z
     };
     const volumes = idsOf(rev.volumes, "volumes");
     const structures = idsOf(rev.structures, "structures");
+    const surfaces = idsOf(rev.surfaces, "surfaces");
     const annotations = idsOf(rev.annotations, "annotations");
     const tasks = idsOf(rev.tasks, "tasks");
     const measurements = idsOf(
@@ -505,10 +561,22 @@ export const revisionSchema = z
     rev.structures.forEach((s, i) => {
       if (!s.voxels) return;
       const at = ["structures", i, "voxels"];
+      if ("gridId" in s.voxels) {
+        needAll(volumes, [s.voxels.gridId], [...at, "gridId"], "volume");
+        return;
+      }
       needAll(volumes, [s.voxels.volumeId], [...at, "volumeId"], "volume");
       if (kindOf.has(s.voxels.volumeId) && kindOf.get(s.voxels.volumeId) !== "labels")
         bad([...at, "volumeId"], `volume "${s.voxels.volumeId}" is not a labels volume`);
     });
+    needAll(
+      volumes,
+      rev.surfaces.map((x) => x.gridId),
+      ["surfaces", "gridId"],
+      "volume",
+    );
+    // What a measurement can be shown with.
+    const shown = new Set([...volumes, ...structures, ...surfaces, ...annotations]);
     needAll(
       volumes,
       rev.annotations.map((a) => a.volumeId),
@@ -523,8 +591,8 @@ export const revisionSchema = z
       const own = new Set(t.evidence.map((e) => e.id));
       t.scores.forEach((sc, si) => {
         const at = [...task, "scores", si];
-        needAll(structures, sc.structureIds, [...at, "structureIds"], "structure");
-        needAll(annotations, sc.annotationIds, [...at, "annotationIds"], "annotation");
+        needAll(shown, sc.on, [...at, "on"], "block");
+        needAll(shown, sc.context, [...at, "context"], "block");
         needAll(own, sc.evidenceIds, [...at, "evidenceIds"], "evidence in this task");
       });
       t.checks.forEach((c, ci) => {
@@ -543,8 +611,8 @@ export const revisionSchema = z
       });
       t.measurements.forEach((m, mi) => {
         const at = [...task, "measurements", mi];
-        needAll(structures, m.structureIds, [...at, "structureIds"], "structure");
-        needAll(annotations, m.annotationIds, [...at, "annotationIds"], "annotation");
+        needAll(shown, m.on, [...at, "on"], "block");
+        needAll(shown, m.context, [...at, "context"], "block");
         needAll(own, m.evidenceIds, [...at, "evidenceIds"], "evidence in this task");
         needAll(measurements, [m.numeratorId, m.denominatorId], [...at, "operands"], "measurement");
       });
@@ -559,6 +627,8 @@ export const reviewRunSchema = z
     workflows: z.array(workflowPinSchema).min(1),
     /** Oldest first; the last is the latest. */
     revisions: z.array(revisionSchema).min(1),
+    /** Converted assets by the sha256 of the file they were made from; absent: still preparing. */
+    assets: z.record(sha256, reviewAssetsSchema),
     review: reviewSummarySchema.nullable(),
   })
   .superRefine((run, ctx) => {

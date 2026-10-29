@@ -64,7 +64,7 @@ export function StartPage() {
         <h2 className="px-1 pb-3 text-meta font-semibold text-fg-subtle">Workflows</h2>
         <Card className="border-primary p-3">
           <p className="font-medium">{WORKFLOW.name}</p>
-          <p className="text-meta text-muted-foreground">{ALL_OUTPUT_IDS.length} outputs</p>
+          <p className="text-meta text-muted-foreground">{ALL_OUTPUT_IDS.length} measurements</p>
         </Card>
       </aside>
 

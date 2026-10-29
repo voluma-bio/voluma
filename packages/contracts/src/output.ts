@@ -6,18 +6,23 @@
  * there is one definition of each block.
  *
  * - `measurement`, `score`: a number with a unit; a level of a scale. Both
- *   carry `confidence`, `note` and `definition`, and the structures and
- *   annotations they are about.
- * - `structure`: a label in a `volume` output of kind `labels` (named by
- *   `volume`), optionally with a surface mesh; `status`, `reason`, `definition`.
- * - `annotation`: a point or a line, in world mm, with an optional `note`. Its
- *   optional `volume` names the volume output it sits on; absent means the scan.
+ *   carry `confidence`, `note` and `definition`. What they are shown with
+ *   (`on`, `context`) is in the declaration (`workflow-files.ts`), not here.
+ * - `structure`: a label in its declared grid (a `labels` volume), a mask
+ *   cropped to its bounding box on the grid, or "missing" with a reason.
+ * - `surface`: a height field on its declared grid, along an array axis.
+ * - `annotation`: a point or a line in voxels `[z, y, x]` of its declared grid,
+ *   fractional allowed. The fold maps it to world mm through the grid's affine.
+ *   A mask, surface or annotation also reports the `gridId` of the grid it was made
+ *   on; `report_output` refuses it when that differs from the `gridId` its declared
+ *   grid volume reported.
  * - `volume`: an `.npy` voxel grid on its own affine.
  * - `file`: a figure, table or report; its `title` is its name.
  *
- * `annotation` and `volume` nest their block under the same key because the
- * block has its own `kind`. A reference to another output is its `outputId` in
- * the same task, or `taskId/outputId`. Files are named by evidence ref and
+ * An object (structure, surface, annotation, volume) must be declared: review
+ * places it by its declaration's grid. A reference to another output (a ratio's
+ * operands) is its `outputId` in the same task, or `taskId/outputId`.
+ * Files are named by evidence ref and
  * copied like evidence: the event holds `{root, path, sha256}`, the tool call
  * `{root, path}`, so each schema is built twice from one definition.
  */
@@ -26,13 +31,11 @@ import { segmentSchema } from "./ids";
 import { relativePathSchema, sha256Schema } from "./r2";
 import {
   assetSchema,
-  lineAnnotationSchema,
   measurementSchema,
-  meshSchema,
   npyDtypeSchema,
-  pointAnnotationSchema,
   scoreSchema,
   structureSchema,
+  surfaceSchema,
   volumeSchema,
 } from "./review";
 
@@ -61,8 +64,14 @@ export const fileRefInputSchema = z.object({
   path: relativePathSchema,
 });
 
+/** A position in voxel indices `[z, y, x]` of a grid; fractional allowed. */
+const voxelZyx = z.tuple([z.number().min(0), z.number().min(0), z.number().min(0)]);
+
+const gridIdField = volumeSchema.shape.gridId.describe(
+  "The grid_id of the grid's sidecar, as reported on its volume.",
+);
+
 const outputs = <R extends z.ZodType>(ref: R) => {
-  const mesh = meshSchema.omit({ key: true, sha256: true }).extend({ file: ref });
   const prose = { note: true, definition: true } as const;
   return z.discriminatedUnion("kind", [
     measurementSchema
@@ -71,46 +80,56 @@ const outputs = <R extends z.ZodType>(ref: R) => {
         unit: true,
         confidence: true,
         ...prose,
-        structureIds: true,
-        annotationIds: true,
         numeratorId: true,
         denominatorId: true,
       })
       .extend({ kind: z.literal("measurement") }),
     scoreSchema
-      .pick({
-        level: true,
-        confidence: true,
-        ...prose,
-        structureIds: true,
-        annotationIds: true,
-      })
+      .pick({ level: true, confidence: true, ...prose })
       .extend({ kind: z.literal("score") }),
     structureSchema.pick({ definition: true, volumeMm3: true }).extend({
       kind: z.literal("structure"),
-      /** A `volume` output of kind `labels`. */
-      volume: nonEmpty,
-      /** Absent: every nonzero voxel of the volume (a binary mask). */
-      label: structureSchema.shape.voxels.unwrap().shape.label,
-      /** `missing` is the fold's, for a structure never reported. */
-      status: structureSchema.shape.status.unwrap().exclude(["missing"]).optional(),
-      reason: structureSchema.shape.reason.unwrap().optional(),
-      mesh: mesh.optional(),
+      structure: z.union([
+        z.strictObject({
+          label: z.number().int().positive().describe("The structure's value in its grid."),
+        }),
+        z.strictObject({
+          mask: ref.describe("uint8 `.npy`, 1 inside, cropped to the structure's bounding box."),
+          gridId: gridIdField,
+          shapeZyx: z.tuple([z.int().positive(), z.int().positive(), z.int().positive()]),
+          offsetZyx: z
+            .tuple([z.int().min(0), z.int().min(0), z.int().min(0)])
+            .describe("Voxel of the grid where the mask's [0, 0, 0] sits."),
+        }),
+        z.strictObject({
+          status: z.literal("missing"),
+          reason: nonEmpty.describe("Why it can't be reported, e.g. not in the field of view."),
+        }),
+      ]),
+    }),
+    z.object({
+      kind: z.literal("surface"),
+      surface: z.object({
+        gridId: gridIdField,
+        axis: surfaceSchema.shape.axis.describe("The array axis the heights are measured along."),
+        heights: ref.describe(
+          "float32 `.npy`: the grid's shape without `axis`; NaN where the surface is off the bone.",
+        ),
+      }),
     }),
     z.object({
       kind: z.literal("annotation"),
-      note: pointAnnotationSchema.shape.note,
-      /** A `volume` output the annotation sits on; absent: the scan. */
-      volume: nonEmpty.optional(),
+      gridId: gridIdField,
+      note: z.string().optional(),
       annotation: z.discriminatedUnion("kind", [
-        pointAnnotationSchema.omit({ id: true, name: true, note: true, volumeId: true }),
-        lineAnnotationSchema.omit({ id: true, name: true, note: true, volumeId: true }),
+        z.object({ kind: z.literal("point"), zyx: voxelZyx }),
+        z.object({ kind: z.literal("line"), aZyx: voxelZyx, bZyx: voxelZyx }),
       ]),
     }),
     z.object({
       kind: z.literal("volume"),
       volume: volumeSchema
-        .pick({ kind: true, shapeZyx: true, affine: true, unit: true })
+        .pick({ kind: true, shapeZyx: true, affine: true, unit: true, gridId: true })
         .extend({ file: ref, dtype: npyDtypeSchema }),
     }),
     z.object({

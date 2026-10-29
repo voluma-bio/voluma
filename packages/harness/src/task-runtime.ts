@@ -25,7 +25,7 @@ import type {
 } from "@voluma/contracts/task-tools";
 import type { WorkflowPlan } from "@voluma/contracts/workflow";
 import { isSatisfied, transitiveDependents } from "@voluma/workflow";
-import { declarationProblem, referenceProblem } from "./output-checks";
+import { declarationProblem, placementProblem, referenceProblem } from "./output-checks";
 import type { Evidence } from "./ports/evidence";
 import type { PayloadOf, Recorder } from "./recorder";
 
@@ -71,9 +71,16 @@ async function storedOutput(
 ): Promise<PayloadOf<"output">["output"]> {
   switch (output.kind) {
     case "structure": {
-      const { mesh, ...rest } = output;
-      return mesh ? { ...rest, mesh: { ...mesh, file: await keepFile(mesh.file) } } : rest;
+      const s = output.structure;
+      return "mask" in s
+        ? { ...output, structure: { ...s, mask: await keepFile(s.mask) } }
+        : (output as PayloadOf<"output">["output"]);
     }
+    case "surface":
+      return {
+        ...output,
+        surface: { ...output.surface, heights: await keepFile(output.surface.heights) },
+      };
     case "volume":
       return { ...output, volume: { ...output.volume, file: await keepFile(output.volume.file) } };
     case "file":
@@ -331,7 +338,8 @@ export function taskRuntime(options: TaskRuntimeOptions) {
         const declared = known(taskId).outputs.find((o) => o.id === outputId);
         const problem =
           declarationProblem(declared, { title, output }) ??
-          referenceProblem(view(), taskId, output);
+          referenceProblem(view(), taskId, output) ??
+          placementProblem(view(), [...plan], { outputId, output });
         if (problem) throw new Refusal(problem);
         return t;
       };

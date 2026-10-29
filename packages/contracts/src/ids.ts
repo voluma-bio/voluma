@@ -47,6 +47,7 @@ export const outputKindSchema = z.enum([
   "measurement",
   "score",
   "structure",
+  "surface",
   "annotation",
   "volume",
   "file",

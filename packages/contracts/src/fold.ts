@@ -17,20 +17,27 @@
  *   unique by sha256. A `verdict` counts only from a check thread.
  * - The last step sends each output to its review block, with the id
  *   `${taskId}/${outputId}`: `measurement` to `measurements`, `score` to
- *   `scores`, `file` to `files` (its `title` is its name), and `structure`, `annotation` and `volume` to
- *   the revision's `structures`, `annotations` and `volumes`. A reference to
- *   another output (operands, `structureIds`, `annotationIds`, a structure's
- *   `volume`, an annotation's `volume`) is resolved to that id by one resolver
- *   keyed by block kind (`volume:labels` is not `volume:image`). One that
- *   doesn't resolve in the revision is dropped: a structure's `voxels` becomes
- *   null, an annotation's `volumeId` null, which means the scan (the API fills
- *   its id). So no later attempt of another task can leave a dangling id.
+ *   `scores`, `file` to `files` (its `title` is its name), and `structure`,
+ *   `surface`, `annotation` and `volume` to the revision's `structures`,
+ *   `surfaces`, `annotations` and `volumes`. The links are the plan's, not the
+ *   report's: a measurement's or score's `on` and `context`, and the `grid` of a
+ *   structure, surface or annotation, are output ids of the plan, resolved to
+ *   `taskId/outputId` and kept only if that output is a block of the revision. A
+ *   structure on a grid not reported has null `voxels`; a surface or annotation
+ *   on one is left out. An annotation's voxels map to world mm through its grid's
+ *   affine, after the revision's volumes are known. A ratio's operands and a focus's
+ *   ids go through one resolver keyed by block kind (`volume:labels` is not
+ *   `volume:image`); one that doesn't resolve is dropped. So no later attempt of
+ *   another task can leave a dangling id.
  * - The plan is the first `revision.started`'s. An output fills a declaration
  *   of its kind (a volume, also of its volume kind). Per task, `undeclared` is
  *   the ids of the outputs that fill none; `missing` the declared outputs the
  *   current attempt hasn't reported, except structures, and `missingRequired`
  *   the required ones among all of them. A declared structure not reported is
- *   emitted as a `Structure` with status `missing`.
+ *   emitted as a `Structure` with status `missing`; one reported as missing is too,
+ *   and counts as reported.
+ * - `assets` is the whole log's: the latest `assets.ready` or `assets.failed` per
+ *   source sha256, whatever the revision.
  * - `resultRevisionId` is the revision in which the task's latest event so far
  *   was appended.
  * - To check items (all open; accepting one is the review lane's, and a check
@@ -43,7 +50,7 @@
  *   one left pointing at nothing is absent. "Marked to check" has no focus.
  *   `checkResult` turns a folded task into the status `check-result` gives.
  * - Not from these events (the API adds them): `title`, `ask`,
- *   `structureIds`, `threads.chat`, revision labels, the scan's volume; the API
+ *   `structureIds`, `threads.chat`, revision labels; the API
  *   also sets each asset's `stage` to the task title (here the task id).
  */
 import type { RunEvent, ThreadKind } from "./events";
@@ -55,9 +62,11 @@ import type {
   Asset,
   Focus,
   Measurement,
+  ReviewAssets,
   ReviewTask,
   Score,
   Structure,
+  Surface,
   Volume,
 } from "./review";
 import type { DeclaredOutput } from "./workflow";
@@ -65,14 +74,19 @@ import type { DeclaredOutput } from "./workflow";
 type OutputEvent = Extract<RunEvent, { type: "output" }>;
 
 /** The block an output fills, for resolving references; a `volume` is told apart by its own kind. */
-type RefKind = "measurement" | "structure" | "annotation" | "volume:image" | "volume:labels";
+type RefKind =
+  | "measurement"
+  | "structure"
+  | "surface"
+  | "annotation"
+  | "volume:image"
+  | "volume:labels";
 
-const refKind = (o: Output): RefKind | undefined =>
-  o.kind === "volume"
-    ? `volume:${o.volume.kind}`
-    : o.kind === "score" || o.kind === "file"
-      ? undefined
-      : o.kind;
+/** A grid voxel `[z, y, x]` in world mm through the grid's affine (voxel index (x, y, z) to world). */
+const toWorld = (m: Volume["affine"], [z, y, x]: readonly [number, number, number]) => {
+  const row = (r: Volume["affine"][number]) => r[0] * x + r[1] * y + r[2] * z + r[3];
+  return [row(m[0]), row(m[1]), row(m[2])] satisfies [number, number, number];
+};
 
 /** Whether a reported output fills a declaration: the same kind, and for a volume the same volume kind. */
 const fills = (d: DeclaredOutput, o: Output) =>
@@ -123,15 +137,9 @@ export type FoldedRevision = {
   tasks: FoldedTask[];
   volumes: Volume[];
   structures: Structure[];
-  annotations: FoldedAnnotation[];
+  surfaces: Surface[];
+  annotations: Annotation[];
 };
-
-/** An annotation as reported: a null `volumeId` is the scan, whose id the API knows. */
-export type FoldedAnnotation = Annotation extends infer A
-  ? A extends Annotation
-    ? Omit<A, "volumeId"> & { volumeId: string | null }
-    : never
-  : never;
 
 /**
  * The status the runtime's `check-result` rule gives a task whose check thread
@@ -151,6 +159,8 @@ export type Folded = {
   tasks: FoldedTask[];
   /** Oldest first. Empty until the run's first `revision.started`. */
   revisions: FoldedRevision[];
+  /** Converted assets by source sha256, from the whole log. */
+  assets: Record<string, ReviewAssets>;
 };
 
 type Attempt = {
@@ -176,9 +186,12 @@ export function fold(events: readonly RunEvent[]): Folded {
   const attempts = new Map<string, Attempt>();
   const current = new Map<string, Attempt>();
   const revisions: FoldedRevision[] = [];
+  const assets: Folded["assets"] = {};
   let header: Pick<FoldedRevision, "id" | "createdAt" | "reason" | "taskId"> | undefined;
   // taskId → outputId → declaration, from the run's first event.
   const plan = new Map<string, Map<string, DeclaredOutput>>();
+  // output id → the task that declares it; ids are unique in a plan, so links name bare ids.
+  const owner = new Map<string, string>();
   const dependsOn = new Map<string, string[]>();
   // The run's first event is `revision.started` (`task-tools.ts`).
   let revisionId = "";
@@ -194,13 +207,15 @@ export function fold(events: readonly RunEvent[]): Folded {
       });
   };
 
-  const snapshot = (): Pick<FoldedRevision, "tasks" | "volumes" | "structures" | "annotations"> => {
+  const snapshot = (): Pick<
+    FoldedRevision,
+    "tasks" | "volumes" | "structures" | "surfaces" | "annotations"
+  > => {
+    // The block kind of every output a reference may resolve to, filled as blocks are made.
     const kinds = new Map<string, RefKind>();
     for (const a of current.values())
-      for (const [id, v] of a.outputs) {
-        const k = refKind(v.payload.output);
-        if (k) kinds.set(`${a.taskId}/${id}`, k);
-      }
+      for (const [id, v] of a.outputs)
+        if (v.payload.output.kind === "measurement") kinds.set(`${a.taskId}/${id}`, "measurement");
     // The one guarantee for references: one that doesn't resolve to an output of
     // an accepted block kind in this revision is dropped (`undefined`).
     const ref = (a: Attempt, id: string | undefined, ...accept: RefKind[]) => {
@@ -211,6 +226,18 @@ export function fold(events: readonly RunEvent[]): Folded {
     };
     const refs = (a: Attempt, ids: string[], kind: RefKind) =>
       ids.flatMap((id) => ref(a, id, kind) ?? []);
+    // A declared link: a plan output id to the block it names, when the revision has one.
+    const linked = (id: string, ...accept: RefKind[]): string | undefined => {
+      const task = owner.get(id);
+      const full = `${task}/${id}`;
+      const k = kinds.get(full);
+      return task !== undefined && k && accept.includes(k) ? full : undefined;
+    };
+    const shown = (ids: string[]) =>
+      ids.flatMap(
+        (id) =>
+          linked(id, "volume:image", "volume:labels", "structure", "surface", "annotation") ?? [],
+      );
     // Ids that resolve stay; `label` goes with a `volumeId` that doesn't. A focus
     // left pointing at nothing is absent: the whole task.
     const resolveFocus = (a: Attempt, f: Focus): Focus | undefined => {
@@ -229,26 +256,140 @@ export function fold(events: readonly RunEvent[]): Folded {
         resolved.point;
       return points ? resolved : undefined;
     };
+    const unreportedOf = (a: Attempt) =>
+      [...(plan.get(a.taskId)?.values() ?? [])].filter((d) => {
+        const o = a.outputs.get(d.id)?.payload.output;
+        return !(o && fills(d, o));
+      });
+
+    // Volumes first: every other block sits on one.
     const volumes: Volume[] = [];
+    for (const a of current.values())
+      for (const [outputId, { payload: p, runId }] of a.outputs) {
+        if (p.output.kind !== "volume") continue;
+        const { file, dtype, ...grid } = p.output.volume;
+        const id = `${a.taskId}/${outputId}`;
+        volumes.push({
+          ...grid,
+          id,
+          name: p.title,
+          data: { format: "npy", key: evidenceKey(runId, file.sha256), sha256: file.sha256, dtype },
+        });
+        kinds.set(id, `volume:${grid.kind}`);
+      }
+    const volumeById = new Map(volumes.map((v) => [v.id, v]));
+
     const structures: Structure[] = [];
-    const annotations: FoldedAnnotation[] = [];
-    const tasks = [...current.values()].map((a) => {
-      const measurements: Measurement[] = [];
-      const scores: Score[] = [];
-      const files: Asset[] = [];
-      const undeclared: string[] = [];
-      const declaredOutputs = [...(plan.get(a.taskId)?.values() ?? [])];
+    const surfaces: Surface[] = [];
+    const annotations: Annotation[] = [];
+    for (const a of current.values()) {
       for (const [outputId, v] of a.outputs) {
         const { payload: p } = v;
         const { output: o } = p;
         const id = `${a.taskId}/${outputId}`;
         const decl = plan.get(a.taskId)?.get(outputId);
         const declared = decl !== undefined && fills(decl, o);
-        // A structure records this as `declared` on its block; listing it here too would be a second copy.
-        if (!declared && o.kind !== "structure") undeclared.push(id);
+        const gridId =
+          declared && "grid" in decl
+            ? linked(decl.grid, "volume:image", "volume:labels")
+            : undefined;
+        const grid = gridId === undefined ? undefined : volumeById.get(gridId);
         const key = (sha: string) => evidenceKey(v.runId, sha);
+        switch (o.kind) {
+          case "structure": {
+            const s = o.structure;
+            let voxels: Structure["voxels"] = null;
+            if ("label" in s && grid) voxels = { volumeId: grid.id, label: s.label };
+            else if ("mask" in s && grid)
+              voxels = {
+                gridId: grid.id,
+                mask: { key: key(s.mask.sha256), sha256: s.mask.sha256, shapeZyx: s.shapeZyx },
+                offsetZyx: s.offsetZyx,
+              };
+            structures.push({
+              id,
+              name: p.title,
+              voxels,
+              declared,
+              status: "status" in s ? s.status : null,
+              reason: "status" in s ? s.reason : null,
+              ...(o.definition !== undefined && { definition: o.definition }),
+              ...(o.volumeMm3 !== undefined && { volumeMm3: o.volumeMm3 }),
+            });
+            kinds.set(id, "structure");
+            break;
+          }
+          case "surface":
+            if (!grid) break;
+            surfaces.push({
+              id,
+              name: p.title,
+              gridId: grid.id,
+              axis: o.surface.axis,
+              heights: { key: key(o.surface.heights.sha256), sha256: o.surface.heights.sha256 },
+            });
+            kinds.set(id, "surface");
+            break;
+          case "annotation": {
+            if (!grid) break;
+            const base = { id, name: p.title, volumeId: grid.id };
+            const note = o.note !== undefined ? { note: o.note } : {};
+            annotations.push(
+              o.annotation.kind === "point"
+                ? {
+                    ...base,
+                    ...note,
+                    kind: "point",
+                    position: toWorld(grid.affine, o.annotation.zyx),
+                  }
+                : {
+                    ...base,
+                    ...note,
+                    kind: "line",
+                    a: toWorld(grid.affine, o.annotation.aZyx),
+                    b: toWorld(grid.affine, o.annotation.bZyx),
+                  },
+            );
+            kinds.set(id, "annotation");
+            break;
+          }
+          default:
+            break;
+        }
+      }
+      // A declared structure never reported is a `missing` structure, so the
+      // Structures panel is complete; `missing` lists the kinds with no such slot.
+      for (const d of unreportedOf(a))
+        if (d.kind === "structure") {
+          const id = `${a.taskId}/${d.id}`;
+          structures.push({
+            id,
+            name: d.name ?? d.id,
+            voxels: null,
+            declared: true,
+            status: "missing",
+            reason: `The workflow declares it${d.required ? " as required" : ""}; the task has not reported it.`,
+          });
+          kinds.set(id, "structure");
+        }
+    }
+
+    const tasks = [...current.values()].map((a) => {
+      const measurements: Measurement[] = [];
+      const scores: Score[] = [];
+      const files: Asset[] = [];
+      const undeclared: string[] = [];
+      for (const [outputId, v] of a.outputs) {
+        const { payload: p } = v;
+        const { output: o } = p;
+        const id = `${a.taskId}/${outputId}`;
+        const decl = plan.get(a.taskId)?.get(outputId);
+        // A structure records this as `declared` on its block; listing it here too would be a second copy.
+        if (!(decl !== undefined && fills(decl, o)) && o.kind !== "structure") undeclared.push(id);
         const evidenceIds = p.evidence.map((r) => r.sha256);
         const source = { threadId: v.threadId, eventId: v.id };
+        const on = shown(decl && "on" in decl ? decl.on : []);
+        const context = shown(decl && "context" in decl ? decl.context : []);
         switch (o.kind) {
           case "measurement": {
             const numeratorId = ref(a, o.numeratorId, "measurement");
@@ -263,8 +404,8 @@ export function fold(events: readonly RunEvent[]): Folded {
               ...(o.definition !== undefined && { definition: o.definition }),
               evidenceIds,
               references: [],
-              structureIds: refs(a, o.structureIds, "structure"),
-              annotationIds: refs(a, o.annotationIds, "annotation"),
+              on,
+              context,
               ...(numeratorId !== undefined && { numeratorId }),
               ...(denominatorId !== undefined && { denominatorId }),
               source,
@@ -281,84 +422,26 @@ export function fold(events: readonly RunEvent[]): Folded {
               ...(o.note !== undefined && { note: o.note }),
               ...(o.definition !== undefined && { definition: o.definition }),
               evidenceIds,
-              structureIds: refs(a, o.structureIds, "structure"),
-              annotationIds: refs(a, o.annotationIds, "annotation"),
+              on,
+              context,
               source,
             });
             break;
-          case "structure": {
-            const volumeId = ref(a, o.volume, "volume:labels");
-            structures.push({
-              id,
-              name: p.title,
-              voxels:
-                volumeId === undefined
-                  ? null
-                  : { volumeId, ...(o.label !== undefined && { label: o.label }) },
-              declared,
-              status: o.status ?? null,
-              reason: o.reason ?? null,
-              ...(o.definition !== undefined && { definition: o.definition }),
-              ...(o.volumeMm3 !== undefined && { volumeMm3: o.volumeMm3 }),
-              ...(o.mesh && {
-                mesh: {
-                  key: key(o.mesh.file.sha256),
-                  sha256: o.mesh.file.sha256,
-                  vertices: o.mesh.vertices,
-                  indices: o.mesh.indices,
-                  centerWorldMm: o.mesh.centerWorldMm,
-                },
-              }),
-            });
-            break;
-          }
-          case "annotation":
-            annotations.push({
-              ...o.annotation,
-              id,
-              name: p.title,
-              volumeId: ref(a, o.volume, "volume:labels", "volume:image") ?? null,
-              ...(o.note !== undefined && { note: o.note }),
-            });
-            break;
-          case "volume": {
-            const { file, dtype, ...grid } = o.volume;
-            volumes.push({
-              ...grid,
-              id,
-              name: p.title,
-              data: { format: "npy", key: key(file.sha256), sha256: file.sha256, dtype },
-            });
-            break;
-          }
           case "file":
             files.push({
               id,
               name: p.title,
               stage: a.taskId,
-              key: key(o.file.sha256),
+              key: evidenceKey(v.runId, o.file.sha256),
               sha256: o.file.sha256,
               mediaType: o.mediaType,
             });
             break;
+          default:
+            break;
         }
       }
-      const unreported = declaredOutputs.filter((d) => {
-        const o = a.outputs.get(d.id)?.payload.output;
-        return !(o && fills(d, o));
-      });
-      // A declared structure never reported is a `missing` structure, so the
-      // Structures panel is complete; `missing` lists the kinds with no such slot.
-      for (const d of unreported)
-        if (d.kind === "structure")
-          structures.push({
-            id: `${a.taskId}/${d.id}`,
-            name: d.name ?? d.id,
-            voxels: null,
-            declared: true,
-            status: "missing",
-            reason: `The workflow declares it${d.required ? " as required" : ""}; the task has not reported it.`,
-          });
+      const unreported = unreportedOf(a);
       const missing = unreported.flatMap((d) =>
         d.kind === "structure" ? [] : [{ outputId: d.id, kind: d.kind, required: d.required }],
       );
@@ -399,7 +482,7 @@ export function fold(events: readonly RunEvent[]): Folded {
         evidence: [...a.evidence.values()],
       };
     });
-    return { tasks, volumes, structures, annotations };
+    return { tasks, volumes, structures, surfaces, annotations };
   };
 
   for (const e of events) {
@@ -422,6 +505,7 @@ export function fold(events: readonly RunEvent[]): Folded {
         if (p.reason === "run")
           for (const t of p.plan.tasks) {
             plan.set(t.id, new Map(t.outputs.map((o) => [o.id, o])));
+            for (const o of t.outputs) owner.set(o.id, t.id);
             dependsOn.set(t.id, t.dependsOn);
           }
         header =
@@ -494,6 +578,14 @@ export function fold(events: readonly RunEvent[]): Folded {
         a.resultRevisionId = revisionId;
         break;
       }
+      case "assets.ready": {
+        const { sourceSha256, ...manifest } = e.payload;
+        assets[sourceSha256] = { state: "ready", ...manifest };
+        break;
+      }
+      case "assets.failed":
+        assets[e.payload.sourceSha256] = { state: "failed", error: e.payload.error };
+        break;
       default:
         break;
     }
@@ -501,5 +593,5 @@ export function fold(events: readonly RunEvent[]): Folded {
 
   const last = snapshot();
   if (header) revisions.push({ ...header, ...last });
-  return { tasks: last.tasks, revisions };
+  return { tasks: last.tasks, revisions, assets };
 }

@@ -54,6 +54,16 @@ export type RecordedPin = z.infer<typeof recordedPinSchema>;
 
 const nonEmpty = z.string().min(1);
 const declaredBase = { id: segmentSchema, required: z.boolean() };
+/**
+ * Where a measurement or score is shown (`workflow-files.ts`): output ids of the plan, resolved
+ * by the fold. A plan recorded before these existed reads as no links.
+ */
+const links = {
+  on: z.array(segmentSchema).default([]),
+  context: z.array(segmentSchema).default([]),
+};
+/** The `volume` output a structure, surface or annotation sits on. */
+const grid = { grid: segmentSchema };
 
 /**
  * An output a task must (or may) report, by its `outputId`. The constraints
@@ -63,21 +73,37 @@ export const declaredOutputSchema = z.discriminatedUnion("kind", [
   z.object({
     ...declaredBase,
     kind: z.literal("measurement"),
+    ...links,
     unit: nonEmpty,
     /** Acceptance range `[min, max]` in `unit`: advice for the reviewer and the review screen, never a refusal. */
     range: z.tuple([z.number(), z.number()]).optional(),
   }),
   /** The scale, lowest first: a reported level must be one of these. */
-  z.object({ ...declaredBase, kind: z.literal("score"), levels: z.array(nonEmpty).min(2) }),
-  /** `label` is the value in the labels volume and `name` the structure's title; each, when set, must match. */
+  z.object({
+    ...declaredBase,
+    kind: z.literal("score"),
+    ...links,
+    levels: z.array(nonEmpty).min(2),
+  }),
+  /**
+   * `label` is the value in the grid, a labels volume, and `name` the structure's title; each,
+   * when set, must match. Without `label` the structure is reported as a cropped mask on the grid.
+   */
   z.object({
     ...declaredBase,
     kind: z.literal("structure"),
+    ...grid,
     label: z.number().int().positive().optional(),
     name: nonEmpty.optional(),
   }),
-  z.object({ ...declaredBase, kind: z.literal("annotation"), shape: z.enum(["point", "line"]) }),
-  /** `labels` holds structures' label values; a structure's `volume` must be one. */
+  z.object({ ...declaredBase, kind: z.literal("surface"), ...grid }),
+  z.object({
+    ...declaredBase,
+    kind: z.literal("annotation"),
+    ...grid,
+    shape: z.enum(["point", "line"]),
+  }),
+  /** `labels` holds structures' label values; a grid with `label` structures must be one. */
   z.object({
     ...declaredBase,
     kind: z.literal("volume"),
@@ -108,11 +134,17 @@ export const workflowPlanSchema = z
     const dup = (path: (string | number)[], what: string) =>
       ctx.addIssue({ code: "custom", path, message: `duplicate ${what}` });
     const tasks = new Set<string>();
+    // `on`, `context` and `grid` name bare output ids, so an object's id is unique in the plan.
+    const objects = new Set<string>();
     plan.tasks.forEach((t, ti) => {
       if (tasks.has(t.id)) dup(["tasks", ti, "id"], `task id "${t.id}"`);
       tasks.add(t.id);
       const outputs = new Set<string>();
       t.outputs.forEach((o, oi) => {
+        if (o.kind !== "measurement" && o.kind !== "score" && o.kind !== "file") {
+          if (objects.has(o.id)) dup(["tasks", ti, "outputs", oi, "id"], `object id "${o.id}"`);
+          objects.add(o.id);
+        }
         if (o.kind === "measurement" && o.range && o.range[0] > o.range[1])
           ctx.addIssue({
             code: "custom",

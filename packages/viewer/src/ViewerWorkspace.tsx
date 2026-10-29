@@ -72,7 +72,9 @@ export function ViewerWorkspace({
   );
   const sources = useMemo<LabelSource[]>(() => {
     if (!fileUrl) return [];
-    const ids = new Set(structures.flatMap((s) => (s.voxels ? [s.voxels.volumeId] : [])));
+    const ids = new Set(
+      structures.flatMap((s) => (s.voxels && "volumeId" in s.voxels ? [s.voxels.volumeId] : [])),
+    );
     if (focus?.volumeId) ids.add(focus.volumeId);
     return (
       revision?.volumes.flatMap((volume) =>

@@ -44,8 +44,10 @@ export function drawLabels(
       const value = Number(label);
       const structure = structures.find(
         (s) =>
-          s.voxels?.volumeId === layer.volume.id &&
-          (s.voxels.label === undefined || s.voxels.label === value),
+          s.voxels !== null &&
+          "volumeId" in s.voxels &&
+          s.voxels.volumeId === layer.volume.id &&
+          s.voxels.label === value,
       );
       const focused =
         (focus?.volumeId === layer.volume.id &&

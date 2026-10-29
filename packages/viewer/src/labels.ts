@@ -94,7 +94,7 @@ export function focusTarget(
     ? [{ volumeId: focus.volumeId, label: focus.label }]
     : structures
         .filter((s) => focus.structureIds.includes(s.id))
-        .flatMap((s) => (s.voxels ? [s.voxels] : []));
+        .flatMap((s) => (s.voxels && "volumeId" in s.voxels ? [s.voxels] : []));
   for (const ref of refs) {
     const layer = layers.find((l) => l.volume.id === ref.volumeId);
     if (!layer) continue;
