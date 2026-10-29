@@ -18,7 +18,7 @@ export type ThreadStatus = "running" | "paused" | "completed" | "failed" | "canc
 
 export type Thread = {
   id: string;
-  kind: "supervisor" | "worker" | "check" | "chat";
+  kind: "supervisor" | "main" | "worker" | "check" | "chat";
   taskId?: string;
   model?: string;
   /** Its latest start: a woken thread's clock counts from its wake. */
@@ -168,7 +168,7 @@ const threadRole = (t: Pick<Thread, "kind">) =>
     ? "worker"
     : t.kind === "check"
       ? "checker"
-      : t.kind === "supervisor"
+      : t.kind === "supervisor" || t.kind === "main"
         ? "Main thread"
         : "Chat";
 
@@ -235,13 +235,6 @@ function attentionOf(tasks: FoldedTask[], threads: Thread[], events: RunEvent[])
   }
   return items;
 }
-
-const planOf = (events: RunEvent[]): WorkflowPlan | undefined => {
-  const first = events.find((e) => e.type === "revision.started" && e.payload.reason === "run");
-  return first?.type === "revision.started" && first.payload.reason === "run"
-    ? first.payload.plan
-    : undefined;
-};
 
 /** The newest thread working on each task: the one a task row opens. */
 function latestThreadByTask(threads: Thread[]): Map<string, Thread> {
@@ -339,7 +332,7 @@ function outcomes(
   tasks: FoldedTask[],
   states: Map<string, TaskState>,
 ): Map<string, string> {
-  const byAttempt = new Map(tasks.map((t) => [t.attemptId, t]));
+  const byAttempt = new Map(tasks.flatMap((t) => (t.attemptId ? [[t.attemptId, t] as const] : [])));
   const worker = new Map<string, string>();
   const checker = new Map<string, string>();
   for (const e of events) {
@@ -415,13 +408,13 @@ function outputRows(
     // A stopped task's row says so; only a task that finished its work left an output out.
     const state = states.get(p.id);
     if (state === "done" || state === "to-check" || state === "failed")
-      for (const d of p.outputs)
-        if ((d.kind === "measurement" || d.kind === "score") && t.missingRequired.includes(d.id))
+      for (const m of t.missing)
+        if (m.kind === "measurement" || m.kind === "score")
           rows.push({
-            id: `${p.id}/${d.id}`,
-            title: outputName(d.id),
+            id: `${p.id}/${m.outputId}`,
+            title: outputName(m.outputId),
             value: null,
-            reason: "Not reported",
+            reason: m.reason ?? "Not reported",
           });
     return rows;
   });
@@ -450,7 +443,8 @@ export function runView(
 ): RunView {
   const logged = threadsOf(events);
   const threads = halt ? halted(logged.threads, logged.lastAt, halt) : logged.threads;
-  const plan = planOf(events);
+  // No plan until the run's first `revision.started`.
+  const plan = folded.revisions.length > 0 ? folded.plan : undefined;
   const attention = attentionOf(folded.tasks, logged.threads, events);
   const spent = spend(events, providerCalls);
   if (!plan) return { threads, attention, tasks: [], outputs: [], progress: "", spend: spent };

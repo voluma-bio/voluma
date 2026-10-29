@@ -7,7 +7,7 @@
  * shape. It returns paths, counts and prompts, never voxels.
  */
 import { z } from "zod";
-import type { RunLayout } from "../layout";
+import type { ThreadLayout } from "../layout";
 import { readWindowed, type Shape3, writeU8 } from "../npy";
 import type { Files } from "../ports/files";
 import type { Segmenter, SegmentObject } from "../ports/segmenter";
@@ -78,7 +78,7 @@ const inputSchema = z.object({
 });
 
 export interface SegmentSamDeps {
-  layout: RunLayout;
+  layout: ThreadLayout;
   files: Files;
   segmenter: Segmenter;
 }

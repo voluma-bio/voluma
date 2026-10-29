@@ -177,8 +177,8 @@ function threadSandbox(
 export function sandboxSession(
   create: (threadId: string) => Promise<Sandbox>,
   onState: (threadId: string, state: SandboxState, detail?: string) => void,
-  /** `RunLayout.restartNote`. */
-  restartNote: string,
+  /** `ThreadLayout.restartNote` of the thread. */
+  restartNote: (threadId: string) => string,
 ): SandboxSession {
   const threads = new Map<string, ReturnType<typeof threadSandbox>>();
   let closed = false;
@@ -190,7 +190,7 @@ export function sandboxSession(
       assertOpen();
       let thread = threads.get(threadId);
       if (!thread) {
-        thread = threadSandbox(threadId, create, onState, restartNote, assertOpen);
+        thread = threadSandbox(threadId, create, onState, restartNote(threadId), assertOpen);
         threads.set(threadId, thread);
       }
       return thread.get();

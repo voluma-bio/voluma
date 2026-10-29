@@ -51,6 +51,8 @@ export interface SandboxSpec {
   mounts: SandboxMount[];
   /** Set on every command. The worker's gateway token is the one secret that belongs here. */
   env?: Record<string, string>;
+  /** The working directory of every command. Absent: the image's. */
+  workdir?: string;
   /**
    * Safety net: the provider ends the sandbox about this long after creation, give or
    * take (Modal enforces it loosely). The real limits are the supervisor's budget and
