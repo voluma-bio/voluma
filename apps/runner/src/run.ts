@@ -16,7 +16,7 @@
  * reports `released` with its reason first, so the run is recovered within the platform's
  * grace period, then closes the sandbox. A stop by the server or a lost lease reports nothing.
  * None of these stops writes a `thread.ended`: the threads are cut off, and the next claim
- * (which learns why from `claim.previousClaim`) resumes them (`supervisor.ts`).
+ * (which learns why from `claim.previousClaim`) resumes them (`run-loop.ts`).
  */
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";

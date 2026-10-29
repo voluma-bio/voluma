@@ -126,10 +126,10 @@ check threads, and review chat threads.
   call (`tools/effects.ts`), so a call a crash cut off is answered from the log. It hears about
   the run only through **delivery messages** that resume it: the notices (a submit, a worker that
   stopped, a check result, an `ask`, a stale task), the live agents and the tasks whose row
-  changed (`main-view.ts`). A delivery's `covers` is the last event it accounted for; what lies
+  changed (`messages.ts`, which holds every string an agent is told). A delivery's `covers` is the last event it accounted for; what lies
   after the latest `covers` is undelivered, so a crash can deliver twice, never lose one. If the
-  main agent ends its turn with nothing running and nothing to deliver, it is woken with the full
-  agents list and task table; after `stuckLimit` such wakes in a row code skips the unfinished
+  main agent ends its turn with nothing running and nothing to deliver, it is nudged with the full
+  agents list and task table; after `stuckLimit` such nudges in a row code skips the unfinished
   tasks (a root-written `plan.changed`) and ends the run. A main thread that cannot resume, or
   failed on a provider error, is replaced by `main.<n+1>` whose first message is built from the log.
   A thread that throws or is refused before it starts (`ran` false), a fatal provider error, or an
