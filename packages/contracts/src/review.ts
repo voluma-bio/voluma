@@ -161,7 +161,7 @@ export const voxelIndexSchema = z.tuple([z.int().min(0), z.int().min(0), z.int()
 /**
  * What the converter (`workflows/core/convert/review_assets.py`) prints and writes as
  * `manifest.json`; the runner parses it and builds `assets.ready` from it. Paths are relative
- * to the asset prefix (`reviewAssetKey`). It carries no `sourceSha256`: the runner knows which
+ * to the asset prefix (`reviewAssetKey` in `r2.ts`). It carries no `sourceSha256`: the runner knows which
  * file it converted, and identity is never taken from subprocess output. Other keys in the
  * printed JSON are ignored.
  */

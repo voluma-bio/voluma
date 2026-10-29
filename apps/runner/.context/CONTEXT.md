@@ -76,13 +76,50 @@ Spend and the usage meter sum sandbox seconds over all sandboxes.
   `CAP_LINUX_IMMUTABLE`; `SCRATCH` and the exec `workdir` (`/scratch/t1.check`) take effect;
   `touch /scratch/outside.txt` succeeds, also after `chmod a-w /scratch`; `chattr` is absent.
 
+# Runner: review assets
+
+`packages/harness/src/review-assets.ts` converts every file a task reports as a volume, a
+structure mask or a surface (`convertJob`) into review assets while the run is live, and
+records `assets.ready` / `assets.failed` on the root thread (id `<runId>:assets:<sha256>`).
+`run.ts` starts it at claim beside `superviseRun`.
+
+- **Queue.** Every `output` event in the recorder's view, from the first (so a resume reads the
+  whole log), minus files with an `assets.*` event; new events are polled once a second.
+  One file at a time, in one `convert` sandbox per claim (created at the first file, metered
+  like the others). A failed conversion is recorded and the worker moves on; a sandbox that
+  dies or cannot be created is replaced once, then the file is recorded failed. `sourceSha256`
+  is the queue item's; a converter that prints another one has failed.
+- **Mounts.** `/evidence` (the run's evidence prefix) and `/workflow` read-only, `/review`
+  (`reviewAssetPrefix`) read-write, no network. The snapshot keeps repo paths and includes
+  `core/convert/`, so the command is `python /workflow/workflows/core/convert/review_assets.py` (not `-I`, which drops the `PYTHONPATH`
+  the converter imports `sidecar` through; the sandbox gets `RunLayout.pythonPath` alone).
+  A cloud-bucket mount cannot rename, which zarr's local store does for every file: the converter
+  builds in a fixed `/tmp` path it clears at the start, and copies, `manifest.json` last. A
+  non-zero exit from a sandbox that is gone counts as a sandbox failure (the one retry), not a
+  failed file.
+- **Signal.** One rule: the worker halts exactly when the stop will not end the run (server stop,
+  lost lease, self-stop, shutdown; `reportFor` is not `ended`). A spend cap and an uncaught
+  `error` end the run, so they drain, as does `finally`'s own `abort`, which the worker outlives.
+  `run.ts` remembers which stop halted it (`haltedBy`) and rebuilds the report from that one,
+  never from the first stop. A stopped worker records nothing; the next claim finds the files again and the
+  converter skips what has a `manifest.json` of its version and mode.
+- **Drain.** An `ended` report waits for the queue (`DRAIN_MS`, 10 minutes, the lease
+  heartbeating meanwhile), before the sandboxes close. Then every output still without an
+  `assets.*` event is recorded `assets.failed` ("timed out", or "the run ended before the file
+  was converted" for an output stored late), so an ended run leaves no file "preparing". Events go
+  through `emit` (retried) and count as done once stored. This is **permanent for the run**: the next claim
+  skips it and review shows the object without assets. A stop during the drain ends it at once and the run is reported `released` (nothing, for a server stop or a lost lease) instead of `ended`, so the next claim resumes the queue.
+  A `released` report does not drain.
+- **Not built.** Conversions run one at a time in one 2-CPU sandbox; the scan (about 1 GB of
+  float32) is the long pole. Add sandboxes if the drain times out in practice.
+
 # Runner: how sandboxes end
 
 Sandboxes cost money while up (a GPU one a lot), so every one must end. In order of
 who ends it:
 
 1. **The runner, normally.** `run.ts` closes the run's sandboxes (one per thread) when the supervisor ends,
-   before it flushes events and reports, so the `stopped` event and the last sandbox seconds
+   draining the convert queue meanwhile (a close takes ~30 s) and then closing the convert sandbox, before it flushes events and reports, so the `stopped` event and the last sandbox seconds
    are stored under the live lease. If the close takes over 60 s (15 s after a stop) it asks Modal to terminate
    the sandboxes of this claim, by their `{run, claim}` tags (the claim is a per-claim id: a
    released run's old runner must not kill the sandbox of the runner that reclaimed it).
