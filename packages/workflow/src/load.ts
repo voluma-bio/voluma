@@ -1,14 +1,14 @@
 /**
- * A run's view of its workflow skill: `loadWorkflow` snapshots the workflow's directory and
- * the skill directories it `uses` from the runner's checkout into the run's R2 prefix when the
+ * A run's view of its workflow: `loadWorkflow` snapshots `workflows/core/` and the run's workflow
+ * directory (`workflows/<name>/`) from the runner's checkout into the run's R2 prefix when the
  * run starts (`workflowSnapshotPrefix`), and reads the snapshot, never the checkout, so a
  * resume after a redeploy that changed the files sees what the run began with. IO goes through
  * `WorkflowStore`, so this package holds no S3 client.
  *
- * A skill directory holds `SKILL.md` and may hold `references/` and `resources/`; a directory
- * may also hold skills one level down, `skills/<name>/`. The workflow's directory adds
- * `outputs.json` and `tasks.json`. The role files of `workflows/agents/` are snapshotted too: they
- * are the same for every workflow.
+ * Both directories hold skills, `skills/<name>/SKILL.md` with optional `references/` and
+ * `resources/`. `core/` also holds the role files, `agents/<role>.md`, the same for every
+ * workflow; the workflow's directory adds `outputs.json` and `tasks.json`. Nothing else in
+ * either directory is snapshotted.
  */
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -43,24 +43,25 @@ export interface LoadOptions {
   knownTools: readonly string[];
 }
 
-/** A directory of the repo under `workflows/`: lowercase segments, no `.` or `..`. */
+/** Every run's shared directory: the role files and the generic skills. */
+const CORE = "workflows/core";
+
+/** A workflow's directory, `workflows/<name>`: one lowercase segment, not `core`, not `.` or `..`. */
 export const workflowDirSchema = z
   .string()
-  .regex(/^workflows\/[a-z0-9._-]+(\/[a-z0-9._-]+)*$/)
-  .refine((d) => !d.split("/").some((p) => /^\.+$/.test(p)), "must not contain . or ..");
+  .regex(/^workflows\/(?!\.+$)[a-z0-9._-]+$/)
+  .refine((d) => d !== CORE, "core is not a workflow");
 
 /** Keys of the Agent Skills format that Voluma does not read; any other key must be one it does. */
 const SKILL_KEYS = ["license", "compatibility", "metadata", "allowed-tools", "type"] as const;
 const frontmatterSchema = z.strictObject({
   name: z.string().min(1),
   description: z.string().min(1),
-  /** Other skill directories this skill's roles may use (the workflow's own skill only). */
-  uses: z.array(workflowDirSchema).default([]),
   ...Object.fromEntries(SKILL_KEYS.map((k) => [k, z.unknown().optional()])),
 });
 
 /** Where the role files live in the checkout and the snapshot; `AGENTS.md` there is for people. */
-const AGENTS_DIR = "workflows/agents";
+const AGENTS_DIR = `${CORE}/agents`;
 const agentSchema = z.strictObject({
   name: z.string().min(1),
   description: z.string().min(1),
@@ -70,8 +71,7 @@ const agentSchema = z.strictObject({
 
 /** Written last, so a snapshot cut short is redone, not trusted; its body is the commit. */
 const DONE = ".snapshot-done";
-const FILES = ["SKILL.md", "outputs.json", "tasks.json"];
-const TREES = ["references", "resources", "skills"];
+const FILES = ["outputs.json", "tasks.json"];
 
 /** Parses the `---` block against `schema`; `body` is what follows it, trimmed. */
 function parseFile<T extends z.ZodType>(file: string, text: string, schema: T) {
@@ -128,43 +128,27 @@ async function* walk(root: string, rel: string): AsyncGenerator<string> {
   }
 }
 
-/** The directories the workflow's `SKILL.md` lists in `uses`, read from the checkout. */
-async function usedDirs(root: string, dir: string): Promise<string[]> {
-  const file = `${dir}/SKILL.md`;
-  const text = await readFile(join(root, file), "utf8").catch(() => {
-    throw new WorkflowParseError(file, "not found");
-  });
-  return frontmatter(file, text).uses;
-}
-
 async function snapshot(dir: string, { store, prefix, root, commit }: LoadOptions) {
   if (await store.has(`${prefix}${DONE}`)) return;
-  const dirs = [dir, ...(await usedDirs(root, dir))];
-  for (const d of dirs) {
+  const put = async (path: string) =>
+    store.put(`${prefix}${path}`, await readFile(join(root, path)));
+  for (const d of [CORE, dir]) {
     const names = await readdir(join(root, d)).catch(() => {
       throw new WorkflowParseError(d, "directory not found");
     });
-    const paths: string[] = [];
-    for (const name of names) {
-      if (FILES.includes(name) && (d === dir || name === "SKILL.md")) paths.push(`${d}/${name}`);
-      if (TREES.includes(name)) for await (const p of walk(root, `${d}/${name}`)) paths.push(p);
-    }
-    for (const path of paths) await store.put(`${prefix}${path}`, await readFile(join(root, path)));
+    if (d === dir)
+      for (const name of FILES.filter((f) => names.includes(f))) await put(`${d}/${name}`);
+    if (names.includes("skills")) for await (const p of walk(root, `${d}/skills`)) await put(p);
   }
   for (const name of await readdir(join(root, AGENTS_DIR)).catch(() => {
     throw new WorkflowParseError(AGENTS_DIR, "directory not found");
   })) {
-    if (name.endsWith(".md") && name !== "AGENTS.md") {
-      await store.put(
-        `${prefix}${AGENTS_DIR}/${name}`,
-        await readFile(join(root, AGENTS_DIR, name)),
-      );
-    }
+    if (name.endsWith(".md") && name !== "AGENTS.md") await put(`${AGENTS_DIR}/${name}`);
   }
   await store.put(`${prefix}${DONE}`, new TextEncoder().encode(commit));
 }
 
-/** Snapshots `dir` (`workflows/workflow-<name>`) unless the run already has one, then reads the snapshot. */
+/** Snapshots `dir` (`workflows/<name>`) unless the run already has one, then reads the snapshot. */
 export async function loadWorkflow(dir: string, options: LoadOptions): Promise<WorkflowDefinition> {
   workflowDirSchema.parse(dir);
   await snapshot(dir, options);
@@ -172,20 +156,19 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
   const texts = new Map<string, string>();
   for (const key of await store.list(prefix)) {
     const path = key.slice(prefix.length);
-    if (/(^|\/)SKILL\.md$|(^|\/)(outputs|tasks)\.json$|^workflows\/agents\/[^/]+\.md$/.test(path))
+    if (
+      /(^|\/)SKILL\.md$|(^|\/)(outputs|tasks)\.json$|^workflows\/core\/agents\/[^/]+\.md$/.test(
+        path,
+      )
+    )
       texts.set(path, await store.get(key));
   }
 
-  const own = texts.get(`${dir}/SKILL.md`);
-  if (own === undefined) throw new WorkflowParseError(`${dir}/SKILL.md`, "not found");
-  const dirs = [dir, ...frontmatter(`${dir}/SKILL.md`, own).uses];
   const skills: Skill[] = [];
-  for (const d of dirs) {
+  for (const d of [dir, CORE]) {
     for (const [path, text] of texts) {
-      const m = new RegExp(`^${d.replace(/[.]/g, "\\.")}/((?:skills/[^/]+/)?)SKILL\\.md$`).exec(
-        path,
-      );
-      if (!m) continue;
+      if (!(path.startsWith(`${d}/skills/`) && /^[^/]+\/SKILL\.md$/.test(path.slice(d.length + 8))))
+        continue;
       const skillDir = path.slice(0, -"/SKILL.md".length);
       const fm = frontmatter(path, text);
       const expected = skillDir.slice(skillDir.lastIndexOf("/") + 1);

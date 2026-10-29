@@ -132,16 +132,16 @@ they need:
 - Colours come only from `packages/design-tokens`; components use token
   utilities (`bg-card`, `text-muted-foreground`). Visual rules: [DESIGN.md](DESIGN.md).
   Check shared components at `/dev/ui` in both themes.
-- Workflows and analysis code live in `workflows/`. A workflow is one skill
-  directory there, `workflows/workflow-<name>/`: `SKILL.md` (its `uses:` lists
-  other skill directories), `outputs.json` (every output a run can produce),
-  `tasks.json` (the task list), `references/` and `resources/`; role prompts are
-  built into the harness and models come from runner config. A run
-  snapshots it: `workflows/microct-analysis` holds the generic micro-CT
-  skills, `workflows/workflow-mouse-oa` the mouse knee workflow. Python lives only in
+- Workflows and analysis code live in `workflows/`. `workflows/core/` is shared
+  by every run: the role files (`agents/`) and the generic micro-CT skills
+  (`skills/`). A workflow is `workflows/<name>/`: `outputs.json` (every output
+  a run can produce), `tasks.json` (the task list) and `skills/<skill>/`
+  (`SKILL.md`, `references/`, `resources/`), e.g. `workflows/mouse-oa`, the mouse
+  knee workflow. Models come from runner config. A run snapshots `core/` and its
+  workflow's directory and nothing else. Python lives only in
   `workflows/`, as skill resources: CLI scripts that take and return paths,
   never bytes. Their dependencies are
-  `workflows/microct-analysis/requirements.txt`, compiled from `requirements.in`;
+  `workflows/core/requirements.txt`, compiled from `requirements.in`;
   changing it means running the "Sandbox image" workflow and updating `SANDBOX_IMAGE` in `apps/runner/src/config.ts`.
   `pnpm check` runs ruff and pytest
   there through `uv`; the sandbox image is linux/x86_64, so on macOS or ARM the

@@ -1,6 +1,6 @@
 /**
  * The workflow catalog: server config mapping a `workflowId` to the workflow directory
- * (`workflows/workflow-<name>`) a run uses. A request names an id from here, never a path, so a caller
+ * (`workflows/<name>`) a run uses. A request names an id from here, never a path, so a caller
  * can't point the runner at another directory. A run pins the deployed commit and that path;
  * the runner snapshots the directory (and the ones its `SKILL.md` lists in `uses`) into the
  * run's R2 prefix when it starts. The plan and skills come from those files
@@ -16,7 +16,7 @@ export interface CatalogEntry {
 export type Catalog = Record<string, CatalogEntry>;
 
 export const catalog: Catalog = {
-  smoke: { workflow: "workflows/workflow-smoke" },
-  // A starter for the lab to edit (`workflows/workflow-mouse-oa/SKILL.md`).
-  "mouse-oa": { workflow: "workflows/workflow-mouse-oa" },
+  smoke: { workflow: "workflows/smoke" },
+  // A starter for the lab to edit (`workflows/mouse-oa/skills/mouse-oa/SKILL.md`).
+  "mouse-oa": { workflow: "workflows/mouse-oa" },
 };

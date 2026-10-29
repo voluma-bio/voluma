@@ -136,13 +136,13 @@ file is shared page cache, not counted twice. The `stopped` event of a sandbox M
 sandbox, so an out-of-memory kill or a terminate call), so a restart's cause is in the run's record. In the 2026-10-28 local run the sandbox ended at 1 h 0 min (the
 lifetime) and once more 23 min into the replacement, before the exit code was logged.
 
-# Runner: role text and tool grants come from `workflows/agents/`
+# Runner: role text and tool grants come from `workflows/core/agents/`
 
-The worker's and checker's system prompts are `workflows/agents/<role>.md`'s body, then `COMMON`
+The worker's and checker's system prompts are `workflows/core/agents/<role>.md`'s body, then `COMMON`
 (sandbox text, `prompts.ts`), then the skill list. Their optional tools are the file's `tools`
 (`run.ts` `grant`); `segment_sam` is also dropped when the run has no Meta key. `loadWorkflow`
 snapshots the role files with the workflow and reads them from the snapshot, so a resumed thread
 composes byte-identical text and an edited file reaches only new threads (a thread whose prompt
 changed is still `ThreadStale`). The main thread still uses `MAIN_SYSTEM`; `lead.md` and
-`review-chat.md` are `status: planned` and unused. Format: `workflows/agents/AGENTS.md`. Models stay
+`review-chat.md` are `status: planned` and unused. Format: `workflows/core/agents/AGENTS.md`. Models stay
 config (`RUNNER_MODEL`, `RUNNER_CHECK_MODEL`, `RUNNER_MAIN_MODEL`).

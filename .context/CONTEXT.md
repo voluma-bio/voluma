@@ -24,7 +24,7 @@ packages/
   viewer        in-browser DICOM ZIP parsing, Cornerstone acquired slices, persistent imaging slots
   ui            shared React components, styled from tokens
   design-tokens tokens.css (raw values, two themes) and theme.css (Tailwind mapping)
-workflows/      Workflow skill directories (`SKILL.md`, `outputs.json`, `tasks.json`, `references/`, `resources/`) and their Python skill resources
+workflows/      `core/` (role files, generic micro-CT skills, Python requirements) and one directory per workflow (`outputs.json`, `tasks.json`, `skills/`), with their Python skill resources
 tools/ci        PR-body check
 tools/dev.mjs   the `pnpm dev` launcher (below)
 ```
@@ -59,7 +59,7 @@ checklist, check threads, and review chat threads.
   where; prompts and tools take paths from it.
   There is no internet. The image is a public GHCR image pinned by digest (`SANDBOX_IMAGE` in
   `apps/runner/src/config.ts`), built by the "Sandbox image" workflow from
-  `apps/runner/sandbox/Dockerfile`, which installs `workflows/microct-analysis/requirements.txt`,
+  `apps/runner/sandbox/Dockerfile`, which installs `workflows/core/requirements.txt`,
   so a visitor's Modal workspace pulls the same one. Every command runs
   under `timeout -k`, which leads its own process group,; a timeout or an abort kills the whole
   group, except a descendant that calls `setsid` itself, which survives until the
@@ -156,7 +156,7 @@ checklist, check threads, and review chat threads.
   heartbeat was sent. SIGTERM stops every run, each reports `released`, and the process
   exits. A `voluma` run uses our keys; a `visitor` run uses the claim's, in that run's scope
   only. `redact.ts` masks every literal key in stored events and history rows, console lines
-  (redacted before they are clipped) and the report's `error`. Before a run's sandbox exists the runner snapshots the run's workflow skill directory (`workflows/workflow-<name>/`, plus the skill directories its `SKILL.md` lists in `uses`) from its own checkout into the run's R2 prefix, once per run, and reads the snapshot (`packages/workflow`). The plan is the tasks that produce the outputs the user selected (`Run.selectedOutputs`, all if absent) and what they depend on, built from `tasks.json` and `outputs.json` (`computePlan`), passed through `adaptPlan` (where the main thread will adapt it to the run's notes) and recorded in the first event; a resumed run keeps the plan its first event recorded. The prompts are the harness's role prompts plus the skill list (name, description, `/workflow/...` path; the agent reads the rest with bash) and the task's instructions and done criteria (`prompts.ts`). Every role's tools are `view_image` and, with a Meta key, `segment_sam`, built from the registry (`packages/harness/src/tools/registry.ts`). The claim carries no plan. Workflow format: voluma-bio/docs `work/mvp-contracts-and-data/design/workflow-format.md`.
+  (redacted before they are clipped) and the report's `error`. Before a run's sandbox exists the runner snapshots `workflows/core/` and the run's workflow directory (`workflows/<name>/`) from its own checkout into the run's R2 prefix, once per run, and reads the snapshot (`packages/workflow`). The plan is the tasks that produce the outputs the user selected (`Run.selectedOutputs`, all if absent) and what they depend on, built from `tasks.json` and `outputs.json` (`computePlan`), passed through `adaptPlan` (where the main thread will adapt it to the run's notes) and recorded in the first event; a resumed run keeps the plan its first event recorded. The prompts are the harness's role prompts plus the skill list (name, description, `/workflow/...` path; the agent reads the rest with bash) and the task's instructions and done criteria (`prompts.ts`). Every role's tools are `view_image` and, with a Meta key, `segment_sam`, built from the registry (`packages/harness/src/tools/registry.ts`). The claim carries no plan. Workflow format: voluma-bio/docs `work/mvp-contracts-and-data/design/workflow-format.md`.
 - **`seq` and the database.** `seq` per run is gapless and in commit order: each
   append takes a per-run advisory lock as its own statement before the insert (a lock
   inside the insert's statement races under READ COMMITTED), so the stream hub can
