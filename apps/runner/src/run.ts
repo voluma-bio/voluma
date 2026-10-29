@@ -18,7 +18,7 @@
  * End of the run, in order. A normal end closes the sandbox first, so its `stopped` event
  * and last seconds go out under the live lease, then waits for the conversion queue to drain
  * (bounded by `DRAIN_MS`, the lease heartbeating meanwhile; what is left is recorded as
- * failed), then reports. A stop (shutdown, self-stop) reports `released` first, so the run
+ * failed; a stop during the wait ends it and the run is released instead), then reports. A stop (shutdown, self-stop) reports `released` first, so the run
  * is recovered within the platform's grace period, then closes the sandboxes; it does not
  * drain, the next claim resumes the queue. A stop by the server or a lost lease reports
  * nothing.
@@ -438,17 +438,26 @@ export async function runClaim(
     error = redact(e instanceof Error ? e.message : String(e));
     log(`failed: ${error}`);
   } finally {
-    // Frozen here: a stop that lands while the run is being closed does not change its report.
-    const stopped = why.stopped;
-    const report = reportFor(stopped, stopped === "spend-cap" ? capError : error);
+    // Frozen here: a stop that lands while the run is being closed does not change its report,
+    // except during the drain below, where the queue is unfinished.
+    let report = reportFor(why.stopped, why.stopped === "spend-cap" ? capError : error);
     abort.abort();
-    // An ended run closes its sandbox while the lease is live, then waits for the review
-    // assets (a stop during the wait ends it: the listener stays until then); a released one
-    // reports first.
+    // An ended run closes its sandbox while the lease is live and waits for the review assets
+    // meanwhile; a released one reports first.
+    let closing: Promise<void> | undefined;
     if (report?.kind === "ended") {
-      await closeSandbox(CLOSE_BUDGET_MS.ended, session?.close.bind(session));
+      // Closing a sandbox takes ~30 s: the run's closes while the queue drains.
+      closing = closeSandbox(CLOSE_BUDGET_MS.ended, session?.close.bind(session));
       await convert?.drain(DRAIN_MS);
-      await closeSandbox(CLOSE_BUDGET_MS.ended, convert?.close.bind(convert));
+      // A stop during the drain (it ends it at once) wins: the run is released, not ended, so
+      // the next claim resumes the queue.
+      if (why.stopped && why.stopped !== "spend-cap") report = reportFor(why.stopped);
+      if (report?.kind === "ended") {
+        await Promise.all([
+          closing,
+          closeSandbox(CLOSE_BUDGET_MS.ended, convert?.close.bind(convert)),
+        ]);
+      }
     }
     shutdown.removeEventListener("abort", onShutdown);
     await live?.flush();
@@ -466,11 +475,14 @@ export async function runClaim(
       log(`model cost this claim: $${meter.totalModelCostUsd().toFixed(4)}`);
       for (const line of meter.cacheSummary()) log(`model usage this claim, ${line}`);
     } else {
-      log(`stopped (${stopped}); nothing more to report`);
+      log(`stopped (${why.stopped}); nothing more to report`);
     }
     if (report?.kind !== "ended") {
-      await closeSandbox(CLOSE_BUDGET_MS.stopped, session?.close.bind(session));
-      await closeSandbox(CLOSE_BUDGET_MS.stopped, convert?.close.bind(convert));
+      await Promise.all([
+        closing,
+        closeSandbox(CLOSE_BUDGET_MS.stopped, session?.close.bind(session)),
+        closeSandbox(CLOSE_BUDGET_MS.stopped, convert?.close.bind(convert)),
+      ]);
     }
   }
 

@@ -60,9 +60,9 @@ records `assets.ready` / `assets.failed` on the root thread (id `<runId>:assets:
   outlive. A stopped worker records nothing; the next claim finds the files again and the
   converter skips what has a `manifest.json` of its version and mode.
 - **Drain.** An `ended` report waits for the queue (`DRAIN_MS`, 10 minutes, the lease
-  heartbeating meanwhile) after the main sandbox is closed; what is left is recorded
+  heartbeating meanwhile), while the main sandbox closes; what is left is recorded
   `assets.failed {error: "timed out"}`, which is **permanent for the run**: the next claim
-  skips it and review shows the object without assets. A stop during the drain ends it at once.
+  skips it and review shows the object without assets. A stop during the drain ends it at once and the run is reported `released` (nothing, for a server stop or a lost lease) instead of `ended`, so the next claim resumes the queue.
   A `released` report does not drain.
 - **Not built.** Conversions run one at a time in one 2-CPU sandbox; the scan (about 1 GB of
   float32) is the long pole. Add sandboxes if the drain times out in practice.
@@ -73,7 +73,7 @@ Sandboxes cost money while up (a GPU one a lot), so every one must end. In order
 who ends it:
 
 1. **The runner, normally.** `run.ts` closes the run's sandboxes (one per thread) when the supervisor ends,
-   then drains the convert queue and closes the convert sandbox, before it flushes events and reports, so the `stopped` event and the last sandbox seconds
+   draining the convert queue meanwhile (a close takes ~30 s) and then closing the convert sandbox, before it flushes events and reports, so the `stopped` event and the last sandbox seconds
    are stored under the live lease. If the close takes over 60 s (15 s after a stop) it asks Modal to terminate
    the sandboxes of this claim, by their `{run, claim}` tags (the claim is a per-claim id: a
    released run's old runner must not kill the sandbox of the runner that reclaimed it).
