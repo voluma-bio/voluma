@@ -3,15 +3,17 @@
  * study. A study of one shows as its scan and links straight to its run.
  *
  * Data: `listStudies` for the table and `listRuns` for each study's runs (which run a study of
- * one opens, which runs failed or wait for keys, a live run's tasks done). Both refetch every
- * 5 s while any run is live.
+ * one opens, which runs failed or wait for keys, a live run's tasks done). Each refetches every
+ * 5 s while its own last answer shows a live run, and `studies` also while `runs` does: the two
+ * polls are independent, so each must make one fetch after the last run ends to stop with
+ * fresh counts.
  */
 import { useQuery } from "@tanstack/react-query";
 import { listRuns, listStudies } from "@voluma/api-client";
 import type { Run } from "@voluma/contracts/run";
 import type { StudySummary } from "@voluma/contracts/study";
-import { StatusBadge, type StatusTone } from "@voluma/ui";
-import { RunBadge, runHref } from "@voluma/ui/run";
+import { StatusBadge } from "@voluma/ui";
+import { RunBadge, runHref, studyStatus } from "@voluma/ui/run";
 import { workflowById } from "@voluma/workflow/bundled";
 import { Link } from "react-router";
 import { ButtonLink, Delayed, LoadError, ProgressBar } from "./parts";
@@ -74,7 +76,10 @@ export function HomePage() {
   const studies = useQuery({
     queryKey: ["studies"],
     queryFn: listStudies,
-    refetchInterval: live ? LIVE : false,
+    refetchInterval: (q) =>
+      live || q.state.data?.some(({ runCounts: c }) => c.queued + c.running + c.awaitingKeys > 0)
+        ? LIVE
+        : false,
   });
 
   const header = (
@@ -266,19 +271,6 @@ function Fraction({ done, total }: { done: number; total: number }) {
   );
 }
 
-/** A multi-scan study's chip: what most needs the researcher, else how far it got. */
-function studyChip(v: StudyView): { label: string; tone: StatusTone } {
-  const failures = v.newest.filter(failed).length;
-  if (failures > 0) return { label: `${failures} failed`, tone: "destructive" };
-  if (v.study.toCheck > 0) return { label: `${v.study.toCheck} to check`, tone: "check" };
-  if (v.newest.some((r) => r.state.status === "running")) return { label: "Running", tone: "info" };
-  if (v.newest.some((r) => r.state.status === "awaiting-keys"))
-    return { label: "Needs your keys", tone: "check" };
-  if (v.newest.some(isLive)) return { label: "Queued", tone: "neutral" };
-  if (v.progress.done === v.study.scanCount) return { label: "Completed", tone: "primary" };
-  return { label: v.progress.done > 0 ? "Partly run" : "Not started", tone: "neutral" };
-}
-
 const COLUMNS =
   "grid grid-cols-[minmax(0,1.6fr)_minmax(7rem,1fr)_minmax(6.5rem,auto)_minmax(0,1fr)_6.5rem] items-center gap-4 max-[760px]:grid-cols-[minmax(0,1fr)_auto]";
 
@@ -302,7 +294,11 @@ function StudyTable({ views }: { views: StudyView[] }) {
         <ul>
           {views.map((v) => {
             const one = v.study.scanCount === 1 ? v.newest[0] : undefined;
-            const chip = studyChip(v);
+            const chip = studyStatus({
+              scans: v.study.scanCount,
+              newest: v.newest,
+              toCheck: v.study.toCheck,
+            });
             return (
               <li key={v.study.id} className="border-b border-line-subtle last:border-b-0">
                 <Link to={v.href} className={`${COLUMNS} px-4 py-3 hover:bg-background`}>

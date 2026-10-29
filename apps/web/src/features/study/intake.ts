@@ -6,8 +6,9 @@
  * Names: the lab writes `<mouse><R|L>K`, e.g. `OA6-1RK` (mouse OA6-1, right knee), with an
  * optional separator (`OA6-1_LK`); otherwise a `left` or `right` word gives the knee only.
  *
- * The sheet: the first row is the header. Columns are found by header words: the scan or file
- * name, the mouse (`mouse`, `subject`, `animal`, `specimen`, `id`), the knee (`knee`, `side`,
+ * The sheet: the first row is the header; a CSV's delimiter (`,` `;` or tab) is the one the
+ * header line holds most of. Columns are found by header words: the scan or file name (a
+ * `name` or `file` header first; never a date or time), the mouse (`mouse`, `subject`, `animal`, `specimen`, `id`), the knee (`knee`, `side`,
  * `leg`) and the group (`group`, `treatment`, `condition`, `cohort`). A scan takes the row
  * that names its file; else the row with its mouse and knee; else, in a sheet without a knee
  * column, its mouse's row. Ids compare without case, spaces, `-` or `_`.
@@ -83,7 +84,15 @@ export async function readSheet(file: File): Promise<Sheet> {
     const { readXlsx } = await import("./xlsx");
     return { name, rows: await readXlsx(file) };
   }
-  return { name, rows: parseDelimited(await file.text(), /\.tsv$/i.test(name) ? "\t" : ",") };
+  const text = await file.text();
+  return { name, rows: parseDelimited(text, /\.tsv$/i.test(name) ? "\t" : delimiterOf(text)) };
+}
+
+/** The delimiter the header line uses most: `;` from a European-locale Excel, tab, else `,`. */
+function delimiterOf(text: string): string {
+  const header = text.slice(0, text.search(/\r|\n|$/));
+  const count = (d: string) => header.split(d).length;
+  return [";", "\t"].reduce((best, d) => (count(d) > count(best) ? d : best), ",");
 }
 
 const COLUMNS = {
@@ -104,7 +113,10 @@ export interface SheetColumns {
 export function sheetColumns(header: string[]): SheetColumns {
   const find = (re: RegExp, taken: number[] = []) =>
     header.findIndex((h, i) => !taken.includes(i) && re.test(h));
-  const file = find(COLUMNS.file);
+  // "Scan date" names no file; "Scan name" beats "Scan".
+  const fileLike = header.map((h) => COLUMNS.file.test(h) && !/date|time/i.test(h));
+  const named = header.findIndex((h, i) => fileLike[i] && /name|file/i.test(h));
+  const file = named >= 0 ? named : fileLike.indexOf(true);
   const subject = find(COLUMNS.subject, [file]);
   return {
     file,
@@ -112,6 +124,12 @@ export function sheetColumns(header: string[]): SheetColumns {
     knee: find(COLUMNS.knee, [file, subject]),
     group: find(COLUMNS.group, [file, subject]),
   };
+}
+
+/** Whether the sheet's header names any column intake reads. */
+export function sheetRecognised(sheet: Sheet): boolean {
+  const col = sheetColumns(sheet.rows[0] ?? []);
+  return col.file >= 0 || col.subject >= 0 || col.group >= 0;
 }
 
 /** The sample `name` reads as: its parsed name, filled and overridden by its sheet row. */

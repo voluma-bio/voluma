@@ -1,9 +1,9 @@
 /**
- * A run's status chip, from the `Run` alone (no events): the caller-independent mapping of
- * `Run.state` and `Run.review` to a `StatusBadge` tone and label, shared by Home, the study
- * page and the run page. A completed run with open items reads "N to check", else
- * "Completed", since a failed task raises no item. Also where a run's row links, and how its
- * cost and time read.
+ * The status words of a run and of a study, from `Run`s alone (no events), shared by Home, the
+ * study page and the run page so they read the same: Running, N to check, Checked, Failed,
+ * Waiting (queued), Needs your keys, Not started. A completed run with no open item reads
+ * "Checked" (a failed task raises an item), and "Reviewed" once someone marks it reviewed, which
+ * is never inferred. Also where a run's row links, and how its cost and time read.
  */
 import type { Run } from "@voluma/contracts/run";
 import { StatusBadge, type StatusTone } from "../status-badge";
@@ -41,7 +41,7 @@ export type RunStatus = { label: string; tone: StatusTone; detail?: string };
 export function runStatus({ state, review }: Run): RunStatus {
   switch (state.status) {
     case "queued":
-      return { label: "Queued", tone: "neutral", detail: `Place ${state.position} in line` };
+      return { label: "Waiting", tone: "neutral", detail: `Place ${state.position} in line` };
     case "running":
       return { label: "Running", tone: "info", detail: `Started ${formatTime(state.startedAt)}` };
     case "awaiting-keys":
@@ -52,7 +52,7 @@ export function runStatus({ state, review }: Run): RunStatus {
           ? { label: "Reviewed", tone: "primary" }
           : review?.remainingToCheck
             ? { label: `${review.remainingToCheck} to check`, tone: "check" }
-            : { label: "Completed", tone: "primary" };
+            : { label: "Checked", tone: "primary" };
       if (state.outcome === "failed")
         return { label: "Failed", tone: "destructive", detail: state.error };
       return { label: "Stopped", tone: "neutral" };
@@ -62,4 +62,36 @@ export function runStatus({ state, review }: Run): RunStatus {
 export function RunBadge({ run }: { run: Run }) {
   const { label, tone } = runStatus(run);
   return <StatusBadge tone={tone}>{label}</StatusBadge>;
+}
+
+/**
+ * A study's status from each scan's newest run (`newest`, one per scan that has run) and its
+ * open checks (`StudySummary.toCheck`): what most needs the researcher, else how far it got. A
+ * study of one reads as its run (`runStatus`).
+ */
+export function studyStatus({
+  scans,
+  newest,
+  toCheck,
+}: {
+  scans: number;
+  newest: Run[];
+  toCheck: number;
+}): RunStatus {
+  const count = (status: Run["state"]["status"]) =>
+    newest.filter((r) => r.state.status === status).length;
+  const failed = newest.filter(
+    (r) => r.state.status === "ended" && r.state.outcome === "failed",
+  ).length;
+  if (failed > 0) return { label: `${failed} failed`, tone: "destructive" };
+  if (toCheck > 0) return { label: `${toCheck} to check`, tone: "check" };
+  if (count("running") > 0) return { label: "Running", tone: "info" };
+  if (count("awaiting-keys") > 0) return { label: "Needs your keys", tone: "check" };
+  if (count("queued") > 0) return { label: "Waiting", tone: "neutral" };
+  const completed = newest.filter(
+    (r) => r.state.status === "ended" && r.state.outcome === "completed",
+  ).length;
+  if (completed === scans) return { label: "Checked", tone: "primary" };
+  if (completed > 0) return { label: `${scans - completed} not started`, tone: "neutral" };
+  return { label: "Not started", tone: "neutral" };
 }

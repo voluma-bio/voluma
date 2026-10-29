@@ -2,6 +2,7 @@
   {
     "id": "intake",
     "title": "Scan intake",
+    "summary": "Read the scan: voxel size, dimensions, calibration, and anything wrong with the files.",
     "dependsOn": [],
     "outputs": ["header", "scan"],
     "instructions": "Read the scan header and the files in /inputs: voxel spacing, size, orientation, and any problem with the data. Write what you found for the later tasks, and the notes' account of the field in /outputs/intake/scan-notes.md (scan-intake skill).",
@@ -12,6 +13,7 @@
   {
     "id": "orientation",
     "title": "Orientation",
+    "summary": "Align the knee so femur and tibia sit on their shaft axes, one frame for every later task.",
     "dependsOn": ["intake"],
     "outputs": ["frame"],
     "instructions": "Orient the stack so the later tasks share one frame (a labels-ready volume with known axes), with the orient-joint skill.",
@@ -22,6 +24,7 @@
   {
     "id": "segmentation",
     "title": "Segmentation",
+    "summary": "Segment the bones and joint structures; a piece the data don’t support isn’t named.",
     "dependsOn": ["orientation"],
     "outputs": [
       "patella-volume",
@@ -45,6 +48,7 @@
   {
     "id": "iioc",
     "title": "Tibial IIOC",
+    "summary": "Define ROI-1 from the growth plate to the articular surface; report its volumes, heights and the tibial width.",
     "dependsOn": ["segmentation"],
     "outputs": [
       "tv-tibial-iioc",
@@ -71,6 +75,7 @@
   {
     "id": "subchondral-plate",
     "title": "Subchondral bone plate",
+    "summary": "Measure subchondral bone plate thickness, medial and lateral.",
     "dependsOn": ["iioc"],
     "outputs": [
       "subchondral-bone-plate-thickness-medial",
@@ -86,6 +91,7 @@
   {
     "id": "trabecular-roi",
     "title": "IIOC trabecular bone",
+    "summary": "Define ROI-2: ROI-1 without the plate and the cortical line; report its volumes.",
     "dependsOn": ["iioc", "subchondral-plate"],
     "outputs": [
       "tv-iioc-trab",
@@ -102,6 +108,7 @@
   {
     "id": "metaphyseal-roi",
     "title": "Proximal tibial metaphysis",
+    "summary": "Define ROI-3, 50–250 µm below the growth plate and 20 µm clear of cortex; report its trabecular parameters.",
     "dependsOn": ["iioc"],
     "outputs": [
       "metaphyseal-tv",
@@ -124,6 +131,7 @@
   {
     "id": "cortical",
     "title": "Tibial cortical thickness",
+    "summary": "Measure cortical thickness 100 µm and 1000 µm below the growth plate.",
     "dependsOn": ["metaphyseal-roi"],
     "outputs": [
       "cortical-thickness-100-um-below-the-growth-plate",
@@ -139,6 +147,7 @@
   {
     "id": "femoral-geometry",
     "title": "Distal femur",
+    "summary": "Place the femoral landmarks and measure distal femoral length, width and their ratio.",
     "dependsOn": ["segmentation"],
     "outputs": [
       "distal-femoral-length-dfl",

@@ -1,17 +1,27 @@
 /**
- * A bundled workflow's tasks as a researcher reads them: each task's title, the first sentence
- * of what it asks, and the measurements it reports. Shown in "See tasks" (a side panel over Run
- * on new scans, so the choice in progress stays put) and on the Workflows page.
+ * A bundled workflow's tasks as a researcher reads them: each task's title, its `summary` (the
+ * researcher's sentence in `tasks.json`; never the agent's instructions, which name paths and
+ * skills), and the measurements it reports. Shown in "See tasks" (a side panel over Run on new
+ * scans, so the choice in progress stays put) and on the Workflows page.
  */
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
-import { X } from "lucide-react";
+import { ExternalLink, X } from "lucide-react";
 import { useEffect, useRef } from "react";
-
-/** The instructions' first sentence: the rest is for the AI (paths, skills, file layouts). */
-const firstSentence = (text: string) => /^.*?[.!?](?=\s|$)/s.exec(text)?.[0] ?? text;
+import { Link } from "react-router";
 
 export const measurementsOf = (workflow: BundledWorkflow) =>
   workflow.outputs.filter((o) => o.kind === "measurement");
+
+/** "Measurements from Segmentation, Tibial IIOC… and Distal femur.": the tasks that report one, in task order. */
+export function measuredBy(workflow: BundledWorkflow): string {
+  const measuring = new Set(measurementsOf(workflow).map((o) => o.task));
+  const titles = workflow.tasks
+    .filter((t) => measuring.has(t.id))
+    .map((t) => workflow.taskTitle(t.id));
+  const last = titles.pop();
+  if (!last) return "";
+  return `Measurements from ${titles.length > 0 ? `${titles.join(", ")} and ${last}` : last}.`;
+}
 
 export function TaskList({ workflow }: { workflow: BundledWorkflow }) {
   return (
@@ -23,7 +33,7 @@ export function TaskList({ workflow }: { workflow: BundledWorkflow }) {
             <span className="pt-px font-mono text-meta text-fg-subtle tabular-nums">{i + 1}</span>
             <div>
               <p className="font-medium">{workflow.taskTitle(task.id)}</p>
-              <p className="text-ui text-muted-foreground">{firstSentence(task.instructions)}</p>
+              {task.summary && <p className="text-ui text-muted-foreground">{task.summary}</p>}
               {measures.length > 0 && (
                 // Names hold commas ("TV, tibial IIOC"), so each is its own chip.
                 <ul aria-label="Measures" className="mt-1.5 flex flex-wrap gap-1">
@@ -89,6 +99,18 @@ export function WorkflowPanel({
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
         <TaskList workflow={workflow} />
       </div>
+      <footer className="border-t border-border px-5 py-3">
+        {/* A new tab: leaving Run on new scans would drop the uploads under way. */}
+        <Link
+          to="/workflows"
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1.5 text-ui text-primary-text hover:underline"
+        >
+          Open in Workflows
+          <ExternalLink className="size-3.5" aria-label="opens in a new tab" />
+        </Link>
+      </footer>
     </dialog>
   );
 }

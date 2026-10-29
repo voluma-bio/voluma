@@ -6,6 +6,9 @@
  * then complete. A scan with files that didn't upload waits for Retry, which sends only
  * those; one whose complete failed retries the complete. Removing a scan aborts and cancels
  * its upload. Leaving the page aborts them all; a reload asks first.
+ *
+ * Bytes sent live outside React state (`Progress`), read per scan with `useSent`: progress
+ * arrives every frame, and page state changing at frame rate re-renders the whole page.
  */
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -22,7 +25,7 @@ import {
   type Input,
   MAX_UPLOAD_FILE_BYTES,
 } from "@voluma/contracts/run";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { ScanFile } from "./scan-files";
 
 /** Files PUT at once; enough to fill a lab uplink without starving the page. */
@@ -32,7 +35,8 @@ const TRIES = 3;
 
 export type UploadState =
   | { kind: "waiting" }
-  | { kind: "uploading"; sent: number; total: number }
+  /** Bytes sent so far: `useSent`. */
+  | { kind: "uploading"; total: number }
   | { kind: "finishing" }
   | { kind: "ready"; input: Input }
   /** These files didn't upload; Retry sends them again. */
@@ -81,12 +85,38 @@ function refusal(name: string, files: ScanFile[]): string | undefined {
     return "Some file names can't be stored (hidden characters, or a file and a folder with the same name).";
 }
 
+/** Bytes sent per scan id, with a listener per id so only that scan's line re-renders. */
+function progressStore() {
+  const sent = new Map<string, number>();
+  const listeners = new Map<string, Set<() => void>>();
+  return {
+    get: (id: string) => sent.get(id) ?? 0,
+    set(id: string, bytes: number) {
+      sent.set(id, bytes);
+      for (const listener of listeners.get(id) ?? []) listener();
+    },
+    subscribe(id: string, listener: () => void) {
+      const set = listeners.get(id) ?? new Set();
+      listeners.set(id, set.add(listener));
+      return () => set.delete(listener);
+    },
+  };
+}
+export type Progress = ReturnType<typeof progressStore>;
+
+/** A scan's bytes sent, re-rendering its caller (and nothing else) as they change. */
+export function useSent(progress: Progress, id: string): number {
+  const subscribe = useCallback((l: () => void) => progress.subscribe(id, l), [progress, id]);
+  return useSyncExternalStore(subscribe, () => progress.get(id));
+}
+
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const isAbort = (error: unknown) => error instanceof DOMException && error.name === "AbortError";
 
 export function useUploads() {
   const queryClient = useQueryClient();
   const [states, setStates] = useState<Record<string, UploadState>>({});
+  const [progress] = useState(progressStore);
   const jobs = useRef(new Map<string, Job>());
   const active = useRef<string>(undefined);
 
@@ -107,7 +137,7 @@ export function useUploads() {
         if (job.frame) return;
         job.frame = requestAnimationFrame(() => {
           job.frame = 0;
-          if (!signal.aborted) set(id, { kind: "uploading", sent: sent(), total });
+          if (!signal.aborted) progress.set(id, sent());
         });
       };
       // Leaving the uploading state drops a pending progress frame, so it can't land after.
@@ -118,11 +148,17 @@ export function useUploads() {
       };
       try {
         if (!job.created) {
-          set(id, { kind: "uploading", sent: 0, total });
+          set(id, { kind: "uploading", total });
           job.created = await createUpload({
             name: job.name,
             files: job.files.map((f) => ({ path: f.path, size: f.file.size })),
           });
+          // Removed (or the page left) while this was being created: `remove` saw no upload to
+          // cancel, so free its place under the open-upload limit here.
+          if (signal.aborted) {
+            void cancelUpload(job.created.inputId).catch(() => {});
+            return;
+          }
         }
         const created = job.created;
         // Only new PUTs need a live URL; a complete-only retry works after expiry.
@@ -133,7 +169,8 @@ export function useUploads() {
             retry: false,
           });
         }
-        set(id, { kind: "uploading", sent: sent(), total });
+        progress.set(id, sent());
+        set(id, { kind: "uploading", total });
         const urls = new Map(created.uploads.map((u) => [u.path, u.url]));
         const files = new Map(job.files.map((f) => [f.path, f.file]));
         const queue = [...job.paths];
@@ -184,7 +221,7 @@ export function useUploads() {
         });
       }
     },
-    [queryClient, set],
+    [queryClient, set, progress],
   );
 
   const pump = useCallback(() => {
@@ -270,5 +307,5 @@ export function useUploads() {
     return () => window.removeEventListener("beforeunload", warn);
   }, [busy]);
 
-  return { states, add, retry, remove };
+  return { states, progress, add, retry, remove };
 }

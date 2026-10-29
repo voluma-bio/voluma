@@ -4,14 +4,21 @@
  *
  *   - A sample sheet (`.csv`, `.tsv`, `.xlsx`) is the sheet, wherever it sits.
  *   - An archive (`.zip`, `.tar`, `.tgz`, `.tar.gz`) or a volume file (`.isq`, `.aim`,
- *     `.nii`, `.nii.gz`, `.nrrd`, `.mha`, `.vff`) is one scan on its own, named after the file.
+ *     `.nii`, `.nii.gz`, `.nrrd`, `.mha`, `.vff`, with or without a VMS version such as
+ *     Scanco's `;1`) is one scan on its own, named after the file.
  *   - Any other file is a slice (DICOM with or without `.dcm`, TIFF, BMP, PNG). A folder is one
  *     scan when every slice under it sits in one folder (`OA6-1RK/` of slices, or
- *     `OA6-1RK/DICOM/` of slices), named after that outer folder, with its whole subtree.
- *     Otherwise each of its subfolders is looked at the same way (a folder of scans).
+ *     `OA6-1RK/DICOM/` of slices), with its whole subtree. Otherwise each of its subfolders is
+ *     looked at the same way (a folder of scans).
+ *   - A folder with slices of its own and one `*_rec` folder of slices is a Skyscan export: the
+ *     scan is the folder without the projections beside the reconstruction.
  *   - Loose slices dropped together, outside any folder, are one scan.
- *   - Documents (`.pdf`, `.txt`, `.docx`...) are skipped unless they sit inside a scan's folder.
+ *   - Preview folders (`thumbs`, `preview`...) and documents (`.pdf`, `.txt`, `.docx`...) are
+ *     not used, except that documents inside a scan's folder go with it.
  *   - Hidden files (`.DS_Store`, `._` forks) are never part of a scan.
+ *
+ * A folder scan is named after its nearest folder that isn't a generic one (`DICOM`, `rec`,
+ * `images`...), without a `_rec` suffix: `OA6-1RK/DICOM/` and `M1_rec/` give `OA6-1RK` and `M1`.
  *
  * A scan's paths are relative to its folder (the folder becomes the name): what the run sees
  * under `/inputs`.
@@ -42,8 +49,23 @@ export interface Grouped {
 }
 
 const SHEET = /\.(csv|tsv|xlsx)$/i;
-const SCAN_FILE = /\.(zip|tar|tgz|tar\.gz|isq|aim|nii|nii\.gz|nrrd|mha|vff)$/i;
+const SCAN_FILE = /\.(zip|tar|tgz|tar\.gz|isq|aim|nii|nii\.gz|nrrd|mha|vff)(;\d+)?$/i;
 const DOCUMENT = /\.(pdf|txt|md|rtf|doc|docx|ppt|pptx|xls|json|log|html?)$/i;
+
+const PREVIEW = /^(thumbs?|thumbnails?|previews?)$/i;
+const GENERIC =
+  /^(dicom|dcm|images?|slices?|series|rec|recon|reconstructions?|data|scans?|tiffs?|bmps?|raw|export(ed)?|volume)$/i;
+const REC = /_rec$/i;
+
+/** The nearest folder on `path` that names the scan (`OA6-1RK/DICOM` → `OA6-1RK`), else its last folder. */
+function scanName(path: string): string {
+  const parts = path.split("/");
+  for (const part of [...parts].reverse()) {
+    const name = part.replace(REC, "");
+    if (name && !GENERIC.test(name)) return name;
+  }
+  return parts.at(-1) ?? "Scan";
+}
 
 type Kind = "sheet" | "scan" | "document" | "slice";
 const kindOf = (name: string): Kind =>
@@ -107,17 +129,34 @@ const relativeTo = (files: Dropped[], dir: Dropped["path"]) =>
 
 export function groupDropped(dropped: Dropped[]): Grouped {
   const out: Grouped = { scans: [], sheets: [], skipped: [] };
+  const used: Dropped[] = [];
+  for (const d of dropped) {
+    const folders = d.path.split("/").slice(0, -1);
+    if (folders.some((f) => PREVIEW.test(f))) out.skipped.push(d.path);
+    else used.push(d);
+  }
+
+  /** `dir` (at `path`) as one scan, less `drop`: its sheets go to the sheets, the rest is the scan. */
+  function whole(dir: Dir, path: string, name: string, drop: Dropped[] = []) {
+    const files = everyFile(dir).filter((f) => !drop.includes(f));
+    out.sheets.push(...files.filter((f) => kindOf(f.file.name) === "sheet").map((f) => f.file));
+    const scan = files.filter((f) => kindOf(f.file.name) !== "sheet");
+    out.scans.push({ name, files: relativeTo(scan, path) });
+  }
 
   function visit(dir: Dir, path: string) {
     const isRoot = path === "";
     const folders = sliceFolders(dir);
     // A named folder whose slices all sit in one folder is one scan.
-    if (!isRoot && folders === 1) {
-      const files = everyFile(dir);
-      out.sheets.push(...files.filter((f) => kindOf(f.file.name) === "sheet").map((f) => f.file));
-      const scan = files.filter((f) => kindOf(f.file.name) !== "sheet");
-      out.scans.push({ name: dir.name, files: relativeTo(scan, path) });
-      return;
+    if (!isRoot && folders === 1) return whole(dir, path, scanName(path));
+    // Skyscan: projections here, the reconstruction in `<name>_rec/`.
+    const subs = [...dir.dirs.values()];
+    const rec = subs.filter((d) => REC.test(d.name) && sliceFolders(d) === 1);
+    const own = dir.files.filter((f) => kindOf(f.file.name) === "slice");
+    if (!isRoot && rec.length === 1 && rec[0] && own.length > 0 && folders === 2) {
+      out.skipped.push(...own.map((f) => f.path));
+      // The rest of the folder (Skyscan's `.log` holds the pixel size) goes with the scan.
+      return whole(dir, path, scanName(path), own);
     }
     const loose: Dropped[] = [];
     for (const f of dir.files) {
@@ -131,14 +170,14 @@ export function groupDropped(dropped: Dropped[]): Grouped {
     // Slices beside other scans' folders: one scan, named after where they sit.
     if (loose.length > 0) {
       out.scans.push({
-        name: isRoot ? looseName(loose) : dir.name,
+        name: isRoot ? looseName(loose) : scanName(path),
         files: relativeTo(loose, path),
       });
     }
     for (const sub of dir.dirs.values()) visit(sub, isRoot ? sub.name : `${path}/${sub.name}`);
   }
 
-  visit(tree(dropped), "");
+  visit(tree(used), "");
   out.scans.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
   return out;
 }
