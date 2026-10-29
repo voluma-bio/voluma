@@ -74,9 +74,10 @@
  * sandbox time. The server adds them up per run, and that sum is what the org's
  * dollar ceiling counts. A heartbeat the server did not acknowledge is resent
  * with its usage added to the next one. The runner sends `costCapUsd` (its
- * `RUNNER_MAX_RUN_COST_USD`) with the claim, which stores it as the run's spend
- * cap for the provider gateway to check. The heartbeat answers with `spentUsd`,
- * the run's total spend including its provider calls, so the runner's own cap
+ * `RUNNER_MAX_RUN_COST_USD`) with the claim only when that is set, and the claim
+ * stores it as the run's spend cap for the provider gateway to check. Unset, the
+ * run has no cap. The heartbeat answers with `spentUsd`,
+ * the run's settled spend including its provider calls, so the runner's own cap
  * sees spend that did not come through its heartbeats.
  *
  * Reports. The runner ends the run with `ended`, or gives it up with
@@ -124,7 +125,7 @@ export const claimRequestSchema = z.object({
   runnerId: runnerIdSchema,
   /**
    * The runner's `RUNNER_MAX_RUN_COST_USD`; the claim stores it as the run's spend cap, which
-   * the provider gateway checks. Absent: the API stores its default, $10.
+   * the provider gateway checks. Absent: no cap (spend is still recorded).
    */
   costCapUsd: z.number().positive().optional(),
 });
@@ -165,10 +166,11 @@ export const heartbeatResponseSchema = z.object({
   /** The server has ended the run; stop it. */
   stop: z.boolean(),
   /**
-   * The run's spend in US dollars as the gateway's cap counts it: heartbeat-reported model
-   * cost, plus each provider call's cost, or its reservation while the call is open or was
-   * cut off. Higher than `Run.providerCalls` while a call is open. Optional until the API
-   * sends it.
+   * The run's settled spend in US dollars: heartbeat-reported model cost, plus each finished
+   * provider call's cost, or its reservation if it was cut off. A call still open counts
+   * nothing (the gateway holds its reservation against the cap itself, so the runner does not
+   * stop a run for a reservation). The same provider-call sum as `Run.providerCalls`. Optional
+   * until the API sends it.
    */
   spentUsd: z.number().nonnegative().optional(),
 });

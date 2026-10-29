@@ -18,6 +18,7 @@ import {
   type Usage as RunnerUsage,
 } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
+import { heldUsdOfRun } from "@voluma/provider-calls";
 import { and, asc, desc, eq, gt, notInArray, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { Reader } from "../../domain";
@@ -278,7 +279,7 @@ export function pgRunQueue(
      * under the lock: a start that holds its keys before it commits is either in them or
      * not yet queued.
      */
-    claim: (runnerId: string) =>
+    claim: (runnerId: string, costCapUsd?: number) =>
       locked(async (tx): Promise<Claimed | null> => {
         await sweep(tx);
         await tx
@@ -335,6 +336,7 @@ export function pgRunQueue(
               leaseHolder: runnerId,
               leaseToken,
               leaseExpiresAt: leaseUntil,
+              costCapUsd: costCapUsd ?? null,
             })
             .where(eq(runs.id, run.id));
           const keys = run.credentials === "visitor" ? vault.take(run.id) : undefined;
@@ -348,7 +350,10 @@ export function pgRunQueue(
         return null;
       }),
 
-    /** Extends the lease and adds the usage; `stop` once the run has ended. Throws `LeaseLost`. */
+    /**
+     * Extends the lease and adds the usage; `stop` once the run has ended. `spentUsd` is the
+     * run's settled spend: its model cost plus its finished provider calls (open ones count nothing). Throws `LeaseLost`.
+     */
     heartbeat: (runId: string, leaseToken: string, used: RunnerUsage) =>
       locked(async (tx) => {
         const [run] = await tx
@@ -378,7 +383,8 @@ export function pgRunQueue(
             return { stop: true };
           }
         }
-        return { stop: false };
+        const gateway = await heldUsdOfRun(tx, runId);
+        return { stop: false, spentUsd: run.modelCostUsd + used.modelCostUsd + gateway };
       }),
 
     /** Throws `LeaseLost` or `RunEnded`. */
