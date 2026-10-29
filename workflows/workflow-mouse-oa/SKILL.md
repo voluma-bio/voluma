@@ -8,11 +8,9 @@ uses:
   - workflows/microct-analysis
 ---
 
-# Mouse OA workflow (STARTER: edit me)
+# Mouse OA workflow
 
-This is a starter written from the lab's 28-parameter spec, for Jimmy and Andrew to edit.
-`outputs.json` and `tasks.json` are drafts: task names, dependencies, instructions and
-criteria are guesses, and `range` is missing wherever the expected range is unknown.
+A run measures the lab's 28 standard knee parameters on one mouse knee scan, numbered as in the lab's deck.
 
 - `outputs.json`: the 28 outputs a run can produce, in the deck's numbering (`sourceRef`).
 - `tasks.json`: the tasks that produce them and what each builds on.

@@ -144,17 +144,13 @@ Report `disagreement.npy` as a `volume` output of kind `labels` so the focus res
 
 ## When you check a task
 
-You are the checker: you judge a finished task and do not redo it (you have no `segment_sam`). If a segmentation is wrong,
-say what and where, and let the main thread decide on a rerun.
+What a checker re-derives and opens for a task that made or used labels:
 
-1. Read the task's done criteria, the worker's checkpoints and its outputs.
-2. Re-derive what is cheap, writing under `/scratch/recheck/` so the worker's evidence stays as it was: `label_stats.py` and
-   `unlabelled.py` on the worker's labels, a distance or volume recomputed with `measure.py`, a value against the plan's range.
-3. Look yourself (`visual-check`): the 3D sheet, the overlay on the keyframe, the crop of anything `unlabelled.py` found, and
-   every image the worker cited. Do not trust a description of an image you have not opened.
-4. Write the checkpoint verdict `passed` or `needs-review`. For `needs-review` name the cause (a wrong box, a missing neighbour, a merged fragment, a
-   label on two bones, a number out of range with no explanation, a result that cannot be traced to a file), cite the image
-   or number, and give the region (slice, coordinates, label) so a To check item can point at it.
+- Re-derive under `/scratch/recheck/`: `label_stats.py` and `unlabelled.py` on the worker's labels, and any distance or
+  volume with `measure.py`.
+- Open the 3D sheet, the overlay on the keyframe, and the crop of anything `unlabelled.py` found (`visual-check`).
+- Causes to name for `needs-review`: a wrong box, a missing neighbour, a merged fragment, a label on two bones, a number out of
+  range with no explanation, a result that cannot be traced to a file.
 
 Your eyes are fallible on small things and on bone names away from the joint: confirm in code before you reject, and say
-which of the two you relied on. A To check item the worker raised for a real question is not a defect.
+which of the two you relied on.
