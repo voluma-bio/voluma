@@ -71,7 +71,7 @@ export interface RunnerContext {
   log(line: string): void;
 }
 
-type Stopped = StopReason | "shutdown";
+type Stopped = StopReason | "shutdown" | "spend-cap";
 
 /** Which report a stop reason, a clean end or a failure becomes; undefined: say nothing more. */
 function reportFor(
@@ -129,7 +129,16 @@ export async function runClaim(
   shutdown.addEventListener("abort", onShutdown);
   if (shutdown.aborted) stop("shutdown");
 
-  const meter = usageMeter();
+  // Model and SAM dollars across every claim of the run (the server holds the earlier claims').
+  // Crossing the cap stops everything in flight; the run then ends `failed` naming it.
+  let capError: string | undefined;
+  const meter = usageMeter((claimUsd) => {
+    const total = (run.usage?.modelCostUsd ?? 0) + claimUsd;
+    if (capError || total < config.maxRunCostUsd) return;
+    capError = `spend cap $${config.maxRunCostUsd} reached at $${total.toFixed(2)}`;
+    log(capError);
+    stop("spend-cap");
+  });
   const client = runClient(
     config.api,
     { runId, leaseToken },
@@ -349,7 +358,7 @@ export async function runClaim(
     shutdown.removeEventListener("abort", onShutdown);
     // Frozen here: a stop that lands while the run is being closed does not change its report.
     const stopped = why.stopped;
-    const report = reportFor(stopped, error);
+    const report = reportFor(stopped, stopped === "spend-cap" ? capError : error);
     abort.abort();
     if (stopped === undefined) await closeSandbox(CLOSE_BUDGET_MS.ended);
     await live?.flush();

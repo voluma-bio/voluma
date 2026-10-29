@@ -84,6 +84,21 @@ when a claim reports (`model cost this claim`), and the API stores it as `runs.m
 On 2026-10-28 the claims' lines summed to the run's `model_cost_usd` and to `spend(events).total`
 ($0.9763 over five claims of one run).
 
+**Spend cap.** `RUNNER_MAX_RUN_COST_USD` (default 5) caps a run's model and SAM dollars across all
+its claims (the claim's `run.usage` plus this claim's meter; sandbox time is not counted). The meter
+calls back on each addition; at the cap `run.ts` stops the run and reports `ended failed` with
+`spend cap $X reached at $Y`. Calls in flight are aborted, not waited for.
+
+**A main-thread reply that does not parse.** `llmMainThread` escapes raw control characters inside
+JSON strings, and otherwise sends the reply back once with what was wrong (appended after the
+cached prefix); if that fails too, the wake records both errors and the judgment falls back as for
+any failed main thread.
+
+**`segment_sam` 404.** Meta answers `404 model_not_found` for some inputs (seen: a small box prompt)
+and bills nothing for it. The adapter retries once on the uploaded file; a second 404 throws a
+message naming every object asked for, with its box, and saying the prompt is the likely cause. It
+does not bisect: each successful probe costs a full SAM call ($0.07-0.10).
+
 # Runner: what `/outputs` and `/scratch` support
 
 Both are R2 bucket mounts (`modal-sandbox.ts`), so a file is written whole, once. Rename
