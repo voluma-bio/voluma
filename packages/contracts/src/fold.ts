@@ -524,7 +524,7 @@ export function fold(events: readonly RunEvent[]): Folded {
         threadKind.set(e.threadId, e.payload.kind);
         if (e.payload.model) threadModel.set(e.threadId, e.payload.model);
         const checked = e.payload.attemptId && attempts.get(e.payload.attemptId);
-        // A wake re-emits `thread.started` for the same thread: only a new check thread resets the verdict.
+        // A resume re-emits `thread.started` for the same thread: only a new check thread resets the verdict.
         if (e.payload.kind === "check" && checked && checked.checkThread !== e.threadId) {
           checked.checkThread = e.threadId;
           checked.checker = null; // the verdict shown is this check's

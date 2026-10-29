@@ -16,7 +16,7 @@ import type { RunRecord } from "../../ports";
 
 /** Null until the run's first `revision.started`: a run with no plan has nothing to review. */
 export function reviewRun({ run, events, results: { revisions } }: RunRecord): ReviewRun | null {
-  // Not `events[0]`: the supervisor's `thread.started` and the run-start `wake` come first.
+  // Not `events[0]`: the root's `thread.started` comes first.
   const start = events.find((e) => e.type === "revision.started" && e.payload.reason === "run");
   if (start?.type !== "revision.started" || start.payload.reason !== "run") return null;
   // Each revision's plan is the fold's: the run's plus every `plan.changed` so far, so added tasks show.

@@ -21,7 +21,7 @@ export type Thread = {
   kind: "supervisor" | "main" | "worker" | "check" | "chat";
   taskId?: string;
   model?: string;
-  /** Its latest start: a woken thread's clock counts from its wake. */
+  /** Its latest start: a resumed thread's clock counts from its resume. */
   startedAt: string;
   /** Where its clock stops: its end, the run's end, or its last event while paused. */
   endedAt?: string;
@@ -323,9 +323,8 @@ const ENDED: ReadonlySet<TaskState> = new Set(["done", "to-check", "failed", "st
 /**
  * Each ended task's outcome line: its current attempt's last checkpoint from the worker (the
  * result in the worker's words, with its numbers), else the checker's. A
- * failed task says why it failed. Not the main thread's wake note, which is the whole notes block
- * for every task so far, nor the closing `task` reason, a rule's stock sentence ("The second agent
- * checked this task and agrees"); a judgment's reason is about the check, not the result.
+ * failed task says why it failed. Not the closing `task` reason, a rule's stock sentence ("The second agent
+ * checked this task and agrees"): it is about the check, not the result.
  */
 function outcomes(
   events: RunEvent[],

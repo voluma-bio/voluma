@@ -129,15 +129,14 @@ export function RunPage() {
   );
   const threads = useMemo(() => withLiveCalls(view.threads, live), [view.threads, live]);
   const threadById = useMemo(() => new Map(threads.map((t) => [t.id, t])), [threads]);
-  const main = threads.find((t) => t.kind === "supervisor");
+  // The root thread spans the run; the main agent's threads (`main`, `main.2`, ...) are the page's transcript.
+  const root = threads.find((t) => t.kind === "supervisor");
   const openId = params.get("thread");
-  const open = openId && openId !== main?.id ? threadById.get(openId) : undefined;
+  const opened = openId ? threadById.get(openId) : undefined;
+  const open = opened?.kind === "main" || opened?.kind === "supervisor" ? undefined : opened;
   const rows = useMemo(
-    () =>
-      openId && openId !== main?.id
-        ? threadRows(events, openId, live, halt)
-        : mainRows(events, live),
-    [events, live, halt, openId, main?.id],
+    () => (open ? threadRows(events, open.id, live, halt) : mainRows(events, live, halt)),
+    [events, live, halt, open],
   );
   const openThread = useCallback(
     (threadId: string | null) => setParams(threadId ? { thread: threadId } : {}),
@@ -190,7 +189,7 @@ export function RunPage() {
             <span className="ml-auto flex items-center gap-2">
               <RunSpendSummary
                 spend={spend}
-                since={main?.status === "running" ? events.at(-1)?.createdAt : undefined}
+                since={root?.status === "running" ? events.at(-1)?.createdAt : undefined}
               />
               <RunActions run={data} onChange={setRun} />
             </span>
@@ -213,12 +212,12 @@ export function RunPage() {
                 <div className="px-6 max-[1100px]:px-4">
                   <RunningStrip
                     threads={threads.filter(
-                      (t) => t.status === "running" && t.kind !== "supervisor",
+                      (t) => t.status === "running" && (t.kind === "worker" || t.kind === "check"),
                     )}
                   />
                 </div>
               )}
-              {openId && !open && openId !== main?.id ? (
+              {openId && !opened ? (
                 <Message>This thread isn't in the run yet.</Message>
               ) : (
                 <TranscriptView

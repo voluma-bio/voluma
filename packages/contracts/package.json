@@ -10,7 +10,6 @@
     "./download": "./src/download.ts",
     "./events": "./src/events.ts",
     "./stream": "./src/stream.ts",
-    "./thread-message": "./src/thread-message.ts",
     "./task-tools": "./src/task-tools.ts",
     "./auth": "./src/auth.ts",
     "./history": "./src/history.ts",
