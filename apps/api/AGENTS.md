@@ -77,14 +77,19 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   run whose keys its process doesn't hold to `awaiting-keys`. The vault holds at most 100
   runs per org (429), and `index.ts` caps every `/api` body at 256 KB (8 MB on `/api/run/ingest/*`, the trusted runner).
 - **Limits come from env** (`RUN_LIMITS_<ORG>_*`, read in `index.ts`); the workflow catalog
-  (`catalog.ts`) is code. `seed:example --from <runId> [--backfill <dir|r2:prefix>]` makes an example run
+  (`catalog.ts`) is code. `seed:example --from <runId> [--backfill <dir|r2:prefix>] [--remote]` makes an example run
   (`src/domains/run/seed-example.ts`). To get a run into a fresh local database:
-  `export:run --id <runId> --out <dir|r2:prefix>` dumps its rows to `run.json`, and
+  `export:run --id <runId> --out <dir|r2:dev/…>` dumps its rows to `run.json`, and
   `import:run --from <dir|r2:prefix> [--replace]` loads them (events are checked with
   `runEventSchema`; an existing run is refused without `--replace`). Evidence stays in R2.
-  `r2:put --from <dir> --to r2:<prefix>` uploads a folder. An `r2:` location is a prefix in the
-  `R2_BUCKET` the dev servers use (`r2-dir.ts`). Shared dev data: `dev/runs/<runId>/` (dump) and
-  `dev/backfill/<runId>/` (backfill folder) for ce5a0f21-c948-4e20-a03f-04ff7f0e707b. Outage and restart behaviour: [.context/deploy.md](.context/deploy.md).
+  `r2:put --from <dir> --to r2:dev/<prefix>` uploads a folder. An `r2:` location is a prefix in the
+  `R2_BUCKET` the dev servers use (`r2-dir.ts`). Operator scripts use `DATABASE_URL`, else the
+  database `pnpm dev` wrote to `.dev/env.json`; each prints its database and bucket first, writes to
+  R2 only under `dev/`, and `import:run` / `seed:example` refuse a non-local database without
+  `--remote`. R2 is shared with staging, so a local seed names its example
+  `example-local-<runId>` (it refuses `example-<runId>`, the id staging reads, without `--remote`).
+  Shared dev data: `dev/runs/<runId>/` (dump) and `dev/backfill/<runId>/` (backfill folder) for
+  ce5a0f21-c948-4e20-a03f-04ff7f0e707b. Outage and restart behaviour: [.context/deploy.md](.context/deploy.md).
 
 ## Review domain (`src/domains/review`)
 

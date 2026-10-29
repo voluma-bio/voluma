@@ -9,7 +9,8 @@
  *   assets/<sha256>/      the converter's output for each reported .npy, `manifest.json` last
  *
  * The result is a rewrite of the seeded log, not an append: the fold reads declarations from the
- * recorded plan, and each output has to sit inside its task's last attempt. Every id is derived
+ * recorded plan, and each output has to sit inside its task's last attempt. A To check item's
+ * focus ids must name outputs of this backfill (bare = the item's task's, `task/output` otherwise). Every id is derived
  * from the example's id and the output, so seeding again rewrites the same events.
  */
 import { createHash } from "node:crypto";
@@ -59,7 +60,7 @@ async function sha256Of(path: string): Promise<string> {
 /**
  * Uploads the directory's files as the example's evidence (checking each file's name is its hash,
  * since the directory crosses a trust boundary) and its assets under `reviewAssetKey`, and returns
- * what each asset directory's manifest says. Objects already stored with the same size are kept.
+ * what each asset directory's manifest says. Evidence is content-addressed, so a stored one is kept; assets are overwritten unless the stored bytes match.
  */
 export async function uploadBackfill(
   r2: S3Client,
@@ -72,7 +73,7 @@ export async function uploadBackfill(
     const sha = sha256Schema.parse(name.split(".")[0]);
     const path = join(dir, "files", name);
     if ((await sha256Of(path)) !== sha) throw new Error(`${path} is not the file its name says`);
-    await put(r2, bucket, evidenceKey(exampleId, sha), path);
+    await put(r2, bucket, evidenceKey(exampleId, sha), path, { immutable: true });
   });
 
   const ready: AssetsReady[] = [];
@@ -167,6 +168,15 @@ export function backfillRows(
       createdAt,
     }));
   });
+
+  const known = new Set(backfill.outputs.map((o) => `${o.taskId}/${o.outputId}`));
+  for (const { taskId, title, focus } of backfill.checks) {
+    for (const id of [...(focus?.on ?? []), ...(focus?.volumeId ? [focus.volumeId] : [])]) {
+      if (!known.has(id.includes("/") ? id : `${taskId}/${id}`)) {
+        throw new Error(`To check "${title}": focus id ${id} names no output of the backfill`);
+      }
+    }
+  }
 
   const out = result.flatMap((r, i) => [...(inserts.get(i) ?? []), r]);
   const last = out.at(-1) as EventRow;

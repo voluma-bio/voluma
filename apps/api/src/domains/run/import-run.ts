@@ -1,10 +1,11 @@
 /**
  * Operator script: load a run dumped by `export-run.ts` into DATABASE_URL.
- *   pnpm --filter @voluma/api import:run --from <dir|r2:prefix> [--replace]
+ *   pnpm --filter @voluma/api import:run --from <dir|r2:prefix> [--replace] [--remote]
  * Refuses when the run already exists unless `--replace`, which deletes it and its events,
  * threads and pi messages first. Every event is checked against `runEventSchema` and the ones
  * that fail are listed, with nothing written. The run's input row is added if it is missing.
- * Evidence is not copied: it stays in R2 under `runs/<id>/evidence/`, shared by every database.
+ * Every row must belong to the run. Writes only to a local database unless `--remote` (see
+ * `operator.ts`). Evidence is not copied: it stays in R2 under `runs/<id>/evidence/`, shared by every database.
  */
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -15,13 +16,15 @@ import { eq, getTableColumns, sql } from "drizzle-orm";
 import type { PgTable } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { localDir, required } from "./r2-dir";
+import { databaseUrl } from "./operator";
+import { withLocalDir } from "./r2-dir";
 import { events, inputs, piMessages, runs, threads } from "./schema";
 
 const { values } = parseArgs({
-  options: { from: { type: "string" }, replace: { type: "boolean" } },
+  options: { from: { type: "string" }, replace: { type: "boolean" }, remote: { type: "boolean" } },
 });
-if (!values.from) throw new Error("usage: import:run --from <dir|r2:prefix> [--replace]");
+if (!values.from)
+  throw new Error("usage: import:run --from <dir|r2:prefix> [--replace] [--remote]");
 
 /** The dump is JSON, so its timestamps are strings; Drizzle wants Dates. */
 function revive<T extends PgTable>(table: T, row: unknown): T["$inferInsert"] {
@@ -32,16 +35,28 @@ function revive<T extends PgTable>(table: T, row: unknown): T["$inferInsert"] {
   return out as T["$inferInsert"];
 }
 
-const source = await localDir(values.from);
-const dump = JSON.parse(await readFile(join(source.dir, "run.json"), "utf8")) as {
-  run: { id: string };
-  input: unknown;
-  events: { id: string; seq: number }[];
-  threads: unknown[];
-  piMessages: unknown[];
-};
-await source.done();
+const url = databaseUrl({ writes: true, remote: values.remote });
+const dump = await withLocalDir(
+  values.from,
+  async (dir) =>
+    JSON.parse(await readFile(join(dir, "run.json"), "utf8")) as {
+      run: { id: string };
+      input: unknown;
+      events: { id: string; seq: number; runId: string }[];
+      threads: { runId: string }[];
+      piMessages: { threadId: string }[];
+    },
+);
 const runId = runIdSchema.parse(dump.run.id);
+
+const strays = [
+  ...dump.events.filter((e) => e.runId !== runId).map((e) => `event ${e.id}`),
+  ...dump.threads.filter((t) => t.runId !== runId).map((t) => `thread of ${t.runId}`),
+  ...dump.piMessages.filter((m) => !m.threadId.startsWith(`${runId}.`)).map((m) => m.threadId),
+];
+if (strays.length > 0) {
+  throw new Error(`${strays.length} rows are not run ${runId}'s: ${strays.slice(0, 5).join(", ")}`);
+}
 
 const failed = dump.events.flatMap((e) => {
   const result = runEventSchema.safeParse(e);
@@ -51,7 +66,7 @@ if (failed.length > 0) {
   throw new Error(`${failed.length} events fail runEventSchema:\n${failed.join("\n")}`);
 }
 
-const client = postgres(required("DATABASE_URL"));
+const client = postgres(url);
 const db = drizzle(client, { casing: "snake_case" });
 await db.transaction(async (tx) => {
   const [existing] = await tx.select({ id: runs.id }).from(runs).where(eq(runs.id, runId));

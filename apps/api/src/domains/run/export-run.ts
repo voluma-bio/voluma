@@ -1,7 +1,7 @@
 /**
- * Operator script: dump one run's rows from DATABASE_URL, so another database can load them
+ * Operator script: dump one run's rows from DATABASE_URL (else this worktree's `pnpm dev` database), so another database can load them
  * (`import-run.ts`).
- *   pnpm --filter @voluma/api export:run --id <runId> --out <dir|r2:prefix>
+ *   pnpm --filter @voluma/api export:run --id <runId> --out <dir|r2:dev/prefix>
  * Writes `run.json`: the run, its input, events, threads and pi messages (what `seed:example` reads).
  * Evidence stays in R2 under `runs/<id>/evidence/`; nothing there is copied.
  */
@@ -13,17 +13,18 @@ import { runIdSchema } from "@voluma/contracts/ids";
 import { asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { r2FromEnv, r2Prefix, required, uploadDir } from "./r2-dir";
+import { databaseUrl } from "./operator";
+import { devWritePrefix, r2FromEnv, r2Prefix, uploadDir } from "./r2-dir";
 import { events, inputs, piMessages, runs, threads } from "./schema";
 
 const { values } = parseArgs({ options: { id: { type: "string" }, out: { type: "string" } } });
 if (!values.id || !values.out)
   throw new Error("usage: export:run --id <runId> --out <dir|r2:prefix>");
 const runId = runIdSchema.parse(values.id);
-const prefix = r2Prefix(values.out);
+const prefix = r2Prefix(values.out) && devWritePrefix(values.out);
 const out = prefix ? await mkdtemp(join(tmpdir(), "voluma-export-")) : values.out;
 
-const client = postgres(required("DATABASE_URL"));
+const client = postgres(databaseUrl({ writes: false }));
 const db = drizzle(client, { casing: "snake_case" });
 const [run] = await db.select().from(runs).where(eq(runs.id, runId));
 if (!run) throw new Error(`run ${runId} not found`);

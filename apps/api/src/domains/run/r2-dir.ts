@@ -4,8 +4,9 @@
  * (`r2:dev/runs/<id>/`). An `r2:` folder is downloaded to a temp folder first, so the code after
  * it reads a plain folder. Reads the R2 settings from the environment (the repo .env).
  */
+import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { mkdir, mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -49,29 +50,33 @@ export function r2Prefix(spec: string): string | null {
   return prefix;
 }
 
-export async function exists(
+/**
+ * Stores the file at `key`. Content-addressed keys (`immutable`: evidence by sha256) are skipped
+ * when present. Every other key is overwritten unless the stored ETag equals the file's MD5 (what
+ * R2 reports for a single-part upload), so a changed file never leaves stale bytes.
+ */
+export async function put(
   r2: S3Client,
   bucket: string,
   key: string,
-  size: number,
-): Promise<boolean> {
+  path: string,
+  { immutable = false } = {},
+): Promise<void> {
+  // A buffer, not a stream: the SDK can retry it when the connection drops.
+  const body = await readFile(path);
   try {
     const head = await r2.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
-    return head.ContentLength === size;
+    if (
+      immutable ||
+      head.ETag?.replaceAll('"', "") === createHash("md5").update(body).digest("hex")
+    )
+      return;
   } catch (error) {
-    if ((error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404) {
-      return false;
+    if ((error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode !== 404) {
+      throw error;
     }
-    throw error;
   }
-}
-
-/** Stores the file unless the key already holds an object of the same size. */
-export async function put(r2: S3Client, bucket: string, key: string, path: string): Promise<void> {
-  const { size } = await stat(path);
-  if (await exists(r2, bucket, key, size)) return;
-  // A buffer, not a stream: the SDK can retry it when the connection drops.
-  await r2.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: await readFile(path) }));
+  await r2.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body }));
 }
 
 /** Runs `work` over `items`, `limit` at a time. */
@@ -102,6 +107,7 @@ export async function uploadDir(
   prefix: string,
 ): Promise<number> {
   const paths = await filesUnder(dir);
+  console.log(`uploading ${paths.length} files to bucket ${bucket}, prefix ${prefix}`);
   // A reader treats a folder with its manifest as complete, so manifests go last.
   const isManifest = (p: string) => p.endsWith("manifest.json");
   await pool(
@@ -113,8 +119,12 @@ export async function uploadDir(
   return paths.length;
 }
 
-async function downloadDir(r2: S3Client, bucket: string, prefix: string): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "voluma-r2-"));
+async function downloadDir(
+  r2: S3Client,
+  bucket: string,
+  prefix: string,
+  dir: string,
+): Promise<void> {
   const keys: string[] = [];
   for (let token: string | undefined; ; ) {
     const page = await r2.send(
@@ -134,14 +144,28 @@ async function downloadDir(r2: S3Client, bucket: string, prefix: string): Promis
     await mkdir(dirname(path), { recursive: true });
     await pipeline(body as NodeJS.ReadableStream, createWriteStream(path));
   });
-  return dir;
 }
 
-/** A local folder for `spec`; `done` removes it when it was downloaded. */
-export async function localDir(spec: string): Promise<{ dir: string; done: () => Promise<void> }> {
+/** Runs `use` on a local folder for `spec` (an `r2:` folder is downloaded and removed afterwards). */
+export async function withLocalDir<T>(spec: string, use: (dir: string) => Promise<T>): Promise<T> {
   const prefix = r2Prefix(spec);
-  if (!prefix) return { dir: spec, done: async () => {} };
+  if (!prefix) return use(spec);
   const { r2, bucket } = r2FromEnv();
-  const dir = await downloadDir(r2, bucket, prefix);
-  return { dir, done: () => rm(dir, { recursive: true, force: true }) };
+  const dir = await mkdtemp(join(tmpdir(), "voluma-r2-"));
+  try {
+    await downloadDir(r2, bucket, prefix, dir);
+    return await use(dir);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * The `r2:` prefix a script may write to: only under `dev/`, which holds the shared dev data.
+ * `runs/…` belongs to the API, and the bucket is shared with staging.
+ */
+export function devWritePrefix(spec: string): string {
+  const prefix = r2Prefix(spec);
+  if (!prefix?.startsWith("dev/")) throw new Error(`${spec}: scripts write only to r2:dev/…`);
+  return prefix;
 }
