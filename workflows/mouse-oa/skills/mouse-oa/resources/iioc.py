@@ -30,17 +30,19 @@ import numpy as np
 from scipy import ndimage as ndi
 
 HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the generic skills are found by walking up to the directory that holds them.
-SKILLS = next((p / 'core/skills' for p in HERE.parents
-               if (p / 'core/skills/microct-core/resources/sidecar.py').exists()), None)
-if SKILLS is None:
-    sys.exit('Cannot find microct-core: this script expects core/skills/microct-core/resources/ in a '
-             'directory above it (<workflows>/mouse-oa/skills/mouse-oa/resources/ with <workflows>/core/ beside it)')
-sys.path[:0] = [str(HERE), str(SKILLS / 'microct-core/resources'), str(SKILLS / 'regions-and-landmarks/resources')]
-import frame as fr
-import sidecar
-from envelope import close_and_fill
-from region_from_curves import surface_from_curves
+# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
+# only missing directories are added, so a script imported by another leaves the importer's order alone.
+SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
+sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources'), str(SKILLS / 'regions-and-landmarks/resources')) if d not in sys.path]
+try:
+    import frame as fr
+    import sidecar
+    from annotations import load_annotations, need, traced_surface
+    from envelope import close_and_fill
+except ModuleNotFoundError as e:
+    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
+          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
+    sys.exit(2)
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -49,18 +51,7 @@ MIN_COMPONENT = 50  # coronal fragments below this many pixels are segmentation 
 EDGE_ERODE = 3  # footprint erosion for the local-height search: avoids tangential edge extrema
 
 
-def traced_surface(spec, key, shape):
-    """W index per (V, U) from curves in region_from_curves' schema, traced on coronal sections (axis 1, height = row)."""
-    if spec.get('axis') != 1 or spec.get('height', 'row') != 'row':
-        sidecar.fail(f'"{key}" must be traced on coronal sections of the aligned stack: {{"axis": 1, "height": "row", "slices": '
-                     '{"<v>": [[w, u], ...]}} (a point is [row = W, column = U])')
-    if len(spec.get('slices', {})) < 2:
-        sidecar.fail(f'"{key}" needs curves on at least two coronal sections (V indices): trace more sections')
-    H, *_, valid = surface_from_curves(spec, shape)
-    return H, valid
-
-
-def envelope(bone, gp):
+def envelope(bone, gp, vox):
     """Filled tibial envelope under the face gp (W index per V,U). The cut face is sealed before filling marrow."""
     result = np.zeros(bone.shape, bool)
     wi = np.arange(bone.shape[0])[:, None]
@@ -76,7 +67,7 @@ def envelope(bone, gp):
         if len(us) > 1:
             uu = np.arange(us[0], us[-1] + 1)
             plane[np.clip(np.ceil(gp[v, uu]).astype(int) - 1, 0, bone.shape[0] - 1), uu] = True
-        result[:, v, :] = close_and_fill(plane)
+        result[:, v, :] = close_and_fill(plane, vox)
     result = ndi.binary_fill_holes(ndi.binary_closing(result, iterations=1) | result)
     for u in range(bone.shape[2]):
         result[:, :, u] = ndi.binary_fill_holes(result[:, :, u])
@@ -120,22 +111,6 @@ def first_run(bone, v, u):
     return start, end
 
 
-def load_annotations(path, grid_id):
-    """Annotations hold indices on one aligned grid; read them only for that grid."""
-    ann = json.loads(Path(path).read_text())
-    if 'grid_id' not in ann:
-        sidecar.fail(f'{path} has no "grid_id": copy the grid_id of the aligned grid you traced on (tibia-frame.json) into it')
-    if ann['grid_id'] != grid_id:
-        sidecar.fail(f'{path} was traced on another aligned grid (grid_id differs): its indices do not apply here; trace again')
-    return ann
-
-
-def need(ann, key, hint):
-    if key not in ann:
-        sidecar.fail(f'annotations.json has no "{key}": {hint}')
-    return ann[key]
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--hu-aligned', required=True, help='tibia-hu.npy from tibia_frame.py')
@@ -166,7 +141,7 @@ def main():
     gp = gp + a.gp_shift_mm / vox
     v_traced = sorted(int(k) for k in gp_spec['slices'])
     gp_traced = gp_traced & (np.arange(gp.shape[0])[:, None] >= v_traced[0]) & (np.arange(gp.shape[0])[:, None] <= v_traced[-1])
-    env = envelope(tib, gp)
+    env = envelope(tib, gp, vox)
     w = np.arange(h.shape[0])[:, None, None]
     roi = env & (w < gp[None])
     for fix in ann.get('articular_corrections', []):

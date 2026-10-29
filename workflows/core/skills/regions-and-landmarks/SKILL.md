@@ -83,7 +83,7 @@ python region_from_curves.py polygon --polygons poly.json --grid hu.json --bone 
 
 This curves schema (`axis`, `height`, `slices`) and `surface_from_curves` in `region_from_curves.py` are the only way surfaces are
 traced and interpolated: a workflow's own region scripts import that function rather than carry a second one, so a trace means
-the same thing in every script. A polyline is read as height as a function of the other coordinate, joined linearly. Between traced slices the surface is
+the same thing in every script. A workflow's region scripts also import `annotations.py` (`load_annotations`, `traced_surface`, with the `grid_id` check) rather than reread an annotations file themselves. A polyline is read as height as a function of the other coordinate, joined linearly. Between traced slices the surface is
 joined linearly; the region exists only between the first and last traced slices (or `--slice-range lo hi`) and only
 where the polylines reach along the other axis. `--offset-a-mm` and `--offset-b-mm` move a surface along the height axis,
 which makes a slab at a set distance from a surface (for example a 100 um band starting 30 um above a traced surface).

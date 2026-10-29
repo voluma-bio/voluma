@@ -7,22 +7,13 @@ import hashlib
 import json
 import math
 import os
-import sys
 from pathlib import Path
 
+import frame as fr
 import matplotlib
 import numpy as np
+import sidecar
 from scipy import ndimage as ndi
-
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path, so every directory a script imports from is added here.
-sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'microct-core/resources')]
-try:
-    import frame as fr
-    import sidecar
-except ModuleNotFoundError as e:
-    sys.exit(f'{e}: this script expects <workflows>/core/skills/<skill>/resources/ with '
-             '<workflows>/core/skills/microct-core/resources/sidecar.py beside it')
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt

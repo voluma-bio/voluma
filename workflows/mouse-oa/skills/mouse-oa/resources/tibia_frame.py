@@ -12,7 +12,7 @@ patches) is indexed on this aligned grid: array axes (W, V, U), W running from t
 Writes <out>/<name>-hu.npy (float32, linear), <name>-mask.npy (bool, nearest), <name>-frame.json, and a QC
 montage. The frame.json (schema and maps in `microct-core/resources/frame.py`) maps aligned indices back to the scan grid, which
 `iioc.py` uses to measure on the scan. This script only fits the axes and the crop; it stays here, not in `orient-joint`,
-because its sign rule (+U medial, +V anterior), its crop defaults and `envelope.close_and_fill` are the mouse tibia protocol's.
+because its sign rule (+U medial, +V anterior) and its crop defaults are the mouse tibia protocol's.
 """
 
 import argparse
@@ -23,16 +23,18 @@ import matplotlib
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; microct-core is found by walking up to the directory that holds it.
-CORE = next((p / 'core/skills/microct-core/resources' for p in HERE.parents
-             if (p / 'core/skills/microct-core/resources/sidecar.py').exists()), None)
-if CORE is None:
-    sys.exit('Cannot find microct-core: this script expects core/skills/microct-core/resources/ in a '
-             'directory above it (<workflows>/mouse-oa/skills/mouse-oa/resources/ with <workflows>/core/ beside it)')
-sys.path[:0] = [str(HERE), str(CORE)]
-import frame as fr
-import sidecar
-from envelope import close_and_fill
+# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
+# only missing directories are added, so a script imported by another leaves the importer's order alone.
+SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
+sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources')) if d not in sys.path]
+try:
+    import frame as fr
+    import sidecar
+    from envelope import close_and_fill
+except ModuleNotFoundError as e:
+    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
+          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
+    sys.exit(2)
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -49,10 +51,10 @@ def zrange(frac, lo, hi, joint_end):
     return round(lo + a * n), round(lo + b * n)
 
 
-def fit_frame(mask, shaft_z, epi_z, joint_end):
+def fit_frame(mask, shaft_z, epi_z, joint_end, vox):
     centers = []
     for z in range(shaft_z[0], shaft_z[1], 10):
-        yy, xx = np.where(close_and_fill(mask[z]))
+        yy, xx = np.where(close_and_fill(mask[z], vox))
         if len(yy) == 0:
             sidecar.fail(f'label has no voxels at slice {z}: widen --shaft-frac or check --label and --joint-end')
         centers.append([xx.mean(), yy.mean(), z])
@@ -133,7 +135,7 @@ def main():
     zs = np.flatnonzero(mask.any(axis=(1, 2)))
     shaft_z = a.shaft_z or zrange(a.shaft_frac, zs[0], zs[-1], a.joint_end)
     epi_z = a.epiphysis_z or zrange(a.epiphysis_frac, zs[0], zs[-1], a.joint_end)
-    basis, origin = fit_frame(mask, shaft_z, epi_z, a.joint_end)
+    basis, origin = fit_frame(mask, shaft_z, epi_z, a.joint_end, sp[0])
     depth_vox = round(a.depth_mm / sp[0])
     if a.crop_lower_uvw and a.crop_shape_uvw:
         low, shape_xyz = np.array(a.crop_lower_uvw), np.array(a.crop_shape_uvw)
