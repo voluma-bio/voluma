@@ -8,13 +8,13 @@
  * process), idle (its latest invocation ended completed or failed; a message resumes it),
  * stopped (that invocation ended cancelled; never resumed) or cut off (its latest start has
  * no end and it is not running). A stop appends the end first, so the log shows it at once.
- *
- * The wakes, judgments and notes of the old supervisor are still derived here until
- * `supervisor.ts` is deleted.
  */
 import type { RunEvent } from "@voluma/contracts/events";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { PayloadOf } from "./recorder";
+
+/** The part of a verdict's checkpoint the main agent is told (`text` cut to this many characters). */
+const VERDICT_TEXT_MAX = 1500;
 
 export type Role = "worker" | "check";
 
@@ -23,7 +23,7 @@ export interface AskRecord {
   /** The `ask` event's id. */
   id: string;
   question: string;
-  answer: { id: string; text: string } | undefined;
+  answer: { id: string; text: string; files: { root: string; path: string }[] } | undefined;
 }
 
 export type ThreadState = "running" | "idle" | "stopped" | "cut-off";
@@ -54,6 +54,9 @@ interface ThreadFields {
   waitingMs: number | undefined;
   /** The text of its latest reply in the latest invocation. */
   reply: string;
+  /** Log positions of its latest start and of the latest answer to one of its asks. */
+  startedAt: number;
+  answeredAt: number | undefined;
   /** It made a task `under-review` in the latest invocation. */
   submitted: boolean;
 }
@@ -72,7 +75,13 @@ export type Notice = {
   | { kind: "worker-idle"; reply: string }
   | { kind: "failed"; error: string }
   /** `rule` says how the check ended (`check-result`, `check-limit`, `fix-limit`). */
-  | { kind: "check-result"; rule: string; verdict?: "passed" | "needs-review"; summary?: string }
+  | {
+      kind: "check-result";
+      rule: string;
+      verdict?: "passed" | "needs-review";
+      summary?: string;
+      text?: string;
+    }
   | { kind: "ask"; question: string }
   | { kind: "stale"; reason: string }
 );
@@ -95,14 +104,8 @@ export interface ThreadLog {
   undelivered: Notice[];
   /** How many of the latest deliveries in a row carried no notice. */
   emptyDeliveries: number;
-  /** Judgment events by the id of the thread whose end raised the point. */
-  judgments: Map<string, PayloadOf<"judgment">>;
-  /** The main thread's wakes by `<thread id>@<starts>` of the thread whose end raised them, in log order. */
-  wakes: Map<string, PayloadOf<"wake">>;
   /** Why the previous claim ended, from the latest `claim.started`; undefined on a run's first claim. */
   after: ClaimEndReason | undefined;
-  /** The notes block in force: the latest wake's `note`. */
-  notes: string | undefined;
   ids: Set<string>;
 }
 
@@ -133,9 +136,6 @@ export const openAsk = (r: ThreadRecord): AskRecord | undefined => {
   return last && !last.answer ? last : undefined;
 };
 
-export const JUDGMENT_SUFFIX = ":judgment";
-export const WAKE_SUFFIX = ":wake";
-
 // The log only grows, so its length says whether the derivation is current.
 const memo = new WeakMap<readonly RunEvent[], { length: number; value: ThreadLog }>();
 
@@ -151,10 +151,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
     cursor: undefined,
     undelivered: [],
     emptyDeliveries: 0,
-    judgments: new Map(),
-    wakes: new Map(),
     after: undefined,
-    notes: undefined,
     ids: new Set(),
   };
   const briefed = new Set<string>(); // threads whose brief (first user message) the log holds
@@ -163,7 +160,10 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
   const resumedCutOff = new Set<string>();
   const index = new Map<string, number>(); // event id -> position in the log
   const openers = new Map<string, string>(); // task -> thread that opened its current attempt
-  const verdicts = new Map<string, { verdict: "passed" | "needs-review"; summary?: string }>(); // by attempt
+  const verdicts = new Map<
+    string,
+    { verdict: "passed" | "needs-review"; summary?: string; text: string }
+  >(); // by attempt
   const deliveries: { at: number }[] = []; // positions of the events each delivery covered
   const notice = (n: NoticeBody, at: number) => value.notices.push({ ...n, at } as Notice);
   for (const [at, e] of events.entries()) {
@@ -193,6 +193,8 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
           startedMs: ms,
           waitingMs: record?.waitingMs,
           reply: "",
+          startedAt: at,
+          answeredAt: record?.answeredAt,
           submitted: false,
         };
         value.threads.set(
@@ -234,12 +236,14 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         if (record && e.payload.role === "assistant") record.reply = e.payload.text;
         if (record && e.payload.role === "user" && e.payload.sender.kind === "runtime") {
           const afterCutOff = resumedCutOff.delete(e.threadId);
-          if (briefed.has(e.threadId) && !afterCutOff) record.wakes++;
+          const first = !briefed.has(e.threadId);
+          if (!first && !afterCutOff) record.wakes++;
           briefed.add(e.threadId);
           const { covers } = e.payload.sender;
           if (record.role === "main" && covers !== undefined) {
             value.cursor = covers;
-            deliveries.push({ at: index.get(covers) ?? -1 });
+            // A thread's first message is its brief, not a delivery: it does not count toward liveness.
+            if (!first) deliveries.push({ at: index.get(covers) ?? -1 });
           }
         }
         break;
@@ -247,9 +251,9 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         openers.set(e.payload.taskId, e.threadId);
         break;
       case "checkpoint": {
-        const { verdict, summary } = e.payload;
+        const { verdict, summary, text } = e.payload;
         if (verdict && record?.role === "check") {
-          verdicts.set(e.payload.attemptId, { verdict, ...(summary && { summary }) });
+          verdicts.set(e.payload.attemptId, { verdict, ...(summary && { summary }), text });
         }
         break;
       }
@@ -274,7 +278,19 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
           ) {
             value.fixRounds.set(taskId, (value.fixRounds.get(taskId) ?? 0) + 1);
           }
-          notice({ ...base, kind: "check-result", rule: by.rule, ...result }, at);
+          notice(
+            {
+              ...base,
+              kind: "check-result",
+              rule: by.rule,
+              ...(result && {
+                verdict: result.verdict,
+                ...(result.summary && { summary: result.summary }),
+                text: result.text.slice(0, VERDICT_TEXT_MAX),
+              }),
+            },
+            at,
+          );
         }
         break;
       }
@@ -297,24 +313,14 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         const target = value.threads.get(e.payload.checkThreadId);
         const ask = target?.asks.find((a) => a.id === e.payload.askId);
         if (target && ask && !ask.answer) {
-          ask.answer = { id: e.id, text: e.payload.text };
+          ask.answer = { id: e.id, text: e.payload.text, files: e.payload.files ?? [] };
+          target.answeredAt = at;
           const next = target.asks.find((a) => !a.answer);
           if (target.waitingMs !== undefined) target.closedMs += ms - target.waitingMs;
           target.waitingMs = next ? ms : undefined;
         }
         break;
       }
-      case "judgment":
-        if (e.id.endsWith(JUDGMENT_SUFFIX)) {
-          value.judgments.set(e.id.slice(0, -JUDGMENT_SUFFIX.length), e.payload);
-        }
-        break;
-      case "wake":
-        if (e.id.endsWith(WAKE_SUFFIX)) {
-          value.wakes.set(e.id.slice(0, -WAKE_SUFFIX.length), e.payload);
-          if (e.payload.note !== undefined) value.notes = e.payload.note;
-        }
-        break;
     }
   }
   for (const [taskId, thread] of openers) {
@@ -336,4 +342,14 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
 export const startedFor = (d: ThreadLog, taskId: string, role: Role) =>
   [...d.threads.values()].filter(
     (r): r is TaskThread => r.role !== "main" && r.taskId === taskId && r.role === role,
+  );
+
+/**
+ * Whether the run has ended: the root has a completed `thread.ended` (`finish_run` or the
+ * liveness rule wrote it). A failed end is the run's failure and is never read back.
+ */
+export const runEnded = (events: readonly RunEvent[], rootThreadId: string): boolean =>
+  events.some(
+    (e) =>
+      e.threadId === rootThreadId && e.type === "thread.ended" && e.payload.status === "completed",
   );

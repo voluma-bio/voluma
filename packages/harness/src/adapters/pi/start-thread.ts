@@ -60,6 +60,8 @@ export type StartThreadOptions = ThreadIdentity & {
   interrupted?: (toolName: string, toolCallId: string) => string | undefined;
   /** The thread's first user message; also sent if a resumed thread never stored one. */
   prompt: string;
+  /** The delivery cursor of a main agent's first message built from the log (`message.sender.covers`). */
+  promptCovers?: string;
   /**
    * A new user message for a thread that already has history. A thread whose last reply
    * ended its turn does nothing without one (`ran` is false in the outcome).
@@ -237,7 +239,10 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       if (hasUser) {
         if (options.input) addPrompt(options.input.text, options.input.sender);
       } else {
-        addPrompt(options.prompt, { kind: "runtime" });
+        addPrompt(options.prompt, {
+          kind: "runtime",
+          ...(options.promptCovers && { covers: options.promptCovers }),
+        });
       }
       for (const { text, sender } of early.splice(0)) addPrompt(text, sender);
       const message = prompts.length > 0 ? prompts : undefined;

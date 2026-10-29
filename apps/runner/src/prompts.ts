@@ -6,6 +6,7 @@
  * skill list, both fixed by the run's snapshot. What varies by task goes in the thread's
  * first message.
  */
+import type { Folded, FoldedTask } from "@voluma/contracts/fold";
 import type { ThreadLayout } from "@voluma/harness/layout";
 import type { PlanTask } from "@voluma/harness/supervise-run";
 import type { AgentDefinition, WorkflowDefinition } from "@voluma/workflow/definition";
@@ -52,6 +53,8 @@ function toolIndex(def: WorkflowDefinition, role: AgentDefinition): string {
 /** The role file's body, then the generated environment text, skill list and tool index. */
 export function systemPrompt(def: WorkflowDefinition, thread: ThreadLayout): string {
   const role = def.agents[thread.role];
+  // The main agent has no shell unless its file grants bash; its text is its file's body.
+  if (thread.role === "main" && !role.tools.includes("bash")) return role.body;
   return `${role.body}\n\n${common(thread.role, thread)}\n\n${skillList(def, role)}\n\n${toolIndex(def, role)}`;
 }
 
@@ -94,8 +97,34 @@ export function workerPrompt(task: PlanTask, notes: Notes): string {
   return `Your task is "${task.id}". ${needs}\n${taskBrief(task)}\n${outputList(task)}${notesBlock(notes, "worker")}`;
 }
 
-export function checkPrompt(task: PlanTask, notes: Notes): string {
-  return `Check task "${task.id}". The worker's files are in /outputs/${task.id}/.\n${taskBrief(task)}\n${outputList(task)}${notesBlock(notes, "check")}`;
+/** The check thread's first message: the task as planned, what the worker reported and the scratch files it cited. */
+export function checkPrompt(task: PlanTask, state: FoldedTask, notes: Notes): string {
+  const reported = {
+    measurements: state.measurements,
+    scores: state.scores,
+    files: state.files,
+    missing: state.missing,
+  };
+  const cited = state.citedScratch.length
+    ? `\nEvidence files the worker cited (under /scratch/): ${state.citedScratch.join(", ")}`
+    : "";
+  return `Check task "${task.id}". The worker's files are in /outputs/${task.id}/.\n${taskBrief(task)}\n${outputList(task)}\nReported outputs:\n${JSON.stringify(reported)}${cited}${notesBlock(notes, "check")}`;
+}
+
+/** The main agent's first message: the deliverable, the plan, the researcher's notes. */
+export function mainPrompt(
+  view: Folded,
+  selected: readonly string[] | undefined,
+  notes?: string,
+): string {
+  const tasks = view.plan.tasks.map(
+    (t) =>
+      `- ${t.id}${t.dependsOn.length ? ` (builds on ${t.dependsOn.join(", ")})` : ""}: ${t.title ?? t.instructions ?? ""}`,
+  );
+  const wanted = selected?.length
+    ? `The researcher selected these outputs: ${selected.join(", ")}.\n`
+    : "";
+  return `${wanted}The plan:\n${tasks.join("\n")}${notes ? `\n\nThe researcher's notes:\n${notes}` : ""}`;
 }
 
 function outputList(task: PlanTask): string {

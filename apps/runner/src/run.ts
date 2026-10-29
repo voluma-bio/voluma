@@ -31,13 +31,12 @@ import type { Claim, ReportRequest } from "@voluma/contracts/runner";
 import { runClient } from "@voluma/harness/adapters/http/run-client";
 import { runLayout } from "@voluma/harness/layout";
 import { type LiveBatcher, liveBatcher } from "@voluma/harness/live";
-import { llmMainThread, mainSystem, runBrief } from "@voluma/harness/main-thread";
 import { usageOf } from "@voluma/harness/model-usage";
 import { type Recorder, recorder } from "@voluma/harness/recorder";
 import { type SandboxSession, sandboxSession } from "@voluma/harness/sandbox-session";
 import { checkerSandboxSpec, workerSandboxSpec } from "@voluma/harness/sandbox-specs";
-import { type RunRole, superviseRun } from "@voluma/harness/supervise-run";
-import { optionalTools, TOOL_NAMES } from "@voluma/harness/tools";
+import { type RoleOf, type RoleSetup, superviseRun } from "@voluma/harness/supervise-run";
+import { TOOL_NAMES } from "@voluma/harness/tools";
 import { loadWorkflow } from "@voluma/workflow/load";
 import { computePlan } from "@voluma/workflow/plan";
 import { type Config, isVisitorSafe, providerKey } from "./config.ts";
@@ -52,7 +51,7 @@ import {
 } from "./modal-sandbox.ts";
 import type { ModelFallback } from "./model-fallback.ts";
 import { retryTransient } from "./model-retry.ts";
-import { checkPrompt, systemPrompt, workerPrompt } from "./prompts.ts";
+import { checkPrompt, mainPrompt, systemPrompt, workerPrompt } from "./prompts.ts";
 import { isFatalProviderError, isProviderError } from "./provider-error.ts";
 import { r2Evidence } from "./r2-evidence.ts";
 import { r2Files } from "./r2-files.ts";
@@ -215,19 +214,18 @@ export async function runClaim(
     // The tasks that produce the selected outputs and what they need. The main thread may adapt
     // them to the run's notes when the run starts (`superviseRun`).
     const computed = computePlan(definition.files, run.selectedOutputs);
-    // Each role's optional tools are the ones its file lists. `segment_sam` needs a key, and only
-    // workers hold it: it calls out to Meta and `keepFailed` writes the run-wide scratch.
-    const grant = (role: "worker" | "checker") =>
+    // Each role gets the tools its file lists. `segment_sam` needs a key, and only workers hold
+    // it: it calls out to Meta and `keepFailed` writes the run-wide scratch.
+    const grant = (role: "main" | "worker" | "checker") =>
       definition.agents[role].tools.filter(
-        (t) =>
-          Object.hasOwn(optionalTools, t) &&
-          (t !== "segment_sam" || (role === "worker" && metaKey)),
+        (t) => t !== "segment_sam" || (role === "worker" && metaKey),
       );
 
     const layout = runLayout(
       runId,
       run.input.source === "reference" ? referencePrefix("scan") : inputPrefix(run.input.id),
       definition.skills,
+      definition.agents.main.tools.includes("bash"),
     );
     const createSandbox = createModalSandbox({
       appName: RUNS_APP,
@@ -268,7 +266,8 @@ export async function runClaim(
           workdir: thread.dir,
         };
         return createSandbox(
-          thread.role === "worker"
+          thread.role === "worker" ||
+            thread.mounts.some((m) => m.path === "/outputs" && m.access === "read-write")
             ? workerSandboxSpec({ ...common, mounts: thread.mounts })
             : checkerSandboxSpec({
                 ...common,
@@ -325,7 +324,7 @@ export async function runClaim(
         },
       );
     const streamFor =
-      (role: ModelRole): RunRole["streamFn"] =>
+      (role: ModelRole): RoleSetup["streamFn"] =>
       (m, context, options) => {
         const stream = callModel(role)(m, context, options);
         stream.result().then(
@@ -338,26 +337,18 @@ export async function runClaim(
         );
         return stream;
       };
-    const main = llmMainThread(
-      mainModel,
-      mainSystem(runBrief(run.selectedOutputs, computed.tasks)),
-      async (context, signal, onEvent) => {
-        const stream = callModel("main")(mainModel, context, { signal });
-        // The stream's events and its result are independent: draining one leaves the other.
-        const drained = (async () => {
-          if (onEvent) for await (const event of stream) onEvent(event);
-        })();
-        const [reply] = await Promise.all([stream.result(), drained]);
-        meter.addModelCall("main", usageOf(reply));
-        return reply;
-      },
-    );
+    const role =
+      (primary: Model<Api>, modelRole: ModelRole, agent: "main" | "worker" | "checker"): RoleOf =>
+      (thread, recorded) => ({
+        model: threadModel(primary, recorded),
+        streamFn: streamFor(modelRole),
+        systemPrompt: systemPrompt(definition, thread),
+        tools: grant(agent),
+      });
     const files = r2Files(config.r2);
     const supervised = superviseRun({
       runId,
       plan: computed.tasks,
-      selectedOutputs: run.selectedOutputs,
-      notes: run.notes,
       previousClaim: claim.previousClaim?.reason,
       providerError: isProviderError,
       // With a fallback model set, the redo starts on it, so even a refused key is not the end.
@@ -391,21 +382,19 @@ export async function runClaim(
             },
           })
         : undefined,
-      main,
-      worker: (task, thread, notes, recorded) => ({
-        model: threadModel(workerModel, recorded),
-        streamFn: streamFor("worker"),
-        systemPrompt: systemPrompt(definition, thread),
-        prompt: workerPrompt(task, { user: run.notes, main: notes }),
-        tools: grant("worker"),
-      }),
-      check: (task, thread, notes, recorded) => ({
-        model: threadModel(checkModel, recorded),
-        streamFn: streamFor("check"),
-        systemPrompt: systemPrompt(definition, thread),
-        prompt: checkPrompt(task, { user: run.notes, main: notes }),
-        tools: grant("checker"),
-      }),
+      roles: {
+        main: role(mainModel, "main", "main"),
+        worker: role(workerModel, "worker", "worker"),
+        check: role(checkModel, "check", "checker"),
+      },
+      briefs: {
+        main: (view) => mainPrompt(view, run.selectedOutputs, run.notes),
+        mainRestart: (view, state) =>
+          `The run is under way; you are the main agent again, starting from the log.\n\n${state}\n\nPlan: ${view.plan.tasks.map((t) => t.id).join(", ")}.`,
+        worker: (task, brief) =>
+          `${workerPrompt(task, { user: run.notes })}\n\nFrom the main agent:\n${brief}`,
+        check: (task, state) => checkPrompt(task, state, { user: run.notes }),
+      },
       signal: abort.signal,
     });
     supervised.catch(() => {}); // an error after the race below is moot: the run is stopping

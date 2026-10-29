@@ -1,49 +1,35 @@
 /**
- * Runs one run's plan to the end: the harness's own wiring of thread pool, task runtime,
- * tools and supervisor, so a host supplies only adapters (the stored record, the sandbox,
- * evidence, a model) and what a worker or check thread says and runs on (`RoleSpec` minus
- * its tools, which the harness fixes: bash, the task tools, thread messaging, and `segment_sam` when offered). Resume and a
- * first run are the same call; the recorder is built on the stored events by the host.
+ * Runs one run to the end: the harness's own wiring of thread pool, task runtime, tools and
+ * run loop, so a host supplies only adapters (the stored record, the sandbox, evidence, a
+ * model) and what each role says and runs on (`RoleOf`, `Briefs`). Resume and a first run are
+ * the same call; the recorder is built on the stored events by the host.
  */
 import type { Folded } from "@voluma/contracts/fold";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { RecordedPin } from "@voluma/contracts/workflow";
 import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
-import type { RunLayout, ThreadLayout } from "./layout";
-import type { MainThread } from "./main-thread";
+import type { RunLayout } from "./layout";
 import type { Evidence } from "./ports/evidence";
 import type { Files } from "./ports/files";
 import type { History } from "./ports/history";
 import type { Sandbox } from "./ports/sandbox";
 import type { Segmenter } from "./ports/segmenter";
 import type { Recorder } from "./recorder";
-import { runStartPlan } from "./run-start";
-import { type RoleSpec, supervisor } from "./supervisor";
+import { type Briefs, LOOP_DEFAULTS, type LoopConfig, type RoleOf, runLoop } from "./run-loop";
 import { type PlanTask, taskRuntime } from "./task-runtime";
 import { supervisorThreadId } from "./thread-id";
-import { threadLog } from "./thread-log";
 import { threads } from "./threads";
-import { bashTool } from "./tools/bash";
 import { buildTools } from "./tools/registry";
-import { taskTools } from "./tools/task-tools";
-import { threadMessageTool } from "./tools/thread-message";
 
-/**
- * What a worker or check thread is told and runs on; the harness adds its always-on tools.
- * `tools` names the optional tools its agent grants (`tools/registry.ts`).
- */
-export type RunRole = Omit<RoleSpec, "tools"> & { tools?: readonly string[] };
-export type { PlanTask };
+export type { RoleSetup } from "./run-loop";
+export type { Briefs, LoopConfig, PlanTask, RoleOf };
 
 export interface SuperviseRunOptions {
   runId: string;
-  /** The plan computed from the user's selection; the main thread may adapt it (`run-start.ts`). */
+  /** The plan computed from the user's selection; the run starts with it (the main agent may change it). */
   plan: readonly PlanTask[];
-  /** The workflow's tasks and outputs, which the run-start change is built from. */
+  /** The workflow's tasks and outputs, which the main agent adds tasks from. */
   workflow: WorkflowFiles;
-  selectedOutputs?: readonly string[];
-  /** The user's notes for the run. */
-  notes?: string;
   /** Why the previous claim ended; absent on the run's first claim. Recorded as `claim.started`. */
   previousClaim?: ClaimEndReason;
   /** The workflow packages the run starts from, as recorded on the root's first event. */
@@ -56,34 +42,22 @@ export interface SuperviseRunOptions {
   /** Called when a thread ends: destroys its sandbox (`sandboxSession.release`). */
   releaseSandbox(threadId: string): void;
   evidence: Evidence;
-  /** Offers `segment_sam` to threads when set (the host has a Segmenter and a key for it). */
+  /** Offers `segment_sam` to the roles whose file lists it when set (the host has a Segmenter and a key for it). */
   segmenter?: Segmenter;
-  /** The run's bucket, read and written host-side by `view_image` and `segment_sam`. */
+  /** The run's bucket, read and written host-side by `view_image`, `read_file` and `segment_sam`. */
   files: Files;
-  main: MainThread;
-  /** `notes`: the main thread's notes in force when the thread starts. */
-  /** `model`: the one a resumed thread started on (`provider/id`), which it must keep. */
-  worker(
-    task: PlanTask,
-    thread: ThreadLayout,
-    notes: string | undefined,
-    model: string | undefined,
-  ): RunRole;
-  check(
-    task: PlanTask,
-    thread: ThreadLayout,
-    notes: string | undefined,
-    model: string | undefined,
-  ): RunRole;
-  /** Whether a failed thread's error text says the model provider failed; see `SupervisorOptions`. */
+  roles: { main: RoleOf; worker: RoleOf; check: RoleOf };
+  briefs: Briefs;
+  config?: Partial<LoopConfig>;
+  /** Whether a failed thread's error text says the model provider failed. */
   providerError?(error: string): boolean;
-  /** Whether such an error means no redo can succeed: the run then fails at once; see `SupervisorOptions`. */
+  /** Whether such an error means no redo can succeed: the run then fails at once. */
   providerFatal?(error: string): boolean;
   signal: AbortSignal;
 }
 
 export async function superviseRun(options: SuperviseRunOptions): Promise<Folded> {
-  const { runId, layout, recorder, signal } = options;
+  const { runId, recorder, signal } = options;
   const rootThreadId = supervisorThreadId(runId);
   // A stored log means an earlier claim ran. `previousClaim` says why it ended; a run claimed
   // before the API recorded reasons has none, and its resume says only "restarted".
@@ -97,18 +71,6 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
   recorder.emit(rootThreadId, "claim.started", {
     resumed,
     ...(options.previousClaim && { after: options.previousClaim }),
-  });
-  const plan = await runStartPlan({
-    runId,
-    rootThreadId,
-    recorder,
-    main: options.main,
-    workflow: options.workflow,
-    computed: options.plan,
-    selectedOutputs: options.selectedOutputs,
-    notes: options.notes,
-    timeoutMs: 5 * 60_000,
-    signal,
   });
   const pool = threads(
     {
@@ -124,48 +86,42 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
     recorder,
     evidence: options.evidence,
     runId,
-    layoutOf: layout.forThread,
+    layoutOf: options.layout.forThread,
     rootThreadId,
-    plan,
+    plan: options.plan,
     abortThread: (id) => {
       if (pool.started(id)) pool.abort(id);
     },
   });
-  const task = (id: string): PlanTask => {
-    const found = plan.find((t) => t.id === id);
-    if (!found) throw new Error(`${id} is not a task of the plan`);
-    return found;
-  };
-  const tools = (
-    kind: "worker" | "check",
-    thread: ThreadLayout,
-    granted: readonly string[] = [],
-  ) => [
-    bashTool(thread),
-    ...taskTools(runtime, kind),
-    threadMessageTool((from, to, text) => sup.message(from, to, text)),
-    ...buildTools(granted, { layout: thread, files: options.files, segmenter: options.segmenter }),
-  ];
-  const sup = supervisor({
+  const maxFixRounds = options.config?.maxFixRounds ?? LOOP_DEFAULTS.maxFixRounds;
+  return runLoop({
     runId,
-    plan,
-    runtime,
+    rootThreadId,
     recorder,
+    runtime,
     threads: pool,
-    main: options.main,
-    worker: (id, threadId, notes, model) => {
-      const thread = layout.forThread(threadId, (p) => runtime.cites(id, p));
-      const role = options.worker(task(id), thread, notes, model);
-      return { ...role, tools: tools("worker", thread, role.tools) };
-    },
-    check: (id, threadId, notes, model) => {
-      const thread = layout.forThread(threadId, (p) => runtime.cites(id, p));
-      const role = options.check(task(id), thread, notes, model);
-      return { ...role, tools: tools("check", thread, role.tools) };
-    },
+    layout: options.layout,
+    roles: options.roles,
+    briefs: options.briefs,
+    config: options.config,
+    tools: (thread, names, agents) =>
+      buildTools(names, {
+        layout: thread,
+        files: options.files,
+        segmenter: options.segmenter,
+        runtime,
+        main: {
+          runId,
+          rootThreadId,
+          recorder,
+          runtime,
+          agents,
+          workflow: options.workflow,
+          maxFixRounds,
+        },
+      }),
     providerError: options.providerError,
     providerFatal: options.providerFatal,
     signal,
   });
-  return sup.run();
 }

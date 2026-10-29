@@ -1,8 +1,8 @@
 /**
  * The runtime behind the task tools: every write of a `task`, `checkpoint`, `output`, `ask`,
  * `attempt.opened` or `revision.started` event by a thread's tool call, under the rules in
- * `@voluma/contracts/task-tools`. The run loop writes its own `task` events through
- * `setStatus`, `openAttempt` and `stop`, inside the same `section`. Its only view of the run is
+ * `@voluma/contracts/task-tools`. The run loop and the main agent's tools write their own
+ * events through `setStatus`, `openAttempt` and `stop`, inside the same `section`. Its only view of the run is
  * `fold` of the recorder's events, folded once per change of the log; it keeps no second
  * record. Each decision and its appends run inside one per-run critical section (`section`),
  * whichever thread asks, and the recorder adds an event to the view only once it is stored.
@@ -10,16 +10,15 @@
  * checked again inside. A thread's kind and task come from the call (`Caller`), not from the
  * log, which may not yet hold its `thread.started`. A refusal is thrown as a `Refusal`: the
  * tool turns it into the error the model reads, and nothing is appended. A store failure is
- * an ordinary error: the tool call fails, and the supervisor fails the run when its own
+ * an ordinary error: the tool call fails, and the run loop fails the run when its own
  * append hits one.
  */
 
-import type { By, ThreadKind } from "@voluma/contracts/events";
+import type { By, RunEvent, ThreadKind } from "@voluma/contracts/events";
 import { type Folded, type FoldedTask, fold } from "@voluma/contracts/fold";
 import type { EvidenceRef } from "@voluma/contracts/output";
 import type {
   AskInput,
-  ChecklistInput,
   CheckpointInput,
   ReportOutputInput,
   SubmitTaskInput,
@@ -63,6 +62,7 @@ export interface TaskRuntimeOptions {
   layoutOf(threadId: string, cited: (path: string) => boolean): ThreadLayout;
   /** The thread under which the run's first event is written. */
   rootThreadId: string;
+  /** The plan the run starts with (written by `start`); later plans are `view().plan` (`plan.changed`). */
   plan: readonly PlanTask[];
   /**
    * Aborts the thread if it runs here; never waits for it. The runtime has stored its end
@@ -102,9 +102,26 @@ async function storedOutput(
   }
 }
 
+/** Scratch files (after `/scratch/`) the main agent attached to answers for the check threads of `taskId`. */
+function answeredFiles(events: readonly RunEvent[], taskId: string): Set<string> {
+  const checks = new Set(
+    events.flatMap((e) =>
+      e.type === "thread.started" && e.payload.kind === "check" && e.payload.task === taskId
+        ? [e.threadId]
+        : [],
+    ),
+  );
+  return new Set(
+    events.flatMap((e) =>
+      e.type === "answer" && checks.has(e.payload.checkThreadId)
+        ? (e.payload.files ?? []).flatMap((f) => (f.root === "scratch" ? [f.path] : []))
+        : [],
+    ),
+  );
+}
+
 export function taskRuntime(options: TaskRuntimeOptions) {
-  const { recorder, evidence, runId, layoutOf, rootThreadId, plan, abortThread } = options;
-  const planned = new Map(plan.map((t) => [t.id, t]));
+  const { recorder, evidence, runId, layoutOf, rootThreadId, abortThread } = options;
 
   let tail: Promise<unknown> = Promise.resolve();
   /** The per-run critical section: decisions run one at a time, each seeing every earlier write. */
@@ -122,12 +139,19 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     return folded.value;
   };
   const taskOf = (id: string): FoldedTask | undefined => view().tasks.find((t) => t.id === id);
+  /** The plan now, with every `plan.changed` applied. */
+  const planNow = () => view().plan.tasks;
 
-  /** Whether the attempt of `taskId` cites this scratch file (the path after `/scratch/`). */
-  const cites = (taskId: string, path: string) => !!taskOf(taskId)?.citedScratch.includes(path);
+  /**
+   * Whether the attempt of `taskId` cites this scratch file (the path after `/scratch/`): a
+   * checkpoint or output of it, or a file the main agent attached to an answer for its check.
+   */
+  const cites = (taskId: string, path: string) =>
+    !!taskOf(taskId)?.citedScratch.includes(path) ||
+    answeredFiles(recorder.events(), taskId).has(path);
 
   const known = (taskId: string) => {
-    const t = planned.get(taskId);
+    const t = planNow().find((p) => p.id === taskId);
     if (!t) throw new Refusal(`${taskId} is not a task of this run's plan`);
     return t;
   };
@@ -144,7 +168,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
   ) => recorder.append(threadId, "task", { taskId, attemptId, status, reason, by }, id);
 
   const attempted = (taskId: string) =>
-    transitiveDependents(plan, taskId).filter((dep) => {
+    transitiveDependents(planNow(), taskId).filter((dep) => {
       const t = taskOf(dep);
       return t?.attemptId && t.status !== "stale";
     });
@@ -338,6 +362,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     staleDependents,
     openAttempt,
     stop,
+    keep,
 
     /** Writes the run's first event, carrying the plan. A resumed run already has it. */
     start: () =>
@@ -348,48 +373,12 @@ export function taskRuntime(options: TaskRuntimeOptions) {
           {
             reason: "run",
             plan: {
-              tasks: [...plan],
+              tasks: [...options.plan],
             },
           },
           `${rootThreadId}:revision`,
         ),
       ),
-
-    checklist: (c: Caller, input: ChecklistInput) =>
-      section(async () => {
-        const { taskId, status, reason } = input;
-        known(taskId);
-        if (c.kind !== "worker") throw new Refusal("Only a worker sets a task's status.");
-        if (status === "stale") throw new Refusal("Only the supervisor marks a task stale.");
-        const current = taskOf(taskId)?.status ?? "pending";
-        if (status === "in-progress") {
-          if (current === "in-progress") return done(`${taskId} is already in progress.`);
-          if (current === "done" || current === "to-check") {
-            throw new Refusal(
-              `${taskId} is ${current}: a redo goes through a stale mark from the supervisor.`,
-            );
-          }
-        }
-        if (status === "done") {
-          const missing =
-            taskOf(taskId)?.missingRequired ??
-            known(taskId)
-              .outputs.filter((o) => o.required)
-              .map((o) => o.id);
-          if (missing.length > 0) {
-            throw new Refusal(
-              `${taskId} cannot be done: required outputs not reported: ${missing.join(", ")}. Report them with report_output, or set to-check or failed.`,
-            );
-          }
-        }
-        const target = writeTarget(c, taskId, {
-          verdict: false,
-          what: "sets a task's status",
-        });
-        const id = `${c.threadId}:${c.toolCallId}`;
-        await setStatus(c.threadId, id, taskId, await target.attempt(), status, reason, AGENT);
-        return done(`${taskId} is ${status}.`, id);
-      }),
 
     /**
      * The holder hands its task to the check: `task under-review` with the summary as its
