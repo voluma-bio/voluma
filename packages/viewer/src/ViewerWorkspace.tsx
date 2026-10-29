@@ -7,7 +7,6 @@ import type { DicomSeries } from "./dicom";
 const DicomStack = lazy(() => import("./DicomStack"));
 const DicomVolume = lazy(() => import("./DicomVolume"));
 
-export type StructureDisplay = Record<string, { visible: boolean; opacity: number }>;
 const views = [
   {
     id: "surface",

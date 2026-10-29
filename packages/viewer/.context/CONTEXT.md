@@ -95,6 +95,8 @@ decoder pool remains for the page lifetime.
 
 Selecting a series automatically builds its full-resolution 3D volume alongside
 the acquired slices. There is no resolution picker or separate build step.
+If another pane is maximized, 3D waits for a nonzero viewport before initializing
+its engine and starting the first-render timeout. Closing also aborts this wait.
 Close, replacement and route changes abort copying, wait for active decoding,
 destroy the engine and volume texture, then remove local volume images.
 Replacement volumes wait for the previous volume's cleanup. There is one

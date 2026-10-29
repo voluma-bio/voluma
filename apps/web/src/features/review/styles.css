@@ -286,7 +286,7 @@
     min-height: min-content;
   }
   .dicom-canvas-wrap {
-    @apply relative min-h-0 flex-1;
+    @apply relative min-h-8 flex-1;
     background: var(--viewer-well);
   }
   .dicom-canvas {
@@ -420,9 +420,6 @@
   }
   .task-report {
     padding: 20px;
-  }
-  .viewer-heading span {
-    display: none;
   }
   .view-empty p:last-child {
     display: none;

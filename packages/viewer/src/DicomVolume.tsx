@@ -156,6 +156,8 @@ function VolumeView({ series, plan }: { series: DicomSeries; plan: VolumePlan })
           metadata: { windowCenter: [(min + max) / 2], windowWidth: [max - min] },
         },
       );
+      // Another pane may be maximized. Cornerstone cannot render a zero-size host.
+      await waitForViewport(host, signal);
       engine = new RenderingEngine(`volume-${crypto.randomUUID()}`);
       engine.enableElement({
         viewportId: "volume",
@@ -372,6 +374,30 @@ function VolumeView({ series, plan }: { series: DicomSeries; plan: VolumePlan })
       </fieldset>
     </>
   );
+}
+
+function waitForViewport(host: HTMLElement, signal: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      observer.disconnect();
+      signal.removeEventListener("abort", aborted);
+    };
+    const aborted = () => {
+      cleanup();
+      reject(new Error("Render cancelled"));
+    };
+    const checkSize = () => {
+      if (signal.aborted) aborted();
+      else if (host.clientWidth && host.clientHeight) {
+        cleanup();
+        resolve();
+      }
+    };
+    const observer = new ResizeObserver(checkSize);
+    observer.observe(host);
+    signal.addEventListener("abort", aborted, { once: true });
+    checkSize();
+  });
 }
 
 function renderFrame(host: HTMLElement, signal: AbortSignal, render: () => void) {

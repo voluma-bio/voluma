@@ -193,7 +193,7 @@ function ScanReview({ runId }: { runId: string }) {
           )}
         </div>
       }
-      viewer={() => <ViewerWorkspace series={series} />}
+      viewer={<ViewerWorkspace series={series} />}
       onResult={(updated) => queryClient.setQueryData(["review-run", runId], updated)}
     />
   );
