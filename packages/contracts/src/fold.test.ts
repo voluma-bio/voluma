@@ -325,7 +325,13 @@ describe("fold", () => {
 
   it("plan.changed adds tasks and appends done-when and instructions; a colliding id keeps the first", () => {
     const l = log();
-    const width = { id: "width", kind: "measurement", unit: "mm", required: true } as const;
+    const width = {
+      id: "width",
+      kind: "measurement",
+      unit: "mm",
+      on: [] as string[],
+      required: true,
+    } as const;
     l.run({
       tasks: [
         { id: "a", dependsOn: [], doneWhen: ["one"], instructions: "do a", outputs: [width] },
@@ -366,7 +372,9 @@ describe("fold", () => {
 
   it("a skip cascades to dependents and folds as to-check with every output missing", () => {
     const l = log();
-    const out = (id: string) => [{ id, kind: "measurement", unit: "mm", required: true } as const];
+    const out = (id: string) => [
+      { id, kind: "measurement", unit: "mm", on: [] as string[], required: true } as const,
+    ];
     l.run({
       tasks: [
         { id: "a", dependsOn: [], outputs: out("x") },
@@ -409,8 +417,9 @@ describe("fold", () => {
           dependsOn: [],
           outputs: [
             { id: "fig", kind: "file", mediaType: "image/png", required: true },
-            { id: "bone", kind: "structure", required: true },
-            { id: "gone", kind: "score", levels: ["0", "1"], required: true },
+            { id: "scan", kind: "volume", volumeKind: "labels", required: false },
+            { id: "bone", kind: "structure", grid: "scan", required: true },
+            { id: "gone", kind: "score", levels: ["0", "1"], on: [], required: true },
           ],
         },
       ],
@@ -424,10 +433,11 @@ describe("fold", () => {
     expect(t.undeclared).toEqual([]);
     expect(t.missing.map((m) => [m.outputId, m.reason])).toEqual([
       ["fig", "no figure"],
+      ["scan", undefined],
       ["gone", undefined],
     ]);
     expect(rev(f, 0).structures).toMatchObject([
-      { id: "a/bone", status: "missing", reason: "not in the scan" },
+      { id: "a/bone", missing: { reason: "not in the scan" } },
     ]);
     expectParses(f);
   });

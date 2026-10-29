@@ -6,6 +6,7 @@
  * file at its own commit.
  */
 import {
+  isSelectable,
   type OutputEntry,
   outputsFileSchema,
   tasksFileSchema,
@@ -32,14 +33,16 @@ export type OutputGroup = { title: string; outputs: OutputEntry[] };
 
 const outputs = outputsFileSchema.parse(JSON.parse(outputsJson));
 
-/** One group per producing task, in file order. */
+const selectable = outputs.filter(isSelectable);
+
+/** One group per producing task, in file order; only what can be selected (measurements and scores). */
 export const OUTPUT_GROUPS: OutputGroup[] = (() => {
   const byTask = new Map<string, OutputEntry[]>();
-  for (const o of outputs) byTask.set(o.task, [...(byTask.get(o.task) ?? []), o]);
+  for (const o of selectable) byTask.set(o.task, [...(byTask.get(o.task) ?? []), o]);
   return [...byTask].map(([task, list]) => ({ title: taskTitle(task), outputs: list }));
 })();
 
-export const ALL_OUTPUT_IDS = outputs.map((o) => o.id);
+export const ALL_OUTPUT_IDS = selectable.map((o) => o.id);
 
 const outputNames = new Map(outputs.map((o) => [o.id, o.name]));
 

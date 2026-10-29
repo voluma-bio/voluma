@@ -148,6 +148,7 @@ async function loadLogs(tx: Tx, ids: string[], summaryOnly = false) {
                 "revision.started",
                 "attempt.opened",
                 "task",
+                "plan.changed",
                 "checkpoint",
                 "output",
                 "check.accepted",
@@ -157,10 +158,23 @@ async function loadLogs(tx: Tx, ids: string[], summaryOnly = false) {
         ),
       )
       .orderBy(asc(events.seq));
+    // Rows an older build wrote cross a trust boundary. On the list path (`summaryOnly`)
+    // a run whose events no longer parse is left out, its summary null, instead of failing
+    // every run listed with it. A single run's load throws: its own page and API must
+    // fail loudly, not read as "no plan" (a 409 the web polls forever).
+    const unreadable = new Set<string>();
     for (const row of stored) {
-      const log = logs.get(row.runId) ?? [];
-      log.push(toRunEvent(row));
-      logs.set(row.runId, log);
+      if (unreadable.has(row.runId)) continue;
+      try {
+        const log = logs.get(row.runId) ?? [];
+        log.push(toRunEvent(row));
+        logs.set(row.runId, log);
+      } catch (error) {
+        if (!summaryOnly) throw error;
+        unreadable.add(row.runId);
+        logs.delete(row.runId);
+        console.error(`run ${row.runId}: event ${row.id} (${row.type}) does not parse:`, error);
+      }
     }
   }
   return logs;
