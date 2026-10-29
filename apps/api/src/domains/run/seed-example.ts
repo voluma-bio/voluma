@@ -5,7 +5,8 @@
  *
  * The example gets the source's events, threads and history under its own run id (thread
  * ids are `<runId>.…`, so they are renamed), `startedBy: "voluma-examples"`, `example: true`,
- * and the Demo org's reference-scan input. The source's evidence objects in R2 are copied
+ * and the Demo org's reference-scan input. It belongs to its own study of one scan
+ * (`study-<exampleId>`, `example: true`), replaced with it. The source's evidence objects in R2 are copied
  * under the example's own prefix (`evidenceKey` builds a key from the run being read, so an
  * example can't point at another run's files). Re-seeding the same `--id` replaces the
  * example, and nothing else: an existing run that isn't an example is refused. The source must be a completed `voluma` run on a reference scan: a visitor run's
@@ -25,6 +26,8 @@ import {
   piMessages,
   referenceInput,
   runs,
+  studies,
+  studyScans,
   threads,
 } from "./schema";
 
@@ -37,6 +40,7 @@ const required = (name: string) => {
 if (!values.from) throw new Error("usage: seed:example --from <runId> [--id <exampleRunId>]");
 const source = runIdSchema.parse(values.from);
 const exampleId = runIdSchema.parse(values.id ?? `example-${source}`);
+const studyId = `study-${exampleId}`;
 const demoLabId = required("GUEST_ORGANIZATION_ID");
 
 const client = postgres(required("DATABASE_URL"));
@@ -106,13 +110,31 @@ await db.transaction(async (tx) => {
   await tx.delete(threads).where(eq(threads.runId, exampleId));
   await tx.delete(events).where(eq(events.runId, exampleId));
   await tx.delete(runs).where(eq(runs.id, exampleId));
+  await tx.delete(studyScans).where(eq(studyScans.studyId, studyId));
+  await tx.delete(studies).where(eq(studies.id, studyId));
 
   const reference = referenceInput(demoLabId);
   await tx.insert(inputs).values(reference).onConflictDoNothing();
+  await tx.insert(studies).values({
+    id: studyId,
+    labId: demoLabId,
+    name: reference.name,
+    workflowId: src.run.workflowId,
+    createdBy: EXAMPLES_OPERATOR,
+    example: true,
+  });
+  await tx.insert(studyScans).values({
+    studyId,
+    inputId: reference.id as string,
+    subject: reference.name,
+    attributes: {},
+    position: 0,
+  });
   await tx.insert(runs).values({
     id: exampleId,
     labId: demoLabId,
     startedBy: EXAMPLES_OPERATOR,
+    studyId,
     workflowId: src.run.workflowId,
     workflows: src.run.workflows,
     selectedOutputs: src.run.selectedOutputs ?? null,

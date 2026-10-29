@@ -1,6 +1,6 @@
 /**
  * The browser's run routes (`@voluma/contracts/run`), for signed-in users and guests:
- * start, list, get, cancel and resend keys. Each handler parses, calls the queue or the
+ * start (one run on a scan of a study), list, get, cancel and resend keys. Each handler parses, calls the queue or the
  * reads, and maps the answer. Each route names its own guard: the reads (list, get) take
  * `requireReader`, so a user reads through `readerOf(user)` (another org's run is a 404)
  * and the debug token reads every lab; the writes take `requireUser`. Visitor keys go straight to the queue,
@@ -8,40 +8,49 @@
  */
 import { randomUUID } from "node:crypto";
 import { type Run, resendKeysRequestSchema, startRunRequestSchema } from "@voluma/contracts/run";
-import { workflowById } from "@voluma/workflow/bundled";
+import { pinsOf } from "@voluma/workflow/bundled";
 import { type Context, Hono } from "hono";
 import { type AppEnv, parseJson, readerOf, requireReader, requireUser } from "../../domain";
 import type { RunDeps } from ".";
-import { type Refusal, refusalMessage } from "./admission";
+import { refusalMessage } from "./admission";
+import type { StartRefusal } from "./pg-queue";
 
 /** The answer to a start or resend the queue refused. */
-function refusal(c: Context, refused: Refusal | "no-input" | "input-not-ready" | "full") {
-  if (refused === "no-input") return c.json({ error: "unknown input" }, 404);
-  if (refused === "input-not-ready") return c.json({ error: "The scan is still uploading." }, 409);
-  if (refused === "full") {
-    return c.json({ error: "Too many runs are waiting with keys; try again shortly." }, 429);
+export function refusal(c: Context, refused: StartRefusal) {
+  switch (refused) {
+    case "no-input":
+      return c.json({ error: "unknown input" }, 404);
+    case "no-study":
+      return c.json({ error: "unknown study" }, 404);
+    case "no-workflow":
+      return c.json({ error: "unknown workflow" }, 404);
+    case "example":
+      return c.json({ error: "Example studies are read-only." }, 403);
+    case "input-not-ready":
+      return c.json({ error: "The scan is still uploading." }, 409);
+    case "full":
+      return c.json({ error: "Too many runs are waiting with keys; try again shortly." }, 429);
+    default:
+      return c.json({ error: refusalMessage[refused] }, refused === "per-caller" ? 409 : 429);
   }
-  return c.json({ error: refusalMessage[refused] }, refused === "per-caller" ? 409 : 429);
 }
 
 export function runsRoutes({ reads, queue, repo }: RunDeps) {
   const app = new Hono<AppEnv>();
 
   app.post("/runs", requireUser, async (c) => {
-    const { workflowId, inputId, selectedOutputs, notes, keys } = await parseJson(
+    const { studyId, inputId, selectedOutputs, notes, keys } = await parseJson(
       c,
       startRunRequestSchema,
     );
-    const entry = workflowById(workflowId);
-    if (!entry) return c.json({ error: "unknown workflow" }, 404);
     const user = c.var.user;
     const result = await queue.start(
       readerOf(user),
       { userId: user.userId },
       {
         id: randomUUID(),
-        workflowId,
-        pins: [{ repo, path: entry.path }],
+        studyId,
+        pinsOf: (workflowId) => pinsOf(repo, workflowId),
         inputId,
         selectedOutputs,
         notes,
