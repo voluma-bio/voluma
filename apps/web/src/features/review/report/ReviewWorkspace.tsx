@@ -58,8 +58,17 @@ export function ReviewWorkspace({
     onSuccess: onRefresh,
     onError: onRefresh,
   });
+  // The structures the task reported, and those its numbers are shown with.
+  const shownWith = new Set(
+    [...(task?.measurements ?? []), ...(task?.scores ?? [])].flatMap((m) => [
+      ...m.on,
+      ...m.context,
+    ]),
+  );
   const selected =
-    revision?.structures.filter((item) => task?.structureIds.includes(item.id)) ?? [];
+    revision?.structures.filter(
+      (item) => item.id.startsWith(`${task?.id}/`) || shownWith.has(item.id),
+    ) ?? [];
   return (
     <div className="review-shell" data-theme="light">
       <header className="app-header">
@@ -250,7 +259,7 @@ export function ReviewWorkspace({
                           {item.name}
                         </label>
                         <p className="mt-2 text-muted-foreground">
-                          {[item.status ?? "No status", item.reason].filter(Boolean).join(" · ")}
+                          {item.missing ? `Missing · ${item.missing.reason}` : "Reported"}
                         </p>
                         <label className="opacity-control">
                           Opacity
@@ -289,8 +298,13 @@ export function ReviewWorkspace({
                 {task && revision && run ? (
                   <TaskReport
                     task={task}
-                    structureName={(id) =>
-                      revision.structures.find((item) => item.id === id)?.name ?? id
+                    blockName={(id) =>
+                      [
+                        ...revision.volumes,
+                        ...revision.structures,
+                        ...revision.surfaces,
+                        ...revision.annotations,
+                      ].find((item) => item.id === id)?.name ?? id
                     }
                     resultLabel={`R${run.revisions.findIndex((item) => item.id === task.resultRevisionId) + 1}`}
                     taskNumber={revision.tasks.indexOf(task) + 1}

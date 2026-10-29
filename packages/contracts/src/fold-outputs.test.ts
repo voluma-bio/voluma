@@ -85,8 +85,7 @@ describe("fold outputs", () => {
   });
   const point = (zyx: [number, number, number]): Output => ({
     kind: "annotation",
-    gridId: "image-grid",
-    annotation: { kind: "point", zyx },
+    annotation: { gridId: "image-grid", kind: "point", zyx },
   });
   const plan = (...tasks: WorkflowPlan["tasks"]): WorkflowPlan => ({ tasks });
   const decl = {
@@ -196,22 +195,22 @@ describe("fold outputs", () => {
       {
         id: "seg/femur",
         name: "Femur",
-        voxels: { volumeId: "seg/labels", label: 1 },
-        declared: true,
-        status: null,
+        volumeId: "seg/labels",
+        voxels: { label: 1 },
+        missing: null,
         volumeMm3: 7,
       },
       {
         id: "seg/roi",
+        volumeId: "seg/image",
         voxels: {
-          gridId: "seg/image",
           mask: { sha256: SHA(9), shapeZyx: [1, 2, 2] },
           offsetZyx: [1, 0, 0],
         },
       },
     ]);
     expect(r.surfaces).toMatchObject([
-      { id: "seg/height", gridId: "seg/image", axis: 0, heights: { sha256: SHA(10) } },
+      { id: "seg/height", volumeId: "seg/image", axis: 0, heights: { sha256: SHA(10) } },
     ]);
     // Voxel [z, y, x] = [2, 4, 6] on the half-mm grid offset (10, 20, 30): world (x, y, z) mm.
     expect(r.annotations).toMatchObject([
@@ -257,8 +256,7 @@ describe("fold outputs", () => {
     l.output("w:2", W, "t", "w:1:open", "image", imageVolume(4));
     l.output("w:3", W, "t", "w:1:open", "ruler", {
       kind: "annotation",
-      gridId: "image-grid",
-      annotation: { kind: "line", aZyx: [0, 0, 0], bZyx: [2, 4, 6.5] },
+      annotation: { gridId: "image-grid", kind: "line", aZyx: [0, 0, 0], bZyx: [2, 4, 6.5] },
     });
     const f = fold(l.events);
     expect(rev(f, 0).annotations).toMatchObject([
@@ -318,23 +316,21 @@ describe("fold outputs", () => {
     l.measurement("w:2", W, "a", "w:1:open", "extra", 1);
     l.output("w:3", W, "a", "w:1:open", "qc", { kind: "score", level: "pass", confidence: null });
     let f = fold(l.events);
-    // A missing structure is a `Structure`, not a `missing` entry.
     expect(need(f, "a").missing).toEqual([
       { outputId: "labels", kind: "volume", required: false },
+      { outputId: "femur", kind: "structure", required: false },
       { outputId: "width", kind: "measurement", required: true },
       { outputId: "area", kind: "measurement", required: false },
     ]);
     expect(need(f, "a").missingRequired).toEqual(["width"]);
-    expect(rev(f, 0).structures).toMatchObject([
-      { id: "a/femur", declared: true, status: "missing", voxels: null },
-    ]);
+    expect(rev(f, 0).structures).toEqual([]);
     expect(need(f, "a").undeclared).toEqual(["a/extra", "a/qc"]);
     expect(need(f, "a").scores[0]?.scale).toBeNull(); // no declaration, no scale
     expectParses(f);
     l.measurement("w:4", W, "a", "w:1:open", "width", 3);
     f = fold(l.events);
     expect(need(f, "a").missingRequired).toEqual([]);
-    expect(need(f, "a").measurements.find((m) => m.id === "a/width")?.on).toEqual(["a/femur"]); // the missing structure is a block
+    expect(need(f, "a").measurements.find((m) => m.id === "a/width")?.on).toEqual([]); // no block to show it on
 
     // Reported as missing counts as reported: a block with the reason, no voxels.
     l.output("w:5", W, "a", "w:1:open", "femur", {
@@ -345,9 +341,7 @@ describe("fold outputs", () => {
     expect(rev(f, 0).structures).toMatchObject([
       {
         id: "a/femur",
-        declared: true,
-        status: "missing",
-        reason: "out of the field",
+        missing: { reason: "out of the field" },
         voxels: null,
       },
     ]);
@@ -514,11 +508,11 @@ describe("fold outputs", () => {
   it("a task redone without the grid others sit on: the surface and landmark go, the structure loses its voxels, links follow", () => {
     const f = redone(() => {});
     const [r1, r2] = f.revisions;
-    expect(r1?.structures[0]?.voxels).toMatchObject({ gridId: "seg/image" });
-    expect(r1?.surfaces.map((s) => s.gridId)).toEqual(["seg/image"]);
+    expect(r1?.structures[0]).toMatchObject({ volumeId: "seg/image", voxels: { mask: {} } });
+    expect(r1?.surfaces.map((s) => s.volumeId)).toEqual(["seg/image"]);
     expect(r1?.annotations.map((a) => a.volumeId)).toEqual(["seg/image"]);
     expect(sizeOn(f, 0)).toMatchObject({ on: ["m/roi", "m/landmark"], context: ["m/height"] });
-    expect(r2?.structures[0]).toMatchObject({ id: "m/roi", voxels: null });
+    expect(r2?.structures[0]).toMatchObject({ id: "m/roi", volumeId: null, voxels: null });
     expect(r2?.surfaces).toEqual([]);
     expect(r2?.annotations).toEqual([]);
     expect(sizeOn(f, 1)).toMatchObject({ on: ["m/roi"], context: [] });
@@ -531,13 +525,13 @@ describe("fold outputs", () => {
     expect(r2.volumes).toMatchObject([
       { id: "seg/image", kind: "image", data: { sha256: SHA(8) } },
     ]);
-    expect(r2.structures[0]?.voxels).toMatchObject({ gridId: "seg/image" });
+    expect(r2.structures[0]?.volumeId).toBe("seg/image");
     expect(r2.annotations).toHaveLength(1);
     expectParses(f);
   });
 
   describe("To check focus", () => {
-    const focused = { structureIds: ["m/roi", "gone"], annotationIds: ["landmark"] };
+    const focused = { on: ["m/roi", "gone", "landmark", "seg/labels"] };
     /** Task seg reports the grid; task m, a structure, a landmark and a To check item carrying `focus`. */
     function raised(focus: Focus, redo?: (l: ReturnType<typeof log>) => void) {
       const l = log();
@@ -569,7 +563,7 @@ describe("fold outputs", () => {
     it("ids resolve across tasks, a same-task id too; one that doesn't is dropped", () => {
       const f = raised(focused);
       expect(checks(f, 0)).toMatchObject([
-        { focus: { structureIds: ["m/roi"], annotationIds: ["m/landmark"] } },
+        { focus: { on: ["m/roi", "m/landmark", "seg/labels"] } },
       ]);
       expectParses(f);
     });
@@ -578,16 +572,15 @@ describe("fold outputs", () => {
       const f = raised(focused, (l) =>
         l.output("s:6", W, "seg", "s:5:open", "labels", labelsVolume(6)),
       );
-      expect(checks(f, 0)[0]?.focus?.structureIds).toEqual(["m/roi"]);
+      expect(checks(f, 0)[0]?.focus?.on).toEqual(["m/roi", "m/landmark", "seg/labels"]);
       // The structure stays (its voxels are null); the landmark sat on the grid and is gone.
-      expect(checks(f, 1)[0]?.focus).toEqual({ structureIds: ["m/roi"], annotationIds: [] });
+      expect(checks(f, 1)[0]?.focus).toEqual({ on: ["m/roi", "seg/labels"] });
       expectParses(f);
     });
 
     it("a region of a labels volume, a box and a point are kept; a focus left empty is absent", () => {
       const region: Focus = {
-        structureIds: [],
-        annotationIds: [],
+        on: [],
         volumeId: "seg/labels",
         label: 2,
         box: { min: [0, 0, 0], max: [1, 1, 1] },
@@ -599,15 +592,13 @@ describe("fold outputs", () => {
       expect(checks(f, 0)[0]?.focus).toEqual(region);
       // Redone as an image volume: no longer a labels volume, so the region goes, the box and point stay.
       expect(checks(f, 1)[0]?.focus).toEqual({
-        structureIds: [],
-        annotationIds: [],
+        on: [],
         box: region.box,
         point: region.point,
       });
       expectParses(f);
       const gone = raised({
-        structureIds: ["nope"],
-        annotationIds: [],
+        on: ["nope"],
         volumeId: "nope",
         label: 1,
       });

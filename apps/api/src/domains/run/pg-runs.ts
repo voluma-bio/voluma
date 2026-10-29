@@ -157,10 +157,21 @@ async function loadLogs(tx: Tx, ids: string[], summaryOnly = false) {
         ),
       )
       .orderBy(asc(events.seq));
+    // Rows an older build wrote cross a trust boundary: one run whose events no longer
+    // parse is left out (its own page reads as having no plan) instead of failing every
+    // run that is loaded with it.
+    const unreadable = new Set<string>();
     for (const row of stored) {
-      const log = logs.get(row.runId) ?? [];
-      log.push(toRunEvent(row));
-      logs.set(row.runId, log);
+      if (unreadable.has(row.runId)) continue;
+      try {
+        const log = logs.get(row.runId) ?? [];
+        log.push(toRunEvent(row));
+        logs.set(row.runId, log);
+      } catch (error) {
+        unreadable.add(row.runId);
+        logs.delete(row.runId);
+        console.error(`run ${row.runId}: event ${row.id} (${row.type}) does not parse:`, error);
+      }
     }
   }
   return logs;

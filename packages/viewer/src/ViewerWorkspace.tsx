@@ -66,14 +66,16 @@ export function ViewerWorkspace({
   const structures = useMemo(
     () =>
       revision?.structures.filter(
-        (s) => selectedKey.split("\n").includes(s.id) || focus?.structureIds.includes(s.id),
+        (s) => selectedKey.split("\n").includes(s.id) || focus?.on.includes(s.id),
       ) ?? [],
     [revision, selectedKey, focus],
   );
   const sources = useMemo<LabelSource[]>(() => {
     if (!fileUrl) return [];
     const ids = new Set(
-      structures.flatMap((s) => (s.voxels && "volumeId" in s.voxels ? [s.voxels.volumeId] : [])),
+      structures.flatMap((s) =>
+        s.voxels && "label" in s.voxels && s.volumeId ? [s.volumeId] : [],
+      ),
     );
     if (focus?.volumeId) ids.add(focus.volumeId);
     return (

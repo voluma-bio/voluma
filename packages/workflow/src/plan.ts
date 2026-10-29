@@ -16,43 +16,10 @@ import {
 } from "@voluma/contracts/workflow-files";
 import { WorkflowParseError } from "./definition";
 
+/** The entry less what only the file keeps (`declaredOutputSchema`). */
 function declared(entry: OutputEntry, required: boolean): DeclaredOutput {
-  const base = { id: entry.id, required };
-  switch (entry.kind) {
-    case "measurement":
-      return {
-        ...base,
-        kind: "measurement",
-        on: entry.on,
-        context: entry.context ?? [],
-        unit: entry.unit,
-        ...(entry.range && { range: entry.range }),
-      };
-    case "score":
-      return {
-        ...base,
-        kind: "score",
-        on: entry.on,
-        context: entry.context ?? [],
-        levels: entry.levels,
-      };
-    case "structure":
-      return {
-        ...base,
-        kind: "structure",
-        grid: entry.grid,
-        name: entry.name,
-        ...(entry.label && { label: entry.label }),
-      };
-    case "surface":
-      return { ...base, kind: "surface", grid: entry.grid };
-    case "annotation":
-      return { ...base, kind: "annotation", grid: entry.grid, shape: entry.shape };
-    case "volume":
-      return { ...base, kind: "volume", volumeKind: entry.volumeKind };
-    case "file":
-      return { ...base, kind: "file", mediaType: entry.mediaType };
-  }
+  const { task: _task, region: _region, sourceRef: _sourceRef, ...rest } = entry;
+  return { ...rest, required };
 }
 
 /**

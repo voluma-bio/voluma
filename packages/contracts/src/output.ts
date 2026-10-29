@@ -1,9 +1,11 @@
 /**
  * What a task reports: one `output` per result, of one of the review's
  * building blocks. Only `outputId`, `title` (the block's name) and `evidence`
- * are common; every other field of a kind is picked from the schema in
- * `review.ts` that the fold fills, so a field a block lacks can't be sent and
- * there is one definition of each block.
+ * are common. A value's fields (`value`, `unit`, `level`, `confidence`, `note`,
+ * `definition`, a volume's grid and unit) and the tuples
+ * (`shapeZyxSchema`, `voxelIndexSchema`) are picked from `review.ts`, so there is
+ * one definition of each. What a report adds to its block is the files and voxels
+ * the fold turns into keys, world mm and `volumeId`; the block's links are not reported.
  *
  * - `measurement`, `score`: a number with a unit; a level of a scale. Both
  *   carry `confidence`, `note` and `definition`. What they are shown with
@@ -13,9 +15,9 @@
  * - `surface`: a height field on its declared grid, along an array axis.
  * - `annotation`: a point or a line in voxels `[z, y, x]` of its declared grid,
  *   fractional allowed. The fold maps it to world mm through the grid's affine.
- *   A mask, surface or annotation also reports the `gridId` of the grid it was made
- *   on; `report_output` refuses it when that differs from the `gridId` its declared
- *   grid volume reported.
+ *   A mask, surface or annotation also reports, in its own payload, the `gridId` of the
+ *   grid it was made on; `report_output` refuses it when that differs from the `gridId`
+ *   its declared grid volume reported.
  * - `volume`: an `.npy` voxel grid on its own affine.
  * - `file`: a figure, table or report; its `title` is its name.
  *
@@ -34,9 +36,11 @@ import {
   measurementSchema,
   npyDtypeSchema,
   scoreSchema,
+  shapeZyxSchema,
   structureSchema,
   surfaceSchema,
   volumeSchema,
+  voxelIndexSchema,
 } from "./review";
 
 const nonEmpty = z.string().min(1);
@@ -64,8 +68,8 @@ export const fileRefInputSchema = z.object({
   path: relativePathSchema,
 });
 
-/** A position in voxel indices `[z, y, x]` of a grid; fractional allowed. */
-const voxelZyx = z.tuple([z.number().min(0), z.number().min(0), z.number().min(0)]);
+/** A position in voxel coordinates `[z, y, x]` of a grid; fractional allowed. */
+const positionZyx = z.tuple([z.number().min(0), z.number().min(0), z.number().min(0)]);
 
 const gridIdField = volumeSchema.shape.gridId.describe(
   "The grid_id of the grid's sidecar, as reported on its volume.",
@@ -96,10 +100,10 @@ const outputs = <R extends z.ZodType>(ref: R) => {
         z.strictObject({
           mask: ref.describe("uint8 `.npy`, 1 inside, cropped to the structure's bounding box."),
           gridId: gridIdField,
-          shapeZyx: z.tuple([z.int().positive(), z.int().positive(), z.int().positive()]),
-          offsetZyx: z
-            .tuple([z.int().min(0), z.int().min(0), z.int().min(0)])
-            .describe("Voxel of the grid where the mask's [0, 0, 0] sits."),
+          shapeZyx: shapeZyxSchema,
+          offsetZyx: voxelIndexSchema.describe(
+            "Voxel of the grid where the mask's [0, 0, 0] sits.",
+          ),
         }),
         z.strictObject({
           status: z.literal("missing"),
@@ -119,11 +123,15 @@ const outputs = <R extends z.ZodType>(ref: R) => {
     }),
     z.object({
       kind: z.literal("annotation"),
-      gridId: gridIdField,
       note: z.string().optional(),
       annotation: z.discriminatedUnion("kind", [
-        z.object({ kind: z.literal("point"), zyx: voxelZyx }),
-        z.object({ kind: z.literal("line"), aZyx: voxelZyx, bZyx: voxelZyx }),
+        z.object({ gridId: gridIdField, kind: z.literal("point"), zyx: positionZyx }),
+        z.object({
+          gridId: gridIdField,
+          kind: z.literal("line"),
+          aZyx: positionZyx,
+          bZyx: positionZyx,
+        }),
       ]),
     }),
     z.object({

@@ -19,17 +19,17 @@
  * instead (VS Code `json.schemas`, matching each workflow directory's `outputs.json` and `tasks.json`).
  */
 import { z } from "zod";
-import { segmentSchema, taskIdSchema } from "./ids";
+import { isObjectKind, segmentSchema, taskIdSchema } from "./ids";
 
 const nonEmpty = z.string().min(1);
 
-/** The kinds a measurement can be shown on; the rest are values and files. */
-const OBJECTS = new Set(["volume", "structure", "surface", "annotation"]);
-
-/** Ids of objects (`volume`, `structure`, `surface`, `annotation`) a measurement or score is shown with. */
+/**
+ * Ids of objects (`volume`, `structure`, `surface`, `annotation`) a measurement or score is shown with.
+ * `on` is a required key so each states its links; `[]` is a deliberate "nothing to show it on".
+ */
 const links = {
   /** Highlighted with the value. */
-  on: z.array(segmentSchema).min(1),
+  on: z.array(segmentSchema),
   /** Drawn around it. */
   context: z.array(segmentSchema).optional(),
 };
@@ -172,7 +172,7 @@ export const workflowFilesSchema = z
           const target = byId.get(id);
           const problem = !target
             ? `"${id}" is not in outputs.json`
-            : (field === "grid" ? target.kind !== "volume" : !OBJECTS.has(target.kind))
+            : (field === "grid" ? target.kind !== "volume" : !isObjectKind(target.kind))
               ? `"${id}" is a ${target.kind}, not ${field === "grid" ? "a volume" : "an object"}`
               : target.task !== o.task && !upstream(o.task).has(target.task)
                 ? `"${id}" is produced by task "${target.task}", which "${o.task}" does not build on`

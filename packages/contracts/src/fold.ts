@@ -28,14 +28,14 @@
  *   affine, after the revision's volumes are known. A ratio's operands and a focus's
  *   ids go through one resolver keyed by block kind (`volume:labels` is not
  *   `volume:image`); one that doesn't resolve is dropped. So no later attempt of
- *   another task can leave a dangling id.
+ *   another task can leave a dangling id. A block on a grid names that volume block as
+ *   `volumeId`.
  * - The plan is the first `revision.started`'s. An output fills a declaration
  *   of its kind (a volume, also of its volume kind). Per task, `undeclared` is
  *   the ids of the outputs that fill none; `missing` the declared outputs the
- *   current attempt hasn't reported, except structures, and `missingRequired`
- *   the required ones among all of them. A declared structure not reported is
- *   emitted as a `Structure` with status `missing`; one reported as missing is too,
- *   and counts as reported.
+ *   current attempt hasn't reported, and `missingRequired` the required ones among
+ *   them. A structure reported as missing is a `Structure` with `missing` set and
+ *   counts as reported.
  * - `assets` is the whole log's: the latest `assets.ready` or `assets.failed` per
  *   source sha256, whatever the revision.
  * - `resultRevisionId` is the revision in which the task's latest event so far
@@ -45,12 +45,12 @@
  *   attempt-level flag that the latest `to-check` event not written by
  *   `check-result` sets and a later `in-progress`, `done`, `stale` or `failed`
  *   clears (`under-review` and `check-result` leave it), its id that event's.
- *   A `toCheck` may carry a `focus`: its ids go through the reference resolver
+ *   A `toCheck` may carry a `focus`: its ids (`on`, any block kind) go through the reference resolver
  *   and are dropped if they don't resolve (a `label` goes with its `volumeId`);
  *   one left pointing at nothing is absent. "Marked to check" has no focus.
  *   `checkResult` turns a folded task into the status `check-result` gives.
  * - Not from these events (the API adds them): `title`, `ask`,
- *   `structureIds`, `threads.chat`, revision labels; the API
+ *   `threads.chat`, revision labels; the API
  *   also sets each asset's `stage` to the task title (here the task id).
  */
 import type { RunEvent, ThreadKind } from "./events";
@@ -69,6 +69,7 @@ import type {
   Surface,
   Volume,
 } from "./review";
+import { toWorld } from "./ruler";
 import type { DeclaredOutput } from "./workflow";
 
 type OutputEvent = Extract<RunEvent, { type: "output" }>;
@@ -82,11 +83,14 @@ type RefKind =
   | "volume:image"
   | "volume:labels";
 
-/** A grid voxel `[z, y, x]` in world mm through the grid's affine (voxel index (x, y, z) to world). */
-const toWorld = (m: Volume["affine"], [z, y, x]: readonly [number, number, number]) => {
-  const row = (r: Volume["affine"][number]) => r[0] * x + r[1] * y + r[2] * z + r[3];
-  return [row(m[0]), row(m[1]), row(m[2])] satisfies [number, number, number];
-};
+/** Every kind of block a measurement is shown on or a focus points at. */
+const BLOCK_KINDS: RefKind[] = [
+  "volume:image",
+  "volume:labels",
+  "structure",
+  "surface",
+  "annotation",
+];
 
 /** Whether a reported output fills a declaration: the same kind, and for a volume the same volume kind. */
 const fills = (d: DeclaredOutput, o: Output) =>
@@ -120,7 +124,7 @@ export type FoldedTask = Pick<
   | "evidence"
 > & {
   attemptId: string;
-  /** Ids of the required declared outputs, of any kind (structures too), the attempt hasn't reported. */
+  /** Ids of the required declared outputs the attempt hasn't reported. */
   missingRequired: string[];
   /** The latest `task` event's reason; null while the attempt has none. */
   reason: string | null;
@@ -233,11 +237,7 @@ export function fold(events: readonly RunEvent[]): Folded {
       const k = kinds.get(full);
       return task !== undefined && k && accept.includes(k) ? full : undefined;
     };
-    const shown = (ids: string[]) =>
-      ids.flatMap(
-        (id) =>
-          linked(id, "volume:image", "volume:labels", "structure", "surface", "annotation") ?? [],
-      );
+    const shown = (ids: string[]) => ids.flatMap((id) => linked(id, ...BLOCK_KINDS) ?? []);
     // Ids that resolve stay; `label` goes with a `volumeId` that doesn't. A focus
     // left pointing at nothing is absent: the whole task.
     const resolveFocus = (a: Attempt, f: Focus): Focus | undefined => {
@@ -245,15 +245,11 @@ export function fold(events: readonly RunEvent[]): Folded {
       const { volumeId: _v, label, ...rest } = f;
       const resolved = {
         ...rest,
-        structureIds: refs(a, f.structureIds, "structure"),
-        annotationIds: refs(a, f.annotationIds, "annotation"),
+        on: f.on.flatMap((id) => ref(a, id, ...BLOCK_KINDS) ?? []),
         ...(volumeId !== undefined && { volumeId, ...(label !== undefined && { label }) }),
       };
       const points =
-        resolved.structureIds.length + resolved.annotationIds.length > 0 ||
-        volumeId !== undefined ||
-        resolved.box ||
-        resolved.point;
+        resolved.on.length > 0 || volumeId !== undefined || resolved.box || resolved.point;
       return points ? resolved : undefined;
     };
     const unreportedOf = (a: Attempt) =>
@@ -288,9 +284,8 @@ export function fold(events: readonly RunEvent[]): Folded {
         const { output: o } = p;
         const id = `${a.taskId}/${outputId}`;
         const decl = plan.get(a.taskId)?.get(outputId);
-        const declared = decl !== undefined && fills(decl, o);
         const gridId =
-          declared && "grid" in decl
+          decl && fills(decl, o) && "grid" in decl
             ? linked(decl.grid, "volume:image", "volume:labels")
             : undefined;
         const grid = gridId === undefined ? undefined : volumeById.get(gridId);
@@ -299,20 +294,18 @@ export function fold(events: readonly RunEvent[]): Folded {
           case "structure": {
             const s = o.structure;
             let voxels: Structure["voxels"] = null;
-            if ("label" in s && grid) voxels = { volumeId: grid.id, label: s.label };
+            if ("label" in s && grid) voxels = { label: s.label };
             else if ("mask" in s && grid)
               voxels = {
-                gridId: grid.id,
                 mask: { key: key(s.mask.sha256), sha256: s.mask.sha256, shapeZyx: s.shapeZyx },
                 offsetZyx: s.offsetZyx,
               };
             structures.push({
               id,
               name: p.title,
+              volumeId: grid?.id ?? null,
               voxels,
-              declared,
-              status: "status" in s ? s.status : null,
-              reason: "status" in s ? s.reason : null,
+              missing: "status" in s ? { reason: s.reason } : null,
               ...(o.definition !== undefined && { definition: o.definition }),
               ...(o.volumeMm3 !== undefined && { volumeMm3: o.volumeMm3 }),
             });
@@ -324,7 +317,7 @@ export function fold(events: readonly RunEvent[]): Folded {
             surfaces.push({
               id,
               name: p.title,
-              gridId: grid.id,
+              volumeId: grid.id,
               axis: o.surface.axis,
               heights: { key: key(o.surface.heights.sha256), sha256: o.surface.heights.sha256 },
             });
@@ -357,21 +350,6 @@ export function fold(events: readonly RunEvent[]): Folded {
             break;
         }
       }
-      // A declared structure never reported is a `missing` structure, so the
-      // Structures panel is complete; `missing` lists the kinds with no such slot.
-      for (const d of unreportedOf(a))
-        if (d.kind === "structure") {
-          const id = `${a.taskId}/${d.id}`;
-          structures.push({
-            id,
-            name: d.name ?? d.id,
-            voxels: null,
-            declared: true,
-            status: "missing",
-            reason: `The workflow declares it${d.required ? " as required" : ""}; the task has not reported it.`,
-          });
-          kinds.set(id, "structure");
-        }
     }
 
     const tasks = [...current.values()].map((a) => {
@@ -384,12 +362,11 @@ export function fold(events: readonly RunEvent[]): Folded {
         const { output: o } = p;
         const id = `${a.taskId}/${outputId}`;
         const decl = plan.get(a.taskId)?.get(outputId);
-        // A structure records this as `declared` on its block; listing it here too would be a second copy.
-        if (!(decl !== undefined && fills(decl, o)) && o.kind !== "structure") undeclared.push(id);
+        if (!(decl !== undefined && fills(decl, o))) undeclared.push(id);
         const evidenceIds = p.evidence.map((r) => r.sha256);
         const source = { threadId: v.threadId, eventId: v.id };
         const on = shown(decl && "on" in decl ? decl.on : []);
-        const context = shown(decl && "context" in decl ? decl.context : []);
+        const context = shown(decl && "context" in decl ? (decl.context ?? []) : []);
         switch (o.kind) {
           case "measurement": {
             const numeratorId = ref(a, o.numeratorId, "measurement");
@@ -442,9 +419,11 @@ export function fold(events: readonly RunEvent[]): Folded {
         }
       }
       const unreported = unreportedOf(a);
-      const missing = unreported.flatMap((d) =>
-        d.kind === "structure" ? [] : [{ outputId: d.id, kind: d.kind, required: d.required }],
-      );
+      const missing = unreported.map((d) => ({
+        outputId: d.id,
+        kind: d.kind,
+        required: d.required,
+      }));
       const missingRequired = unreported.filter((d) => d.required).map((d) => d.id);
       const checks: Check[] = a.toChecks.map(({ focus, ...c }) => {
         const f = focus && resolveFocus(a, focus);

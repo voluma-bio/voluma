@@ -25,18 +25,11 @@ export function reviewRun({
     const title = titleOf(t.id);
     const staged = <A extends { stage: string }>(assets: A[]) =>
       assets.map((a) => ({ ...a, stage: title }));
-    // The structures it reported, and those its numbers were measured on.
-    const structures = new Set(rev.structures.map((s) => s.id));
-    const own = [...structures].filter((id) => id.startsWith(`${t.id}/`));
-    const cited = [...t.measurements, ...t.scores].flatMap((m) =>
-      m.on.filter((id) => structures.has(id)),
-    );
     return {
       id: t.id,
       title,
       ask: planned.get(t.id)?.instructions ?? "",
       dependsOn: t.dependsOn,
-      structureIds: [...new Set([...own, ...cited])],
       status: t.status,
       resultRevisionId: t.resultRevisionId,
       checker: t.checker,
@@ -100,7 +93,6 @@ export function reviewRun({
             checker: null,
             threads: { worker: worker?.threadId ?? null, check: null, chat: null },
             models: { worker: worker?.payload.model ?? null, check: null, chat: null },
-            structureIds: [],
             measurements: [],
             scores: [],
             missing: [],
