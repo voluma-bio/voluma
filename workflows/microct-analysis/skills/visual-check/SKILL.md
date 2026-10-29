@@ -27,7 +27,7 @@ a side and 1 MiB (the `view_image` limit); a 6-view 3D sheet of OA6-1RK is about
 | Which segmentation is right here? | Disagreement panel: CT, your labels and the classic labels side by side, disagreeing voxels filled | `segmentation-check`: `disagree.py` |
 
 Open up to four images in one `view_image` call: for example, two quad views to compare before and after. **Only the images of your last two `view_image` calls stay visible**; older ones are a line of text. To compare before and after a fix, open both in one call. Pass `--names
-<the anatomy reference's anatomy.json>` (or `1=femur,2=tibia`) to name every label in the legend, and `--window lo,hi` (the workflow's anatomy reference gives the HU window) to make bone
+<the anatomy reference's anatomy.json>` (or `1=femur,2=tibia`) to name every label in the legend, and `--window lo,hi` (the workflow's anatomy reference gives the HU window; a negative low end works as is: `--window -500,6000`) to make bone
 readable.
 
 **Coordinates on a slice image (`render_slices`, `render_crops`):** x is the column (numbers along the top), y is the row (numbers down the left), both in
@@ -50,12 +50,13 @@ python $Q --hu hu.npy --labels labels.npy --names anatomy.json --out v/1.jpg    
 python $Q --from v/1.view.json --center tibia --zoom 3 --out v/2.jpg                            # look closely at a label, a point or z,y,x
 python $Q --from v/2.view.json --move axis0+10 --out v/3.jpg                                    # step 10 slices along scan axis 0
 python $Q --from v/3.view.json --rotate 60,0 --out v/4.jpg                                      # turn the 3D camera (azimuth, elevation)
-python $Q --from v/4.view.json --points pts.json --ruler a,b --plane 1:contains=a,b --out v/5.jpg   # reslice side-on along a bone
+python $Q --from v/4.view.json --points shaft=pts.json --ruler a,b --plane 1:contains=a,b --out v/5.jpg   # reslice side-on along a bone
 python $Q --from v/5.view.json --frame f.json --mask roi=roi.npy --face plate=face.npy --hide labels --out v/6.jpg   # show a placement
 ```
 
 - `--mask`, `--face` and `--labels` volumes are sampled from their own grid: pass the `frame.json` of any grid that is not the scan's
   with `--frame` (the `grid_id` in the array's sidecar picks it). A point file needs a `grid_id` on the scan grid, as `pick.py` writes.
+- `--points NAME=file`: NAME is the layer `--show`/`--hide` toggles; the points keep the names inside the file, and `--ruler`/`--center`/`contains=` use those.
 - A point shows on a slice only when the plane passes within a few pixels of it; the ruler is dashed on panes it does not lie in, and its
   length is the 3D distance in mm. `--plane 1:normal=z,y,x:up=z,y,x` makes any oblique plane (vectors in mm); `--plane 1:axis=1` goes back.
 - `--center` and `--move` change what you look at, so look again; the state is in the `.view.json` beside each image.

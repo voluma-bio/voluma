@@ -207,6 +207,7 @@ def save_checked(path):
     w, h = Image.open(path).size
     size = Path(path).stat().st_size
     if max(w, h) > MAX_IMAGE_PX or size > MAX_IMAGE_BYTES:
+        Path(path).unlink()  # an over-limit image is no output: leave none behind
         fail(f'{path} is {w}x{h}, {size} bytes: over the {MAX_IMAGE_PX} px / 1 MiB limit; render fewer or smaller panels')
 
 

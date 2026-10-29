@@ -3,8 +3,10 @@
 Coordinates on every image the agent reads: x is the column (labelled along the top), y is the row (labelled down the
 left side), both in pixels of the slice. A box is [row0, col0, row1, col1] = [y0, x0, y1, x1], ends inclusive.
 """
+import hashlib
 import json
 import math
+import os
 import sys
 from pathlib import Path
 
@@ -84,14 +86,16 @@ def show_slice(ax, img, window, grid=True, step=100, title=None):
     ax.set_axis_off()
 
 
+def draw_mask(ax, m, c, alpha=0.18):
+    """Tint plus outline of the boolean 2D array `m`, in colour `c`."""
+    ax.contour(m.astype(float), levels=[0.5], colors=[c], linewidths=1.2)
+    ax.imshow(np.ma.masked_where(~m, m), cmap=matplotlib.colors.ListedColormap([c]), alpha=alpha, interpolation='nearest')
+
+
 def draw_labels(ax, lab, alpha=0.18):
     """Tint plus outline for every label present in the 2D array `lab`."""
     for lv in np.unique(lab[lab > 0]):
-        m = lab == lv
-        c = colour(lv)
-        ax.contour(m.astype(float), levels=[0.5], colors=[c], linewidths=1.2)
-        ax.imshow(np.ma.masked_where(~m, m), cmap=matplotlib.colors.ListedColormap([c]), alpha=alpha,
-                  interpolation='nearest')
+        draw_mask(ax, lab == lv, colour(lv), alpha)
 
 
 def draw_box(ax, box, name=None, color='#ff9f0a'):
@@ -172,3 +176,61 @@ def camera_zyx(cam, spacing):
     scaled the same way (`View` rescales it by the spacing again)."""
     sp = np.array(spacing)
     return {k: (np.array(v)[::-1] / sp).tolist() if k != 'view_angle' else v for k, v in cam.items()}
+
+
+MESH_TARGET = 200  # voxels along the longest axis of a surface's grid: a 3D pane has 800 px, and 2M triangles take 5 s to draw
+MIN_VOXELS = 50  # smaller pieces are not drawn in 3D
+
+
+class Meshes:
+    """Display surfaces in mm (x, y, z), cut from an array downsampled by a step and cached as .vtp files in `cache_dir`.
+
+    A cache file is named by a hash of the array's path and mtime, the step and what was cut, and written to a temporary name
+    and renamed, so a reader never sees half a file. The downsampled array is read once per Meshes, however many labels
+    are cut from it."""
+
+    def __init__(self, cache_dir):
+        self.dir = Path(cache_dir)
+        self._small = {}
+
+    def step_for(self, vol, step=None):
+        return step or max(1, round(max(vol.shape) / MESH_TARGET))
+
+    def small(self, path, vol, step):
+        if (str(path), step) not in self._small:
+            self._small[str(path), step] = np.asarray(vol[::step, ::step, ::step])
+        return self._small[str(path), step]
+
+    def label_ids(self, path, vol, step=None):
+        return [int(v) for v in np.unique(self.small(path, vol, self.step_for(vol, step))) if v]
+
+    def cached(self, key, build):
+        import pyvista as pv
+        f = self.dir / (hashlib.sha1(json.dumps(key, default=str).encode()).hexdigest()[:20] + '.vtp')
+        if f.exists():
+            return pv.read(f)
+        mesh = build()
+        if mesh.n_points:
+            mesh = mesh.compute_normals(split_vertices=False)  # drawing computes them otherwise, on every call
+        self.dir.mkdir(parents=True, exist_ok=True)
+        tmp = f.with_name(f'{f.stem}.{os.getpid()}.tmp.vtp')
+        mesh.save(tmp)
+        os.replace(tmp, f)
+        return mesh
+
+    def surface(self, path, vol, select, kind, spacing, to_scan=lambda p: p, step=None, grid_id=None):
+        """Surface of `select(volume at step)` for the array at `path`; `to_scan` maps its voxel indices to scan voxel indices."""
+        step = self.step_for(vol, step)
+        key = (str(path), Path(path).stat().st_mtime_ns, step, kind, grid_id, list(spacing))
+
+        def build():
+            import pyvista as pv
+            from skimage.measure import marching_cubes
+            small = select(self.small(path, vol, step))
+            if small.sum() < MIN_VOXELS:
+                return pv.PolyData()
+            v, f, _, _ = marching_cubes(np.pad(small, 1).astype(np.float32), 0.5)
+            mm = to_scan((v - 1) * step) * np.asarray(spacing)
+            faces = np.hstack([np.full((len(f), 1), 3), f]).astype(np.int64).ravel()
+            return pv.PolyData(mm[:, ::-1].copy(), faces).smooth(n_iter=20)
+        return self.cached(key, build)

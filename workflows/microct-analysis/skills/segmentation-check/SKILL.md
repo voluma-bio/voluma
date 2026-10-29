@@ -10,7 +10,7 @@ description: >
 
 SAM proposes, and you own the final labels. Code checks gate and your eyes confirm: run the checks in section 1 first,
 then look at what they flag and at the 3D sheet (`visual-check`). Looking alone has missed a fragment carrying the wrong
-label on a 2D overlay. A labels volume leaves your task only after every label has passed the checks below, and every
+label on a 2D slice. A labels volume leaves your task only after every label has passed the checks below, and every
 disagreement you could not settle has been raised as a To check item that names the region. The workflow's anatomy reference
 gives the label table and the expected volumes (`anatomy.json`). This skill gives the method. Resources are in
 `<this skill>/resources/`; all inputs are on the scan grid.
@@ -37,7 +37,7 @@ flag every label. Look at the specks total if it is large. Then:
 - **Volume inside the anatomy reference's range.** Unclipped SAM masks include soft tissue (`sam-segmentation`): clip first,
   then compare. The ranges come from one scan; a value just outside is a question,
   not an error.
-- **No label on two bones.** On the overlay, check each joint face: the boundary should run through the dark joint space, not
+- **No label on two bones.** On the quad view (`visual-check`), check each joint face: the boundary should run through the dark joint space, not
   through bone.
 - **Nothing left over.** `unlabelled.py --hu hu.npy --labels labels.npy --out qc/cand.npy --threshold-hu <T>` lists bone pieces
   that no label covers (with a 0.02 mm rim around labels ignored, so the partial-volume skin does not join them). Each is a
@@ -54,7 +54,7 @@ the femur. For each candidate from `unlabelled.py`, or each piece `label_stats.p
 2. Treat each 3D piece as its own component: a structure in two pieces needs one SAM box and one temporary label per piece (`sam-segmentation`).
 3. Label it, either by relabelling the piece (`relabel.py --labels labels.npy --out fixed.npy --at z,y,x --to N --pieces
    qc/cand.npy`) or with a small-structure SAM request (`sam-segmentation`, steps 6-9, which starts from these candidates).
-   Then look at the overlay again.
+   Then look at the quad view again.
 4. If you cannot name it, leave it unlabelled and raise a To check item that asks what it is. Do not borrow a name because
    a model offered one.
 
@@ -133,7 +133,7 @@ Choose the cheapest fix that addresses the cause:
   anywhere inside its part). The cut falls where the label pinches. On OA6-1RK it split a tibia label that had swallowed the
   fibula back to Dice 0.998 (tibia) and 0.987 (fibula).
 
-After any fix, run the label checks and the overlay and 3D looks again.
+After any fix, run the label checks and the quad view and 3D sheet looks again.
 
 ## 5. Hand on what you could not settle
 
@@ -148,7 +148,7 @@ What a checker re-derives and opens for a task that made or used labels:
 
 - Re-derive under `/scratch/recheck/`: `label_stats.py` and `unlabelled.py` on the worker's labels, and any distance or
   volume with `measure.py`.
-- Open the 3D sheet, the overlay on the keyframe, and the crop of anything `unlabelled.py` found (`visual-check`).
+- Open the 3D sheet, a quad view centred on the keyframe, and the crop of anything `unlabelled.py` found (`visual-check`).
 - Causes to name for `needs-review`: a wrong box, a missing neighbour, a merged fragment, a label on two bones, a number out of
   range with no explanation, a result that cannot be traced to a file.
 

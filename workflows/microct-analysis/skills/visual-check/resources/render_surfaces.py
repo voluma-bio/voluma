@@ -6,8 +6,8 @@ for small fragments merged into a big bone.
 
 Six views, 60 degrees apart, around the long axis of the limb (with `--frame`: the line from bone B's shaft to bone A's,
 and the first view looks along the oriented stack's normal; without it: scan axis 0 points down and the first view looks
-along axis 2). Surfaces are drawn from a copy downsampled by `--step` (default: so the longest axis is ~300 voxels), for
-display only; never measure from them. The renders are of the array's axes, not the world's: left and right are not
+along axis 2). Surfaces are drawn from a copy downsampled by `--step` (default: so the longest axis is ~300 voxels) and
+cached in `.mesh-cache/` beside `--out`, for display only; never measure from them. The renders are of the array's axes, not the world's: left and right are not
 asserted. Needs pyvista with an off-screen VTK (vtk-osmesa in the sandbox).
 """
 import argparse
@@ -15,7 +15,6 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from skimage.measure import marching_cubes
 
 HERE = Path(__file__).resolve().parent
 # `python -I` puts no script directory on sys.path, so every directory a script imports from is added here.
@@ -29,21 +28,6 @@ except ModuleNotFoundError as e:
 
 sl = vl.sidecar
 TILE = 640
-MIN_VOXELS = 50  # smaller label pieces are not drawn
-
-
-def meshes(lab, spacing, labels):
-    import pyvista as pv
-    out = {}
-    for lv in labels:
-        m = lab == lv
-        if m.sum() < MIN_VOXELS:
-            continue
-        v, f, _, _ = marching_cubes(np.pad(m, 1).astype(np.float32), 0.5, spacing=spacing)
-        v = v - np.array(spacing)  # undo the padding offset
-        faces = np.hstack([np.full((len(f), 1), 3), f]).astype(np.int64).ravel()
-        out[lv] = pv.PolyData(v[:, ::-1].copy(), faces).smooth(n_iter=20)
-    return out
 
 
 def view_vectors(frame):
@@ -85,11 +69,12 @@ if __name__ == '__main__':
     labels = np.load(a.labels, mmap_mode='r')
     sp = sl.grid(a.header or str(sl.sidecar_path(a.labels)))['spacing_zyx_mm']
     step = a.step or max(1, round(max(labels.shape) / 300))
-    lab = np.asarray(labels[::step, ::step, ::step])
-    present = [int(v) for v in np.unique(lab[lab > 0])]
+    cache = vl.Meshes(Path(a.out).parent / '.mesh-cache')
+    present = cache.label_ids(a.labels, labels, step)
     if not present:
         sl.fail('the labels volume is empty: nothing to render')
-    ms = meshes(lab, [s * step for s in sp], present)
+    ms = {lv: cache.surface(a.labels, labels, lambda x, lv=lv: x == lv, f'label{lv}', sp, step=step) for lv in present}
+    ms = {lv: m for lv, m in ms.items() if m.n_points}
     frame = fr.load(a.frame) if a.frame else None
     look, up = view_vectors(frame)
     tiles = [render_view(ms, look, up, k * 60, TILE) for k in range(6)]
