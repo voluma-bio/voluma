@@ -37,13 +37,43 @@ Spend and the usage meter sum sandbox seconds over all sandboxes.
 - The sandbox's `/proc/meminfo` shows the host, not the 8 GiB request; the limit is not
   observable from inside.
 
+# Runner: review assets
+
+`packages/harness/src/review-assets.ts` converts every file a task reports as a volume, a
+structure mask or a surface (`convertJob`) into review assets while the run is live, and
+records `assets.ready` / `assets.failed` on the root thread (id `<runId>:assets:<sha256>`).
+`run.ts` starts it at claim beside `superviseRun`.
+
+- **Queue.** Every `output` event in the recorder's view, from the first (so a resume reads the
+  whole log), minus files with an `assets.*` event; new events are polled once a second.
+  One file at a time, in one `convert` sandbox per claim (created at the first file, metered
+  like the others). A failed conversion is recorded and the worker moves on; a sandbox that
+  dies or cannot be created is replaced once, then the file is recorded failed. `sourceSha256`
+  is the queue item's; a converter that prints another one has failed.
+- **Mounts.** `/evidence` (the run's evidence prefix) and `/workflow` read-only, `/review`
+  (`reviewAssetPrefix`) read-write, no network. The snapshot keeps repo paths and includes
+  `core/convert/`, so the command is `python -I /workflow/workflows/core/convert/review_assets.py`.
+  A cloud-bucket mount cannot rename, which zarr's local store does for every file: the converter
+  builds on local disk and copies, `manifest.json` last.
+- **Signal.** The worker stops on every stop (server, lost lease, self-stop, shutdown) but not
+  on the spend cap (the run still ends and drains) nor on `finally`'s own `abort`, which it must
+  outlive. A stopped worker records nothing; the next claim finds the files again and the
+  converter skips what has a `manifest.json` of its version and mode.
+- **Drain.** An `ended` report waits for the queue (`DRAIN_MS`, 10 minutes, the lease
+  heartbeating meanwhile) after the main sandbox is closed; what is left is recorded
+  `assets.failed {error: "timed out"}`, which is **permanent for the run**: the next claim
+  skips it and review shows the object without assets. A stop during the drain ends it at once.
+  A `released` report does not drain.
+- **Not built.** Conversions run one at a time in one 2-CPU sandbox; the scan (about 1 GB of
+  float32) is the long pole. Add sandboxes if the drain times out in practice.
+
 # Runner: how sandboxes end
 
 Sandboxes cost money while up (a GPU one a lot), so every one must end. In order of
 who ends it:
 
 1. **The runner, normally.** `run.ts` closes the run's sandboxes (one per thread) when the supervisor ends,
-   before it flushes events and reports, so the `stopped` event and the last sandbox seconds
+   then drains the convert queue and closes the convert sandbox, before it flushes events and reports, so the `stopped` event and the last sandbox seconds
    are stored under the live lease. If the close takes over 60 s (15 s after a stop) it asks Modal to terminate
    the sandboxes of this claim, by their `{run, claim}` tags (the claim is a per-claim id: a
    released run's old runner must not kill the sandbox of the runner that reclaimed it).

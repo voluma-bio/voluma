@@ -11,10 +11,17 @@
  * clipped. The function never rejects: every failure after `redact` exists is caught and
  * logged through it.
  *
+ * Beside the supervisor runs the conversion worker (`@voluma/harness/review-assets`): it turns
+ * the files tasks report into review assets in a `convert` sandbox as they appear. It stops on
+ * any stop, but not on the internal abort at the end of the run, which it must outlive.
+ *
  * End of the run, in order. A normal end closes the sandbox first, so its `stopped` event
- * and last seconds go out under the live lease, then reports. A stop (shutdown, self-stop)
- * reports `released` first, so the run is recovered within the platform's grace period,
- * then closes the sandbox. A stop by the server or a lost lease reports nothing.
+ * and last seconds go out under the live lease, then waits for the conversion queue to drain
+ * (bounded by `DRAIN_MS`, the lease heartbeating meanwhile; what is left is recorded as
+ * failed), then reports. A stop (shutdown, self-stop) reports `released` first, so the run
+ * is recovered within the platform's grace period, then closes the sandboxes; it does not
+ * drain, the next claim resumes the queue. A stop by the server or a lost lease reports
+ * nothing.
  */
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
@@ -27,8 +34,13 @@ import { type LiveBatcher, liveBatcher } from "@voluma/harness/live";
 import { llmMainThread, mainSystem, runBrief } from "@voluma/harness/main-thread";
 import { usageOf } from "@voluma/harness/model-usage";
 import { type Recorder, recorder } from "@voluma/harness/recorder";
+import {
+  convertMounts,
+  type ReviewAssetsWorker,
+  reviewAssetsWorker,
+} from "@voluma/harness/review-assets";
 import { type SandboxSession, sandboxSession } from "@voluma/harness/sandbox-session";
-import { workerSandboxSpec } from "@voluma/harness/sandbox-specs";
+import { convertSandboxSpec, workerSandboxSpec } from "@voluma/harness/sandbox-specs";
 import { type RunRole, superviseRun } from "@voluma/harness/supervise-run";
 import { optionalTools } from "@voluma/harness/tools";
 import { loadWorkflow } from "@voluma/workflow/load";
@@ -64,6 +76,8 @@ const REPO_ROOT = resolve(import.meta.dirname, "../../..");
 const CLOSE_BUDGET_MS = { ended: 60_000, stopped: 15_000 };
 /** How long threads get to end after a stop before the run is reported anyway. */
 const WIND_DOWN_MS = 5_000;
+/** How long an ended run waits for the review assets still being converted before it reports. */
+const DRAIN_MS = 10 * 60_000;
 /** Pi's own retries of a model call (429 honours retry-after, 5xx, dropped connections). */
 const MODEL_RETRIES = 3;
 
@@ -125,10 +139,14 @@ export async function runClaim(
   const log = (line: string) => ctx.log(`[${runId}] ${redact(line)}`);
 
   const abort = new AbortController();
+  // The conversion worker's own signal: every stop but the spend cap (which still drains), and
+  // not the abort `finally` does to close the run.
+  const halt = new AbortController();
   // An object, so TypeScript does not narrow what the callbacks set.
   const why: { stopped?: Stopped } = {};
   const stop = (reason: Stopped) => {
     why.stopped ??= reason;
+    if (reason !== "spend-cap") halt.abort();
     abort.abort();
   };
   // The shutdown signal outlives this run: the listener is removed in `finally`.
@@ -157,6 +175,7 @@ export async function runClaim(
   let events: Recorder | undefined;
   let live: LiveBatcher | undefined;
   let session: SandboxSession | undefined;
+  let convert: ReviewAssetsWorker | undefined;
   let error: string | undefined;
   try {
     lease = holdLease({ client, meter, onStop: stop, log });
@@ -371,6 +390,38 @@ export async function runClaim(
       }),
       signal: abort.signal,
     });
+    convert = reviewAssetsWorker({
+      runId,
+      recorder: events,
+      signal: halt.signal,
+      log,
+      async createSandbox(signal) {
+        // Metered like the run's sandboxes: from the start of creation to destroy.
+        meter.sandboxUp();
+        try {
+          const sandbox = await createSandbox(
+            convertSandboxSpec({
+              runId,
+              name: "convert",
+              image: config.sandbox.image,
+              lifetimeSeconds: config.sandbox.lifetimeSeconds,
+              idleSeconds: config.sandbox.idleSeconds,
+              ...convertMounts(runId),
+            }),
+            signal,
+          );
+          return {
+            exec: (request, s) => sandbox.exec(request, s),
+            writeFile: (path, bytes, s) => sandbox.writeFile(path, bytes, s),
+            exitCode: () => sandbox.exitCode(),
+            destroy: () => sandbox.destroy().finally(() => meter.sandboxDown()),
+          };
+        } catch (e) {
+          meter.sandboxDown();
+          throw e;
+        }
+      },
+    });
     supervised.catch(() => {}); // an error after the race below is moot: the run is stopping
     // A stop does not wait for a thread stuck in a slow call (creating a sandbox takes a
     // minute): after a grace period the run is reported and the sandbox closed regardless.
@@ -384,13 +435,19 @@ export async function runClaim(
     error = redact(e instanceof Error ? e.message : String(e));
     log(`failed: ${error}`);
   } finally {
-    shutdown.removeEventListener("abort", onShutdown);
     // Frozen here: a stop that lands while the run is being closed does not change its report.
     const stopped = why.stopped;
     const report = reportFor(stopped, stopped === "spend-cap" ? capError : error);
     abort.abort();
-    // An ended run closes its sandbox while the lease is live; a released one reports first.
-    if (report?.kind === "ended") await closeSandbox(CLOSE_BUDGET_MS.ended);
+    // An ended run closes its sandbox while the lease is live, then waits for the review
+    // assets (a stop during the wait ends it: the listener stays until then); a released one
+    // reports first.
+    if (report?.kind === "ended") {
+      await closeSandbox(CLOSE_BUDGET_MS.ended, session?.close.bind(session));
+      await convert?.drain(DRAIN_MS);
+      await closeSandbox(CLOSE_BUDGET_MS.ended, convert?.close.bind(convert));
+    }
+    shutdown.removeEventListener("abort", onShutdown);
     await live?.flush();
     await events?.flush();
     await lease?.end(report !== undefined);
@@ -408,12 +465,15 @@ export async function runClaim(
     } else {
       log(`stopped (${stopped}); nothing more to report`);
     }
-    if (report?.kind !== "ended") await closeSandbox(CLOSE_BUDGET_MS.stopped);
+    if (report?.kind !== "ended") {
+      await closeSandbox(CLOSE_BUDGET_MS.stopped, session?.close.bind(session));
+      await closeSandbox(CLOSE_BUDGET_MS.stopped, convert?.close.bind(convert));
+    }
   }
 
-  async function closeSandbox(budgetMs: number) {
-    if (!session) return;
-    const closed = session.close().then(
+  async function closeSandbox(budgetMs: number, close: (() => Promise<void>) | undefined) {
+    if (!close) return;
+    const closed = close().then(
       () => true,
       () => false,
     );

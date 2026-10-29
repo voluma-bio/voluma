@@ -18,6 +18,7 @@ import argparse
 import json
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 import numcodecs
@@ -144,9 +145,19 @@ def write_meshes(arr, kind, out):
     return meshes
 
 
+def publish(src, dst):
+    """Copies src to dst, manifest.json last, so a copy cut short has no manifest."""
+    files = sorted(p for p in src.rglob('*') if p.is_file())
+    files.sort(key=lambda p: p.name == 'manifest.json')
+    for p in files:
+        target = dst / p.relative_to(src)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(p, target)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--source', required=True, help='a .npy file')
+    ap.add_argument('--source', required=True, help='a .npy file (any name)')
     ap.add_argument('--as', dest='kind', required=True, choices=KINDS)
     ap.add_argument('--axis', type=int, choices=(0, 1, 2), help='surface only: the array axis the height is measured along')
     ap.add_argument('--int16', action='store_true', help='image only: round a float image to int16 at level 0')
@@ -157,9 +168,11 @@ def main():
         sidecar.fail('--axis goes with --as surface, and only with it: say which array axis the heights are measured along')
     if a.int16 and a.kind != 'image':
         sidecar.fail('--int16 goes with --as image, and only with it')
-    if not src.is_file() or src.suffix != '.npy':
-        sidecar.fail(f'--as {a.kind} takes a .npy file; {src} is not one')
-    arr = np.load(src, mmap_mode='r')
+    # No suffix check: the runner passes the evidence file, which is named by its sha256.
+    try:
+        arr = np.load(src, mmap_mode='r', allow_pickle=False)
+    except (OSError, ValueError) as e:
+        sidecar.fail(f'--as {a.kind} takes a .npy file; {src} is not one ({e})')
     want = 2 if a.kind == 'surface' else 3
     if arr.ndim != want:
         sidecar.fail(f'--as {a.kind} takes a {want}-D array; {src} has shape {list(arr.shape)}')
@@ -174,9 +187,9 @@ def main():
         sidecar.fail(f'--int16 rounds a float image; {src} is {arr.dtype}')
     digest = sidecar.sha256_file(src)
 
-    out = Path(a.out) / digest
+    final = Path(a.out) / digest
     mode = {'as': a.kind, 'axis': a.axis, 'int16': a.int16}
-    manifest_path = out / 'manifest.json'
+    manifest_path = final / 'manifest.json'
     if manifest_path.exists():
         done = json.loads(manifest_path.read_text())
         if done.get('converterVersion') == VERSION and done.get('mode') == mode:
@@ -190,8 +203,10 @@ def main():
         arr = np.rint(arr).astype(np.int16)
     manifest = {'sourceSha256': digest, 'converterVersion': VERSION, 'mode': mode, 'levels': [], 'meshes': []}
 
-    shutil.rmtree(out, ignore_errors=True)  # an interrupted conversion has no manifest: start clean
-    out.mkdir(parents=True)
+    shutil.rmtree(final, ignore_errors=True)  # an interrupted conversion has no manifest: start clean
+    # Built on local disk and copied: zarr writes by renaming, which a cloud-bucket mount (--out in a run) cannot do.
+    work = tempfile.TemporaryDirectory()
+    out = Path(work.name)
     if a.kind == 'surface':
         step = 2 if np.isfinite(arr).sum() > BIG else 1
         verts, faces = height_mesh(np.asarray(arr), a.axis, step)
@@ -211,6 +226,8 @@ def main():
 
     text = json.dumps(manifest, allow_nan=False)
     (out / 'manifest.json').write_text(text + '\n')
+    publish(out, final)
+    work.cleanup()
     print(text)
 
 

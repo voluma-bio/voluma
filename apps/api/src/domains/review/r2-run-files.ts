@@ -1,8 +1,12 @@
-/** Read-only R2 access to a run's content-addressed files (`evidenceKey`). Streams; never buffers. */
+/** Read-only R2 access to a run's content-addressed files (`evidenceKey`), streamed, never buffered, and its converted review assets (`reviewAssetKey`), by presigned URL. */
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { evidenceKey } from "@voluma/contracts/r2";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { evidenceKey, reviewAssetKey } from "@voluma/contracts/r2";
 import { HTTPException } from "hono/http-exception";
 import type { RunFiles } from "../../ports";
+
+/** Long enough to follow the redirect, short enough that a leaked URL is of no use. */
+const ASSET_URL_SECONDS = 300;
 
 export function r2RunFiles(config: {
   accountId: string;
@@ -16,6 +20,16 @@ export function r2RunFiles(config: {
     credentials: { accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey },
   });
   return {
+    assetUrl: (runId, sha256, path) =>
+      getSignedUrl(
+        client,
+        new GetObjectCommand({
+          Bucket: config.bucket,
+          Key: reviewAssetKey(runId, sha256, path),
+          ResponseCacheControl: "private, max-age=31536000, immutable",
+        }),
+        { expiresIn: ASSET_URL_SECONDS },
+      ),
     async open(runId, sha256, signal) {
       try {
         const result = await client.send(

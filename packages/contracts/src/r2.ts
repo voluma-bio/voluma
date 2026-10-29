@@ -57,8 +57,9 @@ export const toolOutputKey = (runId: string, toolCallId: string) =>
  * once and never overwritten, so a rerun of a task can't change what an
  * earlier revision points at. Inside the run prefix, so mounts stay isolated.
  */
+export const evidencePrefix = (runId: string) => `${runPrefix(runId)}evidence/`;
 export const evidenceKey = (runId: string, sha256: string) =>
-  `${runPrefix(runId)}evidence/${sha256Schema.parse(sha256)}`;
+  `${evidencePrefix(runId)}${sha256Schema.parse(sha256)}`;
 
 /**
  * What the review converter made from one reported file (`events.ts`, `assets.ready`): zarr

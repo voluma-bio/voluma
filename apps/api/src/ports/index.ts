@@ -48,8 +48,14 @@ export type RunRecords = {
   readable(reader: Reader, runId: string): Promise<boolean>;
 };
 
-/** A run's content-addressed files (`evidenceKey`): evidence, data files, volumes, meshes. */
+/** A run's content-addressed files (`evidenceKey`) and its converted review assets (`reviewAssetKey`). */
 export type RunFiles = {
+  /**
+   * A short-lived URL for one converted asset of the run (`reviewAssetKey(runId, sha256,
+   * path)`); the object is immutable, so storage tells the browser to cache it for a year.
+   * Does not check that the object exists.
+   */
+  assetUrl(runId: string, sha256: string, path: string): Promise<string>;
   /** Rejects with a 404 `HTTPException` when there is no such file, a 502 when storage fails. */
   open(
     runId: string,

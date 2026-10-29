@@ -4,8 +4,10 @@
  *   GET /runs/:runId                the run's review data (`@voluma/contracts/review`),
  *                                   built from its event log on each read
  *   GET /runs/:runId/files/:sha256  one of its files (`evidenceKey`), streamed from storage
+ *   GET /runs/:runId/assets/:sha256/*  a converted review asset (`reviewAssetKey`): a 302 to
+ *                                   a presigned GET, the browser fetches the bytes from storage
  */
-import { sha256Schema } from "@voluma/contracts/r2";
+import { relativePathSchema, sha256Schema } from "@voluma/contracts/r2";
 import {
   acceptCheckRequestSchema,
   markReviewedRequestSchema,
@@ -126,5 +128,28 @@ export function runRoutes({ runs, files }: ReviewDeps) {
     return c.body(stream);
   });
 
+  app.get("/runs/:runId/assets/:sha256/*", async (c) => {
+    const { runId, sha256 } = c.req.param();
+    // Assets are keyed by run (`reviewAssetKey`), so the read check on the run is the whole scope check.
+    const marker = `/assets/${sha256}/`;
+    const tail = decodeTail(c.req.path.slice(c.req.path.indexOf(marker) + marker.length));
+    if (!sha256Schema.safeParse(sha256).success || !relativePathSchema.safeParse(tail).success)
+      return c.json({ error: "not found" }, 404);
+    if (!(await runs.readable(readerOf(c.var.user), runId)))
+      return c.json({ error: "not found" }, 404);
+    if (!files) throw new HTTPException(503, { message: "File storage is not configured." });
+    // The URL expires and the file does not change: the browser must ask again, not cache the redirect.
+    c.header("Cache-Control", "no-store");
+    return c.redirect(await files.assetUrl(runId, sha256, tail), 302);
+  });
+
   return app;
+}
+
+function decodeTail(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return "";
+  }
 }
