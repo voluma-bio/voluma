@@ -19,7 +19,7 @@ import type { UserSender } from "../adapters/pi/start-thread";
 import type { Recorder } from "../recorder";
 import { Refusal, type TaskRuntime } from "../task-runtime";
 import { runEnded, startedFor, type ThreadLog, type ThreadState, threadLog } from "../thread-log";
-import { effectId } from "./effects";
+import { effectId, feedbackText, fromMain } from "./effects";
 import { result } from "./task-tools";
 import type { Tool, ToolContext } from "./tool";
 
@@ -64,7 +64,6 @@ export interface MainDeps {
 
 const nonEmpty = z.string().min(1);
 const AGENT: By = { kind: "agent" };
-const fromMain = (text: string) => `From the main agent:\n${text}`;
 
 export function mainTools(deps: MainDeps) {
   const { recorder, runtime, agents, rootThreadId, workflow, maxFixRounds } = deps;
@@ -201,15 +200,7 @@ export function mainTools(deps: MainDeps) {
               effectId("message", ctx.threadId, ctx.toolCallId),
             );
           }
-          agents.resume(
-            threadId,
-            fromMain(
-              feedback
-                ? `${text}\n\nThis opens a new attempt of ${w.taskId}: fix it, report its outputs again, then submit_task.`
-                : text,
-            ),
-            sender,
-          );
+          agents.resume(threadId, feedback ? feedbackText(w.taskId, text) : fromMain(text), sender);
           return {
             message: feedback
               ? `Feedback sent: ${threadId} resumed on a new attempt of ${w.taskId}.`

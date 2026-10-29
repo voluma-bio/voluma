@@ -314,25 +314,26 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     return section(() => append(target(), prepared));
   }
 
-  /** Stale marks on each transitive dependent that has an attempt and isn't stale yet. */
+  /**
+   * Stale marks on each transitive dependent that has an attempt and isn't stale yet. Its live
+   * threads are stopped first, append-first, whatever the task's status: a worker (idle ones too,
+   * which would otherwise block `start_worker` on the stale task) must not redo the task ahead of
+   * what it builds on, and a check has no result to write.
+   */
   async function staleDependents(threadId: string, prefix: string, taskId: string, why: string) {
     const marked: string[] = [];
     for (const dep of attempted(taskId)) {
       const t = taskOf(dep);
       if (!t?.attemptId) continue;
+      const log = threadLog(recorder.events());
+      const holders = [...startedFor(log, dep, "worker"), ...startedFor(log, dep, "check")];
+      for (const h of holders) {
+        if (h.end?.status !== "cancelled") await stop(h.id, `${prefix}:stale:${dep}:end:${h.id}`);
+      }
       await setStatus(threadId, `${prefix}:stale:${dep}`, dep, t.attemptId, "stale", why, {
         kind: "rule",
         rule: "stale",
       });
-      // A stale mark stops the dependent's live thread: a check (no check-result follows) or
-      // a worker, which must not redo the task ahead of what it builds on.
-      const holder =
-        t.status === "under-review"
-          ? t.threads.check
-          : t.status === "in-progress"
-            ? t.threads.worker
-            : undefined;
-      if (holder) await stop(holder, `${prefix}:stale:${dep}:end`);
       marked.push(dep);
     }
     return marked;

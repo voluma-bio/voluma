@@ -270,10 +270,9 @@ describe("run loop", () => {
     );
   });
 
-  // Known failure of the loop: `staleDependents` stops only a dependent's live thread, picked by
-  // its status (`in-progress`: worker, `under-review`: check). A dependent that is `done` or
-  // `to-check` keeps its idle worker, which then also blocks `start_worker` on the stale task.
-  it.fails("redo with attempted dependents: a correction marks them stale and stops their worker", async () => {
+  // A stale mark stops every worker and check of the dependent, whatever its status, so
+  // `start_worker` on the stale task needs no `stop_worker`.
+  it("redo with attempted dependents: a correction marks them stale and stops their worker", async () => {
     const main: Script = (t) => {
       const redo = t.calls.some((c) => c.name === "message");
       if (t.fresh && passed(t, "t2") && !redo)
@@ -351,10 +350,9 @@ describe("run loop", () => {
       expect(duplicates(w.stored)).toEqual([]);
     });
 
-    // Known failure of the loop: `interruptedResult` tells main the `message` completed because the
-    // attempt it opens is stored, but the worker's copy of the feedback is written after it. A cut
-    // in between leaves the worker idle on an open attempt, and nothing resumes an idle worker.
-    it.fails("message: the feedback opens one attempt and the worker has it after the restart", async () => {
+    // A cut between the attempt `message` opens and the worker's copy of the feedback: the loop
+    // resumes the idle holder with the stored text, and main is not told the worker has it.
+    it("message: the feedback opens one attempt and the worker has it after the restart", async () => {
       const feedback: Script = (t) => {
         const m = /The check of (t\d) found problems/.exec(t.lastUser);
         return t.fresh && m
@@ -380,7 +378,7 @@ describe("run loop", () => {
       ).toHaveLength(1);
       expect(
         resultsOf(w.stored, "main").some((r) =>
-          /message.*completed before the run was cut off/.test(r),
+          /message.*(completed before the run was cut off|opened the new attempt)/.test(r),
         ),
       ).toBe(true);
       expect(duplicates(w.stored)).toEqual([]);

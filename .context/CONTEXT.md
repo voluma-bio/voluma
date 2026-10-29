@@ -115,6 +115,9 @@ check threads, and review chat threads.
   the root has a completed `thread.ended` (`finish_run`, or liveness); then every thread without
   an end is stopped. Stops are appended first (`thread.ended {cancelled}` inside the section,
   then abort without waiting), so the holder check refuses the stopped thread's next write at once.
+  A stale mark stops every worker and check of the dependent the same way, whatever its status.
+  A `message` that opens an attempt for feedback is followed by the worker's copy of the text; if a
+  cut falls between, the loop resumes the idle holder with the text stored in the `message` call.
 - **The main agent** (`<runId>.main[.n]`, kind `main`) is the one model thread that coordinates:
   it starts workers (`start_worker`), steers them or sends feedback on a rejected task
   (`message`), answers a checker (`answer`), accepts a rejected task, changes the plan

@@ -42,7 +42,7 @@ import {
   threadState,
 } from "./thread-log";
 import type { ThreadSpec, Threads } from "./threads";
-import { interruptedResult } from "./tools/effects";
+import { interruptedResult, undeliveredFeedback } from "./tools/effects";
 import type { Agents } from "./tools/main-tools";
 import type { Tool } from "./tools/tool";
 
@@ -390,6 +390,23 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     return false;
   }
 
+  /**
+   * An idle worker that holds an open attempt `message` opened but whose feedback never reached
+   * it (a cut between the two writes): resume it with the stored text.
+   */
+  function resumeFeedback(d: ThreadLog): boolean {
+    for (const r of d.threads.values()) {
+      if (r.role !== "worker" || stateOf(r) !== "idle" || d.holders.get(r.taskId) !== r.id)
+        continue;
+      if (runtime.taskOf(r.taskId)?.status !== "in-progress") continue;
+      const feedback = undeliveredFeedback(recorder.events(), r.id, r.taskId);
+      if (!feedback) continue;
+      resume(r, feedback.text, { kind: "thread", threadId: feedback.from });
+      return true;
+    }
+    return false;
+  }
+
   /** A task `under-review` whose attempt has no check thread: start one. */
   async function startChecks(d: ThreadLog, view: Folded): Promise<boolean> {
     for (const t of view.tasks) {
@@ -573,9 +590,17 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     if (anyRunning(d)) return false;
     const covers = events.at(-1)?.id;
     if (d.emptyDeliveries < config.stuckLimit) {
+      const asks = [...d.threads.values()].flatMap((r) => {
+        const ask = r.role === "check" ? openAsk(r) : undefined;
+        return ask ? [`- ${ask.id} (${r.taskId}): "${ask.question}"`] : [];
+      });
+      const unanswered =
+        asks.length > 0
+          ? `A checker waits for your answer, and nothing else can move until you give it with \`answer\`:\n${asks.join("\n")}\n\n`
+          : "";
       resume(
         m,
-        `Nothing is running and the run is not finished: start the next workers, or finish the run.\n\n${stateBlock(d, events, view, stateOf)}`,
+        `Nothing is running and the run is not finished: ${asks.length > 0 ? "answer the checker, then " : ""}start the next workers, or finish the run.\n\n${unanswered}${stateBlock(d, events, view, stateOf)}`,
         { kind: "runtime", ...(covers && { covers }) },
       );
       return true;
@@ -628,6 +653,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       return "acted";
     }
     if (await unresumable(d)) return "acted";
+    if (resumeFeedback(d)) return "acted";
     if (resumeCutOff(d)) return "acted";
     if (await startChecks(d, view)) return "acted";
     const deadline: { next?: number } = {};
