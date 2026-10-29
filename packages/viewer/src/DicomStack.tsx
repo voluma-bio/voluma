@@ -3,6 +3,7 @@ import { Enums, RenderingEngine, type Types } from "@cornerstonejs/core";
 import { useEffect, useRef, useState } from "react";
 import type { DicomSeries } from "./dicom";
 import { acquireDicomSession, type DicomSession, initializeDicom } from "./dicomSession";
+import { ZoomControls } from "./ZoomControls";
 
 export default function DicomStack({ series }: { series: DicomSeries }) {
   const element = useRef<HTMLDivElement>(null);
@@ -201,34 +202,16 @@ export default function DicomStack({ series }: { series: DicomSeries }) {
             onChange={(event) => changeWindow(window.width, event.target.value)}
           />
         </label>
-        <button
-          type="button"
-          className="icon-button"
-          aria-label="Zoom out"
-          onClick={() => {
+        <ZoomControls
+          label="Zoom"
+          onZoom={(factor) => {
             const view = controls.current?.viewport;
             if (view) {
-              view.setZoom(view.getZoom() / 1.2);
+              view.setZoom(view.getZoom() * factor);
               view.render();
             }
           }}
-        >
-          −
-        </button>
-        <button
-          type="button"
-          className="icon-button"
-          aria-label="Zoom in"
-          onClick={() => {
-            const view = controls.current?.viewport;
-            if (view) {
-              view.setZoom(view.getZoom() * 1.2);
-              view.render();
-            }
-          }}
-        >
-          +
-        </button>
+        />
         <button
           type="button"
           className="text-button"

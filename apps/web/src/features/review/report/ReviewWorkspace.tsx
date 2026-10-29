@@ -1,7 +1,6 @@
 /** Review layout consumes real result snapshots; opening images never invents analysis results. */
 
 import { StatusBadge } from "@voluma/ui";
-import type { StructureDisplay } from "@voluma/viewer";
 import { ArrowLeft, Download, History, Layers, ListChecks } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
@@ -31,14 +30,14 @@ export function ReviewWorkspace({
   revisionId?: string;
   navigate(selection: { task?: string; revision?: string }): void;
   backLink: ReactNode;
-  viewer: (selected: { id: string; name: string }[], display: StructureDisplay) => ReactNode;
+  viewer: ReactNode;
   intake?: ReactNode;
   /** Why there are no results, when `run` is absent: loading, no plan yet, unavailable. */
   notice?: string;
   onResult(run: ReviewRun): void;
 }) {
   const [tab, setTab] = useState<"tasks" | "structures">("tasks");
-  const [display, setDisplay] = useState<StructureDisplay>({});
+  const [display, setDisplay] = useState<Record<string, { visible: boolean; opacity: number }>>({});
   const [filter, setFilter] = useState("");
   const [correction, setCorrection] = useState<{
     task: ReviewTask;
@@ -49,8 +48,6 @@ export function ReviewWorkspace({
   const revision = revisionId ? run?.revisions.find((item) => item.id === revisionId) : latest;
   const task = taskId ? revision?.tasks.find((item) => item.id === taskId) : revision?.tasks[0];
   const readOnly = !service || revision !== latest;
-  const selected =
-    revision?.structures.filter((item) => task?.structureIds.includes(item.id)) ?? [];
   return (
     <div className="review-shell" data-theme="light">
       <header className="app-header">
@@ -297,7 +294,7 @@ export function ReviewWorkspace({
               aria-label="Resize report and viewers"
             />
             <Panel id="imaging" minSize="28%">
-              {viewer(selected, display)}
+              {viewer}
             </Panel>
           </Group>
         </div>

@@ -275,9 +275,6 @@
   .view-empty {
     @apply flex min-h-0 flex-1 flex-col items-center justify-center px-3 text-center text-sm text-muted-foreground;
   }
-  .view-slot footer {
-    @apply flex justify-between gap-2 px-3 py-2 font-mono text-[10px] text-muted-foreground;
-  }
   .dicom-intake {
     @apply max-w-2xl;
   }
@@ -289,7 +286,7 @@
     min-height: min-content;
   }
   .dicom-canvas-wrap {
-    @apply relative min-h-20 flex-1;
+    @apply relative min-h-8 flex-1;
     background: var(--viewer-well);
   }
   .dicom-canvas {
@@ -310,13 +307,31 @@
     @apply whitespace-nowrap font-mono;
   }
   .image-controls {
-    @apply flex shrink-0 flex-wrap items-end gap-2 px-3 pb-2 text-xs;
+    @apply flex shrink-0 flex-wrap items-end gap-3 px-3 py-3 text-xs;
   }
   .image-controls label {
     @apply flex flex-col gap-1 text-muted-foreground;
   }
   .image-controls input {
-    @apply w-20 rounded border border-border bg-card px-1 py-1 font-mono text-foreground;
+    @apply h-8 w-20 rounded border border-border bg-card px-1 py-1 font-mono text-foreground;
+  }
+  .image-controls input:where([type="range"]) {
+    @apply p-0;
+  }
+  .zoom-controls {
+    @apply flex flex-col gap-1;
+  }
+  .image-controls .icon-button {
+    @apply h-8 w-8 border border-border bg-card text-foreground;
+  }
+  .image-controls .icon-button:hover:not(:disabled) {
+    @apply bg-accent;
+  }
+  .image-controls .icon-button:disabled {
+    @apply opacity-40;
+  }
+  .image-controls .text-button {
+    @apply h-8;
   }
   .volume-canvas {
     touch-action: none;
@@ -324,24 +339,6 @@
   }
   .volume-canvas:active {
     cursor: grabbing;
-  }
-  .volume-note {
-    @apply shrink-0 px-3 py-1 text-xs text-muted-foreground;
-  }
-  .volume-quality {
-    @apply my-3 flex max-w-full flex-col gap-1 text-xs;
-  }
-  .volume-quality select {
-    @apply min-w-0 rounded border border-border bg-card p-1 text-foreground;
-  }
-  .volume-actions {
-    @apply flex shrink-0 flex-wrap items-start gap-3 px-3 py-1 text-xs text-muted-foreground;
-  }
-  .viewer-selection {
-    @apply shrink-0 pt-4;
-  }
-  .structure-chip {
-    @apply flex items-center gap-2 rounded border border-border bg-card px-2 py-1 text-xs;
   }
   .resize-handle {
     @apply relative w-2 shrink-0;
@@ -423,9 +420,6 @@
   }
   .task-report {
     padding: 20px;
-  }
-  .viewer-heading span {
-    display: none;
   }
   .view-empty p:last-child {
     display: none;

@@ -1,4 +1,4 @@
-/** On-demand raw volume display. No meshes or analysis results. */
+/** Automatic full-resolution raw volume display. No meshes or analysis results. */
 import {
   cache,
   Enums,
@@ -16,9 +16,10 @@ import {
   initializeDicom,
   sliceCacheBytes,
 } from "./dicomSession";
-import { planVolume, sampleVolume, type VolumePlan, type VolumeSize } from "./volume";
+import { planVolume, sampleVolume, type VolumePlan } from "./volume";
+import { ZoomControls } from "./ZoomControls";
 
-// One preview slot. Serialize replacement so two preview buffers/textures never
+// One volume slot. Serialize replacement so two volume buffers/textures never
 // coexist. Reuse IDs: 4.22's local-image metadata provider has no per-ID removal.
 const volumeId = "voluma-local-preview";
 let retired: Promise<void> = Promise.resolve();
@@ -48,92 +49,34 @@ function admission(plan: VolumePlan) {
   const limit = maxTextureSize();
   if (!limit) return "3D needs WebGL2, which this browser doesn't provide.";
   if (plan.dimensions.some((n) => n > limit))
-    return `This browser's graphics limit is ${limit} voxels per axis. Choose a preview size.`;
+    return `Full-resolution 3D exceeds this browser's limit of ${limit} voxels per axis. Acquired slices remain available.`;
   if (textureBytes(plan) > maxTextureBytes)
-    return "This volume needs more than 2 GiB of graphics memory. Choose a preview size.";
+    return "Full-resolution 3D needs more than 2 GiB of graphics memory. Acquired slices remain available.";
 }
 
 export default function DicomVolume({ series }: { series: DicomSeries }) {
-  const [size, setSize] = useState<VolumeSize>("full");
-  const [open, setOpen] = useState(false);
   const plan = useMemo(() => {
     try {
-      return planVolume(series, size);
+      const planned = planVolume(series);
+      return admission(planned) ?? planned;
     } catch (error) {
       return (error as Error).message;
     }
-  }, [series, size]);
-  const refused = typeof plan === "string" ? undefined : admission(plan);
+  }, [series]);
   return (
-    <section className="dicom-stack" aria-label="Raw volume preview">
+    <section className="dicom-stack" aria-label="3D volume">
       {typeof plan === "string" ? (
-        <div className="view-empty" role="status">
+        <div className="view-empty" role="alert">
           {plan}
         </div>
-      ) : open ? (
-        <VolumeView series={series} plan={plan} onClose={() => setOpen(false)} />
       ) : (
-        <>
-          <div className="view-empty">
-            <p>Raw intensities, not segmented anatomy.</p>
-            <label className="volume-quality">
-              3D resolution
-              <select
-                aria-label="3D resolution"
-                value={size}
-                onChange={(e) =>
-                  setSize(
-                    e.target.value === "full" ? "full" : (Number(e.target.value) as 128 | 256),
-                  )
-                }
-              >
-                <option value="full">Full resolution · every acquired voxel</option>
-                <option value={256}>Standard preview · up to 256 per axis</option>
-                <option value={128}>Compact preview · up to 128 per axis</option>
-              </select>
-            </label>
-            <p className="text-xs">
-              {plan.downsampled ? "Downsampled" : "Native grid"} · {plan.dimensions.join(" × ")} ·{" "}
-              {(plan.bytes / 1048576).toFixed(1)} MiB voxels
-              {plan.stored ? ` · ${plan.ArrayType.BYTES_PER_ELEMENT * 8}-bit stored values` : ""}
-              {textureBytes(plan) > plan.bytes
-                ? ` · up to ${(textureBytes(plan) / 1048576).toFixed(0)} MiB on the graphics card`
-                : ""}
-            </p>
-            {refused && (
-              <p className="text-xs" role="alert">
-                {refused}
-              </p>
-            )}
-            <button
-              className="button mt-3"
-              type="button"
-              disabled={!!refused}
-              onClick={() => setOpen(true)}
-            >
-              Build 3D
-            </button>
-          </div>
-          <p className="volume-note">
-            {plan.downsampled
-              ? "3D is display only. Small structures may disappear at preview resolution."
-              : "3D is display only. Every acquired voxel is kept."}
-          </p>
-        </>
+        <VolumeView series={series} plan={plan} />
       )}
     </section>
   );
 }
 
-function VolumeView({
-  series,
-  plan,
-  onClose,
-}: {
-  series: DicomSeries;
-  plan: VolumePlan;
-  onClose(): void;
-}) {
+function VolumeView({ series, plan }: { series: DicomSeries; plan: VolumePlan }) {
   const element = useRef<HTMLDivElement>(null);
   const controls = useRef<{
     view: VolumeViewport3D;
@@ -167,7 +110,7 @@ function VolumeView({
       await previous;
       signal.throwIfAborted();
       // A failed retirement must never make createLocalVolume reuse an old scan.
-      if (cache.getVolume(volumeId)) throw new Error("Previous preview was not released");
+      if (cache.getVolume(volumeId)) throw new Error("Previous volume was not released");
       await initializeDicom();
       signal.throwIfAborted();
       session = acquireDicomSession(series);
@@ -213,6 +156,8 @@ function VolumeView({
           metadata: { windowCenter: [(min + max) / 2], windowWidth: [max - min] },
         },
       );
+      // Another pane may be maximized. Cornerstone cannot render a zero-size host.
+      await waitForViewport(host, signal);
       engine = new RenderingEngine(`volume-${crypto.randomUUID()}`);
       engine.enableElement({
         viewportId: "volume",
@@ -240,7 +185,7 @@ function VolumeView({
           controls.current = null;
           setReady(false);
           setError(true);
-          setStatus("The 3D graphics context was lost. Release 3D and rebuild the preview.");
+          setStatus("The 3D graphics context was lost. Close and reopen the scan to retry.");
         },
         { signal },
       );
@@ -297,7 +242,7 @@ function VolumeView({
       if (!signal.aborted) {
         setError(true);
         setStatus(
-          "3D could not be built or rendered. Release it and choose a smaller preview size, or reload the page. Acquired slices remain available. WebGL2 is required.",
+          "3D could not be loaded. Close and reopen the scan to retry. Acquired slices remain available.",
         );
       }
     });
@@ -373,10 +318,6 @@ function VolumeView({
           </div>
         )}
       </div>
-      <p className="volume-note">
-        {plan.downsampled ? "Downsampled" : "Native grid"} · {plan.dimensions.join(" × ")} · Raw
-        volume, not segmented surfaces
-      </p>
       <fieldset className="image-controls" disabled={!ready}>
         <legend className="sr-only">Volume display</legend>
         <label>
@@ -409,34 +350,16 @@ function VolumeView({
             }}
           />
         </label>
-        <button
-          className="icon-button"
-          type="button"
-          aria-label="3D zoom out"
-          onClick={() => {
-            const v = controls.current?.view;
-            if (v) {
-              v.setZoom(v.getZoom() / 1.2);
-              v.render();
+        <ZoomControls
+          label="3D zoom"
+          onZoom={(factor) => {
+            const view = controls.current?.view;
+            if (view) {
+              view.setZoom(view.getZoom() * factor);
+              view.render();
             }
           }}
-        >
-          −
-        </button>
-        <button
-          className="icon-button"
-          type="button"
-          aria-label="3D zoom in"
-          onClick={() => {
-            const v = controls.current?.view;
-            if (v) {
-              v.setZoom(v.getZoom() * 1.2);
-              v.render();
-            }
-          }}
-        >
-          +
-        </button>
+        />
         <button
           className="text-button"
           type="button"
@@ -449,13 +372,32 @@ function VolumeView({
           Reset 3D
         </button>
       </fieldset>
-      <div className="volume-actions">
-        <button className="text-button" type="button" onClick={onClose}>
-          {ready || error ? "Release 3D" : "Cancel 3D"}
-        </button>
-      </div>
     </>
   );
+}
+
+function waitForViewport(host: HTMLElement, signal: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      observer.disconnect();
+      signal.removeEventListener("abort", aborted);
+    };
+    const aborted = () => {
+      cleanup();
+      reject(new Error("Render cancelled"));
+    };
+    const checkSize = () => {
+      if (signal.aborted) aborted();
+      else if (host.clientWidth && host.clientHeight) {
+        cleanup();
+        resolve();
+      }
+    };
+    const observer = new ResizeObserver(checkSize);
+    observer.observe(host);
+    signal.addEventListener("abort", aborted, { once: true });
+    checkSize();
+  });
 }
 
 function renderFrame(host: HTMLElement, signal: AbortSignal, render: () => void) {
