@@ -59,10 +59,12 @@ them), but `adapters/pi/elide-images.ts` keeps image blocks only for the last 2 
 calls in each request, so request size does not grow with the thread.
 
 **Model calls retry.** `run.ts` passes `maxRetries: 3` to Pi, which retries a 408, 429 (waiting
-the server's `retry-after`), 5xx or dropped connection. `model-retry.ts` adds one case Pi treats as
-final: Meta's intermittent `404 model_not_found` (only from the `meta` provider; about one tool call
-in five on 2026-10-28 with a working key), retried up to 4 attempts in all, 1 s, 2 s, 4 s apart,
-when the call failed before streaming any content. Any other error ends the thread as before.
+the server's `retry-after`), 5xx or dropped connection. `model-retry.ts` wraps every role's calls
+(the main thread too) and keeps retrying those errors, and Meta's `404 model_not_found` that Pi
+treats as final (about half of all calls on 2026-10-28), when the call failed before streaming
+any content: backoff from 1 s doubling to a 30 s cap, until 4 minutes of waiting are spent, each
+retry logged with its role and attempt. The run's abort ends the wait. Any other error, or the
+spent budget, ends the call. `provider-error.ts` holds the error classification.
 Cost is Pi's per-reply price, summed per claim; the log prints it
 when a claim reports (`model cost this claim`), and the API stores it as `runs.model_cost_usd`.
 On 2026-10-28 the claims' lines summed to the run's `model_cost_usd` and to `spend(events).total`

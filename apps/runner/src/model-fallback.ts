@@ -16,16 +16,9 @@
  * Visitor runs never use it (their key and scan go to Meta only).
  */
 import type { Api, Model } from "@earendil-works/pi-ai";
+import { isProviderError } from "./provider-error.ts";
 
 const COOL_DOWN_MS = 10 * 60_000;
-
-/**
- * Pi formats provider errors as `<provider> API error (<status>): <body>`; the statuses that
- * say the model is unusable (key refused, model not found, timeout, rate limit, server error),
- * not a bad request of ours. A connection failure or client timeout has no status.
- */
-const PROVIDER_ERROR =
-  /API error \((401|403|404|408|429|5\d\d)\)|^Connection error\.?$|^Request timed out\.?$/;
 
 export interface ModelFallback {
   /** The model a new thread starts on: the primary, or the fallback while the primary is down. */
@@ -48,8 +41,7 @@ export function modelFallback(
       return fallback;
     },
     failed(model, message) {
-      if (!fallback || name(model) === name(fallback) || !PROVIDER_ERROR.test(message ?? ""))
-        return;
+      if (!fallback || name(model) === name(fallback) || !isProviderError(message)) return;
       if ((openUntil.get(name(model)) ?? 0) <= Date.now()) {
         log(
           `${name(model)} failed (${message}): new threads use ${name(fallback)} for ${COOL_DOWN_MS / 60_000} min`,
