@@ -53,7 +53,6 @@ import {
   workerSandboxSpec,
 } from "@voluma/harness/sandbox-specs";
 import { type RunRole, superviseRun } from "@voluma/harness/supervise-run";
-import { supervisorThreadId } from "@voluma/harness/thread-id";
 import { optionalTools } from "@voluma/harness/tools";
 import { loadWorkflow } from "@voluma/workflow/load";
 import { computePlan } from "@voluma/workflow/plan";
@@ -491,7 +490,7 @@ async function claimBody(
               lifetimeSeconds: config.sandbox.lifetimeSeconds,
               idleSeconds: config.sandbox.idleSeconds,
               // The converter imports `sidecar` through the run's PYTHONPATH, which every thread shares.
-              env: layout.forThread(supervisorThreadId(runId)).env,
+              env: layout.forThread(`${runId}.main`).env,
               ...convertMounts(runId),
             }),
             signal,

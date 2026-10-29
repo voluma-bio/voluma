@@ -21,7 +21,6 @@
     "./model-usage": "./src/model-usage.ts",
     "./adapters/http/run-client": "./src/adapters/http/run-client.ts",
     "./supervise-run": "./src/supervise-run.ts",
-    "./thread-id": "./src/thread-id.ts",
     "./review-assets": "./src/review-assets.ts",
     "./tools": "./src/tools/registry.ts"
   },
