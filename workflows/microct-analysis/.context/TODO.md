@@ -3,15 +3,10 @@
 From the structural review of PR #62 (`review-pr62` p231, structure) and the correctness re-check (p230). The round-2 fixes there
 (one curve schema and interpolator, one BV owner, one result record) landed; these did not.
 
-- **One frame module and schema (p231 B2).** `orient_joint.py` writes `R_zyx`, `origin_zyx`, `shape_srs` and has `reslice`, `to_scan`,
-  `to_oriented_points`, `to_scan_points`; `workflow-mouse-oa/resources/tibia_frame.py` writes an xyz column basis resampled with
-  `affine_transform`, and `iioc.py` has its own `to_scan` and an inline point mapping (`width_points_zyx`): three mappings of "a rigid
-  resample of the scan grid with a derived grid id". `tibia_frame.json` also has dead keys (`basis_columns_xyz` duplicates
-  `output_xyz_to_original_xyz_matrix`; `origin_xyz` and `local_lower_uvw` are written and never read; `_centers` is returned and dropped), and
-  the prose `axes` string is hashed into `grid_id`, so rewording it changes the id. Direction: one `frame.json` schema
-  (`parent_grid_id`, `R_zyx`, `origin_zyx`, `shape`) and its resample and map-back functions in `microct-core`; `orient_joint` and a generic
-  `orient_bone` (today's `tibia_frame` fit, moved into `orient-joint`: its docstring already says "for one long bone") only compute `R`,
-  origin and shape; delete `iioc.to_scan` and the inline mapping.
+- **A generic `orient_bone` (left from p231 B2).** The frame module landed (`microct-core/resources/frame.py`); `tibia_frame.py` now only fits
+  the axes and crop and calls it. It stayed in `workflow-mouse-oa` because its +U medial / +V anterior sign rule, crop defaults and
+  `envelope.close_and_fill` are the mouse tibia protocol's: moving it to `orient-joint` needs `envelope` in a generic skill and the sign
+  rule behind an argument.
 - **One `--anatomy` profile (p231 M1).** `references/anatomy.json` holds label names, `window_hu` and `segmentation_threshold_hu`, but the
   generic scripts take them as flags: `--names 1=femur,...` (`render_overlay`, `render_surfaces`), `--window` in five scripts, the required
   `--threshold-hu` in five. Speck size is 0.01 mm³ in `unlabelled` and `label_stats` and 0.005 in `disagree`; `orient_joint`'s default

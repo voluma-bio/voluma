@@ -18,7 +18,7 @@ python <this skill>/resources/orient_joint.py --in hu.npy --header hu.json --out
     --threshold-hu <bone threshold> [--window lo,hi]
 ```
 
-It writes `frame.json` (the frame), `oriented.npy` (float32 HU stack, axis 0 = slices, its own `grid_id`) and
+It writes `frame.json` (the frame: `R_zyx`, `origin_zyx`, `shape`, `parent_grid_id`, `grid_id`, the one schema every frame uses, described in `microct-core/resources/frame.py`, plus this fit's diagnostics and `keyframe`), `oriented.npy` (float32 HU stack, axis 0 = slices, its own `grid_id`) and
 `keyframe.jpg`, and prints the keyframe index, the bend angle between the shafts and `skew_vox`.
 
 How it chooses: a threshold; the bones are the largest 3D piece plus the largest other piece near it that is at least

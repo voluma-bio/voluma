@@ -18,7 +18,7 @@ Library use (other resources import this file):
   sidecar.value(v, unit, definition, kind='measurement', **provenance)   # one entry of a result record
   sidecar.emit_values(out_json, values, meta=None, **fields)   # write the result record, print it (below)
   sidecar.save_image(fig, path)  # the image limits below, JPEG
-  sidecar.load_points(path)   # {name: [z, y, x]} from pick.py's points.json or a plain name-to-point file
+  sidecar.load_points(path, grid_id)   # {name: [z, y, x]} from a points file (`pick.py` writes one); refuses another grid
   sidecar.fail(sentence)   # print a sentence the agent can act on to stderr and exit 2
 
 Result record: every script that reports numbers writes `{"values": {id: {value, unit, definition, kind, ...}}, ...meta}`
@@ -39,7 +39,7 @@ import numpy as np
 
 MAX_IMAGE_PX = 2000  # view_image's limit; larger images may be rejected or resized
 MAX_IMAGE_BYTES = 1 << 20  # view_image refuses files over 1 MiB, and every image is resent with later requests
-JPEG_QUALITY = 85
+JPEG_QUALITIES = (85, 75, 65)  # `save_image` tries each until the file is under the limit
 
 
 def sha256_file(path):
@@ -109,12 +109,19 @@ def write(array_path, *, like=None, grid_id=None, spacing_zyx_mm=None, inputs=()
     return out
 
 
-def load_points(path):
-    """{name: [z, y, x]} scan-grid voxel indices from `pick.py`'s points.json or a plain {"name": [z, y, x]} file."""
+def load_points(path, grid_id):
+    """{name: [z, y, x]} from a points file: `{"grid_id": ..., "points": [{"name": ..., "zyx": [z, y, x]}, ...]}` (what `pick.py`
+    writes; more keys per point are fine). Indices mean nothing on another grid, so a file without a `grid_id`, or made on a grid
+    other than `grid_id` (the one the caller is working on), is refused."""
     d = json.loads(Path(path).read_text())
-    if isinstance(d, dict) and 'points' in d:
-        return {p['name']: p['zyx'] for p in d['points']}
-    return d
+    if not isinstance(d, dict) or 'points' not in d:
+        fail(f'{path} is not a points file: it is {{"grid_id": "<grid>", "points": [{{"name": "a", "zyx": [z, y, x]}}, ...]}}')
+    if 'grid_id' not in d:
+        fail(f'{path} has no "grid_id": add the grid_id of the grid the indices are on (the scan\'s is in hu.json)')
+    if d['grid_id'] != grid_id:
+        fail(f'{path} is on another grid than {grid_id[:12]}... (its grid_id is {str(d["grid_id"])[:12]}...): its indices do not '
+             'apply here; map the points to this grid or pick them again')
+    return {p['name']: p['zyx'] for p in d['points']}
 
 
 def emit(**fields):
@@ -162,15 +169,20 @@ def fail(sentence):
 def save_image(fig, path, dpi=100):
     """Save a matplotlib figure as the image the agent will open: JPEG, at most 2000 px a side and 1 MiB.
 
-    JPEG q85 keeps a 6-view sheet well under 1 MiB where PNG does not. Use a .png path only for a small crop
-    where exact colours matter. Fails with a sentence if the figure cannot be made to fit.
+    A JPEG that is over 1 MiB is saved again at quality 75, then 65 (noisy CT panes at q85 can exceed it). Use a .png path
+    only for a small crop where exact colours matter. Fails with a sentence if the figure cannot be made to fit.
     """
     path = Path(path)
     w, h = fig.get_size_inches() * dpi
     if max(w, h) > MAX_IMAGE_PX:
         fail(f'{path.name} would be {w:.0f}x{h:.0f} px, over the {MAX_IMAGE_PX} px limit: use a smaller figure size')
-    kw = {'pil_kwargs': {'quality': JPEG_QUALITY}} if path.suffix.lower() in ('.jpg', '.jpeg') else {}
-    fig.savefig(path, dpi=dpi, **kw)
+    if path.suffix.lower() not in ('.jpg', '.jpeg'):
+        fig.savefig(path, dpi=dpi)
+    else:
+        for q in JPEG_QUALITIES:
+            fig.savefig(path, dpi=dpi, pil_kwargs={'quality': q})
+            if path.stat().st_size <= MAX_IMAGE_BYTES:
+                break
     save_checked(path)
 
 

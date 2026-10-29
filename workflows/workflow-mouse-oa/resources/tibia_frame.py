@@ -10,17 +10,17 @@ frame, cropped around the joint end. Everything the protocol annotates (growth-p
 patches) is indexed on this aligned grid: array axes (W, V, U), W running from the joint end toward the shaft.
 
 Writes <out>/<name>-hu.npy (float32, linear), <name>-mask.npy (bool, nearest), <name>-frame.json, and a QC
-montage. The frame.json maps aligned indices back to the scan grid, which `iioc.py` uses to measure on the scan.
+montage. The frame.json (schema and maps in `microct-core/resources/frame.py`) maps aligned indices back to the scan grid, which
+`iioc.py` uses to measure on the scan. This script only fits the axes and the crop; it stays here, not in `orient-joint`,
+because its sign rule (+U medial, +V anterior), its crop defaults and `envelope.close_and_fill` are the mouse tibia protocol's.
 """
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
 import matplotlib
 import numpy as np
-from scipy import ndimage as ndi
 
 HERE = Path(__file__).resolve().parent
 # `python -I` puts no script directory on sys.path; microct-core is found by walking up to the directory that holds it.
@@ -30,6 +30,7 @@ if CORE is None:
     sys.exit('Cannot find microct-core: this script expects microct-analysis/skills/microct-core/resources/ in a '
              'directory above it (<workflows>/workflow-mouse-oa/resources/ with <workflows>/microct-analysis/ beside it)')
 sys.path[:0] = [str(HERE), str(CORE)]
+import frame as fr
 import sidecar
 from envelope import close_and_fill
 
@@ -73,7 +74,7 @@ def fit_frame(mask, shaft_z, epi_z, joint_end):
     v = np.cross(w, u)
     v /= np.linalg.norm(v)
     u = np.cross(v, w)
-    return np.column_stack([u, v, w]), p.mean(axis=0), centers
+    return np.column_stack([u, v, w]), p.mean(axis=0)
 
 
 def crop_for(mask, basis, origin, joint_end, depth_vox, pad):
@@ -132,38 +133,24 @@ def main():
     zs = np.flatnonzero(mask.any(axis=(1, 2)))
     shaft_z = a.shaft_z or zrange(a.shaft_frac, zs[0], zs[-1], a.joint_end)
     epi_z = a.epiphysis_z or zrange(a.epiphysis_frac, zs[0], zs[-1], a.joint_end)
-    basis, origin, _centers = fit_frame(mask, shaft_z, epi_z, a.joint_end)
+    basis, origin = fit_frame(mask, shaft_z, epi_z, a.joint_end)
     depth_vox = round(a.depth_mm / sp[0])
     if a.crop_lower_uvw and a.crop_shape_uvw:
         low, shape_xyz = np.array(a.crop_lower_uvw), np.array(a.crop_shape_uvw)
     else:
         low, shape_xyz = crop_for(mask, basis, origin, a.joint_end, depth_vox, a.pad)
     shape_zyx = tuple(int(i) for i in shape_xyz[::-1])
-    matrix = basis[::-1, ::-1]
-    offset = (origin + basis @ low)[::-1]
-    aligned = ndi.affine_transform(
-        hu, matrix, offset, output_shape=shape_zyx, order=1, mode='constant', cval=-1000, prefilter=False
-    ).astype(np.float32)
-    amask = ndi.affine_transform(
-        mask.astype(np.uint8), matrix, offset, output_shape=shape_zyx, order=0, mode='constant', cval=0, prefilter=False
-    ).astype(bool)
-    frame = {
-        'basis_columns_xyz': basis.tolist(),
-        'origin_xyz': origin.tolist(),
-        'local_lower_uvw': low.tolist(),
-        'aligned_shape_zyx': list(shape_zyx),
-        'shaft_z_range': list(shaft_z),
-        'epiphysis_z_range': list(epi_z),
-        'joint_end': a.joint_end,
-        'label': a.label,
-        'output_xyz_to_original_xyz_matrix': basis.tolist(),
-        'output_xyz_to_original_xyz_offset': (origin + basis @ low).tolist(),
-        'axes': 'aligned array axes (W, V, U): +U roughly medial, +V anterior, +W from the joint toward the shaft; '
+    frame = fr.make(
+        g['grid_id'],
+        sp,
+        R_zyx=basis[::-1, ::-1].T,  # frame axis i (W, V, U) as a scan (z, y, x) vector: the basis columns, reversed
+        origin_zyx=(origin + basis @ low)[::-1],
+        shape=shape_zyx,
+        axes='aligned array axes (W, V, U): +U roughly medial, +V anterior, +W from the joint toward the shaft; '
         'check on the QC montage before annotating',
-    }
-    frame['grid_id'] = sidecar.derived_grid_id(g['grid_id'], frame)
-    frame['parent_grid_id'] = g['grid_id']
-    frame['spacing_zyx_mm'] = sp
+    )
+    aligned = fr.resample(hu, frame, order=1, cval=-1000)
+    amask = fr.resample(mask.astype(np.uint8), frame, order=0, cval=0, dtype=np.uint8).astype(bool)
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     params = {
@@ -186,7 +173,7 @@ def main():
             params=params,
             script='tibia_frame.py',
         )
-    (out / f'{a.name}-frame.json').write_text(json.dumps(frame, indent=1) + '\n')
+    fr.save(frame, out / f'{a.name}-frame.json')
     fig, axs = plt.subplots(2, 3, figsize=(18, 12))
     for ax, v in zip(axs.ravel(), np.linspace(shape_zyx[1] * 0.2, shape_zyx[1] * 0.8, 6).astype(int)):
         ax.imshow(aligned[:, v, :], cmap='gray', vmin=-500, vmax=6000)

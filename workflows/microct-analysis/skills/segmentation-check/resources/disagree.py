@@ -65,9 +65,8 @@ def region_panel(hu, labels, classic, region_mask, region, frame, window, path, 
     import matplotlib.colors
     centre = region['centre_zyx']
     if frame:
-        R = np.array(frame['R'])
-        s, r, c = (R @ (np.array(centre) - np.array(frame['origin_zyx']))).round().astype(int)
-        cut = lambda v, order: vl.frame_cut(v, frame, 0, int(np.clip(s, 0, frame['shape_srs'][0] - 1)), order=order)
+        s, r, c = vl.fr.from_scan_points(centre, frame).round().astype(int)
+        cut = lambda v, order: vl.frame_cut(v, frame, 0, int(np.clip(s, 0, frame['shape'][0] - 1)), order=order)
         rc = (int(r), int(c))
     else:
         cut = lambda v, order: np.asarray(v[centre[0]])
@@ -143,7 +142,7 @@ if __name__ == '__main__':
     sidecar.write(out / 'disagreement.npy', like=str(sidecar.sidecar_path(a.labels)),
                   inputs=[a.hu, a.labels, a.classic], params={'ids': ids, 'min_mm3': a.min_mm3})
     (out / 'regions.json').write_text(json.dumps(regions, indent=1) + '\n')
-    frame = vl.load_frame(a.frame) if a.frame else None
+    frame = vl.fr.load(a.frame) if a.frame else None
     window = vl.parse_window(a.window) if a.window else vl.auto_window(np.asarray(hu[hu.shape[0] // 2]))
     names = vl.parse_names(a.names)
     panels = []

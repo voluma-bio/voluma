@@ -106,7 +106,7 @@ if __name__ == '__main__':
     if not present:
         sl.fail('the labels volume is empty: nothing to render')
     ms = meshes(lab, [s * step for s in sp], present)
-    frame = vl.load_frame(a.frame) if a.frame else None
+    frame = vl.fr.load(a.frame) if a.frame else None
     look, up = view_vectors(frame)
     if a.azimuth is not None:
         img, cam = render_view(ms, look, up, a.azimuth, a.size)

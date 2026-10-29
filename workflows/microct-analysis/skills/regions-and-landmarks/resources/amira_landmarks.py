@@ -2,8 +2,8 @@
 
   python amira_landmarks.py --points points.json --header hu.json --out landmarks.landmarkAscii
 
-`--points` is the points.json `pick.py` writes, or a plain {"name": [z, y, x]} file (femoral landmarks, the width points
-`iioc.py` writes): scan voxel indices, fractions allowed. Each point is moved to physical millimetres with the DICOM affine in
+`--points` is a points file on the scan grid (`pick.py` writes one; so do `iioc.py` for the width points): `{"grid_id", "points":
+[{"name", "zyx"}]}`, scan voxel indices, fractions allowed. A file on another grid or without a `grid_id` is refused. Each point is moved to physical millimetres with the DICOM affine in
 `hu.json` (voxel centres, DICOM patient coordinates) and written as one landmark set in Amira's ASCII landmark format
 (`# AmiraMesh 3D ASCII 2.0`, `ContentType "LandmarkSet"`), in the order of the file; `<out>.names.json` lists that order,
 because the format has no names. Load it in Amira on the same DICOM series. Amira takes its own origin from the series: if the
@@ -53,7 +53,7 @@ if __name__ == '__main__':
     header = json.loads(Path(a.header).read_text())
     if 'affine_xyz_to_world_mm' not in header:
         sidecar.fail(f'{a.header} has no affine_xyz_to_world_mm: pass the hu.json that scan-intake wrote')
-    points = sidecar.load_points(a.points)
+    points = sidecar.load_points(a.points, header['grid_id'])
     if not points:
         sidecar.fail(f'{a.points} holds no points')
     names = list(points)

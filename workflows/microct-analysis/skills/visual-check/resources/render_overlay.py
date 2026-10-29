@@ -53,15 +53,15 @@ if __name__ == '__main__':
     labels = np.load(a.labels, mmap_mode='r')
     if hu.shape != labels.shape:
         sl.fail(f'hu {hu.shape} and labels {labels.shape} are on different grids: pass arrays on the same grid')
-    frame = vl.load_frame(a.frame) if a.frame else None
+    frame = vl.fr.load(a.frame) if a.frame else None
     if a.center:
         center = [int(v) for v in a.center.split(',')]
     elif frame:
         k = frame['keyframe']
         key_lab = vl.frame_cut(labels, frame, 0, k, order=0)
         rr, cc = np.nonzero(key_lab)
-        center = [k, int(rr.mean()) if len(rr) else frame['shape_srs'][1] // 2,
-                  int(cc.mean()) if len(cc) else frame['shape_srs'][2] // 2]
+        center = [k, int(rr.mean()) if len(rr) else frame['shape'][1] // 2,
+                  int(cc.mean()) if len(cc) else frame['shape'][2] // 2]
     else:
         center = [n // 2 for n in hu.shape]
     cuts, idx = planes(hu, labels, frame, center)

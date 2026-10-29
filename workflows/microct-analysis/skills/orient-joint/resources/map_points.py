@@ -25,8 +25,8 @@ HERE = Path(__file__).resolve().parent
 # `python -I` puts no script directory on sys.path, so every directory a script imports from is added here.
 sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'microct-core/resources')]
 try:
+    import frame as fr
     import sidecar
-    from orient_joint import to_oriented_points, to_scan_points
 except ModuleNotFoundError as e:
     sys.exit(f'{e}: this script expects <workflows>/microct-analysis/skills/<skill>/resources/ with '
              '<workflows>/microct-analysis/skills/microct-core/resources/sidecar.py beside it')
@@ -43,8 +43,8 @@ def parse_points(items):
 
 
 def piece_prompt(voxels_zyx, frame):
-    srs = np.rint(to_oriented_points(voxels_zyx, frame)).astype(int)
-    shape = frame['shape_srs']
+    srs = np.rint(fr.from_scan_points(voxels_zyx, frame)).astype(int)
+    shape = frame['shape']
     ok = ((srs >= 0) & (srs < shape)).all(axis=1)
     if not ok.any():
         sidecar.fail('the piece lies outside the oriented stack: is this the frame of this scan?')
@@ -71,11 +71,11 @@ if __name__ == '__main__':
         sidecar.fail('give exactly one of --to-oriented, --to-scan, --pieces')
     if a.pieces and not a.out:
         sidecar.fail('--pieces needs --out boxes.json')
-    frame = json.loads(Path(a.frame).read_text())
+    frame = fr.load(a.frame)
     if a.to_oriented:
-        sidecar.emit(oriented_srs=to_oriented_points(parse_points(a.to_oriented), frame).round(2).tolist())
+        sidecar.emit(oriented_srs=fr.from_scan_points(parse_points(a.to_oriented), frame).round(2).tolist())
     elif a.to_scan:
-        sidecar.emit(scan_zyx=to_scan_points(parse_points(a.to_scan), frame).round(2).tolist())
+        sidecar.emit(scan_zyx=fr.to_scan_points(parse_points(a.to_scan), frame).round(2).tolist())
     else:
         grid = sidecar.grid(sidecar.sidecar_path(a.pieces))['grid_id']
         if grid != frame['parent_grid_id']:

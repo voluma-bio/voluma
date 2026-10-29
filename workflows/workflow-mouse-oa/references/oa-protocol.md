@@ -134,10 +134,9 @@ measurement. OA6-1RK has a thin perforated mineralized band, not a clean cartila
 at it drawn on the sections before you run. Trace it over at least the V range of the proximal face (section A); the script
 refuses a shorter trace, and a face at or above the proximal one inside that range, and says which V range to fix.
 
-**D, `landmarks.json`** (scan grid, `[z, y, x]`): `a` midpoint of the upper line of the intercondylar groove, `b`
+**D, `landmarks.json`** (a points file on the scan grid, `{"grid_id": <hu.json's>, "points": [{"name": "a", "zyx": [z, y, x]}, ...]}`): `a` midpoint of the upper line of the intercondylar groove, `b`
 intercondylar notch, `c` midpoint of the ridge on the lateral condyle, `d` vertex of the medial condyle (deck figure,
-slide 7). `femoral_frame.py` takes either this file or the `points.json` `pick.py` writes for picks named `a` to `d`, so
-nothing needs converting by hand. Place `a` and `b` on a long view of the femur that shows the shaft and the groove side-on;
+slide 7). `femoral_frame.py` takes this file or the `points.json` `pick.py` writes for picks named `a` to `d` (the same format). Place `a` and `b` on a long view of the femur that shows the shaft and the groove side-on;
 `c` and `d` can go on the joint-face view. The script fails (exit 2, nothing written) when a landmark is more than 0.05 mm from
 femur bone, when DFL is under 0.4 of DFW (the sign of `a` and `b` placed end-on, as on the first full run: 0.824 mm against
 2.42), or when SI points away from the femur: re-place the points; the failure is not a warning to explain.

@@ -1,4 +1,4 @@
-"""Shared drawing helpers for the visual-check renderers: label colours, windowing, pixel-grid figures, cuts through a frame.
+"""Shared drawing helpers for the visual-check renderers: label colours, windowing, pixel-grid figures, plane sampling and cuts through a frame.
 
 Coordinates on every image the agent reads: x is the column (labelled along the top), y is the row (labelled down the
 left side), both in pixels of the slice. A box is [row0, col0, row1, col1] = [y0, x0, y1, x1], ends inclusive.
@@ -15,6 +15,7 @@ HERE = Path(__file__).resolve().parent
 # `python -I` puts no script directory on sys.path, so every directory a script imports from is added here.
 sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'microct-core/resources')]
 try:
+    import frame as fr
     import sidecar
 except ModuleNotFoundError as e:
     sys.exit(f'{e}: this script expects <workflows>/microct-analysis/skills/<skill>/resources/ with '
@@ -105,27 +106,27 @@ def draw_point(ax, rc, name=None, color='#ff9f0a'):
         ax.text(rc[1] + 8, rc[0] - 6, name, color=color, fontsize=9)
 
 
-def load_frame(path):
-    return json.loads(Path(path).read_text())
+def sample_plane(vol, to_index, centre_zyx, u, v, px, size, order=1, cval=0):
+    """A plane of pixels cut from `vol` with `map_coordinates` on the array itself (a memmap is not copied).
+
+    Pixel (i, j) of a `size` = (H, W) image is at centre + (i - (H-1)/2) px u + (j - (W-1)/2) px v: rows run along `u`, columns
+    along `v`, both unit vectors (z, y, x). Positions are in whatever unit `to_index` takes, which maps an array of points
+    (..., 3) to `vol`'s index space: mm with `p / spacing` for views of a scan-grid volume; scan voxels with `lambda p: p` (as
+    `frame_cut` does, since a frame is defined in voxel indices). Orders 0 (labels) and 1 (HU); outside `vol`: `cval`.
+    """
+    pts = fr.plane_points(centre_zyx, u, v, px, size)
+    return ndi.map_coordinates(vol, np.moveaxis(to_index(pts), -1, 0), order=order, mode='constant', cval=cval)
 
 
 def frame_cut(vol, frame, axis, index, order=1, cval=0):
-    """One plane of the oriented stack, sampled straight from the scan-grid volume `vol` (Z,Y,X).
+    """One plane of frame `frame`'s grid, sampled straight from the scan-grid volume `vol` (Z,Y,X).
 
     axis 0 = slice `index` (rows x columns), axis 1 = row `index` (slices x columns), axis 2 = column `index`
-    (slices x rows). order 0 for labels, 1 for HU.
+    (slices x rows). order 0 for labels, 1 for HU. The pixels are the frame's voxels.
     """
-    R = np.array(frame['R'])
-    o = np.array(frame['origin_zyx'])
-    S, H, W = frame['shape_srs']
-    if axis == 0:
-        a, b = np.mgrid[0:H, 0:W].astype(np.float32)
-        s, r, c = np.full_like(a, index), a, b
-    elif axis == 1:
-        a, b = np.mgrid[0:S, 0:W].astype(np.float32)
-        s, r, c = a, np.full_like(a, index), b
-    else:
-        a, b = np.mgrid[0:S, 0:H].astype(np.float32)
-        s, r, c = a, b, np.full_like(a, index)
-    coords = o[:, None, None] + s * R[0][:, None, None] + r * R[1][:, None, None] + c * R[2][:, None, None]
-    return ndi.map_coordinates(vol, coords, order=order, mode='constant', cval=cval)
+    a, b = (i for i in range(3) if i != axis)
+    n = frame['shape']
+    c = np.zeros(3)
+    c[axis], c[a], c[b] = index, (n[a] - 1) / 2, (n[b] - 1) / 2
+    R = np.array(frame['R_zyx'])
+    return sample_plane(vol, lambda p: p, fr.to_scan_points(c, frame), R[a], R[b], 1.0, (n[a], n[b]), order, cval)
