@@ -23,10 +23,13 @@
     "./tools": "./src/tools/registry.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
   },
   "devDependencies": {
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "@types/node": "^24.0.0"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "1.4.0",
