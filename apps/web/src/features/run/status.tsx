@@ -3,7 +3,7 @@ import type { Run } from "@voluma/contracts/run";
 import { StatusBadge, type StatusTone } from "@voluma/ui";
 import { useEffect, useState } from "react";
 
-export function formatTime(iso: string): string {
+function formatTime(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {
     day: "numeric",
     month: "short",
@@ -34,14 +34,6 @@ export function useNow(active: boolean): number {
     return () => clearInterval(timer);
   }, [active]);
   return now;
-}
-
-/** From the first claim to the end, or to now while it runs; null while it waits (queued, or for keys). */
-export function runSeconds({ state }: Run, now = Date.now()): number | null {
-  if (state.status === "queued" || state.status === "awaiting-keys" || !state.startedAt)
-    return null;
-  const end = state.status === "ended" ? Date.parse(state.endedAt) : now;
-  return (end - Date.parse(state.startedAt)) / 1000;
 }
 
 /** Where a row leads: the review (the review lane's `/runs/:runId`) once completed, else the live page. */
