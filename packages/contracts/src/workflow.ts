@@ -87,22 +87,24 @@ export const declaredOutputSchema = z.discriminatedUnion("kind", [
 ]);
 export type DeclaredOutput = z.infer<typeof declaredOutputSchema>;
 
+/** One task of the plan: from the workflow's `tasks.json`, or ad hoc (no outputs). */
+export const planTaskSchema = z.object({
+  id: taskIdSchema,
+  /** Short plain-language name from the workflow's `tasks.json`; shown instead of the id when present. */
+  title: nonEmpty.optional(),
+  /** Tasks this one builds on; a redo of one of them makes this one stale. */
+  dependsOn: z.array(taskIdSchema),
+  /** The workflow's done criteria in its own words, shown to the worker and the check. */
+  doneWhen: z.array(nonEmpty).optional(),
+  /** What the worker is told to do for this task; may point at files in the workflow skill. */
+  instructions: nonEmpty.optional(),
+  outputs: z.array(declaredOutputSchema),
+});
+export type PlanTask = z.infer<typeof planTaskSchema>;
+
 export const workflowPlanSchema = z
   .object({
-    tasks: z.array(
-      z.object({
-        id: taskIdSchema,
-        /** Short plain-language name from the workflow's `tasks.json`; shown instead of the id when present. */
-        title: nonEmpty.optional(),
-        /** Tasks this one builds on; a redo of one of them makes this one stale. */
-        dependsOn: z.array(taskIdSchema),
-        /** The workflow's done criteria in its own words, shown to the worker and the check. */
-        doneWhen: z.array(nonEmpty).optional(),
-        /** What the worker is told to do for this task; may point at files in the workflow skill. */
-        instructions: nonEmpty.optional(),
-        outputs: z.array(declaredOutputSchema),
-      }),
-    ),
+    tasks: z.array(planTaskSchema),
   })
   .superRefine((plan, ctx) => {
     const dup = (path: (string | number)[], what: string) =>

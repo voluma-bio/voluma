@@ -100,7 +100,8 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
       open.delete(threadId);
       const wall = seconds(span.since, at ?? (threadId === root ? latest : span.last));
       const s = owner.get(threadId);
-      if (s) s.wallSeconds += wall;
+      // The main agent's calls charge `main`, but its wall time is the root's, which spans the run.
+      if (s && (s !== main || threadId === root)) s.wallSeconds += wall;
       if (threadId === root) total.wallSeconds += wall;
     }
     for (const [id, call] of bash) if (call.threadId === threadId) bash.delete(id);
@@ -118,7 +119,7 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
         } else close(e.threadId);
         if (!owner.has(e.threadId)) {
           let s: Spend | null = null;
-          if (kind === "supervisor") s = main;
+          if (kind === "supervisor" || kind === "main") s = main;
           else if (task !== undefined && (kind === "worker" || kind === "check")) {
             s = tasks.get(task) ?? empty();
             tasks.set(task, s);

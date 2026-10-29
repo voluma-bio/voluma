@@ -47,7 +47,7 @@ import {
   reviewCompletedSchema,
 } from "./review";
 import { claimEndReasonSchema } from "./runner";
-import { recordedPinSchema, workflowPlanSchema } from "./workflow";
+import { planTaskSchema, recordedPinSchema, workflowPlanSchema } from "./workflow";
 
 const nonEmpty = z.string().min(1);
 
@@ -72,7 +72,7 @@ export const modelUsageSchema = z.object({
 });
 export type ModelUsage = z.infer<typeof modelUsageSchema>;
 
-export const threadKindSchema = z.enum(["supervisor", "worker", "check", "chat"]);
+export const threadKindSchema = z.enum(["supervisor", "main", "worker", "check", "chat"]);
 export type ThreadKind = z.infer<typeof threadKindSchema>;
 
 /**
@@ -83,7 +83,17 @@ export const bySchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("agent") }),
   z.object({
     kind: z.literal("rule"),
-    rule: z.enum(["stuck", "stale", "check-start", "check-result"]),
+    rule: z.enum([
+      "stuck",
+      "stale",
+      "check-start",
+      "check-result",
+      // A check hit its time or ask limit; a task reached its fix-round limit.
+      "check-limit",
+      "fix-limit",
+      // The main agent stopped with work unfinished and code ended it.
+      "liveness",
+    ]),
   }),
   z.object({ kind: z.literal("judgment"), arm: nonEmpty }),
 ]);
@@ -128,7 +138,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         /** Null on a run's root thread. */
         parentThreadId: z.string().nullable(),
         kind: threadKindSchema,
-        /** The task a worker or check thread works on; required for those, absent on the supervisor. */
+        /** The task a worker or check thread works on; required for those, absent on the supervisor and the main agent. */
         task: taskIdSchema.optional(),
         /** The attempt a check thread checks; set on check threads only. */
         attemptId: nonEmpty.optional(),
@@ -138,9 +148,10 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         workflows: z.array(recordedPinSchema).min(1).optional(),
         /**
          * The model this thread calls, as the runner names it: `provider/id`
-         * (`meta/muse-spark-1.3`). Worker, check and chat threads call one and
-         * should set it. The supervisor thread sets none: the main thread's calls run on
-         * it and each `wake` records the model that answered. A thread's model is
+         * (`meta/muse-spark-1.3`). Main, worker, check and chat threads call one and
+         * should set it. The supervisor thread sets none: it runs no model (the `main` thread,
+         * its child, is the run's main agent; the old `wake` events still record the model that
+         * answered on the supervisor). A thread's model is
          * fixed for its life: every `thread.started` of a thread names the same one, and
          * the harness fails a resume on a different model, as it does for a differing
          * system prompt. Optional in the schema until the harness writes it; then it
@@ -160,12 +171,16 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         (p) =>
           p.kind === "worker" || p.kind === "check"
             ? p.task !== undefined
-            : p.kind !== "supervisor" || p.task === undefined,
+            : (p.kind !== "supervisor" && p.kind !== "main") || p.task === undefined,
         {
           path: ["task"],
-          message: "task goes with worker and check threads, and not the supervisor",
+          message: "task goes with worker and check threads, and not the supervisor or main agent",
         },
-      ),
+      )
+      .refine((p) => p.kind !== "main" || p.model !== undefined, {
+        path: ["model"],
+        message: "the main agent calls a model, so it records which",
+      }),
   );
 
   /**
@@ -194,6 +209,8 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     z.object({
       status: z.enum(["completed", "failed", "cancelled"]),
       error: z.string().optional(),
+      /** The root's, from `finish_run`: one or two plain sentences for the researcher. */
+      summary: nonEmpty.optional(),
     }),
   );
 
@@ -214,7 +231,14 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
          */
         sender: z.discriminatedUnion("kind", [
           z.object({ kind: z.literal("thread"), threadId: nonEmpty }),
-          z.object({ kind: z.literal("runtime") }),
+          z.object({
+            kind: z.literal("runtime"),
+            /**
+             * On a delivery to the main agent: the id of the last log event the delivery
+             * accounted for, so what follows it is undelivered. Optional; `fold` ignores it.
+             */
+            covers: nonEmpty.optional(),
+          }),
           z.object({ kind: z.literal("person") }),
         ]),
       }),
@@ -326,7 +350,10 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     z.object({
       taskId: taskIdSchema,
       attemptId: nonEmpty,
+      /** Working detail, for the next agent and the check. */
       text: nonEmpty,
+      /** One or two plain sentences for the researcher. Optional so logs written before it parse. */
+      summary: nonEmpty.optional(),
       by: bySchema,
       evidence: z.array(evidenceRefSchema),
       /** The check thread's verdict line; only check threads may set it. */
@@ -343,6 +370,80 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
   const output = event(
     "output",
     outputReportSchema.extend({ taskId: taskIdSchema, attemptId: nonEmpty }),
+  );
+
+  /**
+   * The main agent changed the plan, written by the main thread before the change applies;
+   * id `<thread>:<toolCallId>:change_plan`. The fold applies it over the plan so far, without
+   * reading the workflow: `add` carries full plan entries (declarations copied from the workflow's
+   * `tasks.json`), `adHoc` tasks have no outputs, `doneWhen` and `instructions` are appended
+   * to the task's. `skip` is fold state (`fold.ts`): the task and its transitive dependents
+   * fold as `to-check` with every declared output missing and the reason; the runtime writes
+   * no attempt for it.
+   *
+   * Rules. A task id is unique in the plan: no id repeats across `add` and `adHoc` (refused
+   * here), and the fold applies an `add` or `adHoc` only when its id is not already in the plan
+   * (the first wins), so a collision can never replace a task's outputs. The schema can't see
+   * the plan, so the runtime refuses a collision itself and validates the resulting plan with
+   * `workflowPlanSchema` (no cycles, every dependency exists) before it writes this event.
+   * `doneWhen` and `instructions` for an unknown task are ignored.
+   */
+  const planChanged = event(
+    "plan.changed",
+    z
+      .object({
+        reason: nonEmpty,
+        add: z.array(planTaskSchema).optional(),
+        adHoc: z
+          .array(
+            z.object({
+              id: taskIdSchema,
+              title: nonEmpty,
+              instructions: nonEmpty,
+              dependsOn: z.array(taskIdSchema),
+            }),
+          )
+          .optional(),
+        doneWhen: z
+          .array(z.object({ taskId: taskIdSchema, lines: z.array(nonEmpty).min(1) }))
+          .optional(),
+        instructions: z.array(z.object({ taskId: taskIdSchema, text: nonEmpty })).optional(),
+        skip: z.array(z.object({ taskId: taskIdSchema, reason: nonEmpty })).optional(),
+      })
+      .superRefine((p, ctx) => {
+        const seen = new Set<string>();
+        for (const [key, tasks] of [
+          ["add", p.add],
+          ["adHoc", p.adHoc],
+        ] as const)
+          tasks?.forEach((t, i) => {
+            if (seen.has(t.id))
+              ctx.addIssue({
+                code: "custom",
+                path: [key, i, "id"],
+                message: `duplicate task id "${t.id}"`,
+              });
+            seen.add(t.id);
+          });
+      }),
+  );
+
+  /** A check thread asked the main agent a question; id `<thread>:<toolCallId>:ask`. `fold` ignores it. */
+  const ask = event("ask", z.object({ question: nonEmpty }));
+
+  /**
+   * The main agent answered a check thread's `ask`; id `<thread>:<toolCallId>:answer`. `askId` is
+   * that `ask` event's id (a check may ask up to three times). `files` are kept like evidence.
+   * `fold` ignores it.
+   */
+  const answer = event(
+    "answer",
+    z.object({
+      checkThreadId: nonEmpty,
+      askId: nonEmpty,
+      text: nonEmpty,
+      files: z.array(evidenceRefSchema).optional(),
+    }),
   );
 
   /**
@@ -458,6 +559,9 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     task,
     checkpoint,
     output,
+    planChanged,
+    ask,
+    answer,
     judgment,
     wake,
     assetsReady,

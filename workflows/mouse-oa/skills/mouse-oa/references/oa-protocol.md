@@ -46,7 +46,8 @@ boundary matters: a sensitivity check, not an error bar.
 axes (W, V, U), the scan's voxel size, W from the joint toward the shaft. +U medial and +V anterior come from a sign
 rule on scan y and the joint end that assumes one knee and one scan orientation: **confirm it on the QC montage**
 before you name a side (a left knee flips it). Every annotation is an index on that grid and carries its `grid_id`;
-the scripts refuse a file without one or from another grid, because indices mean nothing on another frame. The
+the scripts refuse a file without one or from another grid, because indices mean nothing on another frame. They
+also refuse, before writing anything, a key they don't know, a value of the wrong form, and an index outside the grid. The
 femoral landmarks are the exception: `[z, y, x]` on the scan grid.
 
 What the annotations are (their keys, which are required, and the refusals are in each script's `--help`; the curve
