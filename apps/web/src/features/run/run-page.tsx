@@ -122,7 +122,11 @@ export function RunPage() {
   // Query's structural sharing keeps `state` the same object across polls that change nothing.
   const halt = useMemo(() => state && haltOf(state, closed), [state, closed]);
   const folded = useMemo(() => fold(events), [events]);
-  const view = useMemo(() => runView(events, folded, halt), [events, folded, halt]);
+  const providerCalls = run.data?.providerCalls;
+  const view = useMemo(
+    () => runView(events, folded, halt, providerCalls),
+    [events, folded, halt, providerCalls],
+  );
   const threads = useMemo(() => withLiveCalls(view.threads, live), [view.threads, live]);
   const threadById = useMemo(() => new Map(threads.map((t) => [t.id, t])), [threads]);
   const main = threads.find((t) => t.kind === "supervisor");
