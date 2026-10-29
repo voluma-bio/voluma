@@ -71,7 +71,7 @@ def main():
     )
     a = ap.parse_args()
     g = sidecar.grid(sidecar.sidecar_path(a.iioc_tissue))
-    ann = load_annotations(a.annotations, g['grid_id'])
+    ann = load_annotations(a.annotations, g)
     vox = g['spacing_zyx_mm'][0]
     parent = np.load(a.iioc_tissue)
     gp = np.load(a.growth_plate_face)

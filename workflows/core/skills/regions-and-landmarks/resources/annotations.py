@@ -12,14 +12,63 @@ import sidecar
 from region_from_curves import surface_from_curves
 
 
-def load_annotations(path, grid_id):
-    """Annotations hold indices on one aligned grid; read them only for that grid."""
+def load_annotations(path, grid):
+    """Annotations hold indices on one aligned grid; read them only for that grid, and refuse any that fall outside it.
+
+    `grid` is a dict with `grid_id` and `shape` (W, V, U): a frame, or the sidecar of an array on the grid.
+    """
     ann = json.loads(Path(path).read_text())
     if 'grid_id' not in ann:
         sidecar.fail(f'{path} has no "grid_id": copy the grid_id of the aligned grid you traced on (its frame file) into it')
-    if ann['grid_id'] != grid_id:
+    if ann['grid_id'] != grid['grid_id']:
         sidecar.fail(f'{path} was traced on another aligned grid (grid_id differs): its indices do not apply here; trace again')
+    check_bounds(ann, grid['shape'])
     return ann
+
+
+def check_bounds(ann, shape):
+    """Refuse a section, point or range of the known keys that lies outside the grid; ranges are [start, stop), limits inclusive."""
+    W, V, U = shape
+    size = f'{W} W x {V} V x {U} U'
+
+    def inside(key, what, value, n, axis, half_open=False):
+        if not (0 <= value <= n - (0 if half_open else 1)):
+            sidecar.fail(f'annotations.json "{key}": {what} {value:g} is outside the grid ({n} {axis} indices, 0 to {n - 1}; grid is {size}): trace again inside the grid')
+
+    def curves(key, spec):
+        axis = spec.get('axis')
+        if axis not in (0, 1, 2):
+            return  # traced_surface and region_from_curves say what a curve spec needs
+        rows_ax, cols_ax = [i for i in range(3) if i != axis]
+        names = 'WVU'
+        for k, pts in spec.get('slices', {}).items():
+            inside(key, f'{names[axis]} section', int(k), shape[axis], names[axis])
+            for row, col in pts:
+                inside(key, f'{names[axis]} section {k}: a point with {names[rows_ax]}', row, shape[rows_ax], names[rows_ax])
+                inside(key, f'{names[axis]} section {k}: a point with {names[cols_ax]}', col, shape[cols_ax], names[cols_ax])
+
+    for key in ('growth_plate_curves', 'growth_plate_distal_curves', 'under_plate_curves'):
+        if key in ann:
+            curves(key, ann[key])
+    for fix in ann.get('articular_corrections', []):
+        curves('articular_corrections[].curves', fix['curves'])
+        for key, n, axis in (('u_range', U, 'U'), ('v_range', V, 'V')):
+            for x in fix[key]:
+                inside(f'articular_corrections[].{key}', 'bound', x, n, axis, half_open=True)
+    for u, v, w in ann.get('width_points_uvw', []):
+        for key, x, n, axis in (('U', u, U, 'U'), ('V', v, V, 'V'), ('W', w, W, 'W')):
+            inside('width_points_uvw', f'a point with {key}', x, n, axis)
+    for side, u in ann.get('compartment_midpoint_u', {}).items():
+        inside('compartment_midpoint_u', f'{side} U', u, U, 'U')
+    for key, n, axis in (('growth_plate_mid_u', U, 'U'), ('height_section_v', V, 'V')):
+        if key in ann:
+            inside(key, 'value', ann[key], n, axis)
+    for x in ann.get('v_limits', []):
+        inside('v_limits', 'limit', x, V, 'V')
+    for side, patch in ann.get('plate_patches', {}).items():
+        for key, n, axis in (('u', U, 'U'), ('v', V, 'V')):
+            for x in patch[key]:
+                inside(f'plate_patches.{side}.{key}', 'bound', x, n, axis, half_open=True)
 
 
 def need(ann, key, hint):

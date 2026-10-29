@@ -138,7 +138,7 @@ def main():
     )
     a = ap.parse_args()
     frame = fr.load(a.frame)
-    ann = load_annotations(a.annotations, frame['grid_id'])
+    ann = load_annotations(a.annotations, frame)
     g = sidecar.grid(a.hu_json)
     a.threshold = sidecar.bone_threshold_hu(a.hu_json, a.threshold)
     vox = frame['spacing_zyx_mm'][0]

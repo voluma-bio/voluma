@@ -44,7 +44,7 @@ from pathlib import Path
 import matplotlib
 import numpy as np
 import sidecar
-from annotations import load_annotations, traced_surface
+from annotations import load_annotations, need, traced_surface
 from envelope import close_and_fill
 from scipy import ndimage as ndi
 
@@ -128,22 +128,23 @@ def main():
     ap.add_argument('--cortex-search-factor', type=float, default=2.0, help='the cortex mask reaches this multiple of the cortex depth in from the outer edge')
     a = ap.parse_args()
     g = sidecar.grid(sidecar.sidecar_path(a.mask))
-    ann = load_annotations(a.annotations, g['grid_id'])
+    ann = load_annotations(a.annotations, g)
     vox = g['spacing_zyx_mm'][0]
     h = np.load(a.hu_aligned, mmap_mode='r')
     tib = np.load(a.mask)
-    if 'growth_plate_distal_curves' not in ann:
-        sidecar.fail(
-            'annotations.json has no "growth_plate_distal_curves": trace the distal face of the growth-plate band on coronal '
-            'sections of tibia-hu.npy (the side facing the shaft, like the proximal face in section A) and run again'
-        )
     a.threshold = sidecar.bone_threshold_hu(a.hu_json, a.threshold)
-    gd = traced_surface(ann['growth_plate_distal_curves'], 'growth_plate_distal_curves', h.shape)[0].astype(np.float32)
+    gd_spec = need(
+        ann,
+        'growth_plate_distal_curves',
+        'trace the distal face of the growth-plate band on coronal sections of tibia-hu.npy (the side facing the shaft, '
+        'like the proximal face in section A) and run again',
+    )
+    gd, dv = traced_surface(gd_spec, 'growth_plate_distal_curves', h.shape)
+    gd = gd.astype(np.float32)
     prox = np.load(a.proximal_face)
     if prox.shape != gd.shape:
         sidecar.fail(f'--proximal-face is {prox.shape} but the distal face is {gd.shape}: pass the face of the same tibia frame')
-    dv = traced_surface(ann['growth_plate_distal_curves'], 'growth_plate_distal_curves', h.shape)[1]
-    dlo, dhi = (f(int(k) for k in ann['growth_plate_distal_curves']['slices']) for f in (min, max))
+    dlo, dhi = (f(int(k) for k in gd_spec['slices']) for f in (min, max))
     check_below_proximal(gd, dv, dlo, dhi, prox, np.load(a.proximal_valid), tib, vox)
     w = np.arange(h.shape[0])[:, None, None]
     rel = (w - gd[None]) * vox * 1000  # um below the distal face
