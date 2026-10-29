@@ -25,11 +25,10 @@ import type {
 } from "@voluma/contracts/task-tools";
 import type { WorkflowPlan } from "@voluma/contracts/workflow";
 import { isSatisfied, transitiveDependents } from "@voluma/workflow";
-import type { CitedScratch, ThreadLayout } from "./layout";
+import type { ThreadLayout } from "./layout";
 import { declarationProblem, referenceProblem } from "./output-checks";
 import type { Evidence } from "./ports/evidence";
 import type { PayloadOf, Recorder } from "./recorder";
-import { parseThreadId } from "./thread-id";
 
 /** A plan task as the workflow declares it (`workflowPlanSchema`). */
 export type PlanTask = WorkflowPlan["tasks"][number];
@@ -51,9 +50,9 @@ export interface TaskRuntimeOptions {
   runId: string;
   /**
    * The calling thread's view of the files: evidence it names must be readable through it. The
-   * layout asks `citedScratch` below for a checker's reads of the worker's scratch.
+   * layout asks `cited` for a checker's reads of the worker's scratch.
    */
-  layoutOf(threadId: string, cited: CitedScratch): ThreadLayout;
+  layoutOf(threadId: string, cited: (path: string) => boolean): ThreadLayout;
   /** The thread under which the run's first event is written. */
   rootThreadId: string;
   plan: readonly PlanTask[];
@@ -111,11 +110,8 @@ export function taskRuntime(options: TaskRuntimeOptions) {
   };
   const taskOf = (id: string): FoldedTask | undefined => view().tasks.find((t) => t.id === id);
 
-  /** Whether the attempt a check thread reviews cites this scratch file (`CitedScratch`). */
-  const citedScratch: CitedScratch = (threadId, path) => {
-    const thread = parseThreadId(runId, threadId);
-    return thread.kind === "check" && !!taskOf(thread.taskId)?.citedScratch.includes(path);
-  };
+  /** Whether the attempt of `taskId` cites this scratch file (the path after `/scratch/`). */
+  const cites = (taskId: string, path: string) => !!taskOf(taskId)?.citedScratch.includes(path);
 
   const known = (taskId: string) => {
     const t = planned.get(taskId);
@@ -235,7 +231,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
   ): Promise<EvidenceRef> => {
     const path = f.root === "scratch" ? `/scratch/${f.path}` : `/outputs/${taskId}/${f.path}`;
     try {
-      layoutOf(c.threadId, citedScratch).keyOf(path, "read");
+      layoutOf(c.threadId, (p) => cites(taskId, p)).keyOf(path, "read");
     } catch (error) {
       throw new Refusal(
         `Evidence ${path} is not a file you can read: ${error instanceof Error ? error.message : error}`,
@@ -252,7 +248,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
   return {
     view,
     taskOf,
-    citedScratch,
+    cites,
     section,
     setStatus,
     staleDependents,

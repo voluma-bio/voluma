@@ -158,12 +158,12 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
     threads: pool,
     main: options.main,
     worker: (id, threadId, notes, model) => {
-      const thread = layout.forThread(threadId, runtime.citedScratch);
+      const thread = layout.forThread(threadId, (p) => runtime.cites(id, p));
       const role = options.worker(task(id), thread, notes, model);
       return { ...role, tools: tools("worker", thread, role.tools) };
     },
     check: (id, threadId, notes, model) => {
-      const thread = layout.forThread(threadId, runtime.citedScratch);
+      const thread = layout.forThread(threadId, (p) => runtime.cites(id, p));
       const role = options.check(task(id), thread, notes, model);
       return { ...role, tools: tools("check", thread, role.tools) };
     },

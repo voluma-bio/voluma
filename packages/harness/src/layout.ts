@@ -3,16 +3,16 @@
  * path with its R2 prefix, per thread: the runner mounts `mounts`, the tool descriptions say
  * `description`, and host-side tools turn paths into keys with `keyOf`.
  *
- * A worker mounts the run's `/scratch` and `/outputs` read-write. A checker mounts `/outputs`
+ * A worker mounts the run's `/scratch` and `/outputs` read-write and works in `/scratch/<its name>/`. A checker mounts `/outputs`
  * read-only and writes only `/scratch/<its name>/`, the R2 prefix `scratch/<its name>/`; the main
  * agent has the same shape (no sandbox yet). Host-side (`keyOf`, so `view_image`) they also read
  * the run's `/scratch`, but a checker only the files the attempt under review cites as
- * evidence (`CitedScratch`): the worker's scripts, logs and notes stay unread. Its sandbox does
+ * evidence: the worker's scripts, logs and notes stay unread. Its sandbox does
  * not mount the rest. The path namespace is the same for every thread:
  * `/scratch/<name>/x.png` is the key `scratchKey(runId, "<name>/x.png")` whoever wrote it, so
  * evidence `{root: "scratch", path: "<name>/x.png"}` resolves the same way.
  *
- * Every sandbox gets `SCRATCH`, its writable scratch path (`ThreadLayout.env`).
+ * Every sandbox gets `SCRATCH`, its own folder `/scratch/<name>` (`ThreadLayout.dir`).
  */
 import {
   outputsPrefix,
@@ -24,9 +24,6 @@ import {
 import type { Skill } from "@voluma/workflow/definition";
 import type { SandboxMount } from "./ports/sandbox";
 import { parseThreadId } from "./thread-id";
-
-/** Whether the attempt a check thread reviews cites this file (the path after `/scratch/`) as evidence. */
-export type CitedScratch = (threadId: string, path: string) => boolean;
 
 const INPUTS = "/inputs";
 const OUTPUTS = "/outputs";
@@ -40,9 +37,11 @@ export interface ThreadLayout {
   name: string;
   /** What the thread's sandbox mounts. */
   mounts: SandboxMount[];
-  /** The thread's writable scratch mount: `/scratch`, or `/scratch/<name>`. */
+  /** The thread's writable scratch mount: `/scratch` for a worker, `/scratch/<name>` for the others. */
   scratch: SandboxMount;
-  /** The sandbox's env: the run's `PYTHONPATH` and `SCRATCH`, the path of `scratch`. */
+  /** The thread's own working folder, `/scratch/<name>`: `SCRATCH`, the command workdir, its spill folder. */
+  dir: string;
+  /** The sandbox's env: the run's `PYTHONPATH` and `SCRATCH` (`dir`). */
   env: Record<string, string>;
   /** The mounts, as bullet lines for the tool description. */
   description: string;
@@ -64,10 +63,11 @@ type RoleParts = Pick<ThreadLayout, "mounts" | "scratch" | "description" | "rest
 
 export interface RunLayout {
   /**
-   * The layout of a thread id as `thread-id.ts` builds it. `cited` answers for a checker's
-   * host-side reads of the worker's scratch; without it a checker reads none of it.
+   * The layout of a thread id as `thread-id.ts` builds it. `cited` says whether the attempt a
+   * checker reviews cites a scratch file (the path after `/scratch/`); it gates the checker's
+   * host-side reads of the rest of the run's scratch, and without it a checker reads none.
    */
-  forThread(threadId: string, cited?: CitedScratch): ThreadLayout;
+  forThread(threadId: string, cited?: (path: string) => boolean): ThreadLayout;
 }
 
 /**
@@ -99,7 +99,7 @@ export function runLayout(runId: string, inputPrefix: string, skills: readonly S
     `- ${WORKFLOW} holds the workflow's skills and resources, under their repo paths: read them, do not modify them.\n`;
 
   // What differs by role. `hostOnly` entries are readable by host-side tools, not mounted.
-  const worker = (): RoleParts => {
+  const worker = (dir: string): RoleParts => {
     const writable: SandboxMount = { path: SCRATCH, prefix: scratch, access: "read-write" };
     return {
       mounts: [inputs, workflow, writable, outputs("read-write")],
@@ -107,12 +107,11 @@ export function runLayout(runId: string, inputPrefix: string, skills: readonly S
       hostOnly: [],
       description:
         `${common}- ${OUTPUTS} is for files you produce; they are kept.\n` +
-        `- ${SCRATCH} is for intermediate files; it is kept too. Work in $SCRATCH (${SCRATCH}).`,
+        `- ${SCRATCH} is for intermediate files and is kept too; the other threads' folders are there as well. Work in $SCRATCH (${dir}) and write nothing else under ${SCRATCH}.`,
       restartNote: `The sandbox was restarted. ${OUTPUTS} and ${SCRATCH} were kept, ${INPUTS} was copied again, and local files elsewhere (including /tmp) are gone.`,
     };
   };
-  const confined = (name: string): RoleParts => {
-    const dir = `${SCRATCH}/${name}`;
+  const confined = (name: string, dir: string): RoleParts => {
     const writable: SandboxMount = {
       path: dir,
       prefix: `${scratch}${name}/`,
@@ -135,13 +134,15 @@ export function runLayout(runId: string, inputPrefix: string, skills: readonly S
     forThread(threadId, cited = () => false) {
       const { name, kind } = parseThreadId(runId, threadId);
       const role = kind === "worker" ? "worker" : kind === "check" ? "checker" : "main";
-      const parts = role === "worker" ? worker() : confined(name);
+      const dir = `${SCRATCH}/${name}`;
+      const parts = role === "worker" ? worker(dir) : confined(name, dir);
       const { hostOnly, ...rest } = parts;
       return {
         ...rest,
         role,
         name,
-        env: { PYTHONPATH: pythonPath, SCRATCH: parts.scratch.path },
+        dir,
+        env: { PYTHONPATH: pythonPath, SCRATCH: dir },
         toolOutputPath: (toolCallId) =>
           `${SCRATCH}/${toolOutputKey(runId, name, toolCallId).slice(scratch.length)}`,
         keyOf(path, access) {
@@ -157,7 +158,7 @@ export function runLayout(runId: string, inputPrefix: string, skills: readonly S
           if (!relativePathSchema.safeParse(relative).success)
             throw new Error(`${path} is not a valid path`);
           if (role === "checker" && hostOnly.includes(mount)) {
-            if (!cited(threadId, relative))
+            if (!cited(relative))
               throw new Error(`${path} is not a file the worker cited as evidence`);
           }
           return `${mount.prefix}${relative}`;

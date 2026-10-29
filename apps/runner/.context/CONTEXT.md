@@ -17,21 +17,23 @@ named by the thread id without the run id). `RunLayout.forThread(threadId)`
 `keyOf` and bash-spill path, so a worker and a checker each see their own files:
 
 - A worker mounts `/inputs` and `/workflow` read-only and `/scratch` (the run's whole scratch) and
-  `/outputs` read-write.
+  `/outputs` read-write, and works in `/scratch/<its name>/` like every role, so parallel workers
+  don't overwrite each other's fixed-name files.
 - A checker mounts `/inputs`, `/workflow` and `/outputs` read-only and one writable folder,
   `/scratch/<its name>/` (the name is the sandbox name, e.g. `t1.check`), which is the R2 prefix
   `scratch/<name>/` under the run. Its bash does not see the rest of `/scratch`. Host-side
   (`keyOf`, so `view_image`) it also reads, read-only, the files in the run's `/scratch` that the
-  attempt under review cites as evidence (`{root: "scratch"}` refs on that attempt's checkpoints
-  and outputs), and no others: the worker's scripts, logs and notes stay unread. `keyOf` asks a
-  `CitedScratch` predicate, which `taskRuntime.citedScratch` answers from the fold
-  (`FoldedTask.citedScratch`) for the check thread's task; `forThread(threadId, cited)` takes it.
+  attempt under review cites (`{root: "scratch"}` refs on its checkpoints and outputs, and the
+  `root: "scratch"` files in an output's own payload, `fileRefsOf`), and no others: the worker's
+  scripts, logs and notes stay unread. Cited means the path, not the bytes. `keyOf` asks the
+  `(path) => boolean` that `forThread(threadId, cited)` takes; callers pass
+  `(p) => runtime.cites(taskId, p)`, answered from the fold (`FoldedTask.citedScratch`).
   The same `keyOf` check validates the evidence a checker names. The main agent
   (`<runId>.main[.n]`) has the same mounts and reads the run's whole `/scratch` host-side; it has
   no sandbox today.
 - Every thread spills a truncated bash output to `/scratch/<name>/.tool-output/<id>`
   (`toolOutputKey(runId, threadName, toolCallId)`), a worker too.
-- Every sandbox has env `SCRATCH` (the worker's `/scratch`, a checker's `/scratch/<name>`) and runs
+- Every sandbox has env `SCRATCH` (`/scratch/<name>` for every role) and runs
   its commands there (`SandboxSpec.workdir`); the prompt tells the model to write working files
   under `$SCRATCH`.
 - The path namespace is the same for every thread: `/scratch/<name>/x.png` is the key
