@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./run": "./src/run/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"
@@ -16,5 +17,8 @@
     "@types/react": "catalog:",
     "react": "catalog:",
     "typescript": "catalog:"
+  },
+  "dependencies": {
+    "@voluma/contracts": "workspace:*"
   }
 }

@@ -9,13 +9,14 @@ import { RouterProvider } from "react-router/dom";
 import { DevUiPage } from "../dev-ui/dev-ui-page";
 import { reviewRoutes } from "../features/review";
 import { runRoutes } from "../features/run";
+import { studyRoutes } from "../features/study";
 import { SignedIn } from "./signed-in";
 
 const router = createBrowserRouter([
   { path: "/dev/ui", element: <DevUiPage /> },
   {
     element: <SignedIn />,
-    children: [...runRoutes, ...reviewRoutes, { path: "*", element: <NotFound /> }],
+    children: [...studyRoutes, ...runRoutes, ...reviewRoutes, { path: "*", element: <NotFound /> }],
   },
 ]);
 

@@ -2,7 +2,7 @@
  * Status chip for lists, tables and headers: the one chip Home, the study
  * page, the run page and the review share. It takes a tone, not a status: the
  * caller maps its own statuses (task, run, structure) to a tone and label, so
- * this component stays independent of the contracts (`features/run/status.tsx`
+ * this component stays independent of the contracts (`@voluma/ui/run`
  * maps a `Run`).
  */
 import type { ReactNode } from "react";

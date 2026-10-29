@@ -76,7 +76,10 @@ export const toInput = (row: typeof inputs.$inferSelect): Input => ({
 export const toRunEvent = (row: typeof events.$inferSelect) =>
   runEventSchema.parse({ ...row, createdAt: row.createdAt.toISOString() });
 
-function toRun({ run, input, position, calls }: Row, summary: ReviewSummary | null): Run {
+function toRun(
+  { run, input, position, calls }: Row,
+  { summary, tasks }: Pick<Derived, "summary" | "tasks">,
+): Run {
   const iso = (d: Date | null) => d?.toISOString() ?? null;
   const startedAt = iso(run.startedAt);
   const state = ((): Run["state"] => {
@@ -114,6 +117,7 @@ function toRun({ run, input, position, calls }: Row, summary: ReviewSummary | nu
     usage: { modelCostUsd: run.modelCostUsd, sandboxSeconds: run.sandboxSeconds },
     providerCalls: calls,
     review: run.state === "ended" && run.outcome === "completed" ? summary : null,
+    tasks: run.state === "ended" ? null : tasks,
   });
 }
 
@@ -216,25 +220,36 @@ export async function loadRecords(
   return rows.map((row) => {
     const log = logs.get(row.run.id) ?? [];
     const results = reviewState(log);
-    return { run: toRun(row, results.summary), events: log, results };
+    return { run: toRun(row, { summary: results.summary, tasks: null }), events: log, results };
   });
 }
 
-/** What one `reviewState(log)` of a completed run gives the reads: the summary, and for studies its measurement values and open checks. */
+/**
+ * What one `reviewState(log)` gives the reads: for a completed run the summary, and for
+ * studies its measurement values and open checks; for a live run its task progress.
+ */
 type Derived = {
   summary: ReviewSummary | null;
+  tasks: Run["tasks"];
   /** Output id (`outputs.json`) → value, from the latest revision's tasks. */
   values: Record<string, StudyValue>;
   toCheck: Omit<ToCheckItem, "runId">[];
 };
 
-const NOTHING: Derived = { summary: null, values: {}, toCheck: [] };
+const NOTHING: Derived = { summary: null, tasks: null, values: {}, toCheck: [] };
 
 function derive(log: RunRecord["events"]): Derived {
   const { summary, revisions } = reviewState(log);
+  const latest = revisions.at(-1);
+  // The fold has a row only for a task that started; the plan lists them all. "Finished"
+  // counts To check tasks: their work is done (the run page counts the same).
+  const tasks = latest && {
+    done: latest.tasks.filter((t) => t.status === "done" || t.status === "to-check").length,
+    total: latest.plan.tasks.length,
+  };
   const values: Derived["values"] = {};
   const toCheck: Derived["toCheck"] = [];
-  for (const task of revisions.at(-1)?.tasks ?? []) {
+  for (const task of latest?.tasks ?? []) {
     for (const m of task.measurements) {
       // The fold names a measurement `taskId/outputId`; the workflow files know the output id.
       values[m.id.slice(task.id.length + 1)] = {
@@ -249,7 +264,7 @@ function derive(log: RunRecord["events"]): Derived {
       }
     }
   }
-  return { summary, values, toCheck };
+  return { summary, tasks: tasks ?? null, values, toCheck };
 }
 
 type SummaryCache = Map<string, { lastEventId: string | null; derived: Derived }>;
@@ -271,8 +286,9 @@ async function loadResults(
   skipUnreadable = false,
 ): Promise<RunResult[]> {
   const rows = await loadRows(tx, where);
+  // A failed or cancelled run has nothing derived; a live one has its progress.
   const ids = rows
-    .filter(({ run }) => run.state === "ended" && run.outcome === "completed")
+    .filter(({ run }) => run.state !== "ended" || run.outcome === "completed")
     .map(({ run }) => run.id);
   const watermarks = ids.length
     ? await tx
@@ -302,7 +318,7 @@ async function loadResults(
     .filter(({ run }) => !unreadable.has(run.id))
     .map((row) => {
       const derived = derivedOf.get(row.run.id) ?? NOTHING;
-      return { run: toRun(row, derived.summary), ...derived };
+      return { run: toRun(row, derived), ...derived };
     });
 }
 
