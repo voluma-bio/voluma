@@ -10,8 +10,8 @@
  */
 import { and, eq, inArray, ne, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import type { Observed } from "./prices.ts";
-import { providerCalls } from "./schema.ts";
+import type { Observed } from "./prices";
+import { providerCalls } from "./schema";
 
 export type Db = Pick<PostgresJsDatabase, "execute" | "select">;
 
@@ -190,5 +190,5 @@ export async function callsOfRuns(db: Db, runIds: string[]): Promise<Map<string,
 }
 
 /** SQL for one run's settled provider spend, to add to a query over `runs` (the org's daily total). */
-export const settledUsdOf = (runId: SQL | string): SQL =>
-  sql`(SELECT coalesce(sum(coalesce(cost_usd, reserved_usd)), 0) FROM provider_calls WHERE run_id = ${typeof runId === "string" ? sql`${runId}` : runId} AND status <> 'open')`;
+export const settledUsdOf = (runId: SQL): SQL =>
+  sql`(SELECT coalesce(sum(coalesce(cost_usd, reserved_usd)), 0) FROM provider_calls WHERE run_id = ${runId} AND status <> 'open')`;

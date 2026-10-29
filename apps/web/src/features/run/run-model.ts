@@ -6,7 +6,7 @@
  */
 import type { RunEvent } from "@voluma/contracts/events";
 import type { Folded, FoldedTask } from "@voluma/contracts/fold";
-import type { RunState } from "@voluma/contracts/run";
+import type { ProviderCalls, RunState } from "@voluma/contracts/run";
 import { type RunSpend, type Spend, spend } from "@voluma/contracts/spend";
 import type { WorkflowPlan } from "@voluma/contracts/workflow";
 import { isSatisfied } from "@voluma/workflow";
@@ -442,12 +442,17 @@ export type RunView = {
 };
 
 /** Everything the run page shows about the run as a whole, from its durable events. */
-export function runView(events: RunEvent[], folded: Folded, halt: Halt | undefined): RunView {
+export function runView(
+  events: RunEvent[],
+  folded: Folded,
+  halt: Halt | undefined,
+  providerCalls: ProviderCalls | undefined,
+): RunView {
   const logged = threadsOf(events);
   const threads = halt ? halted(logged.threads, logged.lastAt, halt) : logged.threads;
   const plan = planOf(events);
   const attention = attentionOf(folded.tasks, logged.threads, events);
-  const spent = spend(events);
+  const spent = spend(events, providerCalls);
   if (!plan) return { threads, attention, tasks: [], outputs: [], progress: "", spend: spent };
   const states = taskStates(plan, folded.tasks, logged.threads, halt);
   const latest = latestThreadByTask(threads);

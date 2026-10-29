@@ -1,8 +1,8 @@
 /** Reservation and cost arithmetic: a wrong number here is a silent cap breach or a wrong bill. */
 import { describe, expect, it } from "vitest";
-import { fits } from "./calls.ts";
-import { observeLine } from "./observe.ts";
-import { costUsd, type Observed, reservationUsd } from "./prices.ts";
+import { fits } from "./calls";
+import { observeLine } from "./observe";
+import { costUsd, type Observed, reservationUsd } from "./prices";
 
 describe("reservation", () => {
   it("holds SAM's 15,000-frame maximum, which the request cannot lower", () => {

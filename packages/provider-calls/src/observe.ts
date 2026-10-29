@@ -6,7 +6,7 @@
  * the last one wins: Anthropic's `message_start` carries the input, its `message_delta` the
  * final output, and Responses' `response.completed` all of it.
  */
-import type { Observed } from "./prices.ts";
+import type { Observed } from "./prices";
 
 const USAGE = /"usage":\{/g;
 const INTEGER = (key: string) => new RegExp(`"${key}":(\\d+)`, "g");

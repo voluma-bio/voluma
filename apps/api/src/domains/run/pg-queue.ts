@@ -13,6 +13,7 @@ import { randomBytes } from "node:crypto";
 import type { Run, VisitorKeys } from "@voluma/contracts/run";
 import { LEASE_SECONDS, type Usage as RunnerUsage } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
+import { callsOfRuns } from "@voluma/provider-calls";
 import { and, asc, eq, notInArray, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { Reader } from "../../domain";
@@ -21,7 +22,7 @@ import type { KeyVault } from "./key-vault";
 import { LeaseLost } from "./lease";
 import type { Notifier } from "./notifier";
 import { loadRun, loadRuns, readableInputs, readableRuns, type Tx } from "./pg-runs";
-import { inputs, runs } from "./schema";
+import { DEFAULT_COST_CAP_USD, inputs, runs } from "./schema";
 
 /** Serializes every transaction that changes a run, so the limit counts can't race a claim. */
 const QUEUE_LOCK = 0x76_6f_6c_71;
@@ -228,7 +229,7 @@ export function pgRunQueue(
      * under the lock: a start that holds its keys before it commits is either in them or
      * not yet queued.
      */
-    claim: (runnerId: string) =>
+    claim: (runnerId: string, costCapUsd?: number) =>
       locked(async (tx): Promise<Claimed | null> => {
         await sweep(tx);
         await tx
@@ -284,6 +285,7 @@ export function pgRunQueue(
               leaseHolder: runnerId,
               leaseToken,
               leaseExpiresAt: leaseUntil,
+              costCapUsd: costCapUsd ?? DEFAULT_COST_CAP_USD,
             })
             .where(eq(runs.id, run.id));
           const keys = run.credentials === "visitor" ? vault.take(run.id) : undefined;
@@ -296,7 +298,10 @@ export function pgRunQueue(
         return null;
       }),
 
-    /** Extends the lease and adds the usage; `stop` once the run has ended. Throws `LeaseLost`. */
+    /**
+     * Extends the lease and adds the usage; `stop` once the run has ended. `spentUsd` is the
+     * run's total: its model cost plus its provider calls. Throws `LeaseLost`.
+     */
     heartbeat: (runId: string, leaseToken: string, used: RunnerUsage) =>
       locked(async (tx) => {
         const [run] = await tx
@@ -326,7 +331,8 @@ export function pgRunQueue(
             return { stop: true };
           }
         }
-        return { stop: false };
+        const gateway = (await callsOfRuns(tx, [runId])).get(runId)?.costUsd ?? 0;
+        return { stop: false, spentUsd: run.modelCostUsd + used.modelCostUsd + gateway };
       }),
 
     /** Throws `LeaseLost` or `RunEnded`. */

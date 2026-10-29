@@ -4,7 +4,7 @@
  * rejecting anything that would normalize to another path. Anthropic's and OpenAI's Files and
  * Batches APIs stay closed because every run shares our account.
  */
-import { PROVIDER_NAMES, type Provider } from "./token.ts";
+import { PROVIDER_NAMES, type Provider } from "./token";
 
 export type RouteKind =
   /** A model call: its model must have a price in Pi's catalog (or be in `models`). */

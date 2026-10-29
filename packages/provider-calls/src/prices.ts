@@ -7,7 +7,7 @@ import { createModels } from "@earendil-works/pi-ai";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { metaProvider } from "@earendil-works/pi-ai/providers/meta";
 import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
-import type { Provider } from "./token.ts";
+import type { Provider } from "./token";
 
 /** Meta bills $0.20 per 1,000 video frames, at least 50 per request, at most 15,000 frames. */
 export const SAM_MODEL = "sam-3.1";
@@ -78,7 +78,7 @@ export function costUsd(provider: Provider, model: string, seen: Observed): numb
   const uncached =
     provider === "anthropic" ? seen.inputTokens : Math.max(0, seen.inputTokens - cacheRead);
   const promptTokens = uncached + cacheRead + cacheWrite;
-  const tier = (priced.cost.tiers ?? []).findLast((t) => promptTokens > t.inputTokensAbove);
+  const tier = (priced.cost.tiers ?? []).filter((t) => promptTokens > t.inputTokensAbove).at(-1);
   const rate = tier ?? priced.cost;
   return (
     (uncached * rate.input +
