@@ -199,8 +199,9 @@ const selectedOutputsSchema = z
 /**
  * The provider gateway's per-call rows summed for one run. A finished call counts its cost,
  * a call cut off counts its reservation (the provider may still bill), an open call counts
- * nothing here. `sandbox` is the sandbox name the call's token was minted for
- * (`<taskId>.worker[.n]`).
+ * nothing here (the cap counts its reservation: `heartbeatResponse.spentUsd`). `costUsd` and
+ * `calls` cover every row; `bySandbox` covers the rows whose token was minted for a sandbox,
+ * by that sandbox's name (`<taskId>.worker[.n]`, as in its `sandbox` event).
  */
 export const providerCallsSchema = z.object({
   costUsd: z.number().nonnegative(),
