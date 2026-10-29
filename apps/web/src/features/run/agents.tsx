@@ -44,7 +44,7 @@ export function ThreadCost({ thread }: { thread: Thread }) {
   );
 }
 
-/** Its cost, time, tokens and cache share behind an info button. */
+/** Its cost, command time, tokens and cache share behind an info button; its clock is `Elapsed`. */
 export function ThreadSpendInfo({ thread }: { thread: Thread }) {
   if (!thread.spend?.calls) return null;
   return (
@@ -53,7 +53,7 @@ export function ThreadSpendInfo({ thread }: { thread: Thread }) {
       sections={[
         {
           title: thread.model ? `This thread, ${thread.model}` : "This thread",
-          rows: spendRows(thread.spend),
+          rows: spendRows(thread.spend, { wall: false }),
         },
       ]}
     />

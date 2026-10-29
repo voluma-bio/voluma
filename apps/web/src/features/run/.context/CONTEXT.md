@@ -89,7 +89,7 @@ Three screens under `RunLayout` (top bar and query client): `/` start (`start-pa
   with the main thread's share in its popover; under the plan, one row per task covers its worker,
   check and any redo together. Each worker and checker card, and an opened thread's bar, shows that
   thread's own cost: `spend` over just that thread's events (`Thread.spend`), so a card never repeats
-  its task's sum. Wall times move when an event lands; only the header clock and the cards' `Elapsed`
+  its task's sum; its popover has no wall time, since the card's `Elapsed` is the thread's clock. Wall times move when an event lands; only the header clock and the cards' `Elapsed`
   tick each second.
 
 Gaps: "Reviewed" needs review state, which the review lane doesn't expose yet ([#102](https://github.com/voluma-bio/voluma/issues/102)). Workflow versions are not shown (no versions yet).

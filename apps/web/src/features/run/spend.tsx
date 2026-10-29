@@ -10,20 +10,17 @@ import { taskTitle } from "./workflows";
 
 const count = (n: number) => n.toLocaleString();
 
-/** Cost, times (unless `times` is false), then calls and tokens. */
-export function spendRows(
-  s: Spend,
-  { times = true }: { times?: boolean } = {},
-): InfoSection["rows"] {
+/**
+ * Cost, wall time (unless `wall` is false: the main thread's is the run's, and a card's clock is
+ * its thread's), command time, then calls and tokens.
+ */
+export function spendRows(s: Spend, { wall = true }: { wall?: boolean } = {}): InfoSection["rows"] {
   const hit = cacheHitShare(s);
   const rows: InfoSection["rows"] = [["Cost", formatUsd(s.costUsd)]];
   if (s.toolCostUsd > 0) rows.push(["Paid tools", formatUsd(s.toolCostUsd)]);
-  if (times)
-    rows.push(
-      ["Wall time", formatDuration(s.wallSeconds)],
-      // `bash` calls only: the runs list's sandbox time is the sandbox's uptime, which is longer.
-      ["Command time", formatDuration(s.sandboxSeconds)],
-    );
+  if (wall) rows.push(["Wall time", formatDuration(s.wallSeconds)]);
+  // `bash` calls only: the runs list's sandbox time is the sandbox's uptime, which is longer.
+  rows.push(["Command time", formatDuration(s.sandboxSeconds)]);
   rows.push(
     ["Model calls", count(s.calls)],
     ["Input tokens", count(s.input + s.cacheRead)],
@@ -55,8 +52,7 @@ export function RunSpendSummary({ spend, since }: { spend: RunSpend; since?: str
         label="Run cost and time"
         sections={[
           { title: "Whole run", rows: spendRows(total) },
-          // The main thread's span is the run's own, so its times repeat the run's.
-          { title: "Main thread", rows: spendRows(spend.main, { times: false }) },
+          { title: "Main thread", rows: spendRows(spend.main, { wall: false }) },
         ]}
       />
     </span>
