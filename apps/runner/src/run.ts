@@ -38,18 +38,13 @@ import { type SandboxSession, sandboxSession } from "@voluma/harness/sandbox-ses
 import { checkerSandboxSpec, workerSandboxSpec } from "@voluma/harness/sandbox-specs";
 import { type RunRole, superviseRun } from "@voluma/harness/supervise-run";
 import { optionalTools } from "@voluma/harness/tools";
+import type { Skill } from "@voluma/workflow/definition";
 import { loadWorkflow } from "@voluma/workflow/load";
 import { computePlan } from "@voluma/workflow/plan";
 import { type Config, isVisitorSafe, providerKey } from "./config.ts";
 import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
-import { metaSegmenter } from "./meta-segmenter.ts";
-import {
-  createModalSandbox,
-  RUNS_APP,
-  terminateClaim,
-  terminateOtherClaims,
-} from "./modal-sandbox.ts";
+import { claimSandboxes, terminateClaim, terminateOtherClaims } from "./modal-sandbox.ts";
 import type { ModelFallback } from "./model-fallback.ts";
 import { retryTransient } from "./model-retry.ts";
 import { checkPrompt, systemPrompt, workerPrompt } from "./prompts.ts";
@@ -58,6 +53,7 @@ import { r2Evidence } from "./r2-evidence.ts";
 import { r2Files } from "./r2-files.ts";
 import { r2Workflows } from "./r2-workflows.ts";
 import { type Redact, redactor } from "./redact.ts";
+import { sandboxGateway } from "./sandbox-gateway.ts";
 import { heartbeatRoundTrip, inRunScope, type RunScope } from "./telemetry.ts";
 import { type ModelRole, usageMeter } from "./usage.ts";
 
@@ -85,6 +81,14 @@ export interface RunnerContext {
   fallback: ModelFallback;
   log(line: string): void;
 }
+
+/** Where a run's files are: its scan (a reference scan or an upload), outputs and scratch. */
+export const layoutOf = (run: Claim["run"], skills: readonly Skill[]) =>
+  runLayout(
+    run.id,
+    run.input.source === "reference" ? referencePrefix("scan") : inputPrefix(run.input.id),
+    skills,
+  );
 
 /** "error": an error nobody caught reached the process handler while this run was working (`telemetry.ts`). */
 type Stopped = StopReason | "shutdown" | "spend-cap" | "error";
@@ -134,7 +138,6 @@ async function claimBody(
   const keyFor = (provider: string) =>
     visitor ? (provider === "meta" ? keys.metaApiKey : undefined) : providerKey(provider);
   const modal = visitor ? keys.modal : config.modal;
-  const metaKey = visitor ? keys.metaApiKey : config.metaApiKey;
   const redact: Redact = redactor([
     ...config.secrets,
     ...(visitor ? [keys.metaApiKey, keys.modal.tokenId, keys.modal.tokenSecret] : []),
@@ -240,29 +243,12 @@ async function claimBody(
     // The tasks that produce the selected outputs and what they need. The main thread may adapt
     // them to the run's notes when the run starts (`superviseRun`).
     const computed = computePlan(definition.files, run.selectedOutputs);
-    // Each role's optional tools are the ones its file lists. `segment_sam` needs a key, and only
-    // workers hold it: it calls out to Meta and `keepFailed` writes the run-wide scratch.
+    // Each role's optional tools are the ones its file lists; `segment_sam` also needs the gateway.
     const grant = (role: "worker" | "checker") =>
-      definition.agents[role].tools.filter(
-        (t) => t !== "segment_sam" || (role === "worker" && metaKey),
-      );
+      definition.agents[role].tools.filter((t) => t !== "segment_sam" || config.gateway);
 
-    const layout = runLayout(
-      runId,
-      run.input.source === "reference" ? referencePrefix("scan") : inputPrefix(run.input.id),
-      definition.skills,
-    );
-    const createSandbox = createModalSandbox({
-      appName: RUNS_APP,
-      claim: claimId,
-      modal,
-      r2: {
-        accountId: config.r2.accountId,
-        bucket: config.r2.bucket,
-        parentAccessKeyId: config.r2.accessKeyId,
-        cloudflareApiToken: config.r2.cloudflareApiToken,
-      },
-    });
+    const layout = layoutOf(run, definition.skills);
+    const createSandbox = claimSandboxes(config, modal, claimId);
     const stored = await client.storedEvents();
     live = liveBatcher((frames) => client.live(frames));
     const recorded = recorder(
@@ -311,7 +297,20 @@ async function claimBody(
         };
         return createSandbox(
           thread.role === "worker"
-            ? workerSandboxSpec({ ...common, mounts: thread.mounts })
+            ? workerSandboxSpec({
+                ...common,
+                mounts: thread.mounts,
+                // The network and the token follow the tool grant: a sandbox whose role cannot
+                // call `segment_sam` gets neither, since `voluma-sam` is on every sandbox's PATH.
+                gateway: grant("worker").includes("segment_sam")
+                  ? sandboxGateway(
+                      config,
+                      { runId, leaseToken, visitorMetaKey: keys?.metaApiKey },
+                      thread.name,
+                      redact,
+                    )
+                  : undefined,
+              })
             : checkerSandboxSpec({
                 ...common,
                 readOnly: thread.mounts.filter((m) => m !== thread.scratch),
@@ -415,24 +414,6 @@ async function claimBody(
         opened.release(id).catch((e) => log(`releasing ${layout.forThread(id).name} failed: ${e}`)),
       evidence: r2Evidence(config.r2),
       files,
-      segmenter: metaKey
-        ? metaSegmenter({
-            apiKey: metaKey,
-            log,
-            addCost: meter.addModelCost,
-            keepFailed: async (text) => {
-              // Only workers hold segment_sam, so the run-wide scratch is theirs.
-              const name = `failed-sam-response-${new Date().toISOString().replaceAll(":", "-")}.txt`;
-              const path = `/scratch/${name}`;
-              await files.write(
-                scratchKey(runId, name),
-                new TextEncoder().encode(text),
-                AbortSignal.timeout(60_000),
-              );
-              return `kept at ${path}`;
-            },
-          })
-        : undefined,
       main,
       worker: (task, thread, notes, recorded) => ({
         model: threadModel(workerModel, recorded),
