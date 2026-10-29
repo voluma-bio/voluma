@@ -115,7 +115,7 @@ export function segmentSamTool(deps: SegmentSamDeps): Tool<typeof inputSchema> {
         throw new Error(
           `${count} slices along axis ${axis}; the model takes at most ${MAX_FRAMES}`,
         );
-      const objects: SegmentObject[] = input.structures.map(({ label, box, frame }) => {
+      const objects: SegmentObject[] = input.structures.map(({ label, name, box, frame }) => {
         const f = frame ?? input.keyframe;
         const [r0, c0, r1, c1] = box;
         if (f >= count)
@@ -125,7 +125,7 @@ export function segmentSamTool(deps: SegmentSamDeps): Tool<typeof inputSchema> {
             `box [${box}] of label ${label} does not fit a ${height} x ${width} slice`,
           );
         }
-        return { label, frame: f, box };
+        return { label, name, frame: f, box };
       });
       const stack = { data: moveAxis(data, shape, axis, "to-front"), count, height, width };
       const result = await segmenter.segment(stack, objects, ctx.signal, ctx.bill);
