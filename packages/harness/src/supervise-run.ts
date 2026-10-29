@@ -79,7 +79,7 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
     computed: options.plan,
     selectedOutputs: options.selectedOutputs,
     notes: options.notes,
-    timeoutMs: 120_000,
+    timeoutMs: 5 * 60_000,
     signal,
   });
   const pool = threads(

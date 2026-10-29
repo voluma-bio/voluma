@@ -245,10 +245,13 @@ export async function runClaim(
             apiKey: keyFor(m.provider),
             maxRetries: MODEL_RETRIES,
           }),
-        (attempt, delayMs, error) =>
+        (m, attempt, delayMs, error) => {
           log(
             `${role} model call failed (${error}); retry ${attempt} in ${Math.round(delayMs / 1000)}s`,
-          ),
+          );
+          // Threads that start while this one retries should not wait out the same outage.
+          if (!visitor) ctx.fallback.failed(m, error);
+        },
       );
     const streamFor =
       (role: ModelRole): RunRole["streamFn"] =>

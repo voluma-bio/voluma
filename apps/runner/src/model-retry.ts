@@ -4,8 +4,8 @@
  * 429, 5xx and dropped connections a few times and treat Meta's `404 model_not_found` as final;
  * that 404 hit about half of all calls on 2026-10-28, so this wrapper keeps going on those
  * errors and on that 404 (only from the `meta` provider) with exponential backoff capped at
- * MAX_DELAY_MS, until BUDGET_MS of waiting is spent. Then the last error ends the call as before
- * and the supervisor takes over (`provider-error.ts`).
+ * MAX_DELAY_MS, until BUDGET_MS has passed since the first attempt (Pi's own tries inside an attempt
+ * count against it, but an attempt in flight is not cut short). Then the last error ends the call.
  */
 import {
   type Api,
@@ -32,14 +32,14 @@ type Stream = (
 /** `stream`, but a transient provider error before any content is retried; `onRetry` logs each. */
 export function retryTransient(
   stream: Stream,
-  onRetry: (attempt: number, delayMs: number, error: string) => void,
+  onRetry: (model: Model<Api>, attempt: number, delayMs: number, error: string) => void,
   sleep = wait,
 ): Stream {
   return (model, context, options) => {
     const out = createAssistantMessageEventStream();
     const signal = options?.signal;
     (async () => {
-      let waited = 0;
+      const deadline = Date.now() + BUDGET_MS;
       for (let attempt = 1; ; attempt++) {
         let started: AssistantMessageEvent | undefined;
         let content = false;
@@ -55,21 +55,27 @@ export function retryTransient(
           }
         }
         if (!failed) return;
+        const giveUp = () => {
+          if (started) out.push(started);
+          out.push({ type: "error", reason: failed.stopReason as "error", error: failed });
+        };
         const delay =
           Math.min(MAX_DELAY_MS, BASE_DELAY_MS * 2 ** (attempt - 1)) *
           (0.75 + Math.random() * 0.25);
         if (
-          waited + delay > BUDGET_MS ||
+          Date.now() + delay > deadline ||
           signal?.aborted ||
           !isTransientProviderError(model.provider, failed.errorMessage)
         ) {
-          if (started) out.push(started);
-          out.push({ type: "error", reason: failed.stopReason as "error", error: failed });
+          giveUp();
           return;
         }
-        onRetry(attempt, delay, failed.errorMessage ?? "");
-        waited += delay;
+        onRetry(model, attempt, delay, failed.errorMessage ?? "");
         await sleep(delay, signal);
+        if (signal?.aborted) {
+          giveUp(); // the provider's error, not the abort, is what the caller should see
+          return;
+        }
       }
     })().catch((e) => {
       out.push({

@@ -62,9 +62,12 @@ calls in each request, so request size does not grow with the thread.
 the server's `retry-after`), 5xx or dropped connection. `model-retry.ts` wraps every role's calls
 (the main thread too) and keeps retrying those errors, and Meta's `404 model_not_found` that Pi
 treats as final (about half of all calls on 2026-10-28), when the call failed before streaming
-any content: backoff from 1 s doubling to a 30 s cap, until 4 minutes of waiting are spent, each
-retry logged with its role and attempt. The run's abort ends the wait. Any other error, or the
-spent budget, ends the call. `provider-error.ts` holds the error classification.
+any content: backoff from 1 s doubling to a 30 s cap, until 4 minutes have passed since the first
+attempt (Pi's own tries count against it; an attempt in flight is not cut short), each retry
+logged with its role and attempt and reported to the fallback breaker. The run's abort ends the
+wait. Any other error, or the spent budget, ends the call. A main-thread wake is also bounded
+by the supervisor's `wakeTimeoutMs`. Anthropic errors carry no status in their text, so they
+are not retried. `provider-error.ts` holds the error classification.
 Cost is Pi's per-reply price, summed per claim; the log prints it
 when a claim reports (`model cost this claim`), and the API stores it as `runs.model_cost_usd`.
 On 2026-10-28 the claims' lines summed to the run's `model_cost_usd` and to `spend(events).total`

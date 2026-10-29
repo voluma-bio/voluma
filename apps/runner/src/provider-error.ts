@@ -2,7 +2,7 @@
  * Which model-call errors mean the provider is failing, not that our request was bad. Pi formats
  * a provider error as `<provider> API error (<status>): <body>`; a connection failure or client
  * timeout has no status. Used by the call retry (`model-retry.ts`), the fallback breaker
- * (`model-fallback.ts`) and the supervisor's redo of a thread that died on one.
+ * (`model-fallback.ts`).
  */
 
 /** The model is unusable: key refused, model not found, timeout, rate limit, server error. */
