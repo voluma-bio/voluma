@@ -20,6 +20,7 @@ Library use (other resources import this file):
   sidecar.save_image(fig, path)  # the image limits below, JPEG
   sidecar.load_points(paths, grid_id)   # {name: [z, y, x]} merged from points files (`pick.py` writes one per view); refuses another grid
   sidecar.fail(sentence)   # print a sentence the agent can act on to stderr and exit 2
+  sidecar.parser(__doc__)  # the argparse parser every resource uses: the docstring is the `--help` text, defaults appended
 
 Result record: every script that reports numbers writes `{"values": {id: {value, unit, definition, kind, ...}}, ...meta}`
 to its JSON file and prints `{"out": path, "values": {id: {value, unit, definition, kind}}, ...}` (values rounded to 6 decimals).
@@ -40,6 +41,20 @@ import numpy as np
 MAX_IMAGE_PX = 2000  # view_image's limit; larger images may be rejected or resized
 MAX_IMAGE_BYTES = 1 << 20  # view_image refuses files over 1 MiB, and every image is resent with later requests
 JPEG_QUALITIES = (85, 75, 65)  # `save_image` tries each until the file is under the limit
+
+
+class HelpFormatter(argparse.RawDescriptionHelpFormatter, argparse.ArgumentDefaultsHelpFormatter):
+    """Keeps the docstring's layout and appends `(default: X)` to an option that has a real default."""
+
+    def _get_help_string(self, action):
+        if action.default is None or action.default is False:
+            return action.help
+        return super()._get_help_string(action)
+
+
+def parser(doc, **kwargs):
+    """The parser of a resource: `doc` is its module docstring, printed whole by `--help`."""
+    return argparse.ArgumentParser(description=doc, formatter_class=HelpFormatter, **kwargs)
 
 
 def sha256_file(path):
