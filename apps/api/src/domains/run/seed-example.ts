@@ -1,6 +1,6 @@
 /**
  * Operator script: copy a finished run into an example run in the Demo organization.
- *   pnpm --filter @voluma/api seed:example --from <runId> [--id <exampleRunId>] [--backfill <dir>]
+ *   pnpm --filter @voluma/api seed:example --from <runId> [--id <exampleRunId>] [--backfill <dir|r2:prefix>]
  * Reads DATABASE_URL, GUEST_ORGANIZATION_ID (the Demo organization) and the R2 settings (the repo .env, or the host's variables).
  *
  * The example gets the source's events, threads and history under its own run id (thread
@@ -13,13 +13,14 @@
  * outputs are untrusted (`@voluma/contracts/run`), and an example's scan is shown to everyone.
  */
 import { parseArgs } from "node:util";
-import { CopyObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
+import { CopyObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { runIdSchema } from "@voluma/contracts/ids";
 import { evidenceKey, runPrefix } from "@voluma/contracts/r2";
 import { asc, eq, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { backfillRows, readBackfill, uploadBackfill } from "./backfill";
+import { localDir, r2FromEnv, required } from "./r2-dir";
 import {
   EXAMPLES_OPERATOR,
   events,
@@ -33,33 +34,23 @@ import {
 const { values } = parseArgs({
   options: { from: { type: "string" }, id: { type: "string" }, backfill: { type: "string" } },
 });
-const required = (name: string) => {
-  const value = process.env[name];
-  if (!value) throw new Error(`${name} is not set`);
-  return value;
-};
 if (!values.from)
-  throw new Error("usage: seed:example --from <runId> [--id <exampleRunId>] [--backfill <dir>]");
+  throw new Error(
+    "usage: seed:example --from <runId> [--id <exampleRunId>] [--backfill <dir|r2:prefix>]",
+  );
 const source = runIdSchema.parse(values.from);
 const exampleId = runIdSchema.parse(values.id ?? `example-${source}`);
 const demoLabId = required("GUEST_ORGANIZATION_ID");
 
-const backfillDir = values.backfill;
+const backfillSource = values.backfill ? await localDir(values.backfill) : undefined;
+const backfillDir = backfillSource?.dir;
 const backfill = backfillDir ? await readBackfill(backfillDir) : undefined;
 
 const client = postgres(required("DATABASE_URL"));
 const db = drizzle(client, { casing: "snake_case" });
 
 // Objects are content-addressed and never overwritten, so a repeat copy is harmless.
-const bucket = required("R2_BUCKET");
-const r2 = new S3Client({
-  region: "auto",
-  endpoint: `https://${required("R2_ACCOUNT_ID")}.r2.cloudflarestorage.com`,
-  credentials: {
-    accessKeyId: required("R2_ACCESS_KEY_ID"),
-    secretAccessKey: required("R2_SECRET_ACCESS_KEY"),
-  },
-});
+const { r2, bucket } = r2FromEnv();
 async function copyEvidence(): Promise<number> {
   let copied = 0;
   const evidencePrefix = `${runPrefix(source)}evidence/`;
@@ -186,3 +177,4 @@ console.log(
   `example run ${exampleId} seeded from ${source} in ${demoLabId}; ${copied} evidence objects copied`,
 );
 await client.end();
+await backfillSource?.done();

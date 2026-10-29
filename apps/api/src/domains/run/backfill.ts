@@ -1,7 +1,8 @@
 /**
  * The backfill for `seed:example --backfill <dir>`: gives a run recorded before the object outputs
  * existed (ce5a0f21) the objects review shows, as if it had reported them. The directory is made by
- * the run's own prep script (docs repo, `review-site-ce5a0f21/backfill.py`):
+ * the run's own prep script (docs repo, `review-site-ce5a0f21/backfill.py`), or fetched from R2
+ * (`r2:dev/backfill/<id>/`, `r2-dir.ts`):
  *
  *   backfill.json         { plan, outputs: [report + taskId], checks: [{ taskId, title, text, focus? }] }
  *   files/<sha256>[.ext]  the files the outputs name, by content
@@ -13,9 +14,9 @@
  */
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { HeadObjectCommand, PutObjectCommand, type S3Client } from "@aws-sdk/client-s3";
+import type { S3Client } from "@aws-sdk/client-s3";
 import { eventInputSchema } from "@voluma/contracts/events";
 import { taskIdSchema } from "@voluma/contracts/ids";
 import { outputReportSchema } from "@voluma/contracts/output";
@@ -23,6 +24,7 @@ import { evidenceKey, reviewAssetKey, sha256Schema } from "@voluma/contracts/r2"
 import { focusSchema, reviewAssetsManifestSchema } from "@voluma/contracts/review";
 import { workflowPlanSchema } from "@voluma/contracts/workflow";
 import { z } from "zod";
+import { filesUnder, pool, put } from "./r2-dir";
 import type { events } from "./schema";
 
 /** An event row before it has its `seq`. */
@@ -52,51 +54,6 @@ async function sha256Of(path: string): Promise<string> {
   const hash = createHash("sha256");
   for await (const chunk of createReadStream(path)) hash.update(chunk);
   return hash.digest("hex");
-}
-
-async function exists(r2: S3Client, bucket: string, key: string, size: number): Promise<boolean> {
-  try {
-    const head = await r2.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
-    return head.ContentLength === size;
-  } catch (error) {
-    if ((error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404) {
-      return false;
-    }
-    throw error;
-  }
-}
-
-async function put(r2: S3Client, bucket: string, key: string, path: string): Promise<void> {
-  const { size } = await stat(path);
-  if (await exists(r2, bucket, key, size)) return;
-  await r2.send(
-    new PutObjectCommand({
-      Bucket: bucket,
-      Key: key,
-      Body: createReadStream(path),
-      ContentLength: size,
-    }),
-  );
-}
-
-/** Runs `work` over `items`, `limit` at a time. */
-async function pool<T>(items: T[], limit: number, work: (item: T) => Promise<void>) {
-  const queue = [...items];
-  await Promise.all(
-    Array.from({ length: limit }, async () => {
-      for (let item = queue.shift(); item !== undefined; item = queue.shift()) await work(item);
-    }),
-  );
-}
-
-async function filesUnder(dir: string, prefix = ""): Promise<string[]> {
-  const found: string[] = [];
-  for (const entry of await readdir(join(dir, prefix), { withFileTypes: true })) {
-    const path = prefix ? `${prefix}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) found.push(...(await filesUnder(dir, path)));
-    else found.push(path);
-  }
-  return found;
 }
 
 /**
