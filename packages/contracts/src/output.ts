@@ -111,10 +111,6 @@ const outputs = <R extends z.ZodType>(ref: R) => {
             "Voxel of the grid where the mask's [0, 0, 0] sits.",
           ),
         }),
-        z.strictObject({
-          status: z.literal("missing"),
-          reason: nonEmpty.describe("Why it can't be reported, e.g. not in the field of view."),
-        }),
       ]),
     }),
     z.object({

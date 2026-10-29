@@ -133,7 +133,7 @@ export function placementProblem(
   }
 
   if (!self || !("grid" in self)) return undefined;
-  if (output.kind === "structure" && "status" in output.structure) return undefined;
+  if (output.kind === "missing") return undefined;
   const gridTask = declared.get(self.grid)?.task;
   const grid = volumes.get(`${gridTask}/${self.grid}`);
   if (!grid)

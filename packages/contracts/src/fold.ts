@@ -38,8 +38,7 @@
  *   and counts as reported. Per task, `undeclared` is the ids of the outputs that fill none;
  *   `missing` the declared outputs the current attempt hasn't reported or reported `missing`
  *   (with the reason), and `missingRequired` the required ones among those not reported. A
- *   structure reported as missing (its own `status`) is a `Structure` with `missing` set and
- *   counts as reported.
+ *   structure reported `missing` is a `Structure` with `missing` set and counts as reported.
  * - A skipped task (`plan.changed.skip`, kept across revisions) and every task that
  *   transitively depends on it in the plan folds as `to-check`, with every declared output
  *   missing with the reason (the dependents' reason names the skipped task), one open To check
@@ -340,7 +339,7 @@ export function fold(events: readonly RunEvent[]): Folded {
               name: p.title,
               volumeId: grid?.id ?? null,
               voxels,
-              missing: "status" in s ? { reason: s.reason } : null,
+              missing: null,
               ...(o.definition !== undefined && { definition: o.definition }),
               ...(o.volumeMm3 !== undefined && { volumeMm3: o.volumeMm3 }),
             });

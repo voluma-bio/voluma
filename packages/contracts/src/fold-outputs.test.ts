@@ -333,10 +333,7 @@ describe("fold outputs", () => {
     expect(need(f, "a").measurements.find((m) => m.id === "a/width")?.on).toEqual([]); // no block to show it on
 
     // Reported as missing counts as reported: a block with the reason, no voxels.
-    l.output("w:5", W, "a", "w:1:open", "femur", {
-      kind: "structure",
-      structure: { status: "missing", reason: "out of the field" },
-    });
+    l.output("w:5", W, "a", "w:1:open", "femur", { kind: "missing", reason: "out of the field" });
     f = fold(l.events);
     expect(rev(f, 0).structures).toMatchObject([
       {

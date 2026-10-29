@@ -148,6 +148,7 @@ async function loadLogs(tx: Tx, ids: string[], summaryOnly = false) {
                 "revision.started",
                 "attempt.opened",
                 "task",
+                "plan.changed",
                 "checkpoint",
                 "output",
                 "check.accepted",
