@@ -157,61 +157,62 @@ function ScanReview({ runId }: { runId: string }) {
         setSearch(next);
       }}
       backLink={<Link to="/runs">Back to runs</Link>}
-      intake={
-        <div className="dicom-intake">
-          <div className="flex flex-wrap items-center gap-3">
-            <button type="button" className="button primary" onClick={() => void open()}>
-              {runId === "local" ? "Open reference scan" : "Open run scan"}
-            </button>
-            {archive && (
-              <label className="revision-select">
-                Series
-                <select
-                  aria-label="DICOM series"
-                  value={selectedSeries}
-                  onChange={(event) => setSelectedSeries(event.target.value)}
-                >
-                  <option value="" disabled>
-                    Choose a series
-                  </option>
-                  {archive.series.map((item, i) => (
-                    <option key={item.id} value={item.id}>
-                      {i + 1}: {item.modality} · {item.columns} × {item.rows} · {item.slices.length}{" "}
-                      slices
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            {(archive || progress) && (
-              <button type="button" className="button" onClick={close}>
-                {progress ? "Cancel import" : "Close scan"}
+      viewer={
+        <ViewerWorkspace series={series}>
+          <div className="dicom-intake">
+            <div className="flex flex-wrap items-center gap-3">
+              <button type="button" className="button" onClick={() => void open()}>
+                {runId === "local" ? "Open reference scan" : "Open run scan"}
               </button>
+              {archive && (
+                <label className="revision-select">
+                  Series
+                  <select
+                    aria-label="DICOM series"
+                    value={selectedSeries}
+                    onChange={(event) => setSelectedSeries(event.target.value)}
+                  >
+                    <option value="" disabled>
+                      Choose a series
+                    </option>
+                    {archive.series.map((item, i) => (
+                      <option key={item.id} value={item.id}>
+                        {i + 1}: {item.modality} · {item.columns} × {item.rows} ·{" "}
+                        {item.slices.length} slices
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {(archive || progress) && (
+                <button type="button" className="button" onClick={close}>
+                  {progress ? "Cancel import" : "Close scan"}
+                </button>
+              )}
+            </div>
+            {progress && (
+              <p className="text-sm mt-2" role="status">
+                {progress}
+              </p>
+            )}
+            {archive && !selectedSeries && (
+              <p className="text-sm mt-2" role="status">
+                Choose a series to view. Series are not combined.
+              </p>
+            )}
+            {!!archive?.ignoredFiles && (
+              <p className="text-xs text-muted-foreground mt-2">
+                Skipped {archive.ignoredFiles} non-image files.
+              </p>
+            )}
+            {error && (
+              <p className="error-message mt-2" role="alert">
+                {error}
+              </p>
             )}
           </div>
-          {progress && (
-            <p className="text-sm mt-2" role="status">
-              {progress}
-            </p>
-          )}
-          {archive && !selectedSeries && (
-            <p className="text-sm mt-2" role="status">
-              Choose a series to view. Series are not combined.
-            </p>
-          )}
-          {!!archive?.ignoredFiles && (
-            <p className="text-xs text-muted-foreground mt-2">
-              Skipped {archive.ignoredFiles} non-image files.
-            </p>
-          )}
-          {error && (
-            <p className="error-message mt-2" role="alert">
-              {error}
-            </p>
-          )}
-        </div>
+        </ViewerWorkspace>
       }
-      viewer={<ViewerWorkspace series={series} />}
       onRefresh={() =>
         queryClient.invalidateQueries({ queryKey: ["review-run", runId] }, { throwOnError: true })
       }

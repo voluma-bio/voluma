@@ -19,7 +19,6 @@ export function ReviewWorkspace({
   navigate,
   backLink,
   viewer,
-  intake,
   notice,
   onRefresh,
 }: {
@@ -31,7 +30,6 @@ export function ReviewWorkspace({
   navigate(selection: { task?: string; revision?: string }): void;
   backLink: ReactNode;
   viewer: ReactNode;
-  intake?: ReactNode;
   /** Loading/unavailable state, or an actionable refresh failure above retained results. */
   notice?: ReactNode;
   onRefresh(): Promise<void>;
@@ -67,9 +65,20 @@ export function ReviewWorkspace({
             <ArrowLeft size={14} />
             {backLink}
           </div>
-          <h1 className="text-xl font-semibold mt-2">
-            {run?.sample ?? (runId === "local" ? "Scan viewer" : runId)}
-          </h1>
+          <div className="run-title">
+            <h1 className="text-xl font-semibold">
+              {run?.sample ?? (runId === "local" ? "Scan viewer" : runId)}
+            </h1>
+            {run?.review && (
+              <StatusBadge tone={run.review.remainingToCheck ? "check" : "primary"}>
+                {run.review.reviewedAt
+                  ? "Reviewed"
+                  : run.review.remainingToCheck
+                    ? `${run.review.remainingToCheck} to check`
+                    : "Completed"}
+              </StatusBadge>
+            )}
+          </div>
           {run && (
             <p className="text-sm text-muted-foreground">
               {run.workflows
@@ -83,27 +92,15 @@ export function ReviewWorkspace({
           )}
         </div>
         <div className="run-actions">
-          {intake}
-          {run?.review && (
-            <>
-              <StatusBadge tone={run.review.remainingToCheck ? "check" : "primary"}>
-                {run.review.reviewedAt
-                  ? "Reviewed"
-                  : run.review.remainingToCheck
-                    ? `${run.review.remainingToCheck} to check`
-                    : "Completed"}
-              </StatusBadge>
-              {!run.review.reviewedAt && (
-                <button
-                  type="button"
-                  className="button primary"
-                  disabled={readOnly || run.review.remainingToCheck !== 0 || complete.isPending}
-                  onClick={() => complete.mutate()}
-                >
-                  {complete.isPending ? "Marking reviewed…" : "Mark reviewed"}
-                </button>
-              )}
-            </>
+          {run?.review && !run.review.reviewedAt && (
+            <button
+              type="button"
+              className="button primary"
+              disabled={readOnly || run.review.remainingToCheck !== 0 || complete.isPending}
+              onClick={() => complete.mutate()}
+            >
+              {complete.isPending ? "Marking reviewed…" : "Mark reviewed"}
+            </button>
           )}
           {run && revision && (
             <>
