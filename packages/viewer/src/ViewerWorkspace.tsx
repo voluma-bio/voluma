@@ -1,11 +1,16 @@
 /** Persistent viewport slots. Maximizing changes layout, never the identity of a view. */
+import type { Focus, Revision, Structure } from "@voluma/contracts/review";
 import { Box, Layers, Maximize2, Minimize2 } from "lucide-react";
-import { lazy, type ReactNode, Suspense, useState } from "react";
+import { lazy, type ReactNode, Suspense, useMemo, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import type { DicomSeries } from "./dicom";
+import { focusTarget, type LabelSource, type LabelVolume, type StructureDisplay } from "./labels";
+import { useLabelVolumes } from "./useLabelVolumes";
 
 const DicomStack = lazy(() => import("./DicomStack"));
 const DicomVolume = lazy(() => import("./DicomVolume"));
+
+export type { StructureDisplay } from "./labels";
 
 const views = [
   {
@@ -41,11 +46,66 @@ const views = [
 export function ViewerWorkspace({
   series,
   children,
+  selected,
+  display,
+  revision,
+  focus,
+  fileUrl,
 }: {
+  selected: Structure[];
+  display: StructureDisplay;
   series?: DicomSeries;
   children?: ReactNode;
+  revision?: Revision;
+  focus?: Focus;
+  fileUrl?: (sha256: string) => string;
 }) {
   const [maximized, setMaximized] = useState<string | null>(null);
+  const [labels, setLabels] = useState(true);
+  const selectedKey = selected.map((s) => s.id).join("\n");
+  const structures = useMemo(
+    () =>
+      revision?.structures.filter(
+        (s) => selectedKey.split("\n").includes(s.id) || focus?.structureIds.includes(s.id),
+      ) ?? [],
+    [revision, selectedKey, focus],
+  );
+  const sources = useMemo<LabelSource[]>(() => {
+    if (!fileUrl) return [];
+    const ids = new Set(structures.flatMap((s) => (s.voxels ? [s.voxels.volumeId] : [])));
+    if (focus?.volumeId) ids.add(focus.volumeId);
+    return (
+      revision?.volumes.flatMap((volume) =>
+        volume.kind === "labels" && ids.has(volume.id) && volume.data?.format === "npy"
+          ? [{ volume, url: fileUrl(volume.data.sha256) }]
+          : [],
+      ) ?? []
+    );
+  }, [revision, structures, focus?.volumeId, fileUrl]);
+  const loaded = useLabelVolumes(sources, series, revision?.id);
+  const resolvedFocus = useMemo(() => {
+    const target = focusTarget(
+      focus,
+      loaded.layers,
+      structures,
+      revision?.annotations ?? [],
+      series,
+    );
+    return focus && target ? { ...focus, ...target } : undefined;
+  }, [focus, loaded.layers, structures, revision?.annotations, series]);
+  const badFocus =
+    !!series &&
+    !!resolvedFocus &&
+    [resolvedFocus.point, resolvedFocus.box?.min, resolvedFocus.box?.max].some((p) =>
+      p?.some((n, i) => n < 0 || n >= [series.slices.length, series.rows, series.columns][i]!),
+    );
+  const labelView = {
+    layers: loaded.layers,
+    structures,
+    display,
+    focus: badFocus ? undefined : resolvedFocus,
+    labels,
+  };
   return (
     <section
       className={`viewer-workspace ${maximized ? "is-maximized" : ""}`}
@@ -55,6 +115,34 @@ export function ViewerWorkspace({
         <h2 className="font-medium">Imaging workspace</h2>
         {children}
       </div>
+      {sources.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 px-4 py-2 text-xs text-muted-foreground">
+          <label>
+            <input type="checkbox" checked={labels} onChange={(e) => setLabels(e.target.checked)} />{" "}
+            Labels
+          </label>
+          <span role="status">
+            {!series
+              ? "Open the scan to load labels."
+              : loaded.loading
+                ? "Loading labels…"
+                : `${loaded.layers.length} label volume${loaded.layers.length === 1 ? "" : "s"} loaded`}
+          </span>
+        </div>
+      )}
+      {loaded.error && (
+        <p className="error-message" role="alert">
+          {loaded.error}{" "}
+          <button type="button" className="text-button" onClick={loaded.retry}>
+            Retry labels
+          </button>
+        </p>
+      )}
+      {badFocus && (
+        <p className="error-message" role="alert">
+          This check points outside the scan grid.
+        </p>
+      )}
       <div className="viewer-grid">
         <Group orientation="vertical" id="viewer-rows">
           <Panel id="top" defaultSize="50%" minSize="20%">
@@ -67,6 +155,7 @@ export function ViewerWorkspace({
                   maximized={maximized}
                   onMaximize={setMaximized}
                   series={series}
+                  labelView={labelView}
                 />
               ))}
             </Group>
@@ -82,6 +171,7 @@ export function ViewerWorkspace({
                   maximized={maximized}
                   onMaximize={setMaximized}
                   series={series}
+                  labelView={labelView}
                 />
               ))}
             </Group>
@@ -98,12 +188,20 @@ function ViewSlot({
   maximized,
   onMaximize,
   series,
+  labelView,
 }: {
   view: (typeof views)[number];
   showSeparator: boolean;
   maximized: string | null;
   onMaximize(id: string | null): void;
   series?: DicomSeries;
+  labelView: {
+    layers: LabelVolume[];
+    structures: Structure[];
+    display: StructureDisplay;
+    focus?: Focus;
+    labels: boolean;
+  };
 }) {
   const isMax = maximized === view.id;
   const Icon = view.icon;
@@ -142,9 +240,9 @@ function ViewSlot({
               }
             >
               {view.id === "acquired" ? (
-                <DicomStack key={series.id} series={series} />
+                <DicomStack key={series.id} series={series} {...labelView} />
               ) : (
-                <DicomVolume key={series.id} series={series} />
+                <DicomVolume key={series.id} series={series} focus={labelView.focus} />
               )}
             </Suspense>
           ) : (
