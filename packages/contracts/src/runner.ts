@@ -57,10 +57,10 @@
  * itself (`packages/workflow`), and a resumed run keeps the plan its first `revision.started`
  * recorded (`task-tools.ts`). One limit stops a run that keeps costing its runner: the API
  * counts consecutive claims that end `self-stop` or `lease-expired` without run-state
- * progress (a `task`, `checkpoint`, `output`, `attempt.opened` or correcting `revision.started` event;
- * `judgment` while the old supervisor runs), and the run ends `failed` at 3, naming the call
- * that was in flight. Progress resets the count. `shutdown` and `keys-lost` never count, so
- * deploys don't fail a long run.
+ * progress (a `task`, `checkpoint`, `output`, `attempt.opened`, `assets.ready` or correcting
+ * `revision.started` event; `judgment` while the old supervisor runs), and the run ends
+ * `failed` at 3, naming the call that was in flight. Progress resets the count. `shutdown`
+ * never counts, so deploys don't fail a long run.
  *
  * There is no tokenless call: the runner service is the only claimer.
  *
@@ -80,7 +80,7 @@
  * sees spend that did not come through its heartbeats.
  *
  * Reports. The runner ends the run with `ended`, or gives it up with
- * `released` (a shutdown, a self-stop, or lost keys: its `reason`). Either one ends the
+ * `released` (a shutdown or a self-stop: its `reason`). Either one ends the
  * lease, and a `released` run is recovered as above, at once. The runner's
  * `ended` never says `cancelled`, which is the server's to record. The first
  * end wins: a report on a run that has ended, or that this lease no longer
@@ -113,7 +113,7 @@ export const leaseLostSchema = z.object({ code: z.literal("lease-lost") });
 export const runnerIdSchema = z.string().min(1);
 
 /** Why the runner gave up a lease. */
-export const releaseReasonSchema = z.enum(["shutdown", "self-stop", "keys-lost"]);
+export const releaseReasonSchema = z.enum(["shutdown", "self-stop"]);
 export type ReleaseReason = z.infer<typeof releaseReasonSchema>;
 
 /** Why a claim ended: a release reason, or the API swept its expired lease. */
@@ -122,7 +122,10 @@ export type ClaimEndReason = z.infer<typeof claimEndReasonSchema>;
 
 export const claimRequestSchema = z.object({
   runnerId: runnerIdSchema,
-  /** The runner's `RUNNER_MAX_RUN_COST_USD`; the claim stores it as the run's spend cap. */
+  /**
+   * The runner's `RUNNER_MAX_RUN_COST_USD`; the claim stores it as the run's spend cap, which
+   * the provider gateway checks. Absent: the API stores its default, $10.
+   */
   costCapUsd: z.number().positive().optional(),
 });
 export type ClaimRequest = z.infer<typeof claimRequestSchema>;
@@ -162,8 +165,10 @@ export const heartbeatResponseSchema = z.object({
   /** The server has ended the run; stop it. */
   stop: z.boolean(),
   /**
-   * The run's total spend in US dollars: heartbeat-reported model cost plus its provider
-   * calls (`Run.providerCalls`). Optional until the API sends it.
+   * The run's spend in US dollars as the gateway's cap counts it: heartbeat-reported model
+   * cost, plus each provider call's cost, or its reservation while the call is open or was
+   * cut off. Higher than `Run.providerCalls` while a call is open. Optional until the API
+   * sends it.
    */
   spentUsd: z.number().nonnegative().optional(),
 });
@@ -177,7 +182,7 @@ export const reportRequestSchema = z.object({
       /** Why a `failed` run failed, redacted of key values; absent otherwise. */
       error: z.string().optional(),
     }),
-    /** The runner stops the run and gives up its lease: a shutdown, a self-stop, or lost keys. */
+    /** The runner stops the run and gives up its lease: a shutdown or a self-stop. */
     z.object({
       kind: z.literal("released"),
       reason: releaseReasonSchema,

@@ -14,12 +14,11 @@ describe("endClaim", () => {
     expect(endClaim(run({ stalledClaims: 1 }), "lease-expired").stalledClaims).toBe(2);
   });
 
-  it("never counts a shutdown or lost keys, and keeps the count", () => {
+  it("never counts a shutdown, and keeps the count", () => {
     expect(endClaim(run({ stalledClaims: 2 }), "shutdown")).toEqual({
       stalledClaims: 2,
       exhausted: false,
     });
-    expect(endClaim(run({ stalledClaims: 2 }), "keys-lost").stalledClaims).toBe(2);
   });
 
   it("resets on progress since the claim began, whatever the reason", () => {

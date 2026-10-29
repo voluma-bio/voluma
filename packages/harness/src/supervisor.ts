@@ -116,7 +116,6 @@ const PLAIN_REASON: Record<ClaimEndReason, string> = {
   shutdown: "the runner restarted",
   "self-stop": "the runner lost contact with the server",
   "lease-expired": "the server lost contact with the runner",
-  "keys-lost": "the run's keys had to be sent again",
 };
 
 /** What a cut-off thread is told on resume: the tool it was in, if any, and why, in plain words. */

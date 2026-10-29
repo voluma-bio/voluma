@@ -32,7 +32,7 @@ export const isProgress = (event: { type: string; payload: unknown }) =>
 /** Consecutive claims that end without progress before the run fails. */
 export const STALLED_CLAIMS_LIMIT = 3;
 
-/** A deploy (`shutdown`) or a key resend (`keys-lost`) is nobody's fault: never counted. */
+/** A deploy (`shutdown`) is nobody's fault: never counted. */
 const COUNTED_REASONS: ReadonlySet<ClaimEndReason> = new Set(["self-stop", "lease-expired"]);
 
 export function endClaim(
@@ -48,7 +48,6 @@ const WHY: Record<ClaimEndReason, string> = {
   shutdown: "the runner restarted",
   "self-stop": "the runner lost contact with the server",
   "lease-expired": "the server lost contact with the runner",
-  "keys-lost": "the run's keys had to be sent again",
 };
 
 export const stalledError = (reason: ClaimEndReason, tool: string | undefined) =>
