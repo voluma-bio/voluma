@@ -57,6 +57,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 MIN_COMPONENT = 50  # coronal fragments below this many pixels are segmentation specks, not bone
+HEIGHT_FIELDS = ('growth-plate-proximal-face.npy', 'articular-top-surface.npy')  # 2D height arrays; the other .npy are volumes
 EDGE_ERODE = 3  # footprint erosion for the local-height search: avoids tangential edge extrema
 
 
@@ -296,7 +297,7 @@ def main():
         'articular-top-surface.npy': np.where(valid, top, np.nan).astype(np.float32),
     }
     arrays.update({f'{s}-plate-run.npy': m for s, m in plates.items()})
-    for name, arr in arrays.items():
+    for name, arr in arrays.items():  # HEIGHT_FIELDS are heights along axis 0 of the tibia frame
         np.save(out / name, arr)
         sidecar.write(
             out / name,
@@ -305,6 +306,7 @@ def main():
             inputs=inputs,
             params=params,
             script='iioc.py',
+            surface_axis=0 if name in HEIGHT_FIELDS else None,
         )
     (out / 'width-points-scan.json').write_text(json.dumps(width_points, indent=1) + '\n')
     np.save(out / 'iioc-tissue-scan.npy', scan_roi)
