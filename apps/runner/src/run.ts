@@ -1,7 +1,7 @@
 /**
  * One claimed run, start to report: the same path for a fresh run and a recovered one. It
- * reads the run's stored events over HTTP, builds the recorder on them and one sandbox
- * session, and hands the harness its adapters (`superviseRun`). Alongside, it holds the lease
+ * reads the run's stored events over HTTP, builds the recorder on them and the sandbox
+ * session (one sandbox per thread), and hands the harness its adapters (`superviseRun`). Alongside, it holds the lease
  * (`lease.ts`) and stops at once on any of: the server ending the run, a lost lease, a
  * self-stop, or the service shutting down. Then it reports.
  *
@@ -13,8 +13,10 @@
  *
  * End of the run, in order. A normal end closes the sandbox first, so its `stopped` event
  * and last seconds go out under the live lease, then reports. A stop (shutdown, self-stop)
- * reports `released` first, so the run is recovered within the platform's grace period,
- * then closes the sandbox. A stop by the server or a lost lease reports nothing.
+ * reports `released` with its reason first, so the run is recovered within the platform's
+ * grace period, then closes the sandbox. A stop by the server or a lost lease reports nothing.
+ * None of these stops writes a `thread.ended`: the threads are cut off, and the next claim
+ * (which learns why from `claim.previousClaim`) resumes them (`supervisor.ts`).
  */
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
@@ -28,6 +30,7 @@ import { llmMainThread, mainSystem, runBrief } from "@voluma/harness/main-thread
 import { usageOf } from "@voluma/harness/model-usage";
 import { type Recorder, recorder } from "@voluma/harness/recorder";
 import { type SandboxSession, sandboxSession } from "@voluma/harness/sandbox-session";
+import { workerSandboxSpec } from "@voluma/harness/sandbox-specs";
 import { type RunRole, superviseRun } from "@voluma/harness/supervise-run";
 import { optionalTools } from "@voluma/harness/tools";
 import { loadWorkflow } from "@voluma/workflow/load";
@@ -36,7 +39,12 @@ import { type Config, isVisitorSafe, providerKey } from "./config.ts";
 import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
 import { metaSegmenter } from "./meta-segmenter.ts";
-import { createModalSandbox, RUNS_APP, terminateClaim } from "./modal-sandbox.ts";
+import {
+  createModalSandbox,
+  RUNS_APP,
+  terminateClaim,
+  terminateOtherClaims,
+} from "./modal-sandbox.ts";
 import type { ModelFallback } from "./model-fallback.ts";
 import { retryTransient } from "./model-retry.ts";
 import { checkPrompt, checkSystem, workerPrompt, workerSystem } from "./prompts.ts";
@@ -75,12 +83,13 @@ export interface RunnerContext {
 type Stopped = StopReason | "shutdown" | "spend-cap";
 
 /** Which report a stop reason, a clean end or a failure becomes; undefined: say nothing more. */
-function reportFor(
+export function reportFor(
   stopped: Stopped | undefined,
   error?: string,
 ): ReportRequest["report"] | undefined {
   if (stopped === "stop" || stopped === "lease-lost") return undefined;
-  if (stopped === "self-stop" || stopped === "shutdown") return { kind: "released" };
+  if (stopped === "self-stop" || stopped === "shutdown")
+    return { kind: "released", reason: stopped };
   return error === undefined
     ? { kind: "ended", outcome: "completed" }
     : { kind: "ended", outcome: "failed", error };
@@ -158,6 +167,20 @@ export async function runClaim(
       `claimed (${visitor ? "visitor" : "voluma"} keys, model ${workerModel.provider}/${workerModel.id})`,
     );
 
+    // What an earlier claim of this run left running must not keep writing or spending.
+    // Cleanup only: it never decides the run's outcome, and idle timeouts back it up.
+    for (let attempt = 1; attempt <= 2 && !abort.signal.aborted; attempt++) {
+      try {
+        const orphans = await terminateOtherClaims(modal, runId, claimId, abort.signal);
+        if (orphans > 0)
+          log(`ended ${orphans} sandbox${orphans === 1 ? "" : "es"} of an earlier claim`);
+        break;
+      } catch (e) {
+        log(`ending an earlier claim's sandboxes failed (attempt ${attempt}): ${e}`);
+        if (attempt < 2) await new Promise((r) => setTimeout(r, 2000));
+      }
+    }
+
     // Before any sandbox: an unreadable workflow or a bad selection fails the run here, with its
     // message. The run's pin names the workflow directory; its files are snapshotted from this
     // runner's checkout once (at `config.commit`), so a resume reads what the run began with.
@@ -180,6 +203,7 @@ export async function runClaim(
     const layout = runLayout(
       runId,
       run.input.source === "reference" ? referencePrefix("scan") : inputPrefix(run.input.id),
+      definition.skills,
     );
     const createSandbox = createModalSandbox({
       appName: RUNS_APP,
@@ -207,26 +231,29 @@ export async function runClaim(
       stored,
       live,
     );
+    // A sandbox is named by its thread without the run id: `<taskId>.worker[.n]`, `<taskId>.check[.n]`.
+    const sandboxName = (threadId: string) => threadId.slice(runId.length + 1);
     session = sandboxSession(
-      () =>
+      // Check threads use the worker role too: the check skills and the host-side scratch
+      // paths (`RunLayout`, `r2Evidence`) assume one run-wide `/scratch` (apps/runner/.context).
+      (threadId) =>
         createSandbox(
-          {
+          workerSandboxSpec({
             runId,
-            name: "main",
+            name: sandboxName(threadId),
             image: config.sandbox.image,
-            cpu: 2,
-            memoryMiB: 8192,
             lifetimeSeconds: config.sandbox.lifetimeSeconds,
             idleSeconds: config.sandbox.idleSeconds,
             mounts: layout.mounts,
-          },
+            env: layout.env,
+          }),
           abort.signal,
         ),
       (id, state, detail) => {
         // Metered from the start of creation, the sweep included: a conservative upper bound.
         if (state === "starting") meter.sandboxUp();
         else if (state === "stopped" || state === "failed") meter.sandboxDown();
-        events?.emit(id, "sandbox", { name: "main", state, detail });
+        events?.emit(id, "sandbox", { name: sandboxName(id), state, detail });
       },
       layout.restartNote,
     );
@@ -302,6 +329,7 @@ export async function runClaim(
       plan: computed.tasks,
       selectedOutputs: run.selectedOutputs,
       notes: run.notes,
+      previousClaim: claim.previousClaim?.reason,
       providerError: isProviderError,
       // With a fallback model set, the redo starts on it, so even a refused key is not the end.
       providerFatal: (error) => !config.fallbackModel && isFatalProviderError(error),
@@ -312,6 +340,8 @@ export async function runClaim(
       recorder: events,
       history: client,
       sandbox: (id) => opened.get(id),
+      releaseSandbox: (id) =>
+        opened.release(id).catch((e) => log(`releasing ${sandboxName(id)} failed: ${e}`)),
       evidence: r2Evidence(config.r2),
       files,
       segmenter: metaKey

@@ -1,40 +1,26 @@
-"""Give a whole 3D piece a different label: the fix for "this component carries the wrong label" and for naming a
-candidate from `unlabelled.py`.
-
-  python relabel.py --labels labels.npy --out fixed.npy --at z,y,x --to 5
-  python relabel.py --labels labels.npy --out fixed.npy --at z,y,x --to 5 --pieces cand.npy
+"""Give a whole 3D piece a different label: fix a component that carries the wrong label, or name a candidate.
 
 Without `--pieces`, the piece is the 26-connected part of the label under the voxel `--at` (the voxel must be labelled).
-With `--pieces` (a candidate volume from `unlabelled.py`), it is the candidate containing the voxel; it overwrites whatever
-label those voxels had, and the previous labels are reported. `--to 0` clears the piece.
+With `--pieces` (a candidate volume from `unlabelled.py`), it is the candidate containing the voxel (which must lie in a
+candidate); it overwrites whatever label those voxels had, and the previous labels are reported. `--to 0` clears the piece.
+
+Writes: <out>  the labels with the piece relabelled (.npy, the grid of --labels), with its sidecar
+Prints: one JSON line {labels, voxels, previous_labels: {label id: voxels}, now}
+Example: python relabel.py --labels labels.npy --out fixed.npy --at 410,220,130 --to 5 --pieces cand.npy
+Exits 2 with one sentence on bad input, before writing anything.
 """
-import argparse
-import sys
-from pathlib import Path
 
 import numpy as np
+import sidecar
 from scipy import ndimage as ndi
 
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
-# only missing directories are added, so a script imported by another leaves the importer's order alone.
-SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources')) if d not in sys.path]
-try:
-    import sidecar
-except ModuleNotFoundError as e:
-    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
-          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
-    sys.exit(2)
-
-
 if __name__ == '__main__':
-    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--labels', required=True)
-    ap.add_argument('--out', required=True)
-    ap.add_argument('--at', required=True, help='z,y,x of a voxel in the piece')
-    ap.add_argument('--to', type=int, required=True)
-    ap.add_argument('--pieces')
+    ap = sidecar.parser(__doc__)
+    ap.add_argument('--labels', type=sidecar.existing, required=True, help='label volume .npy on the scan grid, with its sidecar beside it')
+    ap.add_argument('--out', required=True, help='relabelled labels .npy to write')
+    ap.add_argument('--at', required=True, metavar='z,y,x', help='scan voxel indices of a voxel in the piece')
+    ap.add_argument('--to', type=int, required=True, help='the label id to give the piece (0 clears it)')
+    ap.add_argument('--pieces', type=sidecar.existing, help='candidate volume .npy from unlabelled.py: the piece is the candidate containing --at')
     a = ap.parse_args()
     labels = np.load(a.labels)
     z, y, x = (int(v) for v in a.at.split(','))

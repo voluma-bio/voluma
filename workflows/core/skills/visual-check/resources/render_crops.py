@@ -1,29 +1,19 @@
-"""Crop sheet for one small component: three orthogonal cuts through its centre, with the labels outlined. For "what is this small unlabelled thing?" and "is it on the right bone?".
+"""Crop sheet of one small piece of bone: three cuts through its centre with the labels outlined, as one JPEG.
 
-  python render_crops.py --hu hu.npy --labels labels.npy --out crop.jpg (--component-at z,y,x --bone-hu T | --label 5)
-        [--pad-mm 1.5] [--window lo,hi] [--header hu.json] [--names 1=femur,2=tibia | anatomy.json]
+Answers "what is this small unlabelled thing?" and "is it on the right bone?". `--component-at` picks the 3D piece of bone
+(labelled or not: voxels at or above `--bone-hu`) that contains the voxel; `--label` picks the largest piece of that label.
+Give exactly one of them. The crop is a cube of the piece's bounding box plus `--pad-mm`, with the piece itself drawn in
+white (dashed) and each label in the `visual-check` label colours with a legend.
 
-`--component-at` picks the 3D piece of bone (labelled or not: voxels at or above `--bone-hu`) that contains the voxel; `--label` picks the largest piece
-of that label. The crop is a cube of the piece's bounding box plus `--pad-mm`, with the piece itself drawn in white.
+Writes: <out>  the JPEG sheet (axis 0, 1, 2 cuts through the piece's centre; titles give the crop origin)
+Prints: one JSON line {image, centre_zyx, bbox_zyx, voxels, volume_mm3, labels_under}; labels_under is the voxel count of each label under the piece
+Example: python render_crops.py --hu hu.npy --labels labels.npy --component-at 410,220,130 --bone-hu 2500 --out crop.jpg
+Exits 2 with one sentence on bad input, before writing anything.
 """
-import argparse
-import sys
-from pathlib import Path
 
 import numpy as np
+import viewlib as vl
 from scipy import ndimage as ndi
-
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
-# only missing directories are added, so a script imported by another leaves the importer's order alone.
-SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources')) if d not in sys.path]
-try:
-    import viewlib as vl
-except ModuleNotFoundError as e:
-    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
-          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
-    sys.exit(2)
 
 sl = vl.sidecar
 
@@ -42,17 +32,17 @@ def piece(mask, seed=None):
 
 
 if __name__ == '__main__':
-    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--hu', required=True)
-    ap.add_argument('--labels', required=True)
-    ap.add_argument('--out', required=True)
-    ap.add_argument('--component-at')
-    ap.add_argument('--label', type=int)
-    ap.add_argument('--bone-hu', type=float, help='threshold defining a piece of bone, required with --component-at')
-    ap.add_argument('--header', help='hu.json, for spacing (default: from the labels sidecar)')
-    ap.add_argument('--pad-mm', type=float, default=1.5)
-    ap.add_argument('--window')
-    ap.add_argument('--names', help='1=femur,2=tibia, or the anatomy.json path for every label name')
+    ap = sl.parser(__doc__)
+    ap.add_argument('--hu', type=sl.existing, required=True, help='hu.npy of the scan')
+    ap.add_argument('--labels', type=sl.existing, required=True, help='label volume .npy on the scan grid')
+    ap.add_argument('--out', required=True, help='the image to write (.jpg)')
+    ap.add_argument('--component-at', metavar='z,y,x', help='scan voxel indices inside the piece of bone to show; needs --bone-hu')
+    ap.add_argument('--label', type=int, help='show the largest piece of this label id')
+    ap.add_argument('--bone-hu', type=float, help='HU at or above which a voxel is bone, defining the piece for --component-at')
+    ap.add_argument('--header', type=sl.existing, help='hu.json, for spacing (default: the labels sidecar)')
+    ap.add_argument('--pad-mm', type=float, default=1.5, help='mm of margin around the piece')
+    ap.add_argument('--window', metavar='lo,hi', help='display window in HU (default: automatic)')
+    ap.add_argument('--names', help='label names, 1=femur,2=tibia or an anatomy.json')
     a = ap.parse_args()
     if a.component_at is not None and a.bone_hu is None:
         sl.fail('--component-at needs --bone-hu: the HU threshold that defines a piece of bone')
