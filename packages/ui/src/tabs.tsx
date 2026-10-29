@@ -3,7 +3,8 @@
  * (Overview | To check 3 | Scans 5/8). It renders the tablist only: the page
  * renders the selected panel with `role="tabpanel"`, the id it passes as
  * `controls`, and `aria-labelledby={tabId(controls, selected)}`. Arrow keys,
- * Home and End move between tabs.
+ * Home and End move between tabs. The row never scrolls: on a narrow screen
+ * the page gives it a line of its own.
  */
 import { type KeyboardEvent, useRef } from "react";
 import { cx } from "./cx";
@@ -64,12 +65,7 @@ export function Tabs<Id extends string>({
       role="tablist"
       aria-label={label}
       onKeyDown={onKeyDown}
-      // No scrollbar: a classic one would take the row's height and add vertical scroll.
-      // A cut-off tab shows there is more; swipe, wheel and arrow-key focus scroll the row.
-      className={cx(
-        "flex min-w-0 items-stretch gap-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none]",
-        className,
-      )}
+      className={cx("flex items-stretch gap-1", className)}
     >
       {tabs.map((tab) => {
         const selected = tab.id === value;

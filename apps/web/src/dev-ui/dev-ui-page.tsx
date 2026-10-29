@@ -185,9 +185,12 @@ function TabsDemo({ theme }: { theme: string }) {
   const [tab, setTab] = useState<(typeof STUDY_TABS)[number]["id"]>("overview");
   return (
     <div className="grid grid-cols-1 gap-3">
-      <div className="flex h-13 items-stretch gap-6 border-b border-border bg-card px-4">
-        <h3 className="self-center font-semibold whitespace-nowrap">DMM knee study</h3>
+      <div className="flex flex-wrap items-stretch gap-x-6 border-b border-border bg-card px-4">
+        <h3 className="flex min-h-13 items-center font-semibold whitespace-nowrap">
+          DMM knee study
+        </h3>
         <Tabs
+          className="max-sm:-mx-4 max-sm:basis-[calc(100%+2rem)] max-sm:px-1"
           tabs={[...STUDY_TABS]}
           value={tab}
           onChange={setTab}
