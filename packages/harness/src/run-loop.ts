@@ -451,7 +451,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     for (const t of view.tasks) {
       if (t.status !== "under-review" || !t.threads.check) continue;
       const c = d.threads.get(t.threads.check);
-      if (!c || c.role !== "check") continue;
+      if (c?.role !== "check") continue;
       const state = stateOf(c);
       const verdict = t.checker?.verdict;
       const waiting = openAsk(c) !== undefined;

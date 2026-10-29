@@ -98,7 +98,7 @@ export function mainTools(deps: MainDeps) {
 
   const workerOf = (d: ThreadLog, threadId: string) => {
     const r = d.threads.get(threadId);
-    if (!r || r.role !== "worker") {
+    if (r?.role !== "worker") {
       throw new Refusal(
         r?.role === "check"
           ? `${threadId} is a checker: answer its question with \`answer\`.`
