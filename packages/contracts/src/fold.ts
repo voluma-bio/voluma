@@ -270,8 +270,6 @@ export function fold(events: readonly RunEvent[]): Folded {
       const k = kinds.get(full);
       return k && accept.includes(k) ? full : undefined;
     };
-    const refs = (a: Attempt, ids: string[], kind: RefKind) =>
-      ids.flatMap((id) => ref(a, id, kind) ?? []);
     // A declared link: a plan output id to the block it names, when the revision has one.
     const linked = (id: string, ...accept: RefKind[]): string | undefined => {
       const task = owner.get(id);
