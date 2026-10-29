@@ -3,6 +3,7 @@
  * `getReviewRun`. Only the correction commands are local: their contract is still to come.
  */
 import type { TaskStatus } from "@voluma/contracts/ids";
+import type { ReviewTask } from "@voluma/contracts/review";
 import type { StatusTone } from "@voluma/ui";
 import { z } from "zod";
 
@@ -28,9 +29,8 @@ export const correctionProposalSchema = correctionRequestSchema.extend({
 export type CorrectionRequest = z.infer<typeof correctionRequestSchema>;
 export type CorrectionProposal = z.infer<typeof correctionProposalSchema>;
 
-/** A task status as its badge, with the run screen's labels and tones (`features/run/status.tsx`). */
-export const taskStatus: Record<TaskStatus, { label: string; tone: StatusTone }> = {
-  pending: { label: "Queued", tone: "neutral" },
+const statuses: Record<TaskStatus, { label: string; tone: StatusTone }> = {
+  pending: { label: "Not started", tone: "neutral" },
   stale: { label: "Queued", tone: "neutral" },
   "in-progress": { label: "Running", tone: "info" },
   done: { label: "Done", tone: "primary" },
@@ -38,3 +38,10 @@ export const taskStatus: Record<TaskStatus, { label: string; tone: StatusTone }>
   "to-check": { label: "To check", tone: "check" },
   "under-review": { label: "Checking", tone: "info" },
 };
+
+/** A pending row has no attempt; a recorded worker start still rules out "Not started". */
+export function taskStatus(task: ReviewTask): { label: string; tone: StatusTone } {
+  return task.status === "pending" && task.threads.worker
+    ? { label: "No result recorded", tone: "neutral" }
+    : statuses[task.status];
+}
