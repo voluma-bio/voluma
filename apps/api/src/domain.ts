@@ -27,7 +27,9 @@ export type Principal =
   | (UserBase & { account: "member"; email: string })
   /** A guest the server minted: no account, no email. */
   | (UserBase & { account: "visitor" })
-  | { kind: "service"; name: "runner" };
+  | { kind: "service"; name: "runner" }
+  /** `VOLUMA_DEBUG_TOKEN`: an agent debugging runs; reads runs in every lab, writes nothing. */
+  | { kind: "service"; name: "debug" };
 
 /** The Hono environment of a domain app: `new Hono<AppEnv>()`. */
 export type AppEnv = { Variables: { principal: Principal } };
@@ -45,26 +47,38 @@ export function readerOf(user: UserPrincipal): Reader {
 }
 
 /**
- * Every lab's records: what the runner's bearer token reads on a run `GET`, so an agent can
- * debug a run with the token. Writes never take it; they take a `Reader`.
+ * Every lab's records: what the debug token (`VOLUMA_DEBUG_TOKEN`) reads on a run `GET`, so an
+ * agent can follow and debug any run. Writes never take it; they take a `Reader`.
  */
 export const EVERY_LAB = "every-lab" as const;
 export type ReadScope = Reader | typeof EVERY_LAB;
 
-/** The environment of a read subtree behind `requireReader`. */
+/** The environment of a read handler behind `requireReader`. */
 export type ReaderEnv = { Variables: { principal: Principal; reader: ReadScope } };
 
-/** Guard a read for a user (their `readerOf`) or the runner's bearer token (`EVERY_LAB`). */
+/** Guard a read: a user reads through `readerOf`, the debug token reads `EVERY_LAB`, anyone else is 403. */
 export const requireReader = createMiddleware<ReaderEnv>(async (c, next) => {
   const principal = c.get("principal");
-  c.set("reader", principal.kind === "user" ? readerOf(principal) : EVERY_LAB);
-  return next();
+  switch (principal.kind) {
+    case "user":
+      c.set("reader", readerOf(principal));
+      return next();
+    case "service":
+      if (principal.name !== "debug") return c.json({ error: "forbidden" }, 403);
+      c.set("reader", EVERY_LAB);
+      return next();
+    default:
+      return principal satisfies never;
+  }
 });
 
-/** Guard a subtree for the runner's bearer token (run ingest). */
-export const requireService = createMiddleware<AppEnv>(async (c, next) =>
-  c.get("principal").kind === "service" ? next() : c.json({ error: "forbidden" }, 403),
-);
+/** Guard a subtree for the runner's bearer token (run ingest). The debug token is refused. */
+export const requireService = createMiddleware<AppEnv>(async (c, next) => {
+  const principal = c.get("principal");
+  return principal.kind === "service" && principal.name === "runner"
+    ? next()
+    : c.json({ error: "forbidden" }, 403);
+});
 
 /** The environment of a subtree behind `requireUser`: `new Hono<UserEnv>().use(requireUser)`. */
 export type UserEnv = { Variables: { principal: Principal; user: UserPrincipal } };

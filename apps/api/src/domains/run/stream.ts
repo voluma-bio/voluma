@@ -2,7 +2,7 @@
  * The browser's run stream, `GET /runs/:id/stream` (`@voluma/contracts/stream`): the run's
  * stored events as server-sent events, `id: seq`. Resumes from `Last-Event-ID`, else
  * `?after=`. Reads are scoped like any run read (`requireReader`), so another org's run is 404;
- * the runner's bearer token reads every lab's runs, for agents debugging a run.
+ * the debug token reads every lab's runs, for agents debugging a run.
  *
  * Each connection loops: read the log from its cursor in `seq` order, send, then wait for
  * a `notifier` wake-up or `POLL_MS`, whichever is first. The log is the only source of what
@@ -25,7 +25,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { LIVE_EVENT, type LiveFrame } from "@voluma/contracts/stream";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import { type ReaderEnv, requireReader } from "../../domain";
+import { type AppEnv, requireReader } from "../../domain";
 import type { RunDeps } from ".";
 import { afterParam, EVENTS_PAGE } from "./cursor";
 
@@ -45,10 +45,9 @@ const LIVE_QUEUE_MAX = 2_000;
 const LIVE_QUEUE_MAX_CHARS = 1024 * 1024;
 
 export function streamRoutes({ eventLog, notifier, shutdown }: RunDeps) {
-  const app = new Hono<ReaderEnv>();
-  app.use("/runs/:id/stream", requireReader);
+  const app = new Hono<AppEnv>();
 
-  app.get("/runs/:id/stream", async (c) => {
+  app.get("/runs/:id/stream", requireReader, async (c) => {
     const runId = c.req.param("id");
     const reader = c.var.reader;
     let cursor = afterParam(c.req.header("Last-Event-ID") ?? c.req.query("after"));

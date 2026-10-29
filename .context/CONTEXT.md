@@ -176,7 +176,8 @@ voluma-bio/docs work item `mvp-contracts-and-data` (`design/harness-v0.md`).
 
 `apps/api/src/auth.ts` authenticates every `/api/*` request once, at the root, and sets
 `principal` (`apps/api/src/domain.ts`): `service` for the runner's bearer token
-(`VOLUMA_API_TOKEN`), `user` for a WorkOS AuthKit session cookie of a member of an allowed
+(`VOLUMA_API_TOKEN`) or the optional read-only debug token (`VOLUMA_DEBUG_TOKEN`, every lab's
+runs, for agents debugging a run), `user` for a WorkOS AuthKit session cookie of a member of an allowed
 organization: the Yao Lab (`WORKOS_LAB_ORGANIZATION_ID`, scope `lab`) or, if set, the Judges
 organization (`WORKOS_JUDGES_ORGANIZATION_ID`, scope `self`). `org_id` must be in that list,
 checked on every request and again in the sign-in callback. The user's `labId` is their

@@ -121,6 +121,7 @@ const auth = createAuth({
   guest: guest && { organizationId: guest.id, scope: guest.scope },
   appUrl: required("APP_URL").replace(/\/$/, ""),
   apiToken: required("VOLUMA_API_TOKEN"),
+  debugToken: process.env.VOLUMA_DEBUG_TOKEN || null,
 });
 
 /** Aborts at SIGTERM so open event streams end and the drain isn't held. */
