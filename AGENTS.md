@@ -31,25 +31,24 @@ Merging to `main` deploys the API (which serves the web app) to Railway staging;
 
 Pre-commit runs Biome on staged files. Nothing runs on push. Use pnpm, never npm.
 
-## Ownership
+## Boundaries
 
-| Path | Owner |
-|---|---|
-| `apps/web/src/features/run`, `apps/api/src/domains/run`, `packages/workflow`, `packages/harness`, `apps/runner` | Run lane |
-| `apps/web/src/features/review`, `apps/api/src/domains/review`, `packages/viewer` | Review lane |
-| `workflows/microct-analysis` | Run lane |
-| `workflows/workflow-mouse-oa`, `workflows/` root files (`package.json`, `test.sh`, `pyproject.toml`) | Both; small PRs |
-| `packages/contracts`, `packages/api-client` | Both; contract PRs only |
-| `packages/design-tokens`, `packages/ui`, `apps/web/src/shell`, `apps/web/src/dev-ui`, `apps/web` and `apps/api` root files, `apps/api/src/index.ts`, `apps/api/src/ports`, root config, `tools/` | Both; small PRs |
+Anyone edits any part of the repo. Both of you hold full context on what the
+other built, so a change that spans run and review is normal work, not an
+exception: make it and say what changed and why, in the PR body and one
+[decisions.md](.context/decisions.md) line. Telling each other after beats
+asking before; a single coherent change lands faster than an approval round
+and a half-migrated middle. "Run lane" and "review lane" in these docs name
+areas of the app, never a person's patch.
 
-- Edit only your lane's directories. When you need a change in the other
-  lane's code, open a GitHub issue for its owner.
+What the structure still requires:
+
 - `features/run` and `features/review` never import each other, and neither
-  do `domains/run` and `domains/review` in the API. Lanes share code only
+  do `domains/run` and `domains/review` in the API. They share code only
   through `packages/` (and `apps/api/src/ports` on the server).
 - Web features reach the API only through `@voluma/api-client`.
-- Each web feature owns its routes and theme; the shell only mounts them.
-- Each API domain owns every path under its prefix (`/run/`, `/review/`).
+- Each web feature serves its routes and theme; the shell only mounts them.
+- Each API domain serves every path under its prefix (`/run/`, `/review/`).
   A domain is built by a factory taking its own dependency type, written in
   ports. Only `apps/api/src/index.ts` reads `env` and builds adapters. One
   domain reaches the other through a port that `index.ts` wires, never an
@@ -57,17 +56,17 @@ Pre-commit runs Biome on staged files. Nothing runs on push. Use pnpm, never npm
 
 ## Contract changes
 
-`packages/contracts` holds the schemas both lanes build against. Never edit
-it inside a feature PR. When you need a contract change:
-1. Stop the feature work that depends on it.
-2. Open a separate PR that changes only `packages/contracts`,
-   `packages/api-client` and, for a new dependency, the
-   lockfile. It follows the same review rule as any PR: a fresh agent
-   reviews it, then merge it once CI is green. A sweeping change waits for
-   both owners to approve it: one that renames, reshapes or removes what the
-   other lane already uses. Adding schemas, fields or calls is not
-   sweeping.
-3. Merge `origin/main` into your branch once it lands, then continue.
+`packages/contracts` holds the schemas everything builds against, so a change
+there reaches every caller at once. Two shapes work:
+
+- **Standalone PR** when the change can land before the code that uses it:
+  only `packages/contracts`, `packages/api-client` and, for a new dependency,
+  the lockfile. Merge `origin/main` into the feature branch once it lands.
+- **One PR with both sides** when a breaking change has to land at once:
+  rename, reshape or remove a field in the contract and in every caller
+  together, so there is no red base and nothing left half-migrated.
+
+Either way the PR body names what breaks and which callers moved.
 
 ## Working in parallel
 
@@ -84,7 +83,7 @@ cd ../voluma.worktrees/<name> && pnpm i
 - Small PRs to `main`. Keep your branch current with
   `git merge origin/main`. Never rebase, force-push or commit to someone
   else's branch.
-- Commit and push early, so the other lane sees work in progress: push
+- Commit and push early, so the other person sees work in progress: push
   after the first commit and open a draft PR (`gh pr create --draft`, with
   the template body filled as far as you can). Push again as you go. Mark
   it ready when it passes `pnpm check` and its review.
@@ -95,9 +94,9 @@ cd ../voluma.worktrees/<name> && pnpm i
   changes behaviour (product logic, the harness, analysis) or structure
   (packages, boundaries, interfaces, the workspace), first have a fresh
   agent review it (one that didn't write it, given the diff and the PR
-  body) and fix what it finds. Docs and small config PRs need no review. Sweeping contract changes also wait for both owners (see Contract changes).
+  body) and fix what it finds. Docs and small config PRs need no review.
 - Tiny changes skip the PR: a typo, a comment, a doc line, or a one-line fix
-  or config tweak in your own lane that changes nothing a user sees and
+  or config tweak that changes nothing a user sees and
   doesn't touch `packages/contracts`. Run `pnpm check`, then
   `git push origin HEAD:main`. If the push is rejected, `git merge
   origin/main` and push again.
@@ -110,13 +109,13 @@ cd ../voluma.worktrees/<name> && pnpm i
 
 ## Shared memory
 
-Agents in the other lane don't share your session or tools. Write down what
+Other agents don't share your session or tools. Write down what
 they need:
 - **Decisions**: append one dated line to
   [.context/decisions.md](.context/decisions.md) when you settle something
-  the other lane must know, linking the PR. Read it before starting work.
+  someone else will build on, linking the PR. Read it before starting work.
 - **Deferred work** in one directory: `.context/TODO.md` in that directory.
-  Cross-lane items: a GitHub issue.
+  Cross-cutting items: a GitHub issue.
 - When a change shifts how a directory works, update its `AGENTS.md` or
   `.context/` in the same PR.
 

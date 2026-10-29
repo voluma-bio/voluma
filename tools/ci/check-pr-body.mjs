@@ -84,7 +84,7 @@ if (changed.some((file) => CONTRACTS_PATH.test(file))) {
   const [first] = authoredLines(sections.get(CONTRACTS) ?? "");
   if (first && /^None\b/i.test(first)) {
     failures.push(
-      `packages/contracts changed, so ${CONTRACTS} can't be "None.": say what changed and what the other lane must do`,
+      `packages/contracts changed, so ${CONTRACTS} can't be "None.": say what changed and which callers it moved`,
     );
   }
 }
