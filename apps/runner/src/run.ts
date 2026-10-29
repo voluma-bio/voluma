@@ -408,6 +408,7 @@ export async function runClaim(
               image: config.sandbox.image,
               lifetimeSeconds: config.sandbox.lifetimeSeconds,
               idleSeconds: config.sandbox.idleSeconds,
+              env: layout.env,
               ...convertMounts(runId),
             }),
             signal,
