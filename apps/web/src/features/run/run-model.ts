@@ -1,11 +1,12 @@
 /**
  * The live run page's run-level data, derived with no React from the run's events and state:
  * the threads (main, workers, checkers) with what each is doing now, the attention list, the
- * plan, where each task stands, and the run's usage. Transcripts are in `transcript.ts`.
+ * plan, where each task stands, and what the run spent. Transcripts are in `transcript.ts`.
  */
-import type { ModelUsage, RunEvent } from "@voluma/contracts/events";
+import type { RunEvent } from "@voluma/contracts/events";
 import type { Folded, FoldedTask } from "@voluma/contracts/fold";
 import type { RunState } from "@voluma/contracts/run";
+import { type RunSpend, type Spend, spend } from "@voluma/contracts/spend";
 import type { WorkflowPlan } from "@voluma/contracts/workflow";
 import { type Halt, type Live, toolTitle } from "./transcript";
 import { taskTitle } from "./workflows";
@@ -26,9 +27,8 @@ export type Thread = {
   error?: string;
   toolCalls: number;
   toolErrors: number;
-  /** Model calls so far, and the sum of their usage; absent until one reports it. */
-  calls: number;
-  usage?: ModelUsage;
+  /** A worker's or checker's own cost and time; the run's spend has the main thread's. */
+  spend?: Spend;
   /** The tool call running now, by title; else the last one it made. */
   liveTool?: string;
   lastTool?: string;
@@ -37,14 +37,6 @@ export type Thread = {
   /** Its last prose, the report a finished card expands to. */
   said?: string;
 };
-
-const addUsage = (a: ModelUsage | undefined, b: ModelUsage): ModelUsage => ({
-  input: (a?.input ?? 0) + b.input,
-  output: (a?.output ?? 0) + b.output,
-  cacheRead: (a?.cacheRead ?? 0) + b.cacheRead,
-  cacheWrite: (a?.cacheWrite ?? 0) + b.cacheWrite,
-  costUsd: (a?.costUsd ?? 0) + b.costUsd,
-});
 
 /**
  * When the runner is not running the run's threads (see `Halt`). A queued run with no threads
@@ -72,9 +64,13 @@ function threadsOf(events: RunEvent[]): { threads: Thread[]; lastAt: Map<string,
   const threads = new Map<string, Thread>();
   const running = new Map<string, Map<string, string>>();
   const lastAt = new Map<string, string>();
+  const own = new Map<string, RunEvent[]>();
   for (const e of events) {
     const t = threads.get(e.threadId);
     lastAt.set(e.threadId, e.createdAt);
+    const mine = own.get(e.threadId);
+    if (mine) mine.push(e);
+    else own.set(e.threadId, [e]);
     switch (e.type) {
       case "thread.started":
         if (t) {
@@ -91,7 +87,6 @@ function threadsOf(events: RunEvent[]): { threads: Thread[]; lastAt: Map<string,
             status: "running",
             toolCalls: 0,
             toolErrors: 0,
-            calls: 0,
           });
         break;
       case "thread.ended":
@@ -121,22 +116,17 @@ function threadsOf(events: RunEvent[]): { threads: Thread[]; lastAt: Map<string,
         if (t) t.result = { text: e.payload.text, verdict: e.payload.verdict };
         break;
       case "message":
-        if (t && e.payload.role === "assistant") {
-          t.calls++;
-          if (e.payload.text) t.said = e.payload.text;
-          if (e.payload.usage) t.usage = addUsage(t.usage, e.payload.usage);
-        }
-        break;
-      case "wake":
-        if (t) {
-          t.calls++;
-          if (e.payload.usage) t.usage = addUsage(t.usage, e.payload.usage);
-        }
+        if (t && e.payload.role === "assistant" && e.payload.text) t.said = e.payload.text;
         break;
     }
   }
-  for (const t of threads.values())
+  for (const t of threads.values()) {
     if (t.status === "running") t.liveTool = [...(running.get(t.id)?.values() ?? [])].at(-1);
+    // `spend` over one worker's or checker's events counts them all for its task, so that one
+    // task's spend is the thread's own.
+    if (t.kind === "worker" || t.kind === "check")
+      t.spend = spend(own.get(t.id) ?? []).tasks[0]?.spend;
+  }
   return { threads: [...threads.values()], lastAt };
 }
 
@@ -328,7 +318,8 @@ export type RunView = {
   states: Map<string, TaskState>;
   /** "3 of 7 finished, 1 to check". */
   progress: string;
-  usage?: ModelUsage;
+  /** Cost and time per task, for the main thread and in total. */
+  spend: RunSpend;
 };
 
 /** Everything the run page shows about the run as a whole, from its durable events. */
@@ -348,10 +339,7 @@ export function runView(events: RunEvent[], folded: Folded, halt: Halt | undefin
     progress: plan
       ? `${done} of ${plan.tasks.length} finished${toCheck > 0 ? `, ${toCheck} to check` : ""}`
       : "",
-    usage: threads.reduce<ModelUsage | undefined>(
-      (sum, t) => (t.usage ? addUsage(sum, t.usage) : sum),
-      undefined,
-    ),
+    spend: spend(events),
   };
 }
 
