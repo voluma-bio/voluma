@@ -13,7 +13,7 @@ It writes regions only: TV, BV and BV/TV of ROI-3 (deck #16-18) and Tb.N/Th/Sp, 
 `morphometry.py trabecular` on roi3-tissue.npy, and Ct.Th is `morphometry.py cortical` on cortex.npy with the distal face as --surface.
 
 --annotations is a JSON file of indices on the aligned grid. It needs "grid_id" (the grid_id of tibia-frame.json; a file without it
-or from another grid is refused). This script reads one key, other sections of the file are ignored:
+or from another grid is refused). This script reads one key; any other key is refused, and so is a value of the wrong form or an index outside the grid:
   growth_plate_distal_curves  required: the distal face of the growth-plate band (the side facing the shaft), curves (below),
                               traced on the coronal sections of tibia-hu.npy
 Curves (every traced surface): {"axis": 1, "height": "row", "slices": {"<v>": [[w, u], ...]}}: the coronal section at
