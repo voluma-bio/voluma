@@ -1,12 +1,16 @@
-"""Snap hand-drawn boxes to the bone they contain, so a prompt box does not cut off bone edges.
+"""Snap hand-drawn boxes on a slice to the bone they contain, so a prompt box does not cut off bone edges.
 
-  python snap_boxes.py --in oriented.npy --index 159 --threshold-hu <T> --boxes r0,c0,r1,c1 [r0,c0,r1,c1 ...] [--pad-mm 0.0315] [--out boxes.json]
+Each box grows to the bounding box of the bone components (pixels >= `--threshold-hu`, 8-connected, at least 50 pixels)
+that lie mostly (>= 50% of their pixels) inside it, plus `--pad-mm` (the pixel size comes from the sidecar beside `--in`).
+It never shrinks a box; a box with no such component is returned unchanged. Boxes are [row0, col0, row1, col1], ends
+inclusive, the form `segment_sam` takes. Look at the result on the slice (`render_slices.py --boxes`) before using it.
+Refused: a 3D stack without `--index`, a missing sidecar, a malformed box.
 
-Prints the snapped boxes, in the [row0, col0, row1, col1] inclusive form `segment_sam` takes, in the same order. Each box grows to the
-bounding box of the bone components (pixels >= threshold, 8-connected) that lie mostly (>= 50% of their pixels) inside it,
-plus `--pad-mm` (the pixel size comes from the sidecar beside `--in`). It never shrinks a box. Look at the result on the slice (`render_slices.py --boxes`) before using it.
+Writes: <out>  with --out: the snapped boxes as a JSON list, in the order given
+Prints: one JSON line {snapped: [[r0, c0, r1, c1], ...], grew: [bool per box], index, out}
+Example: python snap_boxes.py --in oriented.npy --index 159 --threshold-hu 2500 --boxes 100,80,180,200 --out boxes.json
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
-import argparse
 import json
 import sys
 from pathlib import Path
@@ -43,13 +47,13 @@ def snap_box(image, box, threshold, pad=3, min_px=50):
 
 
 if __name__ == '__main__':
-    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
+    ap = sidecar.parser(__doc__)
     ap.add_argument('--in', dest='src', required=True, help='oriented stack (3D) or a 2D slice, .npy, with its sidecar .json beside it (for the pixel size)')
-    ap.add_argument('--index', type=int, help='slice of the stack (axis 0)')
+    ap.add_argument('--index', type=int, help='slice of the stack (axis 0); required for a 3D stack')
     ap.add_argument('--threshold-hu', type=float, required=True, help='bone threshold in the volume units')
-    ap.add_argument('--boxes', nargs='+', required=True, help='r0,c0,r1,c1 (row/column pixels, ends inclusive)')
+    ap.add_argument('--boxes', nargs='+', required=True, metavar='r0,c0,r1,c1', help='boxes in row/column pixels, ends inclusive')
     ap.add_argument('--pad-mm', type=float, default=0.0315, help='margin added around the bone, in mm')
-    ap.add_argument('--out')
+    ap.add_argument('--out', help='JSON file for the snapped boxes')
     a = ap.parse_args()
     v = np.load(a.src, mmap_mode='r')
     if v.ndim == 3 and a.index is None:
