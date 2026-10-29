@@ -7,12 +7,12 @@
  * bills nothing here: Meta's charge is a gateway row.
  */
 import { type SamResult, samInput } from "@voluma/sam/input";
-import type { RunLayout } from "../layout";
+import type { ThreadLayout } from "../layout";
 import type { Tool } from "./tool";
 
 const TIMEOUT_SECONDS = 30 * 60;
 
-export function segmentSamTool(layout: RunLayout): Tool<typeof samInput> {
+export function segmentSamTool(layout: ThreadLayout): Tool<typeof samInput> {
   return {
     name: "segment_sam",
     description:
@@ -24,8 +24,9 @@ export function segmentSamTool(layout: RunLayout): Tool<typeof samInput> {
       "that holds tissue (or your `subVolume`) is sent. A sidecar JSON next to " +
       "the labels (`labels.npy` gives `labels.json`) holds `{axis, shape, crop, prompt, objects: [{label, name, promptFrame, box, " +
       'confidence: {"<slice>": 0-1}}]}`: the model\'s confidence for each object on each slice where it found a mask; ' +
-      "a slice missing from `confidence` had none. The sidecar is written last: if a call was cut off, " +
-      "the labels are complete only when it exists. " +
+      "a slice missing from `confidence` had none. The sidecar also holds the call's `requestId`, which the result repeats. " +
+      "An earlier sidecar is deleted when a call starts writing and the new one is written last: the labels are complete " +
+      "only when the sidecar exists and its `requestId` is the one the call returned. " +
       `${layout.description}`,
     input: samInput,
     async execute(input, ctx) {
@@ -60,7 +61,9 @@ export function segmentSamTool(layout: RunLayout): Tool<typeof samInput> {
         reply?.error ??
         (exitCode === 124
           ? `voluma-sam was stopped after ${TIMEOUT_SECONDS / 60} minutes`
-          : `voluma-sam exited with code ${exitCode} without a result: ${stderr.slice(-1000)}`);
+          : exitCode === 137
+            ? "voluma-sam was killed (exit 137), most likely out of memory: pass a smaller `subVolume`"
+            : `voluma-sam exited with code ${exitCode} without a result: ${stderr.slice(-1000)}`);
       return {
         output: why,
         isError: true,

@@ -192,9 +192,11 @@ class ModalSandboxAdapter implements Sandbox {
   readonly #modal: ModalSandbox;
   readonly #mounts: SandboxMount[];
   readonly #lifetimeSeconds: number;
+  readonly #workdir: string | undefined;
 
   constructor(modal: ModalSandbox, spec: SandboxSpec) {
     this.#modal = modal;
+    this.#workdir = spec.workdir;
     this.#lifetimeSeconds = spec.lifetimeSeconds;
     this.#mounts = spec.mounts;
   }
@@ -230,8 +232,9 @@ class ModalSandboxAdapter implements Sandbox {
     // A command must not outlive the sandbox that Modal ends at its lifetime.
     const timeoutSeconds = Math.min(request.timeoutSeconds, this.#lifetimeSeconds);
     const id = randomUUID();
-    // The inner shell records its process group, then becomes the command.
-    const script = `mkdir -p ${GROUP_DIR}; awk '{print $5}' /proc/$$/stat > ${GROUP_DIR}/${id}; exec bash -c "$0"`;
+    // The inner shell records its process group, enters the working folder (made first: on a
+    // bucket mount an empty prefix is no directory), then becomes the command.
+    const script = `mkdir -p ${GROUP_DIR}; awk '{print $5}' /proc/$$/stat > ${GROUP_DIR}/${id}; mkdir -p -- "$1" && cd -- "$1" || exit 1; exec bash -c "$0"`;
     const argv = [
       "timeout",
       "-k",
@@ -241,6 +244,7 @@ class ModalSandboxAdapter implements Sandbox {
       "-c",
       script,
       request.command,
+      this.#workdir ?? ".",
     ];
     let killing: Promise<void> | undefined;
     const kill = () => {

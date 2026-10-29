@@ -104,17 +104,25 @@ export async function run(
     const sent = objects.map(({ label, name, frame, box }) => {
       if (frame < crop.lo[axis] || frame >= crop.hi[axis])
         throw new Failure(`slice ${frame} of "${name}" is outside the subVolume`);
-      const r0 = Math.max(box[0], crop.lo[ra]) - crop.lo[ra];
-      const r1 = Math.min(box[2], crop.hi[ra] - 1) - crop.lo[ra];
-      const c0 = Math.max(box[1], crop.lo[ca]) - crop.lo[ca];
-      const c1 = Math.min(box[3], crop.hi[ca] - 1) - crop.lo[ca];
-      if (r0 > r1 || c0 > c1)
-        throw new Failure(`the box of "${name}" (label ${label}) is outside the subVolume`);
+      if (
+        box[0] < crop.lo[ra] ||
+        box[2] >= crop.hi[ra] ||
+        box[1] < crop.lo[ca] ||
+        box[3] >= crop.hi[ca]
+      )
+        throw new Failure(
+          `the box of "${name}" (label ${label}) is not inside the subVolume: a clipped box would segment another shape`,
+        );
       return {
         label,
         name,
         frame: frame - crop.lo[axis],
-        box: [r0, c0, r1, c1] as [number, number, number, number],
+        box: [
+          box[0] - crop.lo[ra],
+          box[1] - crop.lo[ca],
+          box[2] - crop.lo[ra],
+          box[3] - crop.lo[ca],
+        ] as [number, number, number, number],
       };
     });
     lap("crop");
@@ -124,13 +132,18 @@ export async function run(
     const prompt = promptText(sent, width, height);
     lap("encode");
 
-    const id = await meta.upload(video);
-    fileId = id;
     // The sandbox ends a stopped call with SIGTERM, then SIGKILL 5 s later: the scan must not
-    // stay in Meta's file store.
+    // stay in Meta's file store, so the handler stands before the upload starts and deletes
+    // whatever id the upload yields.
+    const uploading = meta.upload(video);
     process.once("SIGTERM", () => {
-      meta.remove(id, 4_000).finally(() => process.exit(143));
+      uploading
+        .then((id) => meta.remove(id, 4_000))
+        .catch(() => {})
+        .finally(() => process.exit(143));
     });
+
+    fileId = await uploading;
     lap("upload");
     response = join(dir, "response.sse");
     const asked = sent
@@ -165,6 +178,7 @@ export async function run(
       );
       throw new Failure(
         `${error instanceof Error ? error.message : error}; Meta's response: ${copied}`,
+        error instanceof Failure && error.infrastructure,
       );
     }
     lap("decode");
@@ -173,7 +187,9 @@ export async function run(
     const out = join(dir, basename(input.output));
     await writeFullGrid(out, labels, crop, shape);
     const sidecarPath = input.output.replace(/(\.npy)?$/, ".json");
+    const requestId = tracked.requestId ?? pasted.responseId;
     const sidecar = {
+      requestId,
       axis,
       shape,
       crop: [crop.lo[0], crop.hi[0] - 1, crop.lo[1], crop.hi[1] - 1, crop.lo[2], crop.hi[2] - 1],
@@ -195,6 +211,10 @@ export async function run(
     const sidecarTmp = join(dir, "sidecar.json");
     await writeFile(sidecarTmp, JSON.stringify(sidecar));
     await mkdir(dirname(input.output), { recursive: true });
+    // An earlier call's sidecar must not vouch for these labels if this call is cut off.
+    await rm(sidecarPath, { force: true }).catch((e) => {
+      throw new Failure(`could not remove the old ${sidecarPath}: ${e}`, true);
+    });
     await copy(out, input.output);
     await copy(sidecarTmp, sidecarPath);
     lap("write");
@@ -212,7 +232,7 @@ export async function run(
       sidecar: sidecarPath,
       prompt,
       frames: pasted.frames,
-      requestId: tracked.requestId ?? pasted.responseId,
+      requestId,
       crop: sidecar.crop as Crop,
       timings,
     };
@@ -253,9 +273,11 @@ function copy(from: string, to: string): Promise<void> {
     cp.stderr.on("data", (d) => {
       stderr += d;
     });
-    cp.once("error", reject);
+    cp.once("error", (e) => reject(new Failure(`cp ${to} failed: ${e}`, true)));
     cp.once("close", (code) =>
-      code === 0 ? resolve() : reject(new Error(`cp ${to} failed (${code}): ${stderr.trim()}`)),
+      code === 0
+        ? resolve()
+        : reject(new Failure(`cp ${to} failed (${code}): ${stderr.trim()}`, true)),
     );
   });
 }

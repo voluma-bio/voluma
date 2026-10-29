@@ -21,7 +21,7 @@ cannot `serviceConnect`, but `environmentPatchCommit` (config as a patch) create
 | Restart | on failure, 10 retries |
 | Limits | 2 vCPU / 2 GB (set in the service's settings). The runner is one Node thread and holds no volumes: `segment_sam` and the other data work run in the sandbox, so heavy work creeping back into it hits the limit and fails loudly instead of slowing heartbeats quietly. Railway's default for the service is its 8 vCPU / 8 GB ceiling |
 | Healthcheck | none: the runner serves nothing, so a healthcheck would fail every deploy |
-| Watch paths | `/apps/runner/**`, `/packages/harness/**`, `/packages/workflow/**`, `/packages/contracts/**`, `/packages/provider-calls/**` (the runner imports it), `/workflows/**` (the runner reads `workflows/` from its own checkout, so editing a workflow must redeploy it), `/pnpm-lock.yaml`, `/package.json`, `/.tool-versions`, `/tsconfig.base.json`, `/pnpm-workspace.yaml` |
+| Watch paths | `/apps/runner/**`, `/packages/harness/**`, `/packages/workflow/**`, `/packages/contracts/**`, `/packages/provider-calls/**` (the runner imports it), `/packages/voluma-sam/**` (the harness imports its input schema), `/workflows/**` (the runner reads `workflows/` from its own checkout, so editing a workflow must redeploy it), `/pnpm-lock.yaml`, `/package.json`, `/.tool-versions`, `/tsconfig.base.json`, `/pnpm-workspace.yaml` |
 
 Variables (names only; values never go in the repo):
 

@@ -22,8 +22,8 @@ Writes: <out>  the JPEG (at most 2000 px, 1 MiB)
         pixel -> zyx map, and the 3D camera; an earlier view.json is never rewritten
         .quad-view-cache/  beside <out>: a mesh cache. Inputs may be read-only.
 Prints: one JSON line {image, view, crosshair_zyx, zoom, camera, panes, shown, window_hu, timings_s, jpeg_kib}
-Example: python quad_view.py --hu hu.npy --labels labels.npy --names anatomy.json --out /scratch/v1.jpg
-         python quad_view.py --from /scratch/v1.view.json --center tibia --move axis0+5 --out /scratch/v2.jpg
+Example: python quad_view.py --hu hu.npy --labels labels.npy --names anatomy.json --out $SCRATCH/v1.jpg
+         python quad_view.py --from $SCRATCH/v1.view.json --center tibia --move axis0+5 --out $SCRATCH/v2.jpg
          python quad_view.py --from v2.view.json --rotate 40,0 --plane 1:contains=shaft_a,shaft_b --out v3.jpg
 Exits 2 with one sentence on bad input, before writing anything.
 """

@@ -274,7 +274,11 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         isError: z.boolean(),
         /** What the model saw: head and tail only when `truncated`. */
         output: z.string(),
-        /** When true the full output is at `toolOutputKey(runId, toolCallId)`. */
+        /**
+         * When true the full output is at `toolOutputKey(runId, threadName, toolCallId)`: under
+         * the calling thread's own folder of the run's scratch, `threadName` being its id
+         * without the run id.
+         */
         truncated: z.boolean(),
         /**
          * True when the call failed because of Voluma's infrastructure (gateway or provider 5xx,

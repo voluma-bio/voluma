@@ -38,7 +38,7 @@ All keys are required except `status`; any other key fails the load.
 - `tools`: the optional tools the role is granted, from `packages/harness/src/tools/registry.ts`
   (today `view_image`, `segment_sam`). A name not there fails the load; a tool not listed is not
   granted. This is how "the checker does not rerun SAM" is enforced, not prose in a skill.
-  `segment_sam` is also granted only when the run has a Meta key. The harness's own tools (`bash`,
+  `segment_sam` is also granted only when the runner has a gateway. The harness's own tools (`bash`,
   task tools, `thread_message`) are not listed and not configurable; code keeps their refusals (a
   checker cannot report outputs or set status).
 - `status: planned`: nothing uses the role yet, so its `tools` (which may name tools that do not

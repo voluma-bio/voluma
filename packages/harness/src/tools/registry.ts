@@ -3,7 +3,7 @@
  * thread-message tools. A tool is a factory over the run's dependencies, registered here;
  * `superviseRun` builds the ones the host grants a role (`RunRole.tools`).
  */
-import type { RunLayout } from "../layout";
+import type { ThreadLayout } from "../layout";
 import type { Files } from "../ports/files";
 import { segmentSamTool } from "./segment-sam";
 import type { Tool } from "./tool";
@@ -11,7 +11,7 @@ import { viewImageTool } from "./view-image";
 
 /** What a tool factory may use; a tool that needs more adds its field here. */
 export interface ToolDeps {
-  layout: RunLayout;
+  layout: ThreadLayout;
   /** The run's bucket, read and written host-side. */
   files: Files;
 }

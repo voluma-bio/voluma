@@ -11,7 +11,7 @@
  */
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import type { RunLayout } from "../layout";
+import type { ThreadLayout } from "../layout";
 import type { Files } from "../ports/files";
 import type { Tool } from "./tool";
 
@@ -28,7 +28,7 @@ const inputSchema = z.object({
 });
 
 export interface ViewImageDeps {
-  layout: RunLayout;
+  layout: ThreadLayout;
   files: Files;
 }
 

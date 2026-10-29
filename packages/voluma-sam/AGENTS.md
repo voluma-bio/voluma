@@ -8,6 +8,10 @@ stdout is one JSON line. Entry: `src/main.ts`; the steps are `src/run.ts`.
 - It is bundled to one file (`pnpm --filter @voluma/sam build`, esbuild) because the sandbox
   image has Node and `ffmpeg` but no workspace. The "Sandbox image" workflow builds it and bakes
   it in as `voluma-sam`; change anything here, run that workflow, update `SANDBOX_IMAGE`.
+  The harness and the image are deployed separately, so a schema change reaches the model at once
+  but the program only after the digest bump. The program's parse is `.strict()` so a field it
+  does not know fails the call; nothing else checks the two agree. Build the image and bump the
+  digest in the same PR as any `src/input.ts` change.
 - The harness imports only `@voluma/sam/input` (a zod schema and a type). Nothing else is
   shared, and the runner imports none of this package.
 - Keep every pass over the reply linear (`src/response.ts`): responses are 100+ MB, and the

@@ -1,6 +1,6 @@
 /**
  * The Files port: host-side access to the run's bucket by key, for tools that handle
- * volumes without the sandbox (`segment_sam`). `RunLayout.keyOf` turns the paths the model
+ * volumes without the sandbox (`segment_sam`). `ThreadLayout.keyOf` turns the paths the model
  * names into keys. Reads stream because a scan is gigabytes; a write is one object.
  */
 export interface Files {

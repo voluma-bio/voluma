@@ -59,7 +59,7 @@
  */
 import type { RunEvent, ThreadKind } from "./events";
 import type { TaskStatus } from "./ids";
-import type { EvidenceRef, Output } from "./output";
+import { type EvidenceRef, fileRefsOf, type Output } from "./output";
 import { evidenceKey } from "./r2";
 import type {
   Annotation,
@@ -130,6 +130,8 @@ export type FoldedTask = Pick<
   threads: Pick<ReviewTask["threads"], "worker" | "check">;
   models: Pick<ReviewTask["models"], "worker" | "check">;
   milestones: Milestone[];
+  /** Paths (the part after `/scratch/`) of the scratch files its checkpoints and outputs cite. */
+  citedScratch: string[];
 };
 
 export type FoldedRevision = {
@@ -192,6 +194,7 @@ type Attempt = {
   checker: ReviewTask["checker"];
   outputs: Map<string, OutputEvent>;
   evidence: Map<string, Asset>;
+  citedScratch: Set<string>;
 };
 
 export function fold(events: readonly RunEvent[]): Folded {
@@ -220,7 +223,8 @@ export function fold(events: readonly RunEvent[]): Folded {
   let revisionId = "";
 
   const addEvidence = (a: Attempt, runId: string, refs: EvidenceRef[]) => {
-    for (const r of refs)
+    for (const r of refs) {
+      if (r.root === "scratch") a.citedScratch.add(r.path);
       a.evidence.set(r.sha256, {
         id: r.sha256,
         name: r.path,
@@ -228,6 +232,7 @@ export function fold(events: readonly RunEvent[]): Folded {
         key: evidenceKey(runId, r.sha256),
         sha256: r.sha256,
       });
+    }
   };
 
   const snapshot = (): Pick<FoldedRevision, "tasks" | "volumes" | "structures" | "annotations"> => {
@@ -305,6 +310,7 @@ export function fold(events: readonly RunEvent[]): Folded {
           checker: null,
           outputs: new Map(),
           evidence: new Map(),
+          citedScratch: new Set(),
         });
     const tasks = rows.map((a) => {
       const skip = skipped.get(a.taskId);
@@ -506,6 +512,7 @@ export function fold(events: readonly RunEvent[]): Folded {
         undeclared,
         checks,
         evidence: [...a.evidence.values()],
+        citedScratch: [...a.citedScratch],
       };
     });
     return { tasks, volumes, structures, annotations };
@@ -551,6 +558,7 @@ export function fold(events: readonly RunEvent[]): Folded {
           checker: null,
           outputs: new Map(),
           evidence: new Map(),
+          citedScratch: new Set(),
         };
         attempts.set(e.id, a);
         current.set(a.taskId, a);
@@ -601,6 +609,9 @@ export function fold(events: readonly RunEvent[]): Folded {
         const a = attempts.get(e.payload.attemptId);
         if (!a) break;
         addEvidence(a, e.runId, e.payload.evidence);
+        // The output's own files are the checker's to inspect, though they are not evidence.
+        for (const r of fileRefsOf(e.payload.output))
+          if (r.root === "scratch") a.citedScratch.add(r.path);
         a.outputs.set(e.payload.outputId, e);
         a.resultRevisionId = revisionId;
         break;
