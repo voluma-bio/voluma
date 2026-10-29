@@ -28,7 +28,7 @@ Variables (names only; values never go in the repo):
 |---|---|
 | `VOLUMA_API_URL` | `http://${{@voluma/api.RAILWAY_PRIVATE_DOMAIN}}:${{@voluma/api.PORT}}` (the API's `PORT` is set to 8080 explicitly, since a private URL needs a known port) |
 | `VOLUMA_API_TOKEN` | reference `${{@voluma/api.VOLUMA_API_TOKEN}}`: rotating it on the API reaches the runner at its next deploy |
-| `VOLUMA_META_API_KEY`, `RUNNER_MODEL`, `RUNNER_CONCURRENCY` | the model key; `RUNNER_MODEL=meta/muse-spark-1.3` (Standard mode: never a `-contributor` model on a deployed runner, Meta may train on what it is sent); 2 slots |
+| `VOLUMA_META_API_KEY`, `RUNNER_CONCURRENCY` | the model key; models are the role files' aliases (`wonder` = `meta/muse-wonder-1.0`, Standard mode). Leave `RUNNER_MODEL` unset: it forces every role onto one model. Never a `-contributor` model on a deployed runner, Meta may train on what it is sent; 2 slots |
 | `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` | the Modal profile in `~/.modal.toml` |
 | `RAILPACK_DEPLOY_APT_PACKAGES` | `ffmpeg`: installed in the runner's container (segment_sam needs it) |
 | `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `CLOUDFLARE_API_TOKEN` | as in `.env` |

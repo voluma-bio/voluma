@@ -40,17 +40,15 @@ const resolve = (ref: { provider: string; id: string }) => {
   if (!model) throw new Error(`unknown model ${ref.provider}/${ref.id}`);
   return model;
 };
-const roles = {
-  worker: resolve(config.roles.worker),
-  check: resolve(config.roles.check),
-  main: resolve(config.roles.main),
-};
+const aliases = Object.fromEntries(
+  Object.entries(config.models).map(([alias, ref]) => [alias, resolve(ref)]),
+);
 
 const runnerId = `runner-${randomUUID().slice(0, 8)}`;
 const ctx: RunnerContext = {
   config,
   models,
-  roles,
+  aliases,
   visitorModel: resolve(config.visitorModel),
   fallback: modelFallback(config.fallbackModel && resolve(config.fallbackModel), log),
   log,
@@ -74,8 +72,8 @@ const shuttingDown = new Promise<void>((resolve) =>
 const sleep = (ms: number) => delay(ms, undefined, { signal: shutdown.signal }).catch(() => {});
 
 log(
-  `${runnerId} up: ${config.concurrency} slot(s), models ${Object.entries(config.roles)
-    .map(([role, m]) => `${role} ${m.provider}/${m.id}`)
+  `${runnerId} up: ${config.concurrency} slot(s), models ${Object.entries(config.models)
+    .map(([alias, m]) => `${alias} ${m.provider}/${m.id}`)
     .join(
       ", ",
     )}${config.fallbackModel ? `, fallback ${config.fallbackModel.provider}/${config.fallbackModel.id}` : ""}, api ${config.api.baseUrl}`,

@@ -195,16 +195,23 @@ file is shared page cache, not counted twice. The `stopped` event of a sandbox M
 sandbox, so an out-of-memory kill or a terminate call), so a restart's cause is in the run's record. In the 2026-10-28 local run the sandbox ended at 1 h 0 min (the
 lifetime) and once more 23 min into the replacement, before the exit code was logged.
 
-# Runner: role text and tool grants come from `workflows/core/agents/`
+# Runner: role text, tool grants and models come from `workflows/core/agents/`
 
 The worker's and checker's system prompts are `workflows/core/agents/<role>.md`'s body, then `COMMON`
-(sandbox text, `prompts.ts`), then the skill list. Their optional tools are the file's `tools`
+(sandbox text, `prompts.ts`), then the role's skill list and the tool index (one line per skill
+script, from its docstring's first line; the loader reads it from the snapshot). Their optional tools are the file's `tools`
 (`run.ts` `grant`); `segment_sam` is also dropped when the run has no Meta key. `loadWorkflow`
 snapshots the role files with the workflow and reads them from the snapshot, so a resumed thread
 composes byte-identical text and an edited file reaches only new threads (a thread whose prompt
-changed is still `ThreadStale`). The main thread still uses `MAIN_SYSTEM`; `lead.md` and
-`review-chat.md` are `status: planned` and unused. Format: `workflows/core/agents/AGENTS.md`. Models stay
-config (`RUNNER_MODEL`, `RUNNER_CHECK_MODEL`, `RUNNER_MAIN_MODEL`).
+changed is still `ThreadStale`). The main thread still uses `MAIN_SYSTEM`
+until the new loop lands; `main.md` is loaded and its model resolved, `review-chat.md` is
+`status: planned` and unused. Format: `workflows/core/agents/AGENTS.md`.
+
+A role's model is its file's `model` alias. `config.models` maps each alias to a provider model:
+`RUNNER_MODEL_WONDER` (default `meta/muse-wonder-1.0`), `RUNNER_MODEL_OPUS`, `RUNNER_MODEL_ASTRA`
+(no default; a run whose role file names an unset alias fails when it starts). `RUNNER_MODEL`, when
+set, forces every alias to one model. Each configured alias's provider key is required at start. A
+visitor run uses `RUNNER_VISITOR_MODEL` for every role except `main` on a visitor-safe model.
 
 # Runner: a claim that ends is a cut-off, not a stop
 

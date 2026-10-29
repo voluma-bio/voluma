@@ -37,7 +37,7 @@ import { type Recorder, recorder } from "@voluma/harness/recorder";
 import { type SandboxSession, sandboxSession } from "@voluma/harness/sandbox-session";
 import { checkerSandboxSpec, workerSandboxSpec } from "@voluma/harness/sandbox-specs";
 import { type RunRole, superviseRun } from "@voluma/harness/supervise-run";
-import { optionalTools } from "@voluma/harness/tools";
+import { optionalTools, TOOL_NAMES } from "@voluma/harness/tools";
 import { loadWorkflow } from "@voluma/workflow/load";
 import { computePlan } from "@voluma/workflow/plan";
 import { type Config, isVisitorSafe, providerKey } from "./config.ts";
@@ -77,8 +77,8 @@ const MODEL_RETRIES = 3;
 export interface RunnerContext {
   config: Config;
   models: Models;
-  /** The models the config names for a `voluma` run's roles, resolved at startup. */
-  roles: Record<"worker" | "check" | "main", Model<Api>>;
+  /** The model behind each alias the config sets (`config.models`), resolved at startup. */
+  aliases: Record<string, Model<Api>>;
   visitorModel: Model<Api>;
   /** Starts worker and check threads on the fallback model while their model is failing. */
   fallback: ModelFallback;
@@ -110,17 +110,6 @@ export async function runClaim(
   const runId = run.id;
   const claimId = randomUUID();
   const visitor = keys !== undefined;
-  // A visitor's key and scan go to Standard-mode Meta models only: the main thread keeps its
-  // configured model when that is one, else the visitor model.
-  const roleModel = (role: "worker" | "check" | "main") =>
-    !visitor
-      ? ctx.roles[role]
-      : role === "main" && isVisitorSafe(config.roles.main)
-        ? ctx.roles.main
-        : ctx.visitorModel;
-  const workerModel = roleModel("worker");
-  const checkModel = roleModel("check");
-  const mainModel = roleModel("main");
   /** The key for a provider: a visitor's Meta key is good for Meta alone. */
   const keyFor = (provider: string) =>
     visitor ? (provider === "meta" ? keys.metaApiKey : undefined) : providerKey(provider);
@@ -179,9 +168,7 @@ export async function runClaim(
       },
       log,
     });
-    log(
-      `claimed (${visitor ? "visitor" : "voluma"} keys, model ${workerModel.provider}/${workerModel.id})`,
-    );
+    log(`claimed (${visitor ? "visitor" : "voluma"} keys)`);
 
     // What an earlier claim of this run left running must not keep writing or spending.
     // Cleanup only: it never decides the run's outcome, and idle timeouts back it up.
@@ -207,14 +194,32 @@ export async function runClaim(
       prefix: workflowSnapshotPrefix(runId),
       root: REPO_ROOT,
       commit: config.commit,
-      knownTools: Object.keys(optionalTools),
+      knownTools: TOOL_NAMES,
     });
+    // A role's model is its file's alias. A visitor's key and scan go to Standard-mode Meta
+    // models only: the main thread keeps its configured model when that is one, else the
+    // visitor model.
+    const roleModel = (role: "worker" | "checker" | "main") => {
+      const alias = definition.agents[role].model;
+      const model = ctx.aliases[alias];
+      if (!model)
+        throw new Error(
+          `the ${role} role names model "${alias}", which RUNNER_MODEL_${alias.toUpperCase()} does not set`,
+        );
+      return !visitor || (role === "main" && isVisitorSafe(model)) ? model : ctx.visitorModel;
+    };
+    const workerModel = roleModel("worker");
+    const checkModel = roleModel("checker");
+    const mainModel = roleModel("main");
+    log(`models: worker ${workerModel.id}, checker ${checkModel.id}, main ${mainModel.id}`);
     // The tasks that produce the selected outputs and what they need. The main thread may adapt
     // them to the run's notes when the run starts (`superviseRun`).
     const computed = computePlan(definition.files, run.selectedOutputs);
     // Each role's optional tools are the ones its file lists; `segment_sam` also needs a key.
     const grant = (role: "worker" | "checker") =>
-      definition.agents[role].tools.filter((t) => t !== "segment_sam" || metaKey);
+      definition.agents[role].tools.filter(
+        (t) => Object.hasOwn(optionalTools, t) && (t !== "segment_sam" || metaKey),
+      );
 
     const layout = runLayout(
       runId,

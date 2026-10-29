@@ -8,7 +8,7 @@
  */
 import type { ThreadLayout } from "@voluma/harness/layout";
 import type { PlanTask } from "@voluma/harness/supervise-run";
-import type { WorkflowDefinition } from "@voluma/workflow/definition";
+import type { AgentDefinition, WorkflowDefinition } from "@voluma/workflow/definition";
 
 function common(thread: ThreadLayout): string {
   const worker = thread.role === "worker";
@@ -25,20 +25,32 @@ Check what you report against the files themselves, and say which file or header
 }
 
 /**
- * The skills every role may use, progressively disclosed: name, description and path here, the
- * skill and its references and resources read with bash when needed. The workflow's own skill
- * comes first and is read first.
+ * The role's skills, progressively disclosed: name, description and path here, the skill and its
+ * references and resources read with bash when needed. The workflow's own skill comes first and
+ * is read first.
  */
-function skillList(def: WorkflowDefinition): string {
-  const lines = def.skills.map(
-    (s, i) => `- ${s.name}: ${s.description} (${s.path}/SKILL.md)${i === 0 ? " [read first]" : ""}`,
-  );
+function skillList(def: WorkflowDefinition, role: AgentDefinition): string {
+  const lines = def.skills
+    .filter((s) => role.skills.includes(s.name))
+    .map(
+      (s) =>
+        `- ${s.name}: ${s.description} (${s.path}/SKILL.md)${s === def.skills[0] ? " [read first]" : ""}`,
+    );
   return `Skills: read a skill's SKILL.md with bash before you rely on it; its other files sit beside it in the same directory.\n${lines.join("\n")}`;
 }
 
-/** The role file's body, then the generated environment text and skill list. */
+/** One line per script of the role's skills, from its docstring. */
+function toolIndex(def: WorkflowDefinition, role: AgentDefinition): string {
+  const lines = def.toolIndex
+    .filter((t) => role.skills.includes(t.skill))
+    .map((t) => `- ${t.skill}/${t.script}: ${t.summary}`);
+  return `Scripts of those skills, at <skill dir>/resources/<script> (skill dirs are listed above). Run \`python <skill dir>/resources/<script> --help\` before you use one.\n${lines.join("\n")}`;
+}
+
+/** The role file's body, then the generated environment text, skill list and tool index. */
 export function systemPrompt(def: WorkflowDefinition, thread: ThreadLayout): string {
-  return `${def.agents[thread.role].body}\n\n${common(thread)}\n\n${skillList(def)}`;
+  const role = def.agents[thread.role];
+  return `${role.body}\n\n${common(thread)}\n\n${skillList(def, role)}\n\n${toolIndex(def, role)}`;
 }
 
 function taskBrief(task: PlanTask): string {

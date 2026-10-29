@@ -1,64 +1,61 @@
 # Run agents
 
-The roles every workflow run uses, one file each. A file's frontmatter says which optional tools the
-role holds; its body is that role's job, read by the role on every run. They are the same for every
-workflow: what a workflow adds is its own skills (`workflows/<name>/skills/`). The files live in
-`workflows/core/agents/`.
-
-**Status.** The runner builds the worker's and checker's system prompts and tool grants from
-`worker.md` and `checker.md` (`apps/runner/src/prompts.ts`): edit a file and the next run's new
-threads get the text. `lead.md` and `review-chat.md` are marked `status: planned`: loaded and
-validated, used by nothing yet. The main thread still runs on `MAIN_SYSTEM` in
-`packages/harness/src/main-thread.ts`, and has no tools and does not choose what runs; `lead.md`
-is the target (the main thread as a lead that owns the plan). Moving it onto these files, with the
-lead's tools, fix tasks and label versions, is harness behaviour work in `packages/harness`
-and `apps/runner` (the run model, [#134](https://github.com/voluma-bio/voluma/issues/134)).
-
-Every `.md` here except `AGENTS.md` is parsed as a role file, and the worker and checker files are
-required: a stray `README.md` or `CLAUDE.md`, or a draft without frontmatter, fails every run's load,
-as does a snapshot missing `worker.md` or `checker.md`.
-
-A run snapshots the files with its workflow (`packages/workflow/src/load.ts`) and reads them from
-the snapshot, so a resumed thread gets the text it began with; a changed file reaches only threads
-started after it.
+The roles every workflow run uses, one file each, in `workflows/core/agents/`. A file's frontmatter
+says what the role is and holds; its body is that role's job, read by the role on every run. The
+roles are the same for every workflow: what a workflow adds is its skill (`workflows/<name>/skills/`),
+its task list (`tasks.json`, whose `instructions` and `doneWhen` both the worker and the checker of a
+task read) and its examples of work done right.
 
 | File | Role |
 |---|---|
-| `lead.md` | The main thread: owns the run's plan, starts and steers workers, decides what to fix, redo or cut |
-| `worker.md` | Does one task in the sandbox and reports its outputs |
-| `checker.md` | Re-derives one finished task's results and gives a verdict |
-| `review-chat.md` | Answers the researcher about a finished run from its record |
+| `main.md` | Coordinates the run: plans it, starts a worker per task, routes the checkers' questions, decides what is fixed, accepted or skipped |
+| `worker.md` | Does one task in its sandbox and leaves the files, views and numbers it is judged by |
+| `checker.md` | Inspects one submitted task from its files, blind to the worker's reasoning, and gives one verdict |
+| `review-chat.md` | Answers the researcher about a finished run from its record (`status: planned`, used by nothing yet) |
+
+Every `.md` here except `AGENTS.md` is parsed as a role file; `main.md`, `worker.md` and `checker.md`
+are required. A stray `README.md`, or a draft without frontmatter, fails every run's load. A run
+snapshots the files with its workflow (`packages/workflow/src/load.ts`) and reads them from the
+snapshot, so a resumed thread gets the text it began with; a changed file reaches only runs started
+after it.
 
 ## Frontmatter
 
-All keys are required except `status`; any other key fails the load.
-
 - `name`: the file name without `.md`.
-- `description`: what the role is, for whoever starts it.
-- `tools`: the optional tools the role is granted, from `packages/harness/src/tools/registry.ts`
-  (today `view_image`, `segment_sam`). A name not there fails the load; a tool not listed is not
-  granted. This is how "the checker does not rerun SAM" is enforced, not prose in a skill.
-  `segment_sam` is also granted only when the run has a Meta key. The harness's own tools (`bash`,
-  task tools, `thread_message`) are not listed and not configurable; code keeps their refusals (a
-  checker cannot report outputs or set status).
-- `status: planned`: nothing uses the role yet, so its `tools` (which may name tools that do not
-  exist) are not checked against the registry.
+- `description`: what the role is, for whoever reads the file.
+- `model`: an alias (`wonder`, `opus`, `astra`) the runner's config maps to a provider model.
+- `tools`: every tool the role holds, base tools included, from the harness registry. A tool not
+  listed is not granted: that, not prose, is how the checker holds no `segment_sam` (its role still
+  has to say it does not redo the task, since bash can run the classic segmentation).
+  `segment_sam` is granted only when the run has a key for it.
+- `subagents`: the roles this role may start (`main`: `[worker]`). The checker is started by code on
+  every `submit_task` and is never listed.
+- `skills`: optional; the skills named in the role's prompt. Default: the workflow's whole skill list,
+  the workflow's own skill first.
+- `status: planned`: nothing uses the role yet, so its tools are not checked against the registry.
 
-Models are runner config (`RUNNER_MODEL`, `RUNNER_CHECK_MODEL`, `RUNNER_MAIN_MODEL`), and every
-role is told the same skill list: the workflow's own skill, its other skills, then core's.
+Any other key fails the load.
 
 ## What stays in the harness
 
-Environment text is generated, not written here: the sandbox's paths and mount rules, the Python
-packages in the image, tool schemas, the task brief, declared outputs and notes in a thread's first
-message. These files state the job only, so they survive a change of sandbox or harness.
+Environment text is generated, not written here: the sandbox's mounts and write rules, the Python in
+the image, tool schemas, the skill list and the tool index (one line per resource script, from its
+docstring), the task and its declared outputs in a thread's first message. These files state the job
+only, so they survive a change of sandbox or harness.
 
-## What the supervisor still enforces
+## What code enforces
 
-The lead is told these limits but does not police them; code does:
+The roles are told none of these; code keeps them (design: `design/run-model.md` under
+`work/iterate-and-review/` in the `voluma-bio-docs` repo):
 
-- every choice the lead makes is recorded as an event before it applies, so a resumed run replays it;
-- the run's spend cap (`RUNNER_MAX_RUN_COST_USD`), when one is set;
-- a third fix round on one concern ends patching and goes to the researcher as a To check item;
-- a run cannot end with a selected output unreported: each is reported, or null with a reason;
-- every task that reports a measurement is checked.
+- every effect is an event appended before it is visible, so a resumed run replays it;
+- a checker on every submitted task, by an agent that did not do it; a task is done only on a passed
+  verdict;
+- a check ends: a wall-clock limit and an ask limit; ending without a verdict makes the task to-check;
+- fix rounds are bounded: after N `needs-review` verdicts on one task (default 2, runner config), it
+  is to-check;
+- feedback to a task with attempted dependents makes them stale and stops their agents;
+- one writer per task; the checker's `/outputs` is read-only;
+- `finish_run` is refused while a selected output is neither reported nor missing with a reason, or
+  while an agent runs; a run ended by code records each unreported selected output as missing;
+- the spend cap.

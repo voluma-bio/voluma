@@ -21,6 +21,29 @@ export interface ToolDeps {
 
 export type ToolFactory = (deps: ToolDeps) => Tool;
 
+/**
+ * Every tool name a role file may list: the base tools, the optional ones registered below, and
+ * the tools of the agent loop that is replacing this one (`start_worker` ... `ask`).
+ */
+export const TOOL_NAMES = [
+  "bash",
+  "checkpoint",
+  "report_output",
+  "submit_task",
+  "view_image",
+  "segment_sam",
+  "read_file",
+  "ask",
+  "start_worker",
+  "message",
+  "wait",
+  "stop_worker",
+  "answer",
+  "accept",
+  "change_plan",
+  "finish_run",
+] as const;
+
 export const optionalTools: Readonly<Record<string, ToolFactory>> = {
   view_image: ({ layout, files }) => viewImageTool({ layout, files }),
   segment_sam: ({ layout, files, segmenter }) => {
