@@ -15,5 +15,5 @@ A run measures the lab's 28 standard knee parameters on one mouse knee scan, num
 - Anatomy: `references/anatomy.md`. The protocol and the table of parameters: `references/oa-protocol.md`.
 - Scripts a task may run: `resources/`.
 - Generic micro-CT skills (intake, orientation, segmentation checks, rendering; `workflows/core/skills/`): the skills listed with
-  this one; a task's instructions name the ones it uses.
+  this one; read the ones the protocol's step for your task names.
 - Every task follows `references/oa-protocol.md` and reads the anatomy in `references/anatomy.md`.

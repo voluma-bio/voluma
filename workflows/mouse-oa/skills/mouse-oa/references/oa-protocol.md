@@ -225,7 +225,7 @@ python <regions-and-landmarks>/resources/amira_landmarks.py --points /outputs/ii
 python <regions-and-landmarks>/resources/amira_landmarks.py --points points-ab.json points-cd.json --header hu.json --out femoral.landmarkAscii
 ```
 
-Report the files with the measurements they check.
+Report the files with the measurements they check, and the caveat on the format (`regions-and-landmarks`, "Hand the points to the lab: Amira").
 
 ## Limits to state in every report
 

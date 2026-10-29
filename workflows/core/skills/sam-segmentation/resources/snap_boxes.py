@@ -41,7 +41,7 @@ def snap_box(image, box, threshold, pad=3, min_px=50):
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--in', dest='src', required=True, help='oriented stack (3D) or a 2D slice, .npy')
+    ap.add_argument('--in', dest='src', required=True, help='oriented stack (3D) or a 2D slice, .npy, with its sidecar .json beside it (for the pixel size)')
     ap.add_argument('--index', type=int, help='slice of the stack (axis 0)')
     ap.add_argument('--threshold-hu', type=float, required=True, help='bone threshold in the volume units')
     ap.add_argument('--boxes', nargs='+', required=True, help='r0,c0,r1,c1 (row/column pixels, ends inclusive)')
@@ -56,7 +56,10 @@ if __name__ == '__main__':
     for b in boxes:
         if len(b) != 4 or b[0] > b[2] or b[1] > b[3]:
             sidecar.fail(f'box {b} is not r0,c0,r1,c1 with r0<=r1 and c0<=c1')
-    pixel_mm = sidecar.grid(sidecar.sidecar_path(a.src))['spacing_zyx_mm'][-1]
+    side = sidecar.sidecar_path(a.src)
+    if not side.exists():
+        sidecar.fail(f'{side} not found: snap_boxes needs the sidecar beside --in for the pixel size; write one with sidecar.write(path, like=<the stack it came from>), or pass the 3D stack with --index')
+    pixel_mm = sidecar.grid(side)['spacing_zyx_mm'][-1]
     pad = round(a.pad_mm / pixel_mm)
     snapped = [snap_box(img, b, a.threshold_hu, pad) for b in boxes]
     if a.out:

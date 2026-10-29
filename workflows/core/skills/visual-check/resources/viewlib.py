@@ -60,6 +60,8 @@ def parse_names(s):
 
 def draw_legend(fig, ids, names, loc='upper left'):
     """A swatch and a name for every label in `ids`, in that label's colour; `label N` where no name was given."""
+    if not ids:
+        return
     handles = [matplotlib.patches.Patch(fc=colour(i), ec='none', label=f'{i} {names.get(i, "(unnamed)")}') for i in ids]
     fig.legend(handles=handles, loc=loc, ncol=min(len(handles), 6), fontsize=8, labelcolor='w', facecolor='k', edgecolor='none',
                framealpha=0.7, handlelength=1, columnspacing=1.2, borderpad=0.4)

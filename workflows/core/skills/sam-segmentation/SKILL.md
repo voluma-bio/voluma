@@ -56,8 +56,8 @@ measurement threshold (`microct-core`, two thresholds).
    - **In its range, extra pieces:** each extra piece is bone that is not this structure. Look at it on the 3D sheet. Clear it
      (`relabel.py --at <its voxel> --to 0`, so step 6's `unlabelled.py` finds it) or give it its own label (`--to N`) if it is a
      structure you can name.
-   - **Above its range:** it has taken bone from a neighbour. A piece that is wholly the neighbour's: `relabel.py --to <neighbour>`
-    . A piece that is partly both, joined at a contact: `classic_segment.py --within <label>
+   - **Above its range:** it has taken bone from a neighbour. A piece that is wholly the neighbour's: `relabel.py --to <neighbour>`.
+     A piece that is partly both, joined at a contact: `classic_segment.py --within <label>
      --seeds seeds.json` with **one seed per connected piece of each part**, at the contact piece as well as the far one: a
      piece with only one part's seed is given to that part whole. Do not discard the whole request because one or
      two labels are off: the ones in range keep SAM's labels.
