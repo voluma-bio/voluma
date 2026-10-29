@@ -27,8 +27,7 @@ Three screens under `RunLayout` (top bar and query client): `/` start (`start-pa
   line: the clock while working or being checked, the outcome once it ends, else the state. It
   replaced a dependency graph plus a separate per-task spend list (three lists of the same tasks).
   A waiting row names the tasks it waits on. The outcome (`outcomes` in `run-model.ts`) is the
-  current attempt's last worker checkpoint, else the checker's (the checker's first when it changed
-  the result in a `fix` revision); a failed task's `task` reason.
+  current attempt's last worker checkpoint, else the checker's; a failed task's `task` reason.
   Not the wake `note` (the whole notes block, every task so far), not the closing `task` reason (a
   rule's stock sentence), not a judgment's reason (about the check). Under the tasks, "Outputs so
   far" (`outputRows`): each measurement's and score's value from `fold`, by task in plan order; a

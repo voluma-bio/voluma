@@ -329,8 +329,7 @@ const ENDED: ReadonlySet<TaskState> = new Set(["done", "to-check", "failed", "st
 
 /**
  * Each ended task's outcome line: its current attempt's last checkpoint from the worker (the
- * result in the worker's words, with its numbers), else the checker's; if the checker changed the
- * result (a `fix` revision), its last checkpoint, so the line never quotes a replaced number. A
+ * result in the worker's words, with its numbers), else the checker's. A
  * failed task says why it failed. Not the main thread's wake note, which is the whole notes block
  * for every task so far, nor the closing `task` reason, a rule's stock sentence ("The second agent
  * checked this task and agrees"); a judgment's reason is about the check, not the result.
@@ -341,16 +340,10 @@ function outcomes(
   states: Map<string, TaskState>,
 ): Map<string, string> {
   const byAttempt = new Map(tasks.map((t) => [t.attemptId, t]));
-  const opened = new Set<string>();
-  const fixed = new Set<string>();
   const worker = new Map<string, string>();
   const checker = new Map<string, string>();
   for (const e of events) {
-    if (e.type === "attempt.opened" && byAttempt.has(e.id)) opened.add(e.payload.taskId);
-    else if (e.type === "revision.started" && e.payload.reason === "fix") {
-      // A fix during the current attempt; one on an earlier attempt changed nothing shown now.
-      if (opened.has(e.payload.taskId)) fixed.add(e.payload.taskId);
-    } else if (e.type === "checkpoint") {
+    if (e.type === "checkpoint") {
       const t = byAttempt.get(e.payload.attemptId);
       if (t) (e.threadId === t.threads.worker ? worker : checker).set(t.id, e.payload.text);
     }
@@ -359,12 +352,7 @@ function outcomes(
   for (const t of tasks) {
     const state = states.get(t.id);
     if (!state || !ENDED.has(state)) continue;
-    const line =
-      state === "failed"
-        ? t.reason
-        : fixed.has(t.id)
-          ? (checker.get(t.id) ?? worker.get(t.id))
-          : (worker.get(t.id) ?? checker.get(t.id));
+    const line = state === "failed" ? t.reason : (worker.get(t.id) ?? checker.get(t.id));
     if (line) lines.set(t.id, line);
   }
   return lines;
