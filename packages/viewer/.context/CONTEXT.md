@@ -36,7 +36,7 @@ GridViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
 - **Window.** From the coarsest level, 1st to 99.9th percentile; editable.
 
 Correctness evidence: `compose.test.ts` pins where a cropped, downsampled overlay lands; worker
-planes matched `labels.npy` of OA6-1RK exactly on all three axes (PR #grid-viewer).
+planes matched `labels.npy` of OA6-1RK exactly on all three axes ([#188](https://github.com/voluma-bio/voluma/pull/188)).
 
 # DICOM viewer specification
 
