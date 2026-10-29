@@ -306,7 +306,9 @@ export function supervisor(options: SupervisorOptions) {
       (x) => x.end?.status === "failed" && options.providerError?.(x.end.error ?? ""),
     ).length;
     if (failures > maxProviderRedos) {
-      throw new Error(`${r.id} failed on a model provider error ${failures} times: ${error}`);
+      throw new Error(
+        `${r.taskId}: its ${r.role} failed on a model provider error ${failures} times: ${error}`,
+      );
     }
     return "redo";
   }
@@ -506,6 +508,11 @@ export function supervisor(options: SupervisorOptions) {
     let action: "accept" | "redo" | "fail" = "accept";
     let fallback: "error" | "redo-cap" | undefined;
     if (!wake.decision) {
+      // The main thread's own call died on the provider: the outage is what ends the run, not a
+      // task left unjudged with its dependents never started.
+      if (wake.error && options.providerError?.(wake.error)) {
+        throw new Error(`the main thread could not judge ${taskId}: ${wake.error}`);
+      }
       // A person can still read the task; a main thread that failed must not stall the run.
       fallback = "error";
     } else if (wake.decision.action === "redo" && redosOf(d, taskId) >= maxRedos) {
@@ -553,7 +560,7 @@ export function supervisor(options: SupervisorOptions) {
         expired,
       ]);
     } catch (error) {
-      answer = { error: String(error) };
+      answer = { error: error instanceof Error ? error.message : String(error) };
     }
     if (signal?.aborted) return;
     await runtime.section(async () => {
