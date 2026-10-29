@@ -1,0 +1,244 @@
+/**
+ * The study page (`/studies/:id`): a dashboard for the scans of one study, run through one
+ * workflow. One header row (Home, the study's name, the tabs, Study details, Add scans) over
+ * Overview (groups compared per headline measurement, what needs the researcher, scan tiles),
+ * To check (every open check across scans, by kind) and Scans (a table of every scan). The
+ * selected tab lives in `?tab=`. A study of one has no dashboard: it opens its run.
+ *
+ * "Open in 3D" calls `openChecks` with the queue of To check items in display order. The check
+ * panel (a later lane) passes its own; until then the default opens the run's review at the task.
+ */
+import { useQuery } from "@tanstack/react-query";
+import { ApiError, getStudy } from "@voluma/api-client";
+import type { StudyDetail, ToCheckItem } from "@voluma/contracts/study";
+import { Button, Tabs } from "@voluma/ui";
+import { type BundledWorkflow, catalog, workflowById } from "@voluma/workflow/bundled";
+import { ChevronDown } from "lucide-react";
+import { Popover } from "radix-ui";
+import { useCallback } from "react";
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router";
+import { Overview } from "./overview";
+import { ScansTable } from "./scans-table";
+import { isLive, runPath, studyCounts, studySpend } from "./study-model";
+import { ToCheck } from "./to-check";
+
+/** Opens the check queue at `start`; the check panel's mount point. */
+export type OpenChecks = (queue: ToCheckItem[], start: number) => void;
+
+const TAB_IDS = ["overview", "check", "scans"] as const;
+type TabId = (typeof TAB_IDS)[number];
+const PANEL_ID = "study-panel";
+
+// Every bundled workflow's headline ids, so one read serves a study of any of them: the API
+// returns only the ids a run reported, and the page reads only its own workflow's.
+const HEADLINE_IDS = [
+  ...new Set(Object.values(catalog).flatMap((w) => w.headline.map((o) => o.id))),
+];
+
+export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
+  const { id = "" } = useParams();
+  const navigate = useNavigate();
+  const [search, setSearch] = useSearchParams();
+  const tabParam = search.get("tab");
+  const tab: TabId = TAB_IDS.find((t) => t === tabParam) ?? "overview";
+
+  const study = useQuery({
+    queryKey: ["study", id],
+    queryFn: () => getStudy(id, HEADLINE_IDS),
+    refetchInterval: (query) => (query.state.data?.scans.some(isLive) ? 5000 : false),
+  });
+
+  const openReview = useCallback<OpenChecks>(
+    (queue, start) => {
+      const item = queue[start];
+      if (item) navigate(`/runs/${item.runId}?task=${encodeURIComponent(item.taskId)}`);
+    },
+    [navigate],
+  );
+
+  const setTab = (next: TabId) =>
+    setSearch(next === "overview" ? {} : { tab: next }, { preventScrollReset: true });
+
+  if (study.isPending) return <Loading />;
+  if (study.isError) return <LoadError error={study.error} retry={() => void study.refetch()} />;
+
+  const detail = study.data;
+  const only = detail.scans.length === 1 ? detail.scans[0] : undefined;
+  const onlyRun = only && runPath(only);
+  if (onlyRun) return <Navigate to={onlyRun} replace />;
+
+  const workflow = workflowById(detail.study.workflowId);
+  if (!workflow) return <LoadError error={new Error("unknown workflow")} retry={() => {}} />;
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <StudyHeader detail={detail} workflow={workflow} tab={tab} onTab={setTab} />
+      <div
+        id={PANEL_ID}
+        role="tabpanel"
+        aria-label={tab === "overview" ? "Overview" : tab === "check" ? "To check" : "Scans"}
+        className="min-h-0 flex-1 overflow-y-auto"
+      >
+        <div className="mx-auto w-full max-w-[90rem] px-6 py-5 max-[760px]:px-3 max-[760px]:py-4">
+          {tab === "overview" && <Overview detail={detail} workflow={workflow} onTab={setTab} />}
+          {tab === "check" && (
+            <ToCheck detail={detail} workflow={workflow} openChecks={openChecks ?? openReview} />
+          )}
+          {tab === "scans" && <ScansTable detail={detail} workflow={workflow} />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StudyHeader({
+  detail,
+  workflow,
+  tab,
+  onTab,
+}: {
+  detail: StudyDetail;
+  workflow: BundledWorkflow;
+  tab: TabId;
+  onTab: (tab: TabId) => void;
+}) {
+  const c = studyCounts(detail);
+  const scansLabel = [
+    `${c.done} of ${c.scans} done`,
+    c.running && `${c.running} running`,
+    c.waiting && `${c.waiting} waiting`,
+    c.notStarted && `${c.notStarted} not started`,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  return (
+    <header className="flex shrink-0 flex-wrap items-stretch gap-x-8 border-b border-border bg-card px-6 max-[760px]:gap-x-4 max-[760px]:px-3">
+      <div className="flex min-h-13 min-w-0 items-center gap-2.5">
+        <Link to="/" className="text-ui text-fg-subtle hover:text-foreground">
+          Home
+        </Link>
+        <span aria-hidden className="text-fg-subtle">
+          /
+        </span>
+        <h1 className="truncate text-base font-semibold">{detail.study.name}</h1>
+      </div>
+      <Tabs
+        label="Study"
+        controls={PANEL_ID}
+        value={tab}
+        onChange={onTab}
+        className="max-[760px]:order-last max-[760px]:-mx-3 max-[760px]:basis-[calc(100%+1.5rem)] max-[760px]:px-1"
+        tabs={[
+          { id: "overview", label: "Overview" },
+          {
+            id: "check",
+            label: "To check",
+            count: c.toCheck || undefined,
+            alert: c.toCheck > 0,
+          },
+          {
+            id: "scans",
+            label: "Scans",
+            count: `${c.done}/${c.scans}`,
+            countLabel: scansLabel,
+          },
+        ]}
+      />
+      <div className="ml-auto flex items-center gap-2">
+        <StudyDetails detail={detail} workflow={workflow} />
+        <Link
+          to="/new"
+          className="inline-flex h-8 items-center rounded-lg border border-border bg-card px-3.5 text-ui font-medium whitespace-nowrap hover:bg-accent"
+        >
+          Add scans
+        </Link>
+      </div>
+    </header>
+  );
+}
+
+function StudyDetails({ detail, workflow }: { detail: StudyDetail; workflow: BundledWorkflow }) {
+  const spent = studySpend(detail);
+  const budget = detail.study.budgetUsd;
+  const rows: [string, string][] = [
+    ["Workflow", workflow.name],
+    ["Scans", String(detail.scans.length)],
+    ["Spent so far", `${usd(spent)}${budget === null ? "" : ` of ${usd(budget)}`}`],
+    [
+      "Started",
+      new Date(detail.study.createdAt).toLocaleDateString(undefined, {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      }),
+    ],
+  ];
+  return (
+    <Popover.Root>
+      <Popover.Trigger asChild>
+        <Button variant="ghost" size="sm" className="gap-1 px-2.5">
+          Study details
+          <ChevronDown className="size-3.5" aria-hidden />
+        </Button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          align="end"
+          sideOffset={4}
+          className="z-50 w-72 rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-md"
+        >
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-ui">
+            {rows.map(([k, v]) => (
+              <div key={k} className="contents">
+                <dt className="text-muted-foreground">{k}</dt>
+                <dd className="m-0 tabular-nums">{v}</dd>
+              </div>
+            ))}
+          </dl>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+}
+
+const usd = (n: number) => `$${n.toFixed(2)}`;
+
+function Loading() {
+  return (
+    <main aria-busy="true" className="grid flex-1 place-content-center">
+      {/* Shown only when loading is slow, so a fast load doesn't flash it. */}
+      <p className="animate-[appear_200ms_ease-out_600ms_both] text-ui text-muted-foreground">
+        Loading the study…
+      </p>
+    </main>
+  );
+}
+
+function LoadError({ error, retry }: { error: Error; retry: () => void }) {
+  const missing = error instanceof ApiError && error.status === 404;
+  return (
+    <main className="grid flex-1 place-content-center gap-3 text-center">
+      <h1 className="text-lg font-semibold">
+        {missing ? "This study isn't here" : "Couldn't load the study"}
+      </h1>
+      <p className="text-ui text-muted-foreground">
+        {missing
+          ? "It may have been removed, or it belongs to another lab."
+          : "Check your connection, then try again."}
+      </p>
+      <div className="flex justify-center gap-2">
+        {!missing && (
+          <Button variant="primary" size="sm" onClick={retry}>
+            Try again
+          </Button>
+        )}
+        <Link
+          to="/"
+          className="inline-flex h-8 items-center rounded-lg border border-border bg-card px-3.5 text-ui font-medium hover:bg-accent"
+        >
+          Go to Home
+        </Link>
+      </div>
+    </main>
+  );
+}

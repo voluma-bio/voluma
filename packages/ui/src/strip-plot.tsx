@@ -16,6 +16,8 @@ export type StripPoint = {
   value: number | null;
   /** Far from its group: drawn amber, with its label above it. */
   far?: boolean;
+  /** Why it is far, in the tooltip under "Far from its group" (the rule's numbers). */
+  farReason?: string;
   /** Drawn as a ring; the page's legend says what that means. */
   hollow?: boolean;
 };
@@ -129,7 +131,7 @@ export function StripPlot({
                   key={p.id}
                   point={p}
                   cy={mid + p.y}
-                  name={`${p.label}, ${p.value.toFixed(valueDigits)} ${unit}${p.far ? ", far from its group" : ""}`}
+                  name={`${p.label}, ${p.value.toFixed(valueDigits)} ${unit}${p.far ? `, far from its group${p.farReason ? `: ${p.farReason}` : ""}` : ""}`}
                   onSelect={() => onSelect(p)}
                   onActive={(on) => setActive(on ? p.id : null)}
                 />
@@ -143,6 +145,7 @@ export function StripPlot({
                   <span className="font-mono tabular-nums">{p.value.toFixed(valueDigits)}</span>{" "}
                   {unit}
                   {p.far && <span className="block text-check-solid">Far from its group</span>}
+                  {p.far && p.farReason && <span className="block">{p.farReason}</span>}
                 </Tooltip>
               ))}
           </Row>
