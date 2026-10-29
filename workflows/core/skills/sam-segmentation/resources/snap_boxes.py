@@ -9,27 +9,14 @@ Refused: a 3D stack without `--index`, a missing sidecar, a malformed box.
 Writes: <out>  with --out: the snapped boxes as a JSON list, in the order given
 Prints: one JSON line {snapped: [[r0, c0, r1, c1], ...], grew: [bool per box], index, out}
 Example: python snap_boxes.py --in oriented.npy --index 159 --threshold-hu 2500 --boxes 100,80,180,200 --out boxes.json
-Exits 2 with one sentence on the input it checks; a missing file is a Python error.
+Exits 2 with one sentence on bad input, before writing anything.
 """
 import json
-import sys
 from pathlib import Path
 
 import numpy as np
+import sidecar
 from scipy import ndimage as ndi
-
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
-# only missing directories are added, so a script imported by another leaves the importer's order alone.
-SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources')) if d not in sys.path]
-try:
-    import sidecar
-except ModuleNotFoundError as e:
-    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
-          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
-    sys.exit(2)
-
 
 
 def snap_box(image, box, threshold, pad=3, min_px=50):
@@ -48,7 +35,7 @@ def snap_box(image, box, threshold, pad=3, min_px=50):
 
 if __name__ == '__main__':
     ap = sidecar.parser(__doc__)
-    ap.add_argument('--in', dest='src', required=True, help='oriented stack (3D) or a 2D slice, .npy, with its sidecar .json beside it (for the pixel size)')
+    ap.add_argument('--in', type=sidecar.existing, dest='src', required=True, help='oriented stack (3D) or a 2D slice, .npy, with its sidecar .json beside it (for the pixel size)')
     ap.add_argument('--index', type=int, help='slice of the stack (axis 0); required for a 3D stack')
     ap.add_argument('--threshold-hu', type=float, required=True, help='bone threshold in the volume units')
     ap.add_argument('--boxes', nargs='+', required=True, metavar='r0,c0,r1,c1', help='boxes in row/column pixels, ends inclusive')

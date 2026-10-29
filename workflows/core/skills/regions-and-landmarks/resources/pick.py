@@ -24,28 +24,16 @@ Writes: <out>/points.json  {points: [{name, zyx, snap_distance_mm, method, pick_
         <out>/pick-check.jpg  the pane with the mask outlined (cyan), each pick (red x) and where it snapped (green circle)
 Prints: one JSON line {points, check, snapped: [{name, zyx, snap_distance_mm}]}
 Example: python pick.py --picks picks.json --labels labels.npy --ids 2 --grid hu.json --out picks/A
-Exits 2 with one sentence on the input it checks; a missing file is a Python error.
+Exits 2 with one sentence on bad input, before writing anything.
 """
 
 import json
-import sys
 from pathlib import Path
 
 import numpy as np
+import viewlib as vl
 from scipy import ndimage as ndi
 from scipy.spatial import cKDTree
-
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
-# only missing directories are added, so a script imported by another leaves the importer's order alone.
-SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources'), str(SKILLS / 'visual-check/resources')) if d not in sys.path]
-try:
-    import viewlib as vl
-except ModuleNotFoundError as e:
-    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
-          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
-    sys.exit(2)
 
 sidecar = vl.sidecar
 plt = vl.plt
@@ -127,11 +115,11 @@ def load_mask(a):
 
 def main():
     ap = sidecar.parser(__doc__)
-    ap.add_argument('--picks', required=True, help='JSON of the picks and the view, described above')
-    ap.add_argument('--mask', help='bool .npy of the structure to snap to (or --labels with --ids)')
-    ap.add_argument('--labels', help='label .npy; with --ids, the voxels with those labels are the structure')
+    ap.add_argument('--picks', type=sidecar.existing, required=True, help='JSON of the picks and the view, described above')
+    ap.add_argument('--mask', type=sidecar.existing, help='bool .npy of the structure to snap to (or --labels with --ids)')
+    ap.add_argument('--labels', type=sidecar.existing, help='label .npy; with --ids, the voxels with those labels are the structure')
     ap.add_argument('--ids', type=int, nargs='+', help='label ids that make up the structure, with --labels')
-    ap.add_argument('--grid', required=True, help='hu.json or a sidecar of the grid the mask is on')
+    ap.add_argument('--grid', type=sidecar.existing, required=True, help='hu.json or a sidecar of the grid the mask is on')
     ap.add_argument('--out', required=True, help='output directory (created)')
     a = ap.parse_args()
     spec = json.loads(Path(a.picks).read_text())
@@ -148,7 +136,6 @@ def main():
     inputs += [spec['view'], view['image']]
     img = Image.open(view['image']).convert('RGB')
     out = Path(a.out)
-    out.mkdir(parents=True, exist_ok=True)
     mode = spec.get('mode')
     results = []
     if mode == 'surface':
@@ -190,6 +177,7 @@ def main():
             draw(ax, p['name'], (col, row), (cs, rs))
     else:
         sidecar.fail('the picks JSON needs "mode": "surface" or "slice"')
+    out.mkdir(parents=True, exist_ok=True)
     fig_path = out / 'pick-check.jpg'
     sidecar.save_image(fig, fig_path)
     plt.close(fig)

@@ -37,29 +37,16 @@ Writes: <out>/frame.json  the frame (`microct-core/resources/frame.py` has its s
         <out>/keyframe.jpg  the keyframe slice
 Prints: one JSON line {frame, oriented, keyframe_image, keyframe, slices, bend_deg, skew_vox, shafts_found, keyframe_bone_vox, threshold_hu, plane_rule, ref_object_frames, oriented_shape}
 Example: python orient_joint.py --in hu.npy --header hu.json --out orient --shaft-radius-mm 0.9 --ref-radius-mm 3 --min-object-mm3 0.5
-Exits 2 with one sentence on the input it checks; a missing file is a Python error.
+Exits 2 with one sentence on bad input, before writing anything.
 """
-import sys
 from pathlib import Path
 
+import frame as fr
 import numpy as np
+import render_slices
+import sidecar
 from scipy import ndimage as ndi
 from scipy.spatial import cKDTree
-
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
-# only missing directories are added, so a script imported by another leaves the importer's order alone.
-SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources'), str(SKILLS / 'visual-check/resources')) if d not in sys.path]
-try:
-    import frame as fr
-    import render_slices
-    import sidecar
-except ModuleNotFoundError as e:
-    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
-          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
-    sys.exit(2)
-
 
 END_FRAC = 0.30
 SHAFT_RANGE = (0.35, 0.95)
@@ -181,6 +168,8 @@ def joint_frame(hu, spacing_mm, shaft_radius_mm, ref_radius_mm, min_object_mm3, 
     fg = sub > T
     closed = ndi.binary_closing(fg, ndi.generate_binary_structure(3, 1), iterations=1) | fg
     lab, n = ndi.label(closed)
+    if n == 0:
+        sidecar.fail(f'No bone found above {T:.0f} HU: check the volume and --threshold-hu')
     sizes = ndi.sum_labels(fg, lab, range(1, n + 1)) * 8
     order = np.argsort(-sizes)
     cents = np.array(ndi.center_of_mass(fg, lab, range(1, n + 1))) * 2 + 0.5
@@ -294,8 +283,8 @@ def joint_frame(hu, spacing_mm, shaft_radius_mm, ref_radius_mm, min_object_mm3, 
 
 if __name__ == '__main__':
     ap = sidecar.parser(__doc__)
-    ap.add_argument('--in', dest='src', required=True, help='hu.npy of the scan')
-    ap.add_argument('--header', required=True, help='hu.json from scan-intake')
+    ap.add_argument('--in', type=sidecar.existing, dest='src', required=True, help='hu.npy of the scan')
+    ap.add_argument('--header', type=sidecar.existing, required=True, help='hu.json from scan-intake')
     ap.add_argument('--out', required=True, help='output directory (created)')
     ap.add_argument('--threshold-hu', type=float, help='bone threshold in HU (default: Otsu on the volume)')
     ap.add_argument('--shaft-radius-mm', type=float, required=True, help='mm: the widest a shaft gets')
@@ -310,13 +299,13 @@ if __name__ == '__main__':
     sp = g['spacing_zyx_mm']
     if not np.allclose(sp, sp[0], rtol=1e-3):
         sidecar.fail(f'Voxels are not isotropic ({sp} mm): resample the volume before orienting')
-    out = Path(a.out)
-    out.mkdir(parents=True, exist_ok=True)
     hu = np.load(a.src, mmap_mode='r')
     params = {'threshold_hu': a.threshold_hu, 'shaft_radius_mm': a.shaft_radius_mm, 'ref_radius_mm': a.ref_radius_mm,
                   'min_object_mm3': a.min_object_mm3, 'margin_mm': a.margin_mm,
                   'second_bone_frac': a.second_bone_frac}
     frame = fr.make(g['grid_id'], sp, parent_affine_xyz=g['affine_xyz_to_world_mm'], **joint_frame(hu, sp[0], **params))
+    out = Path(a.out)
+    out.mkdir(parents=True, exist_ok=True)
     stack = fr.resample(hu, frame, cval=frame['background_hu'])
     np.save(out / 'oriented.npy', stack)
     fr.save(frame, out / 'frame.json')

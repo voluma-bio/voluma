@@ -18,27 +18,15 @@ Writes: <out>  with --points-file: {grid_id, points: [{name, zyx}]} on the other
 Prints: --to-oriented: one JSON line {oriented_srs: [[s, r, c], ...]}; --to-scan: {scan_zyx: [[z, y, x], ...]};
         --points-file: {points, grid_id}; --pieces: {boxes, pieces: {id: prompt}, cut_by_stack: [ids]}
 Example: python map_points.py --frame frame.json --pieces cand.npy --ids 1 3 --out boxes.json
-Exits 2 with one sentence on the input it checks; a missing file is a Python error.
+Exits 2 with one sentence on bad input, before writing anything.
 """
 import json
-import sys
 from pathlib import Path
 
+import frame as fr
 import numpy as np
+import sidecar
 from scipy import ndimage as ndi
-
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
-# only missing directories are added, so a script imported by another leaves the importer's order alone.
-SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources')) if d not in sys.path]
-try:
-    import frame as fr
-    import sidecar
-except ModuleNotFoundError as e:
-    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
-          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
-    sys.exit(2)
 
 
 def parse_points(items):
@@ -69,11 +57,11 @@ def piece_prompt(voxels_zyx, frame):
 
 if __name__ == '__main__':
     ap = sidecar.parser(__doc__)
-    ap.add_argument('--frame', required=True, help='frame.json from orient_joint.py')
+    ap.add_argument('--frame', type=sidecar.existing, required=True, help='frame.json from orient_joint.py')
     ap.add_argument('--to-oriented', nargs='+', metavar='z,y,x', help='scan voxel indices to map onto the stack')
     ap.add_argument('--to-scan', nargs='+', metavar='s,r,c', help='stack (slice, row, col) positions to map to scan voxels')
-    ap.add_argument('--points-file', help='points file on the frame grid or the scan grid: written to --out on the other')
-    ap.add_argument('--pieces', help='candidate volume .npy from unlabelled.py (scan grid)')
+    ap.add_argument('--points-file', type=sidecar.existing, help='points file on the frame grid or the scan grid: written to --out on the other')
+    ap.add_argument('--pieces', type=sidecar.existing, help='candidate volume .npy from unlabelled.py (scan grid)')
     ap.add_argument('--ids', type=int, nargs='+', help='with --pieces: the candidate ids to map (default: all)')
     ap.add_argument('--out', help='JSON file to write; required with --pieces or --points-file')
     a = ap.parse_args()

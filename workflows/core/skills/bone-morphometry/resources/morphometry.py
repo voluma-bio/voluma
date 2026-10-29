@@ -17,30 +17,17 @@ Writes: volumes: <out>/volumes.json; trabecular: <out>/morphometry.json, qc.jpg,
         The json is the result record {values: {id: {value, unit, definition, kind}}, grid_id, inputs, ...}
 Prints: one JSON line {out, values: {id: {value, unit, definition, kind}}}; trabecular adds {qc, thickness, separation}, cortical {qc}
 Example: python morphometry.py trabecular --roi roi.npy --hu hu.npy --hu-json hu.json --out out/roi2 --id BV/TV=BVTV-roi2
-Exits 2 with one sentence on the input it checks; a missing file is a Python error.
+Exits 2 with one sentence on bad input, before writing anything.
 """
 
 import argparse
-import sys
 import warnings
 from pathlib import Path
 
 import matplotlib
 import numpy as np
+import sidecar
 from scipy import ndimage as ndi
-
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
-# only missing directories are added, so a script imported by another leaves the importer's order alone.
-SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources')) if d not in sys.path]
-try:
-    import sidecar
-except ModuleNotFoundError as e:
-    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
-          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
-    sys.exit(2)
-
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -401,11 +388,11 @@ def main():
     ap = sidecar.parser(__doc__)
     sub = ap.add_subparsers(dest='cmd', required=True)
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument('--roi', required=True, help='bool .npy: the region measured')
-    common.add_argument('--hu', required=True, help='HU array on the region\'s grid (hu.npy for a scan-grid region, the aligned stack\'s HU otherwise): bone = HU above the threshold')
-    common.add_argument('--hu-json', help='the scan\'s hu.json: the lab threshold in HU comes from its calibration (not needed with --threshold)')
+    common.add_argument('--roi', type=sidecar.existing, required=True, help='bool .npy: the region measured')
+    common.add_argument('--hu', type=sidecar.existing, required=True, help='HU array on the region\'s grid (hu.npy for a scan-grid region, the aligned stack\'s HU otherwise): bone = HU above the threshold')
+    common.add_argument('--hu-json', type=sidecar.existing, help='the scan\'s hu.json: the lab threshold in HU comes from its calibration (not needed with --threshold)')
     common.add_argument('--threshold', type=float, help='bone threshold in HU (default: the lab threshold, 2.16/cm, from --hu-json)')
-    common.add_argument('--grid', help='sidecar of the grid the region and --hu are on (default: the region\'s own)')
+    common.add_argument('--grid', type=sidecar.existing, help='sidecar of the grid the region and --hu are on (default: the region\'s own)')
     common.add_argument('--region', default='ROI', help='name of the region in the value definitions')
     common.add_argument('--out', required=True, help='output directory (created)')
     fmt = sidecar.HelpFormatter
@@ -426,9 +413,9 @@ def main():
     c = sub.add_parser('cortical', formatter_class=fmt, help='Ct.Th in a slab at a depth below a reference surface',
                        description='Ct.Th: mean largest-contained-sphere diameter over the cortical voxels of a slab at a depth below a '
                        'reference surface. Writes <out>/<name>.json and qc-<name>.jpg.')
-    c.add_argument('--cortex', required=True, help='bool .npy of the cortical bone (not trabeculae)')
+    c.add_argument('--cortex', type=sidecar.existing, required=True, help='bool .npy of the cortical bone (not trabeculae)')
     c.add_argument(
-        '--surface', required=True, help='2D .npy: index along --axis of the reference surface, per position (the mask shape without --axis)'
+        '--surface', type=sidecar.existing, required=True, help='2D .npy: index along --axis of the reference surface, per position (the mask shape without --axis)'
     )
     c.add_argument('--axis', type=int, default=0, choices=[0, 1, 2], help='axis the depth is measured along')
     c.add_argument(
@@ -440,7 +427,7 @@ def main():
         '--context-um', type=float, default=400, help='um: cortex kept above and below the slab when measuring spheres'
     )
     c.add_argument('--name', default='Ct.Th', help='the output id of the value (and the output file name)')
-    c.add_argument('--grid', required=True, help='hu.json or a sidecar of the grid the cortex is on')
+    c.add_argument('--grid', type=sidecar.existing, required=True, help='hu.json or a sidecar of the grid the cortex is on')
     c.add_argument('--out', required=True, help='output directory (created)')
     c.set_defaults(fn=cortical)
     a = ap.parse_args()
