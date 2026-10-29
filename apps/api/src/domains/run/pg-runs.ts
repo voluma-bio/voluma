@@ -260,7 +260,7 @@ const CACHE_CAP = 2048;
 type RunResult = { run: Run } & Derived;
 
 /**
- * With `skipUnreadable` (the list), a completed run whose events no longer parse is left out
+ * With `skipUnreadable` (the lists, study reads included), a completed run whose events no longer parse is left out
  * rather than failing every run listed with it. Without it (one run's read) it throws: the
  * run's own page must fail loudly, not read as "no plan" (a 409 the web polls forever).
  */
@@ -452,6 +452,7 @@ export function pgRunReads(db: PostgresJsDatabase) {
             tx,
             and(readableRuns(reader), eq(runs.studyId, studyId)),
             summaries,
+            true,
           );
           const newest = newestCompleted(results);
           return {
