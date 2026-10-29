@@ -1,9 +1,48 @@
+# Runner: sandbox roles
+
+A sandbox is created from a spec with a role (`packages/harness/src/sandbox-specs.ts`), which fixes
+its size (2 CPUs, 8192 MiB), its network and which mounts it holds. Tags on every sandbox:
+`{run, name, claim, startedAt}`; `sandboxes:clean --run` ends all roles.
+
+| Role | Mounts | Network | Name |
+|---|---|---|---|
+| `worker` | as the caller says (today `RunLayout.mounts`) | the gateway host over HTTPS (`outboundDomainAllowlist`), if the spec has a `gateway`; else none | `<taskId>.worker[.n]` |
+| `checker` | `readOnly` mounts read-only, one writable `scratch` prefix | none | `<taskId>.check[.n]` |
+| `convert` | `evidence` read-only, `review` writable | none | the job's |
+
+The builder sets the access of each mount, and the Modal adapter refuses a network on a
+non-worker role. The runner makes one sandbox per thread (`sandboxSession.get(threadId)`,
+named by the thread id without the run id). **Check threads still run on a worker-role
+sandbox**: the checker spec exists, but the run-wide `/scratch` is assumed by the check skills
+(`/scratch/recheck/`), by checkpoint evidence `{root: "scratch", path}` (`r2Evidence`), by the
+`bash` spill (`toolOutputPath`) and by `view_image`/`segment_sam` (`RunLayout.keyOf`). Moving them
+to `/scratch/<check thread>/` needs those four to take the thread, and the skill text to change.
+The checker's other writes: none (`workflows/core/agents/checker.md` says it changes nothing).
+Spend and the usage meter sum sandbox seconds over all sandboxes.
+
+**Probed 2026-10-29 (Modal SDK 0.11.1, run p414), the facts the design relied on:**
+
+- R2 mount writes work with `outboundDomainAllowlist` set and with `blockNetwork: true`: read,
+  write and `ls` all succeeded on a read-write mount in both. A read-only mount refuses writes
+  (`Read-only file system`).
+- A mount does not cache listings for long: sandbox B had listed `/shared` (one file), sandbox A
+  then wrote `late.txt`, and B's next `ls` and `cat` (an exec round trip, about 0.6 s later) saw
+  it; a sandbox created afterwards listed it too. So a checker sees a file a worker just wrote.
+- With an allowlist, HTTPS to the listed host works, and another host (`www.google.com`, by name),
+  an IP (`1.1.1.1`) and plain HTTP (even to the listed host) fail. **DNS queries still leave**:
+  `www.google.com` resolved to an address, and a name that does not exist got NXDOMAIN, while a
+  `blockNetwork` sandbox cannot resolve anything. The allowlist therefore needs `https://` gateway
+  URLs, and the worker sandbox can encode data in lookups of names it picks: treat the token and
+  mounts as readable by anything the worker's code does.
+- The sandbox's `/proc/meminfo` shows the host, not the 8 GiB request; the limit is not
+  observable from inside.
+
 # Runner: how sandboxes end
 
 Sandboxes cost money while up (a GPU one a lot), so every one must end. In order of
 who ends it:
 
-1. **The runner, normally.** `run.ts` closes the run's sandbox when the supervisor ends,
+1. **The runner, normally.** `run.ts` closes the run's sandboxes (one per thread) when the supervisor ends,
    before it flushes events and reports, so the `stopped` event and the last sandbox seconds
    are stored under the live lease. If the close takes over 60 s (15 s after a stop) it asks Modal to terminate
    the sandboxes of this claim, by their `{run, claim}` tags (the claim is a per-claim id: a
@@ -13,7 +52,7 @@ who ends it:
    then closes its sandbox (no `stopped` event is stored); the service waits up to 30 s. A second signal
    exits 130 at once and leaves the sandboxes (use `sandboxes:clean`). Signal the process
    group (Ctrl-C does); `kill <pid of pnpm>` alone leaves the runner running.
-3. **A resume.** `create` terminates live sandboxes tagged with the same `{run, name}`. A creation is aborted with the run's signal (checked before that sweep, between terminations and before `create`), so a released run's creation cannot end the sandbox of the runner that reclaimed it. A process frozen past its lease (a sleeping laptop) can still act late.
+3. **A resume.** Right after a claim succeeds, `run.ts` terminates every live sandbox tagged with the run but not this claim (`terminateOtherClaims`: one list call, then each sandbox's tags; no wait). The claim holds the lease, so nothing an earlier claim started keeps writing or spending. The sweep is cleanup and never decides the run's outcome: an error is logged and retried once, and the idle timeout backs it up. A creation is aborted with the run's signal, so a released run's creation cannot start a sandbox beside the runner that reclaimed it. A process frozen past its lease (a sleeping laptop) can still act late.
 4. **Modal ends it.** After 300 s with no command running (`VOLUMA_SANDBOX_IDLE_SECONDS` in
    `.env`, at least 30) or at a hard lifetime of 14400 s (`VOLUMA_SANDBOX_LIFETIME_SECONDS`).
    Before each call the session asks Modal whether a sandbox it handed out earlier still
@@ -127,11 +166,11 @@ don't cost a turn.
 
 # Runner: sandbox memory
 
-One sandbox serves the whole run (name `main`), so tasks that run in parallel share its memory
-and 2 CPUs. A sandbox has 8192 MiB (`run.ts`). `classic_segment` measured 2.8-3.1 GB anonymous memory and
+Each thread has its own sandbox (`sandboxSession`), destroyed when the supervisor sees the thread end (`release`; a resumed thread gets a fresh one and the restart note), so only the heavy steps of one thread share
+its memory and 2 CPUs. Every role's sandbox has 8192 MiB (`sandbox-specs.ts`). `classic_segment` measured 2.8-3.1 GB anonymous memory and
 about 4.0-4.25 GB RSS with the memory-mapped scan, so 4096 MiB risked an OOM kill in a
 full run.
-Two concurrent heavy steps fit: their anonymous memory adds up (about 6 GB) and the mapped scan
+Two heavy steps of one thread running at once fit: their anonymous memory adds up (about 6 GB) and the mapped scan
 file is shared page cache, not counted twice. The `stopped` event of a sandbox Modal ended carries its exit code (Modal's SDK: 124 a timeout, 137 any terminated
 sandbox, so an out-of-memory kill or a terminate call), so a restart's cause is in the run's record. In the 2026-10-28 local run the sandbox ended at 1 h 0 min (the
 lifetime) and once more 23 min into the replacement, before the exit code was logged.
