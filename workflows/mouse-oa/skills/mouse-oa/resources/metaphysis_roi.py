@@ -187,6 +187,7 @@ def main():
             inputs=inputs,
             params=params,
             script='metaphysis_roi.py',
+            surface_axis=0 if name == 'growth-plate-distal-face.npy' else None,
         )
     (out / 'roi3.json').write_text(json.dumps(params, indent=1) + '\n')
     vs = np.linspace(*np.flatnonzero(roi.any(axis=(0, 2)))[[0, -1]], 4).astype(int)
