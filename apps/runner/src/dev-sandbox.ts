@@ -85,7 +85,7 @@ const stats = () => {
   return line;
 };
 
-const layout = layoutOf(run);
+const layout = layoutOf(run, []); // no workflow is loaded here, so no PYTHONPATH
 const sandboxName = "dev.worker";
 meter.sandboxUp();
 const sandbox = await claimSandboxes(
@@ -100,6 +100,7 @@ const sandbox = await claimSandboxes(
     lifetimeSeconds: config.sandbox.lifetimeSeconds,
     idleSeconds: config.sandbox.idleSeconds,
     mounts: layout.mounts,
+    env: layout.env,
     gateway: sandboxGateway(
       config,
       { runId: run.id, leaseToken, visitorMetaKey: claim.keys?.metaApiKey },

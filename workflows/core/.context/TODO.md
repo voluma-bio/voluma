@@ -33,12 +33,9 @@ From the structural review of PR #62 (`review-pr62` p231, structure) and the cor
 - `annotations.json` mixes point orders: curves are `[w, u]`, `width_points_uvw` and
   `plate_patches` are `[u, v, w]`. Documented, but a hand-writing agent holds two orders.
 
-## Drop the per-script `sys.path` bootstrap (Jimmy, 2026-10-29)
-- Nothing in the runner, sandbox image or harness runs `python -I` or sets `PYTHONPATH`; the eight bootstrap lines at the
-  top of 28 scripts exist only so a script can import `microct-core/resources` and sibling skills' `resources/`. Replace
-  them with one `PYTHONPATH` the runner sets on every sandbox exec (each `skills/*/resources/` of the snapshot) and the
-  `pythonpath` already in `workflows/pyproject.toml` for the tests; then delete the lines, `tests/test_help.py`'s `-I`
-  subprocess case, and the Imports rule in `AGENTS.md`. Touches every script, so it goes after #171.
+## Input checks the parser does not make
+- The sidecar a labels or `--like` file needs beside it (`labels.json`) is read by the script: a missing one is a Python error,
+  not a sentence. A `sidecar.existing` check for it would close it. (`quad_view`'s `NAME=path` forms are checked by `need_file`.)
 
 ## Lengths still in voxels (left by the skills cleanup)
 - Internal, not flags: `classic_segment.py` `MARGIN`, `SLAB`, `GRADIENT_RADIUS` (compute halos), `snap_boxes.py` `min_px=50`.

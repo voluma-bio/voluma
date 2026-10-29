@@ -16,28 +16,16 @@ Writes: <out>/<name>-hu.npy  float32 HU on the aligned grid (linear interpolatio
         <out>/<name>-frame-qc.jpg  six coronal sections of the aligned stack with the mask outlined: check the axes here
 Prints: one JSON line {hu, mask, frame, qc, grid_id, shape_wvu, mask_volume_mm3, shaft_z, epiphysis_z}
 Example: python tibia_frame.py --hu hu.npy --hu-json hu.json --labels labels.npy --label 2 --out tibia/ --joint-end low
-Exits 2 with one sentence on the input it checks; a missing file is a Python error.
+Exits 2 with one sentence on bad input, before writing anything.
 """
 
-import sys
 from pathlib import Path
 
+import frame as fr
 import matplotlib
 import numpy as np
-
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
-# only missing directories are added, so a script imported by another leaves the importer's order alone.
-SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources')) if d not in sys.path]
-try:
-    import frame as fr
-    import sidecar
-    from envelope import close_and_fill
-except ModuleNotFoundError as e:
-    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
-          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
-    sys.exit(2)
+import sidecar
+from envelope import close_and_fill
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -95,9 +83,9 @@ def crop_for(mask, basis, origin, joint_end, depth_vox, pad):
 
 def main():
     ap = sidecar.parser(__doc__)
-    ap.add_argument('--hu', required=True, help='hu.npy of the scan (float32, Z,Y,X)')
-    ap.add_argument('--hu-json', required=True, help='hu.json that scan-intake wrote: grid id and spacing')
-    ap.add_argument('--labels', required=True, help='labels.npy on the scan grid')
+    ap.add_argument('--hu', type=sidecar.existing, required=True, help='hu.npy of the scan (float32, Z,Y,X)')
+    ap.add_argument('--hu-json', type=sidecar.existing, required=True, help='hu.json that scan-intake wrote: grid id and spacing')
+    ap.add_argument('--labels', type=sidecar.existing, required=True, help='labels.npy on the scan grid')
     ap.add_argument('--label', type=int, required=True, help='label id of the bone (tibia = 2)')
     ap.add_argument('--out', required=True, help='output directory (created)')
     ap.add_argument('--name', default='tibia', help='prefix of the output files')

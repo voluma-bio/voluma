@@ -1,6 +1,6 @@
 """Reading an annotations file: the curves an agent traced on slices of one aligned grid, as the scripts that cut regions need them.
 
-Library, not a script: the calling script puts `microct-core/resources` and this directory on `sys.path`.
+Library, not a script: it imports `sidecar` and is imported by name, both through PYTHONPATH.
 A file carries the `grid_id` of the grid it was traced on (indices mean nothing on another grid);
 curves use the schema of `region_from_curves.py` (../SKILL.md).
 """

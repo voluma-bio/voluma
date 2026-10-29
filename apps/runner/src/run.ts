@@ -31,6 +31,7 @@ import { type SandboxSession, sandboxSession } from "@voluma/harness/sandbox-ses
 import { workerSandboxSpec } from "@voluma/harness/sandbox-specs";
 import { type RunRole, superviseRun } from "@voluma/harness/supervise-run";
 import { optionalTools } from "@voluma/harness/tools";
+import type { Skill } from "@voluma/workflow/definition";
 import { loadWorkflow } from "@voluma/workflow/load";
 import { computePlan } from "@voluma/workflow/plan";
 import { type Config, isVisitorSafe, providerKey } from "./config.ts";
@@ -74,10 +75,11 @@ export interface RunnerContext {
 }
 
 /** Where a run's files are: its scan (a reference scan or an upload), outputs and scratch. */
-export const layoutOf = (run: Claim["run"]) =>
+export const layoutOf = (run: Claim["run"], skills: readonly Skill[]) =>
   runLayout(
     run.id,
     run.input.source === "reference" ? referencePrefix("scan") : inputPrefix(run.input.id),
+    skills,
   );
 
 type Stopped = StopReason | "shutdown" | "spend-cap";
@@ -198,7 +200,7 @@ export async function runClaim(
     const grant = (role: "worker" | "checker") =>
       definition.agents[role].tools.filter((t) => t !== "segment_sam" || config.gateway);
 
-    const layout = layoutOf(run);
+    const layout = layoutOf(run, definition.skills);
     const createSandbox = claimSandboxes(config, modal, claimId);
     const stored = await client.storedEvents();
     live = liveBatcher((frames) => client.live(frames));
@@ -229,6 +231,7 @@ export async function runClaim(
             lifetimeSeconds: config.sandbox.lifetimeSeconds,
             idleSeconds: config.sandbox.idleSeconds,
             mounts: layout.mounts,
+            env: layout.env,
             gateway: sandboxGateway(
               config,
               { runId, leaseToken, visitorMetaKey: keys?.metaApiKey },

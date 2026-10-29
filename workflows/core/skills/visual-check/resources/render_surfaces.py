@@ -10,25 +10,13 @@ sandbox).
 Writes: <out>  the JPEG sheet (3 x 2 views, a legend of the labels present); .mesh-cache/ beside it
 Prints: one JSON line {image, labels_drawn, step, triangles}
 Example: python render_surfaces.py --labels labels.npy --out sheet.jpg --frame frame.json --names anatomy.json
-Exits 2 with one sentence on the input it checks; a missing file is a Python error.
+Exits 2 with one sentence on bad input, before writing anything.
 """
-import sys
 from pathlib import Path
 
+import frame as fr
 import numpy as np
-
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
-# only missing directories are added, so a script imported by another leaves the importer's order alone.
-SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources')) if d not in sys.path]
-try:
-    import frame as fr
-    import viewlib as vl
-except ModuleNotFoundError as e:
-    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
-          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
-    sys.exit(2)
+import viewlib as vl
 
 sl = vl.sidecar
 TILE = 640
@@ -63,10 +51,10 @@ def render_view(ms, look, up, azimuth, size):
 
 if __name__ == '__main__':
     ap = sl.parser(__doc__)
-    ap.add_argument('--labels', required=True, help='label volume .npy')
+    ap.add_argument('--labels', type=sl.existing, required=True, help='label volume .npy')
     ap.add_argument('--out', required=True, help='the image to write (.jpg)')
-    ap.add_argument('--frame', help='frame.json from orient_joint.py: orients the views by the bones')
-    ap.add_argument('--header', help='hu.json for the spacing (default: the labels sidecar)')
+    ap.add_argument('--frame', type=sl.existing, help='frame.json from orient_joint.py: orients the views by the bones')
+    ap.add_argument('--header', type=sl.existing, help='hu.json for the spacing (default: the labels sidecar)')
     ap.add_argument('--names', help='label names, 1=femur,2=tibia or an anatomy.json')
     ap.add_argument('--step', type=int, help='downsampling step in voxels (default: the longest axis / 300, rounded, at least 1)')
     a = ap.parse_args()
