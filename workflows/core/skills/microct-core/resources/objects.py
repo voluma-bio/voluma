@@ -20,7 +20,7 @@ Library use (no CLI):
   e = objects.surface('face.npy', heights, axis, like='hu.json')           # write the array as used; `like`: a sidecar of its grid
   e = objects.mask('slab.npy', m, like='hu.json', crop=True)               # crop=False keeps the whole grid (offset 0)
   e = objects.point(zyx, grid_id); e = objects.line(a_zyx, b_zyx, grid_id)
-  e = objects.volume('tibia-hu.npy', 'tibia-frame.json')                    # kind='image', unit='HU'; header: hu.json or frame.json
+  e = objects.volume('tibia-hu.npy', 'tibia-frame.json')                    # kind='image' (unit HU) or 'labels'; header: hu.json or frame.json
   e = objects.missing('the lateral meniscus is outside the field of view')
   sidecar.emit_values(out_json, values, ..., objects={'slab': e})          # into the result record and stdout
   objects.load(e) -> {'kind', 'grid_id', ...} by kind (below); objects.kind_of(e)
@@ -35,6 +35,7 @@ from pathlib import Path
 
 import numpy as np
 import sidecar
+from scipy import ndimage as ndi
 
 GRID, SHAPE, OFFSET = 'gridId', 'shapeZyx', 'offsetZyx'
 KIND, STRUCTURE, SURFACE, ANNOTATION = 'kind', 'structure', 'surface', 'annotation'
@@ -61,12 +62,21 @@ def _abs(path):
     return str(Path(path).resolve())
 
 
-def surface(path, heights, axis, like, **meta):
+def footprint(bone_zyx):
+    """The filled (V,U) footprint of a bone mask on the aligned grid: where a height along W can lie on the bone."""
+    return ndi.binary_fill_holes(np.asarray(bone_zyx, bool).any(axis=0))
+
+
+def surface(path, heights, axis, like, where=None, **meta):
     """Save `heights` (float32, NaN where there is no surface) and return its entry. Pass the array the computation used.
 
-    `meta` (inputs, params, script) goes to the sidecar."""
+    `where` (bool, the heights' shape) says where the surface is on the bone: it is NaN everywhere else, in the one file
+    later scripts also read. `meta` (inputs, params, script) goes to the sidecar."""
     path = _abs(path)
-    np.save(path, np.asarray(heights, np.float32))
+    heights = np.asarray(heights, np.float32)
+    if where is not None:
+        heights = np.where(where, heights, np.float32(np.nan))
+    np.save(path, heights)
     sidecar.write(path, like=like, surface_axis=int(axis), **meta)
     return {KIND: SURFACE, SURFACE: {HEIGHTS: path, GRID: sidecar.grid(like)['grid_id'], AXIS: int(axis)}}
 
@@ -97,9 +107,11 @@ def line(a_zyx, b_zyx, grid_id):
     return {KIND: ANNOTATION, ANNOTATION: {GRID: grid_id, KIND: LINE, A: _coords(a_zyx, 'line end'), B: _coords(b_zyx, 'line end')}}
 
 
-def volume(path, header, kind='image', unit='HU'):
+def volume(path, header, kind='image', unit=None):
     """The entry of a volume already on disk (`path` .npy with its sidecar). `header` is the json that holds the grid's
-    `grid_id` and `affine_xyz_to_world_mm`: the scan's hu.json, or an aligned stack's frame.json."""
+    `grid_id` and `affine_xyz_to_world_mm`: the scan's hu.json, or an aligned stack's frame.json. `unit` is HU for an
+    image unless given, and none for labels."""
+    unit = unit or ('HU' if kind == 'image' else None)
     path = _abs(path)
     g = sidecar.grid(header)
     if 'affine_xyz_to_world_mm' not in g:

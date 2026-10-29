@@ -370,7 +370,7 @@ def cortical(a):
         proj = np.nanmean(tslab, axis=ax) * 1000
     im = axs[1].imshow(proj, cmap='viridis', vmin=0)
     fig.colorbar(im, ax=axs[1], label='um')
-    axs[1].set_title(f'{a.name} = {values[a.name]["value"] * 1000:.1f} um (slab mean; map = mean along axis {ax})')
+    axs[1].set_title(f'{a.name} = {values[a.name]["value"] * 1000:.1f} um (slab mean; map = mean along axis {ax}); object {a.object_id}')
     fig.tight_layout()
     sidecar.save_image(fig, qc)
     plt.close(fig)

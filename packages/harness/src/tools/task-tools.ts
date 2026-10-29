@@ -11,7 +11,7 @@ import {
   checkpointInputSchema,
   reportOutputInputSchema,
 } from "@voluma/contracts/task-tools";
-import { Refusal, type TaskRuntime } from "../task-runtime";
+import { Refusal, refOf, type TaskRuntime } from "../task-runtime";
 import type { Tool, ToolContext, ToolResult } from "./tool";
 
 async function result(run: () => Promise<unknown>): Promise<ToolResult> {
@@ -26,37 +26,27 @@ async function result(run: () => Promise<unknown>): Promise<ToolResult> {
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
-/** `/outputs/<taskId>/rest` or `/scratch/rest`, as a script prints a file's path, becomes the `{root, path}` a report names. */
-function fileRef(taskId: unknown, file: unknown): unknown {
-  if (typeof file !== "string") return file;
-  const own = `/outputs/${taskId}/`;
-  if (file.startsWith(own)) return { root: "outputs", path: file.slice(own.length) };
-  if (file.startsWith("/scratch/"))
-    return { root: "scratch", path: file.slice("/scratch/".length) };
-  return file;
-}
-
 /**
  * A script's `objects` entry goes to `report_output` unchanged, with its files as the sandbox paths the script
- * printed. This names the ones in this task's output folder or the scratch as the refs the schema takes; any
- * other path is left for validation to refuse.
+ * printed. Every file the call names (the output's own, and `evidence`) given as a path becomes the ref the schema
+ * takes; a path that is no file of this task is refused with the reason.
  */
 export function prepareReportOutput(args: unknown): unknown {
   if (!isRecord(args) || !isRecord(args.output)) return args;
-  const { taskId, output } = args;
+  const { taskId, output, evidence } = args;
+  if (typeof taskId !== "string") return args;
+  const ref = (file: unknown) => (typeof file === "string" ? refOf(taskId, file) : file);
   const { structure, surface, volume } = output;
   return {
     ...args,
+    ...(Array.isArray(evidence) && { evidence: evidence.map(ref) }),
     output: {
       ...output,
       ...(isRecord(structure) &&
-        "mask" in structure && {
-          structure: { ...structure, mask: fileRef(taskId, structure.mask) },
-        }),
-      ...(isRecord(surface) && {
-        surface: { ...surface, heights: fileRef(taskId, surface.heights) },
-      }),
-      ...(isRecord(volume) && { volume: { ...volume, file: fileRef(taskId, volume.file) } }),
+        "mask" in structure && { structure: { ...structure, mask: ref(structure.mask) } }),
+      ...(isRecord(surface) && { surface: { ...surface, heights: ref(surface.heights) } }),
+      ...(isRecord(volume) && { volume: { ...volume, file: ref(volume.file) } }),
+      ...("file" in output && { file: ref(output.file) }),
     },
   };
 }

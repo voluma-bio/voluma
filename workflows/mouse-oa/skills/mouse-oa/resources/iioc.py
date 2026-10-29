@@ -32,7 +32,7 @@ V between traced sections (constant past the first and last). A point is [w, u],
 anything but axis 1 and height row is refused.
 
 Writes: in <out>, on the aligned grid (array axes W,V,U), each .npy with its sidecar:
-  iioc-tissue.npy  ROI-1, bool                         growth-plate-proximal-face.npy  W index per (V,U), float32 (a surface object)
+  iioc-tissue.npy  ROI-1, bool                         growth-plate-proximal-face.npy  W index per (V,U), float32, NaN off the tibia (a surface object)
   growth-plate-proximal-valid.npy  2D bool: where the face is traced, not held constant past its first and last section or its curves' ends
   articular-top-surface.npy  W index of the ROI-1 top per (V,U) (a surface object)       <side>-plate-run.npy  bool, the first bone run of each compartment's patch
   iioc-tissue-scan.npy  ROI-1 on the scan grid (the scan's sidecar)    width-points-scan.json  the two width points as a points file on the scan grid, for amira_landmarks.py
@@ -313,7 +313,7 @@ def main():
     meta_files = {'like': a.frame, 'inputs': inputs, 'params': params}
     placed = {  # heights are along axis 0 (W) of the aligned grid
         'roi-iioc': objects.mask(out / 'roi-iioc.npy', roi, crop=True, **meta_files),
-        'growth-plate-proximal-face': objects.surface(out / 'growth-plate-proximal-face.npy', gp, 0, **meta_files),
+        'growth-plate-proximal-face': objects.surface(out / 'growth-plate-proximal-face.npy', gp, 0, where=objects.footprint(tib), **meta_files),
         'articular-surface': objects.surface(out / 'articular-top-surface.npy', np.where(valid, top, np.nan), 0, **meta_files),
         **rulers,
     }

@@ -30,7 +30,7 @@ which face and sections. It also stops on an empty ROI-3.
 
 Writes: <out>/roi3-tissue.npy  ROI-3, bool, on the aligned grid, with its sidecar
         <out>/cortex.npy  the cortex mask for Ct.Th, bool, with its sidecar
-        <out>/growth-plate-distal-face.npy  W index of the distal face per (V,U), float32, with its sidecar (a surface object)
+        <out>/growth-plate-distal-face.npy  W index of the distal face per (V,U), float32, NaN off the tibia's footprint, with its sidecar (a surface object)
         <out>/roi-metaphyseal.npy, cortex-object.npy  the same two masks cropped to their bounding boxes, uint8 (the mask objects)
         <out>/roi3.json  the result record: the parameters used and the cortex estimate (cortex_estimate_mm, cortex_mm_used, threshold);
                          `objects` holds roi-metaphyseal, cortex and growth-plate-distal-face
@@ -71,7 +71,7 @@ def check_below_proximal(gd, dv, dlo, dhi, prox, pv, tib, vox):
                      'face is not known over the whole proximal one: '
                      + ' and '.join(f'trace the distal face on a section near V={v} too'
                                     for v, miss in ((plo, dlo > plo), (phi, dhi < phi)) if miss))
-    footprint = ndi.binary_fill_holes(tib.any(axis=0))
+    footprint = objects.footprint(tib)
     vs = np.arange(gd.shape[0])[:, None]
     cross = (gd <= prox) & footprint & (vs >= max(plo, dlo)) & (vs <= min(phi, dhi))
     bad = cross & pv & dv
@@ -185,7 +185,7 @@ def main():
     placed = {
         'roi-metaphyseal': objects.mask(out / 'roi-metaphyseal.npy', roi, like=like, **meta),
         'cortex': objects.mask(out / 'cortex-object.npy', cortex, like=like, **meta),
-        'growth-plate-distal-face': objects.surface(out / 'growth-plate-distal-face.npy', gd, 0, like=like, **meta),  # heights along W
+        'growth-plate-distal-face': objects.surface(out / 'growth-plate-distal-face.npy', gd, 0, like=like, where=objects.footprint(tib), **meta),  # heights along W
     }
     vs = np.linspace(*np.flatnonzero(roi.any(axis=(0, 2)))[[0, -1]], 4).astype(int)
     fig, axs = plt.subplots(2, 4, figsize=(20, 10))

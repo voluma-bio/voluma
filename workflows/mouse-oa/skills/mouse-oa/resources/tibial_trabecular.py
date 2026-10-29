@@ -18,7 +18,7 @@ anything but axis 1 and height row is refused.
 
 Writes: <out>/iioc-trab-tissue.npy  ROI-2, bool, on the aligned grid, with its sidecar
         <out>/roi-iioc-trabecular.npy  ROI-2 cropped to its bounding box, uint8 (the mask object; the same voxels)
-        <out>/under-plate-boundary.npy  W index of the under-plate boundary per (V,U), float32, with its sidecar (a surface object)
+        <out>/under-plate-boundary.npy  W index of the under-plate boundary per (V,U), float32, NaN off the tibia (where the growth-plate face is NaN), with its sidecar (a surface object)
         <out>/roi2.json  the result record: `objects` holds roi-iioc-trabecular and under-plate-boundary
         <out>/qc-coronal.jpg  six coronal sections: ROI-2 (cyan) inside ROI-1 (green)
 Prints: one JSON line {out, values, objects, qc, tissue, upper_boundary}
@@ -95,7 +95,7 @@ def main():
     like = sidecar.sidecar_path(a.iioc_tissue)
     placed = {
         'roi-iioc-trabecular': objects.mask(out / 'roi-iioc-trabecular.npy', roi, like=like, **meta),
-        'under-plate-boundary': objects.surface(out / 'under-plate-boundary.npy', upper, 0, like=like, **meta),  # heights along W
+        'under-plate-boundary': objects.surface(out / 'under-plate-boundary.npy', upper, 0, like=like, where=np.isfinite(gp), **meta),  # heights along W
     }
     vs = sorted(map(int, ann['under_plate_curves']['slices']))
     picks = [vs[i] for i in np.linspace(0, len(vs) - 1, 6).astype(int)]
