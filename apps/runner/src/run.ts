@@ -37,7 +37,7 @@ import { eventLine } from "./log.ts";
 import { metaSegmenter } from "./meta-segmenter.ts";
 import { createModalSandbox, RUNS_APP, terminateClaim } from "./modal-sandbox.ts";
 import type { ModelFallback } from "./model-fallback.ts";
-import { retryMetaNotFound } from "./model-retry.ts";
+import { retryTransient } from "./model-retry.ts";
 import { checkPrompt, checkSystem, workerPrompt, workerSystem } from "./prompts.ts";
 import { r2Evidence } from "./r2-evidence.ts";
 import { r2Files } from "./r2-files.ts";
@@ -237,17 +237,26 @@ export async function runClaim(
       }
       return visitor ? primary : ctx.fallback.pick(primary);
     };
-    const callModel = retryMetaNotFound((m, context, options) =>
-      models.streamSimple(m, context, {
-        ...options,
-        apiKey: keyFor(m.provider),
-        maxRetries: MODEL_RETRIES,
-      }),
-    );
+    const callModel = (role: ModelRole) =>
+      retryTransient(
+        (m, context, options) =>
+          models.streamSimple(m, context, {
+            ...options,
+            apiKey: keyFor(m.provider),
+            maxRetries: MODEL_RETRIES,
+          }),
+        (m, attempt, delayMs, error) => {
+          log(
+            `${role} model call failed (${error}); retry ${attempt} in ${Math.round(delayMs / 1000)}s`,
+          );
+          // Threads that start while this one retries should not wait out the same outage.
+          if (!visitor) ctx.fallback.failed(m, error);
+        },
+      );
     const streamFor =
       (role: ModelRole): RunRole["streamFn"] =>
       (m, context, options) => {
-        const stream = callModel(m, context, options);
+        const stream = callModel(role)(m, context, options);
         stream.result().then(
           (reply) => {
             meter.addModelCall(role, usageOf(reply));
@@ -262,7 +271,7 @@ export async function runClaim(
       mainModel,
       mainSystem(runBrief(run.selectedOutputs, computed.tasks)),
       async (context, signal, onEvent) => {
-        const stream = callModel(mainModel, context, { signal });
+        const stream = callModel("main")(mainModel, context, { signal });
         // The stream's events and its result are independent: draining one leaves the other.
         const drained = (async () => {
           if (onEvent) for await (const event of stream) onEvent(event);

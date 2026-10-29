@@ -96,7 +96,7 @@ export function supervisor(options: SupervisorOptions) {
   const root = supervisorThreadId(options.runId);
   const stuckLimit = options.stuckLimit ?? 2;
   const maxRedos = options.maxRedos ?? 1;
-  const wakeTimeoutMs = options.wakeTimeoutMs ?? 60_000;
+  const wakeTimeoutMs = options.wakeTimeoutMs ?? 5 * 60_000;
   let failure: unknown; // the first error that failed the run
 
   const derive = () => threadLog(recorder.events());
