@@ -10,35 +10,24 @@ nothing else; with the same version but another mode it exits 2 (use another `--
 unreadable manifest it converts again. Paths in the manifest are relative to `<out>/<sha256>/`.
 
 Levels (OME-Zarr 0.4 on Zarr v2, Blosc zstd, 64-cubed chunks): level 0 is the source; each next level halves every axis
-(rounding up) until every axis is at most ceil(level 0 / 8); the last is one chunk. Images are averaged, labels and masks take the
-mode. A level voxel covers `scaleZyx` source voxels per axis. Integer coordinates are voxel centres: voxel i of level k has its
+(rounding up) until every axis is at most ceil(level 0 / 8); the last is one chunk. Images are averaged; labels and masks take the
+mode of each 2x2x2 block, a tie going to the foreground. A one-voxel sheet survives every level (it fills 4 of 8 voxels of a block: a tie), but a one-voxel rod does not
+(2 of 8: the background wins), so do not read rods and other thin structures off coarse levels. A level voxel covers `scaleZyx` source voxels per axis. Integer coordinates are voxel centres: voxel i of level k has its
 centre at source coordinate i*2^k + (2^k-1)/2, which is the translation in each dataset's OME `coordinateTransformations`. Meshes: marching cubes per nonzero label (or one for a mask), or the
 height field triangulated over its finite cells, wound so each normal points toward +axis. `mesh*.bin` is float32 vertices as full-resolution source voxel (x, y, z),
 then uint32 indices, little-endian. A cropped mask's levels and meshes are in its crop's voxels; the reader adds the crop's offset.
 """
-import argparse
 import json
 import os
 import shutil
-import sys
 from pathlib import Path
 
 import numcodecs
 import numpy as np
+import sidecar  # microct-core's resources/, on PYTHONPATH as in every sandbox of a run
 import zarr
 from scipy import ndimage as ndi
 from skimage.measure import marching_cubes
-
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/.
-SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources'))
-                if d not in sys.path]
-try:
-    import sidecar
-except ModuleNotFoundError as e:
-    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/', file=sys.stderr)
-    sys.exit(2)
 
 CHUNK = 64
 BIG = 1_000_000  # an object of more voxels is meshed at step 2
@@ -160,8 +149,8 @@ def write_meshes(arr, kind, out):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--source', required=True, help='a .npy file')
+    ap = sidecar.parser(__doc__)
+    ap.add_argument('--source', required=True, type=sidecar.existing, help='a .npy file')
     ap.add_argument('--as', dest='kind', required=True, choices=KINDS)
     ap.add_argument('--axis', type=int, choices=(0, 1, 2), help='surface only: the array axis the height is measured along')
     ap.add_argument('--int16', action='store_true', help='image only: round a float image to int16 at level 0')
