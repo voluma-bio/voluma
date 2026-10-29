@@ -39,43 +39,17 @@ import {
   toolCallIdSchema,
 } from "./ids";
 import { evidenceRefSchema, outputReportSchema } from "./output";
-import { relativePathSchema, sha256Schema } from "./r2";
-import { checkAcceptedSchema, focusSchema, reviewCompletedSchema } from "./review";
+import { sha256Schema } from "./r2";
+import {
+  checkAcceptedSchema,
+  focusSchema,
+  reviewAssetsManifestSchema,
+  reviewCompletedSchema,
+} from "./review";
 import { claimEndReasonSchema } from "./runner";
 import { recordedPinSchema, workflowPlanSchema } from "./workflow";
 
 const nonEmpty = z.string().min(1);
-
-const zyx = z.tuple([
-  z.number().int().positive(),
-  z.number().int().positive(),
-  z.number().int().positive(),
-]);
-
-/**
- * What the converter (`workflows/core/convert/review_assets.py`) prints and writes as
- * `manifest.json`; the runner parses it and builds `assets.ready` from it. Paths are relative
- * to the asset prefix (`reviewAssetKey`). It carries no `sourceSha256`: the runner knows which
- * file it converted, and identity is never taken from subprocess output. Other keys in the
- * printed JSON are ignored.
- */
-export const reviewAssetsManifestSchema = z.object({
-  /** OME-Zarr levels, finest first; `scaleZyx` is source voxels per level voxel on each axis. */
-  levels: z.array(z.object({ path: relativePathSchema, shapeZyx: zyx, scaleZyx: zyx })),
-  /**
-   * Surface meshes: float32 vertices (x, y, z) in voxels of the source grid at full resolution,
-   * then uint32 triangle indices, little-endian. `label` is set for a labels volume's mesh.
-   */
-  meshes: z.array(
-    z.object({
-      label: z.number().int().positive().optional(),
-      path: relativePathSchema,
-      vertices: z.number().int().nonnegative(),
-      indices: z.number().int().nonnegative(),
-    }),
-  ),
-});
-export type ReviewAssetsManifest = z.infer<typeof reviewAssetsManifestSchema>;
 
 /** Bounds on what a `wake` stores, in UTF-16 code units: the notes block goes into every later worker's prompt. */
 export const WAKE_NOTE_MAX = 6000;
@@ -472,10 +446,10 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     reviewAssetsManifestSchema.extend({ sourceSha256: sha256Schema }),
   );
 
-  /** Conversion of the file with this `sourceSha256` failed (or timed out at the end of the run); same id as `assets.ready`. Permanent for the run. */
+  /** Conversion of the file with this `sourceSha256` failed (or timed out at the end of the run); same id as `assets.ready`. Permanent for the run. The writer truncates `error` to `WAKE_ERROR_MAX`. */
   const assetsFailed = event(
     "assets.failed",
-    z.object({ sourceSha256: sha256Schema, error: nonEmpty }),
+    z.object({ sourceSha256: sha256Schema, error: z.string().min(1).max(WAKE_ERROR_MAX) }),
   );
 
   return z.discriminatedUnion("type", [
