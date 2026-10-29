@@ -18,7 +18,7 @@ export type ThreadStatus = "running" | "paused" | "completed" | "failed" | "canc
 
 export type Thread = {
   id: string;
-  kind: "supervisor" | "worker" | "check" | "chat";
+  kind: "supervisor" | "main" | "worker" | "check" | "chat";
   taskId?: string;
   model?: string;
   /** Its latest start: a woken thread's clock counts from its wake. */
@@ -168,7 +168,7 @@ const threadRole = (t: Pick<Thread, "kind">) =>
     ? "worker"
     : t.kind === "check"
       ? "checker"
-      : t.kind === "supervisor"
+      : t.kind === "supervisor" || t.kind === "main"
         ? "Main thread"
         : "Chat";
 

@@ -25,7 +25,11 @@
  *   doesn't resolve in the revision is dropped: a structure's `voxels` becomes
  *   null, an annotation's `volumeId` null, which means the scan (the API fills
  *   its id). So no later attempt of another task can leave a dangling id.
- * - The plan is the first `revision.started`'s. An output fills a declaration
+ * - The plan is the first `revision.started`'s, changed by each `plan.changed` after it
+ *   (added and ad-hoc tasks join it; done-when lines and instructions are appended; `skip`
+ *   changes nothing here: the runtime writes a skip as an attempt with every output null and
+ *   status `to-check`). Each revision carries the plan as it stood at its end. `ask` and
+ *   `answer` are ignored. An output fills a declaration
  *   of its kind (a volume, also of its volume kind). Per task, `undeclared` is
  *   the ids of the outputs that fill none; `missing` the declared outputs the
  *   current attempt hasn't reported, except structures, and `missingRequired`
@@ -60,7 +64,7 @@ import type {
   Structure,
   Volume,
 } from "./review";
-import type { DeclaredOutput } from "./workflow";
+import type { DeclaredOutput, PlanTask, WorkflowPlan } from "./workflow";
 
 type OutputEvent = Extract<RunEvent, { type: "output" }>;
 
@@ -124,6 +128,8 @@ export type FoldedRevision = {
   volumes: Volume[];
   structures: Structure[];
   annotations: FoldedAnnotation[];
+  /** The plan at the end of the revision: the run's, with every `plan.changed` so far applied. */
+  plan: WorkflowPlan;
 };
 
 /** An annotation as reported: a null `volumeId` is the scan, whose id the API knows. */
@@ -149,6 +155,8 @@ export function checkResult(
 export type Folded = {
   /** The run now: the last revision's tasks. */
   tasks: FoldedTask[];
+  /** The run's plan now. */
+  plan: WorkflowPlan;
   /** Oldest first. Empty until the run's first `revision.started`. */
   revisions: FoldedRevision[];
 };
@@ -180,6 +188,16 @@ export function fold(events: readonly RunEvent[]): Folded {
   // taskId → outputId → declaration, from the run's first event.
   const plan = new Map<string, Map<string, DeclaredOutput>>();
   const dependsOn = new Map<string, string[]>();
+  // The plan's tasks in order, with every change applied.
+  const planTasks = new Map<string, PlanTask>();
+  const planNow = (): WorkflowPlan => ({
+    tasks: [...planTasks.values()].map((t) => structuredClone(t)),
+  });
+  const setPlanTask = (t: PlanTask) => {
+    planTasks.set(t.id, t);
+    plan.set(t.id, new Map(t.outputs.map((o) => [o.id, o])));
+    dependsOn.set(t.id, t.dependsOn);
+  };
   // The run's first event is `revision.started` (`task-tools.ts`).
   let revisionId = "";
 
@@ -416,14 +434,10 @@ export function fold(events: readonly RunEvent[]): Folded {
         break;
       }
       case "revision.started": {
-        if (header) revisions.push({ ...header, ...snapshot() });
+        if (header) revisions.push({ ...header, ...snapshot(), plan: planNow() });
         revisionId = e.id;
         const { payload: p } = e;
-        if (p.reason === "run")
-          for (const t of p.plan.tasks) {
-            plan.set(t.id, new Map(t.outputs.map((o) => [o.id, o])));
-            dependsOn.set(t.id, t.dependsOn);
-          }
+        if (p.reason === "run") for (const t of p.plan.tasks) setPlanTask(structuredClone(t));
         header =
           p.reason === "run"
             ? { id: e.id, createdAt: e.createdAt, reason: p.reason }
@@ -494,12 +508,34 @@ export function fold(events: readonly RunEvent[]): Folded {
         a.resultRevisionId = revisionId;
         break;
       }
+      case "plan.changed": {
+        const { add, adHoc, doneWhen, instructions } = e.payload;
+        for (const t of add ?? []) setPlanTask(structuredClone(t));
+        for (const t of adHoc ?? [])
+          setPlanTask({
+            id: t.id,
+            title: t.title,
+            dependsOn: t.dependsOn,
+            instructions: t.instructions,
+            outputs: [],
+          });
+        for (const d of doneWhen ?? []) {
+          const t = planTasks.get(d.taskId);
+          if (t) t.doneWhen = [...(t.doneWhen ?? []), ...d.lines];
+        }
+        for (const i of instructions ?? []) {
+          const t = planTasks.get(i.taskId);
+          if (t) t.instructions = t.instructions ? `${t.instructions}\n\n${i.text}` : i.text;
+        }
+        break;
+      }
       default:
         break;
     }
   }
 
   const last = snapshot();
-  if (header) revisions.push({ ...header, ...last });
-  return { tasks: last.tasks, revisions };
+  const planEnd = planNow();
+  if (header) revisions.push({ ...header, ...last, plan: planEnd });
+  return { tasks: last.tasks, plan: planEnd, revisions };
 }
