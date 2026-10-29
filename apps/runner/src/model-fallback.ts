@@ -1,13 +1,11 @@
 /**
- * The worker fallback model (`RUNNER_FALLBACK_MODEL`, off unless set): while a primary model is
- * failing, worker and check threads that start (a redo, the next task) start on the fallback
- * instead. A thread keeps the model it started on (`thread.started.model`; `run.ts` reads it
+ * The fallback model (`RUNNER_FALLBACK_MODEL`, off unless set): while a primary model is
+ * failing, threads of every role (main, worker, check) that start (a redo, the next task) start
+ * on the fallback instead. A thread keeps the model it started on (`thread.started.model`; `run.ts` reads it
  * back for a resume; the harness refuses a resume on another model), so this never switches a
  * thread mid-way. Unsetting the fallback ends it for new threads; one that started on it keeps it.
  *
- * Not covered: the main thread's calls (a judgment, the run-start wake) stay on their own
- * model, so a Meta outage that reaches it leaves a failed task unjudged (accepted for a
- * person). A fatal error (`isFatalProviderError`) fails the run at once unless a fallback is set. Only errors with an HTTP status (see `provider-error.ts`),
+ * A fatal error (`isFatalProviderError`) fails the run at once unless a fallback is set. Only errors with an HTTP status (see `provider-error.ts`),
  * connection failures and timeouts count as the model failing.
  *
  * The breaker is per runner process and per primary model. A call that failed after pi's and

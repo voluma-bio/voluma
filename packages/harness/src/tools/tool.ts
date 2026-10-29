@@ -13,6 +13,8 @@ export interface ToolContext {
   kind: ThreadKind;
   taskId?: string;
   toolCallId: string;
+  /** How many tool calls the reply that made this call holds, itself included. */
+  batchSize: number;
   /** Aborts when the run is cancelled; tools must stop what they started. */
   signal: AbortSignal;
   /** The calling thread's sandbox, created on first use. */
@@ -35,6 +37,11 @@ export interface ToolResult {
    * history, never into the `tool.result` event: the text says which files they are.
    */
   images?: { mimeType: string; data: string }[];
+  /**
+   * Ends the thread's turn when every result of the batch sets it (Pi's rule): the thread is
+   * finished, not failed, and resumes only with a new message.
+   */
+  terminate?: boolean;
 }
 
 export interface Tool<S extends z.ZodType = z.ZodType> {

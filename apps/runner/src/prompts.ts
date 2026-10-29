@@ -1,16 +1,21 @@
 /**
- * The prompts of a run's worker and check threads: the role files plus the sandbox text and the
- * workflow's skills and task text (`@voluma/workflow`). The role's own text is its file in
- * `workflows/core/agents/`, from the run's snapshot. A thread's system prompt is fixed for
- * its life (a resumed thread that differs fails), so it takes only the role's rules and the
- * skill list, both fixed by the run's snapshot. What varies by task goes in the thread's
- * first message.
+ * The prompts of a run's threads: the role files plus the sandbox text and the workflow's
+ * skills (`@voluma/workflow`) as system prompts, and each role's first message. The role's own
+ * text is its file in `workflows/core/agents/`, from the run's snapshot. A thread's system
+ * prompt is fixed for its life (a resumed thread that differs fails), so it takes only the
+ * role's rules and the skill list, both fixed by the run's snapshot. What varies goes in the
+ * first message, which gives each role what its role file says it gets: main the plan, the
+ * deliverable and the researcher's notes; a worker its task, the main agent's brief and the
+ * notes; a checker the task as planned, what the worker reported and the evidence it cited,
+ * never the worker's account.
  */
+import type { Folded, FoldedTask } from "@voluma/contracts/fold";
+import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
 import type { ThreadLayout } from "@voluma/harness/layout";
 import type { PlanTask } from "@voluma/harness/supervise-run";
-import type { WorkflowDefinition } from "@voluma/workflow/definition";
+import type { AgentDefinition, WorkflowDefinition } from "@voluma/workflow/definition";
 
-function common(role: Exclude<ThreadLayout["role"], "main">, thread: ThreadLayout): string {
+function common(role: "worker" | "checker", thread: ThreadLayout): string {
   const dir = thread.dir;
   const files =
     role === "worker"
@@ -27,24 +32,39 @@ Check what you report against the files themselves, and say which file or header
 }
 
 /**
- * The skills every role may use, progressively disclosed: name, description and path here, the
- * skill and its references and resources read with bash when needed. The workflow's own skill
- * comes first and is read first.
+ * The role's skills, progressively disclosed: name, description and path here, the skill and its
+ * references and resources read with bash (or `read_file`, for a role without a shell) when
+ * needed. The workflow's own skill comes first and is read first.
  */
-function skillList(def: WorkflowDefinition): string {
-  const lines = def.skills.map(
-    (s, i) => `- ${s.name}: ${s.description} (${s.path}/SKILL.md)${i === 0 ? " [read first]" : ""}`,
-  );
-  return `Skills: read a skill's SKILL.md with bash before you rely on it; its other files sit beside it in the same directory.\n${lines.join("\n")}`;
+function skillList(def: WorkflowDefinition, role: AgentDefinition, shell: boolean): string {
+  const lines = def.skills
+    .filter((s) => role.skills.includes(s.name))
+    .map(
+      (s) =>
+        `- ${s.name}: ${s.description} (${s.path}/SKILL.md)${s === def.skills[0] ? " [read first]" : ""}`,
+    );
+  return `Skills: read a skill's SKILL.md with ${shell ? "bash" : "`read_file`"} before you rely on it; its other files sit beside it in the same directory.\n${lines.join("\n")}`;
 }
 
-/** The role file's body, then the generated environment text and skill list. */
-export function systemPrompt(
-  def: WorkflowDefinition,
-  role: "worker" | "checker",
-  thread: ThreadLayout,
-): string {
-  return `${def.agents[role].body}\n\n${common(role, thread)}\n\n${skillList(def)}`;
+/** One line per script of the role's skills, from its docstring. */
+function toolIndex(def: WorkflowDefinition, role: AgentDefinition, shell: boolean): string {
+  const lines = def.toolIndex
+    .filter((t) => role.skills.includes(t.skill))
+    .map((t) => `- ${t.skill}/${t.script}: ${t.summary}`);
+  const use = shell
+    ? "Run `python <skill dir>/resources/<script> --help` before you use one."
+    : "Workers run them; read one with `read_file` to know what a worker's result rests on.";
+  return `Scripts of those skills, at <skill dir>/resources/<script> (skill dirs are listed above). ${use}\n${lines.join("\n")}`;
+}
+
+/** The role file's body, then the generated environment text, skill list and tool index. */
+export function systemPrompt(def: WorkflowDefinition, thread: ThreadLayout): string {
+  const role = def.agents[thread.role];
+  // The main agent has a shell only if its file grants bash, and then works as a worker does.
+  const shell = thread.role !== "main" || role.tools.includes("bash");
+  const skills = `${skillList(def, role, shell)}\n\n${toolIndex(def, role, shell)}`;
+  if (!shell) return `${role.body}\n\n${skills}`;
+  return `${role.body}\n\n${common(thread.role === "checker" ? "checker" : "worker", thread)}\n\n${skills}`;
 }
 
 function taskBrief(task: PlanTask): string {
@@ -55,43 +75,117 @@ function taskBrief(task: PlanTask): string {
   return [instructions, done].filter(Boolean).join("\n\n");
 }
 
-/** What a thread's first message carries besides its task: the run's notes, then the main thread's. */
-export interface Notes {
-  /** The user's notes for the run, verbatim. */
-  user?: string;
-  /** The main thread's notes in force when the thread starts. */
-  main?: string;
-}
-
-const PRECEDENCE =
-  "The task's done-when criteria and required outputs come first; notes never outrank them.";
-
-function notesBlock({ user, main }: Notes, role: "worker" | "check"): string {
-  const parts = [];
-  if (user) parts.push(`The user's notes for this run:\n${user}`);
-  if (main) {
-    parts.push(
-      role === "worker"
-        ? `Notes from the main thread, from the tasks before this one. Build on what they settle; if you find one is wrong, say so.\n${main}`
-        : `Context from the main thread, from the tasks before this one. Your verdict rests on your own re-derivation of the result, not on these notes.\n${main}`,
-    );
-  }
-  return parts.length ? `\n${PRECEDENCE}\n${parts.join("\n")}` : "";
-}
-
-export function workerPrompt(task: PlanTask, notes: Notes): string {
-  const needs = task.dependsOn.length
-    ? `It builds on ${task.dependsOn.join(", ")}; their files are in /outputs/<task id>/.`
-    : "It builds on no other task.";
-  return `Your task is "${task.id}". ${needs}\n${taskBrief(task)}\n${outputList(task)}${notesBlock(notes, "worker")}`;
-}
-
-export function checkPrompt(task: PlanTask, notes: Notes): string {
-  return `Check task "${task.id}". The worker's files are in /outputs/${task.id}/.\n${taskBrief(task)}\n${outputList(task)}${notesBlock(notes, "check")}`;
-}
-
 function outputList(task: PlanTask): string {
   if (task.outputs.length === 0) return "The task declares no outputs.";
   const lines = task.outputs.map((o) => `- ${JSON.stringify(o)}`);
   return `Declared outputs:\n${lines.join("\n")}`;
+}
+
+/** The researcher's notes, as a worker or the main agent reads them. */
+function notesBlock(notes: string | undefined): string {
+  return notes
+    ? `\n\nThe researcher's notes for this run (the task's done-when criteria and required outputs come first; notes never outrank them):\n${notes}`
+    : "";
+}
+
+export function workerPrompt(task: PlanTask, brief: string, notes: string | undefined): string {
+  const needs = task.dependsOn.length
+    ? `It builds on ${task.dependsOn.join(", ")}; their files are in /outputs/<task id>/.`
+    : "It builds on no other task.";
+  return `Your task is "${task.id}". ${needs}\n${taskBrief(task)}\n${outputList(task)}\n\nFrom the main agent:\n${brief}${notesBlock(notes)}`;
+}
+
+const list = (items: string[]) => (items.length ? items.join("\n") : "(none)");
+
+/**
+ * The check thread's first message: the task as planned, each output the worker reported with
+ * its value, and the evidence files it cited, then the researcher's notes. Never a checkpoint's
+ * text, the worker's messages or its notes on a value (only the reason a value is missing).
+ */
+export function checkPrompt(task: PlanTask, state: FoldedTask, notes: string | undefined): string {
+  const evidenceName = new Map(state.evidence.map((a) => [a.id, a.name]));
+  const evidenceOf = (ids: string[]) => {
+    const names = ids.flatMap((id) => evidenceName.get(id) ?? []);
+    return names.length ? `; evidence: ${names.join(", ")}` : "";
+  };
+  // The worker's free note is its own account; only the reason a value is missing is a fact.
+  const why = (n: string | undefined) => (n ? `; reason given: ${n}` : "");
+  const reported = [
+    ...state.measurements.map(
+      (m) =>
+        `- ${m.id}: ${m.value === null ? "no value" : `${m.value} ${m.unit}`}${m.confidence ? ` (${m.confidence})` : ""}${m.value === null ? why(m.note) : ""}${evidenceOf(m.evidenceIds)}`,
+    ),
+    ...state.scores.map(
+      (c) =>
+        `- ${c.id}: level "${c.level}"${c.scale ? ` of ${c.scale.join(" < ")}` : ""}${evidenceOf(c.evidenceIds)}`,
+    ),
+    ...state.files.map((f) => `- ${f.id}: file ${f.name}`),
+    ...state.missing.flatMap((m) =>
+      m.reason ? [`- ${m.outputId}: reported missing, because: ${m.reason}`] : [],
+    ),
+  ];
+  const cited = [
+    ...state.evidence.flatMap((a) =>
+      state.citedScratch.includes(a.name) ? [] : [`- {root: "outputs", path: "${a.name}"}`],
+    ),
+    ...state.citedScratch.map((p) => `- {root: "scratch", path: "${p}"}`),
+  ];
+  return `Check task "${task.id}". The worker's files are in /outputs/${task.id}/.
+${taskBrief(task)}
+${outputList(task)}
+
+Outputs the worker reported (other structures, volumes and annotations are in its files):
+${list(reported)}
+
+Evidence files the worker cited (open them with view_image):
+${list(cited)}${notesBlock(notes)}`;
+}
+
+/** The plan as the main agent reads it: each task with what it builds on, what it does and the outputs it reports. */
+function planBlock(view: Folded, workflow: WorkflowFiles): string {
+  const names = new Map(workflow.outputs.map((o) => [o.id, o.name]));
+  const tasks = view.plan.tasks.map((t) => {
+    const outputs = t.outputs.map(
+      (o) =>
+        `  - ${o.id}${names.has(o.id) ? ` (${names.get(o.id)})` : ""}: ${o.kind}${o.required ? ", required" : ""}`,
+    );
+    return `### ${t.id}${t.title ? ` — ${t.title}` : ""}
+Builds on: ${t.dependsOn.length ? t.dependsOn.join(", ") : "nothing"}
+${taskBrief(t)}
+Reports:
+${outputs.length ? outputs.join("\n") : "  (no outputs)"}`;
+  });
+  return `## The plan\n\n${tasks.join("\n\n")}`;
+}
+
+/** The outputs the researcher selected: what the run is for. */
+function deliverableBlock(
+  selected: readonly string[] | undefined,
+  workflow: WorkflowFiles,
+): string {
+  const names = new Map(workflow.outputs.map((o) => [o.id, o.name]));
+  const ids = selected ?? workflow.outputs.map((o) => o.id);
+  const lines = ids.map((id) => `- ${id}${names.has(id) ? ` (${names.get(id)})` : ""}`);
+  return `## The deliverable\n\n${selected ? "The researcher selected these outputs" : "The researcher selected every output of the workflow"}; the run is done when each is reported with its evidence, or missing with a reason:\n${lines.join("\n")}`;
+}
+
+/** The main agent's first message: the plan, the deliverable, the researcher's notes. */
+export function mainPrompt(
+  view: Folded,
+  selected: readonly string[] | undefined,
+  workflow: WorkflowFiles,
+  notes: string | undefined,
+): string {
+  return `${planBlock(view, workflow)}\n\n${deliverableBlock(selected, workflow)}${notesBlock(notes)}`;
+}
+
+/** `main.<n>`'s first message: what the old thread was doing is gone, so the log's state comes with the plan. */
+export function mainRestartPrompt(
+  view: Folded,
+  state: string,
+  selected: readonly string[] | undefined,
+  workflow: WorkflowFiles,
+  notes: string | undefined,
+): string {
+  return `The run is under way. The main agent before you is gone, and whatever it had in mind went with it: start from the record, and trust the lists below over anything you assume.\n\n## The state of the run\n\n${state}\n\n${planBlock(view, workflow)}\n\n${deliverableBlock(selected, workflow)}${notesBlock(notes)}`;
 }

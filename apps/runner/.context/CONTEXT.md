@@ -118,7 +118,7 @@ records `assets.ready` / `assets.failed` on the root thread (id `<runId>:assets:
 Sandboxes cost money while up (a GPU one a lot), so every one must end. In order of
 who ends it:
 
-1. **The runner, normally.** `run.ts` closes the run's sandboxes (one per thread) when the supervisor ends,
+1. **The runner, normally.** `run.ts` closes the run's sandboxes (one per thread) when the run loop ends,
    draining the convert queue meanwhile (a close takes ~30 s) and then closing the convert sandbox, before it flushes events and reports, so the `stopped` event and the last sandbox seconds
    are stored under the live lease. If the close takes over 60 s (15 s after a stop) it asks Modal to terminate
    the sandboxes of this claim, by their `{run, claim}` tags (the claim is a per-claim id: a
@@ -206,19 +206,21 @@ treats as final (about half of all calls on 2026-10-28), when the call failed be
 any content: backoff from 1 s doubling to a 30 s cap, until 4 minutes have passed since the first
 attempt (Pi's own tries count against it; an attempt in flight is not cut short), each retry
 logged with its role and attempt and reported to the fallback breaker. The run's abort ends the
-wait. Any other error, or the spent budget, ends the call. A main-thread wake is also bounded
-by the supervisor's `wakeTimeoutMs`. `provider-error.ts` holds the one error classification (retry, redo and breaker):
+wait. Any other error, or the spent budget, ends the call. `provider-error.ts` holds the one error classification (retry, redo and breaker):
 it reads the status in the text (Pi's `<provider> API error (<status>)`, or the Anthropic SDK's
 `<status> {...}`, `<status> <html>` or `<status> status code (no body)`) and, for an Anthropic error sent mid-stream
 with no status, its documented `error.type` (`overloaded_error` is 529, `rate_limit_error` 429).
 
-**A worker or check that dies on a provider error** (`provider-error.ts`, after the retries above
-gave up) is started again by the supervisor with no main-thread call, since the main thread uses
-the same provider: a worker's task on a fresh thread (a code-made `redo` judgment, arm
-`code:provider-error`), a check as a new check. Twice per task and role; the third failure fails
-the run, with the error in `state.error`, instead of leaving it `completed` with tasks that never
-started. A main-thread call that fails is recorded as that call's error in the `wake` and in the
-judgment's reason.
+**A thread that dies on a provider error** (`provider-error.ts`, after the retries above gave up)
+is the run loop's to handle (`packages/harness/src/run-loop.ts`): a check is started again as a new
+check, the main agent as `main.<n+1>`, up to `maxProviderRedos` (2) per thread; a worker's failure
+is a notice to the main agent. A fatal error (a refused key, with no fallback model) fails the run
+at once, with the error in `state.error`, instead of leaving it `completed` with tasks that never
+started.
+
+**Loop limits** are `config.loop`: `RUNNER_MAX_FIX_ROUNDS` (default 2 `needs-review` rounds per
+task before it is left to check) and `RUNNER_CHECK_TIMEOUT_MINUTES` (default 20 of a checker's
+active time). The harness defaults the rest (`LoopConfig`).
 
 Cost is Pi's per-reply price, summed per claim; the log prints it
 when a claim reports (`model cost this claim`), and the API stores it as `runs.model_cost_usd`.
@@ -233,12 +235,7 @@ which the provider gateway checks too ([apps/gateway](../../gateway/.context/CON
 total is the last heartbeat's `spentUsd` (model cost plus settled gateway calls; an open call
 counts nothing, the gateway holds its reservation itself) plus the model cost not yet sent, checked on each model cost and each acknowledged
 heartbeat; at the cap `run.ts` stops the run and reports `ended failed` with
-`spend cap $X reached at $Y`. Calls in flight are aborted, not waited for. A claim of a run already over the cap stops before its first call. It applies to visitor runs too. The supervisor ends the root thread `cancelled` in the event log while the run row says `failed` with the cap text.
-
-**A main-thread reply that does not parse.** `llmMainThread` escapes raw control characters inside
-JSON strings, and otherwise sends the reply back once with what was wrong (appended after the
-cached prefix); if that fails too, the wake records both errors and the cost of both calls, and the judgment falls back as for
-any failed main thread.
+`spend cap $X reached at $Y`. Calls in flight are aborted, not waited for. A claim of a run already over the cap stops before its first call. It applies to visitor runs too. The run loop ends the root thread `cancelled` in the event log while the run row says `failed` with the cap text.
 
 **`segment_sam` 404.** Meta answers `404 model_not_found` for some inputs (seen: a small box prompt)
 and bills nothing for it. The adapter retries once on the uploaded file; a second 404 throws a
@@ -262,18 +259,17 @@ A local `/scratch` would break all three.
 
 # Runner: who gets which task tools
 
-A worker has `checklist`, `checkpoint` and `report_output`; a check thread only `checkpoint`
-(`supervise-run.ts`). A check re-derives values to compare and gives them in its checkpoint's
+A worker has `checkpoint`, `report_output` and `submit_task`; a check thread `checkpoint` and
+`ask` (its role file's `tools`). A check re-derives values to compare and gives them in its checkpoint's
 text with its verdict (the review shows the checker's verdict and text); it never replaces the
-worker's outputs, so the runtime refuses its `report_output`. Only a worker redo after a
-supervisor correction opens another revision.
+worker's outputs, so the runtime refuses its `report_output`. Only a redo of a task with attempted dependents opens another revision.
 `checkpoint`'s arguments go through `prepareCheckpoint` before validation, so the habits of
 models (a top-level `title`, `toCheck` as a string or with `text`, a nested `{root, path}`)
 don't cost a turn.
 
 # Runner: sandbox memory
 
-Each thread has its own sandbox (`sandboxSession`), destroyed when the supervisor sees the thread end (`release`; a resumed thread gets a fresh one and the restart note), so only the heavy steps of one thread share
+Each thread has its own sandbox (`sandboxSession`), destroyed when the run loop sees the thread end (`release`; a resumed thread gets a fresh one and the restart note), so only the heavy steps of one thread share
 its memory and 2 CPUs. Every role's sandbox has 8192 MiB (`sandbox-specs.ts`). `classic_segment` measured 2.8-3.1 GB anonymous memory and
 about 4.0-4.25 GB RSS with the memory-mapped scan, so 4096 MiB risked an OOM kill in a
 full run.
@@ -282,40 +278,45 @@ file is shared page cache, not counted twice. The `stopped` event of a sandbox M
 sandbox, so an out-of-memory kill or a terminate call), so a restart's cause is in the run's record. In the 2026-10-28 local run the sandbox ended at 1 h 0 min (the
 lifetime) and once more 23 min into the replacement, before the exit code was logged.
 
-# Runner: role text and tool grants come from `workflows/core/agents/`
+# Runner: role text, tool grants and models come from `workflows/core/agents/`
 
-The worker's and checker's system prompts are `workflows/core/agents/<role>.md`'s body, then `COMMON`
-(sandbox text per role, `prompts.ts` `systemPrompt`), then the skill list. Their optional tools are the file's `tools`
+The worker's, checker's and (when its file grants `bash`) main's system prompts are `workflows/core/agents/<role>.md`'s body, then `COMMON`
+(sandbox text per role, `prompts.ts` `systemPrompt`), then the role's skill list and the tool index (one line per skill
+script, from its docstring's first line; the loader reads it from the snapshot). Their optional tools are the file's `tools`
 (`run.ts` `grant`); `segment_sam` is also dropped when the run has no Meta key, and always for the checker (it calls out to Meta; `keepFailed` writes the run-wide scratch). `loadWorkflow`
 snapshots the role files with the workflow and reads them from the snapshot, so a resumed thread
 composes byte-identical text and an edited file reaches only new threads (a thread whose prompt
-changed is still `ThreadStale`). The main thread still uses `MAIN_SYSTEM`; `lead.md` and
-`review-chat.md` are `status: planned` and unused. Format: `workflows/core/agents/AGENTS.md`. Models stay
-config (`RUNNER_MODEL`, `RUNNER_CHECK_MODEL`, `RUNNER_MAIN_MODEL`).
+changed is still `ThreadStale`). The main agent without `bash` gets its file's body alone. `review-chat.md` is
+`status: planned` and unused. Format: `workflows/core/agents/AGENTS.md`.
+
+A role's model is its file's `model` alias. `config.models` maps each alias to a provider model:
+`RUNNER_MODEL_WONDER` (default `meta/muse-wonder-1.0`), `RUNNER_MODEL_OPUS`, `RUNNER_MODEL_ASTRA`
+(no default; a run whose role file names an unset alias fails when it starts). `RUNNER_MODEL`, when
+set, forces every alias to one model. Each configured alias's provider key is required at start. A
+visitor run uses `RUNNER_VISITOR_MODEL` for every role except `main` on a visitor-safe model.
 
 # Runner: a claim that ends is a cut-off, not a stop
 
 A stop the runtime chooses (shutdown, a heartbeat that wasn't acknowledged for 45 s, a lost
 lease, the server ending the run) aborts the run's signal. Threads see it as `runSignal`
 (`start-thread.ts`): from that moment they store nothing more and write no `thread.ended`,
-exactly as after a crash, and the supervisor writes none for the root, even if a step threw
+exactly as after a crash, and the run loop writes none for the root, even if a step threw
 while the signal was aborting. So a `thread.ended {cancelled}` is a stop someone chose and is
 never resumed: a stale dependent's thread stopped (`task-runtime.ts` `staleDependents`), or a
-failing run aborting its threads (`abortAll`). A stop aimed at a thread this process has not
-started (cut off by an earlier claim) writes that `cancelled` end itself (`supervise-run.ts`
-`stopThread`), so "open" always means "cut off". A self-stop reports `released` with reason `self-stop`; a signal, `shutdown`.
+failing run aborting its threads (`abortAll`). A stop stores that `cancelled` end first
+(`task-runtime.ts` `stop`, inside `section`) and then aborts without waiting; the thread's own
+later end is dropped (`start-thread.ts`). So a stopped thread's next write is refused at once,
+and "open" always means "cut off". A self-stop reports `released` with reason `self-stop`; a signal, `shutdown`.
 
 The next claim learns why from `claim.previousClaim` (the API records `lease-expired` itself)
 and writes `claim.started {resumed, after}` right after the root's `thread.started`. The
-supervisor then resumes the thread in charge of each task, if its latest `thread.started` has
-no `thread.ended` and this process hasn't started it: the worker only when it is the task's
-current worker (or the task has no attempt yet), the check only when the task is
-`under-review` and it is the current check. It resumes with the message of
-`supervisor.ts` `cutOffText`, naming the tool the log shows with no result, or the no-tool
-form. A cut-off resume is not a wake, so it spends none of the stuck guard's two and counts
-no redo; the main thread isn't asked. The "You stopped, but ... is not finished" wake is for a
-thread that ended `completed` with its task unfinished. A worker that ended `cancelled` with
-its task `in-progress` gets a fresh worker; a check that ended `cancelled` gets a new check. A tool whose `tool.call` event was
+run loop then resumes each thread still in charge, if its latest `thread.started` has no
+`thread.ended` and this process hasn't started it: the worker only when it holds its task, the
+check only when the task is `under-review` and it is the current check, the latest main. It
+resumes with the message of `cutOffText`, naming the tool the log shows with no result, or the
+no-tool form, and a tool the cut-off interrupted is answered from the log (`tools/effects.ts`).
+A cut-off resume counts as no delivery and no redo. A thread that ended `cancelled` is never
+resumed. A tool whose `tool.call` event was
 still queued when the runner died isn't named (the log lacks it), so a runner killed within
 milliseconds of a call gets the no-tool form.
 

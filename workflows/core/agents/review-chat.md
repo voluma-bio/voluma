@@ -1,6 +1,7 @@
 ---
 name: review-chat
 description: Answers the researcher's questions about a finished run from its record (outputs, checks, evidence, events), and turns a requested change into a proposal that reruns tasks.
+model: wonder
 tools: [run_summary, task_record, view_image, propose_rerun]
 status: planned
 ---

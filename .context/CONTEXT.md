@@ -14,7 +14,7 @@ apps/api        Node server on Postgres (Drizzle), each domain a Hono app. src/i
                 domain's tables and Postgres adapters live in the domain; adapters/ is for
                 shared ports
                 Sign-in: see Authentication
-apps/runner     The runner service: claims runs from the API and runs the supervisor on each (Run lane)
+apps/runner     The runner service: claims runs from the API and runs the run loop on each (Run lane)
 packages/
   contracts     zod schemas for the four contracts and the shared formats
   harness       the agent harness: our tools, the Sandbox and EventLog ports, the Pi
@@ -37,8 +37,8 @@ Dependencies point down: apps → feature code → packages. `contracts` and
 The agent loop is Pi's (`@earendil-works/pi-agent-core`), used as it comes;
 we add our own pieces only when a real run needs them. The agent runs
 outside the sandbox, so credentials never enter it. A run is a tree of
-threads: a supervisor (the root), a worker that goes through the task
-checklist, check threads, and review chat threads.
+threads: a supervisor (the root, code), the main agent, workers (one per task),
+check threads, and review chat threads.
 - **Event log.** Ours, kept separately from Pi's history: the `threads` and
   `events` tables in Postgres, behind the run domain's API. Each event is saved
   before it is published, and `seq` (per run) is the stream cursor. Both the
@@ -83,13 +83,11 @@ checklist, check threads, and review chat threads.
   message into the thread (Pi's steering queue; one sent before the loop starts is queued
   for it) and answers false once it ended.
   `threads.ts` is the run's registry of what is running in this process (start or resume a
-  thread, `send`, `abort`, wait for one to go idle) and holds no run state. `thread_message`
-  (`tools/thread-message.ts`) calls the supervisor's `message`: steer a running thread, or
-  wake an idle one whose task is waiting on it. `wait` is refused until a thread can start
-  children. Thread ids are unique across runs (History is keyed by the thread id alone) and
-  follow `@voluma/contracts/ids`: the root is `<runId>.supervisor`, the others
-  `<runId>.<taskId>.<role>` (plus `.<n>` for the n-th), where n is how many the log has started
-  for that task and role, so a redo never reuses a thread. `thread.started` carries the task id
+  thread, `send`, `abort`, wait for one to go idle) and holds no run state. Thread ids are
+  unique across runs (History is keyed by the thread id alone) and follow
+  `@voluma/contracts/ids`: the root is `<runId>.supervisor`, the main agent `<runId>.main`,
+  the others `<runId>.<taskId>.<role>` (plus `.<n>` for the n-th), where n is how many the log
+  has started for that thread, so a restart never reuses a thread. `thread.started` carries the task id
   for a worker or check thread.
 - **The log is the run.** `recorder.ts` has one ordered delivery queue for `emit` and
   `append`, and an event joins the view (`events()`) only once the store has acknowledged it, in
@@ -102,48 +100,43 @@ checklist, check threads, and review chat threads.
   once per change of the log), inside one per-run critical section (`section`). A thread's
   kind and task come from its tool context, not the log. It writes through `recorder.append`,
   which makes one attempt, so the runtime never decides from an event the store lacks; a
-  store failure fails the tool call, and the supervisor fails the run. Hashing and copying
-  evidence happen outside the section. A thread writes only to its own task, and a worker
-  opens an attempt only when every task it builds on is done. `tools/task-tools.ts` wraps it
-  as the model's `checklist`, `checkpoint` and `report_output`. `output-checks.ts` holds the
+  store failure fails the tool call, and the run loop fails the run. Hashing and copying
+  evidence happen outside the section. A worker writes only to its own task, and an attempt
+  opens only when every task it builds on is satisfied (`openAttempt` is the one way).
+  `tools/task-tools.ts` wraps it as `checkpoint`, `report_output`, `submit_task` and `ask`. `output-checks.ts` holds the
   declared-output, reference, grid-placement and ruler-length checks. Files named as evidence go through the `Evidence` port.
-- **The supervisor** (`supervisor.ts`) is code, not a thread with a model, and keeps no state
-  of its own. Each step, inside the runtime's `section`, is a function of `fold` of the log, the
-  thread records read from the same log (started, ended, wakes, judgments) and which threads
-  run in this process; the header lists the rule per task status. Resume is the same code as a
-  first run: a new process given the stored events and History starts nothing twice, wakes a
-  thread the dead process left running, and names a redo's worker from the log's count. A
-  task whose check passed has a boundary wake; a check that did not pass, or a failed thread,
-  is a judgment point. Both wake **the main thread** (`main-thread.ts`): one model thread per
-  run, kept as a conversation rebuilt from the log (the `wake` events), never held in memory,
-  so it is append-only (a provider's prompt cache keeps hitting its prefix) and a resumed run
-  asks from the context the first run had (each wake names the model that answered; a resume
-  may use another). The run's first wake, `run-started` (`run-start.ts`, from `superviseRun`
-  before the task runtime exists), may adapt the computed plan to the user's notes: no notes,
-  no call. The model answers only a change (done-when lines to append, workflow tasks to add)
-  and code builds the plan from the workflow files (`adaptPlan`), so outputs, units, ranges and
-  required-ness cannot change; a bad answer is recorded as an `error` and the computed plan runs;
-  `revision.started.plan` stays the record of what applied. A stop during that wake leaves no
-  `revision.started` (the supervisor skips `runtime.start()`), so a resume asks again. Every
-  wake sees the selection and computed plan (in the system prompt), and every worker and
-  check thread gets the user's notes verbatim in its first message, beside the main thread's.
-  Each wake is one call, asked outside the section and bounded by a deadline and the abort
-  signal (a stop is no answer and records nothing). It answers with the whole notes block (at
-  most `WAKE_NOTE_MAX` characters) and, at a judgment point, `accept | redo | fail`. The
-  answer is written as a `wake` event `<thread>@<starts>:wake` (the start count lets a
-  re-woken thread have a second wake) before anything uses it; the next step turns a judgment
-  point's decision into the `judgment` event `<thread>:judgment` (arm `main:<provider/id>`; the
-  fallback when the call errored or a redo was capped) and applies it, as `by: judgment(arm)`.
-  A replay finds both and asks no one. The notes in force (the latest `wake` with a `note`) go
-  into the first message of every worker and check thread started after, never a system
-  prompt. Context grows by one wake message (the task's report) and one answer (the notes
-  block, rewritten whole) per wake: about 0.3 k tokens each on a probe run with short
-  reports, at most ~1.5 k for a full-length note. A 10-task run with a few judgments is ~13
-  wakes: 5 to 25 k tokens at the end, and every wake after the first re-reads the earlier
-  ones from the cache.
-  The main thread has no tools or sandbox yet (`apps/runner/.context/TODO.md`). A thread that throws or is refused before it starts (`ran` false), or an
-  error in a step, fails the run: threads aborted, the root ends `failed`. The supervisor never
-  imports Pi; it is built by `superviseRun` (`packages/harness/src/supervise-run.ts`), which a host gives only adapters.
+- **The run loop** (`run-loop.ts`) is code, not a model thread, and keeps no state of its own. Each
+  step, inside the runtime's `section`, is a function of `fold` of the log, `thread-log.ts` (every
+  thread's state: running, idle, stopped, cut off; asks and answers; fix rounds; the delivery
+  cursor and notices) and which threads run in this process. It does the first applicable of:
+  resume a cut-off thread, start the check of an `under-review` task, write a finished check's
+  result (`check-result`, or `fix-limit`), enforce the check deadline (`check-limit`), deliver to
+  the main agent, and the liveness end. Resume is the same code as a first run. The run ends when
+  the root has a completed `thread.ended` (`finish_run`, or liveness); then every thread without
+  an end is stopped. Stops are appended first (`thread.ended {cancelled}` inside the section,
+  then abort without waiting), so the holder check refuses the stopped thread's next write at once.
+  A stale mark stops every worker and check of the dependent the same way, whatever its status.
+  A `message` that opens an attempt for feedback is followed by the worker's copy of the text; if a
+  cut falls between, the loop resumes the idle holder with the text stored in the `message` call.
+- **The main agent** (`<runId>.main[.n]`, kind `main`) is the one model thread that coordinates:
+  it starts workers (`start_worker`), steers them or sends feedback on a rejected task
+  (`message`), answers a checker (`answer`), accepts a rejected task, changes the plan
+  (`change_plan`, recorded as `plan.changed` before it applies) and ends the run
+  (`finish_run`). Its tools are `tools/main-tools.ts`; each writes under an id derived from the
+  call (`tools/effects.ts`), so a call a crash cut off is answered from the log. It hears about
+  the run only through **delivery messages** that resume it: the notices (a submit, a worker that
+  stopped, a check result, an `ask`, a stale task), the live agents and the tasks whose row
+  changed (`messages.ts`, which holds every string an agent is told). A delivery's `covers` is the last event it accounted for; what lies
+  after the latest `covers` is undelivered, so a crash can deliver twice, never lose one. If the
+  main agent ends its turn with nothing running and nothing to deliver, it is nudged with the full
+  agents list and task table; after `stuckLimit` such nudges in a row code skips the unfinished
+  tasks (a root-written `plan.changed`) and ends the run. A main thread that cannot resume, or
+  failed on a provider error, is replaced by `main.<n+1>` whose first message is built from the log.
+  A thread that throws or is refused before it starts (`ran` false), a fatal provider error, or an
+  error in a step fails the run: threads aborted, the root ends `failed`. The loop never imports
+  Pi; `superviseRun` (`packages/harness/src/supervise-run.ts`) wires it, and a host gives only
+  adapters, each role's model/prompt/tool names (`RoleOf`) and the first messages (`Briefs`).
+  The harness builds exactly the tools a role's file names (`tools/registry.ts`).
 - **The runner service** (`apps/runner`, `pnpm --filter @voluma/runner start`). It polls
   `claim` while it has a free slot (`RUNNER_CONCURRENCY`); `run.ts` runs each claim the same
   way whether the run is fresh or recovered: read the run's stored events (paged) and every
@@ -156,7 +149,7 @@ checklist, check threads, and review chat threads.
   heartbeat was sent. SIGTERM stops every run, each reports `released`, and the process
   exits. A `voluma` run uses our keys; a `visitor` run uses the claim's, in that run's scope
   only. `redact.ts` masks every literal key in stored events and history rows, console lines
-  (redacted before they are clipped) and the report's `error`. Before a run's sandbox exists the runner snapshots `workflows/core/` and the run's workflow directory (`workflows/<name>/`) from its own checkout into the run's R2 prefix, once per run, and reads the snapshot (`packages/workflow`). The plan is the tasks that produce the outputs the user selected (`Run.selectedOutputs`, all if absent) and what they depend on, built from `tasks.json` and `outputs.json` (`computePlan`), passed through `adaptPlan` (where the main thread will adapt it to the run's notes) and recorded in the first event; a resumed run keeps the plan its first event recorded. The prompts are the harness's role prompts plus the skill list (name, description, `/workflow/...` path; the agent reads the rest with bash) and the task's instructions and done criteria (`prompts.ts`). Every role's tools are `view_image` and, with a Meta key, `segment_sam`, built from the registry (`packages/harness/src/tools/registry.ts`). The claim carries no plan. Workflow format: voluma-bio/docs `work/mvp-contracts-and-data/design/workflow-format.md`.
+  (redacted before they are clipped) and the report's `error`. Before a run's sandbox exists the runner snapshots `workflows/core/` and the run's workflow directory (`workflows/<name>/`) from its own checkout into the run's R2 prefix, once per run, and reads the snapshot (`packages/workflow`). The plan is the tasks that produce the outputs the user selected (`Run.selectedOutputs`, all if absent) and what they depend on, built from `tasks.json` and `outputs.json` (`computePlan`) and recorded in the first event (the main agent changes it later with `change_plan`); a resumed run keeps the plan its first event recorded. The prompts are the harness's role prompts plus the skill list (name, description, `/workflow/...` path; the agent reads the rest with bash) and the task's instructions and done criteria (`prompts.ts`). Every role's tools are what its role file lists (`workflows/core/agents/`), built from the registry (`packages/harness/src/tools/registry.ts`); `segment_sam` runs `voluma-sam` in the worker's sandbox through the gateway, so it needs `VOLUMA_GATEWAY_URL` and is never granted to the checker. The claim carries no plan. Workflow format: voluma-bio/docs `work/mvp-contracts-and-data/design/workflow-format.md`.
 - **`seq` and the database.** `seq` per run is gapless and in commit order: each
   append takes a per-run advisory lock as its own statement before the insert (a lock
   inside the insert's statement races under READ COMMITTED), so the stream hub can

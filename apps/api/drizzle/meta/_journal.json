@@ -57,6 +57,13 @@
       "when": 1793313018745,
       "tag": "0007_charming_meggan",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793320000000,
+      "tag": "0008_drop_wake_judgment",
+      "breakpoints": true
     }
   ]
 }

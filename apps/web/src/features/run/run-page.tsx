@@ -48,17 +48,12 @@ import { TranscriptView } from "./transcript-view";
  * The run's stream as it arrives: durable events, and live frames folded until their durable
  * event lands. Published at most once per animation frame: a busy run sends many per second.
  * `events` keeps its identity while only frames arrive, so the event derivations don't rerun
- * per token. `closed` once the stream is over for good, when the log is whole; live partials are
- * dropped then: nothing will complete them.
+ * per token. Once the stream is over for good, live partials are dropped: nothing will complete them.
  */
-function useRunStream(
-  runId: string,
-  onClosed: () => void,
-): { events: RunEvent[]; live: Live; closed: boolean } {
-  const [state, setState] = useState<{ events: RunEvent[]; live: Live; closed: boolean }>({
+function useRunStream(runId: string, onClosed: () => void): { events: RunEvent[]; live: Live } {
+  const [state, setState] = useState<{ events: RunEvent[]; live: Live }>({
     events: [],
     live: noLive,
-    closed: false,
   });
   const onClosedRef = useRef(onClosed);
   onClosedRef.current = onClosed;
@@ -67,12 +62,11 @@ function useRunStream(
     let published: RunEvent[] = [];
     let live = noLive;
     const settled: Settled = new Set();
-    let closed = false;
     let frame: number | undefined;
     const publish = () => {
       frame = undefined;
       if (published.length !== events.length) published = [...events];
-      setState({ events: published, live, closed });
+      setState({ events: published, live });
     };
     const schedule = () => {
       frame ??= requestAnimationFrame(publish);
@@ -92,7 +86,6 @@ function useRunStream(
       onClosed: () => {
         if (frame !== undefined) cancelAnimationFrame(frame);
         live = noLive;
-        closed = true;
         publish();
         onClosedRef.current();
       },
@@ -116,27 +109,27 @@ export function RunPage() {
     // Queue position and state changes aren't events; the stream is the source for the rest.
     refetchInterval: (q) => (q.state.data?.state.status === "ended" ? false : 3000),
   });
-  const { events, live, closed } = useRunStream(id, () => void run.refetch());
+  const { events, live } = useRunStream(id, () => void run.refetch());
   const state = run.data?.state;
   // Query's structural sharing keeps `state` the same object across polls that change nothing.
-  const halt = useMemo(() => state && haltOf(state, closed), [state, closed]);
+  const halt = useMemo(() => state && haltOf(state), [state]);
   const folded = useMemo(() => fold(events), [events]);
   const providerCalls = run.data?.providerCalls;
+  // Not shown until the run has loaded; until then any state will do.
   const view = useMemo(
-    () => runView(events, folded, halt, providerCalls),
-    [events, folded, halt, providerCalls],
+    () => runView(events, folded, state ?? { status: "queued", position: 1 }, providerCalls),
+    [events, folded, state, providerCalls],
   );
   const threads = useMemo(() => withLiveCalls(view.threads, live), [view.threads, live]);
   const threadById = useMemo(() => new Map(threads.map((t) => [t.id, t])), [threads]);
-  const main = threads.find((t) => t.kind === "supervisor");
+  // The root thread spans the run; the main agent's threads (`main`, `main.2`, ...) are the page's transcript.
+  const root = threads.find((t) => t.kind === "supervisor");
   const openId = params.get("thread");
-  const open = openId && openId !== main?.id ? threadById.get(openId) : undefined;
+  const opened = openId ? threadById.get(openId) : undefined;
+  const open = opened?.kind === "main" || opened?.kind === "supervisor" ? undefined : opened;
   const rows = useMemo(
-    () =>
-      openId && openId !== main?.id
-        ? threadRows(events, openId, live, halt)
-        : mainRows(events, live),
-    [events, live, halt, openId, main?.id],
+    () => (open ? threadRows(events, open.id, live, halt) : mainRows(events, live, halt)),
+    [events, live, halt, open],
   );
   const openThread = useCallback(
     (threadId: string | null) => setParams(threadId ? { thread: threadId } : {}),
@@ -183,7 +176,7 @@ export function RunPage() {
             <span className="ml-auto flex items-center gap-2">
               <RunSpendSummary
                 spend={spend}
-                since={main?.status === "running" ? events.at(-1)?.createdAt : undefined}
+                since={root?.status === "running" ? events.at(-1)?.createdAt : undefined}
               />
               <RunActions run={data} onChange={setRun} />
             </span>
@@ -206,12 +199,12 @@ export function RunPage() {
                 <div className="px-6 max-[1100px]:px-4">
                   <RunningStrip
                     threads={threads.filter(
-                      (t) => t.status === "running" && t.kind !== "supervisor",
+                      (t) => t.status === "running" && (t.kind === "worker" || t.kind === "check"),
                     )}
                   />
                 </div>
               )}
-              {openId && !open && openId !== main?.id ? (
+              {openId && !opened ? (
                 <Message>This thread isn't in the run yet.</Message>
               ) : (
                 <TranscriptView

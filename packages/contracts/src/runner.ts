@@ -58,7 +58,7 @@
  * recorded (`task-tools.ts`). One limit stops a run that keeps costing its runner: the API
  * counts consecutive claims that end `self-stop` or `lease-expired` without run-state
  * progress (a `task`, `checkpoint`, `output`, `attempt.opened`, `assets.ready` or correcting
- * `revision.started` event; `judgment` while the old supervisor runs), and the run ends
+ * `revision.started` or `plan.changed` event), and the run ends
  * `failed` at 3, naming the call that was in flight. Progress resets the count. `shutdown`
  * never counts, so deploys don't fail a long run.
  *
@@ -67,7 +67,10 @@
  * Cancel. The runner learns a run is over from the heartbeat: `stop` is true
  * once the server has ended it (cancelled by the user, or `failed` by the
  * dollar ceiling). The runner stops its threads and sandboxes and reports
- * nothing more; the server has recorded the end already (`run.ts`).
+ * nothing more; the server has recorded the end already (`run.ts`). A cancel also ends
+ * every open thread `cancelled` and the root last, in the same transaction (`cancelEnds` in
+ * `threads.ts`): the runner's writes are refused once the run has ended, so the server writes
+ * them, and a run cancelled while no runner holds it is left just as consistent.
  *
  * Usage. The heartbeat carries the usage since the previous acknowledged
  * heartbeat (`usageSchema`): the dollars of model calls and the seconds of
