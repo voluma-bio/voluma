@@ -10,6 +10,7 @@ import {
   toolOutputKey,
   workflowSnapshotPrefix,
 } from "@voluma/contracts/r2";
+import type { Skill } from "@voluma/workflow/definition";
 import type { SandboxMount } from "./ports/sandbox";
 
 const INPUTS = "/inputs";
@@ -19,6 +20,12 @@ const WORKFLOW = "/workflow";
 
 export interface RunLayout {
   mounts: SandboxMount[];
+  /**
+   * The environment of every sandbox of the run, whatever its role or thread. `PYTHONPATH` lets
+   * one skill's script import another skill's module; `skills` is `WorkflowDefinition.skills`.
+   * Module names are unique across skills (a test enforces it), so the order does not matter.
+   */
+  env: Record<string, string>;
   /** The mounts, as bullet lines for the tool description. */
   description: string;
   /** Tells a model that resumes a thread which of its files survived in a new sandbox. */
@@ -34,7 +41,7 @@ export interface RunLayout {
 }
 
 /** `inputPrefix` is the R2 prefix of the run's read-only inputs; it is staged to local disk. */
-export function runLayout(runId: string, inputPrefix: string): RunLayout {
+export function runLayout(runId: string, inputPrefix: string, skills: readonly Skill[]): RunLayout {
   const scratch = scratchPrefix(runId);
   const mounts: SandboxMount[] = [
     { path: INPUTS, prefix: inputPrefix, access: "read-only", stage: true },
@@ -44,6 +51,7 @@ export function runLayout(runId: string, inputPrefix: string): RunLayout {
   ];
   return {
     mounts,
+    env: { PYTHONPATH: skills.map((s) => `${s.path}/resources`).join(":") },
     description:
       `- ${INPUTS} is a local copy of the input data: read it, do not modify it.\n` +
       `- ${WORKFLOW} holds the workflow's skills and resources, under their repo paths: read them, do not modify them.\n` +

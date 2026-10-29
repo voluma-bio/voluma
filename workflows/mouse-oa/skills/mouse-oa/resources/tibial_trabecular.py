@@ -21,28 +21,16 @@ Writes: <out>/iioc-trab-tissue.npy  ROI-2, bool, on the aligned grid, with its s
         <out>/qc-coronal.jpg  six coronal sections: ROI-2 (cyan) inside ROI-1 (green)
 Prints: one JSON line {qc, tissue, upper_boundary}
 Example: python tibial_trabecular.py --iioc-tissue iioc/iioc-tissue.npy --growth-plate-face iioc/growth-plate-proximal-face.npy --hu-aligned tibia-hu.npy --annotations annotations.json --out roi2/
-Exits 2 with one sentence on the input it checks; a missing file is a Python error.
+Exits 2 with one sentence on bad input, before writing anything.
 """
 
-import sys
 from pathlib import Path
 
 import matplotlib
 import numpy as np
+import sidecar
+from annotations import load_annotations, need, traced_surface
 from scipy import ndimage as ndi
-
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
-# only missing directories are added, so a script imported by another leaves the importer's order alone.
-SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources'), str(SKILLS / 'regions-and-landmarks/resources')) if d not in sys.path]
-try:
-    import sidecar
-    from annotations import load_annotations, need, traced_surface
-except ModuleNotFoundError as e:
-    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
-          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
-    sys.exit(2)
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -69,10 +57,10 @@ def compartment(parent, gp, ann, vox, shell_mm, growth_mm, upper_shift=0.0):
 
 def main():
     ap = sidecar.parser(__doc__)
-    ap.add_argument('--iioc-tissue', required=True, help='iioc-tissue.npy from iioc.py (ROI-1), with its sidecar beside it')
-    ap.add_argument('--growth-plate-face', required=True, help='growth-plate-proximal-face.npy from iioc.py')
-    ap.add_argument('--hu-aligned', required=True, help='tibia-hu.npy from tibia_frame.py (for the QC image)')
-    ap.add_argument('--annotations', required=True, help='annotations JSON on the aligned grid, described above')
+    ap.add_argument('--iioc-tissue', type=sidecar.existing, required=True, help='iioc-tissue.npy from iioc.py (ROI-1), with its sidecar beside it')
+    ap.add_argument('--growth-plate-face', type=sidecar.existing, required=True, help='growth-plate-proximal-face.npy from iioc.py')
+    ap.add_argument('--hu-aligned', type=sidecar.existing, required=True, help='tibia-hu.npy from tibia_frame.py (for the QC image)')
+    ap.add_argument('--annotations', type=sidecar.existing, required=True, help='annotations JSON on the aligned grid, described above')
     ap.add_argument('--out', required=True, help='output directory (created)')
     ap.add_argument('--shell-clearance-mm', type=float, default=0.021, help='mm: stay this far inside the outer surface of ROI-1')
     ap.add_argument(

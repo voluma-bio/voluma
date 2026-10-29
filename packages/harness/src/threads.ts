@@ -22,7 +22,10 @@ export type ThreadSpec = StartThreadOptions extends infer O
     ? Omit<O, PerRun>
     : never
   : never;
-type Shared = Pick<StartThreadOptions, "runId" | "recorder" | "history" | "sandbox">;
+type Shared = Pick<StartThreadOptions, "runId" | "recorder" | "history" | "sandbox"> & {
+  /** Called when a thread ends, whatever the outcome; its sandbox is no longer needed. */
+  release(threadId: string): void;
+};
 
 export interface Threads {
   /** Starts a thread, or resumes one of the same id from its History (give it an `input`). */
@@ -66,7 +69,13 @@ export function threads(shared: Shared, signal?: AbortSignal): Threads {
     const stop = () => abort.abort();
     signal?.addEventListener("abort", stop);
     if (signal?.aborted) stop();
-    const handle = startThread({ ...shared, ...spec, signal: abort.signal, runSignal: signal });
+    const { release: _, ...startOptions } = shared;
+    const handle = startThread({
+      ...startOptions,
+      ...spec,
+      signal: abort.signal,
+      runSignal: signal,
+    });
     const entry: Entry = { abort, handle, running: true, settled: Promise.resolve() };
     // `running` clears in the same tick `done` resolves: `send` refuses a moment before.
     entry.settled = handle.done
@@ -85,6 +94,7 @@ export function threads(shared: Shared, signal?: AbortSignal): Threads {
       )
       .finally(() => {
         entry.running = false;
+        shared.release(spec.threadId);
         signal?.removeEventListener("abort", stop);
       });
     entries.set(spec.threadId, entry);
