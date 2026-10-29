@@ -1,7 +1,9 @@
 /**
  * The run record and the calls on it, under `/api/run`. These calls are
- * cookie-authenticated (the rules in `auth.ts` apply); the bearer-authenticated
- * ingest routes under the same prefix are a different contract.
+ * cookie-authenticated (the rules in `auth.ts` apply); the reads (`GET /runs`,
+ * `/runs/:id`, `/runs/:id/stream`) also take the read-only debug token, which reads
+ * every org's runs. The bearer-authenticated ingest routes under the same prefix are a
+ * different contract.
  *
  *   POST /api/run/runs             body `startRunRequestSchema` → 200 `runSchema`
  *                                  (404 for an unknown `workflowId` or an `inputId`
@@ -58,8 +60,8 @@
  * unexpired uploads a member may have open.
  *
  * Org scoping, enforced by the server on every call and every read:
- *   - Every read is filtered by the caller's `labId`. Another org's run or
- *     input answers 404, never 403.
+ *   - Every read by a user is filtered by the caller's `labId`. Another org's run
+ *     or input answers 404, never 403. (The debug token reads every org's runs.)
  *   - When the caller's server-side scope is `self` (not in `meResponseSchema`),
  *     reads are also filtered to the caller: a run when `startedBy` is the
  *     caller's `userId` or the run is an `example`; an input when `uploadedBy`

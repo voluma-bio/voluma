@@ -1,6 +1,7 @@
 /**
- * The prompts of a run's worker and check threads: the harness's role prompts plus the
- * workflow's skills and task text (`@voluma/workflow`). A thread's system prompt is fixed for
+ * The prompts of a run's worker and check threads: the role files plus the sandbox text and the
+ * workflow's skills and task text (`@voluma/workflow`). The role's own text is its file in
+ * `workflows/agents/`, from the run's snapshot. A thread's system prompt is fixed for
  * its life (a resumed thread that differs fails), so it takes only the role's rules and the
  * skill list, both fixed by the run's snapshot. What varies by task goes in the thread's
  * first message.
@@ -11,13 +12,6 @@ import type { WorkflowDefinition } from "@voluma/workflow/definition";
 const COMMON = `You work in a sandbox with one shell tool, bash. Python 3.12 with numpy, scipy, scikit-image, pydicom, nibabel, SimpleITK, matplotlib and pyvista (offscreen) is installed. There is no network.
 /inputs holds the scan (a local copy), /outputs/<task id>/ holds each task's result files, and /scratch is for intermediate files; both are kept if the sandbox restarts. /outputs and /scratch are network-backed mounts: write each file whole, once. They do not support rename within them (\`sed -i\`, editors), append (\`>>\`), in-place edits or memory-mapped writes (\`np.lib.format.open_memmap\` in write mode, \`np.memmap\`). Build a file under /tmp (local disk, lost on restart), then \`cp\` it in.
 Check what you report against the files themselves, and say which file or header each number came from. Record your work with the task tools. A file you name in an output or checkpoint is {root: "outputs", path} relative to /outputs/<task id>/, or {root: "scratch", path} relative to /scratch.`;
-
-const WORKER = `You are an analysis agent working on one task of a micro-CT analysis run.\n${COMMON}
-Your task tools are checklist (task status), checkpoint (a milestone, with the files it rests on) and report_output (a result).
-Set your task in-progress when you start. Report every required output with report_output. When all of them are reported set it done; set it to-check if you are unsure of something, and failed if it cannot be done. Work only on your own task.`;
-
-const CHECK = `You are a second agent checking another agent's work on one task of a micro-CT analysis run.\n${COMMON}
-Re-derive the task's results from the scan and the worker's files in /outputs/<task id>/ before you trust them. Your only task tool is checkpoint. You neither set the task's status nor report or change outputs; the worker's outputs stay as they are. Write a checkpoint with verdict "passed" if you agree, or "needs-review" if you do not or cannot tell, and in its text give the values you re-derived next to the worker's, with one plain line of why. Check only your own task.`;
 
 /**
  * The skills every role may use, progressively disclosed: name, description and path here, the
@@ -31,8 +25,13 @@ function skillList(def: WorkflowDefinition): string {
   return `Skills: read a skill's SKILL.md with bash before you rely on it; its other files sit beside it in the same directory.\n${lines.join("\n")}`;
 }
 
-export const workerSystem = (def: WorkflowDefinition) => `${WORKER}\n\n${skillList(def)}`;
-export const checkSystem = (def: WorkflowDefinition) => `${CHECK}\n\n${skillList(def)}`;
+/** The role file's body, then the generated environment text and skill list. */
+function system(def: WorkflowDefinition, role: "worker" | "checker"): string {
+  return `${def.agents[role].body}\n\n${COMMON}\n\n${skillList(def)}`;
+}
+
+export const workerSystem = (def: WorkflowDefinition) => system(def, "worker");
+export const checkSystem = (def: WorkflowDefinition) => system(def, "checker");
 
 function taskBrief(task: PlanTask): string {
   const { instructions } = task;

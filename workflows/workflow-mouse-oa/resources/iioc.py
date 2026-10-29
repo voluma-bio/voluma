@@ -10,7 +10,7 @@ This script writes regions and heights only: TV, BV and BV/TV of ROI-1 (deck #4-
 
 Writes (aligned grid, array axes W,V,U) iioc-tissue.npy, growth-plate-proximal-face.npy, growth-plate-proximal-valid.npy (2D bool: where the face is traced,
 not held constant past its first and last section or its curves' ends), articular-top-surface.npy (2D, W index per V,U), <side>-plate-run.npy, and on the scan grid iioc-tissue-scan.npy and width-points-scan.json (the two
-width points as [z, y, x] scan indices, for `amira_landmarks.py`); plus iioc.json (every value, with its definition) and QC
+width points as a points file on the scan grid, for `amira_landmarks.py`); plus iioc.json (every value, with its definition) and QC
 images. Prints the result record (`microct-core/resources/sidecar.py`) with the paths.
 
 Heights #7-9 are reported two ways until the lab chooses: along W, the tibial shaft axis (the deck values), and
@@ -37,6 +37,7 @@ if SKILLS is None:
     sys.exit('Cannot find microct-core: this script expects microct-analysis/skills/microct-core/resources/ in a '
              'directory above it (<workflows>/workflow-mouse-oa/resources/ with <workflows>/microct-analysis/ beside it)')
 sys.path[:0] = [str(HERE), str(SKILLS / 'microct-core/resources'), str(SKILLS / 'regions-and-landmarks/resources')]
+import frame as fr
 import sidecar
 from envelope import close_and_fill
 from region_from_curves import surface_from_curves
@@ -80,15 +81,6 @@ def envelope(bone, gp):
     for u in range(bone.shape[2]):
         result[:, :, u] = ndi.binary_fill_holes(result[:, :, u])
     return result
-
-
-def to_scan(mask, frame, scan_shape):
-    """Nearest-neighbour map of an aligned-grid mask onto the scan grid."""
-    inv = np.array(frame['output_xyz_to_original_xyz_matrix']).T
-    off = np.array(frame['output_xyz_to_original_xyz_offset'])
-    return ndi.affine_transform(
-        mask.astype(np.uint8), inv[::-1, ::-1], (-inv @ off)[::-1], output_shape=scan_shape, order=0, prefilter=False
-    ).astype(bool)
 
 
 def largest(mask):
@@ -160,7 +152,7 @@ def main():
         help='move the traced growth-plate face by this many voxels (+ = toward the shaft): sensitivity run',
     )
     a = ap.parse_args()
-    frame = json.loads(Path(a.frame).read_text())
+    frame = fr.load(a.frame)
     ann = load_annotations(a.annotations, frame['grid_id'])
     g = sidecar.grid(a.hu_json)
     a.threshold = sidecar.bone_threshold_hu(a.hu_json, a.threshold)
@@ -186,7 +178,7 @@ def main():
         roi &= keep
     roi, removed = largest(roi)
     bone = roi & (np.asarray(h) > a.threshold)
-    scan_roi = to_scan(roi, frame, g['shape'])
+    scan_roi = fr.to_scan(roi, frame, g['shape'])
     values = {'voxel-size': sidecar.value(vox, 'mm', 'voxel edge of the aligned grid, which every length here is a multiple of', kind='diagnostic')}
     valid = roi.any(axis=0)
     top = np.argmax(roi, axis=0).astype(float)
@@ -267,11 +259,8 @@ def main():
         'the other side)',
         points_uvw=wp.tolist(),
     )
-    basis = np.array(frame['output_xyz_to_original_xyz_matrix'])
-    origin_xyz = np.array(frame['output_xyz_to_original_xyz_offset'])
-    width_points_zyx = {
-        name: (basis @ p + origin_xyz)[::-1].tolist() for name, p in zip(('width_a', 'width_b'), wp, strict=True)
-    }
+    width_points_zyx = fr.to_scan_points(wp[:, ::-1], frame)  # [u, v, w] -> aligned (w, v, u) -> scan (z, y, x)
+    width_points = {'grid_id': g['grid_id'], 'points': [{'name': n, 'zyx': p.tolist()} for n, p in zip(('width_a', 'width_b'), width_points_zyx)]}
     plates = {}
     for side in ('medial', 'lateral'):
         patch = ann.get('plate_patches', {}).get(side)
@@ -333,7 +322,7 @@ def main():
             params=params,
             script='iioc.py',
         )
-    (out / 'width-points-scan.json').write_text(json.dumps(width_points_zyx, indent=1) + '\n')
+    (out / 'width-points-scan.json').write_text(json.dumps(width_points, indent=1) + '\n')
     np.save(out / 'iioc-tissue-scan.npy', scan_roi)
     sidecar.write(
         out / 'iioc-tissue-scan.npy', like=a.hu_json, inputs=[a.hu_json, a.frame, a.mask], params=params, script='iioc.py'

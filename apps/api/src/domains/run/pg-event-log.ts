@@ -18,7 +18,7 @@
 import type { EventInput, RunEvent } from "@voluma/contracts/events";
 import { and, asc, eq, gt, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import type { Reader } from "../../domain";
+import type { ReadScope } from "../../domain";
 import { assertLease } from "./lease";
 import type { Notifier } from "./notifier";
 import { readableRuns, type Tx, toRunEvent } from "./pg-runs";
@@ -65,7 +65,7 @@ export function pgEventLog(db: PostgresJsDatabase, notifier: Notifier) {
      * so one snapshot: an append holds `FOR SHARE` on the run row until it commits and every
      * end is an `UPDATE` of that row, so a snapshot that shows `ended` shows every event.
      */
-    async stream(reader: Reader, runId: string, after: number, limit: number) {
+    async stream(reader: ReadScope, runId: string, after: number, limit: number) {
       const page = db
         .select()
         .from(events)

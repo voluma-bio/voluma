@@ -10,18 +10,22 @@ import { type Input, type Run, runSchema } from "@voluma/contracts/run";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { and, asc, desc, eq, inArray, or, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import type { Reader } from "../../domain";
+import { EVERY_LAB, type Reader, type ReadScope } from "../../domain";
 import type { RunRecord } from "../../ports";
 import { events, inputs, referenceInput, runs } from "./schema";
 
 export type Tx = Parameters<Parameters<PostgresJsDatabase["transaction"]>[0]>[0];
 
-/** `lab_id = labId AND (ownerId IS NULL OR started_by = ownerId OR example)` */
-export const readableRuns = ({ labId, ownerId }: Reader): SQL | undefined =>
-  and(
-    eq(runs.labId, labId),
-    ownerId === null ? undefined : or(eq(runs.startedBy, ownerId), eq(runs.example, true)),
-  );
+/** `lab_id = labId AND (ownerId IS NULL OR started_by = ownerId OR example)`; every run for `EVERY_LAB`. */
+export const readableRuns = (scope: ReadScope): SQL | undefined =>
+  scope === EVERY_LAB
+    ? undefined
+    : and(
+        eq(runs.labId, scope.labId),
+        scope.ownerId === null
+          ? undefined
+          : or(eq(runs.startedBy, scope.ownerId), eq(runs.example, true)),
+      );
 
 /** The input rule: the caller's upload, or the org's reference scan. */
 export const readableInputs = ({ labId, ownerId }: Reader): SQL | undefined =>
@@ -222,12 +226,12 @@ export function pgRunReads(db: PostgresJsDatabase) {
   // A watermark is read in the same snapshot as the rows/logs, never a TTL or local invalidation.
   const summaries: SummaryCache = new Map();
   return {
-    list: (reader: Reader) =>
+    list: (reader: ReadScope) =>
       db.transaction((tx) => loadRuns(tx, readableRuns(reader), summaries), {
         isolationLevel: "repeatable read",
       }),
 
-    get: async (reader: Reader, runId: string) =>
+    get: async (reader: ReadScope, runId: string) =>
       (
         await db.transaction(
           (tx) => loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId)), summaries),

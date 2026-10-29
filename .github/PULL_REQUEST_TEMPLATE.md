@@ -1,4 +1,4 @@
-<!-- Write for the other lane's owner, who hasn't seen this work. Explain a
+<!-- Write for the other person, who hasn't seen this work. Explain a
      term the first time it appears and link what you refer to. Open each
      section with its point; describe the final state, not the journey.
 
@@ -30,7 +30,7 @@
 
 ## Knowledge layers, docs and deletions
 
-<!-- What the other lane's agents read differently after this PR:
+<!-- What other agents read differently after this PR:
      AGENTS.md, .context/ (CONTEXT.md, TODO.md, decisions.md), DESIGN.md,
      README and other docs, each with one line on what changed. Then what
      this PR deleted: files, code paths, dependencies, config. "None." and
@@ -41,9 +41,10 @@
 
 ## Contract changes
 
-<!-- Changes to packages/contracts: the schema or command, what the other
-     lane must change. Contract changes
-     ship in their own small PR. "None." when contracts are untouched. -->
+<!-- Changes to packages/contracts: the schema or command, and every caller
+     this PR moved with it. A change that stands alone ships in its own
+     small PR; a breaking one may ship with its callers. "None." when
+     contracts are untouched. -->
 
 ## Verification
 

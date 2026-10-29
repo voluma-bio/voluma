@@ -1,8 +1,8 @@
 """Distal femoral length, width, W/L ratio and landmark frame from four annotated landmarks (deck #26-28).
 
-  python femoral_frame.py --landmarks landmarks.json --hu-json hu.json --labels labels.npy --out <dir> [--label 1]
+  python femoral_frame.py --landmarks points-ab.json points-cd.json --hu-json hu.json --labels labels.npy --out <dir> [--label 1]
 
-Landmarks (zyx voxel indices on the scan grid, floats allowed; the points.json `pick.py` writes for picks named a to d works as is;
+Landmarks (points files on the scan grid, as `pick.py` writes them, one per view or all four in one; picks named a to d, each name once; zyx voxel indices, floats allowed;
 see ../references/oa-protocol.md for how to place them):
   a  midpoint of the upper line of the intercondylar groove      c  midpoint of the ridge on the lateral condyle
   b  intercondylar notch                                         d  vertex of the medial condyle
@@ -59,17 +59,18 @@ def off_bone_mm(point, femur, vox):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--landmarks', required=True, help='JSON {"a": [z,y,x], "b": ..., "c": ..., "d": ...}, or the points.json pick.py wrote with picks named a, b, c, d')
+    ap.add_argument('--landmarks', required=True, nargs='+', help='points files on the scan grid that together hold points named a, b, c, d (the points.json files pick.py writes)')
     ap.add_argument('--hu-json', required=True, help='hu.json: spacing and grid')
     ap.add_argument('--out', required=True)
     ap.add_argument('--labels', required=True, help='labels.npy on the scan grid: the landmarks are checked against the femur')
     ap.add_argument('--label', type=int, default=1, help='femur label id')
     a = ap.parse_args()
-    lm = sidecar.load_points(a.landmarks)
+    grid = sidecar.grid(a.hu_json)
+    lm = sidecar.load_points(a.landmarks, grid['grid_id'])
     missing = [i for i in IDS if i not in lm]
     if missing:
-        sidecar.fail(f'landmarks.json is missing {missing}: place a, b (length) and c, d (width)')
-    sp = np.array(sidecar.grid(a.hu_json)['spacing_zyx_mm'], float)
+        sidecar.fail(f'the landmark files are missing {missing}: place a, b (length) and c, d (width)')
+    sp = np.array(grid['spacing_zyx_mm'], float)
     p = {i: np.array(lm[i], float) for i in IDS}
     if any(v.shape != (3,) for v in p.values()):
         sidecar.fail('each landmark is three numbers [z, y, x] in scan voxel indices')

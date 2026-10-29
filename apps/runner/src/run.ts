@@ -29,6 +29,7 @@ import { usageOf } from "@voluma/harness/model-usage";
 import { type Recorder, recorder } from "@voluma/harness/recorder";
 import { type SandboxSession, sandboxSession } from "@voluma/harness/sandbox-session";
 import { type RunRole, superviseRun } from "@voluma/harness/supervise-run";
+import { optionalTools } from "@voluma/harness/tools";
 import { loadWorkflow } from "@voluma/workflow/load";
 import { computePlan } from "@voluma/workflow/plan";
 import { type Config, isVisitorSafe, providerKey } from "./config.ts";
@@ -167,12 +168,14 @@ export async function runClaim(
       prefix: workflowSnapshotPrefix(runId),
       root: REPO_ROOT,
       commit: config.commit,
+      knownTools: Object.keys(optionalTools),
     });
     // The tasks that produce the selected outputs and what they need. The main thread may adapt
     // them to the run's notes when the run starts (`superviseRun`).
     const computed = computePlan(definition.files, run.selectedOutputs);
-    // Every role's tools come from here, not from the workflow.
-    const roleTools = ["view_image", ...(metaKey ? ["segment_sam"] : [])];
+    // Each role's optional tools are the ones its file lists; `segment_sam` also needs a key.
+    const grant = (role: "worker" | "checker") =>
+      definition.agents[role].tools.filter((t) => t !== "segment_sam" || metaKey);
 
     const layout = runLayout(
       runId,
@@ -333,14 +336,14 @@ export async function runClaim(
         streamFn: streamFor("worker"),
         systemPrompt: workerSystem(definition),
         prompt: workerPrompt(task, { user: run.notes, main: notes }),
-        tools: roleTools,
+        tools: grant("worker"),
       }),
       check: (task, notes, recorded) => ({
         model: threadModel(checkModel, recorded),
         streamFn: streamFor("check"),
         systemPrompt: checkSystem(definition),
         prompt: checkPrompt(task, { user: run.notes, main: notes }),
-        tools: roleTools,
+        tools: grant("checker"),
       }),
       signal: abort.signal,
     });

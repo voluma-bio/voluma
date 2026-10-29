@@ -1,6 +1,6 @@
 /**
- * The review's run routes. Reads are scoped by `readerOf`, so a run the caller can't read
- * is 404, as in the run domain.
+ * The review's run routes, for users only. Reads are scoped by `readerOf`, so a run the
+ * caller can't read is 404.
  *   GET /runs/:runId                the run's review data (`@voluma/contracts/review`),
  *                                   built from its event log on each read
  *   GET /runs/:runId/files/:sha256  one of its files (`evidenceKey`), streamed from storage

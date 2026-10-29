@@ -7,14 +7,20 @@
  *
  * A skill directory holds `SKILL.md` and may hold `references/` and `resources/`; a directory
  * may also hold skills one level down, `skills/<name>/`. The workflow's directory adds
- * `outputs.json` and `tasks.json`.
+ * `outputs.json` and `tasks.json`. The role files of `workflows/agents/` are snapshotted too: they
+ * are the same for every workflow.
  */
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { workflowFilesSchema } from "@voluma/contracts/workflow-files";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import { type Skill, type WorkflowDefinition, WorkflowParseError } from "./definition";
+import {
+  type AgentDefinition,
+  type Skill,
+  type WorkflowDefinition,
+  WorkflowParseError,
+} from "./definition";
 
 /** The run's snapshot bucket, as the loader needs it. Keys are R2 keys. */
 export interface WorkflowStore {
@@ -33,6 +39,8 @@ export interface LoadOptions {
   root: string;
   /** The commit that checkout is at, written into the snapshot's marker. */
   commit: string;
+  /** The optional tool names a role may list (the harness's tool registry). */
+  knownTools: readonly string[];
 }
 
 /** A directory of the repo under `workflows/`: lowercase segments, no `.` or `..`. */
@@ -51,12 +59,22 @@ const frontmatterSchema = z.strictObject({
   ...Object.fromEntries(SKILL_KEYS.map((k) => [k, z.unknown().optional()])),
 });
 
+/** Where the role files live in the checkout and the snapshot; `AGENTS.md` there is for people. */
+const AGENTS_DIR = "workflows/agents";
+const agentSchema = z.strictObject({
+  name: z.string().min(1),
+  description: z.string().min(1),
+  tools: z.array(z.string().min(1)),
+  status: z.literal("planned").optional(),
+});
+
 /** Written last, so a snapshot cut short is redone, not trusted; its body is the commit. */
 const DONE = ".snapshot-done";
 const FILES = ["SKILL.md", "outputs.json", "tasks.json"];
 const TREES = ["references", "resources", "skills"];
 
-function frontmatter(file: string, text: string) {
+/** Parses the `---` block against `schema`; `body` is what follows it, trimmed. */
+function parseFile<T extends z.ZodType>(file: string, text: string, schema: T) {
   const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
   if (!m) throw new WorkflowParseError(file, "missing the --- frontmatter block");
   let data: unknown;
@@ -65,7 +83,7 @@ function frontmatter(file: string, text: string) {
   } catch (e) {
     throw new WorkflowParseError(file, `invalid frontmatter YAML: ${(e as Error).message}`);
   }
-  const r = frontmatterSchema.safeParse(data ?? {});
+  const r = schema.safeParse(data ?? {});
   if (!r.success) {
     const issue = r.error.issues[0];
     throw new WorkflowParseError(
@@ -73,7 +91,30 @@ function frontmatter(file: string, text: string) {
       `frontmatter ${issue?.path.join(".") || ""}: ${issue?.message}`.replace("  ", " "),
     );
   }
-  return r.data;
+  return { data: r.data as z.output<T>, body: text.slice(m[0].length).trim() };
+}
+
+const frontmatter = (file: string, text: string) => parseFile(file, text, frontmatterSchema).data;
+
+function parseAgent(path: string, text: string, knownTools: readonly string[]): AgentDefinition {
+  const { data, body } = parseFile(path, text, agentSchema);
+  const name = path.slice(path.lastIndexOf("/") + 1, -".md".length);
+  if (data.name !== name) {
+    throw new WorkflowParseError(path, `name "${data.name}" must match its file name "${name}"`);
+  }
+  const planned = data.status === "planned";
+  const unknown = data.tools.find((t) => !knownTools.includes(t));
+  if (!planned && unknown) {
+    throw new WorkflowParseError(path, `tool "${unknown}" is not an optional tool of the harness`);
+  }
+  if (!body) throw new WorkflowParseError(path, "the body is empty");
+  return {
+    name,
+    description: data.description.replace(/\s+/g, " ").trim(),
+    tools: data.tools,
+    planned,
+    body,
+  };
 }
 
 /** Files under `rel`, minus dot-entries and `__pycache__` (git ignores them; a symlink is refused). */
@@ -110,6 +151,16 @@ async function snapshot(dir: string, { store, prefix, root, commit }: LoadOption
     }
     for (const path of paths) await store.put(`${prefix}${path}`, await readFile(join(root, path)));
   }
+  for (const name of await readdir(join(root, AGENTS_DIR)).catch(() => {
+    throw new WorkflowParseError(AGENTS_DIR, "directory not found");
+  })) {
+    if (name.endsWith(".md") && name !== "AGENTS.md") {
+      await store.put(
+        `${prefix}${AGENTS_DIR}/${name}`,
+        await readFile(join(root, AGENTS_DIR, name)),
+      );
+    }
+  }
   await store.put(`${prefix}${DONE}`, new TextEncoder().encode(commit));
 }
 
@@ -121,7 +172,7 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
   const texts = new Map<string, string>();
   for (const key of await store.list(prefix)) {
     const path = key.slice(prefix.length);
-    if (/(^|\/)SKILL\.md$|(^|\/)(outputs|tasks)\.json$/.test(path))
+    if (/(^|\/)SKILL\.md$|(^|\/)(outputs|tasks)\.json$|^workflows\/agents\/[^/]+\.md$/.test(path))
       texts.set(path, await store.get(key));
   }
 
@@ -176,5 +227,21 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
       `${issue?.path.slice(1).join(".")}: ${issue?.message}`,
     );
   }
-  return { dir, commit: await store.get(`${prefix}${DONE}`), files: files.data, skills };
+
+  const found: Record<string, AgentDefinition> = {};
+  for (const [path, text] of texts) {
+    if (!path.startsWith(`${AGENTS_DIR}/`)) continue;
+    const agent = parseAgent(path, text, options.knownTools);
+    found[agent.name] = agent;
+  }
+  const { worker, checker, ...others } = found;
+  if (!worker) throw new WorkflowParseError(`${prefix}${AGENTS_DIR}/worker.md`, "not found");
+  if (!checker) throw new WorkflowParseError(`${prefix}${AGENTS_DIR}/checker.md`, "not found");
+  return {
+    dir,
+    commit: await store.get(`${prefix}${DONE}`),
+    files: files.data,
+    skills,
+    agents: { worker, checker, others },
+  };
 }

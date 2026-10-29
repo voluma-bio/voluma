@@ -27,7 +27,9 @@ export type Principal =
   | (UserBase & { account: "member"; email: string })
   /** A guest the server minted: no account, no email. */
   | (UserBase & { account: "visitor" })
-  | { kind: "service"; name: "runner" };
+  | { kind: "service"; name: "runner" }
+  /** `VOLUMA_DEBUG_TOKEN`: an agent debugging runs; reads runs in every lab, writes nothing. */
+  | { kind: "service"; name: "debug" };
 
 /** The Hono environment of a domain app: `new Hono<AppEnv>()`. */
 export type AppEnv = { Variables: { principal: Principal } };
@@ -44,10 +46,39 @@ export function readerOf(user: UserPrincipal): Reader {
   return { labId: user.labId, ownerId: user.scope === "self" ? user.userId : null };
 }
 
-/** Guard a subtree for the runner's bearer token (run ingest). */
-export const requireService = createMiddleware<AppEnv>(async (c, next) =>
-  c.get("principal").kind === "service" ? next() : c.json({ error: "forbidden" }, 403),
-);
+/**
+ * Every lab's records: what the debug token (`VOLUMA_DEBUG_TOKEN`) reads on a run `GET`, so an
+ * agent can follow and debug any run. Writes never take it; they take a `Reader`.
+ */
+export const EVERY_LAB = "every-lab" as const;
+export type ReadScope = Reader | typeof EVERY_LAB;
+
+/** The environment of a read handler behind `requireReader`. */
+export type ReaderEnv = { Variables: { principal: Principal; reader: ReadScope } };
+
+/** Guard a read: a user reads through `readerOf`, the debug token reads `EVERY_LAB`, anyone else is 403. */
+export const requireReader = createMiddleware<ReaderEnv>(async (c, next) => {
+  const principal = c.get("principal");
+  switch (principal.kind) {
+    case "user":
+      c.set("reader", readerOf(principal));
+      return next();
+    case "service":
+      if (principal.name !== "debug") return c.json({ error: "forbidden" }, 403);
+      c.set("reader", EVERY_LAB);
+      return next();
+    default:
+      return principal satisfies never;
+  }
+});
+
+/** Guard a subtree for the runner's bearer token (run ingest). The debug token is refused. */
+export const requireService = createMiddleware<AppEnv>(async (c, next) => {
+  const principal = c.get("principal");
+  return principal.kind === "service" && principal.name === "runner"
+    ? next()
+    : c.json({ error: "forbidden" }, 403);
+});
 
 /** The environment of a subtree behind `requireUser`: `new Hono<UserEnv>().use(requireUser)`. */
 export type UserEnv = { Variables: { principal: Principal; user: UserPrincipal } };
