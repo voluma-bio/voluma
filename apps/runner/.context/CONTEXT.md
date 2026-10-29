@@ -245,6 +245,12 @@ and bills nothing for it. The adapter retries once on the uploaded file; a secon
 message with Meta's body and every object asked for (name, box), saying the cause is this input or an outage and how to tell. It
 does not bisect: each successful probe costs a full SAM call ($0.07-0.10).
 
+# Runner: staging `/inputs`
+
+A mount marked `stage` is mounted privately under `/staged` while the sandbox starts, then copied to its public local path (for example `/staged/inputs` to `/inputs`) by `STAGE_SCRIPT` in `modal-sandbox.ts`. It makes every directory first, then runs `cp --parents` with up to 32 workers of 16 paths each. Making the directories first matters: parallel `cp --parents` calls that race to create one parent directory fail with `File exists`, which surfaced as `staging /inputs failed with exit code 123` (reproduced locally in 12 of 20 copies of an 800-file nested tree; 0 of 20 after). The source is listed once and the listing's exit status checked, so a listing that fails partway can't pass as complete. After each pass it compares that listing with a fresh one of the copy and re-copies only the files missing or the wrong size, up to three more passes, then fails naming them. The error keeps a bounded tail of the copy's stderr.
+
+Never replace this with a whole-copy retry: the input is about 943 MB and every thread stages its own copy.
+
 # Runner: what `/outputs` and `/scratch` support
 
 Both are R2 bucket mounts (`modal-sandbox.ts`), so a file is written whole, once. Rename

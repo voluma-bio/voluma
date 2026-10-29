@@ -11,7 +11,6 @@
  */
 import { Hono } from "hono";
 import type { AppEnv } from "../../domain";
-import type { Catalog } from "./catalog";
 import { ingestRoutes } from "./ingest";
 import { inputsRoutes, type UploadLimits } from "./inputs";
 import type { Notifier } from "./notifier";
@@ -31,7 +30,6 @@ export interface RunDeps {
   history: LeasedHistory;
   /** Wakes open streams when a run's events or state change. */
   notifier: Notifier;
-  catalog: Catalog;
   /** Upload rows, and the object store their files go to (presigned, never through the API); null when R2 is not configured. */
   uploadStore: PgUploads;
   objects: Uploads | null;
