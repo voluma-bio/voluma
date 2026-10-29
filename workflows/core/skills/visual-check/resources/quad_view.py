@@ -52,14 +52,15 @@ import numpy as np
 from scipy import ndimage as ndi
 
 HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path, so every directory a script imports from is added here.
-sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'microct-core/resources')]
+# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/.
+SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
+sys.path[:0] = [str(HERE), str(SKILLS / 'microct-core/resources')]
 try:
     import frame as fr
     import viewlib as vl
 except ModuleNotFoundError as e:
-    sys.exit(f'{e}: this script expects <workflows>/core/skills/<skill>/resources/ with '
-             '<workflows>/core/skills/microct-core/resources/sidecar.py beside it')
+    sys.exit(f'{e}: this script expects core/skills/microct-core/resources/ in a directory above it '
+             '(<workflows>/core/skills/<skill>/resources/, or <workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it)')
 
 sl, plt = vl.sidecar, vl.plt
 PANE_COLOURS = ['#ff3b30', '#34c759', '#4f8dff']  # pane 0, 1, 2: its border, its plane in 3D, its line in the other panes

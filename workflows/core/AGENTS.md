@@ -15,10 +15,11 @@ holds rules, not experiment logs.
   `sidecar.emit_values`: `{id: {value, unit, definition, kind}}`, ids from the caller. A sentence on stderr and exit 2 for what the agent can fix; argument
   checks come before any work or write. Images are JPEG, at most 2000 px and 1 MiB (`view_image`'s limit): use
   `sidecar.save_image`. Every parameter that is a length is in mm; voxels come from `hu.json`.
-- **Imports:** every script works under `python -I` from any directory. It puts its own directory and `microct-core/resources` (and
-  any sibling skill's `resources` it imports from) on `sys.path` itself, and exits with a sentence naming the expected layout when
-  that misses. The layout is `workflows/core/skills/<skill>/resources/`, in the repository and in a run's snapshot
-  alike; scripts in a workflow directory find `core/skills/microct-core/resources` by walking up their ancestors.
+- **Imports:** every script works under `python -I` from any directory, and the same few lines at its top do it: walk up its
+  ancestors to the directory holding `core/skills/microct-core`, put its own directory, `microct-core/resources` and any sibling skill's
+  `resources` it imports from on `sys.path`, and exit with a sentence naming the layout when the import misses. That works in the
+  repository and in a run's snapshot alike (`workflows/core/skills/<skill>/resources/`, a workflow's `skills/<skill>/resources/` beside
+  `core/`). Installing `microct-core` as a package in the sandbox image would delete these lines; it needs an image rebuild, so it waits.
 - **Thresholds:** two, and they are not interchangeable. The segmentation threshold (mask building) is a flag the caller passes,
   from the workflow's anatomy reference. The measurement threshold (BV, BV/TV) is the lab's 2.16/cm converted with the calibration
   block of `hu.json` (`sidecar.bone_threshold_hu`); no script holds a literal HU value for it. BV is the region and HU above the

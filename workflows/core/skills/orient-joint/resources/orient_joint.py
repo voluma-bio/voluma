@@ -50,15 +50,16 @@ from scipy import ndimage as ndi
 from scipy.spatial import cKDTree
 
 HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path, so every directory a script imports from is added here.
-sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'microct-core/resources'), str(HERE.parents[1] / 'visual-check/resources')]
+# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/.
+SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
+sys.path[:0] = [str(HERE), str(SKILLS / 'microct-core/resources'), str(SKILLS / 'visual-check/resources')]
 try:
     import frame as fr
     import render_slices
     import sidecar
 except ModuleNotFoundError as e:
-    sys.exit(f'{e}: this script expects <workflows>/core/skills/<skill>/resources/ with '
-             '<workflows>/core/skills/microct-core/resources/sidecar.py beside it')
+    sys.exit(f'{e}: this script expects core/skills/microct-core/resources/ in a directory above it '
+             '(<workflows>/core/skills/<skill>/resources/, or <workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it)')
 
 
 END_FRAC = 0.30

@@ -30,17 +30,17 @@ import numpy as np
 from scipy import ndimage as ndi
 
 HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the generic skills are found by walking up to the directory that holds them.
-SKILLS = next((p / 'core/skills' for p in HERE.parents
-               if (p / 'core/skills/microct-core/resources/sidecar.py').exists()), None)
-if SKILLS is None:
-    sys.exit('Cannot find microct-core: this script expects core/skills/microct-core/resources/ in a '
-             'directory above it (<workflows>/mouse-oa/skills/mouse-oa/resources/ with <workflows>/core/ beside it)')
+# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/.
+SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
 sys.path[:0] = [str(HERE), str(SKILLS / 'microct-core/resources'), str(SKILLS / 'regions-and-landmarks/resources')]
-import frame as fr
-import sidecar
-from annotations import load_annotations, need, traced_surface
-from envelope import close_and_fill
+try:
+    import frame as fr
+    import sidecar
+    from annotations import load_annotations, need, traced_surface
+    from envelope import close_and_fill
+except ModuleNotFoundError as e:
+    sys.exit(f'{e}: this script expects core/skills/microct-core/resources/ in a directory above it '
+             '(<workflows>/core/skills/<skill>/resources/, or <workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it)')
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt

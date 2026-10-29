@@ -20,10 +20,6 @@ From the structural review of PR #62 (`review-pr62` p231, structure) and the cor
   computes (`deck_volumes_spec.json` is the pattern); `off_bone_mm` repeats `pick.py`'s snap distance; the frame vectors (`ml_vector_zyx` and
   the rest) have no reader. Direction: let `measure.py` distances name points from `--points points.json`, add a `femoral_spec.json`, and
   delete the script or cut it to the a/b swap check. Until then it writes its record with `sidecar.emit_values`.
-- **One import bootstrap (p231 L1, p230 L4).** The `sys.path` bootstrap is copied into about 30 scripts in two variants (`HERE.parents[1]` for
-  generic scripts, a walk up the ancestors for the mouse ones). `python -I` justifies having it; the walk-up variant works from both places, so
-  use that one, or install `microct-core` as a package in the sandbox image and delete it. Tied to how a run lays out its snapshot
-  (`mouse-oa` and `core` side by side), which the workflow-packages lane settles.
 - **A kept synthetic-truth test (p230), for the user to decide.** A tilted planar growth-plate face under a flat top, where `iioc.py`'s height
   along W equals h / cos θ and the perpendicular height equals h. The heights moving by 3 to 7% between the two definitions was silent until a
   reviewer recomputed it; the same shape of test would pin plate thickness and node density. None is added.
