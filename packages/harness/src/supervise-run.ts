@@ -48,6 +48,8 @@ export interface SuperviseRunOptions {
   history: History;
   /** A thread's own sandbox (`sandboxSession.get`). */
   sandbox(threadId: string): Promise<Sandbox>;
+  /** Called when a thread ends: destroys its sandbox (`sandboxSession.release`). */
+  releaseSandbox(threadId: string): void;
   evidence: Evidence;
   /** Offers `segment_sam` to threads when set (the host has a Segmenter and a key for it). */
   segmenter?: Segmenter;
@@ -87,7 +89,13 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
     signal,
   });
   const pool = threads(
-    { runId, recorder, history: options.history, sandbox: options.sandbox },
+    {
+      runId,
+      recorder,
+      history: options.history,
+      sandbox: options.sandbox,
+      release: options.releaseSandbox,
+    },
     signal,
   );
   const runtime = taskRuntime({

@@ -1,6 +1,6 @@
 /**
  * A run's sandboxes, one per thread: a thread's sandbox is created on the first tool call
- * that needs it and destroyed at the end. Concurrent first calls of a thread share one
+ * that needs it and destroyed when the thread ends (`release`). Concurrent first calls of a thread share one
  * creation; a failed creation is forgotten, so the thread's next call tries again. A sandbox
  * the provider ended (idle timeout, lifetime) is replaced on the thread's next call: `get`
  * asks `exitCode()` about a sandbox it has handed out before (a round trip of 30-40 ms),
@@ -22,6 +22,12 @@ export interface SandboxSession {
    * thread's first call gets no note.
    */
   get(threadId: string): Promise<Sandbox>;
+  /**
+   * Destroys the thread's sandbox (the supervisor calls it when the thread ends) and sends
+   * `stopped`. A thread resumed later gets a fresh sandbox and the restart note. A no-op once
+   * the session is closed.
+   */
+  release(threadId: string): Promise<void>;
   /** Destroys every sandbox created; later `get` calls throw. */
   close(): Promise<void>;
 }
@@ -188,6 +194,9 @@ export function sandboxSession(
         threads.set(threadId, thread);
       }
       return thread.get();
+    },
+    async release(threadId) {
+      if (!closed) await threads.get(threadId)?.close();
     },
     async close() {
       closed = true;

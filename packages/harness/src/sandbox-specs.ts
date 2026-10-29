@@ -16,16 +16,14 @@ import type { SandboxMount, SandboxSpec } from "./ports/sandbox";
 
 const CPU = 2;
 const MEMORY_MIB = 8192;
-const LIFETIME_SECONDS = 14400;
-const IDLE_SECONDS = 300;
 
 interface Common {
   runId: string;
   /** Unique within the run: `<taskId>.worker[.n]`, `<taskId>.check[.n]`, or the convert job's name. */
   name: string;
   image: string;
-  lifetimeSeconds?: number;
-  idleSeconds?: number;
+  lifetimeSeconds: number;
+  idleSeconds: number;
 }
 
 const base = (c: Common) => ({
@@ -34,8 +32,8 @@ const base = (c: Common) => ({
   image: c.image,
   cpu: CPU,
   memoryMiB: MEMORY_MIB,
-  lifetimeSeconds: c.lifetimeSeconds ?? LIFETIME_SECONDS,
-  idleSeconds: c.idleSeconds ?? IDLE_SECONDS,
+  lifetimeSeconds: c.lifetimeSeconds,
+  idleSeconds: c.idleSeconds,
 });
 
 const withAccess = (mounts: SandboxMount[], access: SandboxMount["access"]): SandboxMount[] =>
@@ -53,11 +51,21 @@ export function workerSandboxSpec(
     ...base(options),
     role: "worker",
     mounts: options.mounts,
-    network: gateway ? { kind: "hosts", hosts: [new URL(gateway.url).hostname] } : { kind: "none" },
+    network: gateway ? { kind: "hosts", hosts: [gatewayHost(gateway.url)] } : { kind: "none" },
     env: gateway
       ? { VOLUMA_GATEWAY_URL: gateway.url, VOLUMA_GATEWAY_TOKEN: gateway.token }
       : undefined,
   };
+}
+
+// Probed: plain HTTP to an allowlisted host is refused. A port other than 443 is unprobed,
+// and the allowlist names hosts only, so it is refused too.
+function gatewayHost(gatewayUrl: string): string {
+  const url = new URL(gatewayUrl);
+  if (url.protocol !== "https:" || url.port !== "") {
+    throw new Error(`the gateway URL must be https:// with no port: ${gatewayUrl}`);
+  }
+  return url.hostname;
 }
 
 /** A checker: reads everything in `readOnly`, writes only its own `scratch` prefix. */

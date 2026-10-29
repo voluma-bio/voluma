@@ -17,13 +17,12 @@
  *   (`outboundDomainAllowlist`; probed on 0.11.1: plain HTTP, other hosts and IPs are refused,
  *   but DNS lookups of any name still resolve).
  * - Each sandbox gets a fresh name and the tags `{run, name, claim, startedAt}` (`startedAt` is epoch
- *   ms; the SDK exposes no creation time, and `sandboxes:clean` reports age from it). Creating one first
- *   terminates any live sandbox with the same tags: one a dead process left behind would
- *   otherwise keep running its command, with write access to /outputs, beside the resumed thread.
- *   That sweep is by `{run, name}`; it ends only a previous holder's, because the creation is
- *   aborted (checked before the sweep, between terminations and before `create`) once the run's
- *   lease is released or lost (a process frozen past its lease can still act late). Ending one's own sandboxes after a slow close is by
- *   claim (`terminateClaim`), never by run.
+ *   ms; the SDK exposes no creation time, and `sandboxes:clean` reports age from it). Modal limits
+ *   a name to 64 characters, so the Modal name is `<spec.name>.<8 hex>` without the run id (the
+ *   `run` tag carries it) and `validate` rejects a longer one. Sandboxes a dead process left behind
+ *   are ended by the next claim (`terminateOtherClaims`), and one's own after a slow close by
+ *   claim (`terminateClaim`), never by run. Creation is aborted once the run's lease is
+ *   released or lost (a process frozen past its lease can still act late).
  */
 
 import { randomUUID } from "node:crypto";
@@ -59,6 +58,7 @@ export interface ModalSandboxConfig {
   };
 }
 
+const MAX_MODAL_NAME = 64;
 const STAGE_PARALLELISM = 32;
 const STAGE_ROOT = "/staged";
 const GROUP_DIR = "/tmp/voluma-exec";
@@ -94,6 +94,7 @@ export async function terminateOtherClaims(
   modal: ModalSandboxConfig["modal"],
   runId: string,
   claim: string,
+  signal?: AbortSignal,
 ): Promise<number> {
   const client = new ModalClient(modal);
   const app = await client.apps.fromName(RUNS_APP).catch((error) => {
@@ -103,6 +104,7 @@ export async function terminateOtherClaims(
   if (!app) return 0;
   let ended = 0;
   for await (const sandbox of client.sandboxes.list({ appId: app.appId, tags: { run: runId } })) {
+    signal?.throwIfAborted();
     if ((await sandbox.getTags()).claim === claim) continue;
     await sandbox.terminate();
     ended++;
@@ -132,18 +134,15 @@ export function createModalSandbox(config: ModalSandboxConfig): CreateSandbox {
         keyPrefix: mount.prefix,
       });
     }
-    const tags = { run: spec.runId, name: spec.name };
-    // A run released or stopped while this creation was in flight may have been reclaimed by
-    // another runner, whose sandbox the sweep below would end.
-    signal?.throwIfAborted();
-    for await (const old of client.sandboxes.list({ appId: app.appId, tags })) {
-      signal?.throwIfAborted();
-      await old.terminate({ wait: true });
-    }
     signal?.throwIfAborted();
     const modal = await client.sandboxes.create(app, image, {
-      name: `${spec.runId}.${spec.name}.${randomUUID().slice(0, 8)}`,
-      tags: { ...tags, claim: config.claim, startedAt: String(Date.now()) },
+      name: `${spec.name}.${randomUUID().slice(0, 8)}`,
+      tags: {
+        run: spec.runId,
+        name: spec.name,
+        claim: config.claim,
+        startedAt: String(Date.now()),
+      },
       cpu: spec.cpu,
       memoryMiB: spec.memoryMiB,
       gpu: spec.gpu,
@@ -363,11 +362,18 @@ function validate(spec: SandboxSpec): void {
     }
   }
   // The role fixes the network: only a worker may reach out, and only to hosts.
-  if (
-    spec.network.kind === "hosts" &&
-    (spec.role !== "worker" || spec.network.hosts.length === 0)
-  ) {
-    throw new Error(`a ${spec.role} sandbox cannot have network access`);
+  if (spec.network.kind === "hosts") {
+    if (spec.role !== "worker")
+      throw new Error(`a ${spec.role} sandbox cannot have network access`);
+    if (spec.network.hosts.length === 0) {
+      throw new Error("a sandbox with a host allowlist needs at least one host");
+    }
+  }
+  // The Modal name is `<name>.<8 hex>`, and Modal refuses one over 64 characters.
+  if (spec.name.length + 9 > MAX_MODAL_NAME) {
+    throw new Error(
+      `sandbox name "${spec.name}" is ${spec.name.length} characters; the most is ${MAX_MODAL_NAME - 9}`,
+    );
   }
   for (const { path, prefix, access, stage } of spec.mounts) {
     if (prefix === "" || prefix.startsWith("/") || !prefix.endsWith("/")) {

@@ -165,9 +165,18 @@ export async function runClaim(
     );
 
     // What an earlier claim of this run left running must not keep writing or spending.
-    const orphans = await terminateOtherClaims(modal, runId, claimId);
-    if (orphans > 0)
-      log(`ended ${orphans} sandbox${orphans === 1 ? "" : "es"} of an earlier claim`);
+    // Cleanup only: it never decides the run's outcome, and idle timeouts back it up.
+    for (let attempt = 1; attempt <= 2 && !abort.signal.aborted; attempt++) {
+      try {
+        const orphans = await terminateOtherClaims(modal, runId, claimId, abort.signal);
+        if (orphans > 0)
+          log(`ended ${orphans} sandbox${orphans === 1 ? "" : "es"} of an earlier claim`);
+        break;
+      } catch (e) {
+        log(`ending an earlier claim's sandboxes failed (attempt ${attempt}): ${e}`);
+        if (attempt < 2) await new Promise((r) => setTimeout(r, 2000));
+      }
+    }
 
     // Before any sandbox: an unreadable workflow or a bad selection fails the run here, with its
     // message. The run's pin names the workflow directory; its files are snapshotted from this
@@ -325,6 +334,8 @@ export async function runClaim(
       recorder: events,
       history: client,
       sandbox: (id) => opened.get(id),
+      releaseSandbox: (id) =>
+        opened.release(id).catch((e) => log(`releasing ${sandboxName(id)} failed: ${e}`)),
       evidence: r2Evidence(config.r2),
       files,
       segmenter: metaKey

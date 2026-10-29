@@ -87,7 +87,7 @@ export function RunsPage() {
                       <span>{formatUsd(run.usage.modelCostUsd)}</span>
                       {run.usage.sandboxSeconds > 0 && (
                         <span className="text-meta text-muted-foreground">
-                          Sandbox {formatDuration(run.usage.sandboxSeconds)}
+                          Sandbox (summed over sandboxes) {formatDuration(run.usage.sandboxSeconds)}
                         </span>
                       )}
                     </div>

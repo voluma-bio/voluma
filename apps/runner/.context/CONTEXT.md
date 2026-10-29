@@ -52,7 +52,7 @@ who ends it:
    then closes its sandbox (no `stopped` event is stored); the service waits up to 30 s. A second signal
    exits 130 at once and leaves the sandboxes (use `sandboxes:clean`). Signal the process
    group (Ctrl-C does); `kill <pid of pnpm>` alone leaves the runner running.
-3. **A resume.** Right after a claim succeeds, `run.ts` terminates every live sandbox tagged with the run but not this claim (`terminateOtherClaims`: one list call, then each sandbox's tags; no wait). The claim holds the lease, so nothing an earlier claim started keeps writing or spending. Also, `create` terminates live sandboxes tagged with the same `{run, name}`. A creation is aborted with the run's signal (checked before that sweep, between terminations and before `create`), so a released run's creation cannot end the sandbox of the runner that reclaimed it. A process frozen past its lease (a sleeping laptop) can still act late.
+3. **A resume.** Right after a claim succeeds, `run.ts` terminates every live sandbox tagged with the run but not this claim (`terminateOtherClaims`: one list call, then each sandbox's tags; no wait). The claim holds the lease, so nothing an earlier claim started keeps writing or spending. The sweep is cleanup and never decides the run's outcome: an error is logged and retried once, and the idle timeout backs it up. A creation is aborted with the run's signal, so a released run's creation cannot start a sandbox beside the runner that reclaimed it. A process frozen past its lease (a sleeping laptop) can still act late.
 4. **Modal ends it.** After 300 s with no command running (`VOLUMA_SANDBOX_IDLE_SECONDS` in
    `.env`, at least 30) or at a hard lifetime of 14400 s (`VOLUMA_SANDBOX_LIFETIME_SECONDS`).
    Before each call the session asks Modal whether a sandbox it handed out earlier still
@@ -166,11 +166,11 @@ don't cost a turn.
 
 # Runner: sandbox memory
 
-Each thread has its own sandbox (`sandboxSession`), so only the heavy steps of one thread share
+Each thread has its own sandbox (`sandboxSession`), destroyed when the supervisor sees the thread end (`release`; a resumed thread gets a fresh one and the restart note), so only the heavy steps of one thread share
 its memory and 2 CPUs. Every role's sandbox has 8192 MiB (`sandbox-specs.ts`). `classic_segment` measured 2.8-3.1 GB anonymous memory and
 about 4.0-4.25 GB RSS with the memory-mapped scan, so 4096 MiB risked an OOM kill in a
 full run.
-Two concurrent heavy steps fit: their anonymous memory adds up (about 6 GB) and the mapped scan
+Two heavy steps of one thread running at once fit: their anonymous memory adds up (about 6 GB) and the mapped scan
 file is shared page cache, not counted twice. The `stopped` event of a sandbox Modal ended carries its exit code (Modal's SDK: 124 a timeout, 137 any terminated
 sandbox, so an out-of-memory kill or a terminate call), so a restart's cause is in the run's record. In the 2026-10-28 local run the sandbox ended at 1 h 0 min (the
 lifetime) and once more 23 min into the replacement, before the exit code was logged.
