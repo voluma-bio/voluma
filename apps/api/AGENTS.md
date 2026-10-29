@@ -56,12 +56,19 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
 
 ## Run domain (`src/domains/run`)
 
-- `index.ts` is a mount list: `runs.ts` (browser routes: reads `requireReader`, writes `requireUser`), `ingest.ts` (runner
+- `index.ts` is a mount list: `runs.ts` (browser routes: reads `requireReader`, writes `requireUser`), `studies.ts` (create, list, get), `ingest.ts` (runner
   routes, `requireService`), and a file per later route group. The Postgres adapters:
   `pg-queue.ts` owns every state change of a run (start, resume, cancel, claim, lease,
   recovery) and the key vault, `pg-runs.ts` the reads, and the lease-checked
   `pg-event-log.ts`/`pg-history.ts`; their port types are derived from them. `admission.ts`
   is the one limits check and the one message per refusal.
+- **Every run belongs to a study** (`studies`, `study_scans`; `runs.study_id` is not null), and
+  the study owns the workflow. `readableStudies` (`pg-runs.ts`) is `readableRuns` on the study
+  (guests share one lab, so `lab_id` alone is not enough); `queue.start` checks `studyId` with
+  it. `queue.createStudy` inserts the study, its scans and the runs to start in one
+  transaction under the lock: any refusal throws `Refused` and rolls the whole call back, and
+  `startOne` counts the runs it already inserted against the limits. The seeded example has
+  its own study (`study-<exampleId>`, `example`), read-only like its run.
 - **Every transition holds one lock** (`QUEUE_LOCK`, a transaction advisory lock), so
   limit counts can't race. The lease is judged by the database's `now()`. An ingest write
   checks the run's lease token inside its own transaction (`assertLease`, `FOR SHARE`); a
@@ -98,7 +105,7 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   `ReviewRun.review`; no persisted count is maintained. Unfinished/failed/cancelled runs
   have null summaries. Review mutations return/refetch snapshots; execution SSE closes
   at run end and does not continuously deliver human review changes.
-- Run list/get reads memoize at most 256 derived summaries, keyed by each run's latest
+- Run list/get and study reads memoize at most 2048 derived results (`{summary, values, toCheck}`, all from one `reviewState(log)`), keyed by each run's latest
   event ID (ordered by sequence) in the same repeatable-read snapshot, including reseeded
   examples with reused sequence numbers. Cache misses load only fold/review
   events; hits load no event payloads. The event log remains the only durable review state.
