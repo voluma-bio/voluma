@@ -61,22 +61,45 @@ export interface ModalSandboxConfig {
 
 const MAX_MODAL_NAME = 64;
 const STAGE_PARALLELISM = 32;
-// Extra passes over the files whose copy failed (a bucket mount fails reads now and then).
+// Extra passes over the files whose copy failed (a parent-directory race or transient mount read).
 const STAGE_RETRIES = 3;
 // Tail of the stage command's stderr kept in the error.
 const STAGE_STDERR_CHARS = 4000;
-// Copies the files under "$1" to "$2" in parallel. A pass records each file whose `cp` fails
-// in a NUL list; the next pass copies only those, so a copied file is never copied again.
+// Copies the files under "$1" to "$2" in parallel. The healthy pass keeps cp's 16-file batches;
+// only a failed batch is inspected file by file, and later passes retry only failed files.
 // Paths are positional arguments, never spliced into the script.
-const STAGE_SCRIPT = `set -eo pipefail; mkdir -p "$2"; cd "$1"; todo=$(mktemp); failed=$(mktemp); trap 'rm -f "$todo" "$failed"' EXIT
+const STAGE_SCRIPT = `set -eo pipefail; mkdir -p "$2"; cd "$1"; todo=$(mktemp); failures=$(mktemp -d); trap 'rm -rf "$todo" "$failures"' EXIT
 find . -type f -print0 > "$todo"
 for pass in $(seq 0 ${STAGE_RETRIES}); do
-  : > "$failed"
-  xargs -0 -r -P ${STAGE_PARALLELISM} -n 16 bash -c 'out=$0; list=$1; shift; for f; do cp --parents -t "$out" "$f" || printf "%s\\0" "$f" >> "$list"; done' "$2" "$failed" < "$todo"
-  [ -s "$failed" ] || break
-  cp "$failed" "$todo"
+  passFailures="$failures/$pass"; mkdir "$passFailures"
+  xargsCode=0
+  if [ "$pass" -eq 0 ]; then
+    xargs -0 -r -P ${STAGE_PARALLELISM} -n 16 bash -c 'out=$1; passFailures=$2; shift 2; if cp --parents -t "$out" "$@"; then exit 0; else printf "%s\\0" "$@" > "$passFailures/$BASHPID"; exit 1; fi' _ "$2" "$passFailures" < "$todo" || xargsCode=$?
+  else
+    xargs -0 -r -P ${STAGE_PARALLELISM} -n 16 bash -c 'out=$1; passFailures=$2; shift 2; failed=0; for f; do if ! cp --parents -t "$out" "$f"; then printf "%s\\0" "$f" >> "$passFailures/$BASHPID"; failed=1; fi; done; exit "$failed"' _ "$2" "$passFailures" < "$todo" || xargsCode=$?
+  fi
+  nextTodo="$failures/todo-$pass"
+  if failedFile=$(find "$passFailures" -type f -print -quit) && [ -n "$failedFile" ]; then
+    : > "$nextTodo"
+    if [ "$pass" -eq 0 ]; then
+      find "$passFailures" -type f -exec cat {} + | while IFS= read -r -d '' f; do
+        target="$2/$f"
+        cmp -s -- "$f" "$target" || printf "%s\\0" "$f" >> "$nextTodo"
+      done
+    else
+      find "$passFailures" -type f -exec cat {} + > "$nextTodo"
+    fi
+    if [ ! -s "$nextTodo" ]; then
+      [ "$xargsCode" -eq 0 ] || exit "$xargsCode"
+      break
+    fi
+    mv "$nextTodo" "$todo"
+    [ "$pass" -lt ${STAGE_RETRIES} ] || { summary=$(tr '\\0' ' ' < "$todo"); printf 'could not copy: %.1000s\\n' "$summary" >&2; exit 123; }
+  else
+    [ "$xargsCode" -eq 0 ] || exit "$xargsCode"
+    break
+  fi
 done
-if [ -s "$failed" ]; then echo "could not copy: $(tr '\\0' ' ' < "$failed" | head -c 1000)" >&2; exit 1; fi
 test "$(find . -type f | wc -l)" = "$(cd "$2" && find . -type f | wc -l)"`;
 const STAGE_ROOT = "/staged";
 const GROUP_DIR = "/tmp/voluma-exec";
@@ -230,7 +253,10 @@ class ModalSandboxAdapter implements Sandbox {
         else if (chunk.type === "stderr") stderr = (stderr + chunk.data).slice(-STAGE_STDERR_CHARS);
       }
       if (code !== 0) {
-        throw new Error(`staging ${mount.path} failed (exit ${code}): ${stderr.trim()}`);
+        const detail = stderr.trim();
+        throw new Error(
+          `staging ${mount.path} failed (exit ${code})${detail ? `: ${detail}` : ""}`,
+        );
       }
     }
   }

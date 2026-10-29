@@ -245,6 +245,12 @@ and bills nothing for it. The adapter retries once on the uploaded file; a secon
 message with Meta's body and every object asked for (name, box), saying the cause is this input or an outage and how to tell. It
 does not bisect: each successful probe costs a full SAM call ($0.07-0.10).
 
+# Runner: staging `/inputs`
+
+A mount marked `stage` is mounted privately under `/staged` while the sandbox starts, then copied to its public local path (for example `/staged/inputs` to `/inputs`). `modal-sandbox.ts` lists the source once and runs up to 32 workers, with 16 paths per worker. The healthy pass keeps those batches; when a batch's `cp --parents` fails, it checks the candidate files and writes only incomplete paths to a NUL list. Up to three later passes copy those failed files one at a time, so successful files are not recopied. The final source/destination file-count check still rejects a partial copy.
+
+The stage command keeps a bounded tail of stderr in the thrown error. Do not replace the failed-file list with a whole-copy retry: the input is about 943 MB and every thread stages its own copy. The original `xargs` status was 123 when any `cp` failed, but its stderr was previously discarded. A local GNU coreutils 9.4 stress run reproduced `cp --parents`'s shared-parent-directory `EEXIST` race under 32-way copying; the staging incident's exact stderr remains unconfirmed until the staging runner environment is available.
+
 # Runner: what `/outputs` and `/scratch` support
 
 Both are R2 bucket mounts (`modal-sandbox.ts`), so a file is written whole, once. Rename
