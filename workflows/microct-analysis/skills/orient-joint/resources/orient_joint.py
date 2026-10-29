@@ -7,12 +7,11 @@ follow, and the scanner's own axes often do not do that.
   python orient_joint.py --in hu.npy --header hu.json --out <outdir> [--threshold-hu <T>]
         [--shaft-radius-mm 1.2] [--ref-radius-mm 3.15] [--min-object-mm3 0.0035] [--margin-mm 0.126]
         [--second-bone-frac 0.25]
-      Writes <outdir>/frame.json (the frame), oriented.npy (float32 HU stack, axis 0 = slices) with its sidecar,
+      Writes <outdir>/frame.json (the frame: `microct-core/resources/frame.py` has its schema and the maps to and from the scan,
+      plus this script's diagnostics and `keyframe`), oriented.npy (float32 HU stack, axis 0 = slices) with its sidecar,
       and keyframe.jpg (the sheet to look at before going on). Prints the keyframe index and the bend angle.
 
-  from orient_joint import joint_frame, reslice, to_scan     # frame = joint_frame(hu, spacing_mm)
-      to_scan(labels_on_stack, frame, scan_shape)             # nearest neighbour, for labels made on the stack
-      to_oriented_points(zyx, frame), to_scan_points(srs, frame)   # points between the scan grid and the stack
+  from orient_joint import joint_frame     # frame = joint_frame(hu, spacing_mm): R_zyx, origin_zyx, shape and diagnostics
 
 Needs isotropic voxels (the stack is cut on the scan's voxel size), HU in, ZYX order. The three lengths are in mm and
 convert to voxels with the scan's spacing; the defaults suit a mouse knee (a mouse femur shaft is under 1.2 mm in
@@ -42,7 +41,6 @@ condyles; the 3-radius shaft check covers that case.
 A fused neighbouring bone (the fibula) pulls bone B's axis slightly.
 """
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -54,6 +52,7 @@ HERE = Path(__file__).resolve().parent
 # `python -I` puts no script directory on sys.path, so every directory a script imports from is added here.
 sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'microct-core/resources'), str(HERE.parents[1] / 'visual-check/resources')]
 try:
+    import frame as fr
     import render_slices
     import sidecar
 except ModuleNotFoundError as e:
@@ -275,10 +274,10 @@ def joint_frame(hu, spacing_mm, threshold_hu=None, shaft_radius_mm=1.2, ref_radi
              'ref_object_vox_est': None if pf is None else int(sizes[ref_id - 1]),
              'ref_object_frames': None if pf is None else [int(pf.min()), int(pf.max())],
              'ref_object_largest_frame': None if pf is None else int(np.bincount(pf).argmax()),
-             'R': R.tolist(), 'normal_zyx': nrm.tolist(), 'origin_zyx': origin.tolist(), 'shape_srs': shape.tolist(),
+             'R_zyx': R, 'normal_zyx': nrm.tolist(), 'origin_zyx': origin, 'shape': shape,
              'keyframe': key, 'background_hu': float(np.median(sub[~closed]))}
     # The keyframe must cut both bones: count each bone's voxels in it (a bone is the side of the joint it lies on)
-    g = _grid(frame, key)
+    g = np.moveaxis(fr.slice_points(frame, 0, key), -1, 0)
     idx = np.round((g - 0.5) / 2).astype(int)
     ok = np.all((idx >= 0) & (idx < np.array(lab.shape)[:, None, None]), axis=0)
     ok[ok] = np.isin(lab[tuple(idx[:, ok])], np.array(ids) + 1)
@@ -290,48 +289,6 @@ def joint_frame(hu, spacing_mm, threshold_hu=None, shaft_radius_mm=1.2, ref_radi
                      'the frame is wrong. Scan more of the leg or adjust --threshold-hu; a field that holds only the ends '
                      'of the bones, or a second bone cut by the edge of the field, gives this')
     return frame
-
-
-def _grid(frame, s):
-    R = np.array(frame['R'])
-    o = np.array(frame['origin_zyx'])
-    _, H, W = frame['shape_srs']
-    r, c = np.mgrid[0:H, 0:W].astype(np.float32)
-    return o[:, None, None] + s * R[0][:, None, None] + r * R[1][:, None, None] + c * R[2][:, None, None]
-
-
-def reslice(hu, frame, order=1, cval=None):
-    S, H, W = frame['shape_srs']
-    out = np.empty((S, H, W), np.float32)
-    for s in range(S):
-        out[s] = ndi.map_coordinates(hu, _grid(frame, s), order=order, mode='constant',
-                                     cval=frame['background_hu'] if cval is None else cval)
-    return out
-
-
-def to_scan(stack, frame, scan_shape):
-    """Nearest-neighbour map of an oriented label stack (S, H, W) back to the scan grid (Z, Y, X)."""
-    R = np.array(frame['R'])
-    o = np.array(frame['origin_zyx'])
-    S, H, W = stack.shape
-    out = np.zeros(scan_shape, stack.dtype)
-    yy, xx = np.mgrid[0:scan_shape[1], 0:scan_shape[2]].astype(np.float64)
-    for z in range(scan_shape[0]):
-        d = np.stack([np.full_like(yy, z), yy, xx]) - o[:, None, None]
-        idx = [np.rint(np.tensordot(R[i], d, 1)).astype(np.int64) for i in range(3)]
-        ok = (idx[0] >= 0) & (idx[0] < S) & (idx[1] >= 0) & (idx[1] < H) & (idx[2] >= 0) & (idx[2] < W)
-        out[z][ok] = stack[idx[0][ok], idx[1][ok], idx[2][ok]]
-    return out
-
-
-def to_oriented_points(points_zyx, frame):
-    """(slice, row, column) on the oriented stack of scan-grid points (z, y, x); fractional, shape (..., 3)."""
-    return (np.asarray(points_zyx, float) - np.array(frame['origin_zyx'])) @ np.array(frame['R']).T
-
-
-def to_scan_points(points_srs, frame):
-    """Scan-grid (z, y, x) of oriented-stack points (slice, row, column); the inverse of `to_oriented_points`."""
-    return np.asarray(points_srs, float) @ np.array(frame['R']) + np.array(frame['origin_zyx'])
 
 
 if __name__ == '__main__':
@@ -358,12 +315,10 @@ if __name__ == '__main__':
     params = {'threshold_hu': a.threshold_hu, 'shaft_radius_mm': a.shaft_radius_mm, 'ref_radius_mm': a.ref_radius_mm,
                   'min_object_mm3': a.min_object_mm3, 'margin_mm': a.margin_mm,
                   'second_bone_frac': a.second_bone_frac}
-    frame = joint_frame(hu, sp[0], **params)
-    stack = reslice(hu, frame)
+    frame = fr.make(g['grid_id'], sp, **joint_frame(hu, sp[0], **params))
+    stack = fr.resample(hu, frame, cval=frame['background_hu'])
     np.save(out / 'oriented.npy', stack)
-    frame['parent_grid_id'] = g['grid_id']
-    frame['grid_id'] = sidecar.derived_grid_id(g['grid_id'], {k: frame[k] for k in ('R', 'origin_zyx', 'shape_srs')})
-    (out / 'frame.json').write_text(json.dumps(frame, indent=1, default=float) + '\n')
+    fr.save(frame, out / 'frame.json')
     sidecar.write(out / 'oriented.npy', grid_id=frame['grid_id'], spacing_zyx_mm=sp, inputs=[a.src, a.header],
                   params=params)
     k = frame['keyframe']

@@ -18,7 +18,7 @@ python <this skill>/resources/orient_joint.py --in hu.npy --header hu.json --out
     --threshold-hu <bone threshold> [--window lo,hi]
 ```
 
-It writes `frame.json` (the frame), `oriented.npy` (float32 HU stack, axis 0 = slices, its own `grid_id`) and
+It writes `frame.json` (the frame: `R_zyx`, `origin_zyx`, `shape`, `parent_grid_id`, `grid_id`, the one schema every frame uses, described in `microct-core/resources/frame.py`, plus this fit's diagnostics and `keyframe`), `oriented.npy` (float32 HU stack, axis 0 = slices, its own `grid_id`) and
 `keyframe.jpg`, and prints the keyframe index, the bend angle between the shafts and `skew_vox`.
 
 How it chooses: a threshold; the bones are the largest 3D piece plus the largest other piece near it that is at least
@@ -86,6 +86,7 @@ A candidate found on the scan grid (`unlabelled.py`) needs a box on the stack be
 python <this skill>/resources/map_points.py --frame frame.json --pieces qc/cand.npy --ids 3 5 --out qc/boxes.json
 python <this skill>/resources/map_points.py --frame frame.json --to-oriented z,y,x [z,y,x ...]
 python <this skill>/resources/map_points.py --frame frame.json --to-scan s,r,c [s,r,c ...]
+python <this skill>/resources/map_points.py --frame frame.json --points-file points.json --out mapped.json   # a points file to the frame's other grid
 ```
 
 `--pieces` gives each candidate piece a `promptFrame` (the slice that cuts most of it) and a `box` on that slice, ready for
