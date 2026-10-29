@@ -52,7 +52,7 @@ export const runHref = (run: Run) =>
 
 export type RunStatus = { label: string; tone: StatusTone; detail?: string };
 
-export function runStatus({ state, toCheck }: Run): RunStatus {
+export function runStatus({ state, review }: Run): RunStatus {
   switch (state.status) {
     case "queued":
       return { label: "Queued", tone: "neutral", detail: `Place ${state.position} in line` };
@@ -61,12 +61,12 @@ export function runStatus({ state, toCheck }: Run): RunStatus {
     case "awaiting-keys":
       return { label: "Needs your keys", tone: "check" };
     case "ended":
-      // "Reviewed" needs review state, which the review lane doesn't expose yet. No items is
-      // still "Completed": a failed task raises none.
       if (state.outcome === "completed")
-        return toCheck
-          ? { label: `${toCheck} to check`, tone: "check" }
-          : { label: "Completed", tone: "primary" };
+        return review?.reviewedAt
+          ? { label: "Reviewed", tone: "primary" }
+          : review?.remainingToCheck
+            ? { label: `${review.remainingToCheck} to check`, tone: "check" }
+            : { label: "Completed", tone: "primary" };
       if (state.outcome === "failed")
         return { label: "Failed", tone: "destructive", detail: state.error };
       return { label: "Stopped", tone: "neutral" };

@@ -15,14 +15,13 @@
  * costs a read, never an event. Stored rows are parsed against the current event schema:
  * an unsupported historical event fails the read rather than being reinterpreted.
  */
-import { type EventInput, runEventSchema } from "@voluma/contracts/events";
-import { fold } from "@voluma/contracts/fold";
+import type { EventInput, RunEvent } from "@voluma/contracts/events";
 import { and, asc, eq, gt, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { Reader } from "../../domain";
 import { assertLease } from "./lease";
 import type { Notifier } from "./notifier";
-import { readableRuns, type Tx } from "./pg-runs";
+import { readableRuns, type Tx, toRunEvent } from "./pg-runs";
 import { events, runs, threads } from "./schema";
 
 /** An event id already stored under another run. */
@@ -33,19 +32,19 @@ export class EventIdTaken extends Error {
 }
 
 /** First key of the advisory lock pair; the second is the run. Distinguishes our locks from others'. */
-const EVENT_SEQ_LOCK = 0x76_6f_6c_75;
+export const EVENT_SEQ_LOCK = 0x76_6f_6c_75;
 
-export const toRunEvent = (row: typeof events.$inferSelect) =>
-  runEventSchema.parse({ ...row, createdAt: row.createdAt.toISOString() });
-
-/** The open To check items `fold` gives the run's whole log: `Run.toCheck` when the run completes. */
-export async function openChecks(db: Tx | PostgresJsDatabase, runId: string): Promise<number> {
-  const rows = await db
-    .select()
-    .from(events)
-    .where(eq(events.runId, runId))
-    .orderBy(asc(events.seq));
-  return fold(rows.map(toRunEvent)).tasks.reduce((n, task) => n + task.checks.length, 0);
+/** Caller holds EVENT_SEQ_LOCK and has authorized the write under the run-row lock. */
+export async function insertEvent(tx: Tx, event: Omit<RunEvent, "seq">) {
+  return tx
+    .insert(events)
+    .values({
+      ...event,
+      createdAt: new Date(event.createdAt),
+      seq: sql`(SELECT COALESCE(MAX(${events.seq}), 0) + 1 FROM ${events} WHERE ${events.runId} = ${event.runId})`,
+    })
+    .onConflictDoNothing({ target: events.id })
+    .returning({ id: events.id });
 }
 
 export function pgEventLog(db: PostgresJsDatabase, notifier: Notifier) {
@@ -118,19 +117,7 @@ export function pgEventLog(db: PostgresJsDatabase, notifier: Notifier) {
         );
         await assertLease(tx, event.runId, leaseToken);
         const createdAt = new Date(event.createdAt);
-        const inserted = await tx
-          .insert(events)
-          .values({
-            id: event.id,
-            runId: event.runId,
-            threadId: event.threadId,
-            seq: sql`(SELECT COALESCE(MAX(${events.seq}), 0) + 1 FROM ${events} WHERE ${events.runId} = ${event.runId})`,
-            type: event.type,
-            payload: event.payload,
-            createdAt,
-          })
-          .onConflictDoNothing({ target: events.id })
-          .returning({ id: events.id });
+        const inserted = await insertEvent(tx, event);
         if (inserted.length === 0) {
           const [stored] = await tx
             .select({ runId: events.runId })

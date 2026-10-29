@@ -1,6 +1,7 @@
 /** Review projection regressions: the recorded plan survives missing attempts and later revisions. */
 import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
 import { reviewRunSchema } from "@voluma/contracts/review";
+import { reviewState } from "@voluma/contracts/review-state";
 import type { Run } from "@voluma/contracts/run";
 import type { WorkflowPlan } from "@voluma/contracts/workflow";
 import { workflowFilesSchema } from "@voluma/contracts/workflow-files";
@@ -29,6 +30,7 @@ const run: Run = {
   forkedFrom: null,
   createdAt: at,
   state: { status: "ended", outcome: "failed", startedAt: at, endedAt: at },
+  review: null,
 };
 const plan = computePlan(workflowFilesSchema.parse({ outputs, tasks }));
 
@@ -78,7 +80,7 @@ describe("reviewRun", () => {
     const attempt = l.open("intake", "review-111.intake.worker");
     l.status("intake", attempt, "failed", "review-111.intake.worker");
 
-    const result = reviewRun(run, l.events);
+    const result = reviewRun({ run, events: l.events, results: reviewState(l.events) });
     expect(result?.revisions[0]?.tasks.map((t) => [t.id, t.status])).toEqual([
       ["intake", "failed"],
       ["orientation", "pending"],
@@ -119,7 +121,11 @@ describe("reviewRun", () => {
     // A root invocation can precede the initial revision.
     l.add("thread.started", { parentThreadId: null, kind: "supervisor", workflows });
     l.add("revision.started", { reason: "run", plan: selected });
-    expect(reviewRun(run, l.events)?.revisions[0]?.tasks.map((t) => [t.id, t.status])).toEqual([
+    expect(
+      reviewRun({ run, events: l.events, results: reviewState(l.events) })?.revisions[0]?.tasks.map(
+        (t) => [t.id, t.status],
+      ),
+    ).toEqual([
       ["intake", "pending"],
       ["orientation", "pending"],
     ]);
@@ -144,7 +150,8 @@ describe("reviewRun", () => {
     l.worker("intake", "review-111.intake.worker");
     l.open("intake", "review-111.intake.worker");
 
-    const revisions = reviewRun(run, l.events)?.revisions ?? [];
+    const revisions =
+      reviewRun({ run, events: l.events, results: reviewState(l.events) })?.revisions ?? [];
     const orientation = revisions.map((r) => r.tasks.find((t) => t.id === "orientation"));
     expect(orientation.map((t) => [t?.status, t?.threads.worker])).toEqual([
       ["pending", null],
@@ -159,9 +166,11 @@ describe("reviewRun", () => {
   });
 
   it("returns no review without a recorded plan and accepts an empty recorded plan", () => {
-    expect(reviewRun(run, [])).toBeNull();
+    expect(reviewRun({ run, events: [], results: reviewState([]) })).toBeNull();
     const l = log();
     l.add("revision.started", { reason: "run", plan: { tasks: [] } });
-    expect(reviewRun(run, l.events)?.revisions[0]?.tasks).toEqual([]);
+    expect(
+      reviewRun({ run, events: l.events, results: reviewState(l.events) })?.revisions[0]?.tasks,
+    ).toEqual([]);
   });
 });

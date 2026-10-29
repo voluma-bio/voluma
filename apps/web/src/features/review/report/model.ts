@@ -1,11 +1,10 @@
 /**
  * The review's data is the shared contract (`@voluma/contracts/review`), loaded by
- * `getReviewRun`. Only the correction commands are local: their contract is still to come.
+ * `getReviewRun`. Display helpers leave scientific task status unchanged.
  */
 import type { TaskStatus } from "@voluma/contracts/ids";
 import type { ReviewTask } from "@voluma/contracts/review";
 import type { StatusTone } from "@voluma/ui";
-import { z } from "zod";
 
 export type {
   Asset,
@@ -15,19 +14,6 @@ export type {
   Revision,
   Score,
 } from "@voluma/contracts/review";
-
-export const correctionRequestSchema = z.object({
-  runId: z.string(),
-  baseRevisionId: z.string(),
-  taskId: z.string(),
-  instruction: z.string().trim().min(1).max(2000),
-});
-export const correctionProposalSchema = correctionRequestSchema.extend({
-  id: z.string(),
-  affectedTaskIds: z.array(z.string()),
-});
-export type CorrectionRequest = z.infer<typeof correctionRequestSchema>;
-export type CorrectionProposal = z.infer<typeof correctionProposalSchema>;
 
 const statuses: Record<TaskStatus, { label: string; tone: StatusTone }> = {
   pending: { label: "Not started", tone: "neutral" },

@@ -20,7 +20,6 @@ import { admit, type Limits, type Refusal, refusalMessage, type Usage, usage } f
 import type { KeyVault } from "./key-vault";
 import { LeaseLost } from "./lease";
 import type { Notifier } from "./notifier";
-import { openChecks } from "./pg-event-log";
 import { loadRun, loadRuns, readableInputs, readableRuns, type Tx } from "./pg-runs";
 import { inputs, runs } from "./schema";
 
@@ -332,12 +331,6 @@ export function pgRunQueue(
 
     /** Throws `LeaseLost` or `RunEnded`. */
     async report(runId: string, leaseToken: string, report: RunnerReport) {
-      // Counted before the queue lock, which every claim and heartbeat waits on. The runner
-      // flushes its events before it reports, so the log is final.
-      const toCheck =
-        report.kind === "ended" && report.outcome === "completed"
-          ? await openChecks(db, runId)
-          : null;
       await locked(async (tx) => {
         const [run] = await tx
           .select({ state: runs.state })
@@ -357,7 +350,6 @@ export function pgRunQueue(
             outcome: report.outcome,
             endedAt: sql`now()`,
             error: report.error ?? null,
-            toCheck,
           })
           .where(eq(runs.id, runId));
       });

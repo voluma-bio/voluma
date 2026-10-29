@@ -37,10 +37,10 @@ import { createNotifier } from "./domains/run/notifier";
 import { pgEventLog } from "./domains/run/pg-event-log";
 import { pgHistory } from "./domains/run/pg-history";
 import { pgRunQueue } from "./domains/run/pg-queue";
+import { pgRunRecords } from "./domains/run/pg-run-records";
 import { pgRunReads } from "./domains/run/pg-runs";
 import { pgUploads } from "./domains/run/pg-uploads";
 import { r2Uploads } from "./domains/run/r2-uploads";
-import type { RunRecords } from "./ports";
 
 const required = (name: string) => {
   const value = process.env[name];
@@ -130,15 +130,7 @@ const notifier = createNotifier();
 const queue = pgRunQueue(db, limits, new KeyVault(), notifier);
 const eventLog = pgEventLog(db, notifier);
 
-/** The review's read of a run: the run, then its whole log in one statement. */
-const runRecords: RunRecords = {
-  async load(reader, runId) {
-    const run = await reads.get(reader, runId);
-    const log = run && (await eventLog.stream(reader, runId, 0, 2 ** 31 - 1));
-    return run && log ? { run, events: log.events } : null;
-  },
-  readable: async (reader, runId) => (await reads.get(reader, runId)) !== null,
-};
+const runRecords = pgRunRecords(db, notifier);
 
 /** R2, optional as a group: without it the reference download, run files and scan uploads are 503s. */
 const r2Env = {

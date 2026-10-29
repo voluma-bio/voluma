@@ -177,6 +177,7 @@ export function expectParses(f: Folded) {
     id: RUN,
     sample: "s",
     workflows: [{ repo: "o/w", commit: "a".repeat(40) }],
+    review: null,
     revisions: f.revisions.map((r) => ({
       id: r.id,
       label: r.reason,

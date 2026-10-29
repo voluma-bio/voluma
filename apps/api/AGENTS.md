@@ -79,8 +79,22 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   run's `ReviewRun` (`@voluma/contracts/review`), built on each read by `review-run.ts` from
   `fold` over the run's whole event log, plus what `fold` leaves to the API. It parses the
   result with `reviewRunSchema`, so a bad build is a 500, never invalid data.
-- It reads runs only through `RunRecords` (`src/ports`), which `src/index.ts` wires to the run
-  domain's reads and shared event log, with the caller's `readerOf`.
+- It reads runs and writes human decisions only through `RunRecords` (`src/ports`), wired
+  to Run's `pg-run-records.ts`. Reads use one repeatable-read snapshot. Decisions hold
+  the existing event-sequence lock **before** the run-row lock, then validate and append
+  atomically; preserve that order to avoid deadlocking runner appends. Review owns policy;
+  Run owns authorization filters, sequence allocation and persistence. No domain imports
+  the other. `review-state` overlays acceptance on `fold` without changing scientific state.
+- Accept check resolves one current task-result/check identity; only explicit Mark reviewed
+  at zero remaining sets `reviewedAt`. Both are idempotent, shared across authorized
+  readers, and forbidden on examples. The same derived summary is `Run.review` and
+  `ReviewRun.review`; no persisted count is maintained. Unfinished/failed/cancelled runs
+  have null summaries. Review mutations return/refetch snapshots; execution SSE closes
+  at run end and does not continuously deliver human review changes.
+- Run list/get reads memoize at most 256 derived summaries, keyed by each run's latest
+  event ID (ordered by sequence) in the same repeatable-read snapshot, including reseeded
+  examples with reused sequence numbers. Cache misses load only fold/review
+  events; hits load no event payloads. The event log remains the only durable review state.
 - `inputs.ts` owns `/inputs/:inputId/download` and `/inputs/:inputId/file`, guarded by
   `requireUser` only under `/inputs/:inputId/*`. Both authorize through `ReviewInputs`
   and `readerOf` before using `ReferenceArchive`. Reject HEAD before opening R2; keep

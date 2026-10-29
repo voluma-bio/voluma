@@ -3,8 +3,8 @@
 Review is one light-themed workspace at `/runs/:runId`. It downloads an
 authorized R2 input archive, displays acquired images and
 automatically opens a full-resolution raw volume. On a real run it loads the run's results
-(`getReviewRun`, the shared `ReviewRun`). It does not run analysis or persist
-review decisions. `/runs/local` opens the R2 reference scan
+(`getReviewRun`, the shared `ReviewRun`). Accept check and Mark reviewed persist human
+decisions through the API; the workspace never runs analysis. `/runs/local` opens the R2 reference scan
 without creating a run in the API. There is no local-file intake or simulator.
 
 ## Scientific results and acquired images have separate ownership
@@ -43,15 +43,19 @@ report. The behavior is:
 | Measurements | Measurements, scores and declared outputs the task didn't report, with units and confidence; null is unavailable, never zero |
 | Models | The worker's and checker's model, when the run recorded them |
 | Evidence/files | Checkpoint images (by `.jpg`/`.png` name) load lazily through `reviewFileUrl` and open in a lightbox with a download; other evidence and data files are download links. The server decides what renders inline from the bytes |
-| Checks | To check items, with the structures their focus names; the checker is absent when no second agent checked the task |
-| Chat/corrections | Disabled without a service; corrections require a proposal with affected tasks, then confirmation |
+| Checks | Accept check persists acceptance for the latest completed non-example result; earlier revisions, examples and unfinished runs are read-only. Acceptance does not change values, confidence, checker verdict or scientific task status |
+| Run review | The shared summary shows N to check, Completed at zero, and Reviewed only after explicit Mark reviewed. Mark reviewed is disabled until zero, and never inferred from acceptance |
+| Chat/corrections | Disabled; no command adapter or simulated responses |
 | CSV | Available only with a real snapshot; includes task result revision and evidence identifiers, and escapes spreadsheet formulas |
 | Structures | Visibility/opacity are display state, not scientific edits |
 | Viewer layout | Resizable nested panels; maximizing changes CSS layout without remounting the acquired image |
 
-`report/model.ts` re-exports the contract's types and keeps only the correction
-command shapes, whose contract is still to come. `ReviewService` describes the
-commands the controls need (accept, ask, corrections); no implementation is mounted.
+`report/model.ts` re-exports contract types and supplies scientific status labels.
+Controls use `@voluma/api-client` directly. Mutations wait for a refetch rather than
+optimistically changing a count or overwriting newer state with an older command response.
+Errors remain visible and trigger a refresh, including stale-revision conflicts.
+If that refresh fails, the retained snapshot shows a Retry warning and decisions stay
+disabled until a successful refresh. A recovered snapshot clears obsolete decision errors.
 Do not make a fake transport to fill the empty report.
 
 ## Intake remains usable through errors and replacement
@@ -85,8 +89,8 @@ boundaries, API domain factories and real-data policy. Review replaces the
 scaffold's Review placeholder, not its Run screens or `/dev/ui`. Shared contracts
 and API client match upstream. There is no competing `apps/app` application.
 
-Analysis result lookup, provenance matching between images and results, mutations
-and event streaming remain unconnected. The cross-lane
+Provenance matching between images and results, chat/corrections
+and continuous review event streaming remain unconnected. The cross-lane
 dependencies are listed in the [repository TODO][todo]. Scan viewing depends on
 the authorized R2 download, not the analysis result adapter.
 
