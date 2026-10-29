@@ -245,7 +245,12 @@ function derive(log: RunRecord["events"]): Derived {
     }
     for (const check of task.checks) {
       if (check.status === "open") {
-        toCheck.push({ taskId: task.id, checkId: check.id, title: check.title });
+        toCheck.push({
+          taskId: task.id,
+          checkId: check.id,
+          title: check.title,
+          detail: check.detail,
+        });
       }
     }
   }

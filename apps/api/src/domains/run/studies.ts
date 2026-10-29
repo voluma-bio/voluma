@@ -5,19 +5,19 @@
  */
 import { randomUUID } from "node:crypto";
 import { createStudyRequestSchema, studyOutputsQuerySchema } from "@voluma/contracts/study";
+import { pinsOf } from "@voluma/workflow/bundled";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { type AppEnv, parseJson, readerOf, requireReader, requireUser } from "../../domain";
 import type { RunDeps } from ".";
-import { pinsOf } from "./catalog";
 import { refusal } from "./runs";
 
-export function studiesRoutes({ reads, queue, catalog, repo }: RunDeps) {
+export function studiesRoutes({ reads, queue, repo }: RunDeps) {
   const app = new Hono<AppEnv>();
 
   app.post("/studies", requireUser, async (c) => {
     const body = await parseJson(c, createStudyRequestSchema);
-    const pins = pinsOf(catalog, repo, body.workflowId);
+    const pins = pinsOf(repo, body.workflowId);
     if (!pins) return c.json({ error: "unknown workflow" }, 404);
     const user = c.var.user;
     const reader = readerOf(user);

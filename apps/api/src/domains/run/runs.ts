@@ -8,11 +8,11 @@
  */
 import { randomUUID } from "node:crypto";
 import { type Run, resendKeysRequestSchema, startRunRequestSchema } from "@voluma/contracts/run";
+import { pinsOf } from "@voluma/workflow/bundled";
 import { type Context, Hono } from "hono";
 import { type AppEnv, parseJson, readerOf, requireReader, requireUser } from "../../domain";
 import type { RunDeps } from ".";
 import { refusalMessage } from "./admission";
-import { pinsOf } from "./catalog";
 import type { StartRefusal } from "./pg-queue";
 
 /** The answer to a start or resend the queue refused. */
@@ -35,7 +35,7 @@ export function refusal(c: Context, refused: StartRefusal) {
   }
 }
 
-export function runsRoutes({ reads, queue, catalog, repo }: RunDeps) {
+export function runsRoutes({ reads, queue, repo }: RunDeps) {
   const app = new Hono<AppEnv>();
 
   app.post("/runs", requireUser, async (c) => {
@@ -50,7 +50,7 @@ export function runsRoutes({ reads, queue, catalog, repo }: RunDeps) {
       {
         id: randomUUID(),
         studyId,
-        pinsOf: (workflowId) => pinsOf(catalog, repo, workflowId),
+        pinsOf: (workflowId) => pinsOf(repo, workflowId),
         inputId,
         selectedOutputs,
         notes,

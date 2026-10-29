@@ -4,14 +4,16 @@ Spec (all sections optional; a name is the output id the value is written under,
 add "kind": "diagnostic" for a number that is not a deliverable):
   {"distances": {"name": {"points_zyx": [[z, y, x], [z, y, x]], "definition": "..."}},
    "volumes":   {"name": {"labels": "labels.npy", "ids": [3], "definition": "..."}},
-   "ratios":    {"name": {"num": "name_a", "den": "name_b", "definition": "..."}}}
+   "ratios":    {"name": {"num": "name_a", "den": "name_b", "definition": "..."}},
+   "objects":   {"output-id": {"labels": "labels.npy"}}}
+`objects` reports each labels volume that the volumes were counted on, as the output id's volume object (on --grid's grid).
 Points are voxel indices on the grid of --grid (fractions allowed). A ratio's unit is "1" when both values share a
 unit, else "<num unit>/<den unit>". Ratios may use distances, volumes and earlier ratios. Refused: a name used twice, a
 distance that is not two [z, y, x] points, a volume without "labels" and "ids", a ratio naming something not computed
 before it, a zero denominator. The record format is in `microct-core/resources/sidecar.py`.
 
 Writes: <out>  the result record {values: {id: {value, unit, definition, kind, ...}}, grid_id, spacing_zyx_mm, inputs}
-Prints: one JSON line {out, values: {id: {value, unit, definition, kind}}}
+Prints: one JSON line {out, values: {id: {value, unit, definition, kind}}, objects}
 Example: python measure.py --spec spec.json --grid hu.json --out measurements.json
 Exits 2 with one sentence on bad input, before writing anything.
 """
@@ -20,6 +22,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import objects
 import sidecar
 
 
@@ -86,10 +89,15 @@ def main():
     ap.add_argument('--out', required=True, help='JSON file to write')
     a = ap.parse_args()
     grid = sidecar.grid(a.grid)
-    values, inputs = measure(json.loads(Path(a.spec).read_text()), grid)
+    spec = json.loads(Path(a.spec).read_text())
+    values, inputs = measure(spec, grid)
     inputs.update({a.grid: sidecar.sha256_file(a.grid), a.spec: sidecar.sha256_file(a.spec)})
+    placed = {
+        oid: objects.volume(v['labels'], a.grid, kind='labels')
+        for oid, v in spec.get('objects', {}).items()
+    }
     sidecar.emit_values(
-        a.out, values, meta={'grid_id': grid['grid_id'], 'spacing_zyx_mm': grid['spacing_zyx_mm'], 'inputs': inputs}
+        a.out, values, objects=placed, meta={'grid_id': grid['grid_id'], 'spacing_zyx_mm': grid['spacing_zyx_mm'], 'inputs': inputs}
     )
 
 
