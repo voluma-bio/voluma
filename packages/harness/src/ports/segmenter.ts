@@ -16,6 +16,8 @@ export interface SliceStack {
 export interface SegmentObject {
   /** 1 to 255, the value its voxels carry in the result. */
   label: number;
+  /** The agent's name for it, for error messages. */
+  name: string;
   /** The slice the box is drawn on. */
   frame: number;
   /** Pixels of that slice, ends inclusive: `[row0, col0, row1, col1]`. */
