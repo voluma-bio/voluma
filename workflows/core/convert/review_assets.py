@@ -19,6 +19,7 @@ import json
 import shutil
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numcodecs
@@ -146,13 +147,17 @@ def write_meshes(arr, kind, out):
 
 
 def publish(src, dst):
-    """Copies src to dst, manifest.json last, so a copy cut short has no manifest."""
-    files = sorted(p for p in src.rglob('*') if p.is_file())
-    files.sort(key=lambda p: p.name == 'manifest.json')
-    for p in files:
+    """Copies src to dst, 32 files at a time (a bucket mount is slow per file), manifest.json last so a copy cut short has none."""
+    files = [p for p in src.rglob('*') if p.is_file() and p.name != 'manifest.json']
+
+    def copy(p):
         target = dst / p.relative_to(src)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(p, target)
+
+    with ThreadPoolExecutor(32) as pool:
+        list(pool.map(copy, files))
+    shutil.copyfile(src / 'manifest.json', dst / 'manifest.json')
 
 
 def main():
