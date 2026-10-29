@@ -33,7 +33,5 @@ From the structural review of PR #62 (`review-pr62` p231, structure) and the cor
 - `annotations.json` mixes point orders: curves are `[w, u]`, `width_points_uvw` and
   `plate_patches` are `[u, v, w]`. Documented, but a hand-writing agent holds two orders.
 
-## Lengths still in voxels or um (left by the skills cleanup)
+## Lengths still in voxels (left by the skills cleanup)
 - Internal, not flags: `classic_segment.py` `MARGIN`, `SLAB`, `GRADIENT_RADIUS` (compute halos), `snap_boxes.py` `min_px=50`.
-- `morphometry.py cortical` and the protocol's commands take `--depth-um`, `--slab-um`, `--context-um`; mm would match the rule
-  "every length is in mm" but changes every cortical command in `oa-protocol.md`.
