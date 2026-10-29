@@ -433,6 +433,8 @@ export const taskSchema = z.object({
       outputId: z.string(),
       kind: outputKindSchema.exclude(["structure"]),
       required: z.boolean(),
+      /** Why, when the attempt reported it missing or the task was skipped; absent when it simply wasn't reported. */
+      reason: z.string().optional(),
     }),
   ),
   /** Ids (`taskId/outputId`, as in the blocks) of the outputs the workflow didn't declare. Structures say it on their own block (`Structure.declared`). */
