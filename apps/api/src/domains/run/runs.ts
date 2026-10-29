@@ -8,6 +8,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { type Run, resendKeysRequestSchema, startRunRequestSchema } from "@voluma/contracts/run";
+import { workflowById } from "@voluma/workflow/bundled";
 import { type Context, Hono } from "hono";
 import { type AppEnv, parseJson, readerOf, requireReader, requireUser } from "../../domain";
 import type { RunDeps } from ".";
@@ -23,7 +24,7 @@ function refusal(c: Context, refused: Refusal | "no-input" | "input-not-ready" |
   return c.json({ error: refusalMessage[refused] }, refused === "per-caller" ? 409 : 429);
 }
 
-export function runsRoutes({ reads, queue, catalog, repo }: RunDeps) {
+export function runsRoutes({ reads, queue, repo }: RunDeps) {
   const app = new Hono<AppEnv>();
 
   app.post("/runs", requireUser, async (c) => {
@@ -31,7 +32,7 @@ export function runsRoutes({ reads, queue, catalog, repo }: RunDeps) {
       c,
       startRunRequestSchema,
     );
-    const entry = Object.hasOwn(catalog, workflowId) ? catalog[workflowId] : undefined;
+    const entry = workflowById(workflowId);
     if (!entry) return c.json({ error: "unknown workflow" }, 404);
     const user = c.var.user;
     const result = await queue.start(
@@ -40,7 +41,7 @@ export function runsRoutes({ reads, queue, catalog, repo }: RunDeps) {
       {
         id: randomUUID(),
         workflowId,
-        pins: [{ repo, path: entry.workflow }],
+        pins: [{ repo, path: entry.path }],
         inputId,
         selectedOutputs,
         notes,
