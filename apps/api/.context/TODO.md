@@ -17,7 +17,7 @@
   `Principal` (`core.parseTokenClaims(accessToken).sid` in `auth.ts`), not as a second root
   variable. Or cap a stream's lifetime (say 5 min, the access-token lifetime) and let the
   client reconnect with `Last-Event-ID`, which re-authenticates it with no new code in
-  `auth.ts`. Decide with the run lane.
+  `auth.ts`. Decide once, for both domains.
 - **"Sign in with another account" can't force an account chooser.** After `not-a-member`,
   `/api/auth/login` passes no `prompt`, so Google may sign the same account straight back
   in. Email and password showed the email form again, which is fine. `createSignIn` takes
