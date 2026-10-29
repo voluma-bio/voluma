@@ -446,10 +446,10 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     reviewAssetsManifestSchema.extend({ sourceSha256: sha256Schema }),
   );
 
-  /** Conversion of the file with this `sourceSha256` failed (or timed out at the end of the run); same id as `assets.ready`. Permanent for the run. */
+  /** Conversion of the file with this `sourceSha256` failed (or timed out at the end of the run); same id as `assets.ready`. Permanent for the run. The writer truncates `error` to `WAKE_ERROR_MAX`. */
   const assetsFailed = event(
     "assets.failed",
-    z.object({ sourceSha256: sha256Schema, error: nonEmpty }),
+    z.object({ sourceSha256: sha256Schema, error: z.string().min(1).max(WAKE_ERROR_MAX) }),
   );
 
   return z.discriminatedUnion("type", [

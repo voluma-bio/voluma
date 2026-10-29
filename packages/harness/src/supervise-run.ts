@@ -6,6 +6,7 @@
  * first run are the same call; the recorder is built on the stored events by the host.
  */
 import type { Folded } from "@voluma/contracts/fold";
+import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { RecordedPin } from "@voluma/contracts/workflow";
 import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
 import type { RunLayout } from "./layout";
@@ -19,6 +20,7 @@ import type { Recorder } from "./recorder";
 import { runStartPlan } from "./run-start";
 import { type RoleSpec, supervisor, supervisorThreadId } from "./supervisor";
 import { type PlanTask, taskRuntime } from "./task-runtime";
+import { threadLog } from "./thread-log";
 import { threads } from "./threads";
 import { bashTool } from "./tools/bash";
 import { buildTools } from "./tools/registry";
@@ -41,6 +43,8 @@ export interface SuperviseRunOptions {
   selectedOutputs?: readonly string[];
   /** The user's notes for the run. */
   notes?: string;
+  /** Why the previous claim ended; absent on the run's first claim. Recorded as `claim.started`. */
+  previousClaim?: ClaimEndReason;
   /** The workflow packages the run starts from, as recorded on the root's first event. */
   workflows: RecordedPin[];
   layout: RunLayout;
@@ -70,11 +74,18 @@ export interface SuperviseRunOptions {
 export async function superviseRun(options: SuperviseRunOptions): Promise<Folded> {
   const { runId, layout, recorder, signal } = options;
   const rootThreadId = supervisorThreadId(runId);
+  // A stored log means an earlier claim ran. `previousClaim` says why it ended; a run claimed
+  // before the API recorded reasons has none, and its resume says only "restarted".
+  const resumed = recorder.events().length > 0;
   // Not a derived id: each invocation of the root is a thread start of its own.
   recorder.emit(rootThreadId, "thread.started", {
     parentThreadId: null,
     kind: "supervisor",
     workflows: options.workflows,
+  });
+  recorder.emit(rootThreadId, "claim.started", {
+    resumed,
+    ...(options.previousClaim && { after: options.previousClaim }),
   });
   const plan = await runStartPlan({
     runId,
@@ -104,7 +115,13 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
     runId,
     rootThreadId,
     plan,
-    stopThread: (id) => pool.abort(id),
+    stopThread: (id) => {
+      if (pool.started(id)) return pool.abort(id);
+      // Cut off by an earlier claim and not resumed here: nothing runs to abort, so the stop is
+      // stored as its end, or the next claim would resume a thread nobody wants (`supervisor.ts`).
+      const open = threadLog(recorder.events()).threads.get(id);
+      if (open && !open.end) recorder.emit(id, "thread.ended", { status: "cancelled" });
+    },
   });
   const task = (id: string): PlanTask => {
     const found = plan.find((t) => t.id === id);

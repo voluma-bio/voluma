@@ -34,7 +34,8 @@
  * Files are stored as full R2 keys (`storedKeySchema`), always produced by an
  * `r2.ts` builder: `evidenceKey(runId, sha256)` for run files, and a key under
  * `reference/OA6-1RK/run/` for the reference run. Never a path relative to some
- * root.
+ * root. Converted review assets (`reviewAssetKey`) are not stored: the assets route builds
+ * their keys from the manifest.
  *
  * Nullable fields are what a producer may not know (the reference manifest has
  * no tasks, checker, structure status or measurement-to-evidence links); the
@@ -159,7 +160,7 @@ const zyx = z.tuple([
 /**
  * What the converter (`workflows/core/convert/review_assets.py`) prints and writes as
  * `manifest.json`; the runner parses it and builds `assets.ready` from it. Paths are relative
- * to the asset prefix (`reviewAssetKey`). It carries no `sourceSha256`: the runner knows which
+ * to the asset prefix (`reviewAssetKey` in `r2.ts`). It carries no `sourceSha256`: the runner knows which
  * file it converted, and identity is never taken from subprocess output. Other keys in the
  * printed JSON are ignored.
  */
@@ -175,7 +176,11 @@ export const reviewAssetsManifestSchema = z.object({
       label: z.number().int().positive().optional(),
       path: relativePathSchema,
       vertices: z.number().int().nonnegative(),
-      indices: z.number().int().nonnegative(),
+      indices: z
+        .number()
+        .int()
+        .nonnegative()
+        .refine((n) => n % 3 === 0, "indices come in triangles"),
     }),
   ),
 });

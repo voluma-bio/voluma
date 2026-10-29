@@ -121,7 +121,11 @@ export function placementProblem(
     if (lines.length !== 1 || !line || line.kind !== "line" || output.value === null)
       return undefined;
     // The block holds world mm already, so measure it through the identity.
-    const zyx = (p: readonly number[]) => [p[2] ?? 0, p[1] ?? 0, p[0] ?? 0];
+    const zyx = (p: readonly number[]): [number, number, number] => [
+      p[2] ?? 0,
+      p[1] ?? 0,
+      p[0] ?? 0,
+    ];
     const problem = rulerLengthProblem(
       { aZyx: zyx(line.a), bZyx: zyx(line.b) },
       [

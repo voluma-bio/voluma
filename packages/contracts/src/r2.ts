@@ -79,7 +79,7 @@ export const referenceKey = (part: "scan" | "run", path: string) =>
 export const referenceScanArchiveKey = () => "reference/OA6-1RK/scan.zip";
 
 /**
- * A stored pointer to a file in R2: an `evidenceKey`, a `reviewAssetKey`, or a key under the
+ * A stored pointer to a file in R2: an `evidenceKey`, or a key under the
  * reference run (whose files are already immutable). Review data stores full
  * keys of this form, never paths relative to some root.
  */
@@ -87,16 +87,10 @@ export const storedKeySchema = z.string().refine(
   (k) => {
     const evidence = /^runs\/([^/]+)\/evidence\/([0-9a-f]{64})$/.exec(k);
     if (evidence) return segmentSchema.safeParse(evidence[1]).success;
-    const asset = /^runs\/([^/]+)\/review\/[0-9a-f]{64}\/(.+)$/.exec(k);
-    if (asset) {
-      return (
-        segmentSchema.safeParse(asset[1]).success && relativePathSchema.safeParse(asset[2]).success
-      );
-    }
     const ref = referencePrefix("run");
     return k.startsWith(ref) && relativePathSchema.safeParse(k.slice(ref.length)).success;
   },
-  { message: "must be an evidence, review-asset or reference-run key" },
+  { message: "must be an evidence key or a reference-run key" },
 );
 
 /**

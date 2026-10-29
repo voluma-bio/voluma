@@ -66,6 +66,10 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   limit counts can't race. The lease is judged by the database's `now()`. An ingest write
   checks the run's lease token inside its own transaction (`assertLease`, `FOR SHARE`); a
   late write can't land after a takeover.
+- **Recovery ends a claim with a reason** (`shutdown`, `self-stop` from the runner's `released`;
+  `lease-expired` when the claim's sweep finds the lease gone). `recover` in `pg-queue.ts` stores it
+  for the next claim's `previousClaim` and applies the no-progress limit (`claim-progress.ts`:
+  the counting rule and the progress events). There is no other restart counter.
 - **Visitor keys live only in `key-vault.ts`**, in memory, and only `pg-queue.ts` touches it,
   under the lock. Never store, log or return them, and log no body on a route that takes
   them. A transition holds the keys before the write that makes the run claimable commits;
