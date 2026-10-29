@@ -14,7 +14,6 @@ import type { Evidence } from "./ports/evidence";
 import type { Files } from "./ports/files";
 import type { History } from "./ports/history";
 import type { Sandbox } from "./ports/sandbox";
-import type { Segmenter } from "./ports/segmenter";
 import type { Recorder } from "./recorder";
 import { runStartPlan } from "./run-start";
 import { type RoleSpec, supervisor, supervisorThreadId } from "./supervisor";
@@ -49,8 +48,6 @@ export interface SuperviseRunOptions {
   /** The run's sandbox for a thread (`sandboxSession.get`). */
   sandbox(threadId: string): Promise<Sandbox>;
   evidence: Evidence;
-  /** Offers `segment_sam` to threads when set (the host has a Segmenter and a key for it). */
-  segmenter?: Segmenter;
   /** The run's bucket, read and written host-side by `view_image` and `segment_sam`. */
   files: Files;
   main: MainThread;
@@ -107,7 +104,7 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
     bashTool(layout),
     ...taskTools(runtime, kind),
     threadMessageTool((from, to, text) => sup.message(from, to, text)),
-    ...buildTools(granted, { layout, files: options.files, segmenter: options.segmenter }),
+    ...buildTools(granted, { layout, files: options.files }),
   ];
   const sup = supervisor({
     runId,

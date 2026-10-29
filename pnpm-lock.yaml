@@ -308,6 +308,9 @@ importers:
       '@voluma/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@voluma/sam':
+        specifier: workspace:*
+        version: link:../voluma-sam
       '@voluma/workflow':
         specifier: workspace:*
         version: link:../workflow
@@ -367,6 +370,25 @@ importers:
       '@types/three':
         specifier: 'catalog:'
         version: 0.186.0
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+
+  packages/voluma-sam:
+    dependencies:
+      undici:
+        specifier: ^7.16.0
+        version: 7.30.1
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.7
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.19.2
+      esbuild:
+        specifier: ^0.25.12
+        version: 0.25.12
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
@@ -9781,8 +9803,7 @@ snapshots:
 
   undici@7.29.0: {}
 
-  undici@7.30.1:
-    optional: true
+  undici@7.30.1: {}
 
   unicode-canonical-property-names-ecmascript@2.0.1: {}
 

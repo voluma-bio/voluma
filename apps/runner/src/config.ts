@@ -181,8 +181,10 @@ export function runnerConfig() {
      */
     visitorModel: visitorModel(),
     modal,
-    /** Meta's key for SAM (`segment_sam`) on a `voluma` run; absent: the tool is not offered. A visitor's run uses the visitor's own key. */
+    /** Our Meta key, for the main thread's Muse Wonder (SAM goes through the gateway). */
     metaApiKey,
+    /** The gateway sandboxes reach providers through; absent: `segment_sam` is not offered. */
+    gatewayUrl: optional("VOLUMA_GATEWAY_URL"),
     r2,
     commit: checkoutCommit(),
     /** Every secret of ours, to redact from anything that leaves the process. */

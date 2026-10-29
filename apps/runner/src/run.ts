@@ -35,7 +35,6 @@ import { computePlan } from "@voluma/workflow/plan";
 import { type Config, isVisitorSafe, providerKey } from "./config.ts";
 import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
-import { metaSegmenter } from "./meta-segmenter.ts";
 import { createModalSandbox, RUNS_APP, terminateClaim } from "./modal-sandbox.ts";
 import type { ModelFallback } from "./model-fallback.ts";
 import { retryTransient } from "./model-retry.ts";
@@ -111,7 +110,6 @@ export async function runClaim(
   const keyFor = (provider: string) =>
     visitor ? (provider === "meta" ? keys.metaApiKey : undefined) : providerKey(provider);
   const modal = visitor ? keys.modal : config.modal;
-  const metaKey = visitor ? keys.metaApiKey : config.metaApiKey;
   const redact: Redact = redactor([
     ...config.secrets,
     ...(visitor ? [keys.metaApiKey, keys.modal.tokenId, keys.modal.tokenSecret] : []),
@@ -173,9 +171,9 @@ export async function runClaim(
     // The tasks that produce the selected outputs and what they need. The main thread may adapt
     // them to the run's notes when the run starts (`superviseRun`).
     const computed = computePlan(definition.files, run.selectedOutputs);
-    // Each role's optional tools are the ones its file lists; `segment_sam` also needs a key.
+    // Each role's optional tools are the ones its file lists; `segment_sam` also needs the gateway.
     const grant = (role: "worker" | "checker") =>
-      definition.agents[role].tools.filter((t) => t !== "segment_sam" || metaKey);
+      definition.agents[role].tools.filter((t) => t !== "segment_sam" || config.gatewayUrl);
 
     const layout = runLayout(
       runId,
@@ -314,22 +312,6 @@ export async function runClaim(
       sandbox: (id) => opened.get(id),
       evidence: r2Evidence(config.r2),
       files,
-      segmenter: metaKey
-        ? metaSegmenter({
-            apiKey: metaKey,
-            log,
-            addCost: meter.addModelCost,
-            keepFailed: async (text) => {
-              const path = `/scratch/failed-sam-response-${new Date().toISOString().replaceAll(":", "-")}.txt`;
-              await files.write(
-                layout.keyOf(path, "write"),
-                new TextEncoder().encode(text),
-                AbortSignal.timeout(60_000),
-              );
-              return `kept at ${path}`;
-            },
-          })
-        : undefined,
       main,
       worker: (task, notes, recorded) => ({
         model: threadModel(workerModel, recorded),
