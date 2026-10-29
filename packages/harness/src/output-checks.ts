@@ -17,6 +17,7 @@ export function declarationProblem(
   if (!declared) return undefined; // Undeclared outputs are accepted; the fold lists them.
   const quote = `The plan declares: ${JSON.stringify(declared)}.`;
   const mismatch = (what: string) => `${what}. ${quote}`;
+  if (output.kind === "missing") return undefined; // It fills any declaration.
   if (declared.kind !== output.kind) return mismatch(`This output is a ${output.kind}`);
   switch (declared.kind) {
     case "measurement":
@@ -102,6 +103,7 @@ export function referenceProblem(view: Folded, taskId: string, output: Out): str
       break;
     }
     case "file":
+    case "missing":
       break;
   }
   return missing.length === 0

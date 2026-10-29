@@ -236,13 +236,6 @@ function attentionOf(tasks: FoldedTask[], threads: Thread[], events: RunEvent[])
   return items;
 }
 
-const planOf = (events: RunEvent[]): WorkflowPlan | undefined => {
-  const first = events.find((e) => e.type === "revision.started" && e.payload.reason === "run");
-  return first?.type === "revision.started" && first.payload.reason === "run"
-    ? first.payload.plan
-    : undefined;
-};
-
 /** The newest thread working on each task: the one a task row opens. */
 function latestThreadByTask(threads: Thread[]): Map<string, Thread> {
   const byTask = new Map<string, Thread>();
@@ -450,7 +443,8 @@ export function runView(
 ): RunView {
   const logged = threadsOf(events);
   const threads = halt ? halted(logged.threads, logged.lastAt, halt) : logged.threads;
-  const plan = planOf(events);
+  // No plan until the run's first `revision.started`.
+  const plan = folded.revisions.length > 0 ? folded.plan : undefined;
   const attention = attentionOf(folded.tasks, logged.threads, events);
   const spent = spend(events, providerCalls);
   if (!plan) return { threads, attention, tasks: [], outputs: [], progress: "", spend: spent };

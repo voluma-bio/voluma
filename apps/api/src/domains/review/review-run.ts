@@ -19,15 +19,19 @@ export function reviewRun({ run, events, results: { revisions } }: RunRecord): R
   // Not `events[0]`: the supervisor's `thread.started` and the run-start `wake` come first.
   const start = events.find((e) => e.type === "revision.started" && e.payload.reason === "run");
   if (start?.type !== "revision.started" || start.payload.reason !== "run") return null;
-  const plan = start.payload.plan.tasks;
-  const planned = new Map(plan.map((t) => [t.id, t]));
-  const titleOf = (taskId: string) => planned.get(taskId)?.title ?? taskId;
+  // Each revision's plan is the fold's: the run's plus every `plan.changed` so far, so added tasks show.
+  const plannedIn = (rev: FoldedRevision) => new Map(rev.plan.tasks.map((t) => [t.id, t]));
 
   // TODO(.context/TODO.md): an annotation on the scan (`volumeId` null) needs the scan's
   // volume, whose geometry the API doesn't read yet; until then it and every reference to
   // it are left out.
-  const task = (t: FoldedTask, rev: FoldedRevision, onScan: Set<string>): ReviewTask => {
-    const title = titleOf(t.id);
+  const task = (
+    t: FoldedTask,
+    rev: FoldedRevision,
+    planned: ReturnType<typeof plannedIn>,
+    onScan: Set<string>,
+  ): ReviewTask => {
+    const title = planned.get(t.id)?.title ?? t.id;
     const staged = <A extends { stage: string }>(assets: A[]) =>
       assets.map((a) => ({ ...a, stage: title }));
     const kept = <X extends { annotationIds: string[] }>(x: X) => ({
@@ -71,7 +75,10 @@ export function reviewRun({ run, events, results: { revisions } }: RunRecord): R
 
   const label = (rev: FoldedRevision) => {
     if (rev.reason === "run") return "Run";
-    if (rev.reason === "correction") return `Correction: ${titleOf(rev.taskId ?? "")}`;
+    if (rev.reason === "correction") {
+      const id = rev.taskId ?? "";
+      return `Correction: ${plannedIn(rev).get(id)?.title ?? id}`;
+    }
     throw new Error("Unsupported revision reason");
   };
 
@@ -95,19 +102,20 @@ export function reviewRun({ run, events, results: { revisions } }: RunRecord): R
         )
           workers.set(event.payload.task, event);
       }
+      const planned = plannedIn(rev);
       const attempted = new Map(rev.tasks.map((t) => [t.id, t]));
       const onScan = new Set(rev.annotations.filter((a) => a.volumeId === null).map((a) => a.id));
       return {
         id: rev.id,
         label: label(rev),
         createdAt: rev.createdAt,
-        tasks: plan.map((p): ReviewTask => {
+        tasks: rev.plan.tasks.map((p): ReviewTask => {
           const t = attempted.get(p.id);
-          if (t) return { ...task(t, rev, onScan), dependsOn: p.dependsOn };
+          if (t) return { ...task(t, rev, planned, onScan), dependsOn: p.dependsOn };
           const worker = workers.get(p.id);
           return {
             id: p.id,
-            title: titleOf(p.id),
+            title: p.title ?? p.id,
             ask: p.instructions ?? "",
             dependsOn: p.dependsOn,
             status: "pending",
