@@ -1,7 +1,8 @@
-# Tool settings only; the dependencies are microct-analysis/requirements.txt.
+# Tool settings only; the dependencies are core/requirements.txt.
 [tool.ruff]
 line-length = 100
 extend-exclude = [".venv"]
 
 [tool.pytest.ini_options]
+pythonpath = ["core/skills/microct-core/resources"]  # for tests of libraries, which do not set up sys.path
 addopts = "-p no:cacheprovider"
