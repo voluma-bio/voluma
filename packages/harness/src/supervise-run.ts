@@ -6,9 +6,10 @@
  * first run are the same call; the recorder is built on the stored events by the host.
  */
 import type { Folded } from "@voluma/contracts/fold";
+import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { RecordedPin } from "@voluma/contracts/workflow";
 import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
-import type { RunLayout } from "./layout";
+import type { RunLayout, ThreadLayout } from "./layout";
 import type { MainThread } from "./main-thread";
 import type { Evidence } from "./ports/evidence";
 import type { Files } from "./ports/files";
@@ -17,8 +18,10 @@ import type { Sandbox } from "./ports/sandbox";
 import type { Segmenter } from "./ports/segmenter";
 import type { Recorder } from "./recorder";
 import { runStartPlan } from "./run-start";
-import { type RoleSpec, supervisor, supervisorThreadId } from "./supervisor";
+import { type RoleSpec, supervisor } from "./supervisor";
 import { type PlanTask, taskRuntime } from "./task-runtime";
+import { supervisorThreadId } from "./thread-id";
+import { threadLog } from "./thread-log";
 import { threads } from "./threads";
 import { bashTool } from "./tools/bash";
 import { buildTools } from "./tools/registry";
@@ -41,6 +44,8 @@ export interface SuperviseRunOptions {
   selectedOutputs?: readonly string[];
   /** The user's notes for the run. */
   notes?: string;
+  /** Why the previous claim ended; absent on the run's first claim. Recorded as `claim.started`. */
+  previousClaim?: ClaimEndReason;
   /** The workflow packages the run starts from, as recorded on the root's first event. */
   workflows: RecordedPin[];
   layout: RunLayout;
@@ -58,8 +63,18 @@ export interface SuperviseRunOptions {
   main: MainThread;
   /** `notes`: the main thread's notes in force when the thread starts. */
   /** `model`: the one a resumed thread started on (`provider/id`), which it must keep. */
-  worker(task: PlanTask, notes: string | undefined, model: string | undefined): RunRole;
-  check(task: PlanTask, notes: string | undefined, model: string | undefined): RunRole;
+  worker(
+    task: PlanTask,
+    thread: ThreadLayout,
+    notes: string | undefined,
+    model: string | undefined,
+  ): RunRole;
+  check(
+    task: PlanTask,
+    thread: ThreadLayout,
+    notes: string | undefined,
+    model: string | undefined,
+  ): RunRole;
   /** Whether a failed thread's error text says the model provider failed; see `SupervisorOptions`. */
   providerError?(error: string): boolean;
   /** Whether such an error means no redo can succeed: the run then fails at once; see `SupervisorOptions`. */
@@ -70,11 +85,18 @@ export interface SuperviseRunOptions {
 export async function superviseRun(options: SuperviseRunOptions): Promise<Folded> {
   const { runId, layout, recorder, signal } = options;
   const rootThreadId = supervisorThreadId(runId);
+  // A stored log means an earlier claim ran. `previousClaim` says why it ended; a run claimed
+  // before the API recorded reasons has none, and its resume says only "restarted".
+  const resumed = recorder.events().length > 0;
   // Not a derived id: each invocation of the root is a thread start of its own.
   recorder.emit(rootThreadId, "thread.started", {
     parentThreadId: null,
     kind: "supervisor",
     workflows: options.workflows,
+  });
+  recorder.emit(rootThreadId, "claim.started", {
+    resumed,
+    ...(options.previousClaim && { after: options.previousClaim }),
   });
   const plan = await runStartPlan({
     runId,
@@ -102,20 +124,31 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
     recorder,
     evidence: options.evidence,
     runId,
+    layoutOf: layout.forThread,
     rootThreadId,
     plan,
-    stopThread: (id) => pool.abort(id),
+    stopThread: (id) => {
+      if (pool.started(id)) return pool.abort(id);
+      // Cut off by an earlier claim and not resumed here: nothing runs to abort, so the stop is
+      // stored as its end, or the next claim would resume a thread nobody wants (`supervisor.ts`).
+      const open = threadLog(recorder.events()).threads.get(id);
+      if (open && !open.end) recorder.emit(id, "thread.ended", { status: "cancelled" });
+    },
   });
   const task = (id: string): PlanTask => {
     const found = plan.find((t) => t.id === id);
     if (!found) throw new Error(`${id} is not a task of the plan`);
     return found;
   };
-  const tools = (kind: "worker" | "check", granted: readonly string[] = []) => [
-    bashTool(layout),
+  const tools = (
+    kind: "worker" | "check",
+    thread: ThreadLayout,
+    granted: readonly string[] = [],
+  ) => [
+    bashTool(thread),
     ...taskTools(runtime, kind),
     threadMessageTool((from, to, text) => sup.message(from, to, text)),
-    ...buildTools(granted, { layout, files: options.files, segmenter: options.segmenter }),
+    ...buildTools(granted, { layout: thread, files: options.files, segmenter: options.segmenter }),
   ];
   const sup = supervisor({
     runId,
@@ -124,13 +157,15 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
     recorder,
     threads: pool,
     main: options.main,
-    worker: (id, notes, model) => {
-      const role = options.worker(task(id), notes, model);
-      return { ...role, tools: tools("worker", role.tools) };
+    worker: (id, threadId, notes, model) => {
+      const thread = layout.forThread(threadId, (p) => runtime.cites(id, p));
+      const role = options.worker(task(id), thread, notes, model);
+      return { ...role, tools: tools("worker", thread, role.tools) };
     },
-    check: (id, notes, model) => {
-      const role = options.check(task(id), notes, model);
-      return { ...role, tools: tools("check", role.tools) };
+    check: (id, threadId, notes, model) => {
+      const thread = layout.forThread(threadId, (p) => runtime.cites(id, p));
+      const role = options.check(task(id), thread, notes, model);
+      return { ...role, tools: tools("check", thread, role.tools) };
     },
     providerError: options.providerError,
     providerFatal: options.providerFatal,

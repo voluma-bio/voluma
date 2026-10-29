@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "start": "tsx src/main.ts",
     "sandboxes:clean": "tsx src/sandboxes-clean.ts"
@@ -19,6 +20,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "vitest": "catalog:",
     "typescript": "catalog:"
   }
 }

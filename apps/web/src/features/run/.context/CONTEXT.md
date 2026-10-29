@@ -44,7 +44,7 @@ Three screens under `RunLayout` (top bar and query client): `/` start (`start-pa
   its last event, until the runner's `thread.started` resumes it. The end applies only once the
   stream has closed, when the log is whole, so a reload never shows a finished thread as Stopped
   while its backlog loads. Never decide "running" from the events alone.
-- **Run-level data** is one `runView(events, folded, halt)` (`run-model.ts`): threads, attention,
+- **Run-level data** is one `runView(events, folded, halt, providerCalls)` (`run-model.ts`): threads, attention,
   plan, task states, progress and spend, memoized on the events. `withLiveCalls` overlays the tool
   calls being written per frame.
 - **The attention list** (`attentionOf`) is built from `fold`'s tasks (To check items, the checker's

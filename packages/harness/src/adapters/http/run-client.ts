@@ -17,7 +17,7 @@
  * `live` posts a batch of live frames (`live.ts`): one attempt, and the caller drops a failure.
  * `heartbeat` makes one attempt: the caller keeps the usage and resends it if this throws.
  * `report` ends or releases the run; a 409 means the server ended the run first or the lease
- * is no longer ours, so it returns. A network failure is retried for REPORT_BUDGET_MS; the
+ * is no longer ours, so it returns false (the caller logs that nothing was stored). A network failure is retried for REPORT_BUDGET_MS; the
  * lease expires on its own after that.
  */
 import { type EventInput, type RunEvent, runEventsResponseSchema } from "@voluma/contracts/events";
@@ -40,7 +40,8 @@ const REPORT_BUDGET_MS = 60_000;
 export interface RunClient extends EventLog, History {
   storedEvents(): Promise<RunEvent[]>;
   heartbeat(usage: Usage): Promise<HeartbeatResponse>;
-  report(report: ReportRequest["report"]): Promise<void>;
+  /** True when the server stored the report; false on a 409 (the run ended first, or the lease is gone). */
+  report(report: ReportRequest["report"]): Promise<boolean>;
   /** One batch of live frames: a single attempt, no retry (they are best effort). */
   live(frames: LiveFrame[]): Promise<void>;
 }
@@ -111,9 +112,10 @@ export function runClient(
     async report(report) {
       try {
         await post(`${runPath}/report`, { report }, REPORT_BUDGET_MS);
+        return true;
       } catch (error) {
         if (error instanceof LeaseLost || (error instanceof HttpError && error.status === 409)) {
-          return;
+          return false;
         }
         throw error;
       }
