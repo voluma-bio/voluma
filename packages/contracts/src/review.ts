@@ -49,10 +49,9 @@ import { sha256Schema as sha256, storedKeySchema, storedPrefixSchema } from "./r
 import { workflowPinSchema } from "./workflow";
 
 /**
- * Review progress for the latest successfully completed results. The implementation
- * cutover will replace Run.toCheck with this one summary on Run and ReviewRun, nullable
- * unless the current execution completed successfully. This preparatory contract does
- * not change either existing read response. A correction invalidates review completion;
+ * Review progress for the latest successfully completed results, shared by Run and
+ * ReviewRun; null unless the current execution completed successfully.
+ * A correction invalidates review completion;
  * only unchanged task results retain acceptance. Count the latest results' open checks,
  * never historical revisions. Accepting the last check leaves reviewedAt null: only an
  * explicit Mark reviewed sets it, and only with no open checks.
@@ -71,7 +70,6 @@ export type ReviewSummary = z.infer<typeof reviewSummarySchema>;
 
 /**
  * Cookie-authenticated review commands, returning 200 reviewDecisionResponseSchema.
- * These definitions prepare the API; handlers and UI are not connected yet.
  *   POST /api/review/runs/:runId/checks/:checkId/accept
  *     body acceptCheckRequestSchema (runId and checkId are URL parameters)
  *   POST /api/review/runs/:runId/mark-reviewed
@@ -561,6 +559,7 @@ export const reviewRunSchema = z
     workflows: z.array(workflowPinSchema).min(1),
     /** Oldest first; the last is the latest. */
     revisions: z.array(revisionSchema).min(1),
+    review: reviewSummarySchema.nullable(),
   })
   .superRefine((run, ctx) => {
     const ids = new Set(run.revisions.map((r) => r.id));
@@ -576,18 +575,7 @@ export const reviewRunSchema = z
           });
       });
     });
-  });
-export type ReviewRun = z.infer<typeof reviewRunSchema>;
-
-/**
- * A successful review command returns the result snapshots with acceptance overlaid,
- * plus their summary. It reuses the existing read model; its summary is non-null because
- * commands require successful completion. The later read-response cutover will use the
- * same shape for ReviewRun, with nullable review while unfinished/failed/cancelled.
- */
-export const reviewDecisionResponseSchema = reviewRunSchema
-  .safeExtend({ review: reviewSummarySchema })
-  .superRefine((run, ctx) => {
+    if (!run.review) return;
     const latest = run.revisions.at(-1);
     if (run.review.revisionId !== latest?.id)
       ctx.addIssue({
@@ -606,4 +594,10 @@ export const reviewDecisionResponseSchema = reviewRunSchema
         message: "review count must equal the latest revision's open checks",
       });
   });
+export type ReviewRun = z.infer<typeof reviewRunSchema>;
+
+/** Commands require successfully completed results, so their summary is non-null. */
+export const reviewDecisionResponseSchema = reviewRunSchema.safeExtend({
+  review: reviewSummarySchema,
+});
 export type ReviewDecisionResponse = z.infer<typeof reviewDecisionResponseSchema>;

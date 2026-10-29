@@ -1,14 +1,20 @@
 /**
- * The review's run routes. Reads are scoped by `readerOf`, so a run the caller can't read
- * is 404, as in the run domain.
+ * The review's run routes, for users only. Reads are scoped by `readerOf`, so a run the
+ * caller can't read is 404.
  *   GET /runs/:runId                the run's review data (`@voluma/contracts/review`),
  *                                   built from its event log on each read
  *   GET /runs/:runId/files/:sha256  one of its files (`evidenceKey`), streamed from storage
  */
 import { sha256Schema } from "@voluma/contracts/r2";
+import {
+  acceptCheckRequestSchema,
+  markReviewedRequestSchema,
+  reviewDecisionResponseSchema,
+} from "@voluma/contracts/review";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { readerOf, requireUser, type UserEnv } from "../../domain";
+import { parseJson, readerOf, requireUser, type UserEnv } from "../../domain";
+import type { RunRecord } from "../../ports";
 import type { ReviewDeps } from ".";
 import { reviewRun } from "./review-run";
 
@@ -20,6 +26,16 @@ function imageType(head: Uint8Array): string | null {
   return null;
 }
 
+function currentReview(record: RunRecord, baseRevisionId: string) {
+  if (record.run.example) throw new HTTPException(403, { message: "Example runs are read-only." });
+  const review = record.run.review;
+  if (!review || review.revisionId !== baseRevisionId)
+    throw new HTTPException(409, {
+      message: "Results changed or are not completed. Reload the run.",
+    });
+  return review;
+}
+
 export function runRoutes({ runs, files }: ReviewDeps) {
   const app = new Hono<UserEnv>();
   app.use("/runs/*", requireUser);
@@ -27,9 +43,51 @@ export function runRoutes({ runs, files }: ReviewDeps) {
   app.get("/runs/:runId", async (c) => {
     const record = await runs.load(readerOf(c.var.user), c.req.param("runId"));
     if (!record) return c.json({ error: "not found" }, 404);
-    const review = reviewRun(record.run, record.events);
+    const review = reviewRun(record);
     if (!review) return c.json({ error: "this run has no plan" }, 409);
     return c.json(review);
+  });
+
+  app.post("/runs/:runId/checks/:checkId/accept", async (c) => {
+    const { baseRevisionId, taskId } = await parseJson(c, acceptCheckRequestSchema);
+    const { runId, checkId } = c.req.param();
+    const record = await runs.decide(readerOf(c.var.user), runId, (record) => {
+      currentReview(record, baseRevisionId);
+      const task = record.results.revisions.at(-1)?.tasks.find((task) => task.id === taskId);
+      const check = task?.checks.find((check) => check.id === checkId);
+      if (!task || !check) throw new HTTPException(404, { message: "Check not found." });
+      if (check.status === "accepted") return null;
+      return {
+        type: "check.accepted",
+        payload: {
+          by: c.var.user.userId,
+          revisionId: baseRevisionId,
+          taskId,
+          checkId,
+          resultRevisionId: task.resultRevisionId,
+        },
+      };
+    });
+    if (!record) return c.json({ error: "not found" }, 404);
+    return c.json(reviewDecisionResponseSchema.parse(reviewRun(record)));
+  });
+
+  app.post("/runs/:runId/mark-reviewed", async (c) => {
+    const { baseRevisionId } = await parseJson(c, markReviewedRequestSchema);
+    const record = await runs.decide(readerOf(c.var.user), c.req.param("runId"), (record) => {
+      const review = currentReview(record, baseRevisionId);
+      if (review.remainingToCheck !== 0)
+        throw new HTTPException(409, {
+          message: "Accept every To check item before marking reviewed.",
+        });
+      if (review.reviewedAt) return null;
+      return {
+        type: "review.completed",
+        payload: { by: c.var.user.userId, revisionId: baseRevisionId },
+      };
+    });
+    if (!record) return c.json({ error: "not found" }, 404);
+    return c.json(reviewDecisionResponseSchema.parse(reviewRun(record)));
   });
 
   app.get("/runs/:runId/files/:sha256", async (c) => {

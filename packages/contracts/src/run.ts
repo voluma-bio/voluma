@@ -1,7 +1,9 @@
 /**
  * The run record and the calls on it, under `/api/run`. These calls are
- * cookie-authenticated (the rules in `auth.ts` apply); the bearer-authenticated
- * ingest routes under the same prefix are a different contract.
+ * cookie-authenticated (the rules in `auth.ts` apply); the reads (`GET /runs`,
+ * `/runs/:id`, `/runs/:id/stream`) also take the read-only debug token, which reads
+ * every org's runs. The bearer-authenticated ingest routes under the same prefix are a
+ * different contract.
  *
  *   POST /api/run/runs             body `startRunRequestSchema` → 200 `runSchema`
  *                                  (404 for an unknown `workflowId` or an `inputId`
@@ -58,8 +60,8 @@
  * unexpired uploads a member may have open.
  *
  * Org scoping, enforced by the server on every call and every read:
- *   - Every read is filtered by the caller's `labId`. Another org's run or
- *     input answers 404, never 403.
+ *   - Every read by a user is filtered by the caller's `labId`. Another org's run
+ *     or input answers 404, never 403. (The debug token reads every org's runs.)
  *   - When the caller's server-side scope is `self` (not in `meResponseSchema`),
  *     reads are also filtered to the caller: a run when `startedBy` is the
  *     caller's `userId` or the run is an `example`; an input when `uploadedBy`
@@ -137,6 +139,7 @@ import { z } from "zod";
 import { userIdSchema } from "./auth";
 import { inputIdSchema, runIdSchema, segmentSchema } from "./ids";
 import { relativePathSchema } from "./r2";
+import { reviewSummarySchema } from "./review";
 import { workflowPinSchema } from "./workflow";
 
 /**
@@ -193,52 +196,53 @@ const selectedOutputsSchema = z
   .max(200)
   .refine((ids) => new Set(ids).size === ids.length, "duplicate output id");
 
-export const runSchema = z.object({
-  id: runIdSchema,
-  labId: z.string(),
-  startedBy: userIdSchema,
-  /** The pins the server resolved from the request's `workflowId`, as in `r2.ts`'s `workflowSnapshotPrefix`. */
-  workflows: z.array(workflowPinSchema).min(1),
-  input: inputSchema,
-  /**
-   * The output ids the user selected ("What do you want measured?", `outputs.json`); the run
-   * covers the tasks that produce them and the tasks those depend on. Absent: every output.
-   */
-  selectedOutputs: selectedOutputsSchema.optional(),
-  /** Free text the user added at the start; the workflow's main thread reads it. */
-  notes: z.string().max(4000).optional(),
-  /** Who pays for models and sandboxes; see the header. */
-  credentials: z.enum(["voluma", "visitor"]),
-  /**
-   * A shared, read-only run every caller in the org can read, even under
-   * `self`, set only by seeding (see the header). It always reads its org's
-   * reference scan.
-   */
-  example: z.boolean(),
-  /** The example run this one was forked from by a correction on it; null for a fresh run. */
-  forkedFrom: runIdSchema.nullable(),
-  createdAt: z.iso.datetime(),
-  state: runStateSchema,
-  /**
-   * What the run has spent so far: the sum of the usage its heartbeats reported (`runner.ts`).
-   * `modelCostUsd` is model calls and paid tool calls (`tool.result.costUsd`), in US dollars;
-   * `sandboxSeconds` is how long its sandbox was up. Per task: `spend` in `spend.ts`.
-   * Optional until the API writes it, as is `toCheck`.
-   */
-  usage: z
-    .object({
-      modelCostUsd: z.number().nonnegative(),
-      sandboxSeconds: z.number().nonnegative(),
-    })
-    .optional(),
-  /**
-   * The open To check items when the run last completed, counted by `fold` over its whole
-   * log; null while it runs, and when it ended failed or cancelled (a failed run's items are
-   * still in its review). Set each time the run completes; the review lane owns what happens
-   * to the items between.
-   */
-  toCheck: z.number().int().nonnegative().nullable().optional(),
-});
+export const runSchema = z
+  .object({
+    id: runIdSchema,
+    labId: z.string(),
+    startedBy: userIdSchema,
+    /** The pins the server resolved from the request's `workflowId`, as in `r2.ts`'s `workflowSnapshotPrefix`. */
+    workflows: z.array(workflowPinSchema).min(1),
+    input: inputSchema,
+    /**
+     * The output ids the user selected ("What do you want measured?", `outputs.json`); the run
+     * covers the tasks that produce them and the tasks those depend on. Absent: every output.
+     */
+    selectedOutputs: selectedOutputsSchema.optional(),
+    /** Free text the user added at the start; the workflow's main thread reads it. */
+    notes: z.string().max(4000).optional(),
+    /** Who pays for models and sandboxes; see the header. */
+    credentials: z.enum(["voluma", "visitor"]),
+    /**
+     * A shared, read-only run every caller in the org can read, even under
+     * `self`, set only by seeding (see the header). It always reads its org's
+     * reference scan.
+     */
+    example: z.boolean(),
+    /** The example run this one was forked from by a correction on it; null for a fresh run. */
+    forkedFrom: runIdSchema.nullable(),
+    createdAt: z.iso.datetime(),
+    state: runStateSchema,
+    /**
+     * What the run has spent so far: the sum of the usage its heartbeats reported (`runner.ts`).
+     * `modelCostUsd` is model calls and paid tool calls (`tool.result.costUsd`), in US dollars;
+     * `sandboxSeconds` is how long its sandbox was up. Per task: `spend` in `spend.ts`.
+     * Optional until the API writes it.
+     */
+    usage: z
+      .object({
+        modelCostUsd: z.number().nonnegative(),
+        sandboxSeconds: z.number().nonnegative(),
+      })
+      .optional(),
+    /** Latest successfully completed results and their human review progress; null otherwise. */
+    review: reviewSummarySchema.nullable(),
+  })
+  .refine(
+    (run) =>
+      (run.state.status === "ended" && run.state.outcome === "completed") === (run.review !== null),
+    { path: ["review"], message: "only successfully completed runs have review progress" },
+  );
 export type Run = z.infer<typeof runSchema>;
 
 /** Real keys are well under 512 characters; the cap bounds what the server holds in memory. */

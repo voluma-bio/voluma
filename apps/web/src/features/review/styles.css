@@ -70,6 +70,9 @@
   .back-link a:hover {
     @apply text-primary-text underline;
   }
+  .run-title {
+    @apply mt-2 flex flex-wrap items-center gap-3;
+  }
   .run-actions {
     @apply flex flex-wrap items-center gap-2;
   }
@@ -393,15 +396,6 @@
   }
   .dialog-content {
     @apply fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-border bg-card p-7 shadow-xl;
-  }
-  .instruction {
-    @apply rounded-md border border-border bg-background p-4 text-sm leading-relaxed whitespace-pre-wrap;
-  }
-  .affected-tasks {
-    @apply divide-y divide-border rounded-md border border-border px-3;
-  }
-  .affected-tasks li {
-    @apply flex flex-wrap items-center justify-between gap-2 py-3 text-sm;
   }
   .error-message {
     @apply rounded-md bg-destructive-tint p-3 text-sm text-destructive;

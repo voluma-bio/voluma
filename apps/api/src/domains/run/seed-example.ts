@@ -15,10 +15,9 @@ import { parseArgs } from "node:util";
 import { CopyObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
 import { runIdSchema } from "@voluma/contracts/ids";
 import { evidenceKey, runPrefix } from "@voluma/contracts/r2";
-import { eq, type SQL, sql } from "drizzle-orm";
+import { asc, eq, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { openChecks } from "./pg-event-log";
 import {
   EXAMPLES_OPERATOR,
   events,
@@ -125,20 +124,33 @@ await db.transaction(async (tx) => {
     outcome: "completed",
     startedAt: src.run.startedAt,
     endedAt: src.run.endedAt,
-    // What the source run spent and left to check; limits skip examples, so no org pays twice.
-    // Counted here, since a source run that completed before `to_check` existed has none.
+    // Limits skip examples, so no org pays twice.
     modelCostUsd: src.run.modelCostUsd,
     sandboxSeconds: src.run.sandboxSeconds,
-    toCheck: await openChecks(tx, source),
   });
 
-  // Thread ids begin `<runId>.`; in the payloads they are the only strings that do.
+  // Preserve human decisions and attempt identity under the copied event ids.
   const rename = (text: SQL) => sql`${exampleId} || substr(${text}, ${source.length + 1})`;
-  const renamePayload = sql`replace(payload::text, ${`"${source}.`}, ${`"${exampleId}.`})::json`;
-  await tx.execute(sql`
-    INSERT INTO events (id, run_id, thread_id, seq, type, payload, created_at)
-    SELECT ${exampleId} || ':' || id, ${exampleId}, ${rename(sql`thread_id`)}, seq, type, ${renamePayload}, created_at
-    FROM events WHERE run_id = ${source}`);
+  const sourceEvents = await tx
+    .select()
+    .from(events)
+    .where(eq(events.runId, source))
+    .orderBy(asc(events.seq));
+  for (const event of sourceEvents) {
+    const payload = JSON.parse(
+      JSON.stringify(event.payload).replaceAll(`"${source}.`, `"${exampleId}.`),
+    );
+    for (const field of ["attemptId", "revisionId", "resultRevisionId", "checkId"]) {
+      if (typeof payload[field] === "string") payload[field] = `${exampleId}:${payload[field]}`;
+    }
+    await tx.insert(events).values({
+      ...event,
+      id: `${exampleId}:${event.id}`,
+      runId: exampleId,
+      threadId: `${exampleId}${event.threadId.slice(source.length)}`,
+      payload,
+    });
+  }
   await tx.execute(sql`
     INSERT INTO threads (id, run_id, parent_thread_id, kind, task, status, created_at, ended_at)
     SELECT ${rename(sql`id`)}, ${exampleId},
