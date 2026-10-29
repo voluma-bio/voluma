@@ -105,8 +105,9 @@ function CheckRow({
       ) : (
         <span className="truncate font-mono text-ui">{scan.scan.subject}</span>
       )}
-      <span className="text-ui text-muted-foreground max-[760px]:order-last max-[760px]:col-span-2">
-        {scanMeta(scan).join(", ")}
+      <span className="grid gap-0.5 text-ui max-[760px]:order-last max-[760px]:col-span-2">
+        {item.detail && <span className="text-pretty">{item.detail}</span>}
+        <span className="text-meta text-muted-foreground">{scanMeta(scan).join(", ")}</span>
         {accept.isError && (
           <span role="alert" className="block text-destructive">
             {acceptError(accept.error)}

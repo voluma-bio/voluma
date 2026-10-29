@@ -196,8 +196,8 @@ export function checkKinds(detail: StudyDetail, workflow: BundledWorkflow): Chec
       kinds.set(key, kind);
     }
   }
-  const order = new Map(workflow.tasks.map((t, i) => [t.id, i]));
-  const rank = (k: CheckKind) => order.get(k.taskId) ?? workflow.tasks.length;
+  const order = new Map(workflow.taskIds.map((id, i) => [id, i]));
+  const rank = (k: CheckKind) => order.get(k.taskId) ?? workflow.taskIds.length;
   return [...kinds.values()].sort((a, b) => rank(a) - rank(b) || a.title.localeCompare(b.title));
 }
 
@@ -224,10 +224,10 @@ export function failureText(
   workflow: BundledWorkflow,
 ): { what: string; why?: string } {
   const taskId = error?.match(/^([\w-]+): /)?.[1];
-  const task = taskId && workflow.tasks.find((t) => t.id === taskId);
-  const what = task
-    ? `${subject}'s run stopped during ${workflow.taskTitle(task.id)}.`
-    : `${subject}'s run stopped before it finished.`;
+  const what =
+    taskId && workflow.taskIds.includes(taskId)
+      ? `${subject}'s run stopped during ${workflow.taskTitle(taskId)}.`
+      : `${subject}'s run stopped before it finished.`;
   return error?.includes("failed on a model provider error")
     ? { what, why: "The AI couldn't reach its provider." }
     : { what };

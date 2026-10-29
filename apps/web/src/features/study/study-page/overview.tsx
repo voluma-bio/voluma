@@ -35,7 +35,7 @@ type Props = {
   openChecks: OpenChecks;
 };
 
-type Measure = { output: OutputEntry & { task: string }; digits: number; far: Map<string, Far> };
+type Measure = { output: OutputEntry; digits: number; far: Map<string, Far> };
 
 export function Overview({ detail, workflow, onTab, openChecks }: Props) {
   const measures: Measure[] = workflow.headline.map((output) => ({
@@ -191,6 +191,7 @@ function NeedsYourEye({
   workflow,
   measures,
   onTab,
+  openChecks,
 }: {
   detail: StudyDetail;
   workflow: BundledWorkflow;
