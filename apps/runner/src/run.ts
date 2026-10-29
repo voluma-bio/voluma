@@ -180,6 +180,7 @@ export async function runClaim(
     const layout = runLayout(
       runId,
       run.input.source === "reference" ? referencePrefix("scan") : inputPrefix(run.input.id),
+      definition.skills,
     );
     const createSandbox = createModalSandbox({
       appName: RUNS_APP,
@@ -219,6 +220,7 @@ export async function runClaim(
             lifetimeSeconds: config.sandbox.lifetimeSeconds,
             idleSeconds: config.sandbox.idleSeconds,
             mounts: layout.mounts,
+            env: layout.env,
           },
           abort.signal,
         ),

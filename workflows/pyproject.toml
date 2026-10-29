@@ -4,5 +4,16 @@ line-length = 100
 extend-exclude = [".venv"]
 
 [tool.pytest.ini_options]
-pythonpath = ["core/skills/microct-core/resources"]  # for tests of libraries, which do not set up sys.path
+pythonpath = [  # what the runner sets as PYTHONPATH: every skill's resources/
+  "core/skills/bone-morphometry/resources",
+  "core/skills/microct-core/resources",
+  "core/skills/orient-joint/resources",
+  "core/skills/regions-and-landmarks/resources",
+  "core/skills/sam-segmentation/resources",
+  "core/skills/scan-intake/resources",
+  "core/skills/segmentation-check/resources",
+  "core/skills/visual-check/resources",
+  "mouse-oa/skills/mouse-oa/resources",
+  "smoke/skills/smoke-skills/resources",
+]
 addopts = "-p no:cacheprovider"

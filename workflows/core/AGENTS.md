@@ -15,11 +15,9 @@ holds rules, not experiment logs.
   `sidecar.emit_values`: `{id: {value, unit, definition, kind}}`, ids from the caller. A sentence on stderr and exit 2 for what the agent can fix; argument
   checks come before any work or write. **`--help` is the contract an agent reads before running a script** (the planned tool index is its first docstring line): the module docstring is the help text (`sidecar.parser(__doc__)` prints it as written and appends defaults), laid out as one index sentence under 110 characters, the rule it enforces and what it refuses, then `Writes:`, `Prints:`, `Example:` and `Exits 2`; every argument has `help=` naming its unit; a JSON the script reads has its schema in the docstring. `workflows/core/tests/test_help.py` fails on a script that breaks this. Images are JPEG, at most 2000 px and 1 MiB (`view_image`'s limit): use
   `sidecar.save_image`. Every parameter that is a length is in mm; voxels come from `hu.json`.
-- **Imports:** every script works under `python -I` from any directory, and the same few lines at its top do it: walk up its
-  ancestors to the directory holding `core/skills/microct-core`, put its own directory, `microct-core/resources` and any sibling skill's
-  `resources` it imports from on `sys.path` (first, but only those not already there: a script that another script imports must not reorder the importer's path; a library never touches it), and exit with a sentence naming the layout when the import misses. That works in the
-  repository and in a run's snapshot alike (`workflows/core/skills/<skill>/resources/`, a workflow's `skills/<skill>/resources/` beside
-  `core/`). Installing `microct-core` as a package in the sandbox image would delete these lines; it needs an image rebuild, so it waits.
+- **Imports:** a script imports another skill's module by its plain name (`import sidecar`, `import frame`). The runner puts every
+  skill's `resources/` on `PYTHONPATH` in the sandbox (`runLayout` in `packages/harness/src/layout.ts`), so a module name is unique across
+  skills (a test checks). In a checkout: `export PYTHONPATH=$(ls -d $PWD/workflows/*/skills/*/resources | paste -sd:)` from the repo root.
 - **Thresholds:** two, and they are not interchangeable. The segmentation threshold (mask building) is a flag the caller passes,
   from the workflow's anatomy reference. The measurement threshold (BV, BV/TV) is the lab's 2.16/cm converted with the calibration
   block of `hu.json` (`sidecar.bone_threshold_hu`); no script holds a literal HU value for it. BV is the region and HU above the
