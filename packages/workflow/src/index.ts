@@ -19,16 +19,22 @@ export interface TaskState {
   status: string;
   /** Required declared outputs the attempt hasn't reported. */
   missingRequired: readonly string[];
+  /** Set on a skipped task (and one that depends on a skipped task): it has no result. */
+  skipped?: unknown;
+  /** The check rejected the result (`needs-review`) and the main agent hasn't yet decided. */
+  rejected?: boolean;
 }
 
 /**
  * Whether a task that builds on this one may start: it is `done`, or `to-check` with every
  * required output present. A To check item is for the researcher in review; it must not
- * stop the run, but a task with no usable result still blocks. `undefined`: no attempt yet.
+ * stop the run, but a task with no usable result still blocks: one that is skipped or whose
+ * check rejected it (`needs-review`). `to-check` by `accept` or the `fix-limit` rule is satisfied. `undefined`: no attempt yet.
  */
 export function isSatisfied(task: TaskState | undefined): boolean {
+  if (!task || task.skipped || task.rejected) return false;
   return (
-    task?.status === "done" || (task?.status === "to-check" && task.missingRequired.length === 0)
+    task.status === "done" || (task.status === "to-check" && task.missingRequired.length === 0)
   );
 }
 

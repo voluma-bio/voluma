@@ -233,7 +233,14 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
          */
         sender: z.discriminatedUnion("kind", [
           z.object({ kind: z.literal("thread"), threadId: nonEmpty }),
-          z.object({ kind: z.literal("runtime") }),
+          z.object({
+            kind: z.literal("runtime"),
+            /**
+             * On a delivery to the main agent: the id of the last log event the delivery
+             * accounted for, so what follows it is undelivered. Optional; `fold` ignores it.
+             */
+            covers: nonEmpty.optional(),
+          }),
           z.object({ kind: z.literal("person") }),
         ]),
       }),
@@ -383,39 +390,73 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
    * id `<thread>:<toolCallId>:change_plan`. The fold applies it over the plan so far, without
    * reading the workflow: `add` carries full plan entries (declarations copied from the workflow's
    * `tasks.json`), `adHoc` tasks have no outputs, `doneWhen` and `instructions` are appended
-   * to the task's. `skip` changes no plan state: the runtime writes the skip with an attempt,
-   * each output reported null with the reason, and status `to-check` by rule `skip`.
+   * to the task's. `skip` is fold state (`fold.ts`): the task and its transitive dependents
+   * fold as `to-check` with every declared output missing and the reason; the runtime writes
+   * no attempt for it.
+   *
+   * Rules. A task id is unique in the plan: no id repeats across `add` and `adHoc` (refused
+   * here), and the fold applies an `add` or `adHoc` only when its id is not already in the plan
+   * (the first wins), so a collision can never replace a task's outputs. The schema can't see
+   * the plan, so the runtime refuses a collision itself and validates the resulting plan with
+   * `workflowPlanSchema` (no cycles, every dependency exists) before it writes this event.
+   * `doneWhen` and `instructions` for an unknown task are ignored.
    */
   const planChanged = event(
     "plan.changed",
-    z.object({
-      reason: nonEmpty,
-      add: z.array(planTaskSchema).optional(),
-      adHoc: z
-        .array(
-          z.object({
-            id: taskIdSchema,
-            title: nonEmpty,
-            instructions: nonEmpty,
-            dependsOn: z.array(taskIdSchema),
-          }),
-        )
-        .optional(),
-      doneWhen: z
-        .array(z.object({ taskId: taskIdSchema, lines: z.array(nonEmpty).min(1) }))
-        .optional(),
-      instructions: z.array(z.object({ taskId: taskIdSchema, text: nonEmpty })).optional(),
-      skip: z.array(z.object({ taskId: taskIdSchema, reason: nonEmpty })).optional(),
-    }),
+    z
+      .object({
+        reason: nonEmpty,
+        add: z.array(planTaskSchema).optional(),
+        adHoc: z
+          .array(
+            z.object({
+              id: taskIdSchema,
+              title: nonEmpty,
+              instructions: nonEmpty,
+              dependsOn: z.array(taskIdSchema),
+            }),
+          )
+          .optional(),
+        doneWhen: z
+          .array(z.object({ taskId: taskIdSchema, lines: z.array(nonEmpty).min(1) }))
+          .optional(),
+        instructions: z.array(z.object({ taskId: taskIdSchema, text: nonEmpty })).optional(),
+        skip: z.array(z.object({ taskId: taskIdSchema, reason: nonEmpty })).optional(),
+      })
+      .superRefine((p, ctx) => {
+        const seen = new Set<string>();
+        for (const [key, tasks] of [
+          ["add", p.add],
+          ["adHoc", p.adHoc],
+        ] as const)
+          tasks?.forEach((t, i) => {
+            if (seen.has(t.id))
+              ctx.addIssue({
+                code: "custom",
+                path: [key, i, "id"],
+                message: `duplicate task id "${t.id}"`,
+              });
+            seen.add(t.id);
+          });
+      }),
   );
 
   /** A check thread asked the main agent a question; id `<thread>:<toolCallId>:ask`. `fold` ignores it. */
   const ask = event("ask", z.object({ question: nonEmpty }));
 
-  /** The main agent answered a check thread's `ask`; id `<thread>:<toolCallId>:answer`. `fold` ignores it. */
+  /**
+   * The main agent answered a check thread's `ask`; id `<thread>:<toolCallId>:answer`. `askId` is
+   * that `ask` event's id (a check may ask up to three times). `files` are kept like evidence.
+   * `fold` ignores it.
+   */
   const answer = event(
     "answer",
-    z.object({ checkThreadId: nonEmpty, text: nonEmpty, files: z.array(nonEmpty).optional() }),
+    z.object({
+      checkThreadId: nonEmpty,
+      askId: nonEmpty,
+      text: nonEmpty,
+      files: z.array(evidenceRefSchema).optional(),
+    }),
   );
 
   /**

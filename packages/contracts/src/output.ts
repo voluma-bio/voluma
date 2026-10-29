@@ -14,6 +14,10 @@
  *   optional `volume` names the volume output it sits on; absent means the scan.
  * - `volume`: an `.npy` voxel grid on its own affine.
  * - `file`: a figure, table or report; its `title` is its name.
+ * - `missing`: the output could not be made. It fills whatever the declaration for its
+ *   `outputId` is, of any kind, and `reason` says why. It counts as reported (the task did its
+ *   job and said so); the review shows the output missing with the reason. A measurement
+ *   keeps its own `value: null`; use `missing` for every other kind.
  *
  * `annotation` and `volume` nest their block under the same key because the
  * block has its own `kind`. A reference to another output is its `outputId` in
@@ -118,6 +122,7 @@ const outputs = <R extends z.ZodType>(ref: R) => {
       file: ref,
       mediaType: assetSchema.shape.mediaType.unwrap(),
     }),
+    z.object({ kind: z.literal("missing"), reason: nonEmpty }),
   ]);
 };
 

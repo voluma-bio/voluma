@@ -225,7 +225,7 @@ export function TaskReport({
                   </span>
                 </th>
                 <td className="font-mono">—</td>
-                <td />
+                <td className="text-muted-foreground">{o.reason}</td>
               </tr>
             ))}
           </tbody>

@@ -323,47 +323,126 @@ describe("fold", () => {
     expect(need(fold(l.events), "c").checker?.verdict).toBe("passed");
   });
 
-  it("plan.changed adds tasks, appends done-when and instructions, and a skip is an ordinary attempt", () => {
+  it("plan.changed adds tasks and appends done-when and instructions; a colliding id keeps the first", () => {
+    const l = log();
+    const width = { id: "width", kind: "measurement", unit: "mm", required: true } as const;
+    l.run({
+      tasks: [
+        { id: "a", dependsOn: [], doneWhen: ["one"], instructions: "do a", outputs: [width] },
+      ],
+    });
+    l.add("plan.changed", "m:1:change_plan", "m", {
+      reason: "check the placement too",
+      add: [{ id: "c", dependsOn: ["a"], outputs: [{ ...width, id: "len" }] }],
+      adHoc: [
+        { id: "audit", title: "Audit", instructions: "audit it", dependsOn: ["a"] },
+        { id: "a", title: "Imposter", instructions: "x", dependsOn: [] },
+      ],
+      doneWhen: [{ taskId: "a", lines: ["two"] }],
+      instructions: [{ taskId: "a", text: "and more" }],
+    });
+    l.add("plan.changed", "m:2:change_plan", "m", {
+      reason: "again",
+      add: [{ id: "c", dependsOn: [], outputs: [] }],
+    });
+    l.open("w:1:open", W, "a");
+    const f = fold(l.events);
+    const t = (id: string) => f.plan.tasks.find((x) => x.id === id);
+    expect(f.plan.tasks.map((x) => x.id)).toEqual(["a", "c", "audit"]);
+    expect(t("a")).toMatchObject({ doneWhen: ["one", "two"], instructions: "do a\n\nand more" });
+    expect(t("a")?.outputs).toEqual([width]);
+    expect(t("c")?.dependsOn).toEqual(["a"]);
+    expect(t("audit")).toMatchObject({ title: "Audit", outputs: [] });
+    expect(rev(f, 0).plan).toEqual(f.plan);
+    expect(need(f, "a").missingRequired).toEqual(["width"]);
+    expectParses(f);
+    const dup = {
+      reason: "r",
+      add: [{ id: "x", dependsOn: [], outputs: [] }],
+      adHoc: [{ id: "x", title: "X", instructions: "i", dependsOn: [] }],
+    };
+    expect(runEventSchema.safeParse({ ...l.events[1], payload: dup }).success).toBe(false);
+  });
+
+  it("a skip cascades to dependents and folds as to-check with every output missing", () => {
+    const l = log();
+    const out = (id: string) => [{ id, kind: "measurement", unit: "mm", required: true } as const];
+    l.run({
+      tasks: [
+        { id: "a", dependsOn: [], outputs: out("x") },
+        { id: "b", dependsOn: ["a"], outputs: out("y") },
+        { id: "c", dependsOn: ["b"], outputs: out("z") },
+        { id: "d", dependsOn: [], outputs: out("w") },
+      ],
+    });
+    // b has an attempt with y reported; a and c have none.
+    l.open("w:1:open", W, "b");
+    l.measurement("w:2", W, "b", "w:1:open", "y", 1);
+    l.add("plan.changed", "m:1:change_plan", "m", {
+      reason: "r",
+      skip: [{ taskId: "a", reason: "no sample" }],
+    });
+    const f = fold(l.events);
+    expect(f.tasks.map((t) => [t.id, t.status, t.skipped?.reason])).toEqual([
+      ["b", "to-check", "a was skipped: no sample"],
+      ["a", "to-check", "no sample"],
+      ["c", "to-check", "a was skipped: no sample"],
+    ]);
+    const a = need(f, "a");
+    expect(a).toMatchObject({ attemptId: "", missingRequired: [], rejected: false });
+    expect(a.missing).toEqual([
+      { outputId: "x", kind: "measurement", required: true, reason: "no sample" },
+    ]);
+    expect(a.checks).toHaveLength(1);
+    // The attempt's reported output stays; nothing else is missing.
+    expect(need(f, "b").measurements).toHaveLength(1);
+    expect(need(f, "b").missing).toEqual([]);
+    expectParses(f);
+  });
+
+  it("a missing output fills any declaration, with its reason, and counts as reported", () => {
     const l = log();
     l.run({
       tasks: [
         {
           id: "a",
           dependsOn: [],
-          doneWhen: ["one"],
-          instructions: "do a",
-          outputs: [{ id: "width", kind: "measurement", unit: "mm", required: true }],
+          outputs: [
+            { id: "fig", kind: "file", mediaType: "image/png", required: true },
+            { id: "bone", kind: "structure", required: true },
+            { id: "gone", kind: "score", levels: ["0", "1"], required: true },
+          ],
         },
       ],
     });
-    l.add("plan.changed", "m:1:change_plan", "m", {
-      reason: "check the placement too",
-      add: [
-        {
-          id: "c",
-          dependsOn: ["a"],
-          outputs: [{ id: "len", kind: "measurement", unit: "mm", required: true }],
-        },
-      ],
-      adHoc: [{ id: "audit", title: "Audit", instructions: "audit it", dependsOn: ["a"] }],
-      doneWhen: [{ taskId: "a", lines: ["two"] }],
-      instructions: [{ taskId: "a", text: "and more" }],
-      skip: [{ taskId: "c", reason: "not needed" }],
-    });
-    // The skip: an attempt, every output null, status to-check by rule skip.
-    l.open("w:1:open", W, "c");
-    l.measurement("w:2", W, "c", "w:1:open", "len", null);
-    l.status("w:3", W, "c", "w:1:open", "to-check", { kind: "rule", rule: "skip" });
+    l.open("w:1:open", W, "a");
+    l.output("w:2", W, "a", "w:1:open", "fig", { kind: "missing", reason: "no figure" });
+    l.output("w:3", W, "a", "w:1:open", "bone", { kind: "missing", reason: "not in the scan" });
     const f = fold(l.events);
-    const t = (id: string) => f.plan.tasks.find((x) => x.id === id);
-    expect(f.plan.tasks.map((x) => x.id)).toEqual(["a", "c", "audit"]);
-    expect(t("a")?.doneWhen).toEqual(["one", "two"]);
-    expect(t("a")?.instructions).toBe("do a\n\nand more");
-    expect(t("audit")).toMatchObject({ title: "Audit", outputs: [] });
-    expect(rev(f, 0).plan).toEqual(f.plan);
-    // The added task's declaration drives `missing`; the skipped one reported its output.
-    expect(need(f, "c")).toMatchObject({ status: "to-check", missing: [] });
-    expect(need(f, "c").dependsOn).toEqual([]);
+    const t = need(f, "a");
+    expect(t.missingRequired).toEqual(["gone"]);
+    expect(t.undeclared).toEqual([]);
+    expect(t.missing.map((m) => [m.outputId, m.reason])).toEqual([
+      ["fig", "no figure"],
+      ["gone", undefined],
+    ]);
+    expect(rev(f, 0).structures).toMatchObject([
+      { id: "a/bone", status: "missing", reason: "not in the scan" },
+    ]);
     expectParses(f);
+  });
+
+  it("a result the check rejected is not satisfied; accepting or the fix limit satisfy it", () => {
+    const l = log();
+    l.run({ tasks: [{ id: "a", dependsOn: [], outputs: [] }] });
+    l.open("w:1:open", W, "a");
+    l.thread("c1", "check", "w:1:open");
+    l.checkpoint("c1:1", "c1", "a", "w:1:open", { verdict: "needs-review" });
+    l.result("c1", "a", "w:1:open");
+    expect(need(fold(l.events), "a")).toMatchObject({ status: "to-check", rejected: true });
+    // Main accepts it.
+    l.status("m:1", "m", "a", "w:1:open", "to-check");
+    const accepted = need(fold(l.events), "a");
+    expect(accepted.rejected).toBe(false);
   });
 });
