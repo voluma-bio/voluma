@@ -33,5 +33,10 @@ From the structural review of PR #62 (`review-pr62` p231, structure) and the cor
 - `annotations.json` mixes point orders: curves are `[w, u]`, `width_points_uvw` and
   `plate_patches` are `[u, v, w]`. Documented, but a hand-writing agent holds two orders.
 
+## Input checks the parser does not make
+- `NAME=path` arguments (`quad_view --mask`, `--points`, `--face`) and the sidecar a labels or `--like` file needs beside it
+  (`labels.json`) are read by the script: a missing one is a Python error, not a sentence. A `type=` that splits `NAME=path`
+  and a `sidecar.existing` check for the sidecar would close it.
+
 ## Lengths still in voxels (left by the skills cleanup)
 - Internal, not flags: `classic_segment.py` `MARGIN`, `SLAB`, `GRADIENT_RADIUS` (compute halos), `snap_boxes.py` `min_px=50`.

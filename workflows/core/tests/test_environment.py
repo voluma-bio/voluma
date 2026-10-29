@@ -31,4 +31,5 @@ def test_pyvista_renders_offscreen(tmp_path):
 
 def test_module_names_are_unique_across_skills():
     names = Counter(p.name for p in Path(__file__).parents[2].glob("*/skills/*/resources/*.py"))
-    assert not [n for n, c in names.items() if c > 1], "the runner puts every resources/ on one PYTHONPATH"
+    duplicates = [n for n, c in names.items() if c > 1]
+    assert not duplicates, f"{duplicates} named in two skills' resources/: the runner puts them all on one PYTHONPATH"
