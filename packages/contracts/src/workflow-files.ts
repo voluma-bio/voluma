@@ -1,5 +1,5 @@
 /**
- * The two data files of a workflow skill (`workflows/workflow-<name>/`), written by people and
+ * The two data files of a workflow skill (`workflows/<name>/`), written by people and
  * read by `packages/workflow`:
  *
  * - `outputs.json`: every output a run of the workflow can produce. The run screen lists
