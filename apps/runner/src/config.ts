@@ -164,8 +164,12 @@ export function runnerConfig() {
     api,
     /** Runs at once. */
     concurrency: positiveInt("RUNNER_CONCURRENCY", 2),
-    /** A run whose model and SAM spend (all claims) reaches this is stopped and ends `failed`. */
-    maxRunCostUsd: positiveNumber("RUNNER_MAX_RUN_COST_USD", 5),
+    /**
+     * A run whose spend (all claims, gateway calls included) reaches this is stopped and ends
+     * `failed`. Sent with every claim: the gateway checks the same cap. A SAM call reserves $3
+     * there, so the cap must leave room for it.
+     */
+    maxRunCostUsd: positiveNumber("RUNNER_MAX_RUN_COST_USD", 10),
     /**
      * The model of each role of a `voluma` run: `RUNNER_MODEL` (worker), `RUNNER_CHECK_MODEL`
      * (the check threads; default the worker's) and `RUNNER_MAIN_MODEL` (the main thread;

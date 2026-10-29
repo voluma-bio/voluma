@@ -8,8 +8,8 @@ import type { Usage } from "@voluma/contracts/runner";
 
 export type ModelRole = "main" | "worker" | "check";
 
-/** `onCost` gets the claim's running model total after each addition. */
-export function usageMeter(onCost?: (totalUsd: number) => void) {
+/** `onCost` is called after each model cost is added. */
+export function usageMeter(onCost?: () => void) {
   let modelCostUsd = 0;
   let sandboxSeconds = 0;
   let upSince: number | undefined;
@@ -37,9 +37,11 @@ export function usageMeter(onCost?: (totalUsd: number) => void) {
     addModelCost(usd: number) {
       modelCostUsd += usd;
       totalCostUsd += usd;
-      onCost?.(totalCostUsd);
+      onCost?.();
     },
     totalModelCostUsd: () => totalCostUsd,
+    /** Model dollars the server has not yet acknowledged in a heartbeat. */
+    pendingModelCostUsd: () => modelCostUsd,
     sandboxUp() {
       upSince ??= Date.now();
     },

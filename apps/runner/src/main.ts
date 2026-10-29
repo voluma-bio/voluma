@@ -87,7 +87,7 @@ while (!shutdown.signal.aborted) {
   }
   let claim: Awaited<ReturnType<typeof claimRun>>;
   try {
-    claim = await claimRun(config.api, runnerId);
+    claim = await claimRun(config.api, runnerId, config.maxRunCostUsd);
   } catch (error) {
     log(`claim failed: ${error instanceof Error ? error.message : error}`);
     await sleep(CLAIM_POLL_SECONDS * 1000);

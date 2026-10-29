@@ -13,7 +13,7 @@ import { randomBytes } from "node:crypto";
 import type { Run, VisitorKeys } from "@voluma/contracts/run";
 import { LEASE_SECONDS, type Usage as RunnerUsage } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
-import { callsOfRuns } from "@voluma/provider-calls";
+import { heldUsdOfRun } from "@voluma/provider-calls";
 import { and, asc, eq, notInArray, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { Reader } from "../../domain";
@@ -300,7 +300,7 @@ export function pgRunQueue(
 
     /**
      * Extends the lease and adds the usage; `stop` once the run has ended. `spentUsd` is the
-     * run's total: its model cost plus its provider calls. Throws `LeaseLost`.
+     * run's total: its model cost plus its provider calls, an open one at its reservation (what the gateway's cap counts). Throws `LeaseLost`.
      */
     heartbeat: (runId: string, leaseToken: string, used: RunnerUsage) =>
       locked(async (tx) => {
@@ -331,7 +331,7 @@ export function pgRunQueue(
             return { stop: true };
           }
         }
-        const gateway = (await callsOfRuns(tx, [runId])).get(runId)?.costUsd ?? 0;
+        const gateway = await heldUsdOfRun(tx, runId);
         return { stop: false, spentUsd: run.modelCostUsd + used.modelCostUsd + gateway };
       }),
 

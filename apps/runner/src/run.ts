@@ -130,18 +130,20 @@ export async function runClaim(
   shutdown.addEventListener("abort", onShutdown);
   if (shutdown.aborted) stop("shutdown");
 
-  // Model and SAM dollars across every claim of the run (the server holds the earlier claims').
-  // Crossing the cap stops everything in flight; the run then ends `failed` naming it.
+  // The run's dollars across every claim, gateway calls included: what the server last
+  // acknowledged (a heartbeat's `spentUsd`) plus the model cost not yet sent. Crossing the cap
+  // stops everything in flight; the run then ends `failed` naming it.
+  let acknowledgedUsd = (run.usage?.modelCostUsd ?? 0) + (run.providerCalls?.costUsd ?? 0);
   let capError: string | undefined;
-  const checkCap = (claimUsd: number) => {
-    const total = (run.usage?.modelCostUsd ?? 0) + claimUsd;
+  const checkCap = () => {
+    const total = acknowledgedUsd + meter.pendingModelCostUsd();
     if (capError || total < config.maxRunCostUsd) return;
     capError = `spend cap $${config.maxRunCostUsd} reached at $${total.toFixed(2)}`;
     log(capError);
     stop("spend-cap");
   };
   const meter = usageMeter(checkCap);
-  checkCap(0); // a resumed run that is already over the cap makes no call
+  checkCap(); // a resumed run that is already over the cap makes no call
   const client = runClient(
     config.api,
     { runId, leaseToken },
@@ -153,7 +155,16 @@ export async function runClaim(
   let session: SandboxSession | undefined;
   let error: string | undefined;
   try {
-    lease = holdLease({ client, meter, onStop: stop, log });
+    lease = holdLease({
+      client,
+      meter,
+      onStop: stop,
+      onSpent(usd) {
+        acknowledgedUsd = usd;
+        checkCap();
+      },
+      log,
+    });
     log(
       `claimed (${visitor ? "visitor" : "voluma"} keys, model ${workerModel.provider}/${workerModel.id})`,
     );
