@@ -18,7 +18,7 @@ runner: pi message_update / callModel stream / bash output
   empty `id:` either: it resets the browser's cursor.
 - **Reload mid-stream is out of scope.** Nothing replays frames: a browser that connects
   (or reconnects) while a reply is being written sees that reply only when its durable
-  `message` (or, for the main thread, `wake`) lands. If this must change, either journal
+  `message` lands. If this must change, either journal
   deltas as events (a retention and volume decision, and `fold` must ignore them) or cache
   each live reply's frames in the notifier and replay them after the durable page.
 - **Best effort everywhere.** The batcher drops past 256 KB of unacknowledged text and
@@ -27,11 +27,9 @@ runner: pi message_update / callModel stream / bash output
   partial".
 - **Frames can trail their durable event** by up to a batch (~80 ms), e.g. `tool.output`
   after `tool.result`. The browser ignores a frame whose durable event it already holds.
-- **The main thread's reply** streams as `text.delta` keyed by the id of its durable
-  `wake` event (`<key>:wake`); the text is the JSON it answers with.
 - **Redaction** is per posted body: a secret split across two frames is not caught, and a
   redacted secret changes a frame's length, so the browser drops the rest of that partial.
-- **A wake asked again** after a runner restart reuses its `<key>:wake` id; a browser that
+- **A reply asked again** after a runner restart reuses its message id; a browser that
   stayed connected should reset a key's partial when a frame arrives at offset 0.
 - No thread streams reasoning unless the model call asks for it (`reasoning` option in
   pi-ai); `reasoning.delta` and `message.reasoning` appear once a role does.

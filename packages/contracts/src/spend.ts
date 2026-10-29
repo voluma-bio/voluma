@@ -13,7 +13,7 @@
  *   that `name`. They are not model calls, so `calls` stays the model calls that reported usage.
  * - A worker or check thread belongs to the task its `thread.started` names, so a task's
  *   spend covers all its attempts: worker, check and any redo. The root thread (the main
- *   thread's wakes) belongs to no task: that is `main`. A chat thread counts only in `total`.
+ *   agent's thread) belongs to no task: that is `main`. A chat thread counts only in `total`.
  * - Wall time is per thread invocation, from `thread.started` to its `thread.ended`, or to
  *   the thread's latest event while it has none (running, or cut off by a crash). A task's is
  *   the sum over its threads. `main`'s and `total`'s are the root thread's, whose open span
@@ -133,14 +133,8 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
       case "thread.ended":
         close(e.threadId, at);
         break;
-      case "message":
-      case "wake": {
-        const used =
-          e.type === "wake"
-            ? e.payload.usage
-            : e.payload.role === "assistant"
-              ? e.payload.usage
-              : undefined;
+      case "message": {
+        const used = e.payload.role === "assistant" ? e.payload.usage : undefined;
         if (!used) break;
         add(e.threadId, (s) => {
           s.costUsd += used.costUsd;

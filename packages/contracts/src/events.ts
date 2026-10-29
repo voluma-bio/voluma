@@ -51,9 +51,8 @@ import { planTaskSchema, recordedPinSchema, workflowPlanSchema } from "./workflo
 
 const nonEmpty = z.string().min(1);
 
-/** Bounds on what a `wake` stores, in UTF-16 code units: the notes block goes into every later worker's prompt. */
-export const WAKE_NOTE_MAX = 6000;
-export const WAKE_ERROR_MAX = 1000;
+/** The bound on an `assets.failed` error, in UTF-16 code units. */
+export const ASSET_ERROR_MAX = 1000;
 
 /**
  * What one model call used, as Pi reports it: `input` is the uncached input tokens only, so
@@ -75,10 +74,7 @@ export type ModelUsage = z.infer<typeof modelUsageSchema>;
 export const threadKindSchema = z.enum(["supervisor", "main", "worker", "check", "chat"]);
 export type ThreadKind = z.infer<typeof threadKindSchema>;
 
-/**
- * Who made a decision: a tool call, a named runtime rule (`task-tools.ts`), or
- * a judgment seam (the experiment's arm name).
- */
+/** Who made a decision: a tool call or a named runtime rule (`task-tools.ts`). */
 export const bySchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("agent") }),
   z.object({
@@ -95,7 +91,6 @@ export const bySchema = z.discriminatedUnion("kind", [
       "liveness",
     ]),
   }),
-  z.object({ kind: z.literal("judgment"), arm: nonEmpty }),
 ]);
 export type By = z.infer<typeof bySchema>;
 
@@ -150,8 +145,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
          * The model this thread calls, as the runner names it: `provider/id`
          * (`meta/muse-spark-1.3`). Main, worker, check and chat threads call one and
          * should set it. The supervisor thread sets none: it runs no model (the `main` thread,
-         * its child, is the run's main agent; the old `wake` events still record the model that
-         * answered on the supervisor). A thread's model is
+         * its child, is the run's main agent). A thread's model is
          * fixed for its life: every `thread.started` of a thread names the same one, and
          * the harness fails a resume on a different model, as it does for a differing
          * system prompt. Optional in the schema until the harness writes it; then it
@@ -226,7 +220,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         role: z.literal("user"),
         text: z.string(),
         /**
-         * Who sent it: another thread's `thread_message` (`thread-message.ts`),
+         * Who sent it: another thread's tool (the main agent's `message`),
          * the runtime (the restart note), or a person.
          */
         sender: z.discriminatedUnion("kind", [
@@ -335,9 +329,9 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
   const attemptOpened = event("attempt.opened", z.object({ taskId: taskIdSchema }));
 
   /**
-   * A checklist task changed status. Written when a `checklist` tool call
-   * succeeds (`by` agent) or by the runtime's own code (`by` rule or judgment);
-   * the envelope `threadId` is the thread whose tool or wake produced it.
+   * A task changed status. Written when a task tool call succeeds (`by` agent)
+   * or by the runtime's own code (`by` rule); the envelope `threadId` is the thread whose
+   * tool or rule produced it.
    */
   const task = event(
     "task",
@@ -458,83 +452,6 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
   );
 
   /**
-   * One judgment point and what came of it, written by the runtime so the
-   * judgment experiment's data comes from the record. `point` is what the arm
-   * was given; `decision` is its raw answer (absent when it threw); `applied`
-   * is the action the runtime took, which differs from `decision` on a
-   * fallback. `fold` ignores it for results.
-   */
-  const judgment = event(
-    "judgment",
-    z.object({
-      point: z.object({ kind: nonEmpty, input: z.unknown() }),
-      arm: nonEmpty,
-      taskId: taskIdSchema.optional(),
-      decision: z.unknown().optional(),
-      applied: z.object({
-        action: nonEmpty,
-        /** Why `applied` is not `decision`: the arm threw (taken as accept), or the redo cap was reached. */
-        fallback: z.enum(["error", "redo-cap"]).optional(),
-      }),
-    }),
-  );
-
-  /**
-   * One wake of the run's main thread: what it was told (`point`), what it answered, and
-   * which model (`provider/id`). Written before the runtime applies the answer, so a resumed
-   * run applies this and does not ask again. The main thread runs on the root thread, which
-   * has no `model` on `thread.started`: each wake names the model that answered, and a
-   * resume may run on another one (the thread's context is rebuilt from the recorded
-   * answers, not from a provider-side session).
-   *
-   * Points: `run-started` (the run's first wake: the main thread may adapt the computed plan;
-   * `plan` is the plan it chose, absent when it kept the computed one, and
-   * `revision.started.plan` stays the record of what was applied), `task-checked` (a task's
-   * check passed), and the judgment points `check-disagreed` and `thread-failed`, which
-   * need a `decision`; a `judgment` event records what was applied. `note` is the whole
-   * notes block in force from here on (absent: unchanged), at most `WAKE_NOTE_MAX` UTF-16
-   * code units; the supervisor passes it into later workers' and checkers' prompts. `error`
-   * (the writer truncates it to `WAKE_ERROR_MAX`): the model did not answer, so there is no
-   * note, decision or plan. `fold` ignores it.
-   */
-  const wakePoint = z.discriminatedUnion("kind", [
-    z.object({ kind: z.literal("run-started"), input: z.unknown() }),
-    z.object({ kind: z.literal("task-checked"), taskId: taskIdSchema, input: z.unknown() }),
-    z.object({ kind: z.literal("check-disagreed"), taskId: taskIdSchema, input: z.unknown() }),
-    z.object({ kind: z.literal("thread-failed"), taskId: taskIdSchema, input: z.unknown() }),
-  ]);
-  const wake = event(
-    "wake",
-    z
-      .object({
-        point: wakePoint,
-        model: modelRefSchema,
-        /** The call's usage; absent when the model did not answer at all, or on an older wake. */
-        usage: modelUsageSchema.optional(),
-        note: z.string().max(WAKE_NOTE_MAX).optional(),
-        decision: z
-          .object({ action: z.enum(["accept", "redo", "fail"]), reason: nonEmpty })
-          .optional(),
-        plan: workflowPlanSchema.optional(),
-        error: z.string().max(WAKE_ERROR_MAX).optional(),
-      })
-      .superRefine((p, ctx) => {
-        const judged = p.point.kind === "check-disagreed" || p.point.kind === "thread-failed";
-        const issue = (message: string) => ctx.addIssue({ code: "custom", message });
-        if (p.error !== undefined) {
-          if (p.note !== undefined || p.decision !== undefined || p.plan !== undefined) {
-            issue("a wake the model did not answer has no note, decision or plan");
-          }
-        } else if (judged !== (p.decision !== undefined)) {
-          issue("a decision goes with, and only with, a judgment point the model answered");
-        }
-        if (p.plan !== undefined && p.point.kind !== "run-started") {
-          issue("only the run-started wake carries a plan");
-        }
-      }),
-  );
-
-  /**
    * Review assets (OME-Zarr levels, meshes) for one reported file were converted: the
    * manifest plus the `sourceSha256` of the file. Written by the runner's conversion worker
    * on the run's root thread (`<runId>.supervisor`); id `<runId>:assets:<sha256>`, so a retry
@@ -551,10 +468,10 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     reviewAssetsManifestSchema.extend({ sourceSha256: sha256Schema }),
   );
 
-  /** Conversion of the file with this `sourceSha256` failed (or timed out at the end of the run); same id as `assets.ready`. Permanent for the run. The writer truncates `error` to `WAKE_ERROR_MAX`. */
+  /** Conversion of the file with this `sourceSha256` failed (or timed out at the end of the run); same id as `assets.ready`. Permanent for the run. The writer truncates `error` to `ASSET_ERROR_MAX`. */
   const assetsFailed = event(
     "assets.failed",
-    z.object({ sourceSha256: sha256Schema, error: z.string().min(1).max(WAKE_ERROR_MAX) }),
+    z.object({ sourceSha256: sha256Schema, error: z.string().min(1).max(ASSET_ERROR_MAX) }),
   );
 
   return z.discriminatedUnion("type", [
@@ -573,8 +490,6 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     planChanged,
     ask,
     answer,
-    judgment,
-    wake,
     assetsReady,
     assetsFailed,
   ]);

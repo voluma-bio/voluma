@@ -51,7 +51,13 @@ import {
 } from "./modal-sandbox.ts";
 import type { ModelFallback } from "./model-fallback.ts";
 import { retryTransient } from "./model-retry.ts";
-import { checkPrompt, mainPrompt, systemPrompt, workerPrompt } from "./prompts.ts";
+import {
+  checkPrompt,
+  mainPrompt,
+  mainRestartPrompt,
+  systemPrompt,
+  workerPrompt,
+} from "./prompts.ts";
 import { isFatalProviderError, isProviderError } from "./provider-error.ts";
 import { r2Evidence } from "./r2-evidence.ts";
 import { r2Files } from "./r2-files.ts";
@@ -388,13 +394,13 @@ export async function runClaim(
         check: role(checkModel, "check", "checker"),
       },
       briefs: {
-        main: (view) => mainPrompt(view, run.selectedOutputs, run.notes),
+        main: (view) => mainPrompt(view, run.selectedOutputs, definition.files, run.notes),
         mainRestart: (view, state) =>
-          `The run is under way; you are the main agent again, starting from the log.\n\n${state}\n\nPlan: ${view.plan.tasks.map((t) => t.id).join(", ")}.`,
-        worker: (task, brief) =>
-          `${workerPrompt(task, { user: run.notes })}\n\nFrom the main agent:\n${brief}`,
-        check: (task, state) => checkPrompt(task, state, { user: run.notes }),
+          mainRestartPrompt(view, state, run.selectedOutputs, definition.files, run.notes),
+        worker: (task, brief) => workerPrompt(task, brief, run.notes),
+        check: checkPrompt,
       },
+      config: config.loop,
       signal: abort.signal,
     });
     supervised.catch(() => {}); // an error after the race below is moot: the run is stopping

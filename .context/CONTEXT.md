@@ -14,7 +14,7 @@ apps/api        Node server on Postgres (Drizzle), each domain a Hono app. src/i
                 domain's tables and Postgres adapters live in the domain; adapters/ is for
                 shared ports
                 Sign-in: see Authentication
-apps/runner     The runner service: claims runs from the API and runs the supervisor on each (Run lane)
+apps/runner     The runner service: claims runs from the API and runs the run loop on each (Run lane)
 packages/
   contracts     zod schemas for the four contracts and the shared formats
   harness       the agent harness: our tools, the Sandbox and EventLog ports, the Pi

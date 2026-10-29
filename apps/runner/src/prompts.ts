@@ -1,12 +1,16 @@
 /**
- * The prompts of a run's worker and check threads: the role files plus the sandbox text and the
- * workflow's skills and task text (`@voluma/workflow`). The role's own text is its file in
- * `workflows/core/agents/`, from the run's snapshot. A thread's system prompt is fixed for
- * its life (a resumed thread that differs fails), so it takes only the role's rules and the
- * skill list, both fixed by the run's snapshot. What varies by task goes in the thread's
- * first message.
+ * The prompts of a run's threads: the role files plus the sandbox text and the workflow's
+ * skills (`@voluma/workflow`) as system prompts, and each role's first message. The role's own
+ * text is its file in `workflows/core/agents/`, from the run's snapshot. A thread's system
+ * prompt is fixed for its life (a resumed thread that differs fails), so it takes only the
+ * role's rules and the skill list, both fixed by the run's snapshot. What varies goes in the
+ * first message, which gives each role what its role file says it gets: main the plan, the
+ * deliverable and the researcher's notes; a worker its task, the main agent's brief and the
+ * notes; a checker the task as planned, what the worker reported and the evidence it cited,
+ * never the worker's account.
  */
 import type { Folded, FoldedTask } from "@voluma/contracts/fold";
+import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
 import type { ThreadLayout } from "@voluma/harness/layout";
 import type { PlanTask } from "@voluma/harness/supervise-run";
 import type { AgentDefinition, WorkflowDefinition } from "@voluma/workflow/definition";
@@ -66,69 +70,115 @@ function taskBrief(task: PlanTask): string {
   return [instructions, done].filter(Boolean).join("\n\n");
 }
 
-/** What a thread's first message carries besides its task: the run's notes, then the main thread's. */
-export interface Notes {
-  /** The user's notes for the run, verbatim. */
-  user?: string;
-  /** The main thread's notes in force when the thread starts. */
-  main?: string;
-}
-
-const PRECEDENCE =
-  "The task's done-when criteria and required outputs come first; notes never outrank them.";
-
-function notesBlock({ user, main }: Notes, role: "worker" | "check"): string {
-  const parts = [];
-  if (user) parts.push(`The user's notes for this run:\n${user}`);
-  if (main) {
-    parts.push(
-      role === "worker"
-        ? `Notes from the main thread, from the tasks before this one. Build on what they settle; if you find one is wrong, say so.\n${main}`
-        : `Context from the main thread, from the tasks before this one. Your verdict rests on your own re-derivation of the result, not on these notes.\n${main}`,
-    );
-  }
-  return parts.length ? `\n${PRECEDENCE}\n${parts.join("\n")}` : "";
-}
-
-export function workerPrompt(task: PlanTask, notes: Notes): string {
-  const needs = task.dependsOn.length
-    ? `It builds on ${task.dependsOn.join(", ")}; their files are in /outputs/<task id>/.`
-    : "It builds on no other task.";
-  return `Your task is "${task.id}". ${needs}\n${taskBrief(task)}\n${outputList(task)}${notesBlock(notes, "worker")}`;
-}
-
-/** The check thread's first message: the task as planned, what the worker reported and the scratch files it cited. */
-export function checkPrompt(task: PlanTask, state: FoldedTask, notes: Notes): string {
-  const reported = {
-    measurements: state.measurements,
-    scores: state.scores,
-    files: state.files,
-    missing: state.missing,
-  };
-  const cited = state.citedScratch.length
-    ? `\nEvidence files the worker cited (under /scratch/): ${state.citedScratch.join(", ")}`
-    : "";
-  return `Check task "${task.id}". The worker's files are in /outputs/${task.id}/.\n${taskBrief(task)}\n${outputList(task)}\nReported outputs:\n${JSON.stringify(reported)}${cited}${notesBlock(notes, "check")}`;
-}
-
-/** The main agent's first message: the deliverable, the plan, the researcher's notes. */
-export function mainPrompt(
-  view: Folded,
-  selected: readonly string[] | undefined,
-  notes?: string,
-): string {
-  const tasks = view.plan.tasks.map(
-    (t) =>
-      `- ${t.id}${t.dependsOn.length ? ` (builds on ${t.dependsOn.join(", ")})` : ""}: ${t.title ?? t.instructions ?? ""}`,
-  );
-  const wanted = selected?.length
-    ? `The researcher selected these outputs: ${selected.join(", ")}.\n`
-    : "";
-  return `${wanted}The plan:\n${tasks.join("\n")}${notes ? `\n\nThe researcher's notes:\n${notes}` : ""}`;
-}
-
 function outputList(task: PlanTask): string {
   if (task.outputs.length === 0) return "The task declares no outputs.";
   const lines = task.outputs.map((o) => `- ${JSON.stringify(o)}`);
   return `Declared outputs:\n${lines.join("\n")}`;
+}
+
+/** The researcher's notes, as a worker or the main agent reads them. */
+function notesBlock(notes: string | undefined): string {
+  return notes
+    ? `\n\nThe researcher's notes for this run (the task's done-when criteria and required outputs come first; notes never outrank them):\n${notes}`
+    : "";
+}
+
+export function workerPrompt(task: PlanTask, brief: string, notes: string | undefined): string {
+  const needs = task.dependsOn.length
+    ? `It builds on ${task.dependsOn.join(", ")}; their files are in /outputs/<task id>/.`
+    : "It builds on no other task.";
+  return `Your task is "${task.id}". ${needs}\n${taskBrief(task)}\n${outputList(task)}\n\nFrom the main agent:\n${brief}${notesBlock(notes)}`;
+}
+
+const list = (items: string[]) => (items.length ? items.join("\n") : "(none)");
+
+/**
+ * The check thread's first message: the task as planned, each output the worker reported with
+ * its value, and the evidence files it cited. Never a checkpoint's text or the worker's messages.
+ */
+export function checkPrompt(task: PlanTask, state: FoldedTask): string {
+  const evidenceName = new Map(state.evidence.map((a) => [a.id, a.name]));
+  const evidenceOf = (ids: string[]) => {
+    const names = ids.flatMap((id) => evidenceName.get(id) ?? []);
+    return names.length ? `; evidence: ${names.join(", ")}` : "";
+  };
+  const note = (n: string | undefined) => (n ? `; the worker's note: ${n}` : "");
+  const reported = [
+    ...state.measurements.map(
+      (m) =>
+        `- ${m.id}: ${m.value === null ? "no value" : `${m.value} ${m.unit}`}${m.confidence ? ` (${m.confidence})` : ""}${note(m.note)}${evidenceOf(m.evidenceIds)}`,
+    ),
+    ...state.scores.map(
+      (c) =>
+        `- ${c.id}: level "${c.level}"${c.scale ? ` of ${c.scale.join(" < ")}` : ""}${note(c.note)}${evidenceOf(c.evidenceIds)}`,
+    ),
+    ...state.files.map((f) => `- ${f.id}: file ${f.name}`),
+    ...state.missing.flatMap((m) =>
+      m.reason ? [`- ${m.outputId}: reported missing, because: ${m.reason}`] : [],
+    ),
+  ];
+  const cited = [
+    ...state.evidence.flatMap((a) =>
+      state.citedScratch.includes(a.name) ? [] : [`- {root: "outputs", path: "${a.name}"}`],
+    ),
+    ...state.citedScratch.map((p) => `- {root: "scratch", path: "${p}"}`),
+  ];
+  return `Check task "${task.id}". The worker's files are in /outputs/${task.id}/.
+${taskBrief(task)}
+${outputList(task)}
+
+Outputs the worker reported (other structures, volumes and annotations are in its files):
+${list(reported)}
+
+Evidence files the worker cited (open them with view_image):
+${list(cited)}`;
+}
+
+/** The plan as the main agent reads it: each task with what it builds on, what it does and the outputs it reports. */
+function planBlock(view: Folded, workflow: WorkflowFiles): string {
+  const names = new Map(workflow.outputs.map((o) => [o.id, o.name]));
+  const tasks = view.plan.tasks.map((t) => {
+    const outputs = t.outputs.map(
+      (o) =>
+        `  - ${o.id}${names.has(o.id) ? ` (${names.get(o.id)})` : ""}: ${o.kind}${o.required ? ", required" : ""}`,
+    );
+    return `### ${t.id}${t.title ? ` — ${t.title}` : ""}
+Builds on: ${t.dependsOn.length ? t.dependsOn.join(", ") : "nothing"}
+${taskBrief(t)}
+Reports:
+${outputs.length ? outputs.join("\n") : "  (no outputs)"}`;
+  });
+  return `## The plan\n\n${tasks.join("\n\n")}`;
+}
+
+/** The outputs the researcher selected: what the run is for. */
+function deliverableBlock(
+  selected: readonly string[] | undefined,
+  workflow: WorkflowFiles,
+): string {
+  const names = new Map(workflow.outputs.map((o) => [o.id, o.name]));
+  const ids = selected ?? workflow.outputs.map((o) => o.id);
+  const lines = ids.map((id) => `- ${id}${names.has(id) ? ` (${names.get(id)})` : ""}`);
+  return `## The deliverable\n\n${selected ? "The researcher selected these outputs" : "The researcher selected every output of the workflow"}; the run is done when each is reported with its evidence, or missing with a reason:\n${lines.join("\n")}`;
+}
+
+/** The main agent's first message: the plan, the deliverable, the researcher's notes. */
+export function mainPrompt(
+  view: Folded,
+  selected: readonly string[] | undefined,
+  workflow: WorkflowFiles,
+  notes: string | undefined,
+): string {
+  return `${planBlock(view, workflow)}\n\n${deliverableBlock(selected, workflow)}${notesBlock(notes)}`;
+}
+
+/** `main.<n>`'s first message: what the old thread was doing is gone, so the log's state comes with the plan. */
+export function mainRestartPrompt(
+  view: Folded,
+  state: string,
+  selected: readonly string[] | undefined,
+  workflow: WorkflowFiles,
+  notes: string | undefined,
+): string {
+  return `The run is under way. The main agent before you is gone, and whatever it had in mind went with it: start from the record, and trust the lists below over anything you assume.\n\n## The state of the run\n\n${state}\n\n${planBlock(view, workflow)}\n\n${deliverableBlock(selected, workflow)}${notesBlock(notes)}`;
 }

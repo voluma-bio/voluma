@@ -58,7 +58,7 @@
  * recorded (`task-tools.ts`). One limit stops a run that keeps costing its runner: the API
  * counts consecutive claims that end `self-stop` or `lease-expired` without run-state
  * progress (a `task`, `checkpoint`, `output`, `attempt.opened`, `assets.ready` or correcting
- * `revision.started` event; `judgment` while the old supervisor runs), and the run ends
+ * `revision.started` or `plan.changed` event), and the run ends
  * `failed` at 3, naming the call that was in flight. Progress resets the count. `shutdown`
  * never counts, so deploys don't fail a long run.
  *
