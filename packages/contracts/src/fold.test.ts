@@ -322,4 +322,48 @@ describe("fold", () => {
     l.thread("chk", "check", "w:1:open"); // a wake: same thread, started again
     expect(need(fold(l.events), "c").checker?.verdict).toBe("passed");
   });
+
+  it("plan.changed adds tasks, appends done-when and instructions, and a skip is an ordinary attempt", () => {
+    const l = log();
+    l.run({
+      tasks: [
+        {
+          id: "a",
+          dependsOn: [],
+          doneWhen: ["one"],
+          instructions: "do a",
+          outputs: [{ id: "width", kind: "measurement", unit: "mm", required: true }],
+        },
+      ],
+    });
+    l.add("plan.changed", "m:1:change_plan", "m", {
+      reason: "check the placement too",
+      add: [
+        {
+          id: "c",
+          dependsOn: ["a"],
+          outputs: [{ id: "len", kind: "measurement", unit: "mm", required: true }],
+        },
+      ],
+      adHoc: [{ id: "audit", title: "Audit", instructions: "audit it", dependsOn: ["a"] }],
+      doneWhen: [{ taskId: "a", lines: ["two"] }],
+      instructions: [{ taskId: "a", text: "and more" }],
+      skip: [{ taskId: "c", reason: "not needed" }],
+    });
+    // The skip: an attempt, every output null, status to-check by rule skip.
+    l.open("w:1:open", W, "c");
+    l.measurement("w:2", W, "c", "w:1:open", "len", null);
+    l.status("w:3", W, "c", "w:1:open", "to-check", { kind: "rule", rule: "skip" });
+    const f = fold(l.events);
+    const t = (id: string) => f.plan.tasks.find((x) => x.id === id);
+    expect(f.plan.tasks.map((x) => x.id)).toEqual(["a", "c", "audit"]);
+    expect(t("a")?.doneWhen).toEqual(["one", "two"]);
+    expect(t("a")?.instructions).toBe("do a\n\nand more");
+    expect(t("audit")).toMatchObject({ title: "Audit", outputs: [] });
+    expect(rev(f, 0).plan).toEqual(f.plan);
+    // The added task's declaration drives `missing`; the skipped one reported its output.
+    expect(need(f, "c")).toMatchObject({ status: "to-check", missing: [] });
+    expect(need(f, "c").dependsOn).toEqual([]);
+    expectParses(f);
+  });
 });
