@@ -71,7 +71,7 @@ export function metaSegmenter(options: {
           throw new Error("Meta's upload reply had no file id");
         }
         signal.throwIfAborted();
-        const text = await track(prompt, fileId, signal, bill);
+        const text = await track(prompt, objects, fileId, signal, bill);
         try {
           return { ...paste(text, stack, objects, width, height), prompt };
         } catch (error) {
@@ -100,31 +100,53 @@ export function metaSegmenter(options: {
 
   async function track(
     prompt: string,
+    objects: SegmentObject[],
     fileId: string,
     signal: AbortSignal,
     bill: (usd: number) => void,
   ) {
     const started = Date.now();
-    const res = await fetch(`${BASE}/responses`, {
-      method: "POST",
-      headers: { ...auth, "Content-Type": "application/json", Accept: "text/event-stream" },
-      body: JSON.stringify({
-        model: "sam-3.1",
-        stream: true,
-        metadata: { propagation_direction: "both", include_confidence: "true" },
-        input: [
-          {
-            type: "message",
-            role: "user",
-            content: [
-              { type: "input_text", text: prompt },
-              { type: "input_video", file_id: fileId },
-            ],
-          },
-        ],
-      }),
-      signal: withTimeout(signal),
-    });
+    const request = () =>
+      fetch(`${BASE}/responses`, {
+        method: "POST",
+        headers: { ...auth, "Content-Type": "application/json", Accept: "text/event-stream" },
+        body: JSON.stringify({
+          model: "sam-3.1",
+          stream: true,
+          metadata: { propagation_direction: "both", include_confidence: "true" },
+          input: [
+            {
+              type: "message",
+              role: "user",
+              content: [
+                { type: "input_text", text: prompt },
+                { type: "input_video", file_id: fileId },
+              ],
+            },
+          ],
+        }),
+        signal: withTimeout(signal),
+      });
+    let res = await request();
+    // Meta answers `404 model_not_found` for some prompts (a small box), not only for an outage,
+    // and bills nothing for it. Once more on the uploaded file costs nothing if it fails again.
+    if (res.status === 404) {
+      log(`Meta answered 404 to a SAM request: ${await failure(res)}; trying once more`);
+      res = await request();
+    }
+    if (res.status === 404) {
+      const asked = objects
+        .map((o) => `"${o.name}" (label ${o.label}, frame ${o.frame}, box [${o.box}])`)
+        .join("; ");
+      throw new Error(
+        `Meta answered 404 twice to this request: ${await failure(res)}. It bills nothing for a failed ` +
+          `call. Either this input is the cause (seen once: a small box prompt failed on every call ` +
+          `while the other objects succeeded) or Meta is down. Asked for: ${asked}. To tell which: ` +
+          `try once more with the smallest or least certain object left out or given a larger box ` +
+          `(a call that succeeds costs about $0.07-0.10). If that also gets a 404, stop calling ` +
+          `segment_sam and report the outage.`,
+      );
+    }
     if (!res.ok || !res.body) throw new Error(`Meta request failed: ${await failure(res)}`);
     let text = "";
     let pending = "";

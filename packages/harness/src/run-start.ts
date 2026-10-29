@@ -15,7 +15,7 @@ import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
 import { adaptPlan } from "@voluma/workflow/plan";
 import { replyFrames } from "./live";
 import type { MainThread, Reply } from "./main-thread";
-import { pointOf } from "./main-thread";
+import { pointOf, UnusableReplyError } from "./main-thread";
 import type { Recorder } from "./recorder";
 import type { PlanTask } from "./task-runtime";
 import { threadLog, WAKE_SUFFIX } from "./thread-log";
@@ -82,6 +82,7 @@ export async function runStartPlan(o: RunStartOptions): Promise<readonly PlanTas
     if (reply.change) plan = adaptPlan(o.workflow, o.selectedOutputs, reply.change);
   } catch (e) {
     error = String(e);
+    if (e instanceof UnusableReplyError) usage = e.usage;
   }
   if (o.signal?.aborted) return o.computed; // a stop is no answer; the supervisor ends the run
   await o.recorder.append(
@@ -91,7 +92,7 @@ export async function runStartPlan(o: RunStartOptions): Promise<readonly PlanTas
       point: pointOf(point),
       model: o.main.model,
       ...(error !== undefined
-        ? { error: error.slice(0, WAKE_ERROR_MAX) }
+        ? { error: error.slice(0, WAKE_ERROR_MAX), ...(usage && { usage }) }
         : {
             ...(usage && { usage }),
             ...(note !== undefined && { note }),

@@ -38,12 +38,18 @@
  * because the supervisor must not carry on from a record the store does not hold. The root
  * is the supervisor's own thread: it runs no agent loop and calls no tool.
  */
-import { type By, WAKE_ERROR_MAX } from "@voluma/contracts/events";
+import { type By, type ModelUsage, WAKE_ERROR_MAX } from "@voluma/contracts/events";
 import { checkResult, type Folded, type FoldedTask } from "@voluma/contracts/fold";
 import type { ThreadMessageResult } from "@voluma/contracts/thread-message";
 import { readyTasks } from "@voluma/workflow";
 import { replyFrames } from "./live";
-import { decisionSchema, type MainThread, pointOf, type WakePoint } from "./main-thread";
+import {
+  decisionSchema,
+  type MainThread,
+  pointOf,
+  UnusableReplyError,
+  type WakePoint,
+} from "./main-thread";
 import type { PayloadOf, Recorder } from "./recorder";
 import type { PlanTask, TaskRuntime } from "./task-runtime";
 import {
@@ -559,14 +565,17 @@ export function supervisor(options: SupervisorOptions) {
     );
     const wakeId = `${key}${WAKE_SUFFIX}`;
     const past = [...derive().wakes.values()];
-    let answer: Awaited<ReturnType<MainThread["ask"]>> | { error: string };
+    let answer: Awaited<ReturnType<MainThread["ask"]>> | { error: string; usage?: ModelUsage };
     try {
       answer = await Promise.race([
         main.ask(point, past, limit, replyFrames(root, wakeId, recorder.live)),
         expired,
       ]);
     } catch (error) {
-      answer = { error: error instanceof Error ? error.message : String(error) };
+      answer = {
+        error: error instanceof Error ? error.message : String(error),
+        usage: error instanceof UnusableReplyError ? error.usage : undefined,
+      };
     }
     if (signal?.aborted) return;
     await runtime.section(async () => {
@@ -578,7 +587,10 @@ export function supervisor(options: SupervisorOptions) {
           point: pointOf(point),
           model: main.model,
           ...("error" in answer
-            ? { error: answer.error.slice(0, WAKE_ERROR_MAX) }
+            ? {
+                error: answer.error.slice(0, WAKE_ERROR_MAX),
+                ...(answer.usage && { usage: answer.usage }),
+              }
             : {
                 ...(answer.usage && { usage: answer.usage }),
                 ...(answer.note !== undefined && { note: answer.note }),

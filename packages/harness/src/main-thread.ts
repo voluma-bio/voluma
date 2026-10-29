@@ -19,7 +19,7 @@ import type {
   Message,
   Model,
 } from "@earendil-works/pi-ai";
-import { WAKE_ERROR_MAX, WAKE_NOTE_MAX } from "@voluma/contracts/events";
+import { type ModelUsage, WAKE_ERROR_MAX, WAKE_NOTE_MAX } from "@voluma/contracts/events";
 import type { WorkflowPlan } from "@voluma/contracts/workflow";
 import type { PlanChange } from "@voluma/workflow/plan";
 import { z } from "zod";
@@ -177,8 +177,71 @@ function conversation(model: Model<Api>, past: readonly Wake[], point: Wake["poi
 }
 
 /**
+ * Models put raw newlines and tabs inside JSON strings (a multi-line note); `JSON.parse` refuses
+ * them. Escaping them inside strings changes no value that was meant, so it is safe; any other
+ * malformation is not repaired here (see the retry in `ask`).
+ */
+function escapeControlChars(json: string): string {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  for (const ch of json) {
+    if (inString && !escaped && ch.charCodeAt(0) < 0x20) {
+      out += JSON.stringify(ch).slice(1, -1);
+      continue;
+    }
+    if (inString && !escaped && ch === "\\") escaped = true;
+    else {
+      escaped = false;
+      if (ch === '"') inString = !inString;
+    }
+    out += ch;
+  }
+  return out;
+}
+
+/** The reply's text parsed into an answer; throws what is wrong with it, in words the model can act on. */
+function parseAnswer(text: string, judged: boolean) {
+  const json = text.match(/\{[\s\S]*\}/)?.[0];
+  if (!json) throw new Error(`the main thread answered without JSON: ${text.slice(0, 200)}`);
+  const answer = replySchema.parse(JSON.parse(escapeControlChars(json)));
+  if (judged && !answer.decision) {
+    throw new Error("the main thread gave no decision at a judgment point");
+  }
+  return answer;
+}
+
+/** Several replies' usage as one; the wake records the cost of every call it made. */
+function addUsage(a: ModelUsage | undefined, b: ModelUsage | undefined): ModelUsage | undefined {
+  if (!a || !b) return a ?? b;
+  return {
+    input: a.input + b.input,
+    output: a.output + b.output,
+    cacheRead: a.cacheRead + b.cacheRead,
+    cacheWrite: a.cacheWrite + b.cacheWrite,
+    ...(a.reasoning !== undefined || b.reasoning !== undefined
+      ? { reasoning: (a.reasoning ?? 0) + (b.reasoning ?? 0) }
+      : {}),
+    costUsd: a.costUsd + b.costUsd,
+  };
+}
+
+/** `ask` failed after the model answered: `usage` is what its replies cost, for the `wake` that records the error. */
+export class UnusableReplyError extends Error {
+  constructor(
+    message: string,
+    readonly usage: ModelUsage | undefined,
+  ) {
+    super(message);
+  }
+}
+
+/**
  * `complete` is one model call, e.g. `(c, signal) => models.completeSimple(model, c, { apiKey, signal })`.
  * `system` is fixed for the run: a changed one would miss the cache and change what resume asks.
+ * A reply that does not parse is sent back once with what was wrong; the retry only appends to the
+ * conversation, so the prefix the cache holds is unchanged. If the retry fails too, both errors
+ * are thrown (the `wake` records them).
  */
 export function llmMainThread(
   model: Model<Api>,
@@ -192,28 +255,44 @@ export function llmMainThread(
   return {
     model: `${model.provider}/${model.id}`,
     async ask(point, past, signal, onEvent) {
-      const reply = await complete(
-        { systemPrompt: system, messages: conversation(model, past, pointOf(point)) },
-        signal,
-        onEvent,
-      );
-      // A call that failed has no content; its error is the cause, not "answered without JSON".
-      if (reply.stopReason === "error")
-        throw new Error(reply.errorMessage ?? "the model request failed");
-      const text = reply.content.flatMap((c) => (c.type === "text" ? [c.text] : [])).join("");
-      const json = text.match(/\{[\s\S]*\}/)?.[0];
-      if (!json) throw new Error(`the main thread answered without JSON: ${text.slice(0, 200)}`);
-      const answer = replySchema.parse(JSON.parse(json));
+      const messages = conversation(model, past, pointOf(point));
       const judged = point.kind === "check-disagreed" || point.kind === "thread-failed";
-      if (judged && !answer.decision) {
-        throw new Error("the main thread gave no decision at a judgment point");
+      let firstError: string | undefined;
+      let usage: ModelUsage | undefined;
+      for (;;) {
+        const reply = await complete({ systemPrompt: system, messages }, signal, onEvent);
+        // A call that failed has no content; its error is the cause, not "answered without JSON".
+        if (reply.stopReason === "error")
+          throw new Error(reply.errorMessage ?? "the model request failed");
+        usage = addUsage(usage, usageOf(reply));
+        const text = reply.content.flatMap((c) => (c.type === "text" ? [c.text] : [])).join("");
+        try {
+          const answer = parseAnswer(text, judged);
+          return {
+            usage,
+            note: answer.note?.slice(0, WAKE_NOTE_MAX),
+            decision: judged ? answer.decision : undefined,
+            change: point.kind === "run-started" ? answer.change : undefined,
+          };
+        } catch (error) {
+          const why =
+            error instanceof z.ZodError
+              ? z.prettifyError(error)
+              : error instanceof Error
+                ? error.message
+                : String(error);
+          if (firstError !== undefined) {
+            throw new UnusableReplyError(`${why} (the first reply: ${firstError})`, usage);
+          }
+          firstError = why;
+          signal.throwIfAborted();
+          messages.push(reply, {
+            role: "user",
+            content: `Your reply could not be used: ${why}\nReply again to the same message with one JSON object and nothing else.`,
+            timestamp: Date.now(),
+          });
+        }
       }
-      return {
-        usage: usageOf(reply),
-        note: answer.note?.slice(0, WAKE_NOTE_MAX),
-        decision: judged ? answer.decision : undefined,
-        change: point.kind === "run-started" ? answer.change : undefined,
-      };
     },
   };
 }

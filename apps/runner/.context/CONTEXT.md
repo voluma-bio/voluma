@@ -89,6 +89,16 @@ its claims (the claim's `run.usage` plus this claim's meter; sandbox time is not
 calls back on each addition; at the cap `run.ts` stops the run and reports `ended failed` with
 `spend cap $X reached at $Y`. Calls in flight are aborted, not waited for. A claim of a run already over the cap stops before its first call. It applies to visitor runs too. The supervisor ends the root thread `cancelled` in the event log while the run row says `failed` with the cap text.
 
+**A main-thread reply that does not parse.** `llmMainThread` escapes raw control characters inside
+JSON strings, and otherwise sends the reply back once with what was wrong (appended after the
+cached prefix); if that fails too, the wake records both errors and the cost of both calls, and the judgment falls back as for
+any failed main thread.
+
+**`segment_sam` 404.** Meta answers `404 model_not_found` for some inputs (seen: a small box prompt)
+and bills nothing for it. The adapter retries once on the uploaded file; a second 404 throws a
+message with Meta's body and every object asked for (name, box), saying the cause is this input or an outage and how to tell. It
+does not bisect: each successful probe costs a full SAM call ($0.07-0.10).
+
 # Runner: what `/outputs` and `/scratch` support
 
 Both are R2 bucket mounts (`modal-sandbox.ts`), so a file is written whole, once. Rename
