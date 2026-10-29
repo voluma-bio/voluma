@@ -38,7 +38,21 @@ function ScanReview({ runId }: { runId: string }) {
     queryKey: ["run", runId],
     queryFn: () => getRun(runId),
     enabled: runId !== "local",
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      return data && data.state.status !== "ended" ? 3000 : false;
+    },
   });
+  const runStatus = execution.data?.state.status;
+  const live = runStatus !== undefined && runStatus !== "ended";
+  // The review payload carries no run status, so the run ending is the cue for one last fetch
+  // (the polled snapshot is up to 5 s old and has no review summary yet).
+  const lastStatus = useRef(runStatus);
+  useEffect(() => {
+    if (lastStatus.current !== undefined && lastStatus.current !== "ended" && runStatus === "ended")
+      void queryClient.invalidateQueries({ queryKey: ["review-run", runId] });
+    lastStatus.current = runStatus;
+  }, [runStatus, runId]);
   // `/runs/local` is the reference scan alone: no run, so no results.
   const review = useQuery({
     queryKey: ["review-run", runId],
@@ -46,10 +60,11 @@ function ScanReview({ runId }: { runId: string }) {
     enabled: runId !== "local",
     // Only a server error may pass on retry; a 404, a 409 or data the contract rejects won't.
     retry: (count, cause) => cause instanceof ApiError && cause.status >= 500 && count < 2,
-    // A run with no plan yet gets one once the runner starts it.
+    // A run with no plan yet gets one once the runner starts it; a live run's results fill in
+    // as tasks report. The effect above makes the final fetch when the run ends.
     refetchInterval: (query) => {
       const cause = query.state.error;
-      return cause instanceof ApiError && cause.status === 409 ? 5000 : false;
+      return (cause instanceof ApiError && cause.status === 409) || live ? 5000 : false;
     },
   });
   const status = review.error instanceof ApiError ? review.error.status : undefined;
@@ -67,6 +82,8 @@ function ScanReview({ runId }: { runId: string }) {
           {review.isFetching ? "Retrying…" : "Retry"}
         </button>
       </>
+    ) : review.data && live ? (
+      "This run is still going. Results fill in as tasks report; you can accept checks and mark it reviewed once it completes."
     ) : runId === "local" || review.data ? undefined : review.isPending ? (
       "Loading results…"
     ) : status === 409 ? (

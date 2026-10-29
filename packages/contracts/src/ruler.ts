@@ -19,8 +19,10 @@ export const toWorld = (
 };
 
 /** Distance in mm between two world points. */
-export const distanceMm = (a: readonly number[], b: readonly number[]) =>
-  Math.hypot(...a.map((v, i) => v - (b[i] ?? 0)));
+export const distanceMm = (
+  [ax, ay, az]: readonly [number, number, number],
+  [bx, by, bz]: readonly [number, number, number],
+) => Math.hypot(ax - bx, ay - by, az - bz);
 
 /** A sentence naming both lengths when they differ by more than max(0.005 mm, 0.5 %); else undefined. */
 export function rulerLengthProblem(

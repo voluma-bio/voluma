@@ -13,8 +13,9 @@ format is in `microct-core/resources/sidecar.py`. Methods: ../SKILL.md. Refused:
 holding only bone or only marrow, HU on another grid than the region, anisotropic voxels (thickness).
 
 Writes: volumes: <out>/volumes.json; trabecular: <out>/morphometry.json, qc.jpg, thickness-mm.npy and separation-mm.npy
-        (the ROI's bounding box, with sidecars: a derived grid, mm); cortical: <out>/<name>.json and qc-<name>.jpg.
-        The json is the result record {values: {id: {value, unit, definition, kind}}, grid_id, inputs, ...}
+        (the ROI's bounding box on the region's grid, `offset_zyx` in their sidecars, mm); cortical: <out>/<name>.json,
+        qc-<name>.jpg and slab-<name>.npy (the slab measured, cropped, as an object: see `microct-core/resources/objects.py`).
+        The json is the result record {values: {id: {value, unit, definition, kind}}, grid_id, inputs, ...}; cortical adds `objects` (the slab)
 Prints: one JSON line {out, values: {id: {value, unit, definition, kind}}}; trabecular adds {qc, thickness, separation}, cortical {qc}
 Example: python morphometry.py trabecular --roi roi.npy --hu hu.npy --hu-json hu.json --out out/roi2 --id BV/TV=BVTV-roi2
 Exits 2 with one sentence on bad input, before writing anything.
@@ -26,6 +27,7 @@ from pathlib import Path
 
 import matplotlib
 import numpy as np
+import objects
 import sidecar
 from scipy import ndimage as ndi
 
@@ -107,13 +109,13 @@ def crop_box(mask, pad=0):
 
 def write_crop_map(path, arr, parent_grid, spacing, box, inputs, params):
     np.save(path, arr)
-    origin = [s.start for s in box]
     sidecar.write(
         path,
-        grid_id=sidecar.derived_grid_id(parent_grid, {'crop_origin_zyx': origin}),
+        grid_id=parent_grid,
         spacing_zyx_mm=spacing,
         inputs=inputs,
-        params=dict(params, crop_origin_zyx=origin, unit='mm'),
+        params=dict(params, unit='mm'),
+        offset_zyx=[s.start for s in box],
     )
 
 
@@ -372,6 +374,7 @@ def cortical(a):
     fig.tight_layout()
     sidecar.save_image(fig, qc)
     plt.close(fig)
+    slab_entry = objects.mask(out / f'slab-{a.name}.npy', slab, like=a.grid, crop=True)
     sidecar.emit_values(
         out / f'{a.name}.json',
         values,
@@ -381,6 +384,7 @@ def cortical(a):
             'inputs': {str(q): sidecar.sha256_file(q) for q in (a.cortex, a.surface, a.grid)},
         },
         qc=str(qc),
+        objects={f'{a.name}-slab': slab_entry},
     )
 
 

@@ -20,6 +20,10 @@
  *   its declared grid volume reported.
  * - `volume`: an `.npy` voxel grid on its own affine.
  * - `file`: a figure, table or report; its `title` is its name.
+ * - `missing`: the output could not be made. It fills whatever the declaration for its
+ *   `outputId` is, of any kind, and `reason` says why. It counts as reported (the task did its
+ *   job and said so); the review shows the output missing with the reason. A measurement
+ *   keeps its own `value: null` with a reason; `missing` on a measurement declaration is refused.
  *
  * An object (structure, surface, annotation, volume) must be declared: review
  * places it by its declaration's grid. A reference to another output (a ratio's
@@ -91,7 +95,9 @@ const outputs = <R extends z.ZodType>(ref: R) => {
     scoreSchema
       .pick({ level: true, confidence: true, ...prose })
       .extend({ kind: z.literal("score") }),
-    structureSchema.pick({ definition: true, volumeMm3: true }).extend({
+    z.object({
+      definition: structureSchema.shape.definition,
+      volumeMm3: structureSchema.shape.volumeMm3,
       kind: z.literal("structure"),
       structure: z.union([
         z.strictObject({
@@ -145,6 +151,7 @@ const outputs = <R extends z.ZodType>(ref: R) => {
       file: ref,
       mediaType: assetSchema.shape.mediaType.unwrap(),
     }),
+    z.object({ kind: z.literal("missing"), reason: nonEmpty }),
   ]);
 };
 
@@ -164,3 +171,19 @@ export const outputReportSchema = report(evidenceRefSchema);
 /** The `report_output` call, less `taskId`. */
 export const outputReportInputSchema = report(fileRefInputSchema);
 export type Output = z.infer<typeof outputReportSchema>["output"];
+
+/** The files an output's own payload names: its `file`, a volume's `file`, a structure's mask, a surface's heights. */
+export const fileRefsOf = (output: Output): EvidenceRef[] => {
+  switch (output.kind) {
+    case "file":
+      return [output.file];
+    case "volume":
+      return [output.volume.file];
+    case "structure":
+      return "mask" in output.structure ? [output.structure.mask] : [];
+    case "surface":
+      return [output.surface.heights];
+    default:
+      return [];
+  }
+};

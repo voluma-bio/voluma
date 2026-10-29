@@ -9,7 +9,7 @@ import { ArrowLeft, Download, History, Layers, ListChecks } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { downloadCsv } from "./export";
-import { type ReviewRun, taskStatus } from "./model";
+import { type ReviewRun, structuresOf, taskStatus } from "./model";
 import { TaskReport } from "./TaskReport";
 
 export function ReviewWorkspace({
@@ -58,17 +58,7 @@ export function ReviewWorkspace({
     onSuccess: onRefresh,
     onError: onRefresh,
   });
-  // The structures the task reported, and those its numbers are shown with.
-  const shownWith = new Set(
-    [...(task?.measurements ?? []), ...(task?.scores ?? [])].flatMap((m) => [
-      ...m.on,
-      ...m.context,
-    ]),
-  );
-  const selected =
-    revision?.structures.filter(
-      (item) => item.id.startsWith(`${task?.id}/`) || shownWith.has(item.id),
-    ) ?? [];
+  const selected = revision && task ? structuresOf(revision, task) : [];
   return (
     <div className="review-shell" data-theme="light">
       <header className="app-header">

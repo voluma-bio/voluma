@@ -19,12 +19,18 @@ export function declarationProblem(
 ): string | undefined {
   if (!declared) {
     // Review places an object by its declaration's grid; a value or file needs no place.
-    return isObjectKind(output.kind)
+    return output.kind !== "missing" && isObjectKind(output.kind)
       ? `This ${output.kind} is not in the plan. Only declared objects (structures, surfaces, annotations, volumes) can be reported: review cannot place others.`
       : undefined;
   }
   const quote = `The plan declares: ${JSON.stringify(declared)}.`;
   const mismatch = (what: string) => `${what}. ${quote}`;
+  if (output.kind === "missing") {
+    // A measurement says it is missing with `value: null` and a reason, so it has one shape.
+    return declared.kind === "measurement"
+      ? mismatch("A measurement declaration takes `value: null` with a reason, not `missing`")
+      : undefined;
+  }
   if (declared.kind !== output.kind) return mismatch(`This output is a ${output.kind}`);
   switch (declared.kind) {
     case "measurement":
@@ -144,7 +150,8 @@ export function placementProblem(
   if (reportedGrid !== undefined && reportedGrid !== grid.gridId)
     return `This was made on grid "${reportedGrid}", but "${self.grid}" was reported as grid "${grid.gridId}". Redo it on that grid.`;
 
-  const outside = (zyx: readonly number[]) => zyx.some((v, i) => v >= (grid.shapeZyx[i] ?? 0));
+  // A voxel index i covers [i - 0.5, i + 0.5], so a fractional position fits up to shape - 0.5.
+  const outside = (zyx: readonly number[]) => zyx.some((v, i) => v > (grid.shapeZyx[i] ?? 0) - 0.5);
   const tooBig = `It does not fit in grid "${self.grid}", whose shape [z, y, x] is [${grid.shapeZyx.join(", ")}].`;
   if (output.kind === "structure" && "mask" in output.structure) {
     const { offsetZyx, shapeZyx } = output.structure;

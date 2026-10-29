@@ -275,30 +275,35 @@ export const volumeSchema = z.object({
 export type Volume = z.infer<typeof volumeSchema>;
 
 /** A segmented object: a label in a `labels` volume, or a cropped mask on a grid. */
-export const structureSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  /** The volume it sits on; null when that volume isn't reported. */
-  volumeId: z.string().nullable(),
-  /**
-   * Where its voxels are: a value in the `labels` volume; or a uint8 mask cropped to its
-   * bounding box, placed on the volume at `offsetZyx` (its levels and mesh are in crop voxels:
-   * add the offset). Null when the structure is reported missing or its volume isn't reported.
-   */
-  voxels: z
-    .union([
-      z.object({ label: z.number().int().positive() }),
-      z.object({
-        mask: z.object({ key: storedKeySchema, sha256, shapeZyx: shapeZyxSchema }),
-        offsetZyx: voxelIndexSchema,
-      }),
-    ])
-    .nullable(),
-  /** Set when the task reported the structure as missing (not in the field of view): why. */
-  missing: z.object({ reason: z.string().min(1) }).nullable(),
-  definition: z.string().optional(),
-  volumeMm3: z.number().optional(),
-});
+export const structureSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    /** The volume it sits on; null when that volume isn't reported. */
+    volumeId: z.string().nullable(),
+    /**
+     * Where its voxels are: a value in the `labels` volume; or a uint8 mask cropped to its
+     * bounding box, placed on the volume at `offsetZyx` (its levels and mesh are in crop voxels:
+     * add the offset). Null when the structure is reported missing or its volume isn't reported.
+     */
+    voxels: z
+      .union([
+        z.object({ label: z.number().int().positive() }),
+        z.object({
+          mask: z.object({ key: storedKeySchema, sha256, shapeZyx: shapeZyxSchema }),
+          offsetZyx: voxelIndexSchema,
+        }),
+      ])
+      .nullable(),
+    /** Set when the task reported the structure as missing (not in the field of view): why. */
+    missing: z.object({ reason: z.string().min(1) }).nullable(),
+    definition: z.string().optional(),
+    volumeMm3: z.number().optional(),
+  })
+  .refine((s) => s.voxels === null || s.volumeId !== null, {
+    path: ["volumeId"],
+    message: "a structure with voxels names its volume",
+  });
 export type Structure = z.infer<typeof structureSchema>;
 
 /** A traced face as a height field on a grid, drawn as a line in the slices and a mesh in 3D. */
@@ -469,6 +474,8 @@ export const taskSchema = z.object({
       outputId: z.string(),
       kind: outputKindSchema,
       required: z.boolean(),
+      /** Why, when the attempt reported it missing or the task was skipped; absent when it simply wasn't reported. */
+      reason: z.string().optional(),
     }),
   ),
   /** Ids (`taskId/outputId`, as in the blocks) of the outputs the workflow didn't declare. */
@@ -547,16 +554,13 @@ export const revisionSchema = z
         );
     });
     // Every block on a grid names that volume.
-    needAll(
-      volumes,
-      [
-        ...rev.structures.map((x) => x.volumeId ?? undefined),
-        ...rev.surfaces.map((x) => x.volumeId),
-        ...rev.annotations.map((x) => x.volumeId),
-      ],
-      ["volumeId"],
-      "volume",
-    );
+    const onVolume = (block: string, xs: { volumeId: string | null }[]) =>
+      xs.forEach((x, i) => {
+        needAll(volumes, [x.volumeId ?? undefined], [block, i, "volumeId"], "volume");
+      });
+    onVolume("structures", rev.structures);
+    onVolume("surfaces", rev.surfaces);
+    onVolume("annotations", rev.annotations);
     rev.structures.forEach((x, i) => {
       if (
         x.voxels &&
