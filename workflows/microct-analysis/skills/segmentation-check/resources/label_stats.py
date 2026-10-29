@@ -14,6 +14,9 @@ in the same order, whether the piece reaches the scan's edge (what lies there is
 One more rule reads optional anatomy keys: `must_touch: [ids]` flags a label that comes within `touch_mm` (default 0.05) of
 none of a neighbour the anatomy requires, so a joint gap of a few voxels does not flag a correct label while a label on the
 wrong bone, which touches only background, does. `within_mm` lists the labels found within that reach and their distances.
+A label whose volume is under a tenth of the range's low end, or over ten times its high end (`--far-factor`), is not a
+slightly-off version of that structure: it is a different piece. It gets `identity_unsupported: true` and a flag that says
+to drop the label and report the structure absent (`segmentation-check`, section 2); the ids are also in `unsupported`.
 Prints a one-line summary with the labels that fail; the full table is in `--out`.
 """
 import argparse
@@ -90,6 +93,8 @@ if __name__ == '__main__':
     ap.add_argument('--out', required=True)
     ap.add_argument('--ranges')
     ap.add_argument('--header', help='hu.json (default: the labels sidecar)')
+    ap.add_argument('--far-factor', type=float, default=10,
+                    help='a volume this many times under the range low end or over its high end is a different structure')
     ap.add_argument('--min-piece-mm3', type=float, default=0.01, help='smaller pieces are specks, not counted as pieces')
     a = ap.parse_args()
     labels = np.load(a.labels)
@@ -97,7 +102,7 @@ if __name__ == '__main__':
     expected = {}
     if a.ranges:
         expected = {e['id']: e for e in json.loads(Path(a.ranges).read_text())['labels']}
-    table, flags = {}, []
+    table, flags, unsupported = {}, [], []
     ids = [int(i) for i in np.unique(labels) if i > 0]
     for lv in ids:
         e = expected.get(lv)
@@ -107,7 +112,13 @@ if __name__ == '__main__':
             s['name'] = e['name']
             s['volume_in_range'] = lo <= s['volume_mm3'] <= hi
             s['pieces_expected'] = e.get('components', 1)
-            if not s['volume_in_range']:
+            s['identity_unsupported'] = s['volume_mm3'] < lo / a.far_factor or s['volume_mm3'] > hi * a.far_factor
+            if s['identity_unsupported']:
+                unsupported.append(lv)
+                flags.append(f'{lv} {e["name"]}: {s["volume_mm3"]} mm3 is more than {a.far_factor:g}x away from {lo}-{hi}: '
+                             f'this piece is not a {e["name"]}. Remove the label and report the structure absent; '
+                             'do not keep the name because a model or a box gave it')
+            elif not s['volume_in_range']:
                 flags.append(f'{lv} {e["name"]}: {s["volume_mm3"]} mm3 outside {lo}-{hi}')
             if s['pieces'] != s['pieces_expected']:
                 flags.append(f'{lv} {e["name"]}: {s["pieces"]} pieces, expected {s["pieces_expected"]}')
@@ -124,4 +135,4 @@ if __name__ == '__main__':
         flags.append(f'labels {unknown} are not in the ranges file')
     Path(a.out).write_text(json.dumps(table, indent=1) + '\n')
     sidecar.emit(stats=a.out, labels=ids, volume_mm3={lv: table[lv]['volume_mm3'] for lv in ids},
-                 pieces={lv: table[lv]['pieces'] for lv in ids}, specks={lv: table[lv]['specks']['count'] for lv in ids}, flags=flags)
+                 pieces={lv: table[lv]['pieces'] for lv in ids}, specks={lv: table[lv]['specks']['count'] for lv in ids}, unsupported=unsupported, flags=flags)

@@ -19,7 +19,7 @@
       "name": "patella",
       "volume_mm3": [0.957, 1.659],
       "components": 1,
-      "notes": "Does not include label 12 (proximal patellar ossification), which stays separate. Range is the OA6-1RK reference volume 1.276 mm3 widened (x0.75 to x1.3); one scan only (n=1), not a population range."
+      "notes": "May be outside the field (a scan of the bone ends only): then it is absent, not a small piece renamed. Does not include label 12 (proximal patellar ossification), which stays separate. Range is the OA6-1RK reference volume 1.276 mm3 widened (x0.75 to x1.3); one scan only (n=1), not a population range."
     },
     {
       "id": 4,
