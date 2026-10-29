@@ -10,9 +10,11 @@
  *   command therefore runs under `timeout -k` (which leads its own process group and
  *   signals all of it) and records that group;
  *   an abort kills that group with a second exec, or terminates the sandbox if that fails.
- * - Read-only inputs flagged `stage` are copied to local disk at their path at create, 32
- *   files at a time (the copy is writable: commands run as root, and a sandbox cannot
- *   remount or `chattr` a path or run as another user and still write the mounts); the bucket is mounted at a private path under /staged for the copy.
+ * - Read-only inputs flagged `stage` are copied to local disk at their path at create, with 32
+ *   parallel workers and 16 files per worker; a failed batch is filtered and its incomplete
+ *   files are retried up to three times (the copy is writable: commands run as root, and a
+ *   sandbox cannot remount or `chattr` a path or run as another user and still write the mounts);
+ *   the bucket is mounted at a private path under /staged for the copy.
  * - Network follows the spec: none (`blockNetwork`), or HTTPS to the listed hosts only
  *   (`outboundDomainAllowlist`; probed on 0.11.1: plain HTTP, other hosts and IPs are refused,
  *   but DNS lookups of any name still resolve).

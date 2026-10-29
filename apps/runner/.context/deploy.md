@@ -5,6 +5,11 @@ Railway's private network and runs them (sandboxes on Modal, files in R2). It se
 nothing. Project, environment and the `gql` helper are in
 [../../api/.context/deploy.md](../../api/.context/deploy.md); this file holds only what differs.
 
+## Temporary state (p540 staging plumbing run 3)
+
+The staging runner is scaled from `numReplicas` 1 (recorded before the change) to 0 so it doesn't claim
+the test run. Restore it to 1 and confirm the runner is live in this session, even on failure.
+
 ## Staging plumbing probe (2026-10-29)
 
 Runner deployment `4a38210`'s source pins the sandbox image `sha256:b3ea9afc…`; actual image use

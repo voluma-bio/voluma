@@ -1,5 +1,7 @@
 # Runner TODO
 
+- **Measure the live `/inputs` staging rate after #198.** Run a before/after A/B on the staging OA6-1RK prefix with the staging runner environment, recording `cp` stderr and elapsed time. The local GNU coreutils 9.4 harness reproduces the parent-directory `EEXIST` race, but this checkout had no staging API/gateway environment or input prefix. Do not lower `-P 32` without that Modal measurement.
+
 From the round-2 review of #40 (`voluma-bio/docs` `work/mvp-contracts-and-data/research/review-pr40-round2.md`):
 
 - **`released` can miss Railway's 30 s drain under a slow API.** `lease.end` waits for an in-flight heartbeat and sends one more (up to 15 s each) before the report. Skip or shorten the final heartbeat when the report is `released`.
