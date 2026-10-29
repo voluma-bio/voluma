@@ -9,8 +9,8 @@ description: >
 
 `segment_sam` is SAM 3.1 behind a tool. You draw a box per structure on one slice of a stack; the model tracks each
 through every slice and writes a uint8 labels `.npy` on the grid of the volume you passed, with a sidecar of its
-prompts and per-slice confidence. It runs outside the sandbox on Meta's API (about a minute and $0.10 per scan;
-results vary slightly between runs) and reads and writes under `/outputs` or `$SCRATCH`. It is a first full 3D
+prompts and per-slice confidence. It runs in your sandbox and sends the scan to Meta's API (a few minutes and
+about $0.10 per call; results vary slightly between runs); it reads and writes under `/outputs` or `$SCRATCH`. It is a first full 3D
 segmentation of every bone and a second opinion on your own; **you own the final labels** (`segmentation-check`).
 
 ## When not to use it
