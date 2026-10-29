@@ -205,8 +205,10 @@ share, run by run, so it is for signed-in members; public examples are seeded in
 organization instead. They share the Demo workspace
 but each sees only their own runs (`self`). When an `Authorization` header is present only the
 bearer counts. The root answers 401 for no principal on everything but `/api/auth/*`;
-a domain guards a subtree with `requireService` or `requireUser` (which also sets a typed
-`c.var.user`) and gets 403 for the other kind. A cookie-authenticated non-GET request must
+a domain guards a subtree with `requireService` (the runner) or `requireUser` (which also sets
+a typed `c.var.user`) and gets 403 for the other kind; a run read takes `requireReader` on its
+route, which reads through the user's `readerOf` or, for the read-only debug token
+(`VOLUMA_DEBUG_TOKEN`), every lab. A cookie-authenticated non-GET request must
 carry an `Origin` equal to `APP_URL`'s origin (`SameSite=Lax` is same-site, not
 same-origin) and a JSON content type. No GET changes app state. Nothing upgrades to
 WebSockets (run streams are planned as server-sent events, plain GETs, in #28); a route that

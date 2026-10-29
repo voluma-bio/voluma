@@ -56,7 +56,7 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
 
 ## Run domain (`src/domains/run`)
 
-- `index.ts` is a mount list: `runs.ts` (browser routes, `requireUser`), `ingest.ts` (runner
+- `index.ts` is a mount list: `runs.ts` (browser routes: reads `requireReader`, writes `requireUser`), `ingest.ts` (runner
   routes, `requireService`), and a file per later route group. The Postgres adapters:
   `pg-queue.ts` owns every state change of a run (start, resume, cancel, claim, lease,
   recovery) and the key vault, `pg-runs.ts` the reads, and the lease-checked
