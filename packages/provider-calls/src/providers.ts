@@ -24,6 +24,11 @@ export type Route = {
 };
 
 export type ProviderDef = {
+  /**
+   * Whether the gateway admits any route. Anthropic and OpenAI are off until the runner's model
+   * calls move onto the gateway; the gate for turning them on is in `apps/gateway/.context/TODO.md`.
+   */
+  enabled: boolean;
   baseUrl: string;
   /** The headers that carry our key (the caller's own auth headers are stripped). */
   auth(key: string): Record<string, string>;
@@ -34,6 +39,7 @@ const bearer = (key: string) => ({ authorization: `Bearer ${key}` });
 
 export const PROVIDERS: Record<Provider, ProviderDef> = {
   meta: {
+    enabled: true,
     baseUrl: "https://api.meta.ai",
     auth: bearer,
     routes: [
@@ -43,11 +49,13 @@ export const PROVIDERS: Record<Provider, ProviderDef> = {
     ],
   },
   anthropic: {
+    enabled: false,
     baseUrl: "https://api.anthropic.com",
     auth: (key) => ({ "x-api-key": key }),
     routes: [{ method: "POST", path: "/v1/messages", kind: "model" }],
   },
   openai: {
+    enabled: false,
     baseUrl: "https://api.openai.com",
     auth: bearer,
     routes: [{ method: "POST", path: "/v1/responses", kind: "model" }],
@@ -65,7 +73,7 @@ export type Matched = { route: Route; fileId?: string };
 
 /** The route a request may use, or null: a 403. `path` has no query string. */
 export function matchRoute(provider: Provider, method: string, path: string): Matched | null {
-  if (!path.startsWith("/") || ABNORMAL.test(path)) return null;
+  if (!PROVIDERS[provider].enabled || !path.startsWith("/") || ABNORMAL.test(path)) return null;
   for (const route of PROVIDERS[provider].routes) {
     if (route.method !== method) continue;
     if (route.kind !== "file-delete") {

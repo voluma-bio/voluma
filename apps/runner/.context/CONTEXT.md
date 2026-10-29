@@ -87,8 +87,8 @@ On 2026-10-28 the claims' lines summed to the run's `model_cost_usd` and to `spe
 **Spend cap.** `RUNNER_MAX_RUN_COST_USD` (default 10) caps a run's dollars across all its claims
 (sandbox time is not counted). It goes to the API with each claim and becomes `runs.cost_cap_usd`,
 which the provider gateway checks too ([apps/gateway](../../gateway/.context/CONTEXT.md)). The runner's
-total is the last heartbeat's `spentUsd` (model cost plus gateway calls, open calls at their
-reservation) plus the model cost not yet sent, checked on each model cost and each acknowledged
+total is the last heartbeat's `spentUsd` (model cost plus settled gateway calls; an open call
+counts nothing, the gateway holds its reservation itself) plus the model cost not yet sent, checked on each model cost and each acknowledged
 heartbeat; at the cap `run.ts` stops the run and reports `ended failed` with
 `spend cap $X reached at $Y`. Calls in flight are aborted, not waited for. A claim of a run already over the cap stops before its first call. It applies to visitor runs too. The supervisor ends the root thread `cancelled` in the event log while the run row says `failed` with the cap text.
 

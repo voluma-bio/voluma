@@ -22,7 +22,7 @@ Variables:
 | `DATABASE_URL` | reference `${{Postgres.DATABASE_URL}}` (private URL) |
 | `GATEWAY_TOKEN_SECRET` | `<kid>:<base64 of 32 random bytes>`, e.g. `k1:$(openssl rand -base64 32)`. Comma-separate to rotate: the first mints, all open. The runner gets the same value |
 | `GATEWAY_META_API_KEY` | our Meta key (SAM) |
-| `GATEWAY_ANTHROPIC_API_KEY`, `GATEWAY_OPENAI_API_KEY` | optional; a provider without a key serves visitor tokens only |
+| `GATEWAY_ANTHROPIC_API_KEY`, `GATEWAY_OPENAI_API_KEY` | leave unset for now: those providers are disabled in code |
 | `PORT` | `8080`, set explicitly |
 | `GATEWAY_DRAIN_SECONDS` | optional, default 60 |
 | `GATEWAY_<PROVIDER>_BASE_URL` | optional; only for pointing at a stub |

@@ -4,9 +4,10 @@
  * reads are named in SQL (`state`, `lease_token`, `lease_expires_at`, `model_cost_usd`,
  * `cost_cap_usd`), so nothing here imports the API.
  *
- * A call's cost for the cap is its `cost_usd`, else its reservation: an `open` call or one `cut`
- * with no usage seen may still be billed. A run's reported spend leaves `open` calls out (they
- * are in flight, not spent).
+ * A call's cost is its `cost_usd`, else its reservation: an `open` call or one `cut` with no
+ * usage seen may still be billed. Admission counts `open` calls at their reservation (the cap
+ * must hold for everything in flight); every reported figure (the run's heartbeat, `providerCalls`,
+ * the org's daily total) leaves them out, since they are in flight, not spent.
  */
 import { and, eq, inArray, ne, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
@@ -17,8 +18,10 @@ export type Db = Pick<PostgresJsDatabase, "execute" | "select">;
 
 /** Calls in flight per sandbox token. */
 export const MAX_IN_FLIGHT = 4;
-/** The longest a call may run (the gateway's upstream timeouts), plus a margin for clock drift. */
-export const STALE_OPEN_MINUTES = 40;
+/** The longest a call may run: the gateway aborts it at this age. */
+export const MAX_CALL_MS = 30 * 60_000;
+/** An `open` row older than this belongs to no live call: the longest call plus a margin for clock drift. */
+export const STALE_OPEN_MINUTES = MAX_CALL_MS / 60_000 + 10;
 
 const heldUsd = sql`coalesce(${providerCalls.costUsd}, ${providerCalls.reservedUsd})`;
 
@@ -32,12 +35,15 @@ export type NewCall = {
   model: string | null;
   instance: string;
   reservedUsd: number;
+  /** Whether the token carries a visitor's own keys; the run's `credentials` must agree. */
+  visitor: boolean;
 };
 
-export type Refusal = { status: 401 | 402 | 429; reason: string };
+export type Refusal = { status: 401 | 402 | 403 | 429; reason: string };
 
 type RunRow = {
   state: string;
+  credentials: string;
   lease_ok: boolean;
   lease_live: boolean;
   model_cost_usd: number;
@@ -55,7 +61,7 @@ export function admitCall(db: PostgresJsDatabase, call: NewCall): Promise<Refusa
     // tables as of its start, so it would miss rows the call ahead of it just inserted. The
     // statements below start after the lock is held.
     const [run] = await tx.execute<RunRow>(sql`
-      SELECT state,
+      SELECT state, credentials,
         coalesce(encode(sha256(convert_to(lease_token, 'UTF8')), 'hex') = ${call.leaseHash}, false) AS lease_ok,
         coalesce(lease_expires_at > now(), false) AS lease_live,
         cost_cap_usd::float8 AS cost_cap_usd,
@@ -65,6 +71,10 @@ export function admitCall(db: PostgresJsDatabase, call: NewCall): Promise<Refusa
     if (run.state !== "running") return { status: 401, reason: "the run is not running" };
     if (!run.lease_ok) return { status: 401, reason: "the run was claimed again" };
     if (!run.lease_live) return { status: 401, reason: "the run's lease expired" };
+    // The database decides whose keys a run spends; a token minted the other way is a lane-2 bug.
+    if ((run.credentials === "visitor") !== call.visitor) {
+      return { status: 403, reason: "the token's keys do not match the run's credentials" };
+    }
     const [open] = await tx
       .select({ n: sql<number>`count(*)::int` })
       .from(providerCalls)
@@ -78,7 +88,7 @@ export function admitCall(db: PostgresJsDatabase, call: NewCall): Promise<Refusa
     if ((open?.n ?? 0) >= MAX_IN_FLIGHT) {
       return { status: 429, reason: `${MAX_IN_FLIGHT} calls are already in flight` };
     }
-    const spentUsd = run.model_cost_usd + (await heldUsdOfRun(tx, call.runId));
+    const spentUsd = run.model_cost_usd + (await heldUsdOfRun(tx, call.runId, true));
     if (!fits(spentUsd, call.reservedUsd, run.cost_cap_usd)) {
       return {
         status: 402,
@@ -194,11 +204,13 @@ export async function callsOfRuns(db: Db, runIds: string[]): Promise<Map<string,
 export const settledUsdOf = (runId: SQL): SQL =>
   sql`(SELECT coalesce(sum(coalesce(cost_usd, reserved_usd)), 0) FROM provider_calls WHERE run_id = ${runId} AND status <> 'open')`;
 
-/** What the spend cap counts for one run's calls: each one's cost, else its reservation, open calls included. */
-export async function heldUsdOfRun(db: Db, runId: string): Promise<number> {
+/** One run's calls in dollars: each one's cost, else its reservation; `open` calls only when asked. */
+export async function heldUsdOfRun(db: Db, runId: string, withOpen = false): Promise<number> {
   const [row] = await db
     .select({ usd: sql<number>`coalesce(sum(${heldUsd}), 0)::float8` })
     .from(providerCalls)
-    .where(eq(providerCalls.runId, runId));
+    .where(
+      and(eq(providerCalls.runId, runId), withOpen ? undefined : ne(providerCalls.status, "open")),
+    );
   return row?.usd ?? 0;
 }

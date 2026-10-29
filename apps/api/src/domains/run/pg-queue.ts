@@ -300,7 +300,7 @@ export function pgRunQueue(
 
     /**
      * Extends the lease and adds the usage; `stop` once the run has ended. `spentUsd` is the
-     * run's total: its model cost plus its provider calls, an open one at its reservation (what the gateway's cap counts). Throws `LeaseLost`.
+     * run's settled spend: its model cost plus its finished provider calls (open ones count nothing). Throws `LeaseLost`.
      */
     heartbeat: (runId: string, leaseToken: string, used: RunnerUsage) =>
       locked(async (tx) => {

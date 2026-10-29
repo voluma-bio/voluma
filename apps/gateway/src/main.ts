@@ -7,6 +7,7 @@
  *   GATEWAY_<PROVIDER>_BASE_URL   optional: another upstream (tests use local stubs)
  *   GATEWAY_DRAIN_SECONDS   how long SIGTERM waits for calls in flight (default 60)
  *   PORT                    default 8080
+ * Every 5 minutes, and at boot, open rows older than the longest call are marked `cut`.
  * On SIGTERM: stop taking calls, drain, mark this instance's still-open rows `cut`, exit.
  */
 import { randomUUID } from "node:crypto";
@@ -30,6 +31,7 @@ function required(name: string): string {
 
 const log = (line: string) => console.log(`${new Date().toISOString()} ${line}`);
 const instance = `${process.env.RAILWAY_DEPLOYMENT_ID ?? "local"}-${randomUUID().slice(0, 8)}`;
+const SWEEP_MS = 5 * 60_000;
 const drainMs = Number(process.env.GATEWAY_DRAIN_SECONDS ?? 60) * 1000;
 
 const client = postgres(required("DATABASE_URL"), { max: 10, onnotice: () => {} });
@@ -56,7 +58,19 @@ for (const name of PROVIDER_NAMES) {
   );
 }
 
-const staleCut = await cutStaleCalls(db);
+/** Closes rows no live call owns (a crashed instance's, or a settle that kept failing). */
+const sweep = async () => {
+  try {
+    const cut = await cutStaleCalls(db);
+    if (cut > 0) log(`${cut} stale open row(s) cut`);
+    return cut;
+  } catch (error) {
+    log(`stale sweep failed: ${error instanceof Error ? error.message : error}`);
+    return 0;
+  }
+};
+const staleCut = await sweep();
+setInterval(sweep, SWEEP_MS).unref();
 const gateway = createGateway({
   db,
   secrets: parseTokenSecrets(required("GATEWAY_TOKEN_SECRET")),

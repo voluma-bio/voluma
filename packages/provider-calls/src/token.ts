@@ -88,12 +88,18 @@ export function openGatewayToken(
 
 /** `GATEWAY_TOKEN_SECRET`: `<kid>:<base64 of 32 bytes>`, several separated by commas (first mints). */
 export function parseTokenSecrets(text: string): TokenSecret[] {
-  return text.split(",").map((part) => {
+  const secrets = text.split(",").map((part) => {
     const [kid, b64] = part.trim().split(":");
     const key = Buffer.from(b64 ?? "", "base64");
     if (!kid || key.length !== 32) {
       throw new Error("GATEWAY_TOKEN_SECRET must be <kid>:<base64 of 32 bytes>[,<kid>:…]");
     }
+    // A token is `v1.<kid>.<sealed>`, split on dots.
+    if (kid.includes("."))
+      throw new Error(`GATEWAY_TOKEN_SECRET kid "${kid}" must not contain "."`);
     return { kid, key };
   });
+  const kids = new Set(secrets.map((s) => s.kid));
+  if (kids.size !== secrets.length) throw new Error("GATEWAY_TOKEN_SECRET repeats a kid");
+  return secrets;
 }

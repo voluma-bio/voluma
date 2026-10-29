@@ -3,14 +3,15 @@
  * request is `/<provider>/<upstream path>` with `Authorization: Bearer <gateway token>` (or the
  * `x-api-key` Anthropic's SDK sends). In order: open the token; check the provider, our key (a
  * visitor's token has only its own keys and never falls back to ours), the exact route and, for
- * a model call, the model (read from the first 4 KB of the body); admit the call against the
+ * a model call, the model (read from the top level of the first 4 KB of the body); admit the call against the
  * database (`admitCall`: run live, lease matches, in-flight limit, spend cap, `open` row with
  * its reservation); forward with our key and the caller's auth headers stripped; stream the
  * reply back unbuffered while reading usage from its lines; settle the row.
  *
  * Gateway-made refusals are JSON `{error: {type: "gateway", message}}` with 401 (token or run
  * revoked), 402 (spend cap), 403 (route, model, provider or key not allowed), 429 (calls in
- * flight), 502 (provider unreachable) or 503 (database). A call whose row cannot be written is
+ * flight), 502 (provider unreachable) or 503 (database, or draining). A call lasts at most
+ * `MAX_CALL_MS`, then it is aborted and cut. A call whose row cannot be written is
  * not made. Nothing from a body is stored or logged.
  */
 import { randomUUID } from "node:crypto";
@@ -22,7 +23,9 @@ import {
   costUsd,
   fileIdOf,
   hasPrice,
+  isFinalEvent,
   isProvider,
+  MAX_CALL_MS,
   type Matched,
   matchRoute,
   type Observed,
@@ -39,12 +42,15 @@ import {
 import { and, eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Agent, fetch } from "undici";
-import { lineScanner } from "./scan.ts";
+import { readBodyFields } from "./body.ts";
+import { replyScanner } from "./scan.ts";
 
 /** How much of a model call's body is read for its model name and `max_tokens`. */
 const PEEK_BYTES = 4096;
 /** Upstream timeouts: SAM can be quiet for minutes on one call, so the 300 s default would cut it. */
-const UPSTREAM_TIMEOUT_MS = 30 * 60_000;
+const UPSTREAM_TIMEOUT_MS = MAX_CALL_MS;
+/** Tries to write a call's end to the database before leaving the row for the stale sweep. */
+const SETTLE_ATTEMPTS = 3;
 
 const HOP_BY_HOP = new Set([
   "connection",
@@ -110,6 +116,21 @@ export function createGateway(deps: GatewayDeps) {
   });
   server.requestTimeout = UPSTREAM_TIMEOUT_MS;
 
+  /** Writes a call's end, trying again if the database blinks; a row left `open` is swept as stale. */
+  async function settle(id: string, started: number, end: Omit<Settled, "durationMs">) {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await settleCall(db, id, { ...end, durationMs: Date.now() - started });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : error;
+        if (attempt === SETTLE_ATTEMPTS) {
+          return log(`settle ${id} failed, the row stays open: ${message}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, attempt * 250));
+      }
+    }
+  }
+
   async function handle(req: IncomingMessage, res: ServerResponse) {
     const [path = "", query] = (req.url ?? "/").split("?", 2) as [string, string?];
     if (path === "/health") {
@@ -117,6 +138,16 @@ export function createGateway(deps: GatewayDeps) {
       await db.execute("select 1");
       return reply(res, 200, "ok");
     }
+    if (draining) {
+      res.setHeader("connection", "close");
+      throw new Refused(503, "draining");
+    }
+    // Listening from the first await: a caller that leaves during the peek or admission must
+    // still stop the call, and a late listener would never hear a close that already happened.
+    const abort = new AbortController();
+    res.on("close", () => {
+      if (!res.writableFinished) abort.abort();
+    });
     const name = /^\/([a-z]+)(\/.*)$/.exec(path);
     const provider = name?.[1];
     const upstreamPath = name?.[2];
@@ -135,15 +166,17 @@ export function createGateway(deps: GatewayDeps) {
     if (!matched) throw new Refused(403, `${method} ${upstreamPath} is not allowed`);
 
     const peek = matched.route.kind === "model" ? await peekBody(req, PEEK_BYTES) : undefined;
-    const model = peek ? modelOf(peek.head) : null;
+    let model: string | null = null;
     let reservedUsd = 0;
-    if (matched.route.kind === "model") {
-      if (!model) throw new Refused(403, "no model in the first 4 KB of the request");
+    if (peek) {
+      const fields = readBodyFields(peek.head);
+      if (typeof fields === "string") throw new Refused(403, fields);
+      model = fields.model;
       if (matched.route.models && !matched.route.models.includes(model)) {
         throw new Refused(403, `model ${model} is not allowed on this route`);
       }
       if (!hasPrice(provider, model)) throw new Refused(403, `model ${model} has no price`);
-      reservedUsd = reservationUsd(provider, model, maxTokensOf(peek?.head ?? "")) ?? 0;
+      reservedUsd = reservationUsd(provider, model, fields.maxTokens) ?? 0;
     } else if (matched.fileId) {
       const [own] = await db
         .select({ id: providerCalls.id })
@@ -166,6 +199,7 @@ export function createGateway(deps: GatewayDeps) {
         model,
         instance,
         reservedUsd,
+        visitor: claims.visitorKeys !== undefined,
       });
     } catch (error) {
       log(`admit failed: ${error instanceof Error ? error.message : error}`);
@@ -173,18 +207,20 @@ export function createGateway(deps: GatewayDeps) {
     }
     if (refusal) throw new Refused(refusal.status, refusal.reason);
 
-    const abort = new AbortController();
+    // The caller left while the call was being admitted: nothing was sent, so nothing was billed.
+    if (abort.signal.aborted) {
+      await settle(id, Date.now(), { status: "failed", costUsd: 0 });
+      return;
+    }
     active.set(id, abort);
-    // The caller going away cancels the upstream call; a normal end has finished the response.
-    res.on("close", () => {
-      if (!res.writableFinished) abort.abort();
-    });
+    const limit = setTimeout(() => abort.abort(), MAX_CALL_MS);
     try {
       await forward(
         { req, res, provider, key, upstreamPath, query, matched, model, id, abort },
         peek,
       );
     } finally {
+      clearTimeout(limit);
       active.delete(id);
     }
   }
@@ -208,16 +244,8 @@ export function createGateway(deps: GatewayDeps) {
     const started = Date.now();
     const seen: Observed = {};
     let fileId: string | undefined;
-    const scan = lineScanner((line) => {
-      observeLine(line, seen);
-      if (matched.route.kind === "file-upload") fileId ??= fileIdOf(line);
-    });
-    const end = (end: Omit<Settled, "durationMs">) =>
-      settleCall(db, id, { ...end, durationMs: Date.now() - started }).catch((error) =>
-        log(
-          `settle ${id} failed, the row stays open: ${error instanceof Error ? error.message : error}`,
-        ),
-      );
+    let finalEvent = false;
+    const end = (end: Omit<Settled, "durationMs">) => settle(id, started, end);
 
     const headers: Record<string, string> = { ...PROVIDERS[provider].auth(key) };
     for (const [name, value] of Object.entries(req.headers)) {
@@ -257,6 +285,14 @@ export function createGateway(deps: GatewayDeps) {
       out[name] = value;
     });
     res.writeHead(upstream.status, out);
+    // An event stream is read a line at a time; any other reply (possibly pretty-printed JSON)
+    // as one text through the bounded window.
+    const streamed = (upstream.headers.get("content-type") ?? "").includes("text/event-stream");
+    const scan = replyScanner(streamed, (line) => {
+      observeLine(line, seen);
+      if (isFinalEvent(line)) finalEvent = true;
+      if (matched.route.kind === "file-upload" && upstream.status < 400) fileId ??= fileIdOf(line);
+    });
 
     let complete = false;
     try {
@@ -282,7 +318,9 @@ export function createGateway(deps: GatewayDeps) {
         ? costUsd(provider, model ?? "", seen)
         : 0;
     // A reply that was cut short, or that reported nothing to price, may still be billed in full.
-    const known = complete && cost !== null;
+    // An Anthropic or Responses stream that never reached its last event has partial usage.
+    const finished = !streamed || provider === "meta" || finalEvent;
+    const known = complete && finished && cost !== null;
     await end({
       status: !ok ? "failed" : known ? "done" : "cut",
       costUsd: !ok ? 0 : known ? cost : null,
@@ -367,9 +405,3 @@ async function peekBody(req: IncomingMessage, limit: number) {
   });
   return { head: head.subarray(0, limit).toString("latin1"), body };
 }
-
-const modelOf = (head: string) => /"model"\s*:\s*"([^"]{1,200})"/.exec(head)?.[1] ?? null;
-const maxTokensOf = (head: string) => {
-  const found = /"max(?:_output)?_tokens"\s*:\s*(\d+)/.exec(head)?.[1];
-  return found === undefined ? undefined : Number(found);
-};
