@@ -13,13 +13,13 @@ who ends it:
    then closes its sandbox (no `stopped` event is stored); the service waits up to 30 s. A second signal
    exits 130 at once and leaves the sandboxes (use `sandboxes:clean`). Signal the process
    group (Ctrl-C does); `kill <pid of pnpm>` alone leaves the runner running.
-3. **A resume.** `create` terminates live sandboxes tagged with the same `{run, name}`.
+3. **A resume.** `create` terminates live sandboxes tagged with the same `{run, name}`. A creation is aborted with the run's signal (checked before that sweep, between terminations and before `create`), so a released run's creation cannot end the sandbox of the runner that reclaimed it. A process frozen past its lease (a sleeping laptop) can still act late.
 4. **Modal ends it.** After 300 s with no command running (`VOLUMA_SANDBOX_IDLE_SECONDS` in
    `.env`, at least 30) or at a hard lifetime of 14400 s (`VOLUMA_SANDBOX_LIFETIME_SECONDS`).
    Before each call the session asks Modal whether a sandbox it handed out earlier still
-   runs (`alive()`, 30-40 ms) and replaces a dead one (`stopped`, then `starting`, `ready`
-   events). Modal also refuses commands for at least 15 s while it shuts a sandbox down,
-   with `alive()` still true; the adapter turns that refusal (`FAILED_PRECONDITION`, "shutting
+   runs (`exitCode()`, 30-40 ms; null while it runs) and replaces a dead one (`stopped` with the exit code in its detail, then `starting`, `ready`
+   events; Modal's SDK reports 124 for a timeout, 137 for any terminated sandbox (a terminate call or possibly an out-of-memory kill) and else the entrypoint's code). Modal also refuses commands for at least 15 s while it shuts a sandbox down,
+   with `exitCode()` still null; the adapter turns that refusal (`FAILED_PRECONDITION`, "shutting
    down", at command start) into `SandboxEndedError`, and the session replaces the sandbox
    and runs the command again once. Either way the model gets the restart note, and files
    outside the mounts are gone. A sandbox that dies during a command still fails that
@@ -46,7 +46,7 @@ the runner host needs it on PATH; it deletes its upload from Meta's file store w
 ends (a failed delete is logged). Its response masks (`!` one_bit and `~` lossless) decode in `sam-mask.ts`, a port of
 Meta's decoder, because `meta-sam-parser` takes minutes per response. The tool is offered only
 when a Meta key exists (`VOLUMA_META_API_KEY`, or the visitor's key on a visitor run). What a
-call costs goes to the run's usage meter (the adapter reports it as soon as Meta gives the frame count, so a failed call is still billed). The tool also writes a sidecar `<labels>.json` (prompt frames and per-slice confidence per object). The runner checks `ffmpeg -version` at start when a Meta key is set. How agents should use it (orientation, boxes,
+call costs goes to the run's usage meter and to the call's own `bill`, which the harness records as the `tool.result`'s `costUsd` so `spend` can charge the task (the adapter reports it as soon as Meta gives the frame count, so a failed call is still billed). The tool also writes a sidecar `<labels>.json` (prompt frames and per-slice confidence per object). The runner checks `ffmpeg -version` at start when a Meta key is set. How agents should use it (orientation, boxes,
 which structures share a call) is the `sam-segmentation` skill's job, not the tool's.
 
 # Runner: `view_image` shows the model files the sandbox wrote
@@ -59,12 +59,28 @@ them), but `adapters/pi/elide-images.ts` keeps image blocks only for the last 2 
 calls in each request, so request size does not grow with the thread.
 
 **Model calls retry.** `run.ts` passes `maxRetries: 3` to Pi, which retries a 408, 429 (waiting
-the server's `retry-after`), 5xx or dropped connection. `model-retry.ts` adds one case Pi treats as
-final: Meta's intermittent `404 model_not_found` (only from the `meta` provider; about one tool call
-in five on 2026-10-28 with a working key), retried up to 4 attempts in all, 1 s, 2 s, 4 s apart,
-when the call failed before streaming any content. Any other error ends the thread as before.
+the server's `retry-after`), 5xx or dropped connection. `model-retry.ts` wraps every role's calls
+(the main thread too) and keeps retrying those errors, and Meta's `404 model_not_found` that Pi
+treats as final (about half of all calls on 2026-10-28), when the call failed before streaming
+any content: backoff from 1 s doubling to a 30 s cap, until 4 minutes have passed since the first
+attempt (Pi's own tries count against it; an attempt in flight is not cut short), each retry
+logged with its role and attempt and reported to the fallback breaker. The run's abort ends the
+wait. Any other error, or the spent budget, ends the call. A main-thread wake is also bounded
+by the supervisor's `wakeTimeoutMs`. Anthropic errors carry no status in their text, so they
+are not retried. `provider-error.ts` holds the error classification.
+
+**A worker or check that dies on a provider error** (`provider-error.ts`, after the retries above
+gave up) is started again by the supervisor with no main-thread call, since the main thread uses
+the same provider: a worker's task on a fresh thread (a code-made `redo` judgment, arm
+`code:provider-error`), a check as a new check. Twice per task and role; the third failure fails
+the run, with the error in `state.error`, instead of leaving it `completed` with tasks that never
+started. A main-thread call that fails is recorded as that call's error in the `wake` and in the
+judgment's reason.
+
 Cost is Pi's per-reply price, summed per claim; the log prints it
 when a claim reports (`model cost this claim`), and the API stores it as `runs.model_cost_usd`.
+On 2026-10-28 the claims' lines summed to the run's `model_cost_usd` and to `spend(events).total`
+($0.9763 over five claims of one run).
 
 # Runner: what `/outputs` and `/scratch` support
 
@@ -99,7 +115,6 @@ and 2 CPUs. A sandbox has 8192 MiB (`run.ts`). `classic_segment` measured 2.8-3.
 about 4.0-4.25 GB RSS with the memory-mapped scan, so 4096 MiB risked an OOM kill in a
 full run.
 Two concurrent heavy steps fit: their anonymous memory adds up (about 6 GB) and the mapped scan
-file is shared page cache, not counted twice. Whether a given restart was an out-of-memory kill
-is not known: `alive()` only says the sandbox ended (the event reads "ended by the provider"), and
-Modal's exit code is not logged. In the 2026-10-28 local run the sandbox ended at 1 h 0 min (the
-lifetime) and once more 23 min into the replacement, with no reason recorded. See TODO.md.
+file is shared page cache, not counted twice. The `stopped` event of a sandbox Modal ended carries its exit code (Modal's SDK: 124 a timeout, 137 any terminated
+sandbox, so an out-of-memory kill or a terminate call), so a restart's cause is in the run's record. In the 2026-10-28 local run the sandbox ended at 1 h 0 min (the
+lifetime) and once more 23 min into the replacement, before the exit code was logged.

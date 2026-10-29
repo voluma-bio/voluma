@@ -36,8 +36,10 @@ import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
 import { metaSegmenter } from "./meta-segmenter.ts";
 import { createModalSandbox, RUNS_APP, terminateClaim } from "./modal-sandbox.ts";
-import { retryMetaNotFound } from "./model-retry.ts";
+import type { ModelFallback } from "./model-fallback.ts";
+import { retryTransient } from "./model-retry.ts";
 import { checkPrompt, checkSystem, workerPrompt, workerSystem } from "./prompts.ts";
+import { isProviderError } from "./provider-error.ts";
 import { r2Evidence } from "./r2-evidence.ts";
 import { r2Files } from "./r2-files.ts";
 import { r2Workflows } from "./r2-workflows.ts";
@@ -64,6 +66,8 @@ export interface RunnerContext {
   /** The models the config names for a `voluma` run's roles, resolved at startup. */
   roles: Record<"worker" | "check" | "main", Model<Api>>;
   visitorModel: Model<Api>;
+  /** Starts worker and check threads on the fallback model while their model is failing. */
+  fallback: ModelFallback;
   log(line: string): void;
 }
 
@@ -191,18 +195,22 @@ export async function runClaim(
     );
     session = sandboxSession(
       () =>
-        createSandbox({
-          runId,
-          name: "main",
-          image: config.sandbox.image,
-          cpu: 2,
-          memoryMiB: 8192,
-          lifetimeSeconds: config.sandbox.lifetimeSeconds,
-          idleSeconds: config.sandbox.idleSeconds,
-          mounts: layout.mounts,
-        }),
+        createSandbox(
+          {
+            runId,
+            name: "main",
+            image: config.sandbox.image,
+            cpu: 2,
+            memoryMiB: 8192,
+            lifetimeSeconds: config.sandbox.lifetimeSeconds,
+            idleSeconds: config.sandbox.idleSeconds,
+            mounts: layout.mounts,
+          },
+          abort.signal,
+        ),
       (id, state, detail) => {
-        if (state === "ready") meter.sandboxUp();
+        // Metered from the start of creation, the sweep included: a conservative upper bound.
+        if (state === "starting") meter.sandboxUp();
         else if (state === "stopped" || state === "failed") meter.sandboxDown();
         events?.emit(id, "sandbox", { name: "main", state, detail });
       },
@@ -210,19 +218,52 @@ export async function runClaim(
     );
     const opened = session;
 
-    const callModel = retryMetaNotFound((m, context, options) =>
-      models.streamSimple(m, context, {
-        ...options,
-        apiKey: keyFor(m.provider),
-        maxRetries: MODEL_RETRIES,
-      }),
-    );
+    // A thread keeps the model it started on (the log records it); a new one starts on the
+    // fallback while the primary is failing. A visitor's run never falls back: their key and
+    // scan go to Standard-mode Meta only.
+    const threadModel = (primary: Model<Api>, recorded: string | undefined) => {
+      if (recorded) {
+        // Only a model this run may use: a visitor's scan goes to Standard-mode Meta only, and
+        // a fallback that was switched off stays off for threads that started on it.
+        const [provider = "", ...id] = recorded.split("/");
+        const allowed = visitor
+          ? isVisitorSafe({ provider, id: id.join("/") })
+          : [workerModel, checkModel, mainModel, config.fallbackModel].some(
+              (m) => m && `${m.provider}/${m.id}` === recorded,
+            );
+        const model = allowed ? models.getModel(provider, id.join("/")) : undefined;
+        if (!model)
+          throw new Error(`the thread started on ${recorded}, which this run may not use`);
+        return model;
+      }
+      return visitor ? primary : ctx.fallback.pick(primary);
+    };
+    const callModel = (role: ModelRole) =>
+      retryTransient(
+        (m, context, options) =>
+          models.streamSimple(m, context, {
+            ...options,
+            apiKey: keyFor(m.provider),
+            maxRetries: MODEL_RETRIES,
+          }),
+        (m, attempt, delayMs, error) => {
+          log(
+            `${role} model call failed (${error}); retry ${attempt} in ${Math.round(delayMs / 1000)}s`,
+          );
+          // Threads that start while this one retries should not wait out the same outage.
+          if (!visitor) ctx.fallback.failed(m, error);
+        },
+      );
     const streamFor =
       (role: ModelRole): RunRole["streamFn"] =>
       (m, context, options) => {
-        const stream = callModel(m, context, options);
+        const stream = callModel(role)(m, context, options);
         stream.result().then(
-          (reply) => meter.addModelCall(role, usageOf(reply)),
+          (reply) => {
+            meter.addModelCall(role, usageOf(reply));
+            if (reply.stopReason === "error" && !visitor)
+              ctx.fallback.failed(m, reply.errorMessage);
+          },
           () => {},
         );
         return stream;
@@ -231,7 +272,7 @@ export async function runClaim(
       mainModel,
       mainSystem(runBrief(run.selectedOutputs, computed.tasks)),
       async (context, signal, onEvent) => {
-        const stream = callModel(mainModel, context, { signal });
+        const stream = callModel("main")(mainModel, context, { signal });
         // The stream's events and its result are independent: draining one leaves the other.
         const drained = (async () => {
           if (onEvent) for await (const event of stream) onEvent(event);
@@ -247,6 +288,7 @@ export async function runClaim(
       plan: computed.tasks,
       selectedOutputs: run.selectedOutputs,
       notes: run.notes,
+      providerError: isProviderError,
       workflow: definition.files,
       // The commit the files came from: the snapshot's, which a resume keeps.
       workflows: run.workflows.map((pin) => ({ ...pin, commit: definition.commit })),
@@ -273,15 +315,15 @@ export async function runClaim(
           })
         : undefined,
       main,
-      worker: (task, notes) => ({
-        model: workerModel,
+      worker: (task, notes, recorded) => ({
+        model: threadModel(workerModel, recorded),
         streamFn: streamFor("worker"),
         systemPrompt: workerSystem(definition),
         prompt: workerPrompt(task, { user: run.notes, main: notes }),
         tools: roleTools,
       }),
-      check: (task, notes) => ({
-        model: checkModel,
+      check: (task, notes, recorded) => ({
+        model: threadModel(checkModel, recorded),
         streamFn: streamFor("check"),
         systemPrompt: checkSystem(definition),
         prompt: checkPrompt(task, { user: run.notes, main: notes }),

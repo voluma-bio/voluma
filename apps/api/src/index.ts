@@ -12,7 +12,9 @@
  * WORKOS_LAB_ORGANIZATION_ID, and optionally WORKOS_JUDGES_ORGANIZATION_ID, and
  * GUEST_ORGANIZATION_ID with GUEST_SCOPE (lab|self, default lab) to let anyone in as a guest (the repo .env).
  * Run limits, per organization (LAB, JUDGES, DEMO) and number: RUN_LIMITS_<ORG>_PER_CALLER, _CONCURRENT,
- * _PER_DAY, _USD_PER_DAY, _VISITOR_ACTIVE; unset is no limit. Fails at startup if the database is unreachable or not migrated.
+ * _PER_DAY, _USD_PER_DAY, _VISITOR_ACTIVE; unset is no limit. Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
+ * R2_SECRET_ACCESS_KEY, R2_BUCKET: Review's reference download and scan uploads (the API
+ * presigns PUTs; files never pass through it). UPLOAD_MAX_FILES, UPLOAD_MAX_BYTES per scan and UPLOAD_MAX_OPEN uploads in progress per member (defaults below). Fails at startup if the database is unreachable or not migrated.
  */
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -26,6 +28,7 @@ import postgres from "postgres";
 import { createAuth } from "./auth";
 import { createReview } from "./domains/review";
 import { r2ReferenceArchive } from "./domains/review/r2-reference-archive";
+import { r2RunFiles } from "./domains/review/r2-run-files";
 import { createRun } from "./domains/run";
 import type { Limits } from "./domains/run/admission";
 import { catalog } from "./domains/run/catalog";
@@ -35,6 +38,8 @@ import { pgEventLog } from "./domains/run/pg-event-log";
 import { pgHistory } from "./domains/run/pg-history";
 import { pgRunQueue } from "./domains/run/pg-queue";
 import { pgRunReads } from "./domains/run/pg-runs";
+import { pgUploads } from "./domains/run/pg-uploads";
+import { r2Uploads } from "./domains/run/r2-uploads";
 import type { RunRecords } from "./ports";
 
 const required = (name: string) => {
@@ -66,6 +71,15 @@ const limitsFromEnv = (org: "LAB" | "JUDGES" | "DEMO"): Limits => ({
   usdPerDay: limitNumber(`RUN_LIMITS_${org}_USD_PER_DAY`),
   visitorActive: limitNumber(`RUN_LIMITS_${org}_VISITOR_ACTIVE`),
 });
+
+/** A positive whole number from env, or `fallback` when unset. */
+function countFromEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1) throw new Error(`${name} must be a whole number`);
+  return value;
+}
 
 const client = postgres(required("DATABASE_URL"));
 const db = drizzle(client, { casing: "snake_case" });
@@ -123,18 +137,42 @@ const runRecords: RunRecords = {
     const log = run && (await eventLog.stream(reader, runId, 0, 2 ** 31 - 1));
     return run && log ? { run, events: log.events } : null;
   },
+  readable: async (reader, runId) => (await reads.get(reader, runId)) !== null,
 };
+
+/** R2, optional as a group: without it the reference download, run files and scan uploads are 503s. */
+const r2Env = {
+  accountId: process.env.R2_ACCOUNT_ID,
+  bucket: process.env.R2_BUCKET,
+  accessKeyId: process.env.R2_ACCESS_KEY_ID,
+  secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+};
+const r2 =
+  r2Env.accountId && r2Env.bucket && r2Env.accessKeyId && r2Env.secretAccessKey
+    ? {
+        accountId: r2Env.accountId,
+        bucket: r2Env.bucket,
+        accessKeyId: r2Env.accessKeyId,
+        secretAccessKey: r2Env.secretAccessKey,
+      }
+    : null;
+const referenceArchive = r2 && r2ReferenceArchive(r2);
+const runFiles = r2 && r2RunFiles(r2);
 
 const app = new Hono();
 app.get("/health", (c) => c.text("ok"));
 // A body over the limit is a 413 before anything reads it. Browsers get 256 KB (the key
-// vault and the event log keep what they send). The runner is trusted, and a model's
+// vault and the event log keep what they send), except an upload's file list (up to
+// 10,000 paths of 300 ASCII characters: 4 MB). The runner is trusted, and a model's
 // history row can be large (reasoning blobs, long tool calls), so /ingest/* gets 8 MB.
 const browserLimit = bodyLimit({ maxSize: 256 * 1024 });
+const fileListLimit = bodyLimit({ maxSize: 4 * 1024 * 1024 });
 const runnerLimit = bodyLimit({ maxSize: 8 * 1024 * 1024 });
-app.use("/api/*", (c, next) =>
-  c.req.path.startsWith("/api/run/ingest/") ? runnerLimit(c, next) : browserLimit(c, next),
-);
+app.use("/api/*", (c, next) => {
+  if (c.req.path.startsWith("/api/run/ingest/")) return runnerLimit(c, next);
+  if (c.req.path === "/api/run/inputs") return fileListLimit(c, next);
+  return browserLimit(c, next);
+});
 // Every /api request is authenticated here, in this order (auth.ts): the bearer and
 // CSRF checks, which do no I/O; the routes that write the session cookie; the session
 // cookie and the 401 for no principal; then the routes that need a user.
@@ -151,26 +189,22 @@ app.route(
     notifier,
     history: pgHistory(db),
     catalog,
+    uploadStore: pgUploads(db),
+    objects: r2 && r2Uploads(r2),
+    // A prepared scan is a few hundred files and a few hundred MB; a raw one, a few thousand.
+    uploadLimits: {
+      maxFiles: countFromEnv("UPLOAD_MAX_FILES", 5000),
+      maxBytes: countFromEnv("UPLOAD_MAX_BYTES", 20_000_000_000),
+      maxOpen: countFromEnv("UPLOAD_MAX_OPEN", 3),
+    },
     repo: "voluma-bio/voluma",
     shutdown: draining.signal,
   }),
 );
-const r2 = {
-  accountId: process.env.R2_ACCOUNT_ID,
-  bucket: process.env.R2_BUCKET,
-  accessKeyId: process.env.R2_ACCESS_KEY_ID,
-  secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
-};
-const referenceArchive =
-  r2.accountId && r2.bucket && r2.accessKeyId && r2.secretAccessKey
-    ? r2ReferenceArchive({
-        accountId: r2.accountId,
-        bucket: r2.bucket,
-        accessKeyId: r2.accessKeyId,
-        secretAccessKey: r2.secretAccessKey,
-      })
-    : null;
-app.route("/api/review", createReview({ runs: runRecords, inputs: reads, referenceArchive }));
+app.route(
+  "/api/review",
+  createReview({ runs: runRecords, files: runFiles, inputs: reads, referenceArchive }),
+);
 
 const isApi = (path: string) => path === "/api" || path.startsWith("/api/");
 const webDist = resolve(import.meta.dirname, "../../web/dist");

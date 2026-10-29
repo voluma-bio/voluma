@@ -18,13 +18,7 @@ import {
   type AgentTool,
   type StreamFn,
 } from "@earendil-works/pi-agent-core";
-import {
-  type Api,
-  type AssistantMessage,
-  type Model,
-  type ToolResultMessage,
-  Type,
-} from "@earendil-works/pi-ai";
+import { type Api, type Model, type ToolResultMessage, Type } from "@earendil-works/pi-ai";
 import type { EventType } from "@voluma/contracts/events";
 import { z } from "zod";
 import { replyFrames } from "../../live";
@@ -76,7 +70,7 @@ export type StartThreadOptions = ThreadIdentity & {
 
 export interface ThreadHandle {
   /** Steers a user message into the running thread. False once the thread has ended or never ran. */
-  send(text: string, sender?: UserSender): boolean;
+  send(text: string, sender: UserSender): boolean;
   done: Promise<ThreadOutcome>;
 }
 
@@ -85,6 +79,8 @@ export interface ThreadOutcome {
   ran: boolean;
   status: "completed" | "failed" | "cancelled";
   error?: string;
+  /** The thread was refused because it cannot be resumed as stored (see `ThreadStale`). */
+  stale?: true;
   /** The text of the thread's last reply in this invocation; empty if it made none. */
   reply: string;
 }
@@ -93,12 +89,16 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
   const { threadId, recorder, history, signal } = options;
   const emit = <T extends EventType>(type: T, payload: PayloadOf<T>) =>
     recorder.emit(threadId, type, payload);
+  // What each running tool call has been billed (`ToolContext.bill`), until its result is emitted.
+  const billed = new Map<string, number>();
+  const bill = (toolCallId: string, usd: number) =>
+    billed.set(toolCallId, (billed.get(toolCallId) ?? 0) + usd);
 
   const agent = new Agent({
     initialState: {
       systemPrompt: options.systemPrompt,
       model: options.model,
-      tools: options.tools.map((tool) => toAgentTool(tool, options)),
+      tools: options.tools.map((tool) => toAgentTool(tool, options, bill)),
       messages: [],
     },
     streamFn: options.streamFn,
@@ -125,13 +125,17 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       return false;
     }
   };
-  const emitToolResult = (result: ToolResultMessage) =>
+  const emitToolResult = (result: ToolResultMessage) => {
+    const costUsd = billed.get(result.toolCallId);
+    billed.delete(result.toolCallId);
     emit("tool.result", {
       toolCallId: result.toolCallId,
       isError: result.isError,
       output: textOf(result),
       truncated: (result.details as { truncated?: boolean } | undefined)?.truncated === true,
+      ...(costUsd !== undefined && { costUsd }),
     });
+  };
 
   // The sender of each user message we prompt with, kept with the message itself.
   const senders = new WeakMap<AgentMessage, UserSender>();
@@ -161,9 +165,22 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       // Every check that can refuse the thread runs before `thread.started`: a refused
       // re-invocation must not relabel a finished thread in the stream record.
       if (stored.length > 0 && !sameSystem(stored[0], system)) {
-        throw new ThreadFailure(
+        throw new ThreadStale(
           "the stored system message differs from the current system prompt or tools; " +
             "a resumed thread keeps the prompt it started with (prompt-cache rule 1)",
+        );
+      }
+      // The model is part of a thread's identity, like its prompt: History is the record of it
+      // (an assistant message names the model that wrote it), not `thread.started`, which may
+      // not have landed before a crash.
+      const wrote = stored.find((m) => m.role === "assistant");
+      if (
+        wrote?.role === "assistant" &&
+        (wrote.provider !== options.model.provider || wrote.model !== options.model.id)
+      ) {
+        throw new ThreadStale(
+          `the thread was written by ${wrote.provider}/${wrote.model}, not ${options.model.provider}/${options.model.id}; ` +
+            "a resumed thread keeps its model",
         );
       }
       const repairs = interruptedToolResults(stored);
@@ -171,8 +188,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       const finished = isFinished([...stored, ...repairs].at(-1));
       // A thread with no user message yet (new, or a crash before the first one was stored)
       // starts from the prompt. A finished one runs only for a new input. Each message
-      // carries its sender; the prompt counts as a person's, since the harness can't tell a
-      // supervisor's task from a human's. The sandbox restart note reaches the model through
+      // carries its sender; the prompt is the runtime's (the supervisor's brief). The sandbox restart note reaches the model through
       // the sandbox's command output (`sandbox-session.ts`), not as a message here.
       const prompts: AgentMessage[] = [];
       const addPrompt = (text: string | undefined, sender: UserSender) => {
@@ -181,7 +197,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       if (hasUser) {
         if (options.input) addPrompt(options.input.text, options.input.sender);
       } else {
-        addPrompt(options.prompt, { kind: "person" });
+        addPrompt(options.prompt, { kind: "runtime" });
       }
       for (const { text, sender } of early.splice(0)) addPrompt(text, sender);
       const message = prompts.length > 0 ? prompts : undefined;
@@ -201,6 +217,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
         ...(options.taskId && { task: options.taskId }),
         ...(options.attemptId && { attemptId: options.attemptId }),
         ...(options.spawnedBy && { spawnedBy: options.spawnedBy }),
+        model: `${options.model.provider}/${options.model.id}`,
       });
       if (stored.length === 0) {
         // A new thread: store the system message before anything else.
@@ -293,6 +310,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       outcome = {
         status: "failed",
         error: error instanceof ThreadFailure ? error.message : String(error),
+        ...(error instanceof ThreadStale && { stale: true }),
       };
       if (!(error instanceof ThreadFailure)) unexpected = error;
     } finally {
@@ -307,7 +325,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
   }
 
   return {
-    send(text, sender = { kind: "person" }) {
+    send(text, sender) {
       if (ended) return false;
       if (!accepting) {
         early.push({ text, sender });
@@ -323,6 +341,12 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
 /** A failure of the thread itself, as opposed to a bug: reported as the outcome, not thrown. */
 class ThreadFailure extends Error {}
 
+/**
+ * The stored thread cannot be resumed as it is (its prompt, tools or model changed, e.g. by a
+ * deploy): `ran` is false and `stale` true. The caller starts the work again on a new thread.
+ */
+class ThreadStale extends ThreadFailure {}
+
 const historyFailure = (error: unknown): Omit<ThreadOutcome, "ran" | "reply"> => ({
   status: "failed",
   error: `storing the thread's history failed, so it stopped: ${String(error)}`,
@@ -332,6 +356,7 @@ const historyFailure = (error: unknown): Omit<ThreadOutcome, "ran" | "reply"> =>
 function toAgentTool(
   tool: Tool,
   { runId, threadId, kind, taskId, sandbox, recorder }: StartThreadOptions,
+  bill: (toolCallId: string, usd: number) => void,
 ): AgentTool {
   const { $schema: _, ...jsonSchema } = z.toJSONSchema(tool.input, { io: "input" });
   return {
@@ -352,6 +377,7 @@ function toAgentTool(
         sandbox: () => sandbox(threadId),
         output: (stream, text) =>
           recorder.live({ type: "tool.output", threadId, toolCallId, stream, text }),
+        bill: (usd) => bill(toolCallId, usd),
       });
       return {
         content: [

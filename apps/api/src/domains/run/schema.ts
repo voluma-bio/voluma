@@ -76,7 +76,11 @@ export const piMessages = pgTable(
   (t) => [primaryKey({ columns: [t.threadId, t.idx] })],
 );
 
-/** A scan a run reads (`inputSchema`). The reference scan has one row per organization. */
+/**
+ * A scan a run reads (`inputSchema`). The reference scan has one row per organization.
+ * An upload is `uploading` from create until complete finds every declared file
+ * (`files`, `[{path, size}]`) stored; only a `ready` input is listed or started on.
+ */
 export const inputs = pgTable("inputs", {
   id: text().primaryKey(),
   labId: text().notNull(),
@@ -84,6 +88,10 @@ export const inputs = pgTable("inputs", {
   uploadedBy: text().notNull(),
   name: text().notNull(),
   createdAt: timestamptz().notNull().defaultNow(),
+  status: text({ enum: ["uploading", "ready"] })
+    .notNull()
+    .default("ready"),
+  files: json(),
 });
 
 /** The scan every org may start from: one row per org, uploaded by the examples operator. */
@@ -132,6 +140,8 @@ export const runs = pgTable(
     recoveries: integer().notNull().default(0),
     modelCostUsd: doublePrecision().notNull().default(0),
     sandboxSeconds: doublePrecision().notNull().default(0),
+    /** Open To check items when the run completed (`runSchema.toCheck`); null otherwise. */
+    toCheck: integer(),
   },
   (t) => [
     index("runs_lab_state").on(t.labId, t.state, t.createdAt),

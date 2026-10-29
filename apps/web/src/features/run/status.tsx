@@ -1,7 +1,7 @@
-/** Run and task status as the list badges: the caller's statuses mapped to `StatusBadge` tones. */
-import type { TaskStatus } from "@voluma/contracts/ids";
+/** Run status as the list badge (the caller's statuses mapped to `StatusBadge` tones), how a run's spend and time read, and a ticking clock. */
 import type { Run } from "@voluma/contracts/run";
 import { StatusBadge, type StatusTone } from "@voluma/ui";
+import { useEffect, useState } from "react";
 
 export function formatTime(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {
@@ -12,6 +12,38 @@ export function formatTime(iso: string): string {
   });
 }
 
+/** US dollars: cents, or a tenth of a cent under a dollar so a short run doesn't read $0.00. */
+export function formatUsd(usd: number): string {
+  return `$${usd.toFixed(usd < 1 ? 3 : 2)}`;
+}
+
+/** Whole seconds as `45 s`, `12 min 5 s` or `2 h 3 min`. */
+export function formatDuration(seconds: number): string {
+  const s = Math.round(seconds);
+  if (s < 60) return `${s} s`;
+  if (s < 3600) return `${Math.floor(s / 60)} min ${s % 60} s`;
+  return `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min`;
+}
+
+/** The time now, ticking each second while `active`. */
+export function useNow(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [active]);
+  return now;
+}
+
+/** From the first claim to the end, or to now while it runs; null while it waits (queued, or for keys). */
+export function runSeconds({ state }: Run, now = Date.now()): number | null {
+  if (state.status === "queued" || state.status === "awaiting-keys" || !state.startedAt)
+    return null;
+  const end = state.status === "ended" ? Date.parse(state.endedAt) : now;
+  return (end - Date.parse(state.startedAt)) / 1000;
+}
+
 /** Where a row leads: the review (the review lane's `/runs/:runId`) once completed, else the live page. */
 export const runHref = (run: Run) =>
   run.state.status === "ended" && run.state.outcome === "completed"
@@ -20,7 +52,7 @@ export const runHref = (run: Run) =>
 
 export type RunStatus = { label: string; tone: StatusTone; detail?: string };
 
-export function runStatus({ state }: Run): RunStatus {
+export function runStatus({ state, toCheck }: Run): RunStatus {
   switch (state.status) {
     case "queued":
       return { label: "Queued", tone: "neutral", detail: `Place ${state.position} in line` };
@@ -29,7 +61,12 @@ export function runStatus({ state }: Run): RunStatus {
     case "awaiting-keys":
       return { label: "Needs your keys", tone: "check" };
     case "ended":
-      if (state.outcome === "completed") return { label: "Completed", tone: "primary" };
+      // "Reviewed" needs review state, which the review lane doesn't expose yet. No items is
+      // still "Completed": a failed task raises none.
+      if (state.outcome === "completed")
+        return toCheck
+          ? { label: `${toCheck} to check`, tone: "check" }
+          : { label: "Completed", tone: "primary" };
       if (state.outcome === "failed")
         return { label: "Failed", tone: "destructive", detail: state.error };
       return { label: "Stopped", tone: "neutral" };
@@ -39,24 +76,4 @@ export function runStatus({ state }: Run): RunStatus {
 export function RunBadge({ run }: { run: Run }) {
   const { label, tone } = runStatus(run);
   return <StatusBadge tone={tone}>{label}</StatusBadge>;
-}
-
-/** A task's badge; `under-review` is the second agent's check. */
-export function taskStatus(status: TaskStatus | undefined): { label: string; tone: StatusTone } {
-  switch (status) {
-    case undefined:
-    case "pending":
-    case "stale":
-      return { label: "Queued", tone: "neutral" };
-    case "in-progress":
-      return { label: "Running", tone: "info" };
-    case "done":
-      return { label: "Done", tone: "primary" };
-    case "to-check":
-      return { label: "To check", tone: "check" };
-    case "failed":
-      return { label: "Failed", tone: "destructive" };
-    case "under-review":
-      return { label: "Checking", tone: "info" };
-  }
 }

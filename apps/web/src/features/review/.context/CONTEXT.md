@@ -42,7 +42,7 @@ report. The behavior is:
 | Revisions | Latest snapshot by default; `revision` selects an earlier, read-only snapshot |
 | Measurements | Measurements, scores and declared outputs the task didn't report, with units and confidence; null is unavailable, never zero |
 | Models | The worker's and checker's model, when the run recorded them |
-| Evidence/files | Listed by name; the API doesn't serve R2 run files yet, so no image or download |
+| Evidence/files | Checkpoint images (by `.jpg`/`.png` name) load lazily through `reviewFileUrl` and open in a lightbox with a download; other evidence and data files are download links. The server decides what renders inline from the bytes |
 | Checks | To check items, with the structures their focus names; the checker is absent when no second agent checked the task |
 | Chat/corrections | Disabled without a service; corrections require a proposal with affected tasks, then confirmation |
 | CSV | Available only with a real snapshot; includes task result revision and evidence identifiers, and escapes spreadsheet formulas |

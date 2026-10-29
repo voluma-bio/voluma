@@ -15,6 +15,7 @@
  * costs a read, never an event.
  */
 import type { EventInput, RunEvent } from "@voluma/contracts/events";
+import { fold } from "@voluma/contracts/fold";
 import { and, asc, eq, gt, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { Reader } from "../../domain";
@@ -33,8 +34,18 @@ export class EventIdTaken extends Error {
 /** First key of the advisory lock pair; the second is the run. Distinguishes our locks from others'. */
 const EVENT_SEQ_LOCK = 0x76_6f_6c_75;
 
-const toRunEvent = (row: typeof events.$inferSelect) =>
+export const toRunEvent = (row: typeof events.$inferSelect) =>
   ({ ...row, createdAt: row.createdAt.toISOString() }) as RunEvent;
+
+/** The open To check items `fold` gives the run's whole log: `Run.toCheck` when the run completes. */
+export async function openChecks(db: Tx | PostgresJsDatabase, runId: string): Promise<number> {
+  const rows = await db
+    .select()
+    .from(events)
+    .where(eq(events.runId, runId))
+    .orderBy(asc(events.seq));
+  return fold(rows.map(toRunEvent)).tasks.reduce((n, task) => n + task.checks.length, 0);
+}
 
 export function pgEventLog(db: PostgresJsDatabase, notifier: Notifier) {
   const readAfter = async (runId: string, after: number, limit: number, tx: Tx | typeof db) =>

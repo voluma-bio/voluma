@@ -26,6 +26,12 @@
  * event, `<thread>:judgment`, and applies it. A resume finds these events and asks no one
  * again; a wake the model never answered before a crash is asked again.
  *
+ * A thread whose stored History cannot be resumed (`stale`: a deploy changed its prompt, tools
+ * or model) is not a failure. A worker's task starts again on a new thread (a code-made `redo`
+ * judgment, `redoByCode`); a check is replaced by a new check. A message sent to such a
+ * thread is lost. A worker or check that died on a provider error (`providerError`) is treated the
+ * same way, up to `maxProviderRedos` times; then the run fails naming the error.
+ *
  * A thread that throws or is refused before it starts, or an error in a step (a store failure
  * above all), fails the run on purpose: the threads are aborted and the root ends `failed`,
  * because the supervisor must not carry on from a record the store does not hold. The root
@@ -63,13 +69,23 @@ export interface SupervisorOptions {
   recorder: Recorder;
   threads: Threads;
   main: MainThread;
-  /** `notes` are the main thread's notes in force when the thread starts (none yet at the first task). */
-  worker(taskId: string, notes: string | undefined): RoleSpec;
-  check(taskId: string, notes: string | undefined): RoleSpec;
+  /**
+   * `notes` are the main thread's notes in force when the thread starts (none yet at the first
+   * task). `model` is the one a resumed thread started on, which it must keep.
+   */
+  worker(taskId: string, notes: string | undefined, model: string | undefined): RoleSpec;
+  check(taskId: string, notes: string | undefined, model: string | undefined): RoleSpec;
   /** Wakes of a worker that stopped with its task unfinished before the stuck guard marks it. */
   stuckLimit?: number;
   /** Redos a judgment may order for one task. */
   maxRedos?: number;
+  /** Whether a failed thread's error text says the model provider failed (the host knows its texts). */
+  providerError?(error: string): boolean;
+  /**
+   * Times a task's worker, and separately its check, is started again after a provider error
+   * before the run fails.
+   */
+  maxProviderRedos?: number;
   /** How long the main thread may take to answer a wake before it counts as failed. */
   wakeTimeoutMs?: number;
   signal?: AbortSignal;
@@ -88,14 +104,23 @@ export function supervisor(options: SupervisorOptions) {
   const root = supervisorThreadId(options.runId);
   const stuckLimit = options.stuckLimit ?? 2;
   const maxRedos = options.maxRedos ?? 1;
-  const wakeTimeoutMs = options.wakeTimeoutMs ?? 60_000;
+  const maxProviderRedos = options.maxProviderRedos ?? 2;
+  const wakeTimeoutMs = options.wakeTimeoutMs ?? 5 * 60_000;
   let failure: unknown; // the first error that failed the run
 
   const derive = () => threadLog(recorder.events());
 
   /** A thread's record; a thread whose `thread.started` the store lacks counts as not ended. */
   const recordOf = (d: ThreadLog, id: string, role: Role, taskId: string): ThreadRecord =>
-    d.threads.get(id) ?? { id, role, taskId, end: undefined, wakes: 0, starts: 0 };
+    d.threads.get(id) ?? {
+      id,
+      role,
+      taskId,
+      end: undefined,
+      wakes: 0,
+      starts: 0,
+      model: undefined,
+    };
 
   /**
    * A wake's key: the thread whose end raised it and how many times the log shows it started,
@@ -107,8 +132,12 @@ export function supervisor(options: SupervisorOptions) {
   /** `<runId>.<taskId>.<role>`, plus `.<n>` for the n-th (ids.ts: run and task ids hold no '.'). */
   const threadId = (taskId: string, role: Role, n: number) =>
     `${options.runId}.${taskId}.${role}${n === 1 ? "" : `.${n}`}`;
-  const nextThreadId = (d: ThreadLog, taskId: string, role: Role) =>
-    threadId(taskId, role, startedFor(d, taskId, role).length + 1);
+  /** An id this process refused as unresumable counts as used, even if its `thread.started` never landed. */
+  const nextThreadId = (d: ThreadLog, taskId: string, role: Role) => {
+    let n = startedFor(d, taskId, role).length + 1;
+    while (threads.stale(threadId(taskId, role, n))) n++;
+    return threadId(taskId, role, n);
+  };
 
   /**
    * The task's thread running in this process. The next id counts too: a thread just
@@ -129,9 +158,12 @@ export function supervisor(options: SupervisorOptions) {
     id: string,
     extra: { attemptId?: string; input?: ThreadSpec["input"] } = {},
   ) {
-    const { notes } = derive();
+    const { notes, threads: known } = derive();
+    const model = known.get(id)?.model;
     threads.start({
-      ...(role === "worker" ? options.worker(taskId, notes) : options.check(taskId, notes)),
+      ...(role === "worker"
+        ? options.worker(taskId, notes, model)
+        : options.check(taskId, notes, model)),
       threadId: id,
       kind: role,
       parentThreadId: root,
@@ -161,9 +193,11 @@ export function supervisor(options: SupervisorOptions) {
   }
 
   /** The reason a recorded judgment applied, rebuilt from the event. */
-  function reasonOf(j: PayloadOf<"judgment">): string {
+  function reasonOf(j: PayloadOf<"judgment">, wakeError: string | undefined): string {
     const { fallback } = j.applied;
-    if (fallback === "error") return "The judgment could not decide; left for a person.";
+    if (fallback === "error") {
+      return `The judgment could not decide${wakeError ? ` (${wakeError.slice(0, 200)})` : ""}; left for a person.`;
+    }
     const { reason } = decisionSchema.parse(j.decision);
     return fallback === "redo-cap"
       ? `${reason} (A redo was ordered, but ${j.taskId} was already redone ${maxRedos} time(s); left for a person.)`
@@ -186,7 +220,7 @@ export function supervisor(options: SupervisorOptions) {
     if (!taskId) throw new Error(`judgment ${id} names no task`);
     const eventId = `${root}:${id}${JUDGMENT_SUFFIX}`;
     if (d.ids.has(eventId)) return "idle"; // already applied
-    const reason = reasonOf(j);
+    const reason = reasonOf(j, d.wakes.get(wakeKey(d, id))?.error);
     const action = j.applied.action;
     const arm: By = { kind: "judgment", arm: j.arm };
     if (action === "redo") {
@@ -233,13 +267,76 @@ export function supervisor(options: SupervisorOptions) {
     return "acted";
   }
 
+  /**
+   * A worker's task starts again on a fresh thread, as after a `redo` judgment, but decided
+   * here with no model call: the thread could not resume after a deploy changed its prompt,
+   * tools or model (`code:unresumable-thread`), or it died on a provider error, whose
+   * judgment would go to the same failing provider (`code:provider-error`). Recorded as the
+   * thread's judgment, so a resume applies it and a restart does not try the thread again.
+   */
+  async function redoByCode(
+    r: ThreadRecord,
+    arm: "code:unresumable-thread" | "code:provider-error",
+    error: string,
+    reason: string,
+  ): Promise<Next> {
+    await recorder.append(
+      root,
+      "judgment",
+      {
+        point: { kind: "thread-failed", input: { error: error.slice(0, WAKE_ERROR_MAX) } },
+        arm,
+        taskId: r.taskId,
+        decision: { action: "redo", reason },
+        applied: { action: "redo" },
+      },
+      `${r.id}${JUDGMENT_SUFFIX}`,
+    );
+    return "acted";
+  }
+
+  /**
+   * A worker or check that died on a provider error is started again by code, up to
+   * `maxProviderRedos` times per task and role; then the run fails naming the error, rather than
+   * ending `completed` with tasks that never ran. Undefined: `error` is not a provider error.
+   */
+  function providerRetry(d: ThreadLog, r: ThreadRecord, error: string): "redo" | undefined {
+    if (!options.providerError?.(error)) return undefined;
+    const failures = startedFor(d, r.taskId, r.role).filter(
+      (x) => x.end?.status === "failed" && options.providerError?.(x.end.error ?? ""),
+    ).length;
+    if (failures > maxProviderRedos) {
+      throw new Error(
+        `${r.taskId}: its ${r.role} failed on a model provider error ${failures} times: ${error}`,
+      );
+    }
+    return "redo";
+  }
+
   /** A worker that is not running and did not finish its task. */
   async function stalled(d: ThreadLog, w: ThreadRecord, t: FoldedTask | undefined): Promise<Next> {
     const j = d.judgments.get(w.id);
     if (j) return apply(d, w.id, j, t);
     const { taskId } = w;
+    const unresumable = threads.stale(w.id);
+    if (unresumable) {
+      return redoByCode(
+        w,
+        "code:unresumable-thread",
+        unresumable,
+        `${w.id} could not resume after a change to its prompt, tools or model; ${taskId} starts again on a new thread.`,
+      );
+    }
     if (w.end?.status === "failed") {
       const error = w.end.error ?? "failed";
+      if (providerRetry(d, w, error)) {
+        return redoByCode(
+          w,
+          "code:provider-error",
+          error,
+          `${w.id} failed on a model provider error (${error.slice(0, 200)}); ${taskId} starts again on a new thread.`,
+        );
+      }
       return judgmentFor(d, { kind: "thread-failed", taskId, error, report: report(taskId) }, w.id);
     }
     if (w.wakes < stuckLimit) {
@@ -354,8 +451,18 @@ export function supervisor(options: SupervisorOptions) {
         const c = recordOf(d, t.threads.check, "check", taskId);
         const j = d.judgments.get(c.id);
         if (j) return apply(d, c.id, j, t);
+        // A check that cannot resume is checked again by a new thread; the worker's result stands.
+        if (threads.stale(c.id)) {
+          launch("check", taskId, nextThreadId(d, taskId, "check"), { attemptId: t.attemptId });
+          return "acted";
+        }
         if (c.end?.status === "failed") {
           const error = c.end.error ?? "failed";
+          // The worker's result stands; a new check replaces the one the provider cut short.
+          if (providerRetry(d, c, error)) {
+            launch("check", taskId, nextThreadId(d, taskId, "check"), { attemptId: t.attemptId });
+            return "acted";
+          }
           return judgmentFor(
             d,
             { kind: "thread-failed", taskId, error, report: report(taskId) },
@@ -401,6 +508,11 @@ export function supervisor(options: SupervisorOptions) {
     let action: "accept" | "redo" | "fail" = "accept";
     let fallback: "error" | "redo-cap" | undefined;
     if (!wake.decision) {
+      // The main thread's own call died on the provider: the outage is what ends the run, not a
+      // task left unjudged with its dependents never started.
+      if (wake.error && options.providerError?.(wake.error)) {
+        throw new Error(`the main thread could not judge ${taskId}: ${wake.error}`);
+      }
       // A person can still read the task; a main thread that failed must not stall the run.
       fallback = "error";
     } else if (wake.decision.action === "redo" && redosOf(d, taskId) >= maxRedos) {
@@ -448,7 +560,7 @@ export function supervisor(options: SupervisorOptions) {
         expired,
       ]);
     } catch (error) {
-      answer = { error: String(error) };
+      answer = { error: error instanceof Error ? error.message : String(error) };
     }
     if (signal?.aborted) return;
     await runtime.section(async () => {
@@ -473,8 +585,10 @@ export function supervisor(options: SupervisorOptions) {
   }
 
   const redosOf = (d: ThreadLog, taskId: string) =>
-    [...d.judgments.values()].filter((j) => j.taskId === taskId && j.applied.action === "redo")
-      .length;
+    // A restart for an unresumable thread (`code:` arms) is not the main thread's to count.
+    [...d.judgments.values()].filter(
+      (j) => j.taskId === taskId && j.applied.action === "redo" && !j.arm.startsWith("code:"),
+    ).length;
 
   const fail = (error: unknown) => {
     failure ??= error;

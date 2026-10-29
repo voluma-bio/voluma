@@ -6,6 +6,7 @@ follow, and the scanner's own axes often do not do that.
 
   python orient_joint.py --in hu.npy --header hu.json --out <outdir> [--threshold-hu <T>]
         [--shaft-radius-mm 1.2] [--ref-radius-mm 3.15] [--min-object-mm3 0.0035] [--margin-mm 0.126]
+        [--second-bone-frac 0.25]
       Writes <outdir>/frame.json (the frame), oriented.npy (float32 HU stack, axis 0 = slices) with its sidecar,
       and keyframe.jpg (the sheet to look at before going on). Prints the keyframe index and the bend angle.
 
@@ -18,16 +19,27 @@ convert to voxels with the scan's spacing; the defaults suit a mouse knee (a mou
 radius; the reference object, the patella, sits within 3.15 mm of the joint). Rescale them for another animal or joint.
 
 How it chooses (details in the comments of joint_frame):
- 1. A threshold (Otsu unless given). The two bones are one 3D component because they touch at the joint.
- 2. The two end portions of that component seed the two shaft axes; each axis is refit three times on its shaft
-    only (35-95% of its length from the joint), so condyles and plateau do not pull it.
- 3. The slicing plane is spanned by the two shaft axes (the bending plane); slices stack along its normal, and the
-    keyframe is the slice through the joint. Bone A is the shaft passing nearer the reference object (at the knee,
-    the femur: the patella sits on it).
-Where it fails: a joint inside either 30% end portion (a very short stub); a nearly straight joint (< 10 deg bend:
-falls back to the plane through bone A's axis and the reference object); two axes far apart out of plane (one slice
-cannot cut both shafts: see `skew_vox`); a large non-bone object near the joint taken for the reference object
-(raises when none is found). A fused neighbouring bone (the fibula) pulls bone B's axis slightly.
+ 1. A threshold (Otsu unless given) and 3D pieces. The bones are the largest piece plus, if there is one, the largest
+    other piece within --ref-radius-mm of it that is at least --second-bone-frac of its size: femur and tibia are one
+    touching piece, or two pieces across the joint space. Smaller pieces (the patella) are reference object candidates.
+ 2. The two end portions of the bones along their main axis seed the two shaft axes; each axis is refit three times
+    on its shaft only (35-95% of its length from the joint), so condyles and plateau do not pull it. The joint is
+    where the axes pass closest. Each shaft in the field must be at least 3 shaft radii long.
+ 3. With no shaft in the field, and two separate pieces: the leg axis is the line through the two centroids, the joint
+    half way across the gap, `bend_deg` and `skew_vox` are null (a bend cannot be measured from bone ends). With no
+    shaft and one piece the script stops.
+ 4. The slicing plane is spanned by the two shaft axes (the bending plane); slices stack along its normal, and the
+    keyframe is the slice through the joint. When the joint is straight (< 10 deg) or there is no shaft, the plane holds
+    the leg axis and the reference object, or, with none, the widest spread of the bones. Bone A is the shaft passing
+    nearer the reference object (at the knee, the femur: the patella sits on it); with no shaft or no reference object
+    it is the bigger bone, and the side of the slice the reference sits on is then arbitrary.
+ 5. It counts each bone's voxels in the keyframe (`keyframe_bone_vox`) and stops if one has under 5% of the other's.
+Where it fails: a joint inside either 30% end portion (a very short stub); two axes far apart out of plane (one slice
+cannot cut both shafts: see `skew_vox`); no shaft and no second piece of at least --second-bone-frac (stops); a non-bone
+piece taken for the second bone or the reference object when size cannot tell (a large patella, a fragment). The keyframe
+check splits voxels by side of the joint, so with one touching piece it cannot tell two bones from one bone's shaft and
+condyles; the 3-radius shaft check covers that case.
+A fused neighbouring bone (the fibula) pulls bone B's axis slightly.
 """
 import argparse
 import json
@@ -36,6 +48,7 @@ from pathlib import Path
 
 import numpy as np
 from scipy import ndimage as ndi
+from scipy.spatial import cKDTree
 
 HERE = Path(__file__).resolve().parent
 # `python -I` puts no script directory on sys.path, so every directory a script imports from is added here.
@@ -51,6 +64,9 @@ except ModuleNotFoundError as e:
 END_FRAC = 0.30
 SHAFT_RANGE = (0.35, 0.95)
 MIN_BEND_DEG = 10.0
+MIN_ELONGATION = 2.0  # spread along the main axis over spread across it; a blob is about 1
+MIN_SHAFT_RADII = 3.0  # a shaft in the field is at least this many shaft radii long
+MIN_CUT_FRAC = 0.05  # each bone must have this fraction of the other's voxels in the keyframe
 
 
 def _otsu(v):
@@ -106,8 +122,56 @@ def _closest_points(p1, d1, p2, d2):
     return p1 + s * d1, p2 + u * d2
 
 
+def _elongation(P):
+    """Spread along the main axis over the spread across it: about 1 for a blob, above 2 for a shaft."""
+    w = np.linalg.eigvalsh(np.cov(P.T))
+    return float(np.sqrt(w[2] / w[1]))
+
+
+def _fit_shafts(P, cyl_radius):
+    """Two shaft axes from the end portions of P, refit on the shaft voxels. Returns (axes, fits, joint, skew), or None
+    when a refit finds no shaft voxels."""
+    mu0, a0 = _line_fit(P)
+    t = (P - mu0) @ a0
+    lo, hi = t.min(), t.max()
+    ax = []
+    for sel, sgn in ((t < lo + END_FRAC * (hi - lo), -1), (t > hi - END_FRAC * (hi - lo), 1)):
+        Q = _largest_piece(P[sel])
+        ax.append(_slab_line(Q, sgn * a0, Q.mean(0)))
+    fits = []
+    for _ in range(3):
+        q0, q1 = _closest_points(ax[0][0], ax[0][1], ax[1][0], ax[1][1])
+        joint = (q0 + q1) / 2
+        new = []
+        for mu, a in ax:
+            s_ = (P - joint) @ a
+            d = P - mu
+            inc = np.linalg.norm(d - np.outer(d @ a, a), axis=1) < cyl_radius
+            if not inc.any():
+                return None
+            smax = s_[inc].max()
+            keep = inc & (s_ > SHAFT_RANGE[0] * smax) & (s_ < SHAFT_RANGE[1] * smax)
+            if not keep.any():
+                return None
+            Q = _largest_piece(P[keep])
+            new.append(_slab_line(Q, a, Q.mean(0)) + (len(Q), float(smax)))
+        fits.append([{'n': n_, 'extent_vox': e_} for *_, n_, e_ in new])
+        ax = [(m, a_) for m, a_, *_ in new]
+    q0, q1 = _closest_points(ax[0][0], ax[0][1], ax[1][0], ax[1][1])
+    return ax, fits, (q0 + q1) / 2, float(np.linalg.norm(q0 - q1))
+
+
+def _gap_axis(PA, PB):
+    """Leg axis and joint for two separate bone pieces with no shaft in the field: the line through the two centroids, the
+    joint half way across the gap between the pieces along it. Each axis points from the joint into its bone."""
+    cA, cB = PA.mean(0), PB.mean(0)
+    u = (cA - cB) / np.linalg.norm(cA - cB)
+    joint = cB + u * (((PA - cB) @ u).min() + ((PB - cB) @ u).max()) / 2
+    return [(joint, u), (joint, -u)], joint
+
+
 def joint_frame(hu, spacing_mm, threshold_hu=None, shaft_radius_mm=1.2, ref_radius_mm=3.15, min_object_mm3=0.0035,
-                margin_mm=0.126):
+                margin_mm=0.126, second_bone_frac=0.25):
     cyl_radius = shaft_radius_mm / spacing_mm
     ref_radius = ref_radius_mm / spacing_mm
     min_small_vox = min_object_mm3 / spacing_mm ** 3
@@ -119,74 +183,80 @@ def joint_frame(hu, spacing_mm, threshold_hu=None, shaft_radius_mm=1.2, ref_radi
     lab, n = ndi.label(closed)
     sizes = ndi.sum_labels(fg, lab, range(1, n + 1)) * 8
     order = np.argsort(-sizes)
-    pair_id = order[0] + 1
-    pair = lab == pair_id
-    # shaft seeds from the two end portions of the leg
-    P = np.argwhere(pair).astype(np.float64) * 2 + 0.5
-    mu0, a0 = _line_fit(P)
-    t = (P - mu0) @ a0
-    lo, hi = t.min(), t.max()
-    L = hi - lo
-    ax = []
-    for sel, sgn in ((t < lo + END_FRAC * L, -1), (t > hi - END_FRAC * L, 1)):
-        Q = _largest_piece(P[sel])
-        ax.append(_slab_line(Q, sgn * a0, Q.mean(0)))
-    # refine: shaft voxels only, measured from the joint centre
-    fits = []
-    for _ in range(3):
-        q0, q1 = _closest_points(ax[0][0], ax[0][1], ax[1][0], ax[1][1])
-        joint = (q0 + q1) / 2
-        new = []
-        for mu, a in ax:
-            s_ = (P - joint) @ a
-            d = P - mu
-            rad = np.linalg.norm(d - np.outer(d @ a, a), axis=1)
-            inc = rad < cyl_radius
-            smax = s_[inc].max()
-            keep = inc & (s_ > SHAFT_RANGE[0] * smax) & (s_ < SHAFT_RANGE[1] * smax)
-            Q = _largest_piece(P[keep])
-            new.append(_slab_line(Q, a, Q.mean(0)) + (len(Q), float(smax)))
-        fits.append([{'n': n_, 'extent_vox': e_} for *_, n_, e_ in new])
-        ax = [(m, a_) for m, a_, *_ in new]
-    q0, q1 = _closest_points(ax[0][0], ax[0][1], ax[1][0], ax[1][1])
-    joint = (q0 + q1) / 2
-    skew = float(np.linalg.norm(q0 - q1))
-    ext = [f['extent_vox'] for f in fits[-1]]
-    # reference object: the largest other component near the joint
-    cand = []
+    cents = np.array(ndi.center_of_mass(fg, lab, range(1, n + 1))) * 2 + 0.5
+    # Bones: the largest piece, plus the largest other piece within reach of it and at least `second_bone_frac` of its
+    # size. Position along the largest piece does not separate tibia from patella in a flexed or cropped knee, so size
+    # alone decides, and the keyframe check catches a second bone the slice misses.
+    P0 = np.argwhere(lab == order[0] + 1).astype(np.float64) * 2 + 0.5
+    tree = cKDTree(P0[::4])
+    second, small_near = None, False
     for i in order[1:]:
         if sizes[i] < min_small_vox:
             break
-        c = np.argwhere(lab == i + 1).mean(0) * 2 + 0.5
-        if np.linalg.norm(c - joint) < ref_radius:
-            cand.append((i + 1, c))
-    if not cand:
-        sidecar.fail('No reference object near the joint: raise --ref-radius-mm or lower --min-object-mm3, or '
-                     'check that --threshold-hu keeps the patella-like bone')
-    ref_id, ref_c = cand[0]
-    # bone A's shaft line passes nearer the reference object than bone B's
-    dl = [np.linalg.norm((ref_c - m) - ((ref_c - m) @ a) * a) for m, a in ax]
-    ia = int(np.argmin(dl))
+        Pi = np.argwhere(lab == i + 1).astype(np.float64) * 2 + 0.5
+        if tree.query(Pi[::4])[0].min() > ref_radius:
+            continue
+        small_near = sizes[i] < second_bone_frac * sizes[order[0]]
+        second = None if small_near else i
+        break
+    ids = [order[0]] + ([] if second is None else [second])
+    P = np.vstack([P0] + ([] if second is None else [Pi]))
+    fit = _fit_shafts(P, cyl_radius) if _elongation(P) >= MIN_ELONGATION else None
+    if fit is not None and min(f['extent_vox'] for f in fit[1][-1]) < MIN_SHAFT_RADII * cyl_radius:
+        fit = None
+    if fit is None and second is None:
+        why = ('the bones are not clearly longer than wide' if _elongation(P) < MIN_ELONGATION else
+               f'a shaft reaches under {MIN_SHAFT_RADII:g} shaft radii from the joint')
+        hint = (f'; a piece near it is under --second-bone-frac {second_bone_frac:g} of its size: if that is the other '
+                'long bone (a short stub), lower --second-bone-frac and check that the keyframe holds it'
+                if small_near else '; scan more of the leg')
+        sidecar.fail(f'No shaft in the field: {why}, and there is no second bone piece, so no axis can be fitted{hint}')
+    if fit is not None:
+        ax, fits, joint, skew = fit
+        ext = [f['extent_vox'] for f in fits[-1]]
+    else:  # two separate pieces, no shaft in the field
+        PA, PB = P0, Pi  # the largest piece is A
+        ax, joint = _gap_axis(PA, PB)
+        fits, skew = None, None
+        ext = [float(((Q - joint) @ a).max()) for Q, (_, a) in zip((PA, PB), ax)]
+    side_a = ((P - joint) @ (ax[0][1] - ax[1][1])) > 0  # which side of the bisecting plane at the joint
+    # reference object: the largest other component near the joint
+    cand = [(i + 1, cents[i]) for i in order if i not in ids and sizes[i] >= min_small_vox
+            and np.linalg.norm(cents[i] - joint) < ref_radius]
+    ref_id, ref_c = cand[0] if cand else (None, None)
+    dl = None
+    if fit is not None and ref_c is not None:
+        # bone A's shaft line passes nearer the reference object than bone B's
+        dl = [float(np.linalg.norm((ref_c - m) - ((ref_c - m) @ a) * a)) for m, a in ax]
+        ia = int(np.argmin(dl))
+    else:  # nothing to tell the bones apart by: the bigger bone is A
+        ia = 0 if side_a.sum() >= (~side_a).sum() else 1
     ib = 1 - ia
     a_a, a_b = ax[ia][1], ax[ib][1]  # each points away from the joint
-    ang = float(np.degrees(np.arccos(np.clip(a_a @ a_b, -1, 1))))  # 180 = straight
-    bend = 180.0 - ang
-    if bend >= MIN_BEND_DEG:
+    ang = float(np.degrees(np.arccos(np.clip(a_a @ a_b, -1, 1)))) if fit is not None else None  # 180 = straight
+    bend = None if ang is None else 180.0 - ang
+    if bend is not None and bend >= MIN_BEND_DEG:
         nrm = np.cross(a_a, a_b)
         plane_rule = 'span of the two shaft axes'
-    else:  # straight: plane through bone A's axis and the reference object
-        v = ref_c - joint
-        nrm = np.cross(a_a, v - (v @ a_a) * a_a)
-        plane_rule = 'fallback: bone A axis + reference object'
+    else:  # straight or no shaft: the plane holds the leg axis and one more direction
+        if ref_c is not None:
+            w = ref_c - joint
+            plane_rule = 'leg axis + reference object'
+        else:
+            w = _line_fit(P[::20] - np.outer(P[::20] @ a_a, a_a))[1]
+            plane_rule = 'leg axis + widest spread of the bones'
+        nrm = np.cross(a_a, w - (w @ a_a) * a_a)
     nrm /= np.linalg.norm(nrm)
     r = a_b - a_a
     r -= (r @ nrm) * nrm
     r /= np.linalg.norm(r)
     c = np.cross(nrm, r)
-    if (ref_c - joint) @ c > 0:
+    if ref_c is not None and (ref_c - joint) @ c > 0:
         c, nrm = -c, -nrm
-    # grid over the pair + reference object
-    P = np.vstack([P, np.argwhere(lab == ref_id).astype(np.float64) * 2 + 0.5])
+    # grid over the bones + reference object
+    if ref_c is not None:
+        Pr = np.argwhere(lab == ref_id).astype(np.float64) * 2 + 0.5
+        P = np.vstack([P, Pr])
     R = np.stack([nrm, r, c])
     proj = P @ R.T
     pmin, pmax = proj.min(0) - margin, proj.max(0) + margin
@@ -194,18 +264,32 @@ def joint_frame(hu, spacing_mm, threshold_hu=None, shaft_radius_mm=1.2, ref_radi
     shape[1:] += shape[1:] % 2
     origin = pmin @ R
     key = round(joint @ nrm - pmin[0])
-    Pr = np.argwhere(lab == ref_id).astype(np.float64) * 2 + 0.5
-    pf = np.round(Pr @ nrm - pmin[0]).astype(int)
-    return {'threshold_hu': T, 'n_components': int(n), 'pair_vox_est': int(sizes[pair_id - 1]), 'refine_fits': fits,
-                'ref_object_line_dist_vox': [float(x) for x in dl], 'bone_a_axis_zyx': a_a.tolist(),
-                'bone_a_axis_point_zyx': ax[ia][0].tolist(), 'bone_b_axis_zyx': a_b.tolist(),
-                'bone_b_axis_point_zyx': ax[ib][0].tolist(), 'bone_a_extent_from_joint_vox': ext[ia],
-                'bone_b_extent_from_joint_vox': ext[ib], 'axis_angle_deg': ang, 'bend_deg': bend, 'skew_vox': skew,
-                'joint_centre_zyx': joint.tolist(), 'ref_object_centroid_zyx': ref_c.tolist(),
-                'ref_object_vox_est': int(sizes[ref_id - 1]), 'ref_object_candidates': len(cand), 'plane_rule': plane_rule,
-                'ref_object_frames': [int(pf.min()), int(pf.max())], 'ref_object_largest_frame': int(np.bincount(pf).argmax()),
-                'R': R.tolist(), 'normal_zyx': nrm.tolist(), 'origin_zyx': origin.tolist(), 'shape_srs': shape.tolist(),
-                'keyframe': key, 'background_hu': float(np.median(sub[~closed]))}
+    pf = None if ref_c is None else np.round(Pr @ nrm - pmin[0]).astype(int)
+    frame = {'threshold_hu': T, 'n_components': int(n), 'n_bone_pieces': len(ids), 'bone_vox_est': int(sizes[ids].sum()),
+             'shafts_found': fit is not None, 'refine_fits': fits, 'ref_object_line_dist_vox': dl,
+             'bone_a_axis_zyx': a_a.tolist(), 'bone_a_axis_point_zyx': ax[ia][0].tolist(), 'bone_b_axis_zyx': a_b.tolist(),
+             'bone_b_axis_point_zyx': ax[ib][0].tolist(), 'bone_a_extent_from_joint_vox': ext[ia],
+             'bone_b_extent_from_joint_vox': ext[ib], 'axis_angle_deg': ang, 'bend_deg': bend, 'skew_vox': skew,
+             'joint_centre_zyx': joint.tolist(), 'plane_rule': plane_rule, 'ref_object_candidates': len(cand),
+             'ref_object_centroid_zyx': None if pf is None else ref_c.tolist(),
+             'ref_object_vox_est': None if pf is None else int(sizes[ref_id - 1]),
+             'ref_object_frames': None if pf is None else [int(pf.min()), int(pf.max())],
+             'ref_object_largest_frame': None if pf is None else int(np.bincount(pf).argmax()),
+             'R': R.tolist(), 'normal_zyx': nrm.tolist(), 'origin_zyx': origin.tolist(), 'shape_srs': shape.tolist(),
+             'keyframe': key, 'background_hu': float(np.median(sub[~closed]))}
+    # The keyframe must cut both bones: count each bone's voxels in it (a bone is the side of the joint it lies on)
+    g = _grid(frame, key)
+    idx = np.round((g - 0.5) / 2).astype(int)
+    ok = np.all((idx >= 0) & (idx < np.array(lab.shape)[:, None, None]), axis=0)
+    ok[ok] = np.isin(lab[tuple(idx[:, ok])], np.array(ids) + 1)
+    side = ((g[:, ok].T - joint) @ (a_a - a_b)) > 0
+    cut = [int(side.sum()), int((~side).sum())]
+    frame['keyframe_bone_vox'] = {'bone_a': cut[0], 'bone_b': cut[1]}
+    if min(cut) < MIN_CUT_FRAC * max(cut):
+        sidecar.fail(f'The keyframe cuts one bone and barely the other (bone voxels in it: A {cut[0]}, B {cut[1]}), so '
+                     'the frame is wrong. Scan more of the leg or adjust --threshold-hu; a field that holds only the ends '
+                     'of the bones, or a second bone cut by the edge of the field, gives this')
+    return frame
 
 
 def _grid(frame, s):
@@ -259,6 +343,8 @@ if __name__ == '__main__':
     ap.add_argument('--shaft-radius-mm', type=float, default=1.2)
     ap.add_argument('--ref-radius-mm', type=float, default=3.15)
     ap.add_argument('--min-object-mm3', type=float, default=0.0035)
+    ap.add_argument('--second-bone-frac', type=float, default=0.25, help='smallest second bone piece, as a fraction '
+                    'of the largest; smaller pieces are reference object candidates')
     ap.add_argument('--margin-mm', type=float, default=0.126)
     ap.add_argument('--window', help='lo,hi for the keyframe sheet, e.g. 1000,8000')
     a = ap.parse_args()
@@ -270,7 +356,8 @@ if __name__ == '__main__':
     out.mkdir(parents=True, exist_ok=True)
     hu = np.load(a.src, mmap_mode='r')
     params = {'threshold_hu': a.threshold_hu, 'shaft_radius_mm': a.shaft_radius_mm, 'ref_radius_mm': a.ref_radius_mm,
-                  'min_object_mm3': a.min_object_mm3, 'margin_mm': a.margin_mm}
+                  'min_object_mm3': a.min_object_mm3, 'margin_mm': a.margin_mm,
+                  'second_bone_frac': a.second_bone_frac}
     frame = joint_frame(hu, sp[0], **params)
     stack = reslice(hu, frame)
     np.save(out / 'oriented.npy', stack)
@@ -283,6 +370,8 @@ if __name__ == '__main__':
     render_slices.render(stack[k], out / 'keyframe.jpg', render_slices.vl.parse_window(a.window) if a.window else None,
                          title=f'keyframe {k} of {len(stack)}')
     sidecar.emit(frame=str(out / 'frame.json'), oriented=str(out / 'oriented.npy'), keyframe_image=str(out / 'keyframe.jpg'),
-                 keyframe=k, slices=len(stack), bend_deg=round(frame['bend_deg'], 1), skew_vox=round(frame['skew_vox'], 1),
+                 keyframe=k, slices=len(stack), bend_deg=None if frame['bend_deg'] is None else round(frame['bend_deg'], 1),
+                 skew_vox=None if frame['skew_vox'] is None else round(frame['skew_vox'], 1), shafts_found=frame['shafts_found'],
+                 keyframe_bone_vox=frame['keyframe_bone_vox'],
                  threshold_hu=round(frame['threshold_hu'], 1), plane_rule=frame['plane_rule'],
                  ref_object_frames=frame['ref_object_frames'], oriented_shape=list(stack.shape))

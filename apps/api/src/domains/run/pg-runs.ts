@@ -34,7 +34,7 @@ type Row = {
   position: number | null;
 };
 
-const toInput = (row: typeof inputs.$inferSelect): Input => ({
+export const toInput = (row: typeof inputs.$inferSelect): Input => ({
   id: row.id,
   labId: row.labId,
   source: row.source,
@@ -76,6 +76,8 @@ function toRun({ run, input, position }: Row): Run {
     forkedFrom: run.forkedFrom,
     createdAt: run.createdAt.toISOString(),
     state,
+    usage: { modelCostUsd: run.modelCostUsd, sandboxSeconds: run.sandboxSeconds },
+    toCheck: run.toCheck,
   };
 }
 
@@ -124,11 +126,12 @@ export function pgRunReads(db: PostgresJsDatabase) {
         await db.transaction((tx) => loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId))))
       )[0] ?? null,
 
+    /** Inputs a run can start on: an upload only once completed. */
     async listInputs({ labId, ownerId }: Reader) {
       const rows = await db
         .select()
         .from(inputs)
-        .where(readableInputs({ labId, ownerId }))
+        .where(and(readableInputs({ labId, ownerId }), eq(inputs.status, "ready")))
         .orderBy(desc(inputs.createdAt), asc(inputs.id));
       return rows.map(toInput);
     },

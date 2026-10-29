@@ -19,6 +19,8 @@ export interface ToolContext {
   sandbox(): Promise<Sandbox>;
   /** Live output for people watching: queued, best effort, may be dropped. */
   output(stream: "stdout" | "stderr", text: string): void;
+  /** Charges this call what a provider billed for it, in US dollars; its `tool.result` records the sum (`costUsd`). */
+  bill(usd: number): void;
 }
 
 export interface ToolResult {

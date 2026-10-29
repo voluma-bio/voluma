@@ -1,9 +1,11 @@
 /**
- * Meta intermittently answers a call that carries tools with `404 model_not_found` (about one
- * in five on 2026-10-28, with a key that works a second later). Pi's own retries
- * (`maxRetries`, which `run.ts` sets) cover 408, 429, 5xx and dropped connections but treat a
- * 404 as final, so this retries that one error: only from the `meta` provider, and only when
- * the call failed before streaming any content. Anything else ends the call as before.
+ * Retries a model call that failed on the provider's side before streaming any content, for
+ * every role (the main thread too). Pi's own retries (`maxRetries`, set in `run.ts`) cover 408,
+ * 429, 5xx and dropped connections a few times and treat Meta's `404 model_not_found` as final;
+ * that 404 hit about half of all calls on 2026-10-28, so this wrapper keeps going on those
+ * errors and on that 404 (only from the `meta` provider) with exponential backoff capped at
+ * MAX_DELAY_MS, until BUDGET_MS has passed since the first attempt (Pi's own tries inside an attempt
+ * count against it, but an attempt in flight is not cut short). Then the last error ends the call.
  */
 import {
   type Api,
@@ -15,9 +17,11 @@ import {
   type Model,
   type SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
+import { isTransientProviderError } from "./provider-error.ts";
 
-const ATTEMPTS = 4;
 const BASE_DELAY_MS = 1000;
+const MAX_DELAY_MS = 30_000;
+const BUDGET_MS = 4 * 60_000;
 
 type Stream = (
   model: Model<Api>,
@@ -25,21 +29,17 @@ type Stream = (
   options?: SimpleStreamOptions,
 ) => AssistantMessageEventStream;
 
-/** Pi formats provider errors as `<provider> API error (<status>): <body>`. */
-export function isMetaNotFound(provider: string, message: string | undefined): boolean {
-  return (
-    provider === "meta" &&
-    /API error \(404\)/.test(message ?? "") &&
-    (message ?? "").includes('"code":"model_not_found"')
-  );
-}
-
-/** `stream`, but Meta's transient 404 before any content is retried with exponential backoff. */
-export function retryMetaNotFound(stream: Stream, sleep = wait): Stream {
+/** `stream`, but a transient provider error before any content is retried; `onRetry` logs each. */
+export function retryTransient(
+  stream: Stream,
+  onRetry: (model: Model<Api>, attempt: number, delayMs: number, error: string) => void,
+  sleep = wait,
+): Stream {
   return (model, context, options) => {
     const out = createAssistantMessageEventStream();
     const signal = options?.signal;
     (async () => {
+      const deadline = Date.now() + BUDGET_MS;
       for (let attempt = 1; ; attempt++) {
         let started: AssistantMessageEvent | undefined;
         let content = false;
@@ -55,16 +55,27 @@ export function retryMetaNotFound(stream: Stream, sleep = wait): Stream {
           }
         }
         if (!failed) return;
-        if (
-          attempt >= ATTEMPTS ||
-          signal?.aborted ||
-          !isMetaNotFound(model.provider, failed.errorMessage)
-        ) {
+        const giveUp = () => {
           if (started) out.push(started);
           out.push({ type: "error", reason: failed.stopReason as "error", error: failed });
+        };
+        const delay =
+          Math.min(MAX_DELAY_MS, BASE_DELAY_MS * 2 ** (attempt - 1)) *
+          (0.75 + Math.random() * 0.25);
+        if (
+          Date.now() + delay > deadline ||
+          signal?.aborted ||
+          !isTransientProviderError(model.provider, failed.errorMessage)
+        ) {
+          giveUp();
           return;
         }
-        await sleep(BASE_DELAY_MS * 2 ** (attempt - 1) * (0.75 + Math.random() * 0.25), signal);
+        onRetry(model, attempt, delay, failed.errorMessage ?? "");
+        await sleep(delay, signal);
+        if (signal?.aborted) {
+          giveUp(); // the provider's error, not the abort, is what the caller should see
+          return;
+        }
       }
     })().catch((e) => {
       out.push({

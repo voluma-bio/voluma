@@ -9,7 +9,7 @@
  * holds, and rebuilds the conversation from them (a user message per wake, the recorded
  * answer as the reply), so a resumed run asks from the same context the first run had and
  * a provider's prompt cache keeps hitting the prefix. The context grows by one wake and
- * one answer per wake.
+ * one answer per wake. The `run-started` answer replays the plan it built, if it changed one.
  */
 import type {
   Api,
@@ -143,8 +143,15 @@ function conversation(model: Model<Api>, past: readonly Wake[], point: Wake["poi
   for (const w of past) {
     if (w.error !== undefined) continue;
     messages.push({ role: "user", content: wakeText(w.point), timestamp: at });
+    // `plan` is the one the run-started answer's `change` built (tasks, order and done-when
+    // lines; the instructions stay out, they are large); later wakes would not otherwise see it
+    // (the system prompt's brief is the computed plan). It comes from the log, so every later
+    // wake and a resume replay the same bytes.
     const answer = {
       ...(w.note !== undefined && { note: w.note }),
+      ...(w.plan !== undefined && {
+        plan: w.plan.tasks.map(({ id, dependsOn, doneWhen }) => ({ id, dependsOn, doneWhen })),
+      }),
       decision: w.decision,
     };
     messages.push({
@@ -190,6 +197,9 @@ export function llmMainThread(
         signal,
         onEvent,
       );
+      // A call that failed has no content; its error is the cause, not "answered without JSON".
+      if (reply.stopReason === "error")
+        throw new Error(reply.errorMessage ?? "the model request failed");
       const text = reply.content.flatMap((c) => (c.type === "text" ? [c.text] : [])).join("");
       const json = text.match(/\{[\s\S]*\}/)?.[0];
       if (!json) throw new Error(`the main thread answered without JSON: ${text.slice(0, 200)}`);
