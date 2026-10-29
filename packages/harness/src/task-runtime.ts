@@ -25,9 +25,11 @@ import type {
 } from "@voluma/contracts/task-tools";
 import type { WorkflowPlan } from "@voluma/contracts/workflow";
 import { isSatisfied, transitiveDependents } from "@voluma/workflow";
+import type { CitedScratch, ThreadLayout } from "./layout";
 import { declarationProblem, referenceProblem } from "./output-checks";
 import type { Evidence } from "./ports/evidence";
 import type { PayloadOf, Recorder } from "./recorder";
+import { parseThreadId } from "./thread-id";
 
 /** A plan task as the workflow declares it (`workflowPlanSchema`). */
 export type PlanTask = WorkflowPlan["tasks"][number];
@@ -47,6 +49,11 @@ export interface TaskRuntimeOptions {
   recorder: Recorder;
   evidence: Evidence;
   runId: string;
+  /**
+   * The calling thread's view of the files: evidence it names must be readable through it. The
+   * layout asks `citedScratch` below for a checker's reads of the worker's scratch.
+   */
+  layoutOf(threadId: string, cited: CitedScratch): ThreadLayout;
   /** The thread under which the run's first event is written. */
   rootThreadId: string;
   plan: readonly PlanTask[];
@@ -84,7 +91,7 @@ async function storedOutput(
 }
 
 export function taskRuntime(options: TaskRuntimeOptions) {
-  const { recorder, evidence, runId, rootThreadId, plan, stopThread } = options;
+  const { recorder, evidence, runId, layoutOf, rootThreadId, plan, stopThread } = options;
   const planned = new Map(plan.map((t) => [t.id, t]));
 
   let tail: Promise<unknown> = Promise.resolve();
@@ -103,6 +110,12 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     return folded.value;
   };
   const taskOf = (id: string): FoldedTask | undefined => view().tasks.find((t) => t.id === id);
+
+  /** Whether the attempt a check thread reviews cites this scratch file (`CitedScratch`). */
+  const citedScratch: CitedScratch = (threadId, path) => {
+    const thread = parseThreadId(runId, threadId);
+    return thread.kind === "check" && !!taskOf(thread.taskId)?.citedScratch.includes(path);
+  };
 
   const known = (taskId: string) => {
     const t = planned.get(taskId);
@@ -214,14 +227,22 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     return marked;
   }
 
+  /** Keeps a file the calling thread named, if its own layout lets it read that path. */
   const keep = async (
+    c: Caller,
     taskId: string,
     f: Pick<EvidenceRef, "root" | "path">,
-  ): Promise<EvidenceRef> => ({
-    root: f.root,
-    path: f.path,
-    sha256: await evidence.keep(runId, taskId, f),
-  });
+  ): Promise<EvidenceRef> => {
+    const path = f.root === "scratch" ? `/scratch/${f.path}` : `/outputs/${taskId}/${f.path}`;
+    try {
+      layoutOf(c.threadId, citedScratch).keyOf(path, "read");
+    } catch (error) {
+      throw new Refusal(
+        `Evidence ${path} is not a file you can read: ${error instanceof Error ? error.message : error}`,
+      );
+    }
+    return { root: f.root, path: f.path, sha256: await evidence.keep(runId, taskId, f) };
+  };
 
   const done = (message: string, eventId?: string): TaskToolResult => ({
     message,
@@ -231,6 +252,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
   return {
     view,
     taskOf,
+    citedScratch,
     section,
     setStatus,
     staleDependents,
@@ -297,7 +319,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
             verdict: verdict !== undefined,
             what: "writes checkpoints",
           }),
-        () => Promise.all(input.evidence.map((f) => keep(taskId, f))),
+        () => Promise.all(input.evidence.map((f) => keep(c, taskId, f))),
         async (target, refs) => {
           const id = `${c.threadId}:${c.toolCallId}`;
           await recorder.append(
@@ -338,8 +360,8 @@ export function taskRuntime(options: TaskRuntimeOptions) {
       // Files first, outside the section: a missing one fails the call before anything is
       // appended, and a copy does not hold up the run's other task writes.
       const prepare = async () => ({
-        evidenceRefs: await Promise.all(input.evidence.map((f) => keep(taskId, f))),
-        output: await storedOutput(output, (f) => keep(taskId, f)),
+        evidenceRefs: await Promise.all(input.evidence.map((f) => keep(c, taskId, f))),
+        output: await storedOutput(output, (f) => keep(c, taskId, f)),
       });
       return write(target, prepare, async (t, prepared) => {
         const attemptId = await t.attempt();
