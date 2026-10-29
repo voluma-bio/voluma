@@ -4,13 +4,15 @@
  * clock instead); under them, each value reported so far, and a required one a task ended without.
  * A task's name opens its newest thread. Data: `TaskRow` and `OutputRow` from `runView`.
  */
+import { catalog } from "@voluma/workflow/bundled";
 import { Elapsed } from "./agents";
 import { InfoButton } from "./chat/info-button";
 import { useOpenThread } from "./chat/thread-navigation";
 import type { OutputRow, TaskRow, TaskState } from "./run-model";
 import { spendRows } from "./spend";
 import { formatDuration, formatUsd } from "./status";
-import { taskTitle } from "./workflows";
+
+const { taskTitle } = catalog["mouse-oa"];
 
 const STATE: Record<TaskState, { label: string; dot: string; text?: string }> = {
   running: { label: "Working", dot: "bg-info motion-safe:animate-pulse" },
