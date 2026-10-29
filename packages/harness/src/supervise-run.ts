@@ -127,12 +127,8 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
     layoutOf: layout.forThread,
     rootThreadId,
     plan,
-    stopThread: (id) => {
-      if (pool.started(id)) return pool.abort(id);
-      // Cut off by an earlier claim and not resumed here: nothing runs to abort, so the stop is
-      // stored as its end, or the next claim would resume a thread nobody wants (`supervisor.ts`).
-      const open = threadLog(recorder.events()).threads.get(id);
-      if (open && !open.end) recorder.emit(id, "thread.ended", { status: "cancelled" });
+    abortThread: (id) => {
+      if (pool.started(id)) pool.abort(id);
     },
   });
   const task = (id: string): PlanTask => {

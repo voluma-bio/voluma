@@ -1,8 +1,8 @@
 /**
- * The runtime behind the task tools: every write of a `task`, `checkpoint`, `output`,
+ * The runtime behind the task tools: every write of a `task`, `checkpoint`, `output`, `ask`,
  * `attempt.opened` or `revision.started` event by a thread's tool call, under the rules in
- * `@voluma/contracts/task-tools`. The supervisor writes its own `task` events through
- * `setStatus` and `staleDependents`, inside the same `section`. Its only view of the run is
+ * `@voluma/contracts/task-tools`. The run loop writes its own `task` events through
+ * `setStatus`, `openAttempt` and `stop`, inside the same `section`. Its only view of the run is
  * `fold` of the recorder's events, folded once per change of the log; it keeps no second
  * record. Each decision and its appends run inside one per-run critical section (`section`),
  * whichever thread asks, and the recorder adds an event to the view only once it is stored.
@@ -18,9 +18,11 @@ import type { By, ThreadKind } from "@voluma/contracts/events";
 import { type Folded, type FoldedTask, fold } from "@voluma/contracts/fold";
 import type { EvidenceRef } from "@voluma/contracts/output";
 import type {
+  AskInput,
   ChecklistInput,
   CheckpointInput,
   ReportOutputInput,
+  SubmitTaskInput,
   TaskToolResult,
 } from "@voluma/contracts/task-tools";
 import type { WorkflowPlan } from "@voluma/contracts/workflow";
@@ -29,6 +31,10 @@ import type { ThreadLayout } from "./layout";
 import { declarationProblem, referenceProblem } from "./output-checks";
 import type { Evidence } from "./ports/evidence";
 import type { PayloadOf, Recorder } from "./recorder";
+import { startedFor, threadLog } from "./thread-log";
+
+/** A check thread may ask the main agent this many questions. */
+export const MAX_ASKS = 3;
 
 /** A plan task as the workflow declares it (`workflowPlanSchema`). */
 export type PlanTask = WorkflowPlan["tasks"][number];
@@ -39,6 +45,8 @@ export interface Caller {
   toolCallId: string;
   kind: ThreadKind;
   taskId?: string;
+  /** How many tool calls the reply that made this call holds (`ToolContext.batchSize`). */
+  batchSize: number;
 }
 
 /** The call broke a rule; the message is what the model reads. */
@@ -56,8 +64,11 @@ export interface TaskRuntimeOptions {
   /** The thread under which the run's first event is written. */
   rootThreadId: string;
   plan: readonly PlanTask[];
-  /** Called for a thread whose task a stale mark has just taken from it (a check or a worker). */
-  stopThread(threadId: string): void;
+  /**
+   * Aborts the thread if it runs here; never waits for it. The runtime has stored its end
+   * first (`stop`), so its next write is refused whatever it was doing.
+   */
+  abortThread(threadId: string): void;
 }
 
 const AGENT: By = { kind: "agent" };
@@ -65,6 +76,8 @@ const AGENT: By = { kind: "agent" };
 /** Who a call writes as, and the attempt it writes to. */
 interface Target {
   attempt(): Promise<string>;
+  /** The call opens a new attempt, so the fold's view of the current one does not apply. */
+  fresh: boolean;
 }
 
 type OutputInput = ReportOutputInput["output"];
@@ -90,7 +103,7 @@ async function storedOutput(
 }
 
 export function taskRuntime(options: TaskRuntimeOptions) {
-  const { recorder, evidence, runId, layoutOf, rootThreadId, plan, stopThread } = options;
+  const { recorder, evidence, runId, layoutOf, rootThreadId, plan, abortThread } = options;
   const planned = new Map(plan.map((t) => [t.id, t]));
 
   let tail: Promise<unknown> = Promise.resolve();
@@ -130,25 +143,68 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     by: By,
   ) => recorder.append(threadId, "task", { taskId, attemptId, status, reason, by }, id);
 
-  async function openAttempt(c: Caller, taskId: string): Promise<string> {
-    const id = `${c.threadId}:${c.toolCallId}:open`;
-    await recorder.append(c.threadId, "attempt.opened", { taskId }, id);
-    return id;
+  const attempted = (taskId: string) =>
+    transitiveDependents(plan, taskId).filter((dep) => {
+      const t = taskOf(dep);
+      return t?.attemptId && t.status !== "stale";
+    });
+
+  /**
+   * The one way an attempt opens: `attempt.opened` under `holderThreadId`, id `eventId`. A task
+   * that already had a result and has dependents with an attempt first starts a correction
+   * revision and marks them stale (stopping their live threads). Call inside `section`.
+   */
+  async function openAttempt(taskId: string, holderThreadId: string, eventId: string) {
+    if (taskOf(taskId)?.attemptId && attempted(taskId).length > 0) {
+      await recorder.append(
+        holderThreadId,
+        "revision.started",
+        { reason: "correction", taskId },
+        `${eventId}:revision`,
+      );
+      await staleDependents(
+        holderThreadId,
+        eventId,
+        taskId,
+        `${taskId} was corrected, so this result may no longer hold.`,
+      );
+    }
+    await recorder.append(holderThreadId, "attempt.opened", { taskId }, eventId);
+    return eventId;
   }
 
   /**
-   * Who a call writes as and where. A worker writes only to its own task, and its target
-   * opens a new attempt when the task has none (or is `stale` or `failed` and `redo`),
-   * only once every task this one builds on is satisfied (the rule `readyTasks` uses), so a
-   * refusal later in the call leaves no `attempt.opened` behind. A check thread writes to the
-   * attempt under review; only it sets a verdict.
+   * Stores the thread's end as cancelled, then aborts it without waiting: it is stopped from
+   * this moment, and its own later end is dropped. A thread already stopped is left alone.
+   * Call inside `section`; `eventId` derives from what stops it.
+   */
+  async function stop(threadId: string, eventId: string) {
+    const record = threadLog(recorder.events()).threads.get(threadId);
+    if (record && record.end?.status !== "cancelled") {
+      await recorder.append(threadId, "thread.ended", { status: "cancelled" }, eventId);
+    }
+    abortThread(threadId);
+  }
+
+  /**
+   * Who a call writes as and where. A check thread writes to the attempt under review; only it
+   * sets a verdict. A worker writes only to its own task, the main agent to any it may hold.
+   * The current attempt takes the write when the caller opened it, it has no verdict yet and
+   * the task is not stale or failed. Otherwise the caller's write opens a new attempt, if the
+   * caller is eligible (the task's latest non-stopped worker; the main agent when no worker of
+   * the task is live) and every task this one builds on is satisfied. Nothing is opened until
+   * the call is sure to write (`attempt()`), so a refusal later leaves no `attempt.opened` behind.
    */
   function writeTarget(
     c: Caller,
     taskId: string,
-    { redo, verdict, what }: { redo: boolean; verdict: boolean; what: string },
+    { verdict, what }: { verdict: boolean; what: string },
   ): Target {
     known(taskId);
+    const log = threadLog(recorder.events());
+    if (log.threads.get(c.threadId)?.end?.status === "cancelled") {
+      throw new Refusal("You were stopped; stop here.");
+    }
     if (c.kind === "check") {
       if (c.taskId !== taskId) {
         throw new Refusal(
@@ -162,27 +218,44 @@ export function taskRuntime(options: TaskRuntimeOptions) {
       }
       const attemptId = t.attemptId;
       if (!attemptId) throw new Refusal(`${taskId} has no attempt to check.`);
-      return { attempt: async () => attemptId };
+      return { attempt: async () => attemptId, fresh: false };
     }
-    if (c.kind !== "worker") throw new Refusal(`Only a worker or a check thread ${what}.`);
+    if (c.kind !== "worker" && c.kind !== "main") {
+      throw new Refusal(`Only a worker, the main agent or a check thread ${what}.`);
+    }
     if (verdict) throw new Refusal("Only a check thread sets a verdict.");
-    if (c.taskId !== taskId) {
+    if (c.kind === "worker" && c.taskId !== taskId) {
       throw new Refusal(`You work on ${c.taskId}; you can write only to it, not to ${taskId}.`);
     }
     const t = taskOf(taskId);
     const status = t?.status ?? "pending";
+    if (t?.skipped) throw new Refusal(`${taskId} was skipped: ${t.skipped.reason}`);
     if (status === "under-review") {
       throw new Refusal(`${taskId} is under review: only the check thread writes to it.`);
     }
-    if ((status === "stale" || status === "failed") && !redo) {
-      throw new Refusal(
-        `${taskId} is ${status}${t?.reason ? ` (${t.reason})` : ""}: call checklist in-progress to redo it, then write to it.`,
-      );
+    const attemptId = t?.attemptId;
+    if (
+      attemptId &&
+      log.holders.get(taskId) === c.threadId &&
+      !t.checker &&
+      status !== "stale" &&
+      status !== "failed"
+    ) {
+      return { attempt: async () => attemptId, fresh: false };
     }
-    if (t?.skipped) throw new Refusal(`${taskId} was skipped: ${t.skipped.reason}`);
-    if (t?.attemptId && status !== "stale" && status !== "failed") {
-      const attemptId = t.attemptId;
-      return { attempt: async () => attemptId };
+    const workers = startedFor(log, taskId, "worker").filter((r) => r.end?.status !== "cancelled");
+    if (c.kind === "main") {
+      if (workers.length > 0) {
+        throw new Refusal(
+          `${taskId} has a worker (${workers[0]?.id}); it is not yours to write to.`,
+        );
+      }
+    } else {
+      // Its own `thread.started` may not be stored yet: a thread not in the log is the newest.
+      const latest = workers.at(-1);
+      if (latest && latest.id !== c.threadId && log.threads.has(c.threadId)) {
+        throw new Refusal(`${taskId} is held by a newer worker (${latest.id}); stop here.`);
+      }
     }
     const waiting = known(taskId).dependsOn.filter((d) => !isSatisfied(taskOf(d)));
     if (waiting.length > 0) {
@@ -190,7 +263,10 @@ export function taskRuntime(options: TaskRuntimeOptions) {
         `${taskId} builds on ${waiting.join(", ")}, which has no usable result yet.`,
       );
     }
-    return { attempt: () => openAttempt(c, taskId) };
+    return {
+      attempt: () => openAttempt(taskId, c.threadId, `${c.threadId}:${c.toolCallId}:open`),
+      fresh: true,
+    };
   }
 
   /**
@@ -209,19 +285,23 @@ export function taskRuntime(options: TaskRuntimeOptions) {
 
   /** Stale marks on each transitive dependent that has an attempt and isn't stale yet. */
   async function staleDependents(threadId: string, prefix: string, taskId: string, why: string) {
-    const current = view().tasks;
     const marked: string[] = [];
-    for (const dep of transitiveDependents(plan, taskId)) {
-      const t = current.find((x) => x.id === dep);
-      if (!t?.attemptId || t.status === "stale") continue;
+    for (const dep of attempted(taskId)) {
+      const t = taskOf(dep);
+      if (!t?.attemptId) continue;
       await setStatus(threadId, `${prefix}:stale:${dep}`, dep, t.attemptId, "stale", why, {
         kind: "rule",
         rule: "stale",
       });
       // A stale mark stops the dependent's live thread: a check (no check-result follows) or
       // a worker, which must not redo the task ahead of what it builds on.
-      if (t.status === "under-review" && t.threads.check) stopThread(t.threads.check);
-      else if (t.status === "in-progress" && t.threads.worker) stopThread(t.threads.worker);
+      const holder =
+        t.status === "under-review"
+          ? t.threads.check
+          : t.status === "in-progress"
+            ? t.threads.worker
+            : undefined;
+      if (holder) await stop(holder, `${prefix}:stale:${dep}:end`);
       marked.push(dep);
     }
     return marked;
@@ -256,6 +336,8 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     section,
     setStatus,
     staleDependents,
+    openAttempt,
+    stop,
 
     /** Writes the run's first event, carrying the plan. A resumed run already has it. */
     start: () =>
@@ -301,7 +383,6 @@ export function taskRuntime(options: TaskRuntimeOptions) {
           }
         }
         const target = writeTarget(c, taskId, {
-          redo: status === "in-progress",
           verdict: false,
           what: "sets a task's status",
         });
@@ -310,12 +391,59 @@ export function taskRuntime(options: TaskRuntimeOptions) {
         return done(`${taskId} is ${status}.`, id);
       }),
 
+    /**
+     * The holder hands its task to the check: `task under-review` with the summary as its
+     * reason. The caller ends its turn. Refused with other tools in the batch (the turn would
+     * not end), and while a required output is unreported.
+     */
+    submitTask: (c: Caller, input: SubmitTaskInput) =>
+      section(async () => {
+        const { taskId, summary } = input;
+        if (c.batchSize > 1) throw new Refusal("Call submit_task alone, not with other tools.");
+        const target = writeTarget(c, taskId, { verdict: false, what: "submits tasks" });
+        const missing = target.fresh
+          ? known(taskId)
+              .outputs.filter((o) => o.required)
+              .map((o) => o.id)
+          : (taskOf(taskId)?.missingRequired ?? []);
+        if (missing.length > 0) {
+          throw new Refusal(
+            `${taskId} cannot be submitted: required outputs not reported: ${missing.join(", ")}. Report them with report_output, or report them missing with the reason.`,
+          );
+        }
+        const id = `${c.threadId}:${c.toolCallId}`;
+        await setStatus(
+          c.threadId,
+          id,
+          taskId,
+          await target.attempt(),
+          "under-review",
+          summary,
+          AGENT,
+        );
+        return done(`${taskId} is submitted for checking. Your turn ends here.`, id);
+      }),
+
+    /** A check thread's question to the main agent; it ends its turn and the answer resumes it. */
+    ask: (c: Caller, input: AskInput) =>
+      section(async () => {
+        if (c.kind !== "check" || !c.taskId) throw new Refusal("Only a check thread asks.");
+        if (c.batchSize > 1) throw new Refusal("Call ask alone, not with other tools.");
+        writeTarget(c, c.taskId, { verdict: false, what: "asks" });
+        const asked = threadLog(recorder.events()).threads.get(c.threadId)?.asks.length ?? 0;
+        if (asked >= MAX_ASKS) {
+          throw new Refusal(`You have asked ${MAX_ASKS} questions; give your verdict now.`);
+        }
+        const id = `${c.threadId}:${c.toolCallId}:ask`;
+        await recorder.append(c.threadId, "ask", { question: input.question }, id);
+        return done("Question sent. Your turn ends here; the answer resumes you.", id);
+      }),
+
     checkpoint: (c: Caller, input: CheckpointInput) => {
-      const { taskId, text, verdict, toCheck } = input;
+      const { taskId, text, summary, verdict, toCheck } = input;
       return write(
         () =>
           writeTarget(c, taskId, {
-            redo: false,
             verdict: verdict !== undefined,
             what: "writes checkpoints",
           }),
@@ -329,6 +457,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
               taskId,
               attemptId: await target.attempt(),
               text,
+              summary,
               by: AGENT,
               evidence: refs,
               ...(verdict && { verdict }),
@@ -349,7 +478,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
             "A check thread does not report outputs: put the values you re-derived in your checkpoint's text.",
           );
         }
-        const t = writeTarget(c, taskId, { redo: false, verdict: false, what: "reports outputs" });
+        const t = writeTarget(c, taskId, { verdict: false, what: "reports outputs" });
         const declared = known(taskId).outputs.find((o) => o.id === outputId);
         const problem =
           declarationProblem(declared, { title, output }) ??

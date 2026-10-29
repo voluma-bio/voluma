@@ -7,9 +7,11 @@
  * refuses it the other two.
  */
 import {
+  askInputSchema,
   checklistInputSchema,
   checkpointInputSchema,
   reportOutputInputSchema,
+  submitTaskInputSchema,
 } from "@voluma/contracts/task-tools";
 import { Refusal, type TaskRuntime } from "../task-runtime";
 import type { Tool, ToolContext, ToolResult } from "./tool";
@@ -67,10 +69,43 @@ export function prepareCheckpoint(args: unknown): unknown {
   return out;
 }
 
+/** A success ends the turn; a refusal leaves the thread going. */
+const finish = (r: ToolResult): ToolResult => (r.isError ? r : { ...r, terminate: true });
+
+/** `submit_task` (the holder's) and `ask` (a check thread's): each ends the thread's turn. */
+export function turnEndingTools(runtime: TaskRuntime) {
+  const caller = (ctx: ToolContext) => ({
+    threadId: ctx.threadId,
+    toolCallId: ctx.toolCallId,
+    batchSize: ctx.batchSize,
+    kind: ctx.kind,
+    ...(ctx.taskId && { taskId: ctx.taskId }),
+  });
+  const submitTask: Tool<typeof submitTaskInputSchema> = {
+    name: "submit_task",
+    description:
+      "Hand your task to the check once its outputs are reported (an output you could not make is reported missing, with the reason). Call it alone: it ends your turn, and you are resumed only if the main agent sends you a message.",
+    input: submitTaskInputSchema,
+    sequential: true,
+    execute: async (input, ctx) =>
+      finish(await result(() => runtime.submitTask(caller(ctx), input))),
+  };
+  const ask: Tool<typeof askInputSchema> = {
+    name: "ask",
+    description:
+      "Ask the main agent a question you need answered to decide your verdict (at most 3 per check). Call it alone: it ends your turn, and the answer resumes you.",
+    input: askInputSchema,
+    sequential: true,
+    execute: async (input, ctx) => finish(await result(() => runtime.ask(caller(ctx), input))),
+  };
+  return { submitTask, ask };
+}
+
 export function taskTools(runtime: TaskRuntime, kind: "worker" | "check"): Tool[] {
   const caller = (ctx: ToolContext) => ({
     threadId: ctx.threadId,
     toolCallId: ctx.toolCallId,
+    batchSize: ctx.batchSize,
     kind: ctx.kind,
     ...(ctx.taskId && { taskId: ctx.taskId }),
   });
@@ -85,7 +120,7 @@ export function taskTools(runtime: TaskRuntime, kind: "worker" | "check"): Tool[
   const checkpoint: Tool<typeof checkpointInputSchema> = {
     name: "checkpoint",
     description:
-      'Record a milestone under a task, in plain language, with the files it rests on. Arguments: {taskId, text, evidence: [{root, path}], verdict?, toCheck?: {title, focus?}}; there is no top-level title, and `text` is the milestone. Set toCheck when you are unsure of something a person should look at: `title` says what to look at in a few words, and `text` explains. A check thread sets verdict ("passed" or "needs-review") and puts the values it re-derived in `text`: it does not report outputs.',
+      'Record a milestone under a task, in plain language, with the files it rests on. Arguments: {taskId, text, summary, evidence: [{root, path}], verdict?, toCheck?: {title, focus?}}; there is no top-level title, and `text` is the milestone and `summary` one or two plain sentences for the researcher. Set toCheck when you are unsure of something a person should look at: `title` says what to look at in a few words, and `text` explains. A check thread sets verdict ("passed" or "needs-review") and puts the values it re-derived in `text`: it does not report outputs.',
     input: checkpointInputSchema,
     prepare: prepareCheckpoint,
     sequential: true,

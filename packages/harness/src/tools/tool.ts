@@ -13,6 +13,8 @@ export interface ToolContext {
   kind: ThreadKind;
   taskId?: string;
   toolCallId: string;
+  /** How many tool calls the reply that made this call holds, itself included. */
+  batchSize: number;
   /** Aborts when the run is cancelled; tools must stop what they started. */
   signal: AbortSignal;
   /** The calling thread's sandbox, created on first use. */

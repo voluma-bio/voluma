@@ -112,11 +112,21 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
   const bill = (toolCallId: string, usd: number) =>
     billed.set(toolCallId, (billed.get(toolCallId) ?? 0) + usd);
 
-  const agent = new Agent({
+  // The reply holding the call is in the agent's messages before any of its tools runs.
+  const batchSize = (toolCallId: string): number => {
+    for (const m of agent.state.messages.slice().reverse()) {
+      if (m.role !== "assistant") continue;
+      const calls = m.content.filter((b) => b.type === "toolCall");
+      if (calls.some((b) => b.id === toolCallId)) return calls.length;
+    }
+    return 1;
+  };
+
+  const agent: Agent = new Agent({
     initialState: {
       systemPrompt: options.systemPrompt,
       model: options.model,
-      tools: options.tools.map((tool) => toAgentTool(tool, options, bill)),
+      tools: options.tools.map((tool) => toAgentTool(tool, options, bill, batchSize)),
       messages: [],
     },
     streamFn: options.streamFn,
@@ -395,6 +405,7 @@ function toAgentTool(
   tool: Tool,
   { runId, threadId, kind, taskId, sandbox, recorder }: StartThreadOptions,
   bill: (toolCallId: string, usd: number) => void,
+  batchSize: (toolCallId: string) => number,
 ): AgentTool {
   const { $schema: _, ...jsonSchema } = z.toJSONSchema(tool.input, { io: "input" });
   return {
@@ -411,6 +422,7 @@ function toAgentTool(
         kind,
         ...(taskId && { taskId }),
         toolCallId,
+        batchSize: batchSize(toolCallId),
         signal: signal ?? new AbortController().signal,
         sandbox: () => sandbox(threadId),
         output: (stream, text) =>

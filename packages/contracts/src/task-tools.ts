@@ -148,6 +148,9 @@ export const checkpointInputSchema = z.object({
   text: nonEmpty.describe(
     "A milestone in plain language, e.g. 'Width on the plane square to the shaft: 3.39 mm.'",
   ),
+  summary: nonEmpty.describe(
+    "One or two plain sentences for the researcher: what this milestone shows, without file names or working detail.",
+  ),
   evidence: evidencePaths,
   verdict: z
     .enum(["passed", "needs-review"])
@@ -169,3 +172,19 @@ export type CheckpointInput = z.infer<typeof checkpointInputSchema>;
 
 export const reportOutputInputSchema = outputReportInputSchema.extend({ taskId: taskIdSchema });
 export type ReportOutputInput = z.infer<typeof reportOutputInputSchema>;
+
+/**
+ * `submit_task`: the holder hands its task to the check. Every required output must be reported
+ * (a `missing` one with its reason counts). It ends the thread's turn; call it alone.
+ */
+export const submitTaskInputSchema = z.object({
+  taskId: taskIdSchema,
+  summary: nonEmpty.describe("One or two plain sentences for the researcher: what the task found."),
+});
+export type SubmitTaskInput = z.infer<typeof submitTaskInputSchema>;
+
+/** `ask`: a check thread's question to the main agent (at most 3 per check). It ends the turn; call it alone. */
+export const askInputSchema = z.object({
+  question: nonEmpty.describe("What you need to know to decide your verdict."),
+});
+export type AskInput = z.infer<typeof askInputSchema>;
