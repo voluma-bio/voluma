@@ -1,6 +1,6 @@
 /** Persistent viewport slots. Maximizing changes layout, never the identity of a view. */
 import { Box, Layers, Maximize2, Minimize2 } from "lucide-react";
-import { lazy, Suspense, useState } from "react";
+import { lazy, type ReactNode, Suspense, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import type { DicomSeries } from "./dicom";
 
@@ -38,7 +38,13 @@ const views = [
   },
 ];
 
-export function ViewerWorkspace({ series }: { series?: DicomSeries }) {
+export function ViewerWorkspace({
+  series,
+  children,
+}: {
+  series?: DicomSeries;
+  children?: ReactNode;
+}) {
   const [maximized, setMaximized] = useState<string | null>(null);
   return (
     <section
@@ -47,6 +53,7 @@ export function ViewerWorkspace({ series }: { series?: DicomSeries }) {
     >
       <div className="viewer-heading">
         <h2 className="font-medium">Imaging workspace</h2>
+        {children}
       </div>
       <div className="viewer-grid">
         <Group orientation="vertical" id="viewer-rows">

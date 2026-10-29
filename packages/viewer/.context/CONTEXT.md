@@ -8,6 +8,9 @@ calculate scientific measurements. It is not a validated diagnostic viewer.
 Review supplies only ZIPs downloaded from authorized R2 inputs; there is no
 local-file picker. The parser still takes a `File`, produced by the downloader.
 
+`ViewerWorkspace` renders its `children` beside the Imaging workspace heading.
+Review supplies scan controls there; downloading and series selection stay feature-owned.
+
 ## ZIP → validated series → decoded slice
 
 ```diagram
