@@ -9,7 +9,7 @@ who ends it:
    the sandboxes of this claim, by their `{run, claim}` tags (the claim is a per-claim id: a
    released run's old runner must not kill the sandbox of the runner that reclaimed it).
 2. **A signal.** SIGINT and SIGTERM stop every run (the running command is killed), each
-   reports `released` first, so the run is recovered within the platform's grace period,
+   reports `released` with reason `shutdown` first, so the run is recovered within the platform's grace period,
    then closes its sandbox (no `stopped` event is stored); the service waits up to 30 s. A second signal
    exits 130 at once and leaves the sandboxes (use `sandboxes:clean`). Signal the process
    group (Ctrl-C does); `kill <pid of pnpm>` alone leaves the runner running.
@@ -146,3 +146,26 @@ composes byte-identical text and an edited file reaches only new threads (a thre
 changed is still `ThreadStale`). The main thread still uses `MAIN_SYSTEM`; `lead.md` and
 `review-chat.md` are `status: planned` and unused. Format: `workflows/core/agents/AGENTS.md`. Models stay
 config (`RUNNER_MODEL`, `RUNNER_CHECK_MODEL`, `RUNNER_MAIN_MODEL`).
+
+# Runner: a claim that ends is a cut-off, not a stop
+
+A stop the runtime chooses (shutdown, a heartbeat that wasn't acknowledged for 45 s, a lost
+lease, the server ending the run) aborts the run's signal. Threads see it as `runSignal`
+(`start-thread.ts`): from that moment they store nothing more and write no `thread.ended`,
+exactly as after a crash, and the supervisor writes none for the root. So every
+`thread.ended` is a stop someone chose (a stale dependent stopped, a check's time limit) and
+is never resumed. A self-stop reports `released` with reason `self-stop`; a signal, `shutdown`.
+
+The next claim learns why from `claim.previousClaim` (the API records `lease-expired` itself)
+and writes `claim.started {resumed, after}` right after the root's `thread.started`. The
+supervisor then resumes every worker or check thread whose latest `thread.started` has no
+`thread.ended` (and that this process hasn't started) with the message of
+`supervisor.ts` `cutOffText`, naming the tool the log shows with no result, or the no-tool
+form. A cut-off resume is not a wake, so it spends none of the stuck guard's two and counts
+no redo; the main thread isn't asked. The "You stopped, but ... is not finished" wake is for a
+thread that ended `completed` with its task unfinished. A tool whose `tool.call` event was
+still queued when the runner died isn't named (the log lacks it), so a runner killed within
+milliseconds of a call gets the no-tool form.
+
+The API bounds restarts with one limit (`apps/api/.context/deploy.md`); the runner has no
+restart counter of its own.
