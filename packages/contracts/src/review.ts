@@ -37,6 +37,7 @@
  * derives it.
  */
 import { z } from "zod";
+import { userIdSchema } from "./auth";
 import {
   modelRefSchema,
   outputKindSchema,
@@ -46,6 +47,92 @@ import {
 } from "./ids";
 import { sha256Schema as sha256, storedKeySchema, storedPrefixSchema } from "./r2";
 import { workflowPinSchema } from "./workflow";
+
+/**
+ * Review progress for the latest successfully completed results. The implementation
+ * cutover will replace Run.toCheck with this one summary on Run and ReviewRun, nullable
+ * unless the current execution completed successfully. This preparatory contract does
+ * not change either existing read response. A correction invalidates review completion;
+ * only unchanged task results retain acceptance. Count the latest results' open checks,
+ * never historical revisions. Accepting the last check leaves reviewedAt null: only an
+ * explicit Mark reviewed sets it, and only with no open checks.
+ */
+export const reviewSummarySchema = z
+  .object({
+    revisionId: z.string().min(1),
+    remainingToCheck: z.number().int().nonnegative(),
+    reviewedAt: z.iso.datetime().nullable(),
+  })
+  .refine((r) => r.reviewedAt === null || r.remainingToCheck === 0, {
+    path: ["reviewedAt"],
+    message: "reviewed results cannot have open checks",
+  });
+export type ReviewSummary = z.infer<typeof reviewSummarySchema>;
+
+/**
+ * Cookie-authenticated review commands, returning 200 reviewDecisionResponseSchema.
+ * These definitions prepare the API; handlers and UI are not connected yet.
+ *   POST /api/review/runs/:runId/checks/:checkId/accept
+ *     body acceptCheckRequestSchema (runId and checkId are URL parameters)
+ *   POST /api/review/runs/:runId/mark-reviewed
+ *     body markReviewedRequestSchema
+ *
+ * Both require the latest successfully completed result. 400: invalid request;
+ * 404: unknown/unreadable run or unknown task/check; 403: read-only example;
+ * 409: obsolete baseRevisionId, no current completed result, or Mark reviewed with
+ * open checks. Authentication and Origin rules are the same as run.ts. Readable
+ * non-example runs have shared review state: authorized readers can review them,
+ * including guests reviewing their own runs, not one review state per researcher.
+ *
+ * Accept is idempotent for the same check on the same task result; a duplicate changes
+ * no count and appends no second decision. Mark reviewed is also idempotent for the
+ * same completed revision, preserving its original actor and time. Stale revisions
+ * still conflict on a retry. Neither command changes results, confidence, execution
+ * or task status. Zero checks alone never means Reviewed; viewing/exporting does not
+ * mark a run reviewed. Current-result validation, deduplication, decision append and
+ * summary update are one serialized transaction against correction writes. A failure
+ * persists neither decision nor summary. Use the response/refetch for UI updates:
+ * the existing run SSE connection closes when execution ends.
+ */
+export const acceptCheckRequestSchema = z.object({
+  baseRevisionId: z.string().min(1),
+  taskId: taskIdSchema,
+});
+export type AcceptCheckRequest = z.infer<typeof acceptCheckRequestSchema>;
+
+export const markReviewedRequestSchema = z.object({
+  baseRevisionId: z.string().min(1),
+});
+export type MarkReviewedRequest = z.infer<typeof markReviewedRequestSchema>;
+
+/**
+ * Server-authored decisions in the run log, ignored by the scientific fold. Their
+ * envelope's threadId is `<runId>.reviewer`, a record of human actions, not a model
+ * thread (no thread.started or Pi history). The API supplies by and createdAt from
+ * the authenticated caller and its clock; runner ingest rejects these event types.
+ * Server writes share the run log's seq allocation, without a runner lease.
+ * Decisions and the summary commit atomically. The summary is a projection of these
+ * decisions over the latest folded checks, not a second independently editable count.
+ */
+export const checkAcceptedSchema = z.object({
+  by: userIdSchema,
+  /** The request's baseRevisionId, verified as the latest completed revision. */
+  revisionId: z.string().min(1),
+  taskId: taskIdSchema,
+  checkId: z.string().min(1),
+  /**
+   * The named task's resultRevisionId at acceptance. Carry acceptance forward only
+   * while that result and check identity are unchanged; a rerun must not reuse an
+   * acceptance merely because its check id survived. Keep earlier results and decisions.
+   */
+  resultRevisionId: z.string().min(1),
+});
+
+/** Only explicit Mark reviewed writes this event; acceptance never does. */
+export const reviewCompletedSchema = z.object({
+  by: userIdSchema,
+  revisionId: z.string().min(1),
+});
 
 /** A position or direction in world mm. */
 const vec3 = z.tuple([z.number(), z.number(), z.number()]);
@@ -491,3 +578,32 @@ export const reviewRunSchema = z
     });
   });
 export type ReviewRun = z.infer<typeof reviewRunSchema>;
+
+/**
+ * A successful review command returns the result snapshots with acceptance overlaid,
+ * plus their summary. It reuses the existing read model; its summary is non-null because
+ * commands require successful completion. The later read-response cutover will use the
+ * same shape for ReviewRun, with nullable review while unfinished/failed/cancelled.
+ */
+export const reviewDecisionResponseSchema = reviewRunSchema
+  .safeExtend({ review: reviewSummarySchema })
+  .superRefine((run, ctx) => {
+    const latest = run.revisions.at(-1);
+    if (run.review.revisionId !== latest?.id)
+      ctx.addIssue({
+        code: "custom",
+        path: ["review", "revisionId"],
+        message: "review must describe the latest revision",
+      });
+    const remaining = latest?.tasks.reduce(
+      (n, task) => n + task.checks.filter((check) => check.status === "open").length,
+      0,
+    );
+    if (run.review.remainingToCheck !== remaining)
+      ctx.addIssue({
+        code: "custom",
+        path: ["review", "remainingToCheck"],
+        message: "review count must equal the latest revision's open checks",
+      });
+  });
+export type ReviewDecisionResponse = z.infer<typeof reviewDecisionResponseSchema>;
