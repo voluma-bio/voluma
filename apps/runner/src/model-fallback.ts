@@ -7,7 +7,7 @@
  *
  * Not covered: the main thread's calls (a judgment, the run-start wake) stay on their own
  * model, so a Meta outage that reaches it leaves a failed task unjudged (accepted for a
- * person). Only errors with an HTTP status (see `provider-error.ts`),
+ * person). A fatal error (`isFatalProviderError`) fails the run at once unless a fallback is set. Only errors with an HTTP status (see `provider-error.ts`),
  * connection failures and timeouts count as the model failing.
  *
  * The breaker is per runner process and per primary model. A call that failed after pi's and

@@ -6,7 +6,7 @@
  * - Anthropic (SDK message): `<status> {"type":"error","error":{"type":"<type>",...}}`. An error
  *   sent mid-stream (an overloaded server) is that JSON alone, in any key order, so its
  *   documented `error.type` stands in for a status.
- * - Anthropic's spend cap is a `400` whose message says so (`USAGE_LIMIT`).
+ * - An account out of money has its own message (`OUT_OF_MONEY`).
  * - A connection failure or client timeout: no status.
  */
 
@@ -43,9 +43,13 @@ function statusOf(message: string): number | undefined {
   }
 }
 
-/** Anthropic's spend cap arrives as a 400 `invalid_request_error`, told apart only by its message. */
-const USAGE_LIMIT =
-  /^(?:Server requested [^.]*\. )?400 .*You have reached your specified API usage limits/;
+/**
+ * An account out of money: Anthropic's spend cap and empty balance are `400 invalid_request_error`
+ * and OpenAI's is `429 insufficient_quota`, told apart from a bad request or a rate limit only by
+ * the message.
+ */
+const OUT_OF_MONEY =
+  /You have reached your specified API usage limits|Your credit balance is too low|insufficient_quota/;
 
 /** The model is unusable: key refused, model not found, timeout, rate limit, server error, spend cap. */
 export function isProviderError(message: string | undefined): boolean {
@@ -53,7 +57,7 @@ export function isProviderError(message: string | undefined): boolean {
   const status = statusOf(m);
   return (
     CONNECTION.test(m) ||
-    USAGE_LIMIT.test(m) ||
+    OUT_OF_MONEY.test(m) ||
     (status !== undefined && [401, 402, 403, 404, 408, 429].includes(status)) ||
     (status ?? 0) >= 500
   );
@@ -66,7 +70,7 @@ export function isTransientProviderError(provider: string, message: string | und
   return (
     CONNECTION.test(m) ||
     status === 408 ||
-    status === 429 ||
+    (status === 429 && !OUT_OF_MONEY.test(m)) ||
     (status ?? 0) >= 500 ||
     (provider === "meta" && status === 404 && m.includes('"code":"model_not_found"'))
   );
@@ -75,5 +79,5 @@ export function isTransientProviderError(provider: string, message: string | und
 /** No later call can succeed on this account: key refused, billing, permission or spend cap. */
 export function isFatalProviderError(message: string | undefined): boolean {
   const m = message ?? "";
-  return USAGE_LIMIT.test(m) || [401, 402, 403].includes(statusOf(m) ?? 0);
+  return OUT_OF_MONEY.test(m) || [401, 402, 403].includes(statusOf(m) ?? 0);
 }

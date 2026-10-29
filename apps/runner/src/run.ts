@@ -289,7 +289,8 @@ export async function runClaim(
       selectedOutputs: run.selectedOutputs,
       notes: run.notes,
       providerError: isProviderError,
-      providerFatal: isFatalProviderError,
+      // With a fallback model set, the redo starts on it, so even a refused key is not the end.
+      providerFatal: (error) => !config.fallbackModel && isFatalProviderError(error),
       workflow: definition.files,
       // The commit the files came from: the snapshot's, which a resume keeps.
       workflows: run.workflows.map((pin) => ({ ...pin, commit: definition.commit })),
