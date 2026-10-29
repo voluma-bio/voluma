@@ -1,0 +1,23 @@
+{
+  "name": "@voluma/gateway",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "start": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@voluma/provider-calls": "workspace:*",
+    "drizzle-orm": "^0.45.4",
+    "postgres": "catalog:",
+    "tsx": "^4.23.15",
+    "undici": "^7.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

@@ -123,9 +123,14 @@ when a claim reports (`model cost this claim`), and the API stores it as `runs.m
 On 2026-10-28 the claims' lines summed to the run's `model_cost_usd` and to `spend(events).total`
 ($0.9763 over five claims of one run).
 
-**Spend cap.** `RUNNER_MAX_RUN_COST_USD` (default 5) caps a run's model and SAM dollars across all
-its claims (the claim's `run.usage` plus this claim's meter; sandbox time is not counted). The meter
-calls back on each addition; at the cap `run.ts` stops the run and reports `ended failed` with
+**Spend cap.** `RUNNER_MAX_RUN_COST_USD` caps a run's dollars across all its claims (sandbox time
+is not counted). Unset, the default, there is no cap: test runs have none, so leave it unset on
+staging and locally (spend is still recorded and shown). When set it goes to the API with each
+claim and becomes `runs.cost_cap_usd` (null: no cap),
+which the provider gateway checks too ([apps/gateway](../../gateway/.context/CONTEXT.md)). The runner's
+total is the last heartbeat's `spentUsd` (model cost plus settled gateway calls; an open call
+counts nothing, the gateway holds its reservation itself) plus the model cost not yet sent, checked on each model cost and each acknowledged
+heartbeat; at the cap `run.ts` stops the run and reports `ended failed` with
 `spend cap $X reached at $Y`. Calls in flight are aborted, not waited for. A claim of a run already over the cap stops before its first call. It applies to visitor runs too. The supervisor ends the root thread `cancelled` in the event log while the run row says `failed` with the cap text.
 
 **A main-thread reply that does not parse.** `llmMainThread` escapes raw control characters inside
@@ -222,12 +227,12 @@ with `telemetry`; on Railway search the deploy logs for these:
 
 | grep | Line | Means |
 |---|---|---|
-| `telemetry loop-delay` | once a minute: `p99=…ms max=…ms` | event-loop delay over the last minute. A healthy runner stays well under 1 s; the heartbeat deadline is `LEASE_SECONDS - HEARTBEAT_SECONDS` |
+| `telemetry loop-delay` | once a minute: `p99=…ms max=…ms` | event-loop delay over the last minute; p99 includes the 10 ms sampling interval (an idle loop reads about 11 ms). A healthy runner stays well under 1 s; the heartbeat deadline is `LEASE_SECONDS - HEARTBEAT_SECONDS` |
 | `telemetry heartbeat-rtt` | once a minute: `p50`, `max`, `n` | send-to-answer time of the acknowledged heartbeats (absent when none were acknowledged) |
 | `telemetry loop-block` | when a 100 ms timer fires over 1 s late: `…ms; in flight: <run> <thread> <tool>; …` | the loop was held that long, and the tool calls recorded as started and not yet resulted at that moment (`no tool`: none) |
-| `telemetry unhandledRejection in run` / `uncaughtException in run` | on the error | an error nobody caught, tied to its run: that run stops (`stop: error`) and ends `failed` with the error's message; other runs go on |
+| `[<run>] telemetry unhandledRejection in this run` / `uncaughtException in this run` | on the error | an error nobody caught, tied to its run and logged through its redacting log: that run stops (`stop: error`) and ends `failed` with the error's message; other runs go on. After the run's report is fixed the line says `after its report was fixed` and nothing changes |
 | `telemetry … outside any run` | on the error | tied to no run; logged and the process stays up |
-| `stop: <reason>` | per run, once per reason | every stop reason, with the first (the one that decides the report) named when it differs |
+| `stop: <reason>` | per run, once per reason | every stop reason (the console is the only record of the later ones), with the first (the one that decides the report) named when it differs |
 | `release not stored` / `end not stored` | after a `report` | the server answered 409: the run ended first or the lease is gone |
 
 An error is tied to its run by `AsyncLocalStorage` (`runScope`), set around each `runClaim`: the

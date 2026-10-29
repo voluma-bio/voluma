@@ -98,6 +98,7 @@ def main():
             inputs=[a.iioc_tissue, a.growth_plate_face, a.annotations],
             params=params,
             script='tibial_trabecular.py',
+            surface_axis=0 if name == 'under-plate-boundary.npy' else None,
         )
     vs = sorted(map(int, ann['under_plate_curves']['slices']))
     picks = [vs[i] for i in np.linspace(0, len(vs) - 1, 6).astype(int)]

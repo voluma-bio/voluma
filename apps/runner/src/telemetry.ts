@@ -13,46 +13,61 @@ import { monitorEventLoopDelay, performance } from "node:perf_hooks";
 
 export interface RunScope {
   runId: string;
-  /** Fails the run with this error; set once the run can report. */
-  fail?(error: unknown): void;
+  /** The run's redacting log: the only way an error that mentions its keys may reach the console. */
+  log(line: string): void;
+  /** Tool calls emitted and not yet resulted, by toolCallId -> "thread tool". */
+  inFlight: Map<string, string>;
+  /**
+   * Fails the run with this error; set once the run can report. Returns false when the run's
+   * report is already fixed, so the error changes nothing.
+   */
+  fail?(error: unknown): boolean;
 }
-export const runScope = new AsyncLocalStorage<RunScope>();
+const runScope = new AsyncLocalStorage<RunScope>();
+const scopes = new Set<RunScope>();
+
+/** Runs the body inside the scope; the scope, and so its in-flight calls, ends when the body settles. */
+export function inRunScope<T>(scope: RunScope, body: () => Promise<T>): Promise<T> {
+  scopes.add(scope);
+  return runScope.run(scope, body).finally(() => scopes.delete(scope));
+}
+
+/** The calls in flight across live runs, as "run thread tool". */
+export function inFlightCalls(): string[] {
+  return [...scopes].flatMap((s) => [...s.inFlight.values()].map((label) => `${s.runId} ${label}`));
+}
 
 const REPORT_EVERY_MS = 60_000;
 const SAMPLE_MS = 100;
 const BLOCK_MS = 1_000;
 const ms = (ns: number) => Math.round(ns / 1e6);
 
-const inFlight = new Map<string, string>(); // toolCallId -> "runId thread tool"
 let roundTrips: number[] = [];
 
-/** A tool call started: it is named in a block line until `toolEnded`. */
-export function toolStarted(toolCallId: string, label: string) {
-  inFlight.set(toolCallId, label);
-}
-export function toolEnded(toolCallId: string) {
-  inFlight.delete(toolCallId);
-}
-/** A run is over: its unfinished calls are not in flight any more. */
-export function runEnded(runId: string) {
-  for (const [id, label] of inFlight) if (label.startsWith(`${runId} `)) inFlight.delete(id);
-}
 export function heartbeatRoundTrip(millis: number) {
   roundTrips.push(millis);
 }
 
 /** Installs the process handlers and the timers; call once, at startup. */
 export function startTelemetry(log: (line: string) => void) {
-  const describe = (reason: unknown) =>
-    reason instanceof Error ? (reason.stack ?? reason.message) : String(reason);
+  // Inside an uncaughtException handler a throw kills the process: never throw here.
+  const describe = (reason: unknown) => {
+    try {
+      return reason instanceof Error ? (reason.stack ?? reason.message) : String(reason);
+    } catch {
+      return "(unprintable error)";
+    }
+  };
   const onError = (kind: string) => (reason: unknown) => {
     const scope = runScope.getStore();
     if (!scope) {
       log(`telemetry ${kind} outside any run (process kept alive): ${describe(reason)}`);
       return;
     }
-    log(`telemetry ${kind} in run ${scope.runId}, failing that run: ${describe(reason)}`);
-    scope.fail?.(reason);
+    const failed = scope.fail?.(reason) ?? false;
+    scope.log(
+      `telemetry ${kind} ${failed ? "in this run, failing it" : "after its report was fixed"}: ${describe(reason)}`,
+    );
   };
   process.on("unhandledRejection", onError("unhandledRejection"));
   process.on("uncaughtException", onError("uncaughtException"));
@@ -80,7 +95,7 @@ export function startTelemetry(log: (line: string) => void) {
     last = now;
     if (late > BLOCK_MS)
       log(
-        `telemetry loop-block ${Math.round(late)}ms; in flight: ${[...inFlight.values()].join("; ") || "no tool"}`,
+        `telemetry loop-block ${Math.round(late)}ms; in flight: ${inFlightCalls().join("; ") || "no tool"}`,
       );
   }, SAMPLE_MS).unref();
 }

@@ -53,14 +53,7 @@ import { r2Evidence } from "./r2-evidence.ts";
 import { r2Files } from "./r2-files.ts";
 import { r2Workflows } from "./r2-workflows.ts";
 import { type Redact, redactor } from "./redact.ts";
-import {
-  heartbeatRoundTrip,
-  type RunScope,
-  runEnded,
-  runScope,
-  toolEnded,
-  toolStarted,
-} from "./telemetry.ts";
+import { heartbeatRoundTrip, inRunScope, type RunScope } from "./telemetry.ts";
 import { type ModelRole, usageMeter } from "./usage.ts";
 
 /**
@@ -106,8 +99,8 @@ export function reportFor(
 
 /** Runs the claim inside its `RunScope`, so an uncaught error in its work fails this run alone. */
 export function runClaim(ctx: RunnerContext, claim: Claim, shutdown: AbortSignal): Promise<void> {
-  const scope: RunScope = { runId: claim.run.id };
-  return runScope.run(scope, () => claimBody(ctx, claim, shutdown, scope));
+  const scope: RunScope = { runId: claim.run.id, log: () => {}, inFlight: new Map() };
+  return inRunScope(scope, () => claimBody(ctx, claim, shutdown, scope));
 }
 
 async function claimBody(
@@ -142,6 +135,7 @@ async function claimBody(
     ...(visitor ? [keys.metaApiKey, keys.modal.tokenId, keys.modal.tokenSecret] : []),
   ]);
   const log = (line: string) => ctx.log(`[${runId}] ${redact(line)}`);
+  scope.log = log;
 
   const abort = new AbortController();
   // An object, so TypeScript does not narrow what the callbacks set.
@@ -162,18 +156,20 @@ async function claimBody(
   shutdown.addEventListener("abort", onShutdown);
   if (shutdown.aborted) stop("shutdown");
 
-  // Model and SAM dollars across every claim of the run (the server holds the earlier claims').
-  // Crossing the cap stops everything in flight; the run then ends `failed` naming it.
+  // The run's dollars across every claim, gateway calls included: what the server last
+  // acknowledged (a heartbeat's `spentUsd`) plus the model cost not yet sent. Crossing the cap
+  // stops everything in flight; the run then ends `failed` naming it.
+  let acknowledgedUsd = (run.usage?.modelCostUsd ?? 0) + (run.providerCalls?.costUsd ?? 0);
   let capError: string | undefined;
-  const checkCap = (claimUsd: number) => {
-    const total = (run.usage?.modelCostUsd ?? 0) + claimUsd;
-    if (capError || total < config.maxRunCostUsd) return;
+  const checkCap = () => {
+    const total = acknowledgedUsd + meter.pendingModelCostUsd();
+    if (capError || config.maxRunCostUsd === undefined || total < config.maxRunCostUsd) return;
     capError = `spend cap $${config.maxRunCostUsd} reached at $${total.toFixed(2)}`;
     log(capError);
     stop("spend-cap");
   };
   const meter = usageMeter(checkCap);
-  checkCap(0); // a resumed run that is already over the cap makes no call
+  checkCap(); // a resumed run that is already over the cap makes no call
   const client = runClient(
     config.api,
     { runId, leaseToken },
@@ -184,12 +180,28 @@ async function claimBody(
   let live: LiveBatcher | undefined;
   let session: SandboxSession | undefined;
   let error: string | undefined;
+  // An error nobody caught (`telemetry.ts`) is kept apart from `error`, so a later throw does
+  // not replace it. Once `finally` fixes the report it can change nothing.
+  let uncaught: string | undefined;
+  let reportFixed = false;
   scope.fail = (e) => {
-    error ??= redact(e instanceof Error ? e.message : String(e));
+    if (reportFixed) return false;
+    uncaught ??= redact(e instanceof Error ? e.message : String(e));
     stop("error");
+    return true;
   };
   try {
-    lease = holdLease({ client, meter, onStop: stop, onRoundTrip: heartbeatRoundTrip, log });
+    lease = holdLease({
+      client,
+      meter,
+      onStop: stop,
+      onSpent(usd) {
+        acknowledgedUsd = usd;
+        checkCap();
+      },
+      onRoundTrip: heartbeatRoundTrip,
+      log,
+    });
     log(
       `claimed (${visitor ? "visitor" : "voluma"} keys, model ${workerModel.provider}/${workerModel.id})`,
     );
@@ -245,14 +257,10 @@ async function claimBody(
     });
     const stored = await client.storedEvents();
     live = liveBatcher((frames) => client.live(frames));
-    events = recorder(
+    const recorded = recorder(
       {
         async append(event) {
           await client.append(event);
-          if (event.type === "tool.call") {
-            const { toolCallId, name } = event.payload;
-            toolStarted(toolCallId, `${runId} ${event.threadId.slice(runId.length + 1)} ${name}`);
-          } else if (event.type === "tool.result") toolEnded(event.payload.toolCallId);
           log(eventLine(event, redact));
         },
       },
@@ -262,6 +270,25 @@ async function claimBody(
       stored,
       live,
     );
+    // The in-flight tool calls (`telemetry.ts`) follow the events as they are emitted, not as
+    // the queue delivers them: a stall must name the call that caused it.
+    const track = (threadId: string, type: string, payload: unknown) => {
+      const { toolCallId, name } = payload as { toolCallId: string; name?: string };
+      if (type === "tool.call")
+        scope.inFlight.set(toolCallId, `${threadId.slice(runId.length + 1)} ${name}`);
+      else if (type === "tool.result") scope.inFlight.delete(toolCallId);
+    };
+    events = {
+      ...recorded,
+      emit(threadId, type, payload, id) {
+        track(threadId, type, payload);
+        recorded.emit(threadId, type, payload, id);
+      },
+      append(threadId, type, payload, id) {
+        track(threadId, type, payload);
+        return recorded.append(threadId, type, payload, id);
+      },
+    };
     // A sandbox is named by its thread without the run id: `<taskId>.worker[.n]`, `<taskId>.check[.n]`.
     const sandboxName = (threadId: string) => threadId.slice(runId.length + 1);
     session = sandboxSession(
@@ -422,10 +449,10 @@ async function claimBody(
     log(`failed: ${error}`);
   } finally {
     shutdown.removeEventListener("abort", onShutdown);
-    runEnded(runId);
     // Frozen here: a stop that lands while the run is being closed does not change its report.
     const stopped = why.stopped;
-    const report = reportFor(stopped, stopped === "spend-cap" ? capError : error);
+    reportFixed = true;
+    const report = reportFor(stopped, stopped === "spend-cap" ? capError : (uncaught ?? error));
     abort.abort();
     // An ended run closes its sandbox while the lease is live; a released one reports first.
     if (report?.kind === "ended") await closeSandbox(CLOSE_BUDGET_MS.ended);
