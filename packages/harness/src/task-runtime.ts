@@ -73,6 +73,21 @@ interface Target {
 type OutputInput = ReportOutputInput["output"];
 type FileInput = Extract<OutputInput, { kind: "file" }>["file"];
 
+/** The sandbox path of a file the task names: the inverse of `refOf`. */
+export const pathOf = (taskId: string, f: Pick<EvidenceRef, "root" | "path">): string =>
+  f.root === "scratch" ? `/scratch/${f.path}` : `/outputs/${taskId}/${f.path}`;
+
+/** The `{root, path}` of a sandbox path as a script prints it; only this task's outputs and the scratch have one. */
+export function refOf(taskId: string, path: string): Pick<EvidenceRef, "root" | "path"> {
+  const own = `/outputs/${taskId}/`;
+  if (path.startsWith(own)) return { root: "outputs", path: path.slice(own.length) };
+  if (path.startsWith("/scratch/"))
+    return { root: "scratch", path: path.slice("/scratch/".length) };
+  throw new Refusal(
+    `${path} is not a file this task can report: it is not under ${own} or /scratch/ (a file in another task's outputs is not yours to report).`,
+  );
+}
+
 /** The stored output: the file it names as its own is kept, and carries its sha256. */
 async function storedOutput(
   output: OutputInput,
@@ -257,7 +272,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     taskId: string,
     f: Pick<EvidenceRef, "root" | "path">,
   ): Promise<EvidenceRef> => {
-    const path = f.root === "scratch" ? `/scratch/${f.path}` : `/outputs/${taskId}/${f.path}`;
+    const path = pathOf(taskId, f);
     const layout = layoutOf(c.threadId, (p) => cites(taskId, p));
     try {
       layout.keyOf(path, "read");

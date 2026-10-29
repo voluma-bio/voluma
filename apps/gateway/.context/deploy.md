@@ -1,9 +1,11 @@
 # Deploying the gateway (Railway staging)
 
-## Temporary state (p510 staging plumbing probe)
+## Staging plumbing probe (2026-10-29)
 
-The probe sets `GATEWAY_META_BASE_URL` to a Modal stub tunnel; it was unset before the probe.
-Unset it and terminate the stub sandbox in the same session.
+A stub-SAM run stopped before segmentation; `GATEWAY_META_BASE_URL` was unset again and the stub
+sandbox terminated. Railway routed `/health` by HTTP `Host` in both directions: a request with
+gateway TLS/SNI and API Host reached the API, and one with API TLS/SNI and gateway Host reached
+the gateway. The maximum stream duration was not measured.
 
 ## Setup
 

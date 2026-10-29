@@ -11,3 +11,13 @@ From the skillset move (`workflows/` in this repo):
 
 - **Models per role** are config (`RUNNER_MODEL` worker, `RUNNER_CHECK_MODEL`, `RUNNER_MAIN_MODEL`), not an alias table in `apps/api` as the format doc says, because the runner holds the keys. The per-workflow or per-org override is not built.
 - **The main thread has no tools or sandbox.** At run start it sees the plan, the selection and the user's notes, not the workflow skill's text; the skillset's `microct-lead` names `view_image` and skills it would read, which needs the thread to have a sandbox. The `review` role is not started.
+
+- **An ended run can leave review assets "preparing" when it fails before the conversion worker
+  starts** (e.g. `loadWorkflow` throws on a resume whose log already holds outputs). Create the
+  recorder and worker right after `storedEvents()`, or record `assets.failed` for pending outputs in
+  `finally` when the report is `ended` and the worker is undefined. (review p528 of #184)
+- **A stop between `drain`'s last abort check and its final flush** releases the run with its
+  leftovers already `assets.failed`, so the next claim won't retry them. Have `drain` return whether
+  it closed the queue and rebuild the report only when it didn't. (p528)
+- An output appended after the drain's final scan (a thread stuck past the 5 s wind-down) gets no
+  `assets.*` event. Narrow. (p529)

@@ -18,8 +18,8 @@ height field triangulated over its finite cells, wound so each normal points tow
 then uint32 indices, little-endian. A cropped mask's levels and meshes are in its crop's voxels; the reader adds the crop's offset.
 """
 import json
-import os
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numcodecs
@@ -148,9 +148,23 @@ def write_meshes(arr, kind, out):
     return meshes
 
 
+def publish(src, dst):
+    """Copies src to dst, 32 files at a time (a bucket mount is slow per file), manifest.json last so a copy cut short has none."""
+    files = [p for p in src.rglob('*') if p.is_file() and p.name != 'manifest.json']
+
+    def copy(p):
+        target = dst / p.relative_to(src)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(p, target)
+
+    with ThreadPoolExecutor(32) as pool:
+        list(pool.map(copy, files))
+    shutil.copyfile(src / 'manifest.json', dst / 'manifest.json')
+
+
 def main():
     ap = sidecar.parser(__doc__)
-    ap.add_argument('--source', required=True, type=sidecar.existing, help='a .npy file')
+    ap.add_argument('--source', required=True, type=sidecar.existing, help='a .npy file (any name)')
     ap.add_argument('--as', dest='kind', required=True, choices=KINDS)
     ap.add_argument('--axis', type=int, choices=(0, 1, 2), help='surface only: the array axis the height is measured along')
     ap.add_argument('--int16', action='store_true', help='image only: round a float image to int16 at level 0')
@@ -161,7 +175,7 @@ def main():
         sidecar.fail('--axis goes with --as surface, and only with it: say which array axis the heights are measured along')
     if a.int16 and a.kind != 'image':
         sidecar.fail('--int16 goes with --as image, and only with it')
-    if not src.is_file() or src.suffix != '.npy':
+    if not src.is_file():
         sidecar.fail(f'--as {a.kind} takes a .npy file; {src} is not one')
     arr = np.load(src, mmap_mode='r')
     want = 2 if a.kind == 'surface' else 3
@@ -178,16 +192,16 @@ def main():
         sidecar.fail(f'--int16 rounds a float image; {src} is {arr.dtype}')
     digest = sidecar.sha256_file(src)
 
-    out = Path(a.out) / digest
+    final = Path(a.out) / digest
     mode = {'as': a.kind, 'axis': a.axis, 'int16': a.int16}
-    manifest_path = out / 'manifest.json'
+    manifest_path = final / 'manifest.json'
     try:
         done = json.loads(manifest_path.read_text())
     except (OSError, ValueError):  # none yet, or unreadable: convert
         done = {}
     if done.get('converterVersion') == VERSION:
         if done.get('mode') != mode:
-            sidecar.fail(f'{out} already holds {src} converted as {done.get("mode")}; give --out another directory for {mode}')
+            sidecar.fail(f'{final} already holds {src} converted as {done.get("mode")}; give --out another directory for {mode}')
         print(manifest_path.read_text().strip())
         return
     if a.int16:
@@ -200,8 +214,12 @@ def main():
             sidecar.fail(f'values run from {lo:g} to {hi:g} (or hold NaN): {src} cannot be stored as int16')
     manifest = {'sourceSha256': digest, 'converterVersion': VERSION, 'mode': mode, 'levels': [], 'meshes': []}
 
-    shutil.rmtree(out, ignore_errors=True)  # an interrupted conversion has no manifest: start clean
-    out.mkdir(parents=True)
+    shutil.rmtree(final, ignore_errors=True)  # an interrupted conversion has no manifest: start clean
+    # Built on local disk and copied: zarr writes by renaming, which a cloud-bucket mount (--out in a run) cannot do.
+    # A fixed path, cleared at the start: a conversion killed on timeout leaves no temp dir to pile up on the reused sandbox.
+    out = Path('/tmp/review-assets-work')
+    shutil.rmtree(out, ignore_errors=True)
+    out.mkdir()
     if a.kind == 'surface':
         step = 2 if np.isfinite(arr).sum() > BIG else 1
         verts, faces = height_mesh(np.asarray(arr), a.axis, step)
@@ -223,9 +241,9 @@ def main():
             manifest['meshes'] = write_meshes(arr, a.kind, out)
 
     text = json.dumps(manifest, allow_nan=False)
-    tmp = out / 'manifest.json.tmp'
-    tmp.write_text(text + '\n')
-    os.replace(tmp, manifest_path)  # a reader never sees half a manifest
+    (out / 'manifest.json').write_text(text + '\n')
+    publish(out, final)  # manifest.json last: a reader never sees half a manifest
+    shutil.rmtree(out)
     print(text)
 
 

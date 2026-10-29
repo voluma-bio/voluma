@@ -7,8 +7,9 @@
  *
  * Both directories hold skills, `skills/<name>/SKILL.md` with optional `references/` and
  * `resources/`. `core/` also holds the role files, `agents/<role>.md`, the same for every
- * workflow; the workflow's directory adds `outputs.json` and `tasks.json`. Nothing else in
- * either directory is snapshotted.
+ * workflow; the workflow's directory adds `outputs.json` and `tasks.json`. `core/convert/`
+ * (the review converter, run by the runner's convert sandbox) is snapshotted too; nothing else
+ * in either directory is.
  */
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -139,6 +140,9 @@ async function snapshot(dir: string, { store, prefix, root, commit }: LoadOption
     if (d === dir)
       for (const name of FILES.filter((f) => names.includes(f))) await put(`${d}/${name}`);
     if (names.includes("skills")) for await (const p of walk(root, `${d}/skills`)) await put(p);
+    // The review converter (`core/convert/`), which the runner's convert sandbox runs from /workflow.
+    if (d === CORE && names.includes("convert"))
+      for await (const p of walk(root, `${d}/convert`)) await put(p);
   }
   for (const name of await readdir(join(root, AGENTS_DIR)).catch(() => {
     throw new WorkflowParseError(AGENTS_DIR, "directory not found");
