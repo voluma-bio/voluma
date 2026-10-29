@@ -25,24 +25,11 @@ Example: python label_stats.py --labels labels.npy --out stats.json --ranges ana
 Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
 import json
-import sys
 from pathlib import Path
 
 import numpy as np
+import sidecar
 from scipy import ndimage as ndi
-
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
-# only missing directories are added, so a script imported by another leaves the importer's order alone.
-SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources')) if d not in sys.path]
-try:
-    import sidecar
-except ModuleNotFoundError as e:
-    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
-          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
-    sys.exit(2)
-
 
 CONN26 = np.ones((3, 3, 3))
 DEFAULT_TOUCH_MM = 0.05  # closes a joint gap or a clip that opened a voxel or two, not a wrong bone; scale with voxel size for another scanner

@@ -6,6 +6,7 @@ the printed text: a missing help string is then a fact, not a layout guess.
 """
 import argparse
 import ast
+import os
 import runpy
 import subprocess
 import sys
@@ -14,7 +15,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]  # workflows/
-RESOURCES = ROOT.glob('*/skills/*/resources')  # core and each workflow
+RESOURCES = sorted(ROOT.glob('*/skills/*/resources'))  # core and each workflow
+# What the runner sets in the sandbox (runLayout): every skill's resources/, so scripts import one another by name.
+ENV = {**os.environ, 'PYTHONPATH': os.pathsep.join(map(str, RESOURCES))}
 # Libraries have no CLI by design; sidecar.py also has one, but its docstring is the library's reference.
 LIBRARIES = {'frame.py', 'viewlib.py', 'envelope.py', 'annotations.py', 'sidecar.py'}
 # Every other resources/*.py is a script: a new file is checked without anyone listing it.
@@ -34,7 +37,7 @@ def test_all_scripts_found():
 
 @pytest.mark.parametrize('script', SCRIPTS, ids=ids(SCRIPTS))
 def test_help_exits_0(script):
-    r = subprocess.run([sys.executable, '-I', str(script), '--help'], check=False, capture_output=True, text=True, timeout=120)
+    r = subprocess.run([sys.executable, str(script), '--help'], check=False, capture_output=True, text=True, timeout=120, cwd='/', env=ENV)
     assert r.returncode == 0, r.stderr
     assert r.stdout.startswith('usage:')
 
@@ -59,7 +62,6 @@ def build_parser(script, monkeypatch):
 
     monkeypatch.setattr(argparse.ArgumentParser, 'parse_args', capture)
     monkeypatch.setattr(sys, 'argv', [str(script)])
-    monkeypatch.setattr(sys, 'path', list(sys.path))  # the script's own sys.path setup must not leak between cases
     with pytest.raises(_Captured) as e:
         runpy.run_path(str(script), run_name='__main__')
     return e.value.args[0]

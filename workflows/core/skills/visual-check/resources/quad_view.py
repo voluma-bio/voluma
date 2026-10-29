@@ -31,22 +31,11 @@ import sys
 import time
 from pathlib import Path
 
+import frame as fr
 import matplotlib.patheffects as pe
 import numpy as np
+import viewlib as vl
 from scipy import ndimage as ndi
-
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
-# only missing directories are added, so a script imported by another leaves the importer's order alone.
-SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources')) if d not in sys.path]
-try:
-    import frame as fr
-    import viewlib as vl
-except ModuleNotFoundError as e:
-    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
-          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
-    sys.exit(2)
 
 sl, plt = vl.sidecar, vl.plt
 PANE_COLOURS = ['#ff3b30', '#34c759', '#4f8dff']  # pane 0, 1, 2: its border, its plane in 3D, its line in the other panes

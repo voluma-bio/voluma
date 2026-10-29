@@ -9,24 +9,10 @@ Prints: one JSON line {labels, voxels, previous_labels: {label id: voxels}, now}
 Example: python relabel.py --labels labels.npy --out fixed.npy --at 410,220,130 --to 5 --pieces cand.npy
 Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
-import sys
-from pathlib import Path
 
 import numpy as np
+import sidecar
 from scipy import ndimage as ndi
-
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
-# only missing directories are added, so a script imported by another leaves the importer's order alone.
-SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources')) if d not in sys.path]
-try:
-    import sidecar
-except ModuleNotFoundError as e:
-    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
-          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
-    sys.exit(2)
-
 
 if __name__ == '__main__':
     ap = sidecar.parser(__doc__)
