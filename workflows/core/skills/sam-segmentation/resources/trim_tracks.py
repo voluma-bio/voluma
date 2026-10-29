@@ -12,26 +12,13 @@ labels whose `grid_id` is not `--like`'s, so labels from another orientation of 
 Writes: <out>  the trimmed labels (.npy, the shape of --labels), with its sidecar (the grid of --like, min_conf, only)
 Prints: one JSON line {labels, trimmed: {label: {kept_slices, slices, voxels_before, voxels_after}}}
 Example: python trim_tracks.py --labels small_oriented.npy --out small_trimmed_oriented.npy --like oriented.json --only 61 62 5
-Exits 2 with one sentence on the input it checks; a missing file is a Python error.
+Exits 2 with one sentence on bad input, before writing anything.
 """
 import json
-import sys
 from pathlib import Path
 
 import numpy as np
-
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
-# only missing directories are added, so a script imported by another leaves the importer's order alone.
-SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources')) if d not in sys.path]
-try:
-    import sidecar
-except ModuleNotFoundError as e:
-    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
-          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
-    sys.exit(2)
-
+import sidecar
 
 
 def load_tracks(path):
@@ -66,10 +53,10 @@ def trim(confidence, frame, n_frames, min_conf=0.5):
 
 if __name__ == '__main__':
     ap = sidecar.parser(__doc__)
-    ap.add_argument('--labels', required=True, help='labels .npy from segment_sam, on the oriented stack, stamped with its grid')
+    ap.add_argument('--labels', type=sidecar.existing, required=True, help='labels .npy from segment_sam, on the oriented stack, stamped with its grid')
     ap.add_argument('--out', required=True, help='trimmed labels .npy to write')
-    ap.add_argument('--like', required=True, help='sidecar of the stack segment_sam was given (oriented.json): the grid of the output')
-    ap.add_argument('--tracks', help='segment_sam sidecar (default: <labels>.json)')
+    ap.add_argument('--like', type=sidecar.existing, required=True, help='sidecar of the stack segment_sam was given (oriented.json): the grid of the output')
+    ap.add_argument('--tracks', type=sidecar.existing, help='segment_sam sidecar (default: <labels>.json)')
     ap.add_argument('--only', type=int, nargs='+', help='labels to trim (default: all objects in the sidecar)')
     ap.add_argument('--min-conf', type=float, default=0.5, help='SAM confidence (0-1) a slice needs to be kept')
     a = ap.parse_args()
