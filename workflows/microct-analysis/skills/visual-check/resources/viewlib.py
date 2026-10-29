@@ -4,6 +4,7 @@ Coordinates on every image the agent reads: x is the column (labelled along the 
 left side), both in pixels of the slice. A box is [row0, col0, row1, col1] = [y0, x0, y1, x1], ends inclusive.
 """
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -130,3 +131,49 @@ def frame_cut(vol, frame, axis, index, order=1, cval=0):
     c[axis], c[a], c[b] = index, (n[a] - 1) / 2, (n[b] - 1) / 2
     R = np.array(frame['R_zyx'])
     return sample_plane(vol, lambda p: p, fr.to_scan_points(c, frame), R[a], R[b], 1.0, (n[a], n[b]), order, cval)
+
+
+def unit(v):
+    n = np.linalg.norm(v)
+    return v / n if n else v
+
+
+class View:
+    """A pinhole camera on a rendered image (a 3D pane of `quad_view`). `camera` holds position, focal_point and view_up as
+    zyx voxel indices (`camera_zyx`) and view_angle, the vertical field of view in degrees. Maths is done in mm, in xyz order
+    (a zyx cross product has the opposite handedness to the renderer's)."""
+
+    def __init__(self, camera, size, spacing_zyx_mm):
+        self.sp = np.asarray(spacing_zyx_mm, float)
+        self.w, self.h = size
+        pos = np.asarray(camera['position'], float) * self.sp
+        focal = np.asarray(camera['focal_point'], float) * self.sp
+        up = np.asarray(camera['view_up'], float) * self.sp
+        self.pos = pos[::-1]
+        self.dir = unit(focal[::-1] - self.pos)
+        self.right = unit(np.cross(self.dir, up[::-1]))
+        self.up = np.cross(self.right, self.dir)
+        self.tan = math.tan(math.radians(float(camera['view_angle']) / 2))
+        self.aspect = self.w / self.h
+
+    def ray(self, col, row):
+        nx = (2 * col / self.w - 1) * self.tan * self.aspect
+        ny = (1 - 2 * row / self.h) * self.tan
+        return unit(self.dir + nx * self.right + ny * self.up)
+
+    def project(self, zyx_idx):
+        """Pixel (col, row) of a voxel index, or None if it is behind the camera."""
+        v = np.asarray(zyx_idx, float)[::-1] * self.sp[::-1] - self.pos
+        depth = v @ self.dir
+        if depth <= 0:
+            return None
+        nx = (v @ self.right) / depth / (self.tan * self.aspect)
+        ny = (v @ self.up) / depth / self.tan
+        return (nx + 1) / 2 * self.w, (1 - ny) / 2 * self.h
+
+
+def camera_zyx(cam, spacing):
+    """Camera vectors from mesh coordinates (mm, x,y,z) to scan voxel indices z,y,x. view_up is a direction, so it is
+    scaled the same way (`View` rescales it by the spacing again)."""
+    sp = np.array(spacing)
+    return {k: (np.array(v)[::-1] / sp).tolist() if k != 'view_angle' else v for k, v in cam.items()}

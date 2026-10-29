@@ -16,8 +16,8 @@ instead of assembling the region here).
 
 ## Loop
 
-1. **Render** a view of the structure (`visual-check`). For a 3D pick, render one view with `render_surfaces.py --azimuth DEG` (a 100 px grid) and keep its `.camera.json`: it holds the `image` and `camera` keys of the surface-pick JSON. Place the two ends of a length on a view that shows that length side-on (for a bone, along the shaft, not looking at the joint face): an end-on view foreshortens it and the points land across it.
-2. **Pick** on it: read the pixel from the image's pixel grid, write the picks JSON.
+1. **Render** a quad view of the structure (`visual-check`, `quad_view.py`) and keep its `.view.json`. Pick on the 3D pane for a point on a surface and on a slice pane for a point inside the bone. Place the two ends of a length on a view that shows that length side-on (for a bone, rotate the 3D pane or reslice along the shaft, not looking at the joint face): an end-on view foreshortens it and the points land across it.
+2. **Pick** on it: read the pixel off the whole image (its x, y), write the picks JSON with the `view.json` path.
 3. **Snap**: run `pick.py`. It writes `points.json` and `pick-check.jpg`.
 4. **Look** at `pick-check.jpg` (`view_image`): red x is your pick, green circle is where it landed. Check the circle sits on
    the feature you meant, on the right bone, and on the right side of a ridge. If not, change the pixel and run again.
@@ -30,36 +30,36 @@ region). Look at it before you measure in the region.
 ## pick.py
 
 ```
-python pick.py --picks picks.json (--mask bone.npy | --labels labels.npy --ids 2) --grid hu.json --out DIR [--hu hu.npy]
+python pick.py --picks picks.json (--mask bone.npy | --labels labels.npy --ids 2) --grid hu.json --out DIR
 ```
 
 Output `points.json`: `{"points": [{"name", "zyx": [z, y, x], "snap_distance_mm", "method", ...}], "grid_id",
 "spacing_zyx_mm", "inputs"}`. `zyx` are voxel indices on the scan grid. `snap_distance_mm` is how far the snap moved the pick:
 a large value means the pick was off the bone, so look again.
 
-**Surface pick**, on a 3D render. All vectors are `[z, y, x]` voxel indices on the scan grid, pixels are `[col, row]` from
-the top left of the image:
+**Surface pick**, on the 3D pane of a quad view. Pixels are `[x, y]` from the top left of the whole image:
 
 ```json
-{"mode": "surface", "image": "view.jpg",
- "camera": {"position": [z, y, x], "focal_point": [z, y, x], "view_up": [z, y, x], "view_angle": 30},
+{"mode": "surface", "view": "v/5.view.json",
  "picks": [{"name": "A", "pixel": [500, 400]}]}
 ```
 
-`view_angle` is the vertical field of view in degrees (VTK's). The ray from the pixel goes into the mask and snaps to the first surface
-voxel it meets (`method: ray_hit`). If it misses the bone it takes the surface voxel nearest the ray (`nearest_to_ray`, with
-the distance from the ray as `snap_distance_mm`): a miss is a warning.
+The ray of the 3D pane's camera from the pixel goes into the mask and snaps to the first surface voxel it meets (`method: ray_hit`). If it misses the bone it takes the surface voxel nearest the ray (`nearest_to_ray`, with
+the distance from the ray as `snap_distance_mm`): a miss is a warning. A pixel outside the pane is refused with the pane's pixel range.
 
-**Slice pick**, on an axis-aligned slice. Rows are the lower-numbered of the two remaining axes, columns the higher:
+**Slice pick**, on slice pane 0, 1 or 2 (axis-aligned or oblique; pane 0 is top right, 1 bottom left, 2 bottom right: red, green, blue borders):
 
 ```json
-{"mode": "slice", "axis": 0,
- "picks": [{"name": "P", "index": 250, "pixel": [250, 200], "snap": "nearest"}]}
+{"mode": "slice", "view": "v/5.view.json", "pane": 1,
+ "picks": [{"name": "P", "pixel": [250, 200], "snap": "nearest"}]}
 ```
 
-`snap` is `exact` (the pixel as given), `nearest` (default: nearest mask pixel on the slice), `center` (centroid of the mask on
-the slice; `on_mask` says whether it lies on the bone: a concave section can put it in the marrow), or `edge_min` and `edge_max`
-(the lowest or highest column of the mask on the slice, at the median row).
+`pick-check.jpg` is the pane with the mask outlined (cyan), your pick and its snap. The snap works in the pane's plane, so on an oblique pane the point
+stays on that plane. The mask and the view must be on the same scan grid.
+
+`snap` is `exact` (the pixel as given), `nearest` (default: nearest mask pixel on the pane), `center` (centroid of the mask on
+the pane; `on_mask` says whether it lies on the bone: a concave section can put it in the marrow), or `edge_min` and `edge_max`
+(the lowest or highest column of the mask on the pane, at the median row).
 
 ## region_from_curves.py
 

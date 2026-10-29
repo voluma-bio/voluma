@@ -1,75 +1,35 @@
-"""Snap a pick made on a rendered view or a slice to the bone, as voxel indices on the scan grid, and draw it.
+"""Snap a pick made on a pane of a quad view to the bone, as voxel indices on the scan grid, and draw it.
 
-  surface   a pixel on a 3D render: cast the view's ray into the mask, snap to the first surface voxel it meets
+  surface   a pixel on the 3D pane: cast the pane's camera ray into the mask, snap to the first surface voxel it meets
             (or, if the ray misses, the surface voxel nearest the ray)
-  slice     a pixel on an axis-aligned slice: snap by `center`, `nearest`, `edge_min`, `edge_max` or `exact`
+  slice     a pixel on a slice pane, axis-aligned or oblique: snap by `center`, `nearest`, `edge_min`, `edge_max` or `exact`
 
-Writes points.json (zyx voxel indices on the grid of --grid, snap distance in mm) and pick-check.jpg: the pick (red x)
-and where it snapped (green circle) drawn on the view. Look at pick-check.jpg before you keep the points.
-Input schema: ../SKILL.md.
+Pixels are those of the quad view image (`visual-check/resources/quad_view.py`); its `.view.json` holds each pane's rectangle,
+pixel -> voxel map and camera. Writes points.json (zyx voxel indices on the grid of --grid, snap distance in mm) and
+pick-check.jpg: the pick (red x) and where it snapped (green circle) drawn on the pane. Look at pick-check.jpg before you keep
+the points. Input schema: ../SKILL.md.
 """
 
 import argparse
 import json
-import math
 import sys
 from pathlib import Path
 
-import matplotlib
 import numpy as np
 from scipy import ndimage as ndi
 from scipy.spatial import cKDTree
 
 HERE = Path(__file__).resolve().parent
 # `python -I` puts no script directory on sys.path, so every directory a script imports from is added here.
-sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'microct-core/resources')]
+sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'microct-core/resources'), str(HERE.parents[1] / 'visual-check/resources')]
 try:
-    import sidecar
+    import viewlib as vl
 except ModuleNotFoundError as e:
     sys.exit(f'{e}: this script expects <workflows>/microct-analysis/skills/<skill>/resources/ with '
              '<workflows>/microct-analysis/skills/microct-core/resources/sidecar.py beside it')
 
-
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-
-
-def unit(v):
-    n = np.linalg.norm(v)
-    return v / n if n else v
-
-
-class View:
-    """A pinhole camera on a rendered image. Vectors are zyx voxel indices; maths is done in mm, in xyz order
-    (a zyx cross product has the opposite handedness to the renderer's)."""
-
-    def __init__(self, camera, size, spacing_zyx_mm):
-        self.sp = np.asarray(spacing_zyx_mm, float)
-        self.w, self.h = size
-        pos = np.asarray(camera['position'], float) * self.sp
-        focal = np.asarray(camera['focal_point'], float) * self.sp
-        up = np.asarray(camera['view_up'], float) * self.sp
-        self.pos = pos[::-1]
-        self.dir = unit(focal[::-1] - self.pos)
-        self.right = unit(np.cross(self.dir, up[::-1]))
-        self.up = np.cross(self.right, self.dir)
-        self.tan = math.tan(math.radians(float(camera['view_angle']) / 2))
-        self.aspect = self.w / self.h
-
-    def ray(self, col, row):
-        nx = (2 * col / self.w - 1) * self.tan * self.aspect
-        ny = (1 - 2 * row / self.h) * self.tan
-        return unit(self.dir + nx * self.right + ny * self.up)
-
-    def project(self, zyx_idx):
-        """Pixel (col, row) of a voxel index, or None if it is behind the camera."""
-        v = np.asarray(zyx_idx, float)[::-1] * self.sp[::-1] - self.pos
-        depth = v @ self.dir
-        if depth <= 0:
-            return None
-        nx = (v @ self.right) / depth / (self.tan * self.aspect)
-        ny = (v @ self.up) / depth / self.tan
-        return (nx + 1) / 2 * self.w, (1 - ny) / 2 * self.h
+sidecar = vl.sidecar
+plt = vl.plt
 
 
 def surface_voxels(mask):
@@ -102,24 +62,15 @@ def snap_to_surface(view, mask, tree, surf_idx, col, row):
     return surf_idx[j], float(off[j]), 'nearest_to_ray'
 
 
-def snap_to_slice(mask, axis, index, col, row, mode):
-    if not 0 <= index < mask.shape[axis]:
-        sidecar.fail(f'slice index {index} is outside axis {axis} (0..{mask.shape[axis] - 1})')
-    plane = np.take(mask, index, axis=axis)
-    rest = [i for i in range(3) if i != axis]
+def snap_in_plane(plane, col, row, mode):
+    """Snap the pixel (col, row) of a bool image of the mask on a pane. Returns (row, col, note, on_mask)."""
     on = np.argwhere(plane)
-
-    def to3(r, c):
-        z = [0, 0, 0]
-        z[axis], z[rest[0]], z[rest[1]] = index, r, c
-        return z
-
     if mode == 'exact' or len(on) == 0:
-        note = 'exact' if mode == 'exact' else f'no mask on slice {index}: raw pick kept'
+        note = 'exact' if mode == 'exact' else 'no mask on this pane: raw pick kept'
         r, c = row, col
     elif mode == 'center':
         r, c = on.mean(axis=0)
-        note = f'centroid of the mask on slice {index}'
+        note = 'centroid of the mask on the pane'
     elif mode == 'nearest':
         k = int(np.argmin(((on - [row, col]) ** 2).sum(axis=1)))
         r, c = on[k]
@@ -127,16 +78,21 @@ def snap_to_slice(mask, axis, index, col, row, mode):
     elif mode in ('edge_min', 'edge_max'):
         c = on[:, 1].min() if mode == 'edge_min' else on[:, 1].max()
         r = np.median(on[on[:, 1] == c][:, 0])
-        note = f'{mode[5:]} of the in-plane column axis on slice {index}'
+        note = f'{mode[5:]} column of the mask on the pane, at the median row'
     else:
         sidecar.fail(f'unknown snap mode {mode!r}: use exact, center, nearest, edge_min or edge_max')
-    z = to3(float(r), float(c))
-    on_mask = (
-        bool(plane[round(r), round(c)])
-        if 0 <= round(r) < plane.shape[0] and 0 <= round(c) < plane.shape[1]
-        else False
-    )
-    return z, note, on_mask, rest
+    ri, ci = round(r), round(c)
+    on_mask = bool(plane[ri, ci]) if 0 <= ri < plane.shape[0] and 0 <= ci < plane.shape[1] else False
+    return float(r), float(c), note, on_mask
+
+
+def pane_of(pane, image_px):
+    """The pane's rectangle and its pixel (col, row), from a pixel (col, row) read off the whole quad image."""
+    x0, y0, x1, y1 = pane['rect']
+    col, row = image_px[0] - x0, image_px[1] - y0
+    if not (0 <= col < x1 - x0 and 0 <= row < y1 - y0):
+        sidecar.fail(f'pixel {list(image_px)} is outside this pane, which spans x {x0}-{x1 - 1}, y {y0}-{y1 - 1} of the image')
+    return col, row
 
 
 def load_mask(a):
@@ -157,7 +113,6 @@ def main():
     ap.add_argument('--labels', help='label .npy, with --ids')
     ap.add_argument('--ids', type=int, nargs='+')
     ap.add_argument('--grid', required=True, help='hu.json or a sidecar of the grid the mask is on')
-    ap.add_argument('--hu', help='hu.npy: background for the slice picture (slice mode)')
     ap.add_argument('--out', required=True, help='output directory')
     a = ap.parse_args()
     spec = json.loads(Path(a.picks).read_text())
@@ -166,80 +121,57 @@ def main():
     mask, inputs = load_mask(a)
     if not mask.any():
         sidecar.fail('the mask is empty: nothing to snap to')
+    view = json.loads(Path(spec['view']).read_text())
+    if view['state']['scan']['grid_id'] != g['grid_id']:
+        sidecar.fail(f'{spec["view"]} was drawn on another grid than {a.grid}: the mask and the view must share the scan grid')
+    from PIL import Image
+
+    inputs += [spec['view'], view['image']]
+    img = Image.open(view['image']).convert('RGB')
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     mode = spec.get('mode')
     results = []
-    fig_path = out / 'pick-check.jpg'
     if mode == 'surface':
-        from PIL import Image
-
-        img = Image.open(spec['image']).convert('RGB')
-        inputs.append(spec['image'])
-        view = View(spec['camera'], img.size, sp)
+        pane = view['3d']
+        crop = img.crop(pane['rect'])
+        cam = vl.View(pane['camera'], crop.size, sp)
         box = tuple(slice(max(b.start - 1, 0), b.stop + 1) for b in ndi.find_objects(mask.astype(np.uint8))[0])
         surf = np.argwhere(surface_voxels(mask[box])) + [b.start for b in box]
         tree = cKDTree(surf * sp)
-        fig = plt.figure(figsize=(img.size[0] / 100, img.size[1] / 100))
-        ax = fig.add_axes((0.04, 0.04, 0.95, 0.95))
-        ax.imshow(img)
+        fig = plt.figure(figsize=(crop.size[0] / 100, crop.size[1] / 100))
+        ax = fig.add_axes((0, 0, 1, 1))
+        ax.imshow(crop)
         for p in spec['picks']:
-            col, row = p['pixel']
-            zyx, dist, how = snap_to_surface(view, mask, tree, surf, col, row)
-            results.append(
-                {
-                    'name': p['name'], 'zyx': [int(v) for v in zyx], 'snap_distance_mm': dist, 'method': how, 'pick_pixel': [col, row]
-                }
-            )
-            draw(ax, p['name'], (col, row), view.project(zyx))
+            col, row = pane_of(pane, p['pixel'])
+            zyx, dist, how = snap_to_surface(cam, mask, tree, surf, col, row)
+            results.append({'name': p['name'], 'zyx': [int(v) for v in zyx], 'snap_distance_mm': dist, 'method': how,
+                            'pick_pixel': p['pixel']})
+            draw(ax, p['name'], (col, row), cam.project(zyx))
     elif mode == 'slice':
-        axis = spec['axis']
-        fig = plt.subplots(figsize=(9, 9))[0]
-        ax = fig.axes[0]
-        shown = {}
+        k = spec['pane']
+        pane = view['panes'][k]
+        crop = img.crop(pane['rect'])
+        o, dr, dc = (np.asarray(pane[key], float) for key in ('origin_zyx', 'd_row_zyx', 'd_col_zyx'))
+        n = crop.size[0]
+        r, c = np.mgrid[0:n, 0:n]
+        at = lambda row, col: o + row * dr + col * dc  # scan voxel indices of a pane pixel
+        plane = ndi.map_coordinates(mask.view(np.uint8), np.moveaxis(at(r[..., None], c[..., None]), -1, 0), order=0) > 0
+        fig = plt.figure(figsize=(n / 100, n / 100))
+        ax = fig.add_axes((0, 0, 1, 1))
+        ax.imshow(crop)
+        ax.contour(plane, levels=[0.5], colors='cyan', linewidths=0.8)
         for p in spec['picks']:
-            col, row = p['pixel']
-            zyx, note, on_mask, rest = snap_to_slice(mask, axis, p['index'], col, row, p.get('snap', 'nearest'))
-            d_mm = float(
-                np.linalg.norm(
-                    (np.array(zyx) - [p['index'] if i == axis else (row if i == rest[0] else col) for i in range(3)])
-                    * sp
-                )
-            )
-            results.append(
-                {
-                    'name': p['name'],
-                    'zyx': [round(v, 2) for v in zyx],
-                    'snap_distance_mm': d_mm,
-                    'method': note,
-                    'on_mask': on_mask,
-                    'pick_pixel': [col, row],
-                    'slice_axis': axis,
-                    'slice_index': p['index'],
-                }
-            )
-            shown.setdefault(p['index'], []).append((p['name'], (col, row), (zyx[rest[1]], zyx[rest[0]])))
-        fig.clf()
-        n = len(shown)
-        hu = np.load(a.hu, mmap_mode='r') if a.hu else None
-        if hu is not None:
-            inputs.append(a.hu)
-        fig.set_size_inches(min(7 * n, 20), 7)
-        for k, (index, items) in enumerate(sorted(shown.items())):
-            ax = fig.add_subplot(1, n, k + 1)
-            bg = np.asarray(np.take(hu, index, axis=axis)) if hu is not None else None
-            if bg is not None:
-                ax.imshow(bg, cmap='gray')
-            m = np.take(mask, index, axis=axis)
-            ax.contour(m, levels=[0.5], colors='cyan', linewidths=0.8)
-            if bg is None:
-                ax.imshow(~m, cmap='gray', vmin=-1, vmax=1.2, alpha=0.5)
-            for name, pick, snapped in items:
-                draw(ax, name, pick, snapped)
-            ax.set_title(f'axis {axis} index {index}: columns run along axis {[i for i in range(3) if i != axis][1]}')
-        fig.tight_layout()
+            col, row = pane_of(pane, p['pixel'])
+            rs, cs, note, on_mask = snap_in_plane(plane, col, row, p.get('snap', 'nearest'))
+            zyx = at(rs, cs)
+            results.append({'name': p['name'], 'zyx': [round(float(v), 2) for v in zyx],
+                            'snap_distance_mm': float(np.linalg.norm((zyx - at(row, col)) * sp)), 'method': note,
+                            'on_mask': on_mask, 'pick_pixel': p['pixel'], 'pane': k})
+            draw(ax, p['name'], (col, row), (cs, rs))
     else:
         sidecar.fail('the picks JSON needs "mode": "surface" or "slice"')
+    fig_path = out / 'pick-check.jpg'
     sidecar.save_image(fig, fig_path)
     plt.close(fig)
     (out / 'points.json').write_text(

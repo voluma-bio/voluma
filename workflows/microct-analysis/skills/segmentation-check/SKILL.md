@@ -103,7 +103,7 @@ at its panel and decide:
 Do not keep your label because it is yours, and do not take the classic one because it is the check. Use evidence that does not
 come from either method. Each panel prints the region's assignment and size at the top ("region 2 (0.0056 mm3): yours = 1 femur,
 classic = 8 lateral-sesamoid"): read that line first, then the tinted region in each half, which is the colour of the label that
-side gave it. For a zoom on the region, use the panel, or `render_overlay.py --center <region centre> --names <anatomy.json>`;
+side gave it. For a zoom on the region, use the panel, or `quad_view.py --center <region centre z,y,x> --names <anatomy.json> --zoom 4`;
 `render_crops.py` takes a whole connected piece of bone, so on a region that touches a big bone it shows the big bone. Then the
 3D sheet and the anatomy table.
 
