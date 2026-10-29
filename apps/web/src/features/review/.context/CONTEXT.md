@@ -48,6 +48,7 @@ report. The behavior is:
 | CSV | Available only with a real snapshot; includes task result revision and evidence identifiers, and escapes spreadsheet formulas |
 | Structures | Visibility/opacity are display state, not scientific edits |
 | Viewer layout | Resizable nested panels; maximizing changes CSS layout without remounting the acquired image |
+| Scan toolbar | Scan loading, series selection, progress and errors live in the imaging toolbar, supplied by `index.tsx` as `ViewerWorkspace` children. Revision and Export CSV stay in one header row |
 
 `report/model.ts` re-exports the contract's types and keeps only the correction
 command shapes, whose contract is still to come. `ReviewService` describes the

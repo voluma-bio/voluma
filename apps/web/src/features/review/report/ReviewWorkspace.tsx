@@ -19,7 +19,6 @@ export function ReviewWorkspace({
   navigate,
   backLink,
   viewer,
-  intake,
   notice,
   onResult,
 }: {
@@ -31,7 +30,6 @@ export function ReviewWorkspace({
   navigate(selection: { task?: string; revision?: string }): void;
   backLink: ReactNode;
   viewer: ReactNode;
-  intake?: ReactNode;
   /** Why there are no results, when `run` is absent: loading, no plan yet, unavailable. */
   notice?: string;
   onResult(run: ReviewRun): void;
@@ -83,7 +81,6 @@ export function ReviewWorkspace({
           )}
         </div>
         <div className="run-actions">
-          {intake}
           {run && revision && (
             <>
               <label className="revision-select">
