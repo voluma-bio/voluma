@@ -10,7 +10,7 @@ import { InfoButton } from "./chat/info-button";
 import { useOpenThread } from "./chat/thread-navigation";
 import type { OutputRow, TaskRow, TaskState } from "./run-model";
 import { costLabel, spendRows } from "./spend";
-import { formatDuration, formatUsd } from "./status";
+import { formatDuration } from "./status";
 
 const { taskTitle } = catalog["mouse-oa"];
 
