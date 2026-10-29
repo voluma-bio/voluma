@@ -9,7 +9,7 @@ import { Elapsed } from "./agents";
 import { InfoButton } from "./chat/info-button";
 import { useOpenThread } from "./chat/thread-navigation";
 import type { OutputRow, TaskRow, TaskState } from "./run-model";
-import { spendRows } from "./spend";
+import { costLabel, spendRows } from "./spend";
 import { formatDuration, formatUsd } from "./status";
 
 const { taskTitle } = catalog["mouse-oa"];
@@ -46,7 +46,7 @@ function TaskItem({ task }: { task: TaskRow }) {
   // A working row's clock is on its second line: spend's wall time stops at the last event. A
   // run logged before model usage was recorded has times but no cost.
   const spent = [
-    spend && spend.calls > 0 && formatUsd(spend.costUsd),
+    spend && (spend.calls > 0 || spend.unknownCostCalls > 0) && costLabel(spend),
     spend && !live && formatDuration(spend.wallSeconds),
   ]
     .filter(Boolean)

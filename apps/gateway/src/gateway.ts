@@ -4,8 +4,7 @@
  * `x-api-key` Anthropic's SDK sends). In order: open the token; check the provider, our key (a
  * visitor's token has only its own keys and never falls back to ours), the exact route and, for
  * a model call, the model (read from the top level of the first 4 KB of the body); admit the call against the
- * database (`admitCall`: run live, lease matches, in-flight limit, spend cap, `open` row with
- * its reservation); forward with our key and the caller's auth headers stripped; stream the
+ * database (`admitCall`: run live, lease matches, in-flight limit, spend cap, `open` row); forward with our key and the caller's auth headers stripped; stream the
  * reply back unbuffered while reading usage from its lines; settle the row.
  *
  * Gateway-made refusals are JSON `{error: {type: "gateway", message}}` with 401 (token or run
@@ -34,7 +33,6 @@ import {
   PROVIDERS,
   type Provider,
   providerCalls,
-  reservationUsd,
   type Settled,
   settleCall,
   type TokenSecret,
@@ -45,7 +43,7 @@ import { Agent, fetch } from "undici";
 import { BodyScanner } from "./body.ts";
 import { replyScanner } from "./scan.ts";
 
-/** How much of a model call's body is read for its model name and `max_tokens`. */
+/** How much of a model call's body is read for its model name. */
 const PEEK_BYTES = 4096;
 /** Upstream timeouts: SAM can be quiet for minutes on one call, so the 300 s default would cut it. */
 const UPSTREAM_TIMEOUT_MS = MAX_CALL_MS;
@@ -169,7 +167,6 @@ export function createGateway(deps: GatewayDeps) {
     const peek =
       matched.route.kind === "model" ? await peekBody(req, PEEK_BYTES, scanner) : undefined;
     let model: string | null = null;
-    let reservedUsd = 0;
     if (peek) {
       const fields = scanner.fields();
       if (typeof fields === "string") throw new Refused(403, fields);
@@ -178,7 +175,6 @@ export function createGateway(deps: GatewayDeps) {
         throw new Refused(403, `model ${model} is not allowed on this route`);
       }
       if (!hasPrice(provider, model)) throw new Refused(403, `model ${model} has no price`);
-      reservedUsd = reservationUsd(provider, model, fields.maxTokens) ?? 0;
     } else if (matched.fileId) {
       const [own] = await db
         .select({ id: providerCalls.id })
@@ -200,7 +196,6 @@ export function createGateway(deps: GatewayDeps) {
         route: `${method} ${matched.fileId ? `${matched.route.path}{id}` : upstreamPath}`,
         model,
         instance,
-        reservedUsd,
         visitor: claims.visitorKeys !== undefined,
       });
     } catch (error) {
@@ -319,7 +314,7 @@ export function createGateway(deps: GatewayDeps) {
       : matched.route.kind === "model"
         ? costUsd(provider, model ?? "", seen)
         : 0;
-    // A reply that was cut short, or that reported nothing to price, may still be billed in full.
+    // A reply that was cut short, or that reported nothing to price, may still have been billed: its cost stays unknown (null).
     // An Anthropic or Responses stream that never reached its last event has partial usage.
     const finished = !streamed || provider === "meta" || finalEvent;
     const known = complete && finished && cost !== null;

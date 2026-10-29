@@ -4,10 +4,9 @@
  * reads are named in SQL (`state`, `lease_token`, `lease_expires_at`, `model_cost_usd`,
  * `cost_cap_usd`), so nothing here imports the API.
  *
- * A call's cost is its `cost_usd`, else its reservation: an `open` call or one `cut` with no
- * usage seen may still be billed. Admission counts `open` calls at their reservation (the cap
- * must hold for everything in flight); every reported figure (the run's heartbeat, `providerCalls`,
- * the org's daily total) leaves them out, since they are in flight, not spent.
+ * Nothing is held at admission. A call's cost is its `cost_usd`; a call that ended with none
+ * (`cut`) has an unknown cost, counted apart and never as an amount. Spend is the sum of known
+ * costs, so an `open` call counts nothing until it settles.
  */
 import { and, eq, inArray, ne, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
@@ -23,8 +22,6 @@ export const MAX_CALL_MS = 30 * 60_000;
 /** An `open` row older than this belongs to no live call: the longest call plus a margin for clock drift. */
 export const STALE_OPEN_MINUTES = MAX_CALL_MS / 60_000 + 10;
 
-const heldUsd = sql`coalesce(${providerCalls.costUsd}, ${providerCalls.reservedUsd})`;
-
 export type NewCall = {
   id: string;
   runId: string;
@@ -34,7 +31,6 @@ export type NewCall = {
   route: string;
   model: string | null;
   instance: string;
-  reservedUsd: number;
   /** Whether the token carries a visitor's own keys; the run's `credentials` must agree. */
   visitor: boolean;
 };
@@ -52,8 +48,8 @@ type RunRow = {
 
 /**
  * Locks the run's row (`FOR UPDATE`: a lock per run, not the API's queue lock), checks that the
- * token may still spend, and inserts the `open` row with its reservation in the same transaction,
- * so concurrent calls cannot all pass one check. Returns the refusal, or null once the row exists.
+ * token may still spend, and inserts the `open` row in the same transaction, so concurrent
+ * calls cannot all pass one check. Returns the refusal, or null once the row exists.
  */
 export function admitCall(db: PostgresJsDatabase, call: NewCall): Promise<Refusal | null> {
   return db.transaction(async (tx) => {
@@ -89,12 +85,9 @@ export function admitCall(db: PostgresJsDatabase, call: NewCall): Promise<Refusa
       return { status: 429, reason: `${MAX_IN_FLIGHT} calls are already in flight` };
     }
     if (run.cost_cap_usd !== null) {
-      const spentUsd = run.model_cost_usd + (await heldUsdOfRun(tx, call.runId, true));
-      if (!fits(spentUsd, call.reservedUsd, run.cost_cap_usd)) {
-        return {
-          status: 402,
-          reason: `the run's spend cap of $${run.cost_cap_usd} would be exceeded`,
-        };
+      const spentUsd = run.model_cost_usd + (await knownUsdOfRun(tx, call.runId));
+      if (spentUsd >= run.cost_cap_usd) {
+        return { status: 402, reason: `the run's spend cap of $${run.cost_cap_usd} is reached` };
       }
     }
     await tx.insert(providerCalls).values({
@@ -106,15 +99,10 @@ export function admitCall(db: PostgresJsDatabase, call: NewCall): Promise<Refusa
       model: call.model,
       instance: call.instance,
       status: "open",
-      reservedUsd: call.reservedUsd,
     });
     return null;
   });
 }
-
-/** Whether spend plus a reservation stays within the cap (to the cent's millionth, for floats). */
-export const fits = (spentUsd: number, reservedUsd: number, capUsd: number) =>
-  spentUsd + reservedUsd <= capUsd + 1e-9;
 
 export type Settled = Observed & {
   status: "done" | "failed" | "cut";
@@ -125,7 +113,7 @@ export type Settled = Observed & {
   durationMs: number;
 };
 
-/** Ends a call. Unconditional: whatever the row's status by then, the actual cost replaces the reservation. */
+/** Ends a call. Unconditional: whatever the row's status by then, the row takes the cost, which is null when unknown. */
 export async function settleCall(db: PostgresJsDatabase, id: string, end: Settled) {
   await db
     .update(providerCalls)
@@ -143,7 +131,7 @@ export async function settleCall(db: PostgresJsDatabase, id: string, end: Settle
     .where(eq(providerCalls.id, id));
 }
 
-/** At shutdown, after draining: an instance's own `open` rows become `cut` and keep their reservation. */
+/** At shutdown, after draining: an instance's own `open` rows become `cut` (cost unknown). */
 export async function cutOwnCalls(db: PostgresJsDatabase, instance: string) {
   const cut = await db
     .update(providerCalls)
@@ -172,9 +160,12 @@ export async function cutStaleCalls(db: PostgresJsDatabase) {
 }
 
 export type RunCalls = {
+  /** Known costs only. */
   costUsd: number;
   calls: number;
-  bySandbox: { sandbox: string; costUsd: number; calls: number }[];
+  /** Ended calls whose cost is unknown (`cut`). */
+  unknownCostCalls: number;
+  bySandbox: { sandbox: string; costUsd: number; calls: number; unknownCostCalls: number }[];
 };
 
 /** Each run's calls that are no longer in flight, by sandbox; a run with none is absent. */
@@ -186,33 +177,33 @@ export async function callsOfRuns(db: Db, runIds: string[]): Promise<Map<string,
       runId: providerCalls.runId,
       sandbox: providerCalls.sandbox,
       calls: sql<number>`count(*)::int`,
-      costUsd: sql<number>`coalesce(sum(${heldUsd}), 0)::float8`,
+      costUsd: sql<number>`coalesce(sum(${providerCalls.costUsd}), 0)::float8`,
+      unknownCostCalls: sql<number>`(count(*) FILTER (WHERE ${providerCalls.costUsd} IS NULL))::int`,
     })
     .from(providerCalls)
     .where(and(inArray(providerCalls.runId, runIds), ne(providerCalls.status, "open")))
     .groupBy(providerCalls.runId, providerCalls.sandbox)
     .orderBy(providerCalls.runId, providerCalls.sandbox);
   for (const { runId, ...bySandbox } of rows) {
-    const run = out.get(runId) ?? { costUsd: 0, calls: 0, bySandbox: [] };
+    const run = out.get(runId) ?? { costUsd: 0, calls: 0, unknownCostCalls: 0, bySandbox: [] };
     run.costUsd += bySandbox.costUsd;
     run.calls += bySandbox.calls;
+    run.unknownCostCalls += bySandbox.unknownCostCalls;
     run.bySandbox.push(bySandbox);
     out.set(runId, run);
   }
   return out;
 }
 
-/** SQL for one run's settled provider spend, to add to a query over `runs` (the org's daily total). */
+/** SQL for one run's known provider spend, to add to a query over `runs` (the org's daily total). */
 export const settledUsdOf = (runId: SQL): SQL =>
-  sql`(SELECT coalesce(sum(${heldUsd}), 0) FROM ${providerCalls} WHERE ${providerCalls.runId} = ${runId} AND ${providerCalls.status} <> 'open')`;
+  sql`(SELECT coalesce(sum(${providerCalls.costUsd}), 0) FROM ${providerCalls} WHERE ${providerCalls.runId} = ${runId} AND ${providerCalls.status} <> 'open')`;
 
-/** One run's calls in dollars: each one's cost, else its reservation; `open` calls only when asked. */
-export async function heldUsdOfRun(db: Db, runId: string, withOpen = false): Promise<number> {
+/** One run's known provider spend: the costs of calls that ended with one. */
+export async function knownUsdOfRun(db: Db, runId: string): Promise<number> {
   const [row] = await db
-    .select({ usd: sql<number>`coalesce(sum(${heldUsd}), 0)::float8` })
+    .select({ usd: sql<number>`coalesce(sum(${providerCalls.costUsd}), 0)::float8` })
     .from(providerCalls)
-    .where(
-      and(eq(providerCalls.runId, runId), withOpen ? undefined : ne(providerCalls.status, "open")),
-    );
+    .where(eq(providerCalls.runId, runId));
   return row?.usd ?? 0;
 }
