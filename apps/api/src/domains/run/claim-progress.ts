@@ -8,14 +8,26 @@
  */
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 
-export const PROGRESS_EVENT_TYPES: ReadonlySet<string> = new Set([
+const PROGRESS_EVENT_TYPES: ReadonlySet<string> = new Set([
   "task",
   "checkpoint",
   "output",
   "attempt.opened",
   "revision.started",
   "judgment",
+  // Phase 1's review-asset conversion, after the supervisor: a run whose only work left is
+  // conversion is not stalled. Matched by type string; the event joins the contract with phase 1.
+  "assets.ready",
 ]);
+
+/**
+ * Whether an appended event is run-state progress. The plan every first claim writes
+ * (`revision.started` with reason `run`) is not: a run that crashes its runner right after
+ * planning has made none.
+ */
+export const isProgress = (event: { type: string; payload: unknown }) =>
+  PROGRESS_EVENT_TYPES.has(event.type) &&
+  !(event.type === "revision.started" && (event.payload as { reason?: string }).reason === "run");
 
 /** Consecutive claims that end without progress before the run fails. */
 export const STALLED_CLAIMS_LIMIT = 3;

@@ -71,15 +71,15 @@ export interface SuperviseRunOptions {
 export async function superviseRun(options: SuperviseRunOptions): Promise<Folded> {
   const { runId, layout, recorder, signal } = options;
   const rootThreadId = supervisorThreadId(runId);
-  recorder.emit(rootThreadId, "claim.started", {
-    resumed: options.previousClaim !== undefined,
-    ...(options.previousClaim && { after: options.previousClaim }),
-  });
   // Not a derived id: each invocation of the root is a thread start of its own.
   recorder.emit(rootThreadId, "thread.started", {
     parentThreadId: null,
     kind: "supervisor",
     workflows: options.workflows,
+  });
+  recorder.emit(rootThreadId, "claim.started", {
+    resumed: options.previousClaim !== undefined,
+    ...(options.previousClaim && { after: options.previousClaim }),
   });
   const plan = await runStartPlan({
     runId,

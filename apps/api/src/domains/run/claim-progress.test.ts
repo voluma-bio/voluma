@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { endClaim, stalledError } from "./claim-progress";
+import { endClaim, isProgress, stalledError } from "./claim-progress";
 
 const run = (over: Partial<Parameters<typeof endClaim>[0]> = {}) => ({
   lastProgressSeq: 5,
@@ -40,5 +40,15 @@ describe("stalledError", () => {
       "Stopped: the server lost contact with the runner 3 times in a row without progress (last call: `segment_sam`).",
     );
     expect(stalledError("self-stop", undefined)).not.toContain("last call");
+  });
+});
+
+describe("isProgress", () => {
+  it("counts run-state changes, not model turns, tool calls or the first plan", () => {
+    expect(isProgress({ type: "task", payload: {} })).toBe(true);
+    expect(isProgress({ type: "revision.started", payload: { reason: "correction" } })).toBe(true);
+    expect(isProgress({ type: "revision.started", payload: { reason: "run" } })).toBe(false);
+    expect(isProgress({ type: "tool.call", payload: {} })).toBe(false);
+    expect(isProgress({ type: "message", payload: {} })).toBe(false);
   });
 });

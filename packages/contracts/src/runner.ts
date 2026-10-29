@@ -57,7 +57,7 @@
  * itself (`packages/workflow`), and a resumed run keeps the plan its first `revision.started`
  * recorded (`task-tools.ts`). One limit stops a run that keeps costing its runner: the API
  * counts consecutive claims that end `self-stop` or `lease-expired` without run-state
- * progress (a `task`, `checkpoint`, `output`, `attempt.opened` or `revision.started` event;
+ * progress (a `task`, `checkpoint`, `output`, `attempt.opened` or correcting `revision.started` event;
  * `judgment` while the old supervisor runs), and the run ends `failed` at 3, naming the call
  * that was in flight. Progress resets the count. `shutdown` and `keys-lost` never count, so
  * deploys don't fail a long run.

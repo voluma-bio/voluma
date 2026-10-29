@@ -20,7 +20,7 @@ import type { EventInput, RunEvent } from "@voluma/contracts/events";
 import { and, asc, eq, gt, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { ReadScope } from "../../domain";
-import { PROGRESS_EVENT_TYPES } from "./claim-progress";
+import { isProgress } from "./claim-progress";
 import { assertLease } from "./lease";
 import type { Notifier } from "./notifier";
 import { readableRuns, type Tx, toRunEvent } from "./pg-runs";
@@ -130,7 +130,7 @@ export function pgEventLog(db: PostgresJsDatabase, notifier: Notifier) {
         }
         await projectThread(tx, event, createdAt);
         const [row] = inserted;
-        if (row && PROGRESS_EVENT_TYPES.has(event.type)) {
+        if (row && isProgress(event)) {
           await tx.update(runs).set({ lastProgressSeq: row.seq }).where(eq(runs.id, event.runId));
         }
       });

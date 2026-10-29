@@ -77,7 +77,7 @@ export interface RunnerContext {
 type Stopped = StopReason | "shutdown" | "spend-cap";
 
 /** Which report a stop reason, a clean end or a failure becomes; undefined: say nothing more. */
-function reportFor(
+export function reportFor(
   stopped: Stopped | undefined,
   error?: string,
 ): ReportRequest["report"] | undefined {
