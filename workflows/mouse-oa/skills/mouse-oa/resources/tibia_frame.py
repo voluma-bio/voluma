@@ -1,21 +1,24 @@
-"""Shaft-aligned frame and cropped stack for one long bone (the tibia for the IIOC protocol).
-
-  python tibia_frame.py --hu hu.npy --hu-json hu.json --labels labels.npy --label 2 --out <dir> [--name tibia]
-         [--joint-end low|high] [--shaft-frac 0.5 0.95] [--epiphysis-frac 0 0.2] [--depth-mm 3.15] [--pad-mm 0.105]
+"""Make a shaft-aligned frame and a cropped HU stack and mask for one long bone (the tibia for IIOC).
 
 Fits the bone's shaft axis (centroid regression over the shaft part), takes the epiphyseal long cross-axis as U
 (+U medial and +V anterior come from a sign rule on scan y and `--joint-end` that assumes one knee and one scan orientation:
 confirm it on the QC montage before naming a side), and resamples the HU volume and the bone mask onto that
 frame, cropped around the joint end. Everything the protocol annotates (growth-plate curves, heights, plate
 patches) is indexed on this aligned grid: array axes (W, V, U), W running from the joint end toward the shaft.
-
-Writes <out>/<name>-hu.npy (float32, linear), <name>-mask.npy (bool, nearest), <name>-frame.json, and a QC
-montage. The frame.json (schema and maps in `microct-core/resources/frame.py`) maps aligned indices back to the scan grid, which
+The frame.json (schema and maps in `microct-core/resources/frame.py`) maps aligned indices back to the scan grid, which
 `iioc.py` uses to measure on the scan. This script only fits the axes and the crop; it stays here, not in `orient-joint`,
-because its sign rule (+U medial, +V anterior) and its crop defaults are the mouse tibia protocol's.
+because its sign rule (+U medial, +V anterior) and its crop defaults are the mouse tibia protocol's. Refused: anisotropic
+voxels, HU and labels of different shapes, an empty label, no bone in the epiphysis range.
+
+Writes: <out>/<name>-hu.npy  float32 HU on the aligned grid (linear interpolation, -1000 outside the scan), with its sidecar
+        <out>/<name>-mask.npy  bool bone mask on the aligned grid (nearest), with its sidecar
+        <out>/<name>-frame.json  the frame, mapping aligned indices back to the scan grid
+        <out>/<name>-frame-qc.jpg  six coronal sections of the aligned stack with the mask outlined: check the axes here
+Prints: one JSON line {hu, mask, frame, qc, grid_id, shape_wvu, mask_volume_mm3, shaft_z, epiphysis_z}
+Example: python tibia_frame.py --hu hu.npy --hu-json hu.json --labels labels.npy --label 2 --out tibia/ --joint-end low
+Exits 2 with one sentence on bad input, before writing anything.
 """
 
-import argparse
 import sys
 from pathlib import Path
 
@@ -91,13 +94,13 @@ def crop_for(mask, basis, origin, joint_end, depth_vox, pad):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
+    ap = sidecar.parser(__doc__)
     ap.add_argument('--hu', required=True, help='hu.npy of the scan (float32, Z,Y,X)')
     ap.add_argument('--hu-json', required=True, help='hu.json that scan-intake wrote: grid id and spacing')
     ap.add_argument('--labels', required=True, help='labels.npy on the scan grid')
     ap.add_argument('--label', type=int, required=True, help='label id of the bone (tibia = 2)')
-    ap.add_argument('--out', required=True, help='output directory')
-    ap.add_argument('--name', default='tibia')
+    ap.add_argument('--out', required=True, help='output directory (created)')
+    ap.add_argument('--name', default='tibia', help='prefix of the output files')
     ap.add_argument(
         '--joint-end',
         choices=['low', 'high'],
@@ -108,16 +111,17 @@ def main():
         '--shaft-frac',
         type=float,
         nargs=2,
+        metavar=('FROM', 'TO'),
         default=[0.5, 0.95],
         help='shaft part of the bone, as fractions of its z extent from the joint end',
     )
-    ap.add_argument('--epiphysis-frac', type=float, nargs=2, default=[0.0, 0.2], help='epiphysis part, same fractions')
-    ap.add_argument('--shaft-z', type=int, nargs=2, help='explicit shaft slice range (overrides --shaft-frac)')
-    ap.add_argument('--epiphysis-z', type=int, nargs=2, help='explicit epiphysis slice range')
-    ap.add_argument('--crop-lower-uvw', type=int, nargs=3, help='explicit crop corner in aligned (U, V, W) voxels')
-    ap.add_argument('--crop-shape-uvw', type=int, nargs=3, help='explicit crop size (U, V, W) with --crop-lower-uvw')
-    ap.add_argument('--depth-mm', type=float, default=3.15, help='how far from the joint end the crop reaches')
-    ap.add_argument('--pad-mm', type=float, default=0.105, help='margin around the bone in the crop')
+    ap.add_argument('--epiphysis-frac', type=float, nargs=2, metavar=('FROM', 'TO'), default=[0.0, 0.2], help='epiphysis part, same fractions')
+    ap.add_argument('--shaft-z', type=int, nargs=2, metavar=('FIRST', 'LAST'), help='explicit shaft slice range in scan z (overrides --shaft-frac)')
+    ap.add_argument('--epiphysis-z', type=int, nargs=2, metavar=('FIRST', 'LAST'), help='explicit epiphysis slice range in scan z (overrides --epiphysis-frac)')
+    ap.add_argument('--crop-lower-uvw', type=int, nargs=3, metavar=('U', 'V', 'W'), help='explicit crop corner in aligned voxels (needs --crop-shape-uvw)')
+    ap.add_argument('--crop-shape-uvw', type=int, nargs=3, metavar=('U', 'V', 'W'), help='explicit crop size in aligned voxels (needs --crop-lower-uvw)')
+    ap.add_argument('--depth-mm', type=float, default=3.15, help='mm: how far from the joint end the crop reaches')
+    ap.add_argument('--pad-mm', type=float, default=0.105, help='mm: margin around the bone in the crop')
     a = ap.parse_args()
     g = sidecar.grid(a.hu_json)
     sp = g['spacing_zyx_mm']

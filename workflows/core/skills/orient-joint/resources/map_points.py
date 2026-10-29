@@ -1,23 +1,25 @@
-"""Move points and candidate pieces between the scan grid and the oriented stack, so a small structure found on the scan
-gets a SAM box on the stack.
+"""Map points, or candidate pieces from unlabelled.py, between the scan grid and the oriented stack.
 
-  python map_points.py --frame frame.json --to-oriented z,y,x [z,y,x ...]      scan voxel -> (slice, row, col) on the stack
-  python map_points.py --frame frame.json --to-scan s,r,c [s,r,c ...]         stack (slice, row, col) -> scan voxel
-  python map_points.py --frame frame.json --points-file points.json --out mapped.json      a points file, to the other grid
-  python map_points.py --frame frame.json --pieces cand.npy [--ids 1 3 4] --out boxes.json
+Four modes, give exactly one: `--to-oriented` (scan voxels z,y,x -> stack slice,row,col), `--to-scan` (the reverse),
+`--points-file` (a whole points file to the other grid) and `--pieces` (a SAM box on the stack for each candidate piece).
 
 `--points-file` takes a points file (`pick.py` writes one) made on the frame's grid or on its parent scan grid and writes the same
-points on the other, with that grid's `grid_id`, so a script that refuses a file from the wrong grid accepts the new one. Fractional.
+points on the other, with that grid's `grid_id`, so a script that refuses a file from the wrong grid accepts the new one. Fractional;
+a file on neither grid of the frame is refused.
 
 `--pieces` takes the candidate volume `unlabelled.py` wrote (scan grid, one id per 3D piece) and gives each piece the SAM
 prompt for the stack: `promptFrame` (the slice that cuts most of the piece), `box` ([row0, col0, row1, col1], ends inclusive,
 that piece's extent on that slice), `centre_srs` and the slice range it spans. The box is where the piece is, not yet snapped to
-the bone: pass it to `snap_boxes.py --index <promptFrame>` and look at it. Prints the same table and writes it to `--out`.
-A piece with `voxels_outside_stack` > 0 is cut by the stack's edge and is listed under `cut_by_stack`: its box and its SAM track
-would be truncated, so re-orient with a larger `--margin-mm` before prompting it.
-Points are fractional where the mapping is; a point outside the stack is reported, not clipped.
+the bone: pass it to `snap_boxes.py --index <promptFrame>` and look at it. A piece with `voxels_outside_stack` > 0 is cut by
+the stack's edge and is listed under `cut_by_stack`: its box and its SAM track would be truncated, so re-orient with a larger
+`--margin-mm` before prompting it. Points are fractional where the mapping is; a point outside the stack is reported, not clipped.
+
+Writes: <out>  with --points-file: {grid_id, points: [{name, zyx}]} on the other grid; with --pieces: {id: prompt} (nothing for --to-oriented / --to-scan)
+Prints: --to-oriented: one JSON line {oriented_srs: [[s, r, c], ...]}; --to-scan: {scan_zyx: [[z, y, x], ...]};
+        --points-file: {points, grid_id}; --pieces: {boxes, pieces: {id: prompt}, cut_by_stack: [ids]}
+Example: python map_points.py --frame frame.json --pieces cand.npy --ids 1 3 --out boxes.json
+Exits 2 with one sentence on bad input, before writing anything.
 """
-import argparse
 import json
 import sys
 from pathlib import Path
@@ -66,14 +68,14 @@ def piece_prompt(voxels_zyx, frame):
 
 
 if __name__ == '__main__':
-    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
+    ap = sidecar.parser(__doc__)
     ap.add_argument('--frame', required=True, help='frame.json from orient_joint.py')
-    ap.add_argument('--to-oriented', nargs='+', metavar='z,y,x')
-    ap.add_argument('--to-scan', nargs='+', metavar='s,r,c')
+    ap.add_argument('--to-oriented', nargs='+', metavar='z,y,x', help='scan voxel indices to map onto the stack')
+    ap.add_argument('--to-scan', nargs='+', metavar='s,r,c', help='stack (slice, row, col) positions to map to scan voxels')
     ap.add_argument('--points-file', help='points file on the frame grid or the scan grid: written to --out on the other')
-    ap.add_argument('--pieces', help='candidate volume from unlabelled.py (scan grid)')
-    ap.add_argument('--ids', type=int, nargs='+', help='candidate ids to map (default: all)')
-    ap.add_argument('--out', help='JSON file for --pieces or --points-file')
+    ap.add_argument('--pieces', help='candidate volume .npy from unlabelled.py (scan grid)')
+    ap.add_argument('--ids', type=int, nargs='+', help='with --pieces: the candidate ids to map (default: all)')
+    ap.add_argument('--out', help='JSON file to write; required with --pieces or --points-file')
     a = ap.parse_args()
     if sum(x is not None for x in (a.to_oriented, a.to_scan, a.points_file, a.pieces)) != 1:
         sidecar.fail('give exactly one of --to-oriented, --to-scan, --points-file, --pieces')

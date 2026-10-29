@@ -1,16 +1,17 @@
-"""6-view 3D sheet of a labels volume, one colour per label: the best check for "does one label cover two bones?" and
-for small fragments merged into a big bone.
+"""6-view 3D sheet of a labels volume, one colour per label, to check one label does not cover two bones.
 
-  python render_surfaces.py --labels labels.npy --out sheet.jpg [--frame frame.json] [--names 1=femur,2=tibia | anatomy.json]
-        [--step 3] [--header hu.json]
+Also shows small fragments merged into a big bone. Six views, 60 degrees apart, around the long axis of the limb (with
+`--frame`: the line from bone B's shaft to bone A's, and the first view looks along the oriented stack's normal; without
+it: scan axis 0 points down and the first view looks along axis 2). Surfaces are drawn from a copy downsampled by
+`--step` and cached in `.mesh-cache/` beside `--out`, for display only; never measure from them. The renders are of the
+array's axes, not the world's: left and right are not asserted. Needs pyvista with an off-screen VTK (vtk-osmesa in the
+sandbox).
 
-Six views, 60 degrees apart, around the long axis of the limb (with `--frame`: the line from bone B's shaft to bone A's,
-and the first view looks along the oriented stack's normal; without it: scan axis 0 points down and the first view looks
-along axis 2). Surfaces are drawn from a copy downsampled by `--step` (default: so the longest axis is ~300 voxels) and
-cached in `.mesh-cache/` beside `--out`, for display only; never measure from them. The renders are of the array's axes, not the world's: left and right are not
-asserted. Needs pyvista with an off-screen VTK (vtk-osmesa in the sandbox).
+Writes: <out>  the JPEG sheet (3 x 2 views, a legend of the labels present); .mesh-cache/ beside it
+Prints: one JSON line {image, labels_drawn, step, triangles}
+Example: python render_surfaces.py --labels labels.npy --out sheet.jpg --frame frame.json --names anatomy.json
+Exits 2 with one sentence on bad input, before writing anything.
 """
-import argparse
 import sys
 from pathlib import Path
 
@@ -61,13 +62,13 @@ def render_view(ms, look, up, azimuth, size):
 
 
 if __name__ == '__main__':
-    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--labels', required=True)
-    ap.add_argument('--out', required=True)
-    ap.add_argument('--frame')
+    ap = sl.parser(__doc__)
+    ap.add_argument('--labels', required=True, help='label volume .npy')
+    ap.add_argument('--out', required=True, help='the image to write (.jpg)')
+    ap.add_argument('--frame', help='frame.json from orient_joint.py: orients the views by the bones')
     ap.add_argument('--header', help='hu.json for the spacing (default: the labels sidecar)')
-    ap.add_argument('--names', help='1=femur,2=tibia, or the anatomy.json path for every label name')
-    ap.add_argument('--step', type=int)
+    ap.add_argument('--names', help='label names, 1=femur,2=tibia or an anatomy.json')
+    ap.add_argument('--step', type=int, help='downsampling step in voxels (default: the longest axis / 300, rounded, at least 1)')
     a = ap.parse_args()
     labels = np.load(a.labels, mmap_mode='r')
     sp = sl.grid(a.header or str(sl.sidecar_path(a.labels)))['spacing_zyx_mm']

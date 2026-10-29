@@ -1,22 +1,23 @@
-"""Distal femoral length, width, W/L ratio and landmark frame from four annotated landmarks (deck #26-28).
-
-  python femoral_frame.py --landmarks points-ab.json points-cd.json --hu-json hu.json --labels labels.npy --out <dir> [--label 1]
+"""Measure the distal femur (length, width, W/L ratio) from four landmarks and build its landmark frame.
 
 Landmarks (points files on the scan grid, as `pick.py` writes them, one per view or all four in one; picks named a to d, each name once; zyx voxel indices, floats allowed;
 see ../references/oa-protocol.md for how to place them):
   a  midpoint of the upper line of the intercondylar groove      c  midpoint of the ridge on the lateral condyle
   b  intercondylar notch                                         d  vertex of the medial condyle
-DFL = |a - b|, DFW = |c - d|, W/L = DFW / DFL, all straight 3D distances through physical spacing. The script also
+DFL = |a - b|, DFW = |c - d|, W/L = DFW / DFL (deck #26-28), all straight 3D distances through physical spacing. The script also
 builds a frame (ML from d to c, SI from b to a made perpendicular to ML, normal = ML x SI) and checks the points against
 the femur label. A failed check stops the script (exit 2, nothing written): re-place the points, do not explain the check
-away. The checks: each landmark within MAX_OFF_BONE_MM of femur bone; DFL at least MIN_LENGTH_OVER_WIDTH of DFW (an
-end-on view of the joint face puts a and b across the notch and DFL comes out a third of its size); and SI (b to a)
-pointing toward the shaft.
+away. The checks: each landmark within 0.05 mm of femur bone; DFL at least 0.4 of DFW (an end-on view of the joint face
+puts a and b across the notch and DFL comes out a third of its size); and SI (b to a) pointing toward the shaft. Also
+refused: a missing landmark, coincident landmarks, a points file on another grid.
 
-Writes femoral.json (the result record of `microct-core/resources/sidecar.py`, plus frame and checks); prints it.
+Writes: <out>/femoral.json  the result record of `microct-core/resources/sidecar.py` (ids distal-femoral-length-dfl,
+        distal-femoral-width-dfw, width-length-ratio; mm, mm, 1), plus landmarks_zyx, frame (ml, si, normal vectors, zyx) and checks
+Prints: one JSON line {out, values: {id: {value, unit, definition, kind}}}
+Example: python femoral_frame.py --landmarks points-ab.json points-cd.json --hu-json hu.json --labels labels.npy --out femoral/
+Exits 2 with one sentence on bad input, before writing anything.
 """
 
-import argparse
 import sys
 from pathlib import Path
 
@@ -60,10 +61,10 @@ def off_bone_mm(point, femur, vox):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
+    ap = sidecar.parser(__doc__)
     ap.add_argument('--landmarks', required=True, nargs='+', help='points files on the scan grid that together hold points named a, b, c, d (the points.json files pick.py writes)')
     ap.add_argument('--hu-json', required=True, help='hu.json: spacing and grid')
-    ap.add_argument('--out', required=True)
+    ap.add_argument('--out', required=True, help='output directory (created)')
     ap.add_argument('--labels', required=True, help='labels.npy on the scan grid: the landmarks are checked against the femur')
     ap.add_argument('--label', type=int, default=1, help='femur label id')
     a = ap.parse_args()

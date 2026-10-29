@@ -1,15 +1,21 @@
-"""Distances, label volumes and ratios from a JSON spec, in mm and mm³, each with its definition and inputs.
+"""Compute distances, label volumes and ratios from a JSON spec, in mm and mm³, with definitions and inputs.
 
 Spec (all sections optional; a name is the output id the value is written under, unique across sections; an entry may
 add "kind": "diagnostic" for a number that is not a deliverable):
   {"distances": {"name": {"points_zyx": [[z, y, x], [z, y, x]], "definition": "..."}},
    "volumes":   {"name": {"labels": "labels.npy", "ids": [3], "definition": "..."}},
    "ratios":    {"name": {"num": "name_a", "den": "name_b", "definition": "..."}}}
-Writes the result record described in `microct-core/resources/sidecar.py`. Points are voxel indices on the grid of --grid (fractions allowed). A ratio's unit is "1" when both values share a
-unit, else "<num unit>/<den unit>". Ratios may use distances, volumes and earlier ratios.
+Points are voxel indices on the grid of --grid (fractions allowed). A ratio's unit is "1" when both values share a
+unit, else "<num unit>/<den unit>". Ratios may use distances, volumes and earlier ratios. Refused: a name used twice, a
+distance that is not two [z, y, x] points, a volume without "labels" and "ids", a ratio naming something not computed
+before it, a zero denominator. The record format is in `microct-core/resources/sidecar.py`.
+
+Writes: <out>  the result record {values: {id: {value, unit, definition, kind, ...}}, grid_id, spacing_zyx_mm, inputs}
+Prints: one JSON line {out, values: {id: {value, unit, definition, kind}}}
+Example: python measure.py --spec spec.json --grid hu.json --out measurements.json
+Exits 2 with one sentence on bad input, before writing anything.
 """
 
-import argparse
 import json
 import sys
 from pathlib import Path
@@ -87,8 +93,8 @@ def measure(spec, grid):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--spec', required=True, help='JSON spec, see the file header')
+    ap = sidecar.parser(__doc__)
+    ap.add_argument('--spec', required=True, help='JSON spec, described above')
     ap.add_argument('--grid', required=True, help='hu.json (or any sidecar): the grid the points and labels are on')
     ap.add_argument('--out', required=True, help='JSON file to write')
     a = ap.parse_args()

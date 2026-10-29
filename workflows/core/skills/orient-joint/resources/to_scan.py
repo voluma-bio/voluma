@@ -1,8 +1,12 @@
-"""Map a labels stack made on the oriented grid back to the scan grid (nearest neighbour), so measurements use the scan.
+"""Map a labels stack made on the oriented grid back to the scan grid, so measurements use the scan.
 
-  python to_scan.py --in labels_big_oriented.npy --frame frame.json --header hu.json --out labels_big.npy
+Nearest neighbour. Refuses a frame made on another scan grid than `--header`, and an array whose shape is not the frame's stack.
+
+Writes: <out>  the labels on the scan grid (.npy, the scan's shape), with its sidecar (the scan's grid, inputs, `mapped_from`)
+Prints: one JSON line {labels, shape_zyx, voxels: {label id: voxel count}}
+Example: python to_scan.py --in labels_big_oriented.npy --frame frame.json --header hu.json --out labels_big.npy
+Exits 2 with one sentence on bad input, before writing anything.
 """
-import argparse
 import json
 import sys
 from pathlib import Path
@@ -24,11 +28,11 @@ except ModuleNotFoundError as e:
 
 
 if __name__ == '__main__':
-    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--in', dest='src', required=True)
-    ap.add_argument('--frame', required=True)
-    ap.add_argument('--header', required=True, help='hu.json: gives the scan grid')
-    ap.add_argument('--out', required=True)
+    ap = sidecar.parser(__doc__)
+    ap.add_argument('--in', dest='src', required=True, help='labels .npy on the oriented grid (the frame\'s stack shape)')
+    ap.add_argument('--frame', required=True, help='frame.json from orient_joint.py')
+    ap.add_argument('--header', required=True, help='hu.json: gives the scan grid and shape')
+    ap.add_argument('--out', required=True, help='labels .npy to write, on the scan grid')
     a = ap.parse_args()
     frame = fr.load(a.frame)
     header = json.loads(Path(a.header).read_text())

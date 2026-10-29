@@ -13,7 +13,7 @@ holds rules, not experiment logs.
   (`microct-core/resources/sidecar.py`: grid id, spacing, input sha256, params; it keeps the keys `segment_sam` wrote). One JSON line
   on stdout, never arrays, never NaN (`sidecar.emit` fails on it). A script that reports numbers uses one result record,
   `sidecar.emit_values`: `{id: {value, unit, definition, kind}}`, ids from the caller. A sentence on stderr and exit 2 for what the agent can fix; argument
-  checks come before any work or write. Images are JPEG, at most 2000 px and 1 MiB (`view_image`'s limit): use
+  checks come before any work or write. **`--help` is the contract an agent reads before running a script** (the runner's tool index is its first docstring line): the module docstring is the help text (`sidecar.parser(__doc__)` prints it as written and appends defaults), laid out as one index sentence under 110 characters, the rule it enforces and what it refuses, then `Writes:`, `Prints:`, `Example:` and `Exits 2`; every argument has `help=` naming its unit; a JSON the script reads has its schema in the docstring. `workflows/tests/test_help.py` fails on a script that breaks this. Images are JPEG, at most 2000 px and 1 MiB (`view_image`'s limit): use
   `sidecar.save_image`. Every parameter that is a length is in mm; voxels come from `hu.json`.
 - **Imports:** every script works under `python -I` from any directory, and the same few lines at its top do it: walk up its
   ancestors to the directory holding `core/skills/microct-core`, put its own directory, `microct-core/resources` and any sibling skill's

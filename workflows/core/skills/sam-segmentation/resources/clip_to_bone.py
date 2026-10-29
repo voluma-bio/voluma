@@ -1,15 +1,15 @@
-"""Clip each label to bone: keep only the voxels at or above the segmentation threshold, so volumes count bone and not
-the soft tissue (or marrow) a SAM mask spans.
+"""Clip each label to bone: keep only the voxels at or above the segmentation threshold, so volumes count bone.
 
-  python clip_to_bone.py --hu hu.npy --labels labels.npy --out clipped.npy --threshold-hu <T>
+A SAM mask spans whole bones, marrow and some soft tissue, so its volume is larger than the bone's. Labels keep their ids;
+every voxel below `--threshold-hu` becomes 0. The anatomy reference's volumes are bone voxels, so compare them with this
+output, not with the mask. Never refill the clipped voxels with the nearest label: the tibia refills with fibula. Refuses
+`--hu` and `--labels` of different shapes.
 
-Labels keep their ids. A SAM mask spans whole bones, marrow and some soft tissue: on OA6-1RK the femur mask was 19.3 mm3 and
-its bone 8.5 mm3 (reference 8.4), and the patella mask was 16 mm3 for 2.5 mm3 of bone. The anatomy reference's volumes are
-bone voxels, so compare them with this output, not with the mask. Prints per label the clipped volume and the volume removed.
-Clipping moved bone-voxel Dice by at most 0.002. Never refill the clipped voxels with the nearest label: the tibia
-refills with fibula.
+Writes: <out>  the clipped labels (.npy, the shape of --labels), with its sidecar (the labels' grid, the threshold)
+Prints: one JSON line {labels, volume_mm3: {label id: clipped volume}, removed_mm3: {label id: volume removed}}
+Example: python clip_to_bone.py --hu hu.npy --labels labels.npy --out clipped.npy --threshold-hu 2500
+Exits 2 with one sentence on bad input, before writing anything.
 """
-import argparse
 import sys
 from pathlib import Path
 
@@ -29,11 +29,11 @@ except ModuleNotFoundError as e:
 
 
 if __name__ == '__main__':
-    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--hu', required=True)
-    ap.add_argument('--labels', required=True)
-    ap.add_argument('--out', required=True)
-    ap.add_argument('--threshold-hu', type=float, required=True)
+    ap = sidecar.parser(__doc__)
+    ap.add_argument('--hu', required=True, help='hu.npy of the scan')
+    ap.add_argument('--labels', required=True, help='label volume .npy on the scan grid, with its sidecar beside it')
+    ap.add_argument('--out', required=True, help='clipped labels .npy to write')
+    ap.add_argument('--threshold-hu', type=float, required=True, help='HU: voxels below this are cleared (the segmentation threshold of the workflow\'s anatomy reference)')
     a = ap.parse_args()
     hu = np.load(a.hu, mmap_mode='r')
     labels = np.load(a.labels)

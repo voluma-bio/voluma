@@ -1,14 +1,20 @@
-"""A region mask from curves traced on slices: the space between two surfaces, or a polygon swept between slices.
+"""Make a region mask from curves traced on slices: between two surfaces, or a polygon swept between slices.
 
-  between   two surfaces, each traced as one polyline per slice (or given as a 2D height map), interpolated across
-            slices; the region is every voxel between them along one axis, and only where the curves reach
-  polygon   one closed outline per traced slice, interpolated between traced slices by signed distance
+Two modes (`between --help`, `polygon --help` give each one's schema and options). The region can then be clipped to a bone
+mask (`--bone`, or `--labels` with `--ids`) and kept `--clearance-mm` inside the mask's outer surface: for a filled bone that is the
+periosteum, so the cortex stays inside the region; a clearance from the inner cortex needs the cortex depth added, which is
+the protocol's job. The grid's shape comes from `--hu`, `--bone` or `--labels` (one is required). Trace on slices you have
+looked at with a pixel grid (`visual-check`); fewer than about five traced slices across a curved region gives a coarse
+surface. An empty region, a bone mask of another shape and curves with too few points are refused.
 
-The region can then be clipped to a bone mask and kept a clearance (mm) inside the mask's outer surface.
-Writes region.npy (bool, same grid as --grid) with its sidecar, and region-check.jpg. Schemas: ../SKILL.md.
+Writes: <out>/region.npy  bool, the grid of --grid, with its sidecar
+        <out>/region-check.jpg  four slices across the region: region cyan, bone orange (with --hu and a bone), traced curve red
+Prints: one JSON line {region, check, voxels, volume_mm3, bbox_zyx}; bbox_zyx is [[min z, y, x], [max z, y, x + 1]]
+Example: python region_from_curves.py between --surface-a A.json --surface-b B.json --grid hu.json --bone bone.npy --out DIR
+         python region_from_curves.py polygon --polygons poly.json --grid hu.json --bone bone.npy --out DIR
+Exits 2 with one sentence on bad input, before writing anything.
 """
 
-import argparse
 import json
 import sys
 from pathlib import Path
@@ -142,30 +148,46 @@ def polygon_sweep(a, shape):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
+    ap = sidecar.parser(__doc__)
     sub = ap.add_subparsers(dest='cmd', required=True)
-    b = sub.add_parser('between', help='the region between two traced surfaces')
-    b.add_argument('--surface-a', required=True, help='curves JSON, or a 2D height map .npy')
-    b.add_argument('--surface-b', required=True)
-    b.add_argument('--axis', type=int, help='slice axis, needed with a .npy height map')
-    b.add_argument('--height-axis', type=int, help='axis the surface heights are indices of, needed with a .npy map')
+    between_doc = """The voxels between two surfaces along one axis, over the traced slices.
+
+Each surface is a curves JSON, or a 2D .npy height map (then give --axis and --height-axis). Curves JSON: one polyline per
+traced slice, [row, col] points on that slice (rows are the lower-numbered of the two axes left after `axis`; `height`
+says whether the surface height is the `row` or the `col`; default row):
+  {"axis": 1, "height": "row", "slices": {"100": [[140, 80], [123, 95], [122, 120]], "190": [[138, 80], [103, 100]]}}
+A polyline is read as height as a function of the other coordinate, joined linearly. Between traced slices the surface is
+joined linearly; the region exists only between the first and last traced slices (or --slice-range) and only where the
+polylines reach along the other axis. --offset-a-mm and --offset-b-mm move a surface along the height axis, which makes a
+slab at a set distance from a surface. Both surfaces must use the same slice and height axes. This schema and
+`surface_from_curves` are the only way surfaces are traced and interpolated."""
+    polygon_doc = """A polygon traced on slices, swept between them.
+
+--polygons is {"axis": 0, "slices": {"230": [[row, col], ...], "270": [[row, col], ...]}}: one closed outline (at least
+three points) per traced slice, at least two slices. Slices between are interpolated by signed distance, so the outline
+morphs smoothly; it is not an extrusion. Trace slices where the shape changes, and at the ends of the region."""
+    b = sub.add_parser('between', help='the region between two traced surfaces', description=between_doc, formatter_class=sidecar.HelpFormatter)
+    b.add_argument('--surface-a', required=True, help='curves JSON, or a 2D height map .npy (axis-length by other-axis-length)')
+    b.add_argument('--surface-b', required=True, help='the second surface, same form and same axes as --surface-a')
+    b.add_argument('--axis', type=int, help='slice axis (0-2), needed with a .npy height map')
+    b.add_argument('--height-axis', type=int, help='axis (0-2) the surface heights are indices of, needed with a .npy map')
     b.add_argument(
-        '--offset-a-mm', type=float, default=0, help='move surface A along the height axis (+ = higher index)'
+        '--offset-a-mm', type=float, default=0, help='mm: move surface A along the height axis (+ = higher index)'
     )
-    b.add_argument('--offset-b-mm', type=float, default=0)
-    b.add_argument('--slice-range', type=int, nargs=2, help='limit the region to these slices (inclusive)')
-    p = sub.add_parser('polygon', help='a polygon traced on slices, swept between them')
-    p.add_argument('--polygons', required=True, help='JSON {"axis": n, "slices": {"index": [[row, col], ...]}}')
+    b.add_argument('--offset-b-mm', type=float, default=0, help='mm: move surface B along the height axis (+ = higher index)')
+    b.add_argument('--slice-range', type=int, nargs=2, metavar=('FIRST', 'LAST'), help='limit the region to these slices (inclusive; default: the slices both surfaces were traced on)')
+    p = sub.add_parser('polygon', help='a polygon traced on slices, swept between them', description=polygon_doc, formatter_class=sidecar.HelpFormatter)
+    p.add_argument('--polygons', required=True, help='JSON file, described above')
     for q in (b, p):
-        q.add_argument('--grid', required=True)
+        q.add_argument('--grid', required=True, help='hu.json or a sidecar of the grid the curves and masks are on')
         q.add_argument('--bone', help='bool .npy: keep only the region inside this mask')
         q.add_argument('--labels', help='label .npy, with --ids, instead of --bone')
-        q.add_argument('--ids', type=int, nargs='+')
+        q.add_argument('--ids', type=int, nargs='+', help='label ids that make up the bone, with --labels')
         q.add_argument(
-            '--clearance-mm', type=float, default=0, help='also drop voxels closer than this to the outer surface of the bone mask you pass (periosteum for a filled bone, not the inner surface of the cortex)'
+            '--clearance-mm', type=float, default=0, help='mm: also drop voxels closer than this to the outer surface of the bone mask you pass (periosteum for a filled bone, not the inner surface of the cortex)'
         )
-        q.add_argument('--hu', help='hu.npy: background for the check image')
-        q.add_argument('--out', required=True, help='output directory')
+        q.add_argument('--hu', help='hu.npy: background for the check image, and the grid shape')
+        q.add_argument('--out', required=True, help='output directory (created)')
     a = ap.parse_args()
 
     g = sidecar.grid(a.grid)
