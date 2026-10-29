@@ -34,8 +34,15 @@ export interface WorkflowDefinition {
   files: WorkflowFiles;
   /** The workflow's own skill first, then the skills of each directory it `uses`. */
   skills: Skill[];
-  /** Every role file of `workflows/agents/`, by name. They are the same for every workflow. */
-  agents: Record<string, AgentDefinition>;
+  /**
+   * The role files of `workflows/agents/`, the same for every workflow. A run starts the worker and
+   * the checker, so the loader requires both; `others` holds the rest by name.
+   */
+  agents: {
+    worker: AgentDefinition;
+    checker: AgentDefinition;
+    others: Record<string, AgentDefinition>;
+  };
 }
 
 /** A file that could not be read into a definition; names where. */

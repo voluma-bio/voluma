@@ -39,7 +39,7 @@ import { metaSegmenter } from "./meta-segmenter.ts";
 import { createModalSandbox, RUNS_APP, terminateClaim } from "./modal-sandbox.ts";
 import type { ModelFallback } from "./model-fallback.ts";
 import { retryTransient } from "./model-retry.ts";
-import { agent, checkPrompt, checkSystem, workerPrompt, workerSystem } from "./prompts.ts";
+import { checkPrompt, checkSystem, workerPrompt, workerSystem } from "./prompts.ts";
 import { isFatalProviderError, isProviderError } from "./provider-error.ts";
 import { r2Evidence } from "./r2-evidence.ts";
 import { r2Files } from "./r2-files.ts";
@@ -175,7 +175,7 @@ export async function runClaim(
     const computed = computePlan(definition.files, run.selectedOutputs);
     // Each role's optional tools are the ones its file lists; `segment_sam` also needs a key.
     const grant = (role: "worker" | "checker") =>
-      agent(definition, role).tools.filter((t) => t !== "segment_sam" || metaKey);
+      definition.agents[role].tools.filter((t) => t !== "segment_sam" || metaKey);
 
     const layout = runLayout(
       runId,

@@ -27,14 +27,7 @@ function skillList(def: WorkflowDefinition): string {
 
 /** The role file's body, then the generated environment text and skill list. */
 function system(def: WorkflowDefinition, role: "worker" | "checker"): string {
-  return `${agent(def, role).body}\n\n${COMMON}\n\n${skillList(def)}`;
-}
-
-/** A role file of `workflows/agents/`, which every run needs for the roles it starts. */
-export function agent(def: WorkflowDefinition, role: "worker" | "checker") {
-  const found = def.agents[role];
-  if (!found) throw new Error(`workflows/agents/${role}.md not found`);
-  return found;
+  return `${def.agents[role].body}\n\n${COMMON}\n\n${skillList(def)}`;
 }
 
 export const workerSystem = (def: WorkflowDefinition) => system(def, "worker");

@@ -228,11 +228,20 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
     );
   }
 
-  const agents: Record<string, AgentDefinition> = {};
+  const found: Record<string, AgentDefinition> = {};
   for (const [path, text] of texts) {
     if (!path.startsWith(`${AGENTS_DIR}/`)) continue;
     const agent = parseAgent(path, text, options.knownTools);
-    agents[agent.name] = agent;
+    found[agent.name] = agent;
   }
-  return { dir, commit: await store.get(`${prefix}${DONE}`), files: files.data, skills, agents };
+  const { worker, checker, ...others } = found;
+  if (!worker) throw new WorkflowParseError(`${prefix}${AGENTS_DIR}/worker.md`, "not found");
+  if (!checker) throw new WorkflowParseError(`${prefix}${AGENTS_DIR}/checker.md`, "not found");
+  return {
+    dir,
+    commit: await store.get(`${prefix}${DONE}`),
+    files: files.data,
+    skills,
+    agents: { worker, checker, others },
+  };
 }
