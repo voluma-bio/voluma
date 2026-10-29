@@ -1,16 +1,13 @@
-/** Volume geometry, native-grid copy and bounded trilinear resampling for display, never segmentation or measurement. */
+/** Volume geometry and native-grid copy for display, never segmentation or measurement. */
 import type { Types } from "@cornerstonejs/core";
 import type { DicomSeries, Point3 } from "./dicom";
 import type { DicomSession } from "./dicomSession";
 
-/** Native grid, or a cap on voxels per axis. */
-export type VolumeSize = "full" | 256 | 128;
-
-export function planVolume(series: DicomSeries, size: VolumeSize) {
-  const source: Point3 = [series.columns, series.rows, series.slices.length];
+export function planVolume(series: DicomSeries) {
+  const dimensions: Point3 = [series.columns, series.rows, series.slices.length];
   const first = series.slices[0];
   const last = series.slices.at(-1);
-  if (!first || !last || source.some((n) => n < 2))
+  if (!first || !last || dimensions.some((n) => n < 2))
     throw new Error(
       "3D needs at least two slices and two pixels on each axis. Acquired slices remain available.",
     );
@@ -33,7 +30,7 @@ export function planVolume(series: DicomSeries, size: VolumeSize) {
       (sum, axis) => sum + normal[axis] * (last.position[axis] - origin[axis]),
       0,
     ) /
-    (source[2] - 1);
+    (dimensions[2] - 1);
   // Reject missing slices, nonuniform gaps and in-plane drift/gantry tilt. The
   // tolerance is 1% of a slice interval, with a 0.001 mm rounding allowance.
   const tolerance = Math.max(0.001, dz * 0.01);
@@ -49,16 +46,12 @@ export function planVolume(series: DicomSeries, size: VolumeSize) {
     throw new Error(
       "3D requires regular spacing without missing slices or in-plane drift. This series can still be viewed as acquired slices.",
     );
-  const factor = size === "full" ? 1 : Math.max(1, ...source.map((n) => (n - 1) / (size - 1)));
-  const dimensions = source.map((n) => Math.max(2, Math.floor((n - 1) / factor) + 1)) as Point3;
-  const steps = axes.map((axis) => (source[axis] - 1) / (dimensions[axis] - 1)) as Point3;
   // The native grid keeps stored integers when every slice shares one increasing
   // linear rescale: 1 or 2 bytes per voxel instead of 4, and display maps
-  // intensities by range, so the affine offset is invisible. Otherwise (and for
-  // interpolated previews) voxels are Float32 modality values.
+  // intensities by range, so the affine offset is invisible. Otherwise voxels
+  // are Float32 modality values.
   const { signed, slope, intercept } = first.stored;
   const stored =
-    factor === 1 &&
     // The loader's PT (SUV) and RTDOSE (dose grid) prescale is not the rescale.
     !["PT", "RTDOSE"].includes(series.modality) &&
     Number.isFinite(slope) &&
@@ -76,15 +69,9 @@ export function planVolume(series: DicomSeries, size: VolumeSize) {
       : bits <= 8
         ? Uint8Array
         : Uint16Array;
-  const spacing: Point3 = [
-    (series.spacing[1] as number) * steps[0],
-    (series.spacing[0] as number) * steps[1],
-    dz * steps[2],
-  ];
+  const spacing: Point3 = [series.spacing[1] as number, series.spacing[0] as number, dz];
   return {
-    source,
     dimensions,
-    steps,
     spacing,
     origin,
     direction: [...o, ...normal] as [
@@ -102,7 +89,6 @@ export function planVolume(series: DicomSeries, size: VolumeSize) {
     /** Voxels hold stored pixel values, not modality units (same order, linear). */
     stored,
     bytes: dimensions[0] * dimensions[1] * dimensions[2] * ArrayType.BYTES_PER_ELEMENT,
-    downsampled: factor > 1,
   };
 }
 
@@ -116,9 +102,7 @@ export async function sampleVolume(
 ) {
   signal.throwIfAborted();
   const {
-    source,
     dimensions: [width, height, depth],
-    steps,
   } = plan;
   const scalarData = new plan.ArrayType(width * height * depth);
   let min = Infinity;
@@ -134,83 +118,33 @@ export async function sampleVolume(
     // Allow cancel, slice navigation and progress to paint between planes.
     await new Promise((resolve) => setTimeout(resolve, 0));
   };
-  if (!plan.downsampled) {
-    // Native grid: copy each slice once, no interpolation.
-    for (let z = 0; z < depth; z++) {
-      signal.throwIfAborted();
-      await session.read(z, (image) => {
-        signal.throwIfAborted();
-        const { pixels, slope, intercept } = intensities(image);
-        const scaled = !!image.preScale?.scaled;
-        const plane = scalarData.subarray(z * width * height, (z + 1) * width * height);
-        for (let i = 0; i < plane.length; i++) {
-          const v = pixels[i] as number;
-          // Undo the decoder's prescale to recover the stored integer. Float32
-          // can't resolve it when the slope is below the value's precision.
-          const value = !plan.stored
-            ? v * slope + intercept
-            : scaled
-              ? Math.round((v - image.intercept) / image.slope)
-              : v;
-          plane[i] = value;
-          if (
-            plan.stored &&
-            (plane[i] !== value ||
-              (scaled && Math.fround(value * image.slope + image.intercept) !== v))
-          )
-            throw new Error("Stored intensity could not be recovered exactly");
-        }
-      });
-      await finishPlane(z);
-    }
-    return { scalarData, min, max: Math.max(max, min + 1) };
-  }
-  const contributions = Array.from(
-    { length: source[2] },
-    () => [] as { z: number; weight: number; last: boolean }[],
-  );
+  // Copy each acquired slice once, no interpolation.
   for (let z = 0; z < depth; z++) {
-    const sourceZ = Math.min(source[2] - 1, z * steps[2]);
-    const low = Math.floor(sourceZ);
-    const fraction = sourceZ - low;
-    contributions[low]?.push({ z, weight: 1 - fraction, last: fraction === 0 });
-    if (fraction) contributions[low + 1]?.push({ z, weight: fraction, last: true });
-  }
-  // A source plane can feed adjacent output planes. Consume it once before
-  // the session evicts it; skip source planes with no interpolation weight.
-  for (const [slice, planes] of contributions.entries()) {
     signal.throwIfAborted();
-    if (!planes.length) continue;
-    await session.read(slice, async (image) => {
+    await session.read(z, (image) => {
       signal.throwIfAborted();
       const { pixels, slope, intercept } = intensities(image);
-      for (const { z, weight, last } of planes) {
-        signal.throwIfAborted();
-        for (let y = 0; y < height; y++) {
-          const sy = Math.min(source[1] - 1, y * steps[1]);
-          const y0 = Math.floor(sy),
-            y1 = Math.min(y0 + 1, source[1] - 1),
-            fy = sy - y0;
-          for (let x = 0; x < width; x++) {
-            const sx = Math.min(source[0] - 1, x * steps[0]);
-            const x0 = Math.floor(sx),
-              x1 = Math.min(x0 + 1, source[0] - 1),
-              fx = sx - x0;
-            const a =
-              (pixels[y0 * source[0] + x0] as number) * (1 - fx) +
-              (pixels[y0 * source[0] + x1] as number) * fx;
-            const b =
-              (pixels[y1 * source[0] + x0] as number) * (1 - fx) +
-              (pixels[y1 * source[0] + x1] as number) * fx;
-            const offset = (z * height + y) * width + x;
-            scalarData[offset] =
-              (scalarData[offset] as number) +
-              ((a * (1 - fy) + b * fy) * slope + intercept) * weight;
-          }
-        }
-        if (last) await finishPlane(z);
+      const scaled = !!image.preScale?.scaled;
+      const plane = scalarData.subarray(z * width * height, (z + 1) * width * height);
+      for (let i = 0; i < plane.length; i++) {
+        const v = pixels[i] as number;
+        // Undo the decoder's prescale to recover the stored integer. Float32
+        // can't resolve it when the slope is below the value's precision.
+        const value = !plan.stored
+          ? v * slope + intercept
+          : scaled
+            ? Math.round((v - image.intercept) / image.slope)
+            : v;
+        plane[i] = value;
+        if (
+          plan.stored &&
+          (plane[i] !== value ||
+            (scaled && Math.fround(value * image.slope + image.intercept) !== v))
+        )
+          throw new Error("Stored intensity could not be recovered exactly");
       }
     });
+    await finishPlane(z);
   }
   return { scalarData, min, max: Math.max(max, min + 1) };
 }

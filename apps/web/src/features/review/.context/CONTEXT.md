@@ -2,7 +2,7 @@
 
 Review is one light-themed workspace at `/runs/:runId`. It downloads an
 authorized R2 input archive, displays acquired images and
-builds a bounded raw volume preview. On a real run it loads the run's results
+automatically opens a full-resolution raw volume. On a real run it loads the run's results
 (`getReviewRun`, the shared `ReviewRun`). It does not run analysis or persist
 review decisions. `/runs/local` opens the R2 reference scan
 without creating a run in the API. There is no local-file intake or simulator.
@@ -67,11 +67,12 @@ changes terminate the import worker and release viewer resources. Reloading
 loses the browser's scan state; query parameters never contain scan bytes.
 
 The light Review chrome surrounds a dark imaging well. The first loaded image
-is an acquired slice, not necessarily axial. The **3D preview** slot builds a
-raw volume only on request, validates reconstructable geometry separately, and
-labels downsampling and the absence of anatomical meshes. Its rotation, zoom,
-intensity and opacity controls affect display only. Release 3D preserves slices;
-maximize/restore preserves both engines and camera state. There is no benchmark
+is an acquired slice, not necessarily axial. The **3D** slot automatically builds a
+native-grid raw volume and validates reconstructable geometry separately. There
+is no resolution picker, build screen or selection metadata in the view corners.
+Its rotation, zoom, intensity and opacity controls affect display only. A 3D
+failure leaves acquired slices available; maximize/restore preserves both engines
+and camera state. There is no benchmark
 panel, timer sampling, automated rotation measurement or timing export.
 Coronal and sagittal slots remain unavailable. At narrow widths the existing
 layout stacks report and imaging areas; desktop panel sizes and image state
