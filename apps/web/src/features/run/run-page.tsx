@@ -31,6 +31,7 @@ import {
   threadName,
   withLiveCalls,
 } from "./run-model";
+import { RunSpendSummary, TaskSpendList } from "./spend";
 import { RunBadge, runStatus } from "./status";
 import { TaskGraph } from "./task-graph";
 import {
@@ -156,10 +157,13 @@ export function RunPage() {
 
   const data = run.data;
   const ended = halt?.kind === "ended";
-  const { attention, plan, states, progress, usage } = view;
+  const { attention, plan, states, progress, spend } = view;
   const setRun = (next: Run) => queryClient.setQueryData(["run", id], next);
   const graph = plan && (
-    <TaskGraph plan={plan} states={states} threadByTask={latestThreadByTask(threads)} />
+    <>
+      <TaskGraph plan={plan} states={states} threadByTask={latestThreadByTask(threads)} />
+      <TaskSpendList spend={spend} plan={plan} />
+    </>
   );
   const tasksLabel = plan ? `Tasks: ${progress}` : "Tasks";
 
@@ -181,12 +185,7 @@ export function RunPage() {
               {runStatus(data).detail ? `, ${runStatus(data).detail}` : ""}
             </span>
             <span className="ml-auto flex items-center gap-2">
-              {usage && (
-                <InfoButton
-                  label="Run usage"
-                  sections={[{ title: "Every model call so far", rows: usageRows(usage) }]}
-                />
-              )}
+              <RunSpendSummary spend={spend} />
               <RunActions run={data} onChange={setRun} />
             </span>
           </header>

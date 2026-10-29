@@ -1,11 +1,12 @@
 /**
  * The live run page's run-level data, derived with no React from the run's events and state:
  * the threads (main, workers, checkers) with what each is doing now, the attention list, the
- * plan, where each task stands, and the run's usage. Transcripts are in `transcript.ts`.
+ * plan, where each task stands, and what the run spent. Transcripts are in `transcript.ts`.
  */
 import type { ModelUsage, RunEvent } from "@voluma/contracts/events";
 import type { Folded, FoldedTask } from "@voluma/contracts/fold";
 import type { RunState } from "@voluma/contracts/run";
+import { type RunSpend, spend } from "@voluma/contracts/spend";
 import type { WorkflowPlan } from "@voluma/contracts/workflow";
 import { type Halt, type Live, toolTitle } from "./transcript";
 import { taskTitle } from "./workflows";
@@ -328,7 +329,8 @@ export type RunView = {
   states: Map<string, TaskState>;
   /** "3 of 7 finished, 1 to check". */
   progress: string;
-  usage?: ModelUsage;
+  /** Cost and time per task, for the main thread and in total. */
+  spend: RunSpend;
 };
 
 /** Everything the run page shows about the run as a whole, from its durable events. */
@@ -348,10 +350,7 @@ export function runView(events: RunEvent[], folded: Folded, halt: Halt | undefin
     progress: plan
       ? `${done} of ${plan.tasks.length} finished${toCheck > 0 ? `, ${toCheck} to check` : ""}`
       : "",
-    usage: threads.reduce<ModelUsage | undefined>(
-      (sum, t) => (t.usage ? addUsage(sum, t.usage) : sum),
-      undefined,
-    ),
+    spend: spend(events),
   };
 }
 
