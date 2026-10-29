@@ -143,6 +143,7 @@ def main():
     frame = fr.make(
         g['grid_id'],
         sp,
+        parent_affine_xyz=g['affine_xyz_to_world_mm'],
         R_zyx=basis[::-1, ::-1].T,  # frame axis i (W, V, U) as a scan (z, y, x) vector: the basis columns, reversed
         origin_zyx=(origin + basis @ low)[::-1],
         shape=shape_zyx,
