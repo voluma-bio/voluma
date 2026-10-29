@@ -20,9 +20,14 @@ named by the thread id without the run id). `RunLayout.forThread(threadId)`
   `/outputs` read-write.
 - A checker mounts `/inputs`, `/workflow` and `/outputs` read-only and one writable folder,
   `/scratch/<its name>/` (the name is the sandbox name, e.g. `t1.check`), which is the R2 prefix
-  `scratch/<name>/` under the run. Its bash does not see the rest of `/scratch`. Host-side tools
-  (`keyOf`, so `view_image`) do read the run's whole `/scratch`, read-only: that is how a checker
-  opens the images the worker cited. The main agent (`<runId>.main[.n]`) has the same shape; it has
+  `scratch/<name>/` under the run. Its bash does not see the rest of `/scratch`. Host-side
+  (`keyOf`, so `view_image`) it also reads, read-only, the files in the run's `/scratch` that the
+  attempt under review cites as evidence (`{root: "scratch"}` refs on that attempt's checkpoints
+  and outputs), and no others: the worker's scripts, logs and notes stay unread. `keyOf` asks a
+  `CitedScratch` predicate, which `taskRuntime.citedScratch` answers from the fold
+  (`FoldedTask.citedScratch`) for the check thread's task; `forThread(threadId, cited)` takes it.
+  The same `keyOf` check validates the evidence a checker names. The main agent
+  (`<runId>.main[.n]`) has the same mounts and reads the run's whole `/scratch` host-side; it has
   no sandbox today.
 - Every thread spills a truncated bash output to `/scratch/<name>/.tool-output/<id>`
   (`toolOutputKey(runId, threadName, toolCallId)`), a worker too.
@@ -38,9 +43,9 @@ named by the thread id without the run id). `RunLayout.forThread(threadId)`
   `/scratch/<name>/` (say `/scratch/v1.jpg`) succeeds but is local and lost on restart. Nothing
   stops it: sandboxes run as root without `CAP_SYS_ADMIN` (`chmod a-w` does not bind root, no
   `chattr`, no remount), and a mount over `/scratch` would be the worker's scratch. The fence is
-  `$SCRATCH` as the working directory and in the prompt. Residual: a checker that writes
-  `/scratch/v1.jpg` locally and cites `v1.jpg` is read as the worker's `scratch/v1.jpg` if the
-  worker wrote one.
+  `$SCRATCH` as the working directory and in the prompt. A checker that writes `/scratch/v1.jpg`
+  locally and cites `v1.jpg` is refused unless the worker cited `v1.jpg`, in which case the
+  citation resolves to the worker's file.
 - Thread ids are built and parsed in `packages/harness/src/thread-id.ts`.
 
 Spend and the usage meter sum sandbox seconds over all sandboxes.

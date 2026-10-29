@@ -113,6 +113,8 @@ export type FoldedTask = Pick<
   threads: Pick<ReviewTask["threads"], "worker" | "check">;
   models: Pick<ReviewTask["models"], "worker" | "check">;
   milestones: Milestone[];
+  /** Paths (the part after `/scratch/`) of the scratch files its checkpoints and outputs cite. */
+  citedScratch: string[];
 };
 
 export type FoldedRevision = {
@@ -168,6 +170,7 @@ type Attempt = {
   checker: ReviewTask["checker"];
   outputs: Map<string, OutputEvent>;
   evidence: Map<string, Asset>;
+  citedScratch: Set<string>;
 };
 
 export function fold(events: readonly RunEvent[]): Folded {
@@ -184,7 +187,8 @@ export function fold(events: readonly RunEvent[]): Folded {
   let revisionId = "";
 
   const addEvidence = (a: Attempt, runId: string, refs: EvidenceRef[]) => {
-    for (const r of refs)
+    for (const r of refs) {
+      if (r.root === "scratch") a.citedScratch.add(r.path);
       a.evidence.set(r.sha256, {
         id: r.sha256,
         name: r.path,
@@ -192,6 +196,7 @@ export function fold(events: readonly RunEvent[]): Folded {
         key: evidenceKey(runId, r.sha256),
         sha256: r.sha256,
       });
+    }
   };
 
   const snapshot = (): Pick<FoldedRevision, "tasks" | "volumes" | "structures" | "annotations"> => {
@@ -397,6 +402,7 @@ export function fold(events: readonly RunEvent[]): Folded {
         undeclared,
         checks,
         evidence: [...a.evidence.values()],
+        citedScratch: [...a.citedScratch],
       };
     });
     return { tasks, volumes, structures, annotations };
@@ -445,6 +451,7 @@ export function fold(events: readonly RunEvent[]): Folded {
           checker: null,
           outputs: new Map(),
           evidence: new Map(),
+          citedScratch: new Set(),
         };
         attempts.set(e.id, a);
         current.set(a.taskId, a);

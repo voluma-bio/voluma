@@ -6,8 +6,9 @@
  * A worker mounts the run's `/scratch` and `/outputs` read-write. A checker mounts `/outputs`
  * read-only and writes only `/scratch/<its name>/`, the R2 prefix `scratch/<its name>/`; the main
  * agent has the same shape (no sandbox yet). Host-side (`keyOf`, so `view_image`) they also read
- * the run's whole `/scratch`, which is how a checker opens the images the worker cited; its
- * sandbox does not mount the rest. The path namespace is the same for every thread:
+ * the run's `/scratch`, but a checker only the files the attempt under review cites as
+ * evidence (`CitedScratch`): the worker's scripts, logs and notes stay unread. Its sandbox does
+ * not mount the rest. The path namespace is the same for every thread:
  * `/scratch/<name>/x.png` is the key `scratchKey(runId, "<name>/x.png")` whoever wrote it, so
  * evidence `{root: "scratch", path: "<name>/x.png"}` resolves the same way.
  *
@@ -23,6 +24,9 @@ import {
 import type { Skill } from "@voluma/workflow/definition";
 import type { SandboxMount } from "./ports/sandbox";
 import { parseThreadId } from "./thread-id";
+
+/** Whether the attempt a check thread reviews cites this file (the path after `/scratch/`) as evidence. */
+export type CitedScratch = (threadId: string, path: string) => boolean;
 
 const INPUTS = "/inputs";
 const OUTPUTS = "/outputs";
@@ -59,8 +63,11 @@ type RoleParts = Pick<ThreadLayout, "mounts" | "scratch" | "description" | "rest
 };
 
 export interface RunLayout {
-  /** The layout of a thread id as `thread-id.ts` builds it. */
-  forThread(threadId: string): ThreadLayout;
+  /**
+   * The layout of a thread id as `thread-id.ts` builds it. `cited` answers for a checker's
+   * host-side reads of the worker's scratch; without it a checker reads none of it.
+   */
+  forThread(threadId: string, cited?: CitedScratch): ThreadLayout;
 }
 
 /**
@@ -119,13 +126,13 @@ export function runLayout(runId: string, inputPrefix: string, skills: readonly S
       description:
         `${common}- ${OUTPUTS} holds the worker's files: read them, do not modify them.\n` +
         `- ${dir} is for your intermediate files; it is kept. $SCRATCH is ${dir}. Write nothing else under ${SCRATCH}. ` +
-        `bash sees only your folder there; view_image also opens the files the worker kept under ${SCRATCH}/ (read-only).`,
+        `bash sees only your folder there; view_image also opens the files under ${SCRATCH}/ that the worker cited as evidence (read-only).`,
       restartNote: `The sandbox was restarted. ${dir} was kept, ${INPUTS} was copied again, and local files elsewhere (including /tmp) are gone.`,
     };
   };
 
   return {
-    forThread(threadId) {
+    forThread(threadId, cited = () => false) {
       const { name, kind } = parseThreadId(runId, threadId);
       const role = kind === "worker" ? "worker" : kind === "check" ? "checker" : "main";
       const parts = role === "worker" ? worker() : confined(name);
@@ -149,6 +156,10 @@ export function runLayout(runId: string, inputPrefix: string, skills: readonly S
           const relative = path.slice(mount.path.length + 1);
           if (!relativePathSchema.safeParse(relative).success)
             throw new Error(`${path} is not a valid path`);
+          if (role === "checker" && hostOnly.includes(mount)) {
+            if (!cited(threadId, relative))
+              throw new Error(`${path} is not a file the worker cited as evidence`);
+          }
           return `${mount.prefix}${relative}`;
         },
       };
