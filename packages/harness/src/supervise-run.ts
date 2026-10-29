@@ -60,6 +60,8 @@ export interface SuperviseRunOptions {
   check(task: PlanTask, notes: string | undefined, model: string | undefined): RunRole;
   /** Whether a failed thread's error text says the model provider failed; see `SupervisorOptions`. */
   providerError?(error: string): boolean;
+  /** Whether such an error means no redo can succeed: the run then fails at once; see `SupervisorOptions`. */
+  providerFatal?(error: string): boolean;
   signal: AbortSignal;
 }
 
@@ -123,6 +125,7 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
       return { ...role, tools: tools("check", role.tools) };
     },
     providerError: options.providerError,
+    providerFatal: options.providerFatal,
     signal,
   });
   return sup.run();
