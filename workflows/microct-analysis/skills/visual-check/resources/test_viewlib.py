@@ -39,5 +39,5 @@ def test_frame_cut_is_the_frames_own_slice():
 
     vol = asymmetric_volume()
     R = np.array([[0, 0, 1], [1, 0, 0], [0, 1, 0]], float)  # slice axis 0 is scan x; rows run along z, columns along y
-    f = fr.make('scan', [1, 1, 1], R_zyx=R, origin_zyx=[0, 0, 0], shape=[40, 20, 30])
+    f = fr.make('scan', [1, 1, 1], parent_affine_xyz=np.eye(4), R_zyx=R, origin_zyx=[0, 0, 0], shape=[40, 20, 30])
     np.testing.assert_allclose(vl.frame_cut(vol, f, 0, 13), vol[:, :, 13], atol=1e-6)

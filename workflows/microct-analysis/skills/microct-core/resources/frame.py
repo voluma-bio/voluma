@@ -8,11 +8,14 @@
   origin_zyx       scan voxel index of frame index (0, 0, 0)
   shape            frame array shape (its axis 0, 1, 2)
   spacing_zyx_mm   voxel size of the scan, which the frame shares (frames need isotropic voxels, so lengths agree)
+  affine_xyz_to_world_mm   the frame's own placement in world mm, same convention as `hu.json` and the review contract's
+                   `Volume.affine`: 4x4 row-major, bottom row [0, 0, 0, 1], consumes voxel-centre indices (x, y, z) = (array axis 2,
+                   1, 0), a rotation times the voxel size. Composed from the parent's affine by `make`, nowhere else.
 A frame index p and a scan voxel index x are related by  x = p @ R_zyx + origin_zyx  and  p = (x - origin_zyx) @ R_zyx.T,
 both fractional. Voxel centres are at integer indices.
 
   import frame as fr
-  f = fr.make(parent_grid_id, spacing, R_zyx=R, origin_zyx=o, shape=shape, **extra)   # a new frame; fr.save / fr.load
+  f = fr.make(parent_grid_id, spacing, parent_affine_xyz=hu['affine_xyz_to_world_mm'], R_zyx=R, origin_zyx=o, shape=shape, **extra)   # a new frame; fr.save / fr.load
   fr.resample(scan_vol, f, order=1, cval=0)       # the scan cut onto the frame (order 0 for labels)
   fr.to_scan(stack, f, scan_shape)                 # nearest-neighbour map of a frame-grid stack back onto the scan
   fr.from_scan_points(zyx, f), fr.to_scan_points(p, f)   # points, either way, shape (..., 3)
@@ -26,15 +29,35 @@ import numpy as np
 import sidecar
 from scipy import ndimage as ndi
 
-KEYS = ('parent_grid_id', 'grid_id', 'R_zyx', 'origin_zyx', 'shape', 'spacing_zyx_mm')
+KEYS = ('parent_grid_id', 'grid_id', 'R_zyx', 'origin_zyx', 'shape', 'spacing_zyx_mm', 'affine_xyz_to_world_mm')
 
 
-def make(parent_grid_id, spacing_zyx_mm, *, R_zyx, origin_zyx, shape, **extra):
+def world_affine(parent_affine_xyz, R_zyx, origin_zyx, spacing_zyx_mm):
+    """The frame's `affine_xyz_to_world_mm`: the parent's affine after the frame-to-parent map. With P reversing (z, y, x) to
+    (x, y, z), a frame index q = (x, y, z) is parent (z, y, x) index  R.T @ P q + o,  so the map in (x, y, z) is  P R.T P q + P o."""
+    P = np.eye(3)[::-1]
+    to_parent = np.eye(4)
+    to_parent[:3, :3] = P @ np.asarray(R_zyx, float).T @ P
+    to_parent[:3, 3] = P @ np.asarray(origin_zyx, float)
+    affine = np.asarray(parent_affine_xyz, float) @ to_parent
+    cols = affine[:3, :3]
+    lengths = np.linalg.norm(cols, axis=0)
+    unit = cols / lengths
+    if not np.allclose(unit.T @ unit, np.eye(3), atol=1e-4) or not np.allclose(lengths, spacing_zyx_mm[::-1], rtol=1e-3):
+        sidecar.fail(f'the parent affine and the frame do not give a rotation times the voxel size (column lengths {lengths.tolist()} '
+                     f'mm against spacing {list(spacing_zyx_mm[::-1])} mm, or the columns are not orthogonal): the frame has shear or '
+                     'the wrong spacing, so it cannot be placed in world space; check the affine in hu.json and the frame fit')
+    affine[3] = [0, 0, 0, 1]
+    return affine.tolist()
+
+
+def make(parent_grid_id, spacing_zyx_mm, *, parent_affine_xyz, R_zyx, origin_zyx, shape, **extra):
     """A frame dict. `grid_id` is derived from the numbers, so rewording an `extra` key never changes it."""
     core = {'R_zyx': np.asarray(R_zyx, float).tolist(), 'origin_zyx': np.asarray(origin_zyx, float).tolist(),
             'shape': [int(n) for n in shape]}
+    spacing = [float(s) for s in spacing_zyx_mm]
     return {'parent_grid_id': parent_grid_id, 'grid_id': sidecar.derived_grid_id(parent_grid_id, core), **core,
-            'spacing_zyx_mm': [float(s) for s in spacing_zyx_mm], **extra}
+            'spacing_zyx_mm': spacing, 'affine_xyz_to_world_mm': world_affine(parent_affine_xyz, R_zyx, origin_zyx, spacing), **extra}
 
 
 def save(frame, path):

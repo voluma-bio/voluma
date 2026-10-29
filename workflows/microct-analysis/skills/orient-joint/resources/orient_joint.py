@@ -315,7 +315,7 @@ if __name__ == '__main__':
     params = {'threshold_hu': a.threshold_hu, 'shaft_radius_mm': a.shaft_radius_mm, 'ref_radius_mm': a.ref_radius_mm,
                   'min_object_mm3': a.min_object_mm3, 'margin_mm': a.margin_mm,
                   'second_bone_frac': a.second_bone_frac}
-    frame = fr.make(g['grid_id'], sp, **joint_frame(hu, sp[0], **params))
+    frame = fr.make(g['grid_id'], sp, parent_affine_xyz=g['affine_xyz_to_world_mm'], **joint_frame(hu, sp[0], **params))
     stack = fr.resample(hu, frame, cval=frame['background_hu'])
     np.save(out / 'oriented.npy', stack)
     fr.save(frame, out / 'frame.json')
