@@ -137,7 +137,7 @@
     height: 100%;
   }
   .report-scroll {
-    @apply h-full overflow-y-auto bg-card;
+    @apply relative h-full overflow-y-auto bg-card;
     scrollbar-gutter: stable;
   }
   .task-report {
