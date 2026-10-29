@@ -1,7 +1,10 @@
 # Deploying the gateway (Railway staging)
 
-Not created yet: this is what has to be set. Same project and environment as the API
+Set up on staging (2026-10-29): service `@voluma/gateway`, id `9d59dc78-573e-4892-9a25-3c21ddb81912`,
+domain `https://volumagateway-staging.up.railway.app`. Same project and environment as the API
 ([../../api/.context/deploy.md](../../api/.context/deploy.md) has the project and the `gql` helper).
+Created with `serviceCreate`, settings through `environmentPatchCommit`, the domain with
+`serviceDomainCreate`, then `serviceInstanceDeployV2`. The table is what is set.
 
 | Setting | Value |
 |---|---|
@@ -27,8 +30,11 @@ Variables:
 | `GATEWAY_DRAIN_SECONDS` | optional, default 60 |
 | `GATEWAY_<PROVIDER>_BASE_URL` | optional; only for pointing at a stub |
 
-Keys live in this service's env only. The runner needs `VOLUMA_GATEWAY_URL` and
-`GATEWAY_TOKEN_SECRET` once it mints tokens (lane 2).
+Keys live in this service's env only. The runner has `VOLUMA_GATEWAY_URL` (the domain above) and
+the same `GATEWAY_TOKEN_SECRET`.
+
+Checked on staging: `/health` 200; a POST on a route with no or a bad token 401; a path outside
+the routes 403; boot log `up on :8080; keys for meta` (so the API's migrations 0005 and 0006 had run).
 
 Things only staging can show (design §5): whether Railway's edge routes by `Host`, its maximum
 request duration on a long stream, and the real size of Meta's `response.completed` line.
