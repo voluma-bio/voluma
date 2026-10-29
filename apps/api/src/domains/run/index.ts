@@ -1,9 +1,9 @@
 /**
  * Run lane's API domain, mounted at /api/run/ (paths are relative to the mount). A short
  * mount list: each file owns its routes and its guard.
- *   runs.ts    the browser's run routes (users and guests)
+ *   runs.ts    the run routes (users and guests; the reads also take the debug token)
  *   inputs.ts  the browser's scans: list, and upload (members); `upload-scan.ts` is the CLI for it
- *   stream.ts  the browser's server-sent event stream of a run's stored events
+ *   stream.ts  the server-sent event stream of a run's stored events (users, debug token)
  *   ingest.ts  the runner's claim, heartbeat, report, events and history (bearer token)
  * RunDeps lists what it needs; index.ts supplies the adapters (the queue is built with the limits and the key vault). The factory
  * returns a Hono app and does not know its mount. The Postgres adapters and tables are in

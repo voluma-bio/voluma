@@ -7,17 +7,21 @@ import type { Input, Run } from "@voluma/contracts/run";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { and, asc, desc, eq, or, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import type { Reader } from "../../domain";
+import { EVERY_LAB, type Reader, type ReadScope } from "../../domain";
 import { inputs, referenceInput, runs } from "./schema";
 
 export type Tx = Parameters<Parameters<PostgresJsDatabase["transaction"]>[0]>[0];
 
-/** `lab_id = labId AND (ownerId IS NULL OR started_by = ownerId OR example)` */
-export const readableRuns = ({ labId, ownerId }: Reader): SQL | undefined =>
-  and(
-    eq(runs.labId, labId),
-    ownerId === null ? undefined : or(eq(runs.startedBy, ownerId), eq(runs.example, true)),
-  );
+/** `lab_id = labId AND (ownerId IS NULL OR started_by = ownerId OR example)`; every run for `EVERY_LAB`. */
+export const readableRuns = (scope: ReadScope): SQL | undefined =>
+  scope === EVERY_LAB
+    ? undefined
+    : and(
+        eq(runs.labId, scope.labId),
+        scope.ownerId === null
+          ? undefined
+          : or(eq(runs.startedBy, scope.ownerId), eq(runs.example, true)),
+      );
 
 /** The input rule: the caller's upload, or the org's reference scan. */
 export const readableInputs = ({ labId, ownerId }: Reader): SQL | undefined =>
@@ -119,9 +123,9 @@ export async function loadRun(tx: Tx, runId: string): Promise<Run> {
 
 export function pgRunReads(db: PostgresJsDatabase) {
   return {
-    list: (reader: Reader) => db.transaction((tx) => loadRuns(tx, readableRuns(reader))),
+    list: (reader: ReadScope) => db.transaction((tx) => loadRuns(tx, readableRuns(reader))),
 
-    get: async (reader: Reader, runId: string) =>
+    get: async (reader: ReadScope, runId: string) =>
       (
         await db.transaction((tx) => loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId))))
       )[0] ?? null,

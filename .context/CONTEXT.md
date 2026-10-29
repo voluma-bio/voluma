@@ -176,7 +176,8 @@ voluma-bio/docs work item `mvp-contracts-and-data` (`design/harness-v0.md`).
 
 `apps/api/src/auth.ts` authenticates every `/api/*` request once, at the root, and sets
 `principal` (`apps/api/src/domain.ts`): `service` for the runner's bearer token
-(`VOLUMA_API_TOKEN`), `user` for a WorkOS AuthKit session cookie of a member of an allowed
+(`VOLUMA_API_TOKEN`) or the optional read-only debug token (`VOLUMA_DEBUG_TOKEN`, every lab's
+runs, for agents debugging a run), `user` for a WorkOS AuthKit session cookie of a member of an allowed
 organization: the Yao Lab (`WORKOS_LAB_ORGANIZATION_ID`, scope `lab`) or, if set, the Judges
 organization (`WORKOS_JUDGES_ORGANIZATION_ID`, scope `self`). `org_id` must be in that list,
 checked on every request and again in the sign-in callback. The user's `labId` is their
@@ -204,8 +205,10 @@ share, run by run, so it is for signed-in members; public examples are seeded in
 organization instead. They share the Demo workspace
 but each sees only their own runs (`self`). When an `Authorization` header is present only the
 bearer counts. The root answers 401 for no principal on everything but `/api/auth/*`;
-a domain guards a subtree with `requireService` or `requireUser` (which also sets a typed
-`c.var.user`) and gets 403 for the other kind. A cookie-authenticated non-GET request must
+a domain guards a subtree with `requireService` (the runner) or `requireUser` (which also sets
+a typed `c.var.user`) and gets 403 for the other kind; a run read takes `requireReader` on its
+route, which reads through the user's `readerOf` or, for the read-only debug token
+(`VOLUMA_DEBUG_TOKEN`), every lab. A cookie-authenticated non-GET request must
 carry an `Origin` equal to `APP_URL`'s origin (`SameSite=Lax` is same-site, not
 same-origin) and a JSON content type. No GET changes app state. Nothing upgrades to
 WebSockets (run streams are planned as server-sent events, plain GETs, in #28); a route that

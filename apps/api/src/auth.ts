@@ -1,8 +1,10 @@
 /**
  * Authentication for the whole API, at the composition root (index.ts is its only
  * caller, so there is no port). Two ways in:
- *  - `Authorization: Bearer <VOLUMA_API_TOKEN>`: the runner, principal `service`. When
- *    the header is present only the bearer counts; the cookie is never consulted.
+ *  - `Authorization: Bearer <VOLUMA_API_TOKEN>`: the runner, principal `service`/`runner`;
+ *    or `Bearer <VOLUMA_DEBUG_TOKEN>` (optional): agents debugging runs, principal
+ *    `service`/`debug`, which only reads runs (domain.ts `requireReader`). When the header
+ *    is present only the bearer counts; the cookie is never consulted.
  *  - the WorkOS AuthKit session cookie: a member of an allowed organization, principal
  *    `user` (its `labId` is that organization, its `scope` the organization's entry).
  * With `config.guest` set, a request with neither a session cookie nor a bearer but a
@@ -73,6 +75,8 @@ export interface AuthConfig {
   appUrl: string;
   /** The runner's bearer token. */
   apiToken: string;
+  /** A read-only bearer token for agents debugging runs (principal `debug`); null turns it off. */
+  debugToken: string | null;
 }
 
 // `principal` is set by the first guard, then by `session`; null means no credential
@@ -457,8 +461,17 @@ export function createAuth(config: AuthConfig) {
   const bearer = createMiddleware<RootEnv>(async (c, next) => {
     const authorization = c.req.header("authorization");
     const token = authorization && /^Bearer +(.+)$/i.exec(authorization)?.[1];
-    const ok = token && (await timingSafeEqual(token, config.apiToken));
-    c.set("principal", ok ? { kind: "service", name: "runner" } : null);
+    const runner = token && (await timingSafeEqual(token, config.apiToken));
+    const debug =
+      !runner && token && config.debugToken && (await timingSafeEqual(token, config.debugToken));
+    c.set(
+      "principal",
+      runner
+        ? { kind: "service", name: "runner" }
+        : debug
+          ? { kind: "service", name: "debug" }
+          : null,
+    );
     return next();
   });
 
