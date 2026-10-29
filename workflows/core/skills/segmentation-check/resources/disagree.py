@@ -1,38 +1,29 @@
-"""Where two segmentations disagree: bone voxels the classic method labels that your labels give to another label (or to
-nothing), grouped into 3D regions, ranked by size, with a panel for the largest ones.
+"""Find where two segmentations disagree: bone voxels the classic labels give to another label than yours.
 
-  python disagree.py --hu hu.npy --labels labels.npy --classic classic.npy --out <outdir> [--frame frame.json]
-        [--ids 1,2,3] [--min-mm3 0.005] [--render 6] [--names 1=femur,2=tibia | anatomy.json]
+Voxels are flagged when they are bone (HU at or above `--threshold-hu`), the classic labels give them a label, and your labels
+give them another one (or none). Flagged voxels are grouped into 3D regions (26-connected), ranked by size (1 = largest),
+and regions under `--min-mm3` are not numbered. `--ids` limits which classic labels count (e.g. the big bones). A panel is
+drawn for the `--render` largest regions: three side-by-side cuts, the CT alone, your labels, the classic labels, each in the
+label colours of `visual-check` with a legend, and the region outlined in white and, inside it, each side's label in a strong
+tint, with the region's assignment printed on top. (Overlaid outlines of two near-identical segmentations cannot be told
+apart.) The panels cut the scan grid along axis 0 through the region's centre, or the oriented keyframe direction with
+`--frame`. Register each region you cannot settle as a labels volume output so a To check item can point at it
+(`focus.volumeId`, `focus.label` = the region id). Refuses volumes of different shapes.
 
-Writes <outdir>/disagreement.npy (uint16 region id by rank, 1 = largest; regions under the floor are not numbered) with its
-sidecar, <outdir>/regions.json, and <outdir>/panel_<id>.jpg for the `--render` largest regions: three
-side-by-side cuts: the CT alone, your labels, the classic labels, each in the label colours of `visual-check` with a legend, and the
-region outlined in white and, inside it, each side's label in a strong tint, with the region's assignment printed on top. (Overlaid outlines of two near-identical segmentations cannot be told apart.) `--ids` limits which classic
-labels count (e.g. the big bones). The panels cut the scan grid along axis 0 through the region's centre, or the oriented
-keyframe direction with `--frame`. Register each region you cannot settle as a labels volume output so a To check item can
-point at it (`focus.volumeId`, `focus.label` = the region id).
+Writes: <out>/disagreement.npy  uint16 region id by rank, on the grid of --labels, with its sidecar
+        <out>/regions.json  per region: id, voxels, volume_mm3, centre_zyx, bbox_zyx, your_labels and classic_labels (voxel counts per label)
+        <out>/panel_<id>.jpg  the three-cut panel of each rendered region
+Prints: one JSON line {regions, disagreement, panels, flagged_voxels, flagged_pct_of_classic_bone, regions_over_floor, regions_total, top}; top is the 8 largest regions
+Example: python disagree.py --hu hu.npy --labels labels.npy --classic classic.npy --threshold-hu 2500 --out disagree/
+Exits 2 with one sentence on bad input, before writing anything.
 """
-import argparse
 import json
-import sys
 from pathlib import Path
 
+import frame as fr
 import numpy as np
+import viewlib as vl
 from scipy import ndimage as ndi
-
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
-# only missing directories are added, so a script imported by another leaves the importer's order alone.
-SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources'), str(SKILLS / 'visual-check/resources')) if d not in sys.path]
-try:
-    import frame as fr
-    import viewlib as vl
-except ModuleNotFoundError as e:
-    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
-          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
-    sys.exit(2)
-
 
 sidecar = vl.sidecar
 
@@ -100,18 +91,18 @@ def region_panel(hu, labels, classic, region_mask, region, frame, window, path, 
 
 
 if __name__ == '__main__':
-    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--hu', required=True)
-    ap.add_argument('--labels', required=True)
-    ap.add_argument('--classic', required=True)
-    ap.add_argument('--out', required=True)
-    ap.add_argument('--frame')
-    ap.add_argument('--threshold-hu', type=float, required=True, help='bone threshold: only voxels at or above it can disagree')
-    ap.add_argument('--ids', help='classic labels that count, e.g. 1,2,3')
-    ap.add_argument('--min-mm3', type=float, default=0.005)
-    ap.add_argument('--render', type=int, default=6)
-    ap.add_argument('--window')
-    ap.add_argument('--names', help='1=femur,2=tibia, or the anatomy.json path for every label name')
+    ap = sidecar.parser(__doc__)
+    ap.add_argument('--hu', type=sidecar.existing, required=True, help='hu.npy of the scan')
+    ap.add_argument('--labels', type=sidecar.existing, required=True, help='your label volume .npy on the scan grid, with its sidecar beside it')
+    ap.add_argument('--classic', type=sidecar.existing, required=True, help='the classic method\'s labels .npy (classic_segment.py), same grid')
+    ap.add_argument('--out', required=True, help='output directory (created)')
+    ap.add_argument('--frame', type=sidecar.existing, help='frame.json from orient_joint.py: cut the panels along its slices')
+    ap.add_argument('--threshold-hu', type=float, required=True, help='HU: only voxels at or above it can disagree')
+    ap.add_argument('--ids', help='classic label ids that count, e.g. 1,2,3 (default: all)')
+    ap.add_argument('--min-mm3', type=float, default=0.005, help='mm3: regions under this volume are not numbered')
+    ap.add_argument('--render', type=int, default=6, help='number of largest regions to draw a panel for')
+    ap.add_argument('--window', metavar='lo,hi', help='display window in HU (default: automatic)')
+    ap.add_argument('--names', help='label names, 1=femur,2=tibia or an anatomy.json')
     a = ap.parse_args()
     hu = np.load(a.hu, mmap_mode='r')
     labels = np.load(a.labels, mmap_mode='r')

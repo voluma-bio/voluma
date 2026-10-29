@@ -1,15 +1,16 @@
 import { describe, expect, it } from "vitest";
+import type { Volume } from "./review";
 import { rulerLengthProblem } from "./ruler";
 
 // Anisotropic: 0.02 mm in x, 0.03 mm in y, 0.05 mm in z.
-const affine = [
+const affine: Volume["affine"] = [
   [0.02, 0, 0, 1],
   [0, 0.03, 0, 2],
   [0, 0, 0.05, 3],
   [0, 0, 0, 1],
 ];
 // 100 voxels in x, 40 in y, 20 in z: (2, 1.2, 1) mm.
-const line = { aZyx: [10, 20, 30], bZyx: [30, 60, 130] };
+const line = { aZyx: [10, 20, 30], bZyx: [30, 60, 130] } as const;
 const mm = Math.hypot(2, 1.2, 1);
 
 describe("rulerLengthProblem", () => {

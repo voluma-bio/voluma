@@ -17,6 +17,7 @@
     "@hono/node-server": "^2.1.5",
     "@voluma/contracts": "workspace:*",
     "@voluma/harness": "workspace:*",
+    "@voluma/provider-calls": "workspace:*",
     "@voluma/workflow": "workspace:*",
     "@workos-inc/node": "10.14.0",
     "@workos/authkit-session": "0.8.0",

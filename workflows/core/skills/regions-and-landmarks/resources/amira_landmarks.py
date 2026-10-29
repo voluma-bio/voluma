@@ -1,32 +1,22 @@
 """Write points as an Amira landmark file, so the lab can check them on the scan in Amira.
 
-  python amira_landmarks.py --points points.json [more.json ...] --header hu.json --out landmarks.landmarkAscii
-
 `--points` takes points files on the scan grid (`pick.py` writes one per view; so does `iioc.py` for the width points), merged: `{"grid_id", "points":
 [{"name", "zyx"}]}`, scan voxel indices, fractions allowed. A file on another grid or without a `grid_id`, or a name in two files, is refused. Each point is moved to physical millimetres with the DICOM affine in
 `hu.json` (voxel centres, DICOM patient coordinates) and written as one landmark set in Amira's ASCII landmark format
-(`# AmiraMesh 3D ASCII 2.0`, `ContentType "LandmarkSet"`), in the order of the file; `<out>.names.json` lists that order,
-because the format has no names. Load it in Amira on the same DICOM series. Amira takes its own origin from the series: if the
+(`# AmiraMesh 3D ASCII 2.0`, `ContentType "LandmarkSet"`), in the order of the file. Load it in Amira on the same DICOM series. Amira takes its own origin from the series: if the
 points sit a constant offset from the bone, the series was loaded with another origin; check one point on a known feature.
+
+Writes: <out>  the Amira ASCII landmark file, physical mm (x, y, z)
+        <out>.names.json  the point names in file order, because the format has no names
+Prints: one JSON line {landmarks, names, world_mm_xyz}
+Example: python amira_landmarks.py --points points.json more.json --header hu.json --out landmarks.landmarkAscii
+Exits 2 with one sentence on bad input, before writing anything.
 """
-import argparse
 import json
-import sys
 from pathlib import Path
 
 import numpy as np
-
-HERE = Path(__file__).resolve().parent
-# `python -I` puts no script directory on sys.path; the skills are found by walking up to the directory that holds core/skills/;
-# only missing directories are added, so a script imported by another leaves the importer's order alone.
-SKILLS = next((p / 'core/skills' for p in HERE.parents if (p / 'core/skills/microct-core').is_dir()), HERE)
-sys.path[:0] = [d for d in (str(HERE), str(SKILLS / 'microct-core/resources')) if d not in sys.path]
-try:
-    import sidecar
-except ModuleNotFoundError as e:
-    print(f'{e}: a skill this script imports is missing; it expects <workflows>/core/skills/<skill>/resources/, or '
-          '<workflows>/<workflow>/skills/<skill>/resources/ with <workflows>/core/ beside it', file=sys.stderr)
-    sys.exit(2)
+import sidecar
 
 
 def to_world_mm(points_zyx, affine_xyz):
@@ -48,10 +38,10 @@ def amira_text(world_mm):
 
 
 if __name__ == '__main__':
-    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--points', required=True, nargs='+', help='points files on the scan grid, merged; a name may appear once')
-    ap.add_argument('--header', required=True, help='hu.json of the scan the points are on (has the affine)')
-    ap.add_argument('--out', required=True)
+    ap = sidecar.parser(__doc__)
+    ap.add_argument('--points', type=sidecar.existing, required=True, nargs='+', help='points files on the scan grid, merged; a name may appear once')
+    ap.add_argument('--header', type=sidecar.existing, required=True, help='hu.json of the scan the points are on (has the affine)')
+    ap.add_argument('--out', required=True, help='the landmark file to write')
     a = ap.parse_args()
     header = json.loads(Path(a.header).read_text())
     if 'affine_xyz_to_world_mm' not in header:

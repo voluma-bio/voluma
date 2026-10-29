@@ -11,17 +11,28 @@
 const MIN_SECRET_LENGTH = 6;
 const MASK = "[redacted]";
 
-export type Redact = (text: string) => string;
+/** `add` puts a secret minted after the run began (a gateway token) on the list. */
+export type Redact = {
+  (text: string): string;
+  add(secret: string): void;
+};
 
 export function redactor(secrets: readonly (string | undefined)[]): Redact {
   const needles = new Set<string>();
-  for (const secret of secrets) {
-    if (!secret || secret.length < MIN_SECRET_LENGTH) continue;
+  let ordered: string[] = [];
+  const add = (secret: string | undefined) => {
+    if (!secret || secret.length < MIN_SECRET_LENGTH) return;
     // The JSON-escaped form first: a secret holding a quote or backslash appears that way in
     // serialized events.
     needles.add(JSON.stringify(secret).slice(1, -1));
     needles.add(secret);
-  }
-  const ordered = [...needles].sort((a, b) => b.length - a.length);
-  return (text) => ordered.reduce((out, needle) => out.replaceAll(needle, MASK), text);
+    ordered = [...needles].sort((a, b) => b.length - a.length);
+  };
+  for (const secret of secrets) add(secret);
+  return Object.assign(
+    (text: string) => ordered.reduce((out, n) => out.replaceAll(n, MASK), text),
+    {
+      add,
+    },
+  );
 }

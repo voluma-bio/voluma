@@ -30,7 +30,7 @@
  *
  * Lease. A claim is a lease on the run for `LEASE_SECONDS` from the server's
  * last heartbeat for it. The holder (`runnerId`), the lease token, the expiry
- * and the count of recoveries are columns of the run row. The expiry is judged
+ * and why the claim ended are columns of the run row. The expiry is judged
  * by the database's `now()` inside the claim's transaction, which is also where
  * expired leases are swept, so no API process's clock or memory decides it.
  * Every claim issues a new lease token (`leaseToken`). Every ingest call on
@@ -52,12 +52,15 @@
  * `visitor` run goes to `awaiting-keys`, because its keys are gone. The runner
  * keeps its `events` already written, and the next claim resumes the thread
  * from them. That claim carries `previousClaim.reason`, why the claim before it ended
- * (`claimEndReasonSchema`); the API records `lease-expired` itself when it sweeps a lease. The claim carries no plan: the runner snapshots the run's
- * workflow directory and builds the plan itself (`packages/workflow`), and a resumed run
- * keeps the plan its first `revision.started` recorded (`task-tools.ts`). A run
- * whose lease expired three times with no `released` ends `failed` instead, so
- * one that crashes the runner doesn't loop. A `released` run is not counted,
- * so deploys don't fail a long run.
+ * (`claimEndReasonSchema`); the API records `lease-expired` itself when it sweeps a lease. The
+ * claim carries no plan: the runner snapshots the run's workflow directory and builds the plan
+ * itself (`packages/workflow`), and a resumed run keeps the plan its first `revision.started`
+ * recorded (`task-tools.ts`). One limit stops a run that keeps costing its runner: the API
+ * counts consecutive claims that end `self-stop` or `lease-expired` without run-state
+ * progress (a `task`, `checkpoint`, `output`, `attempt.opened`, `assets.ready` or correcting
+ * `revision.started` event; `judgment` while the old supervisor runs), and the run ends
+ * `failed` at 3, naming the call that was in flight. Progress resets the count. `shutdown`
+ * never counts, so deploys don't fail a long run.
  *
  * There is no tokenless call: the runner service is the only claimer.
  *
@@ -71,9 +74,10 @@
  * sandbox time. The server adds them up per run, and that sum is what the org's
  * dollar ceiling counts. A heartbeat the server did not acknowledge is resent
  * with its usage added to the next one. The runner sends `costCapUsd` (its
- * `RUNNER_MAX_RUN_COST_USD`) with the claim, which stores it as the run's spend
- * cap for the provider gateway to check. The heartbeat answers with `spentUsd`,
- * the run's total spend including its provider calls, so the runner's own cap
+ * `RUNNER_MAX_RUN_COST_USD`) with the claim only when that is set, and the claim
+ * stores it as the run's spend cap for the provider gateway to check. Unset, the
+ * run has no cap. The heartbeat answers with `spentUsd`,
+ * the run's settled spend including its provider calls, so the runner's own cap
  * sees spend that did not come through its heartbeats.
  *
  * Reports. The runner ends the run with `ended`, or gives it up with
@@ -121,7 +125,7 @@ export const claimRequestSchema = z.object({
   runnerId: runnerIdSchema,
   /**
    * The runner's `RUNNER_MAX_RUN_COST_USD`; the claim stores it as the run's spend cap, which
-   * the provider gateway checks. Absent: the API stores its default, $10.
+   * the provider gateway checks. Absent: no cap (spend is still recorded).
    */
   costCapUsd: z.number().positive().optional(),
 });
@@ -162,10 +166,11 @@ export const heartbeatResponseSchema = z.object({
   /** The server has ended the run; stop it. */
   stop: z.boolean(),
   /**
-   * The run's spend in US dollars as the gateway's cap counts it: heartbeat-reported model
-   * cost, plus each provider call's cost, or its reservation while the call is open or was
-   * cut off. Higher than `Run.providerCalls` while a call is open. Optional until the API
-   * sends it.
+   * The run's settled spend in US dollars: heartbeat-reported model cost, plus each finished
+   * provider call's cost, or its reservation if it was cut off. A call still open counts
+   * nothing (the gateway holds its reservation against the cap itself, so the runner does not
+   * stop a run for a reservation). The same provider-call sum as `Run.providerCalls`. Optional
+   * until the API sends it.
    */
   spentUsd: z.number().nonnegative().optional(),
 });
@@ -182,8 +187,7 @@ export const reportRequestSchema = z.object({
     /** The runner stops the run and gives up its lease: a shutdown or a self-stop. */
     z.object({
       kind: z.literal("released"),
-      /** Optional until the runner sends it. */
-      reason: releaseReasonSchema.optional(),
+      reason: releaseReasonSchema,
     }),
   ]),
 });

@@ -34,7 +34,8 @@
  * Files are stored as full R2 keys (`storedKeySchema`), always produced by an
  * `r2.ts` builder: `evidenceKey(runId, sha256)` for run files, and a key under
  * `reference/OA6-1RK/run/` for the reference run. Never a path relative to some
- * root.
+ * root. Converted review assets (`reviewAssetKey`) are not stored: the assets route builds
+ * their keys from the manifest.
  *
  * Nullable fields are what a producer may not know (the reference manifest has
  * no tasks, checker, structure status or measurement-to-evidence links); the
@@ -671,3 +672,38 @@ export const reviewDecisionResponseSchema = reviewRunSchema.safeExtend({
   review: reviewSummarySchema,
 });
 export type ReviewDecisionResponse = z.infer<typeof reviewDecisionResponseSchema>;
+
+const zyx = z.tuple([
+  z.number().int().positive(),
+  z.number().int().positive(),
+  z.number().int().positive(),
+]);
+
+/**
+ * What the converter (`workflows/core/convert/review_assets.py`) prints and writes as
+ * `manifest.json`; the runner parses it and builds `assets.ready` from it. Paths are relative
+ * to the asset prefix (`reviewAssetKey` in `r2.ts`). It carries no `sourceSha256`: the runner knows which
+ * file it converted, and identity is never taken from subprocess output. Other keys in the
+ * printed JSON are ignored.
+ */
+export const reviewAssetsManifestSchema = z.object({
+  /** OME-Zarr levels, finest first; `scaleZyx` is source voxels per level voxel on each axis. */
+  levels: z.array(z.object({ path: relativePathSchema, shapeZyx: zyx, scaleZyx: zyx })),
+  /**
+   * Surface meshes: float32 vertices (x, y, z) in voxels of the source grid at full resolution,
+   * then uint32 triangle indices, little-endian. `label` is set for a labels volume's mesh.
+   */
+  meshes: z.array(
+    z.object({
+      label: z.number().int().positive().optional(),
+      path: relativePathSchema,
+      vertices: z.number().int().nonnegative(),
+      indices: z
+        .number()
+        .int()
+        .nonnegative()
+        .refine((n) => n % 3 === 0, "indices come in triangles"),
+    }),
+  ),
+});
+export type ReviewAssetsManifest = z.infer<typeof reviewAssetsManifestSchema>;

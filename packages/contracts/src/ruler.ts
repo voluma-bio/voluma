@@ -4,24 +4,27 @@
  * when the second of the pair is reported. Pure; the caller supplies the grid's affine.
  */
 
-/** 4x4 row-major: voxel index (x, y, z) to world mm. */
-type Affine = readonly (readonly number[])[];
+import type { Volume } from "./review";
+
+type Vec3 = readonly [number, number, number];
 
 const REL_TOLERANCE = 0.005;
 const ABS_TOLERANCE_MM = 0.005;
 
 /** A sentence naming both lengths when they differ by more than max(0.005 mm, 0.5 %); else undefined. */
 export function rulerLengthProblem(
-  line: { aZyx: readonly number[]; bZyx: readonly number[] },
-  affine: Affine,
+  line: { aZyx: Vec3; bZyx: Vec3 },
+  affine: Volume["affine"],
   measurement: { value: number; unit: string },
 ): string | undefined {
   if (measurement.unit !== "mm") {
     return `a ruler's length is checked in mm, but the measurement is in ${measurement.unit}`;
   }
   // The line is in voxel (z, y, x); the affine takes (x, y, z).
-  const d = [2, 1, 0].map((i) => (line.bZyx[i] ?? 0) - (line.aZyx[i] ?? 0));
-  const world = [0, 1, 2].map((r) => d.reduce((sum, di, c) => sum + (affine[r]?.[c] ?? 0) * di, 0));
+  const d = [line.bZyx[2] - line.aZyx[2], line.bZyx[1] - line.aZyx[1], line.bZyx[0] - line.aZyx[0]];
+  const world = affine
+    .slice(0, 3)
+    .map((row) => row.slice(0, 3).reduce((s, a, c) => s + a * (d[c] ?? 0), 0));
   const length = Math.hypot(...world);
   const tolerance = Math.max(ABS_TOLERANCE_MM, REL_TOLERANCE * measurement.value);
   if (Math.abs(length - measurement.value) <= tolerance) return undefined;

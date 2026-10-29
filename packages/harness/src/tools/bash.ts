@@ -1,5 +1,5 @@
 /**
- * The `bash` tool: runs a command in the run's sandbox. The model sees the combined
+ * The `bash` tool: runs a command in the thread's sandbox. The model sees the combined
  * output capped to its head and tail; when that cuts something, the full text is
  * written to `toolOutputKey` through the sandbox (the harness has no R2 client) and
  * the result says so. Live chunks go to `ctx.output`, coalesced.
