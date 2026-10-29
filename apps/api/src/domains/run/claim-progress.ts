@@ -14,6 +14,7 @@ const PROGRESS_EVENT_TYPES: ReadonlySet<string> = new Set([
   "output",
   "attempt.opened",
   "revision.started",
+  "plan.changed",
   "judgment",
   // Phase 1's review-asset conversion, after the supervisor: a run whose only work left is
   // conversion is not stalled. Matched by type string; the event joins the contract with phase 1.
