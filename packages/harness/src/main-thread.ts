@@ -197,6 +197,9 @@ export function llmMainThread(
         signal,
         onEvent,
       );
+      // A call that failed has no content; its error is the cause, not "answered without JSON".
+      if (reply.stopReason === "error")
+        throw new Error(reply.errorMessage ?? "the model request failed");
       const text = reply.content.flatMap((c) => (c.type === "text" ? [c.text] : [])).join("");
       const json = text.match(/\{[\s\S]*\}/)?.[0];
       if (!json) throw new Error(`the main thread answered without JSON: ${text.slice(0, 200)}`);
