@@ -4,9 +4,8 @@
  * log gives the spend so far.
  *
  * - Cost and tokens: the `usage` on each assistant `message` and each `wake`, plus a
- *   `tool.result`'s `costUsd` (a `segment_sam` call's Meta charge). Each counts for the
- *   thread that wrote the event; an event from a thread with no `thread.started` before it
- *   counts only in `total`.
+ *   Each counts for the thread that wrote the event; an event from a thread with no
+ *   `thread.started` before it counts only in `total`.
  * - Provider calls (the gateway's, `Run.providerCalls`) are passed in separately and added
  *   to `costUsd` and `toolCostUsd`: `total` takes their `costUsd`, and each `bySandbox`
  *   entry's cost also goes to the task (or `main`) whose thread wrote the `sandbox` event with
@@ -25,7 +24,7 @@
  *   bill is the uptime of all the run's sandboxes (`Run.usage.sandboxSeconds`), which is longer:
  *   each thread's sandbox idles between its calls.
  *
- * The runner's end-of-run log line sums the same model and tool costs over the run's
+ * The runner's end-of-run log line sums the same model costs over the run's
  * threads, so without provider calls `total.costUsd` matches it for a run that didn't lose
  * events (a review chat thread is not the runner's).
  */
@@ -159,16 +158,9 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
         if (e.payload.name === "bash") bash.set(e.payload.toolCallId, { threadId: e.threadId, at });
         break;
       case "tool.result": {
-        const { costUsd, toolCallId } = e.payload;
-        const call = bash.get(toolCallId);
-        bash.delete(toolCallId);
-        add(e.threadId, (s) => {
-          if (costUsd !== undefined) {
-            s.costUsd += costUsd;
-            s.toolCostUsd += costUsd;
-          }
-          if (call) s.sandboxSeconds += seconds(call.at, at);
-        });
+        const call = bash.get(e.payload.toolCallId);
+        bash.delete(e.payload.toolCallId);
+        if (call) add(e.threadId, (s) => (s.sandboxSeconds += seconds(call.at, at)));
         break;
       }
     }
