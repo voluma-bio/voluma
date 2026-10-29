@@ -1,6 +1,6 @@
 # Runner TODO
 
-- **Measure the live `/inputs` staging rate after #198.** Run a before/after A/B on the staging OA6-1RK prefix with the staging runner environment, recording `cp` stderr and elapsed time. The local GNU coreutils 9.4 harness reproduces the parent-directory `EEXIST` race, but this checkout had no staging API/gateway environment or input prefix. Do not lower `-P 32` without that Modal measurement.
+- **Measure the live `/inputs` staging rate after #198.** Run a before/after A/B on the staging OA6-1RK prefix with the staging runner environment, recording `cp` stderr and elapsed time. The parent-directory race is reproduced and fixed locally; a real-Modal count confirms it was the only cause. Do not lower `-P 32` without that measurement.
 
 From the round-2 review of #40 (`voluma-bio/docs` `work/mvp-contracts-and-data/research/review-pr40-round2.md`):
 

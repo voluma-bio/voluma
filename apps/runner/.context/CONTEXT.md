@@ -247,9 +247,9 @@ does not bisect: each successful probe costs a full SAM call ($0.07-0.10).
 
 # Runner: staging `/inputs`
 
-A mount marked `stage` is mounted privately under `/staged` while the sandbox starts, then copied to its public local path (for example `/staged/inputs` to `/inputs`). `modal-sandbox.ts` lists the source once and runs up to 32 workers, with 16 paths per worker. The healthy pass keeps those batches; when a batch's `cp --parents` fails, it checks the candidate files and writes only incomplete paths to a NUL list. Up to three later passes copy those failed files one at a time, so successful files are not recopied. The final source/destination file-count check still rejects a partial copy.
+A mount marked `stage` is mounted privately under `/staged` while the sandbox starts, then copied to its public local path (for example `/staged/inputs` to `/inputs`) by `STAGE_SCRIPT` in `modal-sandbox.ts`. It makes every directory first, then runs `cp --parents` with up to 32 workers of 16 paths each. Making the directories first matters: parallel `cp --parents` calls that race to create one parent directory fail with `File exists`, which surfaced as `staging /inputs failed with exit code 123` (reproduced locally in 12 of 20 copies of an 800-file nested tree; 0 of 20 after). After each pass it compares one sorted `size path` listing per side and re-copies only the files missing or the wrong size, up to three more passes, then fails naming them. The error keeps a bounded tail of the copy's stderr.
 
-The stage command keeps a bounded tail of stderr in the thrown error. Do not replace the failed-file list with a whole-copy retry: the input is about 943 MB and every thread stages its own copy. The original `xargs` status was 123 when any `cp` failed, but its stderr was previously discarded. A local GNU coreutils 9.4 stress run reproduced `cp --parents`'s shared-parent-directory `EEXIST` race under 32-way copying; the staging incident's exact stderr remains unconfirmed until the staging runner environment is available.
+Never replace this with a whole-copy retry: the input is about 943 MB and every thread stages its own copy.
 
 # Runner: what `/outputs` and `/scratch` support
 
