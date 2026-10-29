@@ -17,6 +17,7 @@ import { modelFallback } from "./model-fallback.ts";
 import { PROVIDERS } from "./providers.ts";
 import { redactor } from "./redact.ts";
 import { type RunnerContext, runClaim } from "./run.ts";
+import { startTelemetry } from "./telemetry.ts";
 
 /** How long a shutdown waits for runs to report before it exits anyway. */
 const SHUTDOWN_BUDGET_MS = 30_000;
@@ -80,6 +81,8 @@ log(
       ", ",
     )}${config.fallbackModel ? `, fallback ${config.fallbackModel.provider}/${config.fallbackModel.id}` : ""}, api ${config.api.baseUrl}`,
 );
+// After startup: a failure above must still kill the process, not be logged and survived.
+startTelemetry(log);
 while (!shutdown.signal.aborted) {
   if (active.size >= config.concurrency) {
     await Promise.race([...active, shuttingDown]);

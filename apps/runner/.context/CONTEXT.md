@@ -214,3 +214,23 @@ milliseconds of a call gets the no-tool form.
 
 The API bounds restarts with one limit (`apps/api/.context/deploy.md`); the runner has no
 restart counter of its own.
+
+# Runner: telemetry, and what an uncaught error does
+
+`telemetry.ts` starts after startup (a failure before it still kills the process). Every line starts
+with `telemetry`; on Railway search the deploy logs for these:
+
+| grep | Line | Means |
+|---|---|---|
+| `telemetry loop-delay` | once a minute: `p99=…ms max=…ms` | event-loop delay over the last minute. A healthy runner stays well under 1 s; the heartbeat deadline is `LEASE_SECONDS - HEARTBEAT_SECONDS` |
+| `telemetry heartbeat-rtt` | once a minute: `p50`, `max`, `n` | send-to-answer time of the acknowledged heartbeats (absent when none were acknowledged) |
+| `telemetry loop-block` | when a 100 ms timer fires over 1 s late: `…ms; in flight: <run> <thread> <tool>; …` | the loop was held that long, and the tool calls recorded as started and not yet resulted at that moment (`no tool`: none) |
+| `telemetry unhandledRejection in run` / `uncaughtException in run` | on the error | an error nobody caught, tied to its run: that run stops (`stop: error`) and ends `failed` with the error's message; other runs go on |
+| `telemetry … outside any run` | on the error | tied to no run; logged and the process stays up |
+| `stop: <reason>` | per run, once per reason | every stop reason, with the first (the one that decides the report) named when it differs |
+| `release not stored` / `end not stored` | after a `report` | the server answered 409: the run ended first or the lease is gone |
+
+An error is tied to its run by `AsyncLocalStorage` (`runScope`), set around each `runClaim`: the
+async context an error was raised in survives into the process handler, so it names the run
+without parsing messages. An error raised from a timer or callback created inside a run's work
+belongs to that run; one raised by the main loop's own code (claiming) belongs to none.

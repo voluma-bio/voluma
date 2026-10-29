@@ -53,6 +53,14 @@ import { r2Evidence } from "./r2-evidence.ts";
 import { r2Files } from "./r2-files.ts";
 import { r2Workflows } from "./r2-workflows.ts";
 import { type Redact, redactor } from "./redact.ts";
+import {
+  heartbeatRoundTrip,
+  type RunScope,
+  runEnded,
+  runScope,
+  toolEnded,
+  toolStarted,
+} from "./telemetry.ts";
 import { type ModelRole, usageMeter } from "./usage.ts";
 
 /**
@@ -80,7 +88,8 @@ export interface RunnerContext {
   log(line: string): void;
 }
 
-type Stopped = StopReason | "shutdown" | "spend-cap";
+/** "error": an error nobody caught reached the process handler while this run was working (`telemetry.ts`). */
+type Stopped = StopReason | "shutdown" | "spend-cap" | "error";
 
 /** Which report a stop reason, a clean end or a failure becomes; undefined: say nothing more. */
 export function reportFor(
@@ -95,10 +104,17 @@ export function reportFor(
     : { kind: "ended", outcome: "failed", error };
 }
 
-export async function runClaim(
+/** Runs the claim inside its `RunScope`, so an uncaught error in its work fails this run alone. */
+export function runClaim(ctx: RunnerContext, claim: Claim, shutdown: AbortSignal): Promise<void> {
+  const scope: RunScope = { runId: claim.run.id };
+  return runScope.run(scope, () => claimBody(ctx, claim, shutdown, scope));
+}
+
+async function claimBody(
   ctx: RunnerContext,
   claim: Claim,
   shutdown: AbortSignal,
+  scope: RunScope,
 ): Promise<void> {
   const { config, models } = ctx;
   const { run, leaseToken, keys } = claim;
@@ -130,8 +146,15 @@ export async function runClaim(
   const abort = new AbortController();
   // An object, so TypeScript does not narrow what the callbacks set.
   const why: { stopped?: Stopped } = {};
+  // The first reason decides the report; every reason is logged, since a later one (a spend
+  // cap, an error) is what a self-stop would otherwise hide.
+  const reasons = new Set<Stopped>();
   const stop = (reason: Stopped) => {
     why.stopped ??= reason;
+    if (!reasons.has(reason)) {
+      reasons.add(reason);
+      log(`stop: ${reason}${reason === why.stopped ? "" : ` (first was ${why.stopped})`}`);
+    }
     abort.abort();
   };
   // The shutdown signal outlives this run: the listener is removed in `finally`.
@@ -161,8 +184,12 @@ export async function runClaim(
   let live: LiveBatcher | undefined;
   let session: SandboxSession | undefined;
   let error: string | undefined;
+  scope.fail = (e) => {
+    error ??= redact(e instanceof Error ? e.message : String(e));
+    stop("error");
+  };
   try {
-    lease = holdLease({ client, meter, onStop: stop, log });
+    lease = holdLease({ client, meter, onStop: stop, onRoundTrip: heartbeatRoundTrip, log });
     log(
       `claimed (${visitor ? "visitor" : "voluma"} keys, model ${workerModel.provider}/${workerModel.id})`,
     );
@@ -222,6 +249,10 @@ export async function runClaim(
       {
         async append(event) {
           await client.append(event);
+          if (event.type === "tool.call") {
+            const { toolCallId, name } = event.payload;
+            toolStarted(toolCallId, `${runId} ${event.threadId.slice(runId.length + 1)} ${name}`);
+          } else if (event.type === "tool.result") toolEnded(event.payload.toolCallId);
           log(eventLine(event, redact));
         },
       },
@@ -391,6 +422,7 @@ export async function runClaim(
     log(`failed: ${error}`);
   } finally {
     shutdown.removeEventListener("abort", onShutdown);
+    runEnded(runId);
     // Frozen here: a stop that lands while the run is being closed does not change its report.
     const stopped = why.stopped;
     const report = reportFor(stopped, stopped === "spend-cap" ? capError : error);
@@ -401,10 +433,18 @@ export async function runClaim(
     await events?.flush();
     await lease?.end(report !== undefined);
     if (report) {
-      await client
-        .report(report)
-        .catch((e) => log(`report failed: ${e instanceof Error ? e.message : e}`));
-      log(`reported ${report.kind}${report.kind === "ended" ? ` ${report.outcome}` : ""}`);
+      const stored = await client.report(report).catch((e) => {
+        log(`report failed: ${e instanceof Error ? e.message : e}`);
+        return undefined;
+      });
+      if (stored === false)
+        log(
+          `${report.kind === "released" ? "release" : "end"} not stored: the server answered 409 (the run ended first or the lease is gone); ${
+            report.kind === "released" ? `reason ${report.reason}` : `outcome ${report.outcome}`
+          }`,
+        );
+      else if (stored)
+        log(`reported ${report.kind}${report.kind === "ended" ? ` ${report.outcome}` : ""}`);
       if (live) {
         const { frames, requests, dropped } = live.stats();
         log(`live frames this claim: ${frames} in ${requests} requests, ${dropped} dropped`);
@@ -412,7 +452,7 @@ export async function runClaim(
       log(`model cost this claim: $${meter.totalModelCostUsd().toFixed(4)}`);
       for (const line of meter.cacheSummary()) log(`model usage this claim, ${line}`);
     } else {
-      log(`stopped (${stopped}); nothing more to report`);
+      log(`stopped (${[...reasons].join(", ")}); nothing more to report`);
     }
     if (report?.kind !== "ended") await closeSandbox(CLOSE_BUDGET_MS.stopped);
   }
