@@ -1,22 +1,19 @@
 """Trim each small structure's SAM track to the frames it actually occupies.
 
-  python trim_tracks.py --labels small_oriented.npy --out small_trimmed_oriented.npy --like oriented.json [--only 61 62 5]
-
 After a small structure ends, SAM keeps its object alive and it picks up whatever sits at the same spot on later frames (a
 neighbouring bone, unlabelled bone). For every object in the sidecar `segment_sam` writes beside its labels (`--tracks`,
 default `<labels>.json`), this keeps the unbroken run of slices around its prompt frame in which the object has a mask
-with confidence >= `--min-conf` (0.5), and clears its label elsewhere. Run it on the small-structure request only, and
+with confidence >= `--min-conf`, and clears its label elsewhere. Run it on the small-structure request only, and
 give `--only 5 7 8` to limit it to some labels. Slices are axis 0, so pass labels on the stack `segment_sam` was given,
 before `to_scan.py`. `--like` is that stack's sidecar (`oriented.json`). `segment_sam`'s own sidecar has no grid, so stamp
 one on its output right after the call (`sidecar.py --array small_oriented.npy --like oriented.json`); this script refuses
 labels whose `grid_id` is not `--like`'s, so labels from another orientation of the same scan cannot pass.
 
-One rule, set after seeing OA6-1RK's reference, validated on that scan only (Dice 0.90-0.98 for 6 of 8 small labels). The
-cut shortens a structure's ends, so trimmed volumes run 10-20% under the reference. A rule that follows overlap with the
-neighbouring slice (IoU >= 0.3) scored higher on labels 5, 9 and 10 in the same experiment, and was also picked after
-seeing the reference: neither is validated on a second scan. Only the confidence rule is implemented.
+Writes: <out>  the trimmed labels (.npy, the shape of --labels), with its sidecar (the grid of --like, min_conf, only)
+Prints: one JSON line {labels, trimmed: {label: {kept_slices, slices, voxels_before, voxels_after}}}
+Example: python trim_tracks.py --labels small_oriented.npy --out small_trimmed_oriented.npy --like oriented.json --only 61 62 5
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
-import argparse
 import json
 import sys
 from pathlib import Path
@@ -68,13 +65,13 @@ def trim(confidence, frame, n_frames, min_conf=0.5):
 
 
 if __name__ == '__main__':
-    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--labels', required=True)
-    ap.add_argument('--out', required=True)
+    ap = sidecar.parser(__doc__)
+    ap.add_argument('--labels', required=True, help='labels .npy from segment_sam, on the oriented stack, stamped with its grid')
+    ap.add_argument('--out', required=True, help='trimmed labels .npy to write')
     ap.add_argument('--like', required=True, help='sidecar of the stack segment_sam was given (oriented.json): the grid of the output')
     ap.add_argument('--tracks', help='segment_sam sidecar (default: <labels>.json)')
     ap.add_argument('--only', type=int, nargs='+', help='labels to trim (default: all objects in the sidecar)')
-    ap.add_argument('--min-conf', type=float, default=0.5)
+    ap.add_argument('--min-conf', type=float, default=0.5, help='SAM confidence (0-1) a slice needs to be kept')
     a = ap.parse_args()
     tracks_path = a.tracks or str(sidecar.sidecar_path(a.labels))
     if not Path(tracks_path).exists():

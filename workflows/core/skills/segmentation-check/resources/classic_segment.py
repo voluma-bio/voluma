@@ -1,19 +1,24 @@
-"""A second opinion on boundaries: a seeded watershed inside the bone threshold, seeded from the labels you already have.
+"""Second opinion on boundaries: a seeded watershed inside the bone threshold, seeded from your labels.
 
-  python classic_segment.py --hu hu.npy --labels labels.npy --out classic.npy --threshold-hu <T> [--core-mm 0.05]
-  python classic_segment.py --hu hu.npy --labels labels.npy --out split.npy --threshold-hu <T> --within 2 --seeds seeds.json
-
-Default mode: seeds are the eroded cores of each label (`--core-mm` deep; a label with no core left seeds from its bone voxels),
-the elevation is the Gaussian gradient magnitude of the HU volume (sigma 1 voxel), and basins grow with 6-connectivity inside
-bone. It shares the labels' idea of which bone is which, so it checks where boundaries run, not identity: a label on two bones
-stays on two bones.
+Default mode: seeds are the eroded cores of each label (`--core-mm` deep; a label with no core left seeds from its bone voxels,
+and is listed in `core_fallback_labels`), the elevation is the Gaussian gradient magnitude of the HU volume (sigma 1 voxel),
+and basins grow with 6-connectivity inside bone (HU at or above `--threshold-hu`). It shares the labels' idea of which bone is
+which, so it checks where boundaries run, not identity: a label on two bones stays on two bones. The output holds only the
+watershed's labels (bone voxels).
 
 `--within L --seeds seeds.json` splits the voxels of label L between parts you seed: seeds.json is
-{"<label>": [[z,y,x], ...]}, one entry per part (use L for the part that keeps its id). Each seed grows to a ball of 3 voxels
-before the watershed; voxels of other labels are left alone. The elevation here is minus the distance to the label's edge,
-so the cut falls where the label pinches (the contact), whatever the HU gradient does; a seed only has to lie inside its part.
+{"<label>": [[z,y,x], ...]}, one entry per part (use L for the part that keeps its id), z,y,x scan voxel indices. Each seed grows to
+a ball of 3 voxels before the watershed; voxels of other labels are left alone, and the output is `--labels` with the parts
+written over label L. The elevation here is minus the distance to the label's edge, so the cut falls where the label pinches
+(the contact), whatever the HU gradient does; a seed only has to lie inside its part. `--within` and `--seeds` go together;
+a seed outside the region around label L is refused.
+
+Writes: <out>  uint8 labels on the grid of --labels, with its sidecar
+Prints: one JSON line {labels, volume_mm3: {label id: volume}, core_fallback_labels (default mode only)}
+Example: python classic_segment.py --hu hu.npy --labels labels.npy --out classic.npy --threshold-hu 2500
+         python classic_segment.py --hu hu.npy --labels labels.npy --out split.npy --threshold-hu 2500 --within 2 --seeds seeds.json
+Exits 2 with one sentence on the input it checks; a missing file is a Python error.
 """
-import argparse
 import json
 import sys
 from pathlib import Path
@@ -104,14 +109,14 @@ def grow(shape, build, fill_elevation):
 
 
 if __name__ == '__main__':
-    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--hu', required=True)
-    ap.add_argument('--labels', required=True)
-    ap.add_argument('--out', required=True)
-    ap.add_argument('--threshold-hu', type=float, required=True)
-    ap.add_argument('--core-mm', type=float, default=0.05)
-    ap.add_argument('--within', type=int)
-    ap.add_argument('--seeds')
+    ap = sidecar.parser(__doc__)
+    ap.add_argument('--hu', required=True, help='hu.npy of the scan')
+    ap.add_argument('--labels', required=True, help='label volume .npy on the scan grid, with its sidecar beside it')
+    ap.add_argument('--out', required=True, help='labels .npy to write')
+    ap.add_argument('--threshold-hu', type=float, required=True, help='HU: voxels at or above this are bone (the segmentation threshold)')
+    ap.add_argument('--core-mm', type=float, default=0.05, help='mm: how deep each label is eroded to make its seed, in the default segmentation mode')
+    ap.add_argument('--within', type=int, help='label id to split between the parts in --seeds')
+    ap.add_argument('--seeds', help='JSON {"<label>": [[z,y,x], ...]}: the parts of label --within')
     a = ap.parse_args()
     hu = np.load(a.hu, mmap_mode='r')
     labels = np.load(a.labels, mmap_mode='r')
