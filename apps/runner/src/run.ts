@@ -13,8 +13,10 @@
  *
  * End of the run, in order. A normal end closes the sandbox first, so its `stopped` event
  * and last seconds go out under the live lease, then reports. A stop (shutdown, self-stop)
- * reports `released` first, so the run is recovered within the platform's grace period,
- * then closes the sandbox. A stop by the server or a lost lease reports nothing.
+ * reports `released` with its reason first, so the run is recovered within the platform's
+ * grace period, then closes the sandbox. A stop by the server or a lost lease reports nothing.
+ * None of these stops writes a `thread.ended`: the threads are cut off, and the next claim
+ * (which learns why from `claim.previousClaim`) resumes them (`supervisor.ts`).
  */
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
@@ -81,12 +83,13 @@ export interface RunnerContext {
 type Stopped = StopReason | "shutdown" | "spend-cap";
 
 /** Which report a stop reason, a clean end or a failure becomes; undefined: say nothing more. */
-function reportFor(
+export function reportFor(
   stopped: Stopped | undefined,
   error?: string,
 ): ReportRequest["report"] | undefined {
   if (stopped === "stop" || stopped === "lease-lost") return undefined;
-  if (stopped === "self-stop" || stopped === "shutdown") return { kind: "released" };
+  if (stopped === "self-stop" || stopped === "shutdown")
+    return { kind: "released", reason: stopped };
   return error === undefined
     ? { kind: "ended", outcome: "completed" }
     : { kind: "ended", outcome: "failed", error };
@@ -337,6 +340,7 @@ export async function runClaim(
       plan: computed.tasks,
       selectedOutputs: run.selectedOutputs,
       notes: run.notes,
+      previousClaim: claim.previousClaim?.reason,
       providerError: isProviderError,
       // With a fallback model set, the redo starts on it, so even a refused key is not the end.
       providerFatal: (error) => !config.fallbackModel && isFatalProviderError(error),

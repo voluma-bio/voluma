@@ -29,3 +29,8 @@
   delete `uploading` rows older than the URL lifetime (6 h, `inputs.ts`) on a schedule. Also
   delete `inputs/<id>/` for any id with no `ready` row: a complete cancelled or abandoned
   part way through its copy leaves files there.
+
+- **Drop the `runs.recoveries` column.** Nothing reads or writes it since the no-progress limit
+  (`claim-progress.ts`) replaced it, but it stays in `schema.ts` so the previous deploy's code,
+  which still selects it, keeps working while a migration runs. Drop it in a later PR, once that
+  code is drained.
