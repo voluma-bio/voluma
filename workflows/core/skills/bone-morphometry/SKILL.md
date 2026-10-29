@@ -21,7 +21,7 @@ workflow's protocol says which region each parameter uses, and this skill builds
 | BV/TV | BV / TV, in % | |
 | Tb.Th | mean diameter of the largest sphere inside bone that covers each bone voxel | sphere thickness (Hildebrand and Rüegsegger), not twice the distance transform, which reads thin struts low |
 | Tb.Sp | the same on marrow (ROI minus bone) | space outside the ROI is not marrow: struts and gaps cut by the ROI edge read thin and small |
-| Tb.N | (BV/TV) / Tb.Th, in 1/mm | model-derived, not a strut count: say "model-derived" when you report it |
+| Tb.N | (BV/TV as a fraction) / Tb.Th, in 1/mm | model-derived, not a strut count: say "model-derived" when you report it |
 | Tb.Nd, Tb.Tm | skeleton nodes (3 or more neighbours) and ends (1 neighbour) per mm³ of the tissue counted | 3D skeleton. Voxels within an edge margin of the ROI are left out, because the ROI cuts struts and makes false ends, so the density divides by the counted part, which the record carries. **Unvalidated against any reference tool**; plate-like bone skeletonises to a surface and gives many nodes. Report them as exploratory |
 | Ct.Th | mean sphere diameter over cortical voxels in a slab | a slab centred at a depth below a reference surface. **Needs a cortical mask, not a bone mask**: near a growth plate a bone mask's slab averages in trabeculae and plate. Say which mask you used. The record also gives the median and standard deviation, since thick blobs where the wall meets a ridge lift the mean |
 

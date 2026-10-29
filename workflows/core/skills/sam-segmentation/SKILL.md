@@ -47,5 +47,4 @@ segmentation of every bone and a second opinion on your own; **you own the final
   each piece lost to them; a large loss is a To check item. Clip once more: that is `labels.npy`.
 
 Do not claim a voxel-exact number from one call: keep the call's counts, prompts and labels as evidence, and when a
-measurement must be stable, call twice and report the spread. A rerun costs the same as the first call; a third
-rerun on one problem is a To check item.
+measurement must be stable, call twice and report the spread. A third rerun on one problem is a To check item.

@@ -16,7 +16,7 @@
     "outputs": ["frame"],
     "instructions": "Orient the stack so the later tasks share one frame (a labels-ready volume with known axes), with the orient-joint skill.",
     "doneWhen": [
-      "The keyframe cuts the femur, the tibia and the patella through the joint, as examples/README.md (orientation) describes."
+      "The keyframe cuts the femur and the tibia through the joint, and the patella when it is in the field, as examples/README.md (orientation) describes."
     ]
   },
   {
@@ -30,7 +30,7 @@
     ],
     "instructions": "Segment the bones and joint structures and settle the final labels; a piece the data do not support is not named, and whether its structure is absent is decided by the segmentation-check skill, section 2.",
     "doneWhen": [
-      "Every label is one structure, checked on the 3D sheet and the label checks, as examples/README.md (segmentation) describes.",
+      "Every label is one structure and every piece present is labelled or raised as a To check item, checked on the 3D sheet and the label checks, as examples/README.md (segmentation) describes.",
       "The volumes of #1-3 follow from the final labels."
     ]
   },
@@ -47,7 +47,7 @@
       "iioc-height-lateral-compartment",
       "tibial-width-at-the-growth-plate"
     ],
-    "instructions": "Define the IIOC region (ROI-1) and report its volumes, heights and the tibial width.",
+    "instructions": "Define the IIOC region (ROI-1) and report its volumes, heights and the tibial width. Write the aligned frame to /outputs/iioc/frame/ and the ROI-1 files to /outputs/iioc/iioc/: the later tibial tasks read them there.",
     "doneWhen": [
       "ROI-1 runs from the growth plate to the articular surface, as examples/README.md (iioc) describes, and was checked on a render."
     ]
@@ -89,7 +89,7 @@
       "metaphyseal-tb-nd",
       "metaphyseal-tb-tm"
     ],
-    "instructions": "Define ROI-3 below the growth plate and report its trabecular parameters.",
+    "instructions": "Define ROI-3 below the growth plate and report its trabecular parameters. Write them to /outputs/metaphyseal-roi/meta/: the cortical task reads cortex.npy and growth-plate-distal-face.npy there.",
     "doneWhen": [
       "ROI-3 starts 50 um below the growth plate, is 200 um long and 20 um clear of cortical bone, as examples/README.md (metaphyseal-roi) describes."
     ]

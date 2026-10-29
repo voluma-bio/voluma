@@ -21,7 +21,7 @@ where it has one; use that instead of assembling the region here.
 2. `pick.py` snaps the picks to the bone and writes `points.json` and `pick-check.jpg` (`--help` for the picks
    file). A large `snap_distance_mm` means the pick was off the bone.
 3. Look at `pick-check.jpg`: the circle must sit on the feature you meant, on the right bone, on the right side of a
-   ridge. For a point that matters, judge it from a second view as well: depth is the one thing a single render
+   ridge. A landmark a measurement uses is judged from a second view as well: depth is the one thing a single render
    hides.
 4. Report the points with `pick-check.jpg` as evidence.
 

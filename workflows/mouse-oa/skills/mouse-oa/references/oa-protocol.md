@@ -25,12 +25,12 @@ on.
 
 | # | Do | Script | Look at |
 |---|---|---|---|
-| 1 | Align the tibia (in the `iioc` task; later tasks read `/outputs/iioc/frame/`): shaft axis, +W from joint toward shaft, crop around the joint end | `tibia_frame.py` | `tibia-frame-qc.jpg`: coronal sections, joint at top, tibia outline following the bone; a crop that cuts bone or a tilted bone means the shaft or epiphysis range needs setting |
+| 1 | Align the tibia (in the `iioc` task, `--out frame`: later tasks read `/outputs/iioc/frame/`): shaft axis, +W from joint toward shaft, crop around the joint end | `tibia_frame.py` | `tibia-frame-qc.jpg`: coronal sections, joint at top, tibia outline following the bone; a crop that cuts bone or a tilted bone means the shaft or epiphysis range needs setting |
 | 2 | Trace the growth plate's proximal face on coronal sections (annotation A) | you write `annotations.json` | coronal sections of `tibia-hu.npy` with a pixel grid, every 20 V indices over the epiphysis |
-| 3 | ROI-1 (IIOC), heights, width, plate columns | `iioc.py` | `qc-coronal.jpg` and `qc-heights.jpg` against `examples` (iioc) |
+| 3 | ROI-1 (IIOC), heights, width, plate columns (`--out iioc`: later tasks read `/outputs/iioc/iioc/`) | `iioc.py` | `qc-coronal.jpg` and `qc-heights.jpg` against `examples` (iioc) |
 | 4 | Trace the boundary under the subchondral plate (annotation B) | you | coronal sections with the ROI-1 outline |
 | 5 | ROI-2 (IIOC trabecular) | `tibial_trabecular.py` | `qc-coronal.jpg` against `examples` (trabecular-roi) |
-| 6 | Trace the growth plate's distal face (annotation C), then ROI-3 and the cortex under the plate | `metaphysis_roi.py` | `qc-roi3.jpg` against `examples` (metaphyseal-roi) |
+| 6 | Trace the growth plate's distal face (annotation C), then ROI-3 and the cortex under the plate (`--out meta`: the `cortical` task reads `/outputs/metaphyseal-roi/meta/`) | `metaphysis_roi.py` | `qc-roi3.jpg` against `examples` (metaphyseal-roi) |
 | 7 | TV, BV, BV/TV of ROI-1 and ROI-2 (#4–6, #13–15); TV, BV, BV/TV, Tb.N, Tb.Th, Tb.Sp, nodes and ends of ROI-3 (#16–23) | `morphometry.py volumes` per region; `trabecular --skeleton` for ROI-3 | the QC image `trabecular` writes (`bone-morphometry`) |
 | 8 | Ct.Th at 100 and 1000 µm below the distal face, on the cortex mask and face `metaphyseal-roi` wrote (the face is traced once; `metaphysis_roi.py` is not run again); plate thickness per compartment on the plate runs `iioc.py` wrote, 175 µm deep, 350 µm slab, under the articular top surface | `morphometry.py cortical` | its QC image against `examples` (cortical, subchondral-plate) |
 | 9 | Femoral landmarks: four points on a 3D render of the femur (`regions-and-landmarks`, picks named `a` to `d`), then compute | `femoral_frame.py` on the `points.json` files `pick.py` wrote | each `pick-check.jpg` against `examples` (femoral-geometry); the script refuses a bad landmark (D) |
@@ -166,7 +166,7 @@ the measurements they check.
 
 ## Limits to state in every report
 
-- Every region follows traces you made on one scan; the old run labelled its values provisional and so do we.
+- Every region follows traces made on one scan; the old run labelled its values provisional and so do we.
 - The aligned grid is a linear resampling of HU, and every region traced on it is counted on it (grid rule above).
 - ROI-3 depends on the traced distal face, and its cortex edge uses an estimated cortex depth (reported as
   `cortex_estimate_mm`): a wrong depth moves ROI-3.

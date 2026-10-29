@@ -8,10 +8,10 @@ description: >
 
 # Segmentation check
 
-SAM proposes; you own the final labels. Code checks gate and your eyes confirm: run `label_stats.py` and
+SAM proposes; the task that submits the labels owns them. Code checks gate and eyes confirm: run `label_stats.py` and
 `unlabelled.py` first, then look at what they flag and at the 3D sheet (`visual-check`). Looking alone has passed a
-fragment carrying the wrong label. A labels volume leaves your task when every label passes the checks below and
-every disagreement you could not settle is a To check item that names its region. The workflow's `anatomy.json`
+fragment carrying the wrong label. A labels volume is finished when every label passes the checks below and every
+disagreement the CT could not settle is a To check item that names its region. The workflow's `anatomy.json`
 holds the label table, the expected volumes and pieces, and which labels must touch which.
 
 ## 1. Each label
@@ -64,15 +64,15 @@ Volumes decide only when the region is a sizeable share of the smaller structure
 across the edge of its range; a region far smaller than both ranges rests on the CT and the anatomy table. Never
 average or vote.
 
-## 4. Fix, then check again
+## 4. The fix for each cause
 
-The cheapest fix that addresses the cause: a wrong box or missing neighbour, fix the prompt and call `segment_sam`
-again; a whole piece with the wrong label, `relabel.py`; two bones under one label, `classic_segment.py --within`
-with seeds. After any fix, run the label checks and look at the quad view and the 3D sheet again.
+A wrong box or a missing neighbour: a new `segment_sam` request with the prompt fixed. A whole piece with the wrong
+label: `relabel.py`. Two bones under one label: `classic_segment.py --within` with seeds. After any fix, the label
+checks, the quad view and the 3D sheet again.
 
 ## 5. A To check item that points at the region
 
 `checkpoint` with `toCheck: {title, focus: {structureIds, annotationIds, volumeId, label}}` (both arrays required):
 the title gives the place and the question ("Joint face, slices 140-170: bone A or bone B?"), the text both methods'
-labels and the one you kept. Report `disagreement.npy` as a `volume` output of kind `labels` so the focus resolves
-to it.
+labels and the one kept. The focus resolves only when the task that made `disagreement.npy` reports it as a
+`volume` output of kind `labels`.

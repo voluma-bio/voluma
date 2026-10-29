@@ -6,30 +6,34 @@ crop from the lab's parameter deck unless its name says otherwise.
 
 ## orientation
 
-The keyframe cuts the femur, the tibia and the patella in one slice, with the joint space between femur and tibia
-dark and open. No deck figure: the frame is ours, not the lab's.
+The keyframe cuts the femur and the tibia in one slice through the joint, with the joint space between them dark
+and open, and the patella too when the scan's notes put it in the field. No deck figure: the frame is ours, not
+the lab's.
 
 ## segmentation
 
-`segmentation/deck-patella-menisci.jpg`: the lab's labels 1 (patella), 2 (lateral meniscus with osteophytes) and 3 (medial) on the knee, front and back. Each label is one bone: on the 3D sheet no colour reaches onto a neighbour and no bone is uncoloured. On the quad
-view every joint face's boundary runs through the dark joint space, never through bone. The patella is the large
+`segmentation/deck-patella-menisci.jpg`: the lab's labels 1 (patella), 2 (lateral meniscus with osteophytes) and 3 (medial) on the knee, front and back. Each label is one bone: on the 3D sheet no colour reaches onto a neighbour, every structure that is present and
+named carries its colour, and a piece nobody can name stays uncoloured with a To check item asking what it is. On
+the quad view every joint face's boundary runs through the dark joint space, never through bone. The patella is the large
 bone in front of the femur in the trochlear groove; a small piece near the joint is a sesamoid or a fragment,
-whatever its box was called. Labels 5 to 12 (`anatomy.md`) are small blobs a few tens of voxels across, each its
+whatever its box was called. Labels 5 to 12 (`../references/anatomy.md`) are small blobs a few tens of voxels across, each its
 own label.
 
 ## iioc
 
 `iioc/deck-roi1-heights-width.jpg`: the tibia opened along the shaft, the growth plate, and ROI-1 above it with the heights 7, 8, 9 and the width 10 drawn on. ROI-1 runs from the growth plate's proximal face up to the articular surface of the tibial plateau, over the whole
 plateau: on a coronal section the region sits on the traced face, includes the marrow, and excludes the femur above
-and the growth-plate band below. The width (#10) joins the centre of the fibula–tibia junction on the tibial surface
-to the most prominent point on the other side of the plateau. The heights (#7–9) run from the growth plate to the
-top of the articular bone, whole, medial and lateral.
+and the growth-plate band below. The width (#10) is a chord along the growth plate on a coronal section, from the
+centre of the fibula–tibia junction on the tibial surface to the point that sticks out furthest on the other side
+of the plateau. The heights (#7–9) run along the shaft axis from the growth plate's face up to the top of the
+articular bone: #7 from the middle of the growth plate (midway between the width points), #8 and #9 from the
+middle of the medial and the lateral compartment of the plateau.
 
 ## subchondral-plate
 
-`subchondral-plate/deck-plate-patches.jpg` (Tang et al.): a coronal section with the medial and lateral patches, 500 µm wide, the plate in green and the slab below it in red. The plate patch is a 500 µm wide column around each compartment's midpoint, and the measured slab lies under the
-articular top surface, inside the plate, not down in the trabeculae: the deck figure shows where the column sits
-on the plateau.
+`subchondral-plate/deck-plate-patches.jpg` (Tang et al.): a coronal section with the medial and lateral patches, 500 µm wide, the plate in green and the slab below it in red. The plate patch is a 500 µm wide column around the middle of each plateau compartment (medial, lateral), and the
+measured slab lies under the articular top surface, inside the plate, not down in the trabeculae: the figure shows
+where the column sits on the plateau.
 
 ## trabecular-roi
 
@@ -45,12 +49,12 @@ only, and never reaches the fibula.
 
 ## cortical
 
-`cortical/deck-cortical-levels.jpg`: the two levels drawn on the opened tibia, and the cortical ring at one of them. Two slabs on the cortex mask, 100 µm and 1000 µm below the growth plate's distal face, each covering the wall all
-round.
+`cortical/deck-cortical-levels.jpg`: the two levels drawn on the opened tibia, and the cortical ring at one of them. Two slabs on the cortex mask, 50 µm thick, centred 100 µm and 1000 µm below the growth plate's distal face and
+following it, each covering the wall all round.
 
 ## femoral-geometry
 
 `femoral-geometry/deck-points-a-d.jpg`: `a` and `b` on the front and back views, `c` and `d` on the joint-face view, with DFL (4) and DFW (5) drawn. Four points: `a` the midpoint of the upper line of the intercondylar groove, `b` the intercondylar
-notch, `c` the midpoint of the ridge on the lateral condyle, `d` the vertex of the medial condyle. `a` and `b` are
-placed on a long side-on view of the femur that shows the shaft and the groove; `c` and `d` on the joint-face view.
-DFL is `a` to `b`, DFW is `c` to `d`; DFL under 0.4 of DFW means `a` and `b` were placed end-on.
+notch, `c` the midpoint of the ridge on the lateral condyle, `d` the vertex of the medial condyle. `a` and `b` show on
+the front view of the femur with the shaft and the groove, `b` also from the back; `c` and `d` on the joint-face
+view. DFL is `a` to `b`, DFW is `c` to `d`.
