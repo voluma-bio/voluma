@@ -4,8 +4,10 @@
  *   GET /runs/:runId                the run's review data (`@voluma/contracts/review`),
  *                                   built from its event log on each read
  *   GET /runs/:runId/files/:sha256  one of its files (`evidenceKey`), streamed from storage
+ *   GET /runs/:runId/assets/:sha256/<path>  one converted review asset (`reviewAssetKey`):
+ *                                   a 302 to a presigned GET
  */
-import { sha256Schema } from "@voluma/contracts/r2";
+import { relativePathSchema, sha256Schema } from "@voluma/contracts/r2";
 import {
   acceptCheckRequestSchema,
   markReviewedRequestSchema,
@@ -24,6 +26,16 @@ function imageType(head: Uint8Array): string | null {
   const png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
   if (png.every((byte, i) => head[i] === byte)) return "image/png";
   return null;
+}
+
+/** A URL path segment decoded, or null when it is malformed or decodes to more than one segment. */
+function decodeSegment(segment: string) {
+  try {
+    const decoded = decodeURIComponent(segment);
+    return decoded.includes("/") ? null : decoded;
+  } catch {
+    return null;
+  }
 }
 
 function currentReview(record: RunRecord, baseRevisionId: string) {
@@ -124,6 +136,25 @@ export function runRoutes({ runs, files }: ReviewDeps) {
     // Content-addressed: the bytes never change. A day, so a revoked reader's copy doesn't linger.
     c.header("Cache-Control", "private, max-age=86400, immutable");
     return c.body(stream);
+  });
+
+  app.get("/runs/:runId/assets/:sha256/*", async (c) => {
+    if (c.req.method !== "GET") throw new HTTPException(405, { message: "Use GET." });
+    const { runId, sha256 } = c.req.param();
+    if (!sha256Schema.safeParse(sha256).success) return c.json({ error: "not found" }, 404);
+    // Segment by segment from the raw URL, so an encoded "/" can't pass as a separator.
+    const pathname = new URL(c.req.url).pathname;
+    const at = pathname.indexOf(`/assets/${sha256}/`);
+    if (at < 0) return c.json({ error: "not found" }, 404);
+    const tail = pathname.slice(at + `/assets/${sha256}/`.length).split("/");
+    const path = tail.map((segment) => decodeSegment(segment) ?? "/").join("/");
+    if (!relativePathSchema.safeParse(path).success) return c.json({ error: "not found" }, 404);
+    if (!(await runs.readable(readerOf(c.var.user), runId)))
+      return c.json({ error: "not found" }, 404);
+    if (!files) throw new HTTPException(503, { message: "File storage is not configured." });
+    // The presigned URL expires; the asset doesn't. Never cache the redirect.
+    c.header("Cache-Control", "no-store");
+    return c.redirect(await files.assetUrl(runId, sha256, path), 302);
   });
 
   return app;

@@ -112,5 +112,10 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   a day). The leading bytes pick the type: JPEG and PNG inline, anything else an attachment,
   always `nosniff`, since the stored content type is whatever the sandbox mount wrote. HEAD is
   a 405 before storage is opened.
+- `runs.ts` also serves `GET /runs/:runId/assets/:sha256/<path>`: a converted review asset
+  (`reviewAssetKey`), after `RunRecords.readable`, as a 302 to a 10-minute presigned GET
+  (`RunFiles.assetUrl`) with `Cache-Control: no-store` on the redirect; R2's response says
+  `immutable`. The path is checked segment by segment from the raw URL. Missing keys are R2's 404s,
+  which a zarr reader takes as empty chunks.
 - `r2-reference-archive.ts` serves only the published reference scan. Deferred work:
   [.context/TODO.md](src/domains/review/.context/TODO.md).

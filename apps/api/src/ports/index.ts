@@ -56,4 +56,9 @@ export type RunFiles = {
     sha256: string,
     signal: AbortSignal,
   ): Promise<{ body: ReadableStream<Uint8Array>; byteLength: number }>;
+  /**
+   * A short-lived GET URL for one converted review asset (`reviewAssetKey`). Not checked for
+   * existence: a zarr reader asks for chunks that were never written and reads the 404 as empty.
+   */
+  assetUrl(runId: string, sha256: string, path: string): Promise<string>;
 };
