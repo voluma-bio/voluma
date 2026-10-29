@@ -30,19 +30,21 @@ which face and sections. It also stops on an empty ROI-3.
 
 Writes: <out>/roi3-tissue.npy  ROI-3, bool, on the aligned grid, with its sidecar
         <out>/cortex.npy  the cortex mask for Ct.Th, bool, with its sidecar
-        <out>/growth-plate-distal-face.npy  W index of the distal face per (V,U), float32, with its sidecar
-        <out>/roi3.json  the parameters used and the cortex estimate (cortex_estimate_mm, cortex_mm_used, threshold)
+        <out>/growth-plate-distal-face.npy  W index of the distal face per (V,U), float32, with its sidecar (a surface object)
+        <out>/roi-metaphyseal.npy, cortex-object.npy  the same two masks cropped to their bounding boxes, uint8 (the mask objects)
+        <out>/roi3.json  the result record: the parameters used and the cortex estimate (cortex_estimate_mm, cortex_mm_used, threshold);
+                         `objects` holds roi-metaphyseal, cortex and growth-plate-distal-face
         <out>/qc-roi3.jpg  coronal and axial sections: ROI-3 cyan, cortex orange
-Prints: one JSON line {params, qc, roi3_tissue, cortex, distal_face, cortex_estimate_mm, roi3_voxels}
+Prints: one JSON line {out, values, objects, qc, roi3_tissue, cortex, distal_face, cortex_estimate_mm, roi3_voxels}
 Example: python metaphysis_roi.py --hu-aligned tibia-hu.npy --mask tibia-mask.npy --hu-json hu.json --annotations annotations.json --proximal-face iioc/growth-plate-proximal-face.npy --proximal-valid iioc/growth-plate-proximal-valid.npy --out roi3/
 Exits 2 with one sentence on bad input, before writing anything.
 """
 
-import json
 from pathlib import Path
 
 import matplotlib
 import numpy as np
+import objects
 import sidecar
 from annotations import load_annotations, need, traced_surface
 from envelope import close_and_fill
@@ -175,22 +177,16 @@ def main():
         cortex_clearance_um=a.cortex_clearance_um,
         cortex_search_factor=a.cortex_search_factor,
     )
-    for name, arr in (
-        ('roi3-tissue.npy', roi),
-        ('cortex.npy', cortex),
-        ('growth-plate-distal-face.npy', gd),
-    ):
+    for name, arr in (('roi3-tissue.npy', roi), ('cortex.npy', cortex)):
         np.save(out / name, arr)
-        sidecar.write(
-            out / name,
-            grid_id=g['grid_id'],
-            spacing_zyx_mm=g['spacing_zyx_mm'],
-            inputs=inputs,
-            params=params,
-            script='metaphysis_roi.py',
-            surface_axis=0 if name == 'growth-plate-distal-face.npy' else None,
-        )
-    (out / 'roi3.json').write_text(json.dumps(params, indent=1) + '\n')
+        sidecar.write(out / name, grid_id=g['grid_id'], spacing_zyx_mm=g['spacing_zyx_mm'], inputs=inputs, params=params)
+    like = sidecar.sidecar_path(a.mask)
+    meta = {'inputs': inputs, 'params': params}
+    placed = {
+        'roi-metaphyseal': objects.mask(out / 'roi-metaphyseal.npy', roi, like=like, **meta),
+        'cortex': objects.mask(out / 'cortex-object.npy', cortex, like=like, **meta),
+        'growth-plate-distal-face': objects.surface(out / 'growth-plate-distal-face.npy', gd, 0, like=like, **meta),  # heights along W
+    }
     vs = np.linspace(*np.flatnonzero(roi.any(axis=(0, 2)))[[0, -1]], 4).astype(int)
     fig, axs = plt.subplots(2, 4, figsize=(20, 10))
     for v, ax in zip(vs, axs[0]):
@@ -209,8 +205,11 @@ def main():
     qc = out / 'qc-roi3.jpg'
     sidecar.save_image(fig, qc)
     plt.close(fig)
-    sidecar.emit(
-        params=str(out / 'roi3.json'),
+    sidecar.emit_values(
+        out / 'roi3.json',
+        {},
+        params,
+        objects=placed,
         qc=str(qc),
         roi3_tissue=str(out / 'roi3-tissue.npy'),
         cortex=str(out / 'cortex.npy'),

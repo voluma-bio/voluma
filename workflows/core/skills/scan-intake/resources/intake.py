@@ -8,7 +8,8 @@ contradicts Scanco's private calibration, or an `--out` that already holds hu.np
 Writes: <out>/hu.npy  float32 HU, axis order Z,Y,X, slices sorted along the series normal
         <out>/hu.json  the scan's grid: shape_zyx, spacing_zyx_mm, affine_xyz_to_world_mm (consumes x,y,z voxel-centre
         indices), calibration, grid_id, and the sha256 of every source slice
-Prints: one JSON line {hu, header, shape_zyx, spacing_zyx_mm, grid_id, calibration, hu_min, hu_max}
+        <out>/intake.json  the result record: `objects` holds the scan as `scan` (a volume on the scan's affine)
+Prints: one JSON line {out, values, objects, hu, header, shape_zyx, spacing_zyx_mm, grid_id, calibration, hu_min, hu_max}
 Example: python intake.py --in dicom/ --out scan/
 Exits 2 with one sentence on bad input, before writing anything.
 """
@@ -17,6 +18,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import objects
 import pydicom
 import sidecar
 
@@ -114,6 +116,7 @@ if __name__ == '__main__':
     ap.add_argument('--out', required=True, help='output directory (created; must not already hold hu.npy)')
     a = ap.parse_args()
     m, hu_min, hu_max = load_series(a.src, Path(a.out))
-    sidecar.emit(hu=str(Path(a.out) / 'hu.npy'), header=str(Path(a.out) / 'hu.json'), shape_zyx=m['shape_zyx'],
-                 spacing_zyx_mm=m['spacing_zyx_mm'], grid_id=m['grid_id'], calibration=m['calibration']['evidence'],
-                 hu_min=hu_min, hu_max=hu_max)
+    out = Path(a.out)
+    sidecar.emit_values(out / 'intake.json', {}, objects={'scan': objects.volume(out / 'hu.npy', out / 'hu.json')}, hu=str(out / 'hu.npy'),
+                        header=str(out / 'hu.json'), shape_zyx=m['shape_zyx'], spacing_zyx_mm=m['spacing_zyx_mm'], grid_id=m['grid_id'],
+                        calibration=m['calibration']['evidence'], hu_min=hu_min, hu_max=hu_max)

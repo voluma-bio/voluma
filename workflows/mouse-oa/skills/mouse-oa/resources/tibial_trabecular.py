@@ -17,9 +17,11 @@ V between traced sections (constant past the first and last). A point is [w, u],
 anything but axis 1 and height row is refused.
 
 Writes: <out>/iioc-trab-tissue.npy  ROI-2, bool, on the aligned grid, with its sidecar
-        <out>/under-plate-boundary.npy  W index of the under-plate boundary per (V,U), float32, with its sidecar
+        <out>/roi-iioc-trabecular.npy  ROI-2 cropped to its bounding box, uint8 (the mask object; the same voxels)
+        <out>/under-plate-boundary.npy  W index of the under-plate boundary per (V,U), float32, with its sidecar (a surface object)
+        <out>/roi2.json  the result record: `objects` holds roi-iioc-trabecular and under-plate-boundary
         <out>/qc-coronal.jpg  six coronal sections: ROI-2 (cyan) inside ROI-1 (green)
-Prints: one JSON line {qc, tissue, upper_boundary}
+Prints: one JSON line {out, values, objects, qc, tissue, upper_boundary}
 Example: python tibial_trabecular.py --iioc-tissue iioc/iioc-tissue.npy --growth-plate-face iioc/growth-plate-proximal-face.npy --hu-aligned tibia-hu.npy --annotations annotations.json --out roi2/
 Exits 2 with one sentence on bad input, before writing anything.
 """
@@ -28,6 +30,7 @@ from pathlib import Path
 
 import matplotlib
 import numpy as np
+import objects
 import sidecar
 from annotations import load_annotations, need, traced_surface
 from scipy import ndimage as ndi
@@ -86,20 +89,14 @@ def main():
         'growth_clearance_mm': a.growth_clearance_mm,
         'upper_shift_mm': a.upper_shift_mm,
     }
-    for name, arr in (
-        ('iioc-trab-tissue.npy', roi),
-        ('under-plate-boundary.npy', upper.astype(np.float32)),
-    ):
-        np.save(out / name, arr)
-        sidecar.write(
-            out / name,
-            grid_id=g['grid_id'],
-            spacing_zyx_mm=g['spacing_zyx_mm'],
-            inputs=[a.iioc_tissue, a.growth_plate_face, a.annotations],
-            params=params,
-            script='tibial_trabecular.py',
-            surface_axis=0 if name == 'under-plate-boundary.npy' else None,
-        )
+    np.save(out / 'iioc-trab-tissue.npy', roi)
+    meta = {'inputs': [a.iioc_tissue, a.growth_plate_face, a.annotations], 'params': params}
+    sidecar.write(out / 'iioc-trab-tissue.npy', grid_id=g['grid_id'], spacing_zyx_mm=g['spacing_zyx_mm'], **meta)
+    like = sidecar.sidecar_path(a.iioc_tissue)
+    placed = {
+        'roi-iioc-trabecular': objects.mask(out / 'roi-iioc-trabecular.npy', roi, like=like, **meta),
+        'under-plate-boundary': objects.surface(out / 'under-plate-boundary.npy', upper, 0, like=like, **meta),  # heights along W
+    }
     vs = sorted(map(int, ann['under_plate_curves']['slices']))
     picks = [vs[i] for i in np.linspace(0, len(vs) - 1, 6).astype(int)]
     fig, axs = plt.subplots(2, 3, figsize=(18, 11))
@@ -112,7 +109,10 @@ def main():
     qc = out / 'qc-coronal.jpg'
     sidecar.save_image(fig, qc)
     plt.close(fig)
-    sidecar.emit(
+    sidecar.emit_values(
+        out / 'roi2.json',
+        {},
+        objects=placed,
         qc=str(qc),
         tissue=str(out / 'iioc-trab-tissue.npy'),
         upper_boundary=str(out / 'under-plate-boundary.npy'),

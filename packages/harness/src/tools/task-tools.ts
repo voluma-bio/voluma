@@ -26,6 +26,41 @@ async function result(run: () => Promise<unknown>): Promise<ToolResult> {
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
+/** `/outputs/<taskId>/rest` or `/scratch/rest`, as a script prints a file's path, becomes the `{root, path}` a report names. */
+function fileRef(taskId: unknown, file: unknown): unknown {
+  if (typeof file !== "string") return file;
+  const own = `/outputs/${taskId}/`;
+  if (file.startsWith(own)) return { root: "outputs", path: file.slice(own.length) };
+  if (file.startsWith("/scratch/"))
+    return { root: "scratch", path: file.slice("/scratch/".length) };
+  return file;
+}
+
+/**
+ * A script's `objects` entry goes to `report_output` unchanged, with its files as the sandbox paths the script
+ * printed. This names the ones in this task's output folder or the scratch as the refs the schema takes; any
+ * other path is left for validation to refuse.
+ */
+export function prepareReportOutput(args: unknown): unknown {
+  if (!isRecord(args) || !isRecord(args.output)) return args;
+  const { taskId, output } = args;
+  const { structure, surface, volume } = output;
+  return {
+    ...args,
+    output: {
+      ...output,
+      ...(isRecord(structure) &&
+        "mask" in structure && {
+          structure: { ...structure, mask: fileRef(taskId, structure.mask) },
+        }),
+      ...(isRecord(surface) && {
+        surface: { ...surface, heights: fileRef(taskId, surface.heights) },
+      }),
+      ...(isRecord(volume) && { volume: { ...volume, file: fileRef(taskId, volume.file) } }),
+    },
+  };
+}
+
 /**
  * What models send to `checkpoint` by habit, reshaped to the schema without losing meaning.
  * Only these habits are touched; any other unknown key stays for validation to refuse.
@@ -96,6 +131,7 @@ export function taskTools(runtime: TaskRuntime, kind: "worker" | "check"): Tool[
     description:
       "Report one result of a task: a measurement, score, structure, annotation, volume or file. Reuse the outputId when you redo the task.",
     input: reportOutputInputSchema,
+    prepare: prepareReportOutput,
     sequential: true,
     execute: (input, ctx) => result(() => runtime.reportOutput(caller(ctx), input)),
   };
