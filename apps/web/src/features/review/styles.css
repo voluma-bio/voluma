@@ -407,12 +407,6 @@
   .notice {
     @apply rounded-md bg-muted p-3 text-sm text-muted-foreground;
   }
-  .load-state {
-    @apply flex min-h-dvh flex-col items-center justify-center gap-5 p-8 text-center text-muted-foreground;
-  }
-  .load-state h1 {
-    @apply text-xl font-semibold text-foreground;
-  }
 }
 
 @media (max-width: 1000px) {
