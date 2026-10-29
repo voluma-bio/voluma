@@ -69,10 +69,11 @@ export function SignedIn() {
       return <UnreachableScreen cause={session.cause} retry={load} />;
     case "signed-in":
       return (
-        // Pages fill the space under the bar and scroll inside it, so the bar stays put.
+        // Pages fill the space under the bar and scroll inside it, so the bar stays put. `relative`
+        // keeps absolutely placed content (sr-only legends) inside the scroller, not the page.
         <div className="flex h-dvh flex-col">
           <TopBar me={session.me} />
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
             <Outlet context={session.me} />
           </div>
         </div>
