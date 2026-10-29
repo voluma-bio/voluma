@@ -59,6 +59,7 @@ import {
 } from "./main-thread";
 import type { PayloadOf, Recorder } from "./recorder";
 import type { PlanTask, TaskRuntime } from "./task-runtime";
+import { supervisorThreadId, threadId } from "./thread-id";
 import {
   JUDGMENT_SUFFIX,
   type Role,
@@ -87,8 +88,18 @@ export interface SupervisorOptions {
    * `notes` are the main thread's notes in force when the thread starts (none yet at the first
    * task). `model` is the one a resumed thread started on, which it must keep.
    */
-  worker(taskId: string, notes: string | undefined, model: string | undefined): RoleSpec;
-  check(taskId: string, notes: string | undefined, model: string | undefined): RoleSpec;
+  worker(
+    taskId: string,
+    threadId: string,
+    notes: string | undefined,
+    model: string | undefined,
+  ): RoleSpec;
+  check(
+    taskId: string,
+    threadId: string,
+    notes: string | undefined,
+    model: string | undefined,
+  ): RoleSpec;
   /** Wakes of a worker that stopped with its task unfinished before the stuck guard marks it. */
   stuckLimit?: number;
   /** Redos a judgment may order for one task. */
@@ -109,9 +120,6 @@ export interface SupervisorOptions {
 
 /** What `step` found: nothing to do, something done, or a wake to ask, under the key its answer is stored by. */
 type Next = "idle" | "acted" | { point: WakePoint; key: string };
-
-/** The supervisor's own thread: the root, and the envelope of a run's first events. */
-export const supervisorThreadId = (runId: string) => `${runId}.supervisor`;
 
 const PLAIN_REASON: Record<ClaimEndReason, string> = {
   shutdown: "the runner restarted",
@@ -160,14 +168,12 @@ export function supervisor(options: SupervisorOptions) {
   const wakeKey = (d: ThreadLog, threadId: string) =>
     `${threadId}@${d.threads.get(threadId)?.starts ?? 0}`;
 
-  /** `<runId>.<taskId>.<role>`, plus `.<n>` for the n-th (ids.ts: run and task ids hold no '.'). */
-  const threadId = (taskId: string, role: Role, n: number) =>
-    `${options.runId}.${taskId}.${role}${n === 1 ? "" : `.${n}`}`;
+  const idOf = (taskId: string, role: Role, n: number) => threadId(options.runId, taskId, role, n);
   /** An id this process refused as unresumable counts as used, even if its `thread.started` never landed. */
   const nextThreadId = (d: ThreadLog, taskId: string, role: Role) => {
     let n = startedFor(d, taskId, role).length + 1;
-    while (threads.stale(threadId(taskId, role, n))) n++;
-    return threadId(taskId, role, n);
+    while (threads.stale(idOf(taskId, role, n))) n++;
+    return idOf(taskId, role, n);
   };
 
   /**
@@ -193,8 +199,8 @@ export function supervisor(options: SupervisorOptions) {
     const model = known.get(id)?.model;
     threads.start({
       ...(role === "worker"
-        ? options.worker(taskId, notes, model)
-        : options.check(taskId, notes, model)),
+        ? options.worker(taskId, id, notes, model)
+        : options.check(taskId, id, notes, model)),
       threadId: id,
       kind: role,
       parentThreadId: root,

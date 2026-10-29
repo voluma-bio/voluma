@@ -142,3 +142,17 @@ export const outputReportSchema = report(evidenceRefSchema);
 /** The `report_output` call, less `taskId`. */
 export const outputReportInputSchema = report(fileRefInputSchema);
 export type Output = z.infer<typeof outputReportSchema>["output"];
+
+/** The files an output's own payload names: its `file`, a volume's `file`, a structure's mesh `file`. */
+export const fileRefsOf = (output: Output): EvidenceRef[] => {
+  switch (output.kind) {
+    case "file":
+      return [output.file];
+    case "volume":
+      return [output.volume.file];
+    case "structure":
+      return output.mesh ? [output.mesh.file] : [];
+    default:
+      return [];
+  }
+};
