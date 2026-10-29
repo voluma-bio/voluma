@@ -4,7 +4,7 @@
  * set (Enter works too). An empty `rows` shows `empty` across the table. With `groupOf`, a
  * header row names each run of rows sharing a group; the caller orders rows by group.
  */
-import { Fragment, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { cx } from "./cx";
 
 export type TableColumn<Row> = {
@@ -57,28 +57,31 @@ export function Table<Row>({
             ))}
           </tr>
         </thead>
-        <tbody className="[&>tr:last-child>td]:border-b-0">
-          {rows.length === 0 ? (
+        {rows.length === 0 ? (
+          <tbody>
             <tr>
               <td colSpan={columns.length} className="px-4 py-6 text-ui text-fg-subtle">
                 {empty}
               </td>
             </tr>
-          ) : (
-            rows.map((row, i) => (
-              <Fragment key={rowKey(row)}>
-                {groupOf && (i === 0 || groupOf(rows[i - 1] as Row) !== groupOf(row)) && (
-                  <tr>
-                    <th
-                      scope="colgroup"
-                      colSpan={columns.length}
-                      className="border-b border-line-subtle bg-muted px-4 py-1.5 text-left text-meta font-medium text-fg-subtle"
-                    >
-                      {groupOf(row)}
-                    </th>
-                  </tr>
-                )}
+          </tbody>
+        ) : (
+          sections(rows, groupOf).map((section) => (
+            <tbody key={section.name ?? ""} className="[&>tr:last-child>td]:border-b-0">
+              {section.name !== undefined && (
+                <tr>
+                  <th
+                    scope="rowgroup"
+                    colSpan={columns.length}
+                    className="border-y border-line-subtle bg-muted px-4 py-1.5 text-left text-meta font-medium text-fg-subtle"
+                  >
+                    {section.name}
+                  </th>
+                </tr>
+              )}
+              {section.rows.map((row) => (
                 <tr
+                  key={rowKey(row)}
                   tabIndex={onRowClick ? 0 : undefined}
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
                   onKeyDown={
@@ -105,11 +108,23 @@ export function Table<Row>({
                     </td>
                   ))}
                 </tr>
-              </Fragment>
-            ))
-          )}
-        </tbody>
+              ))}
+            </tbody>
+          ))
+        )}
       </table>
     </div>
   );
+}
+
+/** Runs of consecutive rows sharing a group (one unnamed run without `groupOf`). */
+function sections<Row>(rows: Row[], groupOf?: (row: Row) => string) {
+  const out: { name: string | undefined; rows: Row[] }[] = [];
+  for (const row of rows) {
+    const name = groupOf?.(row);
+    const last = out.at(-1);
+    if (last && last.name === name) last.rows.push(row);
+    else out.push({ name, rows: [row] });
+  }
+  return out;
 }
