@@ -28,7 +28,7 @@ Every later step takes `hu.json` for the voxel size and the grid.
   "nothing stated"):
   - `## Present in the field`: structures, regions and features the notes say are imaged.
   - `## Absent or cut off`: structures the notes say are not in the field or are cut by it. Later tasks read this before they name
-    anything: a structure listed here is not to be found, not to be guessed, and its outputs are reported as not measurable.
+    anything (`segmentation-check`, section 2, says what they do with it).
   - `## Other facts later tasks need`: a measurement threshold, a calibration caveat, the animal, side or age, how the
     orientation was worked out, anything that changes how a number is read.
 

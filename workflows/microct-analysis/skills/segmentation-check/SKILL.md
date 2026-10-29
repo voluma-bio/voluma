@@ -30,8 +30,8 @@ flag every label. Look at the specks total if it is large. Then:
   neighbours the anatomy requires, within a small reach (`must_touch` and `touch_mm`: a fibula that is nowhere near the tibia is on
   the wrong bone, however good its volume). Treat it as a wrong seed or box and fix it (section 4); raise it as a To check item
   only if the CT leaves it open. The table's `piece_touches_edge` says which pieces reach the scan edge: data to read, not a flag.
-- **A flag that says "not a <name>" (`identity_unsupported`) is a verdict, not a question.** The piece is under a tenth of
-  the low end of the label's range, or over ten times its high end. Section 2's absence rule applies: drop the label.
+- **A flag that says "not a <name>" (`identity_unsupported`) is a verdict on the piece, not on the structure.** Remove the
+  label and look for the real structure (section 2).
 - **One bone, one main piece.** A second large piece means the label is on two bones, or a bone has broken. Look at
   the 3D sheet. (Clipping can split a thin bone: check the pieces after `clip_to_bone.py` too.)
 - **Volume inside the anatomy reference's range.** Unclipped SAM masks include soft tissue (`sam-segmentation`): clip first,
@@ -58,18 +58,21 @@ the femur. For each candidate from `unlabelled.py`, or each piece `label_stats.p
 4. If you cannot name it, leave it unlabelled and raise a To check item that asks what it is. Do not borrow a name because
    a model offered one.
 
-**A structure the data does not support is absent.** Read `/outputs/intake/scan-notes.md` (`scan-intake`) before you name
-anything. A label is absent, not "plausible but small", when any of these holds:
-- the notes say the structure is outside the field or cut off (the notes are the researcher's account; overrule them only with
-  a render that shows the structure, and say so in the checkpoint);
-- `label_stats.py` reports `identity_unsupported` for it (a volume a tenth of the range's low end or ten times its high end);
-- its position on the keyframe and 3D sheet is not where the anatomy table puts it (a patella is a large bone in front of
-  the femur's trochlear groove, not any small separate piece near the joint).
+**Absent, or just not found.** Read `/outputs/intake/scan-notes.md` (`scan-intake`) before you name anything. A piece the data
+does not support (`identity_unsupported`, or a position the anatomy table does not give) is not that structure: remove its label
+(`relabel.py --at <its voxel> --to 0`; the piece then shows up in `unlabelled.py`; name it from the anatomy table if you can,
+otherwise leave it unnamed) and look for the real one among the candidates and on the keyframe. Then:
+- **Absent** when the notes say the structure is outside the field or cut off (overrule them only with a render that shows it,
+  and say so in the checkpoint), or when you looked and no candidate sits where the anatomy puts it. Write the structure and
+  the reason in the checkpoint.
+- **Found**: label it as above.
 
-For an absent label: `relabel.py --at <its voxel> --to 0` (the piece then shows up in `unlabelled.py`; name it from the anatomy
-table if you can, for example a sesamoid, otherwise leave it unnamed), write the structure and the reason in the checkpoint, and
-report every output that needs it with `value: null` and that reason as the note (`microct-core`, Reporting). Raise a To check
-item only if the notes and the CT disagree. Do not substitute a different piece to fill the output.
+Reporting an absent structure's outputs: `value: null` and the reason as the note when the structure is outside the field or cut
+off (nothing could be measured). `0` with a note when its region is in the field and holds none (a healthy joint with no
+ossification). Do not substitute a different piece to fill the output.
+
+Raise a To check item when the notes and the CT disagree, or when the anatomy expects a structure, no candidate is there and the
+notes say nothing. Not when the notes settle it.
 
 ## 3. Read SAM against a classic segmentation
 

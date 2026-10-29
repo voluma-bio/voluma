@@ -68,10 +68,9 @@ the workflow's anatomy reference gives, not the measurement threshold.
      its main piece; with the tibia seed alone, 0.42 mm³ of tibia stayed in it. Do not discard the whole request because one or
      two labels are off: femur and tibia were right.
    - **Below its range:** it lost bone to a neighbour that is above: fix the pair together.
-   - **Far outside its range (`identity_unsupported`, a tenth of the low end or ten times the high end):** the box found a different
-     structure, or nothing. On a field with no patella, the box on a small anterior piece returned a 0.06 mm³ sesamoid under the
-     name "patella" (range 0.96-1.66). Do not keep the name or plan a To check item on the volume: remove the label
-     (`relabel.py --to 0`) and report the structure absent (`segmentation-check`, section 2). Do not rerun SAM to find it.
+   - **Far below its range (`identity_unsupported`):** the box found a different piece, or a sliver of the structure. On a field
+     with no patella, the box on a small anterior piece returned a 0.06 mm³ sesamoid under the name "patella" (range 0.96-1.66).
+     Do not keep the name: remove the label and look for the real structure (`segmentation-check`, section 2).
    - **Not near any neighbour the anatomy requires:** the label is on the wrong bone (for the fibula, bone that is not the tibia's
      neighbour). Do not accept it for being in range: re-box or re-seed it on the right bone.
    Then run `label_stats.py` again, and repeat until every label is in range with one piece, or what is left is something you can

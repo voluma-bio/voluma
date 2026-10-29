@@ -47,10 +47,7 @@ The prompt lists each skill with its directory. A resource is a script in that d
 
 - Report each declared output with `report_output`. Attach as evidence the files it came
   from and the QC image that shows it.
-- A structure the data does not support gets no output. If a measurement needs a structure that is absent (the notes say so,
-  or `label_stats.py` reports `identity_unsupported`), report each output that needs it with `value: null` and a note that says
-  which structure is absent and why (the notes' sentence, or the volume against its range). Do not measure the nearest
-  look-alike. A null with a reason is a finished task; a number on the wrong structure is not.
+- A structure that is absent gets `null` or `0` with a note, never the nearest look-alike (`segmentation-check`, section 2).
 - Measurements carry units, a definition, and the structures they were measured on.
 - A value outside the plan's range is still reported. Say why in the checkpoint.
 - Never adjust a number after the fact to match an expectation. If the result looks wrong,
@@ -76,8 +73,7 @@ choice that changes a number: a disagreement region you could not resolve, an un
 structure, a boundary the protocol leaves open. Point it at the region (`focus`), and
 say what you chose meanwhile. Do not raise one for a choice you could settle by looking
 harder. Do not name a structure the data, the scan's notes and the anatomy reference do not
-support: a piece far outside the label's expected volume is not that structure. Leave it unnamed (or drop the label), report
-the outputs that need it as absent, and ask.
+support (`segmentation-check`, section 2, says when to remove a label, call it absent, and ask).
 
 ## Two thresholds
 
@@ -85,7 +81,10 @@ the outputs that need it as absent, and ask.
   reference gives it, and each script takes it as `--threshold-hu`.
 - **Measurement threshold:** decides bone volume. It is the lab's 2.16/cm converted to this scan's HU from the calibration block
   in `hu.json` (about 2460 HU on OA6-1RK), and the measurement scripts compute it themselves; a flag overrides it. BV is always
-  the region and HU above the threshold, never gated by a label; BV/TV is in %.
+  the region and HU above the threshold, never gated by a label; BV/TV is in %. The protocol's threshold wins whenever the
+  calibration exists; a different value in `scan-notes.md` is reported beside the measurement, not used. When there is no
+  calibration (the scripts stop asking for `--threshold`), use the threshold the notes give, name them as its source, and
+  raise a To check item.
 
 ## By role
 
