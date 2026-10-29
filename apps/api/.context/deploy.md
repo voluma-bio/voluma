@@ -24,7 +24,7 @@ Moving them to `.railway/railway.ts` is in [TODO.md](TODO.md).
 |---|---|
 | Build | Railpack. Install is Railpack's; build command `pnpm --filter @voluma/web build`. Railpack prunes dev dependencies afterwards, so anything the server runs must be in `dependencies` (tsx, drizzle-orm) |
 | Pre-deploy | `pnpm --filter @voluma/api db:migrate` (`src/migrate.ts`). The only place migrations run in production; a failure stops the deploy and prints the error |
-| Start | `cd apps/api && exec node --import tsx src/index.ts`. `exec` makes node the container's process, so it gets SIGTERM; run from `apps/api` because that is where tsx resolves. Never `pnpm start` |
+| Start | `cd apps/api && exec node --import tsx src/index.ts`. `exec` makes node the container's process, so it gets SIGTERM; run from `apps/api` because that is where tsx resolves. Never `pnpm start`. A bundled `tasks.json` or `outputs.json` that fails its schema stops the API from starting (the healthcheck fails and the old deployment stays); `pnpm check` parses them first (`packages/workflow/src/bundled.test.ts`) |
 | Healthcheck | `/health` (liveness only; the deploy gate, not monitoring) |
 | Draining | 30 s, above the API's `DRAIN_MS` (10 s) in `src/index.ts` |
 | Restart | on failure, 10 retries |

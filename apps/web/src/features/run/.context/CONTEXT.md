@@ -1,8 +1,7 @@
 # Run feature
 
 Two screens under `RunLayout` (the query client they share; the top bar is the shell's): `/`
-start (`start-page.tsx`) and `/runs/:id/live` live run (`run-page.tsx`). There is no runs list:
-Home (`features/study`) replaces it.
+start (`start-page.tsx`) and `/runs/:id/live` live run (`run-page.tsx`). There is no runs list.
 
 - **Outputs checklist data** is `workflows/mouse-oa/outputs.json`, read through
   `catalog["mouse-oa"]` from `@voluma/workflow/bundled` (JSON imports, parsed with the contract's

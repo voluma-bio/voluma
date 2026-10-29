@@ -173,7 +173,7 @@ export function RunPage() {
   return (
     <DisclosureProvider>
       <ThreadNavigationProvider onOpenThread={openThread}>
-        <main className="flex min-h-0 flex-1 flex-col max-[1100px]:h-[calc(100dvh-3.5rem)] max-[1100px]:flex-none">
+        <main className="flex min-h-0 flex-1 flex-col">
           <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-6 py-3 max-[1100px]:px-4">
             <h1 className="text-lg font-semibold">{data.input.name}</h1>
             <RunBadge run={data} />
