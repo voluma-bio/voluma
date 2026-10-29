@@ -48,7 +48,7 @@ export function segmentSamTool(layout: RunLayout): Tool<typeof samInput> {
         }
       }
       const line = stdout.trim().split("\n").at(-1) ?? "";
-      let reply: (Partial<SamResult> & { error?: string; infrastructure?: boolean }) | undefined;
+      let reply: (Partial<SamResult> & { error?: string; infrastructure?: true }) | undefined;
       try {
         reply = JSON.parse(line);
       } catch {
@@ -61,7 +61,12 @@ export function segmentSamTool(layout: RunLayout): Tool<typeof samInput> {
         (exitCode === 124
           ? `voluma-sam was stopped after ${TIMEOUT_SECONDS / 60} minutes`
           : `voluma-sam exited with code ${exitCode} without a result: ${stderr.slice(-1000)}`);
-      return { output: why, isError: true, truncated: false };
+      return {
+        output: why,
+        isError: true,
+        truncated: false,
+        ...(reply?.infrastructure && { infrastructure: true as const }),
+      };
     },
   };
 }
