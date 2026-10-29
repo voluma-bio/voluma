@@ -61,6 +61,23 @@ export interface ModalSandboxConfig {
 
 const MAX_MODAL_NAME = 64;
 const STAGE_PARALLELISM = 32;
+// Extra passes over the files whose copy failed (a bucket mount fails reads now and then).
+const STAGE_RETRIES = 3;
+// Tail of the stage command's stderr kept in the error.
+const STAGE_STDERR_CHARS = 4000;
+// Copies the files under "$1" to "$2" in parallel. A pass records each file whose `cp` fails
+// in a NUL list; the next pass copies only those, so a copied file is never copied again.
+// Paths are positional arguments, never spliced into the script.
+const STAGE_SCRIPT = `set -eo pipefail; mkdir -p "$2"; cd "$1"; todo=$(mktemp); failed=$(mktemp); trap 'rm -f "$todo" "$failed"' EXIT
+find . -type f -print0 > "$todo"
+for pass in $(seq 0 ${STAGE_RETRIES}); do
+  : > "$failed"
+  xargs -0 -r -P ${STAGE_PARALLELISM} -n 16 bash -c 'out=$0; list=$1; shift; for f; do cp --parents -t "$out" "$f" || printf "%s\\0" "$f" >> "$list"; done' "$2" "$failed" < "$todo"
+  [ -s "$failed" ] || break
+  cp "$failed" "$todo"
+done
+if [ -s "$failed" ]; then echo "could not copy: $(tr '\\0' ' ' < "$failed" | head -c 1000)" >&2; exit 1; fi
+test "$(find . -type f | wc -l)" = "$(cd "$2" && find . -type f | wc -l)"`;
 const STAGE_ROOT = "/staged";
 const GROUP_DIR = "/tmp/voluma-exec";
 const KILL_GRACE_SECONDS = 5;
@@ -203,20 +220,18 @@ class ModalSandboxAdapter implements Sandbox {
 
   async stage(): Promise<void> {
     for (const mount of this.#mounts.filter((m) => m.stage)) {
-      // Paths are positional arguments, never spliced into the script.
-      const script =
-        'set -eo pipefail; mkdir -p "$2"; cd "$1"; find . -type f -print0 | ' +
-        `xargs -0 -r -P ${STAGE_PARALLELISM} -n 16 cp --parents -t "$2"; ` +
-        // A partial listing must not pass as a complete copy.
-        'test "$(find . -type f | wc -l)" = "$(cd "$2" && find . -type f | wc -l)"';
       let code = -1;
+      let stderr = "";
       for await (const chunk of this.#run(
-        ["bash", "-c", script, "_", mountedAt(mount), mount.path],
+        ["bash", "-c", STAGE_SCRIPT, "_", mountedAt(mount), mount.path],
         3600,
       )) {
         if (chunk.type === "exit") code = chunk.code;
+        else if (chunk.type === "stderr") stderr = (stderr + chunk.data).slice(-STAGE_STDERR_CHARS);
       }
-      if (code !== 0) throw new Error(`staging ${mount.path} failed with exit code ${code}`);
+      if (code !== 0) {
+        throw new Error(`staging ${mount.path} failed (exit ${code}): ${stderr.trim()}`);
+      }
     }
   }
 
