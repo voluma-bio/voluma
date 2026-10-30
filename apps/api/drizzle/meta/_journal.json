@@ -54,8 +54,15 @@
     {
       "idx": 7,
       "version": "7",
+      "when": 1793317806502,
+      "tag": "0007_pink_steve_rogers",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
       "when": 1793319984852,
-      "tag": "0007_secret_hydra",
+      "tag": "0008_secret_hydra",
       "breakpoints": true
     }
   ]

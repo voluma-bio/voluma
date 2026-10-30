@@ -200,20 +200,23 @@ export const selectedOutputsSchema = z
   .refine((ids) => new Set(ids).size === ids.length, "duplicate output id");
 
 /**
- * The provider gateway's per-call rows summed for one run. A finished call counts its cost,
- * a call cut off counts its reservation (the provider may still bill), an open call counts
- * nothing here (only the gateway's admission counts its reservation). `costUsd` and
- * `calls` cover every row; `bySandbox` covers the rows whose token was minted for a sandbox,
+ * The provider gateway's per-call rows summed for one run. `costUsd` is the sum of known
+ * costs. A call cut off before its usage arrived has an unknown cost (the provider may have
+ * billed it): it adds nothing to `costUsd` and is counted in `unknownCostCalls`, so a screen
+ * shows "cost unknown", not $0. A call still open counts nowhere. `costUsd`, `calls` and
+ * `unknownCostCalls` cover every row; `bySandbox` covers the rows whose token was minted for a sandbox,
  * by that sandbox's name (`<taskId>.worker[.n]`, as in its `sandbox` event).
  */
 export const providerCallsSchema = z.object({
   costUsd: z.number().nonnegative(),
   calls: z.number().int().nonnegative(),
+  unknownCostCalls: z.number().int().nonnegative().default(0),
   bySandbox: z.array(
     z.object({
       sandbox: z.string().min(1),
       costUsd: z.number().nonnegative(),
       calls: z.number().int().nonnegative(),
+      unknownCostCalls: z.number().int().nonnegative().default(0),
     }),
   ),
 });

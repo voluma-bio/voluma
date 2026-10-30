@@ -85,7 +85,7 @@ deployment then fails its healthcheck. So every migration must work with the cod
 deployed now: expand first, contract in a later PR. The rule is in
 [../AGENTS.md](../AGENTS.md).
 
-**The studies migration (0007) is the one exception** (decisions.md): it adds `runs.study_id NOT NULL` and drops `runs.workflow_id` in one step, because there are no users and the nullable form would make the old code's run list throw. While the old process still serves, its `POST /runs` fails with a 500 and a run it already wrote has no study. Watch the overlap; if the new deployment fails `/health`, the old code can't start runs until a fix deploys.
+**The studies migration (0008) is the one exception** (decisions.md): it adds `runs.study_id NOT NULL` and drops `runs.workflow_id` in one step, because there are no users and the nullable form would make the old code's run list throw. While the old process still serves, its `POST /runs` fails with a 500 and a run it already wrote has no study. Watch the overlap; if the new deployment fails `/health`, the old code can't start runs until a fix deploys.
 
 ## What a restart or outage does to runs
 

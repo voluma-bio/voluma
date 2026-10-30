@@ -10,6 +10,12 @@ import { useNow } from "./status";
 
 const count = (n: number) => n.toLocaleString();
 
+/** "$0.412", or "$0.412 + 2 unknown" when paid tool calls were cut off before their cost arrived. */
+export const costLabel = (s: Spend) =>
+  s.unknownCostCalls > 0
+    ? `${formatUsd(s.costUsd)} + ${s.unknownCostCalls} unknown`
+    : formatUsd(s.costUsd);
+
 /**
  * Cost, wall time (unless `wall` is false: the main thread's is the run's, and a card's clock is
  * its thread's), command time, then calls and tokens.
@@ -17,6 +23,11 @@ const count = (n: number) => n.toLocaleString();
 export function spendRows(s: Spend, { wall = true }: { wall?: boolean } = {}): InfoSection["rows"] {
   const hit = cacheHitShare(s);
   const rows: InfoSection["rows"] = [["Cost", formatUsd(s.costUsd)]];
+  if (s.unknownCostCalls > 0)
+    rows.push([
+      "Cost unknown",
+      `${count(s.unknownCostCalls)} paid tool ${s.unknownCostCalls === 1 ? "call" : "calls"}`,
+    ]);
   if (s.toolCostUsd > 0) rows.push(["Paid tools", formatUsd(s.toolCostUsd)]);
   if (wall) rows.push(["Wall time", formatDuration(s.wallSeconds)]);
   // `bash` calls only: the runs list's sandbox time is the sandbox's uptime, which is longer.
@@ -38,7 +49,7 @@ export function spendRows(s: Spend, { wall = true }: { wall?: boolean } = {}): I
  */
 export function RunSpendSummary({ spend, since }: { spend: RunSpend; since?: string }) {
   const now = useNow(since !== undefined);
-  if (spend.total.calls === 0) return null;
+  if (spend.total.calls === 0 && spend.total.unknownCostCalls === 0) return null;
   const total = since
     ? {
         ...spend.total,
@@ -47,7 +58,7 @@ export function RunSpendSummary({ spend, since }: { spend: RunSpend; since?: str
     : spend.total;
   return (
     <span className="flex items-center gap-1 text-ui text-muted-foreground tabular-nums">
-      {formatUsd(total.costUsd)} · {formatDuration(total.wallSeconds)}
+      {costLabel(total)} · {formatDuration(total.wallSeconds)}
       <InfoButton
         label="Run cost and time"
         sections={[

@@ -146,7 +146,7 @@ async function loadRows(tx: Tx, where: SQL | undefined): Promise<Row[]> {
   );
   return rows.map((row) => ({
     ...row,
-    calls: calls.get(row.run.id) ?? { costUsd: 0, calls: 0, bySandbox: [] },
+    calls: calls.get(row.run.id) ?? { costUsd: 0, calls: 0, unknownCostCalls: 0, bySandbox: [] },
   }));
 }
 

@@ -64,6 +64,7 @@ export function StripPlot({ groups, unit, label, onSelect, digits, className }: 
   const [width, setWidth] = useState(0);
   // The dot that holds the plot's one tab stop, and what the tooltip follows.
   const [current, setCurrent] = useState<string | null>(null);
+  // Keyboard focus only: a dot clicked with the mouse keeps focus but shows no tooltip.
   const [focused, setFocused] = useState(false);
   const [hovered, setHovered] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(false);
@@ -88,7 +89,7 @@ export function StripPlot({ groups, unit, label, onSelect, digits, className }: 
   const x = (v: number) => HIT + ((v - lo) / (hi - lo)) * Math.max(0, width - 2 * HIT);
 
   const rows = groups.map((group) => {
-    const placed = width > 0 ? swarm(group.points, x) : [];
+    const placed = width > 0 ? swarm(group.points, x, width) : [];
     const reach = Math.max(0, ...placed.map((p) => Math.abs(p.y)));
     const top = placed.some((p) => p.far) ? LABEL_ROOM : 0;
     const height = Math.max(ROW, 2 * reach + 2 * HIT) + top;
@@ -99,15 +100,16 @@ export function StripPlot({ groups, unit, label, onSelect, digits, className }: 
   const stop = all.some((p) => p.id === current) ? current : (all[0]?.id ?? null);
   const tip = dismissed ? null : (hovered ?? (focused ? stop : null));
 
-  // Escape hides the tooltip wherever focus is, so a hovered tooltip can be dismissed too.
+  // A hovered tooltip hides on Escape wherever focus is. Inside the plot, onKeyDown handles it first.
+  const hoverTip = !dismissed && hovered !== null;
   useEffect(() => {
-    if (tip === null) return;
+    if (!hoverTip) return;
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") setDismissed(true);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [tip]);
+  }, [hoverTip]);
 
   const move = (id: string) => {
     setCurrent(id);
@@ -116,6 +118,12 @@ export function StripPlot({ groups, unit, label, onSelect, digits, className }: 
   };
 
   const onKeyDown = (event: KeyboardEvent) => {
+    // Stopped here so a drawer or dialog around the plot doesn't also close on this press.
+    if (event.key === "Escape" && tip !== null) {
+      event.stopPropagation();
+      setDismissed(true);
+      return;
+    }
     const r = rows.findIndex((row) => row.placed.some((p) => p.id === stop));
     const row = rows[r];
     if (!row) return;
@@ -314,7 +322,7 @@ function Dot({
       onClick={onSelect}
       onPointerEnter={() => onHover(true)}
       onPointerLeave={() => onHover(false)}
-      onFocus={() => onFocus(true)}
+      onFocus={(event) => onFocus(event.currentTarget.matches(":focus-visible"))}
       onBlur={() => onFocus(false)}
     >
       <circle cx={point.x} cy={cy} r={HIT} className="fill-transparent" />
@@ -384,9 +392,9 @@ function Tooltip({
  * Places a group's valued dots, lowest first: each at its value, moved up or
  * down until it clears the dots already placed. Past MAX_LEVEL it moves a
  * dot's width sideways instead, so many equal values (integer grades) make a
- * short, wide cluster rather than a tall column.
+ * short, wide cluster rather than a tall column, never past the axis ends.
  */
-function swarm(points: StripPoint[], x: (v: number) => number): Placed[] {
+function swarm(points: StripPoint[], x: (v: number) => number, width: number): Placed[] {
   const placed: Placed[] = [];
   const valued = points.flatMap((p) => (p.value === null ? [] : { ...p, value: p.value }));
   const offsets = (n: number) =>
@@ -396,11 +404,15 @@ function swarm(points: StripPoint[], x: (v: number) => number): Placed[] {
     const px = x(point.value);
     const free = (dx: number, y: number) =>
       !placed.some((q) => Math.hypot(q.x - (px + dx), q.y - y) < MIN_GAP);
+    // x() maps the domain to [HIT, width - HIT]; a dot spilled past it would read as off the scale.
+    const inside = (dx: number) => px + dx > HIT - 0.5 && px + dx < width - HIT + 0.5;
     let spot: { dx: number; y: number } | undefined;
-    for (let ring = 0; !spot; ring++) {
+    // Past `width` every spot is outside, so a full axis overlaps dots rather than looping forever.
+    for (let ring = 0; !spot && ring * MIN_GAP <= width; ring++) {
       for (const dx of offsets(ring)
         .slice(-2)
-        .map((c) => c * MIN_GAP)) {
+        .map((c) => c * MIN_GAP)
+        .filter(inside)) {
         const y = levels.find((l) => free(dx, l));
         if (y !== undefined) {
           spot = { dx, y };
@@ -408,15 +420,16 @@ function swarm(points: StripPoint[], x: (v: number) => number): Placed[] {
         }
       }
     }
-    placed.push({ ...point, x: px + spot.dx, y: spot.y });
+    placed.push({ ...point, x: px + (spot?.dx ?? 0), y: spot?.y ?? 0 });
   }
   return placed;
 }
 
 /**
  * The axis: the values' range widened outward to whole multiples of a round
- * step (1, 2 or 5 × a power of ten) giving about `count` intervals, as d3's
- * `nice()` does, so both ends carry a tick. A single value gets a range around it.
+ * step (1, 2 or 5 × a power of ten), as d3's `nice()` does, so both ends carry
+ * a tick. The step is the smallest that leaves at most `count + 1` intervals.
+ * A single value gets a range around it.
  */
 function niceDomain(values: number[], count: number): { lo: number; hi: number; step: number } {
   let lo = values.length ? Math.min(...values) : 0;
@@ -426,18 +439,15 @@ function niceDomain(values: number[], count: number): { lo: number; hi: number; 
     lo -= pad;
     hi += pad;
   }
-  let step = 0;
-  // Widening can change the step; d3 settles within a few rounds too.
-  for (let round = 0; round < 10; round++) {
-    const raw = (hi - lo) / count;
-    const magnitude = 10 ** Math.floor(Math.log10(raw));
-    const next = ([1, 2, 5, 10].find((m) => m * magnitude >= raw) ?? 10) * magnitude;
-    if (next === step) break;
-    step = next;
-    lo = Math.floor(lo / step + 1e-9) * step;
-    hi = Math.ceil(hi / step - 1e-9) * step;
+  // A step below 10^e gives more than 2 × count intervals, so the ladder starts there.
+  for (let e = Math.floor(Math.log10((hi - lo) / count)); ; e++) {
+    for (const m of [1, 2, 5]) {
+      const step = m * 10 ** e;
+      const a = Math.floor(lo / step + 1e-9) * step;
+      const b = Math.ceil(hi / step - 1e-9) * step;
+      if (Math.round((b - a) / step) <= count + 1) return { lo: a, hi: b, step };
+    }
   }
-  return { lo, hi, step };
 }
 
 /** Decimals that show a tick step exactly: 0.05 needs 2, 0.25 needs 2, 20 needs 0. */

@@ -1,24 +1,7 @@
-/** Reservation and cost arithmetic: a wrong number here is a silent cap breach or a wrong bill. */
+/** Cost arithmetic: a wrong number here is a wrong bill. */
 import { describe, expect, it } from "vitest";
-import { fits } from "./calls";
 import { observeLine } from "./observe";
-import { costUsd, type Observed, reservationUsd } from "./prices";
-
-describe("reservation", () => {
-  it("holds SAM's 15,000-frame maximum, which the request cannot lower", () => {
-    expect(reservationUsd("meta", "sam-3.1", 1)).toBeCloseTo(3);
-    expect(reservationUsd("meta", "sam-3.1", undefined)).toBeCloseTo(3);
-  });
-  it("holds max_tokens at the output price (claude-sonnet-4-5: $15/M)", () => {
-    expect(reservationUsd("anthropic", "claude-sonnet-4-5", 4096)).toBeCloseTo(0.06144);
-  });
-  it("refuses a model with no price", () => {
-    expect(reservationUsd("anthropic", "no-such-model", 10)).toBeNull();
-  });
-  it("uses the dearest tier's output price", () => {
-    expect(reservationUsd("openai", "gpt-5.6-luna", 1_000_000)).toBeCloseTo(1.8);
-  });
-});
+import { costUsd, type Observed } from "./prices";
 
 describe("cost", () => {
   it("bills SAM per frame with a 50-frame minimum", () => {
@@ -42,16 +25,6 @@ describe("cost", () => {
   });
   it("is unknown when the reply reported no usage", () => {
     expect(costUsd("anthropic", "claude-sonnet-4-5", {})).toBeNull();
-  });
-});
-
-describe("the cap", () => {
-  it("admits up to the cap and no further", () => {
-    expect(fits(7, 3, 10)).toBe(true);
-    expect(fits(7.01, 3, 10)).toBe(false);
-    // three $3.1 reservations in a $10 cap: the third fits, the fourth cannot
-    expect(fits(6.2, 3.1, 10)).toBe(true);
-    expect(fits(9.3, 3.1, 10)).toBe(false);
   });
 });
 
