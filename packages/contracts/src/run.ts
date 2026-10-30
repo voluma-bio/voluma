@@ -238,7 +238,7 @@ export const runSchema = z
     startedBy: userIdSchema,
     /** The study the run belongs to; its workflow is the run's. */
     studyId: studyIdSchema,
-    /** The pins the server resolved from the request's `workflowId`, as in `r2.ts`'s `workflowSnapshotPrefix`. */
+    /** The pins the server resolved from the study's workflow, as in `r2.ts`'s `workflowSnapshotPrefix`. */
     workflows: z.array(workflowPinSchema).min(1),
     input: inputSchema,
     /**

@@ -7,10 +7,10 @@ belongs to a study (`@voluma/contracts/study`); a study of one is a study whose 
 shown as its scan and linked straight to its run.
 
 - **Home's data** is `listStudies` alone: each study carries each scan's newest run in brief
-  (`newestRuns`: run id, state, a live run's tasks done) and its `scansCompleted` and `toCheck`.
-  It refetches every 5 s while any newest run is live. The summary has no per-run review, so a
-  study of one never reads "Reviewed" on Home, and Needs you can't say how many scans have
-  checks open.
+  (`newestRuns`: run id, state, a live run's tasks done, a completed run's `review`) and its
+  `scansCompleted` and `toCheck`. It refetches every 5 s while any newest run is live. "N to
+  check across M scans" counts scans whose newest run has open checks; `toCheck` also holds an
+  older completed run's checks while that scan reruns.
   Needs you has one row per study with one action; example studies are read-only and ask nothing.
   "Last activity" is a relative day, never a time.
 - **Run on new scans** keeps no outputs checklist and no notes: a study runs every output (the
@@ -40,7 +40,7 @@ shown as its scan and linked straight to its run.
 - **Shared with `features/run`** through `@voluma/ui/run`: the run and study status words
   (`runStatus`, `RunBadge`, `studyStatus`: Running, N to check, Checked, Reviewed, Failed,
   Stopped, Waiting, Needs your keys, Not started), the run link, the formatters, and visitor
-  keys. `runStatus` and `RunBadge` take a full `Run` (they need its review); `studyStatus` and
-  `runHref` take the summary's `newestRuns`, and Home uses only those, a study of one included.
+  keys. `runStatus`, `studyStatus` and `runHref` take a run's `state` and `review`, which a full
+  `Run` and a `newestRuns` entry both carry; a study of one reads as `runStatus` of its run.
   "Not started" is only a scan with no run; a stopped one reads "N stopped". The study page uses
   the same mapping; don't add another.

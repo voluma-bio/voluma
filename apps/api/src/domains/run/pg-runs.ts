@@ -6,7 +6,7 @@
 
 import { runEventSchema } from "@voluma/contracts/events";
 import type { ReviewSummary } from "@voluma/contracts/review";
-import { reviewState } from "@voluma/contracts/review-state";
+import { progress, reviewState } from "@voluma/contracts/review-state";
 import { type Input, type Run, runSchema } from "@voluma/contracts/run";
 import type { StudyValue, ToCheckItem } from "@voluma/contracts/study";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
@@ -240,14 +240,9 @@ type Revision = ReturnType<typeof reviewState>["revisions"][number];
 
 /** A revision's finished tasks out of its plan's; null before there is a revision. */
 function progressOf(latest: Revision | undefined): Run["tasks"] {
-  // The fold has a row only for a task that started; the plan lists them all. "Finished"
-  // counts To check tasks: their work is done (the run page counts the same).
-  return latest
-    ? {
-        done: latest.tasks.filter((t) => t.status === "done" || t.status === "to-check").length,
-        total: latest.plan.tasks.length,
-      }
-    : null;
+  if (!latest) return null;
+  const { done, total } = progress(latest);
+  return { done, total };
 }
 
 function derive(log: RunRecord["events"]): Derived {
@@ -291,7 +286,8 @@ interface LoadOptions {
    * The lists and the study reads: a completed run whose events no longer parse is left out
    * rather than failing every run listed with it. Without it (one run's read) it throws: the
    * run's own page must fail loudly, not read as "no plan" (a 409 the web polls forever).
-   * A live run whose events don't parse is always kept, with `tasks: null`: it still runs.
+   * A completed run with no revision is left out the same way. A live run whose events
+   * don't parse is always kept, with `tasks: null`: it still runs.
    */
   skipUnreadable?: boolean;
 }
@@ -336,6 +332,15 @@ async function loadResults(
   }
   return rows
     .filter(({ run }) => !lost.includes(run.id))
+    .filter(
+      // A completed run whose events have no revision has no review summary, so `runSchema`
+      // would throw: in a list it is as unreadable as one whose events don't parse.
+      ({ run }) =>
+        !skipUnreadable ||
+        run.state !== "ended" ||
+        run.outcome !== "completed" ||
+        derivedOf.get(run.id)?.summary,
+    )
     .map((row) => {
       const derived = derivedOf.get(row.run.id) ?? NOTHING;
       return { run: toRun(row, derived), ...derived };

@@ -64,7 +64,7 @@ export const outputEntrySchema = z.discriminatedUnion("kind", [
       .tuple([z.number(), z.number()])
       .refine(([min, max]) => min <= max, "range must be [min, max] with min <= max")
       .optional(),
-    /** The study page plots this measurement for every scan; the web asks for the `headline` ids (`StudyDetail`). */
+    /** The study page plots this measurement for every scan; `StudyDetail` carries the `headline` ids' values. */
     headline: z.boolean().optional(),
   }),
   z.strictObject({

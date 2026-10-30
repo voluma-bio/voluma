@@ -82,6 +82,13 @@ export const studyRunSummarySchema = z.object({
   state: runStateSchema,
   /** As `runSchema.tasks`: a live run's finished tasks out of its plan's. */
   tasks: runTasksSchema,
+  /** As `runSchema.review`: the open checks and review time of a completed run; null otherwise. */
+  review: z
+    .object({
+      remainingToCheck: z.number().int().nonnegative(),
+      reviewedAt: z.iso.datetime().nullable(),
+    })
+    .nullable(),
   example: z.boolean(),
 });
 export type StudyRunSummary = z.infer<typeof studyRunSummarySchema>;

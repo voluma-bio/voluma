@@ -221,6 +221,12 @@ export function pgRunQueue(
     }
   };
 
+  const pinsFor = (workflowId: string) => {
+    const pins = pinsOf(workflowId);
+    if (!pins) throw new Refused("no-workflow");
+    return pins;
+  };
+
   /** Every input must be readable; an uncompleted upload exists only for its uploader. Returns them by id. */
   const checkInputs = async (tx: Tx, reader: Reader, caller: { userId: string }, ids: string[]) => {
     const found = await tx
@@ -252,12 +258,11 @@ export function pgRunQueue(
     hold: Hold,
     reader: Reader,
     caller: { userId: string },
-    study: { id: string; workflowId: string },
+    study: { id: string },
+    pins: WorkflowPin[],
     starts: Starts,
   ) => {
     if (starts.runs.length === 0) return;
-    const pins = pinsOf(study.workflowId);
-    if (!pins) throw new Refused("no-workflow");
     const credentials = starts.keys ? "visitor" : "voluma";
     const used = await usage(tx, reader.labId, { userId: caller.userId, credentials });
     for (const { id, inputId } of starts.runs) {
@@ -308,7 +313,7 @@ export function pgRunQueue(
           );
         if (!scan) throw new Refused("no-input");
         await checkInputs(tx, reader, caller, [request.inputId]);
-        await startRuns(tx, hold, reader, caller, study, {
+        await startRuns(tx, hold, reader, caller, study, pinsFor(study.workflowId), {
           ...request,
           runs: [{ id: request.id, inputId: request.inputId }],
         });
@@ -334,7 +339,7 @@ export function pgRunQueue(
       },
     ) =>
       attempt(async (tx, hold) => {
-        if (!pinsOf(request.study.workflowId)) throw new Refused("no-workflow");
+        const pins = pinsFor(request.study.workflowId);
         const found = await checkInputs(
           tx,
           reader,
@@ -349,12 +354,12 @@ export function pgRunQueue(
         await tx.insert(studyScans).values(
           request.scans.map((scan, position) => ({
             ...scan,
-            subject: scan.subject ?? (found.get(scan.inputId)?.name as string),
+            subject: scan.subject ?? found.get(scan.inputId)!.name,
             studyId: request.study.id,
             position,
           })),
         );
-        await startRuns(tx, hold, reader, caller, request.study, request.starts);
+        await startRuns(tx, hold, reader, caller, request.study, pins, request.starts);
         return { studyId: request.study.id };
       }),
 
