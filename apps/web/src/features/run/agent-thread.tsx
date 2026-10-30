@@ -43,10 +43,15 @@ export function AgentThread({
   // is at the bottom; scrolling up stops it until they scroll back down.
   const viewport = useRef<HTMLDivElement>(null);
   const stuck = useRef(running);
-  const lastTop = useRef(0);
+  const lastTop = useRef<number | null>(null);
   useLayoutEffect(() => {
     const el = viewport.current;
-    if (el && stuck.current && rows.length > 0) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    // A paused thread that fits already starts at the bottom, even without a scroll event.
+    if (lastTop.current === null && el.scrollHeight - el.clientHeight < STICK) stuck.current = true;
+    if (stuck.current && rows.length > 0) el.scrollTop = el.scrollHeight;
+    // Settling a reply removes its caret and can clamp scrollTop down. That is not reader input.
+    lastTop.current = el.scrollTop;
   }, [rows]);
 
   if (!thread) return null;
@@ -79,11 +84,11 @@ export function AgentThread({
           // Any move up lets go, however small (a trackpad's first events stay near the bottom);
           // only coming back down to the bottom sticks again.
           const el = e.currentTarget;
-          if (el.scrollTop < lastTop.current) stuck.current = false;
+          if (lastTop.current !== null && el.scrollTop < lastTop.current) stuck.current = false;
           else if (el.scrollHeight - el.scrollTop - el.clientHeight < STICK) stuck.current = true;
           lastTop.current = el.scrollTop;
         }}
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain pt-4 pr-2"
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain pt-4 pr-2 min-[1100px]:pl-8"
       >
         <TranscriptView
           rows={rows}
