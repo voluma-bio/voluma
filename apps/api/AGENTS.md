@@ -113,6 +113,9 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   `export:run --id <runId> --out <dir|r2:dev/…>` dumps its rows to `run.json`, and
   `import:run --from <dir|r2:prefix> [--replace]` loads them (events are checked with
   `runEventSchema`; an existing run is refused without `--replace`). Evidence stays in R2.
+  `archive:run --id <runId> [--out <dir>] --remote` (all three are in `src/ops/`, since they read both domains'
+  tables) copies an ended run's rows to `~/.local/share/voluma-backups/runs/<runId>/` and deletes
+  them; it refuses a non-local database without `--remote`, like `import:run`. See [.context/deploy.md](.context/deploy.md).
   `r2:put --from <dir> --to r2:dev/<prefix>` uploads a folder. An `r2:` location is a prefix in the
   `R2_BUCKET` the dev servers use (`r2-dir.ts`). Operator scripts use `DATABASE_URL`, else the
   database `pnpm dev` wrote to `.dev/env.json`; each prints its database and bucket first, writes to
