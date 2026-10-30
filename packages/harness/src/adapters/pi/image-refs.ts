@@ -15,7 +15,7 @@ import { historyImageKey } from "@voluma/contracts/r2";
 import { FileNotFound, type Files } from "../../ports/files";
 import type { History } from "../../ports/history";
 import { parseThreadId } from "../../thread-id";
-import { ELIDED_NOTE, KEEP } from "./elide-images";
+import { KEEP, withoutImages } from "./elide-images";
 
 type Block = { type: string; [key: string]: unknown };
 type Row = { content?: unknown; [key: string]: unknown };
@@ -68,15 +68,9 @@ export function withImageRefs(history: History, files: Files, runId: string): Hi
         rows.map(async (r) => {
           const blocks = r.row && blocksOf(r.row);
           if (!r.row || !blocks || !has(r.row, "imageRef")) return r.text;
-          const content = await Promise.all(
-            blocks.map((b) =>
-              b.type !== "imageRef"
-                ? b
-                : shown.has(r)
-                  ? fetchImage(b)
-                  : { type: "text", text: ELIDED_NOTE },
-            ),
-          );
+          const content = shown.has(r)
+            ? await Promise.all(blocks.map((b) => (b.type === "imageRef" ? fetchImage(b) : b)))
+            : withoutImages(blocks, "imageRef");
           return JSON.stringify({ ...r.row, content });
         }),
       );

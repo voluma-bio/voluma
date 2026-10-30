@@ -38,6 +38,8 @@ const inputSchema = z.object({
 export interface ViewImageDeps {
   layout: ThreadLayout;
   files: Files;
+  /** Whether the thread has a sandbox of its own to read a /tmp file from (it holds `bash`). */
+  hasSandbox: boolean;
 }
 
 /** Fits the image in MAX_SIDE and MAX_BYTES: shrinks it, then lowers the JPEG quality, until it does. */
@@ -60,7 +62,11 @@ async function downscale(bytes: Buffer, width: number, height: number) {
   }
 }
 
-export function viewImageTool({ layout, files }: ViewImageDeps): Tool<typeof inputSchema> {
+export function viewImageTool({
+  layout,
+  files,
+  hasSandbox,
+}: ViewImageDeps): Tool<typeof inputSchema> {
   return {
     name: "view_image",
     description:
@@ -75,7 +81,7 @@ export function viewImageTool({ layout, files }: ViewImageDeps): Tool<typeof inp
       for (const named of paths) {
         const path = layout.resolve(named);
         const bytes = await readWhole(
-          { layout, files, sandbox: ctx.sandbox },
+          { layout, files, sandbox: hasSandbox ? ctx.sandbox : undefined },
           path,
           MAX_READ_BYTES,
           ctx.signal,
