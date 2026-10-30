@@ -1,6 +1,6 @@
 /**
- * A composed slice picture and the textured quad that shows it, shared by the slice panes and
- * the 3D view. Corners are in source voxels (z, y, x); each view maps them to its own space.
+ * A composed slice picture and the textured quad that shows it in a slice pane. Corners are in
+ * source voxels (z, y, x); the pane maps them to its own space.
  */
 import {
   BufferAttribute,

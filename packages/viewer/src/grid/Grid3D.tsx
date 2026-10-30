@@ -252,7 +252,8 @@ export function Grid3D({
   }, [meshIds]);
 
   // The volume: the coarsest level at once, then the finest that fits (`volumeLevel`); the raw
-  // values are kept so a contrast change only rebuilds the bytes.
+  // values are kept so a contrast change only rebuilds the bytes. Keyed by the asset, not the
+  // object: Review rebuilds the scene on every display change.
   const [levels, setLevels] = useState<{ k: number; values: ArrayLike<number> }[]>([]);
   useEffect(() => {
     const abort = new AbortController();
@@ -271,7 +272,7 @@ export function Grid3D({
         setVolumeStatus(`Couldn't load the volume: ${(cause as Error).message}`);
     });
     return () => abort.abort();
-  }, [scene.image]);
+  }, [scene.image.base]);
   const shown = levels.reduce<(typeof levels)[number] | undefined>(
     (best, l) => (!best || l.k < best.k ? l : best),
     undefined,

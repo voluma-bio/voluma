@@ -141,7 +141,9 @@ void main() {
   float meshZ = perspectiveDepthToViewZ(texture(meshDepth, gl_FragCoord.xy / resolution).r, near, far);
   float zNear = (localToView * vec4(cameraLocal + dir * tnear, 1.0)).z;
   float zFar = (localToView * vec4(cameraLocal + dir * tfar, 1.0)).z;
-  if (meshZ > zFar && meshZ < zNear) tfar = tnear + (tfar - tnear) * (zNear - meshZ) / (zNear - zFar);
+  // A mesh in front of the box hides all of it here.
+  if (meshZ >= zNear) discard;
+  if (meshZ > zFar) tfar = tnear + (tfar - tnear) * (zNear - meshZ) / (zNear - zFar);
 
   float dt = (tfar - tnear) / float(steps);
   // Opacity per step is for a step of one texel across the box.

@@ -39,7 +39,7 @@ not shown here"), never resampled onto this one.
 made on that same grid, each a converted asset (`assets.ready`: OME-Zarr 0.4 levels, finest first,
 level k = 2^k source voxels per axis; raw meshes, float32 voxel (x, y, z) then uint32 indices).
 Every position is a source voxel (z, y, x) of the grid; source voxel i is centred on i, level voxel j
-spans source [j·2^k, (j+1)·2^k). A cropped mask carries `offsetZyx` and its levels and mesh are in
+spans source [j·2^k − ½, (j+1)·2^k − ½). A cropped mask carries `offsetZyx` and its levels and mesh are in
 crop voxels. The run publishes all geometry; the viewer never resamples between grids, and 3D is
 drawn in the grid's own mm (voxel × spacing), not rotated into the scan.
 
