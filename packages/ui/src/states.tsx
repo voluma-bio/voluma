@@ -43,7 +43,9 @@ export function LoadingState({
 }: LoadingStateProps) {
   const compact = density === "compact";
   return (
-    <div role="status" aria-label={label} className={className}>
+    // Shown after a short delay (`animate-appear`), so a fast load doesn't flash it.
+    <div role="status" className={cx("animate-appear motion-reduce:animate-none", className)}>
+      <span className="sr-only">{label}</span>
       {Array.from({ length: rows }, (_, i) => (
         <div
           // biome-ignore lint/suspicious/noArrayIndexKey: placeholders have no identity

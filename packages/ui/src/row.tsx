@@ -184,16 +184,7 @@ export function RowLink({ to, ...props }: RowLinkProps) {
       interactive
       lead={
         expandable && (
-          <button
-            type="button"
-            aria-label={open ? "Show less" : "Show more"}
-            aria-expanded={open}
-            aria-controls={open ? bodyId : undefined}
-            onClick={() => setOpen(!open)}
-            className="relative z-[1] -ml-1 grid size-[22px] cursor-pointer place-items-center rounded-sm hover:bg-secondary focus-visible:outline-2 focus-visible:outline-ring"
-          >
-            <Chevron open={open} />
-          </button>
+          <ChevronToggle open={open} controls={bodyId} onToggle={() => setOpen(!open)} />
         )
       }
       title={typeof to === "string" ? <a href={to} {...linkProps} /> : to(linkProps)}
@@ -231,6 +222,31 @@ export function Chevron({ open }: { open: boolean }) {
         open ? "rotate-90 text-foreground" : "text-fg-subtle",
       )}
     />
+  );
+}
+
+/** The chevron as its own button, for a row whose main control goes somewhere else. */
+export function ChevronToggle({
+  open,
+  controls,
+  onToggle,
+}: {
+  open: boolean;
+  /** Id of the layer it opens. */
+  controls: string;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={open ? "Show less" : "Show more"}
+      aria-expanded={open}
+      aria-controls={open ? controls : undefined}
+      onClick={onToggle}
+      className="relative z-[1] -ml-1 grid size-[22px] cursor-pointer place-items-center rounded-sm hover:bg-secondary focus-visible:outline-2 focus-visible:outline-ring"
+    >
+      <Chevron open={open} />
+    </button>
   );
 }
 

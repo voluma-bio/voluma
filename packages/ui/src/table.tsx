@@ -13,6 +13,7 @@ import { type ReactNode, useId, useState } from "react";
 import { cx } from "./cx";
 import {
   Chevron,
+  ChevronToggle,
   type Density,
   type LinkRenderProps,
   type LinkTo,
@@ -170,16 +171,11 @@ export function Table<Row>({
                       <td className="w-7 pr-0 pl-4 align-middle">
                         {detail !== undefined &&
                           (to !== undefined ? (
-                            <button
-                              type="button"
-                              aria-label={isOpen ? "Show less" : "Show more"}
-                              aria-expanded={isOpen}
-                              aria-controls={isOpen ? detailId : undefined}
-                              onClick={() => toggle(key)}
-                              className="relative z-[1] -ml-1 grid size-[22px] cursor-pointer place-items-center rounded-sm hover:bg-secondary focus-visible:outline-2 focus-visible:outline-ring"
-                            >
-                              <Chevron open={isOpen} />
-                            </button>
+                            <ChevronToggle
+                              open={isOpen}
+                              controls={detailId}
+                              onToggle={() => toggle(key)}
+                            />
                           ) : (
                             <Chevron open={isOpen} />
                           ))}

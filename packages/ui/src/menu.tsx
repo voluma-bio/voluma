@@ -20,19 +20,30 @@ export type MenuProps = {
   trigger: ReactElement;
   children: ReactNode;
   align?: "start" | "center" | "end";
+  open?: boolean;
+  /** Called as it opens and closes, e.g. to clear an error the menu showed. */
+  onOpenChange?: (open: boolean) => void;
   /** Width overrides; 240 px by default. */
   className?: string;
 };
 
-export function Menu({ trigger, children, align = "end", className }: MenuProps) {
-  const [ref, container] = useThemedPortal();
+export function Menu({
+  trigger,
+  children,
+  align = "end",
+  open,
+  onOpenChange,
+  className,
+}: MenuProps) {
+  const portal = useThemedPortal(onOpenChange);
   return (
-    <M.Root>
-      <M.Trigger asChild ref={ref}>
+    <M.Root open={open} onOpenChange={portal.onOpenChange}>
+      <M.Trigger asChild ref={portal.ref}>
         {trigger}
       </M.Trigger>
-      <M.Portal container={container}>
+      <M.Portal>
         <M.Content
+          data-theme={portal.theme}
           align={align}
           sideOffset={6}
           collisionPadding={8}
@@ -52,7 +63,8 @@ const itemClass = cx(
 
 export type MenuItemProps = {
   children: ReactNode;
-  onSelect?: () => void;
+  /** Picking closes the menu; call `event.preventDefault()` to keep it open (e.g. while pending). */
+  onSelect?: (event: Event) => void;
   /** A lucide icon, drawn at 14 px before the label. */
   icon?: ReactNode;
   /** The key that does the same, e.g. "F". */

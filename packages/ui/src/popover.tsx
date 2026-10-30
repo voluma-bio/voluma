@@ -34,14 +34,15 @@ export function Popover({
   label,
   className,
 }: PopoverProps) {
-  const [ref, container] = useThemedPortal();
+  const portal = useThemedPortal(onOpenChange);
   return (
-    <P.Root open={open} onOpenChange={onOpenChange}>
-      <P.Trigger asChild ref={ref}>
+    <P.Root open={open} onOpenChange={portal.onOpenChange}>
+      <P.Trigger asChild ref={portal.ref}>
         {trigger}
       </P.Trigger>
-      <P.Portal container={container}>
+      <P.Portal>
         <P.Content
+          data-theme={portal.theme}
           align={align}
           side={side}
           sideOffset={6}
