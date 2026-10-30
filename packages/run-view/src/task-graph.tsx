@@ -62,15 +62,18 @@ export const TASK_STATUS: Record<TaskState, Status> = {
   skipped: "waiting",
 };
 
+/** Where a state is more exact than its mark's word. */
+const STATE_WORD: Partial<Record<TaskState, string>> = {
+  ready: "Ready to start",
+  held: "Waiting on the lead AI",
+  failed: "Failed",
+  "awaiting-ai": "Waiting for the AI",
+  skipped: "Skipped",
+};
+
 /** A task's state in a word: STATUS_WORD's, with the states that word would blur named. */
 export const taskStateWord = (state: TaskState) =>
-  state === "skipped"
-    ? "Skipped"
-    : state === "failed"
-      ? "Failed"
-      : state === "awaiting-ai"
-        ? "Waiting for the AI"
-        : STATUS_WORD[TASK_STATUS[state]];
+  STATE_WORD[state] ?? STATUS_WORD[TASK_STATUS[state]];
 
 export function TaskGraph(props: TaskGraphProps) {
   const right = props.size !== "report";

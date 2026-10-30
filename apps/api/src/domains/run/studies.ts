@@ -15,7 +15,6 @@ import {
   requireUser,
 } from "../../domain";
 import type { RunDeps } from ".";
-import { refusal } from "./runs";
 
 export function studiesRoutes({ studies, queue }: RunDeps) {
   const app = new Hono<AppEnv>();
@@ -44,7 +43,6 @@ export function studiesRoutes({ studies, queue }: RunDeps) {
         keys: body.keys,
       },
     });
-    if ("refused" in result) return refusal(c, result.refused, result.detail);
     const detail = await studies.get(reader, result.studyId);
     if (!detail) throw new Error(`study ${result.studyId} vanished after it was created`);
     return c.json(detail);

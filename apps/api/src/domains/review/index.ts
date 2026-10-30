@@ -5,13 +5,7 @@
  */
 import { Hono } from "hono";
 import type { AppEnv } from "../../domain";
-import type {
-  ReferenceArchive,
-  ReviewInputs,
-  RunFiles,
-  RunMessages,
-  RunRecords,
-} from "../../ports";
+import type { ReferenceArchive, RunFiles, RunMessages, RunRecords } from "../../ports";
 import { inputRoutes } from "./inputs";
 import type { pgSnapshots } from "./pg-snapshots";
 import { runRoutes } from "./runs";
@@ -24,7 +18,6 @@ export type ReviewDeps = {
   messages: RunMessages;
   /** Null without R2: run files are 503s. */
   files: RunFiles | null;
-  inputs: ReviewInputs;
   referenceArchive: ReferenceArchive | null;
 };
 
