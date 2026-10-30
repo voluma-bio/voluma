@@ -239,7 +239,7 @@ when a claim reports (`model cost this claim`), and the API stores it as `runs.m
 On 2026-10-28 the claims' lines summed to the run's `model_cost_usd` and to `spend(events).total`
 ($0.9763 over five claims of one run).
 
-**Spend cap.** `RUNNER_MAX_RUN_COST_USD` caps a run's dollars across all its claims (sandbox time
+**Spend cap.** `RUNNER_MAX_RUN_COST_USD` (and, for a run reopened by a researcher's message, `RUNNER_MAX_CORRECTION_COST_USD` on top of the spend at the reopen) caps a run's dollars across all its claims (sandbox time
 is not counted). Unset, the default, there is no cap: test runs have none, so leave it unset on
 staging and locally (spend is still recorded and shown). When set it goes to the API with each
 claim and becomes `runs.cost_cap_usd` (null: no cap),
@@ -341,7 +341,18 @@ run loop then resumes each thread still in charge, if its latest `thread.started
 check only when the task is `under-review` and it is the current check, the latest main. It
 resumes with the message of `cutOffText`, naming the tool the log shows with no result, or the
 no-tool form, and a tool the cut-off interrupted is answered from the log (`tools/effects.ts`).
-A cut-off resume counts as no delivery and no redo. A thread that ended `cancelled` is never
+A cut-off resume counts as no delivery and no redo.
+
+A researcher's message reopens a finished run (`run.reopened`, `packages/contracts/src/messages.ts`)
+and the next claim resumes the main agent with it, as a notice: nothing is cut off, so there is no
+cut-off text. That claim's `claim.started` carries `reopened: true` instead of `after`. A thread
+whose stored history cannot be resumed (a run made before `reply` existed, a changed prompt or tool
+list) or whose recorded model this runner no longer allows is refused as stale and started again
+(`main.<n>`); `threadModel` hands such a thread the role's model rather than failing the run. The
+report carries the highest event `seq` the claim read (`lastSeq`); the API requeues the run when a
+`person.message` came after it. A claim's spend cap is the claim's `costCapUsd`:
+`RUNNER_MAX_RUN_COST_USD` for a run's first claims, and for a reopened run the spend at the reopen
+plus `RUNNER_MAX_CORRECTION_COST_USD`. A thread that ended `cancelled` is never
 resumed. A tool whose `tool.call` event was
 still queued when the runner died isn't named (the log lacks it), so a runner killed within
 milliseconds of a call gets the no-tool form.

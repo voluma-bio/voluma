@@ -81,6 +81,21 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   `lease-expired` when the claim's sweep finds the lease gone). `recover` in `pg-queue.ts` stores it
   for the next claim's `previousClaim` and applies the no-progress limit (`claim-progress.ts`:
   the counting rule and the progress events). There is no other restart counter.
+- **A researcher's message reopens a finished run** (`messages.ts` in contracts is the rulebook;
+  `queue.checkMessage`/`sendMessage` in `pg-queue.ts` implement it, Review's `POST /runs/:id/messages`
+  calls them through the `RunMessages` port after it checks and stores the snapshot PNG).
+  `decideMessage` judges in the contract's order, under the queue lock for `sendMessage`, then takes
+  the event lock (queue lock first, as `cancel` does). A reopen writes `run.reopened` and
+  `person.message`, clears `lastClaimEnd`/`stalledClaims` and the lease, and sets
+  `runs.correction_base_usd` (the spend at the reopen): that column is what makes a run's claims
+  corrections. A correction never ends a run worse than `completed`: every way the queue would
+  fail or cancel a run (`endUnfinished`: the runner's failed end, the no-progress limit, a refused
+  claim or heartbeat, a user's cancel) ends it `completed` with `correction.ended` and its open
+  threads cancelled. `report()` compares the runner's `lastSeq` with the log and requeues an
+  `ended` report that missed a `person.message`. A correction's claim cap is the base spend plus
+  the runner's correction cap; `usage()` counts a reopened run's spend since the reopen toward the
+  day it is claimed in (it keeps only the latest reopen's base, so two corrections of one old run
+  inside a day count only the second's spend).
 - **Visitor keys live only in `key-vault.ts`**, in memory, and only `pg-queue.ts` touches it,
   under the lock. Never store, log or return them, and log no body on a route that takes
   them. A transition holds the keys before the write that makes the run claimable commits;

@@ -51,7 +51,7 @@ Variables (names only; values never go in the repo):
 | `VOLUMA_API_URL` | `http://${{@voluma/api.RAILWAY_PRIVATE_DOMAIN}}:${{@voluma/api.PORT}}` (the API's `PORT` is set to 8080 explicitly, since a private URL needs a known port) |
 | `VOLUMA_API_TOKEN` | reference `${{@voluma/api.VOLUMA_API_TOKEN}}`: rotating it on the API reaches the runner at its next deploy |
 | `VOLUMA_META_API_KEY`, `RUNNER_CONCURRENCY` | the model key; models are the role files' aliases (`wonder` = `meta/muse-wonder-1.0`, Standard mode). Leave `RUNNER_MODEL` unset: it forces every role onto one model. Never a `-contributor` model on a deployed runner, Meta may train on what it is sent; 2 slots |
-| `GATEWAY_TOKEN_SECRET`, `VOLUMA_GATEWAY_URL` | the same secret as `@voluma/gateway`; the gateway's public domain (`https://volumagateway-staging.up.railway.app`). `RUNNER_MAX_RUN_COST_USD` is unset on staging: no spend cap on test runs |
+| `GATEWAY_TOKEN_SECRET`, `VOLUMA_GATEWAY_URL` | the same secret as `@voluma/gateway`; the gateway's public domain (`https://volumagateway-staging.up.railway.app`). `RUNNER_MAX_RUN_COST_USD` and `RUNNER_MAX_CORRECTION_COST_USD` are unset on staging: no spend cap on test runs |
 | `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` | the Modal profile in `~/.modal.toml` |
 | `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `CLOUDFLARE_API_TOKEN` | as in `.env` |
 
