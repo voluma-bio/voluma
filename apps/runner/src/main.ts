@@ -17,6 +17,7 @@ import { PROVIDERS } from "./providers.ts";
 import { redactor } from "./redact.ts";
 import { type RunnerContext, runClaim } from "./run.ts";
 import { startTelemetry } from "./telemetry.ts";
+import { assertThinking } from "./thinking.ts";
 
 /** How long a shutdown waits for runs to report before it exits anyway. */
 const SHUTDOWN_BUDGET_MS = 30_000;
@@ -32,19 +33,26 @@ const resolve = (ref: { provider: string; id: string }) => {
   if (!model) throw new Error(`unknown model ${ref.provider}/${ref.id}`);
   return model;
 };
-const roles = {
-  worker: resolve(config.roles.worker),
-  check: resolve(config.roles.check),
-  main: resolve(config.roles.main),
-};
+const aliases = Object.fromEntries(
+  Object.entries(config.models).map(([alias, ref]) => [alias, resolve(ref)]),
+);
+
+// Pi clamps a level a model lacks to a neighbouring one, so a typo'd or unsupported level
+// would run silently at another. Every alias is checked, named by a role file or not.
+const fallbackModel = config.fallbackModel && resolve(config.fallbackModel);
+assertThinking(
+  config.thinking,
+  [...Object.values(aliases), ...(fallbackModel ? [fallbackModel] : [])],
+  "RUNNER_THINKING",
+);
 
 const runnerId = `runner-${randomUUID().slice(0, 8)}`;
 const ctx: RunnerContext = {
   config,
   models,
-  roles,
+  aliases,
   visitorModel: resolve(config.visitorModel),
-  fallback: modelFallback(config.fallbackModel && resolve(config.fallbackModel), log),
+  fallback: modelFallback(fallbackModel, log),
   log,
 };
 
@@ -66,11 +74,11 @@ const shuttingDown = new Promise<void>((resolve) =>
 const sleep = (ms: number) => delay(ms, undefined, { signal: shutdown.signal }).catch(() => {});
 
 log(
-  `${runnerId} up: ${config.concurrency} slot(s), models ${Object.entries(config.roles)
-    .map(([role, m]) => `${role} ${m.provider}/${m.id}`)
+  `${runnerId} up: ${config.concurrency} slot(s), models ${Object.entries(config.models)
+    .map(([alias, m]) => `${alias} ${m.provider}/${m.id}`)
     .join(
       ", ",
-    )}${config.fallbackModel ? `, fallback ${config.fallbackModel.provider}/${config.fallbackModel.id}` : ""}, api ${config.api.baseUrl}`,
+    )}${config.fallbackModel ? `, fallback ${config.fallbackModel.provider}/${config.fallbackModel.id}` : ""}, thinking ${config.thinking ?? "unset"}, api ${config.api.baseUrl}`,
 );
 // After startup: a failure above must still kill the process, not be logged and survived.
 startTelemetry(log);

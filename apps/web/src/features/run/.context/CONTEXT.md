@@ -12,11 +12,11 @@ is no runs list: Home (`features/study`) replaces it.
   redeploys the web app. The page reads the plan from the first
   `revision.started` itself because `fold` doesn't expose it.
 - **The live page** behaves like Meridian Flow's chat, adapted to a run. The main view is the main
-  thread's transcript, which is the run's orchestration: its wakes (who woke it, why, its decision,
-  its notes clamped), a card where each worker and checker started (live tool line and ticking
-  clock while running, its result when done; the row expands to its report, the name opens its
-  thread), and the supervisor's code (task statuses set by a rule, judgments, revisions) folded like
-  tool calls. `?thread=<threadId>` shows that thread's transcript in its place. Running workers and
+  agent's transcript (every thread of kind `main`: `main`, `main.2` after a restart), which is the
+  run's orchestration: its messages and tool calls like any thread's, a card where each worker and
+  checker started (live tool line and ticking clock while running, its result when done; the row
+  expands to its report, the name opens its thread), and the runtime's own steps (task statuses
+  set by a rule, revisions) folded like tool calls. `?thread=<threadId>` shows that thread's transcript in its place. Running workers and
   checkers are listed above the main transcript; failures and To check items sit at the top; the
   run's progress is a right rail (a closed "Tasks" fold under 1100 px, which scrolls on its own).
 - **The progress rail** (`task-progress.tsx`) reads without opening any agent: one row per plan
@@ -25,8 +25,7 @@ is no runs list: Home (`features/study`) replaces it.
   replaced a dependency graph plus a separate per-task spend list (three lists of the same tasks).
   A waiting row names the tasks it waits on. The outcome (`outcomes` in `run-model.ts`) is the
   current attempt's last worker checkpoint, else the checker's; a failed task's `task` reason.
-  Not the wake `note` (the whole notes block, every task so far), not the closing `task` reason (a
-  rule's stock sentence), not a judgment's reason (about the check). Under the tasks, "Outputs so
+  Not the closing `task` reason (a rule's stock sentence, about the check). Under the tasks, "Outputs so
   far" (`outputRows`): each measurement's and score's value from `fold`, by task in plan order; a
   null value shows the worker's note; once a task is done, to check or failed, a required output it
   never reported reads "Not reported" (a stopped task's row already says it stopped); a stale
@@ -54,13 +53,12 @@ is no runs list: Home (`features/study`) replaces it.
   elapsed time is on agent rows, model usage behind info popovers.
 - **Live frames** (`@voluma/contracts/stream`) are folded in `transcript.ts` (`applyFrame`, offset
   guarded) and dropped by `settle` when their durable event lands: a reply by `messageId` (the
-  `message`, or the `wake` for the main thread, whose streamed text is its JSON reply: the page
-  shows its `note` as it grows), a call's arguments by `toolCallId` until its `tool.call`, its
+  `message`), a call's arguments by `toolCallId` until its `tool.call`, its
   output until its `tool.result`. Frames can trail their durable event (about a third of
   `tool.output` frames arrive after the `tool.result`, and a short reply's single `text.delta`
   can land after its `message`), so `settle` records each settled key in a `Settled` set the
   stream owns and `applyFrame` ignores frames for those keys. A frame at offset 0 starts a partial
-  over (a re-asked wake reuses its id); any other gap drops the partial until the durable event.
+  over (a re-asked reply reuses its id); any other gap drops the partial until the durable event.
   A live `tool.output` keeps only its last 8,000 characters, the tail `bash.ts` keeps.
   A partial row and its durable row share a React key (message id, toolCallId), so the swap does
   not remount it. Frames are not replayed, so a reload mid-reply shows that reply only once its

@@ -10,9 +10,15 @@ export const supervisorThreadId = (runId: string) => `${runId}.supervisor`;
 export const threadId = (runId: string, taskId: string, role: Role, n: number) =>
   `${runId}.${taskId}.${role}${n === 1 ? "" : `.${n}`}`;
 
+export const mainThreadId = (runId: string, n: number) => `${runId}.main${n === 1 ? "" : `.${n}`}`;
+
 export type ParsedThread =
   /** `name`: the id without the run id, a thread's sandbox name and its folder under `/scratch`. */
   { name: string } & ({ kind: "main" } | { kind: Role; taskId: string });
+
+/** Whether `name` is a thread name (`parseThreadId`'s `name`): `main[.n]` or `<task>.worker|check[.n]`. */
+export const isThreadName = (name: string) =>
+  /^main(\.\d+)?$/.test(name) || /^[^.]+\.(worker|check)(\.\d+)?$/.test(name);
 
 /** Throws on an id that is not a worker, check or main thread of the run. */
 export function parseThreadId(runId: string, id: string): ParsedThread {

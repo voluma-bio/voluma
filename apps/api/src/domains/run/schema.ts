@@ -107,7 +107,7 @@ export const referenceInput = (labId: string): typeof inputs.$inferInsert => ({
 /**
  * A group of runs of one workflow, one per scan (`studySchema`, `@voluma/contracts/study`).
  * `example` marks the seeded example's study. Like `runs`, no foreign keys: the rows are
- * checked where they are written (pg-queue.ts).
+ * checked where they are written (pg-queue.ts, and the operator scripts import-run.ts and seed-example.ts).
  */
 export const studies = pgTable(
   "studies",

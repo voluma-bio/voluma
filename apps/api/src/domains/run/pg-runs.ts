@@ -6,7 +6,7 @@
 
 import { runEventSchema } from "@voluma/contracts/events";
 import type { ReviewSummary } from "@voluma/contracts/review";
-import { reviewState } from "@voluma/contracts/review-state";
+import { progress, reviewState } from "@voluma/contracts/review-state";
 import { type Input, type Run, runSchema } from "@voluma/contracts/run";
 import type { StudyValue, ToCheckItem } from "@voluma/contracts/study";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
@@ -214,7 +214,11 @@ export async function loadRecords(
   return rows.map((row) => {
     const log = logs.get(row.run.id) ?? [];
     const results = reviewState(log);
-    return { run: toRun(row, { summary: results.summary, tasks: null }), events: log, results };
+    return {
+      run: toRun(row, { summary: results.summary, tasks: progressOf(results.revisions.at(-1)) }),
+      events: log,
+      results,
+    };
   });
 }
 
@@ -232,15 +236,18 @@ type Derived = {
 
 const NOTHING: Derived = { summary: null, tasks: null, values: {}, toCheck: [] };
 
+type Revision = ReturnType<typeof reviewState>["revisions"][number];
+
+/** A revision's finished tasks out of its plan's; null before there is a revision. */
+function progressOf(latest: Revision | undefined): Run["tasks"] {
+  if (!latest) return null;
+  const { done, total } = progress(latest);
+  return { done, total };
+}
+
 function derive(log: RunRecord["events"]): Derived {
   const { summary, revisions } = reviewState(log);
   const latest = revisions.at(-1);
-  // The fold has a row only for a task that started; the plan lists them all. "Finished"
-  // counts To check tasks: their work is done (the run page counts the same).
-  const tasks = latest && {
-    done: latest.tasks.filter((t) => t.status === "done" || t.status === "to-check").length,
-    total: latest.plan.tasks.length,
-  };
   const values: Derived["values"] = {};
   const toCheck: Derived["toCheck"] = [];
   for (const task of latest?.tasks ?? []) {
@@ -263,7 +270,7 @@ function derive(log: RunRecord["events"]): Derived {
       }
     }
   }
-  return { summary, tasks: tasks ?? null, values, toCheck };
+  return { summary, tasks: progressOf(latest), values, toCheck };
 }
 
 type SummaryCache = Map<string, { lastEventId: string | null; derived: Derived }>;
@@ -279,24 +286,23 @@ interface LoadOptions {
    * The lists and the study reads: a completed run whose events no longer parse is left out
    * rather than failing every run listed with it. Without it (one run's read) it throws: the
    * run's own page must fail loudly, not read as "no plan" (a 409 the web polls forever).
+   * A completed run with no revision is left out the same way. A live run whose events
+   * don't parse is always kept, with `tasks: null`: it still runs.
    */
   skipUnreadable?: boolean;
-  /** Also derive a live run's `tasks`; else only completed runs are derived. */
-  progress?: boolean;
 }
 
 async function loadResults(
   tx: Tx,
   where: SQL | undefined,
-  { cache = new Map(), skipUnreadable = false, progress = false }: LoadOptions = {},
+  { cache = new Map(), skipUnreadable = false }: LoadOptions = {},
 ): Promise<RunResult[]> {
   const rows = await loadRows(tx, where);
-  // A failed or cancelled run has nothing derived; a live one only its progress.
+  const ended = new Set(rows.filter(({ run }) => run.state === "ended").map(({ run }) => run.id));
   const ids = rows
-    .filter(({ run }) => (run.state === "ended" ? run.outcome === "completed" : progress))
+    // A failed or cancelled run has nothing to derive; a live one has its `tasks`.
+    .filter(({ run }) => run.state !== "ended" || run.outcome === "completed")
     .map(({ run }) => run.id);
-  // The newest event `reviewState` reads, so a live run misses the cache only when a task
-  // changes, not on every log line it writes.
   const watermarks = ids.length
     ? await tx
         .selectDistinctOn([events.runId], { runId: events.runId, id: events.id })
@@ -309,8 +315,9 @@ async function loadResults(
   const cached = new Map(ids.map((id) => [id, cache.get(id)]));
   const missing = ids.filter((id) => cached.get(id)?.lastEventId !== (versions.get(id) ?? null));
   const { logs, unreadable } = await loadLogs(tx, missing, true);
-  if (!skipUnreadable && unreadable.size)
-    throw new Error(`run ${[...unreadable].join(", ")}: stored events can't be read`);
+  const lost = [...unreadable].filter((id) => ended.has(id));
+  if (!skipUnreadable && lost.length)
+    throw new Error(`run ${lost.join(", ")}: stored events can't be read`);
   const derivedOf = new Map<string, Derived>();
   for (const id of ids) {
     if (unreadable.has(id)) continue;
@@ -324,7 +331,16 @@ async function loadResults(
     if (cache.size > CACHE_CAP) cache.delete(cache.keys().next().value as string);
   }
   return rows
-    .filter(({ run }) => !unreadable.has(run.id))
+    .filter(({ run }) => !lost.includes(run.id))
+    .filter(
+      // A completed run whose events have no revision has no review summary, so `runSchema`
+      // would throw: in a list it is as unreadable as one whose events don't parse.
+      ({ run }) =>
+        !skipUnreadable ||
+        run.state !== "ended" ||
+        run.outcome !== "completed" ||
+        derivedOf.get(run.id)?.summary,
+    )
     .map((row) => {
       const derived = derivedOf.get(row.run.id) ?? NOTHING;
       return { run: toRun(row, derived), ...derived };
@@ -355,9 +371,7 @@ export function pgRunReads(db: PostgresJsDatabase, results: ResultsLoader) {
     list: (reader: ReadScope) =>
       db.transaction(
         async (tx) =>
-          (await results(tx, readableRuns(reader), { skipUnreadable: true, progress: true })).map(
-            ({ run }) => run,
-          ),
+          (await results(tx, readableRuns(reader), { skipUnreadable: true })).map(({ run }) => run),
         { isolationLevel: "repeatable read" },
       ),
 

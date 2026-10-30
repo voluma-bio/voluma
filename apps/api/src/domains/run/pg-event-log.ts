@@ -17,6 +17,7 @@
  * an unsupported historical event fails the read rather than being reinterpreted.
  */
 import type { EventInput, RunEvent } from "@voluma/contracts/events";
+import { cancelEnds } from "@voluma/contracts/threads";
 import { and, asc, eq, gt, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { ReadScope } from "../../domain";
@@ -47,6 +48,24 @@ export async function insertEvent(tx: Tx, event: Omit<RunEvent, "seq">) {
     })
     .onConflictDoNothing({ target: events.id })
     .returning({ id: events.id, seq: events.seq });
+}
+
+/**
+ * A user's cancel, run inside the queue's transaction before the run row ends: every open
+ * thread ends `cancelled` and the root last, ids `<runId>:cancel:end:<threadId>`. Once the row
+ * has ended the runner's writes are refused, so this is the only moment the server can leave
+ * the log consistent, whether a runner holds the run or none does (a recovered or queued run).
+ */
+export async function cancelOpenThreads(tx: Tx, runId: string) {
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(${EVENT_SEQ_LOCK}, hashtext(${runId}))`);
+  const log = (
+    await tx.select().from(events).where(eq(events.runId, runId)).orderBy(asc(events.seq))
+  ).map(toRunEvent);
+  const createdAt = new Date();
+  for (const ended of cancelEnds(runId, log, createdAt)) {
+    await insertEvent(tx, ended);
+    await projectThread(tx, ended, createdAt);
+  }
 }
 
 export function pgEventLog(db: PostgresJsDatabase, notifier: Notifier) {

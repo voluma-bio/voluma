@@ -5,7 +5,7 @@
  * A task's name opens its newest thread. Data: `TaskRow` and `OutputRow` from `runView`.
  */
 
-import { formatDuration, formatUsd } from "@voluma/ui/run";
+import { formatDuration } from "@voluma/ui/run";
 import { catalog } from "@voluma/workflow/bundled";
 import { Elapsed } from "./agents";
 import { InfoButton } from "./chat/info-button";

@@ -8,6 +8,7 @@ import type { RunEvent } from "@voluma/contracts/events";
 import type { Folded, FoldedTask } from "@voluma/contracts/fold";
 import type { ProviderCalls, RunState } from "@voluma/contracts/run";
 import { type RunSpend, type Spend, spend } from "@voluma/contracts/spend";
+import { openThreads } from "@voluma/contracts/threads";
 import type { WorkflowPlan } from "@voluma/contracts/workflow";
 import { isSatisfied } from "@voluma/workflow";
 import { catalog } from "@voluma/workflow/bundled";
@@ -23,7 +24,7 @@ export type Thread = {
   kind: "supervisor" | "main" | "worker" | "check" | "chat";
   taskId?: string;
   model?: string;
-  /** Its latest start: a woken thread's clock counts from its wake. */
+  /** Its latest start: a resumed thread's clock counts from its resume. */
   startedAt: string;
   /** Where its clock stops: its end, the run's end, or its last event while paused. */
   endedAt?: string;
@@ -44,7 +45,8 @@ export type Thread = {
 
 /**
  * When the runner is not running the run's threads (see `Halt`). A queued run with no threads
- * open is paused too, which changes nothing.
+ * open is paused too, which changes nothing. An ended run halts only once its stream has
+ * closed: until then the cancel's thread ends may still be on the way.
  */
 export function haltOf(state: RunState, streamClosed: boolean): Halt | undefined {
   switch (state.status) {
@@ -135,9 +137,10 @@ function threadsOf(events: RunEvent[]): { threads: Thread[]; lastAt: Map<string,
 }
 
 /**
- * A thread still open when the runner stopped has no `thread.ended`: a cancel ends the run in
- * the API at once, and a lost runner writes nothing. It is stopped (failed, if the run failed)
- * at the run's end, or paused at its last event while the run waits to resume.
+ * A thread still open when the runner stopped: a lost runner writes no end, and a cancel's ends
+ * are all in the log once the stream has closed, so only a failed run leaves threads here.
+ * It is stopped (failed, if the run failed) at the run's end, or paused at its last event while
+ * the run waits to resume.
  */
 function halted(threads: Thread[], lastAt: Map<string, string>, halt: Halt): Thread[] {
   return threads.map((t) =>
@@ -269,15 +272,14 @@ export type TaskState =
 function taskStates(
   plan: WorkflowPlan,
   tasks: FoldedTask[],
-  /** As logged, before `halted`: a worker the halt cut off still counts as working, then stopped. */
-  logged: Thread[],
+  threads: Thread[],
+  /** `openThreads`: a worker the log shows open counts as working, then stopped if the run is halted. */
+  open: ReadonlySet<string>,
   halt: Halt | undefined,
 ): Map<string, TaskState> {
   const byId = new Map(tasks.map((t) => [t.id, t]));
   const working = new Set(
-    logged.flatMap((t) =>
-      t.kind === "worker" && t.status === "running" && t.taskId ? [t.taskId] : [],
-    ),
+    threads.flatMap((t) => (t.kind === "worker" && open.has(t.id) && t.taskId ? [t.taskId] : [])),
   );
   const states = new Map<string, TaskState>();
   for (const t of plan.tasks) {
@@ -325,9 +327,8 @@ const ENDED: ReadonlySet<TaskState> = new Set(["done", "to-check", "failed", "st
 /**
  * Each ended task's outcome line: its current attempt's last checkpoint from the worker (the
  * result in the worker's words, with its numbers), else the checker's. A
- * failed task says why it failed. Not the main thread's wake note, which is the whole notes block
- * for every task so far, nor the closing `task` reason, a rule's stock sentence ("The second agent
- * checked this task and agrees"); a judgment's reason is about the check, not the result.
+ * failed task says why it failed. Not the closing `task` reason, a rule's stock sentence ("The second agent
+ * checked this task and agrees"): it is about the check, not the result.
  */
 function outcomes(
   events: RunEvent[],
@@ -450,7 +451,7 @@ export function runView(
   const attention = attentionOf(folded.tasks, logged.threads, events);
   const spent = spend(events, providerCalls);
   if (!plan) return { threads, attention, tasks: [], outputs: [], progress: "", spend: spent };
-  const states = taskStates(plan, folded.tasks, logged.threads, halt);
+  const states = taskStates(plan, folded.tasks, threads, new Set(openThreads(events)), halt);
   const latest = latestThreadByTask(threads);
   const lines = outcomes(events, folded.tasks, states);
   const taskSpend = new Map(spent.tasks.map((t) => [t.taskId, t.spend]));

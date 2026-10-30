@@ -6,12 +6,13 @@ Home (`/`, `home-page.tsx`), Run on new scans (`/new`, `new-page.tsx`), Workflow
 belongs to a study (`@voluma/contracts/study`); a study of one is a study whose scan count is 1,
 shown as its scan and linked straight to its run.
 
-- **Home's data** is `listStudies` plus `listRuns`. The summary has no run ids, so the runs say
-  which run a study of one opens, which runs failed or wait for keys, and a live run's tasks done
-  (`Run.tasks`, counted by the API from the plan; only the list and the study read derive it).
-  Each refetches every 5 s while its own last answer shows a live run, and `studies` also while
-  `runs` does: the two polls are independent, so stopping on the other's answer left a stale
-  to-check count once the last run ended.
+- **Home's data** is `listStudies` alone: each study carries each scan's newest run in brief
+  (`newestRuns`: run id, state, a live run's tasks done, a completed run's `review`) and its
+  `scansCompleted` and `toCheck`. It refetches every 5 s while any newest run is live. `toCheck`
+  is each scan's newest *completed* run's open checks, which stay acceptable while that scan
+  reruns, so they still ask for the researcher (a study of one too). "Across M scans" shows
+  only when the newest runs hold every open check; under a rerun M is unknowable from
+  `newestRuns`, so the row says just "N to check."
   Needs you has one row per study with one action; example studies are read-only and ask nothing.
   "Last activity" is a relative day, never a time.
 - **Run on new scans** keeps no outputs checklist and no notes: a study runs every output (the
@@ -40,8 +41,13 @@ shown as its scan and linked straight to its run.
   `DOMParser`, loaded only when an `.xlsx` is dropped.
 - **Shared with `features/run`** through `@voluma/ui/run`: the run and study status words
   (`runStatus`, `RunBadge`, `studyStatus`: Running, N to check, Checked, Reviewed, Failed,
-  Waiting, Needs your keys, Not started), the run link, the formatters, and visitor keys. The
-  study page uses the same mapping; don't add another.
+  Stopped, Waiting, Needs your keys, Not started), the run link, the formatters, and visitor
+  keys. `runStatus`, `studyStatus` and `runHref` take a run's `state` and `review`, which a full
+  `Run` and a `newestRuns` entry both carry; a study of one reads as `runStatus` of its run.
+  "Not started" is only a scan with no run; a stopped one reads "N stopped", joined with the
+  rest ("1 stopped, 1 not started"). A study reads "Reviewed" once every scan's newest run is
+  completed and reviewed. The study page uses
+  the same mapping; don't add another.
 - **The study page** derives everything from one `StudyDetail` in `study-page/study-model.ts`
   (pure; its header states the far-from-group rule and the unit rule). Every "Open in 3D" calls
   `StudyPage`'s `openChecks`, the check panel's one mount point; pass a real panel there rather

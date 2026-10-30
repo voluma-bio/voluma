@@ -135,7 +135,8 @@ const queue = pgRunQueue(
   db,
   limits,
   new KeyVault(),
-  notifier, // The repo whose `workflows/` a run uses; the runner adds the commit its checkout was at.
+  notifier,
+  // The repo whose `workflows/` a run uses; the runner adds the commit its checkout was at.
   (id) => pinsOf("voluma-bio/voluma", id),
 );
 const eventLog = pgEventLog(db, notifier);

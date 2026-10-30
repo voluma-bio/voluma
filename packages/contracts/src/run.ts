@@ -222,6 +222,15 @@ export const providerCallsSchema = z.object({
 });
 export type ProviderCalls = z.infer<typeof providerCallsSchema>;
 
+/**
+ * While a run is live (queued, running, awaiting keys): the tasks of its current plan that
+ * are finished (done or to check) out of all of them. Null before the plan is written and
+ * once the run has ended (its state and `review` say the rest).
+ */
+export const runTasksSchema = z
+  .object({ done: z.number().int().nonnegative(), total: z.number().int().nonnegative() })
+  .nullable();
+
 export const runSchema = z
   .object({
     id: runIdSchema,
@@ -229,7 +238,7 @@ export const runSchema = z
     startedBy: userIdSchema,
     /** The study the run belongs to; its workflow is the run's. */
     studyId: studyIdSchema,
-    /** The pins the server resolved from the request's `workflowId`, as in `r2.ts`'s `workflowSnapshotPrefix`. */
+    /** The pins the server resolved from the study's workflow, as in `r2.ts`'s `workflowSnapshotPrefix`. */
     workflows: z.array(workflowPinSchema).min(1),
     input: inputSchema,
     /**
@@ -268,14 +277,7 @@ export const runSchema = z
     providerCalls: providerCallsSchema.optional(),
     /** Latest successfully completed results and their human review progress; null otherwise. */
     review: reviewSummarySchema.nullable(),
-    /**
-     * While the run is live (queued, running, awaiting keys): the tasks of its current plan
-     * that are finished (done or to check) out of all of them. Null before the plan is
-     * written and once the run has ended (its state and `review` say the rest).
-     */
-    tasks: z
-      .object({ done: z.number().int().nonnegative(), total: z.number().int().nonnegative() })
-      .nullable(),
+    tasks: runTasksSchema,
   })
   .refine(
     (run) =>
