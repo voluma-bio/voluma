@@ -11,10 +11,21 @@ import type { RunEvent } from "@voluma/contracts/events";
 import type { PersonMessage } from "@voluma/contracts/messages";
 import type { reviewState } from "@voluma/contracts/review-state";
 import type { Input, Run } from "@voluma/contracts/run";
+import type { ReviewSnapshot } from "@voluma/contracts/snapshot";
 import type { Caller, Reader } from "../domain";
 
 /** Review reads inputs through the Run lane's scoped read adapter. */
 export type ReviewInputs = { listInputs(reader: Reader): Promise<Input[]> };
+
+/** Immutable screenshots; writes require the same run lifetime to still exist. */
+export type ReviewSnapshots = {
+  find(runId: string, generation: string, id: string): Promise<ReviewSnapshot | null>;
+  list(runId: string, generation: string): Promise<ReviewSnapshot[]>;
+  insert(
+    snapshot: ReviewSnapshot,
+    generation: string,
+  ): Promise<{ snapshot: ReviewSnapshot; created: boolean }>;
+};
 
 /** The published reference archive; a version pins the bytes described by the lookup. */
 export type ReferenceArchive = {

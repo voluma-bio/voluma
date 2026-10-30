@@ -2,8 +2,9 @@
  * Operator script: load a run dumped by `export-run.ts` into DATABASE_URL.
  *   pnpm --filter @voluma/api import:run --from <dir|r2:prefix> [--replace] [--remote]
  * Refuses when the run already exists unless `--replace`, which deletes it and its events,
- * threads, pi messages, snapshots and provider calls first. The run gets its own study of one scan (`study-<runId>`, named
- * after the scan, as the migration that introduced studies did). The study's workflow is the one the dump names (the run's `workflowId` in older dumps, else its study's; their
+ * threads, pi messages, snapshots and provider calls first. Dumps with study metadata restore the original
+ * study and scans, refusing conflicting shared rows. Older dumps get a study of one scan.
+ * The study's workflow is the one the dump names (the run's `workflowId` in older dumps, else its study's; their
  * pinned paths may predate a rename), else the bundled workflow at the pinned path. Every event is checked against `runEventSchema` and the ones
  * that fail are listed, with nothing written. The run's input row is added if it is missing.
  * Every row must belong to the run. Writes only to a local database unless `--remote` (see
@@ -11,17 +12,19 @@
  */
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { parseArgs } from "node:util";
+import { isDeepStrictEqual, parseArgs } from "node:util";
 import { runEventSchema } from "@voluma/contracts/events";
 import { runIdSchema } from "@voluma/contracts/ids";
 import { providerCalls } from "@voluma/provider-calls";
 import { catalog, workflowById } from "@voluma/workflow/bundled";
-import { eq, getTableColumns } from "drizzle-orm";
+import { and, eq, getTableColumns, sql } from "drizzle-orm";
 import type { PgTable } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { reviewSnapshots } from "../domains/review/schema";
 import { databaseUrl } from "../domains/run/operator";
+import { eventLock } from "../domains/run/pg-event-log";
+import { QUEUE_LOCK } from "../domains/run/pg-queue";
 import { withLocalDir } from "../domains/run/r2-dir";
 import {
   events,
@@ -55,9 +58,11 @@ const dump = await withLocalDir(
   async (dir) =>
     JSON.parse(await readFile(join(dir, "run.json"), "utf8")) as {
       // `workflowId` is the column dumps carried before studies took it over.
-      run: { id: string; workflowId?: string; workflows: { path: string }[] };
-      input: { id: string; name: string } | null;
-      study?: { workflowId: string };
+      run: typeof runs.$inferSelect & { workflowId?: string; workflows: { path: string }[] };
+      input: typeof inputs.$inferSelect | null;
+      study?: typeof studies.$inferSelect;
+      studyScans?: (typeof studyScans.$inferSelect)[];
+      studyInputs?: (typeof inputs.$inferSelect)[];
       events: { id: string; seq: number; runId: string }[];
       threads: { runId: string }[];
       piMessages: { threadId: string }[];
@@ -89,6 +94,31 @@ const strays = [
     .map((s) => `snapshot of ${s.runId}`),
   ...(dump.providerCalls ?? []).filter((c) => c.runId !== runId).map((c) => `call of ${c.runId}`),
 ];
+if (!dump.study && (dump.studyScans || dump.studyInputs)) {
+  throw new Error("dump has study rows without their study");
+}
+if (dump.study) {
+  if (dump.study.id !== dump.run.studyId || dump.study.labId !== dump.run.labId) {
+    strays.push("study");
+  }
+  if (!dump.studyScans?.some((scan) => scan.inputId === dump.run.inputId)) {
+    throw new Error("dump is missing the run's study scan");
+  }
+  for (const scan of dump.studyScans) {
+    if (scan.studyId !== dump.study.id) strays.push(`scan of ${scan.studyId}`);
+  }
+  for (const input of dump.studyInputs ?? []) {
+    if (
+      input.labId !== dump.run.labId ||
+      !dump.studyScans.some((scan) => scan.inputId === input.id)
+    ) {
+      strays.push(`input ${input.id}`);
+    }
+  }
+}
+if (dump.input && (dump.input.id !== dump.run.inputId || dump.input.labId !== dump.run.labId)) {
+  strays.push("input");
+}
 if (strays.length > 0) {
   throw new Error(`${strays.length} rows are not run ${runId}'s: ${strays.slice(0, 5).join(", ")}`);
 }
@@ -103,11 +133,22 @@ if (failed.length > 0) {
 
 const client = postgres(url);
 const db = drizzle(client, { casing: "snake_case" });
+function sameSharedRow(name: string, actual: unknown, expected: unknown) {
+  // Old dumps may omit columns added since they were written; compare the fields they have.
+  const saved = JSON.parse(JSON.stringify(actual ?? {}));
+  const wanted = JSON.parse(JSON.stringify(expected));
+  if (Object.keys(wanted).some((key) => !isDeepStrictEqual(saved[key], wanted[key]))) {
+    throw new Error(`${name} conflicts with existing shared data; nothing imported`);
+  }
+}
 await db.transaction(async (tx) => {
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(${QUEUE_LOCK})`);
+  await eventLock(tx, runId);
   const [existing] = await tx
     .select({ studyId: runs.studyId })
     .from(runs)
-    .where(eq(runs.id, runId));
+    .where(eq(runs.id, runId))
+    .for("update");
   if (existing && !values.replace) throw new Error(`run ${runId} exists; pass --replace`);
   await tx.delete(providerCalls).where(eq(providerCalls.runId, runId));
   await tx.delete(reviewSnapshots).where(eq(reviewSnapshots.runId, runId));
@@ -116,13 +157,31 @@ await db.transaction(async (tx) => {
   await tx.delete(events).where(eq(events.runId, runId));
   await tx.delete(runs).where(eq(runs.id, runId));
 
-  if (dump.input) await tx.insert(inputs).values(revive(inputs, dump.input)).onConflictDoNothing();
+  for (const input of dump.studyInputs ?? (dump.input ? [dump.input] : [])) {
+    await tx.insert(inputs).values(revive(inputs, input)).onConflictDoNothing();
+    const [stored] = await tx.select().from(inputs).where(eq(inputs.id, input.id));
+    if (dump.study) sameSharedRow(`input ${input.id}`, stored, input);
+  }
   const run = revive(runs, dump.run);
-  // A replaced run keeps the study it is in; anything else gets a study of one.
   const keep = existing?.studyId;
-  if (!keep) {
-    await tx.delete(studyScans).where(eq(studyScans.studyId, studyId));
-    await tx.delete(studies).where(eq(studies.id, studyId));
+  if (dump.study) {
+    await tx.insert(studies).values(revive(studies, dump.study)).onConflictDoNothing();
+    const [stored] = await tx.select().from(studies).where(eq(studies.id, dump.study.id));
+    sameSharedRow(`study ${dump.study.id}`, stored, dump.study);
+    for (const scan of dump.studyScans ?? []) {
+      const [input] = await tx.select().from(inputs).where(eq(inputs.id, scan.inputId));
+      if (!input || input.labId !== run.labId)
+        throw new Error(`missing study input ${scan.inputId}`);
+      await tx.insert(studyScans).values(scan).onConflictDoNothing();
+      const [storedScan] = await tx
+        .select()
+        .from(studyScans)
+        .where(and(eq(studyScans.studyId, scan.studyId), eq(studyScans.inputId, scan.inputId)));
+      sameSharedRow(`scan ${scan.inputId}`, storedScan, scan);
+    }
+    run.studyId = dump.study.id;
+  } else if (!keep) {
+    // Legacy dumps have no study metadata. Never replace a colliding shared study.
     await tx.insert(studies).values({
       id: studyId,
       labId: run.labId,
@@ -139,8 +198,10 @@ await db.transaction(async (tx) => {
       attributes: {},
       position: 0,
     });
+    run.studyId = studyId;
+  } else {
+    run.studyId = keep;
   }
-  run.studyId = keep ?? studyId;
   await tx.insert(runs).values(run);
   // Postgres caps a statement's parameters, so insert in batches.
   const insertAll = async <T extends PgTable>(table: T, rows: unknown[]) => {

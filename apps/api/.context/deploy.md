@@ -208,12 +208,21 @@ tables are replaced), run `pg_restore --clean --if-exists --no-owner --no-acl -d
 (`runs`, `run_events`, `provider_calls`) before trusting it. Never print the URL.
 
 **Archiving a run** frees space on the 1 GB database without losing the run. `archive:run --id <runId> --remote`
-(with `DATABASE_URL` set to the direct URL) refuses an example or a run that has not ended, writes the run's rows
-(`run.json`: run, input, study, events, threads, pi messages, review snapshots, provider calls) to
-`~/.local/share/voluma-backups/runs/<runId>/` (0600; refuses under 1 GB free), checks the file, then deletes those rows in one
-transaction that rolls back unless each table's deleted count equals the file's. Inputs stay (shared); the study goes with its
-scans only when no other run is in it. The run's R2 files are not copied or touched, so `import:run --from <that directory>`
-restores the run whole (its study comes back as a study of one). A `pg_dump` of the tables is still the backup for anything else.
+(with `DATABASE_URL` set to the direct URL) refuses an example, an unfinished run, open provider calls,
+or missing inputs/study metadata and unsupported workflows that prevent restoration. It reads one database snapshot
+(`run.json`: run, study, study scans and their inputs, events, threads, pi messages, review snapshots, provider calls),
+writes `~/.local/share/voluma-backups/runs/<runId>/` (0600; refuses under 1 GB free), syncs the file and directory entries
+to disk, and reads it back. Only then does it delete, holding the queue, event and run-row locks. Every deleted row,
+including the run and any deleted study/scans, must match the archive, not merely its count; any difference rolls back.
+Inputs stay (shared); the study and its scans go only when no other run is in it. A failed write, sync or validation
+never deletes rows; an existing `run.json` is never overwritten. A failure may leave an incomplete file: retain it for
+inspection and use a new output directory when retrying.
+
+`import:run --from <that directory>` restores the original study identity and scan metadata, adding missing shared rows
+and refusing conflicts rather than overwriting them. Legacy dumps without study metadata still get a study of one.
+The run's R2 files are neither copied nor touched: this is a database archive, not an independent backup of evidence.
+Keep those R2 objects and the local archive; choose a persistent disk, not an ephemeral orb or `/tmp`, for an operational
+archive. Filesystem sync does not protect against losing that disk. A `pg_dump` remains the backup for the whole database.
 
 ## Rotating secrets
 

@@ -8,18 +8,18 @@ import type { AppEnv } from "../../domain";
 import type {
   ReferenceArchive,
   ReviewInputs,
+  ReviewSnapshots,
   RunFiles,
   RunMessages,
   RunRecords,
 } from "../../ports";
 import { inputRoutes } from "./inputs";
-import type { pgSnapshots } from "./pg-snapshots";
 import { runRoutes } from "./runs";
 import { snapshotRoutes } from "./snapshots";
 
 export type ReviewDeps = {
   runs: RunRecords;
-  snapshots: ReturnType<typeof pgSnapshots>;
+  snapshots: ReviewSnapshots;
   /** A researcher's message to a run: the Run domain stores it and reopens the run. */
   messages: RunMessages;
   /** Null without R2: run files are 503s. */
