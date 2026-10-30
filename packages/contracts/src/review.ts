@@ -204,8 +204,8 @@ export const reviewAssetsSchema = z.discriminatedUnion("state", [
 export type ReviewAssets = z.infer<typeof reviewAssetsSchema>;
 
 /** Voxel types the viewer loads: intensities for `image` volumes, label values for `labels` volumes. */
-const imageDtype = z.enum(["int16", "uint16", "float32"]);
-const labelDtype = z.enum(["uint8", "uint16"]);
+export const imageDtype = z.enum(["int16", "uint16", "float32"]);
+export const labelDtype = z.enum(["uint8", "uint16"]);
 
 /** Every voxel type an `.npy` volume may hold. */
 export const npyDtypeSchema = z.enum([...imageDtype.options, ...labelDtype.options]);
@@ -497,167 +497,32 @@ export const taskSchema = z.object({
 });
 export type ReviewTask = z.infer<typeof taskSchema>;
 
-export const revisionSchema = z
-  .object({
-    id: z.string(),
-    label: z.string(),
-    createdAt: z.iso.datetime(),
-    tasks: z.array(taskSchema),
-    volumes: z.array(volumeSchema),
-    structures: z.array(structureSchema),
-    surfaces: z.array(surfaceSchema),
-    annotations: z.array(annotationSchema),
-  })
-  .superRefine((rev, ctx) => {
-    // Importer output and older builds' data cross a trust boundary: a dangling
-    // id would otherwise surface later as a blank overlay or a missing ruler.
-    const bad = (path: (string | number)[], message: string) =>
-      ctx.addIssue({ code: "custom", path, message });
-    const idsOf = (xs: { id: string }[], block: string) => {
-      const seen = new Set<string>();
-      xs.forEach((x, i) => {
-        if (seen.has(x.id)) bad([block, i, "id"], `duplicate id "${x.id}"`);
-        seen.add(x.id);
-      });
-      return seen;
-    };
-    const volumes = idsOf(rev.volumes, "volumes");
-    const structures = idsOf(rev.structures, "structures");
-    const surfaces = idsOf(rev.surfaces, "surfaces");
-    const annotations = idsOf(rev.annotations, "annotations");
-    const tasks = idsOf(rev.tasks, "tasks");
-    const measurements = idsOf(
-      rev.tasks.flatMap((t) => t.measurements),
-      "tasks",
-    );
-    idsOf(
-      rev.tasks.flatMap((t) => t.scores),
-      "tasks",
-    );
-    const kindOf = new Map(rev.volumes.map((v) => [v.id, v.kind]));
-    // Each id in `ids` (optional ones may be undefined) must be in `known`.
-    const needAll = (
-      known: Set<string>,
-      ids: (string | undefined)[],
-      path: (string | number)[],
-      what: string,
-    ) => {
-      ids.forEach((id, i) => {
-        if (id !== undefined && !known.has(id)) bad([...path, i], `unknown ${what} "${id}"`);
-      });
-    };
-
-    rev.volumes.forEach((v, i) => {
-      if (v.data?.format !== "npy") return;
-      const ok = v.kind === "image" ? imageDtype : labelDtype;
-      if (!ok.safeParse(v.data.dtype).success)
-        bad(
-          ["volumes", i, "data", "dtype"],
-          `${v.data.dtype} is not allowed for a ${v.kind} volume`,
-        );
-    });
-    // Every block on a grid names that volume.
-    const onVolume = (block: string, xs: { volumeId: string | null }[]) =>
-      xs.forEach((x, i) => {
-        needAll(volumes, [x.volumeId ?? undefined], [block, i, "volumeId"], "volume");
-      });
-    onVolume("structures", rev.structures);
-    onVolume("surfaces", rev.surfaces);
-    onVolume("annotations", rev.annotations);
-    rev.structures.forEach((x, i) => {
-      if (
-        x.voxels &&
-        "label" in x.voxels &&
-        x.volumeId !== null &&
-        kindOf.get(x.volumeId) === "image"
-      )
-        bad(["structures", i, "volumeId"], `volume "${x.volumeId}" is not a labels volume`);
-    });
-    // What a measurement can be shown with.
-    const shown = new Set([...volumes, ...structures, ...surfaces, ...annotations]);
-    rev.tasks.forEach((t, ti) => {
-      idsOf(t.evidence, "tasks");
-      const task = ["tasks", ti];
-      needAll(tasks, t.dependsOn, [...task, "dependsOn"], "task");
-      const own = new Set(t.evidence.map((e) => e.id));
-      t.scores.forEach((sc, si) => {
-        const at = [...task, "scores", si];
-        needAll(shown, sc.on, [...at, "on"], "block");
-        needAll(shown, sc.context, [...at, "context"], "block");
-        needAll(own, sc.evidenceIds, [...at, "evidenceIds"], "evidence in this task");
-      });
-      t.checks.forEach((c, ci) => {
-        const f = c.focus;
-        if (!f) return;
-        const at = [...task, "checks", ci, "focus"];
-        needAll(shown, f.on, [...at, "on"], "block");
-        needAll(volumes, [f.volumeId], [...at, "volumeId"], "volume");
-        if (
-          f.volumeId !== undefined &&
-          kindOf.has(f.volumeId) &&
-          kindOf.get(f.volumeId) !== "labels"
-        )
-          bad([...at, "volumeId"], `volume "${f.volumeId}" is not a labels volume`);
-      });
-      t.measurements.forEach((m, mi) => {
-        const at = [...task, "measurements", mi];
-        needAll(shown, m.on, [...at, "on"], "block");
-        needAll(shown, m.context, [...at, "context"], "block");
-        needAll(own, m.evidenceIds, [...at, "evidenceIds"], "evidence in this task");
-        needAll(measurements, [m.numeratorId, m.denominatorId], [...at, "operands"], "measurement");
-      });
-    });
-  });
+export const revisionSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  createdAt: z.iso.datetime(),
+  tasks: z.array(taskSchema),
+  volumes: z.array(volumeSchema),
+  structures: z.array(structureSchema),
+  surfaces: z.array(surfaceSchema),
+  annotations: z.array(annotationSchema),
+});
 export type Revision = z.infer<typeof revisionSchema>;
 
-export const reviewRunSchema = z
-  .object({
-    id: runIdSchema,
-    sample: z.string(),
-    workflows: z.array(workflowPinSchema).min(1),
-    /** Oldest first; the last is the latest. */
-    revisions: z.array(revisionSchema).min(1),
-    /** Converted assets by the sha256 of the file they were made from; absent: still preparing. */
-    assets: z.record(sha256, reviewAssetsSchema),
-    review: reviewSummarySchema.nullable(),
-  })
-  .superRefine((run, ctx) => {
-    const ids = new Set(run.revisions.map((r) => r.id));
-    if (ids.size !== run.revisions.length)
-      ctx.addIssue({ code: "custom", path: ["revisions"], message: "duplicate revision id" });
-    run.revisions.forEach((r, ri) => {
-      r.tasks.forEach((t, ti) => {
-        if (!ids.has(t.resultRevisionId))
-          ctx.addIssue({
-            code: "custom",
-            path: ["revisions", ri, "tasks", ti, "resultRevisionId"],
-            message: `unknown revision "${t.resultRevisionId}"`,
-          });
-      });
-    });
-    if (!run.review) return;
-    const latest = run.revisions.at(-1);
-    if (run.review.revisionId !== latest?.id)
-      ctx.addIssue({
-        code: "custom",
-        path: ["review", "revisionId"],
-        message: "review must describe the latest revision",
-      });
-    const remaining = latest?.tasks.reduce(
-      (n, task) => n + task.checks.filter((check) => check.status === "open").length,
-      0,
-    );
-    if (run.review.remainingToCheck !== remaining)
-      ctx.addIssue({
-        code: "custom",
-        path: ["review", "remainingToCheck"],
-        message: "review count must equal the latest revision's open checks",
-      });
-  });
+export const reviewRunSchema = z.object({
+  id: runIdSchema,
+  sample: z.string(),
+  workflows: z.array(workflowPinSchema).min(1),
+  /** Oldest first; the last is the latest. */
+  revisions: z.array(revisionSchema).min(1),
+  /** Converted assets by the sha256 of the file they were made from; absent: still preparing. */
+  assets: z.record(sha256, reviewAssetsSchema),
+  review: reviewSummarySchema.nullable(),
+});
 export type ReviewRun = z.infer<typeof reviewRunSchema>;
 
 /** Commands require successfully completed results, so their summary is non-null. */
-export const reviewDecisionResponseSchema = reviewRunSchema.safeExtend({
+export const reviewDecisionResponseSchema = reviewRunSchema.extend({
   review: reviewSummarySchema,
 });
 export type ReviewDecisionResponse = z.infer<typeof reviewDecisionResponseSchema>;

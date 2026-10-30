@@ -269,16 +269,13 @@ export const runSchema = z
      * `modelCostUsd` is model calls, in US dollars;
      * `sandboxSeconds` is sandbox time summed over its sandboxes (one per thread, so concurrent
      * threads add up and it can exceed wall time). Per task: `spend` in `spend.ts`.
-     * Optional until the API writes it.
      */
-    usage: z
-      .object({
-        modelCostUsd: z.number().nonnegative(),
-        sandboxSeconds: z.number().nonnegative(),
-      })
-      .optional(),
-    /** What the run's provider calls cost, from the gateway; optional until the API writes it. */
-    providerCalls: providerCallsSchema.optional(),
+    usage: z.object({
+      modelCostUsd: z.number().nonnegative(),
+      sandboxSeconds: z.number().nonnegative(),
+    }),
+    /** What the run's provider calls cost, from the gateway. */
+    providerCalls: providerCallsSchema,
     /** Latest successfully completed results and their human review progress; null otherwise. */
     review: reviewSummarySchema.nullable(),
     tasks: runTasksSchema,
