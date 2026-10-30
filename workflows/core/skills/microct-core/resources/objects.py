@@ -39,7 +39,7 @@ KIND, STRUCTURE, SURFACE, ANNOTATION = 'kind', 'structure', 'surface', 'annotati
 MASK, HEIGHTS, AXIS = 'mask', 'heights', 'axis'
 POINT, LINE, ZYX, A, B = 'point', 'line', 'zyx', 'aZyx', 'bZyx'
 VOLUME, AFFINE, UNIT, FILE, DTYPE = 'volume', 'affine', 'unit', 'file', 'dtype'
-MISSING, REASON = 'missing', 'reason'
+MISSING = 'missing'
 VOLUME_DTYPES = {'image': ('int16', 'uint16', 'float32'), 'labels': ('uint8', 'uint16')}  # what the viewer loads, by volume kind
 MASK_DTYPE = np.uint8  # what the contract says a mask file holds; the loader also reads bool
 
