@@ -20,11 +20,16 @@ holds rules, not experiment logs.
   on stdout, never arrays, never NaN (`sidecar.emit` fails on it). A script that reports numbers uses one result record,
   `sidecar.emit_values`: `{id: {value, unit, definition, kind}}`, ids from the caller. A sentence on stderr and exit 2 for what the agent can fix (`sidecar.parser` makes every argparse error one sentence); argument
   checks come before any work or write, and an argument naming an input path takes `type=sidecar.existing`, so a missing file is refused after parsing, naming the flag and path. **`--help` is the contract an agent reads before running a script** (the tool index is its first docstring line): the module docstring is the help text (`sidecar.parser(__doc__)` prints it as written and appends defaults), laid out as one index sentence under 110 characters, the rule it enforces and what it refuses, then `Writes:`, `Prints:`, `Example:` and `Exits 2`; every argument has `help=` naming its unit; a JSON the script reads has its schema in the docstring. `workflows/core/tests/test_help.py` fails on a script that breaks this. Images are JPEG, at most 2000 px and 1 MiB (`view_image`'s limit): use
-  `sidecar.save_image`. A length flag takes a physical unit named in the flag (`--pad-mm`, `--depth-um`), never voxels or pixels; the
+  `sidecar.save_image`. A length flag takes a physical unit named in the flag (`--pad-mm`, `--upper-shift-mm`), never voxels or pixels; the
   voxel size comes from `hu.json`.
 - **Imports:** a script imports another skill's module by its plain name (`import sidecar`, `import frame`). The runner puts every
   skill's `resources/` on `PYTHONPATH` in the sandbox (`runLayout` in `packages/harness/src/layout.ts`), so a module name is unique across
   skills (a test checks). In a checkout: `export PYTHONPATH=$(ls -d $PWD/workflows/*/skills/*/resources | paste -sd:)` from the repo root.
+- **Protocol numbers:** a workflow's `skills/<skill>/resources/protocol.json` is keyed by output id and holds the numbers its protocol fixes
+  and the ids its values are written under (`mouse-oa`: ROI offsets and clearances, Ct.Th depth and slab, label ids, the points of a distance).
+  A script reads its entry through `sidecar.protocol` from `--spec`; a core script keeps no default for a protocol number or an output id, and
+  a protocol number is never a flag or prose the agent retypes. A QC image's window is `--window` (`lo,hi` or the workflow's `anatomy.json`,
+  `viewlib.parse_window`), and a sheet of slices with overlays is drawn by `viewlib.slice_sheet`, not by hand.
 - **Thresholds:** two, and they are not interchangeable. The segmentation threshold (mask building) is a flag the caller passes,
   from the workflow's anatomy reference. The measurement threshold (BV, BV/TV) is the lab's 2.16/cm converted with the calibration
   block of `hu.json` (`sidecar.bone_threshold_hu`); no script holds a literal HU value for it. BV is the region and HU above the

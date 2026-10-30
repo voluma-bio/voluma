@@ -18,14 +18,11 @@ Exits 2 with one sentence on bad input, before writing anything.
 import json
 from pathlib import Path
 
-import matplotlib
 import numpy as np
 import sidecar
+import viewlib as vl
 from scipy import ndimage as ndi
 from skimage.draw import polygon as draw_polygon
-
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 
 
 def other_axes(axis):
@@ -174,6 +171,7 @@ morphs smoothly; it is not an extrusion. Trace slices where the shape changes, a
             '--clearance-mm', type=float, default=0, help='mm: also drop voxels closer than this to the outer surface of the bone mask you pass (periosteum for a filled bone, not the inner surface of the cortex)'
         )
         q.add_argument('--hu', type=sidecar.existing, help='hu.npy: background for the check image, and the grid shape')
+        q.add_argument('--window', metavar='lo,hi', help="check image display window in HU, or the workflow's anatomy.json (default: automatic)")
         q.add_argument('--out', required=True, help='output directory (created)')
     a = ap.parse_args()
 
@@ -232,7 +230,7 @@ morphs smoothly; it is not an extrusion. Trace slices where the shape changes, a
         ),
     )
     check = out / 'region-check.jpg'
-    check_figure(check, region, bone, hu if a.hu else None, axis, srange, curves)
+    check_figure(check, region, bone, hu if a.hu else None, axis, curves, vl.parse_window(a.window) if a.window else None, sp[0])
     nz = np.argwhere(region)
     sidecar.emit(
         region=str(out / 'region.npy'),
@@ -243,45 +241,22 @@ morphs smoothly; it is not an extrusion. Trace slices where the shape changes, a
     )
 
 
-def check_figure(path, region, bone, hu, axis, srange, curves):
+def check_figure(path, region, bone, hu, axis, curves, window, vox):
     nz = np.argwhere(region)
     lo, hi = nz[:, axis].min(), nz[:, axis].max()
     idx = sorted({round(v) for v in np.linspace(lo, hi, 4)})
     rows_ax, cols_ax = other_axes(axis)
-    r0, c0 = nz[:, rows_ax].min(), nz[:, cols_ax].min()
-    r1, c1 = nz[:, rows_ax].max() + 1, nz[:, cols_ax].max() + 1
     m = 20
-    r0, c0, r1, c1 = max(r0 - m, 0), max(c0 - m, 0), r1 + m, c1 + m
-    fig, axs = plt.subplots(1, len(idx), figsize=(min(6.5 * len(idx), 20), 6.5), squeeze=False)
-    for ax, i in zip(axs[0], idx):
-        t = [slice(None)] * 3
-        t[axis] = i
-        t = tuple(t)
-        if hu is not None:
-            ax.imshow(np.asarray(hu[t]), cmap='gray')
-        elif bone is not None:
-            ax.imshow(bone[t], cmap='gray')
-        else:
-            ax.imshow(np.zeros(region[t].shape), cmap='gray')
-        if region[t].any():
-            ax.contour(region[t], levels=[0.5], colors='cyan', linewidths=1)
-        if bone is not None and hu is not None:
-            ax.contour(bone[t], levels=[0.5], colors='orange', linewidths=0.5)
-        for c in curves:
-            if c.get('axis') == axis and str(i) in c['slices']:
-                pts = np.array(c['slices'][str(i)])
-                ax.plot(pts[:, 1], pts[:, 0], 'r-', lw=1)
-        ax.set_xlim(c0, c1)
-        ax.set_ylim(r1, r0)
-        ax.set_title(
-            f'axis {axis} index {i}: region cyan'
-            + (', bone orange' if hu is not None and bone is not None else '')
-            + (', traced curve red' if curves else ''),
-            fontsize=9,
-        )
-    fig.tight_layout()
-    sidecar.save_image(fig, path)
-    plt.close(fig)
+    crop = (max(nz[:, rows_ax].min() - m, 0), max(nz[:, cols_ax].min() - m, 0), nz[:, rows_ax].max() + 1 + m, nz[:, cols_ax].max() + 1 + m)
+    if hu is not None:
+        img, window = hu, window or vl.auto_window(hu[hu.shape[0] // 2])
+    else:
+        img, window = (bone if bone is not None else np.zeros(region.shape)).astype(np.uint8), (0, 1)
+    overlays = [(region, 'cyan')] + ([(bone, 'orange')] if bone is not None and hu is not None else [])
+    traced = [[(*np.array(c['slices'][str(i)])[:, ::-1].T, 'red') for c in curves if c.get('axis') == axis and str(i) in c['slices']] for i in idx]
+    what = ' region cyan' + (', bone orange' if hu is not None and bone is not None else '') + (', traced curve red' if curves else '')
+    vl.slice_sheet(path, img, overlays, axis, idx, window, crops=[crop] * len(idx), curves=traced, voxel_mm=vox, cols=4,
+                   titles=[f'axis {axis} index {i}:{what}' for i in idx])
 
 
 if __name__ == '__main__':

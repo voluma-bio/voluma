@@ -110,7 +110,7 @@
   {
     "id": "metaphyseal-roi",
     "title": "Proximal tibial metaphysis",
-    "summary": "Define ROI-3, 50–250 µm below the growth plate and 20 µm clear of cortex; report its trabecular parameters.",
+    "summary": "Define ROI-3 below the growth plate and clear of the cortex; report its trabecular parameters.",
     "dependsOn": ["iioc"],
     "outputs": [
       "metaphyseal-tv",
@@ -127,7 +127,7 @@
     ],
     "instructions": "Define ROI-3 below the growth plate and report its trabecular parameters. Write them to /outputs/metaphyseal-roi/meta/: the cortical task reads cortex.npy and growth-plate-distal-face.npy there.",
     "doneWhen": [
-      "ROI-3 starts 50 um below the growth plate, is 200 um long and 20 um clear of cortical bone, as /workflow/workflows/mouse-oa/skills/mouse-oa/examples/README.md (metaphyseal-roi) describes."
+      "ROI-3 is a band in the marrow below the growth plate's distal face and clear of the cortical wall, as /workflow/workflows/mouse-oa/skills/mouse-oa/examples/README.md (metaphyseal-roi) describes; its offset, length and clearance are the protocol's, in the record's params."
     ]
   },
   {
@@ -141,7 +141,7 @@
       "roi-cortex-100um",
       "roi-cortex-1000um"
     ],
-    "instructions": "Measure the cortical thickness 100 um and 1000 um below the growth plate. Use the cortex mask and distal growth-plate face that metaphyseal-roi wrote (/outputs/metaphyseal-roi/meta/cortex.npy and /outputs/metaphyseal-roi/meta/growth-plate-distal-face.npy); do not trace the face again.",
+    "instructions": "Measure the cortical thickness at the two levels below the growth plate (the roi-cortex-100um and roi-cortex-1000um slabs). Use the cortex mask and distal growth-plate face that metaphyseal-roi wrote (/outputs/metaphyseal-roi/meta/cortex.npy and /outputs/metaphyseal-roi/meta/growth-plate-distal-face.npy); do not trace the face again.",
     "doneWhen": [
       "Both levels are measured on the cortex mask and distal face of metaphyseal-roi, as /workflow/workflows/mouse-oa/skills/mouse-oa/examples/README.md (cortical) describes."
     ]

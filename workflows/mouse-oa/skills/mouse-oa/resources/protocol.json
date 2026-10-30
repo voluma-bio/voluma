@@ -1,0 +1,84 @@
+{
+  "patella-volume": {
+    "labels": [3],
+    "volume": "bone-labels",
+    "definition": "deck #1: patella label (label 12, the proximal patellar ossification, is not included)"
+  },
+  "lateral-meniscus-osteophyte-volume": {
+    "labels": [6],
+    "volume": "bone-labels",
+    "definition": "deck #2: label 6, the lab's working reading of meniscus plus spurs on the lateral side (not anatomically checked)"
+  },
+  "medial-meniscus-osteophyte-volume": {
+    "labels": [5],
+    "volume": "bone-labels",
+    "definition": "deck #3: label 5, the lab's working reading of meniscus plus spurs on the medial side (not anatomically checked)"
+  },
+
+  "roi-iioc": {
+    "region": "ROI-1",
+    "values": { "TV": "tv-tibial-iioc", "BV": "bv-tibial-iioc", "BV/TV": "bv-tv-tibial-iioc" },
+    "plate_patch_width_um": 500
+  },
+  "roi-iioc-trabecular": {
+    "region": "ROI-2",
+    "values": { "TV": "tv-iioc-trab", "BV": "bv-iioc-trab", "BV/TV": "bv-tv-iioc-trab" },
+    "shell_clearance_mm": 0.021,
+    "growth_clearance_mm": 0.021
+  },
+  "roi-metaphyseal": {
+    "region": "ROI-3",
+    "values": {
+      "TV": "metaphyseal-tv",
+      "BV": "metaphyseal-bv",
+      "BV/TV": "metaphyseal-bv-tv",
+      "Tb.N": "metaphyseal-tb-n",
+      "Tb.Th": "metaphyseal-tb-th",
+      "Tb.Sp": "metaphyseal-tb-sp",
+      "Tb.Nd": "metaphyseal-tb-nd",
+      "Tb.Tm": "metaphyseal-tb-tm"
+    },
+    "start_um": 50,
+    "length_um": 200,
+    "cortex_clearance_um": 20,
+    "cortex_search_factor": 2.0,
+    "skeleton_edge_margin_mm": 0.0315
+  },
+
+  "roi-cortex-100um": {
+    "value": "cortical-thickness-100-um-below-the-growth-plate",
+    "depth_um": 100,
+    "slab_um": 50
+  },
+  "roi-cortex-1000um": {
+    "value": "cortical-thickness-1000-um-below-the-growth-plate",
+    "depth_um": 1000,
+    "slab_um": 50
+  },
+  "roi-subchondral-plate-medial": {
+    "value": "subchondral-bone-plate-thickness-medial",
+    "depth_um": 175,
+    "slab_um": 350
+  },
+  "roi-subchondral-plate-lateral": {
+    "value": "subchondral-bone-plate-thickness-lateral",
+    "depth_um": 175,
+    "slab_um": 350
+  },
+
+  "distal-femoral-length-dfl": {
+    "points": ["a", "b"],
+    "ruler": "dfl-ruler",
+    "definition": "deck #26: straight distance from a (midpoint of the upper line of the intercondylar groove) to b (intercondylar notch)"
+  },
+  "distal-femoral-width-dfw": {
+    "points": ["c", "d"],
+    "ruler": "dfw-ruler",
+    "definition": "deck #27: straight distance from c (midpoint of the ridge on the lateral condyle) to d (vertex of the medial condyle)"
+  },
+  "width-length-ratio": {
+    "num": "distal-femoral-width-dfw",
+    "den": "distal-femoral-length-dfl",
+    "definition": "deck #28: distal femoral width-to-length ratio, DFW / DFL"
+  }
+}

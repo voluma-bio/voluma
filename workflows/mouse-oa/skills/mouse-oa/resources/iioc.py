@@ -23,8 +23,8 @@ or from another grid is refused). This script reads these keys; any other key is
   height_section_v        optional: the coronal section the heights are measured on (default: where the footprint's
                           growth-plate-to-top distance is largest)
   plate_patches           optional: {"medial": {"u": [lo, hi], "v": [lo, hi]}, "lateral": {...}}, U and V ranges (hi excluded)
-                          of the subchondral-plate patch per compartment (default: 0.5 mm wide around the compartment
-                          midpoint and height_section_v)
+                          of the subchondral-plate patch per compartment (default: `plate_patch_width_um` of the spec wide around
+                          the compartment midpoint and height_section_v)
 Curves (every traced surface): {"axis": 1, "height": "row", "slices": {"<v>": [[w, u], ...]}}: the coronal section at
 V = <v> (array axis 1 of the aligned grid), each point [row, column] = [W, U] read off that section's pixel grid ("height"
 is "row" or omitted). A surface is linear in U along a curve (points in any order, constant past the ends) and linear in
@@ -40,7 +40,7 @@ Writes: in <out>, on the aligned grid (array axes W,V,U), each .npy with its sid
   iioc.json  the result record (every value with its definition: heights, width, diagnostics; `objects`: roi-iioc, the two surfaces
   and the four rulers, in the shapes `report_output` takes)   qc-coronal.jpg, qc-heights.jpg  QC images
 Prints: the result record {out, values: {id: {value, unit, definition, kind}}, objects} with the paths of the files above (qc, tissue, tissue_scan, width_points_scan, growth_plate_face, growth_plate_traced, articular_top, plate_runs, removed_disconnected_voxels)
-Example: python iioc.py --hu-aligned tibia-hu.npy --mask tibia-mask.npy --frame tibia-frame.json --hu-json hu.json --annotations annotations.json --out iioc/
+Example: python iioc.py --spec protocol.json --window anatomy.json --hu-aligned tibia-hu.npy --mask tibia-mask.npy --frame tibia-frame.json --hu-json hu.json --annotations annotations.json --out iioc/
 Exits 2 with one sentence on bad input, before writing anything.
 """
 
@@ -48,17 +48,15 @@ import json
 from pathlib import Path
 
 import frame as fr
-import matplotlib
 import numpy as np
 import objects
 import sidecar
+import viewlib as vl
 from annotations import load_annotations, need, traced_surface
 from envelope import close_and_fill, footprint
 from scipy import ndimage as ndi
 
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-
+ROI_ID = 'roi-iioc'  # the spec entry this script reads
 MIN_COMPONENT = 50  # coronal fragments below this many pixels are segmentation specks, not bone
 EDGE_ERODE = 3  # footprint erosion for the local-height search: avoids tangential edge extrema
 
@@ -125,6 +123,8 @@ def first_run(bone, v, u):
 
 def main():
     ap = sidecar.parser(__doc__)
+    ap.add_argument('--spec', type=sidecar.existing, required=True, help="the workflow's protocol.json: the entry roi-iioc gives the plate patch width")
+    ap.add_argument('--window', metavar='lo,hi', required=True, help="QC display window in HU, or the workflow's anatomy.json")
     ap.add_argument('--hu-aligned', type=sidecar.existing, required=True, help='tibia-hu.npy from tibia_frame.py')
     ap.add_argument('--mask', type=sidecar.existing, required=True, help='tibia-mask.npy from tibia_frame.py')
     ap.add_argument('--frame', type=sidecar.existing, required=True, help='tibia-frame.json from tibia_frame.py')
@@ -139,6 +139,7 @@ def main():
         help='mm: move the traced growth-plate face by this much (+ = toward the shaft): sensitivity run',
     )
     a = ap.parse_args()
+    plate_width_um = sidecar.protocol(a.spec, ROI_ID, 'plate_patch_width_um')['plate_patch_width_um']
     frame = fr.load(a.frame)
     ann = load_annotations(a.annotations, frame)
     g = sidecar.grid(a.hu_json)
@@ -254,7 +255,7 @@ def main():
     plates = {}
     for side in ('medial', 'lateral'):
         patch = ann.get('plate_patches', {}).get(side)
-        half = round(0.25 / vox)  # deck: plate region is 500 um wide
+        half = round(plate_width_um / 2000 / vox)
         if patch is None:
             c = int(mids[side])
             patch = {'u': [c - half, c + half], 'v': [v_star - half, v_star + half]}
@@ -322,7 +323,7 @@ def main():
     sidecar.write(
         out / 'iioc-tissue-scan.npy', like=a.hu_json, inputs=[a.hu_json, a.frame, a.mask], params=params, script='iioc.py'
     )
-    qc = qc_images(out, h, roi, gp, plates, values, height_ids, v_star, vox)
+    qc = qc_images(out, h, roi, gp, plates, values, height_ids, v_star, vox, vl.parse_window(a.window))
     sidecar.emit_values(
         out / 'iioc.json',
         values,
@@ -342,65 +343,32 @@ def main():
 
 QC_SECTIONS = 4  # coronal sections in qc-coronal.jpg, laid out 2 x 2
 QC_MARGIN = 40  # voxels shown around the ROI and the traced face
-QC_MAX_PX = sidecar.MAX_IMAGE_PX - 10  # a few pixels under the view_image limit: the saved size rounds up
-QC_PAD_PX = (70, 20, 45, 45, 80, 90)  # left, right, top, bottom, gap between columns, gap between rows
 
 
-def qc_images(out, h, roi, gp, plates, values, height_ids, v_star, vox):
+def qc_images(out, h, roi, gp, plates, values, height_ids, v_star, vox, window):
     """qc-coronal.jpg: sections framed on ROI-1 and the traced face (ROI top minus a margin, down to the face plus a margin).
 
-    A whole-stack panel is 1 px per voxel or less and hides a traced face that cuts 10 voxels below the growth plate.
-    Every panel has the same size in voxels and the figure is sized to the panels at the largest scale that fits
-    `QC_MAX_PX`; the title states that scale.
+    A whole-stack panel is 1 px per voxel or less and hides a traced face that cuts 10 voxels below the growth plate, so
+    every panel is framed on the ROI at the same size in voxels. qc-heights.jpg: the three heights on section `v_star`.
     """
     vr = np.flatnonzero(roi.any(axis=(0, 2)))
-    boxes = []
-    for v in (int(v) for v in np.linspace(vr[0], vr[-1], QC_SECTIONS + 2)[1:-1]):
+    vs = [int(v) for v in np.linspace(vr[0], vr[-1], QC_SECTIONS + 2)[1:-1]]
+    crops = []
+    for v in vs:
         us = np.flatnonzero(roi[:, v, :].any(axis=0))
         u0, u1 = max(us[0] - QC_MARGIN, 0), min(us[-1] + QC_MARGIN, h.shape[2])
         top = np.flatnonzero(roi[:, v, :].any(axis=1))[0]
-        w0, w1 = max(top - QC_MARGIN, 0), min(int(gp[v, u0:u1].max()) + QC_MARGIN, h.shape[0])
-        boxes.append((v, u0, u1, w0, w1))
-    nu = max(b[2] - b[1] for b in boxes)
-    nw = max(b[4] - b[3] for b in boxes)
-    left, right, top_pad, bottom, gap_x, gap_y = QC_PAD_PX
-    scale = min(3.0, (QC_MAX_PX - left - right - gap_x) / (2 * nu), (QC_MAX_PX - top_pad - bottom - gap_y) / (2 * nw))
-    fig_w, fig_h = 2 * nu * scale + left + right + gap_x, 2 * nw * scale + top_pad + bottom + gap_y
-    fig = plt.figure(figsize=(fig_w / 100, fig_h / 100), dpi=100)
-    for i, (v, u0, u1, w0, w1) in enumerate(boxes):
-        r, c = divmod(i, 2)
-        ax = fig.add_axes((
-            (left + c * (nu * scale + gap_x)) / fig_w,
-            1 - (top_pad + (r + 1) * nw * scale + r * gap_y) / fig_h,
-            nu * scale / fig_w,
-            nw * scale / fig_h,
-        ))
-        lim_u, lim_w = u0 + nu, w0 + nw  # equal panel size; the frame grows toward the shaft, past the face
-        u1, w1 = min(lim_u, h.shape[2]), min(lim_w, h.shape[0])
-        ax.imshow(h[w0:w1, v, u0:u1], cmap='gray', vmin=0, vmax=5000, extent=(u0 - 0.5, u1 - 0.5, w1 - 0.5, w0 - 0.5), aspect='equal')
-        ax.contour(np.arange(u0, u1), np.arange(w0, w1), roi[w0:w1, v, u0:u1], levels=[0.5], colors='lime', linewidths=0.6)
-        ax.plot(np.arange(u0, u1), gp[v, u0:u1], color='orange', lw=0.6)
-        for side, c in (('medial', 'magenta'), ('lateral', 'cyan')):
-            if plates[side][w0:w1, v, u0:u1].any():
-                ax.contour(np.arange(u0, u1), np.arange(w0, w1), plates[side][w0:w1, v, u0:u1], levels=[0.5], colors=[c], linewidths=0.6)
-        ax.set(title=f'V={v}: green ROI-1, orange growth-plate face', xlabel='U', ylabel='W', xlim=(u0 - 0.5, lim_u - 0.5), ylim=(lim_w - 0.5, w0 - 0.5))
-        ax.grid(alpha=0.15)
-    fig.suptitle(f'{scale:.2f} px per voxel: 0.1 mm = {0.1 / vox * scale:.0f} px', y=1 - 8 / fig_h, fontsize=10)
-    p1 = out / 'qc-coronal.jpg'
-    sidecar.save_image(fig, p1)
-    plt.close(fig)
-    fig, axs = plt.subplots(1, 3, figsize=(18, 7))
-    for k, ax in zip(height_ids, axs):
-        pts = np.array(values[k]['points_uvw'])
-        ax.imshow(h[:, v_star, :], cmap='gray', vmin=0, vmax=5000)
-        ax.contour(roi[:, v_star, :], levels=[0.5], colors='lime', linewidths=0.7)
-        ax.plot(pts[:, 0], pts[:, 2], 'o-', color='cyan')
-        ax.set(title=f'{k} = {values[k]["value"]:.3f} mm (V={v_star})', xlabel='U', ylabel='W')
-    fig.tight_layout()
-    p2 = out / 'qc-heights.jpg'
-    sidecar.save_image(fig, p2)
-    plt.close(fig)
-    return [str(p1), str(p2)]
+        crops.append((max(top - QC_MARGIN, 0), u0, min(int(gp[v, u0:u1].max()) + QC_MARGIN, h.shape[0]), u1))
+    overlays = [(roi, 'lime'), (plates['medial'], 'magenta'), (plates['lateral'], 'cyan')]
+    names = ('W', 'V', 'U')
+    p1 = vl.slice_sheet(out / 'qc-coronal.jpg', h, overlays, 1, vs, window, cols=2, crops=crops, axis_names=names, voxel_mm=vox,
+                        curves=[[(np.arange(c[1], c[3]), gp[v, c[1] : c[3]], 'orange')] for v, c in zip(vs, crops, strict=True)],
+                        titles=[f'V={v}: green ROI-1, orange growth-plate face, plate runs magenta, cyan' for v in vs])
+    pts = [np.array(values[k]['points_uvw']) for k in height_ids]
+    p2 = vl.slice_sheet(out / 'qc-heights.jpg', h, [(roi, 'lime')], 1, [v_star] * len(height_ids), window, axis_names=names, voxel_mm=vox,
+                        curves=[[(p[:, 0], p[:, 2], 'cyan', 'o-')] for p in pts],
+                        titles=[f'{k} = {values[k]["value"]:.3f} mm (V={v_star})' for k in height_ids])
+    return [p1, p2]
 
 
 if __name__ == '__main__':

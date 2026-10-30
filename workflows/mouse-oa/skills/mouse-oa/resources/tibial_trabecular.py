@@ -2,7 +2,8 @@
 
 ROI-2 is ROI-1 (from iioc.py) minus the subchondral plate above a traced under-plate boundary, minus a shell of the
 outer surface, minus a clearance under the growth-plate face, limited laterally by the boundary's end points and by
-V limits. It writes the region only: its TV, BV and BV/TV (deck #13-15) come from `morphometry.py volumes`. An empty ROI-2 is refused.
+V limits. The two clearances (`shell_clearance_mm`, `growth_clearance_mm`) come from the spec (--spec, protocol.json, the entry
+`roi-iioc-trabecular`). It writes the region only: its TV, BV and BV/TV (deck #13-15) come from `morphometry.py volumes`. An empty ROI-2 is refused.
 
 --annotations is a JSON file of indices on the aligned grid. It needs "grid_id" (the grid_id of tibia-frame.json; a file without it
 or from another grid is refused). This script reads two keys; any other key is refused, and so is a value of the wrong form or an index outside the grid:
@@ -22,21 +23,20 @@ Writes: <out>/iioc-trab-tissue.npy  ROI-2, bool, on the aligned grid, with its s
         <out>/roi2.json  the result record: `objects` holds roi-iioc-trabecular and under-plate-boundary
         <out>/qc-coronal.jpg  six coronal sections: ROI-2 (cyan) inside ROI-1 (green)
 Prints: one JSON line {out, values, objects, qc, tissue, upper_boundary}
-Example: python tibial_trabecular.py --iioc-tissue iioc/iioc-tissue.npy --growth-plate-face iioc/growth-plate-proximal-face.npy --hu-aligned tibia-hu.npy --annotations annotations.json --out roi2/
+Example: python tibial_trabecular.py --spec protocol.json --window anatomy.json --iioc-tissue iioc/iioc-tissue.npy --growth-plate-face iioc/growth-plate-proximal-face.npy --hu-aligned tibia-hu.npy --annotations annotations.json --out roi2/
 Exits 2 with one sentence on bad input, before writing anything.
 """
 
 from pathlib import Path
 
-import matplotlib
 import numpy as np
 import objects
 import sidecar
+import viewlib as vl
 from annotations import load_annotations, need, traced_surface
 from scipy import ndimage as ndi
 
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
+ROI_ID = 'roi-iioc-trabecular'  # the spec entry this script reads
 
 
 def compartment(parent, gp, ann, vox, shell_mm, growth_mm, upper_shift=0.0):
@@ -60,15 +60,13 @@ def compartment(parent, gp, ann, vox, shell_mm, growth_mm, upper_shift=0.0):
 
 def main():
     ap = sidecar.parser(__doc__)
+    ap.add_argument('--spec', type=sidecar.existing, required=True, help="the workflow's protocol.json: the entry roi-iioc-trabecular gives the clearances")
+    ap.add_argument('--window', metavar='lo,hi', required=True, help="QC display window in HU, or the workflow's anatomy.json")
     ap.add_argument('--iioc-tissue', type=sidecar.existing, required=True, help='iioc-tissue.npy from iioc.py (ROI-1), with its sidecar beside it')
     ap.add_argument('--growth-plate-face', type=sidecar.existing, required=True, help='growth-plate-proximal-face.npy from iioc.py')
     ap.add_argument('--hu-aligned', type=sidecar.existing, required=True, help='tibia-hu.npy from tibia_frame.py (for the QC image)')
     ap.add_argument('--annotations', type=sidecar.existing, required=True, help='annotations JSON on the aligned grid, described above')
     ap.add_argument('--out', required=True, help='output directory (created)')
-    ap.add_argument('--shell-clearance-mm', type=float, default=0.021, help='mm: stay this far inside the outer surface of ROI-1')
-    ap.add_argument(
-        '--growth-clearance-mm', type=float, default=0.021, help='mm: stay this far above the growth-plate face'
-    )
     ap.add_argument(
         '--upper-shift-mm', type=float, default=0.0, help='mm: move the under-plate boundary by this much: sensitivity run'
     )
@@ -79,14 +77,15 @@ def main():
     parent = np.load(a.iioc_tissue)
     gp = np.load(a.growth_plate_face)
     hu = np.load(a.hu_aligned, mmap_mode='r')
-    roi, upper = compartment(parent, gp, ann, vox, a.shell_clearance_mm, a.growth_clearance_mm, a.upper_shift_mm / vox)
+    p = sidecar.protocol(a.spec, ROI_ID, 'shell_clearance_mm', 'growth_clearance_mm')
+    roi, upper = compartment(parent, gp, ann, vox, p['shell_clearance_mm'], p['growth_clearance_mm'], a.upper_shift_mm / vox)
     if not roi.any():
         sidecar.fail('ROI-2 is empty: the under-plate curves lie outside ROI-1 or the clearances are too large')
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     params = {
-        'shell_clearance_mm': a.shell_clearance_mm,
-        'growth_clearance_mm': a.growth_clearance_mm,
+        'shell_clearance_mm': p['shell_clearance_mm'],
+        'growth_clearance_mm': p['growth_clearance_mm'],
         'upper_shift_mm': a.upper_shift_mm,
     }
     np.save(out / 'iioc-trab-tissue.npy', roi)
@@ -99,21 +98,14 @@ def main():
     }
     vs = sorted(map(int, ann['under_plate_curves']['slices']))
     picks = [vs[i] for i in np.linspace(0, len(vs) - 1, 6).astype(int)]
-    fig, axs = plt.subplots(2, 3, figsize=(18, 11))
-    for v, ax in zip(picks, axs.flat):
-        ax.imshow(hu[:, v, :], cmap='gray', vmin=0, vmax=5000)
-        ax.contour(parent[:, v, :], levels=[0.5], colors='lime', linewidths=0.6)
-        ax.contour(roi[:, v, :], levels=[0.5], colors='cyan', linewidths=1)
-        ax.set(title=f'ROI-2 (cyan) inside ROI-1 (green), V={v}', xlabel='U', ylabel='W')
-    fig.tight_layout()
-    qc = out / 'qc-coronal.jpg'
-    sidecar.save_image(fig, qc)
-    plt.close(fig)
+    qc = vl.slice_sheet(out / 'qc-coronal.jpg', hu, [(parent, 'lime'), (roi, 'cyan')], 1, picks, vl.parse_window(a.window),
+                        axis_names=('W', 'V', 'U'), voxel_mm=vox,
+                        titles=[f'ROI-2 (cyan) inside ROI-1 (green), V={v}' for v in picks])
     sidecar.emit_values(
         out / 'roi2.json',
         {},
         objects=placed,
-        qc=str(qc),
+        qc=qc,
         tissue=str(out / 'iioc-trab-tissue.npy'),
         upper_boundary=str(out / 'under-plate-boundary.npy'),
     )

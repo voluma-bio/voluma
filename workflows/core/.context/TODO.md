@@ -10,16 +10,15 @@ From the structural review of PR #62 (`review-pr62` p231, structure) and the cor
   the axes and crop and calls it (and `envelope.close_and_fill`, beside it). It stayed in `mouse-oa` because its +U medial / +V anterior
   sign rule and crop defaults are the mouse tibia protocol's: moving it to `orient-joint` needs the sign rule behind an argument.
 - **Fold the other slice renderers into `quad_view` (left from the quad-view PR).** Boxes as a layer would let `render_slices` (`--boxes`, `--points`; `orient_joint.py` imports its `render()`) and `render_crops` go, with `sam-segmentation` taking its keyframe from a quad pane. The 6-view sheet stays (4 of 4 catches). Also open: `quad_view` draws a point's name in 3D even where the surface hides it; a new mask's surface costs ~9 s cold (marching cubes and smoothing on the aligned grid), later calls reuse the cache.
-- **One `--anatomy` profile (p231 M1).** `references/anatomy.json` holds label names, `window_hu` and `segmentation_threshold_hu`, but the
-  generic scripts take them as flags: `--names 1=femur,...` (`quad_view`, `render_surfaces`), `--window` in five scripts, the required
-  `--threshold-hu` in six. Speck size is 0.01 mm³ in `unlabelled` and `label_stats` and 0.005 in `disagree`; `orient_joint`'s lengths are now required flags (the anatomy reference gives them). The mouse QC figures bypass `viewlib` and hard-code windows (`vmin=0, vmax=5000` in `iioc`, `metaphysis_roi`,
-  `tibial_trabecular`; -500..6000 in `tibia_frame`). Direction: one `--anatomy` argument read through a `sidecar` helper supplies these
-  defaults (flags only override), so a rat knee needs one new `anatomy.json`; `label_stats --ranges` already reads this file; route the mouse
-  QC figures through `viewlib`.
-- **`femoral_frame.py` becomes a `measure.py` spec (p231 M2).** DFL, DFW and W/L are two distances and a ratio, which `measure.py` already
-  computes (`deck_volumes_spec.json` is the pattern); `off_bone_mm` repeats `pick.py`'s snap distance; the frame vectors (`ml_vector_zyx` and
-  the rest) have no reader. Direction: let `measure.py` distances name points from `--points points.json`, add a `femoral_spec.json`, and
-  delete the script or cut it to the a/b swap check. Until then it writes its record with `sidecar.emit_values`.
+- **One `--anatomy` profile (p231 M1), what is left.** The QC windows are done: every mouse QC sheet goes through `viewlib.slice_sheet` and
+  takes `--window anatomy.json` (`viewlib.parse_window` reads the file's `window_hu`, as every renderer's `--window` now does). Still flags:
+  `--names 1=femur,...` (`quad_view`, `render_surfaces`), the required `--threshold-hu` in six scripts, and the speck size, 0.01 mm³ in `unlabelled`
+  and `label_stats` and 0.005 in `disagree`; `orient_joint`'s lengths are required flags (the anatomy reference gives them). Direction: one
+  `--anatomy` argument read through a `sidecar` helper supplies these defaults (flags only override), so a rat knee needs one new
+  `anatomy.json`; `label_stats --ranges` already reads this file.
+- **`femoral_frame.py` after the spec move (p231 M2), what is left.** DFL, DFW and W/L are computed by `measure.py` from `protocol.json`; the
+  script keeps the landmark checks and the frame. `off_bone_mm` repeats `pick.py`'s snap distance, and the frame vectors (`ml_vector_zyx` and the
+  rest) have no reader beyond the SI check: cut them or give them a reader.
 - **A kept synthetic-truth test (p230), for the user to decide.** A tilted planar growth-plate face under a flat top, where `iioc.py`'s height
   along W equals h / cos θ and the perpendicular height equals h. The heights moving by 3 to 7% between the two definitions was silent until a
   reviewer recomputed it; the same shape of test would pin plate thickness and node density. None is added.
@@ -27,8 +26,6 @@ From the structural review of PR #62 (`review-pr62` p231, structure) and the cor
 ## From the round-3 review (p246, 2026-10-28)
 - `morphometry.py` volume definitions should name the grid the count was made on
   (scan vs aligned); today only the record's `grid_id` says it, and stdout omits it.
-- `volumes`/`trabecular` without `--id` write bare keys (`TV`, `BV/TV`); two calls
-  collide and nothing binds to `outputs.json`. Consider requiring `--id` for every key.
 - `sidecar.py:78-80`: read the calibration after the `if not header: fail`, drop the ternary.
 - `annotations.json` mixes point orders: curves are `[w, u]`, `width_points_uvw` and
   `plate_patches` are `[u, v, w]`. Documented, but a hand-writing agent holds two orders.

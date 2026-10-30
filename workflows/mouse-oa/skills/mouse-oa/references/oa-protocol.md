@@ -12,9 +12,17 @@ below; `kind` is `measurement` for a deck parameter and `diagnostic` for a numbe
 
 **One owner per concept.** Region scripts (`iioc.py`, `tibial_trabecular.py`, `metaphysis_roi.py`) write regions
 and, for `iioc.py`, the geometry that needs the protocol's own steps (heights, width, plate columns). All TV, BV and
-BV/TV, and the thickness and node measures, come from `morphometry.py` (`bone-morphometry`), which takes the output
-ids as `--id`/`--name`. BV uses the measurement threshold (`microct-core`), which `morphometry.py` computes from
+BV/TV, and the thickness and node measures, come from `morphometry.py` (`bone-morphometry`). BV uses the measurement threshold (`microct-core`), which `morphometry.py` computes from
 `--hu-json`, kept apart from `--grid`, the grid the region is on.
+
+**One spec for the numbers.** `resources/protocol.json` is keyed by output id (`outputs.json`'s ids) and holds every number the
+protocol fixes and the output ids a script writes its values under: ROI-3's start, length and clearance, Ct.Th's depth and slab,
+the plate patch width, the clearances of ROI-2, the label ids of #1–3, the points each femoral distance joins. A script takes
+`--spec protocol.json` and reads its entry; there is no flag for a protocol number or an output id, and the record's `params` say
+what was used. A region script reads the entry of its own region (`roi-iioc`, `roi-iioc-trabecular`, `roi-metaphyseal`);
+`morphometry.py` and `measure.py` take `--output <id>`, the region's id (or the slab's, or the values' own) whose entry they read.
+Change a protocol number there, once; prose here and in the examples names the quantity, not its value. The display window of every
+QC image is `anatomy.json`'s (`--window anatomy.json`).
 
 **Grid rule.** A volume is counted where the region is defined: a region traced on the aligned stack is counted on
 the aligned stack, on `tibia-hu.npy`, a linear resampling of the scan. Counting ROI-1 on the unresampled scan grid
@@ -30,11 +38,11 @@ on.
 | 3 | ROI-1 (IIOC), heights, width, plate columns (`--out iioc`: later tasks read `/outputs/iioc/iioc/`) | `iioc.py` | `qc-coronal.jpg` and `qc-heights.jpg` against `examples/README.md` (iioc) |
 | 4 | Trace the boundary under the subchondral plate (annotation B) | you | coronal sections with the ROI-1 outline |
 | 5 | ROI-2 (IIOC trabecular) | `tibial_trabecular.py` | `qc-coronal.jpg` against `examples/README.md` (trabecular-roi) |
-| 6 | Trace the growth plate's distal face (annotation C), then ROI-3 and the cortex under the plate (`--out meta`: the `cortical` task reads `/outputs/metaphyseal-roi/meta/`) | `metaphysis_roi.py` | `qc-roi3.jpg` against `examples/README.md` (metaphyseal-roi) |
-| 7 | TV, BV, BV/TV of ROI-1 and ROI-2 (#4–6, #13–15); TV, BV, BV/TV, Tb.N, Tb.Th, Tb.Sp, nodes and ends of ROI-3 (#16–23) | `morphometry.py volumes` per region; `trabecular --skeleton` for ROI-3 | the QC image `trabecular` writes (`bone-morphometry`) |
-| 8 | Ct.Th at 100 and 1000 µm below the distal face, on the cortex mask and face `metaphyseal-roi` wrote (the face is traced once; `metaphysis_roi.py` is not run again); plate thickness per compartment on the plate runs `iioc.py` wrote, 175 µm deep, 350 µm slab, under the articular top surface | `morphometry.py cortical` (`--object-id` is the declared `roi-cortex-…` or `roi-subchondral-plate-…` id of the slab) | its QC image against `examples/README.md` (cortical, subchondral-plate) |
-| 9 | Femoral landmarks: four points on a 3D render of the femur (`regions-and-landmarks`, picks named `a` to `d`), then compute | `femoral_frame.py` on the `points.json` files `pick.py` wrote | each `pick-check.jpg` against `examples/README.md` (femoral-geometry); the script refuses a bad landmark (D) |
-| 10 | Volumes of labels 3, 5 and 6 (#1–3) | `measure.py --spec resources/deck_volumes_spec.json` | the 3D sheet (`visual-check`) |
+| 6 | Trace the growth plate's distal face (annotation C), then ROI-3 and the cortex under the plate (`--out meta`: the `cortical` task reads `/outputs/metaphyseal-roi/meta/`) | `metaphysis_roi.py` | `qc-roi3.jpg` and `qc-roi3-axial.jpg` against `examples/README.md` (metaphyseal-roi) |
+| 7 | TV, BV, BV/TV of ROI-1 and ROI-2 (#4–6, #13–15); TV, BV, BV/TV, Tb.N, Tb.Th, Tb.Sp, nodes and ends of ROI-3 (#16–23) | `morphometry.py volumes --output roi-iioc` and `roi-iioc-trabecular`; `trabecular --output roi-metaphyseal` | the QC images `trabecular` writes (`bone-morphometry`) |
+| 8 | Ct.Th at the two levels below the distal face (#24, #25), on the cortex mask and face `metaphyseal-roi` wrote (the face is traced once; `metaphysis_roi.py` is not run again); plate thickness per compartment (#11, #12) on the plate runs `iioc.py` wrote, under the articular top surface | `morphometry.py cortical --output roi-cortex-100um`, `roi-cortex-1000um`, `roi-subchondral-plate-medial` or `-lateral` (the slab's declared id; its depth and thickness are in the spec) | its QC image against `examples/README.md` (cortical, subchondral-plate) |
+| 9 | Femoral landmarks: four points on a 3D render of the femur (`regions-and-landmarks`, picks named `a` to `d`), then compute | `femoral_frame.py --spec` on the `points.json` files `pick.py` wrote | each `pick-check.jpg` against `examples/README.md` (femoral-geometry); the script refuses a bad landmark (D) |
+| 10 | Volumes of labels 3, 5 and 6 (#1–3) | `measure.py --spec resources/protocol.json --output patella-volume lateral-meniscus-osteophyte-volume medial-meniscus-osteophyte-volume --labels labels.npy` | the 3D sheet (`visual-check`) |
 | 11 | Hand the points to the lab | `amira_landmarks.py` | the lab opens it in Amira |
 
 `iioc.py --gp-shift-mm` and `tibial_trabecular.py --upper-shift-mm` rerun with a moved trace, to see how much a
@@ -60,13 +68,13 @@ schema is `regions-and-landmarks`'):
   stops the script: move it). The two width points (#10): the centre of the fibula–tibia junction on the tibial
   surface, and the most prominent point on the other side. Optional: where "the middle of the growth plate" is for
   #7 (default: midway between the width points), the coronal section the heights are measured on (default: where
-  the footprint's growth-plate-to-top distance is largest), and the plate patches per compartment (default: 500 µm
-  wide around the compartment midpoint, the deck's figure).
+  the footprint's growth-plate-to-top distance is largest), and the plate patches per compartment (default: the spec's
+  `plate_patch_width_um` wide around the compartment midpoint).
 - **B, for `tibial_trabecular.py`.** The boundary between the subchondral plate and the trabecular compartment,
   with the end points on the inner side of the cortex: the first and last point of each curve limit ROI-2 across.
   The V range it covers.
 - **C, for `metaphysis_roi.py`.** The growth plate's distal face, traced like the proximal one, over at least the
-  proximal face's V range. There is no thickness fallback: ROI-3 starts 50 µm below this face, and a guessed band
+  proximal face's V range. There is no thickness fallback: ROI-3 starts a fixed offset below this face (the spec's `start_um`), and a guessed band
   thickness inside the 100 to 200 µm range seen on OA6-1RK moves ROI-3 BV/TV from 23% to 15%. OA6-1RK has a thin
   perforated mineralized band, not a clean cartilage plate: trace the face you can see and look at it drawn on the
   sections before you run.
@@ -107,13 +115,13 @@ scan, not a starting point for another.
   threshold that gates BV (`microct-core`): the deck volumes run a little under a count at the measurement
   threshold (about 0.6% of the label on OA6-1RK). These three are label volumes, not BV.
 - ROI-1 is the IIOC from growth plate to articular surface. ROI-2 is what remains after removing the subchondral
-  bone plate and the cortical line next to the growth plate. ROI-3 starts 50 µm below the growth plate, runs 200 µm,
-  and stays 20 µm beyond the cortex from the outer edge (the estimated cortex depth plus 20 µm).
+  bone plate and the cortical line next to the growth plate. ROI-3 starts below the growth plate by the spec's `start_um`, runs `length_um`,
+  and stays `cortex_clearance_um` beyond the cortex from the outer edge (the estimated cortex depth plus that clearance).
 
 ## The 28 parameters
 
 The only table of the parameters. **Output id** is the id the value is written under (and the id `outputs.json`
-binds to); `morphometry.py` and `measure.py` take it from you, the other scripts write it themselves. Status is what
+binds to); `morphometry.py`, `measure.py` and `femoral_frame.py` read it from `protocol.json`, the other scripts write it themselves. Status is what
 the code does today: "computed" means the script produces the number from the regions you traced, not that the
 number is validated against the lab's own software or a second scan. BV/TV is in %. Every thickness record carries
 the voxel size; the sphere method reads **high** for structures an odd number of voxels wide (`bone-morphometry`),
@@ -142,7 +150,7 @@ and whether Scanco uses the same convention is open.
 | 19 | Tb.N | `metaphyseal-tb-n` | ROI-3 | same | computed; model-derived, inherits the thickness bias |
 | 20 | Tb.Th | `metaphyseal-tb-th` | ROI-3 | same | computed, with the `voxel-size` diagnostic |
 | 21 | Tb.Sp | `metaphyseal-tb-sp` | ROI-3 | same | computed, with the `voxel-size` diagnostic |
-| 22 | Tb.Nd (nodes) | `metaphyseal-tb-nd` (1/mm³) | ROI-3 | same with `--skeleton` | computed per mm³ of the counted tissue volume, **unvalidated** |
+| 22 | Tb.Nd (nodes) | `metaphyseal-tb-nd` (1/mm³) | ROI-3 | same (the spec lists the node and end ids) | computed per mm³ of the counted tissue volume, **unvalidated** |
 | 23 | Tb.Tm (ends) | `metaphyseal-tb-tm` (1/mm³) | ROI-3 | same | same |
 | 24 | Cortical thickness, 100 µm under the plate | `cortical-thickness-100-um-below-the-growth-plate` | cortex | `metaphysis_roi.py` makes the cortex mask, `morphometry.py cortical` measures | computed; the cortex mask is a heuristic |
 | 25 | Cortical thickness, 1000 µm under the plate | `cortical-thickness-1000-um-below-the-growth-plate` | cortex | same | same |
@@ -152,11 +160,11 @@ and whether Scanco uses the same convention is open.
 
 Diagnostics (`kind: diagnostic`) travel in the same records and are not outputs: the perpendicular heights
 `*-normal`, `growth-plate-plane-rms`, `iioc-max-local-height`, `subchondral-plate-*-first-run`, `voxel-size`, and
-the node and end counts and counted volume of `morphometry.py trabecular --skeleton`.
+the node and end counts and counted volume of `morphometry.py trabecular`.
 
 Not computed: the deck's "developing new parameters" (centre lines of trabeculae along the long axis of ROI-3) and
 the vertebral parameters (another bone, outside this workflow). ROI-2 TV excludes the cortex and growth-plate
-clearance by 0.021 mm each (`--shell-clearance-mm`, `--growth-clearance-mm`), a choice of the old run, not of the
+clearance by `shell_clearance_mm` and `growth_clearance_mm` of the spec, a choice of the old run, not of the
 deck.
 
 ## Hand-off: checking points in Amira

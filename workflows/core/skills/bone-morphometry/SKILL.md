@@ -10,7 +10,9 @@ description: >
 Names and definitions follow Bouxsein et al. 2010 (ASBMR). Lengths in mm, volumes in mm³, BV/TV in %.
 `morphometry.py` is the one owner of TV, BV and BV/TV and of the thickness and skeleton measures; `measure.py`
 gives distances between points, label volumes (voxels of a label, not BV) and ratios. You choose the region: the
-workflow's protocol says which region each parameter uses, and this skill builds none.
+workflow's protocol says which region each parameter uses, and this skill builds none. The protocol also fixes the
+numbers (depths, slabs, margins) and the output id of each value: both scripts read them from the workflow's
+`protocol.json` (`--spec`, `--output`), so a depth or an id is never a flag you type.
 
 ## Definitions and methods
 
@@ -35,10 +37,10 @@ script stops when they are not.
 
 Open it with `view_image` before you report.
 
-- **Trabecular** (`qc.jpg`): the ROI and bone on three slices, the Tb.Th and Tb.Sp maps, the skeleton. The ROI must
+- **Trabecular** (`qc.jpg`: the ROI and bone on three slices; `qc-maps.jpg`: the Tb.Th and Tb.Sp maps, the skeleton). The ROI must
   hold the structure you mean and leave out cortex, plate and growth plate; the bone outline must follow the struts
   (a wrong threshold shows here); Tb.Th colours must match strut width.
-- **Cortical** (`qc-<name>.jpg`): the slab on the cortical mask and the thickness along it. The slab must sit at
+- **Cortical** (`qc-<value id>.jpg`): the slab on the cortical mask and the thickness along it. The slab must sit at
   the depth below the surface you mean and cover the wall all round. The image projects along the slab's axis, so
   it cannot show the depth itself: read the depth and slab parameters back from the record.
 - **Distances:** the two points drawn on the view they were placed on (`regions-and-landmarks`, `pick-check.jpg`,

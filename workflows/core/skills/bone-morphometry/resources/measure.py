@@ -1,20 +1,20 @@
-"""Compute distances, label volumes and ratios from a JSON spec, in mm and mm³, with definitions and inputs.
+"""Compute the protocol's distances, label volumes and ratios, in mm and mm³, with definitions and inputs.
 
-Spec (all sections optional; a name is the output id the value is written under, unique across sections; an entry may
-add "kind": "diagnostic" for a number that is not a deliverable):
-  {"distances": {"name": {"points_zyx": [[z, y, x], [z, y, x]], "definition": "..."}},
-   "volumes":   {"name": {"labels": "labels.npy", "ids": [3], "definition": "..."}},
-   "ratios":    {"name": {"num": "name_a", "den": "name_b", "definition": "..."}},
-   "objects":   {"output-id": {"labels": "labels.npy"}}}
-`objects` reports each labels volume that the volumes were counted on, as the output id's volume object (on --grid's grid).
-Points are voxel indices on the grid of --grid (fractions allowed). A ratio's unit is "1" when both values share a
-unit, else "<num unit>/<den unit>". Ratios may use distances, volumes and earlier ratios. Refused: a name used twice, a
-distance that is not two [z, y, x] points, a volume without "labels" and "ids", a ratio naming something not computed
-before it, a zero denominator. The record format is in `microct-core/resources/sidecar.py`.
+`--spec` is the workflow's protocol.json (keyed by output id); `--output` lists the outputs to compute, and each is built from its
+spec entry, which holds (and may add "kind": "diagnostic" for a number that is not a deliverable):
+  {"points": ["a", "b"], "ruler": "dfl-ruler", "definition": "..."}    distance between two named points of --points; "ruler" is the
+                                                                        output id of the line drawn between them (an object)
+  {"labels": [3], "volume": "bone-labels", "definition": "..."}        voxels of those label values in --labels; "volume" is the
+                                                                        output id of the labels volume the count was made on (an object)
+  {"num": "<output id>", "den": "<output id>", "definition": "..."}    a ratio of two outputs listed before it in --output
+Points are voxel indices on the grid of --grid (fractions allowed). A ratio's unit is "1" when both values share a unit, else
+"<num unit>/<den unit>". Refused: an output the spec lacks or an entry of none of these forms, a point or labels file not
+given, a point missing from the files, a ratio naming an output not computed before it, a zero denominator.
+The record format is in `microct-core/resources/sidecar.py`.
 
-Writes: <out>  the result record {values: {id: {value, unit, definition, kind, ...}}, grid_id, spacing_zyx_mm, inputs}
+Writes: <out>  the result record {values: {id: {value, unit, definition, kind, ...}}, objects, grid_id, spacing_zyx_mm, inputs}
 Prints: one JSON line {out, values: {id: {value, unit, definition, kind}}, objects}
-Example: python measure.py --spec spec.json --grid hu.json --out measurements.json
+Example: python measure.py --spec protocol.json --output patella-volume --labels labels.npy --grid hu.json --out measurements.json
 Exits 2 with one sentence on bad input, before writing anything.
 """
 
@@ -44,58 +44,63 @@ def ratio(num, den):
     return num['value'] / den['value'], unit
 
 
-def measure(spec, grid):
+def measure(spec, outputs, grid_path, labels=None, points=None):
+    """Values, input hashes and objects of `outputs` (ids of `spec`), on the grid of `grid_path`; `labels` is a .npy path, `points` {name: zyx}."""
+    grid = sidecar.grid(grid_path)
     sp = grid['spacing_zyx_mm']
-    out, inputs = {}, {}
-
-    def add(name, value, unit, entry, **extra):
-        if name in out:
-            sidecar.fail(f'the name {name!r} is used twice in the spec: give each measurement its own name')
-        out[name] = sidecar.value(value, unit, entry.get('definition', ''), entry.get('kind', 'measurement'), **extra)
-
-    for name, d in spec.get('distances', {}).items():
-        try:
-            add(name, distance_mm(d['points_zyx'], sp), 'mm', d, points_zyx=d['points_zyx'])
-        except (KeyError, ValueError) as e:
-            sidecar.fail(f'distance {name!r}: {e}; expected {{"points_zyx": [[z, y, x], [z, y, x]]}}')
-    for name, v in spec.get('volumes', {}).items():
-        if 'labels' not in v or 'ids' not in v:
-            sidecar.fail(f'volume {name!r} needs "labels" (a .npy path) and "ids" (a list of label values)')
-        inputs[v['labels']] = sidecar.sha256_file(v['labels'])
-        add(
-            name,
-            volume_mm3(np.load(v['labels'], mmap_mode='r'), v['ids'], sp),
-            'mm³',
-            v,
-            labels=v['labels'],
-            ids=v['ids'],
-        )
-    for name, r in spec.get('ratios', {}).items():
-        missing = [k for k in (r.get('num'), r.get('den')) if k not in out]
-        if missing:
-            sidecar.fail(f'ratio {name!r} refers to {missing}, which are not distances, volumes or earlier ratios')
-        try:
-            value, unit = ratio(out[r['num']], out[r['den']])
-        except ValueError as e:
-            sidecar.fail(f'ratio {name!r}: {e}')
-        add(name, value, unit, r, num=r['num'], den=r['den'])
-    return out, inputs
+    out, inputs, placed = {}, {}, {}
+    for oid in outputs:
+        if oid not in spec:
+            sidecar.fail(f'the spec has no entry for the output {oid!r}: its entries are {sorted(spec)}')
+        e = spec[oid]
+        kind = e.get('kind', 'measurement')
+        if 'points' in e:
+            missing = [n for n in e['points'] if n not in (points or {})]
+            if missing:
+                sidecar.fail(f'{oid}: the points files lack {missing}: pass --points files that hold them')
+            p = [points[n] for n in e['points']]
+            try:
+                value, unit, extra = distance_mm(p, sp), 'mm', {'points_zyx': p}
+            except ValueError as err:
+                sidecar.fail(f'{oid}: {err}')
+            if 'ruler' in e:
+                placed[e['ruler']] = objects.line(p[0], p[1], grid['grid_id'])
+        elif 'labels' in e:
+            if not labels:
+                sidecar.fail(f'{oid} counts label voxels: pass --labels')
+            inputs[labels] = sidecar.sha256_file(labels)
+            value, unit, extra = volume_mm3(np.load(labels, mmap_mode='r'), e['labels'], sp), 'mm³', {'labels': e['labels']}
+            if 'volume' in e:
+                placed[e['volume']] = objects.volume(labels, grid_path, kind='labels')
+        elif 'num' in e and 'den' in e:
+            missing = [k for k in (e['num'], e['den']) if k not in out]
+            if missing:
+                sidecar.fail(f'{oid} is a ratio of {missing}, which --output must list before it')
+            try:
+                value, unit = ratio(out[e['num']], out[e['den']])
+            except ValueError as err:
+                sidecar.fail(f'{oid}: {err}')
+            extra = {'num': e['num'], 'den': e['den']}
+        else:
+            sidecar.fail(f'the entry for {oid!r} is not a distance (points), a label volume (labels) or a ratio (num, den)')
+        out[oid] = sidecar.value(value, unit, e.get('definition', ''), kind, **extra)
+    return out, inputs, placed
 
 
 def main():
     ap = sidecar.parser(__doc__)
-    ap.add_argument('--spec', type=sidecar.existing, required=True, help='JSON spec, described above')
+    ap.add_argument('--spec', type=sidecar.existing, required=True, help="the workflow's protocol.json")
+    ap.add_argument('--output', nargs='+', required=True, metavar='ID', help='output ids to compute, in this order (a ratio after the values it divides)')
     ap.add_argument('--grid', type=sidecar.existing, required=True, help='hu.json (or any sidecar): the grid the points and labels are on')
+    ap.add_argument('--labels', type=sidecar.existing, help='labels.npy on --grid, for the label volumes (its sidecar beside it)')
+    ap.add_argument('--points', type=sidecar.existing, nargs='+', help='points files on --grid that hold the named points (the points.json files pick.py writes)')
     ap.add_argument('--out', required=True, help='JSON file to write')
     a = ap.parse_args()
-    grid = sidecar.grid(a.grid)
     spec = json.loads(Path(a.spec).read_text())
-    values, inputs = measure(spec, grid)
+    grid = sidecar.grid(a.grid)
+    points = sidecar.load_points(a.points, grid['grid_id']) if a.points else None
+    values, inputs, placed = measure(spec, a.output, a.grid, a.labels, points)
     inputs.update({a.grid: sidecar.sha256_file(a.grid), a.spec: sidecar.sha256_file(a.spec)})
-    placed = {
-        oid: objects.volume(v['labels'], a.grid, kind='labels')
-        for oid, v in spec.get('objects', {}).items()
-    }
     sidecar.emit_values(
         a.out, values, objects=placed, meta={'grid_id': grid['grid_id'], 'spacing_zyx_mm': grid['spacing_zyx_mm'], 'inputs': inputs}
     )

@@ -1,23 +1,29 @@
 """Measure a region of interest: the one owner of TV, BV and BV/TV, plus trabecular and cortical thickness.
 
   volumes      TV, BV, BV/TV of a region
-  trabecular   the same three, plus Tb.Th, Tb.Sp, Tb.N (and with --skeleton, Tb.Nd and Tb.Tm), a QC image, thickness maps
+  trabecular   the same three, plus Tb.Th, Tb.Sp, Tb.N (and Tb.Nd and Tb.Tm when the spec lists them), a QC image, thickness maps
   cortical     Ct.Th: largest-contained-sphere thickness of a cortical mask, in a slab at a depth below a surface
 
 Bone is the region and `--hu` above the bone threshold, with no label gate: `--threshold` in HU, else the lab's 2.16/cm
 converted with the calibration in `--hu-json` (the scan's hu.json). `--roi`, `--hu` and `--grid` (default: the region's own
 sidecar) must be on one grid; the volumes are counted on it. Lengths in mm (cortical depth, slab and context in um), volumes
-in mm³, BV/TV in %, densities in 1/mm³. Thickness needs isotropic voxels. Each value is written under the output id the
-caller gives with `--id KEY=output-id` (repeatable; the keys are printed by `<command> --help`), else under KEY. The record
-format is in `microct-core/resources/sidecar.py`. Methods: ../SKILL.md. Refused: a mask that is not bool, an empty ROI, an ROI
-holding only bone or only marrow, HU on another grid than the region, anisotropic voxels (thickness).
+in mm³, BV/TV in %, densities in 1/mm³. Thickness needs isotropic voxels. Nothing of the protocol is a flag: `--spec` is the
+workflow's protocol.json and `--output` the output id of the region (volumes, trabecular) or of the slab (cortical), whose entry
+gives the region's name, the output id each value is written under and the parameters:
+  volumes, trabecular  {"region": "ROI-1", "values": {"TV": id, "BV": id, "BV/TV": id, ...}}; `volumes` needs the three,
+                       `trabecular` also "Tb.N", "Tb.Th", "Tb.Sp", and the node and end counts when "Tb.Nd" and "Tb.Tm" are
+                       there too, with "skeleton_edge_margin_mm" (skeleton points this close to the ROI edge are not counted)
+  cortical             {"value": id, "depth_um": d, "slab_um": s}: the slab centre's depth below the surface, and its thickness
+The record format is in `microct-core/resources/sidecar.py`. Methods: ../SKILL.md. Refused: a mask that is not bool, an empty ROI,
+an ROI holding only bone or only marrow, HU on another grid than the region, anisotropic voxels (thickness), an entry that lacks
+what the command reads.
 
-Writes: volumes: <out>/volumes.json; trabecular: <out>/morphometry.json, qc.jpg, thickness-mm.npy and separation-mm.npy
-        (the ROI's bounding box on the region's grid, `offset_zyx` in their sidecars, mm); cortical: <out>/<name>.json,
-        qc-<name>.jpg and slab-<name>.npy (the slab measured, cropped, as an object: see `microct-core/resources/objects.py`).
-        The json is the result record {values: {id: {value, unit, definition, kind}}, grid_id, inputs, ...}; cortical adds `objects` (the slab, under `--object-id`)
-Prints: one JSON line {out, values: {id: {value, unit, definition, kind}}}; trabecular adds {qc, thickness, separation}, cortical {qc}
-Example: python morphometry.py trabecular --roi roi.npy --hu hu.npy --hu-json hu.json --out out/roi2 --id BV/TV=BVTV-roi2
+Writes: volumes: <out>/volumes.json; trabecular: <out>/morphometry.json, qc.jpg (three slices), qc-maps.jpg, thickness-mm.npy and separation-mm.npy
+        (the ROI's bounding box on the region's grid, `offset_zyx` in their sidecars, mm); cortical: <out>/<value id>.json,
+        qc-<value id>.jpg and slab-<value id>.npy (the slab measured, cropped, as an object: see `microct-core/resources/objects.py`).
+        The json is the result record {values: {id: {value, unit, definition, kind}}, grid_id, inputs, ...}; cortical adds `objects` (the slab, under `--output`)
+Prints: one JSON line {out, values: {id: {value, unit, definition, kind}}}; trabecular adds {qc: [slices, maps], thickness, separation}, cortical {qc}
+Example: python morphometry.py volumes --spec protocol.json --output roi-iioc --roi roi.npy --hu hu.npy --hu-json hu.json --out out/roi1
 Exits 2 with one sentence on bad input, before writing anything.
 """
 
@@ -29,6 +35,7 @@ import matplotlib
 import numpy as np
 import objects
 import sidecar
+import viewlib as vl
 from scipy import ndimage as ndi
 
 matplotlib.use('Agg')
@@ -123,14 +130,15 @@ TRAB_KEYS = ('TV', 'BV', 'BV/TV', 'Tb.Th', 'Tb.Sp', 'Tb.N', 'Tb.Nd', 'Tb.Tm', 'N
 VOLUME_KEYS = TRAB_KEYS[:3]
 
 
-def output_ids(items, keys):
-    ids = {k: k for k in keys}
-    for item in items or []:
-        key, _, new = item.partition('=')
-        if key not in ids or not new:
-            sidecar.fail(f'--id {item!r}: write KEY=output-id, with KEY one of {list(keys)}')
-        ids[key] = new
-    return ids
+def output_ids(entry, keys, required):
+    """{KEY: output id} from the spec entry's `values`; a key the spec leaves out is written under its own name (diagnostics)."""
+    values = entry['values']
+    unknown = [k for k in values if k not in keys]
+    missing = [k for k in required if k not in values]
+    if unknown or missing:
+        sidecar.fail(f'the spec entry\'s "values" must hold {list(required)} and may add {[k for k in keys if k not in required]}: '
+                     f'it has {sorted(values)}')
+    return {k: values.get(k, k) for k in keys}
 
 
 def load_region(a):
@@ -160,19 +168,24 @@ def volume_values(roi, bone, sp, threshold, ids, region):
 
 
 def volumes(a):
-    ids = output_ids(a.id, VOLUME_KEYS)
+    entry = sidecar.protocol(a.spec, a.output, 'region', 'values')
+    ids = output_ids(entry, VOLUME_KEYS, VOLUME_KEYS)
     g, roi, _, bone, threshold = load_region(a)
     sp = np.array(g['spacing_zyx_mm'], float)
-    values, _, _ = volume_values(roi, bone, sp, threshold, ids, a.region)
+    values, _, _ = volume_values(roi, bone, sp, threshold, ids, entry['region'])
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     sidecar.emit_values(out / 'volumes.json', values, meta={
         'grid_id': g['grid_id'], 'spacing_zyx_mm': g['spacing_zyx_mm'], 'threshold_hu': threshold,
-        'inputs': {str(q): sidecar.sha256_file(q) for q in (a.roi, a.hu)}})
+        'inputs': {str(q): sidecar.sha256_file(q) for q in (a.roi, a.hu, a.spec)}})
 
 
 def trabecular(a):
-    ids = output_ids(a.id, TRAB_KEYS)
+    entry = sidecar.protocol(a.spec, a.output, 'region', 'values')
+    skeleton = 'Tb.Nd' in entry['values'] or 'Tb.Tm' in entry['values']
+    ids = output_ids(entry, TRAB_KEYS, TRAB_KEYS[:6] + (('Tb.Nd', 'Tb.Tm') if skeleton else ()))
+    if skeleton and 'skeleton_edge_margin_mm' not in entry:
+        sidecar.fail(f'{a.spec}: the entry for {a.output!r} counts nodes and ends, so it needs "skeleton_edge_margin_mm"')
     g, roi, hu, bone, threshold = load_region(a)
     sp = np.array(g['spacing_zyx_mm'], float)
     if not np.allclose(sp, sp[0], rtol=1e-3):
@@ -180,7 +193,7 @@ def trabecular(a):
             f'spacing {sp.tolist()} mm is not isotropic: sphere thickness needs isotropic voxels; resample first'
         )
     vox = float(sp[0])
-    inputs = [a.roi, a.hu]
+    inputs = [a.roi, a.hu, a.spec]
     marrow = roi & ~bone
     if not bone.any() or not marrow.any():
         sidecar.fail('the ROI holds only bone or only marrow at this threshold: check the threshold and the ROI')
@@ -191,7 +204,7 @@ def trabecular(a):
     th_vox = local_thickness(bone[box])
     sp_vox = local_thickness(marrow[box])
     th, sep = th_vox * vox, sp_vox * vox
-    values, tv, bv = volume_values(roi, bone, sp, threshold, ids, a.region)
+    values, tv, bv = volume_values(roi, bone, sp, threshold, ids, entry['region'])
     frac = bv / tv
     tbth = float(th[bone[box]].mean())
     tbsp = float(sep[marrow[box]].mean())
@@ -213,14 +226,14 @@ def trabecular(a):
     write_crop_map(maps['separation'], sep.astype(np.float32), g['grid_id'], g['spacing_zyx_mm'], box, inputs, p)
 
     sk, counts = None, {}
-    if a.skeleton:
-        c = skeleton_counts(bone[box], roi[box], round(a.edge_margin_mm / vox, 6))
+    if skeleton:
+        c = skeleton_counts(bone[box], roi[box], round(entry['skeleton_edge_margin_mm'] / vox, 6))
         sk = c.pop('skeleton')
         n_in = c['nodes_interior']
         e_in = c['ends_interior']
         tv_in = c['interior_voxels'] * vox**3
         where = (
-            f'counted in the part of the ROI farther than {a.edge_margin_mm:g} mm from its edge '
+            f'counted in the part of the ROI farther than {entry["skeleton_edge_margin_mm"]:g} mm from its edge '
             f'({tv_in:.5f} mm³ of {tv:.5f}), per mm³ of that tissue volume; not validated against Scanco'
         )
         values[ids['Tb.Nd']] = sidecar.value(
@@ -237,8 +250,17 @@ def trabecular(a):
             tv_in, 'mm³', 'part of the ROI the node and end counts come from, which they are divided by', kind='diagnostic')
         counts = c
 
-    qc = out / 'qc.jpg'
-    qc_figure(qc, a, hu, roi, bone, th, sep, box, sk, values)
+    axis = a.qc_axis
+    rows_ax, cols_ax = (d for d in range(3) if d != axis)
+    lo, hi = box[axis].start, box[axis].stop
+    idx = [int(lo + (hi - lo) * f) for f in (0.25, 0.5, 0.75)]
+    window = vl.parse_window(a.window) if a.window else vl.auto_window(np.asarray(hu[hu.shape[0] // 2]))
+    qc = [
+        vl.slice_sheet(out / 'qc.jpg', hu, [(roi, 'cyan'), (bone, 'orange')], axis, idx, window,
+                       crops=[(box[rows_ax].start, box[cols_ax].start, box[rows_ax].stop, box[cols_ax].stop)] * 3,
+                       titles=[f'axis {axis} index {i}: ROI cyan, bone orange' for i in idx], voxel_mm=vox),
+        maps_figure(out / 'qc-maps.jpg', axis, idx[1], th, sep, roi, bone, box, sk, values),
+    ]
     sidecar.emit_values(
         out / 'morphometry.json',
         values,
@@ -250,52 +272,33 @@ def trabecular(a):
             'skeleton_counts': counts,
             'crop_slices_zyx': [[s.start, s.stop] for s in box],
         },
-        qc=str(qc),
+        qc=[str(q) for q in qc],
         thickness=str(maps['thickness']),
         separation=str(maps['separation']),
     )
 
 
-def qc_figure(path, a, hu, roi, bone, th, sep, box, sk, values):
-    axis = a.qc_axis
-    lo, hi = box[axis].start, box[axis].stop
-    idx = [int(lo + (hi - lo) * f) for f in (0.25, 0.5, 0.75)]
+def maps_figure(path, axis, index, th, sep, roi, bone, box, sk, values):
+    """qc-maps.jpg: the skeleton on bone, the Tb.Th and Tb.Sp maps and the values, on the cut at `index` along `axis`."""
     other = [i for i in range(3) if i != axis]
-    sl2 = tuple(box[i] for i in other)
     r0, r1, c0, c1 = box[other[0]].start, box[other[0]].stop, box[other[1]].start, box[other[1]].stop
     extent = (c0, c1, r1, r0)
-    rows, cols = np.arange(r0, r1), np.arange(c0, c1)
-
-    def cut(i):
-        t = [slice(None)] * 3
-        t[axis] = i
-        return tuple(t)
-
-    fig, axs = plt.subplots(4, 2, figsize=(14, 17))
-    for ax, i in zip(axs.flat[:3], idx):
-        t = cut(i)
-        img = np.asarray(hu[t])[sl2]
-        ax.imshow(img, cmap='gray', extent=extent)
-        for m, c in ((roi, 'cyan'), (bone, 'orange')):
-            if m[t][sl2].any():
-                ax.contour(cols, rows, m[t][sl2], levels=[0.5], colors=c, linewidths=0.7)
-        ax.set_title(f'axis {axis} index {i}: ROI cyan, bone orange')
-    t = cut(idx[1] - lo)
-    ax = axs.flat[3]
+    t = tuple(index - box[axis].start if d == axis else slice(None) for d in range(3))
+    fig, axs = plt.subplots(2, 2, figsize=(14, 12))
+    ax = axs[0, 0]
     if sk is not None:
         ax.imshow(bone[box][t], cmap='gray', extent=extent)
         pts = np.argwhere(sk[t])
         ax.scatter(pts[:, 1] + c0, pts[:, 0] + r0, s=2, c='red')
-        ax.set_title(f'skeleton (red) on bone, index {idx[1]}')
+        ax.set_title(f'skeleton (red) on bone, index {index}')
     else:
         ax.axis('off')
-    for ax, arr, m, name in ((axs.flat[4], th, bone[box], 'Tb.Th'), (axs.flat[5], sep, (roi & ~bone)[box], 'Tb.Sp')):
+    for ax, arr, m, name in ((axs[0, 1], th, bone[box], 'Tb.Th'), (axs[1, 0], sep, (roi & ~bone)[box], 'Tb.Sp')):
         im = ax.imshow(np.where(m[t], arr[t] * 1000, np.nan), cmap='viridis', vmin=0, extent=extent)
         fig.colorbar(im, ax=ax, label='um', fraction=0.04)
-        ax.set_title(f'{name} map, index {idx[1]}')
-    for ax in axs.flat[6:]:
-        ax.axis('off')
-    axs.flat[6].text(
+        ax.set_title(f'{name} map, index {index}')
+    axs[1, 1].axis('off')
+    axs[1, 1].text(
         0,
         1,
         '\n'.join(f'{k}: {v["value"]:.4g} {v["unit"]}' if v['value'] is not None else f'{k}: -' for k, v in values.items()),
@@ -306,6 +309,7 @@ def qc_figure(path, a, hu, roi, bone, th, sep, box, sk, values):
     fig.tight_layout()
     sidecar.save_image(fig, path)
     plt.close(fig)
+    return path
 
 
 def cortical(a):
@@ -316,6 +320,8 @@ def cortical(a):
             f'spacing {sp.tolist()} mm is not isotropic: sphere thickness needs isotropic voxels; resample first'
         )
     vox = float(sp[0])
+    entry = sidecar.protocol(a.spec, a.output, 'value', 'depth_um', 'slab_um')
+    name, depth_um, slab_um = entry['value'], entry['depth_um'], entry['slab_um']
     cortex = load_bool(a.cortex, 'cortical mask')
     surf = np.load(a.surface)
     ax = a.axis
@@ -325,14 +331,14 @@ def cortical(a):
             f'surface shape {surf.shape} must be the mask shape without axis {ax}: '
             f'{tuple(cortex.shape[i] for i in other)}'
         )
-    depth_vox = a.depth_um / 1000 / vox
-    half = max(a.slab_um / 1000 / vox / 2, 0.5)
+    depth_vox = depth_um / 1000 / vox
+    half = max(slab_um / 1000 / vox / 2, 0.5)
     coord = np.arange(cortex.shape[ax]).reshape([-1 if i == ax else 1 for i in range(3)])
     s = np.expand_dims(surf, ax)
     d = (coord - s) * a.direction  # depth in voxels below the surface, along `direction`
     slab = cortex & (np.abs(d - depth_vox) <= half) & np.isfinite(s)
     if not slab.any():
-        sidecar.fail(f'no cortical voxels at {a.depth_um} um below the surface: check --axis, --direction and the mask')
+        sidecar.fail(f'no cortical voxels at {depth_um} um below the surface: check --axis, --direction and the mask')
     # Spheres are measured on the cortex within `context` of the slab along the axis, not the whole bone: the walls
     # are thinner than the context, so a sphere never reaches the cut face, and the run takes seconds not minutes.
     context = int(np.ceil(a.context_um / 1000 / vox))
@@ -344,11 +350,11 @@ def cortical(a):
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     values = {
-        a.name: sidecar.value(
+        name: sidecar.value(
             t.mean(),
             'mm',
             f'mean diameter of the largest sphere inside the cortical mask, over cortical '
-            f'voxels within {a.slab_um} um of {a.depth_um} um below the reference surface (axis {ax})',
+            f'voxels within {slab_um} um of {depth_um} um below the reference surface (axis {ax})',
             std=float(t.std()),
             median=float(np.median(t)),
             n_voxels=int(t.size),
@@ -356,7 +362,7 @@ def cortical(a):
         'voxel-size': sidecar.value(vox, 'mm', 'voxel edge: thickness is a whole number of voxels, and reads one voxel high for odd widths',
                                     kind='diagnostic'),
     }
-    qc = out / f'qc-{a.name}.jpg'
+    qc = out / f'qc-{name}.jpg'
     fig, axs = plt.subplots(1, 2, figsize=(14, 7))
     tfull = np.full(cortex.shape, np.nan, np.float32)
     tfull[box] = th
@@ -370,53 +376,50 @@ def cortical(a):
         proj = np.nanmean(tslab, axis=ax) * 1000
     im = axs[1].imshow(proj, cmap='viridis', vmin=0)
     fig.colorbar(im, ax=axs[1], label='um')
-    axs[1].set_title(f'{a.name} = {values[a.name]["value"] * 1000:.1f} um (slab mean; map = mean along axis {ax}); object {a.object_id}')
+    axs[1].set_title(f'{name} = {values[name]["value"] * 1000:.1f} um (slab mean; map = mean along axis {ax}); object {a.output}')
     fig.tight_layout()
     sidecar.save_image(fig, qc)
     plt.close(fig)
-    slab_entry = objects.mask(out / f'slab-{a.name}.npy', slab, like=a.grid, crop=True)  # the voxels the thickness was read from
+    slab_entry = objects.mask(out / f'slab-{name}.npy', slab, like=a.grid, crop=True)  # the voxels the thickness was read from
     sidecar.emit_values(
-        out / f'{a.name}.json',
+        out / f'{name}.json',
         values,
         meta={
             'grid_id': g['grid_id'],
             'spacing_zyx_mm': g['spacing_zyx_mm'],
-            'inputs': {str(q): sidecar.sha256_file(q) for q in (a.cortex, a.surface, a.grid)},
+            'inputs': {str(q): sidecar.sha256_file(q) for q in (a.cortex, a.surface, a.grid, a.spec)},
         },
         qc=str(qc),
-        objects={a.object_id: slab_entry},
+        objects={a.output: slab_entry},
     )
 
 
 def main():
     ap = sidecar.parser(__doc__)
     sub = ap.add_subparsers(dest='cmd', required=True)
+    proto = argparse.ArgumentParser(add_help=False)
+    proto.add_argument('--spec', type=sidecar.existing, required=True, help="the workflow's protocol.json")
+    proto.add_argument('--output', required=True, metavar='ID', help='output id of the region (volumes, trabecular) or of the slab (cortical): the spec entry that gives the parameters and the ids of the values')
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument('--roi', type=sidecar.existing, required=True, help='bool .npy: the region measured')
     common.add_argument('--hu', type=sidecar.existing, required=True, help='HU array on the region\'s grid (hu.npy for a scan-grid region, the aligned stack\'s HU otherwise): bone = HU above the threshold')
     common.add_argument('--hu-json', type=sidecar.existing, help='the scan\'s hu.json: the lab threshold in HU comes from its calibration (not needed with --threshold)')
     common.add_argument('--threshold', type=float, help='bone threshold in HU (default: the lab threshold, 2.16/cm, from --hu-json)')
     common.add_argument('--grid', type=sidecar.existing, help='sidecar of the grid the region and --hu are on (default: the region\'s own)')
-    common.add_argument('--region', default='ROI', help='name of the region in the value definitions')
     common.add_argument('--out', required=True, help='output directory (created)')
     fmt = sidecar.HelpFormatter
-    v = sub.add_parser('volumes', parents=[common], formatter_class=fmt, help='TV, BV, BV/TV of a region',
+    v = sub.add_parser('volumes', parents=[proto, common], formatter_class=fmt, help='TV, BV, BV/TV of a region',
                        description='TV, BV and BV/TV of a region (mm³, mm³, %). Writes <out>/volumes.json.')
-    v.add_argument('--id', action='append', metavar='KEY=ID', help=f'output id for KEY in {list(VOLUME_KEYS)} (repeatable)')
     v.set_defaults(fn=volumes)
-    t = sub.add_parser('trabecular', parents=[common], formatter_class=fmt, help='TV, BV, BV/TV, Tb.Th, Tb.Sp, Tb.N [, Tb.Nd, Tb.Tm] in an ROI',
-                       description='TV, BV, BV/TV, Tb.Th, Tb.Sp, Tb.N [, Tb.Nd, Tb.Tm] of an ROI, a QC image and the thickness and separation maps. '
-                       'Writes <out>/morphometry.json, qc.jpg, thickness-mm.npy, separation-mm.npy.')
-    t.add_argument('--id', action='append', metavar='KEY=ID', help=f'output id for KEY in {list(TRAB_KEYS)} (repeatable)')
-    t.add_argument('--skeleton', action='store_true', help='also count nodes (Tb.Nd) and ends (Tb.Tm)')
-    t.add_argument(
-        '--edge-margin-mm', type=float, default=0.0315, help='mm: skeleton points this close to the ROI edge are not counted'
-    )
+    t = sub.add_parser('trabecular', parents=[proto, common], formatter_class=fmt, help='TV, BV, BV/TV, Tb.Th, Tb.Sp, Tb.N [, Tb.Nd, Tb.Tm] in an ROI',
+                       description='TV, BV, BV/TV, Tb.Th, Tb.Sp, Tb.N [, Tb.Nd, Tb.Tm] of an ROI, two QC images and the thickness and separation maps. '
+                       'Writes <out>/morphometry.json, qc.jpg, qc-maps.jpg, thickness-mm.npy, separation-mm.npy.')
     t.add_argument('--qc-axis', type=int, default=1, choices=[0, 1, 2], help='axis the QC slices are cut across')
+    t.add_argument('--window', metavar='lo,hi', help="QC display window in HU, or the workflow's anatomy.json (default: automatic)")
     t.set_defaults(fn=trabecular)
-    c = sub.add_parser('cortical', formatter_class=fmt, help='Ct.Th in a slab at a depth below a reference surface',
+    c = sub.add_parser('cortical', parents=[proto], formatter_class=fmt, help='Ct.Th in a slab at a depth below a reference surface',
                        description='Ct.Th: mean largest-contained-sphere diameter over the cortical voxels of a slab at a depth below a '
-                       'reference surface. Writes <out>/<name>.json and qc-<name>.jpg.')
+                       'reference surface. Writes <out>/<value id>.json and qc-<value id>.jpg.')
     c.add_argument('--cortex', type=sidecar.existing, required=True, help='bool .npy of the cortical bone (not trabeculae)')
     c.add_argument(
         '--surface', type=sidecar.existing, required=True, help='2D .npy: index along --axis of the reference surface, per position (the mask shape without --axis)'
@@ -425,13 +428,9 @@ def main():
     c.add_argument(
         '--direction', type=int, default=1, choices=[-1, 1], help='+1 if depth grows with the index along --axis'
     )
-    c.add_argument('--depth-um', type=float, required=True, help='um: depth of the slab centre below the surface')
-    c.add_argument('--slab-um', type=float, default=50, help='um: thickness of the slab centred on the depth')
     c.add_argument(
         '--context-um', type=float, default=400, help='um: cortex kept above and below the slab when measuring spheres'
     )
-    c.add_argument('--name', default='Ct.Th', help='the output id of the value (and the output file name)')
-    c.add_argument('--object-id', required=True, help='the output id the workflow declares for the slab measured (its mask is reported under it)')
     c.add_argument('--grid', type=sidecar.existing, required=True, help='hu.json or a sidecar of the grid the cortex is on')
     c.add_argument('--out', required=True, help='output directory (created)')
     c.set_defaults(fn=cortical)
