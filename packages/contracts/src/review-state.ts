@@ -1,7 +1,7 @@
 /** Human review overlays scientific results; it never changes the scientific fold. */
 import type { RunEvent } from "./events";
-import { fold } from "./fold";
-import type { TaskStatus } from "./ids";
+import { type FoldedTask, fold } from "./fold";
+import type { TaskState, TaskStatus } from "./ids";
 import type { ReviewSummary } from "./review";
 
 /**
@@ -67,4 +67,56 @@ export function progress(revision: {
       0,
     ),
   };
+}
+
+/**
+ * Where the run stands, as far as its tasks' states need it: `stopped` once it has ended,
+ * `paused` while it waits for a runner or keys, `awaiting-ai` while it is held until the AI is
+ * back, none while it runs or is queued to.
+ */
+/** What `taskStates` reads of a folded task. */
+export type StateFacts = Pick<FoldedTask, "id" | "status" | "skipped" | "satisfied" | "threads">;
+
+export type RunHalt = "stopped" | "paused" | "awaiting-ai" | undefined;
+
+/**
+ * Every plan task's state, the one rule the scan review and the study both show. It reads fold
+ * fields only (status, skipped, satisfied, the attempt's threads), never a sentence. `running`:
+ * the threads running now (`openThreads` while the run runs, else none). `failed`: the threads
+ * that ended failed when the run failed, else none: a fatal provider error fails the run with no
+ * task event, so the task whose AI failed is the one it failed on.
+ */
+export function taskStates(
+  revision: {
+    tasks: readonly StateFacts[];
+    plan: { tasks: readonly { id: string; dependsOn: readonly string[] }[] };
+  },
+  run: { running: ReadonlySet<string>; failed: ReadonlySet<string>; halt: RunHalt },
+): Map<string, TaskState> {
+  const byId = new Map(revision.tasks.map((t) => [t.id, t]));
+  return new Map(
+    revision.plan.tasks.map((p) => {
+      const t = byId.get(p.id);
+      const blocked = p.dependsOn.some((d) => !byId.get(d)?.satisfied);
+      return [p.id, stateOf(t, blocked, run)];
+    }),
+  );
+}
+
+function stateOf(
+  t: StateFacts | undefined,
+  blocked: boolean,
+  { running, failed, halt }: Parameters<typeof taskStates>[1],
+): TaskState {
+  const status = t?.status;
+  if (t?.skipped) return "skipped";
+  if (status === "done" || status === "to-check" || status === "failed") return status;
+  const { worker, check } = t?.threads ?? {};
+  if ((worker && failed.has(worker)) || (check && failed.has(check))) return "failed";
+  const started = status === "in-progress" || status === "under-review";
+  if (halt && started) return halt;
+  if (worker && running.has(worker)) return "running";
+  if (status === "under-review" && check && running.has(check)) return "checking";
+  if (started) return "held";
+  return blocked ? "waiting" : "ready";
 }

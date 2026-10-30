@@ -17,13 +17,11 @@
  *
  * To check kinds: items group by task and check title, in workflow task order, then title.
  *
- * Task states: a scan's tasks are where its newest run is (`taskStatus`), read with that run's
- * state, so a task working when the run stopped reads Stopped and one working while the run
- * waits for keys reads Paused. A task To check with no open item left reads Done, since its
- * checks were accepted.
+ * Task states: a scan's tasks are where its newest run is (`taskState`), the state the scan
+ * review shows, derived once on the server. A workflow task outside that run's plan reads
+ * Skipped; with no plan yet, Waiting. A task To check with no open item left reads Done, since
+ * its checks were accepted.
  */
-import type { TaskStatus } from "@voluma/contracts/ids";
-import type { Run } from "@voluma/contracts/run";
 import type { StudyDetail, StudyScanDetail, ToCheckItem } from "@voluma/contracts/study";
 import type { OutputEntry } from "@voluma/contracts/workflow-files";
 import {
@@ -196,28 +194,10 @@ export const scanName = (scan: StudyScanDetail) => {
 export const scanHref = ({ runs: [run] }: StudyScanDetail) =>
   run ? runHref({ runId: run.id }) : null;
 
-/** One task of one scan, from its newest run's task status and that run's state. */
-export function taskState(status: TaskStatus | undefined, run: Run | undefined): TaskState {
-  switch (status) {
-    case undefined:
-    case "pending":
-    case "stale":
-      return "waiting";
-    case "done":
-      return "done";
-    case "to-check":
-      return "to-check";
-    case "failed":
-      return "failed";
-    case "in-progress":
-    case "under-review": {
-      const state = run?.state;
-      if (!state || state.status === "ended") return "stopped";
-      if (state.status === "awaiting-keys") return "paused";
-      if (state.status === "queued") return state.waitingForProvider ? "awaiting-ai" : "paused";
-      return status === "in-progress" ? "running" : "checking";
-    }
-  }
+/** One task of one scan: where its newest run is; outside that run's plan, skipped. */
+export function taskState(scan: StudyScanDetail, taskId: string): TaskState {
+  const states = scan.taskState;
+  return states[taskId] ?? (Object.keys(states).length > 0 ? "skipped" : "waiting");
 }
 
 /** Open checks of the scan's result for one task, counted only while that result is its newest run. */
@@ -228,7 +208,7 @@ function openOn(scan: StudyScanDetail, taskId: string): ToCheckItem[] {
 
 /** A cell of the scan-by-task grid: one task of one scan, and its open checks. */
 export function cellOf(scan: StudyScanDetail, taskId: string): { status: Status; open: number } {
-  const state = taskState(scan.taskStatus[taskId], scan.runs[0]);
+  const state = taskState(scan, taskId);
   const open = openOn(scan, taskId).length;
   if (state === "to-check") return { status: open > 0 ? "check" : "done", open };
   return { status: TASK_STATUS[state], open };
@@ -249,7 +229,7 @@ export function scanGraph(scan: StudyScanDetail, workflow: BundledWorkflow): Sca
     id: t.id,
     title: workflow.taskTitle(t.id),
     dependsOn: t.dependsOn,
-    state: taskState(scan.taskStatus[t.id], scan.runs[0]),
+    state: taskState(scan, t.id),
     needs: openOn(scan, t.id).map(
       (item): NeedItem => ({
         id: item.checkId,
@@ -275,9 +255,7 @@ export function scanGraph(scan: StudyScanDetail, workflow: BundledWorkflow): Sca
 export function stoppedIn(scan: StudyScanDetail, workflow: BundledWorkflow): string | null {
   const run = scan.runs[0];
   if (run?.state.status !== "ended" || run.state.outcome === "completed") return null;
-  const id = Object.entries(scan.taskStatus).find(
-    ([, s]) => s === "in-progress" || s === "under-review" || s === "failed",
-  )?.[0];
+  const id = Object.entries(scan.taskState).find(([, s]) => s === "stopped" || s === "failed")?.[0];
   return id ? workflow.taskTitle(id) : null;
 }
 

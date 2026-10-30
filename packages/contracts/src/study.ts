@@ -28,8 +28,10 @@
  * `values` and `toCheck` come from each scan's **newest completed run** only (`resultRunId`):
  * accepting a check needs the latest completed result, so a live run's items would answer 409.
  * `values` is keyed by output id (the `outputs.json` id, not the fold's `taskId/outputId`)
- * and holds every measurement the run reported. `taskStatus` comes from the scan's **newest
- * run**, whatever its state, so the study shows where a live or stopped run is.
+ * and holds every measurement the run reported. `taskState` comes from the scan's **newest
+ * run**, whatever its state, so the study shows where a live or stopped run is: the state the
+ * scan review shows (`taskStates`, review-state.ts), keyed by the run's plan tasks; a workflow
+ * task missing from it is outside the run's plan.
  *
  * The list is what Home renders: per study its counts and each scan's newest run in brief
  * (`studyRunSummarySchema`), so Home reads no run list.
@@ -41,7 +43,7 @@ import {
   segmentSchema,
   studyIdSchema,
   taskIdSchema,
-  taskStatusSchema,
+  taskStateSchema,
 } from "./ids";
 import { measurementSchema } from "./review";
 import {
@@ -150,7 +152,7 @@ export const studyScanDetailSchema = z.object({
    * Task id → status in the newest run's latest revision; empty before it has a plan or with no
    * run. A task outside the run's plan (not selected) is absent.
    */
-  taskStatus: z.record(taskIdSchema, taskStatusSchema),
+  taskState: z.record(taskIdSchema, taskStateSchema),
 });
 export type StudyScanDetail = z.infer<typeof studyScanDetailSchema>;
 

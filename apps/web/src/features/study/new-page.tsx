@@ -14,7 +14,7 @@ import { inputsQuery, runsQuery, studiesQuery } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
 import type { Input, Run, VisitorKeys } from "@voluma/contracts/run";
 import type { CreateStudyRequest } from "@voluma/contracts/study";
-import { formatDuration, formatUsd, loadKeys, RunKeyLine } from "@voluma/run-view";
+import { formatDuration, formatUsd, loadKeys, RunKeyLine, runHref } from "@voluma/run-view";
 import {
   Breadcrumb,
   Button,
@@ -233,7 +233,9 @@ export function NewPage() {
       void queryClient.invalidateQueries({ queryKey: runsQuery().queryKey });
       const run = detail.scans[0]?.runs[0];
       navigate(
-        detail.scans.length === 1 && run ? `/runs/${run.id}/live` : `/studies/${detail.study.id}`,
+        detail.scans.length === 1 && run
+          ? runHref({ runId: run.id })
+          : `/studies/${detail.study.id}`,
       );
     },
   });

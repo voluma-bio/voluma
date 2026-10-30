@@ -19,6 +19,17 @@ export function openThreads(events: readonly RunEvent[]): string[] {
   return [...open].flatMap(([id, isOpen]) => (isOpen ? [id] : []));
 }
 
+/** Ids of the threads whose latest `thread.ended` is `failed`. */
+export function failedThreads(events: readonly RunEvent[]): Set<string> {
+  const failed = new Set<string>();
+  for (const e of events)
+    if (e.type === "thread.ended") {
+      if (e.payload.status === "failed") failed.add(e.threadId);
+      else failed.delete(e.threadId);
+    } else if (e.type === "thread.started") failed.delete(e.threadId);
+  return failed;
+}
+
 /**
  * The server's cancel of a run that did not finish (a user's cancel, or a failure it records as
  * one): every open thread ends `cancelled` and the root last. The server writes the ends in the

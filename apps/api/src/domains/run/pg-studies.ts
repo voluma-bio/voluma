@@ -135,6 +135,7 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
             .orderBy(asc(studyScans.position));
           const found = await results(tx, and(readableRuns(reader), eq(runs.studyId, studyId)), {
             skipUnreadable: true,
+            stoppedNewest: true,
           });
           const { newest, newestCompleted } = newestOf(found);
           const runsOf = new Map<string, Run[]>();
@@ -159,7 +160,7 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
                 toCheck: result
                   ? result.toCheck.map((item) => ({ ...item, runId: result.run.id }))
                   : [],
-                taskStatus: newest.get(scan.inputId)?.taskStatus ?? {},
+                taskState: newest.get(scan.inputId)?.taskState ?? {},
               };
             }),
           };

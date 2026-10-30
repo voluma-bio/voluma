@@ -173,8 +173,7 @@ function Summary({
   const running = detail.scans.filter((s) => s.runs[0]?.state.status === "running");
   const tasks = running.reduce(
     (n, s) =>
-      n +
-      Object.values(s.taskStatus).filter((t) => t === "in-progress" || t === "under-review").length,
+      n + Object.values(s.taskState).filter((t) => t === "running" || t === "checking").length,
     0,
   );
 
@@ -301,7 +300,7 @@ function RunningNow({ detail, workflow }: { detail: StudyDetail; workflow: Bundl
   const working = (s: StudyScanDetail) =>
     workflow.tasks
       .filter((t) => {
-        const state = taskState(s.taskStatus[t.id], s.runs[0]);
+        const state = taskState(s, t.id);
         return state === "running" || state === "checking";
       })
       .map((t) => workflow.taskTitle(t.id));

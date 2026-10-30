@@ -5,11 +5,12 @@
  */
 
 import { runEventSchema } from "@voluma/contracts/events";
-import type { TaskStatus } from "@voluma/contracts/ids";
+import type { TaskState } from "@voluma/contracts/ids";
 import type { ReviewSummary } from "@voluma/contracts/review";
-import { progress, reviewState } from "@voluma/contracts/review-state";
+import { progress, type RunHalt, reviewState, taskStates } from "@voluma/contracts/review-state";
 import { type Input, type Run, runSchema } from "@voluma/contracts/run";
 import type { StudyValue, ToCheckItem } from "@voluma/contracts/study";
+import { failedThreads, openThreads } from "@voluma/contracts/threads";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { callsOfRuns, type RunCalls } from "@voluma/provider-calls";
 import { and, asc, desc, eq, inArray, isNull, lte, or, type SQL, sql } from "drizzle-orm";
@@ -250,8 +251,8 @@ export async function loadRecords(
 
 /**
  * What one `reviewState(log)` gives the reads: for a completed run the summary, and for
- * studies its measurement values and open checks; for a live run its task progress; for any
- * run each task's status (the study's scan-by-task grid).
+ * studies its measurement values and open checks; for a live run its task progress; and what
+ * `taskStates` needs, which the run's state completes on each read (`statesOf`).
  */
 type Derived = {
   summary: ReviewSummary | null;
@@ -259,10 +260,15 @@ type Derived = {
   /** Output id (`outputs.json`) → value, from the latest revision's tasks. */
   values: Record<string, StudyValue>;
   toCheck: Omit<ToCheckItem, "runId">[];
-  taskStatus: Record<string, TaskStatus>;
+  /** The latest revision's tasks and plan as `taskStates` reads them, and the run's threads; null before a plan. */
+  graph: {
+    revision: Parameters<typeof taskStates>[0];
+    open: string[];
+    failed: string[];
+  } | null;
 };
 
-const NOTHING: Derived = { summary: null, tasks: null, values: {}, toCheck: [], taskStatus: {} };
+const NOTHING: Derived = { summary: null, tasks: null, values: {}, toCheck: [], graph: null };
 
 type Revision = ReturnType<typeof reviewState>["revisions"][number];
 
@@ -278,9 +284,7 @@ function derive(log: RunRecord["events"]): Derived {
   const latest = revisions.at(-1);
   const values: Derived["values"] = {};
   const toCheck: Derived["toCheck"] = [];
-  const taskStatus: Derived["taskStatus"] = {};
   for (const task of latest?.tasks ?? []) {
-    taskStatus[task.id] = task.status;
     for (const m of task.measurements) {
       // The fold names a measurement `taskId/outputId`; the workflow files know the output id.
       values[m.id.slice(task.id.length + 1)] = {
@@ -300,15 +304,61 @@ function derive(log: RunRecord["events"]): Derived {
       }
     }
   }
-  return { summary, tasks: progressOf(latest), values, toCheck, taskStatus };
+  // Only what `taskStates` reads is kept, so a cached run holds no evidence or measurements twice.
+  const graph: Derived["graph"] = latest
+    ? {
+        revision: {
+          tasks: latest.tasks.map(({ id, status, skipped, satisfied, threads }) => ({
+            id,
+            status,
+            skipped,
+            satisfied,
+            threads,
+          })),
+          plan: { tasks: latest.plan.tasks.map(({ id, dependsOn }) => ({ id, dependsOn })) },
+        },
+        open: openThreads(log),
+        failed: [...failedThreads(log)],
+      }
+    : null;
+  return { summary, tasks: progressOf(latest), values, toCheck, graph };
 }
 
-type SummaryCache = Map<string, { lastEventId: string | null; derived: Derived }>;
+/** Where the run stands for its tasks, as the run page reads it from the same state. */
+function haltOf({ run, held }: Row): RunHalt {
+  switch (run.state) {
+    case "running":
+      return undefined;
+    case "queued":
+      return held ? "awaiting-ai" : "paused";
+    case "awaiting-keys":
+      return "paused";
+    case "ended":
+      return "stopped";
+  }
+}
+
+/** Every plan task's state: the derived graph read with the run's state now. */
+function statesOf(row: Row, graph: Derived["graph"]): Record<string, TaskState> {
+  if (!graph) return {};
+  const ended = row.run.state === "ended";
+  const states = taskStates(graph.revision, {
+    running: new Set(row.run.state === "running" ? graph.open : []),
+    failed: new Set(ended && row.run.outcome === "failed" ? graph.failed : []),
+    halt: haltOf(row),
+  });
+  return Object.fromEntries(states);
+}
+
+type SummaryCache = Map<
+  string,
+  { lastEventId: string | null; derived: Derived; unreadable: boolean }
+>;
 
 /** The most derived results kept, least recently read out first; evicted ones are derived again from the event log. */
 const CACHE_CAP = 2048;
 
-export type RunResult = { run: Run } & Derived;
+export type RunResult = { run: Run; taskState: Record<string, TaskState> } & Derived;
 
 interface LoadOptions {
   cache?: SummaryCache;
@@ -320,12 +370,17 @@ interface LoadOptions {
    * don't parse is always kept, with `tasks: null`: it still runs.
    */
   skipUnreadable?: boolean;
+  /**
+   * The study read: a failed or cancelled run that is its scan's newest is derived too, so its
+   * scan shows where it stopped (`taskState`). Elsewhere a stopped run has nothing to derive.
+   */
+  stoppedNewest?: boolean;
 }
 
 async function loadResults(
   tx: Tx,
   where: SQL | undefined,
-  { cache = new Map(), skipUnreadable = false }: LoadOptions = {},
+  { cache = new Map(), skipUnreadable = false, stoppedNewest = false }: LoadOptions = {},
 ): Promise<RunResult[]> {
   const rows = await loadRows(tx, where);
   const completed = new Set(
@@ -333,8 +388,15 @@ async function loadResults(
       .filter(({ run }) => run.state === "ended" && run.outcome === "completed")
       .map(({ run }) => run.id),
   );
-  // Every run is derived: a stopped one still shows where it stopped (`taskStatus`).
-  const ids = rows.map(({ run }) => run.id);
+  // Rows are newest first, so a scan's first row is its newest run.
+  const seen = new Set<string>();
+  const ids = rows
+    .filter(({ run }) => {
+      const newest = !seen.has(run.inputId);
+      seen.add(run.inputId);
+      return run.state !== "ended" || run.outcome === "completed" || (stoppedNewest && newest);
+    })
+    .map(({ run }) => run.id);
   const watermarks = ids.length
     ? await tx
         .selectDistinctOn([events.runId], { runId: events.runId, id: events.id })
@@ -347,22 +409,28 @@ async function loadResults(
   const cached = new Map(ids.map((id) => [id, cache.get(id)]));
   const missing = ids.filter((id) => cached.get(id)?.lastEventId !== (versions.get(id) ?? null));
   const { logs, unreadable } = await loadLogs(tx, missing, true);
-  // Only a completed run needs its events; a live or stopped one unreadable reads as `NOTHING`.
-  const lost = [...unreadable].filter((id) => completed.has(id));
-  if (!skipUnreadable && lost.length)
-    throw new Error(`run ${lost.join(", ")}: stored events can't be read`);
   const derivedOf = new Map<string, Derived>();
+  const lost: string[] = [];
   for (const id of ids) {
-    if (unreadable.has(id)) continue;
     const lastEventId = versions.get(id) ?? null;
     const hit = cached.get(id);
-    const derived = hit?.lastEventId === lastEventId ? hit.derived : derive(logs.get(id) ?? []);
-    derivedOf.set(id, derived);
+    // An unreadable run is cached as such against its watermark, so it isn't loaded on every read.
+    const entry =
+      hit?.lastEventId === lastEventId
+        ? hit
+        : unreadable.has(id)
+          ? { lastEventId, derived: NOTHING, unreadable: true }
+          : { lastEventId, derived: derive(logs.get(id) ?? []), unreadable: false };
+    // Only a completed run needs its events; a live or stopped one unreadable reads as `NOTHING`.
+    if (entry.unreadable && completed.has(id)) lost.push(id);
+    derivedOf.set(id, entry.derived);
     // Delete first, so the entry goes last in the map's insertion order.
     cache.delete(id);
-    cache.set(id, { lastEventId, derived });
+    cache.set(id, entry);
     if (cache.size > CACHE_CAP) cache.delete(cache.keys().next().value as string);
   }
+  if (!skipUnreadable && lost.length)
+    throw new Error(`run ${lost.join(", ")}: stored events can't be read`);
   return rows
     .filter(({ run }) => !lost.includes(run.id))
     .filter(
@@ -376,7 +444,7 @@ async function loadResults(
     )
     .map((row) => {
       const derived = derivedOf.get(row.run.id) ?? NOTHING;
-      return { run: toRun(row, derived), ...derived };
+      return { run: toRun(row, derived), taskState: statesOf(row, derived.graph), ...derived };
     });
 }
 
