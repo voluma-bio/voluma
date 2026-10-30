@@ -11,7 +11,7 @@
  *   signals all of it) and records that group;
  *   an abort kills that group with a second exec, or terminates the sandbox if that fails.
  * - Read-only inputs flagged `stage` are copied to local disk at their path at create: every
- *   directory first, then 32 parallel workers of 16 files, then re-copies of only the files still
+ *   directory first, then 32 parallel workers of 16 files (each `cp` killed after 30 s, the whole step after 300 s), then re-copies of only the files still
  *   missing or the wrong size, up to three more passes (`STAGE_SCRIPT`; the copy is writable: commands run as root, and a
  *   sandbox cannot remount or `chattr` a path or run as another user and still write the mounts);
  *   the bucket is mounted at a private path under /staged for the copy.
@@ -66,6 +66,13 @@ const MAX_MODAL_NAME = 64;
 const STAGE_PARALLELISM = 32;
 // Copy passes after the first, over the files still missing or the wrong size.
 const STAGE_RETRIES = 3;
+// A `cp` of 16 files (a few MB each) normally takes well under a second; a full parallel copy of
+// OA7-1R (1,126 files, 535 MB) takes 7-16 s. One that outlasts this is stuck in the mount: it is
+// killed and the next pass re-copies its files.
+const STAGE_COPY_SECONDS = 30;
+// The whole staging step, passes included. A mount that never answers fails the sandbox start
+// here (the runner reports it as infrastructure) instead of holding the run for an hour.
+const STAGE_SECONDS = 300;
 // Tail of the stage command's stderr kept in the error.
 const STAGE_STDERR_CHARS = 4000;
 // Copies the files under "$1" to "$2". Every directory is made first: parallel
@@ -81,7 +88,7 @@ list() { (cd "$1" && find . -type f -printf '%s %p\\0' | sort -z); }
 list . > "$src" || { echo "listing $1 failed" >&2; exit 1; }
 sed -z 's/^[0-9]* //' "$src" > "$todo"
 for pass in $(seq 0 ${STAGE_RETRIES}); do
-  xargs -0 -r -P ${STAGE_PARALLELISM} -n 16 cp --parents -t "$2" < "$todo"
+  xargs -0 -r -P ${STAGE_PARALLELISM} -n 16 timeout -k 2 ${STAGE_COPY_SECONDS} cp --parents -t "$2" < "$todo"
   # A partial destination listing only causes extra re-copies, never a false pass.
   comm -z -23 "$src" <(list "$2") | sed -z 's/^[0-9]* //' > "$todo"
   [ -s "$todo" ] || exit 0
@@ -234,18 +241,30 @@ class ModalSandboxAdapter implements Sandbox {
     for (const mount of this.#mounts.filter((m) => m.stage)) {
       let code = -1;
       let stderr = "";
+      // Under `timeout -k` like `exec()`, so the deadline kills the copies too, not just the shell.
       for await (const chunk of this.#run(
-        ["bash", "-c", STAGE_SCRIPT, "_", mountedAt(mount), mount.path],
-        3600,
+        [
+          "timeout",
+          "-k",
+          String(KILL_GRACE_SECONDS),
+          String(STAGE_SECONDS),
+          "bash",
+          "-c",
+          STAGE_SCRIPT,
+          "_",
+          mountedAt(mount),
+          mount.path,
+        ],
+        STAGE_SECONDS + KILL_GRACE_SECONDS,
       )) {
         if (chunk.type === "exit") code = chunk.code;
         else if (chunk.type === "stderr") stderr = (stderr + chunk.data).slice(-STAGE_STDERR_CHARS);
       }
       if (code !== 0) {
         const detail = stderr.trim();
-        throw new Error(
-          `staging ${mount.path} failed (exit ${code})${detail ? `: ${detail}` : ""}`,
-        );
+        const why =
+          code === 124 || code === 137 ? `timed out after ${STAGE_SECONDS} s` : `exit ${code}`;
+        throw new Error(`staging ${mount.path} failed (${why})${detail ? `: ${detail}` : ""}`);
       }
     }
   }
