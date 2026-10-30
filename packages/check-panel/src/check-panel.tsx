@@ -66,7 +66,12 @@ function Panel({ items, start, onClose, onAccepted }: CheckPanelProps) {
     queryFn: () => getReviewRun(item.runId),
   });
   // Whether the run is an example (read-only), and who may talk to its AI.
-  const run = useQuery({ queryKey: ["run", item.runId], queryFn: () => getRun(item.runId) });
+  const run = useQuery({
+    queryKey: ["run", item.runId],
+    queryFn: () => getRun(item.runId),
+    // A reopened run's claim ends without the panel's stream open: poll until it has.
+    refetchInterval: (q) => (q.state.data?.state.status === "ended" ? false : 3000),
+  });
   const me = useQuery({ queryKey: ["me"], queryFn: getMe, staleTime: Number.POSITIVE_INFINITY });
   // The run's stream moved: its state, and maybe its results, did too.
   const runChanged = useDebounced(() => {

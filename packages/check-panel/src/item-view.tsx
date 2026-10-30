@@ -22,7 +22,7 @@ import {
 } from "@voluma/viewer/grid";
 import { Check } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { Chat, chatBlocked } from "./chat";
+import { Chat, chatBlocked, useRunChat } from "./chat";
 import type { CheckItem } from "./types";
 
 /** How often a view still preparing asks whether its assets have arrived. */
@@ -77,6 +77,10 @@ export function ItemView({
     [run, task, item, checkId],
   );
   const blocked = runInfo && me !== undefined ? chatBlocked(runInfo, me) : undefined;
+  const chat = useRunChat(item.runId, blocked === null ? (runInfo ?? null) : null, onRunChanged);
+  // A run on its first pass has no results to talk about yet; a reopened one does.
+  const firstPass = runInfo?.state.status !== "ended" && !chat.log.reopened;
+  const talk = blocked === null && !firstPass;
   const [marking, setMarking] = useState(false);
   const [marks, setMarks] = useState<Mark[]>([]);
   const viewer = useRef<GridViewerHandle>(null);
@@ -111,7 +115,8 @@ export function ItemView({
 
   let stage: ReactNode;
   if (review.isPending) stage = <Notice>Loading the run…</Notice>;
-  else if (review.isError)
+  // A reopened run's results are unavailable while it is corrected: keep showing the last ones.
+  else if (review.isError && !run)
     stage = (
       <Notice alert action={<Button onClick={() => void refetch()}>Try again</Button>}>
         {loadError(review.error)}
@@ -133,7 +138,7 @@ export function ItemView({
           setMarks((all) => [...all, { volumeId: view.gridId, ...m } as Mark].slice(-20))
         }
       >
-        {blocked === null && (
+        {talk && (
           <span className="flex items-center gap-2">
             <Button size="sm" aria-pressed={marking} onClick={() => setMarking((m) => !m)}>
               {marking ? "Done marking" : "Mark"}
@@ -193,10 +198,10 @@ export function ItemView({
             ))}
           <Values task={task} before={previousAttempt(run!, task)} />
           {view && view.objects.length > 0 && <InView objects={view.objects} />}
-          {blocked === null && runInfo ? (
+          {talk && runInfo && run ? (
             <Chat
               run={runInfo}
-              review={run!}
+              review={run}
               taskId={item.taskId}
               marks={marks}
               onMarksSent={() => {
@@ -205,10 +210,14 @@ export function ItemView({
               }}
               removeMark={(i) => setMarks((all) => all.filter((_, j) => j !== i))}
               viewer={viewer}
-              onRunChanged={onRunChanged}
+              chat={chat}
             />
           ) : (
-            blocked && <p className="text-ui text-muted-foreground">{blocked}</p>
+            (blocked || (blocked === null && firstPass)) && (
+              <p className="text-ui text-muted-foreground">
+                {blocked ?? "You can talk to the run's AI here once the run has finished."}
+              </p>
+            )
           )}
         </aside>
       )}

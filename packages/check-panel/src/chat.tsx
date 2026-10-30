@@ -5,7 +5,7 @@
  * talks to a finished run; everyone else sees one line saying why.
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ApiError, sendRunMessage, subscribe } from "@voluma/api-client";
+import { ApiError, runMessageSnapshotUrl, sendRunMessage, subscribe } from "@voluma/api-client";
 import type { Me } from "@voluma/contracts/auth";
 import { type ConversationItem, conversation } from "@voluma/contracts/conversation";
 import type { RunEvent } from "@voluma/contracts/events";
@@ -18,7 +18,15 @@ import { X } from "lucide-react";
 import { type RefObject, useEffect, useRef, useState } from "react";
 
 /** A correction claim that failed or was stopped; the run kept its earlier results. */
-type Stopped = { from: "stop"; id: string; seq: number; cancelled: boolean; error?: string };
+type Stopped = {
+  from: "stop";
+  id: string;
+  seq: number;
+  cancelled: boolean;
+  /** It was redoing a task (a go), not answering a note. */
+  redo: boolean;
+  error?: string;
+};
 
 /** The chat as the stream has told it so far. */
 type ChatLog = {
@@ -27,9 +35,11 @@ type ChatLog = {
   root?: string;
   /** The `seq` of the latest claim end (the root's end or a `correction.ended`), 0 for none. */
   endedAt: number;
+  /** A message has reopened the run: it is being corrected, not on its first pass. */
+  reopened: boolean;
 };
 
-const EMPTY: ChatLog = { items: [], endedAt: 0 };
+const EMPTY: ChatLog = { items: [], endedAt: 0, reopened: false };
 
 function fold(log: ChatLog, e: RunEvent): ChatLog {
   if (e.type === "person.message" || e.type === "reply")
@@ -45,29 +55,36 @@ function fold(log: ChatLog, e: RunEvent): ChatLog {
           id: e.id,
           seq: e.seq,
           cancelled: e.payload.status === "cancelled",
+          redo: log.items.filter((i) => i.from === "person").at(-1)?.go === true,
           ...(e.payload.error && { error: e.payload.error }),
         },
       ],
     };
+  if (e.type === "run.reopened") return { ...log, reopened: true };
   if (e.type === "thread.started" && e.payload.kind === "supervisor" && !log.root)
     return { ...log, root: e.threadId };
   if (e.type === "thread.ended" && e.threadId === log.root) return { ...log, endedAt: e.seq };
   return log;
 }
 
+export type RunChat = ReturnType<typeof useRunChat>;
+
 /**
- * The run's chat, live. The stream closes when the run ends; `reconnect` opens it again from
- * where it stopped, after a message reopens the run. `onActivity` hears of every event.
+ * The run's chat, live, while `run` is given (null: the chat isn't shown, no stream). The stream
+ * closes when a claim ends; it opens again from where it stopped once the run is no longer
+ * ended (a message reopened it). `onActivity` hears of every event.
  */
-function useRunChat(runId: string, onActivity: () => void) {
+export function useRunChat(runId: string, run: Run | null, onActivity: () => void) {
   const [log, setLog] = useState<ChatLog>(EMPTY);
   const [closed, setClosed] = useState(false);
   const [generation, setGeneration] = useState(0);
   const after = useRef(0);
   const latest = useRef(onActivity);
   latest.current = onActivity;
+  const on = run !== null;
   // biome-ignore lint/correctness/useExhaustiveDependencies: `generation` reopens the stream.
   useEffect(() => {
+    if (!on) return;
     // Buffer the replay of a long run's log: one render per animation frame, not per event.
     let pending: RunEvent[] = [];
     let frame = 0;
@@ -98,16 +115,26 @@ function useRunChat(runId: string, onActivity: () => void) {
       if (pending.length) flush();
       close();
     };
-  }, [runId, generation]);
+  }, [runId, generation, on]);
   const reconnect = () => {
     if (!closed) return;
     setClosed(false);
     setGeneration((g) => g + 1);
   };
-  return { log, closed, reconnect };
+  // A note sent mid-claim queues the run again at once; a send reopens an ended one.
+  const status = run?.state.status;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reconnect is fresh each render.
+  useEffect(() => {
+    if (closed && status !== undefined && status !== "ended") reconnect();
+  }, [closed, status]);
+  return { log, reconnect };
 }
 
-/** Why this run's AI can't be asked here, or null when it can. */
+/**
+ * Why this run's AI can't be asked here, or null when it may be. A run still on its first pass
+ * is told apart from a reopened one by the log (`ChatLog.reopened`): its `Run.review` is null
+ * either way.
+ */
 export function chatBlocked(run: Run, me: Me | null): string | null {
   if (run.example) return "This is an example run, so the AI can't change it.";
   if (run.credentials === "visitor")
@@ -116,9 +143,6 @@ export function chatBlocked(run: Run, me: Me | null): string | null {
     return "Only the person who started this run can ask its AI to change it.";
   if (run.state.status === "ended" && run.state.outcome !== "completed")
     return "This run didn't finish, so it can't be reopened. Start a new run to try again.";
-  // A run still on its first pass has no results to talk about; a reopened one does.
-  if (run.state.status !== "ended" && run.review === null)
-    return "You can talk to the run's AI here once the run has finished.";
   return null;
 }
 
@@ -135,7 +159,7 @@ export function Chat({
   onMarksSent,
   removeMark,
   viewer,
-  onRunChanged,
+  chat,
 }: {
   run: Run;
   review: ReviewRun;
@@ -146,27 +170,10 @@ export function Chat({
   removeMark: (index: number) => void;
   /** The viewer, for a snapshot of the view; null when none is shown. */
   viewer: RefObject<GridViewerHandle | null>;
-  /** The stream moved: refetch the run and its results. */
-  onRunChanged: () => void;
+  chat: RunChat;
 }) {
   const client = useQueryClient();
-  const { log, closed, reconnect } = useRunChat(run.id, onRunChanged);
-  // The stream closes when a claim ends; a note sent mid-claim queues the run again at once.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reconnect is fresh each render.
-  useEffect(() => {
-    if (closed && run.state.status !== "ended") reconnect();
-  }, [closed, run.state.status]);
-  // The views sent from this page, by message event id: the server keeps them where the AI reads
-  // them, which the browser can't.
-  const [sentViews, setSentViews] = useState<ReadonlyMap<string, string>>(new Map());
-  const views = useRef(sentViews);
-  views.current = sentViews;
-  useEffect(
-    () => () => {
-      for (const url of views.current.values()) URL.revokeObjectURL(url);
-    },
-    [],
-  );
+  const { log } = chat;
   const [note, setNote] = useState("");
   // Kept across retries of one message, so a retry stores nothing twice.
   const [messageId, setMessageId] = useState(() => crypto.randomUUID());
@@ -175,25 +182,21 @@ export function Chat({
   const send = useMutation({
     mutationFn: async ({ go }: { go: boolean }) => {
       const blob = go ? null : await viewer.current?.snapshot(MAX_MESSAGE_SNAPSHOT_BYTES);
-      const response = await sendRunMessage(run.id, {
+      return sendRunMessage(run.id, {
         id: messageId,
         taskId,
         ...(go ? { go: true } : { text: note.trim() }),
         ...(!go && marks.length > 0 && { marks }),
         ...(blob && { snapshot: { mimeType: "image/png", data: await base64(blob) } }),
       });
-      return { response, blob };
     },
-    onSuccess: ({ response, blob }, { go }) => {
+    onSuccess: (response, { go }) => {
       client.setQueryData<Run>(["run", run.id], (r) => r && { ...r, state: response.state });
-      if (blob)
-        setSentViews((all) => new Map(all).set(response.eventId, URL.createObjectURL(blob)));
       setMessageId(crypto.randomUUID());
       if (!go) {
         setNote("");
         onMarksSent();
       }
-      reconnect();
     },
   });
 
@@ -237,13 +240,12 @@ export function Chat({
                 <p className="text-ui whitespace-pre-wrap text-foreground">{item.text}</p>
               ) : item.from === "stop" ? (
                 <p role="alert" className="text-ui text-destructive">
-                  {item.cancelled ? "The redo was stopped" : "The redo failed"}
-                  {item.error ? `: ${item.error}` : ""}. The run keeps its earlier results.
+                  {stoppedText(item)} The run keeps its earlier results.
                 </p>
               ) : (
                 <Said
                   item={item}
-                  view={sentViews.get(item.id)}
+                  runId={run.id}
                   about={item.taskId !== taskId && item.taskId ? titleOf(item.taskId) : undefined}
                   queued={redoing && item.seq > lastGo.seq}
                 />
@@ -337,13 +339,12 @@ export function Chat({
 
 function Said({
   item,
-  view,
+  runId,
   about,
   queued,
 }: {
   item: Extract<ConversationItem, { from: "person" }>;
-  /** The view sent with it, when it was sent from this page. */
-  view?: string;
+  runId: string;
   /** Another task's title, when the message was about that one. */
   about?: string;
   /** Sent while a redo runs: the AI reads it after. */
@@ -367,20 +368,25 @@ function Said({
           ))}
         </ul>
       )}
-      {view ? (
+      {item.snapshotKey && (
         <img
-          src={view}
+          // The event id is `<runId>.person:<the id the panel sent>`.
+          src={runMessageSnapshotUrl(runId, item.id.slice(item.id.indexOf(".person:") + 8))}
           alt="The view sent with this message"
           className="max-h-28 self-start rounded border border-border"
         />
-      ) : (
-        item.snapshotKey && <p className="text-meta text-muted-foreground">Sent with the view</p>
       )}
       {queued && (
         <p className="text-meta text-muted-foreground">The AI reads this after the redo.</p>
       )}
     </div>
   );
+}
+
+function stoppedText(item: Stopped) {
+  const what = item.redo ? "The redo" : "The AI's answer";
+  const head = `${what} ${item.cancelled ? "was stopped" : "failed"}`;
+  return item.error ? `${head}: ${item.error.replace(/\.$/, "")}.` : `${head}.`;
 }
 
 /** A blob's bytes as plain base64 (not a data URL). */
