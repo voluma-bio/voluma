@@ -131,6 +131,111 @@ describe("run loop", () => {
     expect(duplicates(w.stored)).toEqual([]);
   });
 
+  it("needs-review: submit_task is refused while an output the previous attempt reported is not reported again", async () => {
+    const plan = [
+      {
+        ...task("t1"),
+        outputs: [
+          ...task("t1").outputs,
+          { id: "m2", required: false, kind: "measurement" as const, unit: "mm", on: [] },
+        ],
+      },
+    ];
+    const report = (outputId: string) =>
+      call("report_output", {
+        taskId: "t1",
+        outputId,
+        title: outputId,
+        output: measurement(1),
+        evidence: [],
+      });
+    const submit = call("submit_task", { taskId: "t1", summary: "t1 measured." });
+    // Attempt 1 reports both; attempt 2 reports only m1, is refused naming m2, then reports it.
+    const twice: Script = (t) => {
+      const attempt = t.users.length;
+      const reports = t.calls.filter((c) => c.name === "report_output").length;
+      if (t.fresh && attempt === 1) return report("m1");
+      if (attempt === 1) return [report("m2"), submit][reports - 1] ?? "Done.";
+      if (t.fresh) return report("m1");
+      if (t.steps === 1) return submit;
+      if (t.steps === 2) return report("m2");
+      if (t.steps === 3) return submit;
+      return "Done.";
+    };
+    const feedback: Script = (t) =>
+      t.fresh && /The check of t1 found problems/.test(t.lastUser)
+        ? call("message", { threadId: `${R}t1.worker`, text: "Redo it." })
+        : undefined;
+    const w = world({
+      plan,
+      worker: twice,
+      main: first(feedback, chain(["t1"])),
+      check: checker((_id, n) => (n === 1 ? "needs-review" : "passed")),
+    });
+    const folded = await w.run();
+    expect(
+      folded.tasks.map((t) => `${t.id}:${t.status}`),
+      w.text(),
+    ).toEqual(["t1:done"]);
+    const refusals = w.text().match(/cannot be submitted: the previous attempt of t1 reported m2/g);
+    expect(refusals).toHaveLength(1);
+    expect(of(w.stored, "output", "t1.worker")).toHaveLength(4);
+  });
+
+  it("needs-review: a stopped partial redo is not the baseline; a new worker is refused for what the checked attempt reported", async () => {
+    const plan = [
+      {
+        ...task("t1"),
+        outputs: [
+          ...task("t1").outputs,
+          { id: "m2", required: false, kind: "measurement" as const, unit: "mm", on: [] },
+        ],
+      },
+    ];
+    const report = (outputId: string) =>
+      call("report_output", {
+        taskId: "t1",
+        outputId,
+        title: outputId,
+        output: measurement(1),
+        evidence: [],
+      });
+    const submit = call("submit_task", { taskId: "t1", summary: "t1 measured." });
+    const worker: Script = (t) => {
+      const steps = [report("m1"), report("m2"), submit];
+      // The first worker: both outputs and a submit, then (after feedback) only m1 and no submit.
+      if (t.thread.endsWith("t1.worker"))
+        return t.users.length === 1 ? steps[t.steps] : t.steps === 0 ? report("m1") : "Stopped.";
+      // The replacement: m1 only, refused naming m2, then m2.
+      return [report("m1"), submit, report("m2"), submit][t.steps] ?? "Done.";
+    };
+    const main: Script = (t) => {
+      const did = (name: string) => t.calls.some((c) => c.name === name);
+      if (t.fresh && /The check of t1 found problems/.test(t.lastUser))
+        return call("message", { threadId: `${R}t1.worker`, text: "Redo it." });
+      if (t.fresh && did("message") && !did("stop_worker") && t.users.length > 2)
+        return call("stop_worker", { threadId: `${R}t1.worker`, reason: "Replacing it." });
+      const starts = t.calls.filter((c) => c.name === "start_worker").length;
+      if (t.fresh && did("stop_worker") && starts === 1)
+        return call("start_worker", { taskId: "t1", brief: "Measure t1 again." });
+      return chain(["t1"])(t);
+    };
+    const w = world({
+      plan,
+      worker,
+      main,
+      check: checker((_id, n) => (n === 1 ? "needs-review" : "passed")),
+    });
+    const folded = await w.run();
+    expect(
+      folded.tasks.map((t) => `${t.id}:${t.status}`),
+      w.text(),
+    ).toEqual(["t1:done"]);
+    expect(of(w.stored, "attempt.opened", "t1.worker.2")).toHaveLength(1);
+    const refusals = w.text().match(/cannot be submitted: the previous attempt of t1 reported m2/g);
+    expect(refusals).toHaveLength(1);
+  });
+
   it("fix limit stops feedback; an upstream correction makes the task stale and it can be redone", async () => {
     const main: Script = (t) => {
       const lastResult = t.results.at(-1) ?? "";
