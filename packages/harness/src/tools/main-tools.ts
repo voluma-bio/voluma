@@ -63,7 +63,6 @@ export interface Agents {
 }
 
 export interface MainDeps {
-  runId: string;
   rootThreadId: string;
   recorder: Recorder;
   runtime: TaskRuntime;

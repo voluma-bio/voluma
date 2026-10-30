@@ -418,7 +418,6 @@ export function taskRuntime(options: TaskRuntimeOptions) {
   }
 
   /**
-  /**
    * The sha256 of a file, computed by the thread's sandbox: a scan-sized file stays off the
    * host. The file goes in on stdin so the output never carries its name (GNU `sha256sum`
    * escapes `\` and newline in names). `note: false`: this exec is the host's, so the restart
@@ -461,35 +460,51 @@ export function taskRuntime(options: TaskRuntimeOptions) {
       f.root === "scratch" && !log().threads.has(`${runId}.${f.path.split("/")[0]}`)
         ? { root: f.root, path: `${ownName}/${f.path}` }
         : { root: f.root, path: f.path };
-    const path = pathOf(taskId, file);
-    const layout = layoutOf(c.threadId, (p) => cites(taskId, p));
+    // `path` is inside the task's output folder; models often repeat the task id in front, so a
+    // path that is missing as given is tried once more without it.
+    const own = `${taskId}/`;
+    const stripped =
+      file.root === "outputs" && file.path.startsWith(own)
+        ? { root: file.root, path: file.path.slice(own.length) }
+        : undefined;
+    const keepFile = async (file: Pick<EvidenceRef, "root" | "path">): Promise<EvidenceRef> => {
+      const path = pathOf(taskId, file);
+      const layout = layoutOf(c.threadId, (p) => cites(taskId, p));
+      try {
+        layout.keyOf(path, "read");
+      } catch (error) {
+        throw new Refusal(
+          `Evidence ${path} is not a file you can read: ${error instanceof Error ? error.message : error}`,
+        );
+      }
+      // Only a path the thread's sandbox mounts can be hashed there.
+      const mounted = layout.mounts.some((m) => path.startsWith(`${m.path}/`));
+      const hash = mounted ? () => sandboxHash(c.threadId, path, c.signal) : undefined;
+      const sha256 = await evidence
+        .keep(runId, taskId, file, { hash, signal: c.signal })
+        .catch((error) => {
+          if (error instanceof EvidenceRefused) throw new Refusal(error.message);
+          if (error instanceof EvidenceNotFound) throw error;
+          if (error instanceof Refusal || c.signal.aborted) throw error;
+          throw new Refusal(`could not keep ${f.path}; try again`);
+        });
+      return { ...file, sha256 };
+    };
     try {
-      layout.keyOf(path, "read");
+      return await keepFile(file).catch((error) => {
+        if (!stripped || !(error instanceof EvidenceNotFound)) throw error;
+        return keepFile(stripped);
+      });
     } catch (error) {
+      if (!(error instanceof EvidenceNotFound)) throw error;
       throw new Refusal(
-        `Evidence ${path} is not a file you can read: ${error instanceof Error ? error.message : error}`,
+        `No file at ${pathOf(taskId, stripped ?? file)}. ${
+          file.root === "outputs"
+            ? `Cite an output file by its path inside /outputs/${taskId}/, e.g. {root: "outputs", path: "frame.json"}.`
+            : `Cite a file in your working folder as {root: "scratch", path: <path inside $SCRATCH>}.`
+        }`,
       );
     }
-    // Only a path the thread's sandbox mounts can be hashed there.
-    const mounted = layout.mounts.some((m) => path.startsWith(`${m.path}/`));
-    const hash = mounted ? () => sandboxHash(c.threadId, path, c.signal) : undefined;
-    const sha256 = await evidence
-      .keep(runId, taskId, file, { hash, signal: c.signal })
-      .catch((error) => {
-        if (error instanceof EvidenceRefused) throw new Refusal(error.message);
-        if (error instanceof EvidenceNotFound) {
-          throw new Refusal(
-            `No file at ${path}. ${
-              file.root === "outputs"
-                ? `Cite an output file by its path inside /outputs/${taskId}/, e.g. {root: "outputs", path: "frame.json"}.`
-                : `Cite a file in your working folder as {root: "scratch", path: <path inside $SCRATCH>}.`
-            }`,
-          );
-        }
-        if (error instanceof Refusal || c.signal.aborted) throw error;
-        throw new Refusal(`could not keep ${f.path}; try again`);
-      });
-    return { ...file, sha256 };
   };
 
   const done = (message: string, eventId?: string): TaskToolResult => ({

@@ -11,13 +11,11 @@ import {
   labelsMiddle,
   type StructureDisplay,
   taskGrid,
+  tokenColor,
   type ViewerState,
   type Zyx,
 } from "@voluma/viewer/grid";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-
-const token = (name: string) =>
-  getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 export function TaskViewer({
   runId,
@@ -54,7 +52,7 @@ export function TaskViewer({
         // The zarr reader resolves level paths against this, so it is absolute.
         assetBase: (sha256) =>
           new URL(reviewAssetUrl(runId, sha256, "x").slice(0, -1), location.href).href,
-        token,
+        token: tokenColor,
       }),
     [runId, revision, task, assets, display, focus],
   );
@@ -111,7 +109,10 @@ export function TaskViewer({
   );
   if (grid.state !== "ready")
     return (
-      <section className="viewer-workspace" aria-label="Imaging workspace">
+      <section
+        className="flex h-full min-h-0 flex-col bg-background p-4"
+        aria-label="Imaging workspace"
+      >
         <div className="view-empty" role={grid.state === "failed" ? "alert" : "status"}>
           {grid.message}
         </div>

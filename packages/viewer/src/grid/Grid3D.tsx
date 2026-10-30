@@ -7,6 +7,7 @@
  * Each frame renders the meshes into a target with depth, copies it to the canvas, then
  * ray-marches the volume over it, stopping each ray at the meshes' depth (`volume.ts`).
  */
+import { cx } from "@voluma/ui";
 import { useEffect, useRef, useState } from "react";
 import {
   AmbientLight,
@@ -31,8 +32,10 @@ import {
 } from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import type { Contrast } from "./compose";
+import { CHIP, PANE } from "./pane-style";
 import { readLevel } from "./planes";
 import { capturePane, type GridMesh, type GridScene, type PaneHandle, type Zyx } from "./scene";
+import { tokenColor } from "./token-color";
 import { volumeBytes, volumeLevel, volumeMesh } from "./volume";
 
 export function Grid3D({
@@ -68,9 +71,8 @@ export function Grid3D({
     const element = host.current!;
     const renderer = new WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(globalThis.devicePixelRatio);
-    const style = getComputedStyle(document.documentElement);
-    renderer.setClearColor(style.getPropertyValue("--viewer-well").trim());
-    renderer.domElement.className = "grid-canvas";
+    renderer.setClearColor(tokenColor("--viewer-well"));
+    renderer.domElement.className = "absolute inset-0";
     element.append(renderer.domElement);
     const s = new Scene();
     const camera = new PerspectiveCamera(30, 1, 0.01, 1000);
@@ -313,7 +315,7 @@ export function Grid3D({
       volumeBytes(shown.values, contrast),
       scene.image.levels[shown.k]!,
       scene.spacingZyx,
-      getComputedStyle(document.documentElement).getPropertyValue("--bone").trim(),
+      tokenColor("--bone"),
       t.depth,
     );
     t.volumes.add(volume);
@@ -333,9 +335,9 @@ export function Grid3D({
   const loading = !!chip || !shown;
   useEffect(() => latestLoading.current(loading), [loading]);
   return (
-    <div ref={host} className="grid-pane">
+    <div ref={host} className={PANE}>
       {chip && (
-        <span className="grid-chip top-right" role="status">
+        <span className={cx(CHIP, "top-2 right-2")} role="status">
           {chip}
         </span>
       )}

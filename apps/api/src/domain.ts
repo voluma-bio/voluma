@@ -1,7 +1,7 @@
 /**
  * What the root hands every domain: who is calling. index.ts authenticates once
  * (auth.ts) and answers 401 itself when there is no principal, so a domain reads a
- * non-null `principal` and checks only its `kind`. Owned by both lanes; small PRs.
+ * non-null `principal` and checks only its `kind`.
  */
 import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
@@ -31,7 +31,6 @@ export type Principal =
   /** `VOLUMA_DEBUG_TOKEN`: an agent debugging runs; reads runs in every lab, writes nothing. */
   | { kind: "service"; name: "debug" };
 
-/** The Hono environment of a domain app: `new Hono<AppEnv>()`. */
 export type AppEnv = { Variables: { principal: Principal } };
 
 type UserPrincipal = Extract<Principal, { kind: "user" }>;

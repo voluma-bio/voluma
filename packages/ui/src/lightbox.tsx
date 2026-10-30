@@ -4,6 +4,7 @@
  * trap, Escape to close and the top layer. Clicking outside the figure closes it.
  */
 import { type ReactNode, useEffect, useRef } from "react";
+import { Button } from "./button";
 import { cx } from "./cx";
 
 export type LightboxProps = {
@@ -45,13 +46,9 @@ export function Lightbox({ open, onClose, children, caption, className }: Lightb
         </div>
         <figcaption className="flex items-center justify-between gap-3 text-ui text-muted-foreground">
           <span>{caption}</span>
-          <button
-            type="button"
-            onClick={onClose}
-            className="cursor-pointer rounded-md px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
+          <Button variant="ghost" size="sm" onClick={onClose}>
             Close
-          </button>
+          </Button>
         </figcaption>
       </figure>
     </dialog>

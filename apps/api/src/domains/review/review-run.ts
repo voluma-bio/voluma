@@ -3,7 +3,7 @@
  * per planned task, `pending` where nothing started. Pure, so the route only loads and serves.
  */
 import type { FoldedRevision, FoldedTask } from "@voluma/contracts/fold";
-import { type ReviewRun, type ReviewTask, reviewRunSchema } from "@voluma/contracts/review";
+import type { ReviewRun, ReviewTask } from "@voluma/contracts/review";
 import type { RunRecord } from "../../ports";
 
 /** Null until the run's first `revision.started`: a run with no plan has nothing to review. */
@@ -46,7 +46,7 @@ export function reviewRun({
     throw new Error("Unsupported revision reason");
   };
 
-  return reviewRunSchema.parse({
+  return {
     id: run.id,
     sample: run.input.name,
     workflows: run.workflows,
@@ -65,5 +65,5 @@ export function reviewRun({
         annotations: rev.annotations,
       };
     }),
-  });
+  };
 }
