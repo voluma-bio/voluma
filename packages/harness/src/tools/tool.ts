@@ -23,6 +23,12 @@ export interface ToolContext {
   output(stream: "stdout" | "stderr", text: string): void;
 }
 
+/**
+ * `ToolContext.sandbox()` could not give the thread a sandbox (creation failed). The tool lets
+ * it propagate; the Pi adapter turns it into an error result flagged `infrastructure`.
+ */
+export class SandboxUnavailableError extends Error {}
+
 export interface ToolResult {
   /** What the model sees. */
   output: string;

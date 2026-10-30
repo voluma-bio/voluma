@@ -27,7 +27,7 @@ import { usageOf } from "../../model-usage";
 import type { History } from "../../ports/history";
 import type { Sandbox } from "../../ports/sandbox";
 import type { PayloadOf, Recorder } from "../../recorder";
-import type { Tool } from "../../tools/tool";
+import { SandboxUnavailableError, type Tool, type ToolResult } from "../../tools/tool";
 import { elideOldImages } from "./elide-images";
 
 export type UserSender = Extract<PayloadOf<"message">, { role: "user" }>["sender"];
@@ -427,18 +427,30 @@ function toAgentTool(
     ...(tool.prepare && { prepareArguments: tool.prepare }),
     ...(tool.sequential && { executionMode: "sequential" as const }),
     execute: async (toolCallId, params, signal) => {
-      const result = await tool.execute(tool.input.parse(params), {
-        runId,
-        threadId,
-        kind,
-        ...(taskId && { taskId }),
-        toolCallId,
-        batchSize: batchSize(toolCallId),
-        signal: signal ?? new AbortController().signal,
-        sandbox: () => sandbox(threadId),
-        output: (stream, text) =>
-          recorder.live({ type: "tool.output", threadId, toolCallId, stream, text }),
-      });
+      let result: ToolResult;
+      try {
+        result = await tool.execute(tool.input.parse(params), {
+          runId,
+          threadId,
+          kind,
+          ...(taskId && { taskId }),
+          toolCallId,
+          batchSize: batchSize(toolCallId),
+          signal: signal ?? new AbortController().signal,
+          sandbox: () =>
+            sandbox(threadId).catch((error: unknown) => {
+              throw new SandboxUnavailableError(
+                `the sandbox could not be started: ${String(error)}`,
+              );
+            }),
+          output: (stream, text) =>
+            recorder.live({ type: "tool.output", threadId, toolCallId, stream, text }),
+        });
+      } catch (error) {
+        // Voluma's failure, not the call's: the model and the run page are told so.
+        if (!(error instanceof SandboxUnavailableError)) throw error;
+        result = { output: error.message, isError: true, infrastructure: true, truncated: false };
+      }
       return {
         content: [
           { type: "text" as const, text: result.output },
