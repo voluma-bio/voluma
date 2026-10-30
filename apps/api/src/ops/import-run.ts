@@ -10,22 +10,19 @@
  * Every row must belong to the run. Writes only to a local database unless `--remote` (see
  * `operator.ts`). Evidence is not copied: it stays in R2 under `runs/<id>/evidence/`, shared by every database.
  */
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isDeepStrictEqual, parseArgs } from "node:util";
-import { runEventSchema } from "@voluma/contracts/events";
 import { runIdSchema } from "@voluma/contracts/ids";
 import { providerCalls } from "@voluma/provider-calls";
-import { catalog, workflowById } from "@voluma/workflow/bundled";
 import { and, eq, getTableColumns, sql } from "drizzle-orm";
 import type { PgTable } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { reviewSnapshots } from "../domains/review/schema";
-import { databaseUrl } from "../domains/run/operator";
 import { eventLock } from "../domains/run/pg-event-log";
 import { QUEUE_LOCK } from "../domains/run/pg-queue";
-import { withLocalDir } from "../domains/run/r2-dir";
 import {
   events,
   inputs,
@@ -35,7 +32,9 @@ import {
   studyScans,
   threads,
 } from "../domains/run/schema";
-import { countsOf, describeCounts, piMessagesOf } from "./run-dump";
+import { databaseUrl } from "./operator";
+import { withLocalDir } from "./r2-dir";
+import { assertRestorable, countsOf, describeCounts, piMessagesOf } from "./run-dump";
 
 const { values } = parseArgs({
   options: { from: { type: "string" }, replace: { type: "boolean" }, remote: { type: "boolean" } },
@@ -67,33 +66,16 @@ const dump = await withLocalDir(
       threads: { runId: string }[];
       piMessages: { threadId: string }[];
       // Dumps from before these were exported have neither.
-      reviewSnapshots?: { runId: string }[];
+      reviewSnapshots?: { runId: string; generation: string }[];
       providerCalls?: { runId: string }[];
     },
 );
 const runId = runIdSchema.parse(dump.run.id);
 const studyId = `study-${runId}`;
 
-const workflowId = dump.run.workflowId ?? dump.study?.workflowId;
-const workflowPath = dump.run.workflows[0]?.path;
-const workflow =
-  (workflowId ? workflowById(workflowId) : undefined) ??
-  Object.values(catalog).find((w) => w.path === workflowPath);
-if (!workflow) {
-  throw new Error(
-    `run ${runId} used ${workflowId ?? workflowPath}, which is not a bundled workflow`,
-  );
-}
+const workflow = assertRestorable(dump);
 
-const strays = [
-  ...dump.events.filter((e) => e.runId !== runId).map((e) => `event ${e.id}`),
-  ...dump.threads.filter((t) => t.runId !== runId).map((t) => `thread of ${t.runId}`),
-  ...dump.piMessages.filter((m) => !m.threadId.startsWith(`${runId}.`)).map((m) => m.threadId),
-  ...(dump.reviewSnapshots ?? [])
-    .filter((s) => s.runId !== runId)
-    .map((s) => `snapshot of ${s.runId}`),
-  ...(dump.providerCalls ?? []).filter((c) => c.runId !== runId).map((c) => `call of ${c.runId}`),
-];
+const strays: string[] = [];
 if (!dump.study && (dump.studyScans || dump.studyInputs)) {
   throw new Error("dump has study rows without their study");
 }
@@ -121,14 +103,6 @@ if (dump.input && (dump.input.id !== dump.run.inputId || dump.input.labId !== du
 }
 if (strays.length > 0) {
   throw new Error(`${strays.length} rows are not run ${runId}'s: ${strays.slice(0, 5).join(", ")}`);
-}
-
-const failed = dump.events.flatMap((e) => {
-  const result = runEventSchema.safeParse(e);
-  return result.success ? [] : [`seq ${e.seq} (${e.id}): ${result.error.issues[0]?.message}`];
-});
-if (failed.length > 0) {
-  throw new Error(`${failed.length} events fail runEventSchema:\n${failed.join("\n")}`);
 }
 
 const client = postgres(url);
@@ -160,9 +134,15 @@ await db.transaction(async (tx) => {
   for (const input of dump.studyInputs ?? (dump.input ? [dump.input] : [])) {
     await tx.insert(inputs).values(revive(inputs, input)).onConflictDoNothing();
     const [stored] = await tx.select().from(inputs).where(eq(inputs.id, input.id));
-    if (dump.study) sameSharedRow(`input ${input.id}`, stored, input);
+    sameSharedRow(`input ${input.id}`, stored, input);
   }
   const run = revive(runs, dump.run);
+  // Import starts a new local lifetime, even when restoring an earlier dump of this run.
+  // A screenshot validated before replacement must not publish into the restored history.
+  run.generation = randomUUID();
+  const [runInput] = await tx.select().from(inputs).where(eq(inputs.id, run.inputId));
+  if (!runInput || runInput.labId !== run.labId)
+    throw new Error(`missing or conflicting run input ${run.inputId}`);
   const keep = existing?.studyId;
   if (dump.study) {
     await tx.insert(studies).values(revive(studies, dump.study)).onConflictDoNothing();
@@ -200,6 +180,17 @@ await db.transaction(async (tx) => {
     });
     run.studyId = studyId;
   } else {
+    const [study] = await tx.select().from(studies).where(eq(studies.id, keep));
+    sameSharedRow(`study ${keep}`, study, {
+      labId: run.labId,
+      workflowId: workflow.id,
+      example: run.example ?? false,
+    });
+    const [scan] = await tx
+      .select()
+      .from(studyScans)
+      .where(and(eq(studyScans.studyId, keep), eq(studyScans.inputId, run.inputId)));
+    if (!scan) throw new Error(`study ${keep} has no scan for input ${run.inputId}`);
     run.studyId = keep;
   }
   await tx.insert(runs).values(run);
@@ -212,7 +203,14 @@ await db.transaction(async (tx) => {
   await insertAll(events, dump.events);
   await insertAll(threads, dump.threads);
   await insertAll(piMessages, dump.piMessages);
-  await insertAll(reviewSnapshots, dump.reviewSnapshots ?? []);
+  await insertAll(
+    reviewSnapshots,
+    (dump.reviewSnapshots ?? []).map((snapshot) => ({
+      ...snapshot,
+      generation:
+        snapshot.generation === dump.run.generation ? run.generation : snapshot.generation,
+    })),
+  );
   await insertAll(providerCalls, dump.providerCalls ?? []);
 });
 console.log(`run ${runId}: ${describeCounts(countsOf(dump))} loaded`);

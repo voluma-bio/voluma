@@ -4,13 +4,13 @@ Run this BEFORE `segment_sam`: SAM tracks through a stack of slices, so each sli
 follow, and the scanner's own axes often do not do that. Writes the frame, the oriented stack and the keyframe slice
 through the joint (the sheet to look at before going on). No segmentation is needed.
 
-Needs isotropic voxels (the stack is cut on the scan's voxel size), HU in, ZYX order. The three sizes are required and in mm,
+Needs isotropic voxels (the stack is cut on the scan's voxel size), HU in, ZYX order. The threshold and the three sizes are required (sizes in mm),
 converted to voxels with the scan's spacing: they say how big this animal's bones are, so the workflow's anatomy
 reference gives them (the shaft radius is the widest a shaft gets, the reference radius how near the joint the reference
 object sits, the minimum object volume the smallest piece worth considering).
 
 How it chooses (details in the comments of joint_frame):
- 1. A threshold (Otsu unless given) and 3D pieces. The bones are the largest piece plus, if there is one, the largest
+ 1. The --threshold-hu bone threshold and 3D pieces. The bones are the largest piece plus, if there is one, the largest
     other piece within --ref-radius-mm of it that is at least --second-bone-frac of its size: femur and tibia are one
     touching piece, or two pieces across the joint space. Smaller pieces (the patella) are reference object candidates.
  2. The two end portions of the bones along their main axis seed the two shaft axes; each axis is refit three times
@@ -36,7 +36,7 @@ Writes: <out>/frame.json  the frame (`microct-core/resources/frame.py` has its s
         <out>/oriented.npy  float32 HU stack, axis 0 = slices, with its sidecar (its own grid)
         <out>/keyframe.jpg  the keyframe slice
 Prints: one JSON line {frame, oriented, keyframe_image, keyframe, slices, bend_deg, skew_vox, shafts_found, keyframe_bone_vox, threshold_hu, plane_rule, ref_object_frames, oriented_shape}
-Example: python orient_joint.py --in hu.npy --header hu.json --out orient --shaft-radius-mm 0.9 --ref-radius-mm 3 --min-object-mm3 0.5
+Example: python orient_joint.py --in hu.npy --header hu.json --out orient --threshold-hu 2500 --shaft-radius-mm 0.9 --ref-radius-mm 3 --min-object-mm3 0.5
 Exits 2 with one sentence on bad input, before writing anything.
 """
 from pathlib import Path
@@ -54,16 +54,6 @@ MIN_BEND_DEG = 10.0
 MIN_ELONGATION = 2.0  # spread along the main axis over spread across it; a blob is about 1
 MIN_SHAFT_RADII = 3.0  # a shaft in the field is at least this many shaft radii long
 MIN_CUT_FRAC = 0.05  # each bone must have this fraction of the other's voxels in the keyframe
-
-
-def _otsu(v):
-    h, e = np.histogram(v, 512)
-    c = (e[:-1] + e[1:]) / 2
-    w = np.cumsum(h)
-    m = np.cumsum(h * c)
-    wb, wf = w, w[-1] - w
-    mb, mf = m / np.maximum(wb, 1), (m[-1] - m) / np.maximum(wf, 1)
-    return float(c[np.argmax(wb * wf * (mb - mf) ** 2)])
 
 
 def _line_fit(points, weights=None):
@@ -157,14 +147,14 @@ def _gap_axis(PA, PB):
     return [(joint, u), (joint, -u)], joint
 
 
-def joint_frame(hu, spacing_mm, shaft_radius_mm, ref_radius_mm, min_object_mm3, threshold_hu=None,
+def joint_frame(hu, spacing_mm, shaft_radius_mm, ref_radius_mm, min_object_mm3, threshold_hu,
                 margin_mm=0.126, second_bone_frac=0.25):
     cyl_radius = shaft_radius_mm / spacing_mm
     ref_radius = ref_radius_mm / spacing_mm
     min_small_vox = min_object_mm3 / spacing_mm ** 3
     margin = round(margin_mm / spacing_mm)
     sub = np.asarray(hu[::2, ::2, ::2], dtype=np.float32)
-    T = _otsu(sub[sub > -600]) if threshold_hu is None else float(threshold_hu)
+    T = float(threshold_hu)
     fg = sub > T
     closed = ndi.binary_closing(fg, ndi.generate_binary_structure(3, 1), iterations=1) | fg
     lab, n = ndi.label(closed)
@@ -286,7 +276,7 @@ if __name__ == '__main__':
     ap.add_argument('--in', type=sidecar.existing, dest='src', required=True, help='hu.npy of the scan')
     ap.add_argument('--header', type=sidecar.existing, required=True, help='hu.json from scan-intake')
     ap.add_argument('--out', required=True, help='output directory (created)')
-    ap.add_argument('--threshold-hu', type=float, help='bone threshold in HU (default: Otsu on the volume)')
+    ap.add_argument('--threshold-hu', type=float, required=True, help='bone threshold in HU (the workflow\'s anatomy reference gives it)')
     ap.add_argument('--shaft-radius-mm', type=float, required=True, help='mm: the widest a shaft gets')
     ap.add_argument('--ref-radius-mm', type=float, required=True, help='mm: how near the joint the reference object sits')
     ap.add_argument('--min-object-mm3', type=float, required=True, help='mm3: the smallest 3D piece worth considering')

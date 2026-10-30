@@ -125,11 +125,7 @@
  *     kind (none for an org whose members share one account); another answers
  *     409;
  *   - for `voluma` runs only: runs at once (a claim takes a `queued` run only
- *     while the org is under it). Runs per day count both kinds, since Voluma pays
- *     every sandbox. The daily limit answers 429 when work starts and is checked again
- *     when a claim dequeues a `voluma` run (a run refused at dequeue ends `failed` with
- *     an `error`; a `visitor` run was counted at start). It counts a run once, so a
- *     recovered run isn't refused for a limit it already passed;
+ *     while the org is under it);
  *   - for `visitor` runs: at most this many `queued` or `running` in the org
  *     (those hold the visitor's keys in the server's memory, or a runner
  *     slot; an `awaiting-keys` run holds neither and doesn't count). Starting
@@ -149,9 +145,8 @@ import { workflowPinSchema } from "./workflow";
 /**
  * A scan a run reads. `source` says where its files are: an `upload` lives at
  * `inputPrefix(id)`; the `reference` scan is `referencePrefix("scan")`. The
- * server derives the R2 prefix; the browser never needs it. The upload call
- * that creates inputs is a later PR; its key layout (`inputKey`) is settled in
- * `r2.ts`. Under `self`, `listInputs` lists the caller's uploads and the
+ * server derives the R2 prefix; the browser never needs it. Its key layout
+ * is `inputKey` in `r2.ts`. Under `self`, `listInputs` lists the caller's uploads and the
  * org's reference scan.
  */
 export const inputSchema = z.object({
@@ -177,12 +172,6 @@ export const runStateSchema = z.discriminatedUnion("status", [
   z.object({
     status: z.literal("queued"),
     position: z.number().int().min(1),
-    /**
-     * Present while the run waits out a model-provider outage: its last claim was released
-     * because the provider kept failing (`provider-outage`, `runner.ts`). `retryAt` is the
-     * time before which no claim takes it.
-     */
-    waitingForProvider: z.object({ retryAt: z.iso.datetime() }).optional(),
   }),
   /** The first claim's time: a re-claim after a recovery keeps it. */
   z.object({ status: z.literal("running"), startedAt: z.iso.datetime() }),
@@ -266,8 +255,6 @@ export const runSchema = z
      * reference scan.
      */
     example: z.boolean(),
-    /** The example run this one was forked from by a correction on it; null for a fresh run. */
-    forkedFrom: runIdSchema.nullable(),
     createdAt: z.iso.datetime(),
     state: runStateSchema,
     /**
@@ -275,16 +262,13 @@ export const runSchema = z
      * `modelCostUsd` is model calls, in US dollars;
      * `sandboxSeconds` is sandbox time summed over its sandboxes (one per thread, so concurrent
      * threads add up and it can exceed wall time). Per task: `spend` in `spend.ts`.
-     * Optional until the API writes it.
      */
-    usage: z
-      .object({
-        modelCostUsd: z.number().nonnegative(),
-        sandboxSeconds: z.number().nonnegative(),
-      })
-      .optional(),
-    /** What the run's provider calls cost, from the gateway; optional until the API writes it. */
-    providerCalls: providerCallsSchema.optional(),
+    usage: z.object({
+      modelCostUsd: z.number().nonnegative(),
+      sandboxSeconds: z.number().nonnegative(),
+    }),
+    /** What the run's provider calls cost, from the gateway. */
+    providerCalls: providerCallsSchema,
     /** Latest successfully completed results and their human review progress; null otherwise. */
     review: reviewSummarySchema.nullable(),
     tasks: runTasksSchema,

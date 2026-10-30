@@ -6,7 +6,8 @@
  * focus names the scan and its value, and `onSelect` decides what it opens.
  * The plot is one tab stop: arrow keys move between dots (left and right in
  * value order, up and down between groups). Scans without a value yet are
- * counted beside their group, not drawn.
+ * counted beside their group, not drawn. Dots and the mean tick are ink; only
+ * a far dot gets colour (amber), as DESIGN.md asks of every chart.
  */
 import {
   type KeyboardEvent,
@@ -181,7 +182,7 @@ export function StripPlot({ groups, unit, label, onSelect, digits, className }: 
                 y1={mid - (reach + 10)}
                 y2={mid + reach + 10}
                 strokeWidth={2}
-                className="stroke-muted-foreground"
+                className="stroke-foreground"
               />
             )}
             {placed.map((p) => (
@@ -217,20 +218,20 @@ export function StripPlot({ groups, unit, label, onSelect, digits, className }: 
               <Tooltip key={p.id} x={p.x} y={mid + p.y} anchor={edge(p.x, width)}>
                 <span className="font-medium">{p.label}</span>{" "}
                 <span className="font-mono tabular-nums">{p.value.toFixed(digits)}</span> {unit}
-                {p.far && <span className="block text-check-solid">Far from its group</span>}
+                {p.far && <span className="block font-medium">Far from its group</span>}
                 {p.far && p.farReason && <span className="block">{p.farReason}</span>}
               </Tooltip>
             ))}
         </Row>
       ))}
-      <div className="self-start pt-1 text-meta text-fg-subtle">{values.length > 0 && unit}</div>
+      <div className="self-start pt-1 text-xs text-fg-subtle">{values.length > 0 && unit}</div>
       <div ref={axisRef} className="relative h-6">
         {values.length > 0 &&
           width > 0 &&
           ticks.map((t) => (
             <span
               key={t}
-              className="absolute top-1 -translate-x-1/2 font-mono text-meta tabular-nums text-fg-subtle"
+              className="absolute top-1 -translate-x-1/2 font-mono text-xs tabular-nums text-fg-subtle"
               style={{ left: x(t) }}
             >
               {t.toFixed(tickDigits)}
@@ -276,7 +277,7 @@ function Row({
       >
         <span className="font-medium text-muted-foreground">{name}</span>
         {missing > 0 && (
-          <span className="text-meta whitespace-nowrap text-fg-subtle">
+          <span className="text-xs whitespace-nowrap text-fg-subtle">
             <span className="tabular-nums">{missing}</span> to come
           </span>
         )}
@@ -345,7 +346,7 @@ function Dot({
               ? "fill-card stroke-check-solid"
               : "fill-card stroke-foreground"
             : point.far
-              ? "fill-check-solid stroke-card"
+              ? "fill-check-solid stroke-check"
               : "fill-foreground stroke-card",
         )}
       />
@@ -354,7 +355,7 @@ function Dot({
           x={point.x + { start: -R, middle: 0, end: R }[anchor]}
           y={cy - R - 5}
           textAnchor={anchor}
-          className="fill-check text-meta font-semibold"
+          className="fill-check text-xs font-medium"
         >
           {point.label}
         </text>
@@ -378,7 +379,7 @@ function Tooltip({
     <div
       role="tooltip"
       className={cx(
-        "pointer-events-none absolute z-10 -translate-y-full whitespace-nowrap rounded-md bg-inverse px-2 py-1 text-sm text-inverse-fg shadow-md",
+        "pointer-events-none absolute z-10 -translate-y-full whitespace-nowrap rounded-md bg-inverse px-2 py-1 text-xs text-inverse-fg shadow-pop",
         SHIFT[anchor],
       )}
       style={{ left: x, top: y - HIT - 2 }}

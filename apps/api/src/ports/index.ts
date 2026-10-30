@@ -1,21 +1,19 @@
 /**
  * Interfaces both API domains depend on: what one domain reads from the other (index.ts
  * wires it; a domain never imports the other), and shared adapters such as blob storage.
- * The run domain's EventLog and History ports live in packages/harness, which the Node
- * runner shares; the Sandbox port too, since the runner, not the API, creates sandboxes.
+ * The run domain's event-log and history ports are derived from its Postgres adapters
+ * (`pg-event-log.ts`, `pg-history.ts`); the Sandbox port lives in packages/harness, since the
+ * runner, not the API, creates sandboxes. A refusal is an `HTTPException` thrown where it is
+ * decided; a port method returns its success shape only.
  * A domain's own adapters live in the domain; adapters shared by domains go in
- * adapters/ (none yet). Only index.ts constructs adapters.
- * Owned by both lanes; change in small PRs.
+ * adapters/. Only index.ts constructs adapters.
  */
 import type { RunEvent } from "@voluma/contracts/events";
 import type { PersonMessage } from "@voluma/contracts/messages";
 import type { reviewState } from "@voluma/contracts/review-state";
-import type { Input, Run } from "@voluma/contracts/run";
+import type { Run } from "@voluma/contracts/run";
 import type { ReviewSnapshot } from "@voluma/contracts/snapshot";
 import type { Caller, Reader } from "../domain";
-
-/** Review reads inputs through the Run lane's scoped read adapter. */
-export type ReviewInputs = { listInputs(reader: Reader): Promise<Input[]> };
 
 /** Immutable screenshots; writes require the same run lifetime to still exist. */
 export type ReviewSnapshots = {
@@ -58,28 +56,23 @@ export type RunRecords = {
     runId: string,
     decision: (record: RunRecord) => ReviewDecision | null,
   ): Promise<RunRecord | null>;
-  /** Whether `reader` can read the run, without reading its log. */
-  readable(reader: Reader, runId: string): Promise<boolean>;
+  /** The run's `generation` when `reader` can read it, else null; reads no log. */
+  readable(reader: Reader, runId: string): Promise<{ generation: string } | null>;
 };
 
-/** Why a message to a run was refused, as the route answers it. */
-export type MessageRefusal = { status: 403 | 404 | 409 | 429; error: string };
-export type MessageResult =
-  | {
-      ok: {
-        /** The stored `person.message` event. */
-        eventId: string;
-        /** The run's state after the message. */
-        state: Run["state"];
-        /** The caller sent this message id before: nothing was stored. */
-        duplicate: boolean;
-      };
-    }
-  | { refused: MessageRefusal };
+export type MessageSent = {
+  /** The stored `person.message` event. */
+  eventId: string;
+  /** The run's state after the message. */
+  state: Run["state"];
+  /** The caller sent this message id before: nothing was stored. */
+  duplicate: boolean;
+};
 
 /**
- * A researcher's message to a run, which the Run domain stores and answers for (`contracts/messages.ts`:
- * who may send, the refusals, the reopen). Review parses the request and stores the snapshot.
+ * A researcher's message to a run, which the Run domain stores and answers for
+ * (`contracts/messages.ts`: who may send, the reopen). A refusal is an `HTTPException` with the
+ * contract's status and text. Review parses the request and stores the snapshot.
  */
 export type RunMessages = {
   /** Judges the message without storing anything, so a refused one leaves no snapshot behind. */
@@ -88,14 +81,14 @@ export type RunMessages = {
     caller: Caller,
     runId: string,
     msg: { id: string; payload: PersonMessage },
-  ): Promise<MessageResult>;
+  ): Promise<MessageSent>;
   /** Judges again under the queue lock and stores it, reopening a finished run. */
   send(
     reader: Reader,
     caller: Caller,
     runId: string,
     msg: { id: string; payload: PersonMessage },
-  ): Promise<MessageResult>;
+  ): Promise<MessageSent>;
 };
 
 /** A run's content-addressed files (`evidenceKey`), its converted review assets (`reviewAssetKey`) and the snapshots researchers attach to messages. */

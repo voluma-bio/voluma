@@ -1,18 +1,27 @@
 /**
  * The sign-in gate: a layout route that asks the API who is signed in, then
- * renders the feature routes under the top bar, or the sign-in screen.
+ * renders the feature routes inside the app shell, or the sign-in screen. It also
+ * owns the one query client every feature shares, so a change in one screen (an
+ * item checked in the review) refreshes the others (the study's counts).
  * Features read the signed-in user with `useOutletContext<Me>()`; they never
  * call `getMe` themselves. With no session, the gate asks the server for a guest
  * (`POST /api/auth/guest`); a server with guests off refuses, and the sign-in screen
- * shows. A 401 from any later call (`onSignedOut`) runs the same load again.
+ * shows. A 401 drops the authenticated tree; returning to the tab rechecks identity,
+ * since another tab can replace the cookie without a 401.
  */
+
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ApiError, getMe, onSignedOut, startGuest } from "@voluma/api-client";
 import type { Me } from "@voluma/contracts/auth";
-import { Button } from "@voluma/ui";
-import { useCallback, useEffect, useState } from "react";
-import { Outlet } from "react-router";
+import { AppShell, Button, LoadingState, ShellLink } from "@voluma/ui";
+import { House, Workflow } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link, Outlet, useLocation, useMatches, useNavigate } from "react-router";
+import { AccountMenu, BrandLockup } from "./account";
 import { GateScreen, SignInScreen } from "./sign-in-screen";
-import { TopBar } from "./top-bar";
+
+/** Static facts a route declares in its `handle`: the shell's theme on that screen. */
+export type RouteHandle = { theme?: "light" | "dark" };
 
 type Session =
   | { state: "loading" }
@@ -23,62 +32,130 @@ type Session =
 
 export function SignedIn() {
   const [session, setSession] = useState<Session>({ state: "loading" });
+  const request = useRef(0);
+  const pendingGuest = useRef<Promise<Me | null> | null>(null);
 
-  const load = useCallback(
-    () =>
-      getMe()
-        .then((me) => me ?? startGuest())
-        .then(
-          (me) => setSession(me ? { state: "signed-in", me } : { state: "signed-out" }),
-          (error: unknown) => {
-            // TypeError: no network. SyntaxError: something other than the API
-            // (a captive portal, a proxy) answered with a non-JSON page.
-            if (error instanceof TypeError || error instanceof SyntaxError)
-              setSession({ state: "unreachable", cause: "offline" });
-            else if (error instanceof ApiError && error.status >= 500)
-              setSession({ state: "unreachable", cause: "down" });
-            // A schema mismatch or an unexpected status is a bug: hand it to
-            // the router's error screen rather than stalling on "Loading…".
-            else
-              setSession(() => {
-                throw error;
-              });
-          },
-        ),
-    [],
-  );
+  const load = useCallback(async () => {
+    const current = ++request.current;
+    try {
+      // A superseded guest response still writes its cookie. Wait even if it fails,
+      // then read the browser's resulting identity instead of racing another mint.
+      await pendingGuest.current?.catch(() => {});
+      if (current !== request.current) return;
+      let me = await getMe();
+      if (current !== request.current) return;
+      if (!me) {
+        pendingGuest.current = startGuest().finally(() => {
+          pendingGuest.current = null;
+        });
+        me = await pendingGuest.current;
+      }
+      if (current !== request.current) return;
+      setSession(me ? { state: "signed-in", me } : { state: "signed-out" });
+    } catch (error) {
+      if (current !== request.current) return;
+      // TypeError: no network. SyntaxError: a captive portal or proxy answered with non-JSON.
+      if (error instanceof TypeError || error instanceof SyntaxError)
+        setSession({ state: "unreachable", cause: "offline" });
+      else if (error instanceof ApiError && error.status >= 500)
+        setSession({ state: "unreachable", cause: "down" });
+      // Schema mismatches and unexpected statuses belong on the router's error screen.
+      else
+        setSession(() => {
+          throw error;
+        });
+    }
+  }, []);
 
   useEffect(() => {
-    load();
-    return onSignedOut(() => void load());
+    const onFocus = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        ++request.current;
+      } else onFocus();
+    };
+    void load();
+    const unsubscribe = onSignedOut(() => {
+      setSession({ state: "loading" });
+      void load();
+    });
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      ++request.current;
+      unsubscribe();
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [load]);
 
   switch (session.state) {
     case "loading":
       return (
         <main aria-busy="true" className="grid min-h-dvh place-content-center">
-          {/* Shown only when loading is slow, so a fast load doesn't flash it. */}
-          <p className="animate-[appear_200ms_ease-out_600ms_both] text-ui text-muted-foreground">
-            Loading…
-          </p>
+          <LoadingState rows={2} className="w-72" />
         </main>
       );
     case "signed-out":
-      return <SignInScreen onSignedIn={(me) => setSession({ state: "signed-in", me })} />;
+      return <SignInScreen />;
     case "unreachable":
       return <UnreachableScreen cause={session.cause} retry={load} />;
     case "signed-in":
       return (
-        // Pages fill the space under the bar and scroll inside it, so the bar stays put. `relative`
-        // keeps absolutely placed content (sr-only legends) inside the scroller, not the page.
-        <div className="flex h-dvh flex-col">
-          <TopBar me={session.me} />
-          <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
-            <Outlet context={session.me} />
-          </div>
-        </div>
+        <Shell
+          key={JSON.stringify([session.me.kind, session.me.labId, session.me.userId])}
+          me={session.me}
+        />
       );
   }
+}
+
+function Shell({ me }: { me: Me }) {
+  const [queryClient] = useState(
+    () => new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+  );
+  useEffect(() => () => queryClient.clear(), [queryClient]);
+  const matches = useMatches();
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const theme =
+    matches
+      .map((m) => (m.handle as RouteHandle | undefined)?.theme)
+      .filter(Boolean)
+      .at(-1) ?? "light";
+  return (
+    <QueryClientProvider client={queryClient}>
+      <AppShell
+        theme={theme}
+        logo={
+          <Link to="/" className="rounded-md">
+            <BrandLockup className="gap-2 [&_svg]:size-5" />
+          </Link>
+        }
+        account={<AccountMenu me={me} />}
+      >
+        <ShellLink
+          id="home"
+          group="app"
+          label="Home"
+          icon={<House />}
+          active={pathname === "/"}
+          go={() => navigate("/")}
+        />
+        <ShellLink
+          id="workflows"
+          group="app"
+          label="Workflows"
+          icon={<Workflow />}
+          active={pathname === "/workflows"}
+          go={() => navigate("/workflows")}
+        />
+        <Outlet context={me} />
+      </AppShell>
+    </QueryClientProvider>
+  );
 }
 
 // Stays up while a retry runs, so a retry that fails again doesn't flicker.

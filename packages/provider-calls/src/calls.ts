@@ -8,7 +8,7 @@
  * (`cut`) has an unknown cost, counted apart and never as an amount. Spend is the sum of known
  * costs, so an `open` call counts nothing until it settles.
  */
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { Observed } from "./prices";
 import { providerCalls } from "./schema";
@@ -103,7 +103,10 @@ export type Settled = Observed & {
   durationMs: number;
 };
 
-/** Ends a call. Unconditional: whatever the row's status by then, the row takes the cost, which is null when unknown. */
+/**
+ * Settles once, even after a sweep marked the call cut. Only settlement writes durationMs:
+ * a non-null duration means accounting is final, so retries cannot change archived rows.
+ */
 export async function settleCall(db: PostgresJsDatabase, id: string, end: Settled) {
   await db
     .update(providerCalls)
@@ -118,7 +121,7 @@ export async function settleCall(db: PostgresJsDatabase, id: string, end: Settle
       ttfbMs: end.ttfbMs ?? null,
       durationMs: end.durationMs,
     })
-    .where(eq(providerCalls.id, id));
+    .where(and(eq(providerCalls.id, id), isNull(providerCalls.durationMs)));
 }
 
 /** At shutdown, after draining: an instance's own `open` rows become `cut` (cost unknown). */

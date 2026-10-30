@@ -12,13 +12,22 @@
  * "Add scans" waits: adding scans to an existing study isn't designed, and `/new` makes a new one.
  */
 import { useQuery } from "@tanstack/react-query";
-import { ApiError, getStudy } from "@voluma/api-client";
+import { ApiError } from "@voluma/api-client";
+import { studyQuery } from "@voluma/api-client/query";
 import type { StudyDetail } from "@voluma/contracts/study";
-import { Button, Tabs } from "@voluma/ui";
-import { formatUsd } from "@voluma/ui/run";
+import { formatUsd } from "@voluma/run-view";
+import {
+  Button,
+  ErrorState,
+  Facts,
+  LoadingState,
+  Popover,
+  TabList,
+  TabPanel,
+  Tabs,
+} from "@voluma/ui";
 import { type BundledWorkflow, workflowById } from "@voluma/workflow/bundled";
 import { ChevronDown } from "lucide-react";
-import { Popover } from "radix-ui";
 import { useCallback } from "react";
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router";
 import { Overview } from "./overview";
@@ -26,9 +35,16 @@ import { ScansTable } from "./scans-table";
 import { isLive, type OpenChecks, scanHref, studyCounts, studySpend } from "./study-model";
 import { ToCheck } from "./to-check";
 
+/** Where the page's loading and error states sit while there is no page to show. */
+const PAGE_STATE = "mx-auto w-full max-w-2xl px-6 py-8 max-[760px]:px-3";
+const homeLink = (
+  <Button asChild variant="link">
+    <Link to="/">Go to Home</Link>
+  </Button>
+);
+
 const TAB_IDS = ["overview", "check", "scans"] as const;
 type TabId = (typeof TAB_IDS)[number];
-const PANEL_ID = "study-panel";
 
 export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
   const { id = "" } = useParams();
@@ -38,8 +54,7 @@ export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
   const tab: TabId = TAB_IDS.find((t) => t === tabParam) ?? "overview";
 
   const study = useQuery({
-    queryKey: ["study", id],
-    queryFn: () => getStudy(id),
+    ...studyQuery(id),
     refetchInterval: (query) => (query.state.data?.scans.some(isLive) ? 5000 : false),
   });
 
@@ -54,9 +69,27 @@ export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
   const setTab = (next: TabId) =>
     setSearch(next === "overview" ? {} : { tab: next }, { preventScrollReset: true });
 
-  if (study.isPending) return <Loading />;
+  if (study.isPending)
+    return (
+      <div className={PAGE_STATE}>
+        <LoadingState label="Loading the study" rows={4} />
+      </div>
+    );
   // A failed background refetch keeps its data (status "error"): the page stays, with a notice.
-  if (!study.data) return <LoadError error={study.error} retry={() => void study.refetch()} />;
+  if (!study.data)
+    return (
+      <div className={PAGE_STATE}>
+        {study.error instanceof ApiError && study.error.status === 404 ? (
+          <ErrorState title="This study isn't here">
+            It may have been removed, or it belongs to another lab. {homeLink}
+          </ErrorState>
+        ) : (
+          <ErrorState title="Couldn't load the study" onRetry={() => void study.refetch()}>
+            Check your connection, then try again. {homeLink}
+          </ErrorState>
+        )}
+      </div>
+    );
 
   const detail = study.data;
   const only = detail.scans.length === 1 ? detail.scans[0] : undefined;
@@ -66,15 +99,16 @@ export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
   const workflow = workflowById(detail.study.workflowId);
   if (!workflow)
     return (
-      <Notice
-        title="Can't show this study"
-        body={`Its workflow, ${detail.study.workflowId}, isn't in this version of Voluma.`}
-      />
+      <div className={PAGE_STATE}>
+        <ErrorState title="Can't show this study">
+          Its workflow, {detail.study.workflowId}, isn't in this version of Voluma. {homeLink}
+        </ErrorState>
+      </div>
     );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <StudyHeader detail={detail} workflow={workflow} tab={tab} onTab={setTab} />
+    <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
+      <StudyHeader detail={detail} workflow={workflow} />
       {study.isError && (
         <p
           role="status"
@@ -86,21 +120,12 @@ export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
             minute: "2-digit",
           })}
           .
-          <button
-            type="button"
-            onClick={() => void study.refetch()}
-            className="cursor-pointer text-primary-text hover:underline"
-          >
+          <Button variant="link" onClick={() => void study.refetch()}>
             Try again
-          </button>
+          </Button>
         </p>
       )}
-      <div
-        id={PANEL_ID}
-        role="tabpanel"
-        aria-label={tab === "overview" ? "Overview" : tab === "check" ? "To check" : "Scans"}
-        className="min-h-0 flex-1 overflow-y-auto"
-      >
+      <TabPanel value={tab} className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[90rem] px-6 py-5 max-[760px]:px-3 max-[760px]:py-4">
           {tab === "overview" && (
             <Overview
@@ -120,28 +145,17 @@ export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
           )}
           {tab === "scans" && <ScansTable detail={detail} workflow={workflow} />}
         </div>
-      </div>
-    </div>
+      </TabPanel>
+    </Tabs>
   );
 }
 
-function StudyHeader({
-  detail,
-  workflow,
-  tab,
-  onTab,
-}: {
-  detail: StudyDetail;
-  workflow: BundledWorkflow;
-  tab: TabId;
-  onTab: (tab: TabId) => void;
-}) {
+function StudyHeader({ detail, workflow }: { detail: StudyDetail; workflow: BundledWorkflow }) {
   const c = studyCounts(detail);
   const scansLabel = [
     `${c.done} of ${c.scans} done`,
     c.running && `${c.running} running`,
     c.waiting && `${c.waiting} waiting`,
-    c.waitingForAI && `${c.waitingForAI} waiting for the AI`,
     c.notStarted && `${c.notStarted} not started`,
   ]
     .filter(Boolean)
@@ -157,11 +171,8 @@ function StudyHeader({
         </span>
         <h1 className="truncate text-base font-semibold">{detail.study.name}</h1>
       </div>
-      <Tabs
+      <TabList<TabId>
         label="Study"
-        controls={PANEL_ID}
-        value={tab}
-        onChange={onTab}
         className="max-[760px]:order-last max-[760px]:-mx-3 max-[760px]:basis-[calc(100%+1.5rem)] max-[760px]:px-1"
         tabs={[
           { id: "overview", label: "Overview" },
@@ -203,77 +214,17 @@ function StudyDetails({ detail, workflow }: { detail: StudyDetail; workflow: Bun
     ],
   ];
   return (
-    <Popover.Root>
-      <Popover.Trigger asChild>
+    <Popover
+      label="Study details"
+      className="w-72"
+      trigger={
         <Button variant="ghost" size="sm" className="gap-1 px-2.5">
           Study details
           <ChevronDown className="size-3.5" aria-hidden />
         </Button>
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Content
-          align="end"
-          sideOffset={4}
-          className="z-50 w-72 rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-md"
-        >
-          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-ui">
-            {rows.map(([k, v]) => (
-              <div key={k} className="contents">
-                <dt className="text-muted-foreground">{k}</dt>
-                <dd className="m-0 tabular-nums">{v}</dd>
-              </div>
-            ))}
-          </dl>
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
-  );
-}
-
-function Loading() {
-  return (
-    <main aria-busy="true" className="grid flex-1 place-content-center">
-      {/* Shown only when loading is slow, so a fast load doesn't flash it. */}
-      <p className="animate-[appear_200ms_ease-out_600ms_both] text-ui text-muted-foreground">
-        Loading the study…
-      </p>
-    </main>
-  );
-}
-
-function LoadError({ error, retry }: { error: Error; retry: () => void }) {
-  return error instanceof ApiError && error.status === 404 ? (
-    <Notice
-      title="This study isn't here"
-      body="It may have been removed, or it belongs to another lab."
-    />
-  ) : (
-    <Notice
-      title="Couldn't load the study"
-      body="Check your connection, then try again."
-      retry={retry}
-    />
-  );
-}
-
-function Notice({ title, body, retry }: { title: string; body: string; retry?: () => void }) {
-  return (
-    <main className="grid flex-1 place-content-center gap-3 text-center">
-      <h1 className="text-lg font-semibold">{title}</h1>
-      <p className="text-ui text-muted-foreground">{body}</p>
-      <div className="flex justify-center gap-2">
-        {retry && (
-          <Button variant="primary" size="sm" onClick={retry}>
-            Try again
-          </Button>
-        )}
-        <Link
-          to="/"
-          className="inline-flex h-8 items-center rounded-lg border border-border bg-card px-3.5 text-ui font-medium hover:bg-accent"
-        >
-          Go to Home
-        </Link>
-      </div>
-    </main>
+      }
+    >
+      <Facts items={rows} />
+    </Popover>
   );
 }

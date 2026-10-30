@@ -42,18 +42,7 @@ type ThreadIdentity =
   | { kind: "chat"; taskId?: string };
 
 export type StartThreadOptions = ThreadIdentity & {
-  runId: string;
   threadId: string;
-  parentThreadId?: string;
-  /** The attempt a check thread checks. */
-  attemptId?: string;
-  /** The tool call in the parent thread that started this thread. */
-  spawnedBy?: string;
-  /**
-   * The id of this invocation's `thread.started`, when the caller (a tool) has already appended
-   * it: the thread's own emit then does nothing.
-   */
-  startedEventId?: string;
   /**
    * Builds the result of a tool call that a crash cut off, from the log (the caller knows what
    * the call did). `undefined` keeps the cautious default text.
@@ -82,17 +71,6 @@ export type StartThreadOptions = ThreadIdentity & {
   sandbox: (threadId: string) => Promise<Sandbox>;
   /** Aborting ends the thread as cancelled and kills a running command. */
   signal?: AbortSignal;
-  /**
-   * A failed model reply with no content is an outage when `is` says so: the call retry spent its
-   * budget on a transient error. Such a reply is not stored or emitted and the thread writes no
-   * `thread.ended`: it stays open with its History an exact prefix, `release` tells the host, which
-   * releases the run (the next claim resumes the thread). A reply that failed after content
-   * is not an outage; it fails the thread as any provider error does.
-   */
-  providerOutage?: {
-    is(provider: string, error: string): boolean;
-    release(error: string): void;
-  };
   /**
    * The run's own signal. When it aborts (shutdown, self-stop, lost lease), the thread is cut
    * off, not stopped: nothing more is stored or emitted for it, not even a `thread.ended`,
@@ -209,7 +187,6 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     let started = false;
     let outcome: Omit<ThreadOutcome, "ran" | "reply">;
     let unexpected: unknown;
-    let outage: string | undefined;
     const abort = () => agent.abort();
     signal?.addEventListener("abort", abort);
     try {
@@ -269,18 +246,6 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       }
 
       started = true;
-      emit(
-        "thread.started",
-        {
-          parentThreadId: options.parentThreadId ?? null,
-          kind: options.kind,
-          ...(options.taskId && { task: options.taskId }),
-          ...(options.attemptId && { attemptId: options.attemptId }),
-          ...(options.spawnedBy && { spawnedBy: options.spawnedBy }),
-          model: `${options.model.provider}/${options.model.id}`,
-        },
-        options.startedEventId,
-      );
       if (stored.length === 0) {
         // A new thread: store the system message before anything else.
         if (system && (await persist(system))) {
@@ -311,21 +276,6 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
             break;
           case "message_end": {
             const { message } = event;
-            if (
-              message.role === "assistant" &&
-              message.stopReason === "error" &&
-              !signal?.aborted &&
-              !cutOff() &&
-              !historyError &&
-              message.content.length === 0 &&
-              options.providerOutage?.is(message.provider, message.errorMessage ?? "")
-            ) {
-              if (outage === undefined) {
-                outage = message.errorMessage ?? "the model request failed";
-                options.providerOutage.release(outage);
-              }
-              break;
-            }
             const ok = await persist(message);
             if (message.role === "assistant") {
               reply = textOf(message);
@@ -377,7 +327,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
         if (message !== undefined) await agent.prompt(message);
         else await agent.continue();
         // A message steered in as the loop was ending is still queued.
-        while (!historyError && !outage && !signal?.aborted && agent.hasQueuedMessages()) {
+        while (!historyError && !signal?.aborted && agent.hasQueuedMessages()) {
           await agent.continue();
         }
       }
@@ -386,11 +336,9 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       // must not read as this invocation completing.
       outcome = historyError
         ? historyFailure(historyError)
-        : outage !== undefined
-          ? { status: "failed", error: outage }
-          : signal?.aborted && !prompted
-            ? { status: "cancelled" }
-            : outcomeOf(agent.state.messages, signal?.aborted === true);
+        : signal?.aborted && !prompted
+          ? { status: "cancelled" }
+          : outcomeOf(agent.state.messages, signal?.aborted === true);
     } catch (error) {
       outcome = {
         status: "failed",
@@ -405,7 +353,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     }
     // The caller owns the recorder and flushes it. A stop stored its own end first (append-first):
     // the thread's end is then a second one for the same start, and is dropped.
-    if (started && !cutOff() && outage === undefined) {
+    if (started && !cutOff()) {
       await recorder.flush();
       if (!endedSinceStart()) emit("thread.ended", outcome);
     }
@@ -444,7 +392,7 @@ const historyFailure = (error: unknown): Omit<ThreadOutcome, "ran" | "reply"> =>
 /** Wraps our tool as a Pi tool: JSON Schema for the model, zod for validation and defaults. */
 function toAgentTool(
   tool: Tool,
-  { runId, threadId, kind, taskId, sandbox, recorder }: StartThreadOptions,
+  { threadId, kind, taskId, sandbox, recorder }: StartThreadOptions,
   batchSize: (toolCallId: string) => number,
 ): AgentTool {
   const { $schema: _, ...jsonSchema } = z.toJSONSchema(tool.input, { io: "input" });
@@ -459,7 +407,6 @@ function toAgentTool(
       let result: ToolResult;
       try {
         result = await tool.execute(tool.input.parse(params), {
-          runId,
           threadId,
           kind,
           ...(taskId && { taskId }),

@@ -8,6 +8,7 @@ import type { Folded } from "@voluma/contracts/fold";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { RecordedPin } from "@voluma/contracts/workflow";
 import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
+import { withImageRefs } from "./adapters/pi/image-refs";
 import type { RunLayout } from "./layout";
 import { keepOutputs } from "./outputs-backup";
 import type { Evidence } from "./ports/evidence";
@@ -54,15 +55,7 @@ export interface SuperviseRunOptions {
   briefs: Briefs;
   config?: Partial<LoopConfig>;
   /** Whether a failed thread's error text says the model provider failed. */
-  providerError?(error: string): boolean;
-  /** Whether such an error means no redo can succeed: the run then fails at once. */
-  providerFatal?(error: string): boolean;
-  /**
-   * A model reply that failed with no content on a transient error is a provider outage (the
-   * call retry spent its budget; see `StartThreadOptions.providerOutage`). `release` lets the
-   * host release the run; the host aborts `signal`, which cuts every thread off.
-   */
-  providerOutage?: { is(provider: string, error: string): boolean; release(error: string): void };
+  providerError?(error: string): "retry" | "fatal" | undefined;
   signal: AbortSignal;
 }
 
@@ -98,12 +91,10 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
   });
   const pool = threads(
     {
-      runId,
       recorder,
-      history: options.history,
+      history: withImageRefs(options.history, options.files, runId),
       sandbox: options.sandbox,
       release: options.releaseSandbox,
-      providerOutage: options.providerOutage,
     },
     signal,
   );
@@ -135,7 +126,6 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
         files: options.files,
         runtime,
         main: {
-          runId,
           rootThreadId,
           recorder,
           runtime,
@@ -144,7 +134,6 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
         },
       }),
     providerError: options.providerError,
-    providerFatal: options.providerFatal,
     signal,
   });
 }

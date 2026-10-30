@@ -1,25 +1,24 @@
 /**
- * Review's authorized reference scan downloads. Both descriptor and file reads use
- * the caller's scoped input list before accessing storage.
+ * Review's authorized reference scan downloads. Every user of an org may read its reference
+ * scan (`referenceInputId`) and no other input has an archive in storage.
  */
 import { downloadDescriptorSchema } from "@voluma/contracts/download";
+import { referenceInputId } from "@voluma/contracts/r2";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { readerOf, requireUser, type UserEnv } from "../../domain";
+import { requireUser, type UserEnv } from "../../domain";
 import type { ReferenceArchive } from "../../ports";
 import type { ReviewDeps } from ".";
 
-export function inputRoutes({ inputs, referenceArchive }: ReviewDeps) {
+export function inputRoutes({ referenceArchive }: ReviewDeps) {
   const app = new Hono<UserEnv & { Variables: { archive: ReferenceArchive } }>();
   app.use("/inputs/:inputId/*", requireUser);
   app.use("/inputs/:inputId/*", async (c, next) => {
     // Hono otherwise runs GET for HEAD and drops the body without cancelling R2.
     if (c.req.method !== "GET")
       throw new HTTPException(405, { message: "Use GET to open a scan." });
-    const available = await inputs.listInputs(readerOf(c.var.user));
-    const input = available.find((item) => item.id === c.req.param("inputId"));
     // Uploaded inputs do not have an archive in storage yet. Never guess an R2 key.
-    if (input?.source !== "reference")
+    if (c.req.param("inputId") !== referenceInputId(c.var.user.labId))
       throw new HTTPException(404, { message: "Scan archive not found." });
     if (!referenceArchive)
       throw new HTTPException(503, { message: "Reference scan storage is not configured." });
