@@ -55,9 +55,9 @@ Variables on `voluma-api` (names in `render.yaml`; values never go in the repo):
 
 **Guest sign-in is on on staging** (2026-10-30, Jimmy: staging shouldn't need a sign-in). `GUEST_ORGANIZATION_ID=org_01M609YS5PSWJSNT20NNKSTAA9` (the Demo organization) and `GUEST_SCOPE=self` are set on `voluma-api` in the dashboard; to close it, delete both and restart. Render routes by `Host`, so a sandbox can still reach the API through the gateway's domain (#236); that is accepted because a guest runs only on their own Meta key. Check: `POST /api/auth/guest` with `Origin` and `content-type: application/json` answers 200 when open, 404 when closed. Judges sign in through `WORKOS_JUDGES_ORGANIZATION_ID` either way.
 
-**The client address for WorkOS** is read from one header, `CLIENT_IP_HEADER` in `src/auth.ts`. Render's docs don't say which header its proxy sets or strips; check it on the deployed API at cutover (the comment there says how).
+**The client address for WorkOS** is read from one header, `CLIENT_IP_HEADER` in `src/auth.ts`. It is `true-client-ip`: Render's edge overwrites it with the caller's address, and passes a client's own `x-real-ip` through unchanged (checked 2026-10-30 with forged headers).
 
-Staging URL: `https://voluma-api.onrender.com` (`<API_ID>` below: fill in at cutover).
+Staging URL: `https://voluma-api.onrender.com` (`srv-dbidaf3l550s73btnpg0`).
 
 **In the WorkOS dashboard (staging), for each deployed origin:** add
 `<APP_URL>/api/auth/callback` to Redirects (`http://localhost:*/api/auth/callback` is
@@ -110,13 +110,13 @@ Reference: https://api-docs.render.com.
 | Id | Value |
 |---|---|
 | Workspace `Voluma Staging` | `tea-d8maeebtqb8s73br9ev0` |
-| `voluma-api` | `<API_ID>` (`srv-...`; filled in at cutover) |
-| `voluma-gateway` | `<GATEWAY_ID>` |
-| `voluma-runner` | `<RUNNER_ID>` |
+| `voluma-api` | `srv-dbidaf3l550s73btnpg0` |
+| `voluma-gateway` | `srv-dbidaf3l550s73btnpfg` |
+| `voluma-runner` | `srv-dbideabl550s73bu5120` |
 
 ```bash
 r() { curl -s -H "Authorization: Bearer $RENDER_API_KEY" -H 'Content-Type: application/json' "$@"; }
-B=https://api.render.com/v1 S=<API_ID>
+B=https://api.render.com/v1 S=srv-dbidaf3l550s73btnpg0
 
 # The ids (to fill in the table above)
 r "$B/services?limit=20"
@@ -238,4 +238,11 @@ its own variables (names in [../../runner/.context/deploy.md](../../runner/.cont
 ## Checked on staging (2026-10-28, on Railway)
 
 - `RUN_LIMITS_*` were set as in the table above and applied: a guest's second concurrent start answered 409 (`DEMO_PER_CALLER=1`).
-- Not yet checked on Render: fill in at cutover.
+
+## Checked on Render (2026-10-30, at cutover)
+
+- `/health` 200 on the API and gateway; the copied database served the test account's runs and studies.
+- Client IP: `true-client-ip` (above). Host routing: a request with the gateway's SNI and the API's `Host`
+  reaches the API (#236); accepted while a guest runs only on their own key.
+- A full mouse-oa run (OA7-1R, 778f0937) completed across two API redeploys with no run effect.
+- Neon: the first query after a forced suspend answered in 1.2 s with no error.
