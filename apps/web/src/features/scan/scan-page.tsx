@@ -233,9 +233,16 @@ function ScanReview({
     () => store.set({ halt, baseThreads: view.threads }),
     [store, halt, view.threads],
   );
-  // What the review payload follows: each task's state and how many results it has.
+  // What the review payload follows: per task its state, its tries (a redo opens one, even when it
+  // lands in one batch with its result) and its values.
   const changed = useMemo(
-    () => view.tasks.map((t) => `${t.id}:${t.state}:${t.results.length}`).join(),
+    () =>
+      view.tasks
+        .map((t) => {
+          const tries = t.threads.reduce((n, th) => n + th.attempts.length, t.threads.length);
+          return `${t.id}:${t.state}:${tries}:${t.results.map((r) => r.value).join("|")}`;
+        })
+        .join(),
     [view.tasks],
   );
   const review = useReviewRun(run.id, run, changed);

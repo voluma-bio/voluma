@@ -196,5 +196,5 @@ console.log(
   `\ncost: $${total.costUsd.toFixed(2)} (${total.calls} model calls` +
     `${run.providerCalls ? `, ${run.providerCalls.calls} gateway calls $${run.providerCalls.costUsd.toFixed(2)}` : ""})`,
 );
-console.log(`page: ${origin}/runs/${runId}/live`);
+console.log(`page: ${origin}/scans/${runId}`);
 process.exit(run.state.status === "ended" && run.state.outcome === "completed" ? 0 : 1);

@@ -8,7 +8,8 @@
  * Reconnecting keeps what was received and resumes after the last `seq`. It happens when
  * `reopened` changes (a message reopened an ended run, whose stream had closed) and, after a
  * backoff, when the browser gives up on the stream while the run still goes (a non-200 answer,
- * as during a deploy, closes an EventSource for good).
+ * as during a deploy, closes an EventSource for good). A stream the server ended because the run
+ * ended is final: no reconnect.
  */
 import { subscribe } from "@voluma/api-client";
 import type { RunEvent } from "@voluma/contracts/events";
@@ -59,17 +60,18 @@ export function useRunStream(
           schedule();
         },
         onLive: (f) => {
+          failures.current = 0;
           const next = applyFrame(live, f, settled);
           if (next === live) return;
           live = next;
           schedule();
         },
-        onClosed: () => {
+        onClosed: (why) => {
           if (frame !== undefined) cancelAnimationFrame(frame);
           live = noLive;
           publish(true);
           onClosedRef.current();
-          if (!goingRef.current) return;
+          if (why === "ended" || !goingRef.current) return;
           const wait = BACKOFF_MS[Math.min(failures.current, BACKOFF_MS.length - 1)];
           failures.current += 1;
           timer = setTimeout(() => setRetry((n) => n + 1), wait);

@@ -292,6 +292,26 @@ export function AppShell({
     return () => window.removeEventListener("keydown", onKey);
   }, [foldSide, toggleFull, toggle, regs, full]);
 
+  // A screen opens one of its panels: it joins what is open on its side, as Shift-click stacks
+  // it. From Full view it brings the saved layout back with the panel added. Stable, so a
+  // screen's callbacks built on it don't change when panels do.
+  const regsRef = useRef(regs);
+  regsRef.current = regs;
+  const open = useCallback((id: string) => {
+    const reg = regsRef.current.get(id);
+    if (!reg || reg.link) return;
+    setFull(false);
+    setLayout((l) =>
+      l.open[reg.side].includes(id)
+        ? l
+        : {
+            ...l,
+            open: { ...l.open, [reg.side]: [...l.open[reg.side], id].slice(-2) },
+            arranged: [...new Set([...l.arranged, reg.side])],
+          },
+    );
+  }, []);
+
   const state = useMemo<ShellState>(
     () => ({
       register,
@@ -299,24 +319,9 @@ export function AppShell({
       slot: (id) => slots[id] ?? null,
       isOpen: (id) => shown.left.includes(id) || shown.right.includes(id),
       toggle,
-      // A screen opens one of its panels: it joins what is open on its side, as Shift-click
-      // stacks it. From Full view it brings the saved layout back with the panel added.
-      open: (id) => {
-        const reg = regs.get(id);
-        if (!reg || reg.link) return;
-        setFull(false);
-        setLayout((l) =>
-          l.open[reg.side].includes(id)
-            ? l
-            : {
-                ...l,
-                open: { ...l.open, [reg.side]: [...l.open[reg.side], id].slice(-2) },
-                arranged: [...new Set([...l.arranged, reg.side])],
-              },
-        );
-      },
+      open,
     }),
-    [register, unregister, slots, shown, toggle, regs],
+    [register, unregister, slots, shown, toggle, open],
   );
 
   // One stable ref callback per panel: a new callback each render would detach and reattach the

@@ -27,7 +27,7 @@ Without `item` or `task`, the task in view is the first open item's, else the pl
   place and state aren't events.
 - **The review payload** (`getReviewRun`) gives what the viewer draws, the values, references and
   files. It is fetched again (once things settle, after 1 s) when the stream shows a task's
-  state or result count changing, and when the run ends. It is polled only while it answers 409
+  state, tries or values changing, and when the run ends. It is polled only while it answers 409
   (no plan yet) and while assets are still being converted, until ten minutes after the end. A task with no review data yet
   shows "No views for <task> yet"; the viewer never falls back to another task.
 
@@ -36,7 +36,7 @@ Without `item` or `task`, the task in view is the first open item's, else the pl
 Every connection appends to the same events and resumes with `subscribe(..., after = last seq)`.
 It reconnects when a message to the AI reopens an ended run, and, with a backoff (1 s to 30 s),
 when the browser gives up on the stream while the run still goes (an EventSource closes for good
-on a non-200 answer, as during a deploy). An ended run's stream closes after its backlog; the
+on a non-200 answer, as during a deploy). An ended run's stream closes after its backlog and is not reconnected; the
 end is applied only then (`haltOf(state, closed)`), so a reload never shows a finished thread as
 stopped.
 

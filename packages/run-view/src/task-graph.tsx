@@ -489,10 +489,11 @@ function AgentRows({
             type="button"
             disabled={!onAgent}
             onClick={() => onAgent?.(t.id)}
-            className="grid h-[22px] w-full cursor-pointer grid-cols-[12px_minmax(0,1fr)_auto] items-center gap-1.5 rounded-sm px-1 text-left text-xs hover:bg-accent disabled:cursor-default disabled:hover:bg-transparent"
+            className="grid min-h-[22px] w-full cursor-pointer grid-cols-[12px_minmax(0,1fr)_auto] items-start gap-x-1.5 rounded-sm px-1 py-[3px] text-left text-xs leading-4 hover:bg-accent disabled:cursor-default disabled:hover:bg-transparent"
           >
-            <StatusGlyph status={THREAD_STATUS[t.status]} className="size-3" />
-            <span className="truncate">{agentLabel(t, threads, { short: true })}</span>
+            <StatusGlyph status={THREAD_STATUS[t.status]} className="mt-0.5 size-3" />
+            {/* A narrow box wraps the name between words rather than cutting it. */}
+            <span className="hyphens-none">{agentLabel(t, threads, { short: true })}</span>
             <AgentOutcome thread={t} />
           </button>
         </li>
@@ -513,7 +514,7 @@ function AgentOutcome({ thread }: { thread: Thread }) {
       <span className="text-muted-foreground">{STATUS_WORD[THREAD_STATUS[thread.status]]}</span>
     );
   return (
-    <span className="text-muted-foreground tabular-nums">
+    <span className="text-muted-foreground tabular-nums whitespace-nowrap">
       {formatDuration(thread.workedBefore + Math.max(0, end - Date.parse(thread.startedAt)) / 1000)}
     </span>
   );
