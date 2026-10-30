@@ -68,11 +68,6 @@ export function runClient(
   }
   const post = (path: string, body: unknown, retryForMs?: number) =>
     guarded(() => postJson(endpoint, path, body, { leaseToken, retryForMs, redact }));
-  /**
-   * The last seq `storedEvents` returned: the report carries it (`ReportRequest.lastSeq`).
-   * 0 for a claim that never read the log; the server counts what the claim started with.
-   */
-  let lastSeq = 0;
   const get = (path: string) =>
     guarded(() => send(endpoint, path, { leaseToken }, HISTORY_BUDGET_MS));
 
@@ -90,7 +85,6 @@ export function runClient(
         events.push(...page.events);
         more = page.more;
       }
-      lastSeq = events.at(-1)?.seq ?? 0;
       return events;
     },
     async load(threadId) {
@@ -117,7 +111,7 @@ export function runClient(
     },
     async report(report) {
       try {
-        await post(`${runPath}/report`, { report, lastSeq }, REPORT_BUDGET_MS);
+        await post(`${runPath}/report`, { report }, REPORT_BUDGET_MS);
         return true;
       } catch (error) {
         if (error instanceof LeaseLost || (error instanceof HttpError && error.status === 409)) {

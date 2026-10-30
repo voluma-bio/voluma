@@ -12,12 +12,12 @@
  * no end and it is not running). A stop appends the end first, so the log shows it at once.
  */
 import type { RunEvent } from "@voluma/contracts/events";
-import { abandonedEvents, type Folded, fold } from "@voluma/contracts/fold";
+import { abandonedEvents, corrections, type Folded, fold } from "@voluma/contracts/fold";
 import type { EvidenceRef } from "@voluma/contracts/output";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { UserSender } from "./adapters/pi/start-thread";
 import type { PayloadOf } from "./recorder";
-import { callKey, effectId, messageOfGoMarker } from "./tools/effects";
+import { callKey, effectId } from "./tools/effects";
 
 /** The sandbox path of a file a task names: the inverse of `refOf` (`task-runtime.ts`). */
 export const pathOf = (taskId: string, f: Pick<EvidenceRef, "root" | "path">): string =>
@@ -108,6 +108,11 @@ export type Notice = {
   /** The loop stopped a thread the main agent did not ask to stop; `reason` says why. */
   | { kind: "stopped"; reason: string }
   /**
+   * A correction ended unfinished (`correction.ended`): its task-state events and the files it
+   * wrote are discarded. `taskId` is the task of its go, if it had one.
+   */
+  | { kind: "correction-ended"; status: "failed" | "cancelled"; error?: string }
+  /**
    * The researcher wrote (`person.message`); `eventId` is the message's. A mark names a volume
    * block (`<taskId>/<outputId>`); `file` is that output's sandbox path, when the log has it.
    * `snapshot` is the sandbox path of the view snapshot.
@@ -122,9 +127,8 @@ export type Notice = {
         box?: { min: number[]; max: number[] };
       }[];
       snapshot?: string;
-      go: boolean;
-      /** The message's `seq`: a delivery covers it only if its claim had read that far (`readSeq`). */
-      seq: number;
+      /** A go: `live` when it lies in the open correction, `cancelled` when its correction ended unfinished. */
+      go?: "live" | "cancelled";
     }
 );
 
@@ -181,16 +185,11 @@ export interface ThreadLog {
    * since: this is a correction, and the main agent's work tools wait for a go.
    */
   correcting: boolean;
-  /** The latest `run.reopened`'s id: what a go marker's id is keyed to (`goMarkerId`). */
-  reopenId: string | undefined;
   /** A reopen was stored after the latest `claim.started`: the next claim says it follows a reopen. */
   reopenPending: boolean;
-  /**
-   * The researcher's go the main agent was told of since the latest reopen (the loop's
-   * `revision.started`, id `goMarkerId`): the task to redo, the message, and the marker's position.
-   */
-  go: { taskId: string; messageId: string; at: number; redone: boolean } | undefined;
-  /** A `person.message` has no `reply` yet from a claim that had read it. */
+  /** The open correction's go the main agent was told of (`corrections`): the task to redo and whether its redo began. */
+  go: { taskId: string; redone: boolean } | undefined;
+  /** A `person.message` has no `reply` yet. */
   unanswered: boolean;
 }
 
@@ -262,21 +261,13 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
     root: { id: undefined, ended: false, endedThisClaim: false },
     correcting: false,
     reopenPending: false,
-    reopenId: undefined,
     go: undefined,
     unanswered: false,
   };
-  // A claim reads the log once (`claim.started.readSeq`). The server stores a researcher's
-  // message mid-claim above that horizon, between the claim's own events: a delivery or a reply
-  // of that claim, though it sits later in the log, never saw the message.
-  let horizon = Number.POSITIVE_INFINITY;
-  const unreplied: number[] = []; // seqs of the person messages no reply has answered
-  const attemptAt = new Map<string, number>(); // each task's latest attempt.opened position
-  const deliveries: { at: number; horizon: number; first: boolean }[] = [];
-  const coveredBy = (d: { at: number; horizon: number }, n: Notice) =>
-    n.at <= d.at && (n.kind !== "person" || n.seq <= d.horizon);
+  let unanswered = false;
+  let claimAt = -1; // the latest claim.started
+  const deliveries: { at: number; first: boolean }[] = [];
   const volumeFiles = new Map<string, string>(); // volume block id -> its file's sandbox path
-  const goTasks = new Map<string, { taskId: string; messageId: string }>(); // person message id -> its go
   const briefed = new Set<string>(); // threads whose brief (first user message) the log holds
   // Threads started again while their latest start had no end: the message that follows is a
   // cut-off resume, not a nudge (a nudge is the runtime asking a thread that stopped).
@@ -288,7 +279,8 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
   >(); // by attempt
   const notice = (n: NoticeBody, at: number) => value.notices.push({ ...n, at } as Notice);
   // The task-state events of a failed or cancelled correction never happened, as `fold` has it.
-  const abandoned = abandonedEvents(events);
+  const { spans, open } = corrections(events);
+  const abandoned = abandonedEvents(events, spans);
   for (const [at, e] of events.entries()) {
     value.written.set(e.id, {
       at,
@@ -302,20 +294,29 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
     switch (e.type) {
       case "claim.started":
         value.after = e.payload.after;
-        value.reopenPending = false;
-        horizon = e.payload.readSeq ?? Number.POSITIVE_INFINITY;
+        claimAt = at;
         break;
+      case "correction.ended": {
+        const span = spans.find((s) => s.to === at && s.closed === "abandoned");
+        notice(
+          {
+            eventId: e.id,
+            threadId: e.threadId,
+            kind: "correction-ended",
+            ...(span?.go && { taskId: span.go.taskId }),
+            status: e.payload.status,
+            ...(e.payload.error !== undefined && { error: e.payload.error }),
+          },
+          at,
+        );
+        break;
+      }
       case "run.reopened":
         value.root.ended = false;
-        value.correcting = true;
-        value.reopenPending = true;
-        value.go = undefined;
-        value.reopenId = e.id;
         break;
       case "person.message": {
         const { text, marks, snapshotKey, go, taskId } = e.payload;
-        unreplied.push(e.seq);
-        if (go && taskId) goTasks.set(e.id, { taskId, messageId: e.id });
+        unanswered = true;
         notice(
           {
             eventId: e.id,
@@ -329,8 +330,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
               ...(m.box && { box: m.box }),
             })),
             ...(snapshotKey && { snapshot: `/scratch/${snapshotKey.split("/scratch/")[1]}` }),
-            go: go === true,
-            seq: e.seq,
+            ...(go && { go: open?.message === e.id ? ("live" as const) : ("cancelled" as const) }),
             ...(taskId && { taskId }),
           },
           at,
@@ -338,16 +338,11 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         break;
       }
       case "reply":
-        unreplied.splice(0, unreplied.length, ...unreplied.filter((seq) => seq > horizon));
+        unanswered = false;
         break;
-      case "revision.started": {
-        const go = goTasks.get(messageOfGoMarker(e.id));
-        if (go && e.payload.reason === "correction") {
-          value.go = { ...go, at, redone: false };
-          value.fixRounds.set(go.taskId, 0);
-        }
+      case "revision.started":
+        if (open?.go?.markerAt === at) value.fixRounds.set(open.go.taskId, 0);
         break;
-      }
       case "output": {
         const { taskId, outputId, output } = e.payload;
         if (output.kind === "volume") {
@@ -400,7 +395,6 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
           value.root.endedThisClaim = true;
           if (e.payload.status === "completed") {
             value.root.ended = true;
-            value.correcting = false;
           }
         }
         if (!record) break;
@@ -454,7 +448,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
           if (record.role === "main" && covers !== undefined) {
             value.cursor = covers;
             // A thread's first message is its brief, not a delivery: it does not count toward liveness.
-            deliveries.push({ at: value.written.get(covers)?.at ?? -1, horizon, first });
+            deliveries.push({ at: value.written.get(covers)?.at ?? -1, first });
           }
         }
         if (record && e.payload.role === "user" && e.payload.sender.kind === "thread") {
@@ -466,7 +460,6 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         break;
       case "attempt.opened":
         if (record) record.pendingFeedback = feedbackOpens.get(e.id);
-        attemptAt.set(e.payload.taskId, at);
         break;
       case "checkpoint": {
         const { verdict, summary, text } = e.payload;
@@ -553,14 +546,17 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
       value.holders.set(t.id, worker);
     }
   }
-  value.undelivered = value.notices.filter((n) => !deliveries.some((d) => coveredBy(d, n)));
-  value.unanswered = unreplied.length > 0;
-  if (value.go) value.go.redone = (attemptAt.get(value.go.taskId) ?? -1) > value.go.at;
+  value.undelivered = value.notices.filter((n) => !deliveries.some((d) => n.at <= d.at));
+  value.unanswered = unanswered;
+  value.correcting = open !== undefined && !value.root.ended;
+  value.reopenPending = open !== undefined && claimAt < open.reopened;
+  if (open?.go?.markerAt !== undefined)
+    value.go = { taskId: open.go.taskId, redone: open.go.redone };
   let from = -1;
   const sizes = deliveries
     .filter((d) => !d.first)
     .map((d) => {
-      const count = value.notices.filter((n) => n.at > from && coveredBy(d, n)).length;
+      const count = value.notices.filter((n) => n.at > from && n.at <= d.at).length;
       from = Math.max(from, d.at);
       return count;
     });

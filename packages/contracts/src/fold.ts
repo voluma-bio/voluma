@@ -205,67 +205,116 @@ const TASK_STATE = new Set<RunEvent["type"]>([
 ]);
 
 /**
- * One correction: what a `run.reopened` starts. The only place correction spans are derived;
- * `abandonedEvents` and the runner's `/outputs` backup (`outputs-backup.ts`) both read it.
+ * One correction: what a `run.reopened` starts. A message reopens the run for one claim, so the
+ * reopen and its `person.message` are written together and a span holds one message (`messages.ts`).
  */
-export type CorrectionSpan = {
+export type Correction = {
   /** The `run.reopened` event's id. */
   reopenId: string;
-  /** Index in the log where the span starts: the earlier of the reopen and the message it is keyed to (a requeue stores its reopen after the unseen messages). */
-  from: number;
-  /** Index of the `run.reopened` itself. */
+  /** Index of the `run.reopened` in the log. */
   reopened: number;
-  /** Index where the span stops (exclusive): its `correction.ended`, else the next span's start, else the log's end. */
+  /** Index where the span stops (exclusive): its `correction.ended`, else the next reopen, else the log's end. */
   to: number;
-  /** A `person.message` with a go lies in the span. */
-  hasGo: boolean;
   /**
    * `abandoned`: a `correction.ended` closed it. `finished`: the next `run.reopened` came with
-   * no end between. `open`: the latest span, which a claim may still be running or have finished.
+   * no end between. `open`: the latest span, which a claim may still be running or have finished
+   * (a finished correction leaves its span open while the run is `ended`).
    */
   closed: "abandoned" | "finished" | "open";
+  /** The id of the span's `person.message`. */
+  message: string | undefined;
+  /**
+   * The message's go: `markerAt` is the index of the loop's `revision.started` (`goMarkerId`) once
+   * the main agent was told of it; `redone` is whether an attempt of the task opened since.
+   */
+  go: { taskId: string; markerAt: number | undefined; redone: boolean } | undefined;
+  /** The `/outputs` backup (`outputs-backup.ts`): the latest `outputs.*` event keyed to this reopen. */
+  backup: "none" | "backed-up" | "restored" | "discarded";
 };
 
-export function correctionSpans(events: readonly RunEvent[]): CorrectionSpan[] {
-  const spans: CorrectionSpan[] = [];
-  const ends = new Map<number, number>(); // span index -> its correction.ended index
+/** The id of the `revision.started` the loop writes when the main agent is told of a go. */
+export const goMarkerId = (personMessageEventId: string) => `${personMessageEventId}:go`;
+
+/**
+ * Every correction of a run, and the latest if it is not abandoned (`open`). The only place
+ * correction state is derived: the thread log, `abandonedEvents`, the runner's `/outputs` backup,
+ * and the API's reopen and end of a correction all read it.
+ */
+export function corrections(events: readonly RunEvent[]): {
+  spans: Correction[];
+  open: Correction | undefined;
+} {
+  const spans: Correction[] = [];
+  const byReopen = new Map<string, Correction>();
   for (const [i, e] of events.entries()) {
-    if (e.type === "run.reopened") {
-      const keyed = events.findIndex((k) => k.id === e.id.replace(/:reopened$/, ""));
-      spans.push({
-        reopenId: e.id,
-        from: keyed >= 0 ? Math.min(i, keyed) : i,
-        reopened: i,
-        to: events.length,
-        hasGo: false,
-        closed: "open",
-      });
-    } else if (e.type === "correction.ended" && spans.length > 0) {
-      const last = spans.length - 1;
-      if (!ends.has(last)) ends.set(last, i);
+    const span = spans.at(-1);
+    switch (e.type) {
+      case "run.reopened": {
+        if (span?.closed === "open") {
+          span.closed = "finished";
+          span.to = i;
+        }
+        const next: Correction = {
+          reopenId: e.id,
+          reopened: i,
+          to: events.length,
+          closed: "open",
+          message: undefined,
+          go: undefined,
+          backup: "none",
+        };
+        spans.push(next);
+        byReopen.set(e.id, next);
+        break;
+      }
+      case "person.message":
+        if (span && span.message === undefined) {
+          span.message = e.id;
+          if (e.payload.go && e.payload.taskId) {
+            span.go = { taskId: e.payload.taskId, markerAt: undefined, redone: false };
+          }
+        }
+        break;
+      case "revision.started":
+        if (span?.go && span.message !== undefined && e.id === goMarkerId(span.message)) {
+          span.go.markerAt = i;
+        }
+        break;
+      case "attempt.opened":
+        if (
+          span?.closed === "open" &&
+          span.go?.markerAt !== undefined &&
+          span.go.taskId === e.payload.taskId
+        ) {
+          span.go.redone = true;
+        }
+        break;
+      case "correction.ended":
+        if (span?.closed === "open") {
+          span.closed = "abandoned";
+          span.to = i;
+        }
+        break;
+      case "outputs.backed-up":
+      case "outputs.restored":
+      case "outputs.discarded": {
+        const owner = byReopen.get(e.payload.reopenId);
+        if (owner) owner.backup = e.type.slice("outputs.".length) as Correction["backup"];
+        break;
+      }
     }
   }
-  for (const [n, span] of spans.entries()) {
-    const end = ends.get(n);
-    const next = spans[n + 1];
-    if (end !== undefined) {
-      span.to = end;
-      span.closed = "abandoned";
-    } else if (next) {
-      span.to = Math.max(next.from, span.reopened);
-      span.closed = "finished";
-    }
-    span.hasGo = events
-      .slice(span.from, span.to)
-      .some((e) => e.type === "person.message" && e.payload.go);
-  }
-  return spans;
+  const last = spans.at(-1);
+  return { spans, open: last?.closed === "open" ? last : undefined };
 }
 
-/** The ids of the task-state events inside abandoned spans (`correctionSpans`). */
-export function abandonedEvents(events: readonly RunEvent[]): Set<string> {
+/** The ids of the task-state events inside abandoned corrections (of `events`, or the `spans` given). */
+export function abandonedEvents(
+  events: readonly RunEvent[],
+  spans: readonly Correction[] = corrections(events).spans,
+): Set<string> {
   const abandoned = new Set<string>();
-  for (const span of correctionSpans(events)) {
+  for (const span of spans) {
     if (span.closed !== "abandoned") continue;
     for (const e of events.slice(span.reopened, span.to))
       if (TASK_STATE.has(e.type)) abandoned.add(e.id);

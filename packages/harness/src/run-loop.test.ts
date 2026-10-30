@@ -1146,12 +1146,7 @@ describe("run loop", () => {
       const claims = of(w.stored, "claim.started").map((e) =>
         e.type === "claim.started" ? e.payload : undefined,
       );
-      expect(claims.map((c) => c && { ...c, readSeq: undefined })).toEqual([
-        { resumed: false, readSeq: undefined },
-        { resumed: true, reopened: true, readSeq: undefined },
-      ]);
-      // Each claim records how far it read: nothing on the first, the whole first run on the second.
-      expect(claims.map((c) => c?.readSeq)).toEqual([0, expect.any(Number)]);
+      expect(claims).toEqual([{ resumed: false }, { resumed: true, reopened: true }]);
       expect(of(w.stored, "thread.started", "t1.worker")).toHaveLength(1);
       expect(of(w.stored, "thread.started", "main.2")).toHaveLength(0);
       // Main was resumed with the message and told no cut-off text.
@@ -1222,7 +1217,7 @@ describe("run loop", () => {
       // redo does not add a second one.
       const revisions = after.filter((e) => e.type === "revision.started");
       expect(revisions).toHaveLength(1);
-      expect(revisions[0]?.id).toMatch(/^r1\.person:m\d+:go:r1\.person:m\d+:reopened$/);
+      expect(revisions[0]?.id).toMatch(/^r1\.person:m\d+:go$/);
       expect(revisions[0]?.type === "revision.started" && revisions[0].payload).toEqual({
         reason: "correction",
         taskId: "t1",
@@ -1272,58 +1267,34 @@ describe("run loop", () => {
       expect(errors(w.stored), w.text()).toEqual([]);
     });
 
-    it("a go that arrived mid-claim is answered by the next claim, which does the attempt", async () => {
-      const goTold = (t: Turn) => t.users.some((u) => /They said go/.test(u));
-      let step = 0; // the second question: reply, reply, wait, finish after the liveness nudge
-      const answer: Script = (t) => {
-        if (goTold(t)) return undefined;
-        if (wrote(t)) return call("reply", { text: "Looking." });
-        const second = t.users.some((u) => /Anything else/.test(u));
-        if (second && sentReply(t)) {
-          return step++ === 0 ? call("reply", { text: "Still looking." }) : call("wait");
-        }
-        if (second && t.fresh) return call("finish_run", { summary: "Answered." });
+    it("a go cancelled before main acted grants nothing to the next correction", async () => {
+      const script: Script = (t) => {
+        if (!talking(t)) return undefined;
+        if (wrote(t)) return call("reply", { text: "t1 is thin." });
         return sentReply(t) ? call("finish_run", { summary: "Answered." }) : undefined;
       };
-      const redo: Script = (t) => {
-        if (!talking(t)) return undefined;
-        const last = t.results.at(-1) ?? "";
-        if (t.fresh && /They said go on t1/.test(t.lastUser))
-          return call("message", { threadId: `${R}t1.worker`, text: "Redo t1." });
-        if (/Feedback sent/.test(last)) return call("reply", { text: "Redoing t1." });
-        if (t.fresh && /The check of t1 passed/.test(t.lastUser) && count(t, "start_worker") === 2)
-          return call("start_worker", { taskId: "t2", brief: "Redo t2." });
-        if (t.fresh && /The check of t2 passed/.test(t.lastUser))
-          return call("finish_run", { summary: "Redone." });
-        return call("wait");
-      };
-      const w = world({ plan: T1, main: first(answer, redo, chain(["t1", "t2"])) });
-      await w.run();
-      // Claim 2 answers M1 (a question) with two replies and a wait. M2, with a go, is stored
-      // between the replies, so a reply, a liveness delivery and `finish_run` of claim 2 follow it
-      // in the log, yet it is above what the claim read: none of them covers or answers it. The claim's end is not recorded: the run is
-      // requeued and `run.reopened` is written after M2 (the stored order of `report()`'s requeue).
-      await w.send({ text: "Why is t1 thin?" });
-      const before = w.stored.length;
-      const folded = await w.send({ text: "Anything else?" }, undefined, {
-        message: { text: "Redo it.", go: true, taskId: "t1" },
-        after: (e) => e.type === "reply",
+      let armed = false;
+      const w = world({
+        plan: T1,
+        main: first(script, chain(["t1", "t2"])),
+        cancelAfter: (e) => armed && e.type === "claim.started",
       });
-      expect(
-        folded.tasks.map((t) => `${t.id}:${t.status}`),
-        w.text(),
-      ).toEqual(["t1:done", "t2:done"]);
+      await w.run();
+      armed = true;
+      await w.send({ text: "Redo it.", go: true, taskId: "t1" });
+      armed = false;
+      const before = w.stored.length;
+      await w.send({ text: "Why is t1 thin?" });
       const after = w.stored.slice(before);
-      // The go sits before claim 2's later events yet still opens the correction, once.
-      expect(after.filter((e) => e.type === "revision.started")).toHaveLength(1);
-      expect(of(after, "attempt.opened", "t1.worker")).toHaveLength(1);
+      expect(after.filter((e) => e.type === "revision.started")).toEqual([]);
+      expect(of(after, "attempt.opened")).toEqual([]);
+      expect(ended(w.stored, "supervisor").at(-1)).toBe("completed");
+      // The new main is told the cancelled go is void and that the correction was discarded.
+      const told = after.flatMap((e) =>
+        e.type === "message" && e.payload.role === "user" ? [e.payload.text] : [],
+      );
+      expect(told.join("\n")).toMatch(/The correction of t1 was cancelled/);
       expect(errors(after), w.text()).toEqual([]);
-      expect(ended(w.stored, "supervisor")).toEqual([
-        "completed",
-        "completed",
-        "completed",
-        "completed",
-      ]);
     });
 
     it("a go on a task the fix limit left to check lets main send feedback again", async () => {

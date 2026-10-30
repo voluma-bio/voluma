@@ -48,8 +48,8 @@ export interface SuperviseRunOptions {
   files: Files;
   /** The run's `/outputs` as a whole: backed up when a correction starts, put back when one ends unfinished (`outputs-backup.ts`). */
   outputs: Outputs;
-  /** An earlier claim's sandboxes are confirmed gone; a restore of `/outputs` waits for it (`outputs-backup.ts`). */
-  earlierClaimsEnded: boolean;
+  /** Resolves once no earlier claim's sandbox is live, throws if some are; awaited before a restore of `/outputs` (`outputs-backup.ts`). */
+  earlierClaimsEnded(signal: AbortSignal): Promise<void>;
   roles: { main: RoleOf; worker: RoleOf; check: RoleOf };
   briefs: Briefs;
   config?: Partial<LoopConfig>;
@@ -66,7 +66,6 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
   // A stored log means an earlier claim ran. `previousClaim` says why it ended; a run claimed
   // before the API recorded reasons has none, and its resume says only "restarted".
   const resumed = recorder.events().length > 0;
-  const readSeq = recorder.events().at(-1)?.seq ?? 0;
   // Not a derived id: each invocation of the root is a thread start of its own.
   recorder.emit(rootThreadId, "thread.started", {
     parentThreadId: null,
@@ -78,7 +77,6 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
   const reopened = threadLog(recorder.events()).reopenPending && !options.previousClaim;
   recorder.emit(rootThreadId, "claim.started", {
     resumed,
-    readSeq,
     ...(options.previousClaim && { after: options.previousClaim }),
     ...(reopened && { reopened }),
   });

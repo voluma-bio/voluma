@@ -135,6 +135,10 @@ export function noticeLine(n: Notice): string {
       return `- ${who} was stopped: ${n.reason}`;
     case "person":
       return personLine(n);
+    case "correction-ended": {
+      const what = n.taskId ? `The correction of ${n.taskId}` : "A correction";
+      return `- ${what} was ${n.status}${n.error ? ` (${n.error})` : ""} before it finished. Its work was discarded: the tasks, the results and /outputs are back at the revision before it. Nothing it did counts; do not report it as done.`;
+    }
     case "check-result": {
       const detail = [n.summary, n.text].filter(Boolean).join("\n  ");
       switch (n.rule) {
@@ -170,9 +174,11 @@ function personLine(n: Extract<Notice, { kind: "person" }>): string {
     lines.push(`  Their view of it is the image ${n.snapshot}: open it with view_image.`);
   }
   lines.push(
-    n.go
-      ? `  They said go on ${n.taskId}: you may now redo it. Send its worker feedback with \`message\` (it opens a new attempt; a worker that was stopped takes \`start_worker\` instead), say in \`reply\` what you are doing, and finish the run once the new attempt is checked and the tasks that build on it are done.`
-      : "  Answer them with `reply`. They have not said go, so start no work.",
+    n.go === "cancelled"
+      ? `  They said go on ${n.taskId}, but that correction was cancelled or failed before you could act on it: its go is void. Start no work for it. Answer them with \`reply\`.`
+      : n.go
+        ? `  They said go on ${n.taskId}: you may now redo it. Send its worker feedback with \`message\` (it opens a new attempt; a worker that was stopped takes \`start_worker\` instead), say in \`reply\` what you are doing, and finish the run once the new attempt is checked and the tasks that build on it are done.`
+        : "  Answer them with `reply`. They have not said go, so start no work.",
   );
   return lines.join("\n");
 }

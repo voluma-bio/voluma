@@ -61,7 +61,12 @@ import { computePlan } from "@voluma/workflow/plan";
 import { type Config, isVisitorSafe, providerKey } from "./config.ts";
 import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
-import { claimSandboxes, terminateClaim, terminateOtherClaims } from "./modal-sandbox.ts";
+import {
+  awaitOtherClaimsGone,
+  claimSandboxes,
+  terminateClaim,
+  terminateOtherClaims,
+} from "./modal-sandbox.ts";
 import { retryTransient } from "./model-retry.ts";
 import {
   checkPrompt,
@@ -225,14 +230,13 @@ async function claimBody(
     log(`claimed (${visitor ? "visitor" : "voluma"} keys)`);
 
     // What an earlier claim of this run left running must not keep writing or spending.
-    // Cleanup only: it never decides the run's outcome, and idle timeouts back it up.
-    let earlierClaimsEnded = false;
+    // Cleanup only: it never decides the run's outcome, and idle timeouts back it up. A restore
+    // of /outputs waits until they are gone (`awaitOtherClaimsGone`).
     for (let attempt = 1; attempt <= 2 && !abort.signal.aborted; attempt++) {
       try {
         const orphans = await terminateOtherClaims(modal, runId, claimId, abort.signal);
         if (orphans > 0)
           log(`ended ${orphans} sandbox${orphans === 1 ? "" : "es"} of an earlier claim`);
-        earlierClaimsEnded = true;
         break;
       } catch (e) {
         log(`ending an earlier claim's sandboxes failed (attempt ${attempt}): ${e}`);
@@ -449,7 +453,7 @@ async function claimBody(
       evidence: r2Evidence(config.r2),
       files,
       outputs: r2Outputs(config.r2),
-      earlierClaimsEnded,
+      earlierClaimsEnded: (signal) => awaitOtherClaimsGone(modal, runId, claimId, signal),
       roles: {
         main: role(mainModel, "main", "main"),
         worker: role(workerModel, "worker", "worker"),

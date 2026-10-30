@@ -101,8 +101,8 @@ export function ingestRoutes({ queue, eventLog, history, notifier }: RunDeps) {
   });
 
   app.post("/ingest/runs/:runId/report", async (c) => {
-    const { report, lastSeq } = await parseJson(c, reportRequestSchema);
-    await queue.report(c.req.param("runId"), c.var.leaseToken, report, lastSeq);
+    const { report } = await parseJson(c, reportRequestSchema);
+    await queue.report(c.req.param("runId"), c.var.leaseToken, report);
     return c.body(null, 204);
   });
 

@@ -8,10 +8,10 @@
  * a transaction that holds the row and then asks for the event lock can deadlock with it.
  */
 import { runEventSchema } from "@voluma/contracts/events";
-import { correctionSpans, fold } from "@voluma/contracts/fold";
+import { corrections, fold } from "@voluma/contracts/fold";
 import type { PersonMessage } from "@voluma/contracts/messages";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
-import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import type { Reader } from "../../domain";
 import type { MessageRefusal, MessageResult } from "../../ports";
 import { admit, type Limits, refusalMessage, usage } from "./admission";
@@ -47,11 +47,10 @@ async function appendPersonEvent(
 }
 
 /**
- * Reopens a run for the person's message `messageEventId`: `run.reopened` (id keyed to the
- * message), then the run to `queued` with its end, claim history and lease cleared. The route calls it for a finished run, after admission;
- * `report()` calls it for a claim that ended without seeing a message, which needs none.
+ * Reopens a finished run for the person's message `messageEventId`: `run.reopened` (id keyed to
+ * the message), then the run to `queued` with its end, claim history and lease cleared.
  */
-export async function reopen(tx: Tx, runId: string, messageEventId: string, by: string) {
+async function reopen(tx: Tx, runId: string, messageEventId: string, by: string) {
   await appendPersonEvent(tx, runId, {
     id: `${messageEventId}:reopened`,
     type: "run.reopened",
@@ -72,9 +71,9 @@ export async function reopen(tx: Tx, runId: string, messageEventId: string, by: 
 }
 
 /**
- * The id of the run's open correction's `run.reopened`, or null: the latest span of
- * `correctionSpans` is open (no `correction.ended` after the latest reopen). A run is in a
- * correction exactly then.
+ * The id of the `run.reopened` of the open correction (`corrections`): the latest, with no
+ * `correction.ended` after it. A correction that finished leaves its span open while the run is
+ * `ended`, so a caller asks this only of a queued or running run.
  */
 export async function openCorrection(tx: Tx, runId: string): Promise<string | null> {
   const rows = await tx
@@ -82,8 +81,7 @@ export async function openCorrection(tx: Tx, runId: string): Promise<string | nu
     .from(events)
     .where(and(eq(events.runId, runId), inArray(events.type, ["run.reopened", "correction.ended"])))
     .orderBy(asc(events.seq));
-  const latest = correctionSpans(rows.map(toRunEvent)).at(-1);
-  return latest?.closed === "open" ? latest.reopenId : null;
+  return corrections(rows.map(toRunEvent)).open?.reopenId ?? null;
 }
 
 /** Writes `correction.ended`, keyed to the open correction's `run.reopened` (`openCorrection`). */
@@ -102,55 +100,12 @@ export async function endCorrection(
 }
 
 /**
- * The task of a go in the run's current reopen whose redo has not begun (no attempt of it after
- * the go), if any. One go at a time: the harness acts on one task per reopen. The window starts
- * at the latest `run.reopened` or at the message that reopen is keyed to, whichever is earlier:
- * a requeue stores its `run.reopened` after the unseen message, and a go in that message is
- * still undelivered.
- */
-async function pendingGo(tx: Tx, runId: string): Promise<string | undefined> {
-  const [reopened] = await tx
-    .select({ id: events.id, seq: events.seq })
-    .from(events)
-    .where(and(eq(events.runId, runId), eq(events.type, "run.reopened")))
-    .orderBy(desc(events.seq))
-    .limit(1);
-  if (!reopened) return undefined;
-  const [keyed] = await tx
-    .select({ seq: events.seq })
-    .from(events)
-    .where(and(eq(events.runId, runId), eq(events.id, reopened.id.replace(/:reopened$/, ""))));
-  const from = Math.min(reopened.seq, keyed?.seq ?? reopened.seq);
-  const since = await tx
-    .select()
-    .from(events)
-    .where(
-      and(
-        eq(events.runId, runId),
-        inArray(events.type, ["person.message", "attempt.opened"]),
-        gte(events.seq, from),
-      ),
-    )
-    .orderBy(asc(events.seq));
-  const log = since.map(toRunEvent);
-  for (const [i, e] of log.entries()) {
-    if (e.type !== "person.message" || !e.payload.go || !e.payload.taskId) continue;
-    const { taskId } = e.payload;
-    const redone = log
-      .slice(i + 1)
-      .some((later) => later.type === "attempt.opened" && later.payload.taskId === taskId);
-    if (!redone) return taskId;
-  }
-  return undefined;
-}
-
-/**
  * A researcher's message to a run, judged in the order the contract lists the refusals. `write`
  * false judges only (nothing is stored, no lock is taken): the route calls that first, so a
  * refused message stores no snapshot, and again with `write` under the queue lock. A run that
- * ended `completed` is reopened through admission; a reopened run still queued or running only
- * gets the message (its claim's report sees it, `report`). A run whose workflow files are not
- * the study's current ones cannot be reopened: the runner could not load them.
+ * ended `completed` is reopened through admission. A run still queued or running takes no message
+ * (one message, one claim). A run whose workflow files are not the study's current ones cannot
+ * be reopened: the runner could not load them.
  */
 export async function decideMessage(
   tx: Tx,
@@ -183,28 +138,25 @@ export async function decideMessage(
   const stateNow = async () => (await loadRun(tx, runId)).state;
   if (again) return { ok: { eventId, state: await stateNow(), duplicate: true } };
 
-  const live =
-    (run.state === "queued" || run.state === "running") &&
-    (await openCorrection(tx, runId)) !== null;
-  const finished = run.state === "ended" && run.outcome === "completed";
-  if (!live && !finished) {
+  if (run.state === "queued" || run.state === "running") {
     return refuse(
       409,
-      run.state === "ended"
-        ? "Only a run that completed can be reopened; rerun this one."
+      (await openCorrection(tx, runId)) !== null
+        ? "The run is still answering your last message. Wait for its reply, or cancel it."
         : "The run has not finished yet.",
     );
   }
-  if (!live) {
-    const [study] = await tx
-      .select({ workflowId: studies.workflowId })
-      .from(studies)
-      .where(eq(studies.id, run.studyId));
-    const current = study && o.pinsOf(study.workflowId);
-    const pathsOf = (pins: readonly WorkflowPin[]) => pins.map((p) => p.path ?? "").sort();
-    if (!current || pathsOf(current).join() !== pathsOf(run.workflows as WorkflowPin[]).join()) {
-      return refuse(409, "This run used an older version of its workflow, so rerun it.");
-    }
+  if (run.state !== "ended" || run.outcome !== "completed") {
+    return refuse(409, "Only a run that completed can be reopened; rerun this one.");
+  }
+  const [study] = await tx
+    .select({ workflowId: studies.workflowId })
+    .from(studies)
+    .where(eq(studies.id, run.studyId));
+  const current = study && o.pinsOf(study.workflowId);
+  const pathsOf = (pins: readonly WorkflowPin[]) => pins.map((p) => p.path ?? "").sort();
+  if (!current || pathsOf(current).join() !== pathsOf(run.workflows as WorkflowPin[]).join()) {
+    return refuse(409, "This run used an older version of its workflow, so rerun it.");
   }
   const { taskId } = msg.payload;
   const view = fold(
@@ -235,25 +187,16 @@ export async function decideMessage(
       return refuse(409, `${taskId} was skipped, so it cannot be corrected.`);
     }
   }
-  if (live && msg.payload.go) {
-    const pending = await pendingGo(tx, runId);
-    if (pending) {
-      const title = view.plan.tasks.find((t) => t.id === pending)?.title ?? pending;
-      return refuse(409, `Wait for the redo of ${title} to start, then send.`);
-    }
-  }
-  if (!live) {
-    const refused = admit(
-      "reopen",
-      o.limits,
-      await usage(tx, reader.labId, { userId, credentials: run.credentials }),
-      run,
-    );
-    if (refused) return refuse(refused === "per-caller" ? 409 : 429, refusalMessage[refused]);
-  }
+  const refused = admit(
+    "reopen",
+    o.limits,
+    await usage(tx, reader.labId, { userId, credentials: run.credentials }),
+    run,
+  );
+  if (refused) return refuse(409, refusalMessage[refused]);
   if (!write) return { ok: { eventId, state: await stateNow(), duplicate: false } };
 
-  if (!live) await reopen(tx, runId, eventId, userId);
+  await reopen(tx, runId, eventId, userId);
   await appendPersonEvent(tx, runId, {
     id: eventId,
     type: "person.message",
