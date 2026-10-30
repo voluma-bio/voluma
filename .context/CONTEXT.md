@@ -16,10 +16,10 @@ apps/api        Node server on Postgres (Drizzle), each domain a Hono app. src/i
                 Sign-in: see Authentication
 apps/runner     The runner service: claims runs from the API and runs the run loop on each (Run lane)
 packages/
-  contracts     zod schemas for the four contracts and the shared formats
+  contracts     zod schemas for the four contracts and the shared formats; the fold (a row per plan task, stale-task graph)
   harness       the agent harness: our tools, the Sandbox and EventLog ports, the Pi
                 adapter; runtime-neutral (no Node types)
-  workflow      a workflow skill directory: snapshot it into the run's R2 prefix and read it (`load.ts`), build the plan from the selected outputs (`plan.ts`), task graph, stale tasks
+  workflow      a workflow skill directory: snapshot it into the run's R2 prefix and read it (`load.ts`), build the plan from the selected outputs (`plan.ts`)
   api-client    typed commands and event stream; the only way web features reach the API
   viewer        the grid viewer (three.js, zarr in a worker) and the grid a review task is shown on
   ui            shared React components, styled from tokens

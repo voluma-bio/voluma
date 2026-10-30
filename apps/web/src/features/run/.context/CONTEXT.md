@@ -125,7 +125,7 @@ are in this directory. The package has no router: `TaskFlow` takes the router `L
   same tail repair Flow uses); raw HTML is skipped and images show as their alt text.
 - **Live tasks** come from the run's stream (`subscribe`), published at most once per
   animation frame. The task list comes from
- the `revision.started` plan; a task not started yet is Ready when every task it builds on has a usable result (`isSatisfied` from `@voluma/workflow`, the supervisor's own rule: done, or To check with every required output), else "Waiting on" those tasks.
+ the `revision.started` plan; a task not started yet is Ready when every task it builds on has a usable result (`isSatisfied` from `@voluma/contracts/fold`, the supervisor's own rule: done, or To check with every required output), else "Waiting on" those tasks.
   Queue position and run state are not events, so `getRun` is polled every 3 s until the run ends.
 - **Visitor keys** (`@voluma/run-view`, shared with `features/study`): a Meta key, the only
   way a guest runs (the API refuses a guest start without it, 403); a member may keep one too. A key

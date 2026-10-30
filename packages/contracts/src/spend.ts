@@ -1,33 +1,35 @@
 /**
- * What a run spent, per task and in total, derived from its events: the run screen's agent
- * cards and header call it. Pure: events in `seq` order in, plain data out; a prefix of the
- * log gives the spend so far.
+ * What a run spent, per thread, per task and in total, derived from its events: the run
+ * screen's agent cards and header call it. Pure: events in `seq` order in, plain data out; a
+ * prefix of the log gives the spend so far.
  *
- * - Cost and tokens: the `usage` on each assistant `message` and each `wake`, plus a
- *   Each counts for the thread that wrote the event; an event from a thread with no
- *   `thread.started` before it counts only in `total`.
+ * - Everything is counted per thread first (`threads`); a task's spend, `main` and `total` are
+ *   sums over threads.
+ * - Cost and tokens: the `usage` on each assistant `message`, for the thread that wrote the
+ *   event; an event from a thread with no `thread.started` before it counts only in `total`.
  * - Provider calls (the gateway's, `Run.providerCalls`) are passed in separately and added
  *   to `costUsd` and `toolCostUsd`: `total` takes their `costUsd`, and each `bySandbox`
- *   entry's cost also goes to the task (or `main`) whose thread wrote the `sandbox` event with
- *   that `name`. They are not model calls, so `calls` stays the model calls that reported usage.
- *   Calls whose cost is unknown (`unknownCostCalls`) add no dollars and are counted apart.
+ *   entry's cost also goes to the thread that wrote the `sandbox` event with that `name`. They
+ *   are not model calls, so `calls` stays the model calls that reported usage. Calls whose
+ *   cost is unknown (`unknownCostCalls`) add no dollars and are counted apart.
  * - A worker or check thread belongs to the task its `thread.started` names, so a task's
- *   spend covers all its attempts: worker, check and any redo. The root thread (the main
- *   agent's thread) belongs to no task: that is `main`. A chat thread counts only in `total`.
- * - Wall time is per thread invocation, from `thread.started` to its `thread.ended`, or to
- *   the thread's latest event while it has none (running, or cut off by a crash). A task's is
- *   the sum over its threads. `main`'s and `total`'s are the root thread's, whose open span
- *   ends at the log's latest event: the run's own working time, across resumes. The root
- *   starting again means the runner restarted, so every open span ends there, each at its
- *   own latest event.
+ *   spend covers all its attempts: worker, check and any redo. The supervisor and main agent
+ *   threads belong to no task: that is `main`. A chat thread counts only in `total`.
+ * - Wall time is per thread, the sum of its spans, each from a `thread.started` to the
+ *   thread's first `thread.ended` after it (a later end, such as a cancel of finished work,
+ *   adds nothing), or to the thread's latest event while it has none (running, or cut off
+ *   by a crash). A resume opens a new span, so a thread's time is its whole working time, not
+ *   its last stretch. A task's wall time is the sum over its threads. `main`'s and `total`'s
+ *   are the root thread's, whose open span ends at the log's latest event: the run's own
+ *   working time, across resumes. The root starting again means the runner restarted, so every
+ *   open span ends there, each at its own latest event.
  * - Sandbox time is the time from a `bash` call to its result, `bash` being the one tool
  *   that runs in the sandbox; a call cut off by a restart counts nothing. The sandbox's
  *   bill is the uptime of all the run's sandboxes (`Run.usage.sandboxSeconds`), which is longer:
  *   each thread's sandbox idles between its calls.
  *
- * The runner's end-of-run log line sums the same model costs over the run's
- * threads, so without provider calls `total.costUsd` matches it for a run that didn't lose
- * events (a review chat thread is not the runner's).
+ * The runner's end-of-run log line sums the same model costs over the run's threads, so
+ * without provider calls `total.costUsd` matches it for a run that didn't lose events.
  */
 import type { RunEvent } from "./events";
 import type { ProviderCalls } from "./run";
@@ -50,7 +52,18 @@ export type Spend = {
   sandboxSeconds: number;
 };
 
+export type ThreadSpend = {
+  threadId: string;
+  spend: Spend;
+  /** Wall seconds of its spans before the one still open; all of `spend.wallSeconds` when none is open. */
+  endedSeconds: number;
+  /** When the span still open at the end of the log started; a live clock shows `endedSeconds` plus now minus this. */
+  openSince: string | null;
+};
+
 export type RunSpend = {
+  /** In the order the threads first started. */
+  threads: ThreadSpend[];
   /** In the order the tasks' first threads started. */
   tasks: { taskId: string; spend: Spend }[];
   main: Spend;
@@ -74,17 +87,24 @@ const empty = (): Spend => ({
 export const cacheHitShare = (s: Spend): number | null =>
   s.input + s.cacheRead > 0 ? s.cacheRead / (s.input + s.cacheRead) : null;
 
+const sum = (spends: Iterable<Spend>): Spend => {
+  const out = empty();
+  for (const s of spends) for (const k of Object.keys(out) as (keyof Spend)[]) out[k] += s[k];
+  return out;
+};
+
 export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls): RunSpend {
-  const tasks = new Map<string, Spend>();
-  const main = empty();
   const total = empty();
-  // threadId → the Spend it counts in besides `total` (none for chat threads).
-  const owner = new Map<string, Spend | null>();
+  // threadId → its own spend and where it counts besides `total` (a task, `main`, or neither).
+  const threads = new Map<string, Spend>();
+  const owner = new Map<string, { task: string } | "main" | null>();
+  const ended = new Map<string, number>();
   const open = new Map<string, { since: number; last: number }>();
   // toolCallId → the `bash` call's thread and start.
   const bash = new Map<string, { threadId: string; at: number }>();
   // sandbox name → the thread that wrote its `sandbox` event.
   const sandboxOwner = new Map<string, string>();
+  const openAtEnd = new Map<string, string>();
   let root: string | undefined;
   // The log's latest event time so far: the root thread's span ends there, since the root is
   // quiet while its workers run.
@@ -93,20 +113,21 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
   const seconds = (from: number, to: number) => Math.max(0, to - from) / 1000;
   const add = (threadId: string, f: (s: Spend) => void) => {
     f(total);
-    const s = owner.get(threadId);
+    const s = threads.get(threadId);
     if (s) f(s);
   };
   // Ends a thread's open span, the root's at the log's latest event and any other at its own,
   // and forgets its unanswered `bash` calls: a resume answers them with a repair result.
-  const close = (threadId: string, at?: number) => {
+  // `last`: the log is over, so the span is still open for a live clock.
+  const close = (threadId: string, at?: number, last = false) => {
     const span = open.get(threadId);
     if (span) {
       open.delete(threadId);
       const wall = seconds(span.since, at ?? (threadId === root ? latest : span.last));
-      const s = owner.get(threadId);
-      // The main agent's calls charge `main`, but its wall time is the root's, which spans the run.
-      if (s && (s !== main || threadId === root)) s.wallSeconds += wall;
-      if (threadId === root) total.wallSeconds += wall;
+      const s = threads.get(threadId);
+      if (s) s.wallSeconds += wall;
+      if (last) openAtEnd.set(threadId, new Date(span.since).toISOString());
+      else ended.set(threadId, (ended.get(threadId) ?? 0) + wall);
     }
     for (const [id, call] of bash) if (call.threadId === threadId) bash.delete(id);
   };
@@ -122,13 +143,11 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
           for (const threadId of [...open.keys()]) close(threadId);
         } else close(e.threadId);
         if (!owner.has(e.threadId)) {
-          let s: Spend | null = null;
-          if (kind === "supervisor" || kind === "main") s = main;
-          else if (task !== undefined && (kind === "worker" || kind === "check")) {
-            s = tasks.get(task) ?? empty();
-            tasks.set(task, s);
-          }
-          owner.set(e.threadId, s);
+          threads.set(e.threadId, empty());
+          if (kind === "supervisor" || kind === "main") owner.set(e.threadId, "main");
+          else if (task !== undefined && (kind === "worker" || kind === "check"))
+            owner.set(e.threadId, { task });
+          else owner.set(e.threadId, null);
         }
         open.set(e.threadId, { since: at, last: at });
         break;
@@ -166,13 +185,15 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
     if (span) span.last = at;
     latest = Math.max(latest, at);
   }
-  for (const threadId of [...open.keys()]) close(threadId);
+  for (const threadId of [...open.keys()]) close(threadId, undefined, true);
+  // The run's own working time is the root's; other threads of `main` add their calls, not time.
+  if (root !== undefined) total.wallSeconds = threads.get(root)?.wallSeconds ?? 0;
   if (providerCalls) {
     total.costUsd += providerCalls.costUsd;
     total.toolCostUsd += providerCalls.costUsd;
     total.unknownCostCalls += providerCalls.unknownCostCalls;
     for (const { sandbox, costUsd, unknownCostCalls } of providerCalls.bySandbox) {
-      const s = owner.get(sandboxOwner.get(sandbox) ?? "");
+      const s = threads.get(sandboxOwner.get(sandbox) ?? "");
       if (s) {
         s.costUsd += costUsd;
         s.toolCostUsd += costUsd;
@@ -180,5 +201,24 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
       }
     }
   }
-  return { tasks: [...tasks].map(([taskId, s]) => ({ taskId, spend: s })), main, total };
+  const tasks = new Map<string, Spend[]>();
+  const mainThreads: Spend[] = [];
+  for (const [threadId, s] of threads) {
+    const o = owner.get(threadId);
+    if (o === "main") mainThreads.push(s);
+    else if (o) tasks.set(o.task, [...(tasks.get(o.task) ?? []), s]);
+  }
+  const main = sum(mainThreads);
+  main.wallSeconds = total.wallSeconds;
+  return {
+    threads: [...threads].map(([threadId, s]) => ({
+      threadId,
+      spend: s,
+      endedSeconds: ended.get(threadId) ?? 0,
+      openSince: openAtEnd.get(threadId) ?? null,
+    })),
+    tasks: [...tasks].map(([taskId, spends]) => ({ taskId, spend: sum(spends) })),
+    main,
+    total,
+  };
 }

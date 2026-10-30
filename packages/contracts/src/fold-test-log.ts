@@ -172,8 +172,7 @@ export function expectParses(f: Folded) {
       annotations: r.annotations,
       tasks: r.tasks.map((t) => ({
         ...t,
-        title: t.id,
-        ask: "",
+        dependsOn: r.plan.tasks.find((p) => p.id === t.id)?.dependsOn ?? [],
         threads: { ...t.threads, chat: null },
         models: { ...t.models, chat: null },
       })),

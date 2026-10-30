@@ -74,7 +74,6 @@ const WIDTH = {
   right: { min: 280, max: 600, initial: 340 },
 };
 const MAIN_MIN = 480;
-const STRIP_AND_EDGES = 2 * 64;
 
 function loadLayout(): Layout {
   const fallback: Layout = {
@@ -85,10 +84,36 @@ function loadLayout(): Layout {
   };
   try {
     const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null");
-    return stored ? { ...fallback, ...stored } : fallback;
+    if (
+      stored &&
+      Array.isArray(stored.arranged) &&
+      stored.arranged.every((side: unknown) => side === "left" || side === "right") &&
+      (["left", "right"] as const).every(
+        (side) =>
+          Array.isArray(stored.open?.[side]) &&
+          stored.open[side].length <= 2 &&
+          stored.open[side].every((id: unknown) => typeof id === "string") &&
+          new Set(stored.open[side]).size === stored.open[side].length &&
+          Number.isFinite(stored.width?.[side]) &&
+          stored.width[side] >= WIDTH[side].min &&
+          stored.width[side] <= WIDTH[side].max &&
+          Number.isFinite(stored.split?.[side]) &&
+          stored.split[side] >= 0.2 &&
+          stored.split[side] <= 0.8,
+      )
+    )
+      return stored;
   } catch {
-    // A value an older build wrote that no longer parses: start from the defaults.
-    return fallback;
+    // Storage may be unavailable, or an older build may have written another shape.
+  }
+  return fallback;
+}
+
+function saveLayout(layout: Layout) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(layout));
+  } catch {
+    // Disabled or full storage must not make the shell unusable.
   }
 }
 
@@ -97,7 +122,7 @@ type ShellState = {
   unregister(id: string): void;
   slot(id: string): HTMLElement | null;
   isOpen(id: string): boolean;
-  tools(id: string, node: ReactNode): void;
+  toggle(reg: Registration, stack: boolean): void;
 };
 
 const ShellContext = createContext<ShellState | null>(null);
@@ -133,32 +158,48 @@ export function AppShell({
 }) {
   const [regs, setRegs] = useState<Map<string, Registration>>(() => new Map());
   const [layout, setLayout] = useState(loadLayout);
-  const [full, setFull] = useState<Layout["open"] | null>(null);
-  const [panelTools, setPanelTools] = useState<Record<string, ReactNode>>({});
+  const [full, setFull] = useState(false);
   const [slots, setSlots] = useState<Record<string, HTMLElement | null>>({});
   const [heading, setHeading] = useState<HTMLElement | null>(null);
+  const frame = useRef<HTMLDivElement>(null);
+  const [available, setAvailable] = useState(0);
+  const hasLeftStrip = [...regs.values()].some((r) => r.side === "left");
+  const hasRightStrip = [...regs.values()].some((r) => r.side === "right");
+  useEffect(() => {
+    const el = frame.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => {
+      const strips = [hasLeftStrip && el.firstElementChild, hasRightStrip && el.lastElementChild];
+      setAvailable(
+        el.clientWidth -
+          strips.reduce((sum, child) => sum + (child ? child.getBoundingClientRect().width : 0), 0),
+      );
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasLeftStrip, hasRightStrip]);
 
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
   // A drag changes the layout on every pointermove; it is saved once, when the pointer goes up.
   const dragging = useRef(false);
-  // Full view is not saved: a reload brings back the panels it folded.
+  // Full view only hides the saved layout; it never changes which panels are open.
   useEffect(() => {
-    if (!full && !dragging.current) localStorage.setItem(STORAGE_KEY, JSON.stringify(layout));
-  }, [layout, full]);
+    if (!dragging.current) saveLayout(layout);
+  }, [layout]);
   const onDragging = useCallback((active: boolean) => {
     dragging.current = active;
-    if (!active) localStorage.setItem(STORAGE_KEY, JSON.stringify(layoutRef.current));
+    if (!active) saveLayout(layoutRef.current);
   }, []);
 
   // Panels that are open but whose screen no longer renders them stay in `layout.open`, so they
   // come back when the screen does; only registered ones show.
   const shown = useMemo(
     () => ({
-      left: layout.open.left.filter((id) => regs.has(id)),
-      right: layout.open.right.filter((id) => regs.has(id)),
+      left: full ? [] : layout.open.left.filter((id) => regs.has(id)),
+      right: full ? [] : layout.open.right.filter((id) => regs.has(id)),
     }),
-    [layout.open, regs],
+    [layout.open, regs, full],
   );
 
   const register = useCallback((reg: Registration) => {
@@ -180,30 +221,33 @@ export function AppShell({
     });
   }, []);
 
-  const toggle = useCallback((reg: Registration, stack: boolean) => {
-    if (reg.link) return reg.link.go();
-    setFull(null);
-    setLayout((l) => {
-      const open = l.open[reg.side];
-      const next = open.includes(reg.id)
-        ? open.filter((id) => id !== reg.id)
-        : stack
-          ? [...open, reg.id].slice(-2)
-          : [reg.id];
-      return {
-        ...l,
-        open: { ...l.open, [reg.side]: next },
-        arranged: [...new Set([...l.arranged, reg.side])],
-      };
-    });
-  }, []);
+  const toggle = useCallback(
+    (reg: Registration, stack: boolean) => {
+      if (reg.link) return reg.link.go();
+      setFull(false);
+      setLayout((l) => {
+        const open = full ? [] : l.open[reg.side];
+        const next = open.includes(reg.id)
+          ? open.filter((id) => id !== reg.id)
+          : stack
+            ? [...open, reg.id].slice(-2)
+            : [reg.id];
+        return {
+          ...l,
+          open: { ...l.open, [reg.side]: next },
+          arranged: [...new Set([...l.arranged, reg.side])],
+        };
+      });
+    },
+    [full],
+  );
 
   const lastOpen = useRef<Layout["open"]>({ left: [], right: [] });
   const foldSide = useCallback((side: ShellSide) => {
     // A side that never had a panel open has nothing to fold, and arranging it would stop its
     // `defaultOpen` panels from opening on their own.
     if (!layoutRef.current.open[side].length && !lastOpen.current[side].length) return;
-    setFull(null);
+    setFull(false);
     setLayout((l) => {
       if (l.open[side].length) lastOpen.current[side] = l.open[side];
       const next = l.open[side].length ? [] : lastOpen.current[side];
@@ -215,22 +259,18 @@ export function AppShell({
     });
   }, []);
 
-  // Full view folds both sides and remembers what was open, so leaving it puts them back.
-  const toggleFull = useCallback(() => {
-    if (full) {
-      setLayout((l) => ({ ...l, open: full }));
-      setFull(null);
-    } else {
-      setFull(layoutRef.current.open);
-      setLayout((l) => ({ ...l, open: { left: [], right: [] } }));
-    }
-  }, [full]);
+  const toggleFull = useCallback(() => setFull((value) => !value), []);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
+      if (event.defaultPrevented || event.repeat || event.isComposing) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
-      if (target.closest("input, textarea, select, [contenteditable='true']")) return;
+      if (
+        target.isContentEditable ||
+        target.closest("input, textarea, select, dialog, [role='dialog'], [role='menu']")
+      )
+        return;
       if (event.key === "\\") foldSide("left");
       else if (event.key === "]") foldSide("right");
       else if (event.key === "Escape") {
@@ -257,38 +297,53 @@ export function AppShell({
       unregister,
       slot: (id) => slots[id] ?? null,
       isOpen: (id) => shown.left.includes(id) || shown.right.includes(id),
-      tools: (id, node) => setPanelTools((t) => (t[id] === node ? t : { ...t, [id]: node })),
+      toggle,
     }),
-    [register, unregister, slots, shown],
+    [register, unregister, slots, shown, toggle],
   );
 
   // One stable ref callback per panel: a new callback each render would detach and reattach the
   // slot, set state, and render again forever.
   const slotRefs = useRef(new Map<string, (el: HTMLElement | null) => void>());
+  const triggers = useRef(new Map<string, HTMLButtonElement>());
   const setSlot = (id: string) => {
     let fn = slotRefs.current.get(id);
     if (!fn) {
-      fn = (el) => setSlots((s) => (s[id] === el ? s : { ...s, [id]: el }));
+      let current: HTMLElement | null = null;
+      fn = (el) => {
+        if (!el && current?.contains(document.activeElement)) triggers.current.get(id)?.focus();
+        current = el;
+        setSlots((s) => (s[id] === el ? s : { ...s, [id]: el }));
+      };
       slotRefs.current.set(id, fn);
     }
     return fn;
   };
 
+  const minimum = (side: ShellSide) =>
+    shown[side].length
+      ? Math.max(WIDTH[side].min, ...shown[side].map((id) => regs.get(id)?.minWidth ?? 0))
+      : 0;
+  const min = { left: minimum("left"), right: minimum("right") };
+  const wanted = {
+    left: min.left ? Math.max(min.left, layout.width.left) : 0,
+    right: min.right ? Math.max(min.right, layout.width.right) : 0,
+  };
+  // As in the redesign, each side gives up its spare width before squeezing the main area.
+  // If even the panel minima do not fit, keep them usable; do not persist a negative width.
+  const spare = wanted.left - min.left + wanted.right - min.right;
+  const shrink = Math.min(
+    1,
+    Math.max(0, wanted.left + wanted.right + MAIN_MIN - available) / (spare || 1),
+  );
+  const widths = {
+    left: wanted.left - (wanted.left - min.left) * shrink,
+    right: wanted.right - (wanted.right - min.right) * shrink,
+  };
   const resize = (side: ShellSide, width: number) => {
-    const others =
-      side === "left"
-        ? shown.right.length
-          ? layout.width.right
-          : 0
-        : shown.left.length
-          ? layout.width.left
-          : 0;
-    const room = window.innerWidth - STRIP_AND_EDGES - others - MAIN_MIN;
-    const floor = Math.max(
-      WIDTH[side].min,
-      ...shown[side].map((id) => regs.get(id)?.minWidth ?? 0),
-    );
-    const clamped = Math.round(Math.min(WIDTH[side].max, room, Math.max(floor, width)));
+    const room = available - widths[side === "left" ? "right" : "left"] - MAIN_MIN;
+    const ceiling = Math.max(min[side], Math.min(WIDTH[side].max, room));
+    const clamped = Math.round(Math.max(min[side], Math.min(ceiling, width)));
     setLayout((l) => ({ ...l, width: { ...l.width, [side]: clamped } }));
   };
 
@@ -296,9 +351,14 @@ export function AppShell({
     shown[side].length > 0 && (
       <Dock
         side={side}
-        width={Math.max(
-          layout.width[side],
-          ...shown[side].map((id) => regs.get(id)?.minWidth ?? 0),
+        width={widths[side]}
+        minWidth={min[side]}
+        maxWidth={Math.max(
+          min[side],
+          Math.min(
+            WIDTH[side].max,
+            available - widths[side === "left" ? "right" : "left"] - MAIN_MIN,
+          ),
         )}
         split={layout.split[side]}
         onResize={(w) => resize(side, w)}
@@ -314,25 +374,8 @@ export function AppShell({
               key={id}
               aria-label={reg.label}
               className="flex min-h-0 flex-1 flex-col bg-card"
-            >
-              <header className="flex h-[var(--panel-head-h)] shrink-0 items-center gap-2 border-b border-border px-3">
-                <h2 className="min-w-0 truncate font-medium text-base">{reg.label}</h2>
-                {reg.count != null && (
-                  <span className="font-mono text-muted-foreground text-xs">{reg.count}</span>
-                )}
-                <span className="flex-1" />
-                {panelTools[id]}
-                <button
-                  type="button"
-                  aria-label={`Close ${reg.label}`}
-                  onClick={() => toggle(reg, false)}
-                  className="grid size-6 cursor-pointer place-items-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-                >
-                  <X className="size-3.5" />
-                </button>
-              </header>
-              <div ref={setSlot(id)} className="min-h-0 flex-1 overflow-y-auto" />
-            </section>
+              ref={setSlot(id)}
+            />
           );
         })}
       </Dock>
@@ -364,6 +407,10 @@ export function AppShell({
                 return (
                   <button
                     key={r.id}
+                    ref={(el) => {
+                      if (el) triggers.current.set(r.id, el);
+                      else triggers.current.delete(r.id);
+                    }}
                     type="button"
                     aria-pressed={r.link ? undefined : active}
                     aria-current={r.link?.active ? "page" : undefined}
@@ -401,7 +448,7 @@ export function AppShell({
             <div ref={setHeading} className="flex min-w-0 flex-1 items-center gap-3" />
             {account}
           </header>
-          <div className="flex min-h-0 flex-1">
+          <div ref={frame} className="flex min-h-0 flex-1">
             {strip("left")}
             {dock("left")}
             <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-card">
@@ -419,6 +466,8 @@ export function AppShell({
 function Dock({
   side,
   width,
+  minWidth,
+  maxWidth,
   split,
   onResize,
   onSplit,
@@ -428,6 +477,8 @@ function Dock({
 }: {
   side: ShellSide;
   width: number;
+  minWidth: number;
+  maxWidth: number;
   split: number;
   onResize(width: number): void;
   onSplit(split: number): void;
@@ -476,9 +527,13 @@ function Dock({
             aria-orientation="horizontal"
             aria-label="Resize the two panels"
             aria-valuenow={Math.round(split * 100)}
+            aria-valuemin={20}
+            aria-valuemax={80}
             tabIndex={0}
             onPointerDown={(e) => drag(e, "split")}
             onKeyDown={(e) => {
+              if (!["ArrowUp", "ArrowDown"].includes(e.key)) return;
+              e.preventDefault();
               if (e.key === "ArrowUp") onSplit(Math.max(0.2, split - 0.05));
               if (e.key === "ArrowDown") onSplit(Math.min(0.8, split + 0.05));
             }}
@@ -495,11 +550,15 @@ function Dock({
         aria-orientation="vertical"
         aria-label="Resize the side"
         aria-valuenow={width}
+        aria-valuemin={minWidth}
+        aria-valuemax={maxWidth}
         tabIndex={0}
         title="Drag to resize, double-click to fold"
         onPointerDown={(e) => drag(e, "width")}
         onDoubleClick={onFold}
         onKeyDown={(e) => {
+          if (!["ArrowRight", "ArrowLeft"].includes(e.key)) return;
+          e.preventDefault();
           const step = side === "left" ? 16 : -16;
           if (e.key === "ArrowRight") onResize(width + step);
           if (e.key === "ArrowLeft") onResize(width - step);
@@ -526,9 +585,31 @@ export function ShellPanel({ children, tools, ...props }: ShellPanelProps) {
     register({ id, side, group, label, icon, count, shortcut, defaultOpen, minWidth, order });
   }, [register, id, side, group, label, count, shortcut, defaultOpen, minWidth, order]);
   useEffect(() => () => unregister(id), [unregister, id]);
-  useEffect(() => shell.tools(id, tools), [shell, id, tools]);
   const slot = shell.isOpen(id) ? shell.slot(id) : null;
-  return slot ? createPortal(children, slot) : null;
+  return slot
+    ? createPortal(
+        <>
+          <header className="flex h-[var(--panel-head-h)] shrink-0 items-center gap-2 border-b border-border px-3">
+            <h2 className="min-w-0 truncate font-medium text-base">{label}</h2>
+            {count != null && (
+              <span className="font-mono text-muted-foreground text-xs">{count}</span>
+            )}
+            <span className="flex-1" />
+            {tools}
+            <button
+              type="button"
+              aria-label={`Close ${label}`}
+              onClick={() => shell.toggle({ ...props, icon, order }, false)}
+              className="grid size-6 cursor-pointer place-items-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <X className="size-3.5" />
+            </button>
+          </header>
+          <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+        </>,
+        slot,
+      )
+    : null;
 }
 
 /** What the header line says about this screen: where you are, and its one-line facts. */
