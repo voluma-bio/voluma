@@ -19,6 +19,7 @@
 
 import type { ModelUsage, RunEvent } from "@voluma/contracts/events";
 import type { LiveFrame } from "@voluma/contracts/stream";
+import { threadRole } from "@voluma/contracts/thread-role";
 import { catalog } from "@voluma/workflow/bundled";
 import { plural } from "./run-status";
 
@@ -382,8 +383,12 @@ function rowsOf(
   let root: string | undefined;
   for (const e of events) {
     if (orchestration) {
-      if (e.type === "thread.started" && e.payload.parentThreadId === null) root = e.threadId;
-      if (e.type === "thread.started" && e.payload.task !== undefined && !seen.has(e.threadId)) {
+      if (e.type === "thread.started" && threadRole(e.payload) === "root") root = e.threadId;
+      if (
+        e.type === "thread.started" &&
+        ["worker", "check"].includes(threadRole(e.payload)) &&
+        !seen.has(e.threadId)
+      ) {
         seen.add(e.threadId);
         b.row({ kind: "agent", id: `agent:${e.threadId}`, threadId: e.threadId });
       } else if (e.type === "revision.started" && e.payload.reason === "correction") {
@@ -525,11 +530,7 @@ export const threadRows = (
 export function mainRows(events: RunEvent[], live: Live = noLive, halt?: Halt): Row[] {
   const mains = new Set(
     events.flatMap((e) =>
-      e.type === "thread.started" &&
-      e.payload.parentThreadId !== null &&
-      e.payload.task === undefined
-        ? [e.threadId]
-        : [],
+      e.type === "thread.started" && threadRole(e.payload) === "main" ? [e.threadId] : [],
     ),
   );
   return rowsOf(events, mains, live, halt, true);

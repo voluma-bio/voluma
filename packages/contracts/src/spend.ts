@@ -33,6 +33,7 @@
  */
 import type { RunEvent } from "./events";
 import type { ProviderCalls } from "./run";
+import { threadRole } from "./thread-role";
 
 export type Spend = {
   /** Model calls plus paid tool calls, in US dollars. */
@@ -136,8 +137,8 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
     const at = Date.parse(e.createdAt);
     switch (e.type) {
       case "thread.started": {
-        const { task, parentThreadId } = e.payload;
-        if (parentThreadId === null) {
+        const { task } = e.payload;
+        if (threadRole(e.payload) === "root") {
           // The root starts again only after the runner restarted, which cut off every thread.
           root = e.threadId;
           for (const threadId of [...open.keys()]) close(threadId);

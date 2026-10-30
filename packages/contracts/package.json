@@ -20,6 +20,7 @@
     "./workflow": "./src/workflow.ts",
     "./fold": "./src/fold.ts",
     "./threads": "./src/threads.ts",
+    "./thread-role": "./src/thread-role.ts",
     "./spend": "./src/spend.ts",
     "./output": "./src/output.ts",
     "./run": "./src/run.ts",

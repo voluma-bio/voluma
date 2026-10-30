@@ -8,6 +8,7 @@
  */
 import type { EventInput, RunEvent } from "./events";
 import { corrections } from "./fold";
+import { threadRole } from "./thread-role";
 
 /**
  * A thread's name: its id without the run id (`main.2`, `segmentation.worker`, `supervisor`), the
@@ -43,7 +44,7 @@ export function openThreads(events: readonly RunEvent[]): string[] {
  * reverted work stands. The next correction starts them fresh (`messages.ts`).
  */
 export function cancelEnds(runId: string, events: readonly RunEvent[], at: Date): EventInput[] {
-  const root = events.find((e) => e.type === "thread.started" && e.payload.parentThreadId === null);
+  const root = events.find((e) => e.type === "thread.started" && threadRole(e.payload) === "root");
   const isRoot = (id: string) => id === root?.threadId;
   const start = new Map<string, string>(); // thread -> its latest thread.started id
   const stopped = new Set<string>(); // threads whose latest end is `cancelled`

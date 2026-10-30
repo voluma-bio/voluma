@@ -301,27 +301,28 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
    * The next thread of a task (`<task>.<role>[.<n>]`) or of the main agent (`main[.<n>]`), after
    * the `n` already logged; an id this process found unresumable is used up.
    */
-  function nextThread(d: ThreadLog, role: "main"): ThreadIdentity;
-  function nextThread(d: ThreadLog, role: Role, taskId: string): ThreadIdentity;
-  function nextThread(d: ThreadLog, role: "main" | Role, taskId?: string): ThreadIdentity {
-    const base = role === "main" ? "main" : `${taskId}.${role}`;
+  function nextThread(
+    d: ThreadLog,
+    of: { role: "main" } | { role: Role; taskId: string },
+  ): ThreadIdentity {
+    const base = of.role === "main" ? "main" : `${of.taskId}.${of.role}`;
     let n =
-      (role === "main"
+      (of.role === "main"
         ? [...d.threads.values()].filter((r) => r.role === "main").length
-        : startedFor(d, taskId as string, role).length) + 1;
+        : startedFor(d, of.taskId, of.role).length) + 1;
     const nameOf = (n: number) => (n === 1 ? base : `${base}.${n}`);
     while (threads.stale(`${runId}.${nameOf(n)}`)) n++;
     const named = { id: `${runId}.${nameOf(n)}`, name: nameOf(n) };
-    return role === "main" ? { ...named, role } : { ...named, role, taskId: taskId as string };
+    return { ...named, ...of };
   }
 
   const startMain = (d: ThreadLog) => {
-    const thread = nextThread(d, "main");
+    const thread = nextThread(d, { role: "main" });
     return begin(specFor(thread), `${thread.id}:started`);
   };
 
   const startCheck = (d: ThreadLog, taskId: string) => {
-    const thread = nextThread(d, "check", taskId);
+    const thread = nextThread(d, { role: "check", taskId });
     return begin(specFor(thread), `${thread.id}:started`);
   };
 
@@ -329,7 +330,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     state: (d, id) => threadState(d.threads.get(id), threads.running(id)),
     fixLimitReached: (d, taskId) => fixLimitReached(d, taskId, config.maxFixRounds),
     startWorker: async ({ taskId, brief, mainThreadId: main, spawnedBy, startedEventId }) => {
-      const thread = nextThread(derive(), "worker", taskId);
+      const thread = nextThread(derive(), { role: "worker", taskId });
       const spec = specFor(thread);
       const task = planTask(runtime.view(), taskId);
       await begin(

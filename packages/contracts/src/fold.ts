@@ -90,6 +90,7 @@ import type {
   Volume,
 } from "./review";
 import { toWorld } from "./ruler";
+import { threadRole } from "./thread-role";
 import type { DeclaredOutput, PlanTask, WorkflowPlan } from "./workflow";
 
 type OutputEvent = Extract<RunEvent, { type: "output" }>;
@@ -339,7 +340,7 @@ export function corrections(events: readonly RunEvent[]): {
         if (span) span.replied = true;
         break;
       case "thread.started":
-        if (e.payload.parentThreadId === null) root = e.threadId;
+        if (threadRole(e.payload) === "root") root = e.threadId;
         break;
       case "thread.ended":
         if (span?.closed === "open" && e.threadId === root && e.payload.status === "completed")
@@ -424,6 +425,7 @@ type Attempt = {
 /** `holdOpenCorrection`: fold as of the last completed revision, skipping a correction still in progress (review). */
 export function fold(events: readonly RunEvent[], holdOpenCorrection = false): Folded {
   // Threads that check an attempt: the starts that name one.
+  const roles = new Set<string>(); // threads whose first start was classified
   const checkThreads = new Set<string>();
   const threadModel = new Map<string, string>();
   const attempts = new Map<string, Attempt>();
@@ -809,8 +811,12 @@ export function fold(events: readonly RunEvent[], holdOpenCorrection = false): F
     if (abandoned.has(e.id)) continue;
     switch (e.type) {
       case "thread.started": {
-        if (e.payload.attemptId) checkThreads.add(e.threadId);
-        else if (e.payload.task) workerOf.set(e.payload.task, e.threadId);
+        if (!roles.has(e.threadId)) {
+          const role = threadRole(e.payload);
+          roles.add(e.threadId);
+          if (role === "check") checkThreads.add(e.threadId);
+          else if (role === "worker" && e.payload.task) workerOf.set(e.payload.task, e.threadId);
+        }
         if (e.payload.model) threadModel.set(e.threadId, e.payload.model);
         const checked = e.payload.attemptId && attempts.get(e.payload.attemptId);
         // A resume re-emits `thread.started` for the same thread: only a new check thread resets the verdict.

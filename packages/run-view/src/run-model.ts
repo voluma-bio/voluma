@@ -12,7 +12,8 @@ import type { Asset } from "@voluma/contracts/review";
 import { progress, reviewState } from "@voluma/contracts/review-state";
 import type { ProviderCalls, RunState } from "@voluma/contracts/run";
 import { type RunSpend, type Spend, spend } from "@voluma/contracts/spend";
-import { openThreads, threadName } from "@voluma/contracts/threads";
+import { type ThreadRole, threadRole } from "@voluma/contracts/thread-role";
+import { openThreads } from "@voluma/contracts/threads";
 import { catalog } from "@voluma/workflow/bundled";
 import { type Halt, type Live, toolTitle } from "./transcript";
 
@@ -28,8 +29,8 @@ export type ThreadStatus = "running" | "paused" | "completed" | "failed" | "canc
 
 export type Thread = {
   id: string;
-  /** Its id without the run id (`main.2`, `segmentation.worker`). */
-  name: string;
+  /** From its first start (`threadRole`). */
+  role: ThreadRole;
   /** The role file's name or `supervisor`: a label (`agentLabel`); behaviour reads the fields below. */
   kind: string;
   /** The thread that started it, from its `thread.started`; null on the run's root. */
@@ -108,7 +109,7 @@ function threadsOf(events: RunEvent[]): { threads: Thread[]; lastAt: Map<string,
         } else
           threads.set(e.threadId, {
             id: e.threadId,
-            name: threadName(e.runId, e.threadId),
+            role: threadRole(e.payload),
             kind: e.payload.kind,
             parentId: e.payload.parentThreadId,
             taskId: e.payload.task,
@@ -198,12 +199,9 @@ export function withLiveCalls(threads: Thread[], live: Live): Thread[] {
   );
 }
 
-/** The main agent: started by the root, on no task (a worker or check has one). */
-export const isMain = (t: Pick<Thread, "parentId" | "taskId">) =>
-  t.parentId !== null && t.taskId === undefined;
+export const isMain = (t: Pick<Thread, "role">) => t.role === "main";
 
-/** A check thread: the only one that records the attempt it checks. */
-export const isCheck = (t: Pick<Thread, "attemptId"> | undefined) => t?.attemptId !== undefined;
+export const isCheck = (t: Pick<Thread, "role"> | undefined) => t?.role === "check";
 
 export type AgentNode = { thread: Thread; children: AgentNode[] };
 
