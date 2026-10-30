@@ -291,6 +291,7 @@ interface LoadOptions {
    * The lists and the study reads: a completed run whose events no longer parse is left out
    * rather than failing every run listed with it. Without it (one run's read) it throws: the
    * run's own page must fail loudly, not read as "no plan" (a 409 the web polls forever).
+   * A live run whose events don't parse is always kept, with `tasks: null`: it still runs.
    */
   skipUnreadable?: boolean;
 }
@@ -301,6 +302,7 @@ async function loadResults(
   { cache = new Map(), skipUnreadable = false }: LoadOptions = {},
 ): Promise<RunResult[]> {
   const rows = await loadRows(tx, where);
+  const ended = new Set(rows.filter(({ run }) => run.state === "ended").map(({ run }) => run.id));
   const ids = rows
     // A failed or cancelled run has nothing to derive; a live one has its `tasks`.
     .filter(({ run }) => run.state !== "ended" || run.outcome === "completed")
@@ -317,8 +319,9 @@ async function loadResults(
   const cached = new Map(ids.map((id) => [id, cache.get(id)]));
   const missing = ids.filter((id) => cached.get(id)?.lastEventId !== (versions.get(id) ?? null));
   const { logs, unreadable } = await loadLogs(tx, missing, true);
-  if (!skipUnreadable && unreadable.size)
-    throw new Error(`run ${[...unreadable].join(", ")}: stored events can't be read`);
+  const lost = [...unreadable].filter((id) => ended.has(id));
+  if (!skipUnreadable && lost.length)
+    throw new Error(`run ${lost.join(", ")}: stored events can't be read`);
   const derivedOf = new Map<string, Derived>();
   for (const id of ids) {
     if (unreadable.has(id)) continue;
@@ -332,7 +335,7 @@ async function loadResults(
     if (cache.size > CACHE_CAP) cache.delete(cache.keys().next().value as string);
   }
   return rows
-    .filter(({ run }) => !unreadable.has(run.id))
+    .filter(({ run }) => !lost.includes(run.id))
     .map((row) => {
       const derived = derivedOf.get(row.run.id) ?? NOTHING;
       return { run: toRun(row, derived), ...derived };
