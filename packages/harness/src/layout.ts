@@ -107,6 +107,15 @@ export function runLayout(
     `- ${INPUTS} is a local copy of the input data: read it, do not modify it.\n` +
     `- ${WORKFLOW} holds the workflow's skills and resources, under their repo paths: read them, do not modify them.\n`;
 
+  // Measured on Modal's R2 mounts (run p659): a file written whole in one pass works; seeks,
+  // reopening for update and renames fail with EINVAL, EBADF, EPERM or ENOSYS, and VTK's
+  // writers (pyvista `.save`) crash the process.
+  const writeRule = (writable: string) =>
+    `- Files under ${writable} live on cloud storage: a file can be created, or replaced, by writing it whole from start to end in one pass, and nothing else. ` +
+    "Seeking back, appending, reopening a file to change it, truncating, renaming (mv, sed -i, os.rename, os.replace) and keeping times (cp -p, cp -a, shutil.copy2) fail there; " +
+    "so do np.savez, tifffile and memmap writes, and pyvista/VTK saves crash or fail. Anything a library writes in several steps goes to /tmp first; then copy it with a plain `cp` or shutil.copy " +
+    `(cp /tmp/x.vtp $SCRATCH/). Reading is unrestricted.\n`;
+
   // What differs by role. `hostOnly` entries are readable by host-side tools, not mounted.
   const worker = (dir: string): RoleParts => {
     const writable: SandboxMount = { path: SCRATCH, prefix: scratch, access: "read-write" };
@@ -115,7 +124,7 @@ export function runLayout(
       scratch: writable,
       hostOnly: [],
       description:
-        `${common}- ${OUTPUTS} is for files you produce; they are kept.\n` +
+        `${common}${writeRule(`${OUTPUTS} and ${SCRATCH}`)}- ${OUTPUTS} is for files you produce; they are kept.\n` +
         `- ${SCRATCH} is for intermediate files and is kept too; the other threads' folders are there as well. Work in $SCRATCH (${dir}) and write nothing else under ${SCRATCH}.`,
       restartNote: `The sandbox was restarted. ${OUTPUTS} and ${SCRATCH} were kept, ${INPUTS} was copied again, and local files elsewhere (including /tmp) are gone.`,
     };
@@ -136,7 +145,7 @@ export function runLayout(
       // After `mounts`: the more specific writable folder matches first.
       hostOnly: [{ path: SCRATCH, prefix: scratch, access: "read-only" }],
       description:
-        `${common}- ${OUTPUTS} holds the worker's files: ${outputsAccess === "read-write" ? "the files you produce go here too" : "read them, do not modify them"}.\n` +
+        `${common}${writeRule(outputsAccess === "read-write" ? `${OUTPUTS} and ${dir}` : dir)}- ${OUTPUTS} holds the worker's files: ${outputsAccess === "read-write" ? "the files you produce go here too" : "read them, do not modify them"}.\n` +
         `- ${dir} is for your intermediate files; it is kept. $SCRATCH is ${dir}. Write nothing else under ${SCRATCH}. ` +
         `bash sees only your folder there; view_image also opens the files under ${SCRATCH}/ that the worker cited as evidence (read-only).`,
       restartNote: `The sandbox was restarted. ${dir} was kept, ${INPUTS} was copied again, and local files elsewhere (including /tmp) are gone.`,

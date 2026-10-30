@@ -87,6 +87,20 @@ Spend and the usage meter sum sandbox seconds over all sandboxes.
 - Same sandbox shape (run p483): commands run as uid 0 with `CapEff` lacking `CAP_SYS_ADMIN` and
   `CAP_LINUX_IMMUTABLE`; `SCRATCH` and the exec `workdir` (`/scratch/t1.check`) take effect;
   `touch /scratch/outside.txt` succeeds, also after `chmod a-w /scratch`; `chattr` is absent.
+- **What an R2 mount accepts (run p659, a worker sandbox, `/scratch` vs local disk).** A file created
+  or replaced by writing it whole in one pass works (`open(...,'wb')`, `np.save`, PIL, matplotlib,
+  json, `cp`/`shutil.copy` from `/tmp`, a 200 MB sequential write, `>` over an existing file). These
+  fail: seeking back (`EINVAL`: `np.savez`, `tifffile`, `f.seek` while writing), reopening to update
+  (`r+`, `w+`: `EBADF`; `open_memmap(mode='w+')` also leaves a 128-byte stub), append (`>>`, `'a'`:
+  `EPERM`), `truncate`, `rename`/`os.replace`/`mv`/`sed -i` within the mount (`ENOSYS`), `cp -p`/`-a`
+  and `shutil.copy2`/`move` from `/tmp` (the copy lands, then setting times is `EPERM`; `mv` also
+  removes the source). VTK savers (pyvista `.save`) with the output on the mount crash Python
+  (`.vtp`: segfault or `double free`) or fail (`.stl`); `.vtk` and `.ply` happen to work. The working
+  directory on the mount is harmless by itself: reading from it and saving to `/tmp` works. A
+  written key was visible to a host `HEAD` within ~100 ms of the writer closing the file (fsync
+  changed nothing). Modal's SDK 0.11.1 offers no cache or write-mode option on `CloudBucketMount`
+  (read-only, requester-pays, endpoint, prefix, OIDC role only), so the rule is told to the model
+  in `ThreadLayout.description` and any script writes locally and copies.
 
 # Runner: review assets
 
@@ -160,6 +174,13 @@ who ends it:
    run, which is what to use when other agents have runs going: the bare form ends theirs too.
 
 Run `sandboxes:clean --run <your run>` before finishing any work that started sandboxes.
+
+**Starting one can fail.** The R2 credential mint (`mintCredentials`) retries 429, 5xx, network errors
+and Cloudflare's spurious `403` code `10042` ("enable R2", seen once, gone 41 s later) up to 5 tries
+with 1, 2, 4 and 8 s between them; any other 4xx (a bad token) fails at once. When creation still
+fails, the Pi adapter returns the tool call as an error result with `infrastructure: true`
+(`SandboxUnavailableError`), so the model and the run page see Voluma's failure, not the agent's;
+the session forgets the failed creation, and the model's next call tries again.
 
 # Runner: `segment_sam` runs in the worker's sandbox
 
