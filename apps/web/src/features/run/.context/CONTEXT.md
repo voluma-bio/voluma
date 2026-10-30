@@ -1,18 +1,15 @@
 # Run feature
 
-Two screens under `RunLayout` (the query client they share; the top bar is the shell's): `/`
-start (`start-page.tsx`) and `/runs/:id/live` live run (`run-page.tsx`). There is no runs list.
+One screen under `RunLayout` (its query client; the top bar is the shell's): `/runs/:id/live`,
+the live run (`run-page.tsx`). Starting runs is `features/study` (Run on new scans, `/new`); there
+is no runs list: Home (`features/study`) replaces it.
 
-- **Outputs checklist data** is `workflows/mouse-oa/outputs.json`, read through
-  `catalog["mouse-oa"]` from `@voluma/workflow/bundled` (JSON imports, parsed with the contract's
-  schemas; the API's workflow catalog is the same export). No endpoint serves it. The bundle holds the outputs of the commit the web was built from; the runner
-  checks selected ids against its own checkout. The API's Railway watch paths include
-  `/workflows/*/outputs.json` (set; see `apps/api/.context/deploy.md`), so an outputs change redeploys the web app.
-  With every output ticked the request sends no `selectedOutputs` (absent means all), so a default run
-  doesn't depend on the bundle matching the runner. Groups are one per producing task.
-- **Task titles** come from `workflows/mouse-oa/tasks.json`, bundled the same way and read by
-  the bundle's `taskTitle` (a task without a title shows its id); don't add another copy. The
-  watch paths need `/workflows/*/tasks.json` too. The page reads the plan from the first
+- **Task titles** come from `workflows/mouse-oa/tasks.json`, read through `catalog["mouse-oa"]`
+  from `@voluma/workflow/bundled` (JSON imports parsed with the contract's schemas; the API's
+  workflow catalog is the same export; no endpoint serves it) by the bundle's `taskTitle` (a task
+  without a title shows its id); don't add another copy. The API's Railway watch paths include
+  `/workflows/*/tasks.json` and `outputs.json` (see `apps/api/.context/deploy.md`), so a change
+  redeploys the web app. The page reads the plan from the first
   `revision.started` itself because `fold` doesn't expose it.
 - **The live page** behaves like Meridian Flow's chat, adapted to a run. The main view is the main
   agent's transcript (every thread of kind `main`: `main`, `main.2` after a restart), which is the
@@ -81,20 +78,13 @@ start (`start-page.tsx`) and `/runs/:id/live` live run (`run-page.tsx`). There i
 - **Live tasks** are `fold(events)` over the run's stream (`subscribe`), published at most once per
   animation frame. "Finished" counts To check tasks: their work is done. The task list comes from the `revision.started` plan; a task not started yet is Ready when every task it builds on has a usable result (`isSatisfied` from `@voluma/workflow`, the supervisor's own rule: done, or To check with every required output), else "Waiting on" those tasks.
   Queue position and run state are not events, so `getRun` is polled every 3 s until the run ends.
-- **Visitor keys** (`keys.tsx`) live in localStorage under `voluma.visitor-keys.<userId>` and are parsed
-  with `visitorKeysSchema`; another user of the browser never sees them (a guest has no sign-out, and
-  signing in as a member switches id). "Forget keys" on the start screen removes them. The start screen
-  asks for keys only for a visitor; a run in `awaiting-keys` shows the form on its page (`resendKeys`) only to the user who started it.
-- **Upload scan** (`scan-upload.tsx`, members only) sits under the scan picker. A folder pick drops the
-  top folder from each path (it becomes the default name) and skips hidden files; each file is a
-  presigned PUT straight to R2 (`putUploadFile`), 4 at once, 3 tries each, then the failed ones are
-  listed with Retry. Complete selects the new scan. API side: `apps/api/src/domains/run/.context/uploads.md`.
+- **Visitor keys** (`@voluma/ui/run`, shared with `features/study`) live in localStorage under
+  `voluma.visitor-keys.<userId>`; a run in `awaiting-keys` shows the form on its page
+  (`resendKeys`) only to the user who started it.
 - A completed run links to `/runs/:runId`, the review lane's route; the live page is `/runs/:id/live` so it never shadows it. Active runs open live; stopped and failed runs open live too (it shows the error).
 
-- **A run's status chip** (`status.tsx`, on Recent runs and the live page) comes from the `Run`
-  alone, no events: a completed run with open items reads "N to check" (`Run.toCheck`, counted by
-  the API when the run completes), else "Completed", since a failed task raises no item. The
-  formatters (`formatUsd`, `formatDuration`) are there too.
+- **A run's status chip** (`RunBadge`, `runStatus`) and the formatters (`formatUsd`,
+  `formatDuration`) are `@voluma/ui/run`, shared with Home; `status.tsx` keeps the clock.
 - **Live page cost and time** come only from `spend(events)` (`@voluma/contracts/spend`), run in
   `runView` on durable events, never per live frame (`spend.tsx`). The header shows the run's total,
   with the main thread's share in its popover; each task's row in the progress rail covers its

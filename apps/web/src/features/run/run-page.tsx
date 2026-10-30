@@ -14,6 +14,7 @@ import type { RunEvent } from "@voluma/contracts/events";
 import { fold } from "@voluma/contracts/fold";
 import type { Run } from "@voluma/contracts/run";
 import { Button } from "@voluma/ui";
+import { KeysForm, RunBadge, runStatus } from "@voluma/ui/run";
 import { workflowName } from "@voluma/workflow/bundled";
 import { ArrowLeft } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -22,7 +23,6 @@ import { AgentMark, Elapsed, RunningStrip, ThreadCost, ThreadSpendInfo } from ".
 import { DisclosureProvider } from "./chat/disclosure-store";
 import { ProcessDisclosure } from "./chat/process-disclosure";
 import { ThreadNavigationProvider, useOpenThread } from "./chat/thread-navigation";
-import { KeysForm } from "./keys";
 import {
   type Attention,
   haltOf,
@@ -32,7 +32,6 @@ import {
   withLiveCalls,
 } from "./run-model";
 import { RunSpendSummary } from "./spend";
-import { RunBadge, runStatus } from "./status";
 import { OutputList, TaskList } from "./task-progress";
 import {
   applyFrame,

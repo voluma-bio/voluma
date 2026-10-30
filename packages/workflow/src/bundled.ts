@@ -14,7 +14,11 @@
  * JSON imports (`with { type: "json" }`) work in Vite, Node (tsx) and `tsc` alike.
  */
 import type { WorkflowPin } from "@voluma/contracts/workflow";
-import { type OutputEntry, workflowFilesSchema } from "@voluma/contracts/workflow-files";
+import {
+  type OutputEntry,
+  type TaskEntry,
+  workflowFilesSchema,
+} from "@voluma/contracts/workflow-files";
 import mouseOaOutputs from "../../../workflows/mouse-oa/outputs.json" with { type: "json" };
 import mouseOaTasks from "../../../workflows/mouse-oa/tasks.json" with { type: "json" };
 import smokeOutputs from "../../../workflows/smoke/outputs.json" with { type: "json" };
@@ -27,6 +31,8 @@ export interface BundledWorkflow {
   path: string;
   name: string;
   description: string;
+  /** The tasks in file order. */
+  tasks: TaskEntry[];
   /** Every output a run can produce, in file order. */
   outputs: OutputEntry[];
   /** The outputs a summary leads with (`headline` in `outputs.json`), in file order. */
@@ -47,6 +53,7 @@ function bundle(
   const names = new Map(outputs.map((o) => [o.id, o.name]));
   return {
     ...meta,
+    tasks,
     outputs,
     // `headline` is optional in the schema; an output without it is not a headline.
     headline: outputs.filter((o) => "headline" in o && o.headline === true),

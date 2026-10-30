@@ -4,8 +4,9 @@
  * list, a worker's or checker's own included).
  */
 import { cacheHitShare, type RunSpend, type Spend } from "@voluma/contracts/spend";
+import { formatDuration, formatUsd } from "@voluma/ui/run";
 import { InfoButton, type InfoSection } from "./chat/info-button";
-import { formatDuration, formatUsd, useNow } from "./status";
+import { useNow } from "./status";
 
 const count = (n: number) => n.toLocaleString();
 
