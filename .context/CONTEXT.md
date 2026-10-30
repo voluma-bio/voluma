@@ -6,20 +6,20 @@ commands are in [AGENTS.md](../AGENTS.md).
 ## Shape
 
 ```
-apps/web        React + Vite. shell/ mounts routes and draws the top bar; features/run and features/review own screens
+apps/web        React + Vite. shell/ mounts routes and the `AppShell` frame (one `QueryClient` in `SignedIn`; no top bar); features/run and features/review own screens
 apps/api        Node server on Postgres (Drizzle), each domain a Hono app. src/index.ts is the
                 composition root: the only code that reads env; it builds the adapters and
                 mounts domains/run at /api/run/ (runs, the queue, the event log) and domains/review at
-                /api/review/ (review data, chat threads, corrections) with app.route. A
+                /api/review/ (review data, corrections) with app.route. A
                 domain's tables and Postgres adapters live in the domain; adapters/ is for
                 shared ports
                 Sign-in: see Authentication
 apps/runner     The runner service: claims runs from the API and runs the run loop on each (Run lane)
 packages/
-  contracts     zod schemas for the four contracts and the shared formats
+  contracts     zod schemas for the four contracts and the shared formats; the fold (a row per plan task, stale-task graph)
   harness       the agent harness: our tools, the Sandbox and EventLog ports, the Pi
                 adapter; runtime-neutral (no Node types)
-  workflow      a workflow skill directory: snapshot it into the run's R2 prefix and read it (`load.ts`), build the plan from the selected outputs (`plan.ts`), task graph, stale tasks
+  workflow      a workflow skill directory: snapshot it into the run's R2 prefix and read it (`load.ts`), build the plan from the selected outputs (`plan.ts`)
   api-client    typed commands and event stream; the only way web features reach the API
   viewer        the grid viewer (three.js, zarr in a worker) and the grid a review task is shown on
   ui            shared React components, styled from tokens
@@ -143,7 +143,7 @@ and check threads.
   agents list and task table; after `stuckLimit` such nudges in a row code skips the unfinished
   tasks (a root-written `plan.changed`) and ends the run. A main thread that cannot resume, or
   failed on a provider error, is replaced by `main.<n+1>` whose first message is built from the log.
-  A thread that throws or is refused before it starts (`ran` false), a fatal provider error, or an
+  A thread that throws or is refused before it starts (`ran` false), a fatal provider error (a retryable one resumes its thread once first), or an
   error in a step fails the run: threads aborted, the root ends `failed`. The loop never imports
   Pi; `superviseRun` (`packages/harness/src/supervise-run.ts`) wires it, and a host gives only
   adapters, each role's model/prompt/tool names (`RoleOf`) and the first messages (`Briefs`).
@@ -192,8 +192,7 @@ user, no email) in the demo entrance PR. No WorkOS user signs into a Demo organi
 none is in the list. WorkOS does not enforce the `organizationId` pin on sign-in, so the
 per-request allow-list is the only control. `scope` is server-internal: `/me` returns only the contract shape.
 
-**Guests.** With `GUEST_ORGANIZATION_ID` (and `GUEST_SCOPE`, `lab` or `self`, default `lab`; the
-Demo org runs `self`) set, a request with no session cookie, no bearer and a valid guest cookie
+**Guests.** With `GUEST_ORGANIZATION_ID` (and `GUEST_SCOPE`, `self` or `lab`, default `self`) set, a request with no session cookie, no bearer and a valid guest cookie
 is a guest: a `user` principal with `account: "visitor"`, no email, and that organization and
 scope, so domains and `readerOf` treat it like any member. Its id (`guest_…`) is minted by
 `POST /api/auth/guest` (same-origin, behind the CSRF guard; it returns the `/me` body) into its
@@ -289,8 +288,8 @@ Import boundaries are written rules in `AGENTS.md`; Biome uses its recommended r
 `[data-theme="light"]`, and again under `[data-theme="dark"]`. `theme.css`
 maps them into Tailwind with `@theme inline`, so a utility reads the token
 where it is used and `data-theme` on any element themes its subtree. That is
-how `/dev/ui` shows both themes side by side. Review now selects light, following
-Andrew's implementation direction. Tailwind's default palette is removed.
+how Storybook shows both themes side by side. The app is light on home and study
+pages and dark in the 3D review. Tailwind's default palette is removed.
 
 The token names are shadcn/ui's (`background`, `card`, `muted`, `accent`,
 `primary`, `destructive`, `border`, `ring`, `chart-*`, `sidebar-*`), with
@@ -315,8 +314,7 @@ route. No synthetic measurements or simulated services are mounted.
 contract. Reports, revision selection and command UI remain available for the
 real adapter; until it exists the workspace shows explicit empty states. Shared
 contracts and API client are unchanged from main. Report/viewer splits retain
-react-resizable-panels to preserve the verified nested maximize/restore behavior;
-the unrelated shared `SplitPanel` API and `/dev/ui` remain unchanged.
+react-resizable-panels to preserve the verified nested maximize/restore behavior.
 
 Images come only from the run: each task's grid and what is drawn on it are the
 run's published blocks and converted assets. The [Review specification][review-spec]
@@ -346,6 +344,29 @@ The pre-commit hook lives in the shared `.git`, so every worktree runs the
 same hook.
 
 ## Amp orb preview
+
+Amp supplies `voluma-bio/docs` and `voluma-bio/voluma-legacy` as additional
+repositories in `../repos/`. `.agents/resume` fetches both repositories' origin
+branch refs after initial activation (including cached snapshots) and every
+wake, then fast-forwards only clean `main` checkouts without local commits or
+an in-progress Git operation. Dirty files (including untracked files), other
+branches and detached HEADs are left alone. The primary checkout stays under
+Amp's control; the hook never switches or updates the agent's working branch.
+Ignored local files also survive: if an incoming tracked path would overwrite
+one, the fast-forward aborts and prints a warning. Nonconflicting ignored files
+do not block the refresh.
+
+The two fetches run concurrently, each with an 8-second timeout and a 1-second
+kill grace. A failed fetch leaves files unchanged and prints a warning; it does
+not prevent the other repository from refreshing. Check
+`~/.cache/amp/logs/resume.log` for status and rerun `.agents/resume` to retry or
+refresh during a long session. Amp waits only 10 seconds for resume; a slow
+checkout can finish after the agent starts. This is a start/wake refresh, not
+a hook on arbitrary `git fetch` commands. Git has no general post-fetch hook.
+Pre-clone and pre-setup project scripts do not run on every wake, and setup
+lacks personal GitHub credentials, so refresh belongs in resume. Existing
+orbs on older branches must pick up this hook before they gain the behavior.
+Lifecycle reference: [Customizing Orbs](https://ampcode.com/docs/orbs/customizing).
 
 `.agents/setup` installs and enables native Postgres on loopback port 5432,
 with a local-only `voluma` role that can create each worktree's database.

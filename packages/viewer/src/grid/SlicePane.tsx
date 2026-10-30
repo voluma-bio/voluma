@@ -4,6 +4,7 @@
  * level and refines to the level the zoom needs. Left drag moves the crosshair, the wheel
  * steps slices, Ctrl or ⌘ + wheel zooms at the pointer, Shift, middle or right drag pans.
  */
+import { cx } from "@voluma/ui";
 import { useEffect, useRef, useState } from "react";
 import {
   BufferGeometry,
@@ -17,6 +18,7 @@ import {
   WebGLRenderer,
 } from "three";
 import { type Contrast, compose, type OverlayPlane } from "./compose";
+import { CHIP, PANE } from "./pane-style";
 import { corners, type Picture, quad, texture } from "./picture";
 import { readPlane } from "./planes";
 import {
@@ -30,11 +32,10 @@ import {
   planeAxes,
   type Zyx,
 } from "./scene";
+import { tokenColor } from "./token-color";
 
 export const axisColor = (axis: Axis) =>
-  getComputedStyle(document.documentElement).getPropertyValue(
-    axis === 0 ? "--axis-z" : axis === 1 ? "--axis-y" : "--axis-x",
-  );
+  tokenColor(axis === 0 ? "--axis-z" : axis === 1 ? "--axis-y" : "--axis-x");
 
 /** Pixels per mm, the zoom that fits the grid in the pane, and the pane centre in mm. */
 type View = { zoom: number; fit: number; center: [number, number] };
@@ -87,11 +88,9 @@ export function SlicePane({
     const element = host.current!;
     const renderer = new WebGLRenderer({ antialias: false });
     renderer.setPixelRatio(globalThis.devicePixelRatio);
-    renderer.setClearColor(
-      getComputedStyle(document.documentElement).getPropertyValue("--viewer-well").trim(),
-    );
+    renderer.setClearColor(tokenColor("--viewer-well"));
     element.append(renderer.domElement);
-    renderer.domElement.className = "grid-canvas";
+    renderer.domElement.className = "absolute inset-0";
     const camera = new OrthographicCamera(-1, 1, 1, -1, -10, 10);
     const s = new Scene();
     const image = new Mesh(new BufferGeometry(), new MeshBasicMaterial());
@@ -292,7 +291,7 @@ export function SlicePane({
     const w = scene.shapeZyx[ca] * sc;
     const h = scene.shapeZyx[ra] * sr;
     const colorOf = (a: Axis) => {
-      const c = axisColor(a).trim();
+      const c = axisColor(a);
       const n = Number.parseInt(c.slice(1), 16);
       return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
     };
@@ -407,23 +406,23 @@ export function SlicePane({
   return (
     <div
       ref={host}
-      className="grid-pane"
+      className={PANE}
       // biome-ignore lint/a11y/noNoninteractiveTabindex: the pane takes arrow keys to step slices.
       tabIndex={0}
       role="img"
       aria-label={`Slice ${index + 1} of ${total}`}
     >
-      <span className="grid-chip bottom-left">
+      <span className={cx(CHIP, "bottom-2 left-2")}>
         {index + 1} / {total}
         {scale && scale > 1 ? ` · 1:${scale}` : ""}
       </span>
       {(!shown || refining) && !error && (
-        <span className="grid-chip top-right" role="status">
+        <span className={cx(CHIP, "top-2 right-2")} role="status">
           {shown ? "Loading full resolution…" : "Loading…"}
         </span>
       )}
       {error && (
-        <span className="grid-chip top-right" role="alert">
+        <span className={cx(CHIP, "top-2 right-2")} role="alert">
           Couldn't load this slice: {error}
         </span>
       )}

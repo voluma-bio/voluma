@@ -1,0 +1,63 @@
+{
+  "events used": 900,
+  "review JSON identical": true,
+  "main": {
+    "last revision tasks (id, status, worker thread)": [
+      ["intake", "done", "ce5a0f21-c948-4e20-a03f-04ff7f0e707b.intake.worker"],
+      ["orientation", "to-check", "ce5a0f21-c948-4e20-a03f-04ff7f0e707b.orientation.worker"],
+      ["segmentation", "to-check", "ce5a0f21-c948-4e20-a03f-04ff7f0e707b.segmentation.worker"],
+      ["iioc", "in-progress", "ce5a0f21-c948-4e20-a03f-04ff7f0e707b.iioc.worker"],
+      ["subchondral-plate", "pending", null],
+      ["trabecular-roi", "pending", null],
+      ["metaphyseal-roi", "pending", null],
+      ["cortical", "pending", null],
+      [
+        "femoral-geometry",
+        "in-progress",
+        "ce5a0f21-c948-4e20-a03f-04ff7f0e707b.femoral-geometry.worker"
+      ]
+    ],
+    "run page tasks (id, state, wall s)": [
+      ["intake", "done", 227.9],
+      ["orientation", "to-check", 234.7],
+      ["segmentation", "to-check", 2715.3],
+      ["iioc", "running", 208.1],
+      ["subchondral-plate", "waiting", null],
+      ["trabecular-roi", "waiting", null],
+      ["metaphyseal-roi", "waiting", null],
+      ["cortical", "waiting", null],
+      ["femoral-geometry", "running", 212.6]
+    ],
+    "total wall s": 3425.67
+  },
+  "branch": {
+    "last revision tasks (id, status, worker thread)": [
+      ["intake", "done", "ce5a0f21-c948-4e20-a03f-04ff7f0e707b.intake.worker"],
+      ["orientation", "to-check", "ce5a0f21-c948-4e20-a03f-04ff7f0e707b.orientation.worker"],
+      ["segmentation", "to-check", "ce5a0f21-c948-4e20-a03f-04ff7f0e707b.segmentation.worker"],
+      ["iioc", "in-progress", "ce5a0f21-c948-4e20-a03f-04ff7f0e707b.iioc.worker"],
+      ["subchondral-plate", "pending", null],
+      ["trabecular-roi", "pending", null],
+      ["metaphyseal-roi", "pending", null],
+      ["cortical", "pending", null],
+      [
+        "femoral-geometry",
+        "in-progress",
+        "ce5a0f21-c948-4e20-a03f-04ff7f0e707b.femoral-geometry.worker"
+      ]
+    ],
+    "run page tasks (id, state, wall s)": [
+      ["intake", "done", 227.9],
+      ["orientation", "to-check", 234.7],
+      ["segmentation", "to-check", 2715.3],
+      ["iioc", "running", 208.1],
+      ["subchondral-plate", "waiting", null],
+      ["trabecular-roi", "waiting", null],
+      ["metaphyseal-roi", "waiting", null],
+      ["cortical", "waiting", null],
+      ["femoral-geometry", "running", 212.6]
+    ],
+    "total wall s": 3425.67
+  },
+  "run page tasks identical (floats rounded to 6 places)": true
+}

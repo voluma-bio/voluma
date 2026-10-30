@@ -19,6 +19,7 @@ import {
   type Folded,
   fold,
 } from "@voluma/contracts/fold";
+import type { Mark } from "@voluma/contracts/messages";
 import type { EvidenceRef } from "@voluma/contracts/output";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { UserSender } from "./adapters/pi/start-thread";
@@ -52,8 +53,6 @@ interface ThreadFields {
   id: string;
   /** How its latest invocation ended; undefined while the log shows it started and not ended. */
   end: PayloadOf<"thread.ended"> | undefined;
-  /** Log position of that end. */
-  endedAt: number | undefined;
   /** Messages the runtime sent it to get it moving again (its brief, the first, is not one). */
   nudges: number;
   /** The main agent's `start_worker` brief, for a worker. */
@@ -122,12 +121,7 @@ export type Notice = {
   | {
       kind: "person";
       text: string;
-      marks: {
-        volumeId: string;
-        file?: string;
-        point?: number[];
-        box?: { min: number[]; max: number[] };
-      }[];
+      marks: (Mark & { file?: string })[];
       snapshot?: string;
       /** The message carries a go (`taskId` names its task). */
       go?: true;
@@ -160,8 +154,6 @@ export interface ThreadLog {
   threads: Map<string, ThreadRecord>;
   /** The latest main thread. */
   main: string | undefined;
-  /** Log position of the latest task-state event (`task`), -1 if none: the run's progress mark. */
-  progressAt: number;
   /** The thread that opened each task's current attempt (the fold's worker), unless that thread is stopped. */
   holders: Map<string, string>;
   /** Per task: `needs-review` check results on its attempts since its latest stale mark. */
@@ -243,7 +235,6 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
     view: fold(events),
     threads: new Map(),
     main: undefined,
-    progressAt: -1,
     holders: new Map(),
     fixRounds: new Map(),
     notices: [],
@@ -322,10 +313,8 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
             kind: "person",
             text: text ?? "",
             marks: (marks ?? []).map((m) => ({
-              volumeId: m.volumeId,
+              ...m,
               ...(volumeFiles.has(m.volumeId) && { file: volumeFiles.get(m.volumeId) }),
-              ...(m.point && { point: m.point }),
-              ...(m.box && { box: m.box }),
             })),
             ...(snapshotKey && { snapshot: `/scratch/${snapshotKey.split("/scratch/")[1]}` }),
             closed,
@@ -363,7 +352,6 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         const fields: ThreadFields = {
           id: e.threadId,
           end: undefined,
-          endedAt: undefined,
           nudges: record?.nudges ?? 0,
           brief: record?.brief ?? briefOf(e.payload, value.calls),
           lastSummary: record?.lastSummary,
@@ -397,7 +385,6 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         if (!record) break;
         const first = !record.end;
         record.end = e.payload;
-        record.endedAt = at;
         if (first && record.role !== "main") {
           const base = { eventId: e.id, threadId: e.threadId, taskId: record.taskId };
           if (e.payload.status === "failed") {
@@ -466,7 +453,6 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         break;
       }
       case "task": {
-        value.progressAt = at;
         const { taskId, attemptId, status, reason, by } = e.payload;
         const base = { eventId: e.id, threadId: e.threadId, taskId };
         if (status === "stale") value.fixRounds.set(taskId, 0);
@@ -535,11 +521,17 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
   }
   for (const t of value.view.tasks) {
     const worker = t.threads.worker;
-    if (worker && value.threads.get(worker)?.end?.status !== "cancelled") {
+    if (t.attemptId && worker && value.threads.get(worker)?.end?.status !== "cancelled") {
       value.holders.set(t.id, worker);
     }
   }
-  value.undelivered = value.notices.filter((n) => !deliveries.some((d) => n.at <= d.at));
+  // A thread that has started again since it failed (resumed by the loop or by main) is not
+  // reported as failed.
+  value.undelivered = value.notices.filter(
+    (n) =>
+      !deliveries.some((d) => n.at <= d.at) &&
+      (n.kind !== "failed" || value.threads.get(n.threadId)?.end?.status === "failed"),
+  );
   value.unanswered = unanswered;
   value.correcting = open !== undefined && !open.claimEnded;
   value.reopenPending = open !== undefined && claimAt < open.reopened;

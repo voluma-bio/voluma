@@ -1,5 +1,11 @@
 # TODO
 
+- **Reconcile abandoned provider calls before archiving their runs.** Archive now refuses
+  calls without a completed settlement (`duration_ms IS NULL`), including swept `cut` rows.
+  Late settlement is preserved; genuinely settled unknown-cost calls remain archivable.
+  A crashed handler that never settles leaves its run retained indefinitely. Decide how an
+  operator proves no settlement can arrive and records unknown accounting before permitting
+  removal; don't fabricate duration/cost or add an age-based override. Export remains available.
 - **Neon free-tier limits, after 2026-11-04.** Check CU-hours and storage in Neon's console
   (limits: 100 CU-hours a month, 1 GB; staging was 256 MB on 2026-10-30, about 95 MB per full
   run, #255). Storage will likely run out first.
@@ -40,3 +46,7 @@
   `dev/` and reject empty, `.` and `..` segments. (p563)
 - `backfill.py`'s scan-grid ruler assert can't fail (both sides use the same transform); compare
   against the `points` `export.py`'s `ruler()` writes. (p563)
+- **Drop `runs.claimable_after`.** `schema.ts` no longer names it (provider errors fail the run
+  instead of holding it); once that code is live, add the drop migration (`decisions.md`
+  2026-10-30, two-step column drops). `claimEndReasonSchema` keeps `provider-outage` for stored
+  events and rows; it stays.

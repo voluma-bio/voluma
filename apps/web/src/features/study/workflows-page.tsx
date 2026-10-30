@@ -9,7 +9,7 @@ const WORKFLOWS = [catalog["mouse-oa"]];
 
 export function WorkflowsPage() {
   return (
-    <main className="mx-auto grid w-full max-w-[760px] content-start gap-6 px-6 pt-7 pb-16 max-[760px]:px-4">
+    <div className="mx-auto grid w-full max-w-[760px] content-start gap-6 px-6 pt-7 pb-16 max-[760px]:px-4">
       <h1 className="text-2xl font-semibold">Workflows</h1>
       {WORKFLOWS.map((w) => (
         <section
@@ -29,6 +29,6 @@ export function WorkflowsPage() {
           <TaskList workflow={w} />
         </section>
       ))}
-    </main>
+    </div>
   );
 }

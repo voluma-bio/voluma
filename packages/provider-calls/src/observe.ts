@@ -20,14 +20,12 @@ const FRAMES = INTEGER("video_frames_processed");
 const FILE_ID = /"id"\s*:\s*"([^"]+)"/;
 const FINAL_EVENT = /"type"\s*:\s*"(?:message_stop|response\.completed)"/;
 
-/** The last capture of `pattern` in `text`, or undefined. */
 function lastInt(pattern: RegExp, text: string): number | undefined {
   let found: number | undefined;
   for (const m of text.matchAll(pattern)) found = Number(m[1]);
   return found;
 }
 
-/** Adds what `line` reports to `seen`. */
 export function observeLine(line: string, seen: Observed): void {
   const frames = line.includes("video_frames_processed") ? lastInt(FRAMES, line) : undefined;
   if (frames !== undefined) seen.frames = frames;

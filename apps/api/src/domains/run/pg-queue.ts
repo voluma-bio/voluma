@@ -13,32 +13,19 @@ import { randomBytes } from "node:crypto";
 import type { PersonMessage } from "@voluma/contracts/messages";
 import type { Run, VisitorKeys } from "@voluma/contracts/run";
 import {
-  type ClaimEndReason,
   LEASE_SECONDS,
   type ReleaseReason,
   type Usage as RunnerUsage,
 } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { type OutputEntry, unselectable } from "@voluma/contracts/workflow-files";
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  gt,
-  inArray,
-  isNull,
-  lte,
-  notInArray,
-  or,
-  type SQL,
-  sql,
-} from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, notInArray, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import { HTTPException } from "hono/http-exception";
 import type { Caller, Reader } from "../../domain";
 import { admit, type Limits, type Refusal, refusalMessage, type Usage, usage } from "./admission";
-import { endClaim, outageDelayMinutes, stalledError } from "./claim-progress";
-import { decideMessage, endCorrection, openCorrection } from "./corrections";
+import { type ClaimEnd, endClaim, stalledError } from "./claim-progress";
+import { decideMessage, endCorrection, GUEST_KEYS_MESSAGE, openCorrection } from "./corrections";
 import type { KeyVault } from "./key-vault";
 import { LeaseLost, noLease } from "./lease";
 import type { Notifier } from "./notifier";
@@ -54,7 +41,7 @@ import {
 import { events, inputs, runs, studies, studyScans } from "./schema";
 
 /** Serializes every transaction that changes a run, so the limit counts can't race a claim. */
-const QUEUE_LOCK = 0x76_6f_6c_71;
+export const QUEUE_LOCK = 0x76_6f_6c_71;
 
 /** How long a visitor run waits for its keys. */
 const KEYS_WAIT = sql`interval '24 hours'`;
@@ -78,7 +65,7 @@ export type Claimed = {
   /** The visitor run's keys, handed out once. */
   keys?: VisitorKeys;
   /** Present on every claim after the run's first. */
-  previousClaim?: { reason: ClaimEndReason };
+  previousClaim?: { reason: NonNullable<(typeof runs.$inferSelect)["lastClaimEnd"]> };
 };
 
 /**
@@ -87,7 +74,7 @@ export type Claimed = {
  * without progress counts toward the no-progress limit (`claim-progress.ts`); at the limit
  * the run ends `failed`, naming the call that was in flight.
  */
-async function recover(tx: Tx, where: SQL, reason: ClaimEndReason) {
+async function recover(tx: Tx, where: SQL, reason: ClaimEnd) {
   const ids = await tx
     .select({ id: runs.id })
     .from(runs)
@@ -102,11 +89,6 @@ async function recover(tx: Tx, where: SQL, reason: ClaimEndReason) {
       stalledClaims,
       ...noLease,
     };
-    // A visitor run waits for its keys, not for a time.
-    const holdBack =
-      reason === "provider-outage" && run.credentials === "voluma"
-        ? sql`now() + make_interval(mins => ${outageDelayMinutes(stalledClaims)})`
-        : null;
     if (exhausted) {
       await endUnfinished(
         tx,
@@ -122,7 +104,6 @@ async function recover(tx: Tx, where: SQL, reason: ClaimEndReason) {
           ...base,
           state: run.credentials === "visitor" ? "awaiting-keys" : "queued",
           awaitingSince: run.credentials === "visitor" ? sql`now()` : null,
-          claimableAfter: holdBack,
         })
         .where(eq(runs.id, run.id));
     }
@@ -181,7 +162,6 @@ async function endUnfinished(
       state: "ended",
       outcome: correcting ? "completed" : status,
       endedAt: sql`now()`,
-      claimableAfter: null,
       error: correcting ? null : (error ?? null),
     })
     .where(eq(runs.id, runId));
@@ -197,31 +177,9 @@ type Starts = {
   keys?: VisitorKeys;
 };
 
-/** Why a write was refused; `Refusal` is a limit. */
-export type QueueRefusal =
-  | Refusal
-  | "guest-keys"
-  | "no-input"
-  | "input-not-ready"
-  | "full"
-  | "no-study"
-  | "no-workflow"
-  | "bad-selection"
-  | "example"
-  | "not-found"
-  | "forbidden"
-  | "conflict";
-
-/** Thrown inside a write's transaction to roll it back whole. */
-class Refused extends Error {
-  /** `detail`: what the answer names (the ids of a bad selection). */
-  constructor(
-    readonly reason: QueueRefusal,
-    readonly detail?: string[],
-  ) {
-    super(reason);
-  }
-}
+/** A limit reached is 429, except the per-caller one: the web branches on its 409. */
+const limitRefusal = (refused: Refusal) =>
+  new HTTPException(refused === "per-caller" ? 409 : 429, { message: refusalMessage[refused] });
 
 /**
  * `limits` has every org the API serves (index.ts). An org missing from it is one no
@@ -248,26 +206,26 @@ export function pgRunQueue(
     return found;
   };
 
-  type Hold = (runId: string, labId: string, keys: VisitorKeys) => boolean;
+  type Hold = (runId: string, labId: string, keys: VisitorKeys) => void;
 
   /**
-   * Runs a write of the browser under the lock. A `Refused` rolls it back and is the answer,
-   * `{ refused }`; any failure forgets the keys the work held through `hold`.
+   * Runs a write of the browser under the lock. A refusal is an `HTTPException` thrown where it
+   * is decided: it rolls the write back and reaches the client. Any failure forgets the keys the
+   * work held through `hold`.
    */
-  const attempt = async <T>(
-    work: (tx: Tx, hold: Hold) => Promise<T>,
-  ): Promise<T | { refused: QueueRefusal; detail?: string[] }> => {
+  const attempt = async <T>(work: (tx: Tx, hold: Hold) => Promise<T>): Promise<T> => {
     const held: string[] = [];
     const hold: Hold = (runId, labId, keys) => {
-      const ok = vault.hold(runId, labId, keys);
-      if (ok) held.push(runId);
-      return ok;
+      if (!vault.hold(runId, labId, keys))
+        throw new HTTPException(429, {
+          message: "Too many runs are waiting with keys; try again shortly.",
+        });
+      held.push(runId);
     };
     try {
       return await locked((tx) => work(tx, hold));
     } catch (error) {
       for (const id of held) vault.drop(id);
-      if (error instanceof Refused) return { refused: error.reason, detail: error.detail };
       throw error;
     }
   };
@@ -279,7 +237,7 @@ export function pgRunQueue(
 
   const workflowFor = (workflowId: string) => {
     const workflow = workflowOf(workflowId);
-    if (!workflow) throw new Refused("no-workflow");
+    if (!workflow) throw new HTTPException(404, { message: "unknown workflow" });
     return workflow;
   };
 
@@ -298,10 +256,11 @@ export function pgRunQueue(
     for (const id of ids) {
       const input = byId.get(id);
       if (!input || (input.status !== "ready" && input.uploadedBy !== caller.userId)) {
-        throw new Refused("no-input");
+        throw new HTTPException(404, { message: "unknown input" });
       }
     }
-    if (found.some((input) => input.status !== "ready")) throw new Refused("input-not-ready");
+    if (found.some((input) => input.status !== "ready"))
+      throw new HTTPException(409, { message: "The scan is still uploading." });
     return byId;
   };
 
@@ -319,16 +278,19 @@ export function pgRunQueue(
     starts: Starts,
   ) => {
     const bad = unselectable(workflow.outputs, starts.selectedOutputs ?? []);
-    if (bad.length) throw new Refused("bad-selection", bad);
+    if (bad.length)
+      throw new HTTPException(400, {
+        message: `Not a measurement or score of this workflow: ${bad.join(", ")}.`,
+      });
     if (starts.runs.length === 0) return;
     // A guest runs only on their own keys: Voluma's are for signed-in accounts.
-    if (caller.guest && !starts.keys) throw new Refused("guest-keys");
+    if (caller.guest && !starts.keys) throw new HTTPException(403, { message: GUEST_KEYS_MESSAGE });
     const credentials = starts.keys ? "visitor" : "voluma";
     const used = await usage(tx, reader.labId, { userId: caller.userId, credentials });
     for (const { id, inputId } of starts.runs) {
       const refused = admit("start", limitsOf(reader.labId), used, { credentials });
-      if (refused) throw new Refused(refused);
-      if (starts.keys && !hold(id, reader.labId, starts.keys)) throw new Refused("full");
+      if (refused) throw limitRefusal(refused);
+      if (starts.keys) hold(id, reader.labId, starts.keys);
       await tx.insert(runs).values({
         id,
         labId: reader.labId,
@@ -342,7 +304,6 @@ export function pgRunQueue(
         state: "queued",
       });
       used.callerUnfinished++;
-      used.waiting++;
       if (credentials === "visitor") used.visitorActive++;
     }
   };
@@ -363,15 +324,15 @@ export function pgRunQueue(
           .select({ id: studies.id, workflowId: studies.workflowId, example: studies.example })
           .from(studies)
           .where(and(readableStudies(reader), eq(studies.id, request.studyId)));
-        if (!study) throw new Refused("no-study");
-        if (study.example) throw new Refused("example");
+        if (!study) throw new HTTPException(404, { message: "unknown study" });
+        if (study.example) throw new HTTPException(403, { message: "Examples are read-only." });
         const [scan] = await tx
           .select({ inputId: studyScans.inputId })
           .from(studyScans)
           .where(
             and(eq(studyScans.studyId, request.studyId), eq(studyScans.inputId, request.inputId)),
           );
-        if (!scan) throw new Refused("no-input");
+        if (!scan) throw new HTTPException(404, { message: "unknown input" });
         await checkInputs(tx, reader, caller, [request.inputId]);
         await startRuns(tx, hold, reader, caller, study, workflowFor(study.workflowId), {
           ...request,
@@ -430,8 +391,8 @@ export function pgRunQueue(
     async cancel(reader: Reader, runId: string) {
       const result = await attempt(async (tx) => {
         const [run] = await loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId)));
-        if (!run) throw new Refused("not-found");
-        if (run.example) throw new Refused("example");
+        if (!run) throw new HTTPException(404, { message: "not found" });
+        if (run.example) throw new HTTPException(403, { message: "Examples are read-only." });
         vault.drop(runId);
         if (run.state.status === "ended") return { run };
         await endUnfinished(tx, runId, "cancelled");
@@ -462,7 +423,7 @@ export function pgRunQueue(
       const result = await locked((tx) =>
         decideMessage(tx, messageContext(reader), reader, caller, runId, msg, true),
       );
-      if ("ok" in result && !result.ok.duplicate) notifier.notify(runId);
+      if (!result.duplicate) notifier.notify(runId);
       return result;
     },
 
@@ -473,12 +434,14 @@ export function pgRunQueue(
     resume: (reader: Reader, userId: string, runId: string, keys: VisitorKeys) =>
       attempt(async (tx, hold) => {
         const [run] = await loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId)));
-        if (!run) throw new Refused("not-found");
-        if (run.startedBy !== userId) throw new Refused("forbidden");
-        if (run.state.status !== "awaiting-keys") throw new Refused("conflict");
+        if (!run) throw new HTTPException(404, { message: "not found" });
+        if (run.startedBy !== userId)
+          throw new HTTPException(403, { message: "Only the run's starter can resend keys." });
+        if (run.state.status !== "awaiting-keys")
+          throw new HTTPException(409, { message: "The run is not waiting for keys." });
         const refused = admit("resume", limitsOf(reader.labId), await usage(tx, reader.labId), run);
-        if (refused) throw new Refused(refused);
-        if (!hold(runId, reader.labId, keys)) throw new Refused("full");
+        if (refused) throw limitRefusal(refused);
+        hold(runId, reader.labId, keys);
         await tx
           .update(runs)
           .set({ state: "queued", awaitingSince: null })
@@ -512,12 +475,7 @@ export function pgRunQueue(
         const queued = await tx
           .select()
           .from(runs)
-          .where(
-            and(
-              eq(runs.state, "queued"),
-              or(isNull(runs.claimableAfter), lte(runs.claimableAfter, sql`now()`)),
-            ),
-          )
+          .where(eq(runs.state, "queued"))
           .orderBy(
             sql`(SELECT max(o.claimed_at) FROM runs o WHERE o.lab_id = ${runs.labId}) ASC NULLS FIRST`,
             asc(runs.createdAt),
@@ -535,10 +493,7 @@ export function pgRunQueue(
           if (run.credentials === "voluma") {
             const used = usages.get(run.labId) ?? (await usage(tx, run.labId));
             usages.set(run.labId, used);
-            const refused = admit("claim", orgLimits, used, {
-              credentials: "voluma",
-              firstClaim: run.startedAt === null,
-            });
+            const refused = admit("claim", orgLimits, used, { credentials: "voluma" });
             if (refused === "concurrent") continue;
             if (refused) {
               await fail(tx, run.id, refusalMessage[refused]);
@@ -552,7 +507,6 @@ export function pgRunQueue(
               state: "running",
               startedAt: sql`coalesce(${runs.startedAt}, now())`,
               claimedAt: sql`now()`,
-              claimableAfter: null,
               claimStartSeq: sql`coalesce((SELECT max(seq) FROM events WHERE run_id = ${run.id}), 0)`,
               leaseHolder: runnerId,
               leaseToken,
