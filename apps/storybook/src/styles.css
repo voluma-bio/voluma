@@ -5,7 +5,6 @@
 @import "@voluma/design-tokens/fonts.css";
 @source "../../../packages/ui/src";
 
-html,
 body {
   font-family: var(--sans);
   font-size: 14px;

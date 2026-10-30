@@ -217,7 +217,7 @@ export function StripPlot({ groups, unit, label, onSelect, digits, className }: 
               <Tooltip key={p.id} x={p.x} y={mid + p.y} anchor={edge(p.x, width)}>
                 <span className="font-medium">{p.label}</span>{" "}
                 <span className="font-mono tabular-nums">{p.value.toFixed(digits)}</span> {unit}
-                {p.far && <span className="block text-check-solid">Far from its group</span>}
+                {p.far && <span className="block">Far from its group</span>}
                 {p.far && p.farReason && <span className="block">{p.farReason}</span>}
               </Tooltip>
             ))}
