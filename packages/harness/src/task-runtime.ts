@@ -56,6 +56,18 @@ export interface Caller {
 /** The call broke a rule; the message is what the model reads. */
 export class Refusal extends Error {}
 
+/** A model that passes its whole list as one item's text: starts with `[` or `{` and parses. */
+function isJson(text: string): boolean {
+  const t = text.trim();
+  if (!t.startsWith("[") && !t.startsWith("{")) return false;
+  try {
+    JSON.parse(t);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export interface TaskRuntimeOptions {
   recorder: Recorder;
   evidence: Evidence;
@@ -564,6 +576,10 @@ export function taskRuntime(options: TaskRuntimeOptions) {
 
     checkpoint: (c: Caller, input: CheckpointInput) => {
       const { taskId, text, summary, verdict, toCheck } = input;
+      if (toCheck && isJson(toCheck.title))
+        throw new Refusal(
+          "toCheck.title is JSON: call checkpoint once per item, each with a plain-sentence title.",
+        );
       return write(
         () =>
           writeTarget(c, taskId, {
