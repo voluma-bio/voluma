@@ -11,7 +11,7 @@ import { runEventSchema } from "@voluma/contracts/events";
 import { corrections, fold } from "@voluma/contracts/fold";
 import type { PersonMessage } from "@voluma/contracts/messages";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
-import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import type { Reader } from "../../domain";
 import type { MessageRefusal, MessageResult } from "../../ports";
 import { admit, type Limits, refusalMessage, usage } from "./admission";

@@ -8,7 +8,6 @@
  */
 import type { EventInput, RunEvent } from "./events";
 import { corrections } from "./fold";
-import type { RunState } from "./run";
 
 /** Ids of the threads left open, in the order they first started; the root thread (kind `supervisor`) among them. */
 export function openThreads(events: readonly RunEvent[]): string[] {
