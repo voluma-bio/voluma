@@ -8,7 +8,8 @@
  *   POST /api/run/runs             body `startRunRequestSchema` → 200 `runSchema`: one
  *                                  run of a scan of an existing study (404 for an
  *                                  unreadable `studyId` or an `inputId` the study lacks;
- *                                  409 and 429: see Limits). `POST /api/run/studies`
+ *                                  409 and 429: see Limits; 400 for a `selectedOutputs` id that is
+ *                                  not a measurement or score of the study's workflow). `POST /api/run/studies`
  *                                  (`study.ts`) creates a study and starts its first runs.
  *   GET  /api/run/runs             → 200 `listRunsResponseSchema`, newest first
  *   GET  /api/run/runs/:id         → 200 `runSchema`
@@ -302,7 +303,7 @@ export const startRunRequestSchema = z.object({
   studyId: studyIdSchema,
   /** One of the study's scans. */
   inputId: inputIdSchema,
-  /** As `runSchema.selectedOutputs`; an id the workflow's `outputs.json` lacks fails the run at start, with that message. */
+  /** As `runSchema.selectedOutputs`; an id that is not a measurement or score of the study's workflow is refused with 400. */
   selectedOutputs: selectedOutputsSchema.min(1).optional(),
   notes: z.string().max(4000).optional(),
   /** Present: the run uses these (`credentials: "visitor"`) and skips the org's runs-at-once count. */
