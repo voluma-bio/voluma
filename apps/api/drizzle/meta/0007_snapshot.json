@@ -1,5 +1,5 @@
 {
-  "id": "3d4daf36-3bc1-4827-8c83-60fd65513ec9",
+  "id": "e9bb8fb2-d152-4069-9399-941b8adaa42b",
   "prevId": "a84503a4-3db9-4e6b-b7cd-f8777d914fd8",
   "version": "7",
   "dialect": "postgresql",
@@ -210,12 +210,6 @@
         },
         "study_id": {
           "name": "study_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "workflow_id": {
-          "name": "workflow_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true
