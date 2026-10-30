@@ -6,7 +6,7 @@
  * The example gets the source's events, threads and history under its own run id (thread
  * ids are `<runId>.…`, so they are renamed), `startedBy: "voluma-examples"`, `example: true`,
  * and the Demo org's reference-scan input. It belongs to its own study of one scan
- * (`study-<exampleId>`, `example: true`), replaced with it. The source's evidence and `outputs/` objects in R2 are copied
+ * (`study-<exampleId>`, `example: true`), replaced with it. The source's evidence, review assets and `outputs/` objects in R2 are copied
  * under the example's own prefix (`evidenceKey` builds a key from the run being read, so an
  * example can't point at another run's files). `--backfill` adds the objects a run recorded before
  * they existed (`backfill.ts`). Re-seeding the same `--id` replaces the
@@ -16,7 +16,7 @@
 import { parseArgs } from "node:util";
 import { CopyObjectCommand, DeleteObjectsCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { runIdSchema } from "@voluma/contracts/ids";
-import { evidencePrefix, outputsPrefix, runPrefix } from "@voluma/contracts/r2";
+import { evidencePrefix, outputsPrefix, reviewAssetPrefix, runPrefix } from "@voluma/contracts/r2";
 import { asc, eq, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
@@ -69,8 +69,9 @@ console.log(`example ${exampleId} -> bucket ${bucket}, prefix ${runPrefix(exampl
 
 // Copies every object under one of the source run's prefixes to the same place under the
 // example's. Evidence is content-addressed and never overwritten, so a repeat copy is harmless.
-// `outputs/` is copied so the example is a whole run for the walkthrough's clone flow; it is
-// emptied first, so a re-seed leaves no object of the previous one.
+// `review/` holds the volumes and meshes the copied `assets.ready` events point at. `outputs/` is
+// copied so the example is a whole run for the walkthrough's clone flow. Both are emptied first,
+// so a re-seed leaves no object of the previous one.
 async function copyPrefix(
   prefixOf: (runId: string) => string,
   { replace = false } = {},
@@ -166,6 +167,7 @@ const renamed = sourceEvents.map(({ seq: _seq, ...event }) => ({
 }));
 
 const copied = await copyPrefix(evidencePrefix);
+const copiedReview = await copyPrefix(reviewAssetPrefix, { replace: true });
 const copiedOutputs = await copyPrefix(outputsPrefix, { replace: true });
 const rows = values.backfill
   ? await withLocalDir(values.backfill, async (dir) =>
@@ -242,6 +244,6 @@ await db.transaction(async (tx) => {
 });
 
 console.log(
-  `example run ${exampleId} seeded from ${source} in ${demoLabId}; ${copied} evidence and ${copiedOutputs} output objects copied`,
+  `example run ${exampleId} seeded from ${source} in ${demoLabId}; ${copied} evidence, ${copiedReview} review asset and ${copiedOutputs} output objects copied`,
 );
 await client.end();
