@@ -208,7 +208,7 @@ tables are replaced), run `pg_restore --clean --if-exists --no-owner --no-acl -d
 (`runs`, `run_events`, `provider_calls`) before trusting it. Never print the URL.
 
 **Archiving a run** frees space on the 1 GB database without losing the run. `archive:run --id <runId> --remote`
-(with `DATABASE_URL` set to the direct URL) refuses an example, an unfinished run, open provider calls,
+(with `DATABASE_URL` set to the direct URL) refuses an example, an unfinished run, unsettled provider calls,
 or missing inputs/study metadata and unsupported workflows that prevent restoration. It reads one database snapshot
 (`run.json`: run, study, study scans and their inputs, events, threads, pi messages, review snapshots, provider calls),
 writes `~/.local/share/voluma-backups/runs/<runId>/` (0600; refuses under 1 GB free), syncs the file and directory entries
@@ -224,10 +224,13 @@ the replaced run's study only if its lab, workflow, example status and scan agre
 Every import creates a fresh local run generation and moves the dump's current screenshots to it. Older screenshot
 generations stay historical. A save that validated before the import is refused instead of entering the restored run.
 
-**Provider settlement is not yet a safe archive boundary.** A `cut` call can still receive its final cost: gateway
-shutdown closes HTTP connections before all settlement work finishes, and `settleCall` updates `cut` rows too. The
-archive refuses `open` calls but cannot detect a pending settlement of a `cut` call. Do not archive these runs while
-their gateway can still settle calls. The terminal-call policy needs resolving before unattended archiving (see [TODO.md](TODO.md)).
+**Provider accounting must be final before archiving.** Only `settleCall` fills `duration_ms`, atomically with cost
+and usage, and it never updates an already-settled row. Archive refuses `open` calls and any call with null duration,
+including `cut` rows from shutdown or stale-call sweeping: those may still receive late settlement. A genuinely settled
+`cut` with unknown cost is archivable; its cost stays null. A crashed call that never settles blocks archiving indefinitely.
+Keep that run in the database (export is still available); do not fill a fake duration to bypass the guard. A separate
+operator reconciliation policy is needed for abandoned calls ([TODO.md](TODO.md)). Use this archive only after gateways
+have rolled onto the settle-once implementation.
 
 The run's R2 files are neither copied nor touched: this is a database archive, not an independent backup of evidence.
 Keep those R2 objects and the local archive; choose a persistent disk, not an ephemeral orb or `/tmp`, for an operational

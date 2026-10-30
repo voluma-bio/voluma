@@ -47,8 +47,9 @@ if (dump.run.example) throw new Error(`run ${runId} is an example; archive refus
 if (dump.run.state !== "ended") {
   throw new Error(`run ${runId} is ${dump.run.state}; archive only a run that has ended`);
 }
-if (dump.providerCalls.some((call) => call.status === "open")) {
-  throw new Error(`run ${runId} has provider calls still in flight; nothing deleted`);
+// A shutdown/stale sweep marks calls cut before their handler's final settlement can land.
+if (dump.providerCalls.some((call) => call.status === "open" || call.durationMs === null)) {
+  throw new Error(`run ${runId} has unsettled provider calls; nothing deleted`);
 }
 if (
   !dump.input ||
