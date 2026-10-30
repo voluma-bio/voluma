@@ -53,7 +53,7 @@ export function ToCheckPanel({
   return (
     <div className="grid gap-3 p-3">
       <div className="flex items-center gap-2">
-        <p className="flex-1 font-mono text-xs text-muted-foreground">
+        <p className="flex-1 text-xs text-muted-foreground">
           {at + 1} of {queue.length} on {scan}
         </p>
         <IconButton
@@ -125,7 +125,7 @@ export function ToCheckPanel({
       <section aria-label={`This scan's ${items.length} items`}>
         <h3 className="flex items-baseline gap-2 px-1 pt-1 pb-1.5 text-sm font-semibold">
           This scan's {items.length} {items.length === 1 ? "item" : "items"}
-          <span className="ml-auto font-mono text-xs font-normal text-muted-foreground">
+          <span className="ml-auto text-xs font-normal text-muted-foreground">
             {handled} handled
           </span>
         </h3>

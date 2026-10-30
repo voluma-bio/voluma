@@ -352,7 +352,7 @@ function ScanReview({
           count={open}
           shortcut="t"
           defaultOpen
-          tools={<span className="font-mono text-xs text-muted-foreground">{title}</span>}
+          tools={<span className="text-xs text-muted-foreground">{title}</span>}
         >
           <ToCheckPanel
             runId={run.id}

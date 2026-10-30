@@ -1,7 +1,7 @@
 /**
  * The AI: the conversation with this run's lead AI, read from the run's events
  * (`conversation`), and a box to write to it (`sendRunMessage`). A message is about the task in
- * view, or the item's task after Something's wrong; "The AI sees" names what goes with it. A
+ * view, or the item's task after Something's wrong; "The AI sees" names what goes with it (the scan and the task). A
  * message reopens a finished run for one answer; "Redo" asks the AI to do the task again with
  * what was said. Who may write, and when, is the API's rule (`messages.ts`); the box says why it
  * is off.
@@ -12,7 +12,7 @@ import type { Me } from "@voluma/contracts/auth";
 import { conversation } from "@voluma/contracts/conversation";
 import type { Run } from "@voluma/contracts/run";
 import { Markdown, type TaskView, useEvents } from "@voluma/run-view";
-import { Button, Chip, EmptyState, StatusMark, TextAreaField } from "@voluma/ui";
+import { Button, EmptyState, StatusMark, TextAreaField } from "@voluma/ui";
 import { RotateCcw, Send } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
@@ -94,16 +94,18 @@ export function AiPanel({
 
   return (
     <div className="flex h-full flex-col">
-      <p className="flex flex-wrap items-center gap-1.5 border-b border-border px-3 py-2 text-xs text-muted-foreground">
-        The AI sees
-        <Chip>{scan}</Chip>
-        {subject && <Chip>{subject.title}</Chip>}
+      <p className="border-b border-border px-3 py-2 text-xs text-muted-foreground">
+        The AI sees <span className="font-medium text-foreground">{scan}</span>
+        {subject && (
+          <>
+            {" "}
+            and <span className="font-medium text-foreground">{subject.title}</span>
+          </>
+        )}
       </p>
       <div ref={log} role="log" className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
         {items.length === 0 ? (
-          <EmptyState title="No messages yet">
-            Ask about what you see, or say what should change; the AI answers here.
-          </EmptyState>
+          <EmptyState title="No messages yet" />
         ) : (
           <ol className="grid gap-3">
             {items.map((m) =>
