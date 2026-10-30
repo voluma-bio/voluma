@@ -19,8 +19,6 @@ import { Link, Outlet, useLocation, useMatches, useNavigate } from "react-router
 import { AccountMenu, BrandLockup } from "./account";
 import { GateScreen, SignInScreen } from "./sign-in-screen";
 
-const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-
 /** Static facts a route declares in its `handle`: the shell's theme on that screen. */
 export type RouteHandle = { theme?: "light" | "dark" };
 
@@ -60,7 +58,10 @@ export function SignedIn() {
 
   useEffect(() => {
     load();
-    return onSignedOut(() => void load());
+    return onSignedOut(() => {
+      setSession({ state: "loading" });
+      void load();
+    });
   }, [load]);
 
   switch (session.state) {
@@ -79,14 +80,19 @@ export function SignedIn() {
       return <UnreachableScreen cause={session.cause} retry={load} />;
     case "signed-in":
       return (
-        <QueryClientProvider client={queryClient}>
-          <Shell me={session.me} />
-        </QueryClientProvider>
+        <Shell
+          key={JSON.stringify([session.me.kind, session.me.labId, session.me.userId])}
+          me={session.me}
+        />
       );
   }
 }
 
 function Shell({ me }: { me: Me }) {
+  const [queryClient] = useState(
+    () => new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+  );
+  useEffect(() => () => queryClient.clear(), [queryClient]);
   const matches = useMatches();
   const navigate = useNavigate();
   const { pathname } = useLocation();
@@ -96,33 +102,35 @@ function Shell({ me }: { me: Me }) {
       .filter(Boolean)
       .at(-1) ?? "light";
   return (
-    <AppShell
-      theme={theme}
-      logo={
-        <Link to="/" className="rounded-md">
-          <BrandLockup className="gap-2 [&_svg]:size-5" />
-        </Link>
-      }
-      account={<AccountMenu me={me} />}
-    >
-      <ShellLink
-        id="home"
-        group="app"
-        label="Home"
-        icon={<House />}
-        active={pathname === "/"}
-        go={() => navigate("/")}
-      />
-      <ShellLink
-        id="workflows"
-        group="app"
-        label="Workflows"
-        icon={<Workflow />}
-        active={pathname === "/workflows"}
-        go={() => navigate("/workflows")}
-      />
-      <Outlet context={me} />
-    </AppShell>
+    <QueryClientProvider client={queryClient}>
+      <AppShell
+        theme={theme}
+        logo={
+          <Link to="/" className="rounded-md">
+            <BrandLockup className="gap-2 [&_svg]:size-5" />
+          </Link>
+        }
+        account={<AccountMenu me={me} />}
+      >
+        <ShellLink
+          id="home"
+          group="app"
+          label="Home"
+          icon={<House />}
+          active={pathname === "/"}
+          go={() => navigate("/")}
+        />
+        <ShellLink
+          id="workflows"
+          group="app"
+          label="Workflows"
+          icon={<Workflow />}
+          active={pathname === "/workflows"}
+          go={() => navigate("/workflows")}
+        />
+        <Outlet context={me} />
+      </AppShell>
+    </QueryClientProvider>
   );
 }
 
