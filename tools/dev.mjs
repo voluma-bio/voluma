@@ -17,8 +17,8 @@
  * With `--sam` (`pnpm dev --sam`) and VOLUMA_META_API_KEY set it also starts the provider gateway on a free port (same database,
  * a random GATEWAY_TOKEN_SECRET per launch) and opens a Cloudflare quick tunnel to it: worker
  * sandboxes run on Modal and can reach only an https host, never localhost. The tunnel's URL and
- * the secret join env.json as { gatewayUrl, gatewaySecret }, which the runner reads when its own
- * VOLUMA_GATEWAY_URL is unset. SAM is opt-in because every SAM call costs money and needs Jimmy's yes.
+ * the secret join env.json as { gatewayUrl, gatewaySecret }, authoritative for runners using this
+ * API. SAM is opt-in because every SAM call costs money and needs Jimmy's yes.
  * Without the tunnel (no `--sam`, no key, or cloudflared can't start) there is no
  * gateway URL: runs work except `segment_sam`, which is not offered. The gateway listens on 127.0.0.1 only. If it or the
  * tunnel dies later, the URL is removed from env.json the same way.
@@ -115,10 +115,14 @@ const env = {
 };
 const envPath = resolve(root, ".dev/env.json");
 mkdirSync(resolve(root, ".dev"), { recursive: true });
-// 0600: it holds the API token and the gateway secret. A file left by a crash keeps its old
-// mode, so start from none.
-const writeEnv = () => writeFileSync(envPath, `${JSON.stringify(env, null, 2)}\n`, { mode: 0o600 });
-rmSync(envPath, { force: true });
+// Publish whole snapshots: a runner reading a truncated manifest could fall back to inherited
+// gateway settings. Recreate the temp file so a crash cannot leave it with an old mode.
+const writeEnv = () => {
+  const next = `${envPath}.${process.pid}.tmp`;
+  rmSync(next, { force: true });
+  writeFileSync(next, `${JSON.stringify(env, null, 2)}\n`, { mode: 0o600 });
+  renameSync(next, envPath);
+};
 writeEnv();
 
 const migrate = spawnSync("pnpm", ["--filter", "@voluma/api", "db:migrate"], {
