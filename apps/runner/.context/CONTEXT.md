@@ -209,13 +209,14 @@ Why TypeScript: the decoder takes seconds there and minutes in Python.
 
 An agent in its own worktree tries a workflow change on the real system like this:
 
-1. `pnpm db:up` once, then `pnpm dev`. With `VOLUMA_META_API_KEY` in `.env` it also starts the gateway
+1. `pnpm db:up` once, then `pnpm dev`. That runs without SAM. **Every SAM call is paid and needs Jimmy's
+   yes first** (say how many calls and why); with it, `pnpm dev --sam` and `VOLUMA_META_API_KEY` in `.env` also start the gateway
    (this worktree's database, a per-launch secret) and a Cloudflare quick tunnel to it, and writes the
    tunnel's URL and the secret to `.dev/env.json`, where a local runner reads them. Wait for the
    `gateway https://…trycloudflare.com` line before starting the runner.
 2. `RUNNER_MODEL=deepseek/deepseek-flash pnpm --filter @voluma/runner start` (set in `.env` or the shell:
-   one cheap model for every role; `RUNNER_THINKING` as usual). Meta SAM is the only paid call and goes
-   through the local gateway, about $0.05 each.
+   one cheap model for every role; `RUNNER_THINKING` as usual). Test runs may use any model; production and
+   demo runs (staging) use Meta models only. Meta SAM is the only Meta call here, about $0.10 each.
 3. `pnpm --filter @voluma/runner try-run [--scan <inputId>] [--workflow <id>] [--outputs a,b] [--notes …]`
    (`src/try-run.ts`) signs in as `WORKOS_TEST_EMAIL`, starts a study and run on the reference scan,
    follows the run's event stream until it ends and prints per-task status, outputs reported and missing,
@@ -223,6 +224,17 @@ An agent in its own worktree tries a workflow change on the real system like thi
    (no `pnpm dev`, sign-in or API errors), 3 when no runner claimed the run in 3 minutes. Edits to `workflows/` are read from
    the checkout when a run starts, so edit, then try-run again.
 4. `sandboxes:clean --run <id>` for each run, as always.
+
+When the runner uses the API in `.dev/env.json` (including an explicit `VOLUMA_API_URL` pointing
+there), that file alone supplies its gateway. Matching uses the origin (the HTTP adapters ignore
+the base URL's path, query and fragment) and treats `localhost` as the launcher's `127.0.0.1`;
+different ports or schemes remain different APIs. `VOLUMA_GATEWAY_URL` and `GATEWAY_TOKEN_SECRET` in the
+shell or `.env` cannot turn SAM on or override the launcher's tunnel. No gateway URL in the file
+means SAM is off, including while the tunnel starts or after it fails. A runner pointed at another
+API still uses its configured gateway pair. Restart the runner when changing the dev launch;
+an already-running runner does not reload `.dev/env.json`.
+The launcher atomically replaces the manifest with a mode-0600 file, and the runner selects its
+API and gateway from one snapshot, so a rewrite cannot mix launches or expose a partial file.
 
 Why a tunnel: sandboxes run on Modal and reach only an https host from an allowlist, never `localhost`.
 A Cloudflare quick tunnel (`cloudflared` npm package runs it; `pnpm dev` downloads the pinned official release once into
@@ -234,7 +246,7 @@ boot line says `gateway <url>` or `gateway off`), and quick tunnels are best eff
 gives no uptime promise). Tried and not chosen: Tailscale Funnel (ties it to one person's tailnet; fixed
 hostname and shared ports), Modal's own tunnel (exposes a port of a sandbox, it cannot reach back to this
 machine), localtunnel (no binary, but flaky and gates browsers behind a page).
-Without the tunnel (no Meta key, download or hash check failed, no network) `pnpm dev` says so and writes no gateway URL:
+Without the tunnel (no `--sam`, no Meta key, download or hash check failed, no network) `pnpm dev` says so and writes no gateway URL:
 runs work, sandboxes have no network and `segment_sam` is not offered.
 
 # Runner: `dev-sandbox` drives the real sandbox, tools and gateway without a model
@@ -295,37 +307,29 @@ files. Sandbox reads bound the bytes read, not the size reported by `stat` (file
 Evidence may be given as a plain path (`/outputs/<task>/x`, `/scratch/<thread>/x`). An outputs `{root, path}` ref
 is always relative to `/outputs/<task>/`: `keep` never strips another task-id segment, which could name a real subfolder.
 
-**Model calls retry.** `run.ts` passes `maxRetries: 3` to Pi, which retries a 408, 429 (waiting
-the server's `retry-after`), 5xx or dropped connection. `model-retry.ts` wraps every role's calls
-(the main thread too) and keeps retrying those errors, and Meta's `404 model_not_found` that Pi
-treats as final (about half of all calls on 2026-10-28), when the call failed before streaming
-any content: backoff from 1 s doubling to a 30 s cap, until 4 minutes have passed since the first
-attempt (Pi's own tries count against it; an attempt in flight is not cut short), each retry
-logged with its role and attempt. The run's abort ends the wait. Any other error, or the spent budget, ends the call.
-`provider-error.ts` holds the one error classification (retry and redo): it reads the status in the text (Pi's `<provider> API error (<status>)`, or the Anthropic SDK's
+**Provider errors fail fast.** `run.ts` passes `maxRetries: 3` to Pi, which retries a 408, 429
+(waiting the server's `retry-after`), 5xx or dropped connection. `model-retry.ts` wraps every
+role's calls (the main thread too) and keeps retrying those errors (`isTransientProviderError`)
+when the call failed before streaming any content: backoff from 1 s doubling to a 30 s cap, until
+60 s have passed since the first attempt (Pi's own tries count against it; an attempt in flight is
+not cut short), each retry logged with its role and attempt. The run's abort ends the wait. Any
+other error, a 4xx included (Meta's `404 model_not_found` too), or the spent budget, ends the call
+at once. The failed reply is stored and the thread ends `failed` with the provider's message. The
+run loop (`packages/harness/src/run-loop.ts`) sees a thread this process ran that failed on a
+provider error (`providerFailure` in `provider-error.ts`: any 4xx or 5xx status, a connection
+failure, an empty account) and fails the run with it in `state.error`: "the main agent failed on a
+model provider error: <message>", or "<taskId>: its worker failed on a model provider error:
+<message>". A retryable error (the set above) on a thread that already streamed content, or that
+outlasted the 60 s, resumes that thread once ("The model provider failed during your last reply;
+continue.") before the run fails; the resumed call has its own 60 s. A context overflow (400/413
+"prompt is too long", `context_length_exceeded`, `request_too_large`; Pi's `isContextOverflow`)
+is not a provider error (only with status 400/413 or none; a 5xx body never counts): it fails that thread only. A failed main is never resumed: `main()` starts a fresh `main.<n>` with the restart brief, once per failed main, and a fresh main that fails too fails the run with its error. A failed worker keeps its history; main replaces it with `stop_worker` then `start_worker`. Nothing
+releases the run to wait or redoes the thread. `provider-error.ts` holds the classification: it
+reads the status in the text (Pi's `<provider> API error (<status>)`, or the Anthropic SDK's
 `<status> {...}`, `<status> <html>` or `<status> status code (no body)`) and, for an Anthropic error sent mid-stream
 with no status, its documented `error.type` (`overloaded_error` is 529, `rate_limit_error` 429).
-
-**A provider outage releases the run.** When a model call still fails with a transient error
-(`isTransientProviderError`) and an empty reply after the retries above (the budget is spent; an
-error after content went out is not an outage), `start-thread.ts` does not store or emit
-that reply and writes no `thread.ended`: the thread stays open with its History an exact prefix,
-its `providerOutage.release` callback fires, and `run.ts` stops the claim as `provider-outage`, which reports
-`released`. Every running thread is cut off exactly as in a shutdown (an in-flight tool exec is
-not waited for: a `segment_sam` call cut this way has an unknown cost, like one cut by a deploy).
-The API requeues the run with `runs.claimable_after` set (1, then 2 minutes by the count of
-such claims in a row without progress) and counts the claim toward the no-progress limit, so a
-provider that stays down fails the run after 3 claims. The next claim's `previousClaim` is
-`provider-outage`, and each cut-off thread is resumed with "…cut off when the model provider was
-unavailable; continue." There is no in-claim redo for these, so the API's `stalledClaims` is the count, and run-state
-progress resets it.
-
-**Other provider errors** (`provider-error.ts`: a transient error that came after content, such as
-a stream dropped mid-reply, and the neither-transient-nor-fatal ones, a non-Meta 404) kill the thread as before and are the run loop's to handle
-(`packages/harness/src/run-loop.ts`): a check is started again as a new check, the main agent as
-`main.<n+1>`, up to `maxProviderRedos` (2) times for the main agent and per task for a check; the main agent's count is the provider-failed main threads in a row that ended after the run's latest task-state event (`task`), so a task that moves, or a main thread that ended otherwise, starts it again; a worker's failure is a notice to the main
-agent. A fatal error (a refused key, out of money) fails the run at once, with the error in
-`state.error`, instead of leaving it `completed` with tasks that never started.
+A run held "AI unavailable" under the earlier release rule is claimed again at the next claim
+(see `apps/api/.context/deploy.md`).
 
 **Loop limits** are `config.loop`: `RUNNER_MAX_FIX_ROUNDS` (default 2 `needs-review` rounds per
 task before it is left to check). The harness defaults the rest (`LoopConfig`). No limit is
@@ -397,8 +401,8 @@ script, from its docstring's first line; the loader reads it from the snapshot).
 (`run.ts` `grant`); `segment_sam` is also dropped when the run has no Meta key, and always for the checker (it calls out to Meta; `keepFailed` writes the run-wide scratch). `loadWorkflow`
 snapshots the role files with the workflow and reads them from the snapshot, so a resumed thread
 composes byte-identical text and an edited file reaches only new threads (a thread whose prompt
-changed is still `ThreadStale`). The main agent without `bash` gets its file's body, then the skill list and the tool index (no sandbox text). `review-chat.md` is
-`status: planned` and unused. Format: `workflows/core/agents/AGENTS.md`.
+changed is still `ThreadStale`). The main agent without `bash` gets its file's body, then the skill list and the tool index (no sandbox text).
+Format: `workflows/core/agents/AGENTS.md`.
 
 A role's model is its file's `model` alias. `config.models` maps each alias to a provider model:
 `RUNNER_MODEL_WONDER` (default `meta/muse-wonder-1.0`), `RUNNER_MODEL_OPUS`, `RUNNER_MODEL_ASTRA`
@@ -427,7 +431,7 @@ never resumed: a stale dependent's thread stopped (`task-runtime.ts` `staleDepen
 failing run aborting its threads (`abortAll`). A stop stores that `cancelled` end first
 (`task-runtime.ts` `stop`, inside `section`) and then aborts without waiting; the thread's own
 later end is dropped (`start-thread.ts`). So a stopped thread's next write is refused at once,
-and "open" always means "cut off". A self-stop reports `released` with reason `self-stop`; a signal, `shutdown`; a provider outage, `provider-outage`.
+and "open" always means "cut off". A self-stop reports `released` with reason `self-stop`; a signal, `shutdown`.
 
 The next claim learns why from `claim.previousClaim` (the API records `lease-expired` itself)
 and writes `claim.started {resumed, after}` right after the root's `thread.started`. The

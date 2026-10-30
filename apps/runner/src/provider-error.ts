@@ -1,7 +1,9 @@
 /**
- * Which model-call errors mean the provider is failing, not that our request was bad. Used by the
- * call retry (`model-retry.ts`) and the run loop's
- * redo (`run-loop.ts`). The error text is all that reaches us, in these shapes:
+ * Which model-call errors are the provider's, and which of them a later call can succeed after.
+ * The call retry (`model-retry.ts`) retries the second set; a provider's error that survives it
+ * (every 4xx) fails the run (`run-loop.ts`), and the retry set once more when it arrives mid-reply,
+ * after content went out, which `model-retry.ts` cannot redo.
+ * The error text is all that reaches us, in these shapes:
  * - Meta, OpenAI, Mistral via Pi: `<provider> API error (<status>): <body>`.
  * - Anthropic (SDK message): `<status> {"type":"error","error":{"type":"<type>",...}}`. An error
  *   sent mid-stream (an overloaded server) is that JSON alone, in any key order, so its
@@ -9,6 +11,7 @@
  * - An account out of money has its own message (`OUT_OF_MONEY`).
  * - A connection failure or client timeout: no status.
  */
+import { type AssistantMessage, isContextOverflow } from "@earendil-works/pi-ai";
 
 const CONNECTION =
   /^Connection error\.?$|^Request timed out\.?$|^Anthropic stream ended before message_stop/;
@@ -51,33 +54,32 @@ function statusOf(message: string): number | undefined {
 const OUT_OF_MONEY =
   /You have reached your specified API usage limits|Your credit balance is too low|insufficient_quota/;
 
-/** The model is unusable: key refused, model not found, timeout, rate limit, server error, spend cap. */
-export function isProviderError(message: string | undefined): boolean {
+/**
+ * What a failed thread's error means for the run: `undefined` when it is not the provider's (a
+ * context overflow is the thread's own, a fresh thread cures it), `"retry"` when a later call can
+ * succeed after it (see below), `"fatal"` for any other provider error: a 4xx or an empty account.
+ */
+export function providerFailure(message: string | undefined): "retry" | "fatal" | undefined {
   const m = message ?? "";
+  // Pi's catch-all overflow patterns also match 5xx bodies ("too many tokens in the batch").
   const status = statusOf(m);
-  return (
-    CONNECTION.test(m) ||
-    OUT_OF_MONEY.test(m) ||
-    (status !== undefined && [401, 402, 403, 404, 408, 429].includes(status)) ||
-    (status ?? 0) >= 500
-  );
+  if (
+    (status === undefined || status === 400 || status === 413) &&
+    isContextOverflow({ stopReason: "error", errorMessage: m } as AssistantMessage)
+  )
+    return;
+  if (isTransientProviderError(m)) return "retry";
+  return CONNECTION.test(m) || OUT_OF_MONEY.test(m) || (status ?? 0) >= 400 ? "fatal" : undefined;
 }
 
-/** The subset a later call can succeed after: no 401/403, and a 404 only for Meta's flaky one. */
-export function isTransientProviderError(provider: string, message: string | undefined): boolean {
+/** The subset a later call can succeed after: a timeout, a rate limit, a server or connection error. */
+export function isTransientProviderError(message: string | undefined): boolean {
   const m = message ?? "";
   const status = statusOf(m);
   return (
     CONNECTION.test(m) ||
     status === 408 ||
     (status === 429 && !OUT_OF_MONEY.test(m)) ||
-    (status ?? 0) >= 500 ||
-    (provider === "meta" && status === 404 && m.includes('"code":"model_not_found"'))
+    (status ?? 0) >= 500
   );
-}
-
-/** No later call can succeed on this account: key refused, billing, permission or spend cap. */
-export function isFatalProviderError(message: string | undefined): boolean {
-  const m = message ?? "";
-  return OUT_OF_MONEY.test(m) || [401, 402, 403].includes(statusOf(m) ?? 0);
 }

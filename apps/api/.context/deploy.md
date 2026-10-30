@@ -48,10 +48,10 @@ Variables on `voluma-api` (names in `render.yaml`; values never go in the repo):
 | `WORKOS_COOKIE_PASSWORD` | `openssl rand -base64 32`; seals the session cookie |
 | `WORKOS_LAB_ORGANIZATION_ID` | the Yao Lab organization's id (`org_...`); its members get scope `lab` |
 | `WORKOS_JUDGES_ORGANIZATION_ID` | the Judges organization's id; its members get scope `self`. Unset means no Judges sign-in |
-| `GUEST_ORGANIZATION_ID`, `GUEST_SCOPE` | not in `render.yaml`: guest sign-in is closed (below). Optional: let anyone in as a guest of this organization (`lab` or `self`, default `lab`). Never the Yao Lab, whose data is for signed-in members only (startup throws if the guest organization is one members sign in to). Unset means the sign-in wall |
+| `GUEST_ORGANIZATION_ID`, `GUEST_SCOPE` | set on `voluma-api`: guest sign-in is on (below). Optional: let anyone in as a guest of this organization (`self` or `lab`, default `self`). Never the Yao Lab, whose data is for signed-in members only (startup throws if the guest organization is one members sign in to). Unset means the sign-in wall |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (and `R2_BUCKET=voluma-staging` from the group) | Optional as a group: enables Review's reference scan download, a run's files (`/api/review/runs/:runId/files/:sha256`, reads under `runs/<id>/evidence/`) and scan uploads. Use an Object Read & Write token scoped to `voluma-staging` (uploads presign PUTs to `uploads/` and move them to `inputs/`); only the server receives it. Missing or partial configuration leaves the API running and returns 503 for a reference scan download, a run file or an upload. Object `reference/OA6-1RK/scan.zip` must be a plain ZIP with no `Content-Encoding` metadata. The descriptor's version pins the GET with `If-Match`; the API streams without buffering or redirecting to R2. The bucket's CORS has two rules, both for any origin: `scan-upload-put` allows `PUT` (the browser PUTs scan files straight to R2; the presigned URL is the credential) and `review-asset-get` allows `GET` and `HEAD` (review assets) |
 | `UPLOAD_MAX_FILES`, `UPLOAD_MAX_BYTES`, `UPLOAD_MAX_OPEN` | not in `render.yaml`; optional: files and bytes per scan upload (default 5000 and 20 GB), and uncompleted uploads per member (default 3) |
-| `RUN_LIMITS_<ORG>_<LIMIT>` | what an organization may run, `<ORG>` one of `LAB`, `JUDGES`, `DEMO` (the guest organization) and `<LIMIT>` one of `PER_CALLER`, `CONCURRENT`, `PER_DAY`, `VISITOR_ACTIVE` (visitor runs queued or running, per org: a start or `/keys` past it is a 429; `awaiting-keys` runs don't count). `PER_DAY`, when set, counts runs of both kinds, since Voluma pays every sandbox. Unset is no limit, so they are literals in `render.yaml`: Yao Lab `CONCURRENT=4`; Judges `CONCURRENT=2`; Demo `PER_CALLER=1`, `CONCURRENT=1`, `VISITOR_ACTIVE=4`. No `PER_DAY` (2026-10-30, Jimmy): guests run on their own Meta key, so their only cost to Voluma is Modal sandbox time, which the runner's two slots (`RUNNER_CONCURRENCY=2`) and the Modal workspace's spend limit bound; Demo's `CONCURRENT=1` keeps guests from holding both slots. A removed key stays on the service until deleted there (a Blueprint sync doesn't delete it). Read at start: a change is a restart, not a deploy of code |
+| `RUN_LIMITS_<ORG>_<LIMIT>` | what an organization may run, `<ORG>` one of `LAB`, `JUDGES`, `DEMO` (the guest organization) and `<LIMIT>` one of `PER_CALLER`, `CONCURRENT`, `VISITOR_ACTIVE` (visitor runs queued or running, per org: a start or `/keys` past it is a 429; `awaiting-keys` runs don't count). Unset is no limit, so they are literals in `render.yaml`: Yao Lab `CONCURRENT=4`; Judges `CONCURRENT=2`; Demo `PER_CALLER=1`, `CONCURRENT=1`, `VISITOR_ACTIVE=4`. There is no daily limit (2026-10-30, Jimmy): guests run on their own Meta key, so their only cost to Voluma is Modal sandbox time, which the runner's two slots (`RUNNER_CONCURRENCY=2`) and the Modal workspace's spend limit bound; Demo's `CONCURRENT=1` keeps guests from holding both slots. A removed key stays on the service until deleted there (a Blueprint sync doesn't delete it). Read at start: a change is a restart, not a deploy of code |
 
 **Guest sign-in is on on staging** (2026-10-30, Jimmy: staging shouldn't need a sign-in). `GUEST_ORGANIZATION_ID=org_01M609YS5PSWJSNT20NNKSTAA9` (the Demo organization) and `GUEST_SCOPE=self` are set on `voluma-api` in the dashboard; to close it, delete both and restart. Render routes by `Host`, so a sandbox can still reach the API through the gateway's domain (#236); that is accepted because a guest runs only on their own Meta key. Check: `POST /api/auth/guest` with `Origin` and `content-type: application/json` answers 200 when open, 404 when closed. Judges sign in through `WORKOS_JUDGES_ORGANIZATION_ID` either way.
 
@@ -89,14 +89,14 @@ instance then fails its health check. So every migration must work with the code
 deployed now: expand first, contract in a later PR. The rule is in
 [../AGENTS.md](../AGENTS.md).
 
-**The studies migration (0008) is the one exception** (decisions.md): it adds `runs.study_id NOT NULL` and drops `runs.workflow_id` in one step, because there are no users and the nullable form would make the old code's run list throw. During the overlap every run read and write on the old process fails, because `workflow_id` is gone from the table (claim, heartbeat, list, get, start); runner heartbeats retry (`apps/runner/src/lease.ts`). If the new deploy fails `/health`, the whole run API is down until a fix deploys.
+**Migrations 0008 (studies) and 0013 (drops `runs.forked_from`) are the exceptions** (decisions.md). 0008 adds `runs.study_id NOT NULL` and drops `runs.workflow_id` in one step, because there are no users and the nullable form would make the old code's run list throw. 0013 drops a column the old code selects, so it fails the same way until traffic moves: merge it only while no run is live. During the overlap every run read and write on the old process fails, because `workflow_id` is gone from the table (claim, heartbeat, list, get, start); runner heartbeats retry (`apps/runner/src/lease.ts`). If the new deploy fails `/health`, the whole run API is down until a fix deploys.
 
 ## What a restart or outage does to runs
 
 - **One API replica.** The visitor-key vault and the event stream's wake-ups (`notifier.ts`) are in this process's memory, which is correct only while there is one replica (the stream's 5 s poll would still catch events another replica appended). Do not scale the API out. Open event streams end at SIGTERM (`draining` in `src/index.ts`), so they don't hold the shutdown; `EventSource` reconnects with `Last-Event-ID`.
 - **A deploy or restart** empties the vault. Every claim moves the queued `visitor` runs whose keys its process doesn't hold to `awaiting-keys` (so a run started on the old process during a deploy overlap is held too), and the browser resends the keys (`/keys`). Running `voluma` runs are unaffected; their leases are in Postgres.
-- **An API outage of more than 45 s** (the runner's self-stop margin, `LEASE_SECONDS - HEARTBEAT_SECONDS`) stops every running run: the runner can't heartbeat. Both ways the claim ends are recovered, and the next claim resumes the cut-off threads. A `released` run (`shutdown`, `self-stop`) is recovered at once when the API returns; one whose lease the database expired is recovered at the next claim (`lease-expired`). `self-stop` and `lease-expired`, like `provider-outage`, count toward the no-progress limit (see "A run that keeps cutting off its runner" below); a deploy (`shutdown`) never does. A `visitor` run goes to `awaiting-keys` either way, because its keys are gone.
-- **A run that keeps cutting off its runner** ends `failed` after 3 claims in a row that end `self-stop`, `lease-expired` or `provider-outage` (the model provider kept failing past the runner's retries) with no run-state progress (`claim-progress.ts`; progress is a `task`, `checkpoint`, `output`, `attempt.opened`, `assets.ready`, `plan.changed` or correcting `revision.started` event; model turns, tool calls and the first plan are not). Except for `provider-outage`, the error names the call in flight: "Stopped: the server lost contact with the runner 3 times in a row without progress (last call: `segment_sam`)." A `provider-outage` release also sets `claimable_after` (1, then 2 minutes by `stalled_claims`; the claim query skips the queued run until then and clears it when it takes the run; a visitor run, which waits for keys, gets none; `endUnfinished` and a reopen clear it). The run row keeps `last_claim_end` (the next claim's `previousClaim`), `last_progress_seq` (moved by the event append), `claim_start_seq` (the log's last seq at the claim) and `stalled_claims`.
+- **An API outage of more than 45 s** (the runner's self-stop margin, `LEASE_SECONDS - HEARTBEAT_SECONDS`) stops every running run: the runner can't heartbeat. Both ways the claim ends are recovered, and the next claim resumes the cut-off threads. A `released` run (`shutdown`, `self-stop`) is recovered at once when the API returns; one whose lease the database expired is recovered at the next claim (`lease-expired`). `self-stop` and `lease-expired` count toward the no-progress limit (see "A run that keeps cutting off its runner" below); a deploy (`shutdown`) never does. A `visitor` run goes to `awaiting-keys` either way, because its keys are gone.
+- **A run that keeps cutting off its runner** ends `failed` after 3 claims in a row that end `self-stop` or `lease-expired` with no run-state progress (`claim-progress.ts`; progress is a `task`, `checkpoint`, `output`, `attempt.opened`, `assets.ready`, `plan.changed` or correcting `revision.started` event; model turns, tool calls and the first plan are not). The error names the call in flight: "Stopped: the server lost contact with the runner 3 times in a row without progress (last call: `segment_sam`)." A model provider's error is not a release: it fails the run (`apps/runner/.context/CONTEXT.md`). The run row keeps `last_claim_end` (the next claim's `previousClaim`), `last_progress_seq` (moved by the event append), `claim_start_seq` (the log's last seq at the claim) and `stalled_claims`. A run held "AI unavailable" before provider errors failed fast (`claimable_after` in the future, `last_claim_end` `provider-outage`) is claimed at the next claim after the deploy, and fails on the provider's next error if it persists.
 - **Guests share Demo's allowance.** Limits are per org, so a scripted guest (guests cost nothing to mint) can hold Demo's one runner slot for every other guest. That is the design, not a bug. The same goes for `VISITOR_ACTIVE`: scripted guests can fill Demo's visitor cap and leave honest guests a 429 until those runs end. Both are accepted for open staging. `VISITOR_ACTIVE` bounds the keys the API holds and the runner slots Demo's visitors take; the claim's round-robin across orgs (the org claimed from least recently goes first) keeps them from starving Yao Lab's runs; the vault's 100-runs-per-org cap is a backstop for an org with no cap set.
 - **A migration** takes no queue lock; the claim and the runs table follow the expand-first rule like any other.
 
@@ -159,7 +159,7 @@ An agent checks staging as a signed-in user with `POST /api/auth/password` (`WOR
 `WORKOS_TEST_PASSWORD`) sending `Origin: <APP_URL>` and `Content-Type: application/json`: the
 CSRF check answers any request that changes state without a bearer token, sign-in included,
 `403 forbidden origin` without the first and `415` without the second. Keep every `Set-Cookie`
-(`upload-scan.ts` shows how). Reading runs needs no sign-in: `Authorization: Bearer
+(`src/ops/upload-scan.ts` shows how). Reading runs needs no sign-in: `Authorization: Bearer
 $VOLUMA_DEBUG_TOKEN` reads every lab's runs.
 
 ## The database (Neon)
@@ -207,11 +207,22 @@ tables are replaced), run `pg_restore --clean --if-exists --no-owner --no-acl -d
 (`.../resume`; the runner stays suspended until a run). Compare row counts with the source
 (`runs`, `run_events`, `provider_calls`) before trusting it. Never print the URL.
 
+**Archiving a run** frees space on the 1 GB database without losing the run. `archive:run --id <runId> --remote`
+(with `DATABASE_URL` set to the direct URL) refuses an example or a run that has not ended, writes the run's rows
+(`run.json`: run, input, study, events, threads, pi messages, review snapshots, provider calls) to
+`~/.local/share/voluma-backups/runs/<runId>/` (0600; refuses under 1 GB free), and does it all in one repeatable-read
+transaction: lock the run, read its rows, check them as `import:run` does, write and fsync the file, then delete, rolling back
+unless each table's deleted count equals the file's. Inputs stay (shared); the study goes with its
+scans only when no other run is in it. The run's R2 files are not copied or touched, so `import:run --from <that directory>`
+restores the run whole, with its study and scans when the study id is free and the scans' inputs exist (else a study of one,
+and it says so). The archive is one copy on one disk: copy the directory off this machine before archiving many runs.
+A `pg_dump` of the tables is still the backup for anything else.
+
 ## Rotating secrets
 
 Each takes minutes. After the Oct 2026 Railway incident, treat anything Railway held
-before 2026-10-21 as exposed and rotate it; the Railway project is deleted after the move, which
-ends that exposure for what was only there.
+before 2026-10-21 as exposed and rotate it; the Railway project was deleted on 2026-10-30, which
+ended that exposure for what was only there.
 
 | Secret | Lives in | Rotate |
 |---|---|---|
@@ -234,10 +245,6 @@ its own variables (names in [../../runner/.context/deploy.md](../../runner/.cont
 - A Render API key reaches every workspace of the account, not one environment; keep it in `.env` only.
 - Neon is reachable from the internet (TLS and the password only; no allow list on the free plan). Keep the direct URL in the two services' variables and the operator's shell, never in the repo or a log.
 - The API holds no model keys. Its R2 key reads and writes objects in `voluma-staging` only; no R2 key ever reaches the browser, which gets presigned URLs for one object each.
-
-## Checked on staging (2026-10-28, on Railway)
-
-- `RUN_LIMITS_*` were set as in the table above and applied: a guest's second concurrent start answered 409 (`DEMO_PER_CALLER=1`).
 
 ## Checked on Render (2026-10-30, at cutover)
 

@@ -19,8 +19,8 @@
  */
 import type { StudyDetail, StudyScanDetail, ToCheckItem } from "@voluma/contracts/study";
 import type { OutputEntry } from "@voluma/contracts/workflow-files";
-import type { StatusTone } from "@voluma/ui";
-import { runHref, runStatus } from "@voluma/ui/run";
+import { runHref, runStatus } from "@voluma/run-view";
+import type { Status } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 
 /** Where "Open in 3D" lands: a To check item, or a run's task (a scan far from its group). */
@@ -30,20 +30,20 @@ export type CheckStop = ToCheckItem | Pick<ToCheckItem, "runId" | "taskId">;
 export type OpenChecks = (queue: CheckStop[], start: number) => void;
 
 /**
- * A scan's status: its newest run's chip (`@voluma/ui/run`), with "N of M tasks" while it runs;
+ * A scan's status: its newest run's chip (`@voluma/run-view`), with "N of M tasks" while it runs;
  * "Not started" without a run. Its values may come from an older completed run.
  */
 export function scanStatus({ runs }: StudyScanDetail): {
   label: string;
-  tone: StatusTone;
+  status: Status;
   progress?: string;
 } {
   const run = runs[0];
-  if (!run) return { label: "Not started", tone: "neutral" };
-  const { label, tone } = runStatus(run);
+  if (!run) return { label: "Not started", status: "waiting" };
+  const status = runStatus(run);
   return run.tasks
-    ? { label, tone, progress: `${run.tasks.done} of ${run.tasks.total} tasks` }
-    : { label, tone };
+    ? { ...status, progress: `${run.tasks.done} of ${run.tasks.total} tasks` }
+    : status;
 }
 
 /** A run the API or the runner is still moving: the page refetches while one is in view. */
@@ -55,27 +55,20 @@ export type StudyCounts = {
   /** Scans with a completed result. */
   done: number;
   running: number;
-  /** Queued or needing keys, except runs held until the AI is back (`waitingForAI`). */
+  /** Queued or needing keys. */
   waiting: number;
-  waitingForAI: number;
   notStarted: number;
   toCheck: number;
 };
 
 export function studyCounts(detail: StudyDetail): StudyCounts {
   const status = (s: StudyScanDetail) => s.runs[0]?.state.status;
-  const held = (s: StudyScanDetail) => {
-    const state = s.runs[0]?.state;
-    return state?.status === "queued" && state.waitingForProvider !== undefined;
-  };
   return {
     scans: detail.scans.length,
     done: detail.scans.filter((s) => s.resultRunId !== null).length,
     running: detail.scans.filter((s) => status(s) === "running").length,
-    waiting: detail.scans.filter(
-      (s) => (status(s) === "queued" && !held(s)) || status(s) === "awaiting-keys",
-    ).length,
-    waitingForAI: detail.scans.filter(held).length,
+    waiting: detail.scans.filter((s) => status(s) === "queued" || status(s) === "awaiting-keys")
+      .length,
     notStarted: detail.scans.filter((s) => s.runs.length === 0).length,
     toCheck: detail.scans.reduce((n, s) => n + s.toCheck.length, 0),
   };

@@ -61,15 +61,15 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   `pg-queue.ts` owns every state change of a run (start, resume, cancel, claim, lease,
   recovery) and the key vault, `pg-runs.ts` and `pg-studies.ts` the reads (one `resultsLoader` cache for both), and the lease-checked
   `pg-event-log.ts`/`pg-history.ts`; their port types are derived from them. `admission.ts`
-  is the one limits check and the one message per refusal.
+  is the one limits check and the one message per limit.
 - **Every run belongs to a study** (`studies`, `study_scans`; `runs.study_id` is not null), and
   the study owns the workflow. `readableStudies` (`pg-runs.ts`) is `readableRuns` on the study
   (guests share one lab, so `lab_id` alone is not enough); `queue.start` checks `studyId` with
   it. `queue.createStudy` inserts the study, its scans and the runs to start in one
-  transaction under the lock: any refusal throws `Refused` and rolls the whole call back, and
+  transaction under the lock: any refusal throws an `HTTPException` (status and text, where it is decided) and rolls the whole call back, and
   `startRuns` reads the counts once and raises them for each run it inserts. Every browser
-  write (start, create, cancel, resume) goes through `attempt`: a `Refused` rolls it back and
-  comes back as `{refused}`, and the visitor keys it held are dropped. `runs` has no workflow
+  write (start, create, cancel, resume) goes through `attempt`: a refusal rolls it back and reaches the
+  client (`onError` answers `{error}`), and `attempt` drops the visitor keys it held. `runs` has no workflow
   column: `pgRunQueue` gets `workflowOf` and resolves the pins and outputs from the study. The seeded example has
   its own study (`study-<exampleId>`, `example`), read-only like its run; `import:run` gives
   an imported run a study of one the same way.
@@ -77,12 +77,13 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   limit counts can't race. The lease is judged by the database's `now()`. An ingest write
   checks the run's lease token inside its own transaction (`assertLease`, `FOR SHARE`); a
   late write can't land after a takeover.
-- **Recovery ends a claim with a reason** (`shutdown`, `self-stop`, `provider-outage` from the runner's `released`;
+- **Recovery ends a claim with a reason** (`shutdown`, `self-stop` from the runner's `released`;
   `lease-expired` when the claim's sweep finds the lease gone). `recover` in `pg-queue.ts` stores it
   for the next claim's `previousClaim` and applies the no-progress limit (`claim-progress.ts`:
-  the counting rule and the progress events). There is no other restart counter. A
-  `provider-outage` release also sets `runs.claimable_after` (the delay rule is `outageDelayMinutes`);
-  `claim` takes only runs with it null or past, and clears it.
+  the counting rule and the progress events). There is no other restart counter. `provider-outage`
+  is read only (events and `last_claim_end` written before provider errors failed the run). The
+  column `runs.claimable_after` is unused and gone from `schema.ts`; drop it in a later migration
+  ([TODO](.context/TODO.md)).
 - **A researcher's message reopens a finished run** (`messages.ts` in contracts is the rulebook;
   `queue.checkMessage`/`sendMessage` in `pg-queue.ts` call `corrections.ts`, which holds the
   rules; Review's `POST /runs/:id/messages` calls them through the `RunMessages` port after it
@@ -107,14 +108,19 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   run whose keys its process doesn't hold to `awaiting-keys`. The vault holds at most 100
   runs per org (429), and `index.ts` caps ordinary `/api` bodies at 256 KB (8 MB on
   `/api/run/ingest/*`, the trusted runner; 12 MiB only on screenshot POSTs).
+- Operator CLIs (seed, archive, export and import a run, `r2:put`, `upload:scan`) live in
+  `src/ops/`, not in a domain.
 - **Limits come from env** (`RUN_LIMITS_<ORG>_*`, read in `index.ts`); the workflow catalog
   (`@voluma/workflow/bundled`) is code. `seed:example --from <runId> [--backfill <dir|r2:prefix>] [--remote]` makes an example run (it copies the source's `evidence/`, `review/`, `scratch/person/` and `outputs/` under the example's prefix)
-  (`src/domains/run/seed-example.ts`; it needs `GUEST_ORGANIZATION_ID`, the Demo organization, in `.env`). To get a run into a fresh local database:
+  (`src/ops/seed-example.ts`; it needs `GUEST_ORGANIZATION_ID`, the Demo organization, in `.env`). To get a run into a fresh local database:
   `export:run --id <runId> --out <dir|r2:dev/…>` dumps its rows to `run.json`, and
   `import:run --from <dir|r2:prefix> [--replace]` loads them (events are checked with
   `runEventSchema`; an existing run is refused without `--replace`). Evidence stays in R2.
+  `archive:run --id <runId> [--out <dir>] --remote` (all three are in `src/ops/`, since they read both domains'
+  tables) copies an ended run's rows to `~/.local/share/voluma-backups/runs/<runId>/` and deletes
+  them; it refuses a non-local database without `--remote`, like `import:run`. See [.context/deploy.md](.context/deploy.md).
   `r2:put --from <dir> --to r2:dev/<prefix>` uploads a folder. An `r2:` location is a prefix in the
-  `R2_BUCKET` the dev servers use (`r2-dir.ts`). Operator scripts use `DATABASE_URL`, else the
+  `R2_BUCKET` the dev servers use (`src/ops/r2-dir.ts`). Operator scripts use `DATABASE_URL`, else the
   database `pnpm dev` wrote to `.dev/env.json`; each prints its database and bucket first, writes to
   R2 only under `dev/`, and `import:run` / `seed:example` refuse a non-local database without
   `--remote`. R2 is shared with staging, so a local seed names its example
@@ -126,8 +132,9 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
 
 - `index.ts` is a mount list, like the run domain's. `runs.ts` serves `GET /runs/:runId`: the
   run's `ReviewRun` (`@voluma/contracts/review`), built on each read by `review-run.ts` from
-  `fold` over the run's whole event log, plus what `fold` leaves to the API. It parses the
-  result with `reviewRunSchema`, so a bad build is a 500, never invalid data.
+  `fold` over the run's whole event log, plus what `fold` leaves to the API. Nothing
+  re-validates it on the way out: the fold's resolvers guarantee no duplicate or dangling
+  id, and `reviewIntegrityIssues` (`fold-test-log.ts`) checks that in the fold tests.
 - It reads runs and writes human decisions only through `RunRecords` (`src/ports`), wired
   to Run's `pg-run-records.ts`. Reads use one repeatable-read snapshot. Decisions hold
   the existing event-sequence lock **before** the run-row lock, then validate and append
@@ -145,8 +152,8 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   examples with reused sequence numbers. Cache misses load only fold/review
   events; hits load no event payloads. The event log remains the only durable human-decision state.
 - `inputs.ts` owns `/inputs/:inputId/download` and `/inputs/:inputId/file`, guarded by
-  `requireUser` only under `/inputs/:inputId/*`. Both authorize through `ReviewInputs`
-  and `readerOf` before using `ReferenceArchive`. Reject HEAD before opening R2; keep
+  `requireUser` only under `/inputs/:inputId/*`. Both allow only the
+  caller's org's reference scan (`referenceInputId(user.labId)`) before using `ReferenceArchive`. Reject HEAD before opening R2; keep
   the descriptor's ETag pin and stream the file without buffering.
 - `runs.ts` also serves `GET /runs/:runId/files/:sha256`: one of the run's content-addressed
   files (`evidenceKey`) through `RunFiles` (`r2-run-files.ts`), after `RunRecords.readable`.
@@ -160,9 +167,10 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   metadata is inserted. Retries keep the same UUID/pixels and return the original actor/time;
   conflicting captures return 409. Run's internal `generation` changes on example replacement:
   every snapshot query and insert uses it, so late saves cannot attach to the replacement.
-- Screenshot geometry is checked against the actual scan in the browser on restore, not by
-  decoding DICOM on the server. The API validates references against the pinned Review
-  projection and currently rejects 3D capture. `RUN_FILES_DIRECTORY` selects local run-file
+- A screenshot is one grid-viewer pane (`slice` or `3d`) on a `gridId`. The API checks the
+  grid has an image volume in the pinned revision, the crosshair lies on it, and every
+  structure and focus reference belongs to the revision; it refuses new `acquired` (DICOM
+  viewer) saves, which stay listed. `RUN_FILES_DIRECTORY` selects local run-file
   storage at the composition root; it never redirects the read-only reference archive.
 - `runs.ts` serves `GET /runs/:runId/assets/:sha256/*`: a converted review asset
   (`reviewAssetKey`, written by the runner's conversion worker) as a 302 to a presigned R2 GET

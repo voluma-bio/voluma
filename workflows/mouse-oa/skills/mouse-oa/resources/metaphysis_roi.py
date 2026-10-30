@@ -1,10 +1,10 @@
 """Cut the tibial metaphyseal regions under the growth plate: ROI-3 (deck #16-23) and the cortex for Ct.Th.
 
 The growth plate's distal face is the reference surface (one face for the whole run: `cortical` reads this script's output,
-it does not trace its own), and it must be traced (`growth_plate_distal_curves`): ROI-3 starts `--start-um` below it, and
+it does not trace its own), and it must be traced (`growth_plate_distal_curves`): ROI-3 starts START_UM (50 um) below it, and
 there is no thickness fallback. The bone threshold (default: the lab's 2.16/cm in this scan's HU, from hu.json's calibration)
 is used here only to estimate the cortex and to build the cortex mask; no label gates it.
-ROI-3 is the slab between `--start-um` and `--start-um` + `--length-um` below that face (measured along W), inside the filled tibial
+ROI-3 is the slab between START_UM and START_UM + LENGTH_UM (50 and 250 um) below that face (measured along W), inside the filled tibial
 cross-section, at least `cortex + clearance` from its outer edge. The cortex thickness used for that edge is the
 depth at which the bone fraction of the outer layers first drops below one half (estimated in the ROI-3 slices,
 reported as cortex_estimate_mm), or --cortex-mm. The cortex mask for Ct.Th is the bone within `--cortex-search-factor` times
@@ -47,12 +47,14 @@ import numpy as np
 import objects
 import sidecar
 from annotations import load_annotations, need, traced_surface
-from envelope import close_and_fill
+from envelope import close_and_fill, footprint
 from scipy import ndimage as ndi
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
+# ROI-3 (the oa-protocol): a LENGTH_UM slab START_UM below the distal growth-plate face, CORTEX_CLEARANCE_UM beyond the cortex
+START_UM, LENGTH_UM, CORTEX_CLEARANCE_UM = 50.0, 200.0, 20.0
 CORTEX_SPAN_MM = 1.3  # shaft length below the plate the cortex mask covers: Ct.Th is asked at up to 1 mm
 
 
@@ -71,9 +73,9 @@ def check_below_proximal(gd, dv, dlo, dhi, prox, pv, tib, vox):
                      'face is not known over the whole proximal one: '
                      + ' and '.join(f'trace the distal face on a section near V={v} too'
                                     for v, miss in ((plo, dlo > plo), (phi, dhi < phi)) if miss))
-    footprint = objects.footprint(tib)
+    on_bone = footprint(tib)
     vs = np.arange(gd.shape[0])[:, None]
-    cross = (gd <= prox) & footprint & (vs >= max(plo, dlo)) & (vs <= min(phi, dhi))
+    cross = (gd <= prox) & on_bone & (vs >= max(plo, dlo)) & (vs <= min(phi, dhi))
     bad = cross & pv & dv
     if bad.any():
         vi, ui = np.nonzero(bad)
@@ -123,9 +125,6 @@ def main():
     ap.add_argument('--proximal-valid', type=sidecar.existing, required=True, help='growth-plate-proximal-valid.npy from iioc.py: where the proximal face was traced')
     ap.add_argument('--out', required=True, help='output directory (created)')
     ap.add_argument('--threshold', type=float, help='bone threshold in HU (default: the lab threshold, 2.16/cm, from --hu-json)')
-    ap.add_argument('--start-um', type=float, default=50.0, help='um: ROI-3 starts this far below the distal growth-plate face')
-    ap.add_argument('--length-um', type=float, default=200.0, help='um: ROI-3 length along the shaft')
-    ap.add_argument('--cortex-clearance-um', type=float, default=20.0, help='um: ROI-3 stays this far beyond the cortex from the outer edge')
     ap.add_argument('--cortex-mm', type=float, help='mm: cortex thickness for the clearance (default: estimated)')
     ap.add_argument('--cortex-search-factor', type=float, default=2.0, help='the cortex mask reaches this multiple of the cortex depth in from the outer edge')
     a = ap.parse_args()
@@ -157,10 +156,10 @@ def main():
         filled[k] = close_and_fill(tib[k], vox)
     dist = edge_distance(filled, w0, w1)
     bone_all = np.asarray(h) > a.threshold  # HU alone; `filled` (from the tibia label) only limits where it is looked at
-    slab = (rel >= a.start_um) & (rel < a.start_um + a.length_um)
+    slab = (rel >= START_UM) & (rel < START_UM + LENGTH_UM)
     est = cortex_depth(bone_all, dist, slab & filled) * vox
     cortex_mm = a.cortex_mm if a.cortex_mm is not None else est
-    edge = (cortex_mm + a.cortex_clearance_um / 1000) / vox
+    edge = (cortex_mm + CORTEX_CLEARANCE_UM / 1000) / vox
     roi = slab & filled & (dist > edge)
     if not roi.any():
         sidecar.fail('ROI-3 is empty: check the growth-plate surfaces, or lower --cortex-mm')
@@ -172,9 +171,9 @@ def main():
     inputs = [a.hu_aligned, a.mask, a.annotations, a.proximal_face, a.proximal_valid]
     params = dict(
         meta,
-        start_um=a.start_um,
-        length_um=a.length_um,
-        cortex_clearance_um=a.cortex_clearance_um,
+        start_um=START_UM,
+        length_um=LENGTH_UM,
+        cortex_clearance_um=CORTEX_CLEARANCE_UM,
         cortex_search_factor=a.cortex_search_factor,
     )
     for name, arr in (('roi3-tissue.npy', roi), ('cortex.npy', cortex)):
@@ -185,7 +184,7 @@ def main():
     placed = {
         'roi-metaphyseal': objects.mask(out / 'roi-metaphyseal.npy', roi, like=like, **meta),
         'cortex': objects.mask(out / 'cortex-object.npy', cortex, like=like, **meta),
-        'growth-plate-distal-face': objects.surface(out / 'growth-plate-distal-face.npy', gd, 0, like=like, where=objects.footprint(tib), **meta),  # heights along W
+        'growth-plate-distal-face': objects.surface(out / 'growth-plate-distal-face.npy', gd, 0, like=like, where=footprint(tib), **meta),  # heights along W
     }
     vs = np.linspace(*np.flatnonzero(roi.any(axis=(0, 2)))[[0, -1]], 4).astype(int)
     fig, axs = plt.subplots(2, 4, figsize=(20, 10))

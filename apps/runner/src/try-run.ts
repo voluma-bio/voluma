@@ -179,6 +179,10 @@ console.log(
 );
 if (run.state.status === "ended" && run.state.error) console.log(`error: ${run.state.error}`);
 for (const t of folded.tasks) {
+  if (t.status === "pending") {
+    console.log(`\n${t.id}: not started`);
+    continue;
+  }
   const reported = [...t.measurements, ...t.scores].map((o) => o.id);
   if (t.files.length) reported.push(`${t.files.length} file(s)`);
   console.log(`\n${t.id}: ${t.status}${t.reason ? ` - ${t.reason}` : ""}`);
