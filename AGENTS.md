@@ -19,6 +19,7 @@ reasons behind the setup: [.context/CONTEXT.md](.context/CONTEXT.md).
 | `pnpm check` | Lint, typecheck and tests across the workspace. CI runs the same |
 | `pnpm db:up` | Start the local Postgres container (once per machine; needs Docker) |
 | `pnpm dev` | API and web app on free ports, with this worktree's own database; prints both URLs |
+| `pnpm worktrees:clean` | List finished worktrees (merged or closed PR, no uncommitted changes) with their dev servers and databases; `--yes` removes them |
 | `pnpm format` | Biome format and safe fixes |
 | `pnpm check:pr-body <body.md>` | Check a PR body draft against the template |
 | `pnpm --filter @voluma/runner start` | The runner service: claims queued runs from the API and runs them (`RUNNER_MODEL=openai/<id>` in `.env`; `pnpm dev` running locally, start a run in the browser); see [CONTEXT.md](.context/CONTEXT.md) |
@@ -120,6 +121,9 @@ cd ../voluma.worktrees/<name> && pnpm i
 - Screenshots for a PR go in `.github/pr-assets/<branch>/`, linked at a commit.
 - When the PR merges, clean up: stop your dev servers, then
   `git worktree remove ../voluma.worktrees/<name>` and `git branch -d <branch>`.
+  `pnpm worktrees:clean --yes` (from any checkout) catches what was left: it removes
+  every worktree whose PR merged or closed, stops its dev servers, and drops its database.
+  Without `--yes` it only lists.
 
 ## Shared memory
 

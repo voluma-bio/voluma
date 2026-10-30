@@ -226,11 +226,15 @@ An agent in its own worktree tries a workflow change on the real system like thi
 4. `sandboxes:clean --run <id>` for each run, as always.
 
 When the runner uses the API in `.dev/env.json` (including an explicit `VOLUMA_API_URL` pointing
-there), that file alone supplies its gateway. `VOLUMA_GATEWAY_URL` and `GATEWAY_TOKEN_SECRET` in the
+there), that file alone supplies its gateway. Matching uses the origin (the HTTP adapters ignore
+the base URL's path, query and fragment) and treats `localhost` as the launcher's `127.0.0.1`;
+different ports or schemes remain different APIs. `VOLUMA_GATEWAY_URL` and `GATEWAY_TOKEN_SECRET` in the
 shell or `.env` cannot turn SAM on or override the launcher's tunnel. No gateway URL in the file
 means SAM is off, including while the tunnel starts or after it fails. A runner pointed at another
 API still uses its configured gateway pair. Restart the runner when changing the dev launch;
 an already-running runner does not reload `.dev/env.json`.
+The launcher atomically replaces the manifest with a mode-0600 file, and the runner selects its
+API and gateway from one snapshot, so a rewrite cannot mix launches or expose a partial file.
 
 Why a tunnel: sandboxes run on Modal and reach only an https host from an allowlist, never `localhost`.
 A Cloudflare quick tunnel (`cloudflared` npm package runs it; `pnpm dev` downloads the pinned official release once into
