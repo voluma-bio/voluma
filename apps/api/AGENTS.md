@@ -107,7 +107,7 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   run whose keys its process doesn't hold to `awaiting-keys`. The vault holds at most 100
   runs per org (429), and `index.ts` caps every `/api` body at 256 KB (8 MB on `/api/run/ingest/*`, the trusted runner).
 - **Limits come from env** (`RUN_LIMITS_<ORG>_*`, read in `index.ts`); the workflow catalog
-  (`@voluma/workflow/bundled`) is code. `seed:example --from <runId> [--backfill <dir|r2:prefix>] [--remote]` makes an example run (it copies the source's `evidence/` and `outputs/` under the example's prefix)
+  (`@voluma/workflow/bundled`) is code. `seed:example --from <runId> [--backfill <dir|r2:prefix>] [--remote]` makes an example run (it copies the source's `evidence/`, `review/` and `outputs/` under the example's prefix)
   (`src/domains/run/seed-example.ts`; it needs `GUEST_ORGANIZATION_ID`, the Demo organization, in `.env`). To get a run into a fresh local database:
   `export:run --id <runId> --out <dir|r2:dev/…>` dumps its rows to `run.json`, and
   `import:run --from <dir|r2:prefix> [--replace]` loads them (events are checked with
