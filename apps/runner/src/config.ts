@@ -211,7 +211,6 @@ export function runnerConfig() {
   };
   return {
     api,
-    /** Runs at once. */
     concurrency: positiveInt("RUNNER_CONCURRENCY", 2),
     /** The run loop's limits (`LoopConfig`); the harness default is 2 fix rounds. */
     loop: {
