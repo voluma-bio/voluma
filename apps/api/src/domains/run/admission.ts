@@ -6,7 +6,7 @@
  * (`started_at`), so a recovered run isn't refused for a limit it passed.
  */
 import type { Run } from "@voluma/contracts/run";
-import { settledUsdOf } from "@voluma/provider-calls";
+import { knownUsdOf } from "@voluma/provider-calls";
 import { sql } from "drizzle-orm";
 import type { Tx } from "./pg-runs";
 
@@ -58,7 +58,7 @@ export async function usage(
       (count(*) FILTER (WHERE ${today}))::int AS "startedToday",
       (count(*) FILTER (WHERE credentials = 'voluma' AND state = 'queued' AND started_at IS NULL))::int AS "waiting",
       (count(*) FILTER (WHERE credentials = 'visitor' AND state IN ('queued', 'running')))::int AS "visitorActive",
-      coalesce(sum(model_cost_usd + ${settledUsdOf(sql`runs.id`)}) FILTER (WHERE ${today}), 0)::float8 AS "spentToday",
+      coalesce(sum(model_cost_usd + ${knownUsdOf(sql`runs.id`)}) FILTER (WHERE ${today}), 0)::float8 AS "spentToday",
       (count(*) FILTER (WHERE ${caller ? sql`started_by = ${caller.userId} AND credentials = ${caller.credentials} AND state <> 'ended'` : sql`false`}))::int AS "callerUnfinished"
     FROM runs WHERE lab_id = ${labId} AND NOT example`);
   return row as Usage;

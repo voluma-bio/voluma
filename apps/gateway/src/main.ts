@@ -41,10 +41,16 @@ const db = drizzle(client, { casing: "snake_case" });
 const [migrated] = await db.execute<{ ok: boolean }>(
   `SELECT to_regclass('provider_calls') IS NOT NULL AND EXISTS (
      SELECT 1 FROM information_schema.columns
-     WHERE table_name = 'runs' AND column_name = 'cost_cap_usd') AS ok`,
+     WHERE table_name = 'runs' AND column_name = 'cost_cap_usd')
+   AND EXISTS (
+     SELECT 1 FROM information_schema.columns
+     WHERE table_name = 'provider_calls' AND column_name = 'reserved_usd'
+       AND is_nullable = 'YES') AS ok`,
 );
 if (!migrated?.ok)
-  throw new Error("the database is not migrated (provider_calls, runs.cost_cap_usd)");
+  throw new Error(
+    "the database is not migrated (provider_calls, runs.cost_cap_usd, nullable provider_calls.reserved_usd)",
+  );
 
 const keys: Partial<Record<Provider, string>> = {};
 const baseUrls = {} as Record<Provider, string>;
