@@ -135,11 +135,6 @@ export function ScansPage() {
   return (
     <>
       <PageHead title="Scans" count={<Count>{detail.scans.length}</Count>} />
-      {canStart && (
-        <div className="border-b border-border px-6 py-2.5">
-          <RunKeyLine userId={me.userId} guest={guest} keys={keys} onChange={setKeys} />
-        </div>
-      )}
       <section aria-labelledby="all-scans">
         <header className="flex h-(--panel-head-h) items-center gap-3 px-4">
           <h2 id="all-scans" className="m-0 text-sm font-semibold">
@@ -181,6 +176,14 @@ export function ScansPage() {
           className="rounded-none border-x-0 border-b-0 [&_td]:whitespace-nowrap"
         />
       </section>
+      {/* Starting a scan runs on a key; the line sits after the scans it starts, not over them. */}
+      {canStart && (
+        <div className="border-t border-border px-6 py-4">
+          <div className="max-w-md">
+            <RunKeyLine userId={me.userId} guest={guest} keys={keys} onChange={setKeys} />
+          </div>
+        </div>
+      )}
     </>
   );
 }
