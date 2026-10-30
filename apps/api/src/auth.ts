@@ -259,13 +259,12 @@ function setCookies(c: Context, cookies: string[]) {
 }
 
 /**
- * The header WorkOS gets as the caller's address. It must be one the host's proxy sets and a
- * client cannot override. Railway's proxy set `x-real-ip`. Render's docs don't say which header
- * its proxy sets or strips (a client-supplied `x-forwarded-for` is kept, with the proxy's
- * entry appended), so this is unchecked on Render: at cutover send a request with a forged
- * value for this header to the deployed API and confirm it arrives replaced.
+ * The header WorkOS gets as the caller's address: one the host's proxy sets and a client cannot
+ * override. Render's edge (Cloudflare) overwrites `true-client-ip` with the caller's address; it
+ * passes a client's own `x-real-ip` through unchanged and keeps a client's `x-forwarded-for`
+ * entries. Checked on 2026-10-30 with forged values against a Render service in Virginia.
  */
-const CLIENT_IP_HEADER = "x-real-ip";
+const CLIENT_IP_HEADER = "true-client-ip";
 
 /** Failed password sign-ins allowed per email in each window. */
 const PASSWORD_ATTEMPTS = 10;
