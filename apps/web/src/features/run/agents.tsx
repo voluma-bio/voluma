@@ -47,7 +47,9 @@ export function Elapsed({ thread }: { thread: Thread }) {
   const end = thread.endedAt ? new Date(thread.endedAt).getTime() : now;
   return (
     <span className="shrink-0 text-meta text-muted-foreground tabular-nums">
-      {formatDuration(Math.max(0, end - new Date(thread.startedAt).getTime()) / 1000)}
+      {formatDuration(
+        thread.workedBefore + Math.max(0, end - new Date(thread.startedAt).getTime()) / 1000,
+      )}
     </span>
   );
 }
