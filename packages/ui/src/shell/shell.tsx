@@ -94,6 +94,7 @@ type ShellState = {
   unregister(id: string): void;
   slot(id: string): HTMLElement | null;
   isOpen(id: string): boolean;
+  open(id: string): void;
   tools(id: string, node: ReactNode): void;
 };
 
@@ -173,6 +174,21 @@ export function AppShell({
     });
   }, []);
 
+  // A screen opens one of its panels (a link to the AI, an agent): it joins what is open on its
+  // side, as Shift-click stacks it.
+  const regsRef = useRef(regs);
+  regsRef.current = regs;
+  const open = useCallback((id: string) => {
+    const reg = regsRef.current.get(id);
+    if (!reg || reg.link) return;
+    setFull(null);
+    setLayout((l) =>
+      l.open[reg.side].includes(id)
+        ? l
+        : { ...l, open: { ...l.open, [reg.side]: [...l.open[reg.side], id].slice(-2) } },
+    );
+  }, []);
+
   const lastOpen = useRef<Layout["open"]>({ left: [], right: [] });
   const foldSide = useCallback((side: ShellSide) => {
     setFull(null);
@@ -226,9 +242,10 @@ export function AppShell({
       unregister,
       slot: (id) => slots[id] ?? null,
       isOpen: (id) => shown.left.includes(id) || shown.right.includes(id),
+      open,
       tools: (id, node) => setPanelTools((t) => (t[id] === node ? t : { ...t, [id]: node })),
     }),
-    [register, unregister, slots, shown],
+    [register, unregister, open, slots, shown],
   );
 
   // One stable ref callback per panel: a new callback each render would detach and reattach the
@@ -491,6 +508,13 @@ export function ShellPanel({ children, tools, ...props }: ShellPanelProps) {
   useEffect(() => shell.tools(id, tools), [shell, id, tools]);
   const slot = shell.isOpen(id) ? shell.slot(id) : null;
   return slot ? createPortal(children, slot) : null;
+}
+
+/** Opens one of the screen's panels by its id, beside what is already open on its side. */
+export function useOpenPanel(): (id: string) => void {
+  const shell = useContext(ShellContext);
+  if (!shell) throw new Error("useOpenPanel must be used inside AppShell");
+  return shell.open;
 }
 
 /** What the header line says about this screen: where you are, and its one-line facts. */

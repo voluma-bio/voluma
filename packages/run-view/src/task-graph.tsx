@@ -303,7 +303,7 @@ function Box({
             aria-pressed={pressed === undefined ? undefined : pressed}
             onClick={onSelect}
             className={cx(
-              "min-w-0 flex-1 cursor-pointer text-left text-sm leading-snug font-medium hyphens-auto [text-wrap:balance]",
+              "min-w-0 flex-1 cursor-pointer text-left text-sm leading-snug font-medium break-words [text-wrap:balance]",
               "after:absolute after:inset-0 after:rounded-lg focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-offset-1 focus-visible:after:outline-ring",
               dim && "text-muted-foreground",
             )}
@@ -313,7 +313,7 @@ function Box({
         ) : (
           <span
             className={cx(
-              "min-w-0 flex-1 text-sm leading-snug font-medium hyphens-auto [text-wrap:balance]",
+              "min-w-0 flex-1 text-sm leading-snug font-medium break-words [text-wrap:balance]",
               dim && "text-muted-foreground",
             )}
           >

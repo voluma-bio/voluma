@@ -5,7 +5,7 @@
  * to the item, never draw it again. Data comes in as props, so the study's To check list and the
  * scan review's queue show the same card.
  */
-import { Button, StatusGlyph, StatusMark } from "@voluma/ui";
+import { Button, cx, StatusGlyph, StatusMark } from "@voluma/ui";
 import { Check } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -52,12 +52,15 @@ export function ItemToCheck({
   readOnly,
   onWrong,
   error,
-  className = "",
+  className,
 }: ItemToCheckProps) {
   return (
     <article
       aria-label={title ?? task}
-      className={`grid gap-2 rounded-lg bg-card p-3.5 inset-ring inset-ring-line-strong ${className}`}
+      className={cx(
+        "grid gap-2 rounded-lg bg-card p-3.5 inset-ring inset-ring-line-strong",
+        className,
+      )}
     >
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <StatusGlyph status={state === "accepted" ? "done" : "check"} className="size-3" />
