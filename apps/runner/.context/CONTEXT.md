@@ -217,9 +217,8 @@ the server's `retry-after`), 5xx or dropped connection. `model-retry.ts` wraps e
 treats as final (about half of all calls on 2026-10-28), when the call failed before streaming
 any content: backoff from 1 s doubling to a 30 s cap, until 4 minutes have passed since the first
 attempt (Pi's own tries count against it; an attempt in flight is not cut short), each retry
-logged with its role and attempt. The run's abort ends the
-wait. Any other error, or the spent budget, ends the call. `provider-error.ts` holds the one error classification (retry and redo):
-it reads the status in the text (Pi's `<provider> API error (<status>)`, or the Anthropic SDK's
+logged with its role and attempt. The run's abort ends the wait. Any other error, or the spent budget, ends the call.
+`provider-error.ts` holds the one error classification (retry and redo): it reads the status in the text (Pi's `<provider> API error (<status>)`, or the Anthropic SDK's
 `<status> {...}`, `<status> <html>` or `<status> status code (no body)`) and, for an Anthropic error sent mid-stream
 with no status, its documented `error.type` (`overloaded_error` is 529, `rate_limit_error` 429).
 
@@ -313,7 +312,8 @@ set, forces every alias to one model. Each configured alias's provider key is re
 visitor run uses `RUNNER_VISITOR_MODEL` for every role except `main` on a visitor-safe model.
 
 A role's thinking level is its role file's `thinking` key, else `RUNNER_THINKING` (one of Pi's
-levels), else none (`"off"`). `run.ts` passes it as the role's `thinkingLevel`, which `start-thread.ts` sets
+levels), else none (`"off"`). With `RUNNER_MODEL` set (every role forced onto one model, a plumbing
+check), the role files' levels are ignored and `RUNNER_THINKING` alone applies (`config.modelForced`). `run.ts` passes it as the role's `thinkingLevel`, which `start-thread.ts` sets
 as the Pi agent's `initialState.thinkingLevel`, so Pi sends it as `reasoning` and records it on each
 History message. Pi clamps an unsupported level silently, so two checks refuse one: `main.ts` at boot
 checks `RUNNER_THINKING` against every alias; `run.ts` at run start checks each

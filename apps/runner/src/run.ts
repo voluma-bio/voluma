@@ -409,7 +409,7 @@ async function claimBody(
             apiKey: keyFor(m.provider),
             maxRetries: MODEL_RETRIES,
           }),
-        (m, attempt, delayMs, error) => {
+        (attempt, delayMs, error) => {
           log(
             `${role} model call failed (${error}); retry ${attempt} in ${Math.round(delayMs / 1000)}s`,
           );
