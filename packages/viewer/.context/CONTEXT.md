@@ -43,6 +43,13 @@ GridViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
   `--check-outline`; `point` starts the crosshair (`GridViewer`'s `point` prop) on the focus point,
   box, mask or ruler, and `locate` finds labels with no point from their coarsest level. Used by
   `packages/check-panel`; `grid-page.tsx` can build its scene the same way.
+- **Marks.** With `marking`, a left click on a slice marks a voxel (and moves the crosshair to it)
+  and a left drag marks a box; `onMark` gets grid voxels `[z, y, x]` (`GridMark`). A box spans the
+  dragged slice's two axes and, across the held axis, the smaller dragged side in mm, centred on
+  the slice. The caller owns the list and passes it back as `marks`: a dot on every slice through
+  a point, a box's outline on every slice it spans, a sphere or box edges in 3D, all in `--mark`.
+- **Snapshot.** `ref` → `snapshot(maxBytes)`: each visible pane renders and is copied in the same
+  task (WebGL buffers aren't preserved), composed as on screen into one PNG, shrunk until it fits.
 
 Correctness evidence: `compose.test.ts` pins where a cropped, downsampled overlay lands; worker
 planes matched `labels.npy` of OA6-1RK exactly on all three axes ([#188](https://github.com/voluma-bio/voluma/pull/188)).
