@@ -254,6 +254,7 @@ export function world(o: WorldOptions) {
 
   const role = (p: typeof mainP, tools: string[]) => () => ({
     model: p.getModel(),
+    thinkingLevel: "off" as const,
     streamFn: models.streamSimple.bind(models) as never,
     systemPrompt: "faux",
     tools,
