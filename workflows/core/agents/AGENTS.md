@@ -39,7 +39,6 @@ after it.
   every `submit_task` and is never listed. A role that holds `start_worker` must list `worker` (the loader refuses it otherwise).
 - `skills`: optional; the skills named in the role's prompt. Default: the workflow's whole skill list,
   the workflow's own skill first.
-- `status: planned`: nothing uses the role yet, so its tools are not checked against the registry.
 
 Any other key fails the load.
 

@@ -40,8 +40,6 @@ export interface AgentDefinition {
   subagents: string[];
   /** The skills named in the role's prompt: names of the workflow's `skills`, its own first. */
   skills: string[];
-  /** `planned`: nothing uses the role yet, so its tools are not checked against the registry. */
-  planned: boolean;
   /** The role's job: the file after its frontmatter, trimmed. */
   body: string;
 }
