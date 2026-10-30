@@ -305,7 +305,8 @@ function Values({ task, before }: { task: ReviewTask; before?: ReviewTask }) {
         name: m.title ?? m.id,
         value: shown(m),
         unit: m.unit === "1" ? "" : m.unit,
-        was: was && was.value !== m.value ? shown(was) : undefined,
+        // Compared as shown: a change past the shown digits isn't one the reader can see.
+        was: was && shown(was) !== shown(m) ? shown(was) : undefined,
       };
     }),
     ...task.scores.map((s) => {
