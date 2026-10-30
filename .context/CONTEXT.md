@@ -316,8 +316,7 @@ No synthetic measurements or simulated services are mounted.
 contract. Reports, revision selection and command UI remain available for the
 real adapter; until it exists the workspace shows explicit empty states. Shared
 contracts and API client are unchanged from main. Report/viewer splits retain
-react-resizable-panels to preserve the verified nested maximize/restore behavior;
-the unrelated shared `SplitPanel` API remains unchanged.
+react-resizable-panels to preserve the verified nested maximize/restore behavior.
 
 Local DICOM intake and rendering work without the API. They do not populate
 analysis results or create server runs. The [Review specification][review-spec]
