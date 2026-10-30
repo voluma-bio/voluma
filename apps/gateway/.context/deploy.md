@@ -31,7 +31,7 @@ called, and the masks are not results.
   The same quiet stream straight to the stub's Modal tunnel (from outside) ran its 1680 s to a
   clean 200, so the cut is Railway's edge, not Modal or the stub. A call past 15 minutes cannot
   finish through Railway, whatever `MAX_CALL_MS` says; a call whose reply goes quiet for 5 minutes
-  is cut too. A cut row was then charged its reservation ($3), and the run read's cost went from $0.13 to
+  is cut too. At the time a cut row was charged its reservation ($3; reservations are gone now), and the run read's cost went from $0.13 to
   $15.14 with five cut calls.
 - **Host from the sandbox:** the gateway domain with `Host:` set to the API reaches the API from a
   worker sandbox. `/health` answered the API's `ok`, and `POST /api/auth/guest` minted a guest

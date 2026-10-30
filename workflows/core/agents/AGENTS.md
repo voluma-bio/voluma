@@ -11,7 +11,6 @@ task read) and its examples of work done right.
 | `main.md` | Coordinates the run: plans it, starts a worker per task, routes the checkers' questions, decides what is fixed, accepted or skipped |
 | `worker.md` | Does one task in its sandbox and leaves the files, views and numbers it is judged by |
 | `checker.md` | Inspects one submitted task from its files, blind to the worker's reasoning, and gives one verdict |
-| `review-chat.md` | Answers the researcher about a finished run from its record (`status: planned`, used by nothing yet) |
 
 Every `.md` here except `AGENTS.md` is parsed as a role file; `main.md`, `worker.md` and `checker.md`
 are required. A stray `README.md`, or a draft without frontmatter, fails every run's load. A run
@@ -40,7 +39,6 @@ after it.
   every `submit_task` and is never listed. A role that holds `start_worker` must list `worker` (the loader refuses it otherwise).
 - `skills`: optional; the skills named in the role's prompt. Default: the workflow's whole skill list,
   the workflow's own skill first.
-- `status: planned`: nothing uses the role yet, so its tools are not checked against the registry.
 
 Any other key fails the load.
 

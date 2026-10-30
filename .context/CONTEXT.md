@@ -10,16 +10,16 @@ apps/web        React + Vite. shell/ mounts routes and the `AppShell` frame (one
 apps/api        Node server on Postgres (Drizzle), each domain a Hono app. src/index.ts is the
                 composition root: the only code that reads env; it builds the adapters and
                 mounts domains/run at /api/run/ (runs, the queue, the event log) and domains/review at
-                /api/review/ (review data, chat threads, corrections) with app.route. A
+                /api/review/ (review data, corrections) with app.route. A
                 domain's tables and Postgres adapters live in the domain; adapters/ is for
                 shared ports
                 Sign-in: see Authentication
 apps/runner     The runner service: claims runs from the API and runs the run loop on each (Run lane)
 packages/
-  contracts     zod schemas for the four contracts and the shared formats
+  contracts     zod schemas for the four contracts and the shared formats; the fold (a row per plan task, stale-task graph)
   harness       the agent harness: our tools, the Sandbox and EventLog ports, the Pi
                 adapter; runtime-neutral (no Node types)
-  workflow      a workflow skill directory: snapshot it into the run's R2 prefix and read it (`load.ts`), build the plan from the selected outputs (`plan.ts`), task graph, stale tasks
+  workflow      a workflow skill directory: snapshot it into the run's R2 prefix and read it (`load.ts`), build the plan from the selected outputs (`plan.ts`)
   api-client    typed commands and event stream; the only way web features reach the API
   viewer        the grid viewer (three.js, zarr in a worker) and the grid a review task is shown on
   ui            shared React components, styled from tokens
@@ -38,7 +38,7 @@ The agent loop is Pi's (`@earendil-works/pi-agent-core`), used as it comes;
 we add our own pieces only when a real run needs them. The agent runs
 outside the sandbox, so credentials never enter it. A run is a tree of
 threads: a supervisor (the root, code), the main agent, workers (one per task),
-check threads, and review chat threads.
+and check threads.
 - **Event log.** Ours, kept separately from Pi's history: the `threads` and
   `events` tables in Postgres, behind the run domain's API. Each event is saved
   before it is published, and `seq` (per run) is the stream cursor. Both the
@@ -51,7 +51,7 @@ check threads, and review chat threads.
   workflow and the inputs read-only, the run's scratch and outputs read-write. Each
   mount gets its own temporary R2 credential, limited to its prefix and the sandbox's
   lifetime, minted from `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_BUCKET` and `CLOUDFLARE_API_TOKEN`; the credentials never enter
-  the sandbox. Inputs flagged `stage` are copied to local disk at their mount path at create (a cold
+  the sandbox. Inputs are copied to local disk at their mount path at create for the threads of a task whose `tasks.json` entry sets `copyInputs` (decisions 2026-10-30) (a cold
   mounted read of the scan is slow; see the POC in the docs repo, `research/modal-poc.md`);
   the bucket is mounted privately for the copy. Each sandbox gets a fresh name (Modal
   names are unique among running sandboxes, so a sandbox a dead runner left behind
@@ -70,7 +70,7 @@ check threads, and review chat threads.
   nothing more is stored, so the history is always an exact prefix. Tool calls and results
   go through the run's `recorder` (`src/recorder.ts`): a background queue in emission
   order whose failures never end a thread (events are retried). Live tool output
-  (`ToolContext.output`) goes nowhere until the stream hub (PR F). `startThread({prompt, input?})`: a new thread sends
+  (`ToolContext.output`) streams as live frames (`bash.ts`). `startThread({prompt, input?})`: a new thread sends
   the prompt; a thread with history sends `input`, or continues if there is none. On
   resume it answers every tool call without a result (appended, never editing history)
   and fails if the stored system message differs from the current prompt and tools. `apps/runner` wires it (see "The runner service" below).
@@ -84,8 +84,8 @@ check threads, and review chat threads.
   for it) and answers false once it ended.
   `threads.ts` is the run's registry of what is running in this process (start or resume a
   thread, `send`, `abort`, wait for one to go idle) and holds no run state. Thread ids are
-  unique across runs (History is keyed by the thread id alone) and follow
-  `@voluma/contracts/ids`: the root is `<runId>.supervisor`, the main agent `<runId>.main`,
+  unique across runs (History is keyed by the thread id alone) and are built by
+  `packages/harness/src/thread-id.ts`: the root is `<runId>.supervisor`, the main agent `<runId>.main`,
   the others `<runId>.<taskId>.<role>` (plus `.<n>` for the n-th), where n is how many the log
   has started for that thread, so a restart never reuses a thread. `thread.started` carries the task id
   for a worker or check thread.
