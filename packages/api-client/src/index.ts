@@ -511,7 +511,7 @@ export function subscribe(
       }
     });
   }
-  // The run ended and every event has been sent; closing here skips the reconnect for a 204.
+  // The run ended and every event has been sent; closing here skips the reconnect.
   source.addEventListener(END_EVENT, () => {
     source.close();
     handlers.onClosed?.();

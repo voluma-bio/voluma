@@ -400,7 +400,7 @@ export function runView(
   const spent = spend(events, providerCalls);
   const hasLead = threads.some((t) => t.kind === "main");
   // No plan until the run's first `revision.started`.
-  const latest = reviewState(events).revisions.at(-1);
+  const latest = reviewState(events, { live: true }).revisions.at(-1);
   if (!latest)
     return {
       threads,

@@ -168,19 +168,26 @@ function personLine(n: Extract<Notice, { kind: "person" }>): string {
       ? `the voxel ${POINT_AXES} = [${m.point.join(", ")}]`
       : `the box ${POINT_AXES} from [${m.box?.min.join(", ")}] to [${m.box?.max.join(", ")}] (inclusive)`;
     lines.push(
-      `  Marked ${where} of volume ${m.volumeId}${m.file ? ` (file ${m.file}; open it with bash or read_file)` : ""}.`,
+      `  Marked ${where} of volume ${m.volumeId}${m.file ? ` (file ${m.file}: a binary array, which \`read_file\` cannot open; you have no tool for it, so work from the marked position, the task's evidence and their view image)` : ""}.`,
     );
   }
   if (n.snapshot) {
     lines.push(`  Their view of it is the image ${n.snapshot}: open it with view_image.`);
   }
-  lines.push(
-    n.go === "cancelled"
-      ? `  They said go on ${n.taskId}, but that correction was cancelled or failed before you could act on it: its go is void. Start no work for it. Answer them with \`reply\`.`
-      : n.go
+  const goOn = n.go ? ` They said go on ${n.taskId}.` : "";
+  if (n.closed === "abandoned") {
+    lines.push(
+      `  That correction was cancelled or failed before you could act on it, so the message is withdrawn.${n.go ? ` Its go on ${n.taskId} is void.` : ""} Do not answer it and start no work for it.`,
+    );
+  } else if (n.closed === "finished") {
+    lines.push(`  That correction finished.${goOn}`);
+  } else {
+    lines.push(
+      n.go
         ? `  They said go on ${n.taskId}: you may now redo it. Send its worker feedback with \`message\` (it opens a new attempt; a worker that was stopped takes \`start_worker\` instead), say in \`reply\` what you are doing, and finish the run once the new attempt is checked and the tasks that build on it are done.`
         : "  Answer them with `reply`. They have not said go, so start no work.",
-  );
+    );
+  }
   return lines.join("\n");
 }
 
@@ -278,6 +285,22 @@ function carriedNotices(d: ThreadLog, view: Folded): Notice[] {
       : d.undelivered.includes(n) ||
         (!!n.taskId && rejected.has(n.taskId) && latestResult.get(n.taskId) === n),
   );
+}
+
+/**
+ * What a main agent that starts inside a correction is told first: the run had finished, so
+ * the tasks below are done and these are its results, which answer the researcher's question
+ * (their message comes with the state block). Only the values are listed; the text files are
+ * read with `read_file` (main has no shell, and `.npy` volumes are binary).
+ */
+export function finishedRunText(view: Folded): string {
+  const lines = view.tasks.flatMap((t) => [
+    ...t.measurements.map(
+      (m) => `- ${m.id}: ${m.value === null ? "no value" : `${m.value} ${m.unit}`}`,
+    ),
+    ...t.scores.map((c) => `- ${c.id}: level "${c.level}"`),
+  ]);
+  return `The run had already finished before the researcher wrote to you. Its tasks are done (see the table below) and their results are the current ones; nothing is being redone unless the researcher said go. Their message is quoted below under "Still open, or not yet told to you": read it and answer it with \`reply\`, from these results when it asks about them. The files are in /outputs/<task id>/ (\`read_file\` opens the text ones; \`.npy\` volumes are binary and it cannot); the values reported:\n${lines.length ? lines.join("\n") : "(none)"}`;
 }
 
 /** The full state block: `main.<n>`'s first message and a liveness nudge carry it. */

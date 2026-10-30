@@ -26,6 +26,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { By } from "@voluma/contracts/events";
 import {
   checkResult,
+  corrections,
   type Folded,
   type FoldedTask,
   fold,
@@ -43,6 +44,7 @@ import {
   cutOffText,
   deliveryText,
   feedbackText,
+  finishedRunText,
   fixLimitReason,
   interruptedResult,
   livenessNudge,
@@ -193,11 +195,17 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
   };
 
   function mainFirstMessage(view: Folded, n: number, d: ThreadLog) {
-    if (n === 1) return { prompt: o.briefs.main(view) };
-    return {
-      prompt: o.briefs.mainRestart(view, stateBlock(d, view, stateOf)),
-      promptCovers: recorder.events().at(-1)?.id,
-    };
+    // A main that starts when the open correction's message is still unread (a fresh `main.<n>`,
+    // or the first main of a run made before corrections) was never told the run had finished.
+    const message = corrections(recorder.events()).open?.message;
+    const inCorrection = d.undelivered.some((u) => u.kind === "person" && u.eventId === message);
+    const covers = { promptCovers: recorder.events().at(-1)?.id };
+    if (n === 1 && !inCorrection) return { prompt: o.briefs.main(view) };
+    const state = stateBlock(d, view, stateOf);
+    if (!inCorrection) return { prompt: o.briefs.mainRestart(view, state), ...covers };
+    const brief =
+      n === 1 ? `${o.briefs.main(view)}\n\n${state}` : o.briefs.mainRestart(view, state);
+    return { prompt: `${finishedRunText(view)}\n\n${brief}`, ...covers };
   }
 
   /** The start options for a thread; `prompt` is its first message, which a resumed thread uses only if it never stored one. */
@@ -550,8 +558,9 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
    * depends on the task.
    */
   async function markGo(d: ThreadLog): Promise<boolean> {
+    const open = corrections(recorder.events()).open;
     for (const n of d.undelivered) {
-      if (n.kind !== "person" || n.go !== "live" || !n.taskId) continue;
+      if (n.kind !== "person" || !n.go || n.eventId !== open?.message || !n.taskId) continue;
       const id = goMarkerId(n.eventId);
       if (d.written.has(id)) continue;
       await recorder.append(
