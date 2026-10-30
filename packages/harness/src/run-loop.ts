@@ -555,6 +555,14 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       await startMain(d);
       return true;
     }
+    // A failed main (a context overflow) keeps the history that failed, so it is never resumed: a
+    // fresh one takes over, once. If that one fails too, so does the run.
+    if (m?.end?.status === "failed" && stateOf(m) === "idle") {
+      const mains = [...d.threads.values()].filter((r) => r.role === "main");
+      if (mains.at(-2)?.end?.status === "failed") throw new Error(fatalText(m, m.end.error ?? ""));
+      await startMain(d);
+      return true;
+    }
     if (!m || stateOf(m) !== "idle") return false;
     if (d.undelivered.length > 0) {
       const { text, covers } = delivery(d);

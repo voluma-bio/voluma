@@ -525,7 +525,13 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
       value.holders.set(t.id, worker);
     }
   }
-  value.undelivered = value.notices.filter((n) => !deliveries.some((d) => n.at <= d.at));
+  // A thread that has started again since it failed (resumed by the loop or by main) is not
+  // reported as failed.
+  value.undelivered = value.notices.filter(
+    (n) =>
+      !deliveries.some((d) => n.at <= d.at) &&
+      (n.kind !== "failed" || value.threads.get(n.threadId)?.end?.status === "failed"),
+  );
   value.unanswered = unanswered;
   value.correcting = open !== undefined && !open.claimEnded;
   value.reopenPending = open !== undefined && claimAt < open.reopened;

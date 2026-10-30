@@ -61,11 +61,15 @@ const OUT_OF_MONEY =
  */
 export function providerFailure(message: string | undefined): "retry" | "fatal" | undefined {
   const m = message ?? "";
-  if (isContextOverflow({ stopReason: "error", errorMessage: m } as AssistantMessage)) return;
+  // Pi's catch-all overflow patterns also match 5xx bodies ("too many tokens in the batch").
+  const status = statusOf(m);
+  if (
+    (status === undefined || status === 400 || status === 413) &&
+    isContextOverflow({ stopReason: "error", errorMessage: m } as AssistantMessage)
+  )
+    return;
   if (isTransientProviderError(m)) return "retry";
-  return CONNECTION.test(m) || OUT_OF_MONEY.test(m) || (statusOf(m) ?? 0) >= 400
-    ? "fatal"
-    : undefined;
+  return CONNECTION.test(m) || OUT_OF_MONEY.test(m) || (status ?? 0) >= 400 ? "fatal" : undefined;
 }
 
 /** The subset a later call can succeed after: a timeout, a rate limit, a server or connection error. */

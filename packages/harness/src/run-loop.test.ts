@@ -1259,5 +1259,59 @@ describe("run loop", () => {
       );
       expect(of(w.stored, "thread.started", "main")).toHaveLength(1);
     });
+
+    const throwing = (n: number, message: string): Script => {
+      let calls = 0;
+      return (t) => {
+        if (++calls <= n) throw new Error(message);
+        return chain(["t1"])(t);
+      };
+    };
+    const retryOverloaded = (e: string) => (/overloaded/.test(e) ? "retry" : undefined);
+
+    it("resumes a thread that failed on a retryable error once; the run goes on", async () => {
+      const w = world({
+        plan: [task("t1")],
+        main: throwing(1, "overloaded"),
+        check: checker(),
+        providerError: retryOverloaded,
+      });
+      const folded = await w.run();
+      expect(folded.tasks.map((t) => `${t.id}:${t.status}`)).toEqual(["t1:done"]);
+      expect(ended(w.stored, "main")[0]).toBe("failed");
+    });
+
+    it("fails the run when the resumed thread fails on a retryable error again", async () => {
+      const w = world({
+        plan: [task("t1")],
+        main: throwing(2, "overloaded"),
+        check: checker(),
+        providerError: retryOverloaded,
+      });
+      await expect(w.run()).rejects.toThrow(
+        "the main agent failed on a model provider error: overloaded",
+      );
+    });
+
+    it("a main that failed is never resumed: a fresh main takes over once", async () => {
+      const w = world({
+        plan: [task("t1")],
+        main: throwing(1, "prompt is too long"),
+        check: checker(),
+      });
+      const folded = await w.run();
+      expect(folded.tasks.map((t) => `${t.id}:${t.status}`)).toEqual(["t1:done"]);
+      expect(of(w.stored, "thread.started", "main.2")).not.toHaveLength(0);
+
+      const again = world({
+        plan: [task("t1")],
+        main: throwing(2, "prompt is too long"),
+        check: checker(),
+      });
+      await expect(again.run()).rejects.toThrow(
+        "the main agent failed on a model provider error: prompt is too long",
+      );
+      expect(of(again.stored, "thread.started", "main.3")).toHaveLength(0);
+    });
   });
 });
