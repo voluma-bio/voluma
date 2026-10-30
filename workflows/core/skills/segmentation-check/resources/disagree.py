@@ -7,13 +7,15 @@ drawn for the `--render` largest regions: three side-by-side cuts, the CT alone,
 label colours of `visual-check` with a legend, and the region outlined in white and, inside it, each side's label in a strong
 tint, with the region's assignment printed on top. (Overlaid outlines of two near-identical segmentations cannot be told
 apart.) The panels cut the scan grid along axis 0 through the region's centre, or the oriented keyframe direction with
-`--frame`. Register each region you cannot settle as a labels volume output so a To check item can point at it
-(`focus.volumeId`, `focus.label` = the region id). Refuses volumes of different shapes.
+`--frame`. `--object-id` names the volume as the workflow declares it; report the record's `objects` entry every run,
+so a To check item can point at a region (`focus.volumeId` = that id, `focus.label` = the region id).
+Refuses volumes of different shapes.
 
 Writes: <out>/disagreement.npy  uint16 region id by rank, on the grid of --labels, with its sidecar
         <out>/regions.json  per region: id, voxels, volume_mm3, centre_zyx, bbox_zyx, your_labels and classic_labels (voxel counts per label)
         <out>/panel_<id>.jpg  the three-cut panel of each rendered region
-Prints: one JSON line {regions, disagreement, panels, flagged_voxels, flagged_pct_of_classic_bone, regions_over_floor, regions_total, top}; top is the 8 largest regions
+        <out>/result.json  with --object-id: {objects: {<id>: the labels volume entry for report_output}}
+Prints: one JSON line {regions, disagreement, panels, result and objects (with --object-id), flagged_voxels, flagged_pct_of_classic_bone, regions_over_floor, regions_total, top}; top is the 8 largest regions
 Example: python disagree.py --hu hu.npy --labels labels.npy --classic classic.npy --threshold-hu 2500 --out disagree/
 Exits 2 with one sentence on bad input, before writing anything.
 """
@@ -22,6 +24,7 @@ from pathlib import Path
 
 import frame as fr
 import numpy as np
+import objects as ob
 import viewlib as vl
 from scipy import ndimage as ndi
 
@@ -103,6 +106,7 @@ if __name__ == '__main__':
     ap.add_argument('--render', type=int, default=6, help='number of largest regions to draw a panel for')
     ap.add_argument('--window', metavar='lo,hi', help='display window in HU (default: automatic)')
     ap.add_argument('--names', help='label names, 1=femur,2=tibia or an anatomy.json')
+    ap.add_argument('--object-id', help='the output id the workflow declares for disagreement.npy as a labels volume: written to result.json as an objects entry for report_output')
     a = ap.parse_args()
     hu = np.load(a.hu, mmap_mode='r')
     labels = np.load(a.labels, mmap_mode='r')
@@ -110,6 +114,12 @@ if __name__ == '__main__':
     if not (hu.shape == labels.shape == classic.shape):
         sidecar.fail('hu, labels and classic must be on the same grid: map them to the scan first')
     sp = sidecar.grid(str(sidecar.sidecar_path(a.labels)))['spacing_zyx_mm']
+    if a.object_id:
+        scan = sidecar.grid(str(sidecar.sidecar_path(a.hu)))
+        if 'affine_xyz_to_world_mm' not in scan:
+            sidecar.fail(f'{sidecar.sidecar_path(a.hu)} has no affine_xyz_to_world_mm: --object-id needs the hu.json scan-intake wrote')
+        if sidecar.grid(str(sidecar.sidecar_path(a.labels)))['grid_id'] != scan['grid_id']:
+            sidecar.fail(f'{a.labels} is not on the scan grid of {a.hu}: map it to the scan first (to_scan.py)')
     vox = float(np.prod(sp))
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -145,7 +155,12 @@ if __name__ == '__main__':
         p = out / f'panel_{rg["id"]}.jpg'
         region_panel(hu, labels, classic, reg == rg['id'], rg, frame, window, p, names)
         panels.append(str(p))
-    sidecar.emit(regions=str(out / 'regions.json'), disagreement=str(out / 'disagreement.npy'), panels=panels,
+    extra = {}
+    if a.object_id:
+        entry = {a.object_id: ob.volume(out / 'disagreement.npy', sidecar.sidecar_path(a.hu), kind='labels')}
+        (out / 'result.json').write_text(json.dumps({'objects': entry}, indent=1) + '\n')
+        extra = {'result': str(out / 'result.json'), 'objects': entry}
+    sidecar.emit(**extra, regions=str(out / 'regions.json'), disagreement=str(out / 'disagreement.npy'), panels=panels,
                  flagged_voxels=int(f.sum()), flagged_pct_of_classic_bone=round(100 * float(f.sum()) / max(classic_bone, 1), 2),
                  regions_over_floor=len(regions), regions_total=int(n),
                  top=[{k: r[k] for k in ('id', 'volume_mm3', 'centre_zyx', 'your_labels', 'classic_labels')} for r in regions[:8]])
