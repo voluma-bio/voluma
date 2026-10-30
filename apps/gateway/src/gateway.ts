@@ -49,6 +49,13 @@ import { replyScanner } from "./scan.ts";
 const PEEK_BYTES = 4096;
 /** Upstream timeouts: SAM can be quiet for minutes on one call, so the 300 s default would cut it. */
 const UPSTREAM_TIMEOUT_MS = MAX_CALL_MS;
+
+/**
+ * Quiet time on an upstream event stream before the gateway writes a comment line to the client.
+ * Railway's edge cuts a response that sends no byte for 300 s (measured), and a SAM call can be
+ * quiet that long while Meta processes the video.
+ */
+const KEEPALIVE_MS = 60_000;
 /** Tries to write a call's end to the database before leaving the row for the stale sweep. */
 const SETTLE_ATTEMPTS = 3;
 
@@ -296,11 +303,37 @@ export function createGateway(deps: GatewayDeps) {
       if (matched.route.kind === "file-upload" && upstream.status < 400) fileId ??= fileIdOf(line);
     });
 
+    // Keepalive: only on an event stream, only after its headers (written above), and only where
+    // a comment cannot split an event. `tail` is the last bytes sent upstream's way: at a line
+    // start the comment is one line, at an event boundary its blank line is harmless, mid-line
+    // nothing is written (the next chunk re-arms the timer).
+    let tail = "\n\n";
+    let lastWrite = Date.now();
+    let timer: NodeJS.Timeout | undefined;
+    const keepalive = () => {
+      const wait = KEEPALIVE_MS - (Date.now() - lastWrite);
+      if (wait > 0) {
+        timer = setTimeout(keepalive, wait);
+        return;
+      }
+      if (tail.endsWith("\n") && !res.writableNeedDrain) {
+        res.write(/\n\r?\n$/.test(tail) ? ": keepalive\n\n" : ": keepalive\n");
+        lastWrite = Date.now();
+      }
+      timer = setTimeout(keepalive, KEEPALIVE_MS);
+    };
+    if (streamed) timer = setTimeout(keepalive, KEEPALIVE_MS);
+
     let complete = false;
     try {
       if (upstream.body) {
         for await (const chunk of upstream.body) {
           scan.push(chunk);
+          if (streamed)
+            tail = (
+              tail + Buffer.from(chunk).toString("latin1", Math.max(0, chunk.length - 3))
+            ).slice(-3);
+          lastWrite = Date.now();
           if (!res.write(chunk)) await once(res, "drain", { signal: abort.signal });
         }
       }
@@ -312,6 +345,7 @@ export function createGateway(deps: GatewayDeps) {
         log(`${id} ${provider} stream failed: ${error instanceof Error ? error.message : error}`);
       res.destroy();
     }
+    clearTimeout(timer);
 
     const ok = upstream.status < 400;
     const cost = !ok
