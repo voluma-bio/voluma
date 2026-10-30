@@ -375,9 +375,10 @@ the main role holds `bash`, which then backs up every span) copies the whole pre
 files before it reports anything, so claim start is the earliest point that precedes every
 writer) and records `outputs.backed-up`; the first claim after `correction.ended` clears
 `/outputs`, copies the backup back, checks that `/outputs` matches it (key and ETag per key, both
-sides `CopyObject` copies) and records `outputs.restored`. A restore needs `terminateOtherClaims`
-to have succeeded: a stale sandbox could write over the restored files, so otherwise the claim
-fails. A failed check throws too, and the next claim repeats the restore. The first claim of the
+sides `CopyObject` copies) and records `outputs.restored`. Before a restore the claim
+calls `awaitOtherClaimsGone`, which re-lists the run's sandboxes of other claims until none is
+live (up to 60 s): a stale sandbox could write over the restored files, so if some remain the
+claim fails. Only a pending restore waits; `terminateOtherClaims` at claim start does not. A failed check throws too, and the next claim repeats the restore. The first claim of the
 next `run.reopened` after a correction finished (no `correction.ended` before it) deletes its
 backup and records `outputs.discarded`. `correctionSpans` (`@voluma/contracts/fold`) is the one
 reader of where a span starts and how it closed (abandoned, finished or open). A thread that ended `cancelled` is never

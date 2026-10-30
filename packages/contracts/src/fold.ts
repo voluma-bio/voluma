@@ -215,10 +215,18 @@ export type CorrectionSpan = {
   from: number;
   /** Index of the `run.reopened` itself. */
   reopened: number;
-  /** Index where the span stops (exclusive): its `correction.ended`, else the next span's start, else the log's end. */
+  /**
+   * Index where the span stops (exclusive): its `correction.ended`, else the next span's start,
+   * else the log's end. Spans can overlap: a failed claim's unseen message sits before the
+   * `correction.ended` of the span before it, and the next span's `from` is that message.
+   */
   to: number;
-  /** A `person.message` with a go lies in the span. */
-  hasGo: boolean;
+  /**
+   * The go messages that belong to the span: each `person.message` with a go belongs to the
+   * latest span whose `from` is at or before it. Only the latest open span's gos grant work;
+   * any other go was cancelled or acted on already.
+   */
+  gos: { id: string; taskId: string }[];
   /**
    * `abandoned`: a `correction.ended` closed it. `finished`: the next `run.reopened` came with
    * no end between. `open`: the latest span, which a claim may still be running or have finished.
@@ -237,7 +245,7 @@ export function correctionSpans(events: readonly RunEvent[]): CorrectionSpan[] {
         from: keyed >= 0 ? Math.min(i, keyed) : i,
         reopened: i,
         to: events.length,
-        hasGo: false,
+        gos: [],
         closed: "open",
       });
     } else if (e.type === "correction.ended" && spans.length > 0) {
@@ -255,17 +263,22 @@ export function correctionSpans(events: readonly RunEvent[]): CorrectionSpan[] {
       span.to = Math.max(next.from, span.reopened);
       span.closed = "finished";
     }
-    span.hasGo = events
-      .slice(span.from, span.to)
-      .some((e) => e.type === "person.message" && e.payload.go);
+  }
+  for (const [i, e] of events.entries()) {
+    if (e.type !== "person.message" || !e.payload.go || !e.payload.taskId) continue;
+    const owner = spans.filter((s) => s.from <= i).at(-1);
+    owner?.gos.push({ id: e.id, taskId: e.payload.taskId });
   }
   return spans;
 }
 
-/** The ids of the task-state events inside abandoned spans (`correctionSpans`). */
-export function abandonedEvents(events: readonly RunEvent[]): Set<string> {
+/** The ids of the task-state events inside abandoned spans (`correctionSpans`, or the spans of `events` given). */
+export function abandonedEvents(
+  events: readonly RunEvent[],
+  spans: readonly CorrectionSpan[] = correctionSpans(events),
+): Set<string> {
   const abandoned = new Set<string>();
-  for (const span of correctionSpans(events)) {
+  for (const span of spans) {
     if (span.closed !== "abandoned") continue;
     for (const e of events.slice(span.reopened, span.to))
       if (TASK_STATE.has(e.type)) abandoned.add(e.id);

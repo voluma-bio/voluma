@@ -48,8 +48,8 @@ export interface SuperviseRunOptions {
   files: Files;
   /** The run's `/outputs` as a whole: backed up when a correction starts, put back when one ends unfinished (`outputs-backup.ts`). */
   outputs: Outputs;
-  /** An earlier claim's sandboxes are confirmed gone; a restore of `/outputs` waits for it (`outputs-backup.ts`). */
-  earlierClaimsEnded: boolean;
+  /** Resolves once no earlier claim's sandbox is live, throws if some are; awaited before a restore of `/outputs` (`outputs-backup.ts`). */
+  earlierClaimsEnded(signal: AbortSignal): Promise<void>;
   roles: { main: RoleOf; worker: RoleOf; check: RoleOf };
   briefs: Briefs;
   config?: Partial<LoopConfig>;

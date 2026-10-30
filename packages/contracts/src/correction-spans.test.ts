@@ -23,7 +23,11 @@ const rootEnds = (l: ReturnType<typeof log>, id: string) =>
 const ended = (l: ReturnType<typeof log>, id: string) =>
   l.add("correction.ended", `${person}:${id}:ended`, person, { status: "cancelled" });
 const view = (l: ReturnType<typeof log>) =>
-  correctionSpans(l.events).map((s) => [s.reopenId.split(":")[1], s.closed, s.hasGo]);
+  correctionSpans(l.events).map((s) => [
+    s.reopenId.split(":")[1],
+    s.closed,
+    s.gos.map((g) => g.id.split(":")[1]),
+  ]);
 
 describe("correctionSpans", () => {
   it("a cancel after the root's completed end still abandons the span", () => {
@@ -33,8 +37,8 @@ describe("correctionSpans", () => {
     ended(l, "m1");
     message(l, "m2", true);
     expect(view(l)).toEqual([
-      ["m1", "abandoned", true],
-      ["m2", "open", true],
+      ["m1", "abandoned", ["m1"]],
+      ["m2", "open", ["m2"]],
     ]);
   });
 
@@ -46,9 +50,9 @@ describe("correctionSpans", () => {
     ended(l, "m2");
     message(l, "m3", false);
     expect(view(l)).toEqual([
-      ["m1", "finished", false],
-      ["m2", "abandoned", true],
-      ["m3", "open", false],
+      ["m1", "finished", []],
+      ["m2", "abandoned", ["m2"]],
+      ["m3", "open", []],
     ]);
   });
 
@@ -61,22 +65,26 @@ describe("correctionSpans", () => {
     l.add("run.reopened", `${person}:m2:reopened`, person, { by: "u" });
     const spans = correctionSpans(l.events);
     expect(view(l)).toEqual([
-      ["m1", "finished", false],
-      ["m2", "open", true],
+      ["m1", "finished", []],
+      ["m2", "open", ["m2"]],
     ]);
     // The first span ends where the second starts, so it does not take the go.
     expect(spans[0]?.to).toBe(spans[1]?.from);
   });
 
-  it("a failed claim followed by a requeue: the end closes only its own span", () => {
+  it("a failed claim's unseen message opens the next span; the go before it stays in the first", () => {
     const l = log();
     message(l, "m1", true);
+    // The claim read m1 only; m2 arrived during it, then the claim failed and the server ended m1.
+    message(l, "m2", true, false);
     ended(l, "m1");
-    message(l, "m2", false, false);
     l.add("run.reopened", `${person}:m2:reopened`, person, { by: "u" });
+    const spans = correctionSpans(l.events);
     expect(view(l)).toEqual([
-      ["m1", "abandoned", true],
-      ["m2", "open", false],
+      ["m1", "abandoned", ["m1"]],
+      ["m2", "open", ["m2"]],
     ]);
+    // The spans overlap: m2 lies before m1's end.
+    expect(spans[1]?.from).toBeLessThan(spans[0]?.to ?? 0);
   });
 });

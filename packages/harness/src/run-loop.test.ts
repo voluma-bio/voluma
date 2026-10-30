@@ -1272,6 +1272,36 @@ describe("run loop", () => {
       expect(errors(w.stored), w.text()).toEqual([]);
     });
 
+    it("a go cancelled before main acted grants nothing to the next correction", async () => {
+      const script: Script = (t) => {
+        if (!talking(t)) return undefined;
+        if (wrote(t)) return call("reply", { text: "t1 is thin." });
+        return sentReply(t) ? call("finish_run", { summary: "Answered." }) : undefined;
+      };
+      let armed = false;
+      const w = world({
+        plan: T1,
+        main: first(script, chain(["t1", "t2"])),
+        cancelAfter: (e) => armed && e.type === "claim.started",
+      });
+      await w.run();
+      armed = true;
+      await w.send({ text: "Redo it.", go: true, taskId: "t1" });
+      armed = false;
+      const before = w.stored.length;
+      await w.send({ text: "Why is t1 thin?" });
+      const after = w.stored.slice(before);
+      expect(after.filter((e) => e.type === "revision.started")).toEqual([]);
+      expect(of(after, "attempt.opened")).toEqual([]);
+      expect(ended(w.stored, "supervisor").at(-1)).toBe("completed");
+      // The new main is told the cancelled go is void and that the correction was discarded.
+      const told = after.flatMap((e) =>
+        e.type === "message" && e.payload.role === "user" ? [e.payload.text] : [],
+      );
+      expect(told.join("\n")).toMatch(/The correction of t1 was cancelled/);
+      expect(errors(after), w.text()).toEqual([]);
+    });
+
     it("a go that arrived mid-claim is answered by the next claim, which does the attempt", async () => {
       const goTold = (t: Turn) => t.users.some((u) => /They said go/.test(u));
       let step = 0; // the second question: reply, reply, wait, finish after the liveness nudge

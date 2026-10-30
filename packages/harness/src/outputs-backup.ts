@@ -13,9 +13,10 @@
  * At the start of a claim, before any thread or sandbox exists:
  * 1. For each abandoned span (`correction.ended`) with a backup (`outputs.backed-up`) and no
  *    `outputs.restored`: `restore` the backup (the port checks `/outputs` matches it), then
- *    record `outputs.restored`. Cut off before the event, the next claim repeats it. A restore
- *    needs the earlier claim's sandboxes confirmed gone (`earlierClaimsEnded`): a stale sandbox
- *    could write over the restored files, so the claim fails instead.
+ *    record `outputs.restored`. Cut off before the event, the next claim repeats it. Before a
+ *    restore, `earlierClaimsEnded` waits until no earlier claim's sandbox is live (one could
+ *    write over the restored files) and throws if some still are, which fails the claim. Only
+ *    a pending restore waits.
  * 2. For each finished span (the next `run.reopened` came with no end) whose backup is neither
  *    restored nor discarded: `discard` it and record `outputs.discarded`.
  * 3. If the latest span is open, needs a backup and has none: `backup` and record
@@ -38,8 +39,8 @@ export async function keepOutputs(o: {
   outputs: Outputs;
   /** The main role holds `bash`, so it can write `/outputs` with no go. */
   mainWorks: boolean;
-  /** An earlier claim's sandboxes are confirmed gone (`terminateOtherClaims` succeeded). */
-  earlierClaimsEnded: boolean;
+  /** Resolves once no earlier claim's sandbox is live; throws if some are (`awaitOtherClaimsGone`). */
+  earlierClaimsEnded(signal: AbortSignal): Promise<void>;
   signal: AbortSignal;
 }): Promise<void> {
   const { runId, rootThreadId, recorder, outputs, signal } = o;
@@ -55,10 +56,7 @@ export async function keepOutputs(o: {
   for (const span of correctionSpans(events)) {
     const { reopenId } = span;
     if (span.closed === "abandoned" && backedUp.has(reopenId) && !done.has(reopenId)) {
-      if (!o.earlierClaimsEnded)
-        throw new Error(
-          "cannot put /outputs back: an earlier claim's sandboxes are not confirmed ended, and one could still write files",
-        );
+      await o.earlierClaimsEnded(signal);
       await outputs.restore(runId, reopenId, signal);
       await recorder.append(rootThreadId, "outputs.restored", { reopenId }, `${reopenId}:restored`);
     } else if (span.closed === "finished" && backedUp.has(reopenId) && !done.has(reopenId)) {
@@ -69,7 +67,11 @@ export async function keepOutputs(o: {
         { reopenId },
         `${reopenId}:discarded`,
       );
-    } else if (span.closed === "open" && !backedUp.has(reopenId) && (span.hasGo || o.mainWorks)) {
+    } else if (
+      span.closed === "open" &&
+      !backedUp.has(reopenId) &&
+      (span.gos.length > 0 || o.mainWorks)
+    ) {
       await outputs.backup(runId, reopenId, signal);
       await recorder.append(
         rootThreadId,

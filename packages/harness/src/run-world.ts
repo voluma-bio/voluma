@@ -16,7 +16,7 @@ import {
   fauxToolCall,
 } from "@earendil-works/pi-ai";
 import type { RunEvent } from "@voluma/contracts/events";
-import type { Folded } from "@voluma/contracts/fold";
+import { correctionSpans, type Folded } from "@voluma/contracts/fold";
 import { cancelEnds } from "@voluma/contracts/threads";
 import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
 import { runLayout } from "./layout";
@@ -299,12 +299,12 @@ export function world(o: WorldOptions) {
           stored.push({ ...ended, seq: stored.length + 1 } as unknown as RunEvent);
         }
         // A cancel inside a correction also records how it ended (`correction.ended`).
-        const reopened = stored.filter((s) => s.type === "run.reopened").at(-1);
-        if (reopened) {
+        const open = correctionSpans(stored).at(-1);
+        if (open?.closed === "open") {
           stored.push({
-            id: reopened.id.replace(/:reopened$/, ":ended"),
+            id: open.reopenId.replace(/:reopened$/, ":ended"),
             runId: RUN,
-            threadId: reopened.threadId,
+            threadId: `${RUN}.person`,
             seq: stored.length + 1,
             type: "correction.ended",
             payload: { status: "cancelled" },
@@ -373,7 +373,7 @@ export function world(o: WorldOptions) {
         },
         write: async () => {},
       },
-      earlierClaimsEnded: true,
+      earlierClaimsEnded: async () => {},
       outputs: {
         backup: async () => {},
         restore: async () => {},

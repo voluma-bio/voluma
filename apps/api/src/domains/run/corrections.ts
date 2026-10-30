@@ -72,9 +72,9 @@ export async function reopen(tx: Tx, runId: string, messageEventId: string, by: 
 }
 
 /**
- * The id of the run's open correction's `run.reopened`, or null: the latest span of
- * `correctionSpans` is open (no `correction.ended` after the latest reopen). A run is in a
- * correction exactly then.
+ * The id of the `run.reopened` of the latest correction span, if that span is still open
+ * (`correctionSpans`): no `correction.ended` after it. A correction that finished leaves its
+ * span open while the run is `ended`, so a caller asks this only of a queued or running run.
  */
 export async function openCorrection(tx: Tx, runId: string): Promise<string | null> {
   const rows = await tx
@@ -102,46 +102,35 @@ export async function endCorrection(
 }
 
 /**
- * The task of a go in the run's current reopen whose redo has not begun (no attempt of it after
- * the go), if any. One go at a time: the harness acts on one task per reopen. The window starts
- * at the latest `run.reopened` or at the message that reopen is keyed to, whichever is earlier:
- * a requeue stores its `run.reopened` after the unseen message, and a go in that message is
- * still undelivered.
+ * The task of a go in the latest open span (`correctionSpans`) whose redo has not begun (no
+ * attempt of it after the go), if any. One go at a time: the harness acts on one task per
+ * reopen. A go of an abandoned span was cancelled and grants nothing.
  */
 async function pendingGo(tx: Tx, runId: string): Promise<string | undefined> {
-  const [reopened] = await tx
-    .select({ id: events.id, seq: events.seq })
-    .from(events)
-    .where(and(eq(events.runId, runId), eq(events.type, "run.reopened")))
-    .orderBy(desc(events.seq))
-    .limit(1);
-  if (!reopened) return undefined;
-  const [keyed] = await tx
-    .select({ seq: events.seq })
-    .from(events)
-    .where(and(eq(events.runId, runId), eq(events.id, reopened.id.replace(/:reopened$/, ""))));
-  const from = Math.min(reopened.seq, keyed?.seq ?? reopened.seq);
-  const since = await tx
+  const rows = await tx
     .select()
     .from(events)
     .where(
       and(
         eq(events.runId, runId),
-        inArray(events.type, ["person.message", "attempt.opened"]),
-        gte(events.seq, from),
+        inArray(events.type, [
+          "run.reopened",
+          "correction.ended",
+          "person.message",
+          "attempt.opened",
+        ]),
       ),
     )
     .orderBy(asc(events.seq));
-  const log = since.map(toRunEvent);
-  for (const [i, e] of log.entries()) {
-    if (e.type !== "person.message" || !e.payload.go || !e.payload.taskId) continue;
-    const { taskId } = e.payload;
-    const redone = log
-      .slice(i + 1)
-      .some((later) => later.type === "attempt.opened" && later.payload.taskId === taskId);
-    if (!redone) return taskId;
-  }
-  return undefined;
+  const log = rows.map(toRunEvent);
+  const latest = correctionSpans(log).at(-1);
+  if (latest?.closed !== "open") return undefined;
+  return latest.gos.find((go) => {
+    const at = log.findIndex((e) => e.id === go.id);
+    return !log
+      .slice(at + 1)
+      .some((e) => e.type === "attempt.opened" && e.payload.taskId === go.taskId);
+  })?.taskId;
 }
 
 /**
@@ -249,7 +238,7 @@ export async function decideMessage(
       await usage(tx, reader.labId, { userId, credentials: run.credentials }),
       run,
     );
-    if (refused) return refuse(refused === "per-caller" ? 409 : 429, refusalMessage[refused]);
+    if (refused) return refuse(409, refusalMessage[refused]);
   }
   if (!write) return { ok: { eventId, state: await stateNow(), duplicate: false } };
 

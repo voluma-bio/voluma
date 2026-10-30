@@ -41,7 +41,7 @@
  * same thread, id `<runId>.person:<id>`.
  *
  * Go. `go` requires `taskId`. When the loop's log shows a `go` the main agent has not been told
- * of, it writes `revision.started {reason: "correction", taskId}` (id `<runId>.person:<id>:go:<the latest run.reopened's id>`)
+ * of, it writes `revision.started {reason: "correction", taskId}` (id `<runId>.person:<id>:go:<the latest run.reopened's id>`; only a go in the latest open correction span gets one, see `correctionSpans`)
  * and then tells main; that marker, not the message, opens the gate. Code refuses `message`,
  * `start_worker`, `change_plan` and `stop_worker` until a marker exists since the latest
  * `run.reopened`. A go that arrived before a requeue's `run.reopened`, or whose marker an earlier

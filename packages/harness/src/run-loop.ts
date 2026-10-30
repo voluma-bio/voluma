@@ -546,7 +546,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
    */
   async function markGo(d: ThreadLog): Promise<boolean> {
     for (const n of d.undelivered) {
-      if (n.kind !== "person" || !n.go || !n.taskId) continue;
+      if (n.kind !== "person" || n.go !== "live" || !n.taskId) continue;
       if (!d.reopenId) continue;
       const id = goMarkerId(n.eventId, d.reopenId);
       if (d.written.has(id)) continue;

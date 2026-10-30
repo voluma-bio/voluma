@@ -12,7 +12,7 @@
  * no end and it is not running). A stop appends the end first, so the log shows it at once.
  */
 import type { RunEvent } from "@voluma/contracts/events";
-import { abandonedEvents, type Folded, fold } from "@voluma/contracts/fold";
+import { abandonedEvents, correctionSpans, type Folded, fold } from "@voluma/contracts/fold";
 import type { EvidenceRef } from "@voluma/contracts/output";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { UserSender } from "./adapters/pi/start-thread";
@@ -108,6 +108,11 @@ export type Notice = {
   /** The loop stopped a thread the main agent did not ask to stop; `reason` says why. */
   | { kind: "stopped"; reason: string }
   /**
+   * A correction ended unfinished (`correction.ended`): its task-state events and the files it
+   * wrote are discarded. `taskIds` are the tasks of the gos it held.
+   */
+  | { kind: "correction-ended"; taskIds: string[]; status: "failed" | "cancelled"; error?: string }
+  /**
    * The researcher wrote (`person.message`); `eventId` is the message's. A mark names a volume
    * block (`<taskId>/<outputId>`); `file` is that output's sandbox path, when the log has it.
    * `snapshot` is the sandbox path of the view snapshot.
@@ -122,7 +127,8 @@ export type Notice = {
         box?: { min: number[]; max: number[] };
       }[];
       snapshot?: string;
-      go: boolean;
+      /** A go: `live` when it lies in the open correction, `cancelled` when its correction ended unfinished. */
+      go?: "live" | "cancelled";
       /** The message's `seq`: a delivery covers it only if its claim had read that far (`readSeq`). */
       seq: number;
     }
@@ -288,7 +294,11 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
   >(); // by attempt
   const notice = (n: NoticeBody, at: number) => value.notices.push({ ...n, at } as Notice);
   // The task-state events of a failed or cancelled correction never happened, as `fold` has it.
-  const abandoned = abandonedEvents(events);
+  const spans = correctionSpans(events);
+  const abandoned = abandonedEvents(events, spans);
+  // A go grants work only inside the latest open span; a go of an abandoned span was cancelled.
+  const latest = spans.at(-1);
+  const liveGos = new Set(latest?.closed === "open" ? latest.gos.map((g) => g.id) : []);
   for (const [at, e] of events.entries()) {
     value.written.set(e.id, {
       at,
@@ -305,6 +315,21 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         value.reopenPending = false;
         horizon = e.payload.readSeq ?? Number.POSITIVE_INFINITY;
         break;
+      case "correction.ended": {
+        const span = spans.find((s) => s.to === at && s.closed === "abandoned");
+        notice(
+          {
+            eventId: e.id,
+            threadId: e.threadId,
+            kind: "correction-ended",
+            taskIds: span?.gos.map((g) => g.taskId) ?? [],
+            status: e.payload.status,
+            ...(e.payload.error !== undefined && { error: e.payload.error }),
+          },
+          at,
+        );
+        break;
+      }
       case "run.reopened":
         value.root.ended = false;
         value.correcting = true;
@@ -315,7 +340,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
       case "person.message": {
         const { text, marks, snapshotKey, go, taskId } = e.payload;
         unreplied.push(e.seq);
-        if (go && taskId) goTasks.set(e.id, { taskId, messageId: e.id });
+        if (go && taskId && liveGos.has(e.id)) goTasks.set(e.id, { taskId, messageId: e.id });
         notice(
           {
             eventId: e.id,
@@ -329,7 +354,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
               ...(m.box && { box: m.box }),
             })),
             ...(snapshotKey && { snapshot: `/scratch/${snapshotKey.split("/scratch/")[1]}` }),
-            go: go === true,
+            ...(go && { go: liveGos.has(e.id) ? ("live" as const) : ("cancelled" as const) }),
             seq: e.seq,
             ...(taskId && { taskId }),
           },
