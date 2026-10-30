@@ -52,6 +52,7 @@ async function downscale(bytes: Buffer, width: number, height: number) {
     };
     for (const quality of [85, 70, 55]) {
       const out = await sharp(bytes)
+        .autoOrient()
         .flatten({ background: "#ffffff" })
         .resize(size.width, size.height)
         .jpeg({ quality })
@@ -92,7 +93,7 @@ export function viewImageTool({
         if (meta?.format !== "png" && meta?.format !== "jpeg") {
           throw new Error(`${path} is not a PNG or JPEG image`);
         }
-        const { width, height } = meta;
+        const { width, height } = meta.autoOrient;
         const big = bytes.length > MAX_BYTES || Math.max(width, height) > MAX_SIDE;
         const shown = big ? await downscale(bytes, width, height) : { bytes, width, height };
         const mimeType = big ? "image/jpeg" : `image/${meta.format}`;
