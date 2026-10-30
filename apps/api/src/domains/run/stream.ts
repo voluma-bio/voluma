@@ -15,10 +15,10 @@
  * log reads as `event: live` with no `id:`; they are not read from the log, and a frame is
  * sent only to streams open when it arrives. A live frame wakes the loop without a log read.
  *
- * Keep-alive: a comment every `KEEPALIVE_MS`, and one at once on connect, since Railway's
- * proxy closes a response that has sent no byte and an idle one (its documented limits are
- * 5 minutes idle, 15 minutes total; the browser's `EventSource` reconnects with
- * `Last-Event-ID`). `shutdown` aborts when the API drains, so streams don't hold the drain.
+ * Keep-alive: a comment every `KEEPALIVE_MS`, and one at once on connect, since a host
+ * proxy may close a response that has sent no byte, or an idle one (Railway's did at 5 minutes
+ * idle and 15 minutes total; Render documents only a 100-minute cap on a response). The
+ * browser's `EventSource` reconnects with `Last-Event-ID`. `shutdown` aborts when the API drains, so streams don't hold the drain.
  */
 
 import { setTimeout as sleep } from "node:timers/promises";

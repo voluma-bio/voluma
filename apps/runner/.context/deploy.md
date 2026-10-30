@@ -1,59 +1,68 @@
-# Deploying the runner (Railway staging)
+# Deploying the runner (Render staging)
 
-The runner is the second deployed service: it claims queued runs from the API over
-Railway's private network and runs them (sandboxes on Modal, files in R2). It serves
-nothing. Project, environment and the `gql` helper are in
-[../../api/.context/deploy.md](../../api/.context/deploy.md); this file holds only what differs.
+The runner is a background worker: it claims queued runs from the API over Render's private
+network and runs them (sandboxes on Modal, files in R2). It serves nothing. The workspace, the
+ids, the API helper `r()` and the settings that apply to every service are in
+[../../api/.context/deploy.md](../../api/.context/deploy.md); `render.yaml` is the record of this
+service's settings. This file holds only what differs.
 
-## Staging plumbing run 3 (2026-10-29, p540)
+## Suspending the runner between runs (from 2026-11-04)
 
-The runner was stopped (`deploymentStop` on its active deployment, 22:37:46 to 22:57:43 UTC) so it did
-not claim the test run, then restored with `deploymentRedeploy` once `dev-sandbox` held the run's
-lease; the log showed `up:` and the replica count was 1 throughout. Railway refuses `numReplicas`
-0 on both `serviceInstanceUpdate` and `environmentPatchCommit` (minimum 1). A commit to `main` that
-touches `apps/runner/**` (including this file) redeploys the runner, so a docs commit during a pause
-would restart it. Results of the run: [../../gateway/.context/deploy.md](../../gateway/.context/deploy.md).
+Render bills a running worker per second (about $0.035/hour at `1c-2g`). **Until Nov 4 the
+runner stays on**: hackathon visitors start runs while nobody watches, and a suspended runner
+would leave them queued. After Nov 4 it is **suspended unless a run is queued or running**. The
+Blueprint has no field to create a service suspended, so suspend it by hand. With `r` and `$B`
+from the API's deploy.md and `<RUNNER_ID>` from its table (both paths are in Render's API
+reference):
 
-## Staging plumbing probe (2026-10-29)
+```bash
+r -X POST "$B/services/<RUNNER_ID>/resume"    # before starting a run
+r -X POST "$B/services/<RUNNER_ID>/suspend"   # when no run is queued or running
+```
 
-Runner deployment `4a38210`'s source pins the sandbox image `sha256:b3ea9afc…`; actual image use
-was not independently confirmed. Its Railway manifest confirms 2 vCPU and 2,000,000,000 bytes
-memory, and its `/packages/**` watch path covers
-`voluma-sam`. `RAILPACK_DEPLOY_APT_PACKAGES` was removed. A stub-SAM and DeepSeek run
-(`68eb632f-44ac-4a80-9fa3-8b16bc4e1f03`) was stopped after 17 minutes while still in scan intake;
-segmentation and restart recovery were not checked. Its checker hit `staging /inputs failed with
-exit code 123` twice before a retry succeeded. During this intake-only interval the largest logged
-event-loop delay was 96 ms. The DeepSeek key and model overrides were removed or restored, and
-all probe sandboxes were terminated. Stub masks are not results.
+A run started while the runner is suspended is created `queued` and stays that way: nothing
+claims it until the next resume, after which the runner claims it within its 2 s poll. Resume
+takes the time of a start (the service boots), so resume first and check the log. Suspend only
+after the last run reports `released` or ends: suspending mid-run sends SIGTERM, and the run
+waits for the lease to lapse before the next claim resumes it. Automating this is later work.
+
+The same suspend keeps it from claiming a plumbing run you start yourself with `dev-sandbox`.
+A commit to `main` that touches the runner's build filter (including this file) redeploys it,
+and a deploy of a suspended service is not started until it is resumed (not yet checked on
+Render), so check the deploys list after a resume. The 2026-10-29 plumbing runs on Railway are
+in [../../gateway/.context/deploy.md](../../gateway/.context/deploy.md).
 
 ## How it is set up
 
-Service `@voluma/runner` (id `ad12b6ff-b9c8-45cb-b9c1-af444e398749`), same project and
-environment as the API. The service existed with no instance in `staging`: the project token
-cannot `serviceConnect`, but `environmentPatchCommit` (config as a patch) created it. Settings:
+Service `voluma-runner` (`<RUNNER_ID>`), same workspace and region as the API. Settings (the
+yaml has them):
 
 | Setting | Value |
 |---|---|
-| Source | GitHub repo `voluma-bio/voluma`, root `/`, branch `main` |
-| CI check suites | Enabled (`source.checkSuites: true`); Railway waits for GitHub check suites before deploying |
-| Build | Railpack, build command `echo runner has no build step`. `tsx` is a runtime dependency, because Railpack prunes dev dependencies |
-| Start | `cd apps/runner && exec node --import tsx src/main.ts`. `exec` makes node the container's process, so it gets SIGTERM |
-| Draining | 60 s: above the runner's `SHUTDOWN_BUDGET_MS` (30 s), which is how long it waits for runs to report `released` |
-| Restart | on failure, 10 retries |
-| Limits | 2 vCPU / 2 GB (set in the service's settings). The runner is one Node thread and holds no volumes: `segment_sam` and the other data work run in the sandbox, so heavy work creeping back into it hits the limit and fails loudly instead of slowing heartbeats quietly. Railway's default for the service is its 8 vCPU / 8 GB ceiling |
-| Healthcheck | none: the runner serves nothing, so a healthcheck would fail every deploy |
-| Watch paths | `/apps/runner/**`, `/packages/harness/**`, `/packages/workflow/**`, `/packages/contracts/**`, `/packages/provider-calls/**` (the runner imports it), `/packages/voluma-sam/**` (the harness imports its input schema), `/workflows/**` (the runner reads `workflows/` from its own checkout, so editing a workflow must redeploy it), `/pnpm-lock.yaml`, `/package.json`, `/.tool-versions`, `/tsconfig.base.json`, `/pnpm-workspace.yaml` |
+| Source | GitHub repo `voluma-bio/voluma`, branch `main`, root `/` |
+| Deploy trigger | `autoDeployTrigger: checksPass`: Render waits for the GitHub check suites before deploying |
+| Build | `pnpm install --frozen-lockfile`. No build step; `tsx` is a runtime dependency |
+| Start | `cd apps/runner && exec node --import tsx src/main.ts`. `exec` makes node the process, so it gets SIGTERM |
+| Shutdown delay | 60 s: above the runner's `SHUTDOWN_BUDGET_MS` (30 s), which is how long it waits for runs to report `released` |
+| Restart | Render restarts a worker that exits; the loop exits non-zero on a dead claim loop so it sees it |
+| Plan | `1c-2g` (1 CPU, 2 GB). The runner is one Node thread and holds no volumes: `segment_sam` and the other data work run in the sandbox, so heavy work creeping back into it hits the limit and fails loudly instead of slowing heartbeats quietly |
+| Health check | none: a background worker has no port |
+| Instances | one. More share the queue (claims are leased through the API): raise `numInstances`; each holds its own `RUNNER_CONCURRENCY` slots |
+| Build filter | `apps/runner`, `packages/harness`, `packages/workflow`, `packages/contracts`, `packages/provider-calls` (the runner imports it), `packages/voluma-sam` (the harness imports its input schema), `workflows` (the runner reads `workflows/` from its own checkout, so editing a workflow must redeploy it), and the root build files |
+| Commit | `RENDER_GIT_COMMIT`, which Render sets; a run records it as the source of its workflow files |
 
 Variables (names only; values never go in the repo):
 
 | Variable | Source |
 |---|---|
-| `VOLUMA_API_URL` | `http://${{@voluma/api.RAILWAY_PRIVATE_DOMAIN}}:${{@voluma/api.PORT}}` (the API's `PORT` is set to 8080 explicitly, since a private URL needs a known port) |
-| `VOLUMA_API_TOKEN` | reference `${{@voluma/api.VOLUMA_API_TOKEN}}`: rotating it on the API reaches the runner at its next deploy |
-| `VOLUMA_META_API_KEY`, `RUNNER_CONCURRENCY` | the model key; 2 slots. Until Jimmy says the infrastructure is ready, staging is a test stack: `RUNNER_MODEL=meta/muse-spark-1.3-contributor` and `RUNNER_THINKING=medium` force every role onto cheap Spark contributor (Jimmy's choice, 30 Oct). Contributor mode lets Meta train on what it is sent, so put only cleared scans (OA6-1RK, OA7) on staging while it is set. For real runs, unset both: each role then takes its role file's alias (`wonder` = `meta/muse-wonder-1.0`, Standard mode) and thinking level. Contributor is never right outside that test default |
-| `GATEWAY_TOKEN_SECRET`, `VOLUMA_GATEWAY_URL` | the same secret as `@voluma/gateway`; the gateway's public domain (`https://volumagateway-staging.up.railway.app`). |
+| `VOLUMA_API_URL` | `fromService` `voluma-api`, `property: hostport` (`host:port` on the private network, no scheme; `apiEndpoint()` in `config.ts` adds `http://`). Check the value at cutover |
+| `VOLUMA_API_TOKEN` | `fromService` `voluma-api`'s variable: rotating it on the API reaches the runner at the next Blueprint sync |
+| `VOLUMA_META_API_KEY`, `RUNNER_CONCURRENCY` | the model key; 2 slots. Until Jimmy says the infrastructure is ready, staging is a test stack: `RUNNER_MODEL=meta/muse-spark-1.3-contributor` and `RUNNER_THINKING=medium` force every role onto cheap Spark contributor (Jimmy's choice, 30 Oct), both literals in `render.yaml`. Contributor mode lets Meta train on what it is sent, so put only cleared scans (OA6-1RK, OA7) on staging while it is set. For real runs, delete both from the yaml: each role then takes its role file's alias (`wonder` = `meta/muse-wonder-1.0`, Standard mode) and thinking level. Contributor is never right outside that test default |
+| `GATEWAY_TOKEN_SECRET` | `fromService` `voluma-gateway`: its secret |
+| `VOLUMA_GATEWAY_URL` | literal `https://voluma-gateway.onrender.com` (public https, no port: the sandbox allowlist is built from it). Must match the gateway's real subdomain, which Render can suffix: check at cutover |
 | `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` | the Modal profile in `~/.modal.toml` |
-| `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `CLOUDFLARE_API_TOKEN` | as in `.env` |
+| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `CLOUDFLARE_API_TOKEN` | as in `.env`; `R2_BUCKET` comes from the env group `voluma-shared` |
+| `VOLUMA_<PROVIDER>_API_KEY` for any other provider | not in the yaml: add in the dashboard only when a role file or `RUNNER_MODEL_*` names that provider |
 
 With `RUNNER_THINKING` unset, a role without a `thinking` key in its role file sends no level (Pi and the provider apply their default; DeepSeek runs with thinking off). Set it to one of `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; the runner will not start if a model alias lacks the level (a role file's own `thinking` is checked when a run starts), and the boot line prints it. With `RUNNER_MODEL` set (every role forced onto one model), the role files' levels are ignored and `RUNNER_THINKING` alone applies.
 
@@ -70,7 +79,7 @@ that digest in `SANDBOX_IMAGE` (`src/config.ts`). Every run of the workflow give
 must be **public**, or a visitor's Modal workspace cannot pull it: GitHub, the org's Packages,
 `voluma-sandbox`, Package settings, Danger Zone, Change visibility.
 
-## Checked on staging (2026-10-28)
+## Checked on staging (2026-10-28, on Railway)
 
 - **Sandbox start from GHCR, our workspace, create to first exec done:** 23.6 s the first time (Modal pulls and caches the image), 1.5 s warm (create call 0.17 s). A different workspace pulls its own copy on its first run.
 - **A guest run** on the reference scan (`two-task-test`): claimed by the deployed runner within seconds, sandbox from the GHCR image, tool calls and results streamed over SSE.

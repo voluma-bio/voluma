@@ -1,0 +1,216 @@
+# Staging on Render: the one record of how each service is built and run. Reference:
+# https://render.com/docs/blueprint-spec. Operating notes: apps/{api,runner,gateway}/.context/deploy.md.
+#
+# Everything is in region `virginia` (it cannot change after creation; the private network is
+# per region). Render does no variable interpolation, and an env group cannot hold `sync: false`
+# values, so secrets are per-service `sync: false` (asked for once, when the Blueprint is
+# created) and the services that share one read it from its owner with `fromService`.
+# A `sync: false` variable added later is not asked for: set it in the dashboard.
+#
+# Prices are from https://render.com/pricing on 2026-10-30. The workspace is on the Hobby tier
+# ($0 plus compute); nothing here needs Pro. Always on: the API $7 + the gateway $7 = $14/month.
+# The runner is $25/month, billed per second (about $0.035/hour) while it is not suspended: it
+# stays on until 2026-11-04 (hackathon visitors start runs unattended), then is suspended between
+# runs (apps/runner/.context/deploy.md). Postgres is Neon's free tier ($0;
+# apps/api/.context/deploy.md), so it is not defined here.
+
+envVarGroups:
+  - name: voluma-shared
+    envVars:
+      # Render's default Node is already this, but `engines` (>=24) is unbounded; pin it to
+      # .tool-versions. Change both together.
+      - key: NODE_VERSION
+        value: 24.22.1
+      # The root `prepare` script runs `lefthook install` when a .git exists; Render's build
+      # has one, and a build has no hooks to install.
+      - key: LEFTHOOK
+        value: "0"
+      - key: R2_BUCKET
+        value: voluma-staging
+
+services:
+  - type: web
+    name: voluma-api
+    runtime: node
+    region: virginia
+    plan: 0.5c-512mb # $7 (the web build runs in the build container, not here)
+    numInstances: 1 # the key vault and stream notifier are in-process: never more than one
+    buildCommand: pnpm install --frozen-lockfile && pnpm --filter @voluma/web build
+    preDeployCommand: pnpm --filter @voluma/api db:migrate
+    # `exec` so node gets SIGTERM; from apps/api because that is where tsx resolves.
+    startCommand: cd apps/api && exec node --import tsx src/index.ts
+    healthCheckPath: /health
+    maxShutdownDelaySeconds: 30 # above the API's DRAIN_MS (10 s)
+    buildFilter:
+      paths:
+        - apps/api/**
+        - apps/web/**
+        - packages/**
+        - pnpm-lock.yaml
+        - package.json
+        - .tool-versions
+        - tsconfig.base.json
+        - pnpm-workspace.yaml
+        # @voluma/workflow/bundled imports these (the API's workflow catalog, the web build's
+        # outputs and task titles). No other workflows/**: the API reads no other workflow file.
+        - workflows/*/outputs.json
+        - workflows/*/tasks.json
+    envVars:
+      - fromGroup: voluma-shared
+      # Neon's direct (unpooled) connection string, not the pooler's: prepared statements need
+      # it. It must use `sslmode=require`. It holds the password, so it is asked for at creation.
+      - key: DATABASE_URL
+        sync: false
+      # The origin browsers use. Replace with the custom domain's origin when there is one.
+      - key: APP_URL
+        fromService:
+          type: web
+          name: voluma-api
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: VOLUMA_API_TOKEN # the runner reads this one
+        sync: false
+      - key: VOLUMA_DEBUG_TOKEN # read-only access to every lab's runs, for agents
+        sync: false
+      - key: WORKOS_CLIENT_ID
+        sync: false
+      - key: WORKOS_API_KEY
+        sync: false
+      - key: WORKOS_COOKIE_PASSWORD
+        sync: false
+      - key: WORKOS_LAB_ORGANIZATION_ID
+        sync: false
+      - key: WORKOS_JUDGES_ORGANIZATION_ID
+        sync: false
+      # The API's own R2 key (the runner has another); R2_BUCKET comes from the group.
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      # What each organization may run (deploy.md); read at start. Guest sign-in is closed:
+      # to open it for a demo, add GUEST_ORGANIZATION_ID and GUEST_SCOPE in the dashboard.
+      - key: RUN_LIMITS_LAB_CONCURRENT
+        value: "4"
+      - key: RUN_LIMITS_JUDGES_CONCURRENT
+        value: "2"
+      - key: RUN_LIMITS_JUDGES_PER_DAY
+        value: "50"
+      - key: RUN_LIMITS_DEMO_PER_CALLER
+        value: "1"
+      - key: RUN_LIMITS_DEMO_CONCURRENT
+        value: "2"
+      - key: RUN_LIMITS_DEMO_PER_DAY
+        value: "10"
+      - key: RUN_LIMITS_DEMO_VISITOR_ACTIVE
+        value: "4"
+
+  - type: web
+    name: voluma-gateway
+    runtime: node
+    region: virginia
+    plan: 0.5c-512mb # $7
+    numInstances: 1
+    buildCommand: pnpm install --frozen-lockfile
+    # No pre-deploy: at boot the gateway waits for the API's migration (/health answers 503 until
+    # `provider_calls` exists).
+    startCommand: cd apps/gateway && exec node --import tsx src/main.ts
+    healthCheckPath: /health # 200 once `provider_calls` exists; 503 before the migration and while draining
+    maxShutdownDelaySeconds: 90 # above GATEWAY_DRAIN_SECONDS (60) plus the row cleanup after it
+    buildFilter:
+      paths:
+        - apps/gateway/**
+        - packages/provider-calls/**
+        - pnpm-lock.yaml
+        - package.json
+        - .tool-versions
+        - tsconfig.base.json
+        - pnpm-workspace.yaml
+    envVars:
+      - fromGroup: voluma-shared
+      - key: DATABASE_URL # Neon's direct connection string, as on voluma-api
+        sync: false
+      - key: GATEWAY_DRAIN_SECONDS
+        value: "60"
+      - key: GATEWAY_TOKEN_SECRET # `<kid>:<base64 of 32 bytes>`; the runner reads this one
+        sync: false
+      - key: GATEWAY_META_API_KEY
+        sync: false
+
+  - type: worker
+    name: voluma-runner
+    runtime: node
+    region: virginia
+    # $25 while running (1 CPU, 2 GB; the cheapest plan with 2 GB). Always on until 2026-11-04,
+    # then suspended between runs by hand (deploy.md; the Blueprint has no field for a suspended
+    # service). The runner is one Node thread and holds no volumes, so heavy work creeping back into it fails loudly
+    # instead of slowing heartbeats.
+    plan: 1c-2g
+    numInstances: 1 # more instances share the queue: claims are leased through the API
+    # Waits for CI before deploying, as the runner did on Railway.
+    autoDeployTrigger: checksPass
+    buildCommand: pnpm install --frozen-lockfile
+    startCommand: cd apps/runner && exec node --import tsx src/main.ts
+    maxShutdownDelaySeconds: 60 # above the runner's SHUTDOWN_BUDGET_MS (30 s)
+    buildFilter:
+      paths:
+        - apps/runner/**
+        - packages/harness/**
+        - packages/workflow/**
+        - packages/contracts/**
+        - packages/provider-calls/**
+        - packages/voluma-sam/**
+        # The runner reads workflows/ from its own checkout.
+        - workflows/**
+        - pnpm-lock.yaml
+        - package.json
+        - .tool-versions
+        - tsconfig.base.json
+        - pnpm-workspace.yaml
+    envVars:
+      - fromGroup: voluma-shared
+      # The API on the private network: host and port, no scheme (the runner adds http://).
+      - key: VOLUMA_API_URL
+        fromService:
+          type: web
+          name: voluma-api
+          property: hostport
+      - key: VOLUMA_API_TOKEN
+        fromService:
+          type: web
+          name: voluma-api
+          envVarKey: VOLUMA_API_TOKEN
+      # The gateway's public https origin (no port: the sandbox allowlist is built from it).
+      # A literal: must match the service's real subdomain, which Render may suffix; checked at
+      # cutover (RENDER_EXTERNAL_URL through fromService is the fallback, but is unverified).
+      - key: VOLUMA_GATEWAY_URL
+        value: https://voluma-gateway.onrender.com
+      - key: GATEWAY_TOKEN_SECRET
+        fromService:
+          type: web
+          name: voluma-gateway
+          envVarKey: GATEWAY_TOKEN_SECRET
+      - key: RUNNER_CONCURRENCY
+        value: "2"
+      # Staging is a test stack until Jimmy says otherwise: every role on Spark contributor.
+      # Contributor mode lets Meta train on what it is sent: only cleared scans. For real
+      # runs delete both (deploy.md).
+      - key: RUNNER_MODEL
+        value: meta/muse-spark-1.3-contributor
+      - key: RUNNER_THINKING
+        value: medium
+      - key: VOLUMA_META_API_KEY
+        sync: false
+      - key: MODAL_TOKEN_ID
+        sync: false
+      - key: MODAL_TOKEN_SECRET
+        sync: false
+      - key: CLOUDFLARE_API_TOKEN
+        sync: false
+      # The runner's own R2 key; R2_BUCKET comes from the group.
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false

@@ -13,7 +13,7 @@ change it safely.
   (routes, auth header) and prices. The gateway imports nothing from `apps/api`; it reads the
   `runs` columns it needs by raw SQL (`calls.ts`). The migration is in `apps/api/drizzle/`.
 - `src/gateway.ts` is the whole request path; `src/main.ts` reads env, builds the handle (it must
-  use `drizzle(client, { casing: "snake_case" })`), checks the migration, cuts stale rows, drains.
+  use `drizzle(client, { casing: "snake_case" })`), waits for the migration, cuts stale rows, drains.
 - A request is `/<provider>/<upstream path>` with the gateway token as `Authorization: Bearer` or
   `x-api-key`. Order: open token, provider allowed, key (a visitor token has only its own keys),
   exact route, model (top level of the first 4 KB of the body) and its price, admit, forward,
@@ -58,8 +58,8 @@ change it safely.
 - **Early stream headers and keepalive.** A Meta model call (route flag `earlyStream` in `providers.ts`; Anthropic and OpenAI keep real
   429/529 and `retry-after`) with `Accept: text/event-stream` (what
   `voluma-sam` sends; the gateway does not read `stream` from the body) is answered with `200
-  text/event-stream` right after admission, before the upstream is called. Railway's edge cuts a
-  response with no byte for 300 s and Meta can hold its headers longer. Every refusal made before
+  text/event-stream` right after admission, before the upstream is called. A host proxy may
+  cut a response with no byte for minutes (Railway's did at 300 s) and Meta can hold its headers longer. Every refusal made before
   admission still carries a normal status.
   After that the upstream's outcome travels in the stream: on 2xx its body is piped; on a non-2xx
   or a network error the gateway writes one terminal `event: gateway-error`
@@ -77,7 +77,7 @@ change it safely.
   an event stream still gets keepalives after its headers.
 - **Boot and shutdown.** While draining, new calls get 503 with `Connection: close`. At SIGTERM
   the instance drains for `GATEWAY_DRAIN_SECONDS`, aborts what remains (those calls end `cut`),
-  then marks its own leftover `open` rows `cut`. The gateway exits at boot if `provider_calls` is missing.
+  then marks its own leftover `open` rows `cut`. If `provider_calls` is missing at boot (a new database, before the API's migration), the gateway serves `/health` 503 and retries with a backoff; the boot sweep runs once it exists.
 
 ## Known limits
 

@@ -258,6 +258,15 @@ function setCookies(c: Context, cookies: string[]) {
   for (const cookie of cookies) c.header("Set-Cookie", cookie, { append: true });
 }
 
+/**
+ * The header WorkOS gets as the caller's address. It must be one the host's proxy sets and a
+ * client cannot override. Railway's proxy set `x-real-ip`. Render's docs don't say which header
+ * its proxy sets or strips (a client-supplied `x-forwarded-for` is kept, with the proxy's
+ * entry appended), so this is unchecked on Render: at cutover send a request with a forged
+ * value for this header to the deployed API and confirm it arrives replaced.
+ */
+const CLIENT_IP_HEADER = "x-real-ip";
+
 /** Failed password sign-ins allowed per email in each window. */
 const PASSWORD_ATTEMPTS = 10;
 const PASSWORD_WINDOW_MS = 15 * 60 * 1000;
@@ -602,8 +611,7 @@ export function createAuth(config: AuthConfig) {
         clientId: config.clientId,
         email,
         password,
-        // Railway's proxy sets x-real-ip; a client can't override it there.
-        ipAddress: c.req.header("x-real-ip"),
+        ipAddress: c.req.header(CLIENT_IP_HEADER),
         userAgent: c.req.header("user-agent"),
       });
     } catch (error) {

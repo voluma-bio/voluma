@@ -167,7 +167,7 @@ check threads, and review chat threads.
   publish after commit and treat a gap as "backfill". `pi_messages.message` is `text`
   because `jsonb` would reorder keys and break byte-for-byte history. Migrations are
   generated Drizzle `.sql` files in `apps/api/drizzle/`, run from one place
-  (`apps/api/src/migrate.ts`: `pnpm db:migrate` locally, Railway's pre-deploy step in production), never at server start
+  (`apps/api/src/migrate.ts`: `pnpm db:migrate` locally, Render's pre-deploy command in production), never at server start
   because `migrate()` takes no lock and never with `push`.
 - **Where the runner lives.** For now it's a Node process (`apps/runner`)
   that talks to the API. Whether it moves into a Durable Object per run is
@@ -261,9 +261,10 @@ characters, and dropped if it doesn't fit, which keeps a PKCE verifier cookie ne
 
 ## Deployment
 
-Staging is one Railway service, `@voluma/api`, plus Railway Postgres: the API serves the
-built web app and `/api/*`, and a merge to `main` deploys it. Setup, variables, secret
-rotation: [apps/api/.context/deploy.md](../apps/api/.context/deploy.md).
+Staging runs on Render (region Virginia), defined in `render.yaml`: the API
+(`voluma-api`, which serves the built web app and `/api/*`), the gateway, the runner (suspended between runs after 2026-11-04) and,
+outside Render, Postgres on Neon's free tier. A merge to `main` deploys each service whose build filter it touches. Setup,
+variables, secret rotation: [apps/api/.context/deploy.md](../apps/api/.context/deploy.md).
 
 ## Packages export source
 
