@@ -256,8 +256,10 @@ app.notFound((c) =>
   isApi(c.req.path) ? c.json({ error: "not found" }, 404) : c.text("Not found", 404),
 );
 app.onError((error, c) => {
-  // Middleware may reject by throwing; keep its status.
-  if (error instanceof HTTPException) return error.getResponse();
+  // A refusal is thrown where it is decided; API clients read its text from the JSON `error`.
+  if (error instanceof HTTPException) {
+    return isApi(c.req.path) ? c.json({ error: error.message }, error.status) : error.getResponse();
+  }
   console.error(error);
   return isApi(c.req.path)
     ? c.json({ error: "internal error" }, 500)

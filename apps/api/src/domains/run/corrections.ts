@@ -12,8 +12,9 @@ import { corrections, fold } from "@voluma/contracts/fold";
 import type { PersonMessage } from "@voluma/contracts/messages";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { and, asc, eq, inArray } from "drizzle-orm";
+import { HTTPException } from "hono/http-exception";
 import type { Reader } from "../../domain";
-import type { MessageRefusal, MessageResult } from "../../ports";
+import type { MessageOk } from "../../ports";
 import { admit, type Limits, refusalMessage, usage } from "./admission";
 import { noLease } from "./lease";
 import { eventLock, insertEvent } from "./pg-event-log";
@@ -120,10 +121,7 @@ export async function decideMessage(
   runId: string,
   msg: { id: string; payload: PersonMessage },
   write: boolean,
-): Promise<MessageResult> {
-  const refuse = (status: MessageRefusal["status"], error: string): MessageResult => ({
-    refused: { status, error },
-  });
+): Promise<MessageOk> {
   const { userId } = caller;
   if (write) await eventLock(tx, runId);
   const found = tx
@@ -131,33 +129,39 @@ export async function decideMessage(
     .from(runs)
     .where(and(readableRuns(reader), eq(runs.id, runId)));
   const [run] = await (write ? found.for("update") : found);
-  if (!run) return refuse(404, "not found");
+  if (!run) throw new HTTPException(404, { message: "not found" });
   if (run.startedBy !== userId) {
-    return refuse(403, "Only the person who started the run can write to it.");
+    throw new HTTPException(403, {
+      message: "Only the person who started the run can write to it.",
+    });
   }
-  if (run.example) return refuse(403, "Examples are read-only.");
+  if (run.example) throw new HTTPException(403, { message: "Examples are read-only." });
   if (run.credentials === "visitor") {
-    return refuse(403, "A run with your own keys keeps no keys, so it cannot be reopened.");
+    throw new HTTPException(403, {
+      message: "A run with your own keys keeps no keys, so it cannot be reopened.",
+    });
   }
   // Only a run on Voluma's keys is left here, and a guest has none of their own to reopen it on.
   if (caller.guest) {
-    return refuse(403, GUEST_KEYS_MESSAGE);
+    throw new HTTPException(403, { message: GUEST_KEYS_MESSAGE });
   }
   const eventId = personEventId(runId, msg.id);
   const [again] = await tx.select({ id: events.id }).from(events).where(eq(events.id, eventId));
   const stateNow = async () => (await loadRun(tx, runId)).state;
-  if (again) return { ok: { eventId, state: await stateNow(), duplicate: true } };
+  if (again) return { eventId, state: await stateNow(), duplicate: true };
 
   if (run.state === "queued" || run.state === "running") {
-    return refuse(
-      409,
-      (await openCorrection(tx, runId)) !== null
-        ? "The run is still answering your last message. Wait for its reply, or cancel it."
-        : "The run has not finished yet.",
-    );
+    throw new HTTPException(409, {
+      message:
+        (await openCorrection(tx, runId)) !== null
+          ? "The run is still answering your last message. Wait for its reply, or cancel it."
+          : "The run has not finished yet.",
+    });
   }
   if (run.state !== "ended" || run.outcome !== "completed") {
-    return refuse(409, "Only a run that completed can be reopened; rerun this one.");
+    throw new HTTPException(409, {
+      message: "Only a run that completed can be reopened; rerun this one.",
+    });
   }
   const [study] = await tx
     .select({ workflowId: studies.workflowId })
@@ -166,7 +170,9 @@ export async function decideMessage(
   const current = study && o.pinsOf(study.workflowId);
   const pathsOf = (pins: readonly WorkflowPin[]) => pins.map((p) => p.path ?? "").sort();
   if (!current || pathsOf(current).join() !== pathsOf(run.workflows as WorkflowPin[]).join()) {
-    return refuse(409, "This run used an older version of its workflow, so rerun it.");
+    throw new HTTPException(409, {
+      message: "This run used an older version of its workflow, so rerun it.",
+    });
   }
   const { taskId } = msg.payload;
   const view = fold(
@@ -188,13 +194,16 @@ export async function decideMessage(
         .orderBy(asc(events.seq))
     ).map(toRunEvent),
   );
-  if (view.plan.tasks.length === 0) return refuse(409, "The run has no plan yet.");
+  if (view.plan.tasks.length === 0)
+    throw new HTTPException(409, { message: "The run has no plan yet." });
   if (taskId !== undefined) {
     if (!view.plan.tasks.some((t) => t.id === taskId)) {
-      return refuse(404, `${taskId} is not a task of this run.`);
+      throw new HTTPException(404, { message: `${taskId} is not a task of this run.` });
     }
     if (view.tasks.find((t) => t.id === taskId)?.skipped) {
-      return refuse(409, `${taskId} was skipped, so it cannot be corrected.`);
+      throw new HTTPException(409, {
+        message: `${taskId} was skipped, so it cannot be corrected.`,
+      });
     }
   }
   const refused = admit(
@@ -203,8 +212,8 @@ export async function decideMessage(
     await usage(tx, reader.labId, { userId, credentials: run.credentials }),
     run,
   );
-  if (refused) return refuse(409, refusalMessage[refused]);
-  if (!write) return { ok: { eventId, state: await stateNow(), duplicate: false } };
+  if (refused) throw new HTTPException(409, { message: refusalMessage[refused] });
+  if (!write) return { eventId, state: await stateNow(), duplicate: false };
 
   await reopen(tx, runId, eventId, userId);
   await appendPersonEvent(tx, runId, {
@@ -212,5 +221,5 @@ export async function decideMessage(
     type: "person.message",
     payload: msg.payload,
   });
-  return { ok: { eventId, state: await stateNow(), duplicate: false } };
+  return { eventId, state: await stateNow(), duplicate: false };
 }
