@@ -15,7 +15,7 @@ import { refusalMessage } from "./admission";
 import type { QueueRefusal } from "./pg-queue";
 
 /** The answer to a write the queue refused. */
-export function refusal(c: Context, refused: QueueRefusal) {
+export function refusal(c: Context, refused: QueueRefusal, detail?: string[]) {
   switch (refused) {
     case "not-found":
       return c.json({ error: "not found" }, 404);
@@ -29,6 +29,11 @@ export function refusal(c: Context, refused: QueueRefusal) {
       return c.json({ error: "unknown study" }, 404);
     case "no-workflow":
       return c.json({ error: "unknown workflow" }, 404);
+    case "bad-selection":
+      return c.json(
+        { error: `Not a measurement or score of this workflow: ${detail?.join(", ")}.` },
+        400,
+      );
     case "example":
       return c.json({ error: "Examples are read-only." }, 403);
     case "input-not-ready":
@@ -61,7 +66,9 @@ export function runsRoutes({ reads, queue }: RunDeps) {
         keys,
       },
     );
-    return "refused" in result ? refusal(c, result.refused) : c.json(result.run satisfies Run);
+    return "refused" in result
+      ? refusal(c, result.refused, result.detail)
+      : c.json(result.run satisfies Run);
   });
 
   app.get("/runs", requireReader, async (c) => c.json({ runs: await reads.list(c.var.reader) }));

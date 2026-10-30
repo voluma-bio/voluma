@@ -70,7 +70,7 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   `startRuns` reads the counts once and raises them for each run it inserts. Every browser
   write (start, create, cancel, resume) goes through `attempt`: a `Refused` rolls it back and
   comes back as `{refused}`, and the visitor keys it held are dropped. `runs` has no workflow
-  column: `pgRunQueue` gets `pinsOf` and resolves the pins from the study. The seeded example has
+  column: `pgRunQueue` gets `workflowOf` and resolves the pins and outputs from the study. The seeded example has
   its own study (`study-<exampleId>`, `example`), read-only like its run; `import:run` gives
   an imported run a study of one the same way.
 - **Every transition holds one lock** (`QUEUE_LOCK`, a transaction advisory lock), so

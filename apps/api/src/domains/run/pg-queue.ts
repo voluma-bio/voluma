@@ -19,6 +19,7 @@ import {
   type Usage as RunnerUsage,
 } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
+import { type OutputEntry, unselectable } from "@voluma/contracts/workflow-files";
 import { knownUsdOfRun } from "@voluma/provider-calls";
 import { and, asc, desc, eq, gt, inArray, notInArray, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
@@ -190,6 +191,7 @@ export type QueueRefusal =
   | "full"
   | "no-study"
   | "no-workflow"
+  | "bad-selection"
   | "example"
   | "not-found"
   | "forbidden"
@@ -197,22 +199,26 @@ export type QueueRefusal =
 
 /** Thrown inside a write's transaction to roll it back whole. */
 class Refused extends Error {
-  constructor(readonly reason: QueueRefusal) {
+  /** `detail`: what the answer names (the ids of a bad selection). */
+  constructor(
+    readonly reason: QueueRefusal,
+    readonly detail?: string[],
+  ) {
     super(reason);
   }
 }
 
 /**
  * `limits` has every org the API serves (index.ts). An org missing from it is one no
- * longer configured: its queued runs fail and its running ones stop. `pinsOf` resolves a
- * study's workflow id to the pins its runs record.
+ * longer configured: its queued runs fail and its running ones stop. `workflowOf` resolves a
+ * study's workflow id to the pins its runs record and the outputs a selection is checked against.
  */
 export function pgRunQueue(
   db: PostgresJsDatabase,
   limits: ReadonlyMap<string, Limits>,
   vault: KeyVault,
   notifier: Notifier,
-  pinsOf: (workflowId: string) => WorkflowPin[] | undefined,
+  workflowOf: (workflowId: string) => { pins: WorkflowPin[]; outputs: OutputEntry[] } | undefined,
 ) {
   const locked = <T>(work: (tx: Tx) => Promise<T>) =>
     db.transaction(async (tx) => {
@@ -235,7 +241,7 @@ export function pgRunQueue(
    */
   const attempt = async <T>(
     work: (tx: Tx, hold: Hold) => Promise<T>,
-  ): Promise<T | { refused: QueueRefusal }> => {
+  ): Promise<T | { refused: QueueRefusal; detail?: string[] }> => {
     const held: string[] = [];
     const hold: Hold = (runId, labId, keys) => {
       const ok = vault.hold(runId, labId, keys);
@@ -246,17 +252,20 @@ export function pgRunQueue(
       return await locked((tx) => work(tx, hold));
     } catch (error) {
       for (const id of held) vault.drop(id);
-      if (error instanceof Refused) return { refused: error.reason };
+      if (error instanceof Refused) return { refused: error.reason, detail: error.detail };
       throw error;
     }
   };
 
-  const messageContext = (reader: Reader) => ({ limits: limitsOf(reader.labId), pinsOf });
+  const messageContext = (reader: Reader) => ({
+    limits: limitsOf(reader.labId),
+    pinsOf: (workflowId: string) => workflowOf(workflowId)?.pins,
+  });
 
-  const pinsFor = (workflowId: string) => {
-    const pins = pinsOf(workflowId);
-    if (!pins) throw new Refused("no-workflow");
-    return pins;
+  const workflowFor = (workflowId: string) => {
+    const workflow = workflowOf(workflowId);
+    if (!workflow) throw new Refused("no-workflow");
+    return workflow;
   };
 
   /** Every input must be readable; an uncompleted upload exists only for its uploader. Returns them by id. */
@@ -291,9 +300,11 @@ export function pgRunQueue(
     reader: Reader,
     caller: { userId: string },
     study: { id: string },
-    pins: WorkflowPin[],
+    workflow: { pins: WorkflowPin[]; outputs: OutputEntry[] },
     starts: Starts,
   ) => {
+    const bad = unselectable(workflow.outputs, starts.selectedOutputs ?? []);
+    if (bad.length) throw new Refused("bad-selection", bad);
     if (starts.runs.length === 0) return;
     const credentials = starts.keys ? "visitor" : "voluma";
     const used = await usage(tx, reader.labId, { userId: caller.userId, credentials });
@@ -306,7 +317,7 @@ export function pgRunQueue(
         labId: reader.labId,
         startedBy: caller.userId,
         studyId: study.id,
-        workflows: pins,
+        workflows: workflow.pins,
         selectedOutputs: starts.selectedOutputs ?? null,
         notes: starts.notes ?? null,
         inputId,
@@ -345,7 +356,7 @@ export function pgRunQueue(
           );
         if (!scan) throw new Refused("no-input");
         await checkInputs(tx, reader, caller, [request.inputId]);
-        await startRuns(tx, hold, reader, caller, study, pinsFor(study.workflowId), {
+        await startRuns(tx, hold, reader, caller, study, workflowFor(study.workflowId), {
           ...request,
           runs: [{ id: request.id, inputId: request.inputId }],
         });
@@ -371,7 +382,7 @@ export function pgRunQueue(
       },
     ) =>
       attempt(async (tx, hold) => {
-        const pins = pinsFor(request.study.workflowId);
+        const workflow = workflowFor(request.study.workflowId);
         const found = await checkInputs(
           tx,
           reader,
@@ -391,7 +402,7 @@ export function pgRunQueue(
             position,
           })),
         );
-        await startRuns(tx, hold, reader, caller, request.study, pins, request.starts);
+        await startRuns(tx, hold, reader, caller, request.study, workflow, request.starts);
         return { studyId: request.study.id };
       }),
 

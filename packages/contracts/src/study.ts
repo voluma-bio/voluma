@@ -8,7 +8,8 @@
  *                              (404: unknown `workflowId`, or a scan the caller can't read;
  *                              409: a scan still uploading, or the per-caller limit;
  *                              429: the other limits, see `run.ts`; 400: `start` names a
- *                              scan the study lacks, or a scan twice)
+ *                              scan the study lacks, a scan twice, or `selectedOutputs` names an
+ *                              output that is not a measurement or score of the workflow)
  *   GET  /api/run/studies      → 200 `listStudiesResponseSchema`, newest activity first
  *   GET  /api/run/studies/:id  → 200 `studyDetailSchema` (404 when absent or unreadable)
  *

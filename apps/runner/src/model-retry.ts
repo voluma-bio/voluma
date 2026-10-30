@@ -32,7 +32,7 @@ type Stream = (
 /** `stream`, but a transient provider error before any content is retried; `onRetry` logs each. */
 export function retryTransient(
   stream: Stream,
-  onRetry: (model: Model<Api>, attempt: number, delayMs: number, error: string) => void,
+  onRetry: (attempt: number, delayMs: number, error: string) => void,
   sleep = wait,
 ): Stream {
   return (model, context, options) => {
@@ -70,7 +70,7 @@ export function retryTransient(
           giveUp();
           return;
         }
-        onRetry(model, attempt, delay, failed.errorMessage ?? "");
+        onRetry(attempt, delay, failed.errorMessage ?? "");
         await sleep(delay, signal);
         if (signal?.aborted) {
           giveUp(); // the provider's error, not the abort, is what the caller should see
