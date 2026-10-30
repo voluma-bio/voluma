@@ -180,7 +180,7 @@ What that means here:
 
 - **Size is the tighter limit.** Staging held 256 MB on 2026-10-30 (`pi_messages` 234 MB). One
   full mouse-oa run (9 tasks) added about 95 MB, nearly all model history: about 7 more full runs
-  reach 1 GB (#255 tracks storing less). Check it (`select pg_size_pretty(pg_database_size(current_database()))`) now and then; [TODO.md](TODO.md) tracks it.
+  reach 1 GB for rows written before images moved to R2 (#255; later runs store image references). Check it (`select pg_size_pretty(pg_database_size(current_database()))`) now and then; [TODO.md](TODO.md) tracks it.
 - **Compute hours.** The runner polls `claim` every 2 s, so with it
   running the compute never reaches its 5 idle minutes. At 0.25 CU that is about 6 CU-hours a
   day, about 180 a month against the 100 allowed; the 5 days to Nov 4 cost about 30. With the

@@ -67,6 +67,13 @@ export const toolOutputKey = (runId: string, threadName: string, toolCallId: str
   `${scratchPrefix(runId)}${seg(threadName)}/.tool-output/${seg(toolCallId)}`;
 
 /**
+ * An image in a thread's stored model history (`adapters/pi/image-refs.ts`): the history row
+ * holds this key and the bytes live here, in the thread's own scratch folder, named by their sha256.
+ */
+export const historyImageKey = (runId: string, threadName: string, sha256: string) =>
+  `${scratchPrefix(runId)}${seg(threadName)}/.images/${sha256Schema.parse(sha256)}`;
+
+/**
  * Content-addressed evidence: a file that backs a stored number, copied here
  * once and never overwritten, so a rerun of a task can't change what an
  * earlier revision points at. Inside the run prefix, so mounts stay isolated.
