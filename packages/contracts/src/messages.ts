@@ -46,8 +46,11 @@
  * `start_worker`, `change_plan` and `stop_worker` until a marker exists since the latest
  * `run.reopened`. A go that arrived before a requeue's `run.reopened`, or whose marker an earlier
  * reopen wrote before its claim failed, is still undelivered, so the next claim writes a marker
- * keyed to its own reopen and opens the gate then. The route refuses a second go (409) while one
- * since the latest `run.reopened` has no attempt of its task yet. The marker also gives review and the
+ * keyed to its own reopen and opens the gate then. A go the main agent had already been told of
+ * when its claim failed counts as delivered and is not marked again; the researcher sees the
+ * failed correction and says go again. The route refuses a second go (409) while one since the
+ * latest `run.reopened` (or the message that reopen is keyed to, when that is earlier) has no
+ * attempt of its task yet. The marker also gives review and the
  * correction span a boundary when nothing depends on the task, and resets the task's fix rounds.
  * The main agent reads the chat as `person.message`s and writes
  * `reply` events; the panel reads `conversation(events)` (`conversation.ts`) from the run stream
@@ -67,8 +70,12 @@
  * root `thread.ended` or `correction.ended`. The task-state events of that span (attempts, task,
  * checkpoints, outputs, plan changes, revisions) are abandoned (`abandonedEvents`, fold.ts): the
  * fold, review, the run page and the harness's own scans skip them, so a failed redo leaves
- * no half-redone task and the next correction starts from the pre-go state. Messages, replies,
- * thread events, `run.reopened` and `correction.ended` stay.
+ * no half-redone task. The files the correction wrote to `/outputs` are put back too: the first
+ * claim of a correction copies the whole outputs prefix to a backup keyed to its reopen
+ * (`outputs.backed-up`, before any thread runs), and the first claim after `correction.ended`
+ * restores it exactly and checks the files the kept results reported (`outputs.restored`,
+ * `outputs-backup.ts` in the harness), so the next correction starts from the pre-go state,
+ * files included. Messages, replies, thread events, `run.reopened` and `correction.ended` stay.
  *
  * Who may send: only the run's `startedBy` (403 otherwise; it also settles whose go counts).
  * Cookie auth and Origin rules are `run.ts`'s. Only this route's body limit is raised, to

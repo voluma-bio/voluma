@@ -39,6 +39,13 @@ export const workflowSnapshotPrefix = (runId: string) => `${runPrefix(runId)}wor
 export const scratchPrefix = (runId: string) => `${runPrefix(runId)}scratch/`;
 /** All tasks' outputs; the sandbox mounts this read-write at `/outputs`. */
 export const outputsPrefix = (runId: string) => `${runPrefix(runId)}outputs/`;
+/**
+ * A copy of the run's outputs taken when a correction's claim starts (`outputs.backed-up`, keyed
+ * to that `run.reopened`'s id), so a correction that ends unfinished can put them back
+ * (`outputs.restored`). Never read as outputs; the sandbox mounts none of it.
+ */
+export const outputsBackupPrefix = (runId: string, reopenId: string) =>
+  `${runPrefix(runId)}corrections/${seg(reopenId)}/`;
 export const taskOutputPrefix = (runId: string, task: string) =>
   `${outputsPrefix(runId)}${seg(task)}/`;
 

@@ -171,7 +171,7 @@ function personLine(n: Extract<Notice, { kind: "person" }>): string {
   }
   lines.push(
     n.go
-      ? `  They said go on ${n.taskId}: you may now redo it. Send its worker feedback with \`message\` (it opens a new attempt), say in \`reply\` what you are doing, and finish the run once the new attempt is checked and the tasks that build on it are done.`
+      ? `  They said go on ${n.taskId}: you may now redo it. Send its worker feedback with \`message\` (it opens a new attempt; a worker that was stopped takes \`start_worker\` instead), say in \`reply\` what you are doing, and finish the run once the new attempt is checked and the tasks that build on it are done.`
       : "  Answer them with `reply`. They have not said go, so start no work.",
   );
   return lines.join("\n");

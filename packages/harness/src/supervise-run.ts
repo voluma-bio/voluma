@@ -9,9 +9,11 @@ import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { RecordedPin } from "@voluma/contracts/workflow";
 import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
 import type { RunLayout } from "./layout";
+import { keepOutputs } from "./outputs-backup";
 import type { Evidence } from "./ports/evidence";
 import type { Files } from "./ports/files";
 import type { History } from "./ports/history";
+import type { Outputs } from "./ports/outputs";
 import type { Sandbox } from "./ports/sandbox";
 import type { Recorder } from "./recorder";
 import { type Briefs, type LoopConfig, type RoleOf, runLoop } from "./run-loop";
@@ -44,6 +46,8 @@ export interface SuperviseRunOptions {
   evidence: Evidence;
   /** The run's bucket, read and written host-side by `view_image` and `read_file`. */
   files: Files;
+  /** The run's `/outputs` as a whole: backed up when a correction starts, put back when one ends unfinished (`outputs-backup.ts`). */
+  outputs: Outputs;
   roles: { main: RoleOf; worker: RoleOf; check: RoleOf };
   briefs: Briefs;
   config?: Partial<LoopConfig>;
@@ -76,6 +80,8 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
     ...(options.previousClaim && { after: options.previousClaim }),
     ...(reopened && { reopened }),
   });
+  // Before any thread or sandbox: nothing may write or read `/outputs` while it is put back.
+  await keepOutputs({ runId, rootThreadId, recorder, outputs: options.outputs, signal });
   const pool = threads(
     {
       runId,

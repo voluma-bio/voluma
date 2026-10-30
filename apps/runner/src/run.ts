@@ -74,6 +74,7 @@ import {
 import { isFatalProviderError, isProviderError } from "./provider-error.ts";
 import { r2Evidence } from "./r2-evidence.ts";
 import { r2Files } from "./r2-files.ts";
+import { r2Outputs } from "./r2-outputs.ts";
 import { r2Workflows } from "./r2-workflows.ts";
 import { type Redact, redactor } from "./redact.ts";
 import { sandboxGateway } from "./sandbox-gateway.ts";
@@ -469,6 +470,7 @@ async function claimBody(
         opened.release(id).catch((e) => log(`releasing ${layout.forThread(id).name} failed: ${e}`)),
       evidence: r2Evidence(config.r2),
       files,
+      outputs: r2Outputs(config.r2),
       roles: {
         main: role(mainModel, "main", "main"),
         worker: role(workerModel, "worker", "worker"),

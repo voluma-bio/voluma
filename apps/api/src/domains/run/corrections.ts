@@ -12,7 +12,7 @@ import { fold } from "@voluma/contracts/fold";
 import type { PersonMessage } from "@voluma/contracts/messages";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { knownUsdOfRun } from "@voluma/provider-calls";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import type { Reader } from "../../domain";
 import type { MessageRefusal, MessageResult } from "../../ports";
 import { admit, type Limits, refusalMessage, usage } from "./admission";
@@ -96,10 +96,25 @@ export async function endCorrection(
 }
 
 /**
- * The task of a go since the run's latest `run.reopened` whose redo has not begun (no attempt of
- * it after the go), if any. One go at a time: the harness acts on one task per reopen.
+ * The task of a go in the run's current reopen whose redo has not begun (no attempt of it after
+ * the go), if any. One go at a time: the harness acts on one task per reopen. The window starts
+ * at the latest `run.reopened` or at the message that reopen is keyed to, whichever is earlier:
+ * a requeue stores its `run.reopened` after the unseen message, and a go in that message is
+ * still undelivered.
  */
 async function pendingGo(tx: Tx, runId: string): Promise<string | undefined> {
+  const [reopened] = await tx
+    .select({ id: events.id, seq: events.seq })
+    .from(events)
+    .where(and(eq(events.runId, runId), eq(events.type, "run.reopened")))
+    .orderBy(desc(events.seq))
+    .limit(1);
+  if (!reopened) return undefined;
+  const [keyed] = await tx
+    .select({ seq: events.seq })
+    .from(events)
+    .where(and(eq(events.runId, runId), eq(events.id, reopened.id.replace(/:reopened$/, ""))));
+  const from = Math.min(reopened.seq, keyed?.seq ?? reopened.seq);
   const since = await tx
     .select()
     .from(events)
@@ -107,7 +122,7 @@ async function pendingGo(tx: Tx, runId: string): Promise<string | undefined> {
       and(
         eq(events.runId, runId),
         inArray(events.type, ["person.message", "attempt.opened"]),
-        sql`${events.seq} > (SELECT COALESCE(MAX(e.seq), 0) FROM ${events} e WHERE e.run_id = ${runId} AND e.type = 'run.reopened')`,
+        gte(events.seq, from),
       ),
     )
     .orderBy(asc(events.seq));
@@ -191,7 +206,15 @@ export async function decideMessage(
         .select()
         .from(events)
         .where(
-          and(eq(events.runId, runId), inArray(events.type, ["revision.started", "plan.changed"])),
+          and(
+            eq(events.runId, runId),
+            inArray(events.type, [
+              "revision.started",
+              "plan.changed",
+              "run.reopened",
+              "correction.ended",
+            ]),
+          ),
         )
         .orderBy(asc(events.seq))
     ).map(toRunEvent),
@@ -209,7 +232,7 @@ export async function decideMessage(
     const pending = await pendingGo(tx, runId);
     if (pending) {
       const title = view.plan.tasks.find((t) => t.id === pending)?.title ?? pending;
-      return refuse(409, `Wait for the redo of ${title} to finish, then send.`);
+      return refuse(409, `Wait for the redo of ${title} to start, then send.`);
     }
   }
   if (!live) {

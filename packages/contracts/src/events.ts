@@ -518,6 +518,15 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     z.object({ sourceSha256: sha256Schema, error: z.string().min(1).max(ASSET_ERROR_MAX) }),
   );
 
+  /**
+   * The runner's copy of `/outputs` taken at the start of the claim that opens a correction
+   * (`run.reopened` `reopenId`), before any thread runs, and the put-back of that copy at the
+   * first claim after the correction ended unfinished (`correction.ended`). Each is written once
+   * per reopen, after the copy is whole, on the root thread. See `outputs-backup.ts` in the harness.
+   */
+  const outputsBackedUp = event("outputs.backed-up", z.object({ reopenId: nonEmpty }));
+  const outputsRestored = event("outputs.restored", z.object({ reopenId: nonEmpty }));
+
   return z.discriminatedUnion("type", [
     claimStarted,
     threadStarted,
@@ -537,6 +546,8 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     reply,
     assetsReady,
     assetsFailed,
+    outputsBackedUp,
+    outputsRestored,
   ]);
 };
 
