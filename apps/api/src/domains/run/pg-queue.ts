@@ -13,32 +13,18 @@ import { randomBytes } from "node:crypto";
 import type { PersonMessage } from "@voluma/contracts/messages";
 import type { Run, VisitorKeys } from "@voluma/contracts/run";
 import {
-  type ClaimEndReason,
   LEASE_SECONDS,
   type ReleaseReason,
   type Usage as RunnerUsage,
 } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { type OutputEntry, unselectable } from "@voluma/contracts/workflow-files";
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  gt,
-  inArray,
-  isNull,
-  lte,
-  notInArray,
-  or,
-  type SQL,
-  sql,
-} from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, notInArray, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { HTTPException } from "hono/http-exception";
 import type { Caller, Reader } from "../../domain";
 import { admit, type Limits, type Refusal, refusalMessage, type Usage, usage } from "./admission";
-import { endClaim, outageDelayMinutes, stalledError } from "./claim-progress";
+import { type ClaimEnd, endClaim, stalledError } from "./claim-progress";
 import { decideMessage, endCorrection, GUEST_KEYS_MESSAGE, openCorrection } from "./corrections";
 import type { KeyVault } from "./key-vault";
 import { LeaseLost, noLease } from "./lease";
@@ -55,7 +41,7 @@ import {
 import { events, inputs, runs, studies, studyScans } from "./schema";
 
 /** Serializes every transaction that changes a run, so the limit counts can't race a claim. */
-const QUEUE_LOCK = 0x76_6f_6c_71;
+export const QUEUE_LOCK = 0x76_6f_6c_71;
 
 /** How long a visitor run waits for its keys. */
 const KEYS_WAIT = sql`interval '24 hours'`;
@@ -79,7 +65,7 @@ export type Claimed = {
   /** The visitor run's keys, handed out once. */
   keys?: VisitorKeys;
   /** Present on every claim after the run's first. */
-  previousClaim?: { reason: ClaimEndReason };
+  previousClaim?: { reason: NonNullable<(typeof runs.$inferSelect)["lastClaimEnd"]> };
 };
 
 /**
@@ -88,7 +74,7 @@ export type Claimed = {
  * without progress counts toward the no-progress limit (`claim-progress.ts`); at the limit
  * the run ends `failed`, naming the call that was in flight.
  */
-async function recover(tx: Tx, where: SQL, reason: ClaimEndReason) {
+async function recover(tx: Tx, where: SQL, reason: ClaimEnd) {
   const ids = await tx
     .select({ id: runs.id })
     .from(runs)
@@ -103,11 +89,6 @@ async function recover(tx: Tx, where: SQL, reason: ClaimEndReason) {
       stalledClaims,
       ...noLease,
     };
-    // A visitor run waits for its keys, not for a time.
-    const holdBack =
-      reason === "provider-outage" && run.credentials === "voluma"
-        ? sql`now() + make_interval(mins => ${outageDelayMinutes(stalledClaims)})`
-        : null;
     if (exhausted) {
       await endUnfinished(
         tx,
@@ -123,7 +104,6 @@ async function recover(tx: Tx, where: SQL, reason: ClaimEndReason) {
           ...base,
           state: run.credentials === "visitor" ? "awaiting-keys" : "queued",
           awaitingSince: run.credentials === "visitor" ? sql`now()` : null,
-          claimableAfter: holdBack,
         })
         .where(eq(runs.id, run.id));
     }
@@ -182,7 +162,6 @@ async function endUnfinished(
       state: "ended",
       outcome: correcting ? "completed" : status,
       endedAt: sql`now()`,
-      claimableAfter: null,
       error: correcting ? null : (error ?? null),
     })
     .where(eq(runs.id, runId));
@@ -496,12 +475,7 @@ export function pgRunQueue(
         const queued = await tx
           .select()
           .from(runs)
-          .where(
-            and(
-              eq(runs.state, "queued"),
-              or(isNull(runs.claimableAfter), lte(runs.claimableAfter, sql`now()`)),
-            ),
-          )
+          .where(eq(runs.state, "queued"))
           .orderBy(
             sql`(SELECT max(o.claimed_at) FROM runs o WHERE o.lab_id = ${runs.labId}) ASC NULLS FIRST`,
             asc(runs.createdAt),
@@ -533,7 +507,6 @@ export function pgRunQueue(
               state: "running",
               startedAt: sql`coalesce(${runs.startedAt}, now())`,
               claimedAt: sql`now()`,
-              claimableAfter: null,
               claimStartSeq: sql`coalesce((SELECT max(seq) FROM events WHERE run_id = ${run.id}), 0)`,
               leaseHolder: runnerId,
               leaseToken,

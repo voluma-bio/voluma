@@ -8,23 +8,24 @@
  * and under 1 GB free disk. Only rows move: the run's R2 files under `runs/<id>/` stay put, so
  * `import:run --from <out>` restores the run whole. Writes to a non-local database only with `--remote`.
  *
- * One repeatable-read transaction does it all: lock the run, read its rows, check them with
- * `assertRestorable` (what `import:run` demands), write the file and fsync it and its directory,
- * read it back, then delete and commit. The file is exactly what was deleted; a concurrent
- * change to the run's rows fails the transaction instead. It also rolls back unless every
- * table's deleted count equals the file's. Inputs are shared and stay. The run's study and its
- * scans are deleted when no other run is in it; `import:run` restores them.
+ * The copy must parse, its events must pass `runEventSchema` (as `import:run` demands), and
+ * its file bytes must equal what was read. The delete runs in one transaction that rolls back
+ * unless every deleted row equals the file's. Inputs are shared and stay. The run's study
+ * is deleted with its scans when no other run is in it; import restores their original metadata.
  */
 import { mkdir, open, readFile, statfs } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
-import { parseArgs } from "node:util";
+import { dirname, join, resolve } from "node:path";
+import { isDeepStrictEqual, parseArgs } from "node:util";
 import { runIdSchema } from "@voluma/contracts/ids";
 import { providerCalls } from "@voluma/provider-calls";
-import { eq } from "drizzle-orm";
+import { workflowById } from "@voluma/workflow/bundled";
+import { eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { reviewSnapshots } from "../domains/review/schema";
+import { eventLock } from "../domains/run/pg-event-log";
+import { QUEUE_LOCK } from "../domains/run/pg-queue";
 import { events, piMessages, runs, studies, studyScans, threads } from "../domains/run/schema";
 import { databaseUrl } from "./operator";
 import { assertRestorable, countsOf, describeCounts, piMessagesOf, readDump } from "./run-dump";
@@ -41,91 +42,118 @@ const file = join(out, "run.json");
 
 const client = postgres(databaseUrl({ writes: true, remote: values.remote }));
 const db = drizzle(client, { casing: "snake_case" });
+const dump = await readDump(db, runId);
+if (dump.run.example) throw new Error(`run ${runId} is an example; archive refuses examples`);
+if (dump.run.state !== "ended") {
+  throw new Error(`run ${runId} is ${dump.run.state}; archive only a run that has ended`);
+}
+// A shutdown/stale sweep marks calls cut before their handler's final settlement can land.
+if (dump.providerCalls.some((call) => call.status === "open" || call.durationMs === null)) {
+  throw new Error(`run ${runId} has unsettled provider calls; nothing deleted`);
+}
+if (
+  !dump.input ||
+  !dump.study ||
+  dump.input.labId !== dump.run.labId ||
+  dump.study.labId !== dump.run.labId ||
+  dump.studyInputs.some((input) => input.labId !== dump.run.labId) ||
+  !workflowById(dump.study.workflowId) ||
+  !dump.studyScans.some((scan) => scan.inputId === dump.run.inputId) ||
+  dump.studyScans.some((scan) => !dump.studyInputs.some((input) => input.id === scan.inputId))
+) {
+  throw new Error(
+    `run ${runId} has missing inputs, study scans or an unknown workflow; cannot restore`,
+  );
+}
 
 await mkdir(out, { recursive: true, mode: 0o700 });
 const { bavail, bsize } = await statfs(out);
 if (bavail * bsize < MIN_FREE_BYTES) {
   throw new Error(`under 1 GB free where ${out} is; refusing to write the archive`);
 }
+const text = JSON.stringify(dump);
+// Check the serialized form that import will read, including its event timestamps.
+assertRestorable(JSON.parse(text));
+const handle = await open(file, "wx", 0o600).catch((e) => {
+  if (e.code === "EEXIST") {
+    throw new Error(`${file} exists (an earlier attempt?); remove it or pass another --out`);
+  }
+  throw e;
+});
+try {
+  await handle.writeFile(text);
+  await handle.sync();
+} finally {
+  await handle.close();
+}
+// File data and every newly created directory entry must survive before the DB commits.
+for (let dir = resolve(out); ; dir = dirname(dir)) {
+  const directory = await open(dir, "r");
+  try {
+    await directory.sync();
+  } finally {
+    await directory.close();
+  }
+  if (dirname(dir) === dir) break;
+}
 
-const result = await db.transaction(
-  async (tx) => {
-    const [locked] = await tx.select().from(runs).where(eq(runs.id, runId)).for("update");
-    if (!locked) throw new Error(`run ${runId} not found`);
-    if (locked.example) throw new Error(`run ${runId} is an example; archive refuses examples`);
-    if (locked.state !== "ended") {
-      throw new Error(`run ${runId} is ${locked.state}; archive only a run that has ended`);
-    }
-    const dump = await readDump(tx, runId);
-    const text = JSON.stringify(dump);
-    // Check what the file will hold: JSON turns the rows' Dates into strings.
-    assertRestorable(JSON.parse(text));
-    const handle = await open(file, "wx", 0o600).catch((e) => {
-      if (e.code === "EEXIST") {
-        throw new Error(`${file} exists (an earlier attempt?); remove it or pass another --out`);
-      }
-      throw e;
-    });
-    try {
-      await handle.writeFile(text);
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-    // The file's name is durable only once its directory is.
-    const dir = await open(out, "r");
-    try {
-      await dir.sync();
-    } finally {
-      await dir.close();
-    }
-
-    // Read the copy back from disk, not from memory.
-    const copy = JSON.parse(await readFile(file, "utf8")) as typeof dump;
-    if (JSON.stringify(copy) !== text) throw new Error(`${file} differs from the rows read`);
-    const expected = countsOf(copy);
-    console.log(
-      `wrote ${file} (${(Buffer.byteLength(text) / 1e6).toFixed(1)} MB): ${describeCounts(expected)}`,
-    );
-
-    const counts = {
-      providerCalls: (
-        await tx.delete(providerCalls).where(eq(providerCalls.runId, runId)).returning()
-      ).length,
-      reviewSnapshots: (
-        await tx.delete(reviewSnapshots).where(eq(reviewSnapshots.runId, runId)).returning()
-      ).length,
-      piMessages: (await tx.delete(piMessages).where(piMessagesOf(runId)).returning()).length,
-      threads: (await tx.delete(threads).where(eq(threads.runId, runId)).returning()).length,
-      events: (await tx.delete(events).where(eq(events.runId, runId)).returning()).length,
-    };
-    const diff = Object.entries(counts).filter(
-      ([k, n]) => n !== expected[k as keyof typeof expected],
-    );
-    if (diff.length > 0) {
-      throw new Error(
-        `deleted counts differ from the archive (${diff.map(([k, n]) => `${k} ${n}`).join(", ")}); rolled back. ${file} was written; remove it before retrying`,
-      );
-    }
-    await tx.delete(runs).where(eq(runs.id, runId));
-    const [sibling] = await tx
-      .select({ id: runs.id })
-      .from(runs)
-      .where(eq(runs.studyId, dump.run.studyId))
-      .limit(1);
-    if (!sibling) {
-      await tx.delete(studyScans).where(eq(studyScans.studyId, dump.run.studyId));
-      await tx.delete(studies).where(eq(studies.id, dump.run.studyId));
-    }
-    return { counts, dump, studyDeleted: !sibling };
-  },
-  { isolationLevel: "repeatable read" },
-);
-await client.end();
-const { dump } = result;
+// Read the copy back from disk, not from memory.
+const copy = JSON.parse(await readFile(file, "utf8")) as typeof dump;
+if (JSON.stringify(copy) !== text) throw new Error(`${file} differs from the rows read`);
+const expected = countsOf(copy);
 console.log(
-  `deleted run ${runId} and ${describeCounts(result.counts)}; ${
-    result.studyDeleted
+  `wrote ${file} (${(Buffer.byteLength(text) / 1e6).toFixed(1)} MB): ${describeCounts(expected)}`,
+);
+
+function matches(name: string, actual: unknown[], archived: unknown[]) {
+  // RETURNING has no ordering guarantee; JSON also normalizes the database's Dates.
+  const rows = (values: unknown[]) => values.map((row) => JSON.stringify(row)).sort();
+  if (!isDeepStrictEqual(rows(actual), rows(archived))) {
+    throw new Error(`${name} rows differ from the archive; rolled back`);
+  }
+}
+
+const deleted = await db.transaction(async (tx) => {
+  // Same order as lifecycle writes. The queue lock also excludes new sibling runs.
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(${QUEUE_LOCK})`);
+  await eventLock(tx, runId);
+  const [locked] = await tx.select().from(runs).where(eq(runs.id, runId)).for("update");
+  matches("run", locked ? [locked] : [], [copy.run]);
+  const rows = {
+    providerCalls: await tx.delete(providerCalls).where(eq(providerCalls.runId, runId)).returning(),
+    reviewSnapshots: await tx
+      .delete(reviewSnapshots)
+      .where(eq(reviewSnapshots.runId, runId))
+      .returning(),
+    piMessages: await tx.delete(piMessages).where(piMessagesOf(runId)).returning(),
+    threads: await tx.delete(threads).where(eq(threads.runId, runId)).returning(),
+    events: await tx.delete(events).where(eq(events.runId, runId)).returning(),
+  };
+  for (const name of Object.keys(rows) as (keyof typeof rows)[]) {
+    matches(name, rows[name], copy[name]);
+  }
+  await tx.delete(runs).where(eq(runs.id, runId));
+  const [sibling] = await tx
+    .select({ id: runs.id })
+    .from(runs)
+    .where(eq(runs.studyId, dump.run.studyId))
+    .limit(1);
+  if (!sibling) {
+    matches(
+      "study scans",
+      await tx.delete(studyScans).where(eq(studyScans.studyId, dump.run.studyId)).returning(),
+      copy.studyScans,
+    );
+    matches("study", await tx.delete(studies).where(eq(studies.id, dump.run.studyId)).returning(), [
+      copy.study,
+    ]);
+  }
+  return { counts: countsOf(rows), studyDeleted: !sibling };
+});
+await client.end();
+console.log(
+  `deleted run ${runId} and ${describeCounts(deleted.counts)}; ${
+    deleted.studyDeleted
       ? `study ${dump.run.studyId} and its scans (no other run in it)`
       : "its study stays (other runs in it)"
   }; input ${dump.run.inputId} stays. R2 runs/${runId}/ untouched. Restore: import:run --from ${out}`,

@@ -7,13 +7,12 @@
  */
 import type { RunEvent } from "@voluma/contracts/events";
 import type { FoldedTask } from "@voluma/contracts/fold";
-import { abandonedEvents } from "@voluma/contracts/fold";
+import { abandonedEvents, isSatisfied } from "@voluma/contracts/fold";
 import type { Asset } from "@voluma/contracts/review";
 import { progress, reviewState } from "@voluma/contracts/review-state";
 import type { ProviderCalls, RunState } from "@voluma/contracts/run";
 import { type RunSpend, type Spend, spend } from "@voluma/contracts/spend";
 import { openThreads } from "@voluma/contracts/threads";
-import { isSatisfied } from "@voluma/workflow";
 import { catalog } from "@voluma/workflow/bundled";
 import { type Halt, type Live, toolTitle } from "./transcript";
 
@@ -23,16 +22,9 @@ const { outputName, taskTitle, tasks: workflowTasks } = catalog["mouse-oa"];
 const purpose = new Map(workflowTasks.map((t) => [t.id, t.summary]));
 
 /**
- * `paused`: open while the run waits for a runner or keys; `awaiting-ai`: open while the run is
- * held until the AI is back. Either resumes with a `thread.started`.
+ * `paused`: open while the run waits for a runner or keys; it resumes with a `thread.started`.
  */
-export type ThreadStatus =
-  | "running"
-  | "paused"
-  | "awaiting-ai"
-  | "completed"
-  | "failed"
-  | "cancelled";
+export type ThreadStatus = "running" | "paused" | "completed" | "failed" | "cancelled";
 
 export type Thread = {
   id: string;
@@ -77,7 +69,7 @@ export function haltOf(state: RunState, closed: boolean): Halt | undefined {
     case "running":
       return undefined;
     case "queued":
-      return { kind: state.waitingForProvider ? "awaiting-ai" : "paused" };
+      return { kind: "paused" };
     case "awaiting-keys":
       return { kind: "paused" };
     case "ended":
@@ -175,8 +167,7 @@ function threadsOf(events: RunEvent[]): { threads: Thread[]; lastAt: Map<string,
 /**
  * A thread still open when the runner is not running the run (`halt`): a lost runner writes no
  * end. A cancel ends every thread in the API, so only a failed run leaves them here. It is stopped
- * (failed, if the run failed) at the run's end, or paused (`awaiting-ai`, if the run is held for
- * the AI) at its last event while the run waits to resume.
+ * (failed, if the run failed) at the run's end, or paused at its last event while the run waits to resume.
  */
 function halted(threads: Thread[], lastAt: Map<string, string>, halt: Halt): Thread[] {
   return threads.map((t) =>
@@ -273,9 +264,7 @@ export type TaskState =
   /** Working or being checked when the run ended. */
   | "stopped"
   /** Working or being checked while the run waits for a runner or keys. */
-  | "paused"
-  /** Working or being checked while the run is held until the AI is back. */
-  | "awaiting-ai";
+  | "paused";
 
 /** One To check item, open or accepted: what the review would show for it. */
 export type NeedItem = {
@@ -359,9 +348,24 @@ const formatNumber = (value: number) =>
     ...(Math.abs(value) >= 1000 ? { maximumFractionDigits: 0 } : { maximumSignificantDigits: 3 }),
   }).format(value);
 
-/** An error's first line, without the provider's raw response: "OpenAI API error (401)". */
-export const plainError = (error: string) =>
-  error.split(/\s*(?:\{\s*"|\n)/)[0]?.replace(/[:\s]+$/, "") || error;
+/**
+ * An error's first line with the provider's raw JSON response cut down to its message:
+ * "meta API error (404): The model does not exist". A body with no message is dropped.
+ */
+export const plainError = (error: string) => {
+  const brace = error.search(/\{\s*"/);
+  const head = brace < 0 ? error : error.slice(0, brace);
+  const title = head.split("\n")[0]?.replace(/[:\s]+$/, "") || error;
+  if (brace < 0) return title;
+  try {
+    const json = JSON.parse(error.slice(brace));
+    const message = json?.message ?? json?.error?.message ?? json?.error;
+    if (typeof message === "string" && message) return `${title}: ${message}`;
+  } catch (e) {
+    if (!(e instanceof SyntaxError)) throw e;
+  }
+  return title;
+};
 
 /**
  * A task's values: each measurement and score of the current attempt (files, volumes,

@@ -5,7 +5,7 @@
  * mimeType}`, the bytes (the ones the model saw, downscaled if they were) written to the thread's
  * scratch in the run's bucket (`historyImageKey`); a loaded history gets the images back.
  *
- * Rows written before this hold inline image blocks and load unchanged. An image whose object
+ * Rows written before this hold inline image blocks and use the same retention rule. An image whose object
  * is gone or no longer matches its sha256 comes back as a short text note. Only the images
  * the next request would carry are fetched (`KEEP` in `elide-images.ts`): older ones become the
  * note the request would have shown anyway.
@@ -16,6 +16,10 @@ import { FileNotFound, type Files } from "../../ports/files";
 import type { History } from "../../ports/history";
 import { parseThreadId } from "../../thread-id";
 import { KEEP, withoutImages } from "./elide-images";
+
+// view_image returns at most 1 MiB per image. Its stored object is on writable scratch,
+// so check the stream before buffering it: a sandbox can replace it with a larger file.
+const MAX_IMAGE_BYTES = 1024 * 1024;
 
 type Block = { type: string; [key: string]: unknown };
 type Row = { content?: unknown; [key: string]: unknown };
@@ -39,8 +43,13 @@ export function withImageRefs(history: History, files: Files, runId: string): Hi
       mimeType: string;
     };
     const chunks: Uint8Array[] = [];
+    let size = 0;
     try {
-      for await (const chunk of files.read(key, signal)) chunks.push(chunk);
+      for await (const chunk of files.read(key, signal)) {
+        size += chunk.length;
+        if (size > MAX_IMAGE_BYTES) return note("its file exceeds the image size limit");
+        chunks.push(chunk);
+      }
     } catch (error) {
       if (error instanceof FileNotFound) return note("its file was deleted");
       throw error;
@@ -61,16 +70,32 @@ export function withImageRefs(history: History, files: Files, runId: string): Hi
             : undefined,
       }));
       const withImages = rows.filter(
-        (r) => r.row && (has(r.row, "image") || has(r.row, "imageRef")),
+        (r) => r.row?.role === "toolResult" && (has(r.row, "image") || has(r.row, "imageRef")),
       );
       const shown = new Set(withImages.slice(-KEEP));
       return Promise.all(
         rows.map(async (r) => {
           const blocks = r.row && blocksOf(r.row);
-          if (!r.row || !blocks || !has(r.row, "imageRef")) return r.text;
-          const content = shown.has(r)
-            ? await Promise.all(blocks.map((b) => (b.type === "imageRef" ? fetchImage(b) : b)))
-            : withoutImages(blocks, "imageRef");
+          if (!r.row || !blocks) return r.text;
+          // Elide both forms before missing references become text; otherwise Pi can promote
+          // an older inline image into the two-result window on the next request.
+          if (
+            r.row.role === "toolResult" &&
+            !shown.has(r) &&
+            blocks.some((b) => b.type === "image" || b.type === "imageRef")
+          ) {
+            return JSON.stringify({
+              ...r.row,
+              content: withoutImages(
+                blocks.filter((b) => b.type !== "imageRef"),
+                "image",
+              ),
+            });
+          }
+          if (!has(r.row, "imageRef")) return r.text;
+          const content = await Promise.all(
+            blocks.map((b) => (b.type === "imageRef" ? fetchImage(b) : b)),
+          );
           return JSON.stringify({ ...r.row, content });
         }),
       );

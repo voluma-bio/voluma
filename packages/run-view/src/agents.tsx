@@ -83,7 +83,6 @@ export function ThreadSpendInfo({ thread }: { thread: Thread }) {
 const MARK: Record<Thread["status"], string> = {
   running: "bg-info-tint text-info",
   paused: "bg-muted text-muted-foreground",
-  "awaiting-ai": "bg-muted text-muted-foreground",
   completed: "bg-primary-tint text-primary-strong",
   failed: "bg-destructive-tint text-destructive",
   cancelled: "bg-muted text-muted-foreground",
@@ -127,7 +126,7 @@ const VERDICT = {
 } as const;
 
 function ResultLine({ thread }: { thread: Thread }) {
-  if (thread.status === "running" || thread.status === "paused" || thread.status === "awaiting-ai")
+  if (thread.status === "running" || thread.status === "paused")
     return (
       <p className="truncate font-mono text-meta text-muted-foreground">
         {thread.liveTool ?? thread.lastTool ?? "Starting"}
@@ -148,7 +147,6 @@ function ResultLine({ thread }: { thread: Thread }) {
 export const THREAD_STATUS: Record<Thread["status"], Status> = {
   running: "running",
   paused: "paused",
-  "awaiting-ai": "waiting",
   completed: "done",
   failed: "stopped",
   cancelled: "stopped",
@@ -156,11 +154,7 @@ export const THREAD_STATUS: Record<Thread["status"], Status> = {
 
 /** A thread's status word: the mark's, except where the thread's state is more exact. */
 export const threadWord = (status: Thread["status"]) =>
-  status === "failed"
-    ? "Failed"
-    : status === "awaiting-ai"
-      ? "Waiting for the AI"
-      : STATUS_WORD[THREAD_STATUS[status]];
+  status === "failed" ? "Failed" : STATUS_WORD[THREAD_STATUS[status]];
 
 /** A worker's or checker's card in the main thread. */
 export function AgentCard({ thread }: { thread: Thread }) {

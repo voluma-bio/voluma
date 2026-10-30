@@ -1,15 +1,14 @@
 /**
  * What `run.json` holds, shared by the operator scripts that write it (`export:run`,
  * `archive:run`) and read it (`import:run`): every database row that belongs to one run.
- * Evidence stays in R2 under `runs/<id>/`; nothing there is copied. The run's input is
- * shared with other runs, so it is inserted only if missing. The study and its scans come
- * back when their ids are free, else the run gets a study of one (`import-run.ts`).
+ * Evidence stays in R2 under `runs/<id>/`; nothing there is copied. Shared study, scan,
+ * and input rows travel with the run so restoring it never invents research metadata.
  */
 
 import { runEventSchema } from "@voluma/contracts/events";
 import { providerCalls } from "@voluma/provider-calls";
 import { catalog, workflowById } from "@voluma/workflow/bundled";
-import { asc, eq, sql } from "drizzle-orm";
+import { asc, eq, inArray, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { reviewSnapshots } from "../domains/review/schema";
 import {
@@ -26,16 +25,25 @@ import {
 export const piMessagesOf = (runId: string) =>
   sql`starts_with(${piMessages.threadId}, ${`${runId}.`})`;
 
-export async function readDump(db: Pick<PostgresJsDatabase, "select">, runId: string) {
+export async function readDump(db: PostgresJsDatabase, runId: string) {
+  return db.transaction((tx) => readRows(tx, runId), { isolationLevel: "repeatable read" });
+}
+
+async function readRows(db: PostgresJsDatabase, runId: string) {
   const [run] = await db.select().from(runs).where(eq(runs.id, runId));
   if (!run) throw new Error(`run ${runId} not found`);
   const [input] = await db.select().from(inputs).where(eq(inputs.id, run.inputId));
   const [study] = await db.select().from(studies).where(eq(studies.id, run.studyId));
+  const scans = await db.select().from(studyScans).where(eq(studyScans.studyId, run.studyId));
   return {
     run,
     input,
     study,
-    studyScans: await db.select().from(studyScans).where(eq(studyScans.studyId, run.studyId)),
+    studyScans: scans,
+    studyInputs: await db
+      .select()
+      .from(inputs)
+      .where(inArray(inputs.id, [...new Set([run.inputId, ...scans.map((s) => s.inputId)])])),
     events: await db.select().from(events).where(eq(events.runId, runId)).orderBy(asc(events.seq)),
     threads: await db.select().from(threads).where(eq(threads.runId, runId)),
     piMessages: await db
