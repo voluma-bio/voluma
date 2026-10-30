@@ -32,8 +32,8 @@
  * `person.message`, `run.reopened` and `correction.ended` are server-authored correction events
  * on thread `<runId>.person`, handled the same way (payloads, ids and rules in messages.ts).
  * `reply` is the main agent's side of the chat: the runner writes it from the `reply` tool on the
- * main thread. The fold ignores all four; `reviewState` reads `run.reopened` and
- * `correction.ended` to leave out the revisions of a correction that ended unfinished.
+ * main thread. The fold ignores all four; it reads `run.reopened` and `correction.ended` only to
+ * skip the task-state events of a correction that ended unfinished (`abandonedEvents`, fold.ts).
  * `conversation` (conversation.ts) reads the chat (nothing calls it yet).
  */
 import { z } from "zod";

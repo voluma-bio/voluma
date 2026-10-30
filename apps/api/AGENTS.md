@@ -88,7 +88,11 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   queue lock for `sendMessage`. **Lock order, everywhere: the queue lock, then the run's event lock
   (`eventLock`), then row locks** (a runner's append takes the event lock before it shares the run
   row, so a transaction holding the row and then asking for the event lock deadlocks with it:
-  `recover`, `heartbeat`, `report` and `decideMessage` take the event lock first). One `reopen`
+  `recover`, `heartbeat`, `report` and `decideMessage` take the event lock first, through the one
+  `eventLock` in `pg-event-log.ts`; `decide` (review decisions) checks the run has ended before
+  taking it, so an accept on a running run never holds it while loading the log). The route
+  refuses a second `go` (409) while one since the latest `run.reopened` has no attempt of its task
+  yet; plain messages go through. One `reopen`
   serves the route and `report()`'s requeue: it writes `run.reopened`, clears `lastClaimEnd`,
   `stalledClaims` and the lease, and sets
   `runs.correction_base_usd` (the spend at the reopen): that column is what makes a run's claims

@@ -298,6 +298,19 @@ export function world(o: WorldOptions) {
         for (const ended of cancelEnds(RUN, stored, new Date())) {
           stored.push({ ...ended, seq: stored.length + 1 } as unknown as RunEvent);
         }
+        // A cancel inside a correction also records how it ended (`correction.ended`).
+        const reopened = stored.filter((s) => s.type === "run.reopened").at(-1);
+        if (reopened) {
+          stored.push({
+            id: reopened.id.replace(/:reopened$/, ":ended"),
+            runId: RUN,
+            threadId: reopened.threadId,
+            seq: stored.length + 1,
+            type: "correction.ended",
+            payload: { status: "cancelled" },
+            createdAt: new Date().toISOString(),
+          } as unknown as RunEvent);
+        }
       }
     },
   };
@@ -404,6 +417,7 @@ export function world(o: WorldOptions) {
       id = `m${++n}`,
       during?: { message: Message; after: (e: RunEvent) => boolean },
     ): Promise<Folded> {
+      cut = frozen = false; // a cancelled correction does not stop the next one
       serverEvents(id, message);
       let landed: string | undefined;
       if (during) {

@@ -4,6 +4,7 @@
  * of the runtime spec's Verification list and asserts on the stored event log.
  */
 import type { RunEvent } from "@voluma/contracts/events";
+import { fold } from "@voluma/contracts/fold";
 import { openThreads } from "@voluma/contracts/threads";
 import { describe, expect, it } from "vitest";
 import {
@@ -1221,7 +1222,7 @@ describe("run loop", () => {
       // redo does not add a second one.
       const revisions = after.filter((e) => e.type === "revision.started");
       expect(revisions).toHaveLength(1);
-      expect(revisions[0]?.id).toMatch(/^r1\.person:m\d+:go$/);
+      expect(revisions[0]?.id).toMatch(/^r1\.person:m\d+:go:r1\.person:m\d+:reopened$/);
       expect(revisions[0]?.type === "revision.started" && revisions[0].payload).toEqual({
         reason: "correction",
         taskId: "t1",
@@ -1238,6 +1239,37 @@ describe("run loop", () => {
       expect(errors(after), w.text()).toEqual([]);
       expect(ended(w.stored, "supervisor")).toEqual(["completed", "completed"]);
       expect(duplicates(w.stored)).toEqual([]);
+    });
+
+    it("a cancelled go leaves no trace: a message-only correction finishes on the pre-go state", async () => {
+      const script: Script = (t) => {
+        if (!talking(t)) return undefined;
+        if (t.fresh && /They said go on t1/.test(t.lastUser))
+          return call("message", { threadId: `${R}t1.worker`, text: "Redo t1." });
+        if (wrote(t)) return call("reply", { text: "t1 is thin." });
+        return sentReply(t) ? call("finish_run", { summary: "Answered." }) : undefined;
+      };
+      // The researcher cancels once the redo's attempt has opened (after the run's first one).
+      let opened = 0;
+      const w = world({
+        plan: T1,
+        main: first(script, chain(["t1", "t2"])),
+        cancelAfter: (e) =>
+          e.type === "attempt.opened" && e.payload.taskId === "t1" && ++opened === 2,
+      });
+      await w.run();
+      const before = w.stored.length;
+      const pre = fold(w.stored).tasks.map((t) => `${t.id}:${t.status}:${t.attemptId}`);
+      await w.send({ text: "Redo it.", go: true, taskId: "t1" });
+      expect(of(w.stored.slice(before), "correction.ended")).toHaveLength(1);
+      const folded = await w.send({ text: "Why is t1 thin?" });
+      expect(
+        folded.tasks.map((t) => `${t.id}:${t.status}:${t.attemptId}`),
+        w.text(),
+      ).toEqual(pre);
+      // The second correction needed no go and finished: `finish_run` accepted.
+      expect(ended(w.stored, "supervisor").at(-1)).toBe("completed");
+      expect(errors(w.stored), w.text()).toEqual([]);
     });
 
     it("a go that arrived mid-claim is answered by the next claim, which does the attempt", async () => {

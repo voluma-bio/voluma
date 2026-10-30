@@ -15,7 +15,7 @@
  */
 
 import type { By, ThreadKind } from "@voluma/contracts/events";
-import type { Folded, FoldedTask } from "@voluma/contracts/fold";
+import { abandonedEvents, type Folded, type FoldedTask } from "@voluma/contracts/fold";
 import type { EvidenceRef } from "@voluma/contracts/output";
 import type {
   AskInput,
@@ -220,7 +220,10 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     const reported = new Map<string, Set<string>>();
     const opened: string[] = [];
     const checked = new Set<string>();
-    for (const e of recorder.events()) {
+    const events = recorder.events();
+    const abandoned = abandonedEvents(events);
+    for (const e of events) {
+      if (abandoned.has(e.id)) continue;
       if (e.type === "attempt.opened" && e.payload.taskId === taskId) opened.push(e.id);
       if (e.type === "task" && e.payload.taskId === taskId && e.payload.status === "under-review")
         checked.add(e.payload.attemptId);

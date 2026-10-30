@@ -34,5 +34,14 @@ export const isEffectTool = (name: string): name is EffectTool => Object.hasOwn(
 export const effectId = (tool: EffectTool, threadId: string, toolCallId: string) =>
   `${threadId}:${toolCallId}${SUFFIX[tool]}`;
 
-/** The `revision.started` the loop writes when the main agent is told of a researcher's go: it opens the correction and, being keyed by the message, tells the log the go was handled. */
-export const goMarkerId = (personMessageEventId: string) => `${personMessageEventId}:go`;
+/**
+ * The `revision.started` the loop writes when the main agent is told of a researcher's go: it opens
+ * the correction and, being keyed by the message and the reopen it follows, tells the log the go was
+ * handled in this reopen. A reopen after a failed claim gets a new marker for the same message.
+ */
+export const goMarkerId = (personMessageEventId: string, reopenId: string) =>
+  `${personMessageEventId}:go:${reopenId}`;
+
+/** The person message a `goMarkerId` belongs to. */
+export const messageOfGoMarker = (markerId: string) =>
+  markerId.slice(0, markerId.lastIndexOf(":go:"));

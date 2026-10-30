@@ -12,12 +12,12 @@
  * no end and it is not running). A stop appends the end first, so the log shows it at once.
  */
 import type { RunEvent } from "@voluma/contracts/events";
-import { type Folded, fold } from "@voluma/contracts/fold";
+import { abandonedEvents, type Folded, fold } from "@voluma/contracts/fold";
 import type { EvidenceRef } from "@voluma/contracts/output";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { UserSender } from "./adapters/pi/start-thread";
 import type { PayloadOf } from "./recorder";
-import { callKey, effectId, goMarkerId } from "./tools/effects";
+import { callKey, effectId, messageOfGoMarker } from "./tools/effects";
 
 /** The sandbox path of a file a task names: the inverse of `refOf` (`task-runtime.ts`). */
 export const pathOf = (taskId: string, f: Pick<EvidenceRef, "root" | "path">): string =>
@@ -181,6 +181,8 @@ export interface ThreadLog {
    * since: this is a correction, and the main agent's work tools wait for a go.
    */
   correcting: boolean;
+  /** The latest `run.reopened`'s id: what a go marker's id is keyed to (`goMarkerId`). */
+  reopenId: string | undefined;
   /** A reopen was stored after the latest `claim.started`: the next claim says it follows a reopen. */
   reopenPending: boolean;
   /**
@@ -260,6 +262,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
     root: { id: undefined, ended: false, endedThisClaim: false },
     correcting: false,
     reopenPending: false,
+    reopenId: undefined,
     go: undefined,
     unanswered: false,
   };
@@ -273,7 +276,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
   const coveredBy = (d: { at: number; horizon: number }, n: Notice) =>
     n.at <= d.at && (n.kind !== "person" || n.seq <= d.horizon);
   const volumeFiles = new Map<string, string>(); // volume block id -> its file's sandbox path
-  const goTasks = new Map<string, { taskId: string; messageId: string }>(); // marker id -> the go it marks
+  const goTasks = new Map<string, { taskId: string; messageId: string }>(); // person message id -> its go
   const briefed = new Set<string>(); // threads whose brief (first user message) the log holds
   // Threads started again while their latest start had no end: the message that follows is a
   // cut-off resume, not a nudge (a nudge is the runtime asking a thread that stopped).
@@ -284,6 +287,8 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
     { verdict: "passed" | "needs-review"; summary?: string; text: string }
   >(); // by attempt
   const notice = (n: NoticeBody, at: number) => value.notices.push({ ...n, at } as Notice);
+  // The task-state events of a failed or cancelled correction never happened, as `fold` has it.
+  const abandoned = abandonedEvents(events);
   for (const [at, e] of events.entries()) {
     value.written.set(e.id, {
       at,
@@ -291,6 +296,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
       threadId: e.threadId,
       ...(e.type === "attempt.opened" && { taskId: e.payload.taskId }),
     });
+    if (abandoned.has(e.id)) continue;
     const record = value.threads.get(e.threadId);
     const ms = Date.parse(e.createdAt);
     switch (e.type) {
@@ -304,11 +310,12 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         value.correcting = true;
         value.reopenPending = true;
         value.go = undefined;
+        value.reopenId = e.id;
         break;
       case "person.message": {
         const { text, marks, snapshotKey, go, taskId } = e.payload;
         unreplied.push(e.seq);
-        if (go && taskId) goTasks.set(goMarkerId(e.id), { taskId, messageId: e.id });
+        if (go && taskId) goTasks.set(e.id, { taskId, messageId: e.id });
         notice(
           {
             eventId: e.id,
@@ -334,8 +341,8 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         unreplied.splice(0, unreplied.length, ...unreplied.filter((seq) => seq > horizon));
         break;
       case "revision.started": {
-        const go = goTasks.get(e.id);
-        if (go) {
+        const go = goTasks.get(messageOfGoMarker(e.id));
+        if (go && e.payload.reason === "correction") {
           value.go = { ...go, at, redone: false };
           value.fixRounds.set(go.taskId, 0);
         }

@@ -37,7 +37,14 @@ export class EventIdTaken extends Error {
 /** First key of the advisory lock pair; the second is the run. Distinguishes our locks from others'. */
 export const EVENT_SEQ_LOCK = 0x76_6f_6c_75;
 
-/** Caller holds EVENT_SEQ_LOCK and has authorized the write under the run-row lock. */
+/**
+ * The run's event lock. Lock order, everywhere: the queue lock, then this, then row locks
+ * (`corrections.ts`).
+ */
+export const eventLock = (tx: Tx, runId: string) =>
+  tx.execute(sql`SELECT pg_advisory_xact_lock(${EVENT_SEQ_LOCK}, hashtext(${runId}))`);
+
+/** Caller holds the event lock and has authorized the write under the run-row lock. */
 export async function insertEvent(tx: Tx, event: Omit<RunEvent, "seq">) {
   return tx
     .insert(events)
@@ -57,7 +64,7 @@ export async function insertEvent(tx: Tx, event: Omit<RunEvent, "seq">) {
  * the log consistent, whether a runner holds the run or none does (a recovered or queued run).
  */
 export async function cancelOpenThreads(tx: Tx, runId: string) {
-  await tx.execute(sql`SELECT pg_advisory_xact_lock(${EVENT_SEQ_LOCK}, hashtext(${runId}))`);
+  await eventLock(tx, runId);
   const log = (
     await tx.select().from(events).where(eq(events.runId, runId)).orderBy(asc(events.seq))
   ).map(toRunEvent);
@@ -133,9 +140,7 @@ export function pgEventLog(db: PostgresJsDatabase, notifier: Notifier) {
     /** Throws `LeaseLost`, or `EventIdTaken` for an id stored under another run. */
     async append(event: EventInput, leaseToken: string) {
       await db.transaction(async (tx) => {
-        await tx.execute(
-          sql`SELECT pg_advisory_xact_lock(${EVENT_SEQ_LOCK}, hashtext(${event.runId}))`,
-        );
+        await eventLock(tx, event.runId);
         await assertLease(tx, event.runId, leaseToken);
         const createdAt = new Date(event.createdAt);
         const inserted = await insertEvent(tx, event);

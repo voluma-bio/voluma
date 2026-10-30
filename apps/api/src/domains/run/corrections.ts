@@ -17,12 +17,9 @@ import type { Reader } from "../../domain";
 import type { MessageRefusal, MessageResult } from "../../ports";
 import { admit, type Limits, refusalMessage, usage } from "./admission";
 import { noLease } from "./lease";
-import { EVENT_SEQ_LOCK, insertEvent } from "./pg-event-log";
+import { eventLock, insertEvent } from "./pg-event-log";
 import { loadRun, readableRuns, type Tx, toRunEvent } from "./pg-runs";
 import { events, runs, studies } from "./schema";
-
-export const eventLock = (tx: Tx, runId: string) =>
-  tx.execute(sql`SELECT pg_advisory_xact_lock(${EVENT_SEQ_LOCK}, hashtext(${runId}))`);
 
 const personThread = (runId: string) => `${runId}.person`;
 const personEventId = (runId: string, messageId: string) => `${personThread(runId)}:${messageId}`;
@@ -96,6 +93,34 @@ export async function endCorrection(
     type: "correction.ended",
     payload: { status, ...(error !== undefined && { error }) },
   });
+}
+
+/**
+ * The task of a go since the run's latest `run.reopened` whose redo has not begun (no attempt of
+ * it after the go), if any. One go at a time: the harness acts on one task per reopen.
+ */
+async function pendingGo(tx: Tx, runId: string): Promise<string | undefined> {
+  const since = await tx
+    .select()
+    .from(events)
+    .where(
+      and(
+        eq(events.runId, runId),
+        inArray(events.type, ["person.message", "attempt.opened"]),
+        sql`${events.seq} > (SELECT COALESCE(MAX(e.seq), 0) FROM ${events} e WHERE e.run_id = ${runId} AND e.type = 'run.reopened')`,
+      ),
+    )
+    .orderBy(asc(events.seq));
+  const log = since.map(toRunEvent);
+  for (const [i, e] of log.entries()) {
+    if (e.type !== "person.message" || !e.payload.go || !e.payload.taskId) continue;
+    const { taskId } = e.payload;
+    const redone = log
+      .slice(i + 1)
+      .some((later) => later.type === "attempt.opened" && later.payload.taskId === taskId);
+    if (!redone) return taskId;
+  }
+  return undefined;
 }
 
 /**
@@ -178,6 +203,13 @@ export async function decideMessage(
     }
     if (view.tasks.find((t) => t.id === taskId)?.skipped) {
       return refuse(409, `${taskId} was skipped, so it cannot be corrected.`);
+    }
+  }
+  if (live && msg.payload.go) {
+    const pending = await pendingGo(tx, runId);
+    if (pending) {
+      const title = view.plan.tasks.find((t) => t.id === pending)?.title ?? pending;
+      return refuse(409, `Wait for the redo of ${title} to finish, then send.`);
     }
   }
   if (!live) {

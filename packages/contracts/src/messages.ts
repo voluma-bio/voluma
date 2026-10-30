@@ -41,11 +41,13 @@
  * same thread, id `<runId>.person:<id>`.
  *
  * Go. `go` requires `taskId`. When the loop's log shows a `go` the main agent has not been told
- * of, it writes `revision.started {reason: "correction", taskId}` (id `<runId>.person:<id>:go`)
+ * of, it writes `revision.started {reason: "correction", taskId}` (id `<runId>.person:<id>:go:<the latest run.reopened's id>`)
  * and then tells main; that marker, not the message, opens the gate. Code refuses `message`,
  * `start_worker`, `change_plan` and `stop_worker` until a marker exists since the latest
- * `run.reopened`. A go that arrived before a requeue's `run.reopened` is still undelivered, so
- * the next claim writes its marker and opens the gate then. The marker also gives review and the
+ * `run.reopened`. A go that arrived before a requeue's `run.reopened`, or whose marker an earlier
+ * reopen wrote before its claim failed, is still undelivered, so the next claim writes a marker
+ * keyed to its own reopen and opens the gate then. The route refuses a second go (409) while one
+ * since the latest `run.reopened` has no attempt of its task yet. The marker also gives review and the
  * correction span a boundary when nothing depends on the task, and resets the task's fix rounds.
  * The main agent reads the chat as `person.message`s and writes
  * `reply` events; the panel reads `conversation(events)` (`conversation.ts`) from the run stream
@@ -62,9 +64,11 @@
  * written as `correction.ended` (server-authored, thread `<runId>.person`, id
  * `<runId>.person:<id>:ended`, keyed to the latest `run.reopened`'s id, payload `correctionEndedSchema`)
  * and the run ends `completed` again. The run page shows the span from `run.reopened` to the next
- * root `thread.ended` or `correction.ended`. The revisions that span opened (`revision.started`
- * after the latest `run.reopened`) are not the run's result: review and progress use the revision
- * before them (`reviewState`), so a failed redo never leaves a half-redone task as the review.
+ * root `thread.ended` or `correction.ended`. The task-state events of that span (attempts, task,
+ * checkpoints, outputs, plan changes, revisions) are abandoned (`abandonedEvents`, fold.ts): the
+ * fold, review, the run page and the harness's own scans skip them, so a failed redo leaves
+ * no half-redone task and the next correction starts from the pre-go state. Messages, replies,
+ * thread events, `run.reopened` and `correction.ended` stay.
  *
  * Who may send: only the run's `startedBy` (403 otherwise; it also settles whose go counts).
  * Cookie auth and Origin rules are `run.ts`'s. Only this route's body limit is raised, to

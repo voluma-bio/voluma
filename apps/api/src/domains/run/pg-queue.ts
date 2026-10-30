@@ -25,11 +25,11 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { Reader } from "../../domain";
 import { admit, type Limits, type Refusal, refusalMessage, type Usage, usage } from "./admission";
 import { endClaim, stalledError } from "./claim-progress";
-import { decideMessage, endCorrection, eventLock, reopen } from "./corrections";
+import { decideMessage, endCorrection, reopen } from "./corrections";
 import type { KeyVault } from "./key-vault";
 import { LeaseLost, noLease } from "./lease";
 import type { Notifier } from "./notifier";
-import { cancelOpenThreads } from "./pg-event-log";
+import { cancelOpenThreads, eventLock } from "./pg-event-log";
 import {
   loadRun,
   loadRuns,
