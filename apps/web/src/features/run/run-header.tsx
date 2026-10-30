@@ -73,7 +73,7 @@ export function RunHeader({
   progress: { done, total, toCheck },
   spend,
   openTask,
-  decisions,
+  agents,
   onChange,
 }: {
   run: Run;
@@ -83,8 +83,8 @@ export function RunHeader({
   spend: RunSpend;
   /** The task "Open in 3D" opens: the one in view, else the first to check. */
   openTask?: string;
-  /** Where "What the AI decided" goes. */
-  decisions: string;
+  /** Where "What the AI did" goes. */
+  agents: string;
   onChange: (run: Run) => void;
 }) {
   const { title, group } = scanTitle(run, study);
@@ -144,7 +144,7 @@ export function RunHeader({
           spend={spend}
           workflow={workflow}
           budgetUsd={study?.study.budgetUsd ?? null}
-          decisions={decisions}
+          agents={agents}
         />
         {live && <StopRun run={run} onChange={onChange} />}
         {(state.status !== "queued" || run.tasks) && (
@@ -165,13 +165,13 @@ function RunDetails({
   spend,
   workflow,
   budgetUsd,
-  decisions,
+  agents,
 }: {
   run: Run;
   spend: RunSpend;
   workflow: string;
   budgetUsd: number | null;
-  decisions: string;
+  agents: string;
 }) {
   const { state } = run;
   const startedAt = state.status === "queued" ? undefined : state.startedAt;
@@ -219,10 +219,10 @@ function RunDetails({
           </dl>
           <Popover.Close asChild>
             <Link
-              to={decisions}
+              to={agents}
               className="mt-3 block border-t border-border pt-3 font-medium text-primary-text hover:underline"
             >
-              What the AI decided
+              What the AI did
             </Link>
           </Popover.Close>
         </Popover.Content>

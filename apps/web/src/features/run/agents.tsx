@@ -140,7 +140,7 @@ function ResultLine({ thread }: { thread: Thread }) {
   );
 }
 
-const STATUS_WORD: Record<Thread["status"], string> = {
+export const STATUS_WORD: Record<Thread["status"], string> = {
   running: "Working",
   paused: "Paused",
   "awaiting-ai": "Waiting for the AI",

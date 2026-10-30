@@ -88,20 +88,17 @@ services:
         sync: false
       - key: R2_SECRET_ACCESS_KEY
         sync: false
-      # What each organization may run (deploy.md); read at start. Guest sign-in is closed:
-      # to open it for a demo, add GUEST_ORGANIZATION_ID and GUEST_SCOPE in the dashboard.
+      # What each organization may run (deploy.md); read at start; unset is no limit. No daily
+      # limits: the runner's two slots and Modal's spend limit bound the spend. Demo takes one slot
+      # at most, so guests never hold both. Guest sign-in: GUEST_* in the dashboard (deploy.md).
       - key: RUN_LIMITS_LAB_CONCURRENT
         value: "4"
       - key: RUN_LIMITS_JUDGES_CONCURRENT
         value: "2"
-      - key: RUN_LIMITS_JUDGES_PER_DAY
-        value: "50"
       - key: RUN_LIMITS_DEMO_PER_CALLER
         value: "1"
       - key: RUN_LIMITS_DEMO_CONCURRENT
-        value: "2"
-      - key: RUN_LIMITS_DEMO_PER_DAY
-        value: "10"
+        value: "1"
       - key: RUN_LIMITS_DEMO_VISITOR_ACTIVE
         value: "4"
 

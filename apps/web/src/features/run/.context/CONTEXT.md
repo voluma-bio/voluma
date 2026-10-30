@@ -16,16 +16,24 @@ is no runs list: Home (`features/study`) replaces it.
   (`run-header.tsx`): a crumb to the study (Home for a study of one: `getStudy` is read once for
   labels only), the scan as "OA6-1, right knee", group and workflow, "N of M tasks done", "K to
   check", a bar, Run details (started as a date, took or running for, settled cost, and "What
-  the AI decided"), Stop while live, and Open in 3D (`/runs/:id?task=`, the review, until a 3D
+  the AI did"), Stop while live, and Open in 3D (`/runs/:id?task=`, the review, until a 3D
   panel exists). A queued run with a plan lost its runner: it reads "Paused"; one the API holds after
   the AI's provider failed (`waitingForProvider`) reads "Waiting: the AI is unavailable", with no
   place in line. Left: the plan as
   a flowchart (`task-flow.tsx`), rows by dependency depth and each row ordered by its parents'
   columns, so a plan change needs no layout table; below 1100 px a compact list, and the page
   scrolls as one. Right: Overview (`overview.tsx`: working on now, needs your eye, results by
-  task), one task (`?task=<id>`, `task-view.tsx`), or what the lead AI decided
-  (`?view=decisions`, from Run details: the main agent's transcript with a card per worker and
-  check, whose name opens its task).
+  task), one task (`?task=<id>`, `task-view.tsx`), or the Agents view
+  (`?view=agents`, from Run details; `agents-view.tsx`).
+- **The Agents view** (a debug view for now; the redesign restyles it): every agent as a tree and
+  the selected agent's stream (`&agent=<threadId>`; no `agent` means Follow live, which keeps the
+  agent it shows while that one works, else shows the newest working agent with no working agent
+  under it, else the lead AI). The tree is `agentTree` (`run-model.ts`): each thread under its
+  `thread.started.parentThreadId`, the supervisor hidden; siblings sharing `task` sit under the
+  task's title. Never parse thread ids and never assume one worker and one check per task: a redo
+  resumes the same worker thread (its tries are its `attempt.opened` ids, `Thread.attempts`), and
+  each check is a new thread whose `attemptId` names the try it checked. Every door onto an agent
+  (a card's name in the lead AI's stream, the tree) is `openThread`, which opens it here.
 - **Researcher words** everywhere but inside a transcript: the AI, a second AI check, the lead AI;
   never worker, checker or model, and no paths, file names or tool names outside "How the AI did
   it". A task's line is its current attempt's latest worker checkpoint `summary`, else its
@@ -120,7 +128,7 @@ is no runs list: Home (`features/study`) replaces it.
   `formatDuration`) are `@voluma/ui/run`, shared with Home; `status.tsx` keeps the clock.
 - **Cost and time** come only from `spend(events, providerCalls)` (`@voluma/contracts/spend`), run
   in `runView` on durable events, never per live frame. Run details shows the run's settled total;
-  each card in "What the AI decided" and each thread in "How the AI did it" shows that thread's own
+  each card in the lead AI's stream and each thread in "How the AI did it" shows that thread's own
   cost (`Thread.spend`). Only `Elapsed` and the header's running-for tick each second.
 
 Gaps: "Reviewed" needs review state, which the review lane doesn't expose yet ([#102](https://github.com/voluma-bio/voluma/issues/102)). Workflow versions are not shown (no versions yet).
