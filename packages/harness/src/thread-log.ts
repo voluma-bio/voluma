@@ -70,12 +70,6 @@ interface ThreadFields {
   openCalls: Map<string, string>;
   /** The questions a check thread asked, in order. */
   asks: AskRecord[];
-  /** Milliseconds in finished invocations and answered asks; `activeMs` adds the open one. */
-  closedMs: number;
-  /** When the latest start began, while it has no end. */
-  startedMs: number | undefined;
-  /** When the oldest unanswered ask was asked. */
-  waitingMs: number | undefined;
   /** The text of its latest reply in the latest invocation. */
   reply: string;
   /** Log positions of the latest answer to one of its asks and of the latest message another thread sent it. */
@@ -103,7 +97,7 @@ export type Notice = {
   /** A worker's turn ended without submitting; `reply` is what it said last. */
   | { kind: "worker-idle"; reply: string }
   | { kind: "failed"; error: string }
-  /** `rule` says how the check ended (`check-result`, `check-limit`, `fix-limit`). */
+  /** `rule` says how the check ended (`check-result`, `fix-limit`; `check-limit` only in runs from when checks were time-limited). */
   | {
       kind: "check-result";
       rule: string;
@@ -233,16 +227,6 @@ export function threadState(
   return r.end.status === "cancelled" ? "stopped" : "idle";
 }
 
-/**
- * A thread's active time at `now`: finished invocations, plus the time since it began waiting
- * on an unanswered ask, or since its latest start if it is `running`. A cut-off invocation
- * counts nothing, so an outage does not eat a check's time.
- */
-export function activeMs(r: ThreadRecord, now: number, running: boolean): number {
-  const open = r.waitingMs ?? (running ? r.startedMs : undefined);
-  return r.closedMs + (open === undefined ? 0 : Math.max(0, now - open));
-}
-
 /** The question a check thread waits on: its latest ask, when unanswered. */
 export const openAsk = (r: ThreadRecord): AskRecord | undefined => {
   const last = r.asks.at(-1);
@@ -303,7 +287,6 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
     });
     if (abandoned.has(e.id)) continue;
     const record = value.threads.get(e.threadId);
-    const ms = Date.parse(e.createdAt);
     switch (e.type) {
       case "claim.started":
         value.after = e.payload.after;
@@ -389,9 +372,6 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
           model: record?.model ?? e.payload.model,
           openCalls: record?.openCalls ?? new Map(),
           asks: record?.asks ?? [],
-          closedMs: record?.closedMs ?? 0,
-          startedMs: ms,
-          waitingMs: record?.waitingMs,
           reply: "",
           answeredAt: record?.answeredAt,
           heardAt: record?.heardAt,
@@ -418,8 +398,6 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         const first = !record.end;
         record.end = e.payload;
         record.endedAt = at;
-        if (record.startedMs !== undefined) record.closedMs += ms - record.startedMs;
-        record.startedMs = undefined;
         if (first && record.role !== "main") {
           const base = { eventId: e.id, threadId: e.threadId, taskId: record.taskId };
           if (e.payload.status === "failed") {
@@ -527,7 +505,6 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
       }
       case "ask": {
         record?.asks.push({ id: e.id, question: e.payload.question, answer: undefined });
-        if (record) record.waitingMs ??= ms;
         notice(
           {
             eventId: e.id,
@@ -551,9 +528,6 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         if (target && ask && !ask.answer) {
           ask.answer = { id: e.id, text: e.payload.text, files: e.payload.files ?? [] };
           target.answeredAt = at;
-          const next = target.asks.find((a) => !a.answer);
-          if (target.waitingMs !== undefined) target.closedMs += ms - target.waitingMs;
-          target.waitingMs = next ? ms : undefined;
         }
         break;
       }
