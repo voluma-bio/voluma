@@ -16,8 +16,7 @@ export function TopBar({ me }: { me: Me }) {
       <Link to="/" className="rounded-md">
         <BrandLockup className="gap-2.5 [&_svg]:size-5" />
       </Link>
-      {/* `/` is the workflows screen until Home lands; then this points at /workflows. */}
-      <Link to="/" className="ml-auto text-ui text-fg-subtle hover:text-foreground">
+      <Link to="/workflows" className="ml-auto text-ui text-fg-subtle hover:text-foreground">
         Workflows
       </Link>
       <AccountMenu me={me} />

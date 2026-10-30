@@ -89,6 +89,18 @@ check threads, and review chat threads.
   the others `<runId>.<taskId>.<role>` (plus `.<n>` for the n-th), where n is how many the log
   has started for that thread, so a restart never reuses a thread. `thread.started` carries the task id
   for a worker or check thread.
+- **Pi's batch rules shape the tools.** Pi runs the tool calls of one reply as a batch: in
+  parallel, unless any tool in it is `sequential`, which makes the whole batch sequential. A
+  batch ends the turn only when every result in it sets `terminate`; one call that doesn't and
+  the agent carries on. A steered message lands only after the whole batch has finished, never
+  between its calls. So a tool that must end the turn (`submit_task`, `ask`) refuses to share a
+  reply (`ToolContext.batchSize`): it answers with an error result and no effect, the other calls
+  run as usual, and the model calls it again alone; `wait` ends the main agent's turn instead of blocking until
+  something happens, because a blocking `wait` would hold every sequential call batched behind it
+  and no steered delivery could reach it; and a stored history whose last batch all set
+  `terminate` is a finished turn, not one to continue (`isFinished` in `start-thread.ts`). Pi
+  does not settle a tool call that ignores its abort signal (`ToolContext.signal`), and the thread
+  cannot stop until every call settles, so a tool passes the signal on to whatever it waits for.
 - **The log is the run.** `recorder.ts` has one ordered delivery queue for `emit` and
   `append`, and an event joins the view (`events()`) only once the store has acknowledged it, in
   delivery order. The view is always a prefix of the store, so `recorder(..., stored)` on a

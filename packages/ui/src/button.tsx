@@ -1,4 +1,7 @@
-/** Button with the mockups' three looks: primary (pine fill), quiet (outlined) and ghost. */
+/**
+ * Button with the mockups' three looks: primary (pine fill), quiet (outlined) and ghost.
+ * `buttonClass` gives a link the same look (a router `Link` that reads as an action).
+ */
 import type { ButtonHTMLAttributes } from "react";
 import { cx } from "./cx";
 
@@ -19,25 +22,20 @@ const sizes = {
   sm: "h-8 px-3.5 text-ui rounded-lg",
 };
 
-export function Button({
+export const buttonClass = ({
   variant = "quiet",
   size = "md",
-  type = "button",
   className,
-  ...props
-}: ButtonProps) {
-  return (
-    <button
-      type={type}
-      className={cx(
-        "inline-flex cursor-pointer items-center justify-center gap-2 font-medium whitespace-nowrap transition-colors",
-        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-        "disabled:pointer-events-none disabled:opacity-50",
-        variants[variant],
-        sizes[size],
-        className,
-      )}
-      {...props}
-    />
+}: Pick<ButtonProps, "variant" | "size" | "className"> = {}) =>
+  cx(
+    "inline-flex cursor-pointer items-center justify-center gap-2 font-medium whitespace-nowrap transition-colors",
+    "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+    "disabled:pointer-events-none disabled:opacity-50",
+    variants[variant],
+    sizes[size],
+    className,
   );
+
+export function Button({ variant, size, type = "button", className, ...props }: ButtonProps) {
+  return <button type={type} className={buttonClass({ variant, size, className })} {...props} />;
 }
