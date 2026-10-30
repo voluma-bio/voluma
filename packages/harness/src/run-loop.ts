@@ -558,8 +558,9 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
    * depends on the task.
    */
   async function markGo(d: ThreadLog): Promise<boolean> {
+    const open = corrections(recorder.events()).open;
     for (const n of d.undelivered) {
-      if (n.kind !== "person" || !n.go || n.closed !== "open" || !n.taskId) continue;
+      if (n.kind !== "person" || !n.go || n.eventId !== open?.message || !n.taskId) continue;
       const id = goMarkerId(n.eventId);
       if (d.written.has(id)) continue;
       await recorder.append(

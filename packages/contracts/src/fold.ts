@@ -289,7 +289,8 @@ export function corrections(events: readonly RunEvent[]): {
         if (e.payload.kind === "supervisor") root = e.threadId;
         break;
       case "thread.ended":
-        if (span?.closed === "open" && e.threadId === root) span.claimEnded = true;
+        if (span?.closed === "open" && e.threadId === root && e.payload.status === "completed")
+          span.claimEnded = true;
         break;
       case "revision.started":
         if (span?.go && span.message !== undefined && e.id === goMarkerId(span.message)) {

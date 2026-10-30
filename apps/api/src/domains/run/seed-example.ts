@@ -14,7 +14,7 @@
  * outputs are untrusted (`@voluma/contracts/run`), and an example's scan is shown to everyone.
  */
 import { parseArgs } from "node:util";
-import { CopyObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import { CopyObjectCommand, DeleteObjectsCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { runIdSchema } from "@voluma/contracts/ids";
 import { evidencePrefix, outputsPrefix, runPrefix } from "@voluma/contracts/r2";
 import { asc, eq, type SQL, sql } from "drizzle-orm";
@@ -55,6 +55,10 @@ if (!values.remote && values.id === stagingId) {
 const exampleId = runIdSchema.parse(
   values.id ?? (values.remote ? stagingId : `example-local-${source}`),
 );
+// `outputs/` is overwritten below, and the bucket is shared with staging.
+if (!values.remote && !exampleId.startsWith("example-local-")) {
+  throw new Error(`without --remote the id must start with example-local- (got ${exampleId})`);
+}
 const studyId = `study-${exampleId}`;
 const demoLabId = required("GUEST_ORGANIZATION_ID");
 
@@ -64,11 +68,34 @@ const { r2, bucket } = r2FromEnv();
 console.log(`example ${exampleId} -> bucket ${bucket}, prefix ${runPrefix(exampleId)}`);
 
 // Copies every object under one of the source run's prefixes to the same place under the
-// example's. Evidence is content-addressed and never overwritten, so a repeat copy is harmless;
-// `outputs/` is what the main agent's `read_file` reads on a correction, so it moves too.
-async function copyPrefix(prefixOf: (runId: string) => string): Promise<number> {
+// example's. Evidence is content-addressed and never overwritten, so a repeat copy is harmless.
+// `outputs/` is copied so the example is a whole run for the walkthrough's clone flow; it is
+// emptied first, so a re-seed leaves no object of the previous one.
+async function copyPrefix(
+  prefixOf: (runId: string) => string,
+  { replace = false } = {},
+): Promise<number> {
   let copied = 0;
   const fromPrefix = prefixOf(source);
+  if (replace) {
+    for (let token: string | undefined; ; ) {
+      const page = await r2.send(
+        new ListObjectsV2Command({
+          Bucket: bucket,
+          Prefix: prefixOf(exampleId),
+          ContinuationToken: token,
+        }),
+      );
+      const Objects = (page.Contents ?? []).map((o) => ({ Key: o.Key as string }));
+      if (Objects.length > 0) {
+        await r2.send(
+          new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects, Quiet: true } }),
+        );
+      }
+      token = page.NextContinuationToken;
+      if (!token) break;
+    }
+  }
   for (let token: string | undefined; ; ) {
     const page = await r2.send(
       new ListObjectsV2Command({ Bucket: bucket, Prefix: fromPrefix, ContinuationToken: token }),
@@ -139,7 +166,7 @@ const renamed = sourceEvents.map(({ seq: _seq, ...event }) => ({
 }));
 
 const copied = await copyPrefix(evidencePrefix);
-const copiedOutputs = await copyPrefix(outputsPrefix);
+const copiedOutputs = await copyPrefix(outputsPrefix, { replace: true });
 const rows = values.backfill
   ? await withLocalDir(values.backfill, async (dir) =>
       backfillRows(

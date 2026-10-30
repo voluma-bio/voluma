@@ -559,7 +559,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
   }
   value.undelivered = value.notices.filter((n) => !deliveries.some((d) => n.at <= d.at));
   value.unanswered = unanswered;
-  value.correcting = open !== undefined && !value.root.ended;
+  value.correcting = open !== undefined && !open.claimEnded;
   value.reopenPending = open !== undefined && claimAt < open.reopened;
   if (open?.go?.markerAt !== undefined)
     value.go = { taskId: open.go.taskId, redone: open.go.redone };
