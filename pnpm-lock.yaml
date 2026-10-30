@@ -358,6 +358,9 @@ importers:
       '@voluma/workflow':
         specifier: workspace:*
         version: link:../workflow
+      sharp:
+        specifier: 0.34.5
+        version: 0.34.5
       typebox:
         specifier: ^1.4.3
         version: 1.4.3
