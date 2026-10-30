@@ -1,7 +1,8 @@
 /**
  * The status words of a run and of a study, from their read models alone (no events), shared by
  * Home, the study page and the run page so they read the same: Running, N to check, Checked,
- * Failed, Stopped, Waiting (queued), Needs your keys, Not started. A completed run with no open
+ * Failed, Stopped, Waiting (queued), Waiting for the model provider (queued after an outage),
+ * Needs your keys, Not started. A completed run with no open
  * item reads "Checked" (a failed task raises an item), and "Reviewed" once someone marks it
  * reviewed, which is never inferred. Also where a run's row links, and how its cost and time read.
  */
@@ -43,7 +44,9 @@ export type RunStatus = { label: string; tone: StatusTone; detail?: string };
 export function runStatus({ state, review }: Pick<StudyRunSummary, "state" | "review">): RunStatus {
   switch (state.status) {
     case "queued":
-      return { label: "Waiting", tone: "neutral", detail: `Place ${state.position} in line` };
+      return state.waitingForProvider
+        ? { label: "Waiting for the model provider", tone: "neutral" }
+        : { label: "Waiting", tone: "neutral", detail: `Place ${state.position} in line` };
     case "running":
       return { label: "Running", tone: "info", detail: `Started ${formatTime(state.startedAt)}` };
     case "awaiting-keys":
