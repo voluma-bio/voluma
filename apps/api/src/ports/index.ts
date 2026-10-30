@@ -27,7 +27,8 @@ export type RunRecord = {
   /** Opaque run lifetime; changes when an example is replaced under the same id. */
   generation: string;
   run: Run;
-  results: ReturnType<typeof reviewState>;
+  /** Shared with the loader's cache: read only. */
+  results: Readonly<ReturnType<typeof reviewState>>;
 };
 /** Only authenticated human decisions can cross the review write port. */
 export type ReviewDecision =

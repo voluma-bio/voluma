@@ -237,10 +237,32 @@ function derive(log: RunEvent[]): Derived {
 
 const NOTHING = derive([]);
 
-type SummaryCache = Map<string, { lastEventId: string | null; derived: Derived }>;
+/** One run's cache entry: null `derived` is the verdict that its events don't parse. `weight` is its event count, a stand-in for its size. */
+type CacheEntry = { lastEventId: string | null; derived: Derived | null; weight: number };
+type SummaryCache = { entries: Map<string, CacheEntry>; weight: number };
 
-/** The most derived results kept, least recently read out first; evicted ones are derived again from the event log. */
-const CACHE_CAP = 2048;
+/**
+ * The most event-weight kept (~76 bytes of results per folded event, so about 20 MB of JSON), least
+ * recently read out first; evicted ones are derived again from the event log.
+ */
+const CACHE_BUDGET = 250_000;
+
+function newCache(): SummaryCache {
+  return { entries: new Map(), weight: 0 };
+}
+
+function remember(cache: SummaryCache, id: string, entry: CacheEntry) {
+  cache.weight -= cache.entries.get(id)?.weight ?? 0;
+  // Delete first, so the entry goes last in the map's insertion order.
+  cache.entries.delete(id);
+  cache.entries.set(id, entry);
+  cache.weight += entry.weight;
+  for (const [oldest, { weight }] of cache.entries) {
+    if (cache.weight <= CACHE_BUDGET || oldest === id) break;
+    cache.entries.delete(oldest);
+    cache.weight -= weight;
+  }
+}
 
 export type RunResult = { run: Run; generation: string } & Derived;
 
@@ -259,7 +281,7 @@ interface LoadOptions {
 async function loadResults(
   tx: Tx,
   where: SQL | undefined,
-  { cache = new Map(), skipUnreadable = false }: LoadOptions = {},
+  { cache = newCache(), skipUnreadable = false }: LoadOptions = {},
 ): Promise<RunResult[]> {
   const rows = await loadRows(tx, where);
   const ids = rows.map(({ run }) => run.id);
@@ -272,23 +294,30 @@ async function loadResults(
     : [];
   // Event identity also changes when the seeder replaces a history at the same sequence.
   const versions = new Map(watermarks.map(({ runId, id }) => [runId, id]));
-  const cached = new Map(ids.map((id) => [id, cache.get(id)]));
+  const cached = new Map(ids.map((id) => [id, cache.entries.get(id)]));
   const missing = ids.filter((id) => cached.get(id)?.lastEventId !== (versions.get(id) ?? null));
   const { logs, unreadable } = await loadLogs(tx, missing);
-  if (!skipUnreadable && unreadable.size)
-    throw new Error(`run ${[...unreadable].join(", ")}: stored events can't be read`);
   const derivedOf = new Map<string, Derived>();
+  const failed: string[] = [];
   for (const id of ids) {
-    if (unreadable.has(id)) continue;
     const lastEventId = versions.get(id) ?? null;
     const hit = cached.get(id);
-    const derived = hit?.lastEventId === lastEventId ? hit.derived : derive(logs.get(id) ?? []);
-    derivedOf.set(id, derived);
-    // Delete first, so the entry goes last in the map's insertion order.
-    cache.delete(id);
-    cache.set(id, { lastEventId, derived });
-    if (cache.size > CACHE_CAP) cache.delete(cache.keys().next().value as string);
+    let entry: CacheEntry;
+    if (hit?.lastEventId === lastEventId) entry = hit;
+    else {
+      const log = logs.get(id) ?? [];
+      entry = {
+        lastEventId,
+        derived: unreadable.has(id) ? null : derive(log),
+        weight: log.length + 1,
+      };
+    }
+    if (entry.derived) derivedOf.set(id, entry.derived);
+    else failed.push(id);
+    remember(cache, id, entry);
   }
+  if (!skipUnreadable && failed.length)
+    throw new Error(`run ${failed.join(", ")}: stored events can't be read`);
   return rows
     .filter(
       // A completed run whose events don't parse, or have no revision, has no review summary,
@@ -307,7 +336,7 @@ async function loadResults(
 
 /** `loadResults` through one cache, so the run and study reads derive a run once between them. */
 export function resultsLoader() {
-  const cache: SummaryCache = new Map();
+  const cache = newCache();
   return (tx: Tx, where: SQL | undefined, options: Omit<LoadOptions, "cache"> = {}) =>
     loadResults(tx, where, { ...options, cache });
 }
