@@ -6,7 +6,7 @@
  * The example gets the source's events, threads and history under its own run id (thread
  * ids are `<runId>.…`, so they are renamed), `startedBy: "voluma-examples"`, `example: true`,
  * and the Demo org's reference-scan input. It belongs to its own study of one scan
- * (`study-<exampleId>`, `example: true`), replaced with it. The source's evidence objects in R2 are copied
+ * (`study-<exampleId>`, `example: true`), replaced with it. The source's evidence and `outputs/` objects in R2 are copied
  * under the example's own prefix (`evidenceKey` builds a key from the run being read, so an
  * example can't point at another run's files). `--backfill` adds the objects a run recorded before
  * they existed (`backfill.ts`). Re-seeding the same `--id` replaces the
@@ -16,7 +16,7 @@
 import { parseArgs } from "node:util";
 import { CopyObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { runIdSchema } from "@voluma/contracts/ids";
-import { evidenceKey, runPrefix } from "@voluma/contracts/r2";
+import { evidencePrefix, outputsPrefix, runPrefix } from "@voluma/contracts/r2";
 import { asc, eq, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
@@ -63,25 +63,23 @@ const db = drizzle(client, { casing: "snake_case" });
 const { r2, bucket } = r2FromEnv();
 console.log(`example ${exampleId} -> bucket ${bucket}, prefix ${runPrefix(exampleId)}`);
 
-// Objects are content-addressed and never overwritten, so a repeat copy is harmless.
-async function copyEvidence(): Promise<number> {
+// Copies every object under one of the source run's prefixes to the same place under the
+// example's. Evidence is content-addressed and never overwritten, so a repeat copy is harmless;
+// `outputs/` is what the main agent's `read_file` reads on a correction, so it moves too.
+async function copyPrefix(prefixOf: (runId: string) => string): Promise<number> {
   let copied = 0;
-  const evidencePrefix = `${runPrefix(source)}evidence/`;
+  const fromPrefix = prefixOf(source);
   for (let token: string | undefined; ; ) {
     const page = await r2.send(
-      new ListObjectsV2Command({
-        Bucket: bucket,
-        Prefix: evidencePrefix,
-        ContinuationToken: token,
-      }),
+      new ListObjectsV2Command({ Bucket: bucket, Prefix: fromPrefix, ContinuationToken: token }),
     );
     for (const object of page.Contents ?? []) {
-      const sha = (object.Key as string).slice(evidencePrefix.length);
+      const rest = (object.Key as string).slice(fromPrefix.length);
       await r2.send(
         new CopyObjectCommand({
           Bucket: bucket,
           CopySource: `${bucket}/${object.Key}`,
-          Key: evidenceKey(exampleId, sha),
+          Key: `${prefixOf(exampleId)}${rest}`,
         }),
       );
       copied++;
@@ -140,7 +138,8 @@ const renamed = sourceEvents.map(({ seq: _seq, ...event }) => ({
   ) as typeof event.payload,
 }));
 
-const copied = await copyEvidence();
+const copied = await copyPrefix(evidencePrefix);
+const copiedOutputs = await copyPrefix(outputsPrefix);
 const rows = values.backfill
   ? await withLocalDir(values.backfill, async (dir) =>
       backfillRows(
@@ -216,6 +215,6 @@ await db.transaction(async (tx) => {
 });
 
 console.log(
-  `example run ${exampleId} seeded from ${source} in ${demoLabId}; ${copied} evidence objects copied`,
+  `example run ${exampleId} seeded from ${source} in ${demoLabId}; ${copied} evidence and ${copiedOutputs} output objects copied`,
 );
 await client.end();

@@ -17,12 +17,12 @@
  *
  * The stream has an end. Once the run has ended and the hub has sent every stored event,
  * it sends one `event: end` message (`END_EVENT`; its `data` means nothing) and closes the
- * response. The browser closes its `EventSource` on it: the log it holds is whole. Without
- * that, `EventSource` would take the close for a drop and reconnect after its retry delay
- * (about 3 s), to be answered 204: a request for an ended run with nothing after the cursor
- * gets 204, which stops `EventSource` for good (it reconnects after any other close).
- * A non-200 status or a non-`text/event-stream` response also stops it. The browser sees
- * that as `readyState === CLOSED` and can then refetch the run, or call `getMe` to tell a
+ * response, also when nothing is left after the cursor (a request for an ended run is
+ * answered 200 with `end` alone). The browser closes its `EventSource` on it: the log it
+ * holds is whole. Without that, `EventSource` would take the close for a drop and
+ * reconnect after its retry delay (about 3 s). A non-200 status (404, 401) or a
+ * non-`text/event-stream` response stops it for good. The browser sees that as
+ * `readyState === CLOSED` and can then refetch the run, or call `getMe` to tell a
  * sign-out from an ended run.
  *
  * Live frames (`liveFrameSchema` below) ride the same response as a *named* SSE event,

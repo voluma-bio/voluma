@@ -54,7 +54,6 @@ export function streamRoutes({ eventLog, notifier, shutdown }: RunDeps) {
 
     const first = await eventLog.stream(reader, runId, cursor, 1);
     if (!first) return c.json({ error: "not found" }, 404);
-    if (first.ended && first.events.length === 0) return c.body(null, 204);
 
     return streamSSE(c, async (stream) => {
       // Renewed before each read, so a wake-up during the read ends the next wait at once.
@@ -115,7 +114,7 @@ export function streamRoutes({ eventLog, notifier, shutdown }: RunDeps) {
               }
             }
             if (ended) {
-              // A browser that saw only the close would reconnect for its 204.
+              // A browser that saw only the close would reconnect.
               await stream.writeSSE({ event: END_EVENT, data: "end" });
               break;
             }
