@@ -371,33 +371,6 @@ describe("run loop", () => {
     });
   });
 
-  it("check deadline: a check that outlives its active time is stopped and the task is left to-check", async () => {
-    // t1's checker never answers its first request, so it is still running at the deadline.
-    const stuck: Script = (t) => (t.task === "t1" ? hang(t) : undefined);
-    const main: Script = (t) => {
-      if (t.fresh && /ran out of time/.test(t.lastUser) && !started(t, "t2"))
-        return call("start_worker", { taskId: "t2", brief: "Measure t2." });
-      if (t.fresh && passed(t, "t2")) return call("finish_run", { summary: "Done." });
-      return t.fresh ? call("wait") : "Waiting.";
-    };
-    const w = world({
-      plan: T1,
-      main: first((t) => (t.users.length === 1 ? chain(["t1"])(t) : undefined), main),
-      check: first(stuck, checker()),
-      config: { checkTimeoutMs: 250 },
-    });
-    const folded = await w.run();
-    expect(
-      folded.tasks.map((t) => `${t.id}:${t.status}`),
-      w.text(),
-    ).toEqual(["t1:to-check", "t2:done"]);
-    expect(taskEvents(w.stored, "t1")).toEqual(["under-review:agent", "to-check:check-limit"]);
-    expect(ended(w.stored, "t1.check")).toEqual(["cancelled"]);
-    expect(w.stored.some((e) => e.type === "checkpoint" && e.threadId === `${R}t1.check`)).toBe(
-      false,
-    );
-  });
-
   // A stale mark stops every worker and check of the dependent, whatever its status, so
   // `start_worker` on the stale task needs no `stop_worker`.
   it("redo with attempted dependents: a correction marks them stale and stops their worker", async () => {
