@@ -45,16 +45,18 @@ only, so they survive a change of sandbox or harness.
 
 ## What code enforces
 
-The roles are told none of these; code keeps them (design: `design/run-model.md` under
-`work/iterate-and-review/` in the `voluma-bio-docs` repo):
+The roles are told none of these; code keeps them (why each holds:
+`archive/voluma/kb/run-model.md` in the docs repo, `voluma-bio/docs`):
 
 - every effect is an event appended before it is visible, so a resumed run replays it;
 - a checker on every submitted task, by an agent that did not do it; a task is done only on a passed
   verdict;
-- a check ends: a wall-clock limit and an ask limit; ending without a verdict makes the task to-check;
+- a check ends: a limit on the checker's active time (a runner outage does not use it up) and an ask
+  limit; ending without a verdict makes the task to-check;
 - fix rounds are bounded: after N `needs-review` verdicts on one task (default 2, runner config), it
   is to-check;
-- feedback to a task with attempted dependents makes them stale and stops their agents;
+- feedback to a task stops the agents of every task that depends on it, and marks stale those that
+  had begun;
 - one writer per task; the checker's `/outputs` is read-only;
 - `finish_run` is refused while a selected output is neither reported nor missing with a reason, or
   while an agent runs; a run ended by code records each unreported selected output as missing;
