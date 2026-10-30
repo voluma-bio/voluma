@@ -19,7 +19,6 @@ import {
 } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { type OutputEntry, unselectable } from "@voluma/contracts/workflow-files";
-import { knownUsdOfRun } from "@voluma/provider-calls";
 import { and, asc, desc, eq, gt, inArray, notInArray, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { Reader } from "../../domain";
@@ -419,7 +418,7 @@ export function pgRunQueue(
      * under the lock: a start that holds its keys before it commits is either in them or
      * not yet queued.
      */
-    claim: (runnerId: string, costCapUsd?: number) =>
+    claim: (runnerId: string) =>
       locked(async (tx): Promise<Claimed | null> => {
         await sweep(tx);
         await tx
@@ -476,7 +475,6 @@ export function pgRunQueue(
               leaseHolder: runnerId,
               leaseToken,
               leaseExpiresAt: leaseUntil,
-              costCapUsd: costCapUsd ?? null,
             })
             .where(eq(runs.id, run.id));
           const keys = run.credentials === "visitor" ? vault.take(run.id) : undefined;
@@ -491,8 +489,7 @@ export function pgRunQueue(
       }),
 
     /**
-     * Extends the lease and adds the usage; `stop` once the run has ended. `spentUsd` is the
-     * run's settled spend: its model cost plus its finished provider calls (open ones count nothing). Throws `LeaseLost`.
+     * Extends the lease and adds the usage; `stop` once the run has ended. Throws `LeaseLost`.
      */
     heartbeat: (runId: string, leaseToken: string, used: RunnerUsage) =>
       locked(async (tx) => {
@@ -503,8 +500,8 @@ export function pgRunQueue(
           .for("update");
         if (!run) throw new LeaseLost();
         if (run.state !== "running") return { stop: true };
-        const orgLimits = limits.get(run.labId);
-        if (!orgLimits) {
+        // An org dropped from config stops its running runs here (its queued ones fail at claim).
+        if (!limits.has(run.labId)) {
           await fail(tx, runId, NO_LIMITS);
           return { stop: true };
         }
@@ -516,15 +513,7 @@ export function pgRunQueue(
             sandboxSeconds: sql`${runs.sandboxSeconds} + ${used.sandboxSeconds}`,
           })
           .where(eq(runs.id, runId));
-        if (run.credentials === "voluma") {
-          const refused = admit("heartbeat", orgLimits, await usage(tx, run.labId), run);
-          if (refused) {
-            await fail(tx, runId, refusalMessage[refused]);
-            return { stop: true };
-          }
-        }
-        const gateway = await knownUsdOfRun(tx, runId);
-        return { stop: false, spentUsd: run.modelCostUsd + used.modelCostUsd + gateway };
+        return { stop: false };
       }),
 
     /** Throws `LeaseLost` or `RunEnded`. */

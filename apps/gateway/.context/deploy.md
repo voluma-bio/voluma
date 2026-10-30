@@ -9,7 +9,7 @@ called, and the masks are not results.
 
 - **`segment_sam` through the gateway:** auto crop (492 frames) and `subVolume` (151 frames) both
   returned, each `requestId` equal to its sidecar's. The run read showed `providerCalls`: 6 calls
-  (upload, response, delete, twice), $0.1286 for `dev.worker`, equal to the heartbeat's `spentUsd`
+  (upload, response, delete, twice), $0.1286 for `dev.worker`, equal to the run read's `providerCalls`
   (643 frames at $0.0002). The gateway log has one line per call (`ok`, `ttfb`, duration).
 - **A stream has two Railway limits (measured from the worker sandbox):**
 
@@ -57,7 +57,7 @@ Created with `serviceCreate`, settings through `environmentPatchCommit`, the dom
 |---|---|
 | Service | `@voluma/gateway`, GitHub repo `voluma-bio/voluma`, branch `main`, root `/` |
 | Build | Railpack, build command `echo gateway has no build step`; `tsx` is a runtime dependency |
-| Pre-deploy | none. The API's pre-deploy runs the migration; the gateway exits at boot until it has run (it also needs 0007, `reserved_usd` nullable), so deploy the API first |
+| Pre-deploy | none. The API's pre-deploy runs the migration; the gateway exits at boot until it has run, so deploy the API first |
 | Start | `cd apps/gateway && exec node --import tsx src/main.ts` (`exec`: node gets SIGTERM) |
 | Healthcheck | `/health` (200 after `select 1`; 503 while draining) |
 | Draining | 60 s, equal to `GATEWAY_DRAIN_SECONDS` (default 60); calls still running then are cut (cost unknown) |

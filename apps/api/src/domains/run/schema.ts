@@ -179,10 +179,10 @@ export const runs = pgTable(
     stalledClaims: integer().notNull().default(0),
     /** Retired, never read or written (`stalledClaims` replaced it). Dropped in a later PR, once the code that read it is drained. */
     recoveries: integer().notNull().default(0),
+    /** Unused: the per-run spend cap is gone, and the old process reads this column during a deploy. Drop it (`.context/TODO.md`). */
+    costCapUsd: doublePrecision(),
     modelCostUsd: doublePrecision().notNull().default(0),
     sandboxSeconds: doublePrecision().notNull().default(0),
-    /** The run's spend cap in dollars, set by each claim when the runner sends one; null: no cap. The provider gateway checks it. */
-    costCapUsd: doublePrecision(),
     /** Retired, never read or written. Drop after servers using the old count are drained. */
     toCheck: integer(),
   },
