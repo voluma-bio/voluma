@@ -146,8 +146,6 @@ const vec3 = z.tuple([z.number(), z.number(), z.number()]);
 const row4 = z.tuple([z.number(), z.number(), z.number(), z.number()]);
 type R4 = z.infer<typeof row4>;
 
-// ── Building blocks ──────────────────────────────────────────────────────────
-
 /** A grid's shape `[z, y, x]`. */
 export const shapeZyxSchema = z.tuple([
   z.number().int().positive(),

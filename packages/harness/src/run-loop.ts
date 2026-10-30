@@ -161,7 +161,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
   const { runId, rootThreadId: root, recorder, runtime, threads, signal } = o;
   const config = { ...LOOP_DEFAULTS, ...o.config };
   const providerError = (e: string) => o.providerError?.(e) === true;
-  let failure: unknown; // the first error that failed the run
+  let failure: unknown;
   /** Threads whose refusal as unresumable the loop has dealt with. */
   const dealtWith = new Set<string>();
 
@@ -189,8 +189,6 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
   const derive = () => threadLog(recorder.events());
   const stateOf = (r: ThreadRecord | undefined): ThreadState | undefined =>
     threadState(r, threads.running(r?.id ?? ""));
-
-  // ---- starting and resuming threads
 
   const planTask = (view: Folded, taskId: string): PlanTask => {
     const found = view.plan.tasks.find((t) => t.id === taskId);
@@ -346,8 +344,6 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     },
     changed: nudge,
   };
-
-  // ---- steps
 
   /** Whether the main agent is still in charge of nothing but waiting: no worker or checker runs. */
   const anyRunning = (d: ThreadLog) =>
@@ -659,8 +655,6 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     if (await main(d, view)) return "acted";
     return "idle";
   }
-
-  // ---- the run
 
   const fail = (error: unknown) => {
     failure ??= error;

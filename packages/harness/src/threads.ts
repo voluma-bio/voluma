@@ -33,7 +33,6 @@ export interface Threads {
   running(threadId: string): boolean;
   /** Whether this process has started the thread (it may have ended, its end not yet stored). */
   started(threadId: string): boolean;
-  /** Whether any thread is running. */
   active(): boolean;
   /** Steers a message into a running thread; false if it is not running or has ended. */
   send(threadId: string, text: string, sender: UserSender): boolean;

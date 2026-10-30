@@ -265,7 +265,6 @@ function meOf(user: Extract<Principal, { kind: "user" }>): Me {
     : { kind: "visitor", userId, name, labId };
 }
 
-// Attach Set-Cookie headers to the response Hono is about to build.
 function setCookies(c: Context, cookies: string[]) {
   for (const cookie of cookies) c.header("Set-Cookie", cookie, { append: true });
 }

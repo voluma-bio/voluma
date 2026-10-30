@@ -5,7 +5,6 @@
  * runner shares; the Sandbox port too, since the runner, not the API, creates sandboxes.
  * A domain's own adapters live in the domain; adapters shared by domains go in
  * adapters/ (none yet). Only index.ts constructs adapters.
- * Owned by both lanes; change in small PRs.
  */
 import type { RunEvent } from "@voluma/contracts/events";
 import type { PersonMessage } from "@voluma/contracts/messages";

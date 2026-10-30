@@ -145,9 +145,8 @@ import { workflowPinSchema } from "./workflow";
 /**
  * A scan a run reads. `source` says where its files are: an `upload` lives at
  * `inputPrefix(id)`; the `reference` scan is `referencePrefix("scan")`. The
- * server derives the R2 prefix; the browser never needs it. The upload call
- * that creates inputs is a later PR; its key layout (`inputKey`) is settled in
- * `r2.ts`. Under `self`, `listInputs` lists the caller's uploads and the
+ * server derives the R2 prefix; the browser never needs it. Its key layout
+ * is `inputKey` in `r2.ts`. Under `self`, `listInputs` lists the caller's uploads and the
  * org's reference scan.
  */
 export const inputSchema = z.object({

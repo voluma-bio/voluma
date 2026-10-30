@@ -29,7 +29,6 @@ import { type AppEnv, requireReader } from "../../domain";
 import type { RunDeps } from ".";
 import { afterParam, EVENTS_PAGE } from "./cursor";
 
-/** A promise and the call that resolves it. */
 function latch() {
   let resolve!: () => void;
   const promise = new Promise<void>((r) => {

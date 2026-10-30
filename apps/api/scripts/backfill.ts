@@ -28,7 +28,6 @@ import { z } from "zod";
 import type { events } from "../src/domains/run/schema";
 import { filesUnder, pool, put } from "./r2-dir";
 
-/** An event row before it has its `seq`. */
 export type EventRow = Omit<typeof events.$inferSelect, "seq">;
 
 const backfillSchema = z.object({
