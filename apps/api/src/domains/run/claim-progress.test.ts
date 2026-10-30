@@ -34,10 +34,10 @@ describe("endClaim", () => {
 });
 
 describe("provider-outage", () => {
-  it("counts like a stall, and the wait grows 1, 2, 5 minutes with the count", () => {
+  it("counts like a stall, and the wait grows 1, 2 minutes with the count", () => {
     expect(endClaim(run(), "provider-outage").stalledClaims).toBe(1);
     expect(endClaim(run({ stalledClaims: 2 }), "provider-outage").exhausted).toBe(true);
-    expect([1, 2, 3, 4].map(outageDelayMinutes)).toEqual([1, 2, 5, 5]);
+    expect([0, 1, 2].map(outageDelayMinutes)).toEqual([1, 1, 2]);
   });
 
   it("starts again at one minute after progress", () => {

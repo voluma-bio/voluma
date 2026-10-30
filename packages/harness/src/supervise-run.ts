@@ -58,12 +58,11 @@ export interface SuperviseRunOptions {
   /** Whether such an error means no redo can succeed: the run then fails at once. */
   providerFatal?(error: string): boolean;
   /**
-   * Whether a failed model reply is a provider outage (the retries are spent and the error is
-   * transient). Such a thread is left open, its reply unstored, and `onProviderOutage` is called
-   * so the host can release the run; the host aborts `signal`, which cuts every thread off.
+   * A model reply that failed with no content on a transient error is a provider outage (the
+   * call retry spent its budget; see `StartThreadOptions.providerOutage`). `release` lets the
+   * host release the run; the host aborts `signal`, which cuts every thread off.
    */
-  providerOutage?(provider: string, error: string): boolean;
-  onProviderOutage?(error: string): void;
+  providerOutage?: { is(provider: string, error: string): boolean; release(error: string): void };
   signal: AbortSignal;
 }
 
@@ -105,7 +104,6 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
       sandbox: options.sandbox,
       release: options.releaseSandbox,
       providerOutage: options.providerOutage,
-      onOutage: options.onProviderOutage,
     },
     signal,
   );

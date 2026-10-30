@@ -65,6 +65,7 @@ async function reopen(tx: Tx, runId: string, messageEventId: string, by: string)
       error: null,
       lastClaimEnd: null,
       stalledClaims: 0,
+      claimableAfter: null,
       ...noLease,
     })
     .where(eq(runs.id, runId));

@@ -11,7 +11,7 @@ import { type Input, type Run, runSchema } from "@voluma/contracts/run";
 import type { StudyValue, ToCheckItem } from "@voluma/contracts/study";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { callsOfRuns, type RunCalls } from "@voluma/provider-calls";
-import { and, asc, desc, eq, inArray, or, type SQL, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lte, or, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { EVERY_LAB, type Reader, type ReadScope } from "../../domain";
 import type { RunRecord } from "../../ports";
@@ -54,6 +54,8 @@ type Row = {
   run: typeof runs.$inferSelect;
   input: typeof inputs.$inferSelect;
   position: number | null;
+  /** The run is queued behind a `provider-outage` hold that has not passed. */
+  held: boolean;
   /** The run's gateway calls that are no longer in flight. */
   calls: RunCalls;
 };
@@ -70,7 +72,7 @@ export const toRunEvent = (row: typeof events.$inferSelect) =>
   runEventSchema.parse({ ...row, createdAt: row.createdAt.toISOString() });
 
 function toRun(
-  { run, input, position, calls }: Row,
+  { run, input, position, held, calls }: Row,
   { summary, tasks }: Pick<Derived, "summary" | "tasks">,
 ): Run {
   const iso = (d: Date | null) => d?.toISOString() ?? null;
@@ -81,9 +83,10 @@ function toRun(
         return {
           status: "queued",
           position: position ?? 1,
-          ...(run.claimableAfter && {
-            waitingForProvider: { retryAt: run.claimableAfter.toISOString() },
-          }),
+          ...(held &&
+            run.claimableAfter && {
+              waitingForProvider: { retryAt: run.claimableAfter.toISOString() },
+            }),
         };
       case "running":
         return { status: "running", startedAt: startedAt as string };
@@ -123,7 +126,8 @@ function toRun(
 /**
  * Runs matching `where`, newest first. A queued `voluma` run's place is counted here, at
  * read time: its place among its org's queued `voluma` runs, oldest first. A visitor run
- * waits only for a runner, so its place is 1.
+ * waits only for a runner, so its place is 1. A run held back after a provider outage takes
+ * no place and counts for none.
  */
 async function loadRows(tx: Tx, where: SQL | undefined): Promise<Row[]> {
   const place = tx.$with("place").as(
@@ -136,11 +140,23 @@ async function loadRows(tx: Tx, where: SQL | undefined): Promise<Row[]> {
           ),
       })
       .from(runs)
-      .where(and(eq(runs.state, "queued"), eq(runs.credentials, "voluma"))),
+      .where(
+        and(
+          eq(runs.state, "queued"),
+          eq(runs.credentials, "voluma"),
+          // A held run is not ahead of anyone: the claim skips it.
+          or(isNull(runs.claimableAfter), lte(runs.claimableAfter, sql`now()`)),
+        ),
+      ),
   );
   const rows = await tx
     .with(place)
-    .select({ run: runs, input: inputs, position: place.position })
+    .select({
+      run: runs,
+      input: inputs,
+      position: place.position,
+      held: sql<boolean>`coalesce(${runs.claimableAfter} > now(), false)`,
+    })
     .from(runs)
     .innerJoin(inputs, eq(runs.inputId, inputs.id))
     .leftJoin(place, eq(place.id, runs.id))

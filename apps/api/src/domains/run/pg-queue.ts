@@ -181,6 +181,7 @@ async function endUnfinished(
       state: "ended",
       outcome: correcting ? "completed" : status,
       endedAt: sql`now()`,
+      claimableAfter: null,
       error: correcting ? null : (error ?? null),
     })
     .where(eq(runs.id, runId));

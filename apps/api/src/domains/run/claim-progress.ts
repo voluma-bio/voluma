@@ -38,12 +38,12 @@ const COUNTED_REASONS: ReadonlySet<ClaimEndReason> = new Set([
   "provider-outage",
 ]);
 
-/** Minutes a run waits before its next claim after a `provider-outage` release, by the count of such claims in a row. */
-const OUTAGE_DELAY_MINUTES = [1, 2, 5];
-
-/** The wait after a `provider-outage` release that left `stalledClaims` (0: it had made progress, so a new outage). */
-export const outageDelayMinutes = (stalledClaims: number) =>
-  OUTAGE_DELAY_MINUTES[Math.min(Math.max(stalledClaims, 1), OUTAGE_DELAY_MINUTES.length) - 1] ?? 5;
+/**
+ * Minutes a run waits before its next claim after a `provider-outage` release that left
+ * `stalledClaims` (0: it had made progress, so a new outage): 1, then 2. The limit fails the run
+ * on the third.
+ */
+export const outageDelayMinutes = (stalledClaims: number) => Math.max(stalledClaims, 1);
 
 export function endClaim(
   run: { lastProgressSeq: number; claimStartSeq: number; stalledClaims: number },
@@ -58,8 +58,10 @@ const WHY: Record<ClaimEndReason, string> = {
   shutdown: "the runner restarted",
   "self-stop": "the runner lost contact with the server",
   "lease-expired": "the server lost contact with the runner",
-  "provider-outage": "the model provider was unavailable",
+  "provider-outage": "the model provider was unavailable", // stalledError words it apart
 };
 
 export const stalledError = (reason: ClaimEndReason, tool: string | undefined) =>
-  `Stopped: ${WHY[reason]} ${STALLED_CLAIMS_LIMIT} times in a row without progress${tool ? ` (last call: \`${tool}\`)` : ""}.`;
+  reason === "provider-outage"
+    ? "Stopped: the model provider was unavailable for about 15 minutes. Start a new run to try again."
+    : `Stopped: ${WHY[reason]} ${STALLED_CLAIMS_LIMIT} times in a row without progress${tool ? ` (last call: \`${tool}\`)` : ""}.`;

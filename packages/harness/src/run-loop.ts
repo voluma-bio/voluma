@@ -110,7 +110,7 @@ export interface LoopConfig {
   checkTimeoutMs: number;
   /** Deliveries with no notice in a row before code ends the run. */
   stuckLimit: number;
-  /** Times a thread is started again after a provider error that is neither fatal nor an outage (`startThread`'s `providerOutage`) before the run fails. */
+  /** Times in a row a thread is started again after a provider error that is neither fatal nor an outage (`startThread`'s `providerOutage`) before the run fails. */
   maxProviderRedos: number;
 }
 
@@ -579,9 +579,13 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       const error = m.end.error ?? "";
       if (o.providerFatal?.(error))
         throw new Error(`the main agent failed on a model provider error: ${error}`);
-      const failures = [...d.threads.values()].filter(
-        (r) => r.role === "main" && r.end?.status === "failed" && providerError(r.end.error ?? ""),
-      ).length;
+      // Consecutive: a main thread that ended any other way starts the count again.
+      let failures = 0;
+      const mains = [...d.threads.values()].filter((r) => r.role === "main");
+      for (const r of mains.reverse()) {
+        if (r.end?.status !== "failed" || !providerError(r.end.error ?? "")) break;
+        failures++;
+      }
       if (failures > config.maxProviderRedos) {
         throw new Error(
           `the main agent failed on a model provider error ${failures} times: ${error}`,

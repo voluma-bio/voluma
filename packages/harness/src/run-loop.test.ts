@@ -1330,4 +1330,48 @@ describe("run loop", () => {
       expect(ended(w.stored, "supervisor")).toEqual(["completed", "completed"]);
     });
   });
+
+  describe("provider outage", () => {
+    const mainMessages = (events: readonly RunEvent[]) =>
+      of(events, "message", "main").flatMap((e) => (e.type === "message" ? [e.payload.role] : []));
+    const outage = (e: string) => /provider down/.test(e);
+
+    it("an error with no reply content releases the run and leaves main's thread open, nothing stored for the failed reply", async () => {
+      const w = world({
+        plan: [task("t1")],
+        main: () => {
+          throw new Error("provider down");
+        },
+        providerError: outage,
+        providerOutage: outage,
+      });
+      await w.run();
+      expect(w.released).toEqual(["provider down"]);
+      expect(mainMessages(w.stored), w.text()).not.toContain("assistant");
+      expect(of(w.stored, "thread.ended", "main")).toEqual([]);
+    });
+
+    it("an error after reply content is redone in the claim, not released", async () => {
+      let drops = 0;
+      const w = world({
+        plan: [task("t1")],
+        main: first(
+          (t) =>
+            t.thread === `${R}main` && drops++ === 0
+              ? { dropped: "provider down", partial: "Let me" }
+              : undefined,
+          chain(["t1"]),
+        ),
+        providerError: outage,
+        providerOutage: outage,
+      });
+      const folded = await w.run();
+      expect(w.released).toEqual([]);
+      expect(ended(w.stored, "main").at(0)).toBe("failed");
+      expect(
+        folded.tasks.map((t) => t.status),
+        w.text(),
+      ).toEqual(["done"]);
+    });
+  });
 });

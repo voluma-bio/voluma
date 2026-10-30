@@ -83,12 +83,16 @@ export type StartThreadOptions = ThreadIdentity & {
   /** Aborting ends the thread as cancelled and kills a running command. */
   signal?: AbortSignal;
   /**
-   * Whether a failed model reply is a provider outage: the provider kept failing past the call
-   * retry. Such a reply is not stored or emitted and the thread writes no `thread.ended`: it
-   * stays open with its History an exact prefix, and the outcome says `outage`, for the host to
-   * release the run (the next claim resumes the thread).
+   * A failed model reply with no content is an outage when `is` says so: the call retry spent its
+   * budget on a transient error. Such a reply is not stored or emitted and the thread writes no
+   * `thread.ended`: it stays open with its History an exact prefix, `release` tells the host, which
+   * releases the run (the next claim resumes the thread). A reply that failed after content
+   * is not an outage; it fails the thread as any provider error does.
    */
-  providerOutage?: (provider: string, error: string) => boolean;
+  providerOutage?: {
+    is(provider: string, error: string): boolean;
+    release(error: string): void;
+  };
   /**
    * The run's own signal. When it aborts (shutdown, self-stop, lost lease), the thread is cut
    * off, not stopped: nothing more is stored or emitted for it, not even a `thread.ended`,
@@ -314,9 +318,13 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
               message.stopReason === "error" &&
               !signal?.aborted &&
               !cutOff() &&
-              options.providerOutage?.(message.provider, message.errorMessage ?? "")
+              message.content.length === 0 &&
+              options.providerOutage?.is(message.provider, message.errorMessage ?? "")
             ) {
-              outage ??= message.errorMessage ?? "the model request failed";
+              if (outage === undefined) {
+                outage = message.errorMessage ?? "the model request failed";
+                options.providerOutage.release(outage);
+              }
               break;
             }
             const ok = await persist(message);

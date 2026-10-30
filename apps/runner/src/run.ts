@@ -445,10 +445,12 @@ async function claimBody(
       previousClaim: claim.previousClaim?.reason,
       providerError: isProviderError,
       providerFatal: isFatalProviderError,
-      providerOutage: isTransientProviderError,
-      onProviderOutage: (error) => {
-        log(`model provider outage (${error}); releasing the run`);
-        stop("provider-outage");
+      providerOutage: {
+        is: isTransientProviderError,
+        release: (error) => {
+          log(`model provider outage (${error}); releasing the run`);
+          stop("provider-outage");
+        },
       },
       workflow: definition.files,
       // The commit the files came from: the snapshot's, which a resume keeps.
