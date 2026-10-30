@@ -258,82 +258,61 @@
   .axis.sagittal {
     @apply text-axis-y;
   }
-  .view-empty {
-    @apply flex min-h-0 flex-1 flex-col items-center justify-center px-3 text-center text-sm text-muted-foreground;
+  .grid-toolbar {
+    @apply flex flex-wrap items-center gap-3 text-xs text-muted-foreground;
   }
-  .dicom-intake {
-    @apply ml-auto min-w-0 max-w-full;
+  .grid-toolbar label {
+    @apply flex items-center gap-1;
   }
-  .dicom-intake > div {
-    @apply justify-end;
+  .grid-toolbar input {
+    @apply h-7 w-20 rounded border border-border bg-card px-1 font-mono text-foreground;
   }
-  .dicom-stack {
-    @apply flex min-h-0 flex-1 flex-col overflow-y-auto;
-  }
-  .dicom-stack > .view-empty {
-    @apply shrink-0 py-3;
-    min-height: min-content;
-  }
-  .dicom-canvas-wrap {
-    @apply relative min-h-8 flex-1;
+  .grid-pane {
+    @apply relative min-h-0 flex-1 overflow-hidden outline-none;
     background: var(--viewer-well);
+    touch-action: none;
   }
-  .dicom-canvas {
+  .grid-pane:focus-visible {
+    @apply ring-2 ring-inset ring-ring;
+  }
+  .grid-canvas {
     @apply absolute inset-0;
   }
-  .dicom-snapshot-frame {
-    @apply absolute inset-0;
-  }
-  .dicom-label-overlay {
-    @apply pointer-events-none absolute inset-0 h-full w-full;
-  }
-  .dicom-status {
-    @apply absolute inset-0 flex flex-col items-center justify-center overflow-auto p-3 text-center text-xs;
-    background: var(--viewer-well);
+  .grid-chip {
+    @apply pointer-events-none absolute z-10 rounded px-1.5 py-0.5 font-mono text-[11px];
+    background: var(--viewer-chip);
     color: var(--viewer-chip-fg);
   }
-  .slice-controls {
-    @apply flex shrink-0 items-center gap-2 px-2 py-1 text-xs;
+  .grid-chip.bottom-left {
+    @apply bottom-2 left-2;
   }
-  .slice-controls input {
-    @apply min-w-0 flex-1;
+  .grid-chip.top-right {
+    @apply top-2 right-2;
   }
-  .slice-controls output {
-    @apply whitespace-nowrap font-mono;
+  .snapshot-tray {
+    @apply mt-3 shrink-0 text-xs;
   }
-  .image-controls {
-    @apply flex shrink-0 flex-wrap items-end gap-3 px-3 py-3 text-xs;
+  .snapshot-tray summary {
+    @apply cursor-pointer font-medium;
   }
-  .image-controls label {
-    @apply flex flex-col gap-1 text-muted-foreground;
+  .snapshot-tray p {
+    @apply mt-2;
   }
-  .image-controls input {
-    @apply h-8 w-20 rounded border border-border bg-card px-1 py-1 font-mono text-foreground;
+  .snapshot-tray ul {
+    @apply mt-2 flex max-h-28 flex-wrap gap-3 overflow-y-auto pb-1;
   }
-  .image-controls input:where([type="range"]) {
-    @apply p-0;
+  .snapshot-tray li {
+    @apply flex shrink-0 items-center gap-2;
   }
-  .zoom-controls {
-    @apply flex flex-col gap-1;
+  .snapshot-item {
+    @apply flex items-center gap-2 text-left;
   }
-  .image-controls .icon-button {
-    @apply h-8 w-8 border border-border bg-card text-foreground;
+  .snapshot-item img {
+    @apply h-12 w-16 border border-border object-contain;
+    background: var(--viewer-well);
   }
-  .image-controls .icon-button:hover:not(:disabled) {
-    @apply bg-accent;
-  }
-  .image-controls .icon-button:disabled {
-    @apply opacity-40;
-  }
-  .image-controls .text-button {
-    @apply h-8;
-  }
-  .volume-canvas {
-    touch-action: none;
-    cursor: grab;
-  }
-  .volume-canvas:active {
-    cursor: grabbing;
+  .view-empty {
+    @apply flex min-h-0 flex-1 flex-col items-center justify-center px-3 text-center text-sm text-muted-foreground;
   }
   .resize-handle {
     @apply relative w-2 shrink-0;
