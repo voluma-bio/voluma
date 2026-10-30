@@ -86,14 +86,14 @@ import { heartbeatRoundTrip, inRunScope, type RunScope } from "./telemetry.ts";
 import { assertThinking } from "./thinking.ts";
 import { type ModelRole, usageMeter } from "./usage.ts";
 
+/** The repo checkout this runner was deployed from: `workflows/` is read from it. */
+const REPO_ROOT = resolve(import.meta.dirname, "../../..");
 /**
  * How long closing the sandbox may take before Modal is asked to terminate the claim's by
  * tag. Terminating takes tens of seconds, so a normal end waits longer (the lease is held
  * meanwhile, and the `stopped` event needs the close to finish); after a stop, the run's
  * report waits only on the platform's grace period.
  */
-/** The repo checkout this runner was deployed from: `workflows/` is read from it. */
-const REPO_ROOT = resolve(import.meta.dirname, "../../..");
 const CLOSE_BUDGET_MS = { ended: 60_000, stopped: 15_000 };
 /** How long threads get to end after a stop before the run is reported anyway. */
 const WIND_DOWN_MS = 5_000;

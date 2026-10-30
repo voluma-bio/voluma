@@ -21,7 +21,7 @@ import { messageSnapshotKey, relativePathSchema, sha256Schema } from "@voluma/co
 import {
   acceptCheckRequestSchema,
   markReviewedRequestSchema,
-  reviewDecisionResponseSchema,
+  type ReviewDecisionResponse,
 } from "@voluma/contracts/review";
 import { type Context, Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -47,6 +47,13 @@ function currentReview(record: RunRecord, baseRevisionId: string) {
       message: "Results changed or are not completed. Reload the run.",
     });
   return review;
+}
+
+/** A decision's answer: the run's review data, whose `review` a decided run always has. */
+function decisionResponse(record: RunRecord): ReviewDecisionResponse {
+  const run = reviewRun(record);
+  if (!run?.review) throw new Error(`run ${record.run.id} has no review after a decision`);
+  return { ...run, review: run.review };
 }
 
 export function runRoutes({ runs, files, messages }: ReviewDeps) {
@@ -82,7 +89,7 @@ export function runRoutes({ runs, files, messages }: ReviewDeps) {
       };
     });
     if (!record) return c.json({ error: "not found" }, 404);
-    return c.json(reviewDecisionResponseSchema.parse(reviewRun(record)));
+    return c.json(decisionResponse(record));
   });
 
   app.post("/runs/:runId/mark-reviewed", async (c) => {
@@ -100,7 +107,7 @@ export function runRoutes({ runs, files, messages }: ReviewDeps) {
       };
     });
     if (!record) return c.json({ error: "not found" }, 404);
-    return c.json(reviewDecisionResponseSchema.parse(reviewRun(record)));
+    return c.json(decisionResponse(record));
   });
 
   app.post("/runs/:runId/messages", async (c) => {
@@ -109,8 +116,6 @@ export function runRoutes({ runs, files, messages }: ReviewDeps) {
     const user = c.var.user;
     const reader = readerOf(user);
     const caller = callerOf(user);
-    const refusedAs = (r: { status: 403 | 404 | 409 | 429; error: string }) =>
-      c.json({ error: r.error }, r.status);
 
     let png: Uint8Array | undefined;
     if (snapshot) {
@@ -127,14 +132,11 @@ export function runRoutes({ runs, files, messages }: ReviewDeps) {
     const message = { id, payload };
 
     const checked = await messages.check(reader, caller, runId, message);
-    if ("refused" in checked) return refusedAs(checked.refused);
-    if (!checked.ok.duplicate && png) {
+    if (!checked.duplicate && png) {
       if (!files) throw new HTTPException(503, { message: "File storage is not configured." });
       await files.putSnapshot(runId, id, png);
     }
-    const sent = await messages.send(reader, caller, runId, message);
-    if ("refused" in sent) return refusedAs(sent.refused);
-    const { eventId, state } = sent.ok;
+    const { eventId, state } = await messages.send(reader, caller, runId, message);
     return c.json({ eventId, state } satisfies SendRunMessageResponse);
   });
 

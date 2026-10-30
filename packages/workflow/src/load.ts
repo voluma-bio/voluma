@@ -74,7 +74,6 @@ const agentSchema = z.strictObject({
   tools: z.array(z.string().min(1)),
   subagents: z.array(z.string().min(1)).default([]),
   skills: z.array(z.string().min(1)).optional(),
-  status: z.literal("planned").optional(),
 });
 
 /** Written last, so a snapshot cut short is redone, not trusted; its body is the commit. */
@@ -113,9 +112,8 @@ function parseAgent(path: string, text: string, knownTools: readonly string[]): 
   if (data.name !== name) {
     throw new WorkflowParseError(path, `name "${data.name}" must match its file name "${name}"`);
   }
-  const planned = data.status === "planned";
   const unknown = data.tools.find((t) => !knownTools.includes(t));
-  if (!planned && unknown) {
+  if (unknown) {
     throw new WorkflowParseError(path, `tool "${unknown}" is not a tool of the harness`);
   }
   if (!body) throw new WorkflowParseError(path, "the body is empty");
@@ -127,7 +125,6 @@ function parseAgent(path: string, text: string, knownTools: readonly string[]): 
     tools: data.tools,
     subagents: data.subagents,
     skills: data.skills,
-    planned,
     body,
   };
 }

@@ -42,18 +42,7 @@ type ThreadIdentity =
   | { kind: "chat"; taskId?: string };
 
 export type StartThreadOptions = ThreadIdentity & {
-  runId: string;
   threadId: string;
-  parentThreadId?: string;
-  /** The attempt a check thread checks. */
-  attemptId?: string;
-  /** The tool call in the parent thread that started this thread. */
-  spawnedBy?: string;
-  /**
-   * The id of this invocation's `thread.started`, when the caller (a tool) has already appended
-   * it: the thread's own emit then does nothing.
-   */
-  startedEventId?: string;
   /**
    * Builds the result of a tool call that a crash cut off, from the log (the caller knows what
    * the call did). `undefined` keeps the cautious default text.
@@ -257,18 +246,6 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       }
 
       started = true;
-      emit(
-        "thread.started",
-        {
-          parentThreadId: options.parentThreadId ?? null,
-          kind: options.kind,
-          ...(options.taskId && { task: options.taskId }),
-          ...(options.attemptId && { attemptId: options.attemptId }),
-          ...(options.spawnedBy && { spawnedBy: options.spawnedBy }),
-          model: `${options.model.provider}/${options.model.id}`,
-        },
-        options.startedEventId,
-      );
       if (stored.length === 0) {
         // A new thread: store the system message before anything else.
         if (system && (await persist(system))) {
@@ -415,7 +392,7 @@ const historyFailure = (error: unknown): Omit<ThreadOutcome, "ran" | "reply"> =>
 /** Wraps our tool as a Pi tool: JSON Schema for the model, zod for validation and defaults. */
 function toAgentTool(
   tool: Tool,
-  { runId, threadId, kind, taskId, sandbox, recorder }: StartThreadOptions,
+  { threadId, kind, taskId, sandbox, recorder }: StartThreadOptions,
   batchSize: (toolCallId: string) => number,
 ): AgentTool {
   const { $schema: _, ...jsonSchema } = z.toJSONSchema(tool.input, { io: "input" });
@@ -430,7 +407,6 @@ function toAgentTool(
       let result: ToolResult;
       try {
         result = await tool.execute(tool.input.parse(params), {
-          runId,
           threadId,
           kind,
           ...(taskId && { taskId }),

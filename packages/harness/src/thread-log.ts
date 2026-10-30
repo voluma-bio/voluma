@@ -19,6 +19,7 @@ import {
   type Folded,
   fold,
 } from "@voluma/contracts/fold";
+import type { Mark } from "@voluma/contracts/messages";
 import type { EvidenceRef } from "@voluma/contracts/output";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { UserSender } from "./adapters/pi/start-thread";
@@ -120,12 +121,7 @@ export type Notice = {
   | {
       kind: "person";
       text: string;
-      marks: {
-        volumeId: string;
-        file?: string;
-        point?: number[];
-        box?: { min: number[]; max: number[] };
-      }[];
+      marks: (Mark & { file?: string })[];
       snapshot?: string;
       /** The message carries a go (`taskId` names its task). */
       go?: true;
@@ -317,10 +313,8 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
             kind: "person",
             text: text ?? "",
             marks: (marks ?? []).map((m) => ({
-              volumeId: m.volumeId,
+              ...m,
               ...(volumeFiles.has(m.volumeId) && { file: volumeFiles.get(m.volumeId) }),
-              ...(m.point && { point: m.point }),
-              ...(m.box && { box: m.box }),
             })),
             ...(snapshotKey && { snapshot: `/scratch/${snapshotKey.split("/scratch/")[1]}` }),
             closed,

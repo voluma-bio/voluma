@@ -364,6 +364,7 @@ export function world(o: WorldOptions) {
           throw new Error("these runs read no files");
         },
         write: async () => {},
+        list: async () => [],
       },
       earlierClaimsEnded: async () => {},
       outputs: {

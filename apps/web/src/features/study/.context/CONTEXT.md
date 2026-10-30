@@ -39,8 +39,8 @@ shown as its scan and linked straight to its run.
   budget cap, so the page never says a run stops at one.
 - **Excel sample sheets**: `xlsx.ts` reads the first worksheet with `fflate` (unzip) and
   `DOMParser`, loaded only when an `.xlsx` is dropped.
-- **Shared with `features/run`** through `@voluma/ui/run`: the run and study status words
-  (`runStatus`, `RunBadge`, `studyStatus`: Running, N to check, Checked, Reviewed, Failed,
+- **Shared with `features/run`** through `@voluma/run-view`: the run and study status words
+  (`runStatus`, `studyStatus`, each a word and a `StatusMark` state: Running, N to check, Checked, Reviewed, Failed,
   Stopped, Waiting, Needs your keys, Not started), the run link, the formatters, and visitor
   keys. `runStatus`, `studyStatus` and `runHref` take a run's `state` and `review`, which a full
   `Run` and a `newestRuns` entry both carry; a study of one reads as `runStatus` of its run.

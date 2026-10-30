@@ -6,11 +6,12 @@
   "scripts": {
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node --import tsx src/migrate.ts",
-    "seed:example": "node --env-file-if-exists ../../.env --import tsx src/domains/run/seed-example.ts",
-    "export:run": "node --env-file-if-exists ../../.env --import tsx src/domains/run/export-run.ts",
-    "import:run": "node --env-file-if-exists ../../.env --import tsx src/domains/run/import-run.ts",
-    "r2:put": "node --env-file-if-exists ../../.env --import tsx src/domains/run/put-dir.ts",
-    "upload:scan": "node --env-file-if-exists ../../.env --import tsx src/domains/run/upload-scan.ts",
+    "seed:example": "node --env-file-if-exists ../../.env --import tsx src/ops/seed-example.ts",
+    "export:run": "node --env-file-if-exists ../../.env --import tsx src/ops/export-run.ts",
+    "import:run": "node --env-file-if-exists ../../.env --import tsx src/ops/import-run.ts",
+    "archive:run": "node --env-file-if-exists ../../.env --import tsx src/ops/archive-run.ts",
+    "r2:put": "node --env-file-if-exists ../../.env --import tsx src/ops/put-dir.ts",
+    "upload:scan": "node --env-file-if-exists ../../.env --import tsx src/ops/upload-scan.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run"
   },

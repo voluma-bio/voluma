@@ -10,7 +10,7 @@
  *
  * Claim. The runner polls `claim` every `CLAIM_POLL_SECONDS` while it has a
  * free slot. Polling over long-polling because the API must look at the clock
- * anyway (expired leases, the daily limit checked at dequeue), a poll holds no
+ * anyway (expired leases), a poll holds no
  * connection or in-memory wake-up on the API, and a run lasts minutes, so two
  * seconds of pickup delay costs nothing. Every run is created `queued` and
  * only a claim starts it (`run.ts`). `claim` is atomic: it picks the oldest
@@ -21,7 +21,7 @@
  * (from the runs' stored claim times, never from an API process's memory);
  * ties go to the older run. It moves it to
  * `running`, and takes the lease. A run's `startedAt` is its first claim's
- * time; a re-claim keeps it, and the daily limit counts a run once. Taking the
+ * time; a re-claim keeps it. Taking the
  * run is what starts it, so the runner reports no "running". `claim` answers
  * `{ claim: null }` when there is nothing to start. For a `visitor` run the
  * response is the only place the keys go and the server forgets them as it
