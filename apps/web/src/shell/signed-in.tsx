@@ -74,7 +74,7 @@ export function SignedIn() {
         </main>
       );
     case "signed-out":
-      return <SignInScreen onSignedIn={(me) => setSession({ state: "signed-in", me })} />;
+      return <SignInScreen />;
     case "unreachable":
       return <UnreachableScreen cause={session.cause} retry={load} />;
     case "signed-in":
