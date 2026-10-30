@@ -207,13 +207,13 @@ const selectedOutputsSchema = z
 export const providerCallsSchema = z.object({
   costUsd: z.number().nonnegative(),
   calls: z.number().int().nonnegative(),
-  unknownCostCalls: z.number().int().nonnegative(),
+  unknownCostCalls: z.number().int().nonnegative().default(0),
   bySandbox: z.array(
     z.object({
       sandbox: z.string().min(1),
       costUsd: z.number().nonnegative(),
       calls: z.number().int().nonnegative(),
-      unknownCostCalls: z.number().int().nonnegative(),
+      unknownCostCalls: z.number().int().nonnegative().default(0),
     }),
   ),
 });

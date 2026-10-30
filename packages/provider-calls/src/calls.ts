@@ -196,8 +196,8 @@ export async function callsOfRuns(db: Db, runIds: string[]): Promise<Map<string,
 }
 
 /** SQL for one run's known provider spend, to add to a query over `runs` (the org's daily total). */
-export const settledUsdOf = (runId: SQL): SQL =>
-  sql`(SELECT coalesce(sum(${providerCalls.costUsd}), 0) FROM ${providerCalls} WHERE ${providerCalls.runId} = ${runId} AND ${providerCalls.status} <> 'open')`;
+export const knownUsdOf = (runId: SQL): SQL =>
+  sql`(SELECT coalesce(sum(${providerCalls.costUsd}), 0) FROM ${providerCalls} WHERE ${providerCalls.runId} = ${runId})`;
 
 /** One run's known provider spend: the costs of calls that ended with one. */
 export async function knownUsdOfRun(db: Db, runId: string): Promise<number> {

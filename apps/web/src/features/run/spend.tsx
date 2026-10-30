@@ -23,7 +23,10 @@ export function spendRows(s: Spend, { wall = true }: { wall?: boolean } = {}): I
   const hit = cacheHitShare(s);
   const rows: InfoSection["rows"] = [["Cost", formatUsd(s.costUsd)]];
   if (s.unknownCostCalls > 0)
-    rows.push(["Cost unknown", `${count(s.unknownCostCalls)} paid tool calls`]);
+    rows.push([
+      "Cost unknown",
+      `${count(s.unknownCostCalls)} paid tool ${s.unknownCostCalls === 1 ? "call" : "calls"}`,
+    ]);
   if (s.toolCostUsd > 0) rows.push(["Paid tools", formatUsd(s.toolCostUsd)]);
   if (wall) rows.push(["Wall time", formatDuration(s.wallSeconds)]);
   // `bash` calls only: the runs list's sandbox time is the sandbox's uptime, which is longer.

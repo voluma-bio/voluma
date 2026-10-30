@@ -38,10 +38,8 @@ export type Observed = {
 type Rates = { input: number; output: number; cacheRead: number; cacheWrite: number };
 type Priced = Rates & { tiers?: (Rates & { inputTokensAbove: number })[] };
 
-function priceOf(provider: Provider, id: string): { cost: Priced } | undefined {
-  const model = models().getModel(provider, id);
-  return model && { cost: model.cost };
-}
+const priceOf = (provider: Provider, id: string): Priced | undefined =>
+  models().getModel(provider, id)?.cost;
 
 /** Whether a model call to this id has a price; SAM is priced by frame. */
 export const hasPrice = (provider: Provider, id: string) =>
@@ -60,8 +58,8 @@ export function costUsd(provider: Provider, model: string, seen: Observed): numb
   const uncached =
     provider === "anthropic" ? seen.inputTokens : Math.max(0, seen.inputTokens - cacheRead);
   const promptTokens = uncached + cacheRead + cacheWrite;
-  const tier = (priced.cost.tiers ?? []).filter((t) => promptTokens > t.inputTokensAbove).at(-1);
-  const rate = tier ?? priced.cost;
+  const tier = (priced.tiers ?? []).filter((t) => promptTokens > t.inputTokensAbove).at(-1);
+  const rate = tier ?? priced;
   return (
     (uncached * rate.input +
       cacheRead * rate.cacheRead +
