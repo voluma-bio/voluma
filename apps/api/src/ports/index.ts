@@ -26,6 +26,8 @@ export type ReferenceArchive = {
 };
 
 export type RunRecord = {
+  /** Opaque run lifetime; changes when an example is replaced under the same id. */
+  generation: string;
   run: Run;
   events: RunEvent[];
   results: ReturnType<typeof reviewState>;
@@ -87,6 +89,8 @@ export type RunMessages = {
 
 /** A run's content-addressed files (`evidenceKey`), its converted review assets (`reviewAssetKey`) and the snapshots researchers attach to messages. */
 export type RunFiles = {
+  /** Publish complete content-addressed bytes; rejects with 502 when storage fails. */
+  put(runId: string, sha256: string, bytes: Uint8Array, signal: AbortSignal): Promise<void>;
   /**
    * A short-lived URL for one converted asset of the run (`reviewAssetKey(runId, sha256,
    * path)`), with the seconds it stays valid for. The same file asked for again soon gets the

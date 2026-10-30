@@ -214,4 +214,18 @@ can set the acquired slice and camera target. Explicit points, then box centres,
 take priority over inferred annotation or label targets. An open raw 3D preview targets the
 same world point and projects an amber box or crosshair; it does not render label
 surfaces. Clearing focus removes outlines without resetting either camera.
-Orthogonal reformats, surfaces and run-persistent snapshots remain separate work.
+Orthogonal reformats and surfaces remain separate work.
+
+## Screenshots
+
+The acquired viewport copies scan pixels and the label/focus overlay before its
+first asynchronous operation. Review supplies persistence through `SnapshotControls`;
+the viewer owns no API calls. A failed save retains the capture and UUID for retry.
+Saving for a different task/revision discards that pending capture rather than
+attaching it elsewhere.
+
+Restore validates the series and scan-geometry hash against the open scan, waits
+for labels and the saved slice, then restores camera, window and frame aspect ratio.
+The saved focus does not subsequently recenter that camera. Task/revision navigation
+clears the restore request. Only acquired slices support capture; 3D capture and
+orthogonal planes remain follow-up work in [TODO.md](TODO.md).

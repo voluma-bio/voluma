@@ -290,6 +290,9 @@
   .dicom-canvas {
     @apply absolute inset-0;
   }
+  .dicom-snapshot-frame {
+    @apply absolute inset-0;
+  }
   .dicom-label-overlay {
     @apply pointer-events-none absolute inset-0 h-full w-full;
   }

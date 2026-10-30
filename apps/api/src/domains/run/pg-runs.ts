@@ -240,6 +240,7 @@ export async function loadRecords(
     const log = logs.get(row.run.id) ?? [];
     const results = reviewState(log);
     return {
+      generation: row.run.generation,
       run: toRun(row, { summary: results.summary, tasks: progressOf(results.revisions.at(-1)) }),
       events: log,
       results,
