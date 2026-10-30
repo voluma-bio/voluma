@@ -89,9 +89,17 @@ function threadSandbox(
         "stopped",
         code === undefined ? "ended by the provider" : `ended by the provider (exit code ${code})`,
       );
-      current = start();
+      const fresh = start();
+      current = fresh;
+      // Awaited below; until then a creation that fails before the destroy returns would be an
+      // unhandled rejection, which fails the whole run (the runner's handler).
+      fresh.sandbox.catch(() => {});
       await (await dead.sandbox).destroy();
       assertOpen();
+      // This caller's replacement, not a second one started because a failure cleared `current`.
+      await fresh.sandbox;
+      assertOpen();
+      return fresh;
     }
     current ??= start();
     const entry = current;
