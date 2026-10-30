@@ -12,9 +12,9 @@
  *   an abort kills that group with a second exec, or terminates the sandbox if that fails.
  * - Read-only inputs flagged `stage` are copied to local disk at their path at create, in two
  *   commands (`STAGE_PREPARE_SCRIPT` makes every directory and lists the source; `STAGE_COPY_SCRIPT`
- *   copies it): 32 parallel workers, one file per `cp`, then re-copies of only the files still
- *   missing or the wrong size, up to three more passes. Each `cp` and the whole copy are bounded by
- *   a stall rate times their bytes, not a fixed time, so a multi-GB file still fits. The copy is
+ *   copies it): 32 parallel workers, 16 files per `cp`, then re-copies of only the files still
+ *   missing or the wrong size, up to three more passes. A watchdog kills a pass whose destination
+ *   stops growing for 60 s; no bound scales with size, so a multi-GB file still fits. The copy is
  *   writable: commands run as root, and a sandbox cannot remount or `chattr` a path or run as
  *   another user and still write the mounts; the bucket is mounted at a private path under
  *   /staged for the copy.
@@ -69,18 +69,14 @@ const MAX_MODAL_NAME = 64;
 const STAGE_PARALLELISM = 32;
 // Copy passes after the first, over the files still missing or the wrong size.
 const STAGE_RETRIES = 3;
-// Staging bounds a stall, not a duration: a stuck read is killed and retried, but a big file may
-// take as long as its bytes need. A full parallel copy of OA7-1R (1,126 files, 535 MB) takes
-// 7-16 s, so these rates are far below a healthy mount's.
-// Each `cp` gets this long plus its file's bytes at STAGE_FILE_BYTES_PER_SECOND (one stream).
-const STAGE_COPY_SECONDS = 30;
-const STAGE_FILE_BYTES_PER_SECOND = 5_000_000;
-// The copy step gets this long plus all bytes at STAGE_TOTAL_BYTES_PER_SECOND (32 streams) plus
-// the largest file at the per-file rate (a lone big file gets one stream, not 32). A mount that
-// never answers fails the sandbox start at that bound (the runner reports it as infrastructure)
-// instead of holding the run for an hour. The bound is only computed once the source is listed.
-const STAGE_BASE_SECONDS = 300;
-const STAGE_TOTAL_BYTES_PER_SECOND = 20_000_000;
+// Staging detects a stall, not a duration: a big scan may take as long as its bytes need, so no
+// bound scales with size. The copy step's watchdog kills a pass whose destination has not grown
+// for STAGE_STALL_SECONDS while copies still run; the next pass re-copies what is missing.
+const STAGE_STALL_SECONDS = 60;
+const STAGE_POLL_SECONDS = 2;
+// The watchdog prints a heartbeat each poll. The TS side gives up on a copy step silent this long
+// (the script itself wedged, e.g. a `cp` in an uninterruptible read that SIGKILL cannot end).
+const STAGE_SILENCE_SECONDS = 90;
 // Listing and making directories; a mount that never answers fails here.
 const STAGE_PREPARE_SECONDS = 120;
 // How long past `timeout -k` the TS side waits for the exit before giving up on the streams.
@@ -92,7 +88,7 @@ const STAGE_STDERR_CHARS = 4000;
 // Listings are sorted "size path" records, so comparing the source's with the copy's finds the
 // files missing or a different size. Paths are positional arguments, never spliced in.
 const STAGE_LIST = `list() { (cd "$1" && find . -type f -printf '%s %p\\0' | sort -z); }`;
-// Prints "<scratch dir> <total bytes> <largest file bytes>"; the scratch dir holds the listing.
+// Prints the scratch directory, which holds the listing.
 const STAGE_PREPARE_SCRIPT = `export LC_ALL=C; set -o pipefail
 ${STAGE_LIST}
 mkdir -p "$2" || exit 1; cd "$1" || exit 1
@@ -100,16 +96,29 @@ find . -type d -print0 | (cd "$2" && xargs -0 -r mkdir -p --) || exit 1
 dir=$(mktemp -d) || exit 1
 # The source is listed once, checked: a listing that fails partway must not pass as complete.
 list . > "$dir/src" || { echo "listing $1 failed" >&2; exit 1; }
-echo "$dir $(cut -z -d' ' -f1 "$dir/src" | tr '\\0' '\\n' | awk '{t+=$1; if ($1>m) m=$1} END {print t+0, m+0}')"`;
-// "$3" is the scratch dir. One file per `cp` under its own timeout, so a stuck read costs one
-// file; `--foreground` keeps the wrapper in this script's process group, so the step's deadline
-// kills everything at once and one `-k` kill doesn't end the `xargs` pass.
+echo "$dir"`;
+// "$3" is the scratch dir. Each pass runs in its own process group (setsid) so the watchdog can
+// kill it whole. Progress is the file count and bytes under the local destination, which the
+// watchdog reads without touching the mount; empty files still count.
 const STAGE_COPY_SCRIPT = `export LC_ALL=C; set -o pipefail
 ${STAGE_LIST}
+progress() { find "$1" -type f -printf '%s\\n' | awk '{t+=$1} END {print NR, t+0}'; }
 cd "$1" || exit 1; dir=$3; trap 'rm -rf "$dir"' EXIT
 cp "$dir/src" "$dir/todo"
 for pass in $(seq 0 ${STAGE_RETRIES}); do
-  xargs -0 -r -P ${STAGE_PARALLELISM} -n 1 sh -c 'timeout --foreground -k 2 "$((${STAGE_COPY_SECONDS} + \${1%% *} / ${STAGE_FILE_BYTES_PER_SECOND}))" cp --parents -t "$0" -- "\${1#* }"' "$2" < "$dir/todo"
+  sed -z 's/^[0-9]* //' "$dir/todo" > "$dir/paths"
+  setsid xargs -0 -r -P ${STAGE_PARALLELISM} -n 16 cp --parents -t "$2" -- < "$dir/paths" &
+  pid=$!; last=$(progress "$2"); since=$SECONDS
+  while kill -0 $pid 2>/dev/null; do
+    sleep ${STAGE_POLL_SECONDS}; echo .
+    now=$(progress "$2")
+    if [ "$now" != "$last" ]; then last=$now; since=$SECONDS
+    elif [ $((SECONDS - since)) -ge ${STAGE_STALL_SECONDS} ]; then
+      echo "pass $pass: no progress for ${STAGE_STALL_SECONDS} s, killed" >&2
+      kill -TERM -- -$pid 2>/dev/null; sleep 2; kill -KILL -- -$pid 2>/dev/null; break
+    fi
+  done
+  wait $pid
   # A partial destination listing only causes extra re-copies, never a false pass.
   comm -z -23 "$dir/src" <(list "$2") > "$dir/todo"
   [ -s "$dir/todo" ] || exit 0
@@ -236,7 +245,7 @@ export function createModalSandbox(config: ModalSandboxConfig): CreateSandbox {
     const sandbox = new ModalSandboxAdapter(modal, spec);
     try {
       signal?.throwIfAborted();
-      await sandbox.stage();
+      await sandbox.stage(signal);
     } catch (error) {
       await sandbox.destroy();
       throw error;
@@ -258,33 +267,58 @@ class ModalSandboxAdapter implements Sandbox {
     this.#mounts = spec.mounts;
   }
 
-  async stage(): Promise<void> {
+  async stage(signal?: AbortSignal): Promise<void> {
     for (const mount of this.#mounts.filter((m) => m.stage)) {
       const from = mountedAt(mount);
-      const prepared = await this.#stageStep(
+      const dir = (
+        await this.#stageStep(
+          mount.path,
+          STAGE_PREPARE_SCRIPT,
+          STAGE_PREPARE_SECONDS,
+          STAGE_PREPARE_SECONDS + KILL_GRACE_SECONDS + STAGE_STREAM_GRACE_SECONDS,
+          [from, mount.path],
+          signal,
+        )
+      ).trim();
+      if (!dir) throw new Error(`staging ${mount.path} failed (no scratch directory)`);
+      // The copy step has no duration bound: its watchdog ends stalls, the sandbox lifetime ends the rest.
+      await this.#stageStep(
         mount.path,
-        STAGE_PREPARE_SCRIPT,
-        STAGE_PREPARE_SECONDS,
-        [from, mount.path],
+        STAGE_COPY_SCRIPT,
+        this.#lifetimeSeconds,
+        STAGE_SILENCE_SECONDS,
+        [from, mount.path, dir],
+        signal,
       );
-      const [dir, total, largest] = prepared.trim().split(" ");
-      const seconds =
-        STAGE_BASE_SECONDS +
-        Math.ceil(Number(total) / STAGE_TOTAL_BYTES_PER_SECOND) +
-        Math.ceil(Number(largest) / STAGE_FILE_BYTES_PER_SECOND);
-      if (!dir || !Number.isFinite(seconds)) {
-        throw new Error(`staging ${mount.path} failed (unreadable listing summary: ${prepared})`);
-      }
-      await this.#stageStep(mount.path, STAGE_COPY_SCRIPT, seconds, [from, mount.path, dir]);
     }
   }
 
   /**
    * Runs one staging script under `timeout -k` like `exec()` and returns its stdout. The TS side
-   * also stops reading at its own deadline: a `cp` stuck in an uninterruptible mount read can
-   * survive SIGKILL and hold the streams open, and the sandbox is destroyed on failure anyway.
+   * also gives up when the script is silent for `silenceSeconds` (a process stuck in an
+   * uninterruptible mount read can survive SIGKILL and hold the streams open) or when `signal`
+   * aborts; the failed start destroys the sandbox, which ends whatever still runs.
    */
-  async #stageStep(path: string, script: string, seconds: number, args: string[]): Promise<string> {
+  async #stageStep(
+    path: string,
+    script: string,
+    seconds: number,
+    silenceSeconds: number,
+    args: string[],
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const silent = new AbortController();
+    let timer: ReturnType<typeof globalThis.setTimeout> | undefined;
+    const arm = () => {
+      globalThis.clearTimeout(timer);
+      timer = globalThis.setTimeout(
+        () =>
+          silent.abort(
+            new Error(`staging ${path} failed (no output for ${silenceSeconds} s, gave up)`),
+          ),
+        silenceSeconds * 1000,
+      );
+    };
     const steps = this.#run(
       [
         "timeout",
@@ -298,33 +332,22 @@ class ModalSandboxAdapter implements Sandbox {
         ...args,
       ],
       seconds + KILL_GRACE_SECONDS,
-    )[Symbol.asyncIterator]();
-    const lateSeconds = seconds + KILL_GRACE_SECONDS + STAGE_STREAM_GRACE_SECONDS;
-    const cancel = new AbortController();
-    // An aborted timer must never resolve, so it can't win the race.
-    const late = setTimeout(lateSeconds * 1000, "late" as const, { signal: cancel.signal }).catch(
-      () => new Promise<never>(() => {}),
+      undefined,
+      signal ? AbortSignal.any([signal, silent.signal]) : silent.signal,
     );
     let code = -1;
     let stdout = "";
     let stderr = "";
+    arm();
     try {
-      for (;;) {
-        const step = await Promise.race([steps.next(), late]);
-        if (step === "late") {
-          // Not awaited: the generator is parked on a read that may never return.
-          steps.return(undefined).catch(() => {});
-          code = 124;
-          break;
-        }
-        if (step.done) break;
-        const chunk = step.value;
+      for await (const chunk of steps) {
+        arm();
         if (chunk.type === "exit") code = chunk.code;
         else if (chunk.type === "stdout") stdout += chunk.data;
         else if (chunk.type === "stderr") stderr = (stderr + chunk.data).slice(-STAGE_STDERR_CHARS);
       }
     } finally {
-      cancel.abort();
+      globalThis.clearTimeout(timer);
     }
     if (code !== 0) {
       const detail = stderr.trim();
@@ -422,7 +445,9 @@ class ModalSandboxAdapter implements Sandbox {
     argv: string[],
     deadlineSeconds: number,
     env?: Record<string, string>,
+    signal?: AbortSignal,
   ): AsyncGenerator<ExecChunk> {
+    signal?.throwIfAborted();
     const process = await this.#modal
       .exec(argv, {
         env,
@@ -441,16 +466,21 @@ class ModalSandboxAdapter implements Sandbox {
       ["stdout", next("stdout")],
       ["stderr", next("stderr")],
     ]);
+    // An abort rejects every wait below, so a reader parked on a silent stream stops at once.
+    const aborted = new Promise<never>((_, reject) =>
+      signal?.addEventListener("abort", () => reject(signal.reason), { once: true }),
+    );
+    aborted.catch(() => {});
     try {
       while (live.size > 0) {
-        const { type, result } = await Promise.race(live.values());
+        const { type, result } = await Promise.race([...live.values(), aborted]);
         if (result.done) live.delete(type);
         else {
           live.set(type, next(type));
           yield { type, data: result.value };
         }
       }
-      yield { type: "exit", code: await process.wait() };
+      yield { type: "exit", code: await Promise.race([process.wait(), aborted]) };
     } finally {
       // A reader that stops early, or a stream that errors later, must not leave
       // an unhandled rejection that ends the runner.
