@@ -30,11 +30,8 @@ export function formatDuration(seconds: number): string {
   return `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min`;
 }
 
-/** Where a row leads: the review (the review lane's `/runs/:runId`) once completed, else the live page. */
-export const runHref = ({ runId, state }: Pick<StudyRunSummary, "runId" | "state">) =>
-  state.status === "ended" && state.outcome === "completed"
-    ? `/runs/${runId}`
-    : `/runs/${runId}/live`;
+/** Where a run's row leads: its scan review, which shows a live run as it goes. */
+export const runHref = ({ runId }: Pick<StudyRunSummary, "runId">) => `/scans/${runId}`;
 
 export type RunStatus = { label: string; status: Status };
 

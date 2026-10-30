@@ -5,6 +5,7 @@
  */
 
 export { Box, type BoxProps } from "./box";
+export { Breadcrumb, type BreadcrumbProps } from "./breadcrumb";
 export {
   Button,
   type ButtonProps,
@@ -34,6 +35,7 @@ export {
   type MenuRadioItemProps,
   MenuSeparator,
 } from "./menu";
+export { PageHead, type PageHeadProps } from "./page-head";
 export { Facts, type FactsProps, Popover, PopoverClose, type PopoverProps } from "./popover";
 export { Progress, type ProgressProps } from "./progress";
 export { Readout, type ReadoutProps, type ReadoutValue } from "./readout";

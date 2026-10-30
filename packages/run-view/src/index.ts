@@ -10,6 +10,7 @@ export { AgentMark, Elapsed, THREAD_STATUS } from "./agents";
 export { DisclosureProvider } from "./chat/disclosure-store";
 export { ClampedMarkdown } from "./chat/markdown";
 export { ThreadNavigationProvider } from "./chat/thread-navigation";
+export { ItemToCheck, type ItemToCheckProps } from "./item-to-check";
 export { KeysForm, loadKeys, RunKeyLine } from "./keys";
 export {
   type AgentNode,
@@ -19,6 +20,7 @@ export {
   type NeedItem,
   plainError,
   runView,
+  type TaskState,
   type TaskView,
   type Thread,
   withLiveCalls,
@@ -40,6 +42,16 @@ export {
   useRunStore,
   useThreads,
 } from "./run-store";
+export {
+  finishedLine,
+  groupNames,
+  groupOf,
+  isLive,
+  kneeOf,
+  type ScanStatus,
+  StudyPanel,
+  scanStatus,
+} from "./study-panel";
 export { TaskFlow, type TaskLinkProps, TaskMark } from "./task-flow";
 export {
   type GraphTask,
