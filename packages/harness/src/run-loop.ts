@@ -107,14 +107,11 @@ export interface LoopConfig {
   maxFixRounds: number;
   /** Deliveries with no notice in a row before code ends the run. */
   stuckLimit: number;
-  /** Times in a row a thread is started again after a provider error that is neither fatal nor an outage (`startThread`'s `providerOutage`) before the run fails. */
-  maxProviderRedos: number;
 }
 
 export const LOOP_DEFAULTS: LoopConfig = {
   maxFixRounds: 2,
   stuckLimit: 2,
-  maxProviderRedos: 2,
 };
 
 export interface RunLoopOptions {
@@ -129,10 +126,8 @@ export interface RunLoopOptions {
   config?: Partial<LoopConfig>;
   /** Builds the tools a thread's role names; the main agent's tools act through `agents`. */
   tools(thread: ThreadLayout, names: readonly string[], agents: Agents): Tool[];
-  /** Whether a failed thread's error text says the model provider failed (the host knows its texts). */
+  /** Whether a failed thread's error text says the model provider failed (the host knows its texts); the run then fails at once. */
   providerError?(error: string): boolean;
-  /** Whether such an error means no retry can succeed: the run then fails at once. */
-  providerFatal?(error: string): boolean;
   signal?: AbortSignal;
 }
 
@@ -143,7 +138,7 @@ const rule = (r: Extract<By, { kind: "rule" }>["rule"]): By => ({ kind: "rule", 
 const RUNTIME: UserSender = { kind: "runtime" };
 
 /**
- * A run's error when a thread fails on a fatal provider error. The web names the task from the
+ * A run's error when a thread fails on a provider error. The web names the task from the
  * `<taskId>: its worker|check` prefix (`run-header.tsx`, `study-model.ts`).
  */
 const fatalText = (r: ThreadRecord, error: string) =>
@@ -433,12 +428,6 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     return false;
   }
 
-  /** Provider failures among a task's checks (the current one included). */
-  const checkFailures = (d: ThreadLog, taskId: string) =>
-    startedFor(d, taskId, "check").filter(
-      (c) => c.end?.status === "failed" && providerError(c.end.error ?? ""),
-    ).length;
-
   /** The result of a check: the task takes `checkResult`, or `to-check` when there was no verdict. */
   async function writeResult(d: ThreadLog, t: FoldedTask, c: ThreadRecord, reason?: string) {
     if (!t.attemptId) throw new Error(`${t.id} has no attempt to give a result`);
@@ -491,14 +480,6 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
         await writeResult(d, t, c);
         return true;
       }
-      const error = c.end?.error ?? "";
-      if (c.end?.status === "failed" && providerError(error)) {
-        if (o.providerFatal?.(error)) throw new Error(fatalText(c, error));
-        if (checkFailures(d, t.id) <= config.maxProviderRedos) {
-          await startCheck(d, t.id);
-          return true;
-        }
-      }
       if (c.end?.status === "completed" && c.nudges < 1) {
         await resume(c, verdictNudge(t.id), RUNTIME);
         return true;
@@ -509,16 +490,11 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     return false;
   }
 
-  /** Throws when a thread this process ran failed on an error no retry can fix. */
+  /** Throws when a thread this process ran failed on a provider error. */
   function checkFatal(d: ThreadLog) {
     for (const r of d.threads.values()) {
       const error = r.end?.status === "failed" ? (r.end.error ?? "") : undefined;
-      if (
-        error !== undefined &&
-        threads.started(r.id) &&
-        providerError(error) &&
-        o.providerFatal?.(error)
-      ) {
+      if (error !== undefined && threads.started(r.id) && providerError(error)) {
         throw new Error(fatalText(r, error));
       }
     }
@@ -568,27 +544,6 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       return true;
     }
     if (!m || stateOf(m) !== "idle") return false;
-    if (m.end?.status === "failed" && providerError(m.end.error ?? "")) {
-      const error = m.end.error ?? "";
-      if (o.providerFatal?.(error)) throw new Error(fatalText(m, error));
-      // Provider-failed main threads in a row, counting only those that ended after the run's
-      // latest task-state event: a main thread that ended any other way, or a task that moved
-      // since, starts the count again.
-      let failures = 0;
-      const mains = [...d.threads.values()].filter((r) => r.role === "main");
-      for (const r of mains.reverse()) {
-        if (r.end?.status !== "failed" || !providerError(r.end.error ?? "")) break;
-        if ((r.endedAt ?? -1) < d.progressAt) break;
-        failures++;
-      }
-      if (failures > config.maxProviderRedos) {
-        throw new Error(
-          `the main agent failed on a model provider error ${failures} times: ${error}`,
-        );
-      }
-      await startMain(d);
-      return true;
-    }
     if (d.undelivered.length > 0) {
       const { text, covers } = delivery(d);
       await resume(m, text, { kind: "runtime", ...(covers && { covers }) });

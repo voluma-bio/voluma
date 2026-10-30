@@ -133,7 +133,6 @@ function Lead({ task, titleOf }: { task: Task; titleOf: (taskId: string) => stri
     case "checking":
     case "held":
     case "paused":
-    case "awaiting-ai":
       return (
         <p className="flex items-center gap-2.5">
           <TaskMark state={task.state} />

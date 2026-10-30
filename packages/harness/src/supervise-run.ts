@@ -55,14 +55,6 @@ export interface SuperviseRunOptions {
   config?: Partial<LoopConfig>;
   /** Whether a failed thread's error text says the model provider failed. */
   providerError?(error: string): boolean;
-  /** Whether such an error means no redo can succeed: the run then fails at once. */
-  providerFatal?(error: string): boolean;
-  /**
-   * A model reply that failed with no content on a transient error is a provider outage (the
-   * call retry spent its budget; see `StartThreadOptions.providerOutage`). `release` lets the
-   * host release the run; the host aborts `signal`, which cuts every thread off.
-   */
-  providerOutage?: { is(provider: string, error: string): boolean; release(error: string): void };
   signal: AbortSignal;
 }
 
@@ -103,7 +95,6 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
       history: options.history,
       sandbox: options.sandbox,
       release: options.releaseSandbox,
-      providerOutage: options.providerOutage,
     },
     signal,
   );
@@ -144,7 +135,6 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
         },
       }),
     providerError: options.providerError,
-    providerFatal: options.providerFatal,
     signal,
   });
 }

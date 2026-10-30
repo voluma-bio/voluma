@@ -270,37 +270,24 @@ only text (path, type, size, sha256). The images are in the thread's history (re
 them), but `adapters/pi/elide-images.ts` keeps image blocks only for the last 2 `view_image`
 calls in each request, so request size does not grow with the thread.
 
-**Model calls retry.** `run.ts` passes `maxRetries: 3` to Pi, which retries a 408, 429 (waiting
-the server's `retry-after`), 5xx or dropped connection. `model-retry.ts` wraps every role's calls
-(the main thread too) and keeps retrying those errors, and Meta's `404 model_not_found` that Pi
-treats as final (about half of all calls on 2026-10-28), when the call failed before streaming
-any content: backoff from 1 s doubling to a 30 s cap, until 4 minutes have passed since the first
-attempt (Pi's own tries count against it; an attempt in flight is not cut short), each retry
-logged with its role and attempt. The run's abort ends the wait. Any other error, or the spent budget, ends the call.
-`provider-error.ts` holds the one error classification (retry and redo): it reads the status in the text (Pi's `<provider> API error (<status>)`, or the Anthropic SDK's
+**Provider errors fail fast.** `run.ts` passes `maxRetries: 3` to Pi, which retries a 408, 429
+(waiting the server's `retry-after`), 5xx or dropped connection. `model-retry.ts` wraps every
+role's calls (the main thread too) and keeps retrying those errors (`isTransientProviderError`)
+when the call failed before streaming any content: backoff from 1 s doubling to a 30 s cap, until
+60 s have passed since the first attempt (Pi's own tries count against it; an attempt in flight is
+not cut short), each retry logged with its role and attempt. The run's abort ends the wait. Any
+other error, a 4xx included (Meta's `404 model_not_found` too), or the spent budget, ends the call
+at once. The failed reply is stored and the thread ends `failed` with the provider's message. The
+run loop (`packages/harness/src/run-loop.ts`) sees a thread this process ran that failed on a
+provider error (`isProviderError`: any 4xx or 5xx status, a connection failure, an empty account)
+and fails the run with it in `state.error`: "the main agent failed on a model provider error:
+<message>", or "<taskId>: its worker failed on a model provider error: <message>". Nothing
+releases the run to wait or redoes the thread. `provider-error.ts` holds the classification: it
+reads the status in the text (Pi's `<provider> API error (<status>)`, or the Anthropic SDK's
 `<status> {...}`, `<status> <html>` or `<status> status code (no body)`) and, for an Anthropic error sent mid-stream
 with no status, its documented `error.type` (`overloaded_error` is 529, `rate_limit_error` 429).
-
-**A provider outage releases the run.** When a model call still fails with a transient error
-(`isTransientProviderError`) and an empty reply after the retries above (the budget is spent; an
-error after content went out is not an outage), `start-thread.ts` does not store or emit
-that reply and writes no `thread.ended`: the thread stays open with its History an exact prefix,
-its `providerOutage.release` callback fires, and `run.ts` stops the claim as `provider-outage`, which reports
-`released`. Every running thread is cut off exactly as in a shutdown (an in-flight tool exec is
-not waited for: a `segment_sam` call cut this way has an unknown cost, like one cut by a deploy).
-The API requeues the run with `runs.claimable_after` set (1, then 2 minutes by the count of
-such claims in a row without progress) and counts the claim toward the no-progress limit, so a
-provider that stays down fails the run after 3 claims. The next claim's `previousClaim` is
-`provider-outage`, and each cut-off thread is resumed with "…cut off when the model provider was
-unavailable; continue." There is no in-claim redo for these, so the API's `stalledClaims` is the count, and run-state
-progress resets it.
-
-**Other provider errors** (`provider-error.ts`: a transient error that came after content, such as
-a stream dropped mid-reply, and the neither-transient-nor-fatal ones, a non-Meta 404) kill the thread as before and are the run loop's to handle
-(`packages/harness/src/run-loop.ts`): a check is started again as a new check, the main agent as
-`main.<n+1>`, up to `maxProviderRedos` (2) times for the main agent and per task for a check; the main agent's count is the provider-failed main threads in a row that ended after the run's latest task-state event (`task`), so a task that moves, or a main thread that ended otherwise, starts it again; a worker's failure is a notice to the main
-agent. A fatal error (a refused key, out of money) fails the run at once, with the error in
-`state.error`, instead of leaving it `completed` with tasks that never started.
+A run held "AI unavailable" under the earlier release rule is claimed again at the next claim
+(see `apps/api/.context/deploy.md`).
 
 **Loop limits** are `config.loop`: `RUNNER_MAX_FIX_ROUNDS` (default 2 `needs-review` rounds per
 task before it is left to check). The harness defaults the rest (`LoopConfig`). No limit is
@@ -402,7 +389,7 @@ never resumed: a stale dependent's thread stopped (`task-runtime.ts` `staleDepen
 failing run aborting its threads (`abortAll`). A stop stores that `cancelled` end first
 (`task-runtime.ts` `stop`, inside `section`) and then aborts without waiting; the thread's own
 later end is dropped (`start-thread.ts`). So a stopped thread's next write is refused at once,
-and "open" always means "cut off". A self-stop reports `released` with reason `self-stop`; a signal, `shutdown`; a provider outage, `provider-outage`.
+and "open" always means "cut off". A self-stop reports `released` with reason `self-stop`; a signal, `shutdown`.
 
 The next claim learns why from `claim.previousClaim` (the API records `lease-expired` itself)
 and writes `claim.started {resumed, after}` right after the root's `thread.started`. The

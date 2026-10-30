@@ -1,7 +1,7 @@
 /**
  * The status words of a run and of a study, from their read models alone (no events), shared by
  * Home, the study page and the run page so they read the same: Running, N to check, Checked,
- * Failed, Stopped, Waiting (queued), AI unavailable (queued, held after an outage),
+ * Failed, Stopped, Waiting (queued),
  * Needs your keys, Not started. A completed run with no open
  * item reads "Checked" (a failed task raises an item), and "Reviewed" once someone marks it
  * reviewed, which is never inferred. Also where a run's row links, and how its cost and time read.
@@ -36,7 +36,7 @@ export type RunStatus = { label: string; tone: StatusTone };
 export function runStatus({ state, review }: Pick<StudyRunSummary, "state" | "review">): RunStatus {
   switch (state.status) {
     case "queued":
-      return { label: state.waitingForProvider ? "AI unavailable" : "Waiting", tone: "neutral" };
+      return { label: "Waiting", tone: "neutral" };
     case "running":
       return { label: "Running", tone: "info" };
     case "awaiting-keys":
@@ -91,15 +91,7 @@ export function studyStatus({
   if (toCheck > 0) return { label: `${toCheck} to check`, tone: "check" };
   if (count("running") > 0) return { label: "Running", tone: "info" };
   if (count("awaiting-keys") > 0) return { label: "Needs your keys", tone: "check" };
-  // Nothing running or needing keys: every live run is queued, and held ones wait for the AI.
-  const queued = newest.filter(({ state }) => state.status === "queued");
-  if (queued.length > 0)
-    return {
-      label: queued.every(({ state }) => state.status === "queued" && state.waitingForProvider)
-        ? "AI unavailable"
-        : "Waiting",
-      tone: "neutral",
-    };
+  if (count("queued") > 0) return { label: "Waiting", tone: "neutral" };
   // What is left: completed, stopped, or never run.
   const stopped = count("cancelled");
   const notStarted = scans - newest.length;

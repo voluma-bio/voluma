@@ -21,7 +21,6 @@ export const STATE_WORD: Record<TaskState, string> = {
   failed: "Failed",
   stopped: "Stopped",
   paused: "Paused",
-  "awaiting-ai": "Waiting for the AI",
 };
 
 /** A task's state as a small mark: hollow until it starts, spinning while it works, filled once it ends. */
@@ -55,7 +54,6 @@ export function TaskMark({ state, className }: { state: TaskState; className?: s
       return <span aria-hidden className={cx(base, "border-2 border-info")} />;
     case "stopped":
     case "paused":
-    case "awaiting-ai":
       return <span aria-hidden className={cx(base, "bg-muted-foreground")} />;
     case "skipped":
       return (

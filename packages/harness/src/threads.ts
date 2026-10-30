@@ -22,10 +22,7 @@ export type ThreadSpec = StartThreadOptions extends infer O
     ? Omit<O, PerRun>
     : never
   : never;
-type Shared = Pick<
-  StartThreadOptions,
-  "runId" | "recorder" | "history" | "sandbox" | "providerOutage"
-> & {
+type Shared = Pick<StartThreadOptions, "runId" | "recorder" | "history" | "sandbox"> & {
   /** Called when a thread ends, whatever the outcome; its sandbox is no longer needed. */
   release(threadId: string): void;
 };

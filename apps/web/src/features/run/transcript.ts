@@ -42,12 +42,11 @@ export const noLive: Live = { replies: new Map(), calls: new Map(), outputs: new
 /**
  * Why the runner is not running the run's threads, from `Run.state`: the log holds no end for
  * the threads it cut off (a user's cancel leaves none; the server ends them). `paused` while the
- * run waits for a runner again (its lease expired) or for its starter's keys; `awaiting-ai` while
- * the API holds it after the AI's provider failed (`waitingForProvider`).
+ * run waits for a runner again (its lease expired) or for its starter's keys.
  */
 export type Halt =
   | { kind: "ended"; at: string; outcome: "completed" | "failed" | "cancelled" }
-  | { kind: "paused" | "awaiting-ai" };
+  | { kind: "paused" };
 
 /** `bash.ts`'s `TAIL_CHARS`: what the durable result keeps of the output's end. */
 const OUTPUT_TAIL_CHARS = 8_000;

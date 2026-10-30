@@ -83,7 +83,6 @@ export function ThreadSpendInfo({ thread }: { thread: Thread }) {
 const MARK: Record<Thread["status"], string> = {
   running: "bg-info-tint text-info",
   paused: "bg-muted text-muted-foreground",
-  "awaiting-ai": "bg-muted text-muted-foreground",
   completed: "bg-primary-tint text-primary-strong",
   failed: "bg-destructive-tint text-destructive",
   cancelled: "bg-muted text-muted-foreground",
@@ -127,7 +126,7 @@ const VERDICT = {
 } as const;
 
 function ResultLine({ thread }: { thread: Thread }) {
-  if (thread.status === "running" || thread.status === "paused" || thread.status === "awaiting-ai")
+  if (thread.status === "running" || thread.status === "paused")
     return (
       <p className="truncate font-mono text-meta text-muted-foreground">
         {thread.liveTool ?? thread.lastTool ?? "Starting"}
@@ -147,7 +146,6 @@ function ResultLine({ thread }: { thread: Thread }) {
 export const STATUS_WORD: Record<Thread["status"], string> = {
   running: "Working",
   paused: "Paused",
-  "awaiting-ai": "Waiting for the AI",
   completed: "Finished",
   failed: "Failed",
   cancelled: "Stopped",

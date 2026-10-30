@@ -8,7 +8,6 @@ import { fold } from "@voluma/contracts/fold";
 import { openThreads } from "@voluma/contracts/threads";
 import { describe, expect, it } from "vitest";
 import {
-  askFirst,
   call,
   checker,
   first,
@@ -963,64 +962,6 @@ describe("run loop", () => {
       expect(duplicates(w.stored)).toEqual([]);
     });
 
-    // main.1 fails on the provider right after it hears of the submission, while the check is
-    // still running; whatever the check stores after that, main.2 must hear of.
-    const restartedRun = (check: Script) => {
-      const main: Script = async (t) => {
-        if (t.thread === `${R}main`) {
-          if (t.calls.length === 0) return call("start_worker", { taskId: "t1", brief: "t1." });
-          if (told(t, /submitted t1/)) {
-            await sleep(300);
-            throw new Error("provider down");
-          }
-          return "Waiting.";
-        }
-        const [askId] = openAskIds(t);
-        if (t.fresh && askId) return call("answer", { askId, text: "Yes." });
-        const accepted = t.calls.some((c) => c.name === "accept");
-        if (t.fresh && accepted) return call("finish_run", { summary: "Done." });
-        if (t.fresh && told(t, /found problems/) && !accepted)
-          return call("accept", { taskId: "t1", reason: "Good enough." });
-        return t.fresh ? call("wait") : "Waiting.";
-      };
-      return world({
-        plan: [task("t1")],
-        main,
-        check,
-        providerError: (e) => /provider down/.test(e),
-      });
-    };
-
-    it("main.<n> hears the verdict the main agent before it never got", async () => {
-      const w = restartedRun(checker(() => "needs-review"));
-      const folded = await w.run();
-      expect(
-        folded.tasks.map((t) => `${t.id}:${t.status}`),
-        w.text(),
-      ).toEqual(["t1:to-check"]);
-      // The verdict's text is only in its notice, not in the task table.
-      expect(userTexts(w.stored, "main.2")[0]).toMatch(/t1 looks needs-review/);
-      expect(duplicates(w.stored)).toEqual([]);
-    });
-
-    it("main.<n> hears the question the main agent before it never answered, with its askId", async () => {
-      const w = restartedRun(
-        askFirst(
-          "Is the scan isotropic?",
-          checker(() => "needs-review"),
-        ),
-      );
-      const folded = await w.run();
-      expect(
-        folded.tasks.map((t) => `${t.id}:${t.status}`),
-        w.text(),
-      ).toEqual(["t1:to-check"]);
-      const [ask] = of(w.stored, "ask", "t1.check");
-      expect(userTexts(w.stored, "main.2")[0]).toContain(`askId ${ask?.id})`);
-      expect(of(w.stored, "answer")).toHaveLength(1);
-      expect(duplicates(w.stored)).toEqual([]);
-    });
-
     it("finish_run refuses a stale task and a running worker, and the liveness end agrees", async () => {
       // t2 passes, then main has t1's worker redo t1 (t2 goes stale); main finishes too early.
       const main: Script = (t) => {
@@ -1304,75 +1245,19 @@ describe("run loop", () => {
     });
   });
 
-  describe("provider outage", () => {
-    const mainMessages = (events: readonly RunEvent[]) =>
-      of(events, "message", "main").flatMap((e) => (e.type === "message" ? [e.payload.role] : []));
-    const outage = (e: string) => /provider down/.test(e);
-
-    it("an error with no reply content releases the run and leaves main's thread open, nothing stored for the failed reply", async () => {
+  describe("provider error", () => {
+    it("fails the run at once with the provider's message, main or worker", async () => {
       const w = world({
         plan: [task("t1")],
         main: () => {
           throw new Error("provider down");
         },
-        providerError: outage,
-        providerOutage: outage,
+        providerError: (e) => /provider down/.test(e),
       });
-      await w.run();
-      expect(w.released).toEqual(["provider down"]);
-      expect(mainMessages(w.stored), w.text()).not.toContain("assistant");
-      expect(of(w.stored, "thread.ended", "main")).toEqual([]);
-    });
-
-    it("an error after reply content is redone in the claim, not released", async () => {
-      let drops = 0;
-      const w = world({
-        plan: [task("t1")],
-        main: first(
-          (t) =>
-            t.thread === `${R}main` && drops++ === 0
-              ? { dropped: "provider down", partial: "Let me" }
-              : undefined,
-          chain(["t1"]),
-        ),
-        providerError: outage,
-        providerOutage: outage,
-      });
-      const folded = await w.run();
-      expect(w.released).toEqual([]);
-      expect(ended(w.stored, "main").at(0)).toBe("failed");
-      expect(
-        folded.tasks.map((t) => t.status),
-        w.text(),
-      ).toEqual(["done"]);
-    });
-
-    it("main's provider redo count starts again after a task moves", async () => {
-      // Two drops before any task state, then t1 passes, then two more drops: four in all, over the limit of 2 only if the count ignored progress.
-      const mains = new Set<string>();
-      const w = world({
-        plan: [task("t1")],
-        main: first(
-          (t) => {
-            if (t.role !== "main") return undefined;
-            mains.add(t.thread);
-            const nth = mains.size;
-            const drop = { dropped: "provider down", partial: "Let me" };
-            if (nth <= 2) return drop;
-            if (nth === 3 && passed(t, "t1")) return drop;
-            return nth === 4 && t.fresh ? drop : undefined;
-          },
-          chain(["t1"]),
-        ),
-        providerError: outage,
-        providerOutage: outage,
-      });
-      const folded = await w.run();
-      expect(
-        folded.tasks.map((t) => t.status),
-        w.text(),
-      ).toEqual(["done"]);
-      expect(ended(w.stored, "supervisor").at(-1)).toBe("completed");
+      await expect(w.run()).rejects.toThrow(
+        "the main agent failed on a model provider error: provider down",
+      );
+      expect(of(w.stored, "thread.started", "main")).toHaveLength(1);
     });
   });
 });
