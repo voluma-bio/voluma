@@ -6,15 +6,18 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { RunRecords } from "../../ports";
 import type { Notifier } from "./notifier";
 import { eventLock, insertEvent } from "./pg-event-log";
-import { loadRecords, readableRuns } from "./pg-runs";
+import { type ResultsLoader, readableRuns } from "./pg-runs";
 import { runs } from "./schema";
 
-export function pgRunRecords(db: PostgresJsDatabase, notifier: Notifier): RunRecords {
+export function pgRunRecords(
+  db: PostgresJsDatabase,
+  notifier: Notifier,
+  results: ResultsLoader,
+): RunRecords {
   return {
     load: (reader, runId) =>
       db.transaction(
-        async (tx) =>
-          (await loadRecords(tx, and(readableRuns(reader), eq(runs.id, runId)), true))[0] ?? null,
+        async (tx) => (await results(tx, and(readableRuns(reader), eq(runs.id, runId))))[0] ?? null,
         { isolationLevel: "repeatable read" },
       ),
     readable: async (reader, runId) => {
@@ -26,7 +29,7 @@ export function pgRunRecords(db: PostgresJsDatabase, notifier: Notifier): RunRec
     },
     async decide(reader, runId, decision) {
       // A run that has not ended has no review to decide on: judge it without the event lock,
-      // which a heartbeat holds the queue lock to wait for while this loads the whole log.
+      // which a heartbeat holds the queue lock to wait for.
       const [state] = await db
         .select({ state: runs.state })
         .from(runs)
@@ -34,7 +37,7 @@ export function pgRunRecords(db: PostgresJsDatabase, notifier: Notifier): RunRec
       if (!state) return null;
       if (state.state !== "ended") {
         const record = await db.transaction(
-          async (tx) => (await loadRecords(tx, eq(runs.id, runId), true))[0],
+          async (tx) => (await results(tx, eq(runs.id, runId)))[0],
         );
         if (!record) return null;
         if (!decision(record)) return record;
@@ -49,7 +52,7 @@ export function pgRunRecords(db: PostgresJsDatabase, notifier: Notifier): RunRec
           .where(and(readableRuns(reader), eq(runs.id, runId)))
           .for("update");
         if (!row) return null;
-        const [record] = await loadRecords(tx, eq(runs.id, runId), true);
+        const [record] = await results(tx, eq(runs.id, runId));
         if (!record) throw new Error(`run ${runId} vanished inside its transaction`);
         const next = decision(record);
         if (!next) return record;
@@ -64,7 +67,8 @@ export function pgRunRecords(db: PostgresJsDatabase, notifier: Notifier): RunRec
             createdAt: new Date().toISOString(),
           }),
         );
-        return (await loadRecords(tx, eq(runs.id, runId), true))[0] ?? null;
+        // The write moved the run's watermark, so this read takes only the fold's events.
+        return (await results(tx, eq(runs.id, runId)))[0] ?? null;
       });
       if (result) notifier.notify(runId);
       return result;

@@ -4,7 +4,8 @@
  * is just absent. Every state change is in pg-queue.ts.
  */
 
-import { runEventSchema } from "@voluma/contracts/events";
+import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
+import { FOLD_EVENT_TYPES } from "@voluma/contracts/fold";
 import type { ReviewSummary } from "@voluma/contracts/review";
 import { progress, reviewState } from "@voluma/contracts/review-state";
 import { type Input, type Run, runSchema } from "@voluma/contracts/run";
@@ -14,7 +15,6 @@ import { callsOfRuns, type RunCalls } from "@voluma/provider-calls";
 import { and, asc, desc, eq, inArray, isNull, lte, or, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { EVERY_LAB, type Reader, type ReadScope } from "../../domain";
-import type { RunRecord } from "../../ports";
 import { events, inputs, referenceInput, runs, studies } from "./schema";
 
 export type Tx = Parameters<Parameters<PostgresJsDatabase["transaction"]>[0]>[0];
@@ -171,39 +171,20 @@ async function loadRows(tx: Tx, where: SQL | undefined): Promise<Row[]> {
   }));
 }
 
-/** The event types `reviewState` reads, so a live run changes its derived results only when one of them is written. */
-const SUMMARY_TYPES = [
-  "thread.started",
-  "revision.started",
-  "attempt.opened",
-  "task",
-  "plan.changed",
-  "checkpoint",
-  "output",
-  "check.accepted",
-  "review.completed",
-  "run.reopened",
-  "correction.ended",
-  "thread.ended",
-] as const;
-
-async function loadLogs(tx: Tx, ids: string[], summaryOnly = false) {
-  const logs = new Map<string, RunRecord["events"]>();
+/**
+ * The fold's events of each run, in `seq` order. Rows an older build wrote cross a trust
+ * boundary: a run whose events no longer parse is reported in `unreadable` instead of
+ * throwing, so `loadResults` decides what that means for its caller.
+ */
+async function loadLogs(tx: Tx, ids: string[]) {
+  const logs = new Map<string, RunEvent[]>();
   const unreadable = new Set<string>();
   if (ids.length) {
     const stored = await tx
       .select()
       .from(events)
-      .where(
-        and(
-          inArray(events.runId, ids),
-          summaryOnly ? inArray(events.type, [...SUMMARY_TYPES]) : undefined,
-        ),
-      )
+      .where(and(inArray(events.runId, ids), inArray(events.type, [...FOLD_EVENT_TYPES])))
       .orderBy(asc(events.seq));
-    // Rows an older build wrote cross a trust boundary. With `summaryOnly` a run whose events
-    // no longer parse is reported in `unreadable` instead of throwing, so `loadRuns` decides
-    // what that means for its caller.
     for (const row of stored) {
       if (unreadable.has(row.runId)) continue;
       try {
@@ -211,7 +192,6 @@ async function loadLogs(tx: Tx, ids: string[], summaryOnly = false) {
         log.push(toRunEvent(row));
         logs.set(row.runId, log);
       } catch (error) {
-        if (!summaryOnly) throw error;
         unreadable.add(row.runId);
         logs.delete(row.runId);
         console.error(`run ${row.runId}: event ${row.id} (${row.type}) does not parse:`, error);
@@ -221,45 +201,19 @@ async function loadLogs(tx: Tx, ids: string[], summaryOnly = false) {
   return { logs, unreadable };
 }
 
-export async function loadRecords(
-  tx: Tx,
-  where: SQL | undefined,
-  includeUnfinished = false,
-): Promise<RunRecord[]> {
-  const rows = await loadRows(tx, where);
-  const { logs } = await loadLogs(
-    tx,
-    rows
-      .filter(
-        ({ run }) => includeUnfinished || (run.state === "ended" && run.outcome === "completed"),
-      )
-      .map(({ run }) => run.id),
-  );
-  return rows.map((row) => {
-    const log = logs.get(row.run.id) ?? [];
-    const results = reviewState(log);
-    return {
-      generation: row.run.generation,
-      run: toRun(row, { summary: results.summary, tasks: progressOf(results.revisions.at(-1)) }),
-      events: log,
-      results,
-    };
-  });
-}
-
 /**
- * What one `reviewState(log)` gives the reads: for a completed run the summary, and for
- * studies its measurement values and open checks; for a live run its task progress.
+ * What one `reviewState(log)` gives the reads: the whole `results` for Review, and from them
+ * for a completed run the summary and, for studies, its measurement values and open checks;
+ * for a live run its task progress.
  */
 type Derived = {
+  results: ReturnType<typeof reviewState>;
   summary: ReviewSummary | null;
   tasks: Run["tasks"];
   /** Output id (`outputs.json`) → value, from the latest revision's tasks. */
   values: Record<string, StudyValue>;
   toCheck: Omit<ToCheckItem, "runId">[];
 };
-
-const NOTHING: Derived = { summary: null, tasks: null, values: {}, toCheck: [] };
 
 type Revision = ReturnType<typeof reviewState>["revisions"][number];
 
@@ -270,8 +224,9 @@ function progressOf(latest: Revision | undefined): Run["tasks"] {
   return { done, total };
 }
 
-function derive(log: RunRecord["events"]): Derived {
-  const { summary, revisions } = reviewState(log);
+function derive(log: RunEvent[]): Derived {
+  const results = reviewState(log);
+  const { summary, revisions } = results;
   const latest = revisions.at(-1);
   const values: Derived["values"] = {};
   const toCheck: Derived["toCheck"] = [];
@@ -295,15 +250,17 @@ function derive(log: RunRecord["events"]): Derived {
       }
     }
   }
-  return { summary, tasks: progressOf(latest), values, toCheck };
+  return { results, summary, tasks: progressOf(latest), values, toCheck };
 }
+
+const NOTHING = derive([]);
 
 type SummaryCache = Map<string, { lastEventId: string | null; derived: Derived }>;
 
 /** The most derived results kept, least recently read out first; evicted ones are derived again from the event log. */
 const CACHE_CAP = 2048;
 
-export type RunResult = { run: Run } & Derived;
+export type RunResult = { run: Run; generation: string } & Derived;
 
 interface LoadOptions {
   cache?: SummaryCache;
@@ -311,8 +268,8 @@ interface LoadOptions {
    * The lists and the study reads: a completed run whose events no longer parse is left out
    * rather than failing every run listed with it. Without it (one run's read) it throws: the
    * run's own page must fail loudly, not read as "no plan" (a 409 the web polls forever).
-   * A completed run with no revision is left out the same way. A live run whose events
-   * don't parse is always kept, with `tasks: null`: it still runs.
+   * A completed run with no revision is left out the same way. Any other run whose events
+   * don't parse is kept, with `tasks: null`: it still runs.
    */
   skipUnreadable?: boolean;
 }
@@ -323,26 +280,21 @@ async function loadResults(
   { cache = new Map(), skipUnreadable = false }: LoadOptions = {},
 ): Promise<RunResult[]> {
   const rows = await loadRows(tx, where);
-  const ended = new Set(rows.filter(({ run }) => run.state === "ended").map(({ run }) => run.id));
-  const ids = rows
-    // A failed or cancelled run has nothing to derive; a live one has its `tasks`.
-    .filter(({ run }) => run.state !== "ended" || run.outcome === "completed")
-    .map(({ run }) => run.id);
+  const ids = rows.map(({ run }) => run.id);
   const watermarks = ids.length
     ? await tx
         .selectDistinctOn([events.runId], { runId: events.runId, id: events.id })
         .from(events)
-        .where(and(inArray(events.runId, ids), inArray(events.type, [...SUMMARY_TYPES])))
+        .where(and(inArray(events.runId, ids), inArray(events.type, [...FOLD_EVENT_TYPES])))
         .orderBy(events.runId, desc(events.seq))
     : [];
   // Event identity also changes when the seeder replaces a history at the same sequence.
   const versions = new Map(watermarks.map(({ runId, id }) => [runId, id]));
   const cached = new Map(ids.map((id) => [id, cache.get(id)]));
   const missing = ids.filter((id) => cached.get(id)?.lastEventId !== (versions.get(id) ?? null));
-  const { logs, unreadable } = await loadLogs(tx, missing, true);
-  const lost = [...unreadable].filter((id) => ended.has(id));
-  if (!skipUnreadable && lost.length)
-    throw new Error(`run ${lost.join(", ")}: stored events can't be read`);
+  const { logs, unreadable } = await loadLogs(tx, missing);
+  if (!skipUnreadable && unreadable.size)
+    throw new Error(`run ${[...unreadable].join(", ")}: stored events can't be read`);
   const derivedOf = new Map<string, Derived>();
   for (const id of ids) {
     if (unreadable.has(id)) continue;
@@ -356,10 +308,9 @@ async function loadResults(
     if (cache.size > CACHE_CAP) cache.delete(cache.keys().next().value as string);
   }
   return rows
-    .filter(({ run }) => !lost.includes(run.id))
     .filter(
-      // A completed run whose events have no revision has no review summary, so `runSchema`
-      // would throw: in a list it is as unreadable as one whose events don't parse.
+      // A completed run whose events don't parse, or have no revision, has no review summary,
+      // so `runSchema` would throw: in a list it is left out.
       ({ run }) =>
         !skipUnreadable ||
         run.state !== "ended" ||
@@ -368,7 +319,7 @@ async function loadResults(
     )
     .map((row) => {
       const derived = derivedOf.get(row.run.id) ?? NOTHING;
-      return { run: toRun(row, derived), ...derived };
+      return { run: toRun(row, derived), generation: row.run.generation, ...derived };
     });
 }
 
