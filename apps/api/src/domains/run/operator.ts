@@ -1,5 +1,5 @@
 /**
- * Shared by the operator scripts (`export:run`, `import:run`, `seed:example`): which database
+ * Shared by the operator scripts (`export:run`, `import:run`, `archive:run`, `seed:example`): which database
  * they write to, and the guard that keeps a local run from touching a shared one.
  */
 import { existsSync, readFileSync } from "node:fs";
