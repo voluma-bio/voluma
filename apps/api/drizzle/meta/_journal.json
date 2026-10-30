@@ -71,6 +71,13 @@
       "when": 1793322466595,
       "tag": "0009_drop_wake_judgment",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793335989221,
+      "tag": "0010_drop_spend_cap_columns",
+      "breakpoints": true
     }
   ]
 }
