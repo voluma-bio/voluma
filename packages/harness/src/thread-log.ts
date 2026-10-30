@@ -127,6 +127,8 @@ export type Notice = {
         file?: string;
         point?: number[];
         box?: { min: number[]; max: number[] };
+        line?: { aZyx: number[]; bZyx: number[]; lengthMm: number };
+        outline?: { axis: 0 | 1 | 2; zyx: number[][]; areaMm2: number };
       }[];
       snapshot?: string;
       /** The message carries a go (`taskId` names its task). */
@@ -326,6 +328,8 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
               ...(volumeFiles.has(m.volumeId) && { file: volumeFiles.get(m.volumeId) }),
               ...(m.point && { point: m.point }),
               ...(m.box && { box: m.box }),
+              ...(m.line && { line: m.line }),
+              ...(m.outline && { outline: m.outline }),
             })),
             ...(snapshotKey && { snapshot: `/scratch/${snapshotKey.split("/scratch/")[1]}` }),
             closed,

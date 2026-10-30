@@ -113,9 +113,38 @@ export const MESSAGE_BODY_BYTES = 3 * 1024 * 1024;
 const MAX_MARKS = 20;
 const MAX_TEXT = 10_000;
 
+const positionZyx = z.tuple([z.number().min(0), z.number().min(0), z.number().min(0)]);
+
 /**
- * Where the researcher pointed: a voxel or an inclusive box on a volume's grid, `[z, y, x]`
- * (the `focusSchema` shape without its output ids). Exactly one of `point` and `box`.
+ * A line between two positions, voxel `[z, y, x]` (sub-voxel allowed), named as the AI's `line`
+ * annotation (`output.ts`). `lengthMm` is what the browser showed, from the grid's spacing; the
+ * server does not check it.
+ */
+const lineMarkSchema = z.object({
+  aZyx: positionZyx,
+  bZyx: positionZyx,
+  lengthMm: z.number().min(0),
+});
+
+/**
+ * A closed outline drawn on one slice: full `[z, y, x]` points that all share one value on
+ * `axis` (0 z axial, 1 y coronal, 2 x sagittal); the last point joins the first. `areaMm2` is what
+ * the browser showed; the server does not check it.
+ */
+const outlineMarkSchema = z
+  .object({
+    axis: z.union([z.literal(0), z.literal(1), z.literal(2)]),
+    zyx: z.array(positionZyx).min(3).max(500),
+    areaMm2: z.number().min(0),
+  })
+  .refine((o) => o.zyx.every((p) => p[o.axis] === o.zyx[0]?.[o.axis]), {
+    message: "every outline point has the same value on the axis",
+  });
+
+/**
+ * Where the researcher pointed: a voxel, an inclusive box, a line or an outline on a volume's
+ * grid, `[z, y, x]` (point and box are the `focusSchema` shape without its output ids). Exactly
+ * one of `point`, `box`, `line` and `outline`.
  * `volumeId` is a volume block id of the task's revision (`ReviewRun`), as `Focus.volumeId`.
  */
 export const markSchema = z
@@ -123,9 +152,11 @@ export const markSchema = z
     volumeId: z.string().min(1),
     point: voxelIndexSchema.optional(),
     box: voxelBoxSchema.optional(),
+    line: lineMarkSchema.optional(),
+    outline: outlineMarkSchema.optional(),
   })
-  .refine((m) => (m.point === undefined) !== (m.box === undefined), {
-    message: "a mark has a point or a box, not both and not neither",
+  .refine((m) => [m.point, m.box, m.line, m.outline].filter((v) => v !== undefined).length === 1, {
+    message: "a mark has exactly one of point, box, line and outline",
   });
 export type Mark = z.infer<typeof markSchema>;
 

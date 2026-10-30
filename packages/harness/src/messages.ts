@@ -160,12 +160,24 @@ export function noticeLine(n: Notice): string {
 
 const POINT_AXES = "[z, y, x]";
 
+const AXIS_NAMES = ["z (axial)", "y (coronal)", "x (sagittal)"] as const;
+
+/** A mark in words; a line's length and an outline's area are the values the researcher read. */
+function markWhere(m: Extract<Notice, { kind: "person" }>["marks"][number]): string {
+  const at = (p: number[]) => `[${p.join(", ")}]`;
+  if (m.point) return `the voxel ${POINT_AXES} = ${at(m.point)}`;
+  if (m.box) return `the box ${POINT_AXES} from ${at(m.box.min)} to ${at(m.box.max)} (inclusive)`;
+  if (m.line)
+    return `the line ${POINT_AXES} from ${at(m.line.aZyx)} to ${at(m.line.bZyx)}, which they measured as ${m.line.lengthMm} mm`;
+  const o = m.outline;
+  if (!o) throw new Error("a mark has no point, box, line or outline");
+  return `a closed outline on the slice ${AXIS_NAMES[o.axis]} = ${o.zyx[0]?.[o.axis]}, through the points ${POINT_AXES} ${o.zyx.map(at).join(" → ")} (the last joins the first), which they measured as ${o.areaMm2} mm²`;
+}
+
 function personLine(n: Extract<Notice, { kind: "person" }>): string {
   const lines = [`- The researcher wrote${n.text ? `: "${n.text}"` : "."}`];
   for (const m of n.marks) {
-    const where = m.point
-      ? `the voxel ${POINT_AXES} = [${m.point.join(", ")}]`
-      : `the box ${POINT_AXES} from [${m.box?.min.join(", ")}] to [${m.box?.max.join(", ")}] (inclusive)`;
+    const where = markWhere(m);
     lines.push(
       `  Marked ${where} of volume ${m.volumeId}${m.file ? ` (file ${m.file}: a binary array, which \`read_file\` cannot open; you have no tool for it, so work from the marked position, the task's evidence and their view image)` : ""}.`,
     );
