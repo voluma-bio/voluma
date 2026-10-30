@@ -4,7 +4,7 @@
  * of the runtime spec's Verification list and asserts on the stored event log.
  */
 import type { RunEvent } from "@voluma/contracts/events";
-import { openThreads, runningThreads } from "@voluma/contracts/threads";
+import { openThreads } from "@voluma/contracts/threads";
 import { describe, expect, it } from "vitest";
 import {
   askFirst,
@@ -94,10 +94,6 @@ describe("run loop", () => {
     // The root's end is the last event: nothing is written after it.
     expect(w.stored.at(-1)?.threadId).toBe(`${R}supervisor`);
     expect(duplicates(w.stored)).toEqual([]);
-    // Nothing is left to resume, and the contract says nothing runs, even for a stale `running` state.
-    expect(
-      runningThreads(w.stored, { status: "running", startedAt: new Date().toISOString() }),
-    ).toEqual(new Set());
   });
 
   it("needs-review: main's feedback resumes the same worker, whose new attempt passes", async () => {
@@ -737,6 +733,41 @@ describe("run loop", () => {
       expect(cp?.type === "checkpoint" && cp.payload.evidence, w.text()).toMatchObject([
         { root: "scratch", path: "t1.worker/x.png" },
       ]);
+    });
+
+    it("a sub-folder named like a thread that is not in the log stays in the caller's folder", async () => {
+      const w = world({
+        plan: [task("t1")],
+        main: chain(["t1"]),
+        check: citing([{ root: "scratch", path: "t9.worker/x.png" }]),
+      });
+      await w.run();
+      const [cp] = of(w.stored, "checkpoint", "t1.check");
+      expect(cp?.type === "checkpoint" && cp.payload.evidence, w.text()).toMatchObject([
+        { root: "scratch", path: "t1.check/t9.worker/x.png" },
+      ]);
+    });
+
+    it("a file a script printed at the scratch root is refused, not looked up in the caller's folder", async () => {
+      const seen: string[] = [];
+      const w = world({
+        plan: [task("t1")],
+        main: chain(["t1"]),
+        worker: (t) => {
+          seen.push(...t.results);
+          return t.steps === 0
+            ? call("report_output", {
+                taskId: "t1",
+                outputId: "m1",
+                title: "M",
+                output: measurement(1),
+                evidence: ["/scratch/foo.png"],
+              })
+            : worker({ ...t, steps: t.steps });
+        },
+      });
+      await w.run();
+      expect(seen.join("\n")).toContain("is not in a thread's folder");
     });
 
     it("a wrong outputs path is refused with a plain message", async () => {

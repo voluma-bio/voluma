@@ -19,14 +19,6 @@ export function openThreads(events: readonly RunEvent[]): string[] {
   return [...open].flatMap(([id, isOpen]) => (isOpen ? [id] : []));
 }
 
-/** The threads running now: the open ones while the run is `running` and its root has not ended. */
-export function runningThreads(events: readonly RunEvent[], state: RunState): Set<string> {
-  if (state.status !== "running") return new Set();
-  const root = events.find((e) => e.type === "thread.started" && e.payload.kind === "supervisor");
-  const open = openThreads(events);
-  return new Set(root && open.includes(root.threadId) ? open : []);
-}
-
 /**
  * A user's cancel is a deliberate stop, so it ends every open thread `cancelled` and the root
  * last, ids `<runId>:cancel:end:<threadId>`. The server writes them in the transaction that

@@ -98,8 +98,17 @@ export const pathOf = (taskId: string, f: Pick<EvidenceRef, "root" | "path">): s
 export function refOf(taskId: string, path: string): Pick<EvidenceRef, "root" | "path"> {
   const own = `/outputs/${taskId}/`;
   if (path.startsWith(own)) return { root: "outputs", path: path.slice(own.length) };
-  if (path.startsWith("/scratch/"))
-    return { root: "scratch", path: path.slice("/scratch/".length) };
+  if (path.startsWith("/scratch/")) {
+    const rest = path.slice("/scratch/".length);
+    // A tool-call scratch path is relative to the caller's folder unless it starts with a thread name, so a file
+    // printed at the scratch root cannot be named; a script writes in $SCRATCH, which is a thread folder.
+    if (!isThreadName(rest.split("/")[0] ?? "")) {
+      throw new Refusal(
+        `${path} is not in a thread's folder under /scratch/. Write files under $SCRATCH and report them by that path.`,
+      );
+    }
+    return { root: "scratch", path: rest };
+  }
   throw new Refusal(
     `${path} is not a file this task can report: it is not under ${own} or /scratch/ (a file in another task's outputs is not yours to report).`,
   );
@@ -390,8 +399,8 @@ export function taskRuntime(options: TaskRuntimeOptions) {
 
   /**
    * Keeps a file the calling thread named, if its own layout lets it read that path. A
-   * `scratch` path is relative to the caller's own folder unless it starts with a thread name
-   * of the run; the event stores the full form.
+   * `scratch` path is relative to the caller's own folder unless it starts with the name of a
+   * thread in the log; the event stores the full form.
    */
   const keep = async (
     c: Caller,
@@ -400,7 +409,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
   ): Promise<EvidenceRef> => {
     const ownName = parseThreadId(runId, c.threadId).name;
     const file =
-      f.root === "scratch" && !isThreadName(f.path.split("/")[0] ?? "")
+      f.root === "scratch" && !log().threads.has(`${runId}.${f.path.split("/")[0]}`)
         ? { root: f.root, path: `${ownName}/${f.path}` }
         : { root: f.root, path: f.path };
     const path = pathOf(taskId, file);
@@ -419,14 +428,17 @@ export function taskRuntime(options: TaskRuntimeOptions) {
       .keep(runId, taskId, file, { hash, signal: c.signal })
       .catch((error) => {
         if (error instanceof EvidenceRefused) throw new Refusal(error.message);
-        if (!(error instanceof EvidenceNotFound)) throw error;
-        throw new Refusal(
-          `No file at ${path}. ${
-            file.root === "outputs"
-              ? `Cite an output file by its path inside /outputs/${taskId}/, e.g. {root: "outputs", path: "frame.json"}.`
-              : `Cite a file in your working folder as {root: "scratch", path: <path inside $SCRATCH>}.`
-          }`,
-        );
+        if (error instanceof EvidenceNotFound) {
+          throw new Refusal(
+            `No file at ${path}. ${
+              file.root === "outputs"
+                ? `Cite an output file by its path inside /outputs/${taskId}/, e.g. {root: "outputs", path: "frame.json"}.`
+                : `Cite a file in your working folder as {root: "scratch", path: <path inside $SCRATCH>}.`
+            }`,
+          );
+        }
+        if (error instanceof Refusal || c.signal.aborted) throw error;
+        throw new Refusal(`could not keep ${f.path}; try again`);
       });
     return { ...file, sha256 };
   };
