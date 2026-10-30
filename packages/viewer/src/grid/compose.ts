@@ -13,7 +13,8 @@ const rgbCache = new Map<string, [number, number, number]>();
 function rgb(color: string): [number, number, number] {
   let value = rgbCache.get(color);
   if (!value) {
-    const c = new Color(color);
+    // Picture bytes are sRGB; Three.js parses CSS colours into linear RGB.
+    const c = new Color(color).convertLinearToSRGB();
     value = [c.r * 255, c.g * 255, c.b * 255];
     rgbCache.set(color, value);
   }
