@@ -200,7 +200,10 @@ function RunScreen({
   const decisions = !taskId && params.get("view") === "decisions";
   const ended = run.state.status === "ended";
   const titles = useMemo(() => new Map(tasks.map((t) => [t.id, t.title])), [tasks]);
-  const firstToCheck = tasks.find((t) => t.needs.some((n) => !n.accepted))?.id;
+  // An ended run's stream is closed, so a "Looks right" made here counts from `accepting.done`.
+  const open = tasks
+    .flatMap((t) => t.needs)
+    .filter((n) => !n.accepted && !accepting.done.has(n.id));
 
   let content: React.ReactNode;
   if (taskId && !task)
@@ -255,12 +258,11 @@ function RunScreen({
             study={study}
             done={view.done}
             total={tasks.length}
-            toCheck={view.toCheck}
+            toCheck={open.length}
             spend={view.spend}
-            openTask={task?.id ?? firstToCheck}
+            openTask={task?.id ?? open[0]?.taskId}
             onChange={setRun}
           />
-          <RunAlerts run={run} userId={me.userId} onChange={setRun} />
           {stale && (
             <p
               role="status"
@@ -272,7 +274,10 @@ function RunScreen({
           <div className="flex min-h-0 flex-1 max-[1100px]:flex-col">
             <TaskFlow tasks={tasks} selected={task?.id} search={search} />
             <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-9 pt-6 pb-24 max-[1100px]:overflow-visible max-[1100px]:px-4 max-[1100px]:pt-4">
-              <div className="mx-auto max-w-[55rem]">{content}</div>
+              <div className="mx-auto max-w-[55rem]">
+                <RunAlerts run={run} userId={me.userId} onChange={setRun} />
+                {content}
+              </div>
             </div>
           </div>
         </main>

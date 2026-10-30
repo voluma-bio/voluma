@@ -355,8 +355,6 @@ export type RunView = {
   tasks: TaskView[];
   /** Tasks done or to check, of all. */
   done: number;
-  /** Open To check items. */
-  toCheck: number;
   spend: RunSpend;
   /** The lead AI's own thread has started (runs before the main agent had none). */
   hasLead: boolean;
@@ -376,7 +374,7 @@ export function runView(
   const hasLead = threads.some((t) => t.kind === "main");
   // No plan until the run's first `revision.started`.
   const latest = reviewState(events).revisions.at(-1);
-  if (!latest) return { threads, tasks: [], done: 0, toCheck: 0, spend: spent, hasLead };
+  if (!latest) return { threads, tasks: [], done: 0, spend: spent, hasLead };
 
   const byId = new Map(latest.tasks.map((t) => [t.id, t]));
   // Checkpoints by event id: their researcher sentence, and the thread that wrote them.
@@ -466,7 +464,6 @@ export function runView(
     threads,
     tasks,
     done: tasks.filter((t) => t.state === "done" || t.state === "to-check").length,
-    toCheck: tasks.reduce((n, t) => n + t.needs.filter((c) => !c.accepted).length, 0),
     spend: spent,
     hasLead,
   };

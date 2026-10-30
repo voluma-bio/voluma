@@ -258,7 +258,7 @@ export function RunAlerts({
   const { state } = run;
   if (state.status === "awaiting-keys")
     return run.startedBy === userId ? (
-      <section className="mx-6 mt-4 max-w-sm rounded-xl border border-check-line bg-check-tint p-4 max-[1100px]:mx-4">
+      <section className="mb-8 max-w-sm rounded-xl border border-check-line bg-check-tint p-4">
         <h2 className="font-medium text-check-strong">The run is waiting for your keys</h2>
         <p className="mt-1 mb-3 text-ui text-check-strong">
           The server restarted and no longer has them. Send them again to continue.
@@ -278,7 +278,7 @@ export function RunAlerts({
         )}
       </section>
     ) : (
-      <p className="border-b border-border bg-check-tint px-6 py-2 text-ui text-check-strong max-[1100px]:px-4">
+      <p className="mb-8 rounded-xl bg-check-tint px-4 py-3 text-ui text-check-strong">
         The run is waiting for the keys of the person who started it.
       </p>
     );
@@ -286,7 +286,7 @@ export function RunAlerts({
     return (
       <p
         role="alert"
-        className="border-b border-border bg-destructive-tint px-6 py-2 text-ui text-destructive max-[1100px]:px-4"
+        className="mb-8 rounded-xl bg-destructive-tint px-4 py-3 text-ui text-destructive"
       >
         {failureText(state.error)}
       </p>

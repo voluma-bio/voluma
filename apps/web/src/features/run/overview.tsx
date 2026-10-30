@@ -102,7 +102,12 @@ export function Overview({
               <li key={t.id}>
                 <Link
                   to={search(t.id)}
-                  className="flex min-w-60 items-start gap-3 rounded-xl bg-info-tint px-3.5 py-2.5 text-ui hover:ring-1 hover:ring-info"
+                  className={cx(
+                    "flex min-w-60 items-start gap-3 rounded-xl px-3.5 py-2.5 text-ui hover:ring-1",
+                    t.state === "paused"
+                      ? "bg-muted hover:ring-line-strong"
+                      : "bg-info-tint hover:ring-info",
+                  )}
                 >
                   <TaskMark state={t.state} className="mt-1" />
                   <span className="min-w-0">
@@ -416,7 +421,11 @@ export function ResultsTable({
                     </span>
                   )}
                   {r.unit && r.value !== null && (
-                    <span className="ml-1 text-meta text-muted-foreground">{r.unit}</span>
+                    <span
+                      className={cx("text-meta text-muted-foreground", r.unit !== "%" && "ml-1")}
+                    >
+                      {r.unit}
+                    </span>
                   )}
                 </td>
               </tr>

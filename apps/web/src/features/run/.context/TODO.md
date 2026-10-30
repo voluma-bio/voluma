@@ -10,7 +10,10 @@
 - **Rebuild only the live tail of the transcript per frame**, if a long run janks. `rows` reruns
   `threadRows`/`mainRows` over every event on each frame (about 1 ms today). Split each into a
   durable part memoized on `events` and a live tail on `live`, then `memo(RowView)`.
-- **Label tasks with the run's own plan titles.** Every label on the page (`taskTitle`) reads the
-  bundled `tasks.json`, so an older run shows today's titles. The plan in the run's first
-  `revision.started` carries the titles it ran with. Build the title lookup from it in `runView` and
-  pass it to the progress rail, attention, `threadName` and the transcript rows.
+- **Label threads with the run's own plan titles.** The flowchart, Overview and task view use the
+  plan's `title` from the run's log; `threadName` and the transcript rows still read the bundled
+  `tasks.json` (`taskTitle`), so an older run's cards show today's titles.
+- **Undo "Looks right".** The prototype offers Undo; the review API has no call to withdraw an
+  acceptance.
+- **A thumbnail rendition of QC images.** Each is 80 to 360 KB and the Needs your eye cards draw
+  them at 88 px; lazy loading keeps it to what is on screen.

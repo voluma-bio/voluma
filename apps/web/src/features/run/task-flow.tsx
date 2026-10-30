@@ -40,7 +40,7 @@ export function TaskMark({ state, className }: { state: TaskState; className?: s
       return (
         <ShieldCheck
           aria-hidden
-          className={cx("size-3.5 shrink-0 text-info motion-safe:animate-pulse", className)}
+          className={cx("size-3.5 shrink-0 bg-card text-info motion-safe:animate-pulse", className)}
         />
       );
     case "done":
@@ -104,6 +104,8 @@ function layout(tasks: TaskView[]) {
 const NODE_H = 50;
 const ROW_GAP = 22;
 const COL_GAP = 6;
+/** A plan of one or two tasks per row would otherwise draw nodes as wide as the column. */
+const NODE_MAX_W = 136;
 /** The flowchart's width inside the 320 px column. */
 const WIDTH = 296;
 
@@ -119,8 +121,9 @@ export function TaskFlow({
   search: (taskId?: string) => string;
 }) {
   const { rows, column, depth, width } = layout(tasks);
-  const nodeW = (WIDTH - (width - 1) * COL_GAP) / width;
-  const x = (id: string) => (column.get(id) ?? 0) * (nodeW + COL_GAP);
+  const nodeW = Math.min(NODE_MAX_W, (WIDTH - (width - 1) * COL_GAP) / width);
+  const left = (WIDTH - width * nodeW - (width - 1) * COL_GAP) / 2;
+  const x = (id: string) => left + (column.get(id) ?? 0) * (nodeW + COL_GAP);
   const y = (id: string) => (depth.get(id) ?? 0) * (NODE_H + ROW_GAP);
   const height = rows.length * NODE_H + (rows.length - 1) * ROW_GAP;
   return (
@@ -170,7 +173,11 @@ export function TaskFlow({
                   aria-current={selected === t.id ? "page" : undefined}
                   className={cx(
                     "relative flex h-full items-center justify-center rounded-lg border bg-card px-1.5 text-center text-[0.6875rem] leading-tight font-medium shadow-xs hover:border-primary",
-                    selected === t.id ? "border-primary ring-1 ring-primary" : "border-border",
+                    selected === t.id
+                      ? "border-primary ring-1 ring-primary"
+                      : t.state === "running" || t.state === "checking"
+                        ? "border-info"
+                        : "border-border",
                     t.state === "skipped" && "border-dashed bg-muted",
                     NOT_STARTED.has(t.state) ? "text-muted-foreground" : "text-foreground",
                   )}
