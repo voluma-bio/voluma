@@ -15,15 +15,12 @@ The report UI is not yet wired to the landed Review run API.
 Reports show no results until real data is supplied. The earlier simulator is
 preserved in the phase 1–3 commits, not in a second application or demo route.
 
-In Review, **Open reference scan** downloads OA6-1RK from R2; **Open run scan**
-resolves the run's own input. Local file selection is not available. Choose a
-series when the archive contains several, then use Acquired slices for navigation,
-window/level and zoom, or **Build 3D** for the native raw volume. Closing or
-reloading releases the browser's scan data. Downloads and expanded archives each
-have a separate 2 GiB limit; neither is a total browser memory budget. Orthogonal
-reformats and segmented 3D meshes are not generated yet.
+In Review, each task opens on its own analysis grid (the scan, or an aligned grid
+the run made) in the grid viewer: 3D plus axial, coronal and sagittal slices
+through one crosshair, with the task's structures and surfaces from the run's
+converted assets.
 
 Specifications: [Review workspace](apps/web/src/features/review/.context/CONTEXT.md)
-and [DICOM intake/viewer](packages/viewer/.context/CONTEXT.md).
+and [grid viewer](packages/viewer/.context/CONTEXT.md).
 
 See [architecture](.context/CONTEXT.md) and [design rules](DESIGN.md).

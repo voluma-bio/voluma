@@ -17,6 +17,7 @@ const mask = (offsetZyx: [number, number, number]): Overlay => ({
   levels: [],
   offsetZyx,
   color: "#ffffff",
+  opacity: 1,
 });
 /** 1 where the overlay coloured the pixel. */
 const painted = (rgba: Uint8Array, rows: number, cols: number) =>

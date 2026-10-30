@@ -1,32 +1,12 @@
 # Viewer follow-up
 
-- Full resolution now builds the native grid in 16-bit stored values where
-  possible. Still open: measure it on a hardware GPU with Andrew's 604×604×412
-  scan and a real micro-CT; check whether the GPU texture is norm16, half float
-  or Float32 there; for scans past the 2 GiB / texture-size limits, bricked or
-  region-of-interest loading.
-- Performance instrumentation was removed for the hackathon. Reintroduce it only
-  when a concrete investigation needs it. Use real OA6-1RK data and a hardware GPU;
-  orb Chromium is not a performance proxy for a researcher's workstation.
-- Expand compatibility only with real inputs: compressed syntaxes beyond the
-  exercised JPEG-LS sample, irregular/oblique acquisitions, multi-frame DICOM,
-  standalone DCM, missing spatial metadata, and representative browser engines.
-- Implement orthogonal reformats, linked navigation and segmented meshes
-  separately. The raw volume preview is not anatomy segmentation. If accessible,
-  use OA6-1RK's existing 18-structure web-review export for a separate mesh
-  benchmark; volume ray-casting timings do not measure mesh performance.
-- Validate small-structure visibility and tune ray sampling / interactive render
-  resolution using workstation evidence before increasing resource or intake
-  limits. Nonlinear modality LUTs remain unsupported in 3D.
-
-## Grid viewer
-
-- Review picks the grid per task from the run's blocks (`ReviewRun.assets`, a measurement's
-  `on`/`context`, volume `gridId`) once #177's data model, the conversion worker and the backfill
-  (#178) land; then delete the DICOM path, Cornerstone, zip.js and dicom-parser.
-- Rulers and points (world mm through the grid's inverse affine), selection framing (frame the
-  `on` blocks, move the slices only on a user's selection), the amber outline under check,
-  structure visibility and opacity, 3D Slicer's mouse and keyboard map (#146).
+- Rulers and points in the slices and 3D (world mm through the grid's affine), a surface's trace
+  in the slices, selection framing (frame the `on` blocks, move the slices only on a user's
+  selection), an outline rather than a fill for the region under check, 3D Slicer's mouse and
+  keyboard map (#146).
+- A check's `point` and `box` are scan voxels, so they place the crosshair only on the scan's grid.
+  A check on an aligned grid can only point through its `on` blocks until the contract gives the
+  focus a grid.
 - Chunk reads cost one API redirect each. A full-resolution coronal plane of the scan plus its
   labels is about 250 chunk requests; through the orb portal a cold scan grid took 26 s to first
   paint and about 50 s to full resolution while 75 MB of bone meshes loaded beside it. If staging

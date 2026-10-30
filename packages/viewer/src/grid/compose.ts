@@ -54,6 +54,9 @@ export function compose(
     const colOf = lookup(cols, imageScale, overlay.offsetZyx[ca], scale, plane.cols);
     const single = typeof overlay.color === "string" ? rgb(overlay.color) : null;
     const byLabel = typeof overlay.color === "string" ? null : overlay.color;
+    const opacityOf = (value: number) =>
+      OVERLAY_ALPHA *
+      (typeof overlay.opacity === "number" ? overlay.opacity : (overlay.opacity[value] ?? 1));
     for (let r = 0; r < rows; r++) {
       const pr = rowOf[r]!;
       if (pr < 0) continue;
@@ -65,10 +68,11 @@ export function compose(
         const hex = byLabel?.[value];
         const color = single ?? (hex ? rgb(hex) : null);
         if (!color) continue;
+        const a = opacityOf(value);
         const o = (r * cols + c) * 4;
-        rgba[o] = rgba[o]! * (1 - OVERLAY_ALPHA) + color[0] * OVERLAY_ALPHA;
-        rgba[o + 1] = rgba[o + 1]! * (1 - OVERLAY_ALPHA) + color[1] * OVERLAY_ALPHA;
-        rgba[o + 2] = rgba[o + 2]! * (1 - OVERLAY_ALPHA) + color[2] * OVERLAY_ALPHA;
+        rgba[o] = rgba[o]! * (1 - a) + color[0] * a;
+        rgba[o + 1] = rgba[o + 1]! * (1 - a) + color[1] * a;
+        rgba[o + 2] = rgba[o + 2]! * (1 - a) + color[2] * a;
       }
     }
   }

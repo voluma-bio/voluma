@@ -156,12 +156,25 @@ export function Grid3D({
     };
   }, []);
 
-  // Meshes load once each; a scene change adds or drops only what changed.
+  // Meshes load once each; a scene change adds or drops only what changed, and colour or
+  // opacity changes repaint the loaded ones.
+  const meshIds = scene.meshes.map((m) => m.id).join("\n");
+  const latestMeshes = useRef(scene.meshes);
+  latestMeshes.current = scene.meshes;
+  useEffect(() => {
+    const t = three.current;
+    if (!t) return;
+    for (const m of scene.meshes) {
+      const mesh = t.meshes.getObjectByName(m.id);
+      if (mesh instanceof Mesh) paint(mesh, m);
+    }
+    t.render();
+  }, [scene.meshes]);
   useEffect(() => {
     const t = three.current;
     if (!t) return;
     const abort = new AbortController();
-    const wanted = new Map(scene.meshes.map((m) => [m.id, m]));
+    const wanted = new Map(latestMeshes.current.map((m) => [m.id, m]));
     for (const child of [...t.meshes.children]) {
       if (wanted.has(child.name)) continue;
       t.meshes.remove(child);
@@ -170,7 +183,7 @@ export function Grid3D({
         child.material.dispose();
       }
     }
-    const missing = scene.meshes.filter((m) => !t.meshes.getObjectByName(m.id));
+    const missing = latestMeshes.current.filter((m) => !t.meshes.getObjectByName(m.id));
     if (missing.length)
       setStatus(`Loading ${missing.length} mesh${missing.length > 1 ? "es" : ""}…`);
     let left = missing.length;
@@ -178,12 +191,8 @@ export function Grid3D({
       loadMesh(m, abort.signal)
         .then((geometry) => {
           const material = new MeshStandardMaterial({
-            color: m.color,
             roughness: 0.75,
             metalness: 0,
-            transparent: m.opacity < 1,
-            opacity: m.opacity,
-            depthWrite: m.opacity >= 1,
             side: DoubleSide,
           });
           const mesh = new Mesh(geometry, material);
@@ -191,8 +200,7 @@ export function Grid3D({
           // Vertices are voxel (x, y, z), in crop voxels for a cropped mask.
           mesh.scale.set(sx, sy, sz);
           mesh.position.copy(toWorld(m.offsetZyx));
-          // Draw see-through shells after what they contain.
-          mesh.renderOrder = m.opacity < 1 ? 1 : 0;
+          paint(mesh, latestMeshes.current.find((l) => l.id === m.id) ?? m);
           t.meshes.add(mesh);
           t.render();
         })
@@ -205,7 +213,7 @@ export function Grid3D({
           if (--left === 0) setStatus(undefined);
         });
     return () => abort.abort();
-  }, [scene.meshes]);
+  }, [meshIds]);
 
   useEffect(() => {
     const t = three.current;
@@ -239,6 +247,18 @@ export function Grid3D({
       )}
     </div>
   );
+}
+
+function paint(mesh: Mesh, m: GridMesh) {
+  const material = mesh.material as MeshStandardMaterial;
+  material.color.set(m.color);
+  material.opacity = m.opacity;
+  material.transparent = m.opacity < 1;
+  material.depthWrite = m.opacity >= 1;
+  material.needsUpdate = true;
+  mesh.visible = m.opacity > 0;
+  // Draw see-through shells after what they contain.
+  mesh.renderOrder = m.opacity < 1 ? 1 : 0;
 }
 
 async function loadMesh(m: GridMesh, signal: AbortSignal) {

@@ -222,7 +222,7 @@ export function SlicePane({
         if (!current && !abort.signal.aborted) clear();
       });
     return () => abort.abort();
-  }, [index, level, contrast, axis]);
+  }, [index, level, contrast, axis, scene.overlays]);
 
   function draw(picture: Picture) {
     const t = three.current;

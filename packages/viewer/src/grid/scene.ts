@@ -21,8 +21,10 @@ export type Overlay = ZarrSource & {
   offsetZyx: Zyx;
   id: string;
   name: string;
-  /** One colour for every nonzero voxel (a mask), or one per label value. */
+  /** One colour for every nonzero voxel (a mask), or one per label value; a label without one isn't drawn. */
   color: string | Readonly<Record<number, string>>;
+  /** 0 to 1, of the overlay's full blend: one for the mask, or one per label value (default 1). */
+  opacity: number | Readonly<Record<number, number>>;
 };
 
 /** float32 vertices (x, y, z) in source voxels, then uint32 indices, little-endian. */
@@ -34,6 +36,7 @@ export type GridMesh = {
   indices: number;
   offsetZyx: Zyx;
   color: string;
+  /** 0 hides the mesh but keeps it loaded. */
   opacity: number;
 };
 

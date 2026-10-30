@@ -2,15 +2,18 @@
 
 import { useMutation } from "@tanstack/react-query";
 import { markReviewed } from "@voluma/api-client";
-import type { Focus, Revision, Structure } from "@voluma/contracts/review";
+import type { Focus } from "@voluma/contracts/review";
 import { StatusBadge } from "@voluma/ui";
-import type { StructureDisplay } from "@voluma/viewer";
+import type { StructureDisplay } from "@voluma/viewer/grid";
 import { ArrowLeft, Download, History, Layers, ListChecks } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { lazy, type ReactNode, Suspense, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { downloadCsv } from "./export";
-import { type ReviewRun, structuresOf, taskStatus } from "./model";
+import { type ReviewRun, taskStatus } from "./model";
 import { TaskReport } from "./TaskReport";
+
+// three.js and the zarr reader load only once there is a task to show.
+const TaskViewer = lazy(() => import("./TaskViewer").then((m) => ({ default: m.TaskViewer })));
 
 export function ReviewWorkspace({
   runId,
@@ -20,7 +23,6 @@ export function ReviewWorkspace({
   revisionId,
   navigate,
   backLink,
-  viewer,
   notice,
   onRefresh,
 }: {
@@ -31,18 +33,12 @@ export function ReviewWorkspace({
   revisionId?: string;
   navigate(selection: { task?: string; revision?: string }): void;
   backLink: ReactNode;
-  viewer: (
-    selected: Structure[],
-    display: StructureDisplay,
-    revision?: Revision,
-    focus?: Focus,
-  ) => ReactNode;
   /** Loading/unavailable state, or an actionable refresh failure above retained results. */
   notice?: ReactNode;
   onRefresh(): Promise<void>;
 }) {
   const [tab, setTab] = useState<"tasks" | "structures">("tasks");
-  const [display, setDisplay] = useState<Record<string, { visible: boolean; opacity: number }>>({});
+  const [display, setDisplay] = useState<StructureDisplay>({});
   const [filter, setFilter] = useState("");
   const [focusedCheck, setFocusedCheck] = useState<{
     revisionId: string;
@@ -58,7 +54,6 @@ export function ReviewWorkspace({
     onSuccess: onRefresh,
     onError: onRefresh,
   });
-  const selected = revision && task ? structuresOf(revision, task) : [];
   return (
     <div className="review-shell" data-theme="light">
       <header className="app-header">
@@ -79,9 +74,7 @@ export function ReviewWorkspace({
             {backLink}
           </div>
           <div className="run-title">
-            <h1 className="text-xl font-semibold">
-              {run?.sample ?? (runId === "local" ? "Scan viewer" : runId)}
-            </h1>
+            <h1 className="text-xl font-semibold">{run?.sample ?? runId}</h1>
             {run?.review && (
               <StatusBadge tone={run.review.remainingToCheck ? "check" : "primary"}>
                 {run.review.reviewedAt
@@ -319,7 +312,7 @@ export function ReviewWorkspace({
                         ? "This task or revision does not exist."
                         : notice
                           ? notice
-                          : "Opening a scan displays its images. Measurements, checks and evidence appear only after an analysis has produced them."}
+                          : "Measurements, checks, evidence and images appear only after an analysis has produced them."}
                     </p>
                     <section>
                       <h3 className="font-medium">Measurements</h3>
@@ -348,15 +341,29 @@ export function ReviewWorkspace({
               aria-label="Resize report and viewers"
             />
             <Panel id="imaging" minSize="28%">
-              {viewer(
-                selected,
-                display,
-                revision,
-                focusedCheck &&
-                  focusedCheck.revisionId === revision?.id &&
-                  focusedCheck.taskId === task?.id
-                  ? focusedCheck.focus
-                  : undefined,
+              {run && revision && task ? (
+                <Suspense>
+                  <TaskViewer
+                    runId={run.id}
+                    revision={revision}
+                    task={task}
+                    assets={run.assets}
+                    display={display}
+                    focus={
+                      focusedCheck &&
+                      focusedCheck.revisionId === revision.id &&
+                      focusedCheck.taskId === task.id
+                        ? focusedCheck.focus
+                        : undefined
+                    }
+                  />
+                </Suspense>
+              ) : (
+                <section className="viewer-workspace" aria-label="Imaging workspace">
+                  <div className="view-empty" role="status">
+                    Images appear with the task's results.
+                  </div>
+                </section>
               )}
             </Panel>
           </Group>

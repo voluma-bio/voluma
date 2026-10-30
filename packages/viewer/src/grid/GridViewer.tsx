@@ -1,7 +1,7 @@
 /**
  * Review of one analysis grid: 3D plus three slice panes through one crosshair, all from the
  * grid's converted review assets. Panes resize and maximize without remounting. The crosshair
- * moves only when the user moves it; loading data never moves it or the camera.
+ * moves when the user moves it or a new `focus` arrives; loading data never moves it or the camera.
  */
 import { Maximize2, Minimize2 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
@@ -22,16 +22,32 @@ const panes = [
 
 export function GridViewer({
   scene,
+  title = "Imaging workspace",
+  focus,
+  notes = [],
   children,
 }: {
-  /** Remount (`key`) for another grid: the panes keep their grid for life. */
+  /**
+   * Remount (`key`) for another grid: the panes keep their grid for life. On the same grid,
+   * new overlays or meshes (display settings) redraw in place.
+   */
   scene: GridScene;
+  title?: string;
+  /** A voxel to centre the crosshair on, when it changes (a check's focus). */
+  focus?: Zyx;
+  /** What the viewer should say it doesn't show. */
+  notes?: string[];
   children?: ReactNode;
 }) {
   const [maximized, setMaximized] = useState<string | null>(null);
   const [point, setPoint] = useState<Zyx>(
-    () => scene.shapeZyx.map((n) => Math.floor(n / 2)) as unknown as Zyx,
+    () => focus ?? (scene.shapeZyx.map((n) => Math.floor(n / 2)) as unknown as Zyx),
   );
+  const focusKey = focus?.join();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: moves only when the voxel changes, not on each render's new tuple.
+  useEffect(() => {
+    if (focus) setPoint(focus);
+  }, [focusKey]);
   const [contrast, setContrast] = useState<Contrast | null>(null);
   const [contrastError, setContrastError] = useState<string>();
   const [pictures, setPictures] = useState<Partial<Record<Axis, Picture>>>({});
@@ -51,7 +67,7 @@ export function GridViewer({
         if (!abort.signal.aborted) setContrastError((cause as Error).message);
       });
     return () => abort.abort();
-  }, [scene.image]);
+  }, [scene.image.base]);
 
   const slot = (pane: (typeof panes)[number], showSeparator: boolean) => {
     const isMax = maximized === pane.id;
@@ -108,7 +124,7 @@ export function GridViewer({
       aria-label="Imaging workspace"
     >
       <div className="viewer-heading">
-        <h2 className="font-medium">Imaging workspace</h2>
+        <h2 className="font-medium">{title}</h2>
         <div className="grid-toolbar">
           <output className="font-mono" aria-label="Crosshair voxel (z, y, x)">
             z {point[0]} · y {point[1]} · x {point[2]}
@@ -130,6 +146,11 @@ export function GridViewer({
           {children}
         </div>
       </div>
+      {notes.map((note) => (
+        <p key={note} className="text-xs text-muted-foreground mb-2">
+          {note}
+        </p>
+      ))}
       {contrastError && (
         <p className="error-message" role="alert">
           Couldn't load the image: {contrastError}
