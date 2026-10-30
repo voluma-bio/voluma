@@ -293,15 +293,17 @@ async function downloadCloudflared(bin) {
 async function openGatewayTunnel(port) {
   try {
     const { Tunnel, use } = await import("cloudflared");
+    if (stopping || gatewayLost) return;
     const bin = resolve(homedir(), ".cache/voluma", `cloudflared-${CLOUDFLARED.version}`);
     if (!existsSync(bin)) {
       mkdirSync(resolve(bin, ".."), { recursive: true });
       await downloadCloudflared(bin);
     }
+    if (stopping || gatewayLost) return;
     use(bin);
     const tunnel = Tunnel.quick(`http://127.0.0.1:${port}`);
     tunnel.on("url", (url) => {
-      if (gatewayLost) return tunnel.stop();
+      if (stopping || gatewayLost) return tunnel.stop();
       env.gatewayUrl = url;
       writeEnv();
       console.log(`gateway ${url} (tunnel to :${port}); start the runner now\n`);
