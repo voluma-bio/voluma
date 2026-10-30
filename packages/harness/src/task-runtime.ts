@@ -414,7 +414,6 @@ export function taskRuntime(options: TaskRuntimeOptions) {
   }
 
   /**
-  /**
    * The sha256 of a file, computed by the thread's sandbox: a scan-sized file stays off the
    * host. The file goes in on stdin so the output never carries its name (GNU `sha256sum`
    * escapes `\` and newline in names). `note: false`: this exec is the host's, so the restart

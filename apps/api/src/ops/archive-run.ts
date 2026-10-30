@@ -25,8 +25,8 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { reviewSnapshots } from "../domains/review/schema";
-import { databaseUrl } from "../domains/run/operator";
 import { events, piMessages, runs, studies, studyScans, threads } from "../domains/run/schema";
+import { databaseUrl } from "./operator";
 import { assertRestorable, countsOf, describeCounts, piMessagesOf, readDump } from "./run-dump";
 
 const MIN_FREE_BYTES = 1024 ** 3;

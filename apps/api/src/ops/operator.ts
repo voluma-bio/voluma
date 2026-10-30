@@ -12,7 +12,7 @@ const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
  * host and database name. With `writes`, a host that isn't this machine is refused without `--remote`.
  */
 export function databaseUrl({ writes, remote }: { writes: boolean; remote?: boolean }): string {
-  const file = resolve(import.meta.dirname, "../../../../../.dev/env.json");
+  const file = resolve(import.meta.dirname, "../../../../.dev/env.json");
   const url =
     process.env.DATABASE_URL ||
     (existsSync(file) ? JSON.parse(readFileSync(file, "utf8")).databaseUrl : undefined);

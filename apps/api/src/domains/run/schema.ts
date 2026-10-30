@@ -18,6 +18,8 @@
  * log, which is the record, so a projection must never fail the append (a missing
  * parent row would roll the event back).
  */
+
+import { referenceInputId } from "@voluma/contracts/r2";
 import {
   boolean,
   doublePrecision,
@@ -98,7 +100,7 @@ export const inputs = pgTable("inputs", {
 /** The scan every org may start from: one row per org, uploaded by the examples operator. */
 export const EXAMPLES_OPERATOR = "voluma-examples";
 export const referenceInput = (labId: string): typeof inputs.$inferInsert => ({
-  id: `reference-${labId}`,
+  id: referenceInputId(labId),
   labId,
   source: "reference",
   uploadedBy: EXAMPLES_OPERATOR,
@@ -160,7 +162,6 @@ export const runs = pgTable(
     inputId: text().notNull(),
     credentials: text({ enum: ["voluma", "visitor"] }).notNull(),
     example: boolean().notNull().default(false),
-    forkedFrom: text(),
     createdAt: timestamptz().notNull().defaultNow(),
     state: text({ enum: ["queued", "running", "awaiting-keys", "ended"] }).notNull(),
     startedAt: timestamptz(),
