@@ -4,7 +4,7 @@
  * of the runtime spec's Verification list and asserts on the stored event log.
  */
 import type { RunEvent } from "@voluma/contracts/events";
-import { openThreads, runningThreads } from "@voluma/contracts/threads";
+import { openThreads } from "@voluma/contracts/threads";
 import { describe, expect, it } from "vitest";
 import {
   askFirst,
@@ -94,10 +94,6 @@ describe("run loop", () => {
     // The root's end is the last event: nothing is written after it.
     expect(w.stored.at(-1)?.threadId).toBe(`${R}supervisor`);
     expect(duplicates(w.stored)).toEqual([]);
-    // Nothing is left to resume, and the contract says nothing runs, even for a stale `running` state.
-    expect(
-      runningThreads(w.stored, { status: "running", startedAt: new Date().toISOString() }),
-    ).toEqual(new Set());
   });
 
   it("needs-review: main's feedback resumes the same worker, whose new attempt passes", async () => {
@@ -133,6 +129,111 @@ describe("run loop", () => {
     expect(of(w.stored, "thread.started", "t1.check")).toHaveLength(1);
     expect(of(w.stored, "thread.started", "t1.check.2")).toHaveLength(1);
     expect(duplicates(w.stored)).toEqual([]);
+  });
+
+  it("needs-review: submit_task is refused while an output the previous attempt reported is not reported again", async () => {
+    const plan = [
+      {
+        ...task("t1"),
+        outputs: [
+          ...task("t1").outputs,
+          { id: "m2", required: false, kind: "measurement" as const, unit: "mm", on: [] },
+        ],
+      },
+    ];
+    const report = (outputId: string) =>
+      call("report_output", {
+        taskId: "t1",
+        outputId,
+        title: outputId,
+        output: measurement(1),
+        evidence: [],
+      });
+    const submit = call("submit_task", { taskId: "t1", summary: "t1 measured." });
+    // Attempt 1 reports both; attempt 2 reports only m1, is refused naming m2, then reports it.
+    const twice: Script = (t) => {
+      const attempt = t.users.length;
+      const reports = t.calls.filter((c) => c.name === "report_output").length;
+      if (t.fresh && attempt === 1) return report("m1");
+      if (attempt === 1) return [report("m2"), submit][reports - 1] ?? "Done.";
+      if (t.fresh) return report("m1");
+      if (t.steps === 1) return submit;
+      if (t.steps === 2) return report("m2");
+      if (t.steps === 3) return submit;
+      return "Done.";
+    };
+    const feedback: Script = (t) =>
+      t.fresh && /The check of t1 found problems/.test(t.lastUser)
+        ? call("message", { threadId: `${R}t1.worker`, text: "Redo it." })
+        : undefined;
+    const w = world({
+      plan,
+      worker: twice,
+      main: first(feedback, chain(["t1"])),
+      check: checker((_id, n) => (n === 1 ? "needs-review" : "passed")),
+    });
+    const folded = await w.run();
+    expect(
+      folded.tasks.map((t) => `${t.id}:${t.status}`),
+      w.text(),
+    ).toEqual(["t1:done"]);
+    const refusals = w.text().match(/cannot be submitted: the previous attempt of t1 reported m2/g);
+    expect(refusals).toHaveLength(1);
+    expect(of(w.stored, "output", "t1.worker")).toHaveLength(4);
+  });
+
+  it("needs-review: a stopped partial redo is not the baseline; a new worker is refused for what the checked attempt reported", async () => {
+    const plan = [
+      {
+        ...task("t1"),
+        outputs: [
+          ...task("t1").outputs,
+          { id: "m2", required: false, kind: "measurement" as const, unit: "mm", on: [] },
+        ],
+      },
+    ];
+    const report = (outputId: string) =>
+      call("report_output", {
+        taskId: "t1",
+        outputId,
+        title: outputId,
+        output: measurement(1),
+        evidence: [],
+      });
+    const submit = call("submit_task", { taskId: "t1", summary: "t1 measured." });
+    const worker: Script = (t) => {
+      const steps = [report("m1"), report("m2"), submit];
+      // The first worker: both outputs and a submit, then (after feedback) only m1 and no submit.
+      if (t.thread.endsWith("t1.worker"))
+        return t.users.length === 1 ? steps[t.steps] : t.steps === 0 ? report("m1") : "Stopped.";
+      // The replacement: m1 only, refused naming m2, then m2.
+      return [report("m1"), submit, report("m2"), submit][t.steps] ?? "Done.";
+    };
+    const main: Script = (t) => {
+      const did = (name: string) => t.calls.some((c) => c.name === name);
+      if (t.fresh && /The check of t1 found problems/.test(t.lastUser))
+        return call("message", { threadId: `${R}t1.worker`, text: "Redo it." });
+      if (t.fresh && did("message") && !did("stop_worker") && t.users.length > 2)
+        return call("stop_worker", { threadId: `${R}t1.worker`, reason: "Replacing it." });
+      const starts = t.calls.filter((c) => c.name === "start_worker").length;
+      if (t.fresh && did("stop_worker") && starts === 1)
+        return call("start_worker", { taskId: "t1", brief: "Measure t1 again." });
+      return chain(["t1"])(t);
+    };
+    const w = world({
+      plan,
+      worker,
+      main,
+      check: checker((_id, n) => (n === 1 ? "needs-review" : "passed")),
+    });
+    const folded = await w.run();
+    expect(
+      folded.tasks.map((t) => `${t.id}:${t.status}`),
+      w.text(),
+    ).toEqual(["t1:done"]);
+    expect(of(w.stored, "attempt.opened", "t1.worker.2")).toHaveLength(1);
+    const refusals = w.text().match(/cannot be submitted: the previous attempt of t1 reported m2/g);
+    expect(refusals).toHaveLength(1);
   });
 
   it("fix limit stops feedback; an upstream correction makes the task stale and it can be redone", async () => {
@@ -411,6 +512,96 @@ describe("run loop", () => {
     });
   });
 
+  // The resume's `thread.started` is stored before the thread loads its history, so a cut right
+  // after it (the load held at 50 ms) leaves a start with no message. The next claim resumes the
+  // thread with the input that start stored, not a bare "continue".
+  describe("a cut right after a resume's start", () => {
+    const slow = (thread: string) => (id: string) => (id === `${R}${thread}` ? 50 : 0);
+    const userTexts = (events: readonly RunEvent[], thread: string) =>
+      of(events, "message", thread).flatMap((e) =>
+        e.type === "message" && e.payload.role === "user" ? [e.payload.text] : [],
+      );
+    const states = (folded: { tasks: { id: string; status: string }[] }) =>
+      folded.tasks.map((t) => `${t.id}:${t.status}`);
+
+    it("an answer reaches the checker, which then judges", async () => {
+      const inner = checker();
+      const asking: Script = (t) => {
+        if (t.task !== "t2") return inner(t);
+        if (!t.calls.some((c) => c.name === "ask"))
+          return call("ask", { question: "Is the scan isotropic?" });
+        return told(t, /The main agent answers/) ? inner(t) : "I am waiting for the answer.";
+      };
+      const answering: Script = (t) => {
+        const [askId] = openAskIds(t);
+        return t.fresh && askId ? call("answer", { askId, text: "Yes, isotropic." }) : undefined;
+      };
+      const w = world({
+        plan: T1,
+        main: first(answering, chain(["t1", "t2"])),
+        check: asking,
+        delayLoad: slow("t2.check"),
+        cutAfter: (e) => e.id === `${R}t2.check:started:2`,
+      });
+      const folded = await w.run();
+      expect(w.wasCut).toBe(true);
+      expect(states(folded), w.text()).toEqual(["t1:done", "t2:done"]);
+      expect(userTexts(w.stored, "t2.check").filter((u) => /Yes, isotropic/.test(u))).toHaveLength(
+        1,
+      );
+      expect(taskEvents(w.stored, "t2")).toEqual(["under-review:agent", "done:check-result"]);
+      expect(duplicates(w.stored)).toEqual([]);
+    });
+
+    it("feedback reaches the worker once, and the new attempt is a fix", async () => {
+      const feedback: Script = (t) => {
+        const m = /The check of (t\d) found problems/.exec(t.lastUser);
+        return t.fresh && m
+          ? call("message", { threadId: `${R}${m[1]}.worker`, text: "Redo the placement." })
+          : undefined;
+      };
+      const w = world({
+        plan: T1,
+        main: first(feedback, chain(["t1", "t2"])),
+        check: checker((id, n) => (id === "t1" && n === 1 ? "needs-review" : "passed")),
+        delayLoad: slow("t1.worker"),
+        cutAfter: (e) => e.id === `${R}t1.worker:started:2`,
+      });
+      const folded = await w.run();
+      expect(w.wasCut).toBe(true);
+      expect(states(folded), w.text()).toEqual(["t1:done", "t2:done"]);
+      expect(of(w.stored, "attempt.opened", "t1.worker")).toHaveLength(2);
+      expect(
+        userTexts(w.stored, "t1.worker").filter((u) => /Redo the placement/.test(u)),
+      ).toHaveLength(1);
+      expect(duplicates(w.stored)).toEqual([]);
+    });
+
+    it("a plain message to an idle worker on a done task reaches it and reopens nothing", async () => {
+      const note: Script = (t) =>
+        t.fresh && passed(t, "t1") && !t.calls.some((c) => c.name === "message")
+          ? call("message", { threadId: `${R}t1.worker`, text: "Note: keep units in mm." })
+          : undefined;
+      const noted: Script = (t) => (/Note: keep units/.test(t.lastUser) ? "Noted." : worker(t));
+      const w = world({
+        plan: T1,
+        main: first(note, chain(["t1", "t2"])),
+        worker: noted,
+        delayLoad: slow("t1.worker"),
+        cutAfter: (e) => e.id === `${R}t1.worker:started:2`,
+      });
+      const folded = await w.run();
+      expect(w.wasCut).toBe(true);
+      expect(states(folded), w.text()).toEqual(["t1:done", "t2:done"]);
+      expect(
+        userTexts(w.stored, "t1.worker").filter((u) => /Note: keep units/.test(u)),
+      ).toHaveLength(1);
+      expect(of(w.stored, "attempt.opened", "t1.worker")).toHaveLength(1);
+      expect(taskEvents(w.stored, "t1")).toEqual(["under-review:agent", "done:check-result"]);
+      expect(duplicates(w.stored)).toEqual([]);
+    });
+  });
+
   it("a notice appended after a delivery was built is delivered next time, once", async () => {
     // t2's worker waits until main has been handed the delivery about t1, then submits.
     let release: () => void = () => {};
@@ -595,6 +786,129 @@ describe("run loop", () => {
     expect(of(w.stored, "thread.started", "t1.check")).toHaveLength(1);
     expect(of(w.stored, "thread.started", "t1.worker")).toHaveLength(0);
     expect(taskEvents(w.stored, "t1")).toEqual(["under-review:agent", "done:check-result"]);
+  });
+
+  describe("evidence paths", () => {
+    const citing = (evidence: object[]): Script => {
+      const pass = checker();
+      return (t) =>
+        t.steps === 0
+          ? call("checkpoint", {
+              taskId: t.task,
+              text: "Re-derived.",
+              summary: "Looks passed.",
+              evidence,
+              verdict: "passed",
+            })
+          : pass(t);
+    };
+
+    it("a scratch path relative to the caller's folder is accepted and stored in full", async () => {
+      const w = world({
+        plan: [task("t1")],
+        main: chain(["t1"]),
+        check: citing([{ root: "scratch", path: "re/frame.json" }]),
+      });
+      await w.run();
+      const [cp] = of(w.stored, "checkpoint", "t1.check");
+      expect(cp?.type === "checkpoint" && cp.payload.evidence, w.text()).toMatchObject([
+        { root: "scratch", path: "t1.check/re/frame.json" },
+      ]);
+    });
+
+    it("a scratch path that starts with a thread name is taken as given", async () => {
+      const w = world({
+        plan: [task("t1")],
+        main: chain(["t1"]),
+        // The check may open a file the worker cited; a worker's report cites it first.
+        worker: (t) =>
+          t.steps === 0
+            ? call("report_output", {
+                taskId: "t1",
+                outputId: "m1",
+                title: "M",
+                output: measurement(1),
+                evidence: [{ root: "scratch", path: "x.png" }],
+              })
+            : worker({ ...t, steps: t.steps }),
+        check: citing([{ root: "scratch", path: "t1.worker/x.png" }]),
+      });
+      await w.run();
+      const [cp] = of(w.stored, "checkpoint", "t1.check");
+      expect(cp?.type === "checkpoint" && cp.payload.evidence, w.text()).toMatchObject([
+        { root: "scratch", path: "t1.worker/x.png" },
+      ]);
+    });
+
+    it("a sub-folder named like a thread that is not in the log stays in the caller's folder", async () => {
+      const w = world({
+        plan: [task("t1")],
+        main: chain(["t1"]),
+        check: citing([{ root: "scratch", path: "t9.worker/x.png" }]),
+      });
+      await w.run();
+      const [cp] = of(w.stored, "checkpoint", "t1.check");
+      expect(cp?.type === "checkpoint" && cp.payload.evidence, w.text()).toMatchObject([
+        { root: "scratch", path: "t1.check/t9.worker/x.png" },
+      ]);
+    });
+
+    it("a file a script printed at the scratch root is refused, not looked up in the caller's folder", async () => {
+      const seen: string[] = [];
+      const w = world({
+        plan: [task("t1")],
+        main: chain(["t1"]),
+        worker: (t) => {
+          seen.push(...t.results);
+          return t.steps === 0
+            ? call("report_output", {
+                taskId: "t1",
+                outputId: "m1",
+                title: "M",
+                output: measurement(1),
+                evidence: ["/scratch/foo.png"],
+              })
+            : worker({ ...t, steps: t.steps });
+        },
+      });
+      await w.run();
+      expect(seen.join("\n")).toContain("is not in a thread's folder");
+    });
+
+    it("a wrong outputs path is refused with a plain message", async () => {
+      const seen: string[] = [];
+      const w = world({
+        plan: [task("t1")],
+        main: chain(["t1"]),
+        evidenceExists: (root, _task, path) => root !== "outputs" || path === "frame.json",
+        check: (t) => {
+          seen.push(...t.results);
+          return t.steps === 0
+            ? call("checkpoint", {
+                taskId: "t1",
+                text: "Re-derived.",
+                summary: "Looks passed.",
+                evidence: [{ root: "outputs", path: "t1/frame.json" }],
+                verdict: "passed",
+              })
+            : t.steps === 1
+              ? call("checkpoint", {
+                  taskId: "t1",
+                  text: "Re-derived.",
+                  summary: "Looks passed.",
+                  evidence: [{ root: "outputs", path: "frame.json" }],
+                  verdict: "passed",
+                })
+              : "Verdict written.";
+        },
+      });
+      await w.run();
+      const refusal = seen.find((r) => r.includes("No file at"));
+      expect(refusal, w.text()).toContain(
+        'No file at /outputs/t1/t1/frame.json. Cite an output file by its path inside /outputs/t1/, e.g. {root: "outputs", path: "frame.json"}.',
+      );
+      expect(refusal).not.toMatch(/key does not exist/i);
+    });
   });
 
   // The four scenarios below are the guarantees a log that runs behind the process would break.

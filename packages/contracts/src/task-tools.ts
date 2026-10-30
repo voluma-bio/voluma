@@ -59,7 +59,9 @@
  * reported with `value: null` (a measurement that could not be made) counts as
  * reported: the task did its job and said so, and the `note` says why. The
  * reviewer sees the null and the note; making the task fail is the worker's
- * choice, with `failed`.
+ * choice, with `failed`. `submit_task` is also refused while a declared output the task's
+ * previous checked attempt reported is not reported again in this one (a `missing` report counts):
+ * a redo cannot silently drop an output.
  *
  * Declarations and references. An object (structure, surface, annotation, volume) the plan
  * doesn't declare is refused: review places it by its declaration's grid. A structure, surface
@@ -144,7 +146,8 @@ export type ReportOutputInput = z.infer<typeof reportOutputInputSchema>;
 
 /**
  * `submit_task`: the holder hands its task to the check. Every required output must be reported
- * (a `missing` one with its reason counts). It ends the thread's turn; call it alone.
+ * (a `missing` one with its reason counts), and so must every declared output the previous checked
+ * attempt reported. It ends the thread's turn; call it alone.
  */
 export const submitTaskInputSchema = z.object({
   taskId: taskIdSchema,

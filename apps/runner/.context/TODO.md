@@ -24,3 +24,4 @@ From the skillset move (`workflows/` in this repo):
 - An output appended after the drain's final scan (a thread stuck past the 5 s wind-down) gets no
   `assets.*` event. Narrow. (p529)
 - **A hung read on the mount blocks thread start for up to an hour.** `stage()` runs through `#run` with a 3600 s deadline and no `timeout -k`; a `cp` stuck in the R2 mount isn't killed and retries can't help. Wrap staging like `exec()` (process group under `timeout -k`) or run each `cp` under `timeout`.
+- **Thinking level isn't in the events.** Pi records each reply's level in History (`thinkingLevel` on the assistant message), and the runner's boot line prints `RUNNER_THINKING`, but a run's events don't say which level a thread used. Per-role levels have landed (role files' `thinking`); record the level with the model on `thread.started` (a contract change) so a resume keeps it.

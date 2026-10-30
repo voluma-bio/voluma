@@ -14,6 +14,7 @@
 import type { RunEvent } from "@voluma/contracts/events";
 import { type Folded, fold } from "@voluma/contracts/fold";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
+import type { UserSender } from "./adapters/pi/start-thread";
 import type { PayloadOf } from "./recorder";
 import { callKey, effectId } from "./tools/effects";
 
@@ -64,9 +65,14 @@ interface ThreadFields {
   waitingMs: number | undefined;
   /** The text of its latest reply in the latest invocation. */
   reply: string;
-  /** Log positions of its latest start and of the latest answer to one of its asks. */
-  startedAt: number;
+  /** Log positions of the latest answer to one of its asks and of the latest message another thread sent it. */
   answeredAt: number | undefined;
+  heardAt: number | undefined;
+  /**
+   * The input its latest start was given, while no user message follows that start: a cut
+   * between the start and the first message. The next resume gives it again.
+   */
+  inputPending: { text: string; sender: UserSender } | undefined;
   /** It made a task `under-review` in the latest invocation. */
   submitted: boolean;
 }
@@ -248,7 +254,8 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         const known =
           kind === "main" ? kind : (kind === "worker" || kind === "check") && task && kind;
         if (!known) break;
-        if (record && !record.end) resumedCutOff.add(e.threadId);
+        // A cut-off start that was given an input is resumed with that input, not a cut-off line.
+        if (record && !record.end && !record.inputPending) resumedCutOff.add(e.threadId);
         const fields: ThreadFields = {
           id: e.threadId,
           end: undefined,
@@ -264,8 +271,9 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
           startedMs: ms,
           waitingMs: record?.waitingMs,
           reply: "",
-          startedAt: at,
           answeredAt: record?.answeredAt,
+          heardAt: record?.heardAt,
+          inputPending: e.payload.input,
           submitted: false,
         };
         value.threads.set(
@@ -322,6 +330,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         record?.openCalls.delete(e.payload.toolCallId);
         break;
       case "message":
+        if (record && e.payload.role === "user") record.inputPending = undefined;
         if (record && e.payload.role === "assistant") record.reply = e.payload.text;
         if (record && e.payload.role === "user" && e.payload.sender.kind === "runtime") {
           const afterCutOff = resumedCutOff.delete(e.threadId);
@@ -337,6 +346,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         }
         if (record && e.payload.role === "user" && e.payload.sender.kind === "thread") {
           const { threadId: from } = e.payload.sender;
+          record.heardAt = at;
           value.relayed.push({ from, to: e.threadId, text: e.payload.text });
           if (record.pendingFeedback?.from === from) record.pendingFeedback = undefined;
         }

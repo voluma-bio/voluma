@@ -31,7 +31,7 @@ is no runs list: Home (`features/study`) replaces it.
   verdict and its `summary`; its full text sits behind "What it found". Values take the
   workflow's names (`outputName`), the AI's title only for an output `outputs.json` lacks.
 - **Running means someone is running it.** A task is Working only while its worker thread runs,
-  and being checked only while its check thread runs (`runningThreads`); an attempt open with
+  and being checked only while its check thread runs (open, per `openThreads`, while the run is `running`); an attempt open with
   neither reads "Waiting on the lead AI". A run that failed on a fatal provider error writes no
   task event: the task whose current thread ended failed shows Failed, with that thread's error.
   "Redoing it after the second AI check" only when an earlier attempt was sent back.

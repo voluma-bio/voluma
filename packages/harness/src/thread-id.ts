@@ -16,6 +16,10 @@ export type ParsedThread =
   /** `name`: the id without the run id, a thread's sandbox name and its folder under `/scratch`. */
   { name: string } & ({ kind: "main" } | { kind: Role; taskId: string });
 
+/** Whether `name` is a thread name (`parseThreadId`'s `name`): `main[.n]` or `<task>.worker|check[.n]`. */
+export const isThreadName = (name: string) =>
+  /^main(\.\d+)?$/.test(name) || /^[^.]+\.(worker|check)(\.\d+)?$/.test(name);
+
 /** Throws on an id that is not a worker, check or main thread of the run. */
 export function parseThreadId(runId: string, id: string): ParsedThread {
   const name = id.startsWith(`${runId}.`) ? id.slice(runId.length + 1) : "";

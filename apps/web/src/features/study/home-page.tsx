@@ -165,13 +165,21 @@ function needsYou(v: StudyView): React.ReactNode[] {
       ];
     if (one.state.status === "awaiting-keys")
       return [row("check", "Waiting for your keys to carry on.", "Add your keys", v.href)];
-    // Only when its newest run is the completed one: else the checks are an older run's.
-    if (one.state.status === "ended" && one.state.outcome === "completed" && study.toCheck > 0)
-      return [row("check", `${study.toCheck} to check`, "Check", v.href)];
+    if (study.toCheck > 0) return [row("check", `${study.toCheck} to check`, "Check", v.href)];
     return [];
   }
   const parts: string[] = [];
-  if (study.toCheck > 0) parts.push(`${study.toCheck} to check.`);
+  if (study.toCheck > 0) {
+    // `toCheck` sums each scan's newest completed run, which `newestRuns` lacks for a scan
+    // rerunning; the scan count is exact only when the newest runs hold every open check.
+    const open = study.newestRuns.filter((r) => (r.review?.remainingToCheck ?? 0) > 0);
+    const shown = open.reduce((n, r) => n + (r.review?.remainingToCheck ?? 0), 0);
+    parts.push(
+      shown === study.toCheck
+        ? `${study.toCheck} to check across ${plural(open.length, "scan")}.`
+        : `${study.toCheck} to check.`,
+    );
+  }
   const failures = study.newestRuns.filter(failed);
   if (failures.length > 0)
     parts.push(

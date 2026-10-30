@@ -39,7 +39,8 @@ export const runHref = ({ runId, state }: Pick<StudyRunSummary, "runId" | "state
 
 export type RunStatus = { label: string; tone: StatusTone; detail?: string };
 
-export function runStatus({ state, review }: Run): RunStatus {
+/** A run's status; a study's newest-run summary carries the same `state` and `review` fields. */
+export function runStatus({ state, review }: Pick<StudyRunSummary, "state" | "review">): RunStatus {
   switch (state.status) {
     case "queued":
       return { label: "Waiting", tone: "neutral", detail: `Place ${state.position} in line` };
@@ -68,8 +69,9 @@ export function RunBadge({ run }: { run: Run }) {
 /**
  * A study's status from each scan's newest run (`newest`, one per scan that has run) and its
  * open checks (`StudySummary.toCheck`): what most needs the researcher, else how far it got.
- * "Not started" counts only scans with no run; a stopped run reads "Stopped". A study of one
- * reads as its run would, except "Reviewed": the summary doesn't say.
+ * "Not started" counts only scans with no run. A study of one reads as its run, except that
+ * open checks outrank a rerun that hasn't failed: `toCheck` is the newest *completed* run's,
+ * which stay acceptable while a rerun is live.
  */
 export function studyStatus({
   scans,
@@ -77,28 +79,38 @@ export function studyStatus({
   toCheck,
 }: {
   scans: number;
-  newest: Pick<StudyRunSummary, "state">[];
+  newest: Pick<StudyRunSummary, "state" | "review">[];
   toCheck: number;
 }): RunStatus {
+  if (scans === 1 && newest[0]) {
+    const own = runStatus(newest[0]);
+    return toCheck > 0 && own.tone !== "destructive"
+      ? { label: `${toCheck} to check`, tone: "check" }
+      : own;
+  }
   // A live run by its status, an ended one by its outcome.
   const count = (
     kind: "queued" | "running" | "awaiting-keys" | "completed" | "failed" | "cancelled",
   ) =>
     newest.filter(({ state }) => (state.status === "ended" ? state.outcome : state.status) === kind)
       .length;
-  const one = scans === 1;
   const failed = count("failed");
-  if (failed > 0) return { label: one ? "Failed" : `${failed} failed`, tone: "destructive" };
-  // A study of one reads as its newest run: checks left on an older run don't show.
-  const open = one && count("completed") === 0 ? 0 : toCheck;
-  if (open > 0) return { label: `${open} to check`, tone: "check" };
+  if (failed > 0) return { label: `${failed} failed`, tone: "destructive" };
+  if (toCheck > 0) return { label: `${toCheck} to check`, tone: "check" };
   if (count("running") > 0) return { label: "Running", tone: "info" };
   if (count("awaiting-keys") > 0) return { label: "Needs your keys", tone: "check" };
   if (count("queued") > 0) return { label: "Waiting", tone: "neutral" };
-  if (count("completed") === scans) return { label: "Checked", tone: "primary" };
+  // What is left: completed, stopped, or never run.
   const stopped = count("cancelled");
-  if (stopped > 0) return { label: one ? "Stopped" : `${stopped} stopped`, tone: "neutral" };
   const notStarted = scans - newest.length;
-  if (notStarted < scans) return { label: `${notStarted} not started`, tone: "neutral" };
-  return { label: "Not started", tone: "neutral" };
+  if (notStarted === scans) return { label: "Not started", tone: "neutral" };
+  if (stopped + notStarted === 0)
+    return newest.every((r) => r.review?.reviewedAt)
+      ? { label: "Reviewed", tone: "primary" }
+      : { label: "Checked", tone: "primary" };
+  const parts = [
+    stopped > 0 && `${stopped} stopped`,
+    notStarted > 0 && `${notStarted} not started`,
+  ];
+  return { label: parts.filter(Boolean).join(", "), tone: "neutral" };
 }

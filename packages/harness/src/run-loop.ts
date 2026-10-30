@@ -19,7 +19,7 @@
  * threads are aborted and the root ends `failed`, because the loop must not carry on from a
  * record the store does not hold. A runtime abort writes no end, like a crash.
  */
-import type { StreamFn } from "@earendil-works/pi-agent-core";
+import type { StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { By } from "@voluma/contracts/events";
 import { checkResult, type Folded, type FoldedTask, fold } from "@voluma/contracts/fold";
@@ -70,6 +70,8 @@ import type { Tool } from "./tools/tool";
 export interface RoleSetup {
   systemPrompt: string;
   model: Model<Api>;
+  /** The Pi agent's thinking level, which Pi sends as `reasoning` and records on each reply. */
+  thinkingLevel: ThinkingLevel;
   streamFn: StreamFn;
   /** The tool names the role's file grants (`TOOL_NAMES`). */
   tools: readonly string[];
@@ -201,6 +203,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       threadId: r.id,
       systemPrompt: role.systemPrompt,
       model: role.model,
+      thinkingLevel: role.thinkingLevel,
       streamFn: role.streamFn,
       tools: o.tools(thread, role.tools, agents),
       interrupted: (tool: string, toolCallId: string) =>
@@ -255,6 +258,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
         ...(spec.attemptId && { attemptId: spec.attemptId }),
         ...(spawnedBy && { spawnedBy }),
         model: `${spec.model.provider}/${spec.model.id}`,
+        ...(spec.input && { input: spec.input }),
       },
       startedEventId,
     );
@@ -375,7 +379,10 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     for (const r of d.threads.values()) {
       if (stateOf(r) !== "cut-off" || threads.stale(r.id) || !inCharge(d, r)) continue;
       const tool = [...r.openCalls.values()].at(-1);
-      await resume(r, cutOffText(d.after, tool), RUNTIME);
+      const cutOff = cutOffText(d.after, tool);
+      // A start cut off before its input landed: give the input again, after the cut-off line.
+      const { text, sender } = r.inputPending ?? { text: "", sender: RUNTIME };
+      await resume(r, text ? `${cutOff}\n\n${text}` : cutOff, sender);
       return true;
     }
     return false;
@@ -467,7 +474,12 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       }
       // Idle, or stopped/cut off with a verdict: the check is over.
       const last = c.asks.at(-1);
-      if (!verdict && last?.answer && (c.answeredAt ?? -1) > c.startedAt && state === "idle") {
+      if (
+        !verdict &&
+        last?.answer &&
+        (c.answeredAt ?? -1) > (c.heardAt ?? -1) &&
+        state === "idle"
+      ) {
         await resume(c, answerText(last.answer, t.id), {
           kind: "thread",
           threadId: d.main ?? root,

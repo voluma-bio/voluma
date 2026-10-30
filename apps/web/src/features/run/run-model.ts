@@ -11,7 +11,7 @@ import type { Asset } from "@voluma/contracts/review";
 import { progress, reviewState } from "@voluma/contracts/review-state";
 import type { ProviderCalls, RunState } from "@voluma/contracts/run";
 import { type RunSpend, type Spend, spend } from "@voluma/contracts/spend";
-import { runningThreads } from "@voluma/contracts/threads";
+import { openThreads } from "@voluma/contracts/threads";
 import { isSatisfied } from "@voluma/workflow";
 import { catalog } from "@voluma/workflow/bundled";
 import { type Halt, type Live, toolTitle } from "./transcript";
@@ -141,18 +141,14 @@ function threadsOf(events: RunEvent[]): { threads: Thread[]; lastAt: Map<string,
 }
 
 /**
- * A thread still open when it is not running (`runningThreads`): a lost runner writes no end.
- * A cancel ends every thread in the API, so only a failed run leaves them here. It is stopped (failed, if the run failed)
- * at the run's end, or paused at its last event while the run waits to resume.
+ * A thread still open when the runner is not running the run (`halt`): a lost runner writes no
+ * end. A cancel ends every thread in the API, so only a failed run leaves them here. It is stopped
+ * (failed, if the run failed) at the run's end, or paused at its last event while the run waits
+ * to resume.
  */
-function halted(
-  threads: Thread[],
-  lastAt: Map<string, string>,
-  halt: Halt,
-  running: ReadonlySet<string>,
-): Thread[] {
+function halted(threads: Thread[], lastAt: Map<string, string>, halt: Halt): Thread[] {
   return threads.map((t) =>
-    t.status !== "running" || running.has(t.id)
+    t.status !== "running"
       ? t
       : halt.kind === "ended"
         ? {
@@ -354,7 +350,7 @@ function unexplained(t: FoldedTask, check: TaskView["check"], image: Asset | und
 function stateOf(
   t: FoldedTask | undefined,
   blocked: boolean,
-  /** Its worker, and its check, is running now (`runningThreads`). */
+  /** Its worker, and its check, is running now: open while the run is `running`. */
   now: { working: boolean; checking: boolean },
   halt: Halt | undefined,
   /** A thread of its current attempt ended failed, and the run failed. */
@@ -396,8 +392,9 @@ export function runView(
   halt: Halt | undefined,
 ): RunView {
   const logged = threadsOf(events);
-  const running = runningThreads(events, state);
-  const threads = halt ? halted(logged.threads, logged.lastAt, halt, running) : logged.threads;
+  // Open threads run only while the run does: an ended or paused run's open threads were cut off.
+  const running = new Set(state.status === "running" ? openThreads(events) : []);
+  const threads = halt ? halted(logged.threads, logged.lastAt, halt) : logged.threads;
   const spent = spend(events, providerCalls);
   const hasLead = threads.some((t) => t.kind === "main");
   // No plan until the run's first `revision.started`.

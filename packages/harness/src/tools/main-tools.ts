@@ -265,7 +265,7 @@ export function mainTools(deps: MainDeps) {
   > = {
     name: "answer",
     description:
-      "Answer a checker's question (its askId is in the message that told you). `files` are files you want the checker to open: a path under the task's /outputs or the run's /scratch. The checker is resumed with your answer.",
+      'Answer a checker\'s question (its askId is in the message that told you). `files` are files you want the checker to open: {root: "outputs", path: <inside /outputs/<task id>/>} or {root: "scratch", path: <inside your $SCRATCH>}. The checker is resumed with your answer.',
     input: z.object({
       askId: nonEmpty,
       text: nonEmpty,

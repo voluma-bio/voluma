@@ -78,6 +78,7 @@ import { r2Workflows } from "./r2-workflows.ts";
 import { type Redact, redactor } from "./redact.ts";
 import { sandboxGateway } from "./sandbox-gateway.ts";
 import { heartbeatRoundTrip, inRunScope, type RunScope } from "./telemetry.ts";
+import { assertThinking } from "./thinking.ts";
 import { type ModelRole, usageMeter } from "./usage.ts";
 
 /**
@@ -274,10 +275,26 @@ async function claimBody(
         );
       return !visitor || (role === "main" && isVisitorSafe(model)) ? model : ctx.visitorModel;
     };
+    // A role's file may set its thinking level; else the runner's; else none is sent ("off").
+    const roleThinking = (role: "worker" | "checker" | "main", model: Model<Api>) => {
+      if (visitor) return "off";
+      const level = definition.agents[role].thinking ?? config.thinking;
+      const fallback =
+        config.fallbackModel &&
+        ctx.models.getModel(config.fallbackModel.provider, config.fallbackModel.id);
+      assertThinking(level, fallback ? [model, fallback] : [model], `the ${role} role's`);
+      return level ?? "off";
+    };
     const workerModel = roleModel("worker");
     const checkModel = roleModel("checker");
     const mainModel = roleModel("main");
+    const thinking = {
+      worker: roleThinking("worker", workerModel),
+      checker: roleThinking("checker", checkModel),
+      main: roleThinking("main", mainModel),
+    };
     log(`models: worker ${workerModel.id}, checker ${checkModel.id}, main ${mainModel.id}`);
+    log(`thinking: worker ${thinking.worker}, checker ${thinking.checker}, main ${thinking.main}`);
     // The tasks that produce the selected outputs and what they need. The main thread may adapt
     // them to the run's notes when the run starts (`superviseRun`).
     const computed = computePlan(definition.files, run.selectedOutputs);
@@ -427,6 +444,7 @@ async function claimBody(
       (primary: Model<Api>, modelRole: ModelRole, agent: "main" | "worker" | "checker"): RoleOf =>
       (thread, recorded) => ({
         model: threadModel(primary, recorded),
+        thinkingLevel: thinking[agent],
         streamFn: streamFor(modelRole),
         systemPrompt: systemPrompt(definition, thread),
         tools: grant(agent),

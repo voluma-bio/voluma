@@ -28,9 +28,10 @@ import type { WorkflowPlan } from "@voluma/contracts/workflow";
 import { isSatisfied, transitiveDependents } from "@voluma/workflow";
 import type { ThreadLayout } from "./layout";
 import { declarationProblem, placementProblem, referenceProblem } from "./output-checks";
-import { type Evidence, EvidenceRefused } from "./ports/evidence";
+import { type Evidence, EvidenceNotFound, EvidenceRefused } from "./ports/evidence";
 import type { Sandbox } from "./ports/sandbox";
 import type { PayloadOf, Recorder } from "./recorder";
+import { isThreadName, parseThreadId } from "./thread-id";
 import { startedFor, threadLog } from "./thread-log";
 import { effectId } from "./tools/effects";
 
@@ -97,8 +98,17 @@ export const pathOf = (taskId: string, f: Pick<EvidenceRef, "root" | "path">): s
 export function refOf(taskId: string, path: string): Pick<EvidenceRef, "root" | "path"> {
   const own = `/outputs/${taskId}/`;
   if (path.startsWith(own)) return { root: "outputs", path: path.slice(own.length) };
-  if (path.startsWith("/scratch/"))
-    return { root: "scratch", path: path.slice("/scratch/".length) };
+  if (path.startsWith("/scratch/")) {
+    const rest = path.slice("/scratch/".length);
+    // A tool-call scratch path is relative to the caller's folder unless it starts with a thread name, so a file
+    // printed at the scratch root cannot be named; a script writes in $SCRATCH, which is a thread folder.
+    if (!isThreadName(rest.split("/")[0] ?? "")) {
+      throw new Refusal(
+        `${path} is not in a thread's folder under /scratch/. Write files under $SCRATCH and report them by that path.`,
+      );
+    }
+    return { root: "scratch", path: rest };
+  }
   throw new Refusal(
     `${path} is not a file this task can report: it is not under ${own} or /scratch/ (a file in another task's outputs is not yours to report).`,
   );
@@ -198,6 +208,38 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     }
     await recorder.append(holderThreadId, "attempt.opened", { taskId }, eventId);
     return eventId;
+  }
+
+  /**
+   * The declared outputs the task's previous attempt reported (the latest earlier attempt handed
+   * to a check, whatever it reported, `missing` included) that its current attempt has not: only
+   * the current attempt's reports count, so each would otherwise vanish. An attempt that was never
+   * submitted (a stopped half-redo) is not the baseline. `fresh`: the current attempt
+   * is not opened yet, so every attempt in the log is earlier. Read from the events, which the
+   * fold keeps only for the current attempt.
+   */
+  function droppedOutputs(taskId: string, fresh: boolean): string[] {
+    const reported = new Map<string, Set<string>>();
+    const opened: string[] = [];
+    const checked = new Set<string>();
+    for (const e of recorder.events()) {
+      if (e.type === "attempt.opened" && e.payload.taskId === taskId) opened.push(e.id);
+      if (e.type === "task" && e.payload.taskId === taskId && e.payload.status === "under-review")
+        checked.add(e.payload.attemptId);
+      if (e.type === "output" && e.payload.taskId === taskId) {
+        const ids = reported.get(e.payload.attemptId) ?? new Set<string>();
+        reported.set(e.payload.attemptId, ids.add(e.payload.outputId));
+      }
+    }
+    const earlier = fresh ? opened : opened.slice(0, -1);
+    const previous = earlier.filter((a) => checked.has(a)).at(-1);
+    const now = fresh ? undefined : opened.at(-1);
+    const declared = known(taskId).outputs;
+    return declared
+      .map((o) => o.id)
+      .filter(
+        (id) => previous && reported.get(previous)?.has(id) && !reported.get(now ?? "")?.has(id),
+      );
   }
 
   /**
@@ -359,6 +401,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
   }
 
   /**
+  /**
    * The sha256 of a file, computed by the thread's sandbox: a scan-sized file stays off the
    * host. The file goes in on stdin so the output never carries its name (GNU `sha256sum`
    * escapes `\` and newline in names). `note: false`: this exec is the host's, so the restart
@@ -386,13 +429,22 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     return sha256;
   };
 
-  /** Keeps a file the calling thread named, if its own layout lets it read that path. */
+  /**
+   * Keeps a file the calling thread named, if its own layout lets it read that path. A
+   * `scratch` path is relative to the caller's own folder unless it starts with the name of a
+   * thread in the log; the event stores the full form.
+   */
   const keep = async (
     c: Caller,
     taskId: string,
     f: Pick<EvidenceRef, "root" | "path">,
   ): Promise<EvidenceRef> => {
-    const path = pathOf(taskId, f);
+    const ownName = parseThreadId(runId, c.threadId).name;
+    const file =
+      f.root === "scratch" && !log().threads.has(`${runId}.${f.path.split("/")[0]}`)
+        ? { root: f.root, path: `${ownName}/${f.path}` }
+        : { root: f.root, path: f.path };
+    const path = pathOf(taskId, file);
     const layout = layoutOf(c.threadId, (p) => cites(taskId, p));
     try {
       layout.keyOf(path, "read");
@@ -405,11 +457,22 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     const mounted = layout.mounts.some((m) => path.startsWith(`${m.path}/`));
     const hash = mounted ? () => sandboxHash(c.threadId, path, c.signal) : undefined;
     const sha256 = await evidence
-      .keep(runId, taskId, f, { hash, signal: c.signal })
+      .keep(runId, taskId, file, { hash, signal: c.signal })
       .catch((error) => {
-        throw error instanceof EvidenceRefused ? new Refusal(error.message) : error;
+        if (error instanceof EvidenceRefused) throw new Refusal(error.message);
+        if (error instanceof EvidenceNotFound) {
+          throw new Refusal(
+            `No file at ${path}. ${
+              file.root === "outputs"
+                ? `Cite an output file by its path inside /outputs/${taskId}/, e.g. {root: "outputs", path: "frame.json"}.`
+                : `Cite a file in your working folder as {root: "scratch", path: <path inside $SCRATCH>}.`
+            }`,
+          );
+        }
+        if (error instanceof Refusal || c.signal.aborted) throw error;
+        throw new Refusal(`could not keep ${f.path}; try again`);
       });
-    return { root: f.root, path: f.path, sha256 };
+    return { ...file, sha256 };
   };
 
   const done = (message: string, eventId?: string): TaskToolResult => ({
@@ -446,7 +509,8 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     /**
      * The holder hands its task to the check: `task under-review` with the summary as its
      * reason. The caller ends its turn. Refused with other tools in the batch (the turn would
-     * not end), and while a required output is unreported.
+     * not end), while a required output is unreported, and while an output the previous attempt
+     * reported is not reported again (`droppedOutputs`).
      */
     submitTask: (c: Caller, input: SubmitTaskInput) =>
       section(async () => {
@@ -461,6 +525,12 @@ export function taskRuntime(options: TaskRuntimeOptions) {
         if (missing.length > 0) {
           throw new Refusal(
             `${taskId} cannot be submitted: required outputs not reported: ${missing.join(", ")}. Report them with report_output, or report them missing with the reason.`,
+          );
+        }
+        const dropped = droppedOutputs(taskId, target.fresh);
+        if (dropped.length > 0) {
+          throw new Refusal(
+            `${taskId} cannot be submitted: the previous attempt of ${taskId} reported ${dropped.join(", ")}, and this one has not. Report each again with report_output, or report it missing with the reason (a measurement: value null with the reason).`,
           );
         }
         const id = effectId("submit_task", c.threadId, c.toolCallId);
