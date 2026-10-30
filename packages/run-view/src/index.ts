@@ -10,6 +10,7 @@ export { AgentMark, Elapsed, THREAD_STATUS } from "./agents";
 export { DisclosureProvider } from "./chat/disclosure-store";
 export { ClampedMarkdown } from "./chat/markdown";
 export { ThreadNavigationProvider } from "./chat/thread-navigation";
+export { ItemToCheck, type ItemToCheckProps } from "./item-to-check";
 export { KeysForm, loadKeys, RunKeyLine } from "./keys";
 export {
   type AgentNode,
