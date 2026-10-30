@@ -2,7 +2,8 @@
  * Button in four looks: primary (ink fill, one per view), secondary (raised, outlined), ghost
  * (bare until hovered; `aria-pressed` shows it on) and link (underlined text that sits in a
  * sentence). `asChild` gives the look to its one child instead, e.g. a router `Link` or a Radix
- * trigger. `IconButton` is the square, icon-only form, named by its tooltip.
+ * trigger. Unavailable actions use a native Button: a link does not support `disabled`.
+ * `IconButton` is the square, icon-only form, named by its tooltip.
  */
 import { Slot } from "radix-ui";
 import { type ButtonHTMLAttributes, type ReactNode, useId } from "react";
@@ -16,12 +17,20 @@ type Look = {
 };
 
 export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> &
-  Look & {
-    /** Why the button is disabled, shown beside it while it is. */
-    reason?: ReactNode;
-    /** Render the one child (a link, a trigger) with this look instead of a `<button>`. */
-    asChild?: boolean;
-  };
+  Look &
+  (
+    | {
+        asChild?: false;
+        /** Why the native button is disabled, shown beside it while it is. */
+        reason?: ReactNode;
+      }
+    | {
+        /** Style one enabled child. Render a native Button for an unavailable action. */
+        asChild: true;
+        disabled?: never;
+        reason?: never;
+      }
+  );
 
 // Hover only while enabled (`not-disabled`, so a link given the look still gets it).
 const variants = {
