@@ -6,7 +6,7 @@
  * scan's review.
  */
 import type { StudyScanDetail, ToCheckItem } from "@voluma/contracts/study";
-import { ItemToCheck, plural, runHref, TaskGraph } from "@voluma/run-view";
+import { ItemToCheck, itemHref, plural, TaskGraph } from "@voluma/run-view";
 import {
   Button,
   Count,
@@ -22,7 +22,14 @@ import { Box as Cube } from "lucide-react";
 import { Link, useSearchParams } from "react-router";
 import { linkTo } from "../link";
 import { useStudy } from "./study-layout";
-import { checkKinds, scanGraph, scanHref, scanName } from "./study-model";
+import {
+  byMostToCheck,
+  checkKinds,
+  checkTitles,
+  reviewHref,
+  scanGraph,
+  scanName,
+} from "./study-model";
 
 type By = "scan" | "issue";
 
@@ -30,12 +37,10 @@ export function ToCheckPage() {
   const { detail, workflow } = useStudy();
   const [search, setSearch] = useSearchParams();
   const by: By = search.get("by") === "issue" ? "issue" : "scan";
-  const scans = detail.scans
-    .filter((s) => s.toCheck.length > 0)
-    .sort((a, b) => b.toCheck.length - a.toCheck.length);
+  const scans = byMostToCheck(detail.scans);
   const items = scans.reduce((n, s) => n + s.toCheck.length, 0);
   const first = scans[0];
-  const firstHref = first && scanHref(first);
+  const firstHref = first && reviewHref(first);
   const anyDone = detail.scans.some((s) => s.resultRunId !== null);
 
   return (
@@ -116,8 +121,8 @@ export function ToCheckPage() {
 /** A scan with items: opens to its tasks at summary size, then its items. */
 function ScanRow({ scan }: { scan: StudyScanDetail }) {
   const { workflow } = useStudy();
-  const href = scanHref(scan);
-  const titles = [...new Set(scan.toCheck.map((i) => i.title))].join(", ");
+  const href = reviewHref(scan);
+  const titles = checkTitles(scan.toCheck);
   const cells = [
     <span key="group" className="text-sm text-muted-foreground">
       {scan.scan.group}
@@ -188,7 +193,7 @@ function Item({
       className="border-t border-border first:border-t-0"
     >
       <Button asChild size="sm" variant="ghost">
-        <Link to={runHref({ runId: item.runId })}>
+        <Link to={itemHref(item)}>
           <Cube aria-hidden />
           Review {scan.scan.subject} in 3D
         </Link>

@@ -1,14 +1,16 @@
 /**
  * Where you are, in the header line: the places above this screen as links, then this screen.
- * A screen renders it inside `ShellHeading`. Links use the app's router through `LinkTo`.
+ * A screen renders it inside `ShellHeading`. Links use the app's router through `CrumbTo`.
  */
-import { Fragment } from "react";
+import { Fragment, type ReactNode } from "react";
 import { cx } from "./cx";
-import type { LinkTo } from "./row";
+
+/** A crumb's link: a path, or the app's router link given its class and label. */
+export type CrumbTo = string | ((props: { className: string; children: ReactNode }) => ReactNode);
 
 export type BreadcrumbProps = {
   /** The places above this screen, outermost first. */
-  trail?: { label: string; to: LinkTo }[];
+  trail?: { label: string; to: CrumbTo }[];
   /** This screen. */
   current: string;
   className?: string;
@@ -29,7 +31,7 @@ export function Breadcrumb({ trail = [], current, className }: BreadcrumbProps) 
                   {label}
                 </a>
               ) : (
-                to({ className: linkClass, children: label, "data-row-control": "" })
+                to({ className: linkClass, children: label })
               )}
             </li>
             <li aria-hidden className="text-fg-subtle">

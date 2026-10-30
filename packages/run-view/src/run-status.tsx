@@ -33,7 +33,29 @@ export function formatDuration(seconds: number): string {
 /** Where a run's row leads: its scan review, which shows a live run as it goes. */
 export const runHref = ({ runId }: Pick<StudyRunSummary, "runId">) => `/scans/${runId}`;
 
+/** Where one To check item leads: its scan review, opened on that task and item (`checkId`, as `acceptCheck` takes it). */
+export const itemHref = ({
+  runId,
+  taskId,
+  checkId,
+}: {
+  runId: string;
+  taskId: string;
+  checkId: string;
+}) => `${runHref({ runId })}?${new URLSearchParams({ task: taskId, item: checkId })}`;
+
 export type RunStatus = { label: string; status: Status };
+
+/** A run's status, with "Task N of M" while it runs: what a row says about a live run. */
+export function liveStatus(run: Pick<StudyRunSummary, "state" | "review" | "tasks">): RunStatus {
+  const tasks = run.state.status === "running" ? run.tasks : null;
+  return tasks
+    ? {
+        label: `Task ${Math.min(tasks.done + 1, tasks.total)} of ${tasks.total}`,
+        status: "running",
+      }
+    : runStatus(run);
+}
 
 /** A run's status; a study's newest-run summary carries the same `state` and `review` fields. */
 export function runStatus({ state, review }: Pick<StudyRunSummary, "state" | "review">): RunStatus {
@@ -45,7 +67,7 @@ export function runStatus({ state, review }: Pick<StudyRunSummary, "state" | "re
     case "running":
       return { label: "Running", status: "running" };
     case "awaiting-keys":
-      return { label: "Needs your keys", status: "check" };
+      return { label: "Needs your keys", status: "paused" };
     case "ended":
       if (state.outcome === "completed")
         return review?.reviewedAt
@@ -91,7 +113,7 @@ export function studyStatus({
   if (failed > 0) return { label: `${failed} failed`, status: "stopped" };
   if (toCheck > 0) return { label: `${toCheck} to check`, status: "check" };
   if (count("running") > 0) return { label: "Running", status: "running" };
-  if (count("awaiting-keys") > 0) return { label: "Needs your keys", status: "check" };
+  if (count("awaiting-keys") > 0) return { label: "Needs your keys", status: "paused" };
   // Nothing running or needing keys: every live run is queued, and held ones wait for the AI.
   const queued = newest.filter(({ state }) => state.status === "queued");
   if (queued.length > 0)

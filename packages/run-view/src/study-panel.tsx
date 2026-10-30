@@ -4,20 +4,11 @@
  * click away on every study page and in the scan review, so both render it from here. Also the
  * scan-level facts both read from a `StudyDetail`: a scan's status, knee and group.
  */
-import type { StudyDetail, StudyScanDetail } from "@voluma/contracts/study";
-import {
-  cx,
-  type LinkTo,
-  List,
-  Progress,
-  Row,
-  RowLink,
-  type Status,
-  StatusGlyph,
-} from "@voluma/ui";
-import { plural, runStatus } from "./run-status";
+import type { StudyDetail, StudyRunSummary, StudyScanDetail } from "@voluma/contracts/study";
+import { type LinkTo, List, Progress, Row, RowLink, type Status, StatusMark } from "@voluma/ui";
+import { liveStatus, plural } from "./run-status";
 
-export type ScanStatus = { label: string; status: Status; open: number };
+type ScanStatus = { label: string; status: Status; open: number };
 
 /**
  * A scan's status: its newest run's (`runStatus`), with "Task N of M" while it runs and its open
@@ -25,19 +16,9 @@ export type ScanStatus = { label: string; status: Status; open: number };
  */
 export function scanStatus({ runs: [run], toCheck }: StudyScanDetail): ScanStatus {
   if (!run) return { label: "Not started", status: "waiting", open: 0 };
-  const { label, status } = runStatus(run);
-  const tasks = run.state.status === "running" ? run.tasks : null;
+  const { label, status } = liveStatus(run);
   const open = status === "check" ? toCheck.length : 0;
-  return {
-    label:
-      open > 0
-        ? `${open} to check`
-        : tasks
-          ? `Task ${Math.min(tasks.done + 1, tasks.total)} of ${tasks.total}`
-          : label,
-    status,
-    open,
-  };
+  return { label: open > 0 ? `${open} to check` : label, status, open };
 }
 
 /** A scan's knee (`attributes.knee`, as `/new`'s intake stores it), or null. */
@@ -57,11 +38,11 @@ export function groupNames(detail: StudyDetail): string[] {
 }
 
 /** A run the API or the runner is still moving: a page refetches while one is in view. */
-export const isLive = (scan: StudyScanDetail) =>
-  scan.runs[0] !== undefined && scan.runs[0].state.status !== "ended";
+export const isLive = (run: Pick<StudyRunSummary, "state"> | undefined) =>
+  run !== undefined && run.state.status !== "ended";
 
 /** "11 of 20 finished, 2 running". */
-export function finishedLine(detail: StudyDetail): string {
+function finishedLine(detail: StudyDetail): string {
   const finished = detail.scans.filter((s) => s.resultRunId !== null).length;
   const running = detail.scans.filter((s) => s.runs[0]?.state.status === "running").length;
   return `${finished} of ${detail.scans.length} finished${running ? `, ${running} running` : ""}`;
@@ -125,26 +106,15 @@ function PanelRow({
   to: LinkTo | undefined;
   selected: boolean;
 }) {
-  const { label, status, open } = scanStatus(scan);
+  const { label, status } = scanStatus(scan);
   const knee = kneeOf(scan);
   const title = (
     <span className="flex min-w-0 items-center gap-2.5">
-      <StatusGlyph status={status} />
       <span className="w-14 shrink-0 font-mono text-sm">{scan.scan.subject}</span>
       {knee && <span className="truncate font-normal text-muted-foreground">{knee} knee</span>}
     </span>
   );
-  // The row's glyph already marks the state, so the cell is the word alone, inked like a StatusMark's.
-  const cell = (
-    <span
-      className={cx(
-        "text-xs",
-        open > 0 ? "text-check" : status === "running" ? "text-info" : "text-muted-foreground",
-      )}
-    >
-      {label}
-    </span>
-  );
+  const cell = <StatusMark status={status} label={label} className="text-xs" />;
   return to ? (
     <RowLink to={to} title={title} cells={[cell]} selected={selected} />
   ) : (

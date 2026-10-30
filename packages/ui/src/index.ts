@@ -5,7 +5,7 @@
  */
 
 export { Box, type BoxProps } from "./box";
-export { Breadcrumb, type BreadcrumbProps } from "./breadcrumb";
+export { Breadcrumb, type BreadcrumbProps, type CrumbTo } from "./breadcrumb";
 export {
   Button,
   type ButtonProps,

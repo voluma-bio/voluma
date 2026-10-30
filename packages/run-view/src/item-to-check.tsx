@@ -59,7 +59,13 @@ export function ItemToCheck({
         <Button
           size="sm"
           disabled={readOnly || !revisionId || accept.isPending || accepted}
-          reason={readOnly ? "An example study can't be changed." : undefined}
+          reason={
+            readOnly
+              ? "An example study can't be changed."
+              : !revisionId
+                ? "Decide on this one in the scan review."
+                : undefined
+          }
           onClick={() => accept.mutate({ checkId, taskId })}
         >
           {accept.isPending ? "Saving…" : accepted ? "Accepted" : "Looks right"}

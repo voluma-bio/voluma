@@ -8,7 +8,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { studiesQuery } from "@voluma/api-client/query";
 import type { StudyRunSummary, StudySummary } from "@voluma/contracts/study";
-import { plural, runHref, runStatus, studyStatus } from "@voluma/run-view";
+import { isLive, liveStatus, plural, runHref, runStatus, studyStatus } from "@voluma/run-view";
 import {
   Box,
   Breadcrumb,
@@ -52,7 +52,6 @@ function view(study: StudySummary): StudyView {
   };
 }
 
-const isLive = ({ state }: StudyRunSummary) => state.status !== "ended";
 const failed = ({ state }: StudyRunSummary) =>
   state.status === "ended" && state.outcome === "failed";
 
@@ -206,29 +205,12 @@ function needsYou(v: StudyView): React.ReactNode[] {
 
 /** A live run: its scan, its study (unless it is a study of one), and where it stands. */
 function RunningRow({ run, study }: { run: StudyRunSummary; study: StudySummary | null }) {
-  const { state, tasks } = run;
-  const mark: { status: Status; label: string } =
-    state.status === "running"
-      ? {
-          status: "running",
-          label: tasks
-            ? `Task ${Math.min(tasks.done + 1, tasks.total)} of ${tasks.total}`
-            : "Running",
-        }
-      : state.status === "queued"
-        ? state.waitingForProvider
-          ? { status: "paused", label: "AI unavailable" }
-          : {
-              status: "waiting",
-              label: state.position === 1 ? "Starts next" : `Place ${state.position} in line`,
-            }
-        : { status: "paused", label: "Needs your keys" };
   return (
     <RowLink
       to={linkTo(runHref(run))}
       title={run.inputName}
       subtitle={study?.name}
-      cells={[<StatusMark key="s" {...mark} />]}
+      cells={[<StatusMark key="s" {...liveStatus(run)} />]}
     />
   );
 }

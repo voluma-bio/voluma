@@ -18,14 +18,12 @@ import {
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import { Download } from "lucide-react";
 import { useSearchParams } from "react-router";
+import { measurementsOf } from "../workflow-tasks";
 import { ResultsTable } from "./results-table";
 import { useStudy } from "./study-layout";
 import { digitsFor, farFromGroup, scanValue, unitOf, valuesOf } from "./study-model";
 
 type View = "group" | "every";
-
-const measurementsOf = (workflow: BundledWorkflow) =>
-  workflow.outputs.filter((o) => o.kind === "measurement");
 
 export function ResultsPage() {
   const { detail, workflow } = useStudy();
@@ -147,11 +145,18 @@ function EveryValue({
 /** One row per scan, one column per measurement (its unit in the head), as a CSV download. */
 function exportCsv(detail: StudyDetail, outputs: OutputEntry[]) {
   const cell = (v: string) => (/[",\n]/.test(v) ? `"${v.replaceAll('"', '""')}"` : v);
-  const head = ["Scan", "Group", "Knee", ...outputs.map((o) => `${o.name} (${unitOf(o) || "-"})`)];
+  // Typed text (subject, group, names) that a spreadsheet would run as a formula opens as text.
+  const text = (v: string) => (/^[=+\-@]/.test(v) ? `'${v}` : v);
+  const head = [
+    "Scan",
+    "Group",
+    "Knee",
+    ...outputs.map((o) => text(`${o.name} (${unitOf(o) || "-"})`)),
+  ];
   const row = (s: StudyScanDetail) => [
-    s.scan.subject,
-    s.scan.group ?? "",
-    kneeOf(s) ?? "",
+    text(s.scan.subject),
+    text(s.scan.group ?? ""),
+    text(kneeOf(s) ?? ""),
     ...outputs.map((o) => String(scanValue(s, o) ?? "")),
   ];
   const csv = [head, ...detail.scans.filter((s) => s.resultRunId !== null).map(row)]
@@ -162,5 +167,6 @@ function exportCsv(detail: StudyDetail, outputs: OutputEntry[]) {
   a.href = url;
   a.download = `${detail.study.name}.csv`;
   a.click();
-  URL.revokeObjectURL(url);
+  // The download reads the URL after this task; revoking at once can cancel it.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }

@@ -26,6 +26,7 @@ import { linkTo } from "../link";
 import { useStudy } from "./study-layout";
 import {
   cellOf,
+  checkTitles,
   digitsFor,
   farFromGroup,
   otherUnit,
@@ -34,7 +35,7 @@ import {
   scanHref,
   scanName,
   scanValue,
-  stoppedIn,
+  stoppedLine,
   unitOf,
   valuesOf,
 } from "./study-model";
@@ -51,9 +52,9 @@ export function ScansPage() {
 
   /** What a scan's row says under its name: what waits, or where it stopped. */
   const line = (s: StudyScanDetail) => {
-    if (s.toCheck.length > 0) return [...new Set(s.toCheck.map((i) => i.title))].join(", ");
-    const where = stoppedIn(s, workflow);
-    if (where) return `Stopped during ${where}`;
+    if (s.toCheck.length > 0) return checkTitles(s.toCheck);
+    const stopped = stoppedLine(s, workflow);
+    if (stopped) return stopped;
     if (s.runs.length === 0) return "Not started";
     return s.resultRunId ? "Nothing to check" : undefined;
   };

@@ -55,7 +55,8 @@ export function StudyLayout() {
   const { id = "" } = useParams();
   const study = useQuery({
     ...studyQuery(id),
-    refetchInterval: (query) => (query.state.data?.scans.some(isLive) ? 5000 : false),
+    refetchInterval: (query) =>
+      query.state.data?.scans.some((s) => isLive(s.runs[0])) ? 5000 : false,
   });
 
   if (study.isPending) return <PageState label="Loading the study" />;

@@ -27,6 +27,8 @@ export {
 export {
   formatDuration,
   formatUsd,
+  itemHref,
+  liveStatus,
   plural,
   type RunStatus,
   runHref,
@@ -42,12 +44,10 @@ export {
   useThreads,
 } from "./run-store";
 export {
-  finishedLine,
   groupNames,
   groupOf,
   isLive,
   kneeOf,
-  type ScanStatus,
   StudyPanel,
   scanStatus,
 } from "./study-panel";

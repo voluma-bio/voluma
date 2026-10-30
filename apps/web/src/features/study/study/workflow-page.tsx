@@ -3,13 +3,13 @@
  * TaskGraph at study size with room to read, and the selected task (`?task=`) on every scan
  * below it, each scan with its state there and a way into its review.
  */
-import { plural, TaskGraph } from "@voluma/run-view";
+import { itemHref, plural, TaskGraph } from "@voluma/run-view";
 import { Button, IconButton, List, PageHead, RowLink, STATUS_WORD, StatusMark } from "@voluma/ui";
 import { Box as Cube, X } from "lucide-react";
 import { Link, useSearchParams } from "react-router";
 import { linkTo } from "../link";
 import { useStudy } from "./study-layout";
-import { cellOf, scanHref, scanName, stoppedIn, studyGraph } from "./study-model";
+import { cellOf, checkTitles, scanHref, scanName, stoppedLine, studyGraph } from "./study-model";
 
 export function WorkflowPage() {
   const { detail, workflow } = useStudy();
@@ -63,16 +63,20 @@ export function WorkflowPage() {
               if (!href) return [];
               const { status, open } = cellOf(scan, selected.id);
               const items = scan.toCheck.filter((i) => i.taskId === selected.id);
-              const where = status === "stopped" ? stoppedIn(scan, workflow) : null;
+              // The task's first item when it has one, so the review opens on it.
+              const to = items[0] ? itemHref(items[0]) : href;
+
               return [
                 <RowLink
                   key={scan.scan.inputId}
-                  to={linkTo(href)}
+                  to={linkTo(to)}
                   title={scanName(scan)}
                   subtitle={
                     items.length > 0
-                      ? [...new Set(items.map((i) => i.title))].join(", ")
-                      : where && `Stopped during ${where}`
+                      ? checkTitles(items)
+                      : status === "stopped"
+                        ? stoppedLine(scan, workflow)
+                        : undefined
                   }
                   cells={[
                     <StatusMark
@@ -81,7 +85,7 @@ export function WorkflowPage() {
                       label={status === "check" ? `${open} to check` : undefined}
                     />,
                     <Button key="3d" asChild size="sm">
-                      <Link to={href}>
+                      <Link to={to}>
                         <Cube aria-hidden />
                         Review in 3D
                       </Link>

@@ -12,14 +12,18 @@ import { Box as Cube, Maximize2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link, useNavigate } from "react-router";
 import { linkTo } from "../link";
+import { measurementsOf } from "../workflow-tasks";
 import { ResultsTable } from "./results-table";
 import { ScanMatrix } from "./scan-matrix";
 import { useStudy } from "./study-layout";
 import {
+  byMostToCheck,
+  checkTitles,
   farFromGroup,
+  reviewHref,
   scanHref,
   scanName,
-  stoppedIn,
+  stoppedLine,
   studyGraph,
   studySpend,
   taskState,
@@ -29,8 +33,8 @@ export function Dashboard() {
   const { detail, workflow } = useStudy();
   const navigate = useNavigate();
   const base = `/studies/${detail.study.id}`;
-  const next = mostToCheck(detail);
-  const nextHref = next && scanHref(next);
+  const [next] = byMostToCheck(detail.scans);
+  const nextHref = next && reviewHref(next);
   return (
     <>
       <PageHead
@@ -100,15 +104,7 @@ export function Dashboard() {
   );
 }
 
-const measures = (workflow: BundledWorkflow) =>
-  workflow.outputs.filter((o) => o.kind === "measurement").length;
-
-/** The scan with the most open checks: where "Review" starts. */
-function mostToCheck(detail: StudyDetail): StudyScanDetail | undefined {
-  return [...detail.scans]
-    .filter((s) => s.toCheck.length > 0)
-    .sort((a, b) => b.toCheck.length - a.toCheck.length)[0];
-}
+const measures = (workflow: BundledWorkflow) => measurementsOf(workflow).length;
 
 /** "10 DMM, left knees. 10 Sham, right knees.", then the workflow. */
 export function StudyFacts({
@@ -243,7 +239,7 @@ function NeedsYou({
     if (scan.toCheck.length > 0)
       rows.push({
         scan,
-        subtitle: [...new Set(scan.toCheck.map((i) => i.title))].join(", "),
+        subtitle: checkTitles(scan.toCheck),
         cell: (
           <span className="flex items-center gap-2">
             {far.has(scan.scan.inputId) && <span className="text-xs text-check">far</span>}
@@ -258,10 +254,9 @@ function NeedsYou({
         cell: <StatusMark status="paused" label="Needs your keys" />,
       });
     else if (scanStatus(scan).status === "stopped") {
-      const where = stoppedIn(scan, workflow);
       rows.push({
         scan,
-        subtitle: where ? `Stopped during ${where}` : "Stopped before it finished",
+        subtitle: stoppedLine(scan, workflow) ?? "Stopped before it finished",
         cell: <StatusMark status="stopped" />,
       });
     }
@@ -293,7 +288,7 @@ function NeedsYou({
   );
 }
 
-/** Scans with a live run: what each is working on, and who waits for a free runner. */
+/** Scans with a live run: what each is working on, and which start as these finish. */
 function RunningNow({ detail, workflow }: { detail: StudyDetail; workflow: BundledWorkflow }) {
   const running = detail.scans.filter((s) => s.runs[0]?.state.status === "running");
   const waiting = detail.scans.filter((s) => s.runs[0]?.state.status === "queued");
@@ -310,7 +305,7 @@ function RunningNow({ detail, workflow }: { detail: StudyDetail; workflow: Bundl
       count={running.length > 0 && <Count tone="running">{running.length}</Count>}
       foot={
         waiting.length > 0 &&
-        `${list(waiting.map((s) => s.scan.subject))} ${waiting.length === 1 ? "starts" : "start"} as a runner frees up.`
+        `${list(waiting.map((s) => s.scan.subject))} ${waiting.length === 1 ? "starts" : "start"} as these finish.`
       }
     >
       {running.length > 0 ? (
@@ -351,8 +346,6 @@ function Spent({ detail }: { detail: StudyDetail }) {
           {budget !== null && <span className="text-fg-subtle"> of {formatUsd(budget)}</span>}
         </span>
       }
-    >
-      {null}
-    </Box>
+    />
   );
 }

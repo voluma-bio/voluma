@@ -1,5 +1,5 @@
 /**
- * What the study page derives from one `StudyDetail`: each scan's status, the tab counts, the
+ * What the study pages derive from one `StudyDetail`: each scan's task states, the
  * headline series by group, the far-from-group flag and the To check kinds. Pure functions, so
  * every tab reads the same numbers.
  *
@@ -27,6 +27,7 @@ import type { OutputEntry } from "@voluma/contracts/workflow-files";
 import {
   groupNames,
   groupOf,
+  itemHref,
   kneeOf,
   type NeedItem,
   runHref,
@@ -37,37 +38,6 @@ import {
 } from "@voluma/run-view";
 import type { Status } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
-
-export type StudyCounts = {
-  scans: number;
-  /** Scans with a completed result. */
-  done: number;
-  running: number;
-  /** Queued or needing keys, except runs held until the AI is back (`waitingForAI`). */
-  waiting: number;
-  waitingForAI: number;
-  notStarted: number;
-  toCheck: number;
-};
-
-export function studyCounts(detail: StudyDetail): StudyCounts {
-  const status = (s: StudyScanDetail) => s.runs[0]?.state.status;
-  const held = (s: StudyScanDetail) => {
-    const state = s.runs[0]?.state;
-    return state?.status === "queued" && state.waitingForProvider !== undefined;
-  };
-  return {
-    scans: detail.scans.length,
-    done: detail.scans.filter((s) => s.resultRunId !== null).length,
-    running: detail.scans.filter((s) => status(s) === "running").length,
-    waiting: detail.scans.filter(
-      (s) => (status(s) === "queued" && !held(s)) || status(s) === "awaiting-keys",
-    ).length,
-    waitingForAI: detail.scans.filter(held).length,
-    notStarted: detail.scans.filter((s) => s.runs.length === 0).length,
-    toCheck: detail.scans.reduce((n, s) => n + s.toCheck.length, 0),
-  };
-}
 
 /**
  * What every run of the study has spent so far: the runner's own model calls (heartbeats) plus
@@ -251,13 +221,27 @@ export function scanGraph(scan: StudyScanDetail, workflow: BundledWorkflow): Sca
   }));
 }
 
-/** The task a stopped scan stopped in: the one its run was working on, by its title. */
-export function stoppedIn(scan: StudyScanDetail, workflow: BundledWorkflow): string | null {
+/** Where a stopped scan stopped: "Stopped during Segmentation", from the task its run stopped or failed in. */
+export function stoppedLine(scan: StudyScanDetail, workflow: BundledWorkflow): string | null {
   const run = scan.runs[0];
   if (run?.state.status !== "ended" || run.state.outcome === "completed") return null;
   const id = Object.entries(scan.taskState).find(([, s]) => s === "stopped" || s === "failed")?.[0];
-  return id ? workflow.taskTitle(id) : null;
+  return id ? `Stopped during ${workflow.taskTitle(id)}` : null;
 }
+
+/** What waits on a scan, by check title: "Patella partly outside the field, Medial osteophyte boundary". */
+export const checkTitles = (items: readonly ToCheckItem[]) =>
+  [...new Set(items.map((i) => i.title))].join(", ");
+
+/** The scans with open checks, most first: the order every queue reads them in. */
+export const byMostToCheck = (scans: readonly StudyScanDetail[]) =>
+  scans.filter((s) => s.toCheck.length > 0).sort((a, b) => b.toCheck.length - a.toCheck.length);
+
+/** Where "Review" on a scan leads: its first open item, else the scan. */
+export const reviewHref = (scan: StudyScanDetail) => {
+  const [item] = scan.toCheck;
+  return item ? itemHref(item) : scanHref(scan);
+};
 
 /** A measurement as the grid and the summary graph read it: about three significant figures. */
 export const formatValue = (v: number) => v.toFixed(digitsFor([v]));
