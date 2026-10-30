@@ -6,14 +6,31 @@ ids, the API helper `r()` and the settings that apply to every service are in
 [../../api/.context/deploy.md](../../api/.context/deploy.md); `render.yaml` is the record of this
 service's settings. This file holds only what differs.
 
-## Pausing the runner
+## Suspending the runner between runs (from 2026-11-04)
 
-To keep it from claiming a run (a plumbing run you start yourself with `dev-sandbox`):
-`r -X POST "$B/services/<RUNNER_ID>/suspend"`, and `.../resume` afterwards (`r` and `$B` are
-defined in the API's deploy.md). A commit to `main` that touches the runner's build filter
-(including this file) redeploys it, and a deploy of a suspended service is not started until it
-is resumed (not yet checked on Render), so check the deploys list after a resume. The 2026-10-29
-plumbing runs on Railway are in [../../gateway/.context/deploy.md](../../gateway/.context/deploy.md).
+Render bills a running worker per second (about $0.035/hour at `1c-2g`). **Until Nov 4 the
+runner stays on**: hackathon visitors start runs while nobody watches, and a suspended runner
+would leave them queued. After Nov 4 it is **suspended unless a run is queued or running**. The
+Blueprint has no field to create a service suspended, so suspend it by hand. With `r` and `$B`
+from the API's deploy.md and `<RUNNER_ID>` from its table (both paths are in Render's API
+reference):
+
+```bash
+r -X POST "$B/services/<RUNNER_ID>/resume"    # before starting a run
+r -X POST "$B/services/<RUNNER_ID>/suspend"   # when no run is queued or running
+```
+
+A run started while the runner is suspended is created `queued` and stays that way: nothing
+claims it until the next resume, after which the runner claims it within its 2 s poll. Resume
+takes the time of a start (the service boots), so resume first and check the log. Suspend only
+after the last run reports `released` or ends: suspending mid-run sends SIGTERM, and the run
+waits for the lease to lapse before the next claim resumes it. Automating this is later work.
+
+The same suspend keeps it from claiming a plumbing run you start yourself with `dev-sandbox`.
+A commit to `main` that touches the runner's build filter (including this file) redeploys it,
+and a deploy of a suspended service is not started until it is resumed (not yet checked on
+Render), so check the deploys list after a resume. The 2026-10-29 plumbing runs on Railway are
+in [../../gateway/.context/deploy.md](../../gateway/.context/deploy.md).
 
 ## How it is set up
 

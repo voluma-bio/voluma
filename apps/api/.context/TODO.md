@@ -1,8 +1,11 @@
 # TODO
 
+- **Neon free-tier limits, after 2026-11-04.** Check CU-hours and storage in Neon's console
+  (limits: 100 CU-hours a month, 1 GB; staging was 183 MB on 2026-10-30, about 10 MB per run).
+  Then either lengthen `SWEEP_MS` in `apps/gateway/src/main.ts` so the compute can scale to
+  zero, or move to Launch. Also watch the size against 1 GB as runs accumulate.
 - **Postgres migration drill.** Before the lab relies on the database: `pg_dump` from
-  Render (needs the operator's address on `voluma-db`'s allow list; remove it after, see
-  [deploy.md](deploy.md)), restore into a fresh local Postgres, run the app against the copy. Proves the "portable Postgres" rule.
+  Neon (direct URL, see [deploy.md](deploy.md)), restore into a fresh local Postgres, run the app against the copy. Proves the "portable Postgres" rule.
 - **Scheduled `pg_dump` to R2**, so backups don't depend on the host.
 - **Run streams: end them on sign-out.** An open run stream (server-sent events,
   `GET /api/run/runs/:id/stream`) is authenticated once, when it opens, so it outlives

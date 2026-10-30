@@ -74,7 +74,7 @@ Variables:
 
 | Variable | Value |
 |---|---|
-| `DATABASE_URL` | `fromDatabase` `voluma-db` `connectionString` (private URL) |
+| `DATABASE_URL` | Neon's direct connection string, `sslmode=require`, the same value as on `voluma-api` (`sync: false`) |
 | `GATEWAY_TOKEN_SECRET` | `<kid>:<base64 of 32 random bytes>`, e.g. `k1:$(openssl rand -base64 32)`. Comma-separate to rotate: the first mints, all open. The runner reads it from here (`fromService`), so a rotated value reaches it at the next Blueprint sync |
 | `GATEWAY_META_API_KEY` | our Meta key (SAM) |
 | `GATEWAY_ANTHROPIC_API_KEY`, `GATEWAY_OPENAI_API_KEY` | not in the yaml: those providers are disabled in code |

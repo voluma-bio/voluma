@@ -7,8 +7,12 @@
 # created) and the services that share one read it from its owner with `fromService`.
 # A `sync: false` variable added later is not asked for: set it in the dashboard.
 #
-# Prices are per month, from https://render.com/pricing on 2026-10-30. The workspace is on the
-# Hobby tier ($0 plus compute); nothing here needs Pro. Compute $7 + $7 + $25 + $19 = $58, plus Postgres storage $1.50 (5 GB at $0.30/GB): $59.50.
+# Prices are from https://render.com/pricing on 2026-10-30. The workspace is on the Hobby tier
+# ($0 plus compute); nothing here needs Pro. Always on: the API $7 + the gateway $7 = $14/month.
+# The runner is $25/month, billed per second (about $0.035/hour) while it is not suspended: it
+# stays on until 2026-11-04 (hackathon visitors start runs unattended), then is suspended between
+# runs (apps/runner/.context/deploy.md). Postgres is Neon's free tier ($0;
+# apps/api/.context/deploy.md), so it is not defined here.
 
 envVarGroups:
   - name: voluma-shared
@@ -23,17 +27,6 @@ envVarGroups:
         value: "0"
       - key: R2_BUCKET
         value: voluma-staging
-
-databases:
-  - name: voluma-db
-    plan: 0.5c-1g # $19 (1 GB RAM, 100 connections; the API and gateway use about 20)
-    region: virginia
-    diskSizeGB: 5 # $1.50 at $0.30/GB; Render allows 1 or a multiple of 5, and a disk cannot shrink
-    databaseName: voluma
-    user: voluma
-    # Private network only: no external connection. For a dump or restore add the operator's
-    # address here for the duration (deploy.md) and remove it after.
-    ipAllowList: []
 
 services:
   - type: web
@@ -64,10 +57,10 @@ services:
         - workflows/*/tasks.json
     envVars:
       - fromGroup: voluma-shared
+      # Neon's direct (unpooled) connection string, not the pooler's: prepared statements need
+      # it. It must use `sslmode=require`. It holds the password, so it is asked for at creation.
       - key: DATABASE_URL
-        fromDatabase:
-          name: voluma-db
-          property: connectionString # private network, no pooler: prepared statements work
+        sync: false
       # The origin browsers use. Replace with the custom domain's origin when there is one.
       - key: APP_URL
         fromService:
@@ -135,10 +128,8 @@ services:
         - pnpm-workspace.yaml
     envVars:
       - fromGroup: voluma-shared
-      - key: DATABASE_URL
-        fromDatabase:
-          name: voluma-db
-          property: connectionString
+      - key: DATABASE_URL # Neon's direct connection string, as on voluma-api
+        sync: false
       - key: GATEWAY_DRAIN_SECONDS
         value: "60"
       - key: GATEWAY_TOKEN_SECRET # `<kid>:<base64 of 32 bytes>`; the runner reads this one
@@ -150,8 +141,10 @@ services:
     name: voluma-runner
     runtime: node
     region: virginia
-    # $25 (1 CPU, 2 GB; the cheapest plan with 2 GB). The runner is one Node thread and holds no
-    # volumes, so heavy work creeping back into it fails loudly instead of slowing heartbeats.
+    # $25 while running (1 CPU, 2 GB; the cheapest plan with 2 GB). Always on until 2026-11-04,
+    # then suspended between runs by hand (deploy.md; the Blueprint has no field for a suspended
+    # service). The runner is one Node thread and holds no volumes, so heavy work creeping back into it fails loudly
+    # instead of slowing heartbeats.
     plan: 1c-2g
     numInstances: 1 # more instances share the queue: claims are leased through the API
     # Waits for CI before deploying, as the runner did on Railway.

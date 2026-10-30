@@ -1,7 +1,8 @@
 # Deploying the API (Render staging)
 
 The API is the user-facing service: it serves the built web app and `/api/*`. Postgres is
-Render's managed Postgres, reached only over the private network. Staging moved from Railway to
+Neon's free tier (AWS us-east-1, next to Render's Virginia), reached over the internet with TLS;
+see "The database (Neon)". Staging moved from Railway to
 Render on 2026-10-30 because Meta's API refuses Railway's network (`decisions.md`).
 
 ## How it is set up
@@ -14,9 +15,8 @@ file, and Render applies it when the Blueprint syncs (not on a service deploy). 
 | Service | State |
 |---|---|
 | `voluma-api` | Web service, auto-deployed from `main`. `https://voluma-api.onrender.com` until a custom domain (`app.voluma.bio`) exists |
-| `voluma-db` | Render Postgres, 5 GB disk ($1.50/month; it cannot shrink), private network only (`ipAllowList: []`) |
 | `voluma-gateway` | Web service: the provider gateway. Notes: [../../gateway/.context/deploy.md](../../gateway/.context/deploy.md) |
-| `voluma-runner` | Background worker: claims runs over the private network. Notes, variables and the sandbox image: [../../runner/.context/deploy.md](../../runner/.context/deploy.md) |
+| `voluma-runner` | Background worker, always on until 2026-11-04, then suspended between runs (its deploy.md). Claims runs over the private network. Notes, variables and the sandbox image: [../../runner/.context/deploy.md](../../runner/.context/deploy.md) |
 
 Things `render.yaml` holds that are easy to miss:
 
@@ -33,14 +33,14 @@ Render has no variable interpolation, and an env group can't hold `sync: false` 
 secrets are per-service `sync: false` (asked for once when the Blueprint is created; a variable
 added to the yaml later must be set in the dashboard), and a secret two services share is read
 from its owner with `fromService` (`VOLUMA_API_TOKEN` from the API, `GATEWAY_TOKEN_SECRET` from the
-gateway). `fromService` and `fromDatabase` values refresh on each Blueprint sync, not on the
+gateway). `fromService` values refresh on each Blueprint sync, not on the
 instant the source changes.
 
 Variables on `voluma-api` (names in `render.yaml`; values never go in the repo):
 
 | Variable | Value |
 |---|---|
-| `DATABASE_URL` | `fromDatabase` `voluma-db` `connectionString` (the private URL; no pooler, so prepared statements work) |
+| `DATABASE_URL` | Neon's direct (unpooled) connection string, `sslmode=require`; asked for when the Blueprint is created. The pooled host (`-pooler`) breaks prepared statements |
 | `VOLUMA_API_TOKEN` | random 32 bytes, hex. The runner reads it from here |
 | `VOLUMA_DEBUG_TOKEN` | optional; random 32 bytes, hex. Lets agents read every lab's runs (`GET /api/run/runs…`) and nothing else; unset turns it off |
 | `APP_URL` | the origin browsers use, no trailing slash: today the service's own `RENDER_EXTERNAL_URL` (self-reference in the yaml); with a custom domain, replace it with that origin as a literal. Must be https (the session cookie is then `Secure` and named `__Host-wos-session`). Builds the sign-in redirect and the `Origin` check |
@@ -113,7 +113,6 @@ Reference: https://api-docs.render.com.
 | `voluma-api` | `<API_ID>` (`srv-...`; filled in at cutover) |
 | `voluma-gateway` | `<GATEWAY_ID>` |
 | `voluma-runner` | `<RUNNER_ID>` |
-| `voluma-db` | `<DB_ID>` (`dpg-...`) |
 
 ```bash
 r() { curl -s -H "Authorization: Bearer $RENDER_API_KEY" -H 'Content-Type: application/json' "$@"; }
@@ -163,18 +162,42 @@ CSRF check answers any request that changes state without a bearer token, sign-i
 (`upload-scan.ts` shows how). Reading runs needs no sign-in: `Authorization: Bearer
 $VOLUMA_DEBUG_TOKEN` reads every lab's runs.
 
-**The database from outside** (a dump, a restore, a drill): `voluma-db` has no external access
-(`ipAllowList: []`). Add the operator's address in the dashboard (`voluma-db`, Networking) or
-by setting `ipAllowList` in `render.yaml`, take the external URL from
-`r "$B/postgres/<DB_ID>/connection-info"` (never print it), run `pg_dump` or `pg_restore`, then
-remove the address.
+## The database (Neon)
 
-**Restoring a dump into `voluma-db`:** the API's pre-deploy has already migrated it, so a plain
-restore collides with the existing tables. Suspend the API, gateway and runner first
-(`r -X POST "$B/services/<ID>/suspend"` for each, so nothing writes while the tables are
-replaced), run `pg_restore --clean --if-exists --no-owner --no-acl`, then resume the three
-(`.../resume`). Compare row counts with the source (`runs`, `run_events`, `provider_calls`)
-before trusting it.
+Neon project in AWS us-east-1, Free plan (Jimmy's choice on 2026-10-30, for cost: Render bills
+a database every hour it exists). Both `DATABASE_URL`s are its **direct** connection string
+(Connect modal, pooling off), `sslmode=require`. Free-plan limits, from
+https://neon.com/pricing on 2026-10-30:
+
+| Limit | Free plan |
+|---|---|
+| Storage | 1 GB per project; at the limit writes are blocked |
+| Compute | 100 CU-hours per month per project; when used up, compute pauses until the next period |
+| Scale to zero | always on, can't be turned off: compute suspends after 5 minutes idle and resumes on the next connection |
+| History retention | 6 hours (point-in-time restore), capped at 1 GB |
+
+What that means here:
+
+- **Size.** Staging held 183 MB on 2026-10-30, 141 MB of it `pi_messages`, and grows about
+  10 MB per run: about 80 runs from the limit. Check it (`select pg_size_pretty(pg_database_size(current_database()))`) now and then; [TODO.md](TODO.md) tracks it.
+- **Compute hours are the tighter limit.** The runner polls `claim` every 2 s, so with it
+  running the compute never reaches its 5 idle minutes. At 0.25 CU that is about 6 CU-hours a
+  day, about 180 a month against the 100 allowed; the 5 days to Nov 4 cost about 30. With the
+  runner suspended, the gateway's 5-minute sweep (`SWEEP_MS` in `apps/gateway/src/main.ts`) may
+  still keep it awake: unchecked. Past the cap compute pauses and every call fails. Launch
+  (pay as you go) is $0.106 per CU-hour and $0.35 per GB-month. After Nov 4 check Neon's
+  console usage ([TODO.md](TODO.md)).
+- **Scale to zero** costs the first query after 5 idle minutes a cold start. postgres.js is
+  expected to reconnect and succeed; it is a cutover check, not yet seen.
+- **Backups** are the 6-hour history only. Take a `pg_dump` before anything risky.
+
+**A dump or restore** connects from the operator's machine to the direct URL (Neon has no
+allow list by default). **Restoring a dump into Neon:** the API's pre-deploy has already
+migrated it, so a plain restore collides with the existing tables. Suspend the API, gateway and
+runner first (`r -X POST "$B/services/<ID>/suspend"` for each, so nothing writes while the
+tables are replaced), run `pg_restore --clean --if-exists --no-owner --no-acl -d "$NEON_DIRECT_URL" dump`, then resume the API and gateway
+(`.../resume`; the runner stays suspended until a run). Compare row counts with the source
+(`runs`, `run_events`, `provider_calls`) before trusting it. Never print the URL.
 
 ## Rotating secrets
 
@@ -186,7 +209,7 @@ ends that exposure for what was only there.
 |---|---|---|
 | `VOLUMA_API_TOKEN` | `voluma-api` variables (the runner reads it from there) | New value (`openssl rand -hex 32`) on `voluma-api`; the restart applies it. Then the runner picks it up at the next Blueprint sync (`fromService`), or set it by hand and restart the runner. Old token stops working at once. A local runner updates its copy |
 | `VOLUMA_DEBUG_TOKEN` | `voluma-api` variables; the agents that debug runs | Same as `VOLUMA_API_TOKEN`; only the agents' copies change |
-| Postgres password | `voluma-db` (Render generates it; `DATABASE_URL` carries it) | Dashboard, `voluma-db`, Credentials: "+ New default credential" (or the create-user endpoint, `POST /postgres/<DB_ID>/users`; neither run yet), then delete the old one. `fromDatabase` values follow on the next Blueprint sync; after it restart the API and gateway, then check `/health` and one authenticated call. Never `ALTER USER` by hand: it changes the database and leaves `DATABASE_URL` stale |
+| Postgres password | the Neon role; `DATABASE_URL` on `voluma-api` and `voluma-gateway` carries it | Neon console, project, branch, Roles, the role's menu, Reset password (it takes effect at once: the old password fails on the next connection). Copy the new connection string from Connect (direct, `sslmode=require`), set it on `voluma-api` and `voluma-gateway`, and restart both. Expect a short error window between the reset and the restart; check `/health` and one authenticated call |
 | `RENDER_API_KEY` (`.env`) | the repo `.env` of whoever deploys | Dashboard, Account Settings, API Keys: create a new one, replace it in `.env`, delete the old |
 | `WORKOS_COOKIE_PASSWORD` | `voluma-api` variables; `.env` | New value on `voluma-api`; restart. Every session cookie stops unsealing, so everyone signs in again. Rotate it whenever it may have leaked: it is the key to forging a session cookie, though a forged one still needs a token WorkOS signed |
 | `WORKOS_API_KEY` | `voluma-api` variables; `.env` | Dashboard, API Keys: create a new key, replace it on `voluma-api` and restart, then delete the old one. It authorizes token refresh and session revocation |
@@ -201,7 +224,7 @@ its own variables (names in [../../runner/.context/deploy.md](../../runner/.cont
 ## Least privilege
 
 - A Render API key reaches every workspace of the account, not one environment; keep it in `.env` only.
-- Postgres has no external access; only services in the workspace's Virginia private network reach it. Open it only for the dump or restore in "Operating staging", and close it after.
+- Neon is reachable from the internet (TLS and the password only; no allow list on the free plan). Keep the direct URL in the two services' variables and the operator's shell, never in the repo or a log.
 - The API holds no model keys. Its R2 key reads and writes objects in `voluma-staging` only; no R2 key ever reaches the browser, which gets presigned URLs for one object each.
 
 ## Checked on staging (2026-10-28, on Railway)
