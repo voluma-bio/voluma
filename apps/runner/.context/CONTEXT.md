@@ -217,8 +217,8 @@ the server's `retry-after`), 5xx or dropped connection. `model-retry.ts` wraps e
 treats as final (about half of all calls on 2026-10-28), when the call failed before streaming
 any content: backoff from 1 s doubling to a 30 s cap, until 4 minutes have passed since the first
 attempt (Pi's own tries count against it; an attempt in flight is not cut short), each retry
-logged with its role and attempt and reported to the fallback breaker. The run's abort ends the
-wait. Any other error, or the spent budget, ends the call. `provider-error.ts` holds the one error classification (retry, redo and breaker):
+logged with its role and attempt. The run's abort ends the
+wait. Any other error, or the spent budget, ends the call. `provider-error.ts` holds the one error classification (retry and redo):
 it reads the status in the text (Pi's `<provider> API error (<status>)`, or the Anthropic SDK's
 `<status> {...}`, `<status> <html>` or `<status> status code (no body)`) and, for an Anthropic error sent mid-stream
 with no status, its documented `error.type` (`overloaded_error` is 529, `rate_limit_error` 429).
@@ -226,7 +226,7 @@ with no status, its documented `error.type` (`overloaded_error` is 529, `rate_li
 **A thread that dies on a provider error** (`provider-error.ts`, after the retries above gave up)
 is the run loop's to handle (`packages/harness/src/run-loop.ts`): a check is started again as a new
 check, the main agent as `main.<n+1>`, up to `maxProviderRedos` (2) per thread; a worker's failure
-is a notice to the main agent. A fatal error (a refused key, with no fallback model) fails the run
+is a notice to the main agent. A fatal error (a refused key) fails the run
 at once, with the error in `state.error`, instead of leaving it `completed` with tasks that never
 started.
 
@@ -316,8 +316,8 @@ A role's thinking level is its role file's `thinking` key, else `RUNNER_THINKING
 levels), else none (`"off"`). `run.ts` passes it as the role's `thinkingLevel`, which `start-thread.ts` sets
 as the Pi agent's `initialState.thinkingLevel`, so Pi sends it as `reasoning` and records it on each
 History message. Pi clamps an unsupported level silently, so two checks refuse one: `main.ts` at boot
-checks `RUNNER_THINKING` against every alias and the fallback; `run.ts` at run start checks each
-role's set level against its model and the fallback (the role files load per run); both use `thinking.ts`, and a level nobody set is not checked. `"off"` sends
+checks `RUNNER_THINKING` against every alias; `run.ts` at run start checks each
+role's set level against its model (the role files load per run); both use `thinking.ts`, and a level nobody set is not checked. `"off"` sends
 no level: for DeepSeek that means `thinking: disabled`. Visitor runs always use `"off"`. The level is
 not in the log, so a resumed thread takes it from the snapshotted role file and the current config.
 
