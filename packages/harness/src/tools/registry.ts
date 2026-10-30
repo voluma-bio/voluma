@@ -49,9 +49,10 @@ export const TOOL_NAMES = [
 export type ToolName = (typeof TOOL_NAMES)[number];
 
 /** The tools that need only the thread's own layout and the run's files. */
-const factories: Record<string, (deps: ToolDeps) => Tool> = {
+const factories: Record<string, (deps: ToolDeps, names: readonly string[]) => Tool> = {
   bash: ({ layout }) => bashTool(layout),
-  view_image: ({ layout, files }) => viewImageTool({ layout, files }),
+  view_image: ({ layout, files }, names) =>
+    viewImageTool({ layout, files, hasSandbox: names.includes("bash") }),
   segment_sam: ({ layout }) => segmentSamTool(layout),
   read_file: ({ layout, files }) => readFileTool({ layout, files }),
 };
@@ -66,7 +67,7 @@ export function buildTools(names: readonly string[], deps: ToolDeps): Tool[] {
     const tool = Object.hasOwn(coordination, name)
       ? coordination[name]
       : Object.hasOwn(factories, name)
-        ? factories[name]?.(deps)
+        ? factories[name]?.(deps, names)
         : undefined;
     if (!tool) throw new Error(`tool "${name}" is not registered`);
     return tool;

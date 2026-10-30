@@ -8,6 +8,7 @@ import type { Folded } from "@voluma/contracts/fold";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { RecordedPin } from "@voluma/contracts/workflow";
 import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
+import { withImageRefs } from "./adapters/pi/image-refs";
 import type { RunLayout } from "./layout";
 import { keepOutputs } from "./outputs-backup";
 import type { Evidence } from "./ports/evidence";
@@ -99,7 +100,7 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
   const pool = threads(
     {
       recorder,
-      history: options.history,
+      history: withImageRefs(options.history, options.files, runId),
       sandbox: options.sandbox,
       release: options.releaseSandbox,
       providerOutage: options.providerOutage,
