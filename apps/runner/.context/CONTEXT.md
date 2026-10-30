@@ -124,8 +124,8 @@ records `assets.ready` / `assets.failed` on the root thread (id `<runId>:assets:
   non-zero exit from a sandbox that is gone counts as a sandbox failure (the one retry), not a
   failed file.
 - **Signal.** One rule: the worker halts exactly when the stop will not end the run (server stop,
-  lost lease, self-stop, shutdown; `reportFor` is not `ended`). A spend cap and an uncaught
-  `error` end the run, so they drain, as does `finally`'s own `abort`, which the worker outlives.
+  lost lease, self-stop, shutdown; `reportFor` is not `ended`). An uncaught
+  `error` ends the run, so the worker drains, as it does on `finally`'s own `abort`, which the worker outlives.
   `run.ts` remembers which stop halted it (`haltedBy`) and rebuilds the report from that one,
   never from the first stop. A stopped worker records nothing; the next claim finds the files again and the
   converter skips what has a `manifest.json` of its version and mode.
@@ -259,15 +259,7 @@ when a claim reports (`model cost this claim`), and the API stores it as `runs.m
 On 2026-10-28 the claims' lines summed to the run's `model_cost_usd` and to `spend(events).total`
 ($0.9763 over five claims of one run).
 
-**Spend cap.** `RUNNER_MAX_RUN_COST_USD` caps a run's dollars across all its claims (sandbox time
-is not counted). Unset, the default, there is no cap: test runs have none, so leave it unset on
-staging and locally (spend is still recorded and shown). When set it goes to the API with each
-claim and becomes `runs.cost_cap_usd` (null: no cap),
-which the provider gateway checks too ([apps/gateway](../../gateway/.context/CONTEXT.md)). The runner's
-total is the last heartbeat's `spentUsd` (model cost plus the known cost of gateway calls; an open call
-or one with unknown cost counts nothing) plus the model cost not yet sent, checked on each model cost and each acknowledged
-heartbeat; at the cap `run.ts` stops the run and reports `ended failed` with
-`spend cap $X reached at $Y`. Calls in flight are aborted, not waited for. A claim of a run already over the cap stops before its first call. It applies to visitor runs too. The run loop ends the root thread `cancelled` in the event log while the run row says `failed` with the cap text.
+**No spend cap.** Spend is recorded and shown, never limited: no run, claim or gateway call is refused or stopped for cost (removed 2026-10-30; [decisions](../../../.context/decisions.md)).
 
 **`segment_sam` 404.** Meta answers `404 model_not_found` for some inputs (seen: a small box prompt)
 and bills nothing for it. The adapter retries once on the uploaded file; a second 404 throws a

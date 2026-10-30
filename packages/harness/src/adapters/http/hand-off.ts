@@ -6,11 +6,7 @@ import { type Claim, claimResponseSchema } from "@voluma/contracts/runner";
 import { type Endpoint, postJson } from "./request";
 
 /** The next run this runner may start, leased to it; null when there is none. */
-export async function claimRun(
-  endpoint: Endpoint,
-  runnerId: string,
-  costCapUsd: number | undefined,
-): Promise<Claim | null> {
-  const response = await postJson(endpoint, "/api/run/ingest/claim", { runnerId, costCapUsd });
+export async function claimRun(endpoint: Endpoint, runnerId: string): Promise<Claim | null> {
+  const response = await postJson(endpoint, "/api/run/ingest/claim", { runnerId });
   return claimResponseSchema.parse(await response.json()).claim;
 }

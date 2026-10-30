@@ -37,12 +37,7 @@ change it safely.
   must hold a top-level `model` (else 403); a repeated `model` key anywhere, or an
   escaped top-level key, refuses at admission or, past 4 KB, errors the upstream stream so the
   call settles `cut`. Never read a price-relevant field from a body by regex.
-- **A null `runs.cost_cap_usd` is no spend cap.** Admission skips the spend check; the in-flight
-  limit, exact routes and model allowlist still apply, and every call is still recorded. With a
-  cap, admission refuses (402) once known spend (model cost plus known call costs) has reached it;
-  calls in flight and cut calls count nothing, so the cap can be passed by what is already running.
-  The heartbeat's `spentUsd`, `providerCalls` and the org's daily total use the same known sum.
-  `provider_calls.reserved_usd` is unused (drop: `apps/api/.context/TODO.md`).
+- **No spend limit.** Admission checks the run is live, the lease, the in-flight limit, exact routes and the model allowlist; every call is recorded and its known cost summed for `providerCalls`. `provider_calls.reserved_usd` and `runs.cost_cap_usd` are unused (drop: `apps/api/.context/TODO.md`).
 - **Exact routes** (`providers.ts`). A path with `%`, `..`, `.` or `//` segments is refused, not
   normalized. Anthropic and OpenAI have message routes only; their Files and Batches APIs stay
   closed because every run shares the account. A Meta `DELETE /v1/files/{id}` needs an id this
@@ -82,8 +77,7 @@ change it safely.
   an event stream still gets keepalives after its headers.
 - **Boot and shutdown.** While draining, new calls get 503 with `Connection: close`. At SIGTERM
   the instance drains for `GATEWAY_DRAIN_SECONDS`, aborts what remains (those calls end `cut`),
-  then marks its own leftover `open` rows `cut`. The gateway exits at boot if `provider_calls` or
-  `runs.cost_cap_usd` is missing.
+  then marks its own leftover `open` rows `cut`. The gateway exits at boot if `provider_calls` is missing.
 
 ## Known limits
 
