@@ -17,7 +17,6 @@ import { mkdir, open, readFile, statfs } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { isDeepStrictEqual, parseArgs } from "node:util";
-import { runEventSchema } from "@voluma/contracts/events";
 import { runIdSchema } from "@voluma/contracts/ids";
 import { providerCalls } from "@voluma/provider-calls";
 import { workflowById } from "@voluma/workflow/bundled";
@@ -25,11 +24,11 @@ import { eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { reviewSnapshots } from "../domains/review/schema";
-import { databaseUrl } from "../domains/run/operator";
 import { eventLock } from "../domains/run/pg-event-log";
 import { QUEUE_LOCK } from "../domains/run/pg-queue";
 import { events, piMessages, runs, studies, studyScans, threads } from "../domains/run/schema";
-import { countsOf, describeCounts, piMessagesOf, readDump } from "./run-dump";
+import { databaseUrl } from "./operator";
+import { assertRestorable, countsOf, describeCounts, piMessagesOf, readDump } from "./run-dump";
 
 const MIN_FREE_BYTES = 1024 ** 3;
 
@@ -72,7 +71,14 @@ if (bavail * bsize < MIN_FREE_BYTES) {
   throw new Error(`under 1 GB free where ${out} is; refusing to write the archive`);
 }
 const text = JSON.stringify(dump);
-const handle = await open(file, "wx", 0o600);
+// Check the serialized form that import will read, including its event timestamps.
+assertRestorable(JSON.parse(text));
+const handle = await open(file, "wx", 0o600).catch((e) => {
+  if (e.code === "EEXIST") {
+    throw new Error(`${file} exists (an earlier attempt?); remove it or pass another --out`);
+  }
+  throw e;
+});
 try {
   await handle.writeFile(text);
   await handle.sync();
@@ -93,14 +99,10 @@ for (let dir = resolve(out); ; dir = dirname(dir)) {
 // Read the copy back from disk, not from memory.
 const copy = JSON.parse(await readFile(file, "utf8")) as typeof dump;
 if (JSON.stringify(copy) !== text) throw new Error(`${file} differs from the rows read`);
-const failed = copy.events.filter((e) => !runEventSchema.safeParse(e).success);
-if (failed.length > 0) {
-  throw new Error(
-    `${failed.length} events fail runEventSchema, so import:run would refuse ${file}`,
-  );
-}
 const expected = countsOf(copy);
-console.log(`wrote ${file} (${(text.length / 1e6).toFixed(1)} MB): ${describeCounts(expected)}`);
+console.log(
+  `wrote ${file} (${(Buffer.byteLength(text) / 1e6).toFixed(1)} MB): ${describeCounts(expected)}`,
+);
 
 function matches(name: string, actual: unknown[], archived: unknown[]) {
   // RETURNING has no ordering guarantee; JSON also normalizes the database's Dates.

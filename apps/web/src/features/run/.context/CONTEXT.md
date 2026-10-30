@@ -1,8 +1,14 @@
 # Run feature
 
-One screen under `RunLayout` (its query client; the top bar is the shell's): `/runs/:id/live`,
+One screen under the shell (`AppShell`, one `QueryClient` in `SignedIn`, no top bar): `/runs/:id/live`,
 the run page (`run-page.tsx`). Starting runs is `features/study` (Run on new scans, `/new`); there
 is no runs list: Home (`features/study`) replaces it.
+
+The run's reusable parts live in `packages/run-view` (`@voluma/run-view`), so other features can
+show them without importing this one: `run-model.ts`, `transcript.ts`, `run-store.tsx`,
+`agent-thread.tsx`, `agents.tsx`, `transcript-view.tsx`, `task-flow.tsx`, `chat/`, `use-now.ts`
+(the clock), and the status and keys helpers. File names below refer to that package unless they
+are in this directory. The package has no router: `TaskFlow` takes the router `Link` as a prop.
 
 - **Task titles** come from `workflows/mouse-oa/tasks.json`, read through `catalog["mouse-oa"]`
   from `@voluma/workflow/bundled` (JSON imports parsed with the contract's schemas; the API's
@@ -51,7 +57,8 @@ is no runs list: Home (`features/study`) replaces it.
   counts), and the open check items. The Overview's badge is the same K. Cards that can't be
   accepted (a task sent back, a value missing, a failed task) show but aren't counted.
 - **Needs your eye** comes from `reviewState` (the fold plus `check.accepted`): every check item
-  of a task, open or accepted, live or finished. "Looks right" calls `acceptCheck` with
+  of a task, open or accepted, live or finished. "Looks right" calls `useAcceptCheck`
+  (`@voluma/api-client/query`, the one mutation and error rule the study page and review share; it also refetches the run, review and study reads) with
   `Run.review.revisionId`, only on a completed run that isn't an example. An ended run's stream has
   closed, so the page also counts what it accepted itself (`useAccepting`, which keeps a pending
   set per item). A To check task with no check item gets a card with no "Looks right"; a failed
@@ -62,8 +69,8 @@ is no runs list: Home (`features/study`) replaces it.
   when the file is missing (a copied run has no R2 files).
 - **One agent's thread is `<AgentThread threadId>`** (`agent-thread.tsx`), wherever it shows: the
   Agents view and "How the AI did it" today. The caller names the thread and gives it a box; the
-  container reads the run's log from `RunLogProvider` (events, live frames, halt, threads; one per
-  run page), builds its rows, and owns its header (name, status, clock, cost), its live line and
+  container reads its rows and thread from the run store (`run-store.tsx`: one per run page, fed by
+  the page's stream; selector hooks, so a thread re-renders only for its own frames), and owns its header (name, status, clock, cost), its live line and
   its own scroll, which sticks to the newest line while the reader is at the bottom. Hosts add
   header controls through `actions`. Shape from Meridian Flow's `ChatView`. Don't render a thread
   any other way; a new place for one is a new `<AgentThread>`.
@@ -121,9 +128,9 @@ is no runs list: Home (`features/study`) replaces it.
   same tail repair Flow uses); raw HTML is skipped and images show as their alt text.
 - **Live tasks** come from the run's stream (`subscribe`), published at most once per
   animation frame. The task list comes from
- the `revision.started` plan; a task not started yet is Ready when every task it builds on has a usable result (`isSatisfied` from `@voluma/workflow`, the supervisor's own rule: done, or To check with every required output), else "Waiting on" those tasks.
+ the `revision.started` plan; a task not started yet is Ready when every task it builds on has a usable result (`isSatisfied` from `@voluma/contracts/fold`, the supervisor's own rule: done, or To check with every required output), else "Waiting on" those tasks.
   Queue position and run state are not events, so `getRun` is polled every 3 s until the run ends.
-- **Visitor keys** (`@voluma/ui/run`, shared with `features/study`): a Meta key, the only
+- **Visitor keys** (`@voluma/run-view`, shared with `features/study`): a Meta key, the only
   way a guest runs (the API refuses a guest start without it, 403); a member may keep one too. A key
   in this browser is sent with every start, and `RunKeyLine` next to each Start says whose key the
   run uses and lets the user remove it. They live in localStorage under
@@ -131,8 +138,8 @@ is no runs list: Home (`features/study`) replaces it.
   (`resendKeys`) only to the user who started it.
 - A completed run links to `/runs/:runId`, the review lane's route; the live page is `/runs/:id/live` so it never shadows it. Active runs open live; stopped and failed runs open live too (it shows the error).
 
-- **A run's status chip** (`RunBadge`, `runStatus`) and the formatters (`formatUsd`,
-  `formatDuration`) are `@voluma/ui/run`, shared with Home; `status.tsx` keeps the clock.
+- **A run's status** (`runStatus`, a word and a `StatusMark` state) and the formatters (`formatUsd`,
+  `formatDuration`, `plural`, `shortDate`) are `@voluma/run-view`, shared with Home; `use-now.ts` is the clock.
 - **Cost and time** come only from `spend(events, providerCalls)` (`@voluma/contracts/spend`), run
   in `runView` on durable events, never per live frame. Run details shows the run's settled total;
   each card in the lead AI's stream and each thread in "How the AI did it" shows that thread's own

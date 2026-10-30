@@ -7,7 +7,6 @@ import { Hono } from "hono";
 import type { AppEnv } from "../../domain";
 import type {
   ReferenceArchive,
-  ReviewInputs,
   ReviewSnapshots,
   RunFiles,
   RunMessages,
@@ -24,7 +23,6 @@ export type ReviewDeps = {
   messages: RunMessages;
   /** Null without R2: run files are 503s. */
   files: RunFiles | null;
-  inputs: ReviewInputs;
   referenceArchive: ReferenceArchive | null;
 };
 

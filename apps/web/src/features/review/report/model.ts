@@ -4,7 +4,7 @@
  */
 import type { TaskStatus } from "@voluma/contracts/ids";
 import type { ReviewRun, ReviewTask } from "@voluma/contracts/review";
-import type { StatusTone } from "@voluma/ui";
+import type { Status } from "@voluma/ui";
 
 export type {
   Asset,
@@ -15,20 +15,20 @@ export type {
   Score,
 } from "@voluma/contracts/review";
 
-const statuses: Record<TaskStatus, { label: string; tone: StatusTone }> = {
-  pending: { label: "Not started", tone: "neutral" },
-  stale: { label: "Queued", tone: "neutral" },
-  "in-progress": { label: "Running", tone: "info" },
-  done: { label: "Done", tone: "primary" },
-  failed: { label: "Failed", tone: "destructive" },
-  "to-check": { label: "To check", tone: "check" },
-  "under-review": { label: "Checking", tone: "info" },
+const statuses: Record<TaskStatus, { label: string; status: Status }> = {
+  pending: { label: "Not started", status: "waiting" },
+  stale: { label: "Queued", status: "waiting" },
+  "in-progress": { label: "Running", status: "running" },
+  done: { label: "Done", status: "done" },
+  failed: { label: "Failed", status: "stopped" },
+  "to-check": { label: "To check", status: "check" },
+  "under-review": { label: "Checking", status: "checking" },
 };
 
 /** A pending row has no attempt; a recorded worker start still rules out "Not started". */
-export function taskStatus(task: ReviewTask): { label: string; tone: StatusTone } {
+export function taskStatus(task: ReviewTask): { label: string; status: Status } {
   return task.status === "pending" && task.threads.worker
-    ? { label: "No result recorded", tone: "neutral" }
+    ? { label: "No result recorded", status: "waiting" }
     : statuses[task.status];
 }
 

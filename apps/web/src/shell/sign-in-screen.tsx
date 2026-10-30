@@ -4,10 +4,10 @@
  * layout, also used when the API can't be reached.
  */
 import { signIn } from "@voluma/api-client";
-import { type Me, signinOutcomeSchema } from "@voluma/contracts/auth";
+import { signinOutcomeSchema } from "@voluma/contracts/auth";
 import { Button } from "@voluma/ui";
 import type { ReactNode } from "react";
-import { BrandLockup } from "./top-bar";
+import { BrandLockup } from "./account";
 
 // Back to this page after sign-in, without the outcome of the last attempt.
 function startSignIn() {
@@ -16,9 +16,7 @@ function startSignIn() {
   signIn(url.pathname + url.search);
 }
 
-/** `onSignedIn` lets an in-page sign-in (the demo's visitor) hand its session to the gate. */
-// biome-ignore lint/correctness/noUnusedFunctionParameters: "Explore the demo" (next PR) calls it.
-export function SignInScreen({ onSignedIn }: { onSignedIn: (me: Me) => void }) {
+export function SignInScreen() {
   const outcome = signinOutcomeSchema.safeParse(new URLSearchParams(location.search).get("signin"));
   if (outcome.data === "not-a-member")
     return (
@@ -44,8 +42,6 @@ export function SignInScreen({ onSignedIn }: { onSignedIn: (me: Me) => void }) {
       <Button variant="primary" onClick={startSignIn}>
         Sign in
       </Button>
-      {/* "Explore the demo" goes here, as a quiet button beside Sign in that
-          mints a visitor and passes it to onSignedIn. */}
     </GateScreen>
   );
 }

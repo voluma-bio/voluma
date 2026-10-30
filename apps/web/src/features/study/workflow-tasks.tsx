@@ -4,6 +4,7 @@
  * skills), and the measurements it reports. Shown in "See tasks" (a side panel over Run on new
  * scans, so the choice in progress stays put) and on the Workflows page.
  */
+import { Button } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import { ExternalLink, X } from "lucide-react";
 import { useEffect, useRef } from "react";
@@ -101,15 +102,12 @@ export function WorkflowPanel({
       </div>
       <footer className="border-t border-border px-5 py-3">
         {/* A new tab: leaving Run on new scans would drop the uploads under way. */}
-        <Link
-          to="/workflows"
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex items-center gap-1.5 text-ui text-primary-text hover:underline"
-        >
-          Open in Workflows
-          <ExternalLink className="size-3.5" aria-label="opens in a new tab" />
-        </Link>
+        <Button asChild variant="link" className="text-ui">
+          <Link to="/workflows" target="_blank" rel="noreferrer">
+            Open in Workflows
+            <ExternalLink aria-label="opens in a new tab" />
+          </Link>
+        </Button>
       </footer>
     </dialog>
   );

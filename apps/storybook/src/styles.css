@@ -1,0 +1,21 @@
+/* The app's global styles, minus the features: Tailwind over the tokens, scanning packages/ui. */
+@import "tailwindcss";
+@import "@voluma/design-tokens/tokens.css";
+@import "@voluma/design-tokens/theme.css";
+@import "@voluma/design-tokens/fonts.css";
+@import "@voluma/run-view/styles.css";
+@source "../../../packages/run-view/src";
+@source "../../../packages/ui/src";
+
+body {
+  font-family: var(--sans);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+/* In the base layer, as in the app, so a utility on a themed element still wins. */
+@layer base {
+  [data-theme] {
+    color: var(--foreground);
+  }
+}
