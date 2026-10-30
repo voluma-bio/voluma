@@ -290,7 +290,7 @@ export type NeedItem = {
   image?: Asset;
   accepted: boolean;
   /**
-   * A check item "Looks right" can accept; "K to check" counts these (`progress`). A task left
+   * A check item "Looks right" can accept; "K items to check" counts these (`progress`). A task left
    * To check with no item (its check sent it back, or a required value is missing) still gets
    * a card, with nothing to accept.
    */
