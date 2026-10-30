@@ -170,7 +170,7 @@ describe("run loop", () => {
       plan,
       worker: twice,
       main: first(feedback, chain(["t1"])),
-      check: checker((id, n) => (n === 1 ? "needs-review" : "passed")),
+      check: checker((_id, n) => (n === 1 ? "needs-review" : "passed")),
     });
     const folded = await w.run();
     expect(
