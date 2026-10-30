@@ -211,24 +211,28 @@ export function taskRuntime(options: TaskRuntimeOptions) {
   }
 
   /**
-   * The declared outputs the task's previous attempt reported (the latest earlier attempt with
-   * reports, whatever it reported, `missing` included) that its current attempt has not: only the
-   * current attempt's reports count, so each would otherwise vanish. `fresh`: the current attempt
+   * The declared outputs the task's previous attempt reported (the latest earlier attempt handed
+   * to a check, whatever it reported, `missing` included) that its current attempt has not: only
+   * the current attempt's reports count, so each would otherwise vanish. An attempt that was never
+   * submitted (a stopped half-redo) is not the baseline. `fresh`: the current attempt
    * is not opened yet, so every attempt in the log is earlier. Read from the events, which the
    * fold keeps only for the current attempt.
    */
   function droppedOutputs(taskId: string, fresh: boolean): string[] {
     const reported = new Map<string, Set<string>>();
     const opened: string[] = [];
+    const checked = new Set<string>();
     for (const e of recorder.events()) {
       if (e.type === "attempt.opened" && e.payload.taskId === taskId) opened.push(e.id);
+      if (e.type === "task" && e.payload.taskId === taskId && e.payload.status === "under-review")
+        checked.add(e.payload.attemptId);
       if (e.type === "output" && e.payload.taskId === taskId) {
         const ids = reported.get(e.payload.attemptId) ?? new Set<string>();
         reported.set(e.payload.attemptId, ids.add(e.payload.outputId));
       }
     }
     const earlier = fresh ? opened : opened.slice(0, -1);
-    const previous = earlier.filter((a) => reported.has(a)).at(-1);
+    const previous = earlier.filter((a) => checked.has(a)).at(-1);
     const now = fresh ? undefined : opened.at(-1);
     const declared = known(taskId).outputs;
     return declared
@@ -526,7 +530,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
         const dropped = droppedOutputs(taskId, target.fresh);
         if (dropped.length > 0) {
           throw new Refusal(
-            `${taskId} cannot be submitted: your previous attempt reported ${dropped.join(", ")}, and this one has not. Report each again with report_output, or report it missing with the reason (a measurement: value null with the reason).`,
+            `${taskId} cannot be submitted: the previous attempt of ${taskId} reported ${dropped.join(", ")}, and this one has not. Report each again with report_output, or report it missing with the reason (a measurement: value null with the reason).`,
           );
         }
         const id = effectId("submit_task", c.threadId, c.toolCallId);
