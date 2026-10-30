@@ -499,8 +499,8 @@ export function subscribe(
     onLive?: (frame: LiveFrame) => void;
     onError?: (error: unknown) => void;
     /**
-     * The stream will not reconnect. `error`: the server refused or failed it (404, 401, 5xx), or
-     * answered 204 (an ended run with nothing after `after`); otherwise it sent the run's end.
+     * The stream will not reconnect. `error`: the server refused or failed it (404, 401, 5xx);
+     * otherwise it sent the run's end (also at once for an ended run with nothing after `after`).
      */
     onClosed?: (error: boolean) => void;
   },

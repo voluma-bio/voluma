@@ -15,13 +15,13 @@ export type StreamClosed = { at: number; failures: number };
  * query's `dataUpdatedAt`) says the run isn't ended: a message reopened it, or the stream
  * failed mid-claim. A read that landed before the close can't say, so the stream never reopens
  * on it. `dataUpdatedAt` is when a read landed, not when it left, so a poll in flight across a
- * claim's end can still say `running` and cost one or two extra stream requests; the ended-run
- * retry below bounds it. Errors in a row (a 502 while the API deploys) wait 1 s, 2 s, 4 s… up
- * to 30 s after the first.
+ * claim's end can still say `running` and cost one extra stream request, which the server ends
+ * at once with `end`. Errors in a row (a 502 while the API deploys) wait 1 s, 2 s, 4 s… up to
+ * 30 s after the first.
  *
- * Once the run has ended, a stream that closed on an error reopens once more, for the events
- * it missed if it failed before the claim ended. Only once: the server answers 204 when nothing
- * was missed, which `EventSource` reports as an error too.
+ * Once the run has ended, a stream that closed on an error reopens once more, for the events it
+ * missed if it failed before the claim ended; the server then sends them and `end`. Only once,
+ * so a stream that keeps failing on an ended run (a 404) stops.
  */
 export function useStreamReopen(
   closed: StreamClosed | null,
@@ -54,7 +54,5 @@ export function useStreamReopen(
 export function waitingOnYou(status: RunState["status"], events: readonly RunEvent[]): boolean {
   const { open } = corrections(events);
   if (status !== "ended" || !open) return false;
-  // TODO(#223): read `open.replied` once corrections() carries it.
-  const replied = events.slice(open.reopened, open.to).some((e) => e.type === "reply");
-  return replied && (open.go === undefined || open.go.redone);
+  return open.replied && (open.go === undefined || open.go.redone);
 }
