@@ -10,7 +10,9 @@
  * started once more. State changes go to `onState` with the thread they belong to (the
  * runner writes them as `sandbox` events).
  */
+
 import { type Sandbox, SandboxEndedError } from "./ports/sandbox";
+import { SandboxUnavailableError } from "./tools/tool";
 
 export type SandboxState = "starting" | "ready" | "stopped" | "failed";
 
@@ -68,7 +70,8 @@ function threadSandbox(
         } catch (error) {
           if (current?.generation === generation) current = undefined;
           onState(threadId, "failed", String(error));
-          throw error;
+          // Every creation path (first use, a replacement mid-command) fails the same way.
+          throw new SandboxUnavailableError(`the sandbox could not be started: ${String(error)}`);
         }
       })(),
     };

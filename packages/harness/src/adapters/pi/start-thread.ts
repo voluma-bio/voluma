@@ -437,17 +437,13 @@ function toAgentTool(
           toolCallId,
           batchSize: batchSize(toolCallId),
           signal: signal ?? new AbortController().signal,
-          sandbox: () =>
-            sandbox(threadId).catch((error: unknown) => {
-              throw new SandboxUnavailableError(
-                `the sandbox could not be started: ${String(error)}`,
-              );
-            }),
+          sandbox: () => sandbox(threadId),
           output: (stream, text) =>
             recorder.live({ type: "tool.output", threadId, toolCallId, stream, text }),
         });
       } catch (error) {
-        // Voluma's failure, not the call's: the model and the run page are told so.
+        // Voluma's failure, not the call's: recorded as `infrastructure`, and the run page
+        // doesn't count it as the agent's failed call.
         if (!(error instanceof SandboxUnavailableError)) throw error;
         result = { output: error.message, isError: true, infrastructure: true, truncated: false };
       }

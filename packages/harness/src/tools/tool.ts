@@ -24,8 +24,8 @@ export interface ToolContext {
 }
 
 /**
- * `ToolContext.sandbox()` could not give the thread a sandbox (creation failed). The tool lets
- * it propagate; the Pi adapter turns it into an error result flagged `infrastructure`.
+ * The thread's sandbox could not be created (`sandbox-session.ts`, first use or a replacement).
+ * The tool lets it propagate; the Pi adapter turns it into an error result flagged `infrastructure`.
  */
 export class SandboxUnavailableError extends Error {}
 
