@@ -55,8 +55,7 @@ export type TaskStatus = z.infer<typeof taskStatusSchema>;
  * - `held`: started, and no AI is working on it or checking it: the lead AI decides what's next.
  * - `skipped`: skipped by the plan, or builds on a skipped task.
  * - `failed`: failed, or its AI failed on the error that failed the run.
- * - `stopped`, `paused`, `awaiting-ai`: started when the run ended, while it waits for a runner
- *   or keys, or while it is held until the AI is back.
+ * - `stopped`, `paused`: started when the run ended, or while it waits for a runner or keys.
  */
 export const taskStateSchema = z.enum([
   "waiting",
@@ -70,7 +69,6 @@ export const taskStateSchema = z.enum([
   "failed",
   "stopped",
   "paused",
-  "awaiting-ai",
 ]);
 export type TaskState = z.infer<typeof taskStateSchema>;
 

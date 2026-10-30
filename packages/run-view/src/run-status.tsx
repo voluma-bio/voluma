@@ -1,7 +1,7 @@
 /**
  * The status words of a run and of a study, from their read models alone (no events), shared by
  * Home, the study page and the run page so they read the same: Running, N to check, Checked,
- * Failed, Stopped, Waiting (queued), AI unavailable (queued, held after an outage),
+ * Failed, Stopped, Waiting (queued),
  * Needs your keys, Not started. A completed run with no open
  * item reads "Checked" (a failed task raises an item), and "Reviewed" once someone marks it
  * reviewed, which is never inferred. Also where a run's row links, and how its cost and time read.
@@ -61,9 +61,7 @@ export function liveStatus(run: Pick<StudyRunSummary, "state" | "review" | "task
 export function runStatus({ state, review }: Pick<StudyRunSummary, "state" | "review">): RunStatus {
   switch (state.status) {
     case "queued":
-      return state.waitingForProvider
-        ? { label: "AI unavailable", status: "paused" }
-        : { label: "Waiting", status: "waiting" };
+      return { label: "Waiting", status: "waiting" };
     case "running":
       return { label: "Running", status: "running" };
     case "awaiting-keys":
@@ -114,12 +112,7 @@ export function studyStatus({
   if (toCheck > 0) return { label: `${toCheck} to check`, status: "check" };
   if (count("running") > 0) return { label: "Running", status: "running" };
   if (count("awaiting-keys") > 0) return { label: "Needs your keys", status: "paused" };
-  // Nothing running or needing keys: every live run is queued, and held ones wait for the AI.
-  const queued = newest.filter(({ state }) => state.status === "queued");
-  if (queued.length > 0)
-    return queued.every(({ state }) => state.status === "queued" && state.waitingForProvider)
-      ? { label: "AI unavailable", status: "paused" }
-      : { label: "Waiting", status: "waiting" };
+  if (count("queued") > 0) return { label: "Waiting", status: "waiting" };
   // What is left: completed, stopped, or never run.
   const stopped = count("cancelled");
   const notStarted = scans - newest.length;

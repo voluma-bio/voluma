@@ -41,7 +41,6 @@ export function TaskMark({ state, className }: { state: TaskState; className?: s
       return <span aria-hidden className={cx(base, "border-2 border-info")} />;
     case "stopped":
     case "paused":
-    case "awaiting-ai":
       return <span aria-hidden className={cx(base, "bg-muted-foreground")} />;
     case "skipped":
       return (

@@ -40,12 +40,11 @@ shown as its scan and linked straight to its scan review (`/scans/:runId`, `runH
   `DOMParser`, loaded only when an `.xlsx` is dropped.
 - **Shared with `features/run`** through `@voluma/run-view`: the run and study status words
   (`runStatus`, `studyStatus`, each a word and a `StatusMark` state: Running, N to check, Checked, Reviewed, Failed,
-  Stopped, Waiting, AI unavailable, Needs your keys (paused), Not started), `liveStatus` ("Task N of M"
+  Stopped, Waiting, Needs your keys (paused), Not started), `liveStatus` ("Task N of M"
   while running), the run and item links, the Study panel and `ItemToCheck`, the formatters, and visitor
   keys. `runStatus`, `studyStatus` and `runHref` take a run's `state` and `review`, which a full
   `Run` and a `newestRuns` entry both carry; a study of one reads as `runStatus` of its run.
-  "AI unavailable" is a queued run the API holds after the AI's provider failed, and a study whose
-  live runs are all held; counts say "N waiting for the AI" for them. "Not started" is only a scan
+  "Not started" is only a scan
   with no run; a stopped one reads "N stopped", joined with the
   rest ("1 stopped, 1 not started"). A study reads "Reviewed" once every scan's newest run is
   completed and reviewed. The study page uses

@@ -71,13 +71,12 @@ export function progress(revision: {
 
 /**
  * Where the run stands, as far as its tasks' states need it: `stopped` once it has ended,
- * `paused` while it waits for a runner or keys, `awaiting-ai` while it is held until the AI is
- * back, none while it runs or is queued to.
+ * `paused` while it waits for a runner or keys, none while it runs.
  */
 /** What `taskStates` reads of a folded task. */
 export type StateFacts = Pick<FoldedTask, "id" | "status" | "skipped" | "satisfied" | "threads">;
 
-export type RunHalt = "stopped" | "paused" | "awaiting-ai" | undefined;
+export type RunHalt = "stopped" | "paused" | undefined;
 
 /**
  * Every plan task's state, the one rule the scan review and the study both show. It reads fold
