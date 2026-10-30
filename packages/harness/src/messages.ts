@@ -190,7 +190,7 @@ function personLine(n: Extract<Notice, { kind: "person" }>): string {
   return lines.join("\n");
 }
 
-/** A plan task as the main agent sees it. The fold has a row only once a task has an attempt or is skipped. */
+/** A plan task as the main agent sees it. */
 export interface TaskRow {
   id: string;
   status: string;
@@ -199,18 +199,15 @@ export interface TaskRow {
   skipped: string | undefined;
 }
 
-/** One row per task of the plan, `pending` for a task the fold has no row for. */
+/** One row per task of the plan. */
 export const taskRows = (view: Folded): TaskRow[] =>
-  view.plan.tasks.map(({ id }) => {
-    const t = view.tasks.find((x) => x.id === id);
-    return {
-      id,
-      status: t?.status ?? "pending",
-      reason: t?.reason ?? null,
-      rejected: t?.rejected ?? false,
-      skipped: t?.skipped?.reason,
-    };
-  });
+  view.tasks.map((t) => ({
+    id: t.id,
+    status: t.status,
+    reason: t.reason,
+    rejected: t.rejected,
+    skipped: t.skipped?.reason,
+  }));
 
 /** The tasks the run cannot end with: not skipped, and neither done nor left to check. */
 export const unfinished = (view: Folded): TaskRow[] =>

@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { eventInputSchema, runEventSchema, runEventsResponseSchema } from "./events";
-import { fold } from "./fold";
+import { fold, isSatisfied, transitiveDependents } from "./fold";
 import { expectParses, log, need, RUN, rev, SHA, SUP, twoDone, W } from "./fold-test-log";
 import { reviewState } from "./review-state";
 
@@ -51,13 +51,79 @@ describe("fold", () => {
     expectParses(f);
   });
 
-  it("a task with no attempt has no row; a bare attempt is in progress", () => {
+  it("a bare attempt is in progress", () => {
     const l = log();
     l.run();
     l.open("w:1:open", W, "a");
     const f = fold(l.events);
     expect(f.tasks.map((t) => [t.id, t.status])).toEqual([["a", "in-progress"]]);
     expectParses(f);
+  });
+
+  it("every plan task has a row in plan order: pending without an attempt, with its latest worker", () => {
+    const l = log();
+    const out = {
+      id: "x",
+      kind: "measurement",
+      unit: "mm",
+      on: [] as string[],
+      required: true,
+    } as const;
+    l.run({
+      tasks: [
+        { id: "a", title: "Task A", instructions: "Do a.", dependsOn: [], outputs: [out] },
+        { id: "b", dependsOn: ["a"], outputs: [out] },
+        { id: "c", dependsOn: [], outputs: [] },
+      ],
+    });
+    l.thread("w2", "worker");
+    l.add("thread.started", "w2:again", "w2", {
+      parentThreadId: null,
+      workflows: [],
+      kind: "worker",
+      task: "c",
+    });
+    l.open("w:1:open", W, "b");
+    const f = fold(l.events);
+    expect(f.tasks.map((t) => [t.id, t.status, t.attemptId])).toEqual([
+      ["a", "pending", null],
+      ["b", "in-progress", "w:1:open"],
+      ["c", "pending", null],
+    ]);
+    // Nothing reported and nothing owed yet; the title and ask are the plan's.
+    expect(need(f, "a")).toMatchObject({
+      title: "Task A",
+      ask: "Do a.",
+      resultRevisionId: "root:revision",
+      missing: [],
+      missingRequired: [],
+      satisfied: false,
+      threads: { worker: null, check: null },
+    });
+    expect(need(f, "b")).toMatchObject({ title: "b", ask: "", missingRequired: ["x"] });
+    expect(need(f, "c").threads.worker).toBe("w2");
+    expectParses(f);
+  });
+
+  it("sentBack lists the attempts the check sent back; a milestone carries its thread and summary", () => {
+    const l = log();
+    l.run({ tasks: [{ id: "a", dependsOn: [], outputs: [] }] });
+    l.open("w:1:open", W, "a");
+    l.checkpoint("w:1", W, "a", "w:1:open", { summary: "Did it." });
+    l.thread("c1", "check", "w:1:open");
+    l.checkpoint("c1:1", "c1", "a", "w:1:open", { verdict: "needs-review" });
+    l.result("c1", "a", "w:1:open");
+    const first = need(fold(l.events), "a");
+    l.open("w:2:open", W, "a");
+    const row = need(fold(l.events), "a");
+    expect(row.sentBack).toEqual(["w:1:open"]);
+    expect(row.attemptId).toBe("w:2:open");
+    expect(first.milestones).toMatchObject([
+      { id: "w:1", threadId: W, summary: "Did it." },
+      { id: "c1:1", threadId: "c1", verdict: "needs-review" },
+    ]);
+    expect(first.rejected).toBe(true);
+    expect(first.satisfied).toBe(false);
   });
 
   for (const earlier of ["done", "to-check"] as const) {
@@ -306,7 +372,7 @@ describe("fold", () => {
     expectParses(f);
   });
 
-  it("a dependency without a row is left out; a woken check thread keeps its verdict", () => {
+  it("a woken check thread keeps its verdict", () => {
     const l = log();
     l.run({
       tasks: [
@@ -316,7 +382,6 @@ describe("fold", () => {
     });
     l.open("w:1:open", W, "c");
     l.status("w:1", W, "c", "w:1:open", "to-check");
-    expect(need(fold(l.events), "c").dependsOn).toEqual([]);
     expectParses(fold(l.events));
     l.thread("chk", "check", "w:1:open");
     l.checkpoint("chk:1", "chk", "c", "w:1:open", { verdict: "passed" });
@@ -392,10 +457,11 @@ describe("fold", () => {
       skip: [{ taskId: "a", reason: "no sample" }],
     });
     const f = fold(l.events);
-    expect(f.tasks.map((t) => [t.id, t.status, t.skipped?.reason])).toEqual([
-      ["b", "to-check", "a was skipped: no sample"],
-      ["a", "to-check", "no sample"],
-      ["c", "to-check", "a was skipped: no sample"],
+    expect(f.tasks.map((t) => [t.id, t.status, t.skipped?.reason, t.skipped?.from])).toEqual([
+      ["a", "to-check", "no sample", "a"],
+      ["b", "to-check", "a was skipped: no sample", "a"],
+      ["c", "to-check", "a was skipped: no sample", "a"],
+      ["d", "pending", undefined, undefined],
     ]);
     const a = need(f, "a");
     expect(a).toMatchObject({ attemptId: null, missingRequired: [], rejected: false });
@@ -481,5 +547,47 @@ describe("fold", () => {
     const state = reviewState(l.events);
     expect(state.revisions.map((r) => r.id)).toEqual(["root:revision", "sup:1:revision"]);
     expect(state.summary?.revisionId).toBe("sup:1:revision");
+  });
+});
+
+// a → b → d, a → c → d, e alone.
+const graph = [
+  { id: "a", dependsOn: [] },
+  { id: "b", dependsOn: ["a"] },
+  { id: "c", dependsOn: ["a"] },
+  { id: "d", dependsOn: ["b", "c"] },
+  { id: "e", dependsOn: [] },
+];
+
+describe("transitiveDependents", () => {
+  it("follows the graph through every path, in plan order", () => {
+    expect(transitiveDependents(graph, "a")).toEqual(["b", "c", "d"]);
+    expect(transitiveDependents(graph, "c")).toEqual(["d"]);
+    expect(transitiveDependents(graph, "d")).toEqual([]);
+  });
+
+  it("finds dependents of a task listed after them", () => {
+    const reordered = [graph[3], graph[1], graph[0], graph[2]] as typeof graph;
+    expect(transitiveDependents(reordered, "a")).toEqual(["d", "b", "c"]);
+  });
+});
+
+describe("isSatisfied", () => {
+  const row = (status: "done" | "to-check" | "failed", over = {}) => ({
+    status,
+    missingRequired: [] as string[],
+    rejected: false,
+    ...over,
+  });
+  it("is true for done, and for to-check with every required output", () => {
+    expect(isSatisfied(row("done"))).toBe(true);
+    expect(isSatisfied(row("to-check"))).toBe(true);
+  });
+  it("is false for no attempt, a missing output, a rejected or skipped result, or failure", () => {
+    expect(isSatisfied(undefined)).toBe(false);
+    expect(isSatisfied(row("to-check", { missingRequired: ["x"] }))).toBe(false);
+    expect(isSatisfied(row("to-check", { rejected: true }))).toBe(false);
+    expect(isSatisfied(row("done", { skipped: { reason: "r", from: "a" } }))).toBe(false);
+    expect(isSatisfied(row("failed"))).toBe(false);
   });
 });

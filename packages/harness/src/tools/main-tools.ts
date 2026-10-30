@@ -10,12 +10,12 @@
  * They never wait for a thread inside the section.
  */
 import type { By } from "@voluma/contracts/events";
+import { isSatisfied, transitiveDependents } from "@voluma/contracts/fold";
 import { taskIdSchema } from "@voluma/contracts/ids";
 import { fileRefInputSchema } from "@voluma/contracts/output";
 import { replyInputSchema } from "@voluma/contracts/task-tools";
 import { type PlanTask, workflowPlanSchema } from "@voluma/contracts/workflow";
 import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
-import { isSatisfied, transitiveDependents } from "@voluma/workflow";
 import { planTask } from "@voluma/workflow/plan";
 import { z } from "zod";
 import type { UserSender } from "../adapters/pi/start-thread";

@@ -82,7 +82,7 @@ describe("reviewRun", () => {
     const attempt = l.open("intake", "review-111.intake.worker");
     l.status("intake", attempt, "failed", "review-111.intake.worker");
 
-    const result = reviewRun({ run, events: l.events, results: reviewState(l.events) });
+    const result = reviewRun({ run, results: reviewState(l.events) });
     expect(result?.revisions[0]?.tasks.map((t) => [t.id, t.status])).toEqual([
       ["intake", "failed"],
       ["orientation", "pending"],
@@ -123,9 +123,10 @@ describe("reviewRun", () => {
     l.add("thread.started", { parentThreadId: null, kind: "supervisor", workflows });
     l.add("revision.started", { reason: "run", plan: selected });
     expect(
-      reviewRun({ run, events: l.events, results: reviewState(l.events) })?.revisions[0]?.tasks.map(
-        (t) => [t.id, t.status],
-      ),
+      reviewRun({ run, results: reviewState(l.events) })?.revisions[0]?.tasks.map((t) => [
+        t.id,
+        t.status,
+      ]),
     ).toEqual([
       ["intake", "pending"],
       ["orientation", "pending"],
@@ -151,8 +152,7 @@ describe("reviewRun", () => {
     l.worker("intake", "review-111.intake.worker");
     l.open("intake", "review-111.intake.worker");
 
-    const revisions =
-      reviewRun({ run, events: l.events, results: reviewState(l.events) })?.revisions ?? [];
+    const revisions = reviewRun({ run, results: reviewState(l.events) })?.revisions ?? [];
     const orientation = revisions.map((r) => r.tasks.find((t) => t.id === "orientation"));
     expect(orientation.map((t) => [t?.status, t?.threads.worker])).toEqual([
       ["pending", null],
@@ -167,11 +167,9 @@ describe("reviewRun", () => {
   });
 
   it("returns no review without a recorded plan and accepts an empty recorded plan", () => {
-    expect(reviewRun({ run, events: [], results: reviewState([]) })).toBeNull();
+    expect(reviewRun({ run, results: reviewState([]) })).toBeNull();
     const l = log();
     l.add("revision.started", { reason: "run", plan: { tasks: [] } });
-    expect(
-      reviewRun({ run, events: l.events, results: reviewState(l.events) })?.revisions[0]?.tasks,
-    ).toEqual([]);
+    expect(reviewRun({ run, results: reviewState(l.events) })?.revisions[0]?.tasks).toEqual([]);
   });
 });

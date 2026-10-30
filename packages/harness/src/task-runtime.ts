@@ -15,7 +15,13 @@
  */
 
 import type { By, ThreadKind } from "@voluma/contracts/events";
-import { abandonedEvents, type Folded, type FoldedTask } from "@voluma/contracts/fold";
+import {
+  abandonedEvents,
+  type Folded,
+  type FoldedTask,
+  isSatisfied,
+  transitiveDependents,
+} from "@voluma/contracts/fold";
 import type { EvidenceRef } from "@voluma/contracts/output";
 import type {
   AskInput,
@@ -25,7 +31,6 @@ import type {
   TaskToolResult,
 } from "@voluma/contracts/task-tools";
 import type { WorkflowPlan } from "@voluma/contracts/workflow";
-import { isSatisfied, transitiveDependents } from "@voluma/workflow";
 import type { ThreadLayout } from "./layout";
 import { declarationProblem, placementProblem, referenceProblem } from "./output-checks";
 import { type Evidence, EvidenceNotFound, EvidenceRefused } from "./ports/evidence";
