@@ -2,30 +2,13 @@
  * The run's tasks as a flowchart from the plan's `dependsOn`: one row per dependency depth, each
  * row ordered by where its parents sit so edges cross as little as the plan allows, every node
  * showing its state and opening its task. Overview sits above it. Below 1100 px it is a compact
- * list. State words and marks are shared with the rest of the page (`TaskMark`, `stateWord`).
+ * list. State words come from `task-graph.tsx`.
  */
-import { cx, STATUS_WORD, type Status } from "@voluma/ui";
+import { cx } from "@voluma/ui";
 import { ShieldCheck } from "lucide-react";
 import type { ComponentType, ReactNode } from "react";
 import type { TaskState, TaskView } from "./run-model";
-
-/** A task's state in the one status vocabulary of `@voluma/ui` (its words); skipped has no word there. */
-const STATE_STATUS: Record<Exclude<TaskState, "skipped">, Status> = {
-  waiting: "waiting",
-  ready: "waiting",
-  running: "running",
-  checking: "checking",
-  held: "waiting",
-  done: "done",
-  "to-check": "check",
-  failed: "stopped",
-  stopped: "stopped",
-  paused: "paused",
-  "awaiting-ai": "waiting",
-};
-
-const stateWord = (state: TaskState) =>
-  state === "skipped" ? "Skipped" : STATUS_WORD[STATE_STATUS[state]];
+import { taskStateWord as stateWord } from "./task-graph";
 
 /** A task's state as a small mark: hollow until it starts, spinning while it works, filled once it ends. */
 export function TaskMark({ state, className }: { state: TaskState; className?: string }) {

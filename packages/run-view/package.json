@@ -24,6 +24,7 @@
     "remend": "catalog:"
   },
   "devDependencies": {
+    "@storybook/react-vite": "^10.6.5",
     "@types/react": "catalog:",
     "react": "catalog:",
     "typescript": "catalog:"

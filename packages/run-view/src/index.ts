@@ -41,5 +41,14 @@ export {
   useThreads,
 } from "./run-store";
 export { TaskFlow, type TaskLinkProps, TaskMark } from "./task-flow";
+export {
+  type GraphTask,
+  type ScanGraphTask,
+  type StudyGraphTask,
+  TASK_STATUS,
+  TaskGraph,
+  type TaskGraphProps,
+  taskStateWord,
+} from "./task-graph";
 export { applyFrame, type Live, noLive, type Settled, settle } from "./transcript";
 export { useNow } from "./use-now";
