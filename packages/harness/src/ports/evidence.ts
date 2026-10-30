@@ -20,10 +20,13 @@ export const MAX_UNMOUNTED_BYTES = 64 * 1024 * 1024;
 /** The file cannot be kept, for a reason the agent can act on; the message is what it reads. */
 export class EvidenceRefused extends Error {}
 
+/** `keep` rejects with this when the named file is not in storage; the caller words the refusal. */
+export class EvidenceNotFound extends Error {}
+
 export interface Evidence {
   /**
-   * Rejects with `EvidenceRefused` if the file does not exist or is too large to read without
-   * `hash`; nothing is stored then. `signal` aborts the call.
+   * Rejects with `EvidenceNotFound` if the file does not exist (checked before `hash` runs) and
+   * `EvidenceRefused` if it is too large to read without `hash`; nothing is stored then. `signal` aborts the call.
    */
   keep(
     runId: string,

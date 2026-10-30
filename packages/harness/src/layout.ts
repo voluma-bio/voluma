@@ -5,7 +5,8 @@
  *
  * A worker mounts the run's `/scratch` and `/outputs` read-write and works in `/scratch/<its name>/`. A checker mounts `/outputs`
  * read-only and writes only `/scratch/<its name>/`, the R2 prefix `scratch/<its name>/`; the main
- * agent has the same shape (no sandbox yet). Host-side (`keyOf`, so `view_image`) they also read
+ * agent has the same shape, with `/outputs` writable when its role holds `bash` (it then does
+ * tasks itself, `mainWorks`), and a sandbox only then. Host-side (`keyOf`, so `view_image`) they also read
  * the run's `/scratch`, but a checker only the files the attempt under review cites as
  * evidence: the worker's scripts, logs and notes stay unread. Its sandbox does
  * not mount the rest. The path namespace is the same for every thread:
@@ -31,7 +32,7 @@ const SCRATCH = "/scratch";
 const WORKFLOW = "/workflow";
 
 export interface ThreadLayout {
-  /** `main` has no sandbox today; its layout is the shape one would have. */
+  /** `main` has a sandbox only if its role holds `bash` (`runLayout`'s `mainWorks`). */
   role: "worker" | "checker" | "main";
   /** The thread id without the run id: the sandbox's name, and the folder of its spill and (non-workers) scratch. */
   name: string;
@@ -77,7 +78,13 @@ export interface RunLayout {
  * `skills` is `WorkflowDefinition.skills`: `PYTHONPATH` lets one skill's script import another
  * skill's module (module names are unique across skills, a test enforces it).
  */
-export function runLayout(runId: string, inputPrefix: string, skills: readonly Skill[]): RunLayout {
+export function runLayout(
+  runId: string,
+  inputPrefix: string,
+  skills: readonly Skill[],
+  /** The main agent's role holds `bash`: it does tasks itself, so its `/outputs` is writable. */
+  mainWorks = false,
+): RunLayout {
   const scratch = scratchPrefix(runId);
   const pythonPath = skills.map((s) => `${s.path}/resources`).join(":");
   const inputs: SandboxMount = {
@@ -113,19 +120,23 @@ export function runLayout(runId: string, inputPrefix: string, skills: readonly S
       restartNote: `The sandbox was restarted. ${OUTPUTS} and ${SCRATCH} were kept, ${INPUTS} was copied again, and local files elsewhere (including /tmp) are gone.`,
     };
   };
-  const confined = (name: string, dir: string): RoleParts => {
+  const confined = (
+    name: string,
+    dir: string,
+    outputsAccess: SandboxMount["access"],
+  ): RoleParts => {
     const writable: SandboxMount = {
       path: dir,
       prefix: `${scratch}${name}/`,
       access: "read-write",
     };
     return {
-      mounts: [inputs, workflow, outputs("read-only"), writable],
+      mounts: [inputs, workflow, outputs(outputsAccess), writable],
       scratch: writable,
       // After `mounts`: the more specific writable folder matches first.
       hostOnly: [{ path: SCRATCH, prefix: scratch, access: "read-only" }],
       description:
-        `${common}- ${OUTPUTS} holds the worker's files: read them, do not modify them.\n` +
+        `${common}- ${OUTPUTS} holds the worker's files: ${outputsAccess === "read-write" ? "the files you produce go here too" : "read them, do not modify them"}.\n` +
         `- ${dir} is for your intermediate files; it is kept. $SCRATCH is ${dir}. Write nothing else under ${SCRATCH}. ` +
         `bash sees only your folder there; view_image also opens the files under ${SCRATCH}/ that the worker cited as evidence (read-only).`,
       restartNote: `The sandbox was restarted. ${dir} was kept, ${INPUTS} was copied again, and local files elsewhere (including /tmp) are gone.`,
@@ -138,7 +149,10 @@ export function runLayout(runId: string, inputPrefix: string, skills: readonly S
       const { name, kind } = parseThreadId(runId, threadId);
       const role = kind === "worker" ? "worker" : kind === "check" ? "checker" : "main";
       const dir = `${SCRATCH}/${name}`;
-      const parts = role === "worker" ? worker(dir) : confined(name, dir);
+      const parts =
+        role === "worker"
+          ? worker(dir)
+          : confined(name, dir, role === "main" && mainWorks ? "read-write" : "read-only");
       const { hostOnly, ...rest } = parts;
       return {
         ...rest,
@@ -162,7 +176,9 @@ export function runLayout(runId: string, inputPrefix: string, skills: readonly S
             throw new Error(`${path} is not a valid path`);
           if (role === "checker" && hostOnly.includes(mount)) {
             if (!cited(relative))
-              throw new Error(`${path} is not a file the worker cited as evidence`);
+              throw new Error(
+                `${path} is in the worker's folder and the worker did not cite it as evidence. A check can open the files the worker cited, and its own folder ${dir}.`,
+              );
           }
           return `${mount.prefix}${relative}`;
         },

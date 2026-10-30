@@ -19,6 +19,7 @@ import {
 import { evidenceKey, outputKey, scratchKey } from "@voluma/contracts/r2";
 import {
   type Evidence,
+  EvidenceNotFound,
   EvidenceRefused,
   MAX_UNMOUNTED_BYTES,
 } from "@voluma/harness/ports/evidence";
@@ -57,7 +58,7 @@ export function r2Evidence(config: {
         .send(new HeadObjectCommand({ Bucket: bucket, Key: key }), { abortSignal: signal })
         .catch((error) => {
           if (error instanceof NotFound) {
-            throw new EvidenceRefused(`Evidence ${file.path} does not exist`);
+            throw new EvidenceNotFound(key);
           }
           throw error;
         });

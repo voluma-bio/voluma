@@ -7,13 +7,13 @@
  * each run of tool calls between two pieces of prose fold into one process block whose
  * summary is a digest; milestones (checkpoints, reported outputs) and failures break the fold.
  *
- * The main thread is the run's orchestration: its wakes are its own voice, workers and
- * checkers appear as agent cards where they started, and the supervisor's code (task
- * statuses set by a rule, judgments applied, revisions) folds like tool calls.
+ * The main thread (kind `main`, possibly several after restarts) is the run's orchestration:
+ * its messages and tool calls render like any thread's, workers and checkers appear as agent
+ * cards where they started, and the runtime's own steps (task statuses set by a rule,
+ * revisions) fold like tool calls.
  *
  * Live frames are folded per key and dropped when their durable event lands: a reply's text
- * and reasoning by `messageId` (the id of the durable `message`, or of the `wake` for the main
- * thread), a tool call's arguments by `toolCallId` (until its `tool.call`), its output by
+ * and reasoning by `messageId` (the id of the durable `message`), a tool call's arguments by `toolCallId` (until its `tool.call`), its output by
  * `toolCallId` (until its `tool.result`).
  */
 
@@ -41,8 +41,7 @@ export const noLive: Live = { replies: new Map(), calls: new Map(), outputs: new
 
 /**
  * Why the runner is not running the run's threads, from `Run.state`: the log holds no end for
- * the threads it cut off. `ended` is set only once the stream has closed, when the log is whole;
- * `paused` while the run waits for a runner again (its lease expired) or for its starter's keys.
+ * the threads it cut off (a user's cancel leaves none; the server ends them). `paused` while the run waits for a runner again (its lease expired) or for its starter's keys.
  */
 export type Halt =
   | { kind: "ended"; at: string; outcome: "completed" | "failed" | "cancelled" }
@@ -63,7 +62,7 @@ const outputKey = (id: string) => `output:${id}`;
 
 /**
  * Appends a frame where its `offset` continues what is held. A frame at offset 0 starts the
- * partial over (a wake asked again after a runner restart reuses its id); any other gap means
+ * partial over (a reply asked again after a runner restart reuses its id); any other gap means
  * frames were dropped, so the partial is dropped until its durable event lands.
  *
  * A thread streams one reply at a time, so a new reply drops the thread's other partials: one
@@ -138,7 +137,7 @@ export function settle(live: Live, e: RunEvent, settled: Settled): Live {
   let replies: Map<string, LiveReply> | undefined;
   let calls: Map<string, LiveCall> | undefined;
   let outputs: Map<string, LiveOutput> | undefined;
-  if (e.type === "message" || e.type === "wake") {
+  if (e.type === "message") {
     settled.add(replyKey(e.id));
     replies = drop(live.replies, (k) => k !== e.id);
   }
@@ -165,7 +164,7 @@ export function settle(live: Live, e: RunEvent, settled: Settled): Live {
 
 /**
  * The value of a string field in JSON that may be cut off mid-string: `{"command":"ls -l` gives
- * `ls -l`. Enough to title a tool call, or show a wake's note, while the model still writes it.
+ * `ls -l`. Enough to title a tool call, while the model still writes it.
  */
 export function partialJsonString(json: string, key: string): string | undefined {
   const at = json.search(new RegExp(`"${key}"\\s*:\\s*"`));
@@ -228,14 +227,28 @@ export function toolTitle(name: string, input: unknown): string {
       const paths = Array.isArray(r.paths) ? r.paths.filter((p) => typeof p === "string") : [];
       return `Viewed ${paths.map((p) => p.split("/").pop()).join(", ") || "an image"}`;
     }
-    case "checklist":
-      return `Marked ${taskTitle(s("taskId") ?? "the task")} ${s("status") ?? ""}`.trim();
+    case "start_worker":
+      return `Started a worker on ${taskTitle(s("taskId") ?? "a task")}`;
+    case "stop_worker":
+      return `Stopped ${s("threadId") ?? "a worker"}`;
+    case "accept":
+      return `Accepted ${taskTitle(s("taskId") ?? "a task")} for review`;
+    case "change_plan":
+      return "Changed the plan";
+    case "finish_run":
+      return "Finished the run";
+    case "submit_task":
+      return `Submitted ${taskTitle(s("taskId") ?? "the task")}`;
     case "checkpoint":
       return "Recorded a checkpoint";
     case "report_output":
       return `Reported ${s("outputId") ?? "an output"}`;
-    case "thread_message":
+    case "message":
       return `Messaged ${s("threadId") ?? "another thread"}`;
+    case "answer":
+      return "Answered the checker";
+    case "ask":
+      return "Asked the main agent";
     case "segment_sam":
       return "Segmented with SAM";
     default: {
@@ -273,7 +286,7 @@ export type ToolStep = {
 export type Step =
   | ToolStep
   | { kind: "reasoning"; id: string; text: string }
-  /** A mechanical step: the sandbox, the supervisor's code. */
+  /** A mechanical step: the sandbox, the runtime's code. */
   | { kind: "note"; id: string; text: string; failed?: boolean };
 
 export type Row =
@@ -284,8 +297,6 @@ export type Row =
   | { kind: "checkpoint"; id: string; event: Ev<"checkpoint"> }
   | { kind: "output"; id: string; event: Ev<"output"> }
   | { kind: "failure"; id: string; text: string }
-  /** The main thread's turn; `partial` is its note while the reply streams. */
-  | { kind: "wake"; id: string; event?: Ev<"wake">; partial?: string }
   | { kind: "agent"; id: string; threadId: string };
 
 /** "Ran 12 commands, viewed 2 images, 1 failed": counts across a fold, Flow's digest. */
@@ -346,15 +357,19 @@ function rowBuilder() {
 const SHOWN_AS_ROWS = new Set(["checkpoint", "report_output"]);
 
 /**
- * One worker, checker or chat thread's transcript: what it was told, its prose, its folded
- * process, its milestones, then whatever of its reply is still streaming. A tool call still
- * running when its thread ended, or when the runner stopped (`halt`), shows as stopped.
+ * The transcript of the threads in `ids` (one worker, checker or chat thread; or every main
+ * thread of the run): what it was told, its prose, its folded process, its milestones, then
+ * whatever of its reply is still streaming. A tool call still running when its thread ended,
+ * or when the runner stopped (`halt`), shows as stopped. `orchestration` adds what the main
+ * thread's page shows from the rest of the run: an agent card where each worker and checker
+ * started, corrections, task statuses set by a rule, failed sandboxes, and the run's failure.
  */
-export function threadRows(
+function rowsOf(
   events: RunEvent[],
-  threadId: string,
-  live: Live = noLive,
-  halt?: Halt,
+  ids: ReadonlySet<string>,
+  live: Live,
+  halt: Halt | undefined,
+  orchestration: boolean,
 ): Row[] {
   const b = rowBuilder();
   const tools = new Map<string, ToolStep>();
@@ -362,8 +377,45 @@ export function threadRows(
     for (const step of tools.values()) if (step.status === "running") step.status = "stopped";
   };
   let briefed = false;
+  const seen = new Set<string>();
+  let root: string | undefined;
   for (const e of events) {
-    if (e.threadId !== threadId) continue;
+    if (orchestration) {
+      if (e.type === "thread.started" && e.payload.kind === "supervisor") root = e.threadId;
+      if (
+        e.type === "thread.started" &&
+        (e.payload.kind === "worker" || e.payload.kind === "check") &&
+        !seen.has(e.threadId)
+      ) {
+        seen.add(e.threadId);
+        b.row({ kind: "agent", id: `agent:${e.threadId}`, threadId: e.threadId });
+      } else if (e.type === "revision.started" && e.payload.reason === "correction") {
+        b.step({
+          kind: "note",
+          id: e.id,
+          text: `${taskTitle(e.payload.taskId)} was corrected: a new revision of its results`,
+        });
+      } else if (e.type === "task" && e.payload.by.kind !== "agent") {
+        b.step({
+          kind: "note",
+          id: e.id,
+          text: `${taskTitle(e.payload.taskId)} is ${e.payload.status}: ${e.payload.reason}`,
+        });
+      } else if (e.type === "sandbox" && e.payload.state === "failed" && !ids.has(e.threadId)) {
+        b.row({
+          kind: "failure",
+          id: e.id,
+          text: `Sandbox ${e.payload.name} failed${e.payload.detail ? `: ${e.payload.detail}` : "."}`,
+        });
+      } else if (
+        e.type === "thread.ended" &&
+        e.threadId === root &&
+        e.payload.status === "failed"
+      ) {
+        b.row({ kind: "failure", id: e.id, text: e.payload.error ?? "The run failed." });
+      }
+    }
+    if (!ids.has(e.threadId)) continue;
     switch (e.type) {
       case "message": {
         const p = e.payload;
@@ -382,7 +434,7 @@ export function threadRows(
               : p.sender.kind === "person"
                 ? "Message from a person"
                 : briefed
-                  ? "Message from the supervisor"
+                  ? "Update from the run"
                   : "Task brief";
           if (p.sender.kind === "runtime") briefed = true;
           b.row({ kind: "brief", id: e.id, label, text: p.text });
@@ -429,8 +481,8 @@ export function threadRows(
         });
         break;
       case "task":
-        // An agent's status change (and the attempt it opens) is its `checklist` call, already a row.
-        if (e.payload.by.kind !== "agent")
+        // An agent's status change is its tool call, already a row.
+        if (!orchestration && e.payload.by.kind !== "agent")
           b.step({
             kind: "note",
             id: e.id,
@@ -446,13 +498,13 @@ export function threadRows(
   }
   if (halt) stopRunning();
   for (const [id, reply] of live.replies) {
-    if (reply.threadId !== threadId) continue;
+    if (!ids.has(reply.threadId)) continue;
     if (reply.reasoning)
       b.step({ kind: "reasoning", id: `${id}:reasoning`, text: reply.reasoning });
     if (reply.text) b.row({ kind: "prose", id, text: reply.text, streaming: true });
   }
   for (const [id, call] of live.calls) {
-    if (call.threadId !== threadId || tools.has(id)) continue;
+    if (!ids.has(call.threadId) || tools.has(id)) continue;
     b.step({
       kind: "tool",
       id,
@@ -464,74 +516,20 @@ export function threadRows(
   return b.done();
 }
 
-/**
- * The main thread's transcript, which is the run's orchestration: wakes, an agent card where
- * each worker and checker started, and the supervisor's own steps folded between them.
- */
-export function mainRows(events: RunEvent[], live: Live = noLive): Row[] {
-  const b = rowBuilder();
-  const supervisor = events.find(
-    (e) => e.type === "thread.started" && e.payload.kind === "supervisor",
-  )?.threadId;
-  const seen = new Set<string>();
-  for (const e of events) {
-    switch (e.type) {
-      case "wake":
-        b.row({ kind: "wake", id: e.id, event: e });
-        break;
-      case "thread.started":
-        if ((e.payload.kind === "worker" || e.payload.kind === "check") && !seen.has(e.threadId)) {
-          seen.add(e.threadId);
-          b.row({ kind: "agent", id: `agent:${e.threadId}`, threadId: e.threadId });
-        }
-        break;
-      case "revision.started":
-        if (e.payload.reason === "correction")
-          b.step({
-            kind: "note",
-            id: e.id,
-            text: `${taskTitle(e.payload.taskId)} was corrected: a new revision of its results`,
-          });
-        break;
-      case "task":
-        if (e.payload.by.kind !== "agent")
-          b.step({
-            kind: "note",
-            id: e.id,
-            text: `${taskTitle(e.payload.taskId)} is ${e.payload.status}: ${e.payload.reason}`,
-          });
-        break;
-      case "judgment":
-        b.step({
-          kind: "note",
-          id: e.id,
-          text: `Applied "${e.payload.applied.action}"${
-            e.payload.applied.fallback === "redo-cap"
-              ? " (the redo limit was reached)"
-              : e.payload.applied.fallback === "error"
-                ? " (the judgment failed, so it accepted)"
-                : ""
-          }`,
-          failed: e.payload.applied.fallback === "error",
-        });
-        break;
-      case "sandbox":
-        if (e.payload.state === "failed")
-          b.row({
-            kind: "failure",
-            id: e.id,
-            text: `Sandbox ${e.payload.name} failed${e.payload.detail ? `: ${e.payload.detail}` : "."}`,
-          });
-        break;
-      case "thread.ended":
-        if (e.threadId === supervisor && e.payload.status === "failed")
-          b.row({ kind: "failure", id: e.id, text: e.payload.error ?? "The run failed." });
-        break;
-    }
-  }
-  for (const [id, reply] of live.replies) {
-    if (reply.threadId !== supervisor) continue;
-    b.row({ kind: "wake", id, partial: partialJsonString(reply.text, "note") ?? "" });
-  }
-  return b.done();
+/** One worker, checker or chat thread's transcript. */
+export const threadRows = (
+  events: RunEvent[],
+  threadId: string,
+  live: Live = noLive,
+  halt?: Halt,
+) => rowsOf(events, new Set([threadId]), live, halt, false);
+
+/** The main agent's page: its thread, with the run's other threads as cards between its steps. */
+export function mainRows(events: RunEvent[], live: Live = noLive, halt?: Halt): Row[] {
+  const mains = new Set(
+    events.flatMap((e) =>
+      e.type === "thread.started" && e.payload.kind === "main" ? [e.threadId] : [],
+    ),
+  );
+  return rowsOf(events, mains, live, halt, true);
 }

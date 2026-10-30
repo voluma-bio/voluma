@@ -19,9 +19,11 @@ import { z } from "zod";
 import {
   type AgentDefinition,
   type Skill,
+  type ToolIndexEntry,
   type WorkflowDefinition,
   WorkflowParseError,
 } from "./definition";
+import { docstringSummary } from "./docstring";
 
 /** The run's snapshot bucket, as the loader needs it. Keys are R2 keys. */
 export interface WorkflowStore {
@@ -40,7 +42,7 @@ export interface LoadOptions {
   root: string;
   /** The commit that checkout is at, written into the snapshot's marker. */
   commit: string;
-  /** The optional tool names a role may list (the harness's tool registry). */
+  /** The tool names a role may list (the harness's tool registry). */
   knownTools: readonly string[];
 }
 
@@ -66,7 +68,10 @@ const AGENTS_DIR = `${CORE}/agents`;
 const agentSchema = z.strictObject({
   name: z.string().min(1),
   description: z.string().min(1),
+  model: z.string().min(1),
   tools: z.array(z.string().min(1)),
+  subagents: z.array(z.string().min(1)).default([]),
+  skills: z.array(z.string().min(1)).optional(),
   status: z.literal("planned").optional(),
 });
 
@@ -97,7 +102,10 @@ function parseFile<T extends z.ZodType>(file: string, text: string, schema: T) {
 
 const frontmatter = (file: string, text: string) => parseFile(file, text, frontmatterSchema).data;
 
-function parseAgent(path: string, text: string, knownTools: readonly string[]): AgentDefinition {
+/** `skills` still unresolved: `parseAgent` leaves the default to the caller, who knows the skills. */
+type ParsedAgent = Omit<AgentDefinition, "skills"> & { skills?: string[] };
+
+function parseAgent(path: string, text: string, knownTools: readonly string[]): ParsedAgent {
   const { data, body } = parseFile(path, text, agentSchema);
   const name = path.slice(path.lastIndexOf("/") + 1, -".md".length);
   if (data.name !== name) {
@@ -106,17 +114,32 @@ function parseAgent(path: string, text: string, knownTools: readonly string[]): 
   const planned = data.status === "planned";
   const unknown = data.tools.find((t) => !knownTools.includes(t));
   if (!planned && unknown) {
-    throw new WorkflowParseError(path, `tool "${unknown}" is not an optional tool of the harness`);
+    throw new WorkflowParseError(path, `tool "${unknown}" is not a tool of the harness`);
   }
   if (!body) throw new WorkflowParseError(path, "the body is empty");
   return {
     name,
     description: data.description.replace(/\s+/g, " ").trim(),
+    model: data.model,
     tools: data.tools,
+    subagents: data.subagents,
+    skills: data.skills,
     planned,
     body,
   };
 }
+
+/**
+ * A skill's script (`resources/*.py`, not a test, not `_`-prefixed): [skill, file name], else null.
+ * Whether it is a script and not a library module is `isCli`'s call.
+ */
+function scriptOf(path: string): [string, string] | null {
+  const m = /^workflows\/[^/]+\/skills\/([^/]+)\/resources\/([^/_][^/]*\.py)$/.exec(path);
+  return m && !m[2]?.startsWith("test_") ? [m[1] as string, m[2] as string] : null;
+}
+
+/** A module with a `__main__` guard has a CLI to `--help`; one without is a library (`frame.py`). */
+const isCli = (source: string) => /^if __name__ == ["']__main__["']/m.test(source);
 
 /** Files under `rel`, minus dot-entries and `__pycache__` (git ignores them; a symlink is refused). */
 async function* walk(root: string, rel: string): AsyncGenerator<string> {
@@ -163,7 +186,8 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
     if (
       /(^|\/)SKILL\.md$|(^|\/)(outputs|tasks)\.json$|^workflows\/core\/agents\/[^/]+\.md$/.test(
         path,
-      )
+      ) ||
+      scriptOf(path)
     )
       texts.set(path, await store.get(key));
   }
@@ -226,20 +250,61 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
     );
   }
 
-  const found: Record<string, AgentDefinition> = {};
+  const toolIndex: ToolIndexEntry[] = [];
+  for (const skill of skills) {
+    const scripts = [...texts.keys()].filter((p) =>
+      p.startsWith(`${skill.path.slice("/workflow/".length)}/resources/`),
+    );
+    for (const path of scripts.sort()) {
+      const script = scriptOf(path)?.[1];
+      const source = texts.get(path) as string;
+      if (!script || !isCli(source)) continue;
+      toolIndex.push({
+        skill: skill.name,
+        script,
+        summary: docstringSummary(path, source),
+      });
+    }
+  }
+
+  const found: Record<string, ParsedAgent> = {};
   for (const [path, text] of texts) {
     if (!path.startsWith(`${AGENTS_DIR}/`)) continue;
     const agent = parseAgent(path, text, options.knownTools);
     found[agent.name] = agent;
   }
-  const { worker, checker, ...others } = found;
-  if (!worker) throw new WorkflowParseError(`${prefix}${AGENTS_DIR}/worker.md`, "not found");
-  if (!checker) throw new WorkflowParseError(`${prefix}${AGENTS_DIR}/checker.md`, "not found");
+  const skillNames = skills.map((s) => s.name);
+  const agents: Record<string, AgentDefinition> = {};
+  for (const agent of Object.values(found)) {
+    const path = `${AGENTS_DIR}/${agent.name}.md`;
+    const missing = agent.subagents.find((n) => !found[n]);
+    if (missing) throw new WorkflowParseError(path, `subagent "${missing}" is not a role file`);
+    if (agent.tools.includes("start_worker") && !agent.subagents.includes("worker")) {
+      throw new WorkflowParseError(
+        path,
+        `a role with start_worker lists "worker" in its subagents`,
+      );
+    }
+    const unknown = agent.skills?.find((n) => !skillNames.includes(n));
+    if (unknown)
+      throw new WorkflowParseError(path, `skill "${unknown}" is not a skill of this workflow`);
+    agents[agent.name] = { ...agent, skills: agent.skills ?? skillNames };
+  }
+  const { main, worker, checker, ...others } = agents;
+  for (const [name, role] of Object.entries({ main, worker, checker })) {
+    if (!role) throw new WorkflowParseError(`${prefix}${AGENTS_DIR}/${name}.md`, "not found");
+  }
   return {
     dir,
     commit: await store.get(`${prefix}${DONE}`),
     files: files.data,
     skills,
-    agents: { worker, checker, others },
+    toolIndex,
+    agents: {
+      main: main as AgentDefinition,
+      worker: worker as AgentDefinition,
+      checker: checker as AgentDefinition,
+      others,
+    },
   };
 }
