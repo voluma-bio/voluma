@@ -14,7 +14,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { ApiError, getStudy } from "@voluma/api-client";
 import type { StudyDetail } from "@voluma/contracts/study";
-import { Button, Tabs } from "@voluma/ui";
+import { Button, TabList, TabPanel, Tabs } from "@voluma/ui";
 import { formatUsd } from "@voluma/ui/run";
 import { type BundledWorkflow, workflowById } from "@voluma/workflow/bundled";
 import { ChevronDown } from "lucide-react";
@@ -28,7 +28,6 @@ import { ToCheck } from "./to-check";
 
 const TAB_IDS = ["overview", "check", "scans"] as const;
 type TabId = (typeof TAB_IDS)[number];
-const PANEL_ID = "study-panel";
 
 export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
   const { id = "" } = useParams();
@@ -73,8 +72,8 @@ export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
     );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <StudyHeader detail={detail} workflow={workflow} tab={tab} onTab={setTab} />
+    <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
+      <StudyHeader detail={detail} workflow={workflow} />
       {study.isError && (
         <p
           role="status"
@@ -95,12 +94,7 @@ export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
           </button>
         </p>
       )}
-      <div
-        id={PANEL_ID}
-        role="tabpanel"
-        aria-label={tab === "overview" ? "Overview" : tab === "check" ? "To check" : "Scans"}
-        className="min-h-0 flex-1 overflow-y-auto"
-      >
+      <TabPanel value={tab} className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[90rem] px-6 py-5 max-[760px]:px-3 max-[760px]:py-4">
           {tab === "overview" && (
             <Overview
@@ -120,22 +114,12 @@ export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
           )}
           {tab === "scans" && <ScansTable detail={detail} workflow={workflow} />}
         </div>
-      </div>
-    </div>
+      </TabPanel>
+    </Tabs>
   );
 }
 
-function StudyHeader({
-  detail,
-  workflow,
-  tab,
-  onTab,
-}: {
-  detail: StudyDetail;
-  workflow: BundledWorkflow;
-  tab: TabId;
-  onTab: (tab: TabId) => void;
-}) {
+function StudyHeader({ detail, workflow }: { detail: StudyDetail; workflow: BundledWorkflow }) {
   const c = studyCounts(detail);
   const scansLabel = [
     `${c.done} of ${c.scans} done`,
@@ -157,11 +141,8 @@ function StudyHeader({
         </span>
         <h1 className="truncate text-base font-semibold">{detail.study.name}</h1>
       </div>
-      <Tabs
+      <TabList<TabId>
         label="Study"
-        controls={PANEL_ID}
-        value={tab}
-        onChange={onTab}
         className="max-[760px]:order-last max-[760px]:-mx-3 max-[760px]:basis-[calc(100%+1.5rem)] max-[760px]:px-1"
         tabs={[
           { id: "overview", label: "Overview" },

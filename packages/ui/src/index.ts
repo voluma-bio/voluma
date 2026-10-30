@@ -3,9 +3,50 @@
  * through design-token utilities. An app that renders them must let Tailwind
  * scan this package: `@source "<path to>/packages/ui/src";` in its CSS entry.
  */
+export { Box, type BoxProps } from "./box";
 export { Button, type ButtonProps, buttonClass } from "./button";
 export { cx } from "./cx";
+export { Disclosure, type DisclosureProps } from "./disclosure";
+export {
+  TextAreaField,
+  type TextAreaFieldProps,
+  TextField,
+  type TextFieldProps,
+} from "./field";
 export { Lightbox, type LightboxProps } from "./lightbox";
+export {
+  Menu,
+  MenuHeader,
+  MenuItem,
+  type MenuItemProps,
+  type MenuProps,
+  MenuRadioGroup,
+  type MenuRadioGroupProps,
+  MenuRadioItem,
+  type MenuRadioItemProps,
+  MenuSeparator,
+} from "./menu";
+export { Popover, type PopoverProps } from "./popover";
+export {
+  type Density,
+  type LinkRenderProps,
+  type LinkTo,
+  List,
+  type ListProps,
+  Row,
+  RowLink,
+  type RowLinkProps,
+  type RowProps,
+} from "./row";
+export { SegmentedControl, type SegmentedControlProps } from "./segmented-control";
+export {
+  EmptyState,
+  type EmptyStateProps,
+  ErrorState,
+  type ErrorStateProps,
+  LoadingState,
+  type LoadingStateProps,
+} from "./states";
 export { StatusBadge, type StatusBadgeProps, type StatusTone } from "./status-badge";
 export {
   type StripGroup,
@@ -14,4 +55,12 @@ export {
   type StripPoint,
 } from "./strip-plot";
 export { Table, type TableColumn, type TableProps } from "./table";
-export { type TabItem, Tabs, type TabsProps, tabId } from "./tabs";
+export {
+  type TabItem,
+  TabList,
+  type TabListProps,
+  TabPanel,
+  type TabPanelProps,
+  Tabs,
+  type TabsProps,
+} from "./tabs";

@@ -20,6 +20,8 @@
     "typescript": "catalog:"
   },
   "dependencies": {
-    "@voluma/contracts": "workspace:*"
+    "@voluma/contracts": "workspace:*",
+    "lucide-react": "catalog:",
+    "radix-ui": "1.8.1"
   }
 }
