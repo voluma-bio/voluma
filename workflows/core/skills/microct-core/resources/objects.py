@@ -11,7 +11,6 @@ keyed by the output id the workflow declares; the worker passes them to `report_
   line      {kind: 'annotation', annotation: {gridId, kind: 'line', aZyx, bZyx}}
   volume    {kind: 'volume', volume: {kind, shapeZyx, affine, unit, gridId, file, dtype}}   an array already on disk that other
                                                                                            objects sit on (a scan, an aligned stack)
-  missing   {kind: 'missing', reason}                                                       the output could not be made (any kind)
 `gridId` is the `grid_id` in a sidecar (`sidecar.py`, `frame.py`). Every field name and the mask dtype are constants below: a
 change in the contract is one edit here. Paths in an entry are absolute.
 
@@ -21,7 +20,6 @@ Library use (no CLI):
   e = objects.mask('slab.npy', m, like='hu.json', crop=True)               # crop=False keeps the whole grid (offset 0)
   e = objects.point(zyx, grid_id); e = objects.line(a_zyx, b_zyx, grid_id)
   e = objects.volume('tibia-hu.npy', 'tibia-frame.json')                    # kind='image' (unit HU) or 'labels'; header: hu.json or frame.json
-  e = objects.missing('the lateral meniscus is outside the field of view')
   sidecar.emit_values(out_json, values, ..., objects={'slab': e})          # into the result record and stdout
   objects.load(e) -> {'kind', 'grid_id', ...} by kind (below); objects.kind_of(e)
   objects.read_file(record.json) -> {id: entry} of the entries to draw (masks, surfaces, points, lines) in a result record's `objects`
@@ -35,7 +33,6 @@ from pathlib import Path
 
 import numpy as np
 import sidecar
-from scipy import ndimage as ndi
 
 GRID, SHAPE, OFFSET = 'gridId', 'shapeZyx', 'offsetZyx'
 KIND, STRUCTURE, SURFACE, ANNOTATION = 'kind', 'structure', 'surface', 'annotation'
@@ -60,11 +57,6 @@ def _coords(zyx, what):
 
 def _abs(path):
     return str(Path(path).resolve())
-
-
-def footprint(bone_zyx):
-    """The filled (V,U) footprint of a bone mask on the aligned grid: where a height along W can lie on the bone."""
-    return ndi.binary_fill_holes(np.asarray(bone_zyx, bool).any(axis=0))
 
 
 def surface(path, heights, axis, like, where=None, **meta):
@@ -124,13 +116,6 @@ def volume(path, header, kind='image', unit=None):
         sidecar.fail(f'{path} is {a.dtype} as a {kind!r} volume: the review loads {VOLUME_DTYPES} (kind: dtypes)')
     return {KIND: VOLUME, VOLUME: {KIND: kind, SHAPE: _ints(a.shape), AFFINE: g['affine_xyz_to_world_mm'], UNIT: unit,
                                    GRID: g['grid_id'], FILE: path, DTYPE: str(a.dtype)}}
-
-
-def missing(reason):
-    """The entry for an output that could not be made, whatever kind it is declared as."""
-    if not reason.strip():
-        sidecar.fail('a missing output needs its reason in a sentence')
-    return {KIND: MISSING, REASON: reason}
 
 
 def of_array(path, kind):
