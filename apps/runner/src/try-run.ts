@@ -7,10 +7,10 @@
  * with the WORKOS_TEST_EMAIL and WORKOS_TEST_PASSWORD of the repo .env, as `upload:scan` does,
  * on the API and origin `.dev/env.json` names; the scan defaults to the lab's reference scan.
  * It waits on the run's event stream, not a timer, and prints a line per task change, tool
- * call and thread. Exit 0 when the run completed, 1 when it failed or was cancelled.
+ * call and thread. Exit 0 when the run completed, 1 when it failed or was cancelled, 2 when the
+ * script itself broke (no `pnpm dev`, sign-in or API errors, the stream lost for good), 3 when no
+ * runner claimed the run within CLAIM_WAIT_MS.
  */
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { meResponseSchema } from "@voluma/contracts/auth";
 import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
@@ -20,7 +20,22 @@ import { spend } from "@voluma/contracts/spend";
 import { END_EVENT } from "@voluma/contracts/stream";
 import { studyDetailSchema } from "@voluma/contracts/study";
 import { workflowById } from "@voluma/workflow/bundled";
-import { required } from "./config.ts";
+import { devEnv, required } from "./config.ts";
+
+const CLAIM_WAIT_MS = 3 * 60_000;
+const RECONNECT_MS = 2000;
+// Long enough to ride out the API's `tsx --watch` restart after an edit.
+const MAX_STREAM_FAILURES = 30;
+
+// A throw anywhere is the script's own failure, not a failed run.
+process.on("uncaughtException", (error) => {
+  console.error(error instanceof Error ? error.message : error);
+  process.exit(2);
+});
+function fail(message: string): never {
+  console.error(message);
+  process.exit(2);
+}
 
 const { values } = parseArgs({
   options: {
@@ -31,12 +46,10 @@ const { values } = parseArgs({
   },
 });
 const workflow = workflowById(values.workflow);
-if (!workflow) throw new Error(`unknown workflow ${values.workflow}`);
+if (!workflow) fail(`unknown workflow ${values.workflow}`);
 
-const dev = JSON.parse(
-  readFileSync(resolve(import.meta.dirname, "../../../.dev/env.json"), "utf8"),
-);
-const origin: string = dev.appUrl;
+const dev = devEnv() ?? fail("no .dev/env.json: run `pnpm dev` first");
+const origin = dev.appUrl;
 const say = (line: string) => console.log(`${new Date().toISOString().slice(11, 19)} ${line}`);
 
 /** The session cookie, kept current from every response (the API rotates it). */
@@ -98,6 +111,12 @@ const runId = study.scans.flatMap((s) => s.runs).at(0)?.id;
 if (!runId) throw new Error("the study started no run");
 say(`started run ${runId} on ${input.name} (${workflow.id}); waiting for a runner to claim it`);
 say("(none running? start one: pnpm --filter @voluma/runner start)");
+const unclaimed = setTimeout(() => {
+  say(
+    `not claimed: no runner took the run in ${CLAIM_WAIT_MS / 60_000} min. Start one on this worktree (pnpm --filter @voluma/runner start), then try-run again; the run is left queued.`,
+  );
+  process.exit(3);
+}, CLAIM_WAIT_MS);
 
 const events: RunEvent[] = [];
 const progress = (e: RunEvent) => {
@@ -106,7 +125,10 @@ const progress = (e: RunEvent) => {
   else if (e.type === "thread.started")
     say(`thread started: ${e.payload.kind} ${e.payload.task ?? ""}`);
   else if (e.type === "thread.ended") say("thread ended");
-  else if (e.type === "claim.started") say("runner claimed the run");
+  else if (e.type === "claim.started") {
+    clearTimeout(unclaimed);
+    say("runner claimed the run");
+  }
 };
 
 // The stream sends `id: seq`, replays from `Last-Event-ID`, and says `event: end` once the run
@@ -141,10 +163,12 @@ for (let ended = false, failures = 0; !ended; ) {
       }
     }
     failures = 0;
+    // The API closes streams cleanly when it shuts down; pause so a repeat is not a tight loop.
+    if (!ended) await new Promise((r) => setTimeout(r, RECONNECT_MS));
   } catch (error) {
-    if (++failures > 5) throw error;
+    if (++failures > MAX_STREAM_FAILURES) throw error;
     say(`stream dropped (${error instanceof Error ? error.message : error}); resuming`);
-    await new Promise((r) => setTimeout(r, 2000));
+    await new Promise((r) => setTimeout(r, RECONNECT_MS));
   }
 }
 

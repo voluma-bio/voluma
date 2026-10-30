@@ -69,7 +69,8 @@ const gateway = createGateway({
   log,
 });
 const port = Number(process.env.PORT ?? 8080);
-gateway.server.listen(port, () => {
+// HOST binds one interface (`pnpm dev` sets 127.0.0.1); unset, all of them.
+gateway.server.listen(port, process.env.HOST, () => {
   log(`${instance} up on :${port}; keys for ${Object.keys(keys).join(", ") || "none"}`);
 });
 

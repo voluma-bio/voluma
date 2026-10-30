@@ -39,8 +39,14 @@ function positiveInt(name: string, fallback: number, min = 1): number {
 }
 
 /** What `pnpm dev` started in this worktree (tools/dev.mjs writes `.dev/env.json`), or undefined. */
-function devEnv():
-  | { apiUrl: string; apiToken: string; gatewayUrl?: string; gatewaySecret?: string }
+export function devEnv():
+  | {
+      apiUrl: string;
+      apiToken: string;
+      appUrl: string;
+      gatewayUrl?: string;
+      gatewaySecret?: string;
+    }
   | undefined {
   try {
     return JSON.parse(readFileSync(resolve(import.meta.dirname, "../../../.dev/env.json"), "utf8"));

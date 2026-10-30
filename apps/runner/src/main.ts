@@ -66,10 +66,12 @@ const shuttingDown = new Promise<void>((resolve) =>
 // Aborts on shutdown, and removes its own listener when it settles.
 const sleep = (ms: number) => delay(ms, undefined, { signal: shutdown.signal }).catch(() => {});
 
+const aliasList = Object.entries(config.models)
+  .map(([alias, m]) => `${alias} ${m.provider}/${m.id}`)
+  .join(", ");
+const gatewayNote = config.gateway?.url ?? "off: segment_sam not offered";
 log(
-  `${runnerId} up: ${config.concurrency} slot(s), models ${Object.entries(config.models)
-    .map(([alias, m]) => `${alias} ${m.provider}/${m.id}`)
-    .join(", ")}, thinking ${config.thinking ?? "unset"}, api ${config.api.baseUrl}`,
+  `${runnerId} up: ${config.concurrency} slot(s), models ${aliasList}, thinking ${config.thinking ?? "unset"}, api ${config.api.baseUrl}, gateway ${gatewayNote}`,
 );
 // After startup: a failure above must still kill the process, not be logged and survived.
 startTelemetry(log);

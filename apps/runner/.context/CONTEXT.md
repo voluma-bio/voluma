@@ -219,20 +219,22 @@ An agent in its own worktree tries a workflow change on the real system like thi
 3. `pnpm --filter @voluma/runner try-run [--scan <inputId>] [--workflow <id>] [--outputs a,b] [--notes …]`
    (`src/try-run.ts`) signs in as `WORKOS_TEST_EMAIL`, starts a study and run on the reference scan,
    follows the run's event stream until it ends and prints per-task status, outputs reported and missing,
-   cost and the run page. Exit 1 when the run failed or was cancelled. Edits to `workflows/` are read from
+   cost and the run page. Exit 1 when the run failed or was cancelled, 2 when the script itself broke
+   (no `pnpm dev`, sign-in or API errors), 3 when no runner claimed the run in 3 minutes. Edits to `workflows/` are read from
    the checkout when a run starts, so edit, then try-run again.
 4. `sandboxes:clean --run <id>` for each run, as always.
 
 Why a tunnel: sandboxes run on Modal and reach only an https host from an allowlist, never `localhost`.
-A Cloudflare quick tunnel (`cloudflared` npm package, which downloads the official binary once into
-`~/.cache/voluma/`) needs no account, no system install, works on Linux and macOS (also ARM), and gives
+A Cloudflare quick tunnel (`cloudflared` npm package runs it; `pnpm dev` downloads the pinned official release once into
+`~/.cache/voluma/cloudflared-<version>` and checks its sha256, kept in `tools/dev.mjs`) needs no account, no system install, works on Linux and macOS (also ARM), and gives
 each `pnpm dev` its own random URL, so worktrees share nothing. The URL is public, so the gateway's token
 check is the only door: a request with no or a bad token is 401. Costs: a download on first use, a new URL
-per launch (restart the runner after `pnpm dev` restarts), and quick tunnels are best effort (Cloudflare
+per launch (restart the runner after `pnpm dev` restarts; the runner reads the gateway once, and its
+boot line says `gateway <url>` or `gateway off`), and quick tunnels are best effort (Cloudflare
 gives no uptime promise). Tried and not chosen: Tailscale Funnel (ties it to one person's tailnet; fixed
 hostname and shared ports), Modal's own tunnel (exposes a port of a sandbox, it cannot reach back to this
 machine), localtunnel (no binary, but flaky and gates browsers behind a page).
-Without the tunnel (no Meta key, download failed, no network) `pnpm dev` says so and writes no gateway URL:
+Without the tunnel (no Meta key, download or hash check failed, no network) `pnpm dev` says so and writes no gateway URL:
 runs work, sandboxes have no network and `segment_sam` is not offered.
 
 # Runner: `dev-sandbox` drives the real sandbox, tools and gateway without a model

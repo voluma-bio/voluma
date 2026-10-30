@@ -79,6 +79,7 @@ Variables:
 | `GATEWAY_META_API_KEY` | our Meta key (SAM) |
 | `GATEWAY_ANTHROPIC_API_KEY`, `GATEWAY_OPENAI_API_KEY` | not in the yaml: those providers are disabled in code |
 | `PORT` | not set: Render's injected 10000 (the code's default is 8080) |
+| `HOST` | not set (all interfaces); `pnpm dev` sets 127.0.0.1 |
 | `GATEWAY_DRAIN_SECONDS` | `60` (the code's default), written in the yaml next to the shutdown delay |
 | `GATEWAY_<PROVIDER>_BASE_URL` | not in the yaml; only for pointing at a stub |
 | `RENDER_INSTANCE_ID` | Render's; names the instance in `provider_calls.instance` |
