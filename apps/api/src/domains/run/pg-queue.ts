@@ -20,11 +20,24 @@ import {
 } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { type OutputEntry, unselectable } from "@voluma/contracts/workflow-files";
-import { and, asc, desc, eq, gt, inArray, notInArray, type SQL, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  lte,
+  notInArray,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { Reader } from "../../domain";
 import { admit, type Limits, type Refusal, refusalMessage, type Usage, usage } from "./admission";
-import { endClaim, stalledError } from "./claim-progress";
+import { endClaim, outageDelayMinutes, stalledError } from "./claim-progress";
 import { decideMessage, endCorrection, openCorrection } from "./corrections";
 import type { KeyVault } from "./key-vault";
 import { LeaseLost, noLease } from "./lease";
@@ -89,6 +102,11 @@ async function recover(tx: Tx, where: SQL, reason: ClaimEndReason) {
       stalledClaims,
       ...noLease,
     };
+    // A visitor run waits for its keys, not for a time.
+    const holdBack =
+      reason === "provider-outage" && run.credentials === "voluma"
+        ? sql`now() + make_interval(mins => ${outageDelayMinutes(stalledClaims)})`
+        : null;
     if (exhausted) {
       await endUnfinished(
         tx,
@@ -104,6 +122,7 @@ async function recover(tx: Tx, where: SQL, reason: ClaimEndReason) {
           ...base,
           state: run.credentials === "visitor" ? "awaiting-keys" : "queued",
           awaitingSince: run.credentials === "visitor" ? sql`now()` : null,
+          claimableAfter: holdBack,
         })
         .where(eq(runs.id, run.id));
     }
@@ -489,7 +508,12 @@ export function pgRunQueue(
         const queued = await tx
           .select()
           .from(runs)
-          .where(eq(runs.state, "queued"))
+          .where(
+            and(
+              eq(runs.state, "queued"),
+              or(isNull(runs.claimableAfter), lte(runs.claimableAfter, sql`now()`)),
+            ),
+          )
           .orderBy(
             sql`(SELECT max(o.claimed_at) FROM runs o WHERE o.lab_id = ${runs.labId}) ASC NULLS FIRST`,
             asc(runs.createdAt),
@@ -524,6 +548,7 @@ export function pgRunQueue(
               state: "running",
               startedAt: sql`coalesce(${runs.startedAt}, now())`,
               claimedAt: sql`now()`,
+              claimableAfter: null,
               claimStartSeq: sql`coalesce((SELECT max(seq) FROM events WHERE run_id = ${run.id}), 0)`,
               leaseHolder: runnerId,
               leaseToken,

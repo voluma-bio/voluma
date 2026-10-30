@@ -32,7 +32,18 @@ export const isProgress = (event: { type: string; payload: unknown }) =>
 export const STALLED_CLAIMS_LIMIT = 3;
 
 /** A deploy (`shutdown`) is nobody's fault: never counted. */
-const COUNTED_REASONS: ReadonlySet<ClaimEndReason> = new Set(["self-stop", "lease-expired"]);
+const COUNTED_REASONS: ReadonlySet<ClaimEndReason> = new Set([
+  "self-stop",
+  "lease-expired",
+  "provider-outage",
+]);
+
+/** Minutes a run waits before its next claim after a `provider-outage` release, by the count of such claims in a row. */
+const OUTAGE_DELAY_MINUTES = [1, 2, 5];
+
+/** The wait after a `provider-outage` release that left `stalledClaims` (0: it had made progress, so a new outage). */
+export const outageDelayMinutes = (stalledClaims: number) =>
+  OUTAGE_DELAY_MINUTES[Math.min(Math.max(stalledClaims, 1), OUTAGE_DELAY_MINUTES.length) - 1] ?? 5;
 
 export function endClaim(
   run: { lastProgressSeq: number; claimStartSeq: number; stalledClaims: number },
@@ -47,6 +58,7 @@ const WHY: Record<ClaimEndReason, string> = {
   shutdown: "the runner restarted",
   "self-stop": "the runner lost contact with the server",
   "lease-expired": "the server lost contact with the runner",
+  "provider-outage": "the model provider was unavailable",
 };
 
 export const stalledError = (reason: ClaimEndReason, tool: string | undefined) =>

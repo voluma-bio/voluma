@@ -78,7 +78,13 @@ function toRun(
   const state = ((): Run["state"] => {
     switch (run.state) {
       case "queued":
-        return { status: "queued", position: position ?? 1 };
+        return {
+          status: "queued",
+          position: position ?? 1,
+          ...(run.claimableAfter && {
+            waitingForProvider: { retryAt: run.claimableAfter.toISOString() },
+          }),
+        };
       case "running":
         return { status: "running", startedAt: startedAt as string };
       case "awaiting-keys":

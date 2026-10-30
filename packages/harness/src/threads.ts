@@ -22,9 +22,14 @@ export type ThreadSpec = StartThreadOptions extends infer O
     ? Omit<O, PerRun>
     : never
   : never;
-type Shared = Pick<StartThreadOptions, "runId" | "recorder" | "history" | "sandbox"> & {
+type Shared = Pick<
+  StartThreadOptions,
+  "runId" | "recorder" | "history" | "sandbox" | "providerOutage"
+> & {
   /** Called when a thread ends, whatever the outcome; its sandbox is no longer needed. */
   release(threadId: string): void;
+  /** Called with the error when a thread was left open by a provider outage (`providerOutage`). */
+  onOutage?(error: string): void;
 };
 
 export interface Threads {
@@ -69,7 +74,7 @@ export function threads(shared: Shared, signal?: AbortSignal): Threads {
     const stop = () => abort.abort();
     signal?.addEventListener("abort", stop);
     if (signal?.aborted) stop();
-    const { release: _, ...startOptions } = shared;
+    const { release: _, onOutage: __, ...startOptions } = shared;
     const handle = startThread({
       ...startOptions,
       ...spec,
@@ -81,7 +86,8 @@ export function threads(shared: Shared, signal?: AbortSignal): Threads {
     entry.settled = handle.done
       .then(
         (outcome) => {
-          if (outcome.stale) stale.set(spec.threadId, outcome.error ?? "unresumable");
+          if (outcome.outage) shared.onOutage?.(outcome.error ?? "");
+          else if (outcome.stale) stale.set(spec.threadId, outcome.error ?? "unresumable");
           else if (!outcome.ran) {
             failure ??= new Error(
               `thread ${spec.threadId} did not run: ${outcome.error ?? "it had nothing to do"}`,

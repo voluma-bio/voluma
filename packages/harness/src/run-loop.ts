@@ -110,7 +110,7 @@ export interface LoopConfig {
   checkTimeoutMs: number;
   /** Deliveries with no notice in a row before code ends the run. */
   stuckLimit: number;
-  /** Times a thread is started again after a provider error before the run fails. */
+  /** Times a thread is started again after a provider error that is neither fatal nor an outage (`startThread`'s `providerOutage`) before the run fails. */
   maxProviderRedos: number;
 }
 

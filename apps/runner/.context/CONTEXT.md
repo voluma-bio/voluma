@@ -243,12 +243,25 @@ logged with its role and attempt. The run's abort ends the wait. Any other error
 `<status> {...}`, `<status> <html>` or `<status> status code (no body)`) and, for an Anthropic error sent mid-stream
 with no status, its documented `error.type` (`overloaded_error` is 529, `rate_limit_error` 429).
 
-**A thread that dies on a provider error** (`provider-error.ts`, after the retries above gave up)
-is the run loop's to handle (`packages/harness/src/run-loop.ts`): a check is started again as a new
-check, the main agent as `main.<n+1>`, up to `maxProviderRedos` (2) per thread; a worker's failure
-is a notice to the main agent. A fatal error (a refused key) fails the run
-at once, with the error in `state.error`, instead of leaving it `completed` with tasks that never
-started.
+**A provider outage releases the run.** When a model call still fails with a transient error
+(`isTransientProviderError`) after the retries above, `start-thread.ts` does not store or emit
+that reply and writes no `thread.ended`: the thread stays open with its History an exact prefix,
+its outcome says `outage`, and `run.ts` stops the claim as `provider-outage`, which reports
+`released`. Every running thread is cut off exactly as in a shutdown (an in-flight tool exec is
+not waited for: a `segment_sam` call cut this way has an unknown cost, like one cut by a deploy).
+The API requeues the run with `runs.claimable_after` set (1, then 2, then 5 minutes by the count of
+such claims in a row without progress) and counts the claim toward the no-progress limit, so a
+provider that stays down fails the run after 3 claims. The next claim's `previousClaim` is
+`provider-outage`, and each cut-off thread is resumed with "…cut off when the model provider was
+unavailable; continue." There is no in-claim redo for these errors, so nothing counts failures per
+thread: the API's `stalledClaims` is the count, and run-state progress resets it.
+
+**Other provider errors** (`provider-error.ts`: the ones that are neither transient nor fatal, a
+non-Meta 404) kill the thread as before and are the run loop's to handle
+(`packages/harness/src/run-loop.ts`): a check is started again as a new check, the main agent as
+`main.<n+1>`, up to `maxProviderRedos` (2) per thread; a worker's failure is a notice to the main
+agent. A fatal error (a refused key, out of money) fails the run at once, with the error in
+`state.error`, instead of leaving it `completed` with tasks that never started.
 
 **Loop limits** are `config.loop`: `RUNNER_MAX_FIX_ROUNDS` (default 2 `needs-review` rounds per
 task before it is left to check) and `RUNNER_CHECK_TIMEOUT_MINUTES` (default 20 of a checker's
@@ -349,7 +362,7 @@ never resumed: a stale dependent's thread stopped (`task-runtime.ts` `staleDepen
 failing run aborting its threads (`abortAll`). A stop stores that `cancelled` end first
 (`task-runtime.ts` `stop`, inside `section`) and then aborts without waiting; the thread's own
 later end is dropped (`start-thread.ts`). So a stopped thread's next write is refused at once,
-and "open" always means "cut off". A self-stop reports `released` with reason `self-stop`; a signal, `shutdown`.
+and "open" always means "cut off". A self-stop reports `released` with reason `self-stop`; a signal, `shutdown`; a provider outage, `provider-outage`.
 
 The next claim learns why from `claim.previousClaim` (the API records `lease-expired` itself)
 and writes `claim.started {resumed, after}` right after the root's `thread.started`. The
