@@ -404,11 +404,9 @@ export function NewPage() {
         )}
       </div>
 
-      {table.length > 0 && (
-        <div className="px-1">
-          <RunKeyLine userId={me.userId} guest={guest} keys={keys} onChange={setKeys} />
-        </div>
-      )}
+      <div className="px-1">
+        <RunKeyLine userId={me.userId} guest={guest} keys={keys} onChange={setKeys} />
+      </div>
 
       {WORKFLOWS.map((w) => (
         <WorkflowPanel
