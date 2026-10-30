@@ -292,7 +292,7 @@ const formatNumber = (value: number) =>
 
 /** An error's first line, without the provider's raw response: "OpenAI API error (401)". */
 export const plainError = (error: string) =>
-  error.split(/\s*[{\n]/)[0]?.replace(/[:\s]+$/, "") || error;
+  error.split(/\s*(?:\{\s*"|\n)/)[0]?.replace(/[:\s]+$/, "") || error;
 
 /**
  * A task's values: each measurement and score of the current attempt (files, volumes,

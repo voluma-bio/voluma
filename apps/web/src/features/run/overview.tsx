@@ -92,18 +92,21 @@ export function Overview({
   tasks,
   toCheck,
   ended,
+  example,
   accepting,
   search,
 }: {
   runId: string;
   tasks: TaskView[];
-  /** The header's number: open items "Looks right" can accept. */
+  /** The header's number: open items "Looks right" can accept; 0 on an ended run that takes no decisions. */
   toCheck: number;
   ended: boolean;
+  example: boolean;
   accepting: Accepting;
   search: (taskId?: string) => string;
 }) {
   const now = tasks.filter((t) => NOW.has(t.state));
+  const working = now.some((t) => t.state === "running" || t.state === "checking");
   const paused = now.every((t) => t.state === "paused");
   const failed = tasks.filter((t) => t.state === "failed");
   const needs = tasks.flatMap((t) => t.needs);
@@ -114,7 +117,7 @@ export function Overview({
   return (
     <>
       {now.length > 0 && (
-        <Section title={paused ? "Paused" : "Working on now"}>
+        <Section title={paused ? "Paused" : working ? "Working on now" : "In progress"}>
           <ul className="flex flex-wrap gap-2.5">
             {now.map((t) => (
               <li key={t.id}>
@@ -153,6 +156,13 @@ export function Overview({
           </p>
         ) : (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,24rem),1fr))] gap-2.5">
+            {ended && !accepting.enabled && open.length > 0 && (
+              <p className="col-span-full text-ui text-muted-foreground">
+                {example
+                  ? "This example is read-only."
+                  : "This run didn't finish, so nothing here can be marked as looked at."}
+              </p>
+            )}
             {failed.map((t) => (
               <FailedCard key={t.id} task={t} to={search(t.id)} />
             ))}
@@ -179,7 +189,7 @@ export function Overview({
   );
 }
 
-/** The tasks "Working on now" lists: under way, or stopped partway until something resumes them. */
+/** The tasks the first section lists: under way, or stopped partway until something resumes them. */
 const NOW: ReadonlySet<TaskView["state"]> = new Set(["running", "checking", "held", "paused"]);
 
 /** A started task's line: what the AI is doing on it, in the researcher's words. */
@@ -399,7 +409,6 @@ const NOT_YET: Partial<Record<TaskView["state"], string>> = {
   running: "in progress",
   checking: "being checked",
   held: "in progress",
-
   paused: "paused",
   stopped: "stopped before it finished",
   skipped: "skipped",

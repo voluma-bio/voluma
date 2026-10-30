@@ -216,9 +216,12 @@ function RunScreen({
   const titles = useMemo(() => new Map(tasks.map((t) => [t.id, t.title])), [tasks]);
   const needs = tasks.flatMap((t) => t.needs);
   // An ended run's stream is closed, so a "Looks right" made here counts from `accepting.done`.
+  // An ended run that takes no decisions (failed, cancelled, an example) has nothing to count.
   const toCheck =
-    view.progress.toCheck -
-    needs.filter((n) => n.acceptable && !n.accepted && accepting.done.has(n.id)).length;
+    ended && !accepting.enabled
+      ? 0
+      : view.progress.toCheck -
+        needs.filter((n) => n.acceptable && !n.accepted && accepting.done.has(n.id)).length;
   const firstOpen = needs.find((n) => !n.accepted && !accepting.done.has(n.id));
 
   let content: React.ReactNode;
@@ -267,6 +270,7 @@ function RunScreen({
         tasks={tasks}
         toCheck={toCheck}
         ended={ended}
+        example={run.example}
         accepting={accepting}
         search={search}
       />
@@ -338,7 +342,6 @@ function Decisions({
         Overview
       </Link>
       <h2 className="mt-2 mb-4 text-xl font-semibold">What the AI decided</h2>
-
       {!lead && rows.length > 0 && (
         <p className="mb-4 text-ui text-muted-foreground">
           This run predates the lead AI's own record: it shows where each task's AI started.

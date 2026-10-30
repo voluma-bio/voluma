@@ -60,9 +60,13 @@ is no runs list: Home (`features/study`) replaces it.
   take: once ended, a thread, tool call or task still open shows as Stopped (Failed if the run
   failed, at the run's end); while queued or awaiting keys it shows as Paused, its clock frozen at
   its last event, until the runner's `thread.started` resumes it. The end applies only once the
-  stream has closed (`useRunStream`'s `closed`), when the log is whole, so a reload never shows a
-  finished thread as Stopped while its backlog loads; until then an open attempt reads "Waiting on
-  the lead AI". Never decide "running" from the events alone.
+  stream has closed (`useRunStream`'s `closed`), when the log is whole: the server ends an ended
+  run's stream with `event: end`, so that is right after the backlog, with no reconnect. A
+  reload therefore never shows a finished thread as Stopped while its backlog loads; during the
+  load an open attempt reads "Waiting on the lead AI". Never decide "running" from the events
+  alone.
+- **Counting:** an ended run that takes no decisions (failed, cancelled, an example) shows its
+  cards with one line saying why none can be accepted, and no "K to check" in the header or badge.
 - **Run-level data** is one `runView(events, state, providerCalls, halt)` (`run-model.ts`):
   threads, progress, and per plan task its state, threads, line, check, To check items, QC image,
   values and spend, memoized on the events. `withLiveCalls` overlays the tool calls being written
