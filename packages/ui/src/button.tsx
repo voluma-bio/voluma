@@ -47,7 +47,7 @@ const linkLook = cx(
   focus,
 );
 
-function buttonClass({
+function buttonLook({
   variant = "secondary",
   size = "md",
   square = false,
@@ -82,7 +82,7 @@ export function Button({
   ...props
 }: ButtonProps) {
   const reasonId = useId();
-  const look = buttonClass({ variant, size, className });
+  const look = buttonLook({ variant, size, className });
   const button = asChild ? (
     <Slot.Root className={look} {...props} />
   ) : (
@@ -130,7 +130,7 @@ export function IconButton({
       <button
         type={type}
         aria-label={label}
-        className={buttonClass({ variant, size, square: true, className })}
+        className={buttonLook({ variant, size, square: true, className })}
         {...props}
       />
     </Tooltip>
