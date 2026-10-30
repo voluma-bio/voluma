@@ -16,7 +16,6 @@ import { ChevronDown } from "lucide-react";
 import { Popover } from "radix-ui";
 import { useState } from "react";
 import { Link } from "react-router";
-import { reviewHref } from "./overview";
 import { plainError } from "./run-model";
 import { useNow } from "./status";
 
@@ -72,7 +71,7 @@ export function RunHeader({
   study,
   progress: { done, total, toCheck },
   spend,
-  openTask,
+  open3d,
   decisions,
   onChange,
   waiting,
@@ -82,8 +81,8 @@ export function RunHeader({
   /** `progress` (total is 0 before the run has a plan), less what was accepted on this page. */
   progress: { done: number; total: number; toCheck: number };
   spend: RunSpend;
-  /** The task "Open in 3D" opens: the one in view, else the first to check. */
-  openTask?: string;
+  /** "Open in 3D": the run's To check items from the task in view; absent before a plan. */
+  open3d?: () => void;
   /** Where "What the AI decided" goes. */
   decisions: string;
   onChange: (run: Run) => void;
@@ -148,13 +147,10 @@ export function RunHeader({
           decisions={decisions}
         />
         {live && <StopRun run={run} onChange={onChange} />}
-        {(state.status !== "queued" || run.tasks) && (
-          <Link
-            to={reviewHref(run.id, openTask)}
-            className={buttonClass({ variant: "primary", size: "sm" })}
-          >
+        {open3d && (
+          <Button variant="primary" size="sm" onClick={open3d}>
             Open in 3D
-          </Link>
+          </Button>
         )}
       </div>
     </header>

@@ -4,7 +4,7 @@
  * built only when the reader opens it. Tool names may show there and nowhere else on the page.
  */
 import type { RunEvent } from "@voluma/contracts/events";
-import { buttonClass, cx } from "@voluma/ui";
+import { Button, cx } from "@voluma/ui";
 import { ArrowLeft, Check, ChevronRight } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router";
@@ -15,9 +15,9 @@ import {
   doingNow,
   LookedRight,
   NeedCard,
+  type Open3d,
   QcImage,
   ResultsTable,
-  reviewHref,
   Section,
   WhatItFound,
 } from "./overview";
@@ -31,6 +31,7 @@ export function TaskView({
   task,
   titleOf,
   accepting,
+  open3d,
   search,
   events,
   live,
@@ -40,6 +41,7 @@ export function TaskView({
   task: Task;
   titleOf: (taskId: string) => string;
   accepting: Accepting;
+  open3d: Open3d;
   search: (taskId?: string) => string;
   events: RunEvent[];
   live: Live;
@@ -70,9 +72,9 @@ export function TaskView({
 
       {ended && (
         <div className="mb-6 flex flex-wrap gap-2">
-          <Link to={reviewHref(runId, task.id)} className={buttonClass({ size: "sm" })}>
+          <Button size="sm" onClick={() => open3d(task.id, open[0]?.id)}>
             Open in 3D
-          </Link>
+          </Button>
         </div>
       )}
 
@@ -80,7 +82,7 @@ export function TaskView({
         <Section title="Needs your eye" count={open.length}>
           <div className="grid gap-2.5">
             {open.map((n) => (
-              <NeedCard key={n.id} runId={runId} item={n} accepting={accepting} />
+              <NeedCard key={n.id} runId={runId} item={n} accepting={accepting} open3d={open3d} />
             ))}
           </div>
           <LookedRight items={looked} />
