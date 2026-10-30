@@ -177,6 +177,9 @@ function ScanStatusCell({
           {start.isPending || start.isSuccess ? "Starting…" : "Start"}
         </Button>
       </span>
+      {guest && !keys && !detail.study.example && (
+        <span className="text-meta text-muted-foreground">Add your Meta key first.</span>
+      )}
       {start.isError && (
         <span role="alert" className="text-meta whitespace-normal text-destructive">
           {startError(start.error)}
