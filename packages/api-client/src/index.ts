@@ -7,6 +7,12 @@ import { logoutResponseSchema, type Me, meResponseSchema } from "@voluma/contrac
 import { type DownloadDescriptor, downloadDescriptorSchema } from "@voluma/contracts/download";
 import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
 import {
+  type SendRunMessageRequest,
+  type SendRunMessageResponse,
+  sendRunMessageRequestSchema,
+  sendRunMessageResponseSchema,
+} from "@voluma/contracts/messages";
+import {
   type AcceptCheckRequest,
   acceptCheckRequestSchema,
   type MarkReviewedRequest,
@@ -310,6 +316,32 @@ export async function markReviewed(
     ),
   );
 }
+
+/**
+ * Sends the main agent a message (and optional marks, a PNG snapshot, or Go) about a finished run;
+ * reopens a run that ended `completed`. Keep `body.id` across retries. Refusals and limits:
+ * `messages.ts`. The chat comes back on the run's event stream: read it with `conversation`.
+ */
+export async function sendRunMessage(
+  runId: string,
+  body: SendRunMessageRequest,
+): Promise<SendRunMessageResponse> {
+  return sendRunMessageResponseSchema.parse(
+    await json(
+      await request(`/review/runs/${encodeURIComponent(runId)}/messages`, {
+        method: "POST",
+        body: sendRunMessageRequestSchema.parse(body),
+      }),
+    ),
+  );
+}
+
+/**
+ * Where the browser reads the view snapshot of a message (`person.message`'s `snapshotKey`,
+ * by the message's id: the `id` the panel sent). A PNG; 404: unreadable run or no such snapshot.
+ */
+export const runMessageSnapshotUrl = (runId: string, messageId: string) =>
+  `/api/review/runs/${encodeURIComponent(runId)}/messages/${encodeURIComponent(messageId)}/snapshot`;
 
 /**
  * Where the browser reads one of a run's files: evidence, a data file, a volume or a mesh,

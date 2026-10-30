@@ -5,18 +5,29 @@
  * the run changed (`Agents.changed`). Each appends under an id derived from its call
  * (`effects.ts`), so a repeated call writes nothing twice and a call a crash cut off is
  * answered from the log. Every tool is refused once the run has ended, and for any thread
- * that is not the main agent. They never wait for a thread inside the section.
+ * that is not the main agent. In a correction (a researcher's message reopened the finished
+ * run) the tools that start, steer or change work are refused until the researcher says go.
+ * They never wait for a thread inside the section.
  */
 import type { By } from "@voluma/contracts/events";
 import { taskIdSchema } from "@voluma/contracts/ids";
 import { fileRefInputSchema } from "@voluma/contracts/output";
+import { replyInputSchema } from "@voluma/contracts/task-tools";
 import { type PlanTask, workflowPlanSchema } from "@voluma/contracts/workflow";
 import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
 import { isSatisfied, transitiveDependents } from "@voluma/workflow";
 import { planTask } from "@voluma/workflow/plan";
 import { z } from "zod";
 import type { UserSender } from "../adapters/pi/start-thread";
-import { feedbackText, fromMain, unfinished } from "../messages";
+import {
+  feedbackText,
+  fromMain,
+  GO_REFUSAL,
+  goNotActedOn,
+  UNANSWERED,
+  UNDELIVERED,
+  unfinished,
+} from "../messages";
 import type { Recorder } from "../recorder";
 import { Refusal, type TaskRuntime } from "../task-runtime";
 import { startedFor, type ThreadLog, type ThreadState, threadLog } from "../thread-log";
@@ -68,21 +79,24 @@ export function mainTools(deps: MainDeps) {
   const { recorder, runtime, agents, rootThreadId, workflow } = deps;
   const log = () => threadLog(recorder.events());
 
-  /** The main agent calls while the run is going. */
-  function main(ctx: ToolContext) {
+  /** The main agent calls while the run is going; `work` tools also wait for the researcher's go in a correction. */
+  function main(ctx: ToolContext, work = false) {
     if (ctx.kind !== "main") throw new Refusal("Only the main agent uses this tool.");
-    if (log().root.ended) throw new Refusal("The run has ended.");
+    const d = log();
+    if (d.root.ended) throw new Refusal("The run has ended.");
+    if (work && d.correcting && !d.go) throw new Refusal(GO_REFUSAL);
   }
 
   /** A tool that decides and writes inside the section, then wakes the loop. */
   function inSection<I>(
     run: (input: I, ctx: ToolContext) => Promise<unknown>,
+    work = false,
   ): (input: I, ctx: ToolContext) => ReturnType<typeof result> {
     return (input, ctx) =>
       result(async () => {
-        main(ctx);
+        main(ctx, work);
         const done = await runtime.section(async () => {
-          main(ctx);
+          main(ctx, work);
           return run(input, ctx);
         });
         agents.changed();
@@ -144,7 +158,7 @@ export function mainTools(deps: MainDeps) {
         startedEventId: effectId("start_worker", ctx.threadId, ctx.toolCallId),
       });
       return { message: `Worker ${threadId} started on ${taskId}.`, threadId };
-    }),
+    }, true),
   };
 
   const message: Tool<z.ZodObject<{ threadId: z.ZodString; text: z.ZodString }>> = {
@@ -155,7 +169,7 @@ export function mainTools(deps: MainDeps) {
     sequential: true,
     execute: (input, ctx) =>
       result(async () => {
-        main(ctx);
+        main(ctx, true);
         const { threadId, text } = input;
         const sender: UserSender = { kind: "thread", threadId: ctx.threadId };
         const before = log();
@@ -176,7 +190,7 @@ export function mainTools(deps: MainDeps) {
         await agents.settled(threadId);
         await recorder.flush();
         const done = await runtime.section(async () => {
-          main(ctx);
+          main(ctx, true);
           const d = log();
           workerOf(d, threadId);
           if (agents.state(d, threadId) === "stopped")
@@ -185,7 +199,11 @@ export function mainTools(deps: MainDeps) {
             throw new Refusal(`${threadId} is running again; send the message once more.`);
           }
           const t = runtime.taskOf(w.taskId);
-          const feedback = !!t?.rejected && d.holders.get(w.taskId) === threadId;
+          // A task its check rejected, or one the researcher said go on that is finished (done, or left
+          // to check by the fix limit), is redone as a new attempt of the same worker.
+          const goTask =
+            d.go?.taskId === w.taskId && (t?.status === "done" || t?.status === "to-check");
+          const feedback = (!!t?.rejected || goTask) && d.holders.get(w.taskId) === threadId;
           if (feedback) {
             await runtime.openAttempt(
               w.taskId,
@@ -253,7 +271,7 @@ export function mainTools(deps: MainDeps) {
         );
       }
       return { message: `${threadId} stopped.${working ? ` ${w.taskId} is pending again.` : ""}` };
-    }),
+    }, true),
   };
 
   const answer: Tool<
@@ -470,13 +488,30 @@ export function mainTools(deps: MainDeps) {
       return {
         message: `The plan changed.${skipped.size > 0 ? ` Skipped: ${[...skipped].join(", ")}.` : ""}`,
       };
+    }, true),
+  };
+
+  const reply: Tool<typeof replyInputSchema> = {
+    name: "reply",
+    description:
+      "Answer the researcher who wrote to the run, in plain words. It starts no work: after a go you act with your other tools. You may call it more than once.",
+    input: replyInputSchema,
+    sequential: true,
+    execute: inSection(async ({ text }, ctx) => {
+      await recorder.append(
+        ctx.threadId,
+        "reply",
+        { text },
+        effectId("reply", ctx.threadId, ctx.toolCallId),
+      );
+      return { message: "Sent to the researcher." };
     }),
   };
 
   const finish_run: Tool<z.ZodObject<{ summary: z.ZodString }>> = {
     name: "finish_run",
     description:
-      "End the run. Refused while a worker or checker is running, while a task is neither done, left to check nor skipped (pending, in progress, under review, stale), while a task's check rejected it and you have not sent feedback or accepted it, and while a selected output is neither reported nor skipped with a reason. `summary` is one or two plain sentences for the researcher.",
+      "End the run. Refused while the researcher's last message is unanswered or their go is not acted on, while a worker or checker is running, while a task is neither done, left to check nor skipped (pending, in progress, under review, stale), while a task's check rejected it and you have not sent feedback or accepted it, and while a selected output is neither reported nor skipped with a reason. `summary` is one or two plain sentences for the researcher.",
     input: z.object({ summary: nonEmpty }),
     sequential: true,
     execute: async (input, ctx) =>
@@ -488,6 +523,9 @@ export function mainTools(deps: MainDeps) {
             (r) => r.role !== "main" && agents.state(d, r.id) === "running",
           );
           const problems = [
+            ...(d.undelivered.some((n) => n.kind === "person") ? [UNDELIVERED] : []),
+            ...(d.unanswered ? [UNANSWERED] : []),
+            ...(d.go && !d.go.redone ? [goNotActedOn(d.go.taskId)] : []),
             ...running.map((r) => `${r.id} (${r.role}, ${r.taskId}) is still running.`),
             ...unfinished(view).map((t) =>
               t.status === "pending"
@@ -520,5 +558,15 @@ export function mainTools(deps: MainDeps) {
       ),
   };
 
-  return { start_worker, message, wait, stop_worker, answer, accept, change_plan, finish_run };
+  return {
+    start_worker,
+    message,
+    wait,
+    stop_worker,
+    answer,
+    accept,
+    change_plan,
+    reply,
+    finish_run,
+  };
 }

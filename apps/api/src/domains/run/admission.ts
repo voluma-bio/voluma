@@ -61,15 +61,17 @@ export async function usage(
 /**
  * Why `run` may not go on at `stage`, or null. Start and resume admit either kind of run;
  * claim is for `voluma` runs, since a visitor run's cap was checked when it
- * was queued. Checks run in this order.
+ * was queued. A reopen (a correction) of a `voluma` run (the route refuses visitor runs first) is
+ * judged by the per-caller limit alone: it is no new run, so no daily count. Checks run in this order.
  */
 export function admit(
-  stage: "start" | "resume" | "claim",
+  stage: "start" | "resume" | "reopen" | "claim",
   limits: Limits,
   u: Usage,
   run: { credentials: Run["credentials"]; firstClaim?: boolean },
 ): Refusal | null {
   if (stage === "claim" && u.running >= limits.concurrent) return "concurrent";
+  if (stage === "reopen") return u.callerUnfinished >= limits.perCaller ? "per-caller" : null;
   if (stage === "start" && u.callerUnfinished >= limits.perCaller) return "per-caller";
   if (run.credentials === "visitor") {
     return u.visitorActive >= limits.visitorActive ? "visitor-active" : null;

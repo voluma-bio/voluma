@@ -39,12 +39,22 @@ export const workflowSnapshotPrefix = (runId: string) => `${runPrefix(runId)}wor
 export const scratchPrefix = (runId: string) => `${runPrefix(runId)}scratch/`;
 /** All tasks' outputs; the sandbox mounts this read-write at `/outputs`. */
 export const outputsPrefix = (runId: string) => `${runPrefix(runId)}outputs/`;
+/**
+ * A copy of the run's outputs taken when the first claim of a correction with a go starts
+ * (`outputs.backed-up`, keyed to that `run.reopened`'s id), so a correction that ends unfinished
+ * can put them back (`outputs.restored`); deleted at the next reopen's first claim once it finished (`outputs.discarded`). Never read as outputs; the sandbox mounts none of it.
+ */
+export const outputsBackupPrefix = (runId: string, reopenId: string) =>
+  `${runPrefix(runId)}corrections/${seg(reopenId)}/`;
 export const taskOutputPrefix = (runId: string, task: string) =>
   `${outputsPrefix(runId)}${seg(task)}/`;
 
 export const inputKey = (inputId: string, path: string) => `${inputPrefix(inputId)}${rel(path)}`;
 export const uploadKey = (inputId: string, path: string) => `${uploadPrefix(inputId)}${rel(path)}`;
 export const scratchKey = (runId: string, path: string) => `${scratchPrefix(runId)}${rel(path)}`;
+/** A researcher's view snapshot for a message (`messages.ts`): `scratch/person/` is readable by the main agent and workers. */
+export const messageSnapshotKey = (runId: string, messageId: string) =>
+  scratchKey(runId, `person/${messageId}.png`);
 export const outputKey = (runId: string, task: string, path: string) =>
   `${taskOutputPrefix(runId, task)}${rel(path)}`;
 

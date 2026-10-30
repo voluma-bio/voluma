@@ -61,7 +61,12 @@ import { computePlan } from "@voluma/workflow/plan";
 import { type Config, isVisitorSafe, providerKey } from "./config.ts";
 import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
-import { claimSandboxes, terminateClaim, terminateOtherClaims } from "./modal-sandbox.ts";
+import {
+  awaitOtherClaimsGone,
+  claimSandboxes,
+  terminateClaim,
+  terminateOtherClaims,
+} from "./modal-sandbox.ts";
 import { retryTransient } from "./model-retry.ts";
 import {
   checkPrompt,
@@ -73,6 +78,7 @@ import {
 import { isFatalProviderError, isProviderError } from "./provider-error.ts";
 import { r2Evidence } from "./r2-evidence.ts";
 import { r2Files } from "./r2-files.ts";
+import { r2Outputs } from "./r2-outputs.ts";
 import { r2Workflows } from "./r2-workflows.ts";
 import { type Redact, redactor } from "./redact.ts";
 import { sandboxGateway } from "./sandbox-gateway.ts";
@@ -224,7 +230,8 @@ async function claimBody(
     log(`claimed (${visitor ? "visitor" : "voluma"} keys)`);
 
     // What an earlier claim of this run left running must not keep writing or spending.
-    // Cleanup only: it never decides the run's outcome, and idle timeouts back it up.
+    // Cleanup only: it never decides the run's outcome, and idle timeouts back it up. A restore
+    // of /outputs waits until they are gone (`awaitOtherClaimsGone`).
     for (let attempt = 1; attempt <= 2 && !abort.signal.aborted; attempt++) {
       try {
         const orphans = await terminateOtherClaims(modal, runId, claimId, abort.signal);
@@ -382,15 +389,15 @@ async function claimBody(
     // A thread keeps the model it started on (the log records it).
     const threadModel = (primary: Model<Api>, recorded: string | undefined) => {
       if (recorded) {
-        // Only a model this run may use: a visitor's scan goes to Standard-mode Meta only.
+        // Only a model this run may use: a visitor's scan goes to Standard-mode Meta only. Any other
+        // thread (a run made on another model, reopened for a correction) gets the role's model:
+        // its stored history was written by another, so it is refused as unresumable and the run
+        // loop starts the work again (`run-loop.ts`), instead of the run failing.
         const [provider = "", ...id] = recorded.split("/");
         const allowed = visitor
           ? isVisitorSafe({ provider, id: id.join("/") })
           : [workerModel, checkModel, mainModel].some((m) => `${m.provider}/${m.id}` === recorded);
-        const model = allowed ? models.getModel(provider, id.join("/")) : undefined;
-        if (!model)
-          throw new Error(`the thread started on ${recorded}, which this run may not use`);
-        return model;
+        return (allowed && models.getModel(provider, id.join("/"))) || primary;
       }
       return primary;
     };
@@ -445,6 +452,8 @@ async function claimBody(
         opened.release(id).catch((e) => log(`releasing ${layout.forThread(id).name} failed: ${e}`)),
       evidence: r2Evidence(config.r2),
       files,
+      outputs: r2Outputs(config.r2),
+      earlierClaimsEnded: (signal) => awaitOtherClaimsGone(modal, runId, claimId, signal),
       roles: {
         main: role(mainModel, "main", "main"),
         worker: role(workerModel, "worker", "worker"),

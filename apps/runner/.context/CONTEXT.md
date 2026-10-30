@@ -358,8 +358,32 @@ run loop then resumes each thread still in charge, if its latest `thread.started
 check only when the task is `under-review` and it is the current check, the latest main. It
 resumes with the message of `cutOffText`, naming the tool the log shows with no result, or the
 no-tool form, and a tool the cut-off interrupted is answered from the log (`tools/effects.ts`).
-A cut-off resume counts as no delivery and no redo. A thread that ended `cancelled` is never
-resumed. A tool whose `tool.call` event was
+A cut-off resume counts as no delivery and no redo.
+
+A researcher's message reopens a finished run (`run.reopened`, `packages/contracts/src/messages.ts`)
+and the next claim resumes the main agent with it, as a notice: nothing is cut off, so there is no
+cut-off text. That claim's `claim.started` carries `reopened: true` instead of `after`. A thread
+whose stored history cannot be resumed (a run made before `reply` existed, a changed prompt or tool
+list) or whose recorded model this runner no longer allows is refused as stale and started again
+(`main.<n>`); `threadModel` hands such a thread the role's model rather than failing the run. A claim answers one message: the API refuses a message to a run that is
+queued or running, so no message arrives mid-claim. A correction whose main agent stops moving fails the claim (the server records
+`correction.ended`) instead of skipping tasks. `/outputs` is one R2 prefix shared by every claim, so
+`superviseRun` first calls `keepOutputs` (`packages/harness/src/outputs-backup.ts`, before any thread or
+sandbox): the first claim of a correction whose span holds a go (only a go can lead to a write: main
+has no `bash` and its work tools wait for a go; a message-only correction gets no backup, unless
+the main role holds `bash`, which then backs up every span) copies the whole prefix to
+`runs/<id>/corrections/<reopen id>/` (server-side `CopyObject`, `r2-outputs.ts`; a worker writes
+files before it reports anything, so claim start is the earliest point that precedes every
+writer) and records `outputs.backed-up`; the first claim after `correction.ended` clears
+`/outputs`, copies the backup back, checks that `/outputs` matches it (key and ETag per key, both
+sides `CopyObject` copies) and records `outputs.restored`. Before a restore the claim
+calls `awaitOtherClaimsGone`, which re-lists the run's sandboxes of other claims until none is
+live (up to 60 s): a stale sandbox could write over the restored files, so if some remain the
+claim fails. Only a pending restore waits; `terminateOtherClaims` at claim start does not. A failed check throws too, and the next claim repeats the restore. The first claim of the
+next `run.reopened` after a correction finished (no `correction.ended` before it) deletes its
+backup and records `outputs.discarded`. `corrections` (`@voluma/contracts/fold`) is the one
+reader of a correction's state (its message and go, how it closed, its backup). A thread that ended `cancelled` is never
+resumed; the server cancels every thread that ran in an abandoned correction, finished ones too, so the next correction starts them fresh. A tool whose `tool.call` event was
 still queued when the runner died isn't named (the log lacks it), so a runner killed within
 milliseconds of a call gets the no-tool form.
 

@@ -10,6 +10,7 @@
  * so that holder is `lease-lost` (lease.ts).
  */
 import { randomBytes } from "node:crypto";
+import type { PersonMessage } from "@voluma/contracts/messages";
 import type { Run, VisitorKeys } from "@voluma/contracts/run";
 import {
   type ClaimEndReason,
@@ -24,10 +25,11 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { Reader } from "../../domain";
 import { admit, type Limits, type Refusal, refusalMessage, type Usage, usage } from "./admission";
 import { endClaim, stalledError } from "./claim-progress";
+import { decideMessage, endCorrection, openCorrection } from "./corrections";
 import type { KeyVault } from "./key-vault";
-import { LeaseLost } from "./lease";
+import { LeaseLost, noLease } from "./lease";
 import type { Notifier } from "./notifier";
-import { cancelOpenThreads } from "./pg-event-log";
+import { cancelOpenThreads, eventLock } from "./pg-event-log";
 import {
   loadRun,
   loadRuns,
@@ -73,31 +75,28 @@ export type Claimed = {
  * the run ends `failed`, naming the call that was in flight.
  */
 async function recover(tx: Tx, where: SQL, reason: ClaimEndReason) {
-  const held = await tx
-    .select()
+  const ids = await tx
+    .select({ id: runs.id })
     .from(runs)
-    .where(and(eq(runs.state, "running"), where))
-    .for("update");
-  for (const run of held) {
+    .where(and(eq(runs.state, "running"), where));
+  for (const { id } of ids) {
+    await eventLock(tx, id); // before the row lock (`corrections.ts`)
+    const [run] = await tx.select().from(runs).where(eq(runs.id, id)).for("update");
+    if (!run) continue;
     const { stalledClaims, exhausted } = endClaim(run, reason);
     const base = {
       lastClaimEnd: reason,
       stalledClaims,
-      leaseHolder: null,
-      leaseToken: null,
-      leaseExpiresAt: null,
+      ...noLease,
     };
     if (exhausted) {
-      await tx
-        .update(runs)
-        .set({
-          ...base,
-          state: "ended",
-          outcome: "failed",
-          endedAt: sql`now()`,
-          error: stalledError(reason, await inFlightTool(tx, run.id, run.claimStartSeq)),
-        })
-        .where(eq(runs.id, run.id));
+      await endUnfinished(
+        tx,
+        run.id,
+        "failed",
+        stalledError(reason, await inFlightTool(tx, run.id, run.claimStartSeq)),
+        base,
+      );
     } else {
       await tx
         .update(runs)
@@ -137,11 +136,36 @@ async function sweep(tx: Tx) {
     WHERE state = 'awaiting-keys' AND awaiting_since <= now() - ${KEYS_WAIT}`);
 }
 
-const fail = (tx: Tx, runId: string, error: string) =>
-  tx
+const fail = (tx: Tx, runId: string, error: string) => endUnfinished(tx, runId, "failed", error);
+
+/**
+ * Ends a run that did not finish, `failed` or `cancelled`. A run in a correction (reopened by a
+ * person's message, `messages.ts`) is never left worse than `completed`: its open threads end
+ * `cancelled`, `correction.ended` records what happened, and the run ends `completed` with its
+ * earlier results. `set` adds columns to the update (a recovery's lease reset).
+ */
+async function endUnfinished(
+  tx: Tx,
+  runId: string,
+  status: "failed" | "cancelled",
+  error?: string,
+  set: Partial<typeof runs.$inferInsert> = {},
+) {
+  const reopenId = await openCorrection(tx, runId);
+  const correcting = reopenId !== null;
+  if (status === "cancelled" || correcting) await cancelOpenThreads(tx, runId);
+  if (correcting) await endCorrection(tx, runId, reopenId, status, error);
+  await tx
     .update(runs)
-    .set({ state: "ended", outcome: "failed", endedAt: sql`now()`, error })
+    .set({
+      ...set,
+      state: "ended",
+      outcome: correcting ? "completed" : status,
+      endedAt: sql`now()`,
+      error: correcting ? null : (error ?? null),
+    })
     .where(eq(runs.id, runId));
+}
 
 const NO_LIMITS = "This organization can no longer run work.";
 
@@ -226,6 +250,11 @@ export function pgRunQueue(
       throw error;
     }
   };
+
+  const messageContext = (reader: Reader) => ({
+    limits: limitsOf(reader.labId),
+    pinsOf: (workflowId: string) => workflowOf(workflowId)?.pins,
+  });
 
   const workflowFor = (workflowId: string) => {
     const workflow = workflowOf(workflowId);
@@ -371,7 +400,10 @@ export function pgRunQueue(
         return { studyId: request.study.id };
       }),
 
-    /** Ends the run `cancelled` at once and forgets its keys. Example runs are read-only. */
+    /**
+     * Ends the run `cancelled` at once and forgets its keys; a run in a correction ends
+     * `completed` with the cancel recorded (`endUnfinished`). Example runs are read-only.
+     */
     async cancel(reader: Reader, runId: string) {
       const result = await attempt(async (tx) => {
         const [run] = await loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId)));
@@ -379,14 +411,35 @@ export function pgRunQueue(
         if (run.example) throw new Refused("example");
         vault.drop(runId);
         if (run.state.status === "ended") return { run };
-        await cancelOpenThreads(tx, runId);
-        await tx
-          .update(runs)
-          .set({ state: "ended", outcome: "cancelled", endedAt: sql`now()` })
-          .where(eq(runs.id, runId));
+        await endUnfinished(tx, runId, "cancelled");
         return { run: await loadRun(tx, runId) };
       });
       notifier.notify(runId);
+      return result;
+    },
+
+    /** Whether `reader` may send this message now, without storing anything (`decideMessage`). */
+    checkMessage: (
+      reader: Reader,
+      userId: string,
+      runId: string,
+      msg: { id: string; payload: PersonMessage },
+    ) =>
+      db.transaction((tx) =>
+        decideMessage(tx, messageContext(reader), reader, userId, runId, msg, false),
+      ),
+
+    /** Stores the message, reopening the run if it had ended; one transaction under the queue lock. */
+    async sendMessage(
+      reader: Reader,
+      userId: string,
+      runId: string,
+      msg: { id: string; payload: PersonMessage },
+    ) {
+      const result = await locked((tx) =>
+        decideMessage(tx, messageContext(reader), reader, userId, runId, msg, true),
+      );
+      if ("ok" in result && !result.ok.duplicate) notifier.notify(runId);
       return result;
     },
 
@@ -493,6 +546,7 @@ export function pgRunQueue(
      */
     heartbeat: (runId: string, leaseToken: string, used: RunnerUsage) =>
       locked(async (tx) => {
+        await eventLock(tx, runId); // a failing heartbeat ends the run's threads (`corrections.ts`)
         const [run] = await tx
           .select()
           .from(runs)
@@ -516,9 +570,13 @@ export function pgRunQueue(
         return { stop: false };
       }),
 
-    /** Throws `LeaseLost` or `RunEnded`. */
+    /**
+     * Throws `LeaseLost` or `RunEnded`. A failed claim of a reopened run ends it `completed`
+     * (`endUnfinished`).
+     */
     async report(runId: string, leaseToken: string, report: RunnerReport) {
       await locked(async (tx) => {
+        await eventLock(tx, runId); // before the row lock: `endUnfinished` appends events
         const [run] = await tx
           .select({ state: runs.state })
           .from(runs)
@@ -528,17 +586,14 @@ export function pgRunQueue(
         if (run.state !== "running") throw new RunEnded();
         if (report.kind === "released") {
           await recover(tx, sql`id = ${runId}`, report.reason);
-          return;
+        } else if (report.outcome === "failed") {
+          await endUnfinished(tx, runId, "failed", report.error);
+        } else {
+          await tx
+            .update(runs)
+            .set({ state: "ended", outcome: "completed", endedAt: sql`now()`, error: null })
+            .where(eq(runs.id, runId));
         }
-        await tx
-          .update(runs)
-          .set({
-            state: "ended",
-            outcome: report.outcome,
-            endedAt: sql`now()`,
-            error: report.error ?? null,
-          })
-          .where(eq(runs.id, runId));
       });
       notifier.notify(runId);
     },

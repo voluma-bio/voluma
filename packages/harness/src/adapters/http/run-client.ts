@@ -16,7 +16,7 @@
  * port's `HistoryConflict`. `storedEvents` is the resume read, paged (`@voluma/contracts/events`).
  * `live` posts a batch of live frames (`live.ts`): one attempt, and the caller drops a failure.
  * `heartbeat` makes one attempt: the caller keeps the usage and resends it if this throws.
- * `report` ends or releases the run; a 409 means the server ended the run first or the lease
+ * `report` ends or releases the run, with the last event seq it read; a 409 means the server ended the run first or the lease
  * is no longer ours, so it returns false (the caller logs that nothing was stored). A network failure is retried for REPORT_BUDGET_MS; the
  * lease expires on its own after that.
  */

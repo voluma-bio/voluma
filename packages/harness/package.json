@@ -7,6 +7,7 @@
     "./ports/sandbox": "./src/ports/sandbox.ts",
     "./ports/history": "./src/ports/history.ts",
     "./ports/files": "./src/ports/files.ts",
+    "./ports/outputs": "./src/ports/outputs.ts",
     "./ports/lease-lost": "./src/ports/lease-lost.ts",
     "./layout": "./src/layout.ts",
     "./recorder": "./src/recorder.ts",

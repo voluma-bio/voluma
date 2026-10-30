@@ -68,6 +68,8 @@ type RoleParts = Pick<ThreadLayout, "mounts" | "scratch" | "description" | "rest
 };
 
 export interface RunLayout {
+  /** The main agent's role holds `bash` (`runLayout`'s `mainWorks`): its `/outputs` is writable. */
+  mainWorks: boolean;
   /** The run's `PYTHONPATH`, for a sandbox outside the threads (the convert sandbox). */
   pythonPath: string;
   /**
@@ -166,6 +168,7 @@ export function runLayout(
   };
 
   return {
+    mainWorks,
     pythonPath,
     forThread(threadId, cited = () => false) {
       const parsed = parseThreadId(runId, threadId);

@@ -151,12 +151,30 @@ export async function terminateClaim(
   for await (const sandbox of live) await sandbox.terminate();
 }
 
+/** The live sandboxes of the run that another claim started. The app is created by the first sandbox, so none yet means none. */
+async function* otherClaims(
+  modal: ModalSandboxConfig["modal"],
+  runId: string,
+  claim: string,
+  signal?: AbortSignal,
+) {
+  const client = new ModalClient(modal);
+  const app = await client.apps.fromName(RUNS_APP).catch((error) => {
+    if (error instanceof NotFoundError) return undefined;
+    throw error;
+  });
+  if (!app) return;
+  for await (const sandbox of client.sandboxes.list({ appId: app.appId, tags: { run: runId } })) {
+    signal?.throwIfAborted();
+    if ((await sandbox.getTags()).claim !== claim) yield sandbox;
+  }
+}
+
 /**
  * Asks Modal to terminate every live sandbox of the run that another claim started, without
  * waiting for it to stop; returns how many. Called right after a claim succeeds: the claim holds
  * the lease, so what an earlier claim left running (a crashed or lost runner) must not keep
- * writing the run's mounts or spending. The app is created by the first sandbox, so none yet
- * means nothing to end.
+ * writing the run's mounts or spending.
  */
 export async function terminateOtherClaims(
   modal: ModalSandboxConfig["modal"],
@@ -164,20 +182,40 @@ export async function terminateOtherClaims(
   claim: string,
   signal?: AbortSignal,
 ): Promise<number> {
-  const client = new ModalClient(modal);
-  const app = await client.apps.fromName(RUNS_APP).catch((error) => {
-    if (error instanceof NotFoundError) return undefined;
-    throw error;
-  });
-  if (!app) return 0;
   let ended = 0;
-  for await (const sandbox of client.sandboxes.list({ appId: app.appId, tags: { run: runId } })) {
-    signal?.throwIfAborted();
-    if ((await sandbox.getTags()).claim === claim) continue;
+  for await (const sandbox of otherClaims(modal, runId, claim, signal)) {
     await sandbox.terminate();
     ended++;
   }
   return ended;
+}
+
+/**
+ * Resolves once no sandbox of the run from another claim is live (a terminated one drops out of
+ * the listing); throws if some remain after `timeoutMs`. Needed before `/outputs` is put back:
+ * a sandbox still running could write over the restored files.
+ */
+export async function awaitOtherClaimsGone(
+  modal: ModalSandboxConfig["modal"],
+  runId: string,
+  claim: string,
+  signal?: AbortSignal,
+  timeoutMs = 60_000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    let live = false;
+    for await (const _ of otherClaims(modal, runId, claim, signal)) {
+      live = true;
+      break;
+    }
+    if (!live) return;
+    if (Date.now() >= deadline)
+      throw new Error(
+        "an earlier claim's sandboxes are still running, so /outputs cannot be put back",
+      );
+    await setTimeout(2000, undefined, { signal });
+  }
 }
 
 /** The sandbox factory of one claim of a run: `run.ts` and `dev-sandbox.ts` build theirs here. */

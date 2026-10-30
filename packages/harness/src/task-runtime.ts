@@ -15,7 +15,7 @@
  */
 
 import type { By, ThreadKind } from "@voluma/contracts/events";
-import type { Folded, FoldedTask } from "@voluma/contracts/fold";
+import { abandonedEvents, type Folded, type FoldedTask } from "@voluma/contracts/fold";
 import type { EvidenceRef } from "@voluma/contracts/output";
 import type {
   AskInput,
@@ -32,7 +32,7 @@ import { type Evidence, EvidenceNotFound, EvidenceRefused } from "./ports/eviden
 import type { Sandbox } from "./ports/sandbox";
 import type { PayloadOf, Recorder } from "./recorder";
 import { isThreadName, parseThreadId } from "./thread-id";
-import { startedFor, threadLog } from "./thread-log";
+import { pathOf, startedFor, threadLog } from "./thread-log";
 import { effectId } from "./tools/effects";
 
 /** A check thread may ask the main agent this many questions. */
@@ -89,10 +89,6 @@ interface Target {
 
 type OutputInput = ReportOutputInput["output"];
 type FileInput = Extract<OutputInput, { kind: "file" }>["file"];
-
-/** The sandbox path of a file the task names: the inverse of `refOf`. */
-export const pathOf = (taskId: string, f: Pick<EvidenceRef, "root" | "path">): string =>
-  f.root === "scratch" ? `/scratch/${f.path}` : `/outputs/${taskId}/${f.path}`;
 
 /** The `{root, path}` of a sandbox path as a script prints it; only this task's outputs and the scratch have one. */
 export function refOf(taskId: string, path: string): Pick<EvidenceRef, "root" | "path"> {
@@ -196,7 +192,9 @@ export function taskRuntime(options: TaskRuntimeOptions) {
   async function openAttempt(taskId: string, holderThreadId: string, eventId: string) {
     if (taskOf(taskId)?.attemptId) {
       const dependents = transitiveDependents(planNow(), taskId);
-      if (dependents.some(attempted)) {
+      // The researcher's go on this task wrote its correction revision already (`run-loop.ts`).
+      const go = threadLog(recorder.events()).go;
+      if (dependents.some(attempted) && !(go?.taskId === taskId && !go.redone)) {
         await recorder.append(
           holderThreadId,
           "revision.started",
@@ -222,7 +220,10 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     const reported = new Map<string, Set<string>>();
     const opened: string[] = [];
     const checked = new Set<string>();
-    for (const e of recorder.events()) {
+    const events = recorder.events();
+    const abandoned = abandonedEvents(events);
+    for (const e of events) {
+      if (abandoned.has(e.id)) continue;
       if (e.type === "attempt.opened" && e.payload.taskId === taskId) opened.push(e.id);
       if (e.type === "task" && e.payload.taskId === taskId && e.payload.status === "under-review")
         checked.add(e.payload.attemptId);

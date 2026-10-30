@@ -16,7 +16,7 @@ import {
   fauxToolCall,
 } from "@earendil-works/pi-ai";
 import type { RunEvent } from "@voluma/contracts/events";
-import type { Folded } from "@voluma/contracts/fold";
+import { corrections, type Folded } from "@voluma/contracts/fold";
 import { cancelEnds } from "@voluma/contracts/threads";
 import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
 import { runLayout } from "./layout";
@@ -268,6 +268,7 @@ export function world(o: WorldOptions) {
       "answer",
       "accept",
       "change_plan",
+      "reply",
       "finish_run",
       ...(o.mainTools ?? []),
     ]),
@@ -295,11 +296,43 @@ export function world(o: WorldOptions) {
         for (const ended of cancelEnds(RUN, stored, new Date())) {
           stored.push({ ...ended, seq: stored.length + 1 } as unknown as RunEvent);
         }
+        // A cancel inside a correction also records how it ended (`correction.ended`).
+        const { open } = corrections(stored);
+        if (open) {
+          stored.push({
+            id: open.reopenId.replace(/:reopened$/, ":ended"),
+            runId: RUN,
+            threadId: `${RUN}.person`,
+            seq: stored.length + 1,
+            type: "correction.ended",
+            payload: { status: "cancelled" },
+            createdAt: new Date().toISOString(),
+          } as unknown as RunEvent);
+        }
       }
     },
   };
 
-  async function claim(): Promise<Folded> {
+  type Message = { text?: string; go?: true; taskId?: string; marks?: unknown[] };
+
+  /** The API's writes for a message `id`: `run.reopened`, then the message. */
+  function serverEvents(id: string, message: Message) {
+    const person = `${RUN}.person`;
+    const add = (type: string, eid: string, payload: unknown) =>
+      stored.push({
+        id: eid,
+        runId: RUN,
+        threadId: person,
+        seq: stored.length + 1,
+        type,
+        payload,
+        createdAt: new Date().toISOString(),
+      } as unknown as RunEvent);
+    add("run.reopened", `${person}:${id}:reopened`, { by: "u1" });
+    add("person.message", `${person}:${id}`, message);
+  }
+
+  async function claim(reopened = false): Promise<Folded> {
     const rec = recorder(store as never, RUN, () => {}, 10, [...stored]);
     return superviseRun({
       runId: RUN,
@@ -338,6 +371,12 @@ export function world(o: WorldOptions) {
         },
         write: async () => {},
       },
+      earlierClaimsEnded: async () => {},
+      outputs: {
+        backup: async () => {},
+        restore: async () => {},
+        discard: async () => {},
+      },
       roles,
       briefs: {
         main: () => "Run the plan.",
@@ -347,7 +386,8 @@ export function world(o: WorldOptions) {
       },
       config: o.config,
       providerError: o.providerError,
-      ...(stored.length > 0 && { previousClaim: "shutdown" as const }),
+      // A reopen clears the claim-end reason (`messages.ts`).
+      ...(stored.length > 0 && !reopened && { previousClaim: "shutdown" as const }),
       signal: abort.signal,
     });
   }
@@ -367,6 +407,17 @@ export function world(o: WorldOptions) {
         folded = await claim();
       }
       return folded;
+    },
+    /**
+     * What the API does when the researcher writes to the finished run (`messages.ts`): stores
+     * `run.reopened` and `person.message` (server events, thread `<run>.person`), then the run is
+     * claimed once more. Returns the fold of the last claim.
+     */
+    async send(message: Message, id = `m${++n}`): Promise<Folded> {
+      cut = frozen = false; // a cancelled correction does not stop the next one
+      serverEvents(id, message);
+      abort = new AbortController();
+      return claim(true);
     },
     /** The log as one line per event, for a failure message. */
     text(): string {

@@ -5,7 +5,7 @@ import { and, eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { RunRecords } from "../../ports";
 import type { Notifier } from "./notifier";
-import { EVENT_SEQ_LOCK, insertEvent } from "./pg-event-log";
+import { eventLock, insertEvent } from "./pg-event-log";
 import { loadRecords, readableRuns } from "./pg-runs";
 import { runs } from "./schema";
 
@@ -25,10 +25,24 @@ export function pgRunRecords(db: PostgresJsDatabase, notifier: Notifier): RunRec
       return rows.length > 0;
     },
     async decide(reader, runId, decision) {
+      // A run that has not ended has no review to decide on: judge it without the event lock,
+      // which a heartbeat holds the queue lock to wait for while this loads the whole log.
+      const [state] = await db
+        .select({ state: runs.state })
+        .from(runs)
+        .where(and(readableRuns(reader), eq(runs.id, runId)));
+      if (!state) return null;
+      if (state.state !== "ended") {
+        const record = await db.transaction(
+          async (tx) => (await loadRecords(tx, eq(runs.id, runId), true))[0],
+        );
+        if (!record) return null;
+        if (!decision(record)) return record;
+      }
       const result = await db.transaction(async (tx) => {
         // Same order as runner append: event lock, then row lock. Lifecycle writes
         // take the row too; none acquires the event lock while holding it.
-        await tx.execute(sql`SELECT pg_advisory_xact_lock(${EVENT_SEQ_LOCK}, hashtext(${runId}))`);
+        await eventLock(tx, runId);
         const [row] = await tx
           .select({ id: runs.id })
           .from(runs)

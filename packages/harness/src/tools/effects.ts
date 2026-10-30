@@ -24,6 +24,7 @@ const SUFFIX = {
   accept: ":accept",
   change_plan: ":change_plan",
   finish_run: ":finish_run",
+  reply: ":reply",
 } as const;
 
 export type EffectTool = keyof typeof SUFFIX;

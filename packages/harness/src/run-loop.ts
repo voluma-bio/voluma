@@ -12,7 +12,9 @@
  * string an agent is told); a delivery's
  * `covers` is the last event it accounted for, so notices after it are still undelivered.
  * The run ends when the root thread has a completed `thread.ended` (`finish_run`, or the
- * liveness rule); then every thread without an end is stopped.
+ * liveness rule); then every thread without an end is stopped. A researcher's message to a
+ * finished run reopens it (`run.reopened`, which clears the root's end): the message reaches the
+ * main agent as a notice, like any other, and the run ends again when the main agent finishes.
  *
  * A thread that throws or is refused before it starts, a store failure, a fatal provider
  * error, or a main agent failing on the provider too often fails the run on purpose: the
@@ -22,7 +24,13 @@
 import type { StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { By } from "@voluma/contracts/events";
-import { checkResult, type Folded, type FoldedTask, fold } from "@voluma/contracts/fold";
+import {
+  checkResult,
+  type Folded,
+  type FoldedTask,
+  fold,
+  goMarkerId,
+} from "@voluma/contracts/fold";
 import type { UserSender } from "./adapters/pi/start-thread";
 import type { RunLayout, ThreadLayout } from "./layout";
 import {
@@ -535,9 +543,37 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     };
   }
 
+  /**
+   * The researcher's go opens a correction of its task: `revision.started` (keyed by the message),
+   * written when the log shows the go and before the main agent is told, so the gate that
+   * refuses its work tools opens with the notice and review has a boundary even when nothing
+   * depends on the task.
+   */
+  async function markGo(d: ThreadLog): Promise<boolean> {
+    for (const n of d.undelivered) {
+      if (n.kind !== "person" || n.go !== "live" || !n.taskId) continue;
+      const id = goMarkerId(n.eventId);
+      if (d.written.has(id)) continue;
+      await recorder.append(
+        d.main ?? root,
+        "revision.started",
+        { reason: "correction", taskId: n.taskId },
+        id,
+      );
+      return true;
+    }
+    return false;
+  }
+
   /** Main is idle: tell it what happened, restart it, or end a run it stopped moving. */
   async function main(d: ThreadLog, view: Folded): Promise<boolean> {
     const m = d.main ? d.threads.get(d.main) : undefined;
+    // A main agent stopped when an earlier correction ended is never resumed: the researcher's
+    // message goes to a new one.
+    if (m && stateOf(m) === "stopped" && d.undelivered.some((n) => n.kind === "person")) {
+      await startMain(d);
+      return true;
+    }
     if (!m || stateOf(m) !== "idle") return false;
     if (m.end?.status === "failed" && providerError(m.end.error ?? "")) {
       const error = m.end.error ?? "";
@@ -569,12 +605,17 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       });
       return true;
     }
-    await endStuckRun(view);
+    await endStuckRun(d, view);
     return true;
   }
 
-  /** The main agent stopped moving: skip every unfinished task and end the run. */
-  async function endStuckRun(view: Folded) {
+  /**
+   * The main agent stopped moving: skip every unfinished task and end the run. A correction is
+   * never ended that way, which would skip tasks that had results: the claim fails, and the
+   * server records the failed correction and leaves the earlier results as they were.
+   */
+  async function endStuckRun(d: ThreadLog, view: Folded) {
+    if (d.correcting) throw new Error("the main agent stopped moving in a correction");
     const left = unfinished(view);
     if (left.length > 0) {
       await recorder.append(
@@ -607,6 +648,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       return "acted";
     }
     if (await unresumable(d)) return "acted";
+    if (await markGo(d)) return "acted";
     if (await resumeFeedback(d)) return "acted";
     if (await resumeCutOff(d)) return "acted";
     if (await startChecks(d, view)) return "acted";

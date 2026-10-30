@@ -4,6 +4,7 @@
  * of the runtime spec's Verification list and asserts on the stored event log.
  */
 import type { RunEvent } from "@voluma/contracts/events";
+import { fold } from "@voluma/contracts/fold";
 import { openThreads } from "@voluma/contracts/threads";
 import { describe, expect, it } from "vitest";
 import {
@@ -1114,6 +1115,219 @@ describe("run loop", () => {
       ).toHaveLength(1);
       expect(ended(w.stored, "t1.worker")).toEqual(["cancelled"]);
       expect(ended(w.stored, "supervisor").at(-1)).toBe("completed");
+    });
+  });
+
+  describe("corrections: a researcher writes to the finished run", () => {
+    const wrote = (t: Turn) => t.fresh && /The researcher wrote/.test(t.lastUser);
+    const sentReply = (t: Turn) => /Sent to the researcher/.test(t.results.at(-1) ?? "");
+    const errors = (events: readonly RunEvent[]) =>
+      of(events, "tool.result", "main").flatMap((e) =>
+        e.type === "tool.result" && e.payload.isError ? [e.payload.output] : [],
+      );
+    const people = (events: readonly RunEvent[]) =>
+      events.filter((e) => e.type === "reply" || e.type === "person.message").map((e) => e.type);
+
+    it("a message reopens the run: main replies, finishes, and the run ends completed again", async () => {
+      const answer: Script = (t) =>
+        wrote(t)
+          ? call("reply", { text: "t1 is thin because the field cuts it off." })
+          : sentReply(t)
+            ? call("finish_run", { summary: "Answered." })
+            : undefined;
+      const w = world({ plan: T1, main: first(answer, chain(["t1", "t2"])) });
+      await w.run();
+      expect(ended(w.stored, "supervisor")).toEqual(["completed"]);
+      const folded = await w.send({ text: "Why is t1 so thin?" });
+      expect(folded.tasks.map((t) => `${t.id}:${t.status}`)).toEqual(["t1:done", "t2:done"]);
+      expect(ended(w.stored, "supervisor")).toEqual(["completed", "completed"]);
+      expect(people(w.stored)).toEqual(["person.message", "reply"]);
+      // The second claim says it follows a reopen, not a claim end; no worker started again.
+      const claims = of(w.stored, "claim.started").map((e) =>
+        e.type === "claim.started" ? e.payload : undefined,
+      );
+      expect(claims).toEqual([{ resumed: false }, { resumed: true, reopened: true }]);
+      expect(of(w.stored, "thread.started", "t1.worker")).toHaveLength(1);
+      expect(of(w.stored, "thread.started", "main.2")).toHaveLength(0);
+      // Main was resumed with the message and told no cut-off text.
+      const toMain = of(w.stored, "message", "main").flatMap((e) =>
+        e.type === "message" && e.payload.role === "user" ? [e.payload.text] : [],
+      );
+      expect(toMain.at(-1)).toContain("Why is t1 so thin?");
+      expect(toMain.at(-1)).not.toMatch(/cut off/);
+      expect(errors(w.stored), w.text()).toEqual([]);
+      expect(duplicates(w.stored)).toEqual([]);
+    });
+
+    /** The thread has been told the researcher wrote (a user message of the correction turn or after). */
+    const talking = (t: Turn) => t.users.some((u) => /The researcher wrote/.test(u));
+    const count = (t: Turn, name: string) => t.calls.filter((c) => c.name === name).length;
+
+    it("work tools are refused until a go; finish_run until main has replied", async () => {
+      const probes = [
+        call("message", { threadId: `${R}t1.worker`, text: "Redo it." }),
+        call("start_worker", { taskId: "t1", brief: "Again." }),
+        call("change_plan", { reason: "Tighten.", doneWhen: [{ taskId: "t1", lines: ["x"] }] }),
+        call("stop_worker", { threadId: `${R}t1.worker`, reason: "No." }),
+        call("finish_run", { summary: "Too soon." }),
+        call("reply", { text: "Looking at it." }),
+        call("finish_run", { summary: "Answered." }),
+      ];
+      const talk: Script = (t) => (talking(t) ? probes[t.steps] : undefined);
+      const w = world({ plan: T1, main: first(talk, chain(["t1", "t2"])) });
+      await w.run();
+      const before = w.stored.length;
+      await w.send({ text: "Look at the left edge." });
+      const refused = errors(w.stored.slice(before));
+      expect(refused.filter((e) => /has not said go/.test(e))).toHaveLength(4);
+      expect(refused.filter((e) => /Answer the researcher with `reply`/.test(e))).toHaveLength(1);
+      expect(refused, w.text()).toHaveLength(5);
+      // Nothing was started, changed or stopped; the run ended completed.
+      const after = w.stored.slice(before).map((e) => e.type);
+      expect(after).not.toContain("attempt.opened");
+      expect(after).not.toContain("plan.changed");
+      expect(ended(w.stored, "t1.worker")).toEqual(["completed"]);
+      expect(ended(w.stored, "supervisor")).toEqual(["completed", "completed"]);
+    });
+
+    it("go: main sends the worker feedback, a new attempt is checked, dependents are redone, the run finishes", async () => {
+      const go: Script = (t) => {
+        if (!talking(t)) return undefined;
+        const last = t.results.at(-1) ?? "";
+        if (t.fresh && /They said go on t1/.test(t.lastUser))
+          return call("message", { threadId: `${R}t1.worker`, text: "The left edge is off." });
+        if (/Feedback sent/.test(last)) return call("reply", { text: "Redoing t1." });
+        // t1's redo made t2 stale and stopped its worker; t2 is redone by a new one.
+        if (t.fresh && /The check of t1 passed/.test(t.lastUser) && count(t, "start_worker") === 2)
+          return call("start_worker", { taskId: "t2", brief: "Redo t2 on the corrected t1." });
+        if (t.fresh && /The check of t2 passed/.test(t.lastUser))
+          return call("finish_run", { summary: "t1 and t2 redone." });
+        return call("wait");
+      };
+      const w = world({ plan: T1, main: first(go, chain(["t1", "t2"])) });
+      await w.run();
+      const before = w.stored.length;
+      const folded = await w.send({ text: "The edge looks off.", go: true, taskId: "t1" });
+      expect(
+        folded.tasks.map((t) => `${t.id}:${t.status}`),
+        w.text(),
+      ).toEqual(["t1:done", "t2:done"]);
+      const after = w.stored.slice(before);
+      // The go opens one correction revision of t1, written by code before main was told; the
+      // redo does not add a second one.
+      const revisions = after.filter((e) => e.type === "revision.started");
+      expect(revisions).toHaveLength(1);
+      expect(revisions[0]?.id).toMatch(/^r1\.person:m\d+:go$/);
+      expect(revisions[0]?.type === "revision.started" && revisions[0].payload).toEqual({
+        reason: "correction",
+        taskId: "t1",
+      });
+      // The same t1 worker got feedback as a new attempt and was told so; the old attempt is kept.
+      expect(of(after, "attempt.opened", "t1.worker")).toHaveLength(1);
+      const toWorker = of(after, "message", "t1.worker").flatMap((e) =>
+        e.type === "message" && e.payload.role === "user" ? [e.payload.text] : [],
+      );
+      expect(toWorker.at(-1)).toContain("opens a new attempt of t1");
+      // A blind checker judged the new attempt, then t2's redo.
+      expect(of(after, "thread.started", "t1.check.2")).toHaveLength(1);
+      expect(taskEvents(after, "t1")).toEqual(["under-review:agent", "done:check-result"]);
+      expect(errors(after), w.text()).toEqual([]);
+      expect(ended(w.stored, "supervisor")).toEqual(["completed", "completed"]);
+      expect(duplicates(w.stored)).toEqual([]);
+    });
+
+    it("a cancelled go leaves no trace: a message-only correction finishes on the pre-go state", async () => {
+      const script: Script = (t) => {
+        if (!talking(t)) return undefined;
+        if (t.fresh && /They said go on t1/.test(t.lastUser))
+          return call("message", { threadId: `${R}t1.worker`, text: "Redo t1." });
+        if (wrote(t)) return call("reply", { text: "t1 is thin." });
+        return sentReply(t) ? call("finish_run", { summary: "Answered." }) : undefined;
+      };
+      // The researcher cancels once the redo's attempt has opened (after the run's first one).
+      let opened = 0;
+      const w = world({
+        plan: T1,
+        main: first(script, chain(["t1", "t2"])),
+        cancelAfter: (e) =>
+          e.type === "attempt.opened" && e.payload.taskId === "t1" && ++opened === 2,
+      });
+      await w.run();
+      const before = w.stored.length;
+      const pre = fold(w.stored).tasks.map((t) => `${t.id}:${t.status}:${t.attemptId}`);
+      await w.send({ text: "Redo it.", go: true, taskId: "t1" });
+      expect(of(w.stored.slice(before), "correction.ended")).toHaveLength(1);
+      const folded = await w.send({ text: "Why is t1 thin?" });
+      expect(
+        folded.tasks.map((t) => `${t.id}:${t.status}:${t.attemptId}`),
+        w.text(),
+      ).toEqual(pre);
+      // The second correction needed no go and finished: `finish_run` accepted.
+      expect(ended(w.stored, "supervisor").at(-1)).toBe("completed");
+      expect(errors(w.stored), w.text()).toEqual([]);
+    });
+
+    it("a go cancelled before main acted grants nothing to the next correction", async () => {
+      const script: Script = (t) => {
+        if (!talking(t)) return undefined;
+        if (wrote(t)) return call("reply", { text: "t1 is thin." });
+        return sentReply(t) ? call("finish_run", { summary: "Answered." }) : undefined;
+      };
+      let armed = false;
+      const w = world({
+        plan: T1,
+        main: first(script, chain(["t1", "t2"])),
+        cancelAfter: (e) => armed && e.type === "claim.started",
+      });
+      await w.run();
+      armed = true;
+      await w.send({ text: "Redo it.", go: true, taskId: "t1" });
+      armed = false;
+      const before = w.stored.length;
+      await w.send({ text: "Why is t1 thin?" });
+      const after = w.stored.slice(before);
+      expect(after.filter((e) => e.type === "revision.started")).toEqual([]);
+      expect(of(after, "attempt.opened")).toEqual([]);
+      expect(ended(w.stored, "supervisor").at(-1)).toBe("completed");
+      // The new main is told the cancelled go is void and that the correction was discarded.
+      const told = after.flatMap((e) =>
+        e.type === "message" && e.payload.role === "user" ? [e.payload.text] : [],
+      );
+      expect(told.join("\n")).toMatch(/The correction of t1 was cancelled/);
+      expect(errors(after), w.text()).toEqual([]);
+    });
+
+    it("a go on a task the fix limit left to check lets main send feedback again", async () => {
+      const first1: Script = (t) => {
+        if (talking(t) || !t.fresh) return undefined;
+        if (/The check of t1 found problems/.test(t.lastUser))
+          return call("message", { threadId: `${R}t1.worker`, text: "Fix it." });
+        if (/used its fix rounds/.test(t.lastUser)) return call("finish_run", { summary: "Left." });
+        return undefined;
+      };
+      const redo: Script = (t) => {
+        if (!talking(t)) return undefined;
+        const last = t.results.at(-1) ?? "";
+        if (t.fresh && /They said go on t1/.test(t.lastUser))
+          return call("message", { threadId: `${R}t1.worker`, text: "Redo t1." });
+        if (/Feedback sent/.test(last)) return call("reply", { text: "Redoing." });
+        if (t.fresh && /The check of t1 passed/.test(t.lastUser))
+          return call("finish_run", { summary: "Done." });
+        return call("wait");
+      };
+      // The first two checks of t1 reject it (the fix limit is 2 rounds); the third passes.
+      const w = world({
+        plan: [task("t1")],
+        main: first(first1, redo, chain(["t1"])),
+        check: checker((_id, n) => (n <= 2 ? "needs-review" : "passed")),
+      });
+      await w.run();
+      expect(taskEvents(w.stored, "t1")).toContain("to-check:fix-limit");
+      const before = w.stored.length;
+      await w.send({ text: "Still wrong.", go: true, taskId: "t1" });
+      expect(errors(w.stored.slice(before)), w.text()).toEqual([]);
+      expect(taskEvents(w.stored, "t1").at(-1)).toBe("done:check-result");
+      expect(ended(w.stored, "supervisor")).toEqual(["completed", "completed"]);
     });
   });
 });

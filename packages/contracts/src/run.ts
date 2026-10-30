@@ -16,7 +16,11 @@
  *   POST /api/run/runs/:id/cancel  → 200 `runSchema` with state `ended`/`cancelled`
  *                                  at once, even if the runner is still stopping (the
  *                                  server records it and the runner obeys); cancelling
- *                                  an ended run is a no-op; 403 for an example run
+ *                                  an ended run is a no-op; 403 for an example run.
+ *                                  A reopened run (`messages.ts`) stays `completed`; the
+ *                                  server writes `correction.ended {cancelled}`
+ *   POST /api/review/runs/:id/messages (`messages.ts`) reopens a run that ended `completed`,
+ *                                  moving it to `queued` for one claim
  *   POST /api/run/runs/:id/keys    body `resendKeysRequestSchema` → 200 `runSchema`
  *                                  (409 unless the run is `awaiting-keys`; 403 unless
  *                                  the caller is its `startedBy`; 429: see Limits)
@@ -76,10 +80,8 @@
  *     operator script, under a dedicated operator id) sets `example`, never
  *     `startRun` or a fork, and it never changes afterwards; to change an
  *     example, re-seed it. An example always reads its org's reference scan.
- *     A correction on one never changes it: the server
- *     creates the caller's own run with `forkedFrom` set (the corrections
- *     contract), which reads the same input. One caller has at most one fork
- *     per example; later corrections apply to it.
+ *     A message to one is refused (403, `messages.ts`) for now; whether a
+ *     researcher may correct an example is open.
  *   - Run-scoped records (events, corrections) inherit `labId` from their run
  *     and do not repeat it; read access to them is read access to the run.
  *     An input exists before any run and can serve several, so it carries its
@@ -94,8 +96,7 @@
  * Every run belongs to a study (`studyId`); a run's `input` is one of the study's scans.
  *
  * Starting work. The rules below hold for every call that creates a run or
- * makes one run again: `startRun`, a fork or a rerun after a correction (the
- * corrections contract), `/keys`, and any added later.
+ * makes one run again: `startRun`, a reopen by a message (`messages.ts`), `/keys`, and any added later.
  *
  * Who pays (`credentials`): `visitor` when the request that creates the run
  * carries `keys`, else `voluma`. It never changes afterwards, and a `visitor`

@@ -59,8 +59,9 @@
  * counts consecutive claims that end `self-stop` or `lease-expired` without run-state
  * progress (a `task`, `checkpoint`, `output`, `attempt.opened`, `assets.ready` or correcting
  * `revision.started` or `plan.changed` event), and the run ends
- * `failed` at 3, naming the call that was in flight. Progress resets the count. `shutdown`
- * never counts, so deploys don't fail a long run.
+ * `failed` at 3, naming the call that was in flight; except a claim of a reopened run, which ends it `completed` and writes `correction.ended` instead (the correction rule in `messages.ts`). Progress resets the count. `shutdown`
+ * never counts, so deploys don't fail a long run. A reopen (`messages.ts`) resets the count to 0
+ * and clears `lastClaimEnd`, so `previousClaim` never reports a reason from before it.
  *
  * There is no tokenless call: the runner service is the only claimer.
  *

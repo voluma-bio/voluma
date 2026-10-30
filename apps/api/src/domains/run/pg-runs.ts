@@ -161,6 +161,8 @@ const SUMMARY_TYPES = [
   "output",
   "check.accepted",
   "review.completed",
+  "run.reopened",
+  "correction.ended",
 ] as const;
 
 async function loadLogs(tx: Tx, ids: string[], summaryOnly = false) {
