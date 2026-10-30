@@ -258,6 +258,7 @@ app.notFound((c) =>
 app.onError((error, c) => {
   // A refusal is thrown where it is decided; API clients read its text from the JSON `error`.
   if (error instanceof HTTPException) {
+    if (error.res) return error.getResponse();
     return isApi(c.req.path) ? c.json({ error: error.message }, error.status) : error.getResponse();
   }
   console.error(error);

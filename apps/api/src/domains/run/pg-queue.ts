@@ -227,7 +227,7 @@ export function pgRunQueue(
     return found;
   };
 
-  type Hold = (runId: string, labId: string, keys: VisitorKeys) => boolean;
+  type Hold = (runId: string, labId: string, keys: VisitorKeys) => void;
 
   /**
    * Runs a write of the browser under the lock. A refusal is an `HTTPException` thrown where it
@@ -237,9 +237,11 @@ export function pgRunQueue(
   const attempt = async <T>(work: (tx: Tx, hold: Hold) => Promise<T>): Promise<T> => {
     const held: string[] = [];
     const hold: Hold = (runId, labId, keys) => {
-      const ok = vault.hold(runId, labId, keys);
-      if (ok) held.push(runId);
-      return ok;
+      if (!vault.hold(runId, labId, keys))
+        throw new HTTPException(429, {
+          message: "Too many runs are waiting with keys; try again shortly.",
+        });
+      held.push(runId);
     };
     try {
       return await locked((tx) => work(tx, hold));
@@ -309,10 +311,7 @@ export function pgRunQueue(
     for (const { id, inputId } of starts.runs) {
       const refused = admit("start", limitsOf(reader.labId), used, { credentials });
       if (refused) throw limitRefusal(refused);
-      if (starts.keys && !hold(id, reader.labId, starts.keys))
-        throw new HTTPException(429, {
-          message: "Too many runs are waiting with keys; try again shortly.",
-        });
+      if (starts.keys) hold(id, reader.labId, starts.keys);
       await tx.insert(runs).values({
         id,
         labId: reader.labId,
@@ -464,10 +463,7 @@ export function pgRunQueue(
           throw new HTTPException(409, { message: "The run is not waiting for keys." });
         const refused = admit("resume", limitsOf(reader.labId), await usage(tx, reader.labId), run);
         if (refused) throw limitRefusal(refused);
-        if (!hold(runId, reader.labId, keys))
-          throw new HTTPException(429, {
-            message: "Too many runs are waiting with keys; try again shortly.",
-          });
+        hold(runId, reader.labId, keys);
         await tx
           .update(runs)
           .set({ state: "queued", awaitingSince: null })

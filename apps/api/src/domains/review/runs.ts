@@ -129,8 +129,7 @@ export function runRoutes({ runs, files, messages }: ReviewDeps) {
       if (!files) throw new HTTPException(503, { message: "File storage is not configured." });
       await files.putSnapshot(runId, id, png);
     }
-    const sent = await messages.send(reader, caller, runId, message);
-    const { eventId, state } = sent;
+    const { eventId, state } = await messages.send(reader, caller, runId, message);
     return c.json({ eventId, state } satisfies SendRunMessageResponse);
   });
 

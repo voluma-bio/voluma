@@ -14,7 +14,7 @@ import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import type { Reader } from "../../domain";
-import type { MessageOk } from "../../ports";
+import type { MessageSent } from "../../ports";
 import { admit, type Limits, refusalMessage, usage } from "./admission";
 import { noLease } from "./lease";
 import { eventLock, insertEvent } from "./pg-event-log";
@@ -121,7 +121,7 @@ export async function decideMessage(
   runId: string,
   msg: { id: string; payload: PersonMessage },
   write: boolean,
-): Promise<MessageOk> {
+): Promise<MessageSent> {
   const { userId } = caller;
   if (write) await eventLock(tx, runId);
   const found = tx

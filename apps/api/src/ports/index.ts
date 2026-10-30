@@ -53,7 +53,7 @@ export type RunRecords = {
   readable(reader: Reader, runId: string): Promise<boolean>;
 };
 
-export type MessageOk = {
+export type MessageSent = {
   /** The stored `person.message` event. */
   eventId: string;
   /** The run's state after the message. */
@@ -63,8 +63,9 @@ export type MessageOk = {
 };
 
 /**
- * A researcher's message to a run, which the Run domain stores and answers for (`contracts/messages.ts`:
- * who may send, the reopen). A refusal is an `HTTPException` with the contract's status and text. Review parses the request and stores the snapshot.
+ * A researcher's message to a run, which the Run domain stores and answers for
+ * (`contracts/messages.ts`: who may send, the reopen). A refusal is an `HTTPException` with the
+ * contract's status and text. Review parses the request and stores the snapshot.
  */
 export type RunMessages = {
   /** Judges the message without storing anything, so a refused one leaves no snapshot behind. */
@@ -73,14 +74,14 @@ export type RunMessages = {
     caller: Caller,
     runId: string,
     msg: { id: string; payload: PersonMessage },
-  ): Promise<MessageOk>;
+  ): Promise<MessageSent>;
   /** Judges again under the queue lock and stores it, reopening a finished run. */
   send(
     reader: Reader,
     caller: Caller,
     runId: string,
     msg: { id: string; payload: PersonMessage },
-  ): Promise<MessageOk>;
+  ): Promise<MessageSent>;
 };
 
 /** A run's content-addressed files (`evidenceKey`), its converted review assets (`reviewAssetKey`) and the snapshots researchers attach to messages. */
