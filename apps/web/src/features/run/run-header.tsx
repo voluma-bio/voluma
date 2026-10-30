@@ -9,7 +9,7 @@ import { ApiError, cancelRun, resendKeys } from "@voluma/api-client";
 import type { Run } from "@voluma/contracts/run";
 import type { RunSpend } from "@voluma/contracts/spend";
 import type { StudyDetail } from "@voluma/contracts/study";
-import { Button, Progress } from "@voluma/ui";
+import { Button, Progress, type Status, StatusMark } from "@voluma/ui";
 import { formatDuration, formatUsd, KeysForm } from "@voluma/ui/run";
 import { catalog, workflowName } from "@voluma/workflow/bundled";
 import { ChevronDown } from "lucide-react";
@@ -45,25 +45,27 @@ const workflowLabel = (run: Run, study: StudyDetail | undefined) => {
 };
 
 /**
- * The run's word for where it is, beside its progress. A queued run with a plan has started: it
- * lost its runner. One held after the AI's provider failed says so (`waitingForProvider`); its retry time stays off screen.
+ * Where the run is, as a status mark beside its progress; the header counts items to check
+ * beside it, so the word carries no count. A queued run with a plan has started (it lost its
+ * runner), so it reads Paused. One held after the AI's provider failed says so
+ * (`waitingForProvider`); its retry time stays off screen.
  */
-function statusWord(run: Run, started: boolean): string {
+function runState(run: Run, started: boolean): { status: Status; label?: string } {
   const { state } = run;
   switch (state.status) {
     case "queued":
-      if (state.waitingForProvider) return "Waiting: the AI is unavailable";
-      return started ? "Paused" : "Waiting to start";
+      if (state.waitingForProvider) return { status: "paused", label: "AI unavailable" };
+      return { status: started ? "paused" : "waiting" };
     case "running":
-      return "Running";
+      return { status: "running" };
     case "awaiting-keys":
-      return "Waiting for your keys";
+      return { status: "check", label: "Needs your keys" };
     case "ended":
       return state.outcome === "completed"
-        ? "Finished"
+        ? { status: "done" }
         : state.outcome === "failed"
-          ? "Failed"
-          : "Stopped";
+          ? { status: "stopped", label: "Failed" }
+          : { status: "stopped" };
   }
 }
 
@@ -110,7 +112,7 @@ export function RunHeader({
 
       <div className="w-full max-w-lg justify-self-center max-[1100px]:justify-self-start">
         <p className="mb-1.5 flex flex-wrap items-baseline gap-x-3.5 text-ui">
-          <b className="font-semibold">{statusWord(run, total > 0)}</b>
+          <StatusMark {...runState(run, total > 0)} className="self-center font-semibold" />
           {total > 0 && (
             <span>
               {done} of {total} tasks done
