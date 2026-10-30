@@ -157,19 +157,6 @@ export type Config = ReturnType<typeof runnerConfig>;
 export function runnerConfig() {
   const modal = modalToken();
   const models = modelAliases();
-  // Off unless set: lab data goes to Standard-mode Meta models by default, so a fallback to
-  // another provider is a per-deploy choice (see model-fallback.ts).
-  const fallbackModel = optional("RUNNER_FALLBACK_MODEL")
-    ? modelRef("RUNNER_FALLBACK_MODEL")
-    : undefined;
-  if (fallbackModel) {
-    required(`VOLUMA_${fallbackModel.provider.toUpperCase()}_API_KEY`);
-    if (fallbackModel.provider === "meta" && fallbackModel.id.endsWith("-contributor")) {
-      throw new Error(
-        "RUNNER_FALLBACK_MODEL must not be a -contributor model: Meta may train on lab data",
-      );
-    }
-  }
   for (const { provider } of Object.values(models))
     required(`VOLUMA_${provider.toUpperCase()}_API_KEY`);
   const api = apiEndpoint();
@@ -205,7 +192,7 @@ export function runnerConfig() {
     models,
     /**
      * The thinking level of every thread of a `voluma` run (`RUNNER_THINKING`), set as each Pi
-     * agent's `thinkingLevel`; main.ts refuses a level an alias's or the fallback's model does
+     * agent's `thinkingLevel`; main.ts refuses a level an alias's model does
      * not support, since Pi would quietly use another. Unset: "off", Pi's default, which sends no
      * level (DeepSeek: thinking disabled; other providers: their default). Visitor runs: "off".
      */
@@ -215,8 +202,6 @@ export function runnerConfig() {
      * levels are chosen for their own models, so then `RUNNER_THINKING` alone sets the level.
      */
     modelForced: optional("RUNNER_MODEL") !== undefined,
-    /** Where new worker and check threads go while their model is failing; absent: nowhere. */
-    fallbackModel,
     /**
      * The model of a `visitor` run, which uses the visitor's Meta key. Standard mode: a
      * `-contributor` model lets Meta train on what it is sent, the visitor's scan included.
