@@ -71,8 +71,9 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   write (start, create, cancel, resume) goes through `attempt`: a refusal rolls it back and reaches the
   client (`onError` answers `{error}`), and `attempt` drops the visitor keys it held. `runs` has no workflow
   column: `pgRunQueue` gets `workflowOf` and resolves the pins and outputs from the study. The seeded example has
-  its own study (`study-<exampleId>`, `example`), read-only like its run; `import:run` gives
-  an imported run a study of one the same way.
+  its own study (`study-<exampleId>`, `example`), read-only like its run; `import:run` restores
+  a dump's original study, scans and inputs, refusing conflicting shared rows. Only legacy dumps
+  without study metadata get a study of one.
 - **Every transition holds one lock** (`QUEUE_LOCK`, a transaction advisory lock), so
   limit counts can't race. The lease is judged by the database's `now()`. An ingest write
   checks the run's lease token inside its own transaction (`assertLease`, `FOR SHARE`); a
@@ -167,6 +168,9 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   metadata is inserted. Retries keep the same UUID/pixels and return the original actor/time;
   conflicting captures return 409. Run's internal `generation` changes on example replacement:
   every snapshot query and insert uses it, so late saves cannot attach to the replacement.
+  `adapters/pg-snapshots.ts` implements the shared `ReviewSnapshots` port: insertion holds a
+  share lock on the matching run generation until commit. Archive/replacement holds the run's
+  update lock, so a save either commits before the archive checks it or is refused afterwards.
 - A screenshot is one grid-viewer pane (`slice` or `3d`) on a `gridId`. The API checks the
   grid has an image volume in the pinned revision, the crosshair lies on it, and every
   structure and focus reference belongs to the revision; it refuses new `acquired` (DICOM

@@ -55,6 +55,10 @@ change it safely.
   margin) belongs to no live call, and `cutStaleCalls` runs at boot and every 5 minutes. A newer
   row may belong to an old instance still draining, so it is left alone. A settle is tried three
   times before the row is left to that sweep.
+- **Final accounting.** `settleCall` writes `duration_ms` with the final cost and usage exactly
+  once. A sweep changes status only, so a swept `cut` can still settle. Retries cannot change
+  an already-settled row. Run archiving requires non-null duration and a non-open status;
+  a permanently abandoned call keeps its run in the database pending operator reconciliation.
 - **Early stream headers and keepalive.** A Meta model call (route flag `earlyStream` in `providers.ts`; Anthropic and OpenAI keep real
   429/529 and `retry-after`) with `Accept: text/event-stream` (what
   `voluma-sam` sends; the gateway does not read `stream` from the body) is answered with `200
