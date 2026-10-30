@@ -130,7 +130,8 @@ function threadsOf(events: RunEvent[]): { threads: Thread[]; lastAt: Map<string,
         if (t) {
           t.status = e.payload.status;
           t.error = e.payload.error;
-          t.endedAt = e.createdAt;
+          // A later cancel can invalidate finished work without adding working time.
+          t.endedAt ??= e.createdAt;
           running.delete(e.threadId);
         }
         break;
