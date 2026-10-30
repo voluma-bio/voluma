@@ -192,8 +192,7 @@ user, no email) in the demo entrance PR. No WorkOS user signs into a Demo organi
 none is in the list. WorkOS does not enforce the `organizationId` pin on sign-in, so the
 per-request allow-list is the only control. `scope` is server-internal: `/me` returns only the contract shape.
 
-**Guests.** With `GUEST_ORGANIZATION_ID` (and `GUEST_SCOPE`, `lab` or `self`, default `lab`; the
-Demo org runs `self`) set, a request with no session cookie, no bearer and a valid guest cookie
+**Guests.** With `GUEST_ORGANIZATION_ID` (and `GUEST_SCOPE`, `self` or `lab`, default `self`) set, a request with no session cookie, no bearer and a valid guest cookie
 is a guest: a `user` principal with `account: "visitor"`, no email, and that organization and
 scope, so domains and `readerOf` treat it like any member. Its id (`guest_…`) is minted by
 `POST /api/auth/guest` (same-origin, behind the CSRF guard; it returns the `/me` body) into its

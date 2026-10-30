@@ -5,16 +5,12 @@
  * runner shares; the Sandbox port too, since the runner, not the API, creates sandboxes.
  * A domain's own adapters live in the domain; adapters shared by domains go in
  * adapters/ (none yet). Only index.ts constructs adapters.
- * Owned by both lanes; change in small PRs.
  */
 import type { RunEvent } from "@voluma/contracts/events";
 import type { PersonMessage } from "@voluma/contracts/messages";
 import type { reviewState } from "@voluma/contracts/review-state";
-import type { Input, Run } from "@voluma/contracts/run";
+import type { Run } from "@voluma/contracts/run";
 import type { Caller, Reader } from "../domain";
-
-/** Review reads inputs through the Run lane's scoped read adapter. */
-export type ReviewInputs = { listInputs(reader: Reader): Promise<Input[]> };
 
 /** The published reference archive; a version pins the bytes described by the lookup. */
 export type ReferenceArchive = {
@@ -47,8 +43,8 @@ export type RunRecords = {
     runId: string,
     decision: (record: RunRecord) => ReviewDecision | null,
   ): Promise<RunRecord | null>;
-  /** Whether `reader` can read the run, without reading its log. */
-  readable(reader: Reader, runId: string): Promise<boolean>;
+  /** The run's `generation` when `reader` can read it, else null; reads no log. */
+  readable(reader: Reader, runId: string): Promise<{ generation: string } | null>;
 };
 
 /** Why a message to a run was refused, as the route answers it. */

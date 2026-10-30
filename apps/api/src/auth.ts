@@ -227,7 +227,11 @@ class RefreshMemo {
 
 type SessionRef = { id: string; refreshToken: string };
 
-function userPrincipal(user: User, labId: string, scope: Scope): Principal {
+function userPrincipal(
+  user: User,
+  labId: string,
+  scope: Scope,
+): Extract<Principal, { account: "member" }> {
   return {
     kind: "user",
     userId: user.id,
@@ -253,7 +257,14 @@ function guestPrincipal(
   };
 }
 
-// Attach Set-Cookie headers to the response Hono is about to build.
+/** What `/me` and the sign-in routes tell the browser about a user. */
+function meOf(user: Extract<Principal, { kind: "user" }>): Me {
+  const { userId, name, labId } = user;
+  return user.account === "member"
+    ? { kind: "member", userId, email: user.email, name, labId }
+    : { kind: "visitor", userId, name, labId };
+}
+
 function setCookies(c: Context, cookies: string[]) {
   for (const cookie of cookies) c.header("Set-Cookie", cookie, { append: true });
 }
@@ -641,16 +652,7 @@ export function createAuth(config: AuthConfig) {
       }),
     );
     setCookies(c, cookies);
-    const {
-      userId,
-      email: memberEmail,
-      name,
-      labId,
-    } = userPrincipal(auth.user, auth.organizationId, scope) as Extract<
-      Principal,
-      { account: "member" }
-    >;
-    return c.json({ kind: "member", userId, email: memberEmail, name, labId } satisfies Me);
+    return c.json(meOf(userPrincipal(auth.user, auth.organizationId, scope)));
   });
 
   sessionRoutes.post("/logout", async (c) => {
@@ -676,21 +678,12 @@ export function createAuth(config: AuthConfig) {
     const cookies: string[] = [];
     const id = (await guestIdFromCookie(c)) ?? (await mintGuest(cookies));
     setCookies(c, cookies);
-    const { userId, name, labId } = guestPrincipal(id, config.guest);
-    return c.json({ kind: "visitor", userId, name, labId } satisfies Me);
+    return c.json(meOf(guestPrincipal(id, config.guest)));
   });
 
   const userRoutes = new Hono<UserEnv>().use(requireUser);
 
-  userRoutes.get("/me", (c) => {
-    const user = c.var.user;
-    const { userId, name, labId } = user;
-    const me: Me =
-      user.account === "member"
-        ? { kind: "member", userId, email: user.email, name, labId }
-        : { kind: "visitor", userId, name, labId };
-    return c.json(me);
-  });
+  userRoutes.get("/me", (c) => c.json(meOf(c.var.user)));
 
   return {
     guards: [bearer, csrf] as const,

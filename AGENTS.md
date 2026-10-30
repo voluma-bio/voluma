@@ -173,6 +173,7 @@ they need:
   a `"test": "vitest run"` script; `pnpm check` picks it up.
 - Comments: a file header says what the file is for. Inline comments explain
   only hidden constraints, units and workarounds.
+  Comments state what is true now; plans go in .context/TODO.md.
 - Writing for people (UI copy, PR bodies, docs): lead with the point, use
   plain labels, and phrase choices as the user's decisions.
 

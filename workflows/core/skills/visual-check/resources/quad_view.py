@@ -57,8 +57,6 @@ RESERVED = ('labels', 'planes')  # layer names that are not objects
 AXIS_PANES = [(E[0], E[1]), (-E[1], E[0]), (E[2], E[0])]
 
 
-# ---- state ----------------------------------------------------------------------------------------------------------
-
 def make_pane(normal, up=None, axis=None, frame=None):
     """A pane dict: unit `normal`, screen-`up` (made perpendicular to it) and screen-`right`, in mm space (z, y, x)."""
     n = vl.unit(np.asarray(normal, float))
@@ -328,8 +326,6 @@ def apply_changes(s, scene, a):
         sl.fail(f'the crosshair {np.round(c, 1).tolist()} is outside the scan {s["scan"]["shape"]}: move it back')
 
 
-# ---- geometry -------------------------------------------------------------------------------------------------------
-
 def pane_geometry(s, scene, k):
     """What a slice pane is: centre (mm), row direction u, column direction v, pixel size, and the pixel -> scan voxel map."""
     pane = s['panes'][k]
@@ -396,8 +392,6 @@ def set_ticks(ax, s, scene, k, g):
     ax.tick_params(length=3, color='#888888', pad=2)
 
 
-# ---- meshes ---------------------------------------------------------------------------------------------------------
-
 def of_face(meshes, scene, name):
     """Mesh of a surface object: its heights along `axis` over the other two axes of its grid, mapped onto the scan."""
     o = scene.objs[name]
@@ -442,8 +436,6 @@ def bone_mesh(s, scene, meshes):
     thr = s['bone_hu']
     return surface(meshes, scene, s['scan']['hu'], lambda a: a > thr, f'hu>{thr}')
 
-
-# ---- 3D pane --------------------------------------------------------------------------------------------------------
 
 def camera_for(s, scene, bounds):
     """Camera (mm, x,y,z) looking at the crosshair from the state's azimuth and elevation, scan axis 0 up."""
@@ -506,8 +498,6 @@ def render_3d(s, scene, meshes, geoms):
     p.close()
     return img, cam
 
-
-# ---- slice panes ----------------------------------------------------------------------------------------------------
 
 def text(ax, x, y, s, colour, size=9, **kw):
     t = ax.text(x, y, s, color=colour, fontsize=size, clip_on=True, **kw)  # clipped: a label must not spill into the next pane
@@ -602,8 +592,6 @@ def draw_3d_pane(ax, s, scene, meshes, img3d, cam):
         text(ax, 8, P - 10 - 14 * n, label, c, size=8)
 
 
-# ---- render ---------------------------------------------------------------------------------------------------------
-
 def check_out(out):
     """Refuse an --out that cannot be written, before any work: a .jpg path, no earlier view in the way, a writable directory."""
     if out.suffix.lower() not in ('.jpg', '.jpeg'):
@@ -691,8 +679,6 @@ def summary(view):
             'panes': [p['name'] for p in view['panes']], 'shown': s['shown'], 'window_hu': s['window'],
             'timings_s': view['timings_s'], 'jpeg_kib': round(Path(view['image']).stat().st_size / 1024)}
 
-
-# ---- command line ---------------------------------------------------------------------------------------------------
 
 def numbers(txt, n, what):
     try:

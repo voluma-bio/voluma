@@ -117,7 +117,6 @@ export const stuckSummary = (left: readonly TaskRow[]) =>
 
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}…` : text);
 
-/** One line (or a few) for a notice. */
 export function noticeLine(n: Notice): string {
   const who = n.taskId ? `${n.threadId} (${n.taskId})` : n.threadId;
   switch (n.kind) {

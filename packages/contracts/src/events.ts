@@ -22,7 +22,7 @@
  *
  * Ids that become R2 key segments (`runId`, `taskId`, `toolCallId`, evidence paths) are checked
  * with the `r2.ts` schemas here, so an accepted event can't fail later when a
- * key is built. `compaction` is added when something produces it.
+ * key is built.
  *
  * `task`, `checkpoint` and `output` are what the run screen and the review are
  * folded from (see below).
@@ -177,8 +177,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
          * its child, is the run's main agent). A thread's model is
          * fixed for its life: every `thread.started` of a thread names the same one, and
          * the harness fails a resume on a different model, as it does for a differing
-         * system prompt. Optional in the schema until the harness writes it; then it
-         * becomes required on those kinds.
+         * system prompt.
          */
         model: modelRefSchema.optional(),
         /**
