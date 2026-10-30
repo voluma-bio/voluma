@@ -728,16 +728,7 @@ def parse_args(argv):
     ap.add_argument('--zoom', type=float, help='slice panes\' field of view = whole scan / Z, Z > 0 (3D always fits the bone)')
     ap.add_argument('--show', action='append', metavar='NAME', help='show a layer by name (repeatable)')
     ap.add_argument('--hide', action='append', metavar='NAME', help='hide a layer by name (repeatable)')
-    takes_value = {o for act in ap._actions if act.nargs != 0 for o in act.option_strings}
-    joined, i = [], 0
-    while i < len(argv):  # `--window -500,6000` would be read as a flag followed by another flag: join them as --window=-500,6000
-        if argv[i] in takes_value and i + 1 < len(argv):
-            joined.append(f'{argv[i]}={argv[i + 1]}')
-            i += 2
-        else:
-            joined.append(argv[i])
-            i += 1
-    a = ap.parse_args(joined)
+    a = ap.parse_args(argv)
     if bool(a.from_) == bool(a.hu):
         sl.fail('pass --hu hu.npy for a first view, or --from <earlier>.view.json to change one (not both)')
     for opt, path in [('--names', a.names if a.names and a.names.endswith('.json') else None),
