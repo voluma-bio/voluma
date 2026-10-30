@@ -11,7 +11,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { acceptCheck, getReviewRun, getRun } from "@voluma/api-client";
+import { acceptCheck, getMe, getReviewRun, getRun } from "@voluma/api-client";
 import { Button } from "@voluma/ui";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -25,6 +25,19 @@ const queryClient = new QueryClient({
 });
 /** How long "Looked right" shows before the next item opens. */
 const ADVANCE_MS = 600;
+
+/** `fn` once `ms` after the last call; the stream replays a long log in a burst. */
+function useDebounced(fn: () => void, ms: number) {
+  const latest = useRef(fn);
+  latest.current = fn;
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const [call] = useState(() => () => {
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => latest.current(), ms);
+  });
+  return call;
+}
 
 const keyOf = (item: CheckItem) => `${item.runId}/${item.taskId}/${item.checkId ?? ""}`;
 
@@ -52,8 +65,14 @@ function Panel({ items, start, onClose, onAccepted }: CheckPanelProps) {
     queryKey: ["review-run", item.runId],
     queryFn: () => getReviewRun(item.runId),
   });
-  // Only for `example`: an example is read-only.
+  // Whether the run is an example (read-only), and who may talk to its AI.
   const run = useQuery({ queryKey: ["run", item.runId], queryFn: () => getRun(item.runId) });
+  const me = useQuery({ queryKey: ["me"], queryFn: getMe, staleTime: Number.POSITIVE_INFINITY });
+  // The run's stream moved: its state, and maybe its results, did too.
+  const runChanged = useDebounced(() => {
+    void client.invalidateQueries({ queryKey: ["run", item.runId] });
+    void client.invalidateQueries({ queryKey: ["review-run", item.runId] });
+  }, 1500);
 
   const accept = useMutation({
     mutationFn: ({ item, revisionId }: { item: CheckItem; revisionId: string }) =>
@@ -150,6 +169,9 @@ function Panel({ items, start, onClose, onAccepted }: CheckPanelProps) {
           key={keyOf(item)}
           item={item}
           review={review}
+          runInfo={run.data}
+          me={me.data}
+          onRunChanged={runChanged}
           canAccept={run.data?.example === false && review.data?.review != null}
           example={run.data?.example === true}
           accepted={done.has(keyOf(item))}

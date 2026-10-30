@@ -6,6 +6,9 @@
 
 export type Zyx = readonly [number, number, number];
 
+/** What the researcher marked on the grid: a voxel, or an inclusive box of voxels. */
+export type GridMark = { point: Zyx } | { box: { min: Zyx; max: Zyx } };
+
 /** One OME-Zarr level: `scaleZyx` source voxels per level voxel (2^k on every axis). */
 export type AssetLevel = { path: string; shapeZyx: Zyx; scaleZyx: Zyx };
 

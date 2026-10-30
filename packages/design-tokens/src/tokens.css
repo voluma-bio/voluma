@@ -200,6 +200,10 @@
   /* The one exception to "status never in mesh colour": the region under check */
   --check-outline: #e9b75b;
 
+  /* The researcher's own marks on the scan, for a message to the AI: clear of the amber
+     outline, the axis colours and the label set */
+  --mark: #ff4fd8;
+
   /* Structure label colours, shown when the label toggle is on. Chosen to
      stay clear of the axis colours, amber and ivory. */
   --label-1: #c792ea;

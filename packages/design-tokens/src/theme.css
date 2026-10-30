@@ -78,6 +78,7 @@
   --color-axis-y: var(--axis-y);
   --color-axis-z: var(--axis-z);
   --color-check-outline: var(--check-outline);
+  --color-mark: var(--mark);
 
   --font-sans: var(--sans);
   --font-mono: var(--mono);

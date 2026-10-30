@@ -290,6 +290,9 @@
     background: var(--viewer-well);
     touch-action: none;
   }
+  .grid-pane.marking {
+    cursor: crosshair;
+  }
   .grid-pane:focus-visible {
     @apply ring-2 ring-inset ring-ring;
   }

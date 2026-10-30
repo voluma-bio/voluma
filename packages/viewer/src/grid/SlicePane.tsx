@@ -3,11 +3,16 @@
  * constant, drawn by three.js with an orthographic camera in mm. It opens on the coarsest
  * level and refines to the level the zoom needs. Left drag moves the crosshair, the wheel
  * steps slices, Ctrl or ⌘ + wheel zooms at the pointer, Shift, middle or right drag pans.
+ * In mark mode a left click marks a voxel (and moves the crosshair to it) and a left drag marks
+ * a box; marks are drawn in `--mark` on every slice that passes through them.
  */
 import { useEffect, useRef, useState } from "react";
 import {
   BufferGeometry,
+  CircleGeometry,
+  Color,
   Float32BufferAttribute,
+  Group,
   LineBasicMaterial,
   LineSegments,
   Mesh,
@@ -19,7 +24,15 @@ import {
 import { compose, type OverlayPlane, type Window } from "./compose";
 import { corners, type Picture, quad, texture } from "./picture";
 import { readPlane } from "./planes";
-import { type Axis, type GridScene, levelFor, levelIndex, planeAxes, type Zyx } from "./scene";
+import {
+  type Axis,
+  type GridMark,
+  type GridScene,
+  levelFor,
+  levelIndex,
+  planeAxes,
+  type Zyx,
+} from "./scene";
 
 export const axisColor = (axis: Axis) =>
   getComputedStyle(document.documentElement).getPropertyValue(
@@ -29,6 +42,14 @@ export const axisColor = (axis: Axis) =>
 /** Pixels per mm, the zoom that fits the grid in the pane, and the pane centre in mm. */
 type View = { zoom: number; fit: number; center: [number, number] };
 
+/** A drag shorter than this (CSS px) is a click: in mark mode, a point. */
+const CLICK_PX = 4;
+/** A point mark's radius on screen, CSS px, whatever the zoom. */
+const DOT_PX = 4;
+
+/** Renders the pane now and returns its canvas, for a snapshot (WebGL clears it after compositing). */
+export type Capture = () => HTMLCanvasElement;
+
 export function SlicePane({
   axis,
   scene,
@@ -36,6 +57,10 @@ export function SlicePane({
   onPoint,
   window,
   onPicture,
+  marking,
+  marks,
+  onMark,
+  onCapture,
 }: {
   axis: Axis;
   scene: GridScene;
@@ -43,6 +68,10 @@ export function SlicePane({
   onPoint(point: Zyx): void;
   window: Window | null;
   onPicture(picture: Picture): void;
+  marking: boolean;
+  marks: readonly GridMark[];
+  onMark(mark: GridMark): void;
+  onCapture(capture: Capture | null): void;
 }) {
   const [ra, ca] = planeAxes(axis);
   const sr = scene.spacingZyx[ra];
@@ -54,14 +83,17 @@ export function SlicePane({
     scene: Scene;
     image: Mesh<BufferGeometry, MeshBasicMaterial>;
     cross: LineSegments<BufferGeometry, LineBasicMaterial>;
+    marks: Group;
     render(): void;
   } | null>(null);
   const view = useRef<View | null>(null);
   const [level, setLevel] = useState(scene.image.levels.length - 1);
   const [shown, setShown] = useState<{ level: number; index: number } | null>(null);
   const [error, setError] = useState<string>();
-  const latest = useRef({ point, onPoint });
-  latest.current = { point, onPoint };
+  // The box being dragged in mark mode, drawn with the marks until the drag ends.
+  const [dragged, setDragged] = useState<GridMark | null>(null);
+  const latest = useRef({ point, onPoint, marking, onMark });
+  latest.current = { point, onPoint, marking, onMark };
 
   // Pane mm: columns run right, rows run down.
   const toPane = (p: Zyx): [number, number] => [p[ca] * sc, -p[ra] * sr];
@@ -84,13 +116,16 @@ export function SlicePane({
       new LineBasicMaterial({ vertexColors: true, depthTest: false }),
     );
     cross.renderOrder = 1;
-    s.add(image, cross);
+    const marks = new Group();
+    marks.renderOrder = 2;
+    s.add(image, cross, marks);
     const state = {
       renderer,
       camera,
       scene: s,
       image,
       cross,
+      marks,
       // One frame per animation frame, however many changes asked for it.
       render() {
         frame ||= requestAnimationFrame(paint);
@@ -107,8 +142,14 @@ export function SlicePane({
       camera.top = v.center[1] + height / 2 / v.zoom;
       camera.bottom = v.center[1] - height / 2 / v.zoom;
       camera.updateProjectionMatrix();
+      // Dots keep their size on screen at any zoom.
+      for (const dot of marks.children) if (dot.userData.dot) dot.scale.setScalar(DOT_PX / v.zoom);
       renderer.render(s, camera);
     };
+    onCapture(() => {
+      paint();
+      return renderer.domElement;
+    });
     const fitZoom = (width: number, height: number) =>
       Math.min(width / (scene.shapeZyx[ca] * sc), height / (scene.shapeZyx[ra] * sr)) * 0.95;
     three.current = state;
@@ -132,6 +173,8 @@ export function SlicePane({
     return () => {
       cancelAnimationFrame(frame);
       observer.disconnect();
+      onCapture(null);
+      disposeMarks(marks);
       image.geometry.dispose();
       image.material.map?.dispose();
       image.material.dispose();
@@ -254,6 +297,73 @@ export function SlicePane({
     t.render();
   }, [point]);
 
+  // Marks: a dot on the slice through a point mark, a box's outline on every slice it spans.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: toPane depends only on the fixed grid.
+  useEffect(() => {
+    const t = three.current;
+    if (!t) return;
+    disposeMarks(t.marks);
+    const color = new Color(
+      getComputedStyle(document.documentElement).getPropertyValue("--mark").trim(),
+    );
+    const at = Math.round(point[axis]);
+    for (const mark of dragged ? [...marks, dragged] : marks) {
+      if ("point" in mark) {
+        if (mark.point[axis] !== at) continue;
+        const dot = new Mesh(
+          new CircleGeometry(1, 20),
+          new MeshBasicMaterial({ color, depthTest: false }),
+        );
+        dot.position.set(...toPane(mark.point), 2);
+        dot.userData.dot = true;
+        t.marks.add(dot);
+      } else {
+        const { min, max } = mark.box;
+        if (at < min[axis] || at > max[axis]) continue;
+        // Voxel i spans i ± ½: the outline goes round the boxed voxels.
+        const x0 = (min[ca] - 0.5) * sc;
+        const x1 = (max[ca] + 0.5) * sc;
+        const y0 = -(min[ra] - 0.5) * sr;
+        const y1 = -(max[ra] + 0.5) * sr;
+        const g = new BufferGeometry();
+        g.setAttribute(
+          "position",
+          new Float32BufferAttribute(
+            [
+              x0,
+              y0,
+              2,
+              x1,
+              y0,
+              2,
+              x1,
+              y0,
+              2,
+              x1,
+              y1,
+              2,
+              x1,
+              y1,
+              2,
+              x0,
+              y1,
+              2,
+              x0,
+              y1,
+              2,
+              x0,
+              y0,
+              2,
+            ],
+            3,
+          ),
+        );
+        t.marks.add(new LineSegments(g, new LineBasicMaterial({ color, depthTest: false })));
+      }
+    }
+    t.render();
+  }, [marks, dragged, point[axis]]);
+
   // Pointer and wheel.
   // biome-ignore lint/correctness/useExhaustiveDependencies: handlers read the latest props through refs.
   useEffect(() => {
@@ -268,17 +378,29 @@ export function SlicePane({
       p[ra] = clamp(Math.round(-mmY / sr), scene.shapeZyx[ra]);
       return p as unknown as Zyx;
     };
-    let drag: { mode: "point" | "pan"; x: number; y: number } | null = null;
+    let drag: {
+      mode: "point" | "pan" | "mark";
+      x: number;
+      y: number;
+      from: Zyx;
+      box?: GridMark;
+    } | null = null;
     const down = (event: PointerEvent) => {
       element.setPointerCapture(event.pointerId);
       const pan = event.button === 1 || event.button === 2 || event.shiftKey;
-      drag = { mode: pan ? "pan" : "point", x: event.clientX, y: event.clientY };
-      if (!pan) latest.current.onPoint(toVoxel(event));
+      const mode = pan ? "pan" : latest.current.marking ? "mark" : "point";
+      drag = { mode, x: event.clientX, y: event.clientY, from: toVoxel(event) };
+      if (mode === "point") latest.current.onPoint(drag.from);
     };
     const move = (event: PointerEvent) => {
       if (!drag) return;
       if (drag.mode === "point") latest.current.onPoint(toVoxel(event));
-      else {
+      else if (drag.mode === "mark") {
+        if (!drag.box && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < CLICK_PX)
+          return;
+        drag.box = boxMark(drag.from, toVoxel(event));
+        setDragged(drag.box);
+      } else {
         const v = view.current!;
         v.center = [
           v.center[0] - (event.clientX - drag.x) / v.zoom,
@@ -289,8 +411,31 @@ export function SlicePane({
         three.current?.render();
       }
     };
-    const up = () => {
+    const up = (event: PointerEvent) => {
+      if (drag?.mode === "mark" && event.type === "pointerup") {
+        if (drag.box) latest.current.onMark(drag.box);
+        else {
+          latest.current.onMark({ point: drag.from });
+          latest.current.onPoint(drag.from);
+        }
+      }
       drag = null;
+      setDragged(null);
+    };
+    // A box dragged on one slice spans that slice's two axes; across the held axis it takes the
+    // smaller of the two dragged sides in mm, centred on the slice, so it reads as a region.
+    const boxMark = (a: Zyx, b: Zyx): GridMark => {
+      const min = [0, 0, 0];
+      const max = [0, 0, 0];
+      for (const i of [ra, ca]) {
+        min[i] = Math.min(a[i], b[i]);
+        max[i] = Math.max(a[i], b[i]);
+      }
+      const depthMm = Math.min((max[ra]! - min[ra]! + 1) * sr, (max[ca]! - min[ca]! + 1) * sc);
+      const half = Math.floor(depthMm / scene.spacingZyx[axis] / 2);
+      min[axis] = clamp(a[axis] - half, scene.shapeZyx[axis]);
+      max[axis] = clamp(a[axis] + half, scene.shapeZyx[axis]);
+      return { box: { min: min as unknown as Zyx, max: max as unknown as Zyx } };
     };
     const wheel = (event: WheelEvent) => {
       event.preventDefault();
@@ -347,7 +492,7 @@ export function SlicePane({
   return (
     <div
       ref={host}
-      className="grid-pane"
+      className={`grid-pane ${marking ? "marking" : ""}`}
       // biome-ignore lint/a11y/noNoninteractiveTabindex: the pane takes arrow keys to step slices.
       tabIndex={0}
       role="img"
@@ -372,3 +517,13 @@ export function SlicePane({
 }
 
 const clamp = (n: number, size: number) => Math.max(0, Math.min(size - 1, n));
+
+function disposeMarks(group: Group) {
+  for (const child of [...group.children]) {
+    group.remove(child);
+    if (child instanceof Mesh || child instanceof LineSegments) {
+      child.geometry.dispose();
+      child.material.dispose();
+    }
+  }
+}

@@ -2,43 +2,57 @@
  * The grid viewer's 3D pane: the scene's meshes and the three slice pictures at the crosshair,
  * in the grid's own mm (voxel × spacing; the grid's rotation into the scan is not applied).
  * Drag rotates, right drag pans, the wheel zooms; a click on a mesh moves the crosshair there.
- * New pictures or meshes never move the camera.
+ * New pictures or meshes never move the camera. Marks show as a dot or a box's edges in `--mark`.
  */
 import { useEffect, useRef, useState } from "react";
 import {
   AmbientLight,
+  BoxGeometry,
   BufferAttribute,
   BufferGeometry,
+  Color,
   DirectionalLight,
   DoubleSide,
+  EdgesGeometry,
   Group,
+  LineBasicMaterial,
+  LineSegments,
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
   PerspectiveCamera,
   Raycaster,
   Scene,
+  SphereGeometry,
   Vector2,
   Vector3,
   WebGLRenderer,
 } from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { corners, type Picture, quad, texture } from "./picture";
-import type { Axis, GridMesh, GridScene, Zyx } from "./scene";
+import type { Capture } from "./SlicePane";
+import type { Axis, GridMark, GridMesh, GridScene, Zyx } from "./scene";
 
 export function Grid3D({
   scene,
   pictures,
   onPoint,
+  marks,
+  onCapture,
 }: {
   scene: GridScene;
   pictures: Partial<Record<Axis, Picture>>;
   onPoint(point: Zyx): void;
+  marks: readonly GridMark[];
+  onCapture(capture: Capture | null): void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const three = useRef<{
     planes: Mesh<BufferGeometry, MeshBasicMaterial>[];
     meshes: Group;
+    marks: Group;
+    /** World mm across the grid's diagonal, half of it. */
+    radius: number;
     render(): void;
   } | null>(null);
   const [status, setStatus] = useState<string>();
@@ -71,7 +85,8 @@ export function Grid3D({
     light.position.set(0.3, 0.6, 1);
     s.add(camera, new AmbientLight(0xffffff, 0.9));
     const meshes = new Group();
-    s.add(meshes);
+    const marks = new Group();
+    s.add(meshes, marks);
     const planes = ([0, 1, 2] as const).map(() => {
       const plane = new Mesh(
         new BufferGeometry(),
@@ -94,7 +109,11 @@ export function Grid3D({
     };
     controls.addEventListener("change", render);
     controls.update();
-    three.current = { planes, meshes, render };
+    three.current = { planes, meshes, marks, radius, render };
+    onCapture(() => {
+      renderer.render(s, camera);
+      return renderer.domElement;
+    });
     const observer = new ResizeObserver(() => {
       const { width, height } = element.getBoundingClientRect();
       if (!width || !height) return;
@@ -138,8 +157,13 @@ export function Grid3D({
     return () => {
       cancelAnimationFrame(frame);
       observer.disconnect();
+      onCapture(null);
       controls.dispose();
       s.traverse((object) => {
+        if (object instanceof LineSegments) {
+          object.geometry.dispose();
+          object.material.dispose();
+        }
         if (object instanceof Mesh) {
           object.geometry.dispose();
           object.material.map?.dispose();
@@ -203,6 +227,49 @@ export function Grid3D({
         });
     return () => abort.abort();
   }, [scene.meshes]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: toWorld depends only on the fixed grid.
+  useEffect(() => {
+    const t = three.current;
+    if (!t) return;
+    for (const child of [...t.marks.children]) {
+      t.marks.remove(child);
+      if (child instanceof Mesh || child instanceof LineSegments) {
+        child.geometry.dispose();
+        child.material.dispose();
+      }
+    }
+    const color = new Color(
+      getComputedStyle(document.documentElement).getPropertyValue("--mark").trim(),
+    );
+    for (const mark of marks) {
+      if ("point" in mark) {
+        const dot = new Mesh(
+          new SphereGeometry(t.radius * 0.012, 16, 12),
+          new MeshBasicMaterial({ color, depthTest: false }),
+        );
+        dot.position.copy(toWorld(mark.point));
+        dot.renderOrder = 2;
+        t.marks.add(dot);
+      } else {
+        const { min, max } = mark.box;
+        // Voxel i spans i ± ½.
+        const lo = toWorld([min[0] - 0.5, min[1] - 0.5, min[2] - 0.5]);
+        const hi = toWorld([max[0] + 0.5, max[1] + 0.5, max[2] + 0.5]);
+        const size = hi.clone().sub(lo);
+        const box = new BoxGeometry(size.x, size.y, size.z);
+        const edges = new LineSegments(
+          new EdgesGeometry(box),
+          new LineBasicMaterial({ color, depthTest: false }),
+        );
+        box.dispose();
+        edges.position.copy(lo.add(hi).multiplyScalar(0.5));
+        edges.renderOrder = 2;
+        t.marks.add(edges);
+      }
+    }
+    t.render();
+  }, [marks]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: toWorld depends only on the fixed grid.
   useEffect(() => {

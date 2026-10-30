@@ -1,15 +1,28 @@
 /**
  * One queue item: the grid viewer on the item's task, with the check (title, why it was raised,
- * "Looks right"), the task's values, and what the view holds beside it. Objects whose 3D assets
- * aren't ready show as preparing or couldn't prepare; they are never drawn from anything else.
+ * "Looks right"), the task's values, what the view holds, and the chat with the run's AI beside
+ * it. "Mark" turns clicks and drags on the slices into marks for the next message. Objects whose
+ * 3D assets aren't ready show as preparing or couldn't prepare; they are never drawn from
+ * anything else. Values that differ from the task's previous attempt are blue (corrected).
  */
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { ApiError, reviewAssetUrl } from "@voluma/api-client";
+import type { Me } from "@voluma/contracts/auth";
+import type { Mark } from "@voluma/contracts/messages";
 import type { ReviewDecisionResponse, ReviewRun, ReviewTask } from "@voluma/contracts/review";
+import type { Run } from "@voluma/contracts/run";
 import { Button } from "@voluma/ui";
-import { GridViewer, type SceneObject, taskScene, type Zyx } from "@voluma/viewer/grid";
+import {
+  type GridMark,
+  GridViewer,
+  type GridViewerHandle,
+  type SceneObject,
+  taskScene,
+  type Zyx,
+} from "@voluma/viewer/grid";
 import { Check } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { Chat, chatBlocked } from "./chat";
 import type { CheckItem } from "./types";
 
 /** How often a view still preparing asks whether its assets have arrived. */
@@ -27,30 +40,49 @@ const format = (value: number) =>
 export function ItemView({
   item,
   review,
+  runInfo,
+  me,
   canAccept,
   example,
   accepted,
   accept,
+  onRunChanged,
 }: {
   item: CheckItem;
   review: UseQueryResult<ReviewRun>;
+  /** The run's record, for who may talk to its AI; undefined while it loads. */
+  runInfo: Run | undefined;
+  me: Me | null | undefined;
   canAccept: boolean;
   example: boolean;
   /** Signed off in this panel. */
   accepted: boolean;
   accept: Accept;
+  onRunChanged: () => void;
 }) {
   const run = review.data;
   const task = run?.revisions.at(-1)?.tasks.find((t) => t.id === item.taskId);
-  const check = task?.checks.find((c) => c.id === item.checkId);
+  // A redo replaces the task's checks: then its first open one is this item's check.
+  const check =
+    task?.checks.find((c) => c.id === item.checkId) ??
+    (item.checkId ? task?.checks.find((c) => c.status === "open") : undefined);
+  const checkId = check?.id ?? item.checkId;
   const view = useMemo(
     () =>
       run && task
-        ? taskScene(run, item.taskId, item.checkId, (sha256) =>
+        ? taskScene(run, item.taskId, checkId, (sha256) =>
             new URL(reviewAssetUrl(item.runId, sha256, "x").slice(0, -1), location.href).toString(),
           )
         : undefined,
-    [run, task, item],
+    [run, task, item, checkId],
+  );
+  const blocked = runInfo && me !== undefined ? chatBlocked(runInfo, me) : undefined;
+  const [marking, setMarking] = useState(false);
+  const [marks, setMarks] = useState<Mark[]>([]);
+  const viewer = useRef<GridViewerHandle>(null);
+  const gridMarks = useMemo(
+    () => marks.map((m): GridMark => (m.point ? { point: m.point } : { box: m.box! })),
+    [marks],
   );
 
   // The region under check, when only its voxels say where it is; the grid's centre if it fails.
@@ -91,7 +123,25 @@ export function ItemView({
   else if (view?.state === "ready")
     stage = (
       // Remounts per item (the parent's key): the crosshair starts on this item's focus.
-      <GridViewer scene={view.scene} point={located ?? view.point} />
+      <GridViewer
+        ref={viewer}
+        scene={view.scene}
+        point={located ?? view.point}
+        marking={marking}
+        marks={gridMarks}
+        onMark={(m) =>
+          setMarks((all) => [...all, { volumeId: view.gridId, ...m } as Mark].slice(-20))
+        }
+      >
+        {blocked === null && (
+          <span className="flex items-center gap-2">
+            <Button size="sm" aria-pressed={marking} onClick={() => setMarking((m) => !m)}>
+              {marking ? "Done marking" : "Mark"}
+            </Button>
+            {marking && <span>Click a slice for a point, drag for a box</span>}
+          </span>
+        )}
+      </GridViewer>
     );
   else if (view?.state === "preparing")
     stage = <Notice>Preparing this scan for 3D. It opens here when it's ready.</Notice>;
@@ -105,7 +155,7 @@ export function ItemView({
         {stage}
       </div>
       {task && (
-        <aside className="flex flex-col gap-6 border-border p-4 md:w-[340px] md:shrink-0 md:overflow-y-auto md:border-l">
+        <aside className="flex flex-col gap-6 border-border p-4 md:w-[360px] md:shrink-0 md:overflow-y-auto md:border-l">
           {item.checkId &&
             (check ? (
               <CheckCard
@@ -141,8 +191,25 @@ export function ItemView({
                 This check is no longer open in the run's latest results.
               </p>
             ))}
-          <Values task={task} />
+          <Values task={task} before={previousAttempt(run!, task)} />
           {view && view.objects.length > 0 && <InView objects={view.objects} />}
+          {blocked === null && runInfo ? (
+            <Chat
+              run={runInfo}
+              review={run!}
+              taskId={item.taskId}
+              marks={marks}
+              onMarksSent={() => {
+                setMarks([]);
+                setMarking(false);
+              }}
+              removeMark={(i) => setMarks((all) => all.filter((_, j) => j !== i))}
+              viewer={viewer}
+              onRunChanged={onRunChanged}
+            />
+          ) : (
+            blocked && <p className="text-ui text-muted-foreground">{blocked}</p>
+          )}
         </aside>
       )}
     </div>
@@ -207,15 +274,39 @@ function CheckCard({
   );
 }
 
-function Values({ task }: { task: ReviewTask }) {
+/** The task as its attempt before the latest one left it, if it had one. */
+function previousAttempt(run: ReviewRun, task: ReviewTask): ReviewTask | undefined {
+  for (const rev of [...run.revisions].reverse()) {
+    const earlier = rev.tasks.find((t) => t.id === task.id);
+    if (earlier && earlier.resultRevisionId !== task.resultRevisionId) return earlier;
+  }
+  return undefined;
+}
+
+function Values({ task, before }: { task: ReviewTask; before?: ReviewTask }) {
+  const shown = (m: ReviewTask["measurements"][number]) =>
+    m.value === null ? "Not supplied" : format(m.value);
   const rows = [
-    ...task.measurements.map((m) => ({
-      id: m.id,
-      name: m.title ?? m.id,
-      value: m.value === null ? "Not supplied" : format(m.value),
-      unit: m.unit === "1" ? "" : m.unit,
-    })),
-    ...task.scores.map((s) => ({ id: s.id, name: s.title ?? s.id, value: s.level, unit: "" })),
+    ...task.measurements.map((m) => {
+      const was = before?.measurements.find((b) => b.id === m.id);
+      return {
+        id: m.id,
+        name: m.title ?? m.id,
+        value: shown(m),
+        unit: m.unit === "1" ? "" : m.unit,
+        was: was && was.value !== m.value ? shown(was) : undefined,
+      };
+    }),
+    ...task.scores.map((s) => {
+      const was = before?.scores.find((b) => b.id === s.id);
+      return {
+        id: s.id,
+        name: s.title ?? s.id,
+        value: s.level,
+        unit: "",
+        was: was && was.level !== s.level ? was.level : undefined,
+      };
+    }),
   ];
   return (
     <section className="flex flex-col gap-2">
@@ -228,9 +319,14 @@ function Values({ task }: { task: ReviewTask }) {
             {rows.map((row) => (
               <tr key={row.id} className="border-b border-line-subtle last:border-0">
                 <td className="py-1.5 pr-3 align-top">{row.name}</td>
-                <td className="py-1.5 text-right align-top font-mono whitespace-nowrap tabular-nums">
+                <td
+                  className={`py-1.5 text-right align-top font-mono whitespace-nowrap tabular-nums ${row.was ? "text-info" : ""}`}
+                >
                   {row.value}
                   {row.unit && <span className="ml-1 text-muted-foreground">{row.unit}</span>}
+                  {row.was && (
+                    <span className="block text-meta text-muted-foreground">was {row.was}</span>
+                  )}
                 </td>
               </tr>
             ))}
