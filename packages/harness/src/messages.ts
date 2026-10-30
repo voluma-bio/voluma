@@ -172,12 +172,12 @@ function markWhere(m: Mark): string {
   if (m.point) return `the voxel ${POINT_AXES} = ${at(m.point)}`;
   if (m.box) return `the box ${POINT_AXES} from ${at(m.box.min)} to ${at(m.box.max)} (inclusive)`;
   if (m.line)
-    return `the line ${POINT_AXES} from ${at(m.line.aZyx)} to ${at(m.line.bZyx)}, which they measured as ${round(m.line.lengthMm)} mm`;
+    return `the line ${POINT_AXES} from ${at(m.line.aZyx)} to ${at(m.line.bZyx)}, which they measured as ${m.line.lengthMm} mm`;
   const o = m.outline;
   if (!o) throw new Error("a mark has no point, box, line or outline");
   const axis = "zyx"[o.axis];
   const slice = `a closed outline of ${o.zyx.length} points on the slice ${axis} = ${o.zyx[0]?.[o.axis]}`;
-  const area = `which they measured as ${round(o.areaMm2)} mm²`;
+  const area = `which they measured as ${o.areaMm2} mm²`;
   if (o.zyx.length > OUTLINE_LISTED_POINTS) {
     const range = [0, 1, 2]
       .filter((i) => i !== o.axis)
