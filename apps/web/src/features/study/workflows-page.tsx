@@ -1,7 +1,8 @@
 /**
- * Workflows (`/workflows`, the top bar's quiet link): the workflows a study can use, each with
- * its tasks and measurements, read from the bundle. No versions or editing yet.
+ * Workflows (`/workflows`, on the left strip): the workflows a study can use, each with its tasks
+ * and measurements, read from the bundle. No versions or editing yet.
  */
+import { Box, Breadcrumb, Count, PageHead, ShellHeading } from "@voluma/ui";
 import { catalog } from "@voluma/workflow/bundled";
 import { measurementsOf, TaskList } from "./workflow-tasks";
 
@@ -9,26 +10,28 @@ const WORKFLOWS = [catalog["mouse-oa"]];
 
 export function WorkflowsPage() {
   return (
-    <main className="mx-auto grid w-full max-w-[760px] content-start gap-6 px-6 pt-7 pb-16 max-[760px]:px-4">
-      <h1 className="text-2xl font-semibold">Workflows</h1>
+    <div className="shrink-0">
+      <ShellHeading>
+        <Breadcrumb current="Workflows" />
+      </ShellHeading>
+      <PageHead title="Workflows" count={<Count>{WORKFLOWS.length}</Count>} />
       {WORKFLOWS.map((w) => (
-        <section
+        <Box
           key={w.id}
-          aria-labelledby={`wf-${w.id}`}
-          className="grid gap-4 rounded-xl border border-border bg-card px-5 py-4"
-        >
-          <div>
-            <h2 id={`wf-${w.id}`} className="text-lg font-semibold">
-              {w.name}
-            </h2>
-            <p className="text-muted-foreground">{w.description}</p>
-            <p className="text-ui text-fg-subtle">
+          title={w.name}
+          tools={
+            <span className="text-sm text-muted-foreground">
               {w.tasks.length} tasks, {measurementsOf(w).length} measurements
-            </p>
+            </span>
+          }
+          className="border-b border-border"
+        >
+          <div className="grid max-w-3xl gap-4 px-6 py-4">
+            <p className="m-0 text-muted-foreground">{w.description}</p>
+            <TaskList workflow={w} />
           </div>
-          <TaskList workflow={w} />
-        </section>
+        </Box>
       ))}
-    </main>
+    </div>
   );
 }
