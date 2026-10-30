@@ -13,7 +13,6 @@
  *
  * JSON imports (`with { type: "json" }`) work in Vite, Node (tsx) and `tsc` alike.
  */
-import type { WorkflowPin } from "@voluma/contracts/workflow";
 import {
   type OutputEntry,
   type TaskEntry,
@@ -92,12 +91,6 @@ type WorkflowId = keyof typeof catalog;
 /** The catalog entry for a request's `workflowId`, or undefined for an id the catalog lacks. */
 export const workflowById = (id: string): BundledWorkflow | undefined =>
   Object.hasOwn(catalog, id) ? catalog[id as WorkflowId] : undefined;
-
-/** The pins a run of `workflowId` records, or undefined for an id the catalog lacks. */
-export function pinsOf(repo: string, workflowId: string): WorkflowPin[] | undefined {
-  const entry = workflowById(workflowId);
-  return entry && [{ repo, path: entry.path }];
-}
 
 /** A run's pinned workflow path as a name; a path outside the catalog shows its directory name. */
 export function workflowName(path: string | undefined): string {

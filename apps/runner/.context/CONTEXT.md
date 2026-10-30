@@ -87,6 +87,20 @@ Spend and the usage meter sum sandbox seconds over all sandboxes.
 - Same sandbox shape (run p483): commands run as uid 0 with `CapEff` lacking `CAP_SYS_ADMIN` and
   `CAP_LINUX_IMMUTABLE`; `SCRATCH` and the exec `workdir` (`/scratch/t1.check`) take effect;
   `touch /scratch/outside.txt` succeeds, also after `chmod a-w /scratch`; `chattr` is absent.
+- **What an R2 mount accepts (run p659, a worker sandbox, `/scratch` vs local disk).** A file created
+  or replaced by writing it whole in one pass works (`open(...,'wb')`, `np.save`, PIL, matplotlib,
+  json, `cp`/`shutil.copy` from `/tmp`, a 200 MB sequential write, `>` over an existing file). These
+  fail: seeking back (`EINVAL`: `np.savez`, `tifffile`, `f.seek` while writing), reopening to update
+  (`r+`, `w+`: `EBADF`; `open_memmap(mode='w+')` also leaves a 128-byte stub), append (`>>`, `'a'`:
+  `EPERM`), `truncate`, `rename`/`os.replace`/`mv`/`sed -i` within the mount (`ENOSYS`), `cp -p`/`-a`
+  and `shutil.copy2`/`move` from `/tmp` (the copy lands, then setting times is `EPERM`; `mv` also
+  removes the source). VTK savers (pyvista `.save`) with the output on the mount crash Python
+  (`.vtp`: segfault or `double free`) or fail (`.stl`); `.vtk` and `.ply` happen to work. The working
+  directory on the mount is harmless by itself: reading from it and saving to `/tmp` works. A
+  written key was visible to a host `HEAD` within ~100 ms of the writer closing the file (fsync
+  changed nothing). Modal's SDK 0.11.1 offers no cache or write-mode option on `CloudBucketMount`
+  (read-only, requester-pays, endpoint, prefix, OIDC role only), so the rule is told to the model
+  in `ThreadLayout.description` and any script writes locally and copies.
 
 # Runner: review assets
 
@@ -110,8 +124,8 @@ records `assets.ready` / `assets.failed` on the root thread (id `<runId>:assets:
   non-zero exit from a sandbox that is gone counts as a sandbox failure (the one retry), not a
   failed file.
 - **Signal.** One rule: the worker halts exactly when the stop will not end the run (server stop,
-  lost lease, self-stop, shutdown; `reportFor` is not `ended`). A spend cap and an uncaught
-  `error` end the run, so they drain, as does `finally`'s own `abort`, which the worker outlives.
+  lost lease, self-stop, shutdown; `reportFor` is not `ended`). An uncaught
+  `error` ends the run, so the worker drains, as it does on `finally`'s own `abort`, which the worker outlives.
   `run.ts` remembers which stop halted it (`haltedBy`) and rebuilds the report from that one,
   never from the first stop. A stopped worker records nothing; the next claim finds the files again and the
   converter skips what has a `manifest.json` of its version and mode.
@@ -160,6 +174,13 @@ who ends it:
    run, which is what to use when other agents have runs going: the bare form ends theirs too.
 
 Run `sandboxes:clean --run <your run>` before finishing any work that started sandboxes.
+
+**Starting one can fail.** The R2 credential mint (`mintCredentials`) retries 429, 5xx, network errors
+and Cloudflare's spurious `403` code `10042` ("enable R2", seen once, gone 41 s later) up to 5 tries
+with 1, 2, 4 and 8 s between them; any other 4xx (a bad token) fails at once. When creation still
+fails, the Pi adapter returns the tool call as an error result with `infrastructure: true`
+(`SandboxUnavailableError`), so the model and the run page see Voluma's failure, not the agent's;
+the session forgets the failed creation, and the model's next call tries again.
 
 # Runner: `segment_sam` runs in the worker's sandbox
 
@@ -217,16 +238,15 @@ the server's `retry-after`), 5xx or dropped connection. `model-retry.ts` wraps e
 treats as final (about half of all calls on 2026-10-28), when the call failed before streaming
 any content: backoff from 1 s doubling to a 30 s cap, until 4 minutes have passed since the first
 attempt (Pi's own tries count against it; an attempt in flight is not cut short), each retry
-logged with its role and attempt and reported to the fallback breaker. The run's abort ends the
-wait. Any other error, or the spent budget, ends the call. `provider-error.ts` holds the one error classification (retry, redo and breaker):
-it reads the status in the text (Pi's `<provider> API error (<status>)`, or the Anthropic SDK's
+logged with its role and attempt. The run's abort ends the wait. Any other error, or the spent budget, ends the call.
+`provider-error.ts` holds the one error classification (retry and redo): it reads the status in the text (Pi's `<provider> API error (<status>)`, or the Anthropic SDK's
 `<status> {...}`, `<status> <html>` or `<status> status code (no body)`) and, for an Anthropic error sent mid-stream
 with no status, its documented `error.type` (`overloaded_error` is 529, `rate_limit_error` 429).
 
 **A thread that dies on a provider error** (`provider-error.ts`, after the retries above gave up)
 is the run loop's to handle (`packages/harness/src/run-loop.ts`): a check is started again as a new
 check, the main agent as `main.<n+1>`, up to `maxProviderRedos` (2) per thread; a worker's failure
-is a notice to the main agent. A fatal error (a refused key, with no fallback model) fails the run
+is a notice to the main agent. A fatal error (a refused key) fails the run
 at once, with the error in `state.error`, instead of leaving it `completed` with tasks that never
 started.
 
@@ -239,15 +259,7 @@ when a claim reports (`model cost this claim`), and the API stores it as `runs.m
 On 2026-10-28 the claims' lines summed to the run's `model_cost_usd` and to `spend(events).total`
 ($0.9763 over five claims of one run).
 
-**Spend cap.** `RUNNER_MAX_RUN_COST_USD` caps a run's dollars across all its claims (sandbox time
-is not counted). Unset, the default, there is no cap: test runs have none, so leave it unset on
-staging and locally (spend is still recorded and shown). When set it goes to the API with each
-claim and becomes `runs.cost_cap_usd` (null: no cap),
-which the provider gateway checks too ([apps/gateway](../../gateway/.context/CONTEXT.md)). The runner's
-total is the last heartbeat's `spentUsd` (model cost plus the known cost of gateway calls; an open call
-or one with unknown cost counts nothing) plus the model cost not yet sent, checked on each model cost and each acknowledged
-heartbeat; at the cap `run.ts` stops the run and reports `ended failed` with
-`spend cap $X reached at $Y`. Calls in flight are aborted, not waited for. A claim of a run already over the cap stops before its first call. It applies to visitor runs too. The run loop ends the root thread `cancelled` in the event log while the run row says `failed` with the cap text.
+**No spend cap.** Spend is recorded and shown, never limited: no run, claim or gateway call is refused or stopped for cost (removed 2026-10-30; [decisions](../../../.context/decisions.md)).
 
 **`segment_sam` 404.** Meta answers `404 model_not_found` for some inputs (seen: a small box prompt)
 and bills nothing for it. The adapter retries once on the uploaded file; a second 404 throws a
@@ -313,11 +325,12 @@ set, forces every alias to one model. Each configured alias's provider key is re
 visitor run uses `RUNNER_VISITOR_MODEL` for every role except `main` on a visitor-safe model.
 
 A role's thinking level is its role file's `thinking` key, else `RUNNER_THINKING` (one of Pi's
-levels), else none (`"off"`). `run.ts` passes it as the role's `thinkingLevel`, which `start-thread.ts` sets
+levels), else none (`"off"`). With `RUNNER_MODEL` set (every role forced onto one model, a plumbing
+check), the role files' levels are ignored and `RUNNER_THINKING` alone applies (`config.modelForced`). `run.ts` passes it as the role's `thinkingLevel`, which `start-thread.ts` sets
 as the Pi agent's `initialState.thinkingLevel`, so Pi sends it as `reasoning` and records it on each
 History message. Pi clamps an unsupported level silently, so two checks refuse one: `main.ts` at boot
-checks `RUNNER_THINKING` against every alias and the fallback; `run.ts` at run start checks each
-role's set level against its model and the fallback (the role files load per run); both use `thinking.ts`, and a level nobody set is not checked. `"off"` sends
+checks `RUNNER_THINKING` against every alias; `run.ts` at run start checks each
+role's set level against its model (the role files load per run); both use `thinking.ts`, and a level nobody set is not checked. `"off"` sends
 no level: for DeepSeek that means `thinking: disabled`. Visitor runs always use `"off"`. The level is
 not in the log, so a resumed thread takes it from the snapshotted role file and the current config.
 
@@ -341,7 +354,33 @@ run loop then resumes each thread still in charge, if its latest `thread.started
 check only when the task is `under-review` and it is the current check, the latest main. It
 resumes with the message of `cutOffText`, naming the tool the log shows with no result, or the
 no-tool form, and a tool the cut-off interrupted is answered from the log (`tools/effects.ts`).
-A cut-off resume counts as no delivery and no redo. A thread that ended `cancelled` is never
+A cut-off resume counts as no delivery and no redo.
+
+A researcher's message reopens a finished run (`run.reopened`, `packages/contracts/src/messages.ts`)
+and the next claim resumes the main agent with it, as a notice: nothing is cut off, so there is no
+cut-off text. That claim's `claim.started` carries `reopened: true` instead of `after`. A thread
+whose stored history cannot be resumed (a run made before `reply` existed, a changed prompt or tool
+list) or whose recorded model this runner no longer allows is refused as stale and started again
+(`main.<n>`); `threadModel` hands such a thread the role's model rather than failing the run. The
+report carries the highest event `seq` the claim read (`lastSeq`, 0 if it read nothing) and the claim's
+`claim.started` records the same as `readSeq`; the API reopens the run when a `person.message` came
+after it, and a message stored mid-claim is never counted as delivered or answered by that claim's
+events. A correction whose main agent stops moving fails the claim (the server records
+`correction.ended`) instead of skipping tasks. `/outputs` is one R2 prefix shared by every claim, so
+`superviseRun` first calls `keepOutputs` (`packages/harness/src/outputs-backup.ts`, before any thread or
+sandbox): the first claim of a correction whose span holds a go (only a go can lead to a write: main
+has no `bash` and its work tools wait for a go; a message-only correction gets no backup, unless
+the main role holds `bash`, which then backs up every span) copies the whole prefix to
+`runs/<id>/corrections/<reopen id>/` (server-side `CopyObject`, `r2-outputs.ts`; a worker writes
+files before it reports anything, so claim start is the earliest point that precedes every
+writer) and records `outputs.backed-up`; the first claim after `correction.ended` clears
+`/outputs`, copies the backup back, checks that `/outputs` matches it (key and ETag per key, both
+sides `CopyObject` copies) and records `outputs.restored`. A restore needs `terminateOtherClaims`
+to have succeeded: a stale sandbox could write over the restored files, so otherwise the claim
+fails. A failed check throws too, and the next claim repeats the restore. The first claim of the
+next `run.reopened` after a correction finished (no `correction.ended` before it) deletes its
+backup and records `outputs.discarded`. `correctionSpans` (`@voluma/contracts/fold`) is the one
+reader of where a span starts and how it closed (abandoned, finished or open). A thread that ended `cancelled` is never
 resumed. A tool whose `tool.call` event was
 still queued when the runner died isn't named (the log lacks it), so a runner killed within
 milliseconds of a call gets the no-tool form.

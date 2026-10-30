@@ -5,43 +5,80 @@
  *   POST /api/review/runs/:runId/messages   body `sendRunMessageRequestSchema` → 200 `sendRunMessageResponseSchema`
  *
  * One message, one claim. A run that ended `completed` is reopened by the message for ONE claim:
- * in one transaction, under the queue lock (taken first, as `cancel` does, then the event lock),
- * the route appends `run.reopened`, then `person.message`, resets `lastClaimEnd` and
- * `stalledClaims` (so `previousClaim` never reports a reason from before the reopen), and moves
- * the run to `queued` through admission. The next `claim.started` carries `reopened: true`
- * (its own flag; not a claim-end reason). The main agent is resumed with the message (a new
+ * in one transaction, under the queue lock (taken first, then the event lock, then row locks:
+ * the order every transaction that changes a run takes, `corrections.ts`), the route appends
+ * `run.reopened`, then `person.message`, resets `lastClaimEnd` and `stalledClaims` (so
+ * `previousClaim` never reports a reason from before the reopen), and moves the run to
+ * `queued` through admission. The main agent is resumed with the message (a new
  * `main.<n>` thread when its stored history cannot resume: a run from before corrections, a
  * changed system prompt or tool list, or a recorded model the runner no longer allows; it never
  * fails the run for that), answers with `reply` (a `reply` event) and calls `finish_run`. On a
  * go it does the new attempt first, then `finish_run`. There is no waiting state.
  *
+ * A reopen claim. The claim response carries no flag; the runner knows its claim follows a reopen
+ * when a `run.reopened` is stored after the latest `claim.started` (the harness's thread log
+ * folds that), and then writes `claim.started {resumed: true, reopened: true}` (`events.ts`; a
+ * resumed claim has exactly one of `after` and `reopened`).
+ *
  * A message to a run that is `queued` or `running` (a reopened run, mid-claim) only appends the
- * `person.message`. The runner reads the log once per claim and cannot see it, so its end or
- * release report carries `lastSeq` (`runner.ts`): `report()`, under the queue lock, sends the run
- * back to `queued` instead of recording the report when a `person.message` has a higher `seq`.
+ * `person.message`. The runner reads the log once per claim and cannot see it, so its `ended`
+ * report carries `lastSeq` (`runner.ts`): `report()`, under the queue lock, finds a
+ * `person.message` with a higher `seq` (than the larger of `lastSeq` and the claim's start seq,
+ * so a claim that failed before it read does not count the message that reopened the run), does
+ * not record a completed report as the run's end, and reopens the run exactly as the route does
+ * (one function, `reopen`: `run.reopened` with an id keyed to that first unseen message, the
+ * run to `queued`, the spend base reset; no admission). A failed report is recorded first
+ * (`correction.ended`, the run `completed`), then the run is reopened. A `released` report is recovered as always and the note waits for the next claim.
  * The note is answered by the next claim; the panel says a note sent mid-fix waits.
  *
  * `run.reopened` (server-authored, thread `<runId>.person`, id `<runId>.person:<id>:reopened`,
- * payload `runReopenedSchema`) is written only when a message moves an ended run to `queued`. The
- * harness's thread log clears the root thread's ended flag on it (that flag otherwise ends the loop
- * and refuses every main tool), and the go gate reads "a `person.message` with `go` after the
- * latest `run.reopened`". `person.message` is on the same thread, id `<runId>.person:<id>`.
+ * payload `runReopenedSchema`) is written by exactly these two paths: the route moving an ended
+ * run to `queued`, and `report()`'s requeue. The harness's thread log clears the root thread's
+ * ended flag on it (that flag otherwise ends the loop and refuses every main tool). On a requeue
+ * it is stored AFTER the unseen message(s), and the harness does not take a message above its
+ * claim's `claim.started.readSeq` as delivered or answered by that claim's events, though they
+ * come later in the log. `person.message` is on the
+ * same thread, id `<runId>.person:<id>`.
  *
- * Go. `go` requires `taskId`. Code refuses `message`, `start_worker`, `change_plan` and
- * `stop_worker` until such a go exists; every go writes `revision.started {reason: "correction",
- * taskId}` (the harness implements; so the review and the correction span have a boundary even
- * when nothing depends on the task). The main agent reads the chat as `person.message`s and writes
+ * Go. `go` requires `taskId`. When the loop's log shows a `go` the main agent has not been told
+ * of, it writes `revision.started {reason: "correction", taskId}` (id `<runId>.person:<id>:go:<the latest run.reopened's id>`)
+ * and then tells main; that marker, not the message, opens the gate. Code refuses `message`,
+ * `start_worker`, `change_plan` and `stop_worker` until a marker exists since the latest
+ * `run.reopened`. A go that arrived before a requeue's `run.reopened`, or whose marker an earlier
+ * reopen wrote before its claim failed, is still undelivered, so the next claim writes a marker
+ * keyed to its own reopen and opens the gate then. A go the main agent had already been told of
+ * when its claim failed counts as delivered and is not marked again; the researcher sees the
+ * failed correction and says go again. The route refuses a second go (409) while one since the
+ * latest `run.reopened` (or the message that reopen is keyed to, when that is earlier) has no
+ * attempt of its task yet. The marker also gives review and the
+ * correction span a boundary when nothing depends on the task, and resets the task's fix rounds.
+ * The main agent reads the chat as `person.message`s and writes
  * `reply` events; the panel reads `conversation(events)` (`conversation.ts`) from the run stream
  * (`GET /api/run/runs/:id/stream`, the frames the run page folds), which closes when the run
  * ends, so the panel reconnects after it posts.
  *
  * A correction never ends a run worse than `completed`. The run row stays `completed` with its
- * earlier results whatever a correction claim does. A failure or cancel of a correction claim
- * (a thread failure, the no-progress limit, a user cancel, a lease that cannot be recovered) is
+ * earlier results whatever a correction claim does, except that review is unavailable meanwhile:
+ * while a reopened run is `queued` or `running`, `runSchema` carries no `review` (it is present
+ * only on an `ended`/`completed` run) and accept and mark-reviewed answer 409. The panel and Home
+ * show that the run is being corrected; review returns when the claim ends. A failure or cancel of a correction claim
+ * (a thread failure, the main agent stopping moving, the no-progress limit, a user cancel, a
+ * lease that cannot be recovered, a claim that cannot load the run's workflow) is
  * written as `correction.ended` (server-authored, thread `<runId>.person`, id
- * `<runId>.person:<id>:ended` with the reopening message's id, payload `correctionEndedSchema`)
+ * `<runId>.person:<id>:ended`, keyed to the latest `run.reopened`'s id, payload `correctionEndedSchema`)
  * and the run ends `completed` again. The run page shows the span from `run.reopened` to the next
- * root `thread.ended` or `correction.ended`.
+ * root `thread.ended` or `correction.ended`. The task-state events of that span (attempts, task,
+ * checkpoints, outputs, plan changes, revisions) are abandoned (`abandonedEvents`, fold.ts): the
+ * fold, review, the run page and the harness's own scans skip them, so a failed redo leaves
+ * no half-redone task. The files the correction wrote to `/outputs` are put back too: the first
+ * claim of a correction whose span holds a go (or any, when the main role holds `bash`) copies the
+ * whole outputs prefix to a backup keyed to its reopen (`outputs.backed-up`, before any thread
+ * runs; only a go can lead to a write while main holds no `bash`, so a message-only correction
+ * makes none), and the first claim after `correction.ended` restores it exactly and checks
+ * `/outputs` matches it (`outputs.restored`, `outputs-backup.ts` in the harness), so the next
+ * correction starts from the pre-go state, files included. The first claim of the next
+ * `run.reopened` deletes the backup of a correction that finished (`outputs.discarded`).
+ * `correctionSpans` (fold.ts) is the one reader of these spans. Messages, replies, thread events, `run.reopened` and `correction.ended` stay.
  *
  * Who may send: only the run's `startedBy` (403 otherwise; it also settles whose go counts).
  * Cookie auth and Origin rules are `run.ts`'s. Only this route's body limit is raised, to
@@ -49,8 +86,8 @@
  * server checks the decoded size and the PNG signature, not only the string. The server writes it
  * to `runs/<runId>/scratch/person/<id>.png` (the sandbox's `/scratch/person/<id>.png`, which the
  * main agent's and a worker's `view_image` can open) and puts that key in `snapshotKey`.
- * Marks name a review block id; the API resolves it to the output's `/outputs` file path in the
- * text the main agent gets.
+ * Marks name a review block id; the harness resolves it to the output's sandbox file path
+ * (`/outputs/...`, or `/scratch/...` for a scratch file) in the text the main agent gets.
  *
  * Idempotent: the caller keeps `id` across retries. A retry with the same `id` stores nothing new
  * and answers 200 with the original event id and the run's current state. The server stamps
@@ -61,20 +98,18 @@
  * are not kept, so a reopened run could not be resumed); 409: the run has not ended, or did not
  * end `completed` (a failed or cancelled run's threads were ended or cut: it is rerun, not
  * reopened), has no plan yet, or `taskId` names a skipped task (a skipped task cannot be
- * corrected); admission's refusal (`run.ts` Limits: the org's limits apply to a reopen as to a
+ * corrected), or the run was made on an older version of its workflow than the study's current
+ * one (the pinned paths differ: the runner could not load its files, so it is rerun); admission's refusal (`run.ts` Limits: the org's limits apply to a reopen as to a
  * start); 413: over the body or snapshot limit; 415: the snapshot is not a PNG; 503: no file
  * storage for the snapshot. A message to a `queued` or `running` reopened run is not refused.
  *
- * Spend. A correction's spend accrues on the same run and counts toward the org's day by claim
- * time (the claim that spends it, not the run's first claim), and each correction has its own cost
- * cap, a runner setting; the API implements both.
+ * Spend. A correction's spend accrues on the same run and is recorded and shown; there is no cap.
  *
  * Stored data. All of this is additive: no stored event or run row changes shape.
  */
 import { z } from "zod";
 import { userIdSchema } from "./auth";
 import { taskIdSchema } from "./ids";
-import { sha256Schema } from "./r2";
 import { voxelBoxSchema, voxelIndexSchema } from "./review";
 import { runStateSchema } from "./run";
 
@@ -102,42 +137,62 @@ export const markSchema = z
   });
 export type Mark = z.infer<typeof markSchema>;
 
-/** Where the server keeps a message's snapshot PNG: `scratch/person/` is readable by the main agent and workers. */
-export const messageSnapshotKey = (runId: string, messageId: string) =>
-  `runs/${runId}/scratch/person/${messageId}.png`;
+/** The fields a person writes, shared by the request and the stored payload. */
+const messageBase = {
+  text: z.string().max(MAX_TEXT).optional(),
+  marks: z.array(markSchema).max(MAX_MARKS).optional(),
+  taskId: taskIdSchema.optional(),
+  go: z.literal(true).optional(),
+};
+
+type MessageRules = { text?: string; marks?: unknown[]; taskId?: string; go?: true };
+
+/** `text` unless `go`; `taskId` with `go` or with marks. */
+function messageRules<T extends z.ZodType<MessageRules>>(schema: T) {
+  return schema
+    .refine((m) => m.go === true || (m.text !== undefined && m.text.trim() !== ""), {
+      path: ["text"],
+      message: "text is required unless go",
+    })
+    .refine((m) => m.go !== true || m.taskId !== undefined, {
+      path: ["taskId"],
+      message: "go needs taskId",
+    })
+    .refine((m) => (m.marks ?? []).length === 0 || m.taskId !== undefined, {
+      path: ["taskId"],
+      message: "marks need taskId: a mark names a block of that task's revision",
+    });
+}
 
 /**
  * The payload of a `person.message` event (`events.ts`). `text` is required unless `go`: the Go
- * button may send nothing else. `taskId` is the task the panel was showing; required with `go`, which
- * tells the main agent it may now act on that task (code enforces it).
+ * button may send nothing else. `taskId` is the task the panel was showing; required with `go`
+ * (it tells the main agent it may now act on that task; code enforces it) and with marks.
  */
-export const personMessageSchema = z
-  .object({
-    text: z.string().max(MAX_TEXT).optional(),
-    marks: z.array(markSchema).max(MAX_MARKS).optional(),
-    /** `messageSnapshotKey(runId, messageId)`, written by the route. */
+export const personMessageSchema = messageRules(
+  z.object({
+    ...messageBase,
+    /** `messageSnapshotKey(runId, messageId)` (`r2.ts`), written by the route. */
     snapshotKey: z
       .string()
       .regex(/^runs\/[^/]+\/scratch\/person\/[^/]+\.png$/)
       .optional(),
-    taskId: taskIdSchema.optional(),
-    go: z.literal(true).optional(),
-  })
-  .refine((m) => m.go === true || (m.text !== undefined && m.text.trim() !== ""), {
-    path: ["text"],
-    message: "text is required unless go",
-  })
-  .refine((m) => m.go !== true || m.taskId !== undefined, {
-    path: ["taskId"],
-    message: "go needs taskId",
-  });
+  }),
+);
 export type PersonMessage = z.infer<typeof personMessageSchema>;
 
-/** The payload of `run.reopened`: who reopened the run (the message's sender, the run's `startedBy`). */
+/**
+ * The payload of `run.reopened`: who reopened the run (the message's sender, the run's `startedBy`).
+ * Its id is `<runId>.person:<messageId>:reopened`, keyed to the message that caused it: the one
+ * the route stored, or on a requeue the first `person.message` the ended claim had not seen.
+ */
 export const runReopenedSchema = z.object({ by: userIdSchema });
 export type RunReopened = z.infer<typeof runReopenedSchema>;
 
-/** The payload of `correction.ended`: a correction claim failed or was cancelled; the run stays `completed`. */
+/**
+ * The payload of `correction.ended`: a correction claim failed or was cancelled; the run stays
+ * `completed`. Its id is the latest `run.reopened`'s id with `:ended` in place of `:reopened`.
+ */
 export const correctionEndedSchema = z.object({
   status: z.enum(["failed", "cancelled"]),
   /** Why it failed, redacted of key values, as `reportRequestSchema`'s `error`. */
@@ -150,14 +205,11 @@ export const replySchema = z.object({ text: z.string().min(1) });
 export type Reply = z.infer<typeof replySchema>;
 
 /** The request body: a `personMessageSchema` with the snapshot as base64 bytes, and the caller's retry id. */
-export const sendRunMessageRequestSchema = z
-  .object({
+export const sendRunMessageRequestSchema = messageRules(
+  z.object({
     /** Kept across retries of the same message. */
     id: z.uuid(),
-    text: z.string().max(MAX_TEXT).optional(),
-    marks: z.array(markSchema).max(MAX_MARKS).optional(),
-    taskId: taskIdSchema.optional(),
-    go: z.literal(true).optional(),
+    ...messageBase,
     /** PNG bytes as plain base64 (not a data URL), at most `MAX_MESSAGE_SNAPSHOT_BYTES` decoded. */
     snapshot: z
       .object({
@@ -165,15 +217,8 @@ export const sendRunMessageRequestSchema = z
         data: z.base64().max(Math.ceil(MAX_MESSAGE_SNAPSHOT_BYTES / 3) * 4),
       })
       .optional(),
-  })
-  .refine((m) => m.go === true || (m.text !== undefined && m.text.trim() !== ""), {
-    path: ["text"],
-    message: "text is required unless go",
-  })
-  .refine((m) => m.go !== true || m.taskId !== undefined, {
-    path: ["taskId"],
-    message: "go needs taskId",
-  });
+  }),
+);
 export type SendRunMessageRequest = z.infer<typeof sendRunMessageRequestSchema>;
 
 export const sendRunMessageResponseSchema = z.object({

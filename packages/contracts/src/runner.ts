@@ -59,15 +59,14 @@
  * counts consecutive claims that end `self-stop` or `lease-expired` without run-state
  * progress (a `task`, `checkpoint`, `output`, `attempt.opened`, `assets.ready` or correcting
  * `revision.started` or `plan.changed` event), and the run ends
- * `failed` at 3, naming the call that was in flight. Progress resets the count. `shutdown`
+ * `failed` at 3, naming the call that was in flight; except a claim of a reopened run, which ends it `completed` and writes `correction.ended` instead (the correction rule in `messages.ts`). Progress resets the count. `shutdown`
  * never counts, so deploys don't fail a long run. A reopen (`messages.ts`) resets the count to 0
  * and clears `lastClaimEnd`, so `previousClaim` never reports a reason from before it.
  *
  * There is no tokenless call: the runner service is the only claimer.
  *
  * Cancel. The runner learns a run is over from the heartbeat: `stop` is true
- * once the server has ended it (cancelled by the user, or `failed` by the
- * dollar ceiling). The runner stops its threads and sandboxes and reports
+ * once the server has ended it (cancelled by the user). The runner stops its threads and sandboxes and reports
  * nothing more; the server has recorded the end already (`run.ts`). A cancel also ends
  * every open thread `cancelled` and the root last, in the same transaction (`cancelEnds` in
  * `threads.ts`): the runner's writes are refused once the run has ended, so the server writes
@@ -75,14 +74,8 @@
  *
  * Usage. The heartbeat carries the usage since the previous acknowledged
  * heartbeat (`usageSchema`): the dollars of model calls and the seconds of
- * sandbox time. The server adds them up per run, and that sum is what the org's
- * dollar ceiling counts. A heartbeat the server did not acknowledge is resent
- * with its usage added to the next one. The runner sends `costCapUsd` (its
- * `RUNNER_MAX_RUN_COST_USD`) with the claim only when that is set, and the claim
- * stores it as the run's spend cap for the provider gateway to check. Unset, the
- * run has no cap. The heartbeat answers with `spentUsd`,
- * the run's settled spend including its provider calls, so the runner's own cap
- * sees spend that did not come through its heartbeats.
+ * sandbox time. The server adds them up per run. A heartbeat the server did not acknowledge is resent
+ * with its usage added to the next one. Spend is recorded, never limited.
  *
  * Reports. The runner ends the run with `ended`, or gives it up with
  * `released` (a shutdown or a self-stop: its `reason`). Either one ends the
@@ -127,11 +120,6 @@ export type ClaimEndReason = z.infer<typeof claimEndReasonSchema>;
 
 export const claimRequestSchema = z.object({
   runnerId: runnerIdSchema,
-  /**
-   * The runner's `RUNNER_MAX_RUN_COST_USD`; the claim stores it as the run's spend cap, which
-   * the provider gateway checks. Absent: no cap (spend is still recorded).
-   */
-  costCapUsd: z.number().positive().optional(),
 });
 export type ClaimRequest = z.infer<typeof claimRequestSchema>;
 
@@ -169,27 +157,23 @@ export type HeartbeatRequest = z.infer<typeof heartbeatRequestSchema>;
 export const heartbeatResponseSchema = z.object({
   /** The server has ended the run; stop it. */
   stop: z.boolean(),
-  /**
-   * The run's known spend in US dollars: heartbeat-reported model cost, plus the cost of each
-   * provider call that has one. A call cut off with no usage (cost unknown) and a call still
-   * open count nothing. The same provider-call sum as `Run.providerCalls`. Optional until the
-   * API sends it.
-   */
-  spentUsd: z.number().nonnegative().optional(),
 });
 export type HeartbeatResponse = z.infer<typeof heartbeatResponseSchema>;
 
 export const reportRequestSchema = z.object({
   /**
-   * The highest event `seq` the runner had read or written when it decided to stop (its log
-   * is read once per claim, so a later `person.message` is one it has not seen). Under the queue
-   * lock `report()` compares it with the run's events: a `person.message` after it sends the
-   * run to `queued` instead of recording the end or the release (`messages.ts`), so a note
-   * sent mid-claim is never lost. For a reopened run that means `completed` stays the outcome
-   * of the earlier work and the new claim answers the note. Optional only until the runner sends it
-   * (the implementation PR); `report()` skips the check when absent.
+   * The highest event `seq` of the log the runner read when the claim started (it reads the log
+   * once per claim, so a later `person.message` is one it has not seen; the runner learns no
+   * seq of what it writes); 0 if it read nothing. `events.seq` is a Postgres integer, hence the
+   * bound. Under the queue lock `report()` compares the larger of this and the claim's start
+   * seq (so a claim that failed before reading does not make the message that reopened the run
+   * look unseen) with the run's events: for an `ended` report, a `person.message` above it means
+   * the report is not recorded as the run's end; a failed claim is first recorded as a failed
+   * correction (`correction.ended`), then the server writes `run.reopened` and sends the run to
+   * `queued` (`messages.ts`), so a note sent mid-claim is never lost and the next claim answers
+   * it. A `released` report is recovered as always and the note waits for the next claim.
    */
-  lastSeq: z.number().int().nonnegative().optional(),
+  lastSeq: z.number().int().min(0).max(2_147_483_647),
   report: z.discriminatedUnion("kind", [
     z.object({
       kind: z.literal("ended"),

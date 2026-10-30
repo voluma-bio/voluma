@@ -222,6 +222,7 @@ export function world(o: WorldOptions) {
   let cut = false;
   let cancelled = false;
   let frozen = false;
+  let whileClaimed: ((e: RunEvent) => void) | undefined;
   let n = 0;
   const callId = () => `c${++n}`;
 
@@ -268,6 +269,7 @@ export function world(o: WorldOptions) {
       "answer",
       "accept",
       "change_plan",
+      "reply",
       "finish_run",
       ...(o.mainTools ?? []),
     ]),
@@ -284,6 +286,7 @@ export function world(o: WorldOptions) {
       const event = { ...e, seq: stored.length + 1 } as unknown as RunEvent;
       stored.push(event);
       o.onStored?.(event);
+      whileClaimed?.(event);
       if (!cut && o.cutAfter?.(event)) {
         cut = true;
         frozen = true;
@@ -295,11 +298,43 @@ export function world(o: WorldOptions) {
         for (const ended of cancelEnds(RUN, stored, new Date())) {
           stored.push({ ...ended, seq: stored.length + 1 } as unknown as RunEvent);
         }
+        // A cancel inside a correction also records how it ended (`correction.ended`).
+        const reopened = stored.filter((s) => s.type === "run.reopened").at(-1);
+        if (reopened) {
+          stored.push({
+            id: reopened.id.replace(/:reopened$/, ":ended"),
+            runId: RUN,
+            threadId: reopened.threadId,
+            seq: stored.length + 1,
+            type: "correction.ended",
+            payload: { status: "cancelled" },
+            createdAt: new Date().toISOString(),
+          } as unknown as RunEvent);
+        }
       }
     },
   };
 
-  async function claim(): Promise<Folded> {
+  type Message = { text?: string; go?: true; taskId?: string; marks?: unknown[] };
+
+  /** The API's writes for a message `id`: `run.reopened` (unless `reopen` is false), then the message when there is one. */
+  function serverEvents(id: string, message: Message | undefined, reopen = true) {
+    const person = `${RUN}.person`;
+    const add = (type: string, eid: string, payload: unknown) =>
+      stored.push({
+        id: eid,
+        runId: RUN,
+        threadId: person,
+        seq: stored.length + 1,
+        type,
+        payload,
+        createdAt: new Date().toISOString(),
+      } as unknown as RunEvent);
+    if (reopen) add("run.reopened", `${person}:${id}:reopened`, { by: "u1" });
+    if (message) add("person.message", `${person}:${id}`, message);
+  }
+
+  async function claim(reopened = false): Promise<Folded> {
     const rec = recorder(store as never, RUN, () => {}, 10, [...stored]);
     return superviseRun({
       runId: RUN,
@@ -338,6 +373,12 @@ export function world(o: WorldOptions) {
         },
         write: async () => {},
       },
+      earlierClaimsEnded: true,
+      outputs: {
+        backup: async () => {},
+        restore: async () => {},
+        discard: async () => {},
+      },
       roles,
       briefs: {
         main: () => "Run the plan.",
@@ -347,7 +388,8 @@ export function world(o: WorldOptions) {
       },
       config: o.config,
       providerError: o.providerError,
-      ...(stored.length > 0 && { previousClaim: "shutdown" as const }),
+      // A reopen clears the claim-end reason (`messages.ts`).
+      ...(stored.length > 0 && !reopened && { previousClaim: "shutdown" as const }),
       signal: abort.signal,
     });
   }
@@ -365,6 +407,39 @@ export function world(o: WorldOptions) {
         abort = new AbortController();
         frozen = false;
         folded = await claim();
+      }
+      return folded;
+    },
+    /**
+     * What the API does when the researcher writes to the finished run (`messages.ts`): stores
+     * `run.reopened` and `person.message` (server events, thread `<run>.person`), then the run is
+     * claimed once more. Returns the fold of the last claim. With `during`, a second message
+     * lands while that claim runs, right after the store accepts the event `after` matches, so it
+     * sits between the claim's own events and above what the claim read. The claim's end is then
+     * not recorded: `report()` writes `run.reopened` after the message and the run is claimed again.
+     */
+    async send(
+      message: Message,
+      id = `m${++n}`,
+      during?: { message: Message; after: (e: RunEvent) => boolean },
+    ): Promise<Folded> {
+      cut = frozen = false; // a cancelled correction does not stop the next one
+      serverEvents(id, message);
+      let landed: string | undefined;
+      if (during) {
+        whileClaimed = (e) => {
+          if (landed || !during.after(e)) return;
+          landed = `m${++n}`;
+          serverEvents(landed, during.message, false);
+        };
+      }
+      abort = new AbortController();
+      let folded = await claim(true);
+      whileClaimed = undefined;
+      if (landed) {
+        serverEvents(landed, undefined);
+        abort = new AbortController();
+        folded = await claim(true);
       }
       return folded;
     },

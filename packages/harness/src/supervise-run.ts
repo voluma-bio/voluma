@@ -9,14 +9,17 @@ import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { RecordedPin } from "@voluma/contracts/workflow";
 import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
 import type { RunLayout } from "./layout";
+import { keepOutputs } from "./outputs-backup";
 import type { Evidence } from "./ports/evidence";
 import type { Files } from "./ports/files";
 import type { History } from "./ports/history";
+import type { Outputs } from "./ports/outputs";
 import type { Sandbox } from "./ports/sandbox";
 import type { Recorder } from "./recorder";
 import { type Briefs, type LoopConfig, type RoleOf, runLoop } from "./run-loop";
 import { type PlanTask, taskRuntime } from "./task-runtime";
 import { supervisorThreadId } from "./thread-id";
+import { threadLog } from "./thread-log";
 import { threads } from "./threads";
 import { buildTools } from "./tools/registry";
 
@@ -43,6 +46,10 @@ export interface SuperviseRunOptions {
   evidence: Evidence;
   /** The run's bucket, read and written host-side by `view_image` and `read_file`. */
   files: Files;
+  /** The run's `/outputs` as a whole: backed up when a correction starts, put back when one ends unfinished (`outputs-backup.ts`). */
+  outputs: Outputs;
+  /** An earlier claim's sandboxes are confirmed gone; a restore of `/outputs` waits for it (`outputs-backup.ts`). */
+  earlierClaimsEnded: boolean;
   roles: { main: RoleOf; worker: RoleOf; check: RoleOf };
   briefs: Briefs;
   config?: Partial<LoopConfig>;
@@ -59,15 +66,31 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
   // A stored log means an earlier claim ran. `previousClaim` says why it ended; a run claimed
   // before the API recorded reasons has none, and its resume says only "restarted".
   const resumed = recorder.events().length > 0;
+  const readSeq = recorder.events().at(-1)?.seq ?? 0;
   // Not a derived id: each invocation of the root is a thread start of its own.
   recorder.emit(rootThreadId, "thread.started", {
     parentThreadId: null,
     kind: "supervisor",
     workflows: options.workflows,
   });
+  // A reopen clears the claim-end reason (`messages.ts`); a claim cut off before it wrote its
+  // `claim.started` has one again, and says that instead.
+  const reopened = threadLog(recorder.events()).reopenPending && !options.previousClaim;
   recorder.emit(rootThreadId, "claim.started", {
     resumed,
+    readSeq,
     ...(options.previousClaim && { after: options.previousClaim }),
+    ...(reopened && { reopened }),
+  });
+  // Before any thread or sandbox: nothing may write or read `/outputs` while it is put back.
+  await keepOutputs({
+    runId,
+    rootThreadId,
+    recorder,
+    outputs: options.outputs,
+    mainWorks: options.layout.mainWorks,
+    earlierClaimsEnded: options.earlierClaimsEnded,
+    signal,
   });
   const pool = threads(
     {

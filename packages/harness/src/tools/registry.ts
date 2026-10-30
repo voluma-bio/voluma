@@ -42,6 +42,7 @@ export const TOOL_NAMES = [
   "answer",
   "accept",
   "change_plan",
+  "reply",
   "finish_run",
 ] as const;
 

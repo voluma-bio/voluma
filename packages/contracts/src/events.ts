@@ -32,7 +32,9 @@
  * `person.message`, `run.reopened` and `correction.ended` are server-authored correction events
  * on thread `<runId>.person`, handled the same way (payloads, ids and rules in messages.ts).
  * `reply` is the main agent's side of the chat: the runner writes it from the `reply` tool on the
- * main thread. The fold ignores all four; `conversation` (conversation.ts) reads the chat.
+ * main thread. The fold ignores all four; it reads `run.reopened` and `correction.ended` only to
+ * skip the task-state events of a correction that ended unfinished (`abandonedEvents`, fold.ts).
+ * `conversation` (conversation.ts) reads the chat (nothing calls it yet).
  */
 import { z } from "zod";
 import {
@@ -216,7 +218,8 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
    * `thread.started` and before anything else the claim writes. `resumed` is false on the run's
    * first claim. On a resume, threads whose latest `thread.started` has no `thread.ended`
    * were cut off by infrastructure; the run page shows that as "Voluma restarted the run".
-   * `after` is why the previous claim ended, present exactly when `resumed`.
+   * `after` is why the previous claim ended; `reopened` says a person's message reopened the run
+   * instead (the reopen clears the claim-end reason). A resumed claim has exactly one of them.
    */
   const claimStarted = event(
     "claim.started",
@@ -226,19 +229,31 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         after: claimEndReasonSchema.optional(),
         /** This claim exists because a person's message reopened the run (`messages.ts`); not a claim-end reason. */
         reopened: z.literal(true).optional(),
+        /**
+         * The highest event `seq` of the log this claim read (the runner reads it once, at the
+         * start). A server-written event above it, a `person.message` stored mid-claim, was not
+         * seen by anything this claim did: the harness's thread log counts none of its deliveries
+         * or replies as covering or answering it. Absent on a log from before it was recorded.
+         */
+        readSeq: z.number().int().nonnegative().optional(),
       })
-      .refine((p) => p.resumed === (p.after !== undefined), {
+      .refine((p) => p.resumed === (p.after !== undefined || p.reopened === true), {
         path: ["after"],
-        message: "after goes with a resumed claim and no other",
+        message: "a resumed claim says why: after a claim end, or after a reopen",
+      })
+      .refine((p) => !(p.after !== undefined && p.reopened === true), {
+        path: ["reopened"],
+        message: "a claim follows a claim end or a reopen, not both",
       }),
   );
 
   /**
    * Every `thread.ended` is deliberate. A runtime abort (shutdown, self-stop, lost lease)
-   * writes none, so `cancelled` always means a stop someone chose (and is final; a `completed`
-   * end is resumable: a person message reopens a finished run with `run.reopened`, and the
-   * harness's thread log then clears the root's ended flag): `stop_worker`, the run
-   * loop's own stops, or a user's cancel of the run (which the server writes, `threads.ts`).
+   * writes none, so `cancelled` always means a stop someone chose: `stop_worker`, the run
+   * loop's own stops, or a user's cancel of the run (which the server writes, `threads.ts`). A
+   * stopped thread is not resumed (a correction's message to a stopped main agent starts a new
+   * `main.<n>`); a `completed` end is resumable: a person message reopens a finished run with
+   * `run.reopened`, and the harness's thread log then clears the root's ended flag.
    */
   const threadEnded = event(
     "thread.ended",
@@ -476,7 +491,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
 
   /**
    * The main agent's answer to the researcher, from its `reply` tool (`replyInputSchema`);
-   * id `<thread>:<toolCallId>:reply`. `fold` ignores it.
+   * id `<thread>:<toolCallId>:reply`; only on a main thread (`onMainThread`). `fold` ignores it.
    */
   const reply = event("reply", replySchema);
 
@@ -503,6 +518,18 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     z.object({ sourceSha256: sha256Schema, error: z.string().min(1).max(ASSET_ERROR_MAX) }),
   );
 
+  /**
+   * The runner's copy of `/outputs` taken at the start of the first claim of a correction that
+   * holds a researcher's go (`run.reopened` `reopenId`), before any thread runs; the put-back of
+   * that copy at the first claim after the correction ended unfinished (`correction.ended`); and
+   * the deletion of it at the first claim after the correction finished (a completed root end
+   * with no `correction.ended`). Each is written once per reopen, after the work is done, on the
+   * root thread. See `outputs-backup.ts` in the harness.
+   */
+  const outputsBackedUp = event("outputs.backed-up", z.object({ reopenId: nonEmpty }));
+  const outputsRestored = event("outputs.restored", z.object({ reopenId: nonEmpty }));
+  const outputsDiscarded = event("outputs.discarded", z.object({ reopenId: nonEmpty }));
+
   return z.discriminatedUnion("type", [
     claimStarted,
     threadStarted,
@@ -522,11 +549,23 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     reply,
     assetsReady,
     assetsFailed,
+    outputsBackedUp,
+    outputsRestored,
+    outputsDiscarded,
   ]);
 };
 
+const onMainThread = (e: { type: string; runId: string; threadId: string }) =>
+  e.type !== "reply" ||
+  e.threadId === `${e.runId}.main` ||
+  e.threadId.startsWith(`${e.runId}.main.`);
+const mainThreadOnly = {
+  path: ["threadId"],
+  message: "a reply belongs to a main thread (<runId>.main or <runId>.main.<n>)",
+};
+
 /** What a runner appends: an event without `seq`, never a human review decision. */
-export const eventInputSchema = eventUnion({});
+export const eventInputSchema = eventUnion({}).refine(onMainThread, mainThreadOnly);
 export type EventInput = z.infer<typeof eventInputSchema>;
 
 const stored = { seq: z.number().int().nonnegative() };
@@ -577,7 +616,8 @@ export const runEventSchema = z
       (e.type !== "person.message" && e.type !== "run.reopened" && e.type !== "correction.ended") ||
       e.threadId === `${e.runId}.person`,
     { path: ["threadId"], message: "correction events belong to <runId>.person" },
-  );
+  )
+  .refine(onMainThread, mainThreadOnly);
 export type RunEvent = z.infer<typeof runEventSchema>;
 export type EventType = RunEvent["type"];
 

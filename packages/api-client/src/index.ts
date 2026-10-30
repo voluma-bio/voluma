@@ -337,6 +337,13 @@ export async function sendRunMessage(
 }
 
 /**
+ * Where the browser reads the view snapshot of a message (`person.message`'s `snapshotKey`,
+ * by the message's id: the `id` the panel sent). A PNG; 404: unreadable run or no such snapshot.
+ */
+export const runMessageSnapshotUrl = (runId: string, messageId: string) =>
+  `/api/review/runs/${encodeURIComponent(runId)}/messages/${encodeURIComponent(messageId)}/snapshot`;
+
+/**
  * Where the browser reads one of a run's files: evidence, a data file, a volume or a mesh,
  * by the `sha256` its `Asset` (or `npy` volume, or mesh) carries. JPEG and PNG come back as
  * images; anything else is an attachment. 404: unreadable run or no such file; 503: no file

@@ -70,7 +70,7 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   `startRuns` reads the counts once and raises them for each run it inserts. Every browser
   write (start, create, cancel, resume) goes through `attempt`: a `Refused` rolls it back and
   comes back as `{refused}`, and the visitor keys it held are dropped. `runs` has no workflow
-  column: `pgRunQueue` gets `pinsOf` and resolves the pins from the study. The seeded example has
+  column: `pgRunQueue` gets `workflowOf` and resolves the pins and outputs from the study. The seeded example has
   its own study (`study-<exampleId>`, `example`), read-only like its run; `import:run` gives
   an imported run a study of one the same way.
 - **Every transition holds one lock** (`QUEUE_LOCK`, a transaction advisory lock), so
@@ -81,6 +81,26 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   `lease-expired` when the claim's sweep finds the lease gone). `recover` in `pg-queue.ts` stores it
   for the next claim's `previousClaim` and applies the no-progress limit (`claim-progress.ts`:
   the counting rule and the progress events). There is no other restart counter.
+- **A researcher's message reopens a finished run** (`messages.ts` in contracts is the rulebook;
+  `queue.checkMessage`/`sendMessage` in `pg-queue.ts` call `corrections.ts`, which holds the
+  rules; Review's `POST /runs/:id/messages` calls them through the `RunMessages` port after it
+  checks and stores the snapshot PNG). `decideMessage` judges in the contract's order, under the
+  queue lock for `sendMessage`. **Lock order, everywhere: the queue lock, then the run's event lock
+  (`eventLock`), then row locks** (a runner's append takes the event lock before it shares the run
+  row, so a transaction holding the row and then asking for the event lock deadlocks with it:
+  `recover`, `heartbeat`, `report` and `decideMessage` take the event lock first, through the one
+  `eventLock` in `pg-event-log.ts`; `decide` (review decisions) checks the run has ended before
+  taking it, so an accept on a running run never holds it while loading the log). The route
+  refuses a second `go` (409) while one since the latest `run.reopened` has no attempt of its task
+  yet; plain messages go through. One `reopen`
+  serves the route and `report()`'s requeue: it writes `run.reopened`, clears `lastClaimEnd`,
+  `stalledClaims` and the lease. A run is in a correction while the latest span of
+  `correctionSpans` is open (`openCorrection`: no `correction.ended` since the latest
+  `run.reopened`), so its claims are corrections. A correction never ends a run worse than `completed`: every way the queue would
+  fail or cancel a run (`endUnfinished`: the runner's failed end, the no-progress limit, a refused
+  claim or heartbeat, a user's cancel) ends it `completed` with `correction.ended` and its open
+  threads cancelled. `report()` compares the larger of the runner's `lastSeq` and the claim's start seq with the log
+  and reopens a run whose claim missed a `person.message` (a failed claim is ended first).
 - **Visitor keys live only in `key-vault.ts`**, in memory, and only `pg-queue.ts` touches it,
   under the lock. Never store, log or return them, and log no body on a route that takes
   them. A transition holds the keys before the write that makes the run claimable commits;

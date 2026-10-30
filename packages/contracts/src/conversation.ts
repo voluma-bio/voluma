@@ -1,8 +1,8 @@
 /**
  * The chat between a researcher and a run's main agent (`messages.ts`), read from the run's
- * events: the panel and the API both call `conversation` on what the run stream delivered
- * (`GET /api/run/runs/:id/stream`, the frames the run page already folds; `stream.ts`), so
- * they cannot disagree about what was said.
+ * events: the panel calls `conversation` on what the run stream delivered (`GET
+ * /api/run/runs/:id/stream`, the frames the run page already folds; `stream.ts`). The panel is
+ * not built yet, so nothing calls it.
  */
 import type { RunEvent } from "./events";
 import type { Mark } from "./messages";
@@ -12,12 +12,14 @@ export type ConversationItem =
       from: "person";
       /** The `person.message` event id. */
       id: string;
+      /** The id the panel sent with the message (`sendRunMessageRequestSchema.id`), the key of `runMessageSnapshotUrl`. */
+      messageId: string;
       seq: number;
       at: string;
       text: string;
       marks: Mark[];
-      /** The snapshot's R2 key (`messageSnapshotKey`). */
-      snapshotKey?: string;
+      /** The message has a view snapshot: `GET /api/review/runs/:runId/messages/:messageId/snapshot`. */
+      hasSnapshot: boolean;
       taskId?: string;
       go: boolean;
     }
@@ -36,14 +38,16 @@ export function conversation(events: readonly RunEvent[]): ConversationItem[] {
   for (const e of events) {
     if (e.type === "person.message") {
       const { text, marks, snapshotKey, taskId, go } = e.payload;
+      const messageId = e.id.slice(e.id.indexOf(".person:") + ".person:".length);
       items.push({
         from: "person",
         id: e.id,
+        messageId,
         seq: e.seq,
         at: e.createdAt,
         text: text ?? "",
         marks: marks ?? [],
-        ...(snapshotKey && { snapshotKey }),
+        hasSnapshot: snapshotKey !== undefined,
         ...(taskId && { taskId }),
         go: go === true,
       });

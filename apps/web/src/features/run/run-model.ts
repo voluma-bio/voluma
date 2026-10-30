@@ -7,6 +7,7 @@
  */
 import type { RunEvent } from "@voluma/contracts/events";
 import type { FoldedTask } from "@voluma/contracts/fold";
+import { abandonedEvents } from "@voluma/contracts/fold";
 import type { Asset } from "@voluma/contracts/review";
 import { progress, reviewState } from "@voluma/contracts/review-state";
 import type { ProviderCalls, RunState } from "@voluma/contracts/run";
@@ -118,7 +119,8 @@ function threadsOf(events: RunEvent[]): { threads: Thread[]; lastAt: Map<string,
         break;
       case "tool.result":
         if (t) {
-          if (e.payload.isError) t.toolErrors++;
+          // A failure of Voluma's infrastructure isn't the agent's failed call.
+          if (e.payload.isError && !e.payload.infrastructure) t.toolErrors++;
           running.get(e.threadId)?.delete(e.payload.toolCallId);
         }
         break;
@@ -423,8 +425,10 @@ export function runView(
   // Attempts the second AI check sent back, by task: a later attempt is a redo.
   const verdicts = new Map<string, "passed" | "needs-review">();
   const sentBack = new Map<string, Set<string>>();
+  const abandoned = abandonedEvents(events);
   for (const e of events)
-    if (e.type === "checkpoint") {
+    if (abandoned.has(e.id)) continue;
+    else if (e.type === "checkpoint") {
       writer.set(e.id, e.threadId);
       if (e.payload.summary) summaries.set(e.id, e.payload.summary);
       if (e.payload.verdict && loggedById.get(e.threadId)?.kind === "check")
@@ -451,7 +455,9 @@ export function runView(
   const taskSpend = new Map(spent.tasks.map((t) => [t.taskId, t.spend]));
   const corrections = new Set(
     events.flatMap((e) =>
-      e.type === "revision.started" && e.payload.reason === "correction" ? [e.id] : [],
+      e.type === "revision.started" && e.payload.reason === "correction" && !abandoned.has(e.id)
+        ? [e.id]
+        : [],
     ),
   );
 
