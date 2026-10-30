@@ -177,8 +177,6 @@ export const runs = pgTable(
     claimStartSeq: integer().notNull().default(0),
     /** Consecutive claims that ended in infrastructure trouble without progress. */
     stalledClaims: integer().notNull().default(0),
-    /** Retired, never read or written (`stalledClaims` replaced it). Dropped in a later PR, once the code that read it is drained. */
-    recoveries: integer().notNull().default(0),
     modelCostUsd: doublePrecision().notNull().default(0),
     sandboxSeconds: doublePrecision().notNull().default(0),
     /** Retired, never read or written. Drop after servers using the old count are drained. */
