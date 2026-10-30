@@ -55,8 +55,12 @@ export interface ThreadLayout {
   restartNote: string;
   /** Where the full output of a truncated `bash` call is written, in the sandbox. */
   toolOutputPath(toolCallId: string): string;
+  /** A path the model named, absolute: a relative one is read from `dir`, the folder its commands run in. */
+  resolve(path: string): string;
+  /** Whether the absolute path is under a mount (or a host-only folder), so `keyOf` can name its key. */
+  mounted(path: string): boolean;
   /**
-   * The bucket key of a file the model named by its sandbox path, for host-side tools that
+   * The bucket key of a file the model named by its sandbox path (`resolve`d), for host-side tools that
    * read or write the mounts without the sandbox. Throws on a path outside what the thread can
    * see (or outside what it can write, when `write`) and on `..` segments.
    */
@@ -181,6 +185,9 @@ export function runLayout(
           ? worker(dir, copy)
           : confined(name, dir, role === "main" && mainWorks ? "read-write" : "read-only", copy);
       const { hostOnly, ...rest } = parts;
+      const table = [...parts.mounts, ...hostOnly];
+      const resolve = (path: string) =>
+        path.startsWith("/") ? path : `${dir}/${path.replace(/^(\.\/)+/, "")}`;
       return {
         ...rest,
         role,
@@ -190,8 +197,10 @@ export function runLayout(
         env: { PYTHONPATH: pythonPath, SCRATCH: dir },
         toolOutputPath: (toolCallId) =>
           `${SCRATCH}/${toolOutputKey(runId, name, toolCallId).slice(scratch.length)}`,
-        keyOf(path, access) {
-          const table = [...parts.mounts, ...hostOnly];
+        resolve,
+        mounted: (path) => table.some((m) => path.startsWith(`${m.path}/`)),
+        keyOf(named, access) {
+          const path = resolve(named);
           const mount = table.find((m) => path.startsWith(`${m.path}/`));
           if (!mount || (access === "write" && mount.access !== "read-write")) {
             const usable = table.filter((m) => access === "read" || m.access === "read-write");

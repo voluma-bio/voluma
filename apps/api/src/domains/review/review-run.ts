@@ -5,7 +5,7 @@
  */
 import type { RunEvent } from "@voluma/contracts/events";
 import type { FoldedRevision, FoldedTask } from "@voluma/contracts/fold";
-import { type ReviewRun, type ReviewTask, reviewRunSchema } from "@voluma/contracts/review";
+import type { ReviewRun, ReviewTask } from "@voluma/contracts/review";
 import type { RunRecord } from "../../ports";
 
 /** Null until the run's first `revision.started`: a run with no plan has nothing to review. */
@@ -56,7 +56,7 @@ export function reviewRun({
 
   const workers = new Map<string, Extract<RunEvent, { type: "thread.started" }>>();
   let cursor = 0;
-  return reviewRunSchema.parse({
+  return {
     id: run.id,
     sample: run.input.name,
     workflows: run.workflows,
@@ -111,5 +111,5 @@ export function reviewRun({
         annotations: rev.annotations,
       };
     }),
-  });
+  };
 }
