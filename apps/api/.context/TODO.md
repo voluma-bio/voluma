@@ -1,7 +1,8 @@
 # TODO
 
 - **Neon free-tier limits, after 2026-11-04.** Check CU-hours and storage in Neon's console
-  (limits: 100 CU-hours a month, 1 GB; staging was 183 MB on 2026-10-30, about 10 MB per run).
+  (limits: 100 CU-hours a month, 1 GB; staging was 256 MB on 2026-10-30, about 95 MB per full
+  run, #255). Storage will likely run out first.
   To allow scale to zero with the runner suspended, remove the per-probe SQL from the gateway's
   `/health` (`apps/gateway/src/gateway.ts`) while preserving its migration-readiness gate, and
   lengthen `SWEEP_MS` in `apps/gateway/src/main.ts` past five minutes. Verify an idle interval
