@@ -14,6 +14,11 @@ stdout is one JSON line. Entry: `src/main.ts`; the steps are `src/run.ts`.
   digest in the same PR as any `src/input.ts` change.
 - The harness imports only `@voluma/sam/input` (a zod schema and a type). Nothing else is
   shared, and the runner imports none of this package.
+- The gateway answers the streaming request `200 text/event-stream` at once and reports a failed
+  Meta call as one `event: error` (`{upstreamStatus, body}`) after any `:` keepalive lines.
+  `streamReply` in `src/meta.ts` turns that back into a reply with Meta's status (null: 502), so
+  the 429 backoff, the 404 retry and the infrastructure rules work on statuses as before. A stream
+  that ends without `response.completed` is an infrastructure failure (`src/response.ts`).
 - Keep every pass over the reply linear (`src/response.ts`): responses are 100+ MB, and the
   quadratic version of this parse is what stopped staging runs.
 - `src/sam-mask.ts` is the one mask decoder. R2 mounts take whole files, so outputs are built in

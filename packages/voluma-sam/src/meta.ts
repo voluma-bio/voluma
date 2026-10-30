@@ -9,7 +9,7 @@
  */
 import { once } from "node:events";
 import { createWriteStream, openAsBlob } from "node:fs";
-import { Agent, FormData, fetch, type Response } from "undici";
+import { Agent, FormData, fetch, Response } from "undici";
 
 export class Failure extends Error {
   constructor(
@@ -30,6 +30,63 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function failure(res: Response): Promise<string> {
   return `${res.status} ${(await res.text()).slice(0, 500)}`;
+}
+
+/**
+ * The gateway answers a streaming call with 200 and event-stream headers at once, before Meta
+ * has answered, and reports a failed upstream as one `event: error` whose data is
+ * `{upstreamStatus, body}` (after any `:` keepalive comments). This turns that event back into
+ * the reply it stands for (`upstreamStatus` as the status, 502 when null or invalid, `body` as
+ * the text), so the callers see the statuses Meta gave. A stream that starts any other way is
+ * returned as it is, unread past its first bytes.
+ */
+async function streamReply(pending: Promise<Response>): Promise<Response> {
+  const res = await pending;
+  if (!res.ok || !res.body) return res;
+  const reader = res.body.getReader();
+  const seen: Uint8Array[] = [];
+  let head = "";
+  let rest = "";
+  let ended = false;
+  while (!ended && (rest.length < "event: error".length || rest.startsWith(":"))) {
+    const next = await reader.read();
+    if (next.done) {
+      ended = true;
+      break;
+    }
+    seen.push(next.value);
+    head += Buffer.from(next.value).toString("latin1");
+    rest = head.replace(/^(?:\r?\n|:[^\n]*\n)+/, "");
+  }
+  if (rest.startsWith("event: error")) {
+    let text = head;
+    for (let read = await reader.read(); !read.done; read = await reader.read()) {
+      text += Buffer.from(read.value).toString("utf8");
+      if (text.length > 64 * 1024) break;
+    }
+    const data = /^data: (.*)$/m.exec(text)?.[1];
+    let event: { upstreamStatus?: unknown; body?: unknown } = {};
+    try {
+      event = JSON.parse(data ?? "{}");
+    } catch {}
+    const status = Number(event.upstreamStatus);
+    return new Response(typeof event.body === "string" ? event.body : "", {
+      status: Number.isInteger(status) && status >= 400 && status < 600 ? status : 502,
+    });
+  }
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of seen) controller.enqueue(chunk);
+      if (ended) controller.close();
+    },
+    async pull(controller) {
+      const next = await reader.read();
+      if (next.done) controller.close();
+      else controller.enqueue(next.value);
+    },
+    cancel: (reason) => reader.cancel(reason),
+  });
+  return new Response(body, { status: res.status, headers: res.headers });
 }
 
 export function metaClient(options: { url: string; token: string; log(line: string): void }) {
@@ -110,26 +167,32 @@ export function metaClient(options: { url: string; token: string; log(line: stri
       const request = () =>
         send(
           () =>
-            fetch(`${base}/responses`, {
-              method: "POST",
-              headers: { ...auth, "Content-Type": "application/json", Accept: "text/event-stream" },
-              body: JSON.stringify({
-                model: "sam-3.1",
-                stream: true,
-                metadata: { propagation_direction: "both", include_confidence: "true" },
-                input: [
-                  {
-                    type: "message",
-                    role: "user",
-                    content: [
-                      { type: "input_text", text: prompt },
-                      { type: "input_video", file_id: fileId },
-                    ],
-                  },
-                ],
+            streamReply(
+              fetch(`${base}/responses`, {
+                method: "POST",
+                headers: {
+                  ...auth,
+                  "Content-Type": "application/json",
+                  Accept: "text/event-stream",
+                },
+                body: JSON.stringify({
+                  model: "sam-3.1",
+                  stream: true,
+                  metadata: { propagation_direction: "both", include_confidence: "true" },
+                  input: [
+                    {
+                      type: "message",
+                      role: "user",
+                      content: [
+                        { type: "input_text", text: prompt },
+                        { type: "input_video", file_id: fileId },
+                      ],
+                    },
+                  ],
+                }),
+                dispatcher,
               }),
-              dispatcher,
-            }),
+            ),
           "Meta request",
         );
       const started = Date.now();

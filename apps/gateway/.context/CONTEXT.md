@@ -59,15 +59,22 @@ change it safely.
   margin) belongs to no live call, and `cutStaleCalls` runs at boot and every 5 minutes. A newer
   row may belong to an old instance still draining, so it is left alone. A settle is tried three
   times before the row is left to that sweep.
-- **Keepalive.** While an upstream `text/event-stream` reply sends nothing for 60 s, the gateway
-  writes a comment line (`: keepalive`) to the client: Railway's edge cuts a response with no
-  byte for 300 s, and a SAM call is quiet while Meta processes the video. It writes only after the
-  upstream's headers, only on an event stream, and only at a line start (`: keepalive\n`; at an
-  event boundary `: keepalive\n\n`), so it never lands inside a line of the upstream's. The usage
-  scan sees upstream bytes only, never these. Headers cannot be sent early: before the upstream
-  answers, its status and content type are unknown, and a 200 sent first would turn a 404 or 429
-  into an empty "successful" stream for the caller (`voluma-sam` retries on a 404 status). A
-  caller that parses an event stream must ignore lines starting with `:` (`voluma-sam` does).
+- **Early stream headers and keepalive.** A model call with `Accept: text/event-stream` (what
+  `voluma-sam` sends; the gateway does not read `stream` from the body) is answered with `200
+  text/event-stream` right after admission, before the upstream is called. Railway's edge cuts a
+  response with no byte for 300 s and Meta can hold its headers longer. Every refusal listed in
+  the header comment still carries a normal status, because it comes before admission completes.
+  After that the upstream's outcome travels in the stream: on 2xx its body is piped; on a non-2xx
+  or a network error the gateway writes one terminal `event: error` with
+  `data: {"upstreamStatus": <number|null>, "body": "<first 1 KB>"}` and closes. The row records
+  the real upstream status (`failed`, cost 0, as before); a network error follows the same
+  `failed`/`cut` rule as a plain call. While waiting for the upstream and during quiet stretches
+  the gateway writes `: keepalive\n` after 60 s without a write, only when the last byte sent was
+  a newline (a comment line cannot split an event there). The usage scan sees upstream bytes
+  only. A caller must ignore `:` lines and treat an `error` event as the call failing
+  (`voluma-sam` does, in `streamReply`). Any other call (uploads, deletes, a model call without
+  that `Accept`) keeps plain upstream status codes, and a plain call whose reply turns out to be
+  an event stream still gets keepalives after its headers.
 - **Boot and shutdown.** While draining, new calls get 503 with `Connection: close`. At SIGTERM
   the instance drains for `GATEWAY_DRAIN_SECONDS`, aborts what remains (those calls end `cut`),
   then marks its own leftover `open` rows `cut`. The gateway exits at boot if `provider_calls` or

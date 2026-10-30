@@ -10,7 +10,9 @@
  *
  * Gateway-made refusals are JSON `{error: {type: "gateway", message}}` with 401 (token or run
  * revoked), 402 (spend cap), 403 (route, model, provider or key not allowed), 429 (calls in
- * flight), 502 (provider unreachable) or 503 (database, or draining). A call lasts at most
+ * flight), 502 (provider unreachable) or 503 (database, or draining). A model call that asks for
+ * `text/event-stream` is instead answered 200 at once after admission, and an upstream failure
+ * (status or unreachable) ends the stream with one `event: error`. A call lasts at most
  * `MAX_CALL_MS`, then it is aborted and cut. A call whose row cannot be written is
  * not made. Nothing from a body is stored or logged.
  */
@@ -58,6 +60,8 @@ const UPSTREAM_TIMEOUT_MS = MAX_CALL_MS;
 const KEEPALIVE_MS = 60_000;
 /** Tries to write a call's end to the database before leaving the row for the stale sweep. */
 const SETTLE_ATTEMPTS = 3;
+/** How much of a failed upstream reply an `error` event carries. */
+const ERROR_EXCERPT_BYTES = 1024;
 
 const HOP_BY_HOP = new Set([
   "connection",
@@ -264,6 +268,41 @@ export function createGateway(deps: GatewayDeps) {
     const hasBody = req.method !== "GET" && req.method !== "DELETE";
     const url = `${baseUrls[provider]}${call.upstreamPath}${call.query ? `?${call.query}` : ""}`;
 
+    // A model call that asks for an event stream is answered at once with 200 and the stream's
+    // headers, so Railway's edge (which cuts a response with no byte for 300 s) sees bytes
+    // while Meta holds its own headers. The upstream's outcome then travels in the stream: its
+    // body on 2xx, one `error` event otherwise.
+    const early =
+      matched.route.kind === "model" && (req.headers.accept ?? "").includes("text/event-stream");
+    // Keepalive comments go out after 60 s of quiet, and only at a line start (the last byte
+    // written is a newline), where a comment line cannot split anything; mid-line nothing is
+    // written and the next chunk re-arms the timer.
+    let lastByte = 0x0a;
+    let lastWrite = Date.now();
+    let timer: NodeJS.Timeout | undefined;
+    const keepalive = () => {
+      const wait = KEEPALIVE_MS - (Date.now() - lastWrite);
+      if (wait > 0) {
+        timer = setTimeout(keepalive, wait);
+        return;
+      }
+      if (lastByte === 0x0a && !res.writableNeedDrain) {
+        res.write(": keepalive\n");
+        lastWrite = Date.now();
+      }
+      timer = setTimeout(keepalive, KEEPALIVE_MS);
+    };
+    if (early) {
+      res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
+      res.flushHeaders();
+      timer = setTimeout(keepalive, KEEPALIVE_MS);
+    }
+    /** Ends an early stream with its one terminal error event. */
+    const failEarly = (upstreamStatus: number | null, excerpt: string) => {
+      const data = JSON.stringify({ upstreamStatus, body: excerpt });
+      res.end(`event: error\ndata: ${data}\n\n`);
+    };
+
     let upstream: Awaited<ReturnType<typeof fetch>>;
     try {
       upstream = await fetch(url, {
@@ -275,6 +314,7 @@ export function createGateway(deps: GatewayDeps) {
         signal: abort.signal,
       });
     } catch (error) {
+      clearTimeout(timer);
       // A refused connection billed nothing; anything later (a timeout, a reset) may have.
       const code = (error as { cause?: { code?: string } }).cause?.code ?? "";
       const unbilled = CONNECT_ERRORS.has(code);
@@ -283,9 +323,17 @@ export function createGateway(deps: GatewayDeps) {
       log(
         `${id} ${provider} unreachable: ${code || (error as { cause?: Error }).cause?.message || (error instanceof Error ? error.message : error)}`,
       );
+      if (early) return failEarly(null, `${provider} is unreachable`);
       throw new Refused(502, `${provider} is unreachable`);
     }
     const ttfbMs = Date.now() - started;
+    if (early && upstream.status >= 400) {
+      clearTimeout(timer);
+      const excerpt = await excerptOf(upstream.body, ERROR_EXCERPT_BYTES).catch(() => "");
+      await end({ status: "failed", costUsd: 0, httpStatus: upstream.status, ttfbMs });
+      log(`${id} ${provider} ${req.method} ${call.upstreamPath} ${upstream.status} error event`);
+      return failEarly(upstream.status, excerpt);
+    }
     const encoded = upstream.headers.has("content-encoding");
     const out: Record<string, string> = {};
     upstream.headers.forEach((value, name) => {
@@ -293,46 +341,24 @@ export function createGateway(deps: GatewayDeps) {
       if (encoded && name === "content-length") return;
       out[name] = value;
     });
-    res.writeHead(upstream.status, out);
+    if (!early) res.writeHead(upstream.status, out);
     // An event stream is read a line at a time; any other reply (possibly pretty-printed JSON)
     // as one text through the bounded window.
-    const streamed = (upstream.headers.get("content-type") ?? "").includes("text/event-stream");
+    const streamed =
+      early || (upstream.headers.get("content-type") ?? "").includes("text/event-stream");
     const scan = replyScanner(streamed, (line) => {
       observeLine(line, seen);
       if (isFinalEvent(line)) finalEvent = true;
       if (matched.route.kind === "file-upload" && upstream.status < 400) fileId ??= fileIdOf(line);
     });
-
-    // Keepalive: only on an event stream, only after its headers (written above), and only where
-    // a comment cannot split an event. `tail` is the last bytes sent upstream's way: at a line
-    // start the comment is one line, at an event boundary its blank line is harmless, mid-line
-    // nothing is written (the next chunk re-arms the timer).
-    let tail = "\n\n";
-    let lastWrite = Date.now();
-    let timer: NodeJS.Timeout | undefined;
-    const keepalive = () => {
-      const wait = KEEPALIVE_MS - (Date.now() - lastWrite);
-      if (wait > 0) {
-        timer = setTimeout(keepalive, wait);
-        return;
-      }
-      if (tail.endsWith("\n") && !res.writableNeedDrain) {
-        res.write(/\n\r?\n$/.test(tail) ? ": keepalive\n\n" : ": keepalive\n");
-        lastWrite = Date.now();
-      }
-      timer = setTimeout(keepalive, KEEPALIVE_MS);
-    };
-    if (streamed) timer = setTimeout(keepalive, KEEPALIVE_MS);
+    if (!early && streamed) timer = setTimeout(keepalive, KEEPALIVE_MS);
 
     let complete = false;
     try {
       if (upstream.body) {
         for await (const chunk of upstream.body) {
           scan.push(chunk);
-          if (streamed)
-            tail = (
-              tail + Buffer.from(chunk).toString("latin1", Math.max(0, chunk.length - 3))
-            ).slice(-3);
+          if (streamed && chunk.length) lastByte = chunk[chunk.length - 1] as number;
           lastWrite = Date.now();
           if (!res.write(chunk)) await once(res, "drain", { signal: abort.signal });
         }
@@ -396,6 +422,22 @@ function reply(res: ServerResponse, status: number, message: string) {
     "content-length": Buffer.byteLength(body),
   });
   res.end(body);
+}
+
+/** The first `limit` bytes of a body as text (a character cut by the limit is replaced), then the body is dropped. */
+async function excerptOf(body: AsyncIterable<Uint8Array> | null, limit: number): Promise<string> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  if (body) {
+    for await (const chunk of body) {
+      chunks.push(Buffer.from(chunk));
+      size += chunk.length;
+      if (size >= limit) break;
+    }
+  }
+  return new TextDecoder("utf-8", { fatal: false }).decode(
+    Buffer.concat(chunks).subarray(0, limit),
+  );
 }
 
 function bearerOf(req: IncomingMessage): string | undefined {
