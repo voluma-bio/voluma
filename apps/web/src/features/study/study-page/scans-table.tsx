@@ -6,10 +6,14 @@
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, startRun } from "@voluma/api-client";
+import type { Me } from "@voluma/contracts/auth";
+import type { VisitorKeys } from "@voluma/contracts/run";
 import type { StudyDetail, StudyScanDetail } from "@voluma/contracts/study";
 import { Button, StatusBadge, Table, type TableColumn } from "@voluma/ui";
+import { KeysForm, loadKeys } from "@voluma/ui/run";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
-import { useNavigate } from "react-router";
+import { useState } from "react";
+import { useNavigate, useOutletContext } from "react-router";
 import {
   digitsFor,
   farFromGroup,
@@ -114,8 +118,12 @@ export function ScansTable({
 
 function ScanStatusCell({ detail, scan }: { detail: StudyDetail; scan: StudyScanDetail }) {
   const client = useQueryClient();
+  const me = useOutletContext<Me>();
+  // A guest runs on their own keys, so the Start button asks for them first.
+  const [askKeys, setAskKeys] = useState(false);
   const start = useMutation({
-    mutationFn: () => startRun({ studyId: detail.study.id, inputId: scan.scan.inputId }),
+    mutationFn: (keys?: VisitorKeys) =>
+      startRun({ studyId: detail.study.id, inputId: scan.scan.inputId, keys }),
     onSuccess: () => client.invalidateQueries({ queryKey: ["study"] }),
   });
   const { label, tone, progress } = scanStatus(scan);
@@ -137,13 +145,28 @@ function ScanStatusCell({ detail, scan }: { detail: StudyDetail; scan: StudyScan
           onClick={(event) => {
             // The row opens the run; this cell's button starts one.
             event.stopPropagation();
-            start.mutate();
+            if (me.kind !== "visitor") return start.mutate(undefined);
+            const keys = loadKeys(me.userId);
+            if (keys) start.mutate(keys);
+            else setAskKeys(true);
           }}
           onKeyDown={(event) => event.stopPropagation()}
         >
           {start.isPending || start.isSuccess ? "Starting…" : "Start"}
         </Button>
       </span>
+      {askKeys && !start.isPending && !start.isSuccess && (
+        <span className="grid max-w-sm gap-2 whitespace-normal py-1">
+          <span className="text-meta text-muted-foreground">
+            Guests run on their own keys. Sign in with an account to use Voluma's.
+          </span>
+          <KeysForm
+            userId={me.userId}
+            submitLabel="Save keys and start"
+            onSubmit={(keys) => start.mutate(keys)}
+          />
+        </span>
+      )}
       {start.isError && (
         <span role="alert" className="text-meta whitespace-normal text-destructive">
           {startError(start.error)}

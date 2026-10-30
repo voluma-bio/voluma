@@ -69,7 +69,7 @@ if (run.id !== values.run) {
   throw new Error(`claimed run ${run.id}, not ${values.run}; gave it back`);
 }
 const claimId = randomUUID();
-const modal = claim.keys?.modal ?? config.modal;
+const { modal } = config;
 log(`claimed run ${run.id}`);
 
 const abort = new AbortController();

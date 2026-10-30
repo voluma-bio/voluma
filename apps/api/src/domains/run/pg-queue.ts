@@ -197,9 +197,13 @@ type Starts = {
   keys?: VisitorKeys;
 };
 
+/** Who starts runs; `guest` is a visitor principal. */
+export type Caller = { userId: string; guest: boolean };
+
 /** Why a write was refused; `Refusal` is a limit. */
 export type QueueRefusal =
   | Refusal
+  | "guest-keys"
   | "no-input"
   | "input-not-ready"
   | "full"
@@ -312,7 +316,7 @@ export function pgRunQueue(
     tx: Tx,
     hold: Hold,
     reader: Reader,
-    caller: { userId: string },
+    caller: Caller,
     study: { id: string },
     workflow: { pins: WorkflowPin[]; outputs: OutputEntry[] },
     starts: Starts,
@@ -320,6 +324,8 @@ export function pgRunQueue(
     const bad = unselectable(workflow.outputs, starts.selectedOutputs ?? []);
     if (bad.length) throw new Refused("bad-selection", bad);
     if (starts.runs.length === 0) return;
+    // A guest runs only on their own keys: Voluma's are for signed-in accounts.
+    if (caller.guest && !starts.keys) throw new Refused("guest-keys");
     const credentials = starts.keys ? "visitor" : "voluma";
     const used = await usage(tx, reader.labId, { userId: caller.userId, credentials });
     for (const { id, inputId } of starts.runs) {
@@ -352,7 +358,7 @@ export function pgRunQueue(
      */
     start: (
       reader: Reader,
-      caller: { userId: string },
+      caller: Caller,
       request: Omit<Starts, "runs"> & { id: string; studyId: string; inputId: string },
     ) =>
       attempt(async (tx, hold) => {
@@ -384,7 +390,7 @@ export function pgRunQueue(
      */
     createStudy: (
       reader: Reader,
-      caller: { userId: string },
+      caller: Caller,
       request: {
         study: Omit<typeof studies.$inferInsert, "labId" | "createdBy" | "example" | "createdAt">;
         /** `subject` absent: the input's name. */

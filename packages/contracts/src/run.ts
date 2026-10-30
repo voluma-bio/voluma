@@ -100,7 +100,9 @@
  *
  * Who pays (`credentials`): `visitor` when the request that creates the run
  * carries `keys`, else `voluma`. It never changes afterwards, and a `visitor`
- * run never falls back to Voluma's credentials.
+ * run never falls back to Voluma's model credentials. A guest (no account) may only
+ * start `visitor` runs: a start without `keys` is refused 403. Every run's sandbox
+ * is on Voluma's Modal account; `keys` is the model key alone.
  *
  * Visitor keys are the caller's own, kept in their browser. The server and the
  * runner hold them in memory for that run only: never in the database, on
@@ -114,9 +116,8 @@
  * ends `failed` with an `error`. `/keys` moves the run `awaiting-keys` →
  * `queued`, where a claim picks it up. The API holds a `visitor` run's keys
  * only in memory, so on start it moves every unclaimed `visitor` run to
- * `awaiting-keys` (`startedAt` null if it never started). Both keys or none: a request with only one
- * fails validation (400). A `visitor` run's sandbox runs in the visitor's own
- * account, so its outputs are untrusted: never seed an example from one.
+ * `awaiting-keys` (`startedAt` null if it never started). A `visitor` run's model calls use the visitor's
+ * own account, so its outputs are untrusted: never seed an example from one.
  *
  * Limits: each org has its own, given to the run domain by the API's
  * composition root:
@@ -124,9 +125,10 @@
  *     kind (none for an org whose members share one account); another answers
  *     409;
  *   - for `voluma` runs only: runs at once (a claim takes a `queued` run only
- *     while the org is under it) and runs per day. The daily limit answers
- *     429 when work starts and is checked again when a claim dequeues a run; a
- *     run refused at dequeue ends `failed` with an `error`. The daily limit counts a run once, so a
+ *     while the org is under it). Runs per day count both kinds, since Voluma pays
+ *     every sandbox. The daily limit answers 429 when work starts and is checked again
+ *     when a claim dequeues a `voluma` run (a run refused at dequeue ends `failed` with
+ *     an `error`; a `visitor` run was counted at start). It counts a run once, so a
  *     recovered run isn't refused for a limit it already passed;
  *   - for `visitor` runs: at most this many `queued` or `running` in the org
  *     (those hold the visitor's keys in the server's memory, or a runner
@@ -297,13 +299,10 @@ export type Run = z.infer<typeof runSchema>;
 /** Real keys are well under 512 characters; the cap bounds what the server holds in memory. */
 const keyField = z.string().min(1).max(512);
 /**
- * A visitor's own credentials: a Meta Model API key and a Modal token. Sent
- * only in requests, never returned; see the header.
+ * A visitor's own credentials: a Meta Model API key. Their sandboxes run on Voluma's Modal
+ * account. Sent only in requests, never returned; see the header.
  */
-export const visitorKeysSchema = z.object({
-  metaApiKey: keyField,
-  modal: z.object({ tokenId: keyField, tokenSecret: keyField }),
-});
+export const visitorKeysSchema = z.object({ metaApiKey: keyField });
 export type VisitorKeys = z.infer<typeof visitorKeysSchema>;
 
 export const startRunRequestSchema = z.object({
@@ -313,7 +312,7 @@ export const startRunRequestSchema = z.object({
   /** As `runSchema.selectedOutputs`; an id that is not a measurement or score of the study's workflow is refused with 400. */
   selectedOutputs: selectedOutputsSchema.min(1).optional(),
   notes: z.string().max(4000).optional(),
-  /** Present: the run uses these (`credentials: "visitor"`) and skips the org's runs-at-once count. */
+  /** Present: the run uses these (`credentials: "visitor"`) and skips the org's runs-at-once count. Absent: a guest is refused (403). */
   keys: visitorKeysSchema.optional(),
 });
 export type StartRunRequest = z.infer<typeof startRunRequestSchema>;

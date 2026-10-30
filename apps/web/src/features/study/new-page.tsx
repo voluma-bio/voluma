@@ -368,6 +368,9 @@ export function NewPage() {
 
       {needsKeys && (
         <Step title="Your keys">
+          <p className="mb-2 text-ui text-muted-foreground">
+            Guests run on their own keys. Sign in with an account to use Voluma's.
+          </p>
           {keys ? (
             <p className="text-ui text-muted-foreground">
               Saved in this browser.{" "}

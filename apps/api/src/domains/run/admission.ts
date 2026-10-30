@@ -2,8 +2,8 @@
  * What an org may do (`@voluma/contracts/run`, Limits) and the one check that enforces
  * it. `usage` reads every count from one query; `admit` judges a run at a stage with them.
  * Examples are seeded, not work, so no count includes them. A day is the last 24 hours by
- * the database's clock. A `voluma` run counts toward the day once, from its first claim
- * (`started_at`), so a recovered run isn't refused for a limit it passed.
+ * the database's clock. A run of either kind counts toward the day once, from its first claim
+ * (`started_at`): Voluma pays every sandbox, so a recovered run isn't refused for a limit it passed.
  */
 import type { Run } from "@voluma/contracts/run";
 import { sql } from "drizzle-orm";
@@ -31,9 +31,9 @@ export const refusalMessage: Record<Refusal, string> = {
 export type Usage = {
   /** `voluma` runs running now. */
   running: number;
-  /** `voluma` runs first claimed in the last day. */
+  /** Runs first claimed in the last day. */
   startedToday: number;
-  /** `voluma` runs queued and never claimed: they count toward the day when they start. */
+  /** Runs queued and never claimed: they count toward the day when they start. */
   waiting: number;
   /** Visitor runs queued or running. An `awaiting-keys` run holds neither keys nor a runner. */
   visitorActive: number;
@@ -46,12 +46,12 @@ export async function usage(
   labId: string,
   caller?: { userId: string; credentials: Run["credentials"] },
 ): Promise<Usage> {
-  const today = sql`credentials = 'voluma' AND started_at > now() - interval '1 day'`;
+  const today = sql`started_at > now() - interval '1 day'`;
   const [row] = await tx.execute<Usage>(sql`
     SELECT
       (count(*) FILTER (WHERE credentials = 'voluma' AND state = 'running'))::int AS "running",
       (count(*) FILTER (WHERE ${today}))::int AS "startedToday",
-      (count(*) FILTER (WHERE credentials = 'voluma' AND state = 'queued' AND started_at IS NULL))::int AS "waiting",
+      (count(*) FILTER (WHERE state = 'queued' AND started_at IS NULL))::int AS "waiting",
       (count(*) FILTER (WHERE credentials = 'visitor' AND state IN ('queued', 'running')))::int AS "visitorActive",
       (count(*) FILTER (WHERE ${caller ? sql`started_by = ${caller.userId} AND credentials = ${caller.credentials} AND state <> 'ended'` : sql`false`}))::int AS "callerUnfinished"
     FROM runs WHERE lab_id = ${labId} AND NOT example`);
@@ -60,7 +60,7 @@ export async function usage(
 
 /**
  * Why `run` may not go on at `stage`, or null. Start and resume admit either kind of run;
- * claim is for `voluma` runs, since a visitor run's cap was checked when it
+ * claim is for `voluma` runs, since a visitor run's caps were checked when it
  * was queued. A reopen (a correction) of a `voluma` run (the route refuses visitor runs first) is
  * judged by the per-caller limit alone: it is no new run, so no daily count. Checks run in this order.
  */
@@ -73,8 +73,8 @@ export function admit(
   if (stage === "claim" && u.running >= limits.concurrent) return "concurrent";
   if (stage === "reopen") return u.callerUnfinished >= limits.perCaller ? "per-caller" : null;
   if (stage === "start" && u.callerUnfinished >= limits.perCaller) return "per-caller";
-  if (run.credentials === "visitor") {
-    return u.visitorActive >= limits.visitorActive ? "visitor-active" : null;
+  if (run.credentials === "visitor" && u.visitorActive >= limits.visitorActive) {
+    return "visitor-active";
   }
   if (stage === "start" && u.startedToday + u.waiting >= limits.perDay) return "daily";
   if (stage === "claim" && run.firstClaim && u.startedToday >= limits.perDay) return "daily";

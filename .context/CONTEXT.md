@@ -60,7 +60,7 @@ check threads, and review chat threads.
   There is no internet. The image is a public GHCR image pinned by digest (`SANDBOX_IMAGE` in
   `apps/runner/src/config.ts`), built by the "Sandbox image" workflow from
   `apps/runner/sandbox/Dockerfile`, which installs `workflows/core/requirements.txt`,
-  so a visitor's Modal workspace pulls the same one. Every command runs
+  so every sandbox, a visitor's too, pulls the same one. Every command runs
   under `timeout -k`, which leads its own process group,; a timeout or an abort kills the whole
   group, except a descendant that calls `setsid` itself, which survives until the
   sandbox is destroyed.
@@ -158,8 +158,8 @@ check threads, and review chat threads.
   seconds from the session's ready/stopped states) and stops the run on `stop`, on a
   `LeaseLost` from events, history or heartbeat, or 45 s after the last acknowledged
   heartbeat was sent. SIGTERM stops every run, each reports `released`, and the process
-  exits. A `voluma` run uses our keys; a `visitor` run uses the claim's, in that run's scope
-  only. `redact.ts` masks every literal key in stored events and history rows, console lines
+  exits. A `voluma` run uses our model key; a `visitor` run uses the claim's Meta key, in that run's scope
+  only. Every sandbox runs on our Modal token. A guest may start only `visitor` runs (403 otherwise). `redact.ts` masks every literal key in stored events and history rows, console lines
   (redacted before they are clipped) and the report's `error`. Before a run's sandbox exists the runner snapshots `workflows/core/` and the run's workflow directory (`workflows/<name>/`) from its own checkout into the run's R2 prefix, once per run, and reads the snapshot (`packages/workflow`). The plan is the tasks that produce the outputs the user selected (`Run.selectedOutputs`, all if absent) and what they depend on, built from `tasks.json` and `outputs.json` (`computePlan`) and recorded in the first event (the main agent changes it later with `change_plan`); a resumed run keeps the plan its first event recorded. The prompts are the harness's role prompts plus the skill list (name, description, `/workflow/...` path; the agent reads the rest with bash) and the task's instructions and done criteria (`prompts.ts`). Every role's tools are what its role file lists (`workflows/core/agents/`), built from the registry (`packages/harness/src/tools/registry.ts`); `segment_sam` runs `voluma-sam` in the worker's sandbox through the gateway, so it needs `VOLUMA_GATEWAY_URL` and is never granted to the checker. The claim carries no plan. Workflow format: voluma-bio/docs `work/mvp-contracts-and-data/design/workflow-format.md`.
 - **`seq` and the database.** `seq` per run is gapless and in commit order: each
   append takes a per-run advisory lock as its own statement before the insert (a lock

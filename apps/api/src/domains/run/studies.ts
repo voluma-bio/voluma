@@ -19,7 +19,7 @@ export function studiesRoutes({ studies, queue }: RunDeps) {
     const reader = readerOf(user);
     const result = await queue.createStudy(
       reader,
-      { userId: user.userId },
+      { userId: user.userId, guest: user.account === "visitor" },
       {
         study: {
           id: randomUUID(),

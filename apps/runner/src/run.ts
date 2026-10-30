@@ -166,11 +166,8 @@ async function claimBody(
   /** The key for a provider: a visitor's Meta key is good for Meta alone. */
   const keyFor = (provider: string) =>
     visitor ? (provider === "meta" ? keys.metaApiKey : undefined) : providerKey(provider);
-  const modal = visitor ? keys.modal : config.modal;
-  const redact: Redact = redactor([
-    ...config.secrets,
-    ...(visitor ? [keys.metaApiKey, keys.modal.tokenId, keys.modal.tokenSecret] : []),
-  ]);
+  const { modal } = config;
+  const redact: Redact = redactor([...config.secrets, ...(visitor ? [keys.metaApiKey] : [])]);
   const log = (line: string) => ctx.log(`[${runId}] ${redact(line)}`);
   scope.log = log;
 

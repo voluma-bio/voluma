@@ -23,6 +23,14 @@ export function refusal(c: Context, refused: QueueRefusal, detail?: string[]) {
       return c.json({ error: "Only the run's starter can resend keys." }, 403);
     case "conflict":
       return c.json({ error: "The run is not waiting for keys." }, 409);
+    case "guest-keys":
+      return c.json(
+        {
+          error:
+            "Guests run on their own keys. Add your keys to start a run, or sign in with an account to use Voluma's.",
+        },
+        403,
+      );
     case "no-input":
       return c.json({ error: "unknown input" }, 404);
     case "no-study":
@@ -56,7 +64,7 @@ export function runsRoutes({ reads, queue }: RunDeps) {
     const user = c.var.user;
     const result = await queue.start(
       readerOf(user),
-      { userId: user.userId },
+      { userId: user.userId, guest: user.account === "visitor" },
       {
         id: randomUUID(),
         studyId,
