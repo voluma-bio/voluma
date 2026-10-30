@@ -195,28 +195,46 @@ function streamWatch(started: number) {
     events: 0,
   };
   let last = started;
-  // The last 6 bytes (one short of LINE) join the next chunk, so a match across chunks is seen once.
+  // The last 6 bytes (one short of LINE): a match across two chunks starts in them.
   let tail: Buffer = Buffer.from("\n");
+  const keepalive = (chunk: Buffer) =>
+    tail[tail.length - 1] === 0x0a &&
+    chunk[0] === 0x3a &&
+    chunk.at(-1) === 0x0a &&
+    chunk.at(-2) === 0x0a;
   return {
     stats,
-    add(chunk: Buffer) {
+    add(bytes: Uint8Array) {
+      // undici yields plain Uint8Arrays, whose indexOf takes a byte, not a pattern: view as a Buffer, no copy.
+      const chunk = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.length);
       const now = Date.now();
       stats.bytes += chunk.length;
-      const joined = Buffer.concat([tail, chunk]);
       let seen = 0;
-      for (let at = joined.indexOf(LINE); at >= 0; at = joined.indexOf(LINE, at + 1)) seen++;
-      // Keepalive comments (`: keepalive`) are bytes but not arrivals: only a chunk with a
-      // `data:` line ends a gap.
-      if (seen) {
+      // A match starting in the tail ends in the chunk's first bytes; the chunk itself is searched in place.
+      const edge = Buffer.concat([tail, chunk.subarray(0, LINE.length - 1)]);
+      for (
+        let at = edge.indexOf(LINE);
+        at >= 0 && at < tail.length;
+        at = edge.indexOf(LINE, at + 1)
+      )
+        seen++;
+      for (let at = chunk.indexOf(LINE); at >= 0; at = chunk.indexOf(LINE, at + 1)) seen++;
+      // A gap ends on any chunk but a lone keepalive comment (`: keepalive`): a very long
+      // `data:` line arrives over many chunks, and that is not silence.
+      if (!keepalive(chunk)) {
         if (now - last > stats.longestGapMs) {
           stats.longestGapMs = now - last;
           stats.longestGapAtMs = now - started;
         }
         last = now;
-        stats.firstEventMs ??= now - started;
       }
+      if (seen) stats.firstEventMs ??= now - started;
       stats.events += seen;
-      tail = joined.subarray(Math.max(joined.length - (LINE.length - 1), 0));
+      const keep = LINE.length - 1;
+      tail =
+        chunk.length >= keep
+          ? chunk.subarray(chunk.length - keep)
+          : Buffer.concat([tail, chunk]).subarray(-keep);
     },
   };
 }
