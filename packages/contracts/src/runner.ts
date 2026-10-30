@@ -63,7 +63,7 @@
  * never counts, so deploys don't fail a long run. A `provider-outage` release also holds the run
  * back: the API sets `runs.claimable_after` (1, 2, then 5 minutes by the count of such claims in a
  * row) and `claim` skips the run until then; the run stays `queued`, and the run page reads
- * `state.waitingForProvider` of a queued run ("Waiting for the model provider"). The claim that takes it clears the time. A reopen (`messages.ts`) resets the count to 0
+ * `state.waitingForProvider` of a queued run (the UI shows "Waiting: the AI is unavailable"). The claim that takes it clears the time. A reopen (`messages.ts`) resets the count to 0
  * and clears `lastClaimEnd`, so `previousClaim` never reports a reason from before it.
  *
  * There is no tokenless call: the runner service is the only claimer.

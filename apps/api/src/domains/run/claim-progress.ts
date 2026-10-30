@@ -58,10 +58,10 @@ const WHY: Record<ClaimEndReason, string> = {
   shutdown: "the runner restarted",
   "self-stop": "the runner lost contact with the server",
   "lease-expired": "the server lost contact with the runner",
-  "provider-outage": "the model provider was unavailable", // stalledError words it apart
+  "provider-outage": "the AI was unavailable", // researcher-facing (runs.error); stalledError words it apart
 };
 
 export const stalledError = (reason: ClaimEndReason, tool: string | undefined) =>
   reason === "provider-outage"
-    ? "Stopped: the model provider was unavailable for about 15 minutes. Start a new run to try again."
+    ? "Stopped: the AI was unavailable for about 15 minutes. Start a new run to try again."
     : `Stopped: ${WHY[reason]} ${STALLED_CLAIMS_LIMIT} times in a row without progress${tool ? ` (last call: \`${tool}\`)` : ""}.`;
