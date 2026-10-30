@@ -181,8 +181,9 @@ class Meshes:
 
     A cache file is named by a hash of the array's path and mtime, the step and what was cut. It is built under /tmp and
     copied into `cache_dir` in one pass: `cache_dir` is usually under $SCRATCH, an R2 mount where VTK's writer crashes and
-    a rename fails. A mesh is read only once its `.done` marker exists, so a copy cut off part way is built again. The
-    downsampled array is read once per Meshes, however many labels are cut from it."""
+    a rename fails. A mesh is read only when its `.done` marker holds the .vtp's byte count, so a copy cut off part way,
+    one being overwritten, or a marker that arrived before its mesh is built again. The downsampled array is read once
+    per Meshes, however many labels are cut from it."""
 
     def __init__(self, cache_dir):
         self.dir = Path(cache_dir)
@@ -202,8 +203,8 @@ class Meshes:
     def cached(self, key, build):
         import pyvista as pv
         f = self.dir / (hashlib.sha1(json.dumps(key, default=str).encode()).hexdigest()[:20] + '.vtp')
-        done = f.with_suffix('.done')  # written after the copy: VTK reads a cut-off .vtp as a smaller mesh without an error
-        if done.exists():
+        done = f.with_suffix('.done')  # the .vtp's byte count, written after the copy: VTK reads a cut-off .vtp without an error
+        if done.exists() and f.exists() and done.read_text() == str(f.stat().st_size):
             return pv.read(f)
         mesh = build()
         if mesh.n_points:
@@ -212,7 +213,7 @@ class Meshes:
         with tempfile.TemporaryDirectory() as tmp:
             mesh.save(Path(tmp) / f.name)
             shutil.copyfile(Path(tmp) / f.name, f)
-        done.write_text('')
+            done.write_text(str((Path(tmp) / f.name).stat().st_size))
         return mesh
 
     def surface(self, path, vol, select, kind, spacing, to_scan=lambda p: p, step=None, grid_id=None):
