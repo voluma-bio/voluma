@@ -24,6 +24,11 @@ after it.
 - `name`: the file name without `.md`.
 - `description`: what the role is, for whoever reads the file.
 - `model`: an alias (`wonder`, `opus`, `astra`) the runner's config maps to a provider model.
+- `thinking`: optional; Pi's thinking level for the role's threads (`off`, `minimal`, `low`, `medium`,
+  `high`, `xhigh`, `max`). Unset: the runner's `RUNNER_THINKING`, else `off`. A run fails at start if
+  the role's model lacks the level; a visitor run is always `off`. The level is not recorded in the
+  log, so a resumed thread takes it from the snapshotted file and the runner's current
+  `RUNNER_THINKING`.
 - `tools`: every tool the role holds, base tools included, from the harness registry. A tool not
   listed is not granted: that, not prose, is how the checker holds no `segment_sam` (its role still
   has to say it does not redo the task, since bash can run the classic segmentation).

@@ -29,7 +29,12 @@
  */
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
-import type { Api, Model, Models } from "@earendil-works/pi-ai";
+import {
+  type Api,
+  getSupportedThinkingLevels,
+  type Model,
+  type Models,
+} from "@earendil-works/pi-ai";
 import {
   inputPrefix,
   referencePrefix,
@@ -153,7 +158,6 @@ async function claimBody(
   const keyFor = (provider: string) =>
     visitor ? (provider === "meta" ? keys.metaApiKey : undefined) : providerKey(provider);
   const modal = visitor ? keys.modal : config.modal;
-  const thinking = (!visitor && config.thinking) || "off";
   const redact: Redact = redactor([
     ...config.secrets,
     ...(visitor ? [keys.metaApiKey, keys.modal.tokenId, keys.modal.tokenSecret] : []),
@@ -275,10 +279,33 @@ async function claimBody(
         );
       return !visitor || (role === "main" && isVisitorSafe(model)) ? model : ctx.visitorModel;
     };
+    // A role's file may set its thinking level; else the runner's. Pi clamps a level a model lacks
+    // to a neighbour, so a mismatch fails the run here, not silently at another level.
+    const roleThinking = (role: "worker" | "checker" | "main", model: Model<Api>) => {
+      if (visitor) return "off";
+      const level = definition.agents[role].thinking ?? config.thinking ?? "off";
+      const fallback =
+        config.fallbackModel &&
+        ctx.models.getModel(config.fallbackModel.provider, config.fallbackModel.id);
+      for (const m of fallback ? [model, fallback] : [model]) {
+        const levels = getSupportedThinkingLevels(m);
+        if (!levels.includes(level))
+          throw new Error(
+            `the ${role} role's thinking level "${level}" is not one ${m.provider}/${m.id} supports: ${levels.join(", ")}`,
+          );
+      }
+      return level;
+    };
     const workerModel = roleModel("worker");
     const checkModel = roleModel("checker");
     const mainModel = roleModel("main");
+    const thinking = {
+      worker: roleThinking("worker", workerModel),
+      checker: roleThinking("checker", checkModel),
+      main: roleThinking("main", mainModel),
+    };
     log(`models: worker ${workerModel.id}, checker ${checkModel.id}, main ${mainModel.id}`);
+    log(`thinking: worker ${thinking.worker}, checker ${thinking.checker}, main ${thinking.main}`);
     // The tasks that produce the selected outputs and what they need. The main thread may adapt
     // them to the run's notes when the run starts (`superviseRun`).
     const computed = computePlan(definition.files, run.selectedOutputs);
@@ -428,7 +455,7 @@ async function claimBody(
       (primary: Model<Api>, modelRole: ModelRole, agent: "main" | "worker" | "checker"): RoleOf =>
       (thread, recorded) => ({
         model: threadModel(primary, recorded),
-        thinkingLevel: thinking,
+        thinkingLevel: thinking[agent],
         streamFn: streamFor(modelRole),
         systemPrompt: systemPrompt(definition, thread),
         tools: grant(agent),
