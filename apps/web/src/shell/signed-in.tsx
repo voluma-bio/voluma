@@ -12,7 +12,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ApiError, getMe, onSignedOut, startGuest } from "@voluma/api-client";
 import type { Me } from "@voluma/contracts/auth";
-import { AppShell, Button, ShellLink } from "@voluma/ui";
+import { AppShell, Button, LoadingState, ShellLink } from "@voluma/ui";
 import { House, Workflow } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Link, Outlet, useLocation, useMatches, useNavigate } from "react-router";
@@ -67,10 +67,7 @@ export function SignedIn() {
     case "loading":
       return (
         <main aria-busy="true" className="grid min-h-dvh place-content-center">
-          {/* Shown only when loading is slow, so a fast load doesn't flash it. */}
-          <p className="animate-[appear_200ms_ease-out_600ms_both] text-ui text-muted-foreground">
-            Loading…
-          </p>
+          <LoadingState rows={2} className="w-72" />
         </main>
       );
     case "signed-out":
