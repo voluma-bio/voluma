@@ -55,9 +55,9 @@ Variables on `voluma-api` (names in `render.yaml`; values never go in the repo):
 
 **Guest sign-in is on on staging** (2026-10-30, Jimmy: staging shouldn't need a sign-in). `GUEST_ORGANIZATION_ID=org_01M609YS5PSWJSNT20NNKSTAA9` (the Demo organization) and `GUEST_SCOPE=self` are set on `voluma-api` in the dashboard; to close it, delete both and restart. Render routes by `Host`, so a sandbox can still reach the API through the gateway's domain (#236); that is accepted because a guest runs only on their own Meta key. Check: `POST /api/auth/guest` with `Origin` and `content-type: application/json` answers 200 when open, 404 when closed. Judges sign in through `WORKOS_JUDGES_ORGANIZATION_ID` either way.
 
-**The client address for WorkOS** is read from one header, `CLIENT_IP_HEADER` in `src/auth.ts`. Render's docs don't say which header its proxy sets or strips; check it on the deployed API at cutover (the comment there says how).
+**The client address for WorkOS** is read from one header, `CLIENT_IP_HEADER` in `src/auth.ts`. It is `true-client-ip`: Render's edge overwrites it with the caller's address, and passes a client's own `x-real-ip` through unchanged (checked 2026-10-30 with forged headers).
 
-Staging URL: `https://voluma-api.onrender.com` (`<API_ID>` below: fill in at cutover).
+Staging URL: `https://voluma-api.onrender.com` (`srv-dbidaf3l550s73btnpg0`).
 
 **In the WorkOS dashboard (staging), for each deployed origin:** add
 `<APP_URL>/api/auth/callback` to Redirects (`http://localhost:*/api/auth/callback` is
@@ -110,13 +110,13 @@ Reference: https://api-docs.render.com.
 | Id | Value |
 |---|---|
 | Workspace `Voluma Staging` | `tea-d8maeebtqb8s73br9ev0` |
-| `voluma-api` | `<API_ID>` (`srv-...`; filled in at cutover) |
-| `voluma-gateway` | `<GATEWAY_ID>` |
-| `voluma-runner` | `<RUNNER_ID>` |
+| `voluma-api` | `srv-dbidaf3l550s73btnpg0` |
+| `voluma-gateway` | `srv-dbidaf3l550s73btnpfg` |
+| `voluma-runner` | `srv-dbideabl550s73bu5120` |
 
 ```bash
 r() { curl -s -H "Authorization: Bearer $RENDER_API_KEY" -H 'Content-Type: application/json' "$@"; }
-B=https://api.render.com/v1 S=<API_ID>
+B=https://api.render.com/v1 S=srv-dbidaf3l550s73btnpg0
 
 # The ids (to fill in the table above)
 r "$B/services?limit=20"
@@ -178,17 +178,25 @@ https://neon.com/pricing on 2026-10-30:
 
 What that means here:
 
-- **Size.** Staging held 183 MB on 2026-10-30, 141 MB of it `pi_messages`, and grows about
-  10 MB per run: about 80 runs from the limit. Check it (`select pg_size_pretty(pg_database_size(current_database()))`) now and then; [TODO.md](TODO.md) tracks it.
-- **Compute hours are the tighter limit.** The runner polls `claim` every 2 s, so with it
+- **Size is the tighter limit.** Staging held 256 MB on 2026-10-30 (`pi_messages` 234 MB). One
+  full mouse-oa run (9 tasks) added about 95 MB, nearly all model history: about 7 more full runs
+  reach 1 GB (#255 tracks storing less). Check it (`select pg_size_pretty(pg_database_size(current_database()))`) now and then; [TODO.md](TODO.md) tracks it.
+- **Compute hours.** The runner polls `claim` every 2 s, so with it
   running the compute never reaches its 5 idle minutes. At 0.25 CU that is about 6 CU-hours a
   day, about 180 a month against the 100 allowed; the 5 days to Nov 4 cost about 30. With the
-  runner suspended, the gateway's 5-minute sweep (`SWEEP_MS` in `apps/gateway/src/main.ts`) may
-  still keep it awake: unchecked. Past the cap compute pauses and every call fails. Launch
+  runner suspended, Render's gateway health checks still query Postgres: `render.yaml` sets
+  `healthCheckPath: /health`, and `apps/gateway/src/gateway.ts` calls `isMigrated` (a SQL query)
+  on every probe. [Render probes running services every few seconds](https://render.com/docs/health-checks),
+  preventing five idle minutes even with no browser open. The gateway also sweeps every five
+  minutes (`SWEEP_MS` in `apps/gateway/src/main.ts`); live run and study pages poll through the
+  API. Lengthening the sweep alone cannot enable scale to zero: the health checks must stop
+  querying Postgres too, with the runner suspended and no other database traffic. Past the cap
+  compute pauses and every call fails. Launch
   (pay as you go) is $0.106 per CU-hour and $0.35 per GB-month. After Nov 4 check Neon's
   console usage ([TODO.md](TODO.md)).
-- **Scale to zero** costs the first query after 5 idle minutes a cold start. postgres.js is
-  expected to reconnect and succeed; it is a cutover check, not yet seen.
+- **Scale to zero** costs the first query after a suspend a cold start. Checked 2026-10-30: with
+  the compute suspended through Neon's API, the API's next sign-in and runs list answered in 1.2 s
+  with no connection error (postgres.js replaces the connections Neon closed).
 - **Backups** are the 6-hour history only. Take a `pg_dump` before anything risky.
 
 **A dump or restore** connects from the operator's machine to the direct URL (Neon has no
@@ -230,4 +238,11 @@ its own variables (names in [../../runner/.context/deploy.md](../../runner/.cont
 ## Checked on staging (2026-10-28, on Railway)
 
 - `RUN_LIMITS_*` were set as in the table above and applied: a guest's second concurrent start answered 409 (`DEMO_PER_CALLER=1`).
-- Not yet checked on Render: fill in at cutover.
+
+## Checked on Render (2026-10-30, at cutover)
+
+- `/health` 200 on the API and gateway; the copied database served the test account's runs and studies.
+- Client IP: `true-client-ip` (above). Host routing: a request with the gateway's SNI and the API's `Host`
+  reaches the API (#236); accepted while a guest runs only on their own key.
+- A full mouse-oa run (OA7-1R, 778f0937) completed across two API redeploys with no run effect.
+- Neon: the first query after a forced suspend answered in 1.2 s with no error.

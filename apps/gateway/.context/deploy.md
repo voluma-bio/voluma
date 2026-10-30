@@ -55,7 +55,7 @@ the gateway. The maximum stream duration was measured later (run 3, above).
 
 ## Setup
 
-Service `voluma-gateway` (`<GATEWAY_ID>`), domain `https://voluma-gateway.onrender.com` (the
+Service `voluma-gateway` (`srv-dbidaf3l550s73btnpfg`), domain `https://voluma-gateway.onrender.com` (the
 runner reads it as `RENDER_EXTERNAL_URL`). Settings, all in `render.yaml`:
 
 | Setting | Value |
@@ -79,6 +79,7 @@ Variables:
 | `GATEWAY_META_API_KEY` | our Meta key (SAM) |
 | `GATEWAY_ANTHROPIC_API_KEY`, `GATEWAY_OPENAI_API_KEY` | not in the yaml: those providers are disabled in code |
 | `PORT` | not set: Render's injected 10000 (the code's default is 8080) |
+| `HOST` | not set (all interfaces); `pnpm dev` sets 127.0.0.1 |
 | `GATEWAY_DRAIN_SECONDS` | `60` (the code's default), written in the yaml next to the shutdown delay |
 | `GATEWAY_<PROVIDER>_BASE_URL` | not in the yaml; only for pointing at a stub |
 | `RENDER_INSTANCE_ID` | Render's; names the instance in `provider_calls.instance` |
@@ -89,7 +90,7 @@ Keys live in this service's env only. The runner has `VOLUMA_GATEWAY_URL` and th
 Checks at cutover: `/health` 200; a POST on a route with no or a bad token 401; a path outside
 the routes 403; boot log `up on :10000; keys for meta`, then `boot sweep done` (the API's migration had run).
 
-Things only the deployed Render service can show: whether its proxy routes by `Host` (the
-Railway result is above: a sandbox reached the API with the gateway's SNI and the API's `Host`;
-guest sign-in stays closed until this is known), its maximum request duration on a long stream,
+Render's proxy routes by `Host`, as Railway's did: a request with the gateway's SNI and the API's
+`Host` reaches the API (checked 2026-10-30, #236); accepted while a guest runs only on their own key.
+Still unmeasured on Render: its maximum request duration on a long stream,
 how long a response may stay silent, and the real size of Meta's `response.completed` line.

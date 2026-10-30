@@ -205,6 +205,38 @@ Why not in the runner: its one Node thread receiving and decoding Meta's 100+ MB
 the heartbeat and the run stopped itself (design `infrastructure.md` §6 and `evidence/findings.md` in voluma-bio/docs).
 Why TypeScript: the decoder takes seconds there and minutes in Python.
 
+# Runner: the local test loop (edit a skill, run, read the result)
+
+An agent in its own worktree tries a workflow change on the real system like this:
+
+1. `pnpm db:up` once, then `pnpm dev`. With `VOLUMA_META_API_KEY` in `.env` it also starts the gateway
+   (this worktree's database, a per-launch secret) and a Cloudflare quick tunnel to it, and writes the
+   tunnel's URL and the secret to `.dev/env.json`, where a local runner reads them. Wait for the
+   `gateway https://…trycloudflare.com` line before starting the runner.
+2. `RUNNER_MODEL=deepseek/deepseek-flash pnpm --filter @voluma/runner start` (set in `.env` or the shell:
+   one cheap model for every role; `RUNNER_THINKING` as usual). Meta SAM is the only paid call and goes
+   through the local gateway, about $0.05 each.
+3. `pnpm --filter @voluma/runner try-run [--scan <inputId>] [--workflow <id>] [--outputs a,b] [--notes …]`
+   (`src/try-run.ts`) signs in as `WORKOS_TEST_EMAIL`, starts a study and run on the reference scan,
+   follows the run's event stream until it ends and prints per-task status, outputs reported and missing,
+   cost and the run page. Exit 1 when the run failed or was cancelled, 2 when the script itself broke
+   (no `pnpm dev`, sign-in or API errors), 3 when no runner claimed the run in 3 minutes. Edits to `workflows/` are read from
+   the checkout when a run starts, so edit, then try-run again.
+4. `sandboxes:clean --run <id>` for each run, as always.
+
+Why a tunnel: sandboxes run on Modal and reach only an https host from an allowlist, never `localhost`.
+A Cloudflare quick tunnel (`cloudflared` npm package runs it; `pnpm dev` downloads the pinned official release once into
+`~/.cache/voluma/cloudflared-<version>` and checks its sha256, kept in `tools/dev.mjs`) needs no account, no system install, works on Linux and macOS (also ARM), and gives
+each `pnpm dev` its own random URL, so worktrees share nothing. The URL is public, so the gateway's token
+check is the only door: a request with no or a bad token is 401. Costs: a download on first use, a new URL
+per launch (restart the runner after `pnpm dev` restarts; the runner reads the gateway once, and its
+boot line says `gateway <url>` or `gateway off`), and quick tunnels are best effort (Cloudflare
+gives no uptime promise). Tried and not chosen: Tailscale Funnel (ties it to one person's tailnet; fixed
+hostname and shared ports), Modal's own tunnel (exposes a port of a sandbox, it cannot reach back to this
+machine), localtunnel (no binary, but flaky and gates browsers behind a page).
+Without the tunnel (no Meta key, download or hash check failed, no network) `pnpm dev` says so and writes no gateway URL:
+runs work, sandboxes have no network and `segment_sam` is not offered.
+
 # Runner: `dev-sandbox` drives the real sandbox, tools and gateway without a model
 
 `pnpm --filter @voluma/runner dev-sandbox --run <id> [--role worker]` (`src/dev-sandbox.ts`) claims the next

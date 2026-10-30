@@ -45,8 +45,10 @@ export type Thread = {
   /** The attempts it opened, in order (`attempt.opened` ids): a redo resumes the same thread. */
   attempts: string[];
   model?: string;
-  /** Its latest start: a resumed thread's clock counts from its resume. */
+  /** Its latest start: the clock's running part counts from here. */
   startedAt: string;
+  /** Seconds it worked before its latest start (a resume after an end, a restart or a redo). */
+  workedBefore: number;
   /** Where its clock stops: its end, the run's end, or its last event while paused. */
   endedAt?: string;
   status: ThreadStatus;
@@ -94,6 +96,7 @@ function threadsOf(events: RunEvent[]): { threads: Thread[]; lastAt: Map<string,
   const own = new Map<string, RunEvent[]>();
   for (const e of events) {
     const t = threads.get(e.threadId);
+    const before = lastAt.get(e.threadId);
     lastAt.set(e.threadId, e.createdAt);
     const mine = own.get(e.threadId);
     if (mine) mine.push(e);
@@ -101,6 +104,9 @@ function threadsOf(events: RunEvent[]): { threads: Thread[]; lastAt: Map<string,
     switch (e.type) {
       case "thread.started":
         if (t) {
+          // The earlier part ran to its end or, cut off by a lost runner, to its last event.
+          const until = t.endedAt ?? before ?? t.startedAt;
+          t.workedBefore += Math.max(0, Date.parse(until) - Date.parse(t.startedAt)) / 1000;
           t.status = "running";
           t.startedAt = e.createdAt;
           t.endedAt = undefined;
@@ -114,6 +120,7 @@ function threadsOf(events: RunEvent[]): { threads: Thread[]; lastAt: Map<string,
             attempts: [],
             model: e.payload.model,
             startedAt: e.createdAt,
+            workedBefore: 0,
             status: "running",
             toolCalls: 0,
             toolErrors: 0,
@@ -123,7 +130,8 @@ function threadsOf(events: RunEvent[]): { threads: Thread[]; lastAt: Map<string,
         if (t) {
           t.status = e.payload.status;
           t.error = e.payload.error;
-          t.endedAt = e.createdAt;
+          // A later cancel can invalidate finished work without adding working time.
+          t.endedAt ??= e.createdAt;
           running.delete(e.threadId);
         }
         break;
@@ -215,15 +223,35 @@ export function agentTree(threads: Thread[]): AgentNode[] {
   return roots;
 }
 
-/** "Segmentation: the AI's work", "Segmentation: second AI check", "Lead AI". */
-export const threadName = (t: Pick<Thread, "kind" | "taskId">) =>
-  t.kind === "worker" && t.taskId
-    ? `${taskTitle(t.taskId)}: the AI's work`
-    : t.kind === "check" && t.taskId
-      ? `${taskTitle(t.taskId)}: second AI check`
-      : t.kind === "chat"
-        ? "Chat"
-        : "Lead AI";
+/**
+ * An agent's name where its task is already shown: "The AI's work, 2 tries", "Second AI check of
+ * try 1", "Lead AI". A check's try is its `attemptId`'s place among its worker's attempts.
+ */
+export function agentLabel(t: Thread, threads: Thread[]): string {
+  switch (t.kind) {
+    case "main":
+      return "Lead AI";
+    case "worker":
+      return t.attempts.length > 1 ? `The AI's work, ${t.attempts.length} tries` : "The AI's work";
+    case "check": {
+      const attemptId = t.attemptId;
+      const tries = attemptId
+        ? threads.find((w) => w.attempts.includes(attemptId))?.attempts
+        : undefined;
+      return tries && tries.length > 1 && attemptId
+        ? `Second AI check of try ${tries.indexOf(attemptId) + 1}`
+        : "Second AI check";
+    }
+    case "chat":
+      return "Chat";
+    default:
+      return "Agent";
+  }
+}
+
+/** An agent's name anywhere: "Segmentation: Second AI check of try 2", "Lead AI". */
+export const agentTitle = (t: Thread, threads: Thread[]) =>
+  t.taskId ? `${taskTitle(t.taskId)}: ${agentLabel(t, threads)}` : agentLabel(t, threads);
 
 export type TaskState =
   /** Not started, and a task it builds on has no usable result yet. */
@@ -263,7 +291,7 @@ export type NeedItem = {
   image?: Asset;
   accepted: boolean;
   /**
-   * A check item "Looks right" can accept; "K to check" counts these (`progress`). A task left
+   * A check item "Looks right" can accept; "K items to check" counts these (`progress`). A task left
    * To check with no item (its check sent it back, or a required value is missing) still gets
    * a card, with nothing to accept.
    */
