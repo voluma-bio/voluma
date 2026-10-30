@@ -9,9 +9,9 @@
  *
  * Gateway-made refusals are JSON `{error: {type: "gateway", message}}` with 401 (token or run
  * revoked), 402 (spend cap), 403 (route, model, provider or key not allowed), 429 (calls in
- * flight), 502 (provider unreachable) or 503 (database, or draining). A model call that asks for
+ * flight), 502 (provider unreachable) or 503 (database, or draining). A Meta model call that asks for
  * `text/event-stream` is instead answered 200 at once after admission, and an upstream failure
- * (status or unreachable) ends the stream with one `event: error`. A call lasts at most
+ * (status or unreachable) ends the stream with one `event: gateway-error`. A call lasts at most
  * `MAX_CALL_MS`, then it is aborted and cut. A call whose row cannot be written is
  * not made. Nothing from a body is stored or logged.
  */
@@ -58,7 +58,7 @@ const UPSTREAM_TIMEOUT_MS = MAX_CALL_MS;
 const KEEPALIVE_MS = 60_000;
 /** Tries to write a call's end to the database before leaving the row for the stale sweep. */
 const SETTLE_ATTEMPTS = 3;
-/** How much of a failed upstream reply an `error` event carries. */
+/** How much of a failed upstream reply an `gateway-error` event carries. */
 const ERROR_EXCERPT_BYTES = 1024;
 
 const HOP_BY_HOP = new Set([
@@ -266,9 +266,10 @@ export function createGateway(deps: GatewayDeps) {
     // A model call that asks for an event stream is answered at once with 200 and the stream's
     // headers, so Railway's edge (which cuts a response with no byte for 300 s) sees bytes
     // while Meta holds its own headers. The upstream's outcome then travels in the stream: its
-    // body on 2xx, one `error` event otherwise.
+    // body on 2xx, one `gateway-error` event otherwise.
     const early =
-      matched.route.kind === "model" && (req.headers.accept ?? "").includes("text/event-stream");
+      matched.route.earlyStream === true &&
+      (req.headers.accept ?? "").includes("text/event-stream");
     // Keepalive comments go out after 60 s of quiet, and only at a line start (the last byte
     // written is a newline), where a comment line cannot split anything; mid-line nothing is
     // written and the next chunk re-arms the timer.
@@ -292,10 +293,10 @@ export function createGateway(deps: GatewayDeps) {
       res.flushHeaders();
       timer = setTimeout(keepalive, KEEPALIVE_MS);
     }
-    /** Ends an early stream with its one terminal error event. */
-    const failEarly = (upstreamStatus: number | null, excerpt: string) => {
-      const data = JSON.stringify({ upstreamStatus, body: excerpt });
-      res.end(`event: error\ndata: ${data}\n\n`);
+    /** Ends an early stream with its one terminal `gateway-error` event. */
+    const failEarly = (upstreamStatus: number | null, excerpt: string, requestId?: string) => {
+      const data = JSON.stringify({ upstreamStatus, body: excerpt, requestId: requestId ?? null });
+      res.end(`event: gateway-error\ndata: ${data}\n\n`);
     };
 
     let upstream: Awaited<ReturnType<typeof fetch>>;
@@ -326,8 +327,10 @@ export function createGateway(deps: GatewayDeps) {
       clearTimeout(timer);
       const excerpt = await excerptOf(upstream.body, ERROR_EXCERPT_BYTES).catch(() => "");
       await end({ status: "failed", costUsd: 0, httpStatus: upstream.status, ttfbMs });
-      log(`${id} ${provider} ${req.method} ${call.upstreamPath} ${upstream.status} error event`);
-      return failEarly(upstream.status, excerpt);
+      log(
+        `${id} ${provider} ${req.method} ${call.upstreamPath} ${upstream.status} gateway-error event`,
+      );
+      return failEarly(upstream.status, excerpt, upstream.headers.get("x-request-id") ?? undefined);
     }
     const encoded = upstream.headers.has("content-encoding");
     const out: Record<string, string> = {};

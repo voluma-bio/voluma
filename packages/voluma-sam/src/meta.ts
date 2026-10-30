@@ -32,11 +32,13 @@ async function failure(res: Response): Promise<string> {
   return `${res.status} ${(await res.text()).slice(0, 500)}`;
 }
 
+const GATEWAY_ERROR = "event: gateway-error";
+
 /**
  * The gateway answers a streaming call with 200 and event-stream headers at once, before Meta
- * has answered, and reports a failed upstream as one `event: error` whose data is
- * `{upstreamStatus, body}` (after any `:` keepalive comments). This turns that event back into
- * the reply it stands for (`upstreamStatus` as the status, 502 when null or invalid, `body` as
+ * has answered, and reports a failed upstream as one `event: gateway-error` whose data is
+ * `{upstreamStatus, body, requestId}` (after any `:` keepalive comments). This turns that event
+ * back into the reply it stands for (`upstreamStatus` as the status, 502 when null or invalid, `body` as
  * the text), so the callers see the statuses Meta gave. A stream that starts any other way is
  * returned as it is, unread past its first bytes.
  */
@@ -45,23 +47,24 @@ async function streamReply(pending: Promise<Response>): Promise<Response> {
   if (!res.ok || !res.body) return res;
   const reader = res.body.getReader();
   const seen: Uint8Array[] = [];
+  const decoder = new TextDecoder();
   let head = "";
   let rest = "";
   let ended = false;
-  while (!ended && (rest.length < "event: error".length || rest.startsWith(":"))) {
+  while (!ended && (rest.length < GATEWAY_ERROR.length || rest.startsWith(":"))) {
     const next = await reader.read();
     if (next.done) {
       ended = true;
       break;
     }
     seen.push(next.value);
-    head += Buffer.from(next.value).toString("latin1");
+    head += decoder.decode(next.value, { stream: true });
     rest = head.replace(/^(?:\r?\n|:[^\n]*\n)+/, "");
   }
-  if (rest.startsWith("event: error")) {
+  if (rest.startsWith(GATEWAY_ERROR)) {
     let text = head;
     for (let read = await reader.read(); !read.done; read = await reader.read()) {
-      text += Buffer.from(read.value).toString("utf8");
+      text += decoder.decode(read.value, { stream: true });
       if (text.length > 64 * 1024) break;
     }
     const data = /^data: (.*)$/m.exec(text)?.[1];
