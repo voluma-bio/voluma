@@ -183,5 +183,5 @@ export function mainRestartPrompt(
   workflow: WorkflowFiles,
   notes: string | undefined,
 ): string {
-  return `The run is under way. The main agent before you is gone, and whatever it had in mind went with it: start from the record, and trust the lists below over anything you assume.\n\n## The state of the run\n\n${state}\n\n${planBlock(view, workflow)}\n\n${deliverableBlock(selected, workflow)}${notesBlock(notes)}`;
+  return `The main agent before you is gone, and whatever it had in mind went with it: start from the record, and trust the lists below over anything you assume.\n\n## The state of the run\n\n${state}\n\n${planBlock(view, workflow)}\n\n${deliverableBlock(selected, workflow)}${notesBlock(notes)}`;
 }

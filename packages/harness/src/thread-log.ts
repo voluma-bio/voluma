@@ -12,7 +12,13 @@
  * no end and it is not running). A stop appends the end first, so the log shows it at once.
  */
 import type { RunEvent } from "@voluma/contracts/events";
-import { abandonedEvents, corrections, type Folded, fold } from "@voluma/contracts/fold";
+import {
+  abandonedEvents,
+  type Correction,
+  corrections,
+  type Folded,
+  fold,
+} from "@voluma/contracts/fold";
 import type { EvidenceRef } from "@voluma/contracts/output";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { UserSender } from "./adapters/pi/start-thread";
@@ -127,8 +133,10 @@ export type Notice = {
         box?: { min: number[]; max: number[] };
       }[];
       snapshot?: string;
-      /** A go: `live` when it lies in the open correction, `cancelled` when its correction ended unfinished. */
-      go?: "live" | "cancelled";
+      /** The message carries a go (`taskId` names its task). */
+      go?: true;
+      /** How its correction closed (`corrections`): `abandoned` withdraws the message and its go. */
+      closed: Correction["closed"];
     }
 );
 
@@ -316,7 +324,9 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         break;
       case "person.message": {
         const { text, marks, snapshotKey, go, taskId } = e.payload;
-        unanswered = true;
+        // A message with no span (sent while the run was live, before corrections) counts as open.
+        const closed = spans.find((s) => s.message === e.id)?.closed ?? "open";
+        if (closed !== "abandoned") unanswered = true;
         notice(
           {
             eventId: e.id,
@@ -330,7 +340,8 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
               ...(m.box && { box: m.box }),
             })),
             ...(snapshotKey && { snapshot: `/scratch/${snapshotKey.split("/scratch/")[1]}` }),
-            ...(go && { go: open?.message === e.id ? ("live" as const) : ("cancelled" as const) }),
+            closed,
+            ...(go && { go: true as const }),
             ...(taskId && { taskId }),
           },
           at,

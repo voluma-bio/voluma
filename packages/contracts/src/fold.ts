@@ -230,6 +230,10 @@ export type Correction = {
   go: { taskId: string; markerAt: number | undefined; redone: boolean } | undefined;
   /** The `/outputs` backup (`outputs-backup.ts`): the latest `outputs.*` event keyed to this reopen. */
   backup: "none" | "backed-up" | "restored" | "discarded";
+  /** A main-agent `reply` lies in the span. */
+  replied: boolean;
+  /** The claim finished: the root thread ended after the reopen and the span was not abandoned. */
+  claimEnded: boolean;
 };
 
 /** The id of the `revision.started` the loop writes when the main agent is told of a go. */
@@ -246,6 +250,7 @@ export function corrections(events: readonly RunEvent[]): {
 } {
   const spans: Correction[] = [];
   const byReopen = new Map<string, Correction>();
+  let root: string | undefined;
   for (const [i, e] of events.entries()) {
     const span = spans.at(-1);
     switch (e.type) {
@@ -262,6 +267,8 @@ export function corrections(events: readonly RunEvent[]): {
           message: undefined,
           go: undefined,
           backup: "none",
+          replied: false,
+          claimEnded: false,
         };
         spans.push(next);
         byReopen.set(e.id, next);
@@ -274,6 +281,15 @@ export function corrections(events: readonly RunEvent[]): {
             span.go = { taskId: e.payload.taskId, markerAt: undefined, redone: false };
           }
         }
+        break;
+      case "reply":
+        if (span) span.replied = true;
+        break;
+      case "thread.started":
+        if (e.payload.kind === "supervisor") root = e.threadId;
+        break;
+      case "thread.ended":
+        if (span?.closed === "open" && e.threadId === root) span.claimEnded = true;
         break;
       case "revision.started":
         if (span?.go && span.message !== undefined && e.id === goMarkerId(span.message)) {
@@ -308,14 +324,22 @@ export function corrections(events: readonly RunEvent[]): {
   return { spans, open: last?.closed === "open" ? last : undefined };
 }
 
-/** The ids of the task-state events inside abandoned corrections (of `events`, or the `spans` given). */
+/**
+ * The ids of the task-state events inside abandoned corrections (of `events`, or the `spans`
+ * given); with `unfinished`, also those of the open correction until its claim ends (review holds
+ * a correction back until it finishes, so it shows the last completed revision meanwhile).
+ */
 export function abandonedEvents(
   events: readonly RunEvent[],
   spans: readonly Correction[] = corrections(events).spans,
+  unfinished = false,
 ): Set<string> {
   const abandoned = new Set<string>();
   for (const span of spans) {
-    if (span.closed !== "abandoned") continue;
+    if (
+      !(span.closed === "abandoned" || (unfinished && span.closed === "open" && !span.claimEnded))
+    )
+      continue;
     for (const e of events.slice(span.reopened, span.to))
       if (TASK_STATE.has(e.type)) abandoned.add(e.id);
   }
@@ -343,7 +367,8 @@ type Attempt = {
   citedScratch: Set<string>;
 };
 
-export function fold(events: readonly RunEvent[]): Folded {
+/** `holdOpenCorrection`: fold as of the last completed revision, skipping a correction still in progress (review). */
+export function fold(events: readonly RunEvent[], holdOpenCorrection = false): Folded {
   const threadKind = new Map<string, ThreadKind>();
   const threadModel = new Map<string, string>();
   const attempts = new Map<string, Attempt>();
@@ -711,7 +736,7 @@ export function fold(events: readonly RunEvent[]): Folded {
     return { tasks, volumes, structures, surfaces, annotations };
   };
 
-  const abandoned = abandonedEvents(events);
+  const abandoned = abandonedEvents(events, undefined, holdOpenCorrection);
   for (const e of events) {
     if (abandoned.has(e.id)) continue;
     switch (e.type) {
