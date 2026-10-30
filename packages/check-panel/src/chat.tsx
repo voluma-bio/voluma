@@ -215,7 +215,7 @@ export function Chat({
         ...(!go && marks.length > 0 && { marks }),
         ...(blob && { snapshot: { mimeType: "image/png", data: await base64(blob) } }),
       });
-      return { response, noPicture: blob === null };
+      return { response, noPicture: !go && blob === null };
     },
     onSuccess: ({ response, noPicture }, { go }) => {
       client.setQueryData<Run>(["run", run.id], (r) => r && { ...r, state: response.state });
@@ -300,7 +300,7 @@ export function Chat({
           {status}
         </p>
       )}
-      {waiting && (
+      {waiting && go === undefined && (
         <div className="flex flex-col gap-1.5">
           <Button
             variant="primary"

@@ -11,11 +11,13 @@ import { useEffect, useRef } from "react";
 export type StreamClosed = { at: number; failures: number };
 
 /**
- * Calls `reopen` once a read of the run made after the stream closed (`readAt`, the query's
- * `dataUpdatedAt`) says the run isn't ended: a message reopened it, or the stream failed
- * mid-claim. A run read from before the close can't say, so the stream never reopens on it:
- * a claim's end reaches the stream before the next poll does. Errors in a row (a 502 while
- * the API deploys) wait 1 s, 2 s, 4 s… up to 30 s after the first.
+ * Calls `reopen` once a read of the run that landed after the stream closed (`readAt`, the
+ * query's `dataUpdatedAt`) says the run isn't ended: a message reopened it, or the stream
+ * failed mid-claim. A read that landed before the close can't say, so the stream never reopens
+ * on it. `dataUpdatedAt` is when a read landed, not when it left, so a poll in flight across a
+ * claim's end can still say `running` and cost one or two extra stream requests; the ended-run
+ * retry below bounds it. Errors in a row (a 502 while the API deploys) wait 1 s, 2 s, 4 s… up
+ * to 30 s after the first.
  *
  * Once the run has ended, a stream that closed on an error reopens once more, for the events
  * it missed if it failed before the claim ended. Only once: the server answers 204 when nothing
