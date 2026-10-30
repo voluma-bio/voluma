@@ -13,9 +13,9 @@ import { runIdSchema } from "@voluma/contracts/ids";
 import { asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
+import { events, inputs, piMessages, runs, threads } from "../src/domains/run/schema";
 import { databaseUrl } from "./operator";
 import { devWritePrefix, r2FromEnv, r2Prefix, uploadDir } from "./r2-dir";
-import { events, inputs, piMessages, runs, threads } from "./schema";
 
 const { values } = parseArgs({ options: { id: { type: "string" }, out: { type: "string" } } });
 if (!values.id || !values.out)

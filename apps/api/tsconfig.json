@@ -5,5 +5,5 @@
     "types": ["node"],
     "jsx": "preserve"
   },
-  "include": ["src", "drizzle.config.ts"]
+  "include": ["src", "scripts", "drizzle.config.ts"]
 }

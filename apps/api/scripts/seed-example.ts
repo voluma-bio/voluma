@@ -26,9 +26,6 @@ import {
 import { asc, eq, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { backfillRows, readBackfill, uploadBackfill } from "./backfill";
-import { databaseUrl } from "./operator";
-import { r2FromEnv, required, withLocalDir } from "./r2-dir";
 import {
   EXAMPLES_OPERATOR,
   events,
@@ -39,7 +36,10 @@ import {
   studies,
   studyScans,
   threads,
-} from "./schema";
+} from "../src/domains/run/schema";
+import { backfillRows, readBackfill, uploadBackfill } from "./backfill";
+import { databaseUrl } from "./operator";
+import { r2FromEnv, required, withLocalDir } from "./r2-dir";
 
 const { values } = parseArgs({
   options: {

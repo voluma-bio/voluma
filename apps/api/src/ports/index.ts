@@ -44,8 +44,8 @@ export type RunRecords = {
     runId: string,
     decision: (record: RunRecord) => ReviewDecision | null,
   ): Promise<RunRecord | null>;
-  /** Whether `reader` can read the run, without reading its log. */
-  readable(reader: Reader, runId: string): Promise<boolean>;
+  /** The run's `generation` when `reader` can read it, else null; reads no log. */
+  readable(reader: Reader, runId: string): Promise<{ generation: string } | null>;
 };
 
 /** Why a message to a run was refused, as the route answers it. */

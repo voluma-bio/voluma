@@ -19,9 +19,17 @@ import { eq, getTableColumns, sql } from "drizzle-orm";
 import type { PgTable } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
+import {
+  events,
+  inputs,
+  piMessages,
+  runs,
+  studies,
+  studyScans,
+  threads,
+} from "../src/domains/run/schema";
 import { databaseUrl } from "./operator";
 import { withLocalDir } from "./r2-dir";
-import { events, inputs, piMessages, runs, studies, studyScans, threads } from "./schema";
 
 const { values } = parseArgs({
   options: { from: { type: "string" }, replace: { type: "boolean" }, remote: { type: "boolean" } },

@@ -159,7 +159,7 @@ An agent checks staging as a signed-in user with `POST /api/auth/password` (`WOR
 `WORKOS_TEST_PASSWORD`) sending `Origin: <APP_URL>` and `Content-Type: application/json`: the
 CSRF check answers any request that changes state without a bearer token, sign-in included,
 `403 forbidden origin` without the first and `415` without the second. Keep every `Set-Cookie`
-(`upload-scan.ts` shows how). Reading runs needs no sign-in: `Authorization: Bearer
+(`scripts/upload-scan.ts` shows how). Reading runs needs no sign-in: `Authorization: Bearer
 $VOLUMA_DEBUG_TOKEN` reads every lab's runs.
 
 ## The database (Neon)

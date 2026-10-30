@@ -107,14 +107,16 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   run whose keys its process doesn't hold to `awaiting-keys`. The vault holds at most 100
   runs per org (429), and `index.ts` caps ordinary `/api` bodies at 256 KB (8 MB on
   `/api/run/ingest/*`, the trusted runner; 12 MiB only on screenshot POSTs).
+- Operator CLIs (seed, export and import a run, `r2:put`, `upload:scan`) live in `scripts/`,
+  not in a domain; they read the database and R2 directly.
 - **Limits come from env** (`RUN_LIMITS_<ORG>_*`, read in `index.ts`); the workflow catalog
   (`@voluma/workflow/bundled`) is code. `seed:example --from <runId> [--backfill <dir|r2:prefix>] [--remote]` makes an example run (it copies the source's `evidence/`, `review/`, `scratch/person/` and `outputs/` under the example's prefix)
-  (`src/domains/run/seed-example.ts`; it needs `GUEST_ORGANIZATION_ID`, the Demo organization, in `.env`). To get a run into a fresh local database:
+  (`scripts/seed-example.ts`; it needs `GUEST_ORGANIZATION_ID`, the Demo organization, in `.env`). To get a run into a fresh local database:
   `export:run --id <runId> --out <dir|r2:dev/…>` dumps its rows to `run.json`, and
   `import:run --from <dir|r2:prefix> [--replace]` loads them (events are checked with
   `runEventSchema`; an existing run is refused without `--replace`). Evidence stays in R2.
   `r2:put --from <dir> --to r2:dev/<prefix>` uploads a folder. An `r2:` location is a prefix in the
-  `R2_BUCKET` the dev servers use (`r2-dir.ts`). Operator scripts use `DATABASE_URL`, else the
+  `R2_BUCKET` the dev servers use (`scripts/r2-dir.ts`). Operator scripts use `DATABASE_URL`, else the
   database `pnpm dev` wrote to `.dev/env.json`; each prints its database and bucket first, writes to
   R2 only under `dev/`, and `import:run` / `seed:example` refuse a non-local database without
   `--remote`. R2 is shared with staging, so a local seed names its example
@@ -126,8 +128,9 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
 
 - `index.ts` is a mount list, like the run domain's. `runs.ts` serves `GET /runs/:runId`: the
   run's `ReviewRun` (`@voluma/contracts/review`), built on each read by `review-run.ts` from
-  `fold` over the run's whole event log, plus what `fold` leaves to the API. It parses the
-  result with `reviewRunSchema`, so a bad build is a 500, never invalid data.
+  `fold` over the run's whole event log, plus what `fold` leaves to the API. Nothing
+  re-validates it on the way out: the fold's resolvers guarantee no duplicate or dangling
+  id, and `reviewIntegrityIssues` (`fold-test-log.ts`) checks that in the fold tests.
 - It reads runs and writes human decisions only through `RunRecords` (`src/ports`), wired
   to Run's `pg-run-records.ts`. Reads use one repeatable-read snapshot. Decisions hold
   the existing event-sequence lock **before** the run-row lock, then validate and append
@@ -145,8 +148,8 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   examples with reused sequence numbers. Cache misses load only fold/review
   events; hits load no event payloads. The event log remains the only durable human-decision state.
 - `inputs.ts` owns `/inputs/:inputId/download` and `/inputs/:inputId/file`, guarded by
-  `requireUser` only under `/inputs/:inputId/*`. Both authorize through `ReviewInputs`
-  and `readerOf` before using `ReferenceArchive`. Reject HEAD before opening R2; keep
+  `requireUser` only under `/inputs/:inputId/*`. Both allow only the
+  caller's org's reference scan (`referenceInputId(user.labId)`) before using `ReferenceArchive`. Reject HEAD before opening R2; keep
   the descriptor's ETag pin and stream the file without buffering.
 - `runs.ts` also serves `GET /runs/:runId/files/:sha256`: one of the run's content-addressed
   files (`evidenceKey`) through `RunFiles` (`r2-run-files.ts`), after `RunRecords.readable`.

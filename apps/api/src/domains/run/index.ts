@@ -3,7 +3,7 @@
  * mount list: each file owns its routes and its guard.
  *   runs.ts    the run routes (users and guests; the reads also take the debug token)
  *   studies.ts the browser's study routes: create (with its first runs), list, get
- *   inputs.ts  the browser's scans: list, and upload (members); `upload-scan.ts` is the CLI for it
+ *   inputs.ts  the browser's scans: list, and upload (members); `scripts/upload-scan.ts` is the CLI for it
  *   stream.ts  the server-sent event stream of a run's stored events (users, debug token)
  *   ingest.ts  the runner's claim, heartbeat, report, events and history (bearer token)
  * RunDeps lists what it needs; index.ts supplies the adapters (the queue is built with the limits and the key vault). The factory
