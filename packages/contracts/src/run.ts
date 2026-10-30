@@ -8,7 +8,8 @@
  *   POST /api/run/runs             body `startRunRequestSchema` → 200 `runSchema`: one
  *                                  run of a scan of an existing study (404 for an
  *                                  unreadable `studyId` or an `inputId` the study lacks;
- *                                  409 and 429: see Limits). `POST /api/run/studies`
+ *                                  409 and 429: see Limits; 400 for a `selectedOutputs` id that is
+ *                                  not a measurement or score of the study's workflow). `POST /api/run/studies`
  *                                  (`study.ts`) creates a study and starts its first runs.
  *   GET  /api/run/runs             → 200 `listRunsResponseSchema`, newest first
  *   GET  /api/run/runs/:id         → 200 `runSchema`
@@ -122,12 +123,9 @@
  *     kind (none for an org whose members share one account); another answers
  *     409;
  *   - for `voluma` runs only: runs at once (a claim takes a `queued` run only
- *     while the org is under it), runs per day, and a dollar ceiling counted
- *     from the usage the runner reports with its heartbeats (`runner.ts`), whose
- *     sum the run record shows as `usage`. The daily and dollar limits answer
- *     429 when work starts and are checked again when a claim dequeues a run; a
- *     run refused at dequeue, or a running one that crosses the dollar ceiling,
- *     ends `failed` with an `error`. The daily limit counts a run once, so a
+ *     while the org is under it) and runs per day. The daily limit answers
+ *     429 when work starts and is checked again when a claim dequeues a run; a
+ *     run refused at dequeue ends `failed` with an `error`. The daily limit counts a run once, so a
  *     recovered run isn't refused for a limit it already passed;
  *   - for `visitor` runs: at most this many `queued` or `running` in the org
  *     (those hold the visitor's keys in the server's memory, or a runner
@@ -302,7 +300,7 @@ export const startRunRequestSchema = z.object({
   studyId: studyIdSchema,
   /** One of the study's scans. */
   inputId: inputIdSchema,
-  /** As `runSchema.selectedOutputs`; an id the workflow's `outputs.json` lacks fails the run at start, with that message. */
+  /** As `runSchema.selectedOutputs`; an id that is not a measurement or score of the study's workflow is refused with 400. */
   selectedOutputs: selectedOutputsSchema.min(1).optional(),
   notes: z.string().max(4000).optional(),
   /** Present: the run uses these (`credentials: "visitor"`) and skips the org's runs-at-once count. */

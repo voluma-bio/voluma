@@ -41,7 +41,7 @@ export function studiesRoutes({ studies, queue }: RunDeps) {
         },
       },
     );
-    if ("refused" in result) return refusal(c, result.refused);
+    if ("refused" in result) return refusal(c, result.refused, result.detail);
     const detail = await studies.get(reader, result.studyId);
     if (!detail) throw new Error(`study ${result.studyId} vanished after it was created`);
     return c.json(detail);

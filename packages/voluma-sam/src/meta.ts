@@ -125,8 +125,6 @@ export function metaClient(options: { url: string; token: string; log(line: stri
     if (res.status === 401)
       throw new Failure(`${what}: the gateway refused this run's token (${detail})`, true);
     if (res.status >= 500) throw new Failure(`${what}: ${detail}`, true);
-    if (res.status === 402)
-      throw new Failure(`${what}: the run's spend cap is reached (${detail})`);
     throw new Failure(`${what}: ${detail}`);
   }
 

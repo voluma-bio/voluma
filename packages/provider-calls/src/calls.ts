@@ -1,14 +1,14 @@
 /**
  * The gateway's database side, which the API shares: admit a call (one transaction under the
  * run's row lock), settle it, close rows left open, and sum a run's calls. The `runs` columns it
- * reads are named in SQL (`state`, `lease_token`, `lease_expires_at`, `model_cost_usd`,
- * `cost_cap_usd`), so nothing here imports the API.
+ * reads are named in SQL (`state`, `lease_token`, `lease_expires_at`, `credentials`), so
+ * nothing here imports the API.
  *
- * Nothing is held at admission. A call's cost is its `cost_usd`; a call that ended with none
+ * No spend limit is checked at admission. A call's cost is its `cost_usd`; a call that ended with none
  * (`cut`) has an unknown cost, counted apart and never as an amount. Spend is the sum of known
  * costs, so an `open` call counts nothing until it settles.
  */
-import { and, eq, inArray, ne, type SQL, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { Observed } from "./prices";
 import { providerCalls } from "./schema";
@@ -35,15 +35,13 @@ export type NewCall = {
   visitor: boolean;
 };
 
-export type Refusal = { status: 401 | 402 | 403 | 429; reason: string };
+export type Refusal = { status: 401 | 403 | 429; reason: string };
 
 type RunRow = {
   state: string;
   credentials: string;
   lease_ok: boolean;
   lease_live: boolean;
-  model_cost_usd: number;
-  cost_cap_usd: number | null;
 };
 
 /**
@@ -59,9 +57,7 @@ export function admitCall(db: PostgresJsDatabase, call: NewCall): Promise<Refusa
     const [run] = await tx.execute<RunRow>(sql`
       SELECT state, credentials,
         coalesce(encode(sha256(convert_to(lease_token, 'UTF8')), 'hex') = ${call.leaseHash}, false) AS lease_ok,
-        coalesce(lease_expires_at > now(), false) AS lease_live,
-        cost_cap_usd::float8 AS cost_cap_usd,
-        model_cost_usd::float8 AS model_cost_usd
+        coalesce(lease_expires_at > now(), false) AS lease_live
       FROM runs WHERE id = ${call.runId} FOR UPDATE`);
     if (!run) return { status: 401, reason: "unknown run" };
     if (run.state !== "running") return { status: 401, reason: "the run is not running" };
@@ -83,12 +79,6 @@ export function admitCall(db: PostgresJsDatabase, call: NewCall): Promise<Refusa
       );
     if ((open?.n ?? 0) >= MAX_IN_FLIGHT) {
       return { status: 429, reason: `${MAX_IN_FLIGHT} calls are already in flight` };
-    }
-    if (run.cost_cap_usd !== null) {
-      const spentUsd = run.model_cost_usd + (await knownUsdOfRun(tx, call.runId));
-      if (spentUsd >= run.cost_cap_usd) {
-        return { status: 402, reason: `the run's spend cap of $${run.cost_cap_usd} is reached` };
-      }
     }
     await tx.insert(providerCalls).values({
       id: call.id,
@@ -193,17 +183,4 @@ export async function callsOfRuns(db: Db, runIds: string[]): Promise<Map<string,
     out.set(runId, run);
   }
   return out;
-}
-
-/** SQL for one run's known provider spend, to add to a query over `runs` (the org's daily total). */
-export const knownUsdOf = (runId: SQL): SQL =>
-  sql`(SELECT coalesce(sum(${providerCalls.costUsd}), 0) FROM ${providerCalls} WHERE ${providerCalls.runId} = ${runId})`;
-
-/** One run's known provider spend: the costs of calls that ended with one. */
-export async function knownUsdOfRun(db: Db, runId: string): Promise<number> {
-  const [row] = await db
-    .select({ usd: sql<number>`coalesce(sum(${providerCalls.costUsd}), 0)::float8` })
-    .from(providerCalls)
-    .where(eq(providerCalls.runId, runId));
-  return row?.usd ?? 0;
 }

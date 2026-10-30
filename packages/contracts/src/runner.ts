@@ -65,8 +65,7 @@
  * There is no tokenless call: the runner service is the only claimer.
  *
  * Cancel. The runner learns a run is over from the heartbeat: `stop` is true
- * once the server has ended it (cancelled by the user, or `failed` by the
- * dollar ceiling). The runner stops its threads and sandboxes and reports
+ * once the server has ended it (cancelled by the user). The runner stops its threads and sandboxes and reports
  * nothing more; the server has recorded the end already (`run.ts`). A cancel also ends
  * every open thread `cancelled` and the root last, in the same transaction (`cancelEnds` in
  * `threads.ts`): the runner's writes are refused once the run has ended, so the server writes
@@ -74,14 +73,8 @@
  *
  * Usage. The heartbeat carries the usage since the previous acknowledged
  * heartbeat (`usageSchema`): the dollars of model calls and the seconds of
- * sandbox time. The server adds them up per run, and that sum is what the org's
- * dollar ceiling counts. A heartbeat the server did not acknowledge is resent
- * with its usage added to the next one. The runner sends `costCapUsd` (its
- * `RUNNER_MAX_RUN_COST_USD`) with the claim only when that is set, and the claim
- * stores it as the run's spend cap for the provider gateway to check. Unset, the
- * run has no cap. The heartbeat answers with `spentUsd`,
- * the run's settled spend including its provider calls, so the runner's own cap
- * sees spend that did not come through its heartbeats.
+ * sandbox time. The server adds them up per run. A heartbeat the server did not acknowledge is resent
+ * with its usage added to the next one. Spend is recorded, never limited.
  *
  * Reports. The runner ends the run with `ended`, or gives it up with
  * `released` (a shutdown or a self-stop: its `reason`). Either one ends the
@@ -126,11 +119,6 @@ export type ClaimEndReason = z.infer<typeof claimEndReasonSchema>;
 
 export const claimRequestSchema = z.object({
   runnerId: runnerIdSchema,
-  /**
-   * The runner's `RUNNER_MAX_RUN_COST_USD`; the claim stores it as the run's spend cap, which
-   * the provider gateway checks. Absent: no cap (spend is still recorded).
-   */
-  costCapUsd: z.number().positive().optional(),
 });
 export type ClaimRequest = z.infer<typeof claimRequestSchema>;
 
@@ -168,13 +156,6 @@ export type HeartbeatRequest = z.infer<typeof heartbeatRequestSchema>;
 export const heartbeatResponseSchema = z.object({
   /** The server has ended the run; stop it. */
   stop: z.boolean(),
-  /**
-   * The run's known spend in US dollars: heartbeat-reported model cost, plus the cost of each
-   * provider call that has one. A call cut off with no usage (cost unknown) and a call still
-   * open count nothing. The same provider-call sum as `Run.providerCalls`. Optional until the
-   * API sends it.
-   */
-  spentUsd: z.number().nonnegative().optional(),
 });
 export type HeartbeatResponse = z.infer<typeof heartbeatResponseSchema>;
 
