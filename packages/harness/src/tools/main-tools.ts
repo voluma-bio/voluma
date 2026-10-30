@@ -140,7 +140,7 @@ export function mainTools(deps: MainDeps) {
       });
       if (live) {
         throw new Refusal(
-          `${taskId} has a worker, ${live.id} (${agents.state(d, live.id)}): use \`message\` to steer or resume it, or \`stop_worker\` first.`,
+          `${taskId} has a worker, ${live.id} (${agents.state(d, live.id)}): use \`message\` to steer or resume it, or \`stop_worker\` first${d.threads.get(live.id)?.end?.status === "failed" ? " (a worker that failed keeps its history; for a fresh one, `stop_worker` then `start_worker`)" : ""}.`,
         );
       }
       if (t?.status === "under-review") throw new Refusal(`${taskId} is under review.`);

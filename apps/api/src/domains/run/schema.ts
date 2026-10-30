@@ -178,8 +178,6 @@ export const runs = pgTable(
     lastClaimEnd: text({
       enum: ["shutdown", "self-stop", "lease-expired", "provider-outage"],
     }),
-    /** A `provider-outage` release holds the queued run back until then; `claim` skips it, and clears it on taking the run. */
-    claimableAfter: timestamptz(),
     /** Seq of the latest progress event (`claim-progress.ts`), and the log's last seq when the current claim began. */
     lastProgressSeq: integer().notNull().default(0),
     claimStartSeq: integer().notNull().default(0),

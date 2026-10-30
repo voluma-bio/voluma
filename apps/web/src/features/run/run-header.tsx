@@ -57,14 +57,12 @@ const workflowLabel = (run: Run, study: StudyDetail | undefined) => {
 /**
  * Where the run is, as a status mark beside its progress; the header counts items to check
  * beside it, so the word carries no count. A queued run with a plan has started (it lost its
- * runner), so it reads Paused. One held after the AI's provider failed says so
- * (`waitingForProvider`); its retry time stays off screen.
+ * runner), so it reads Paused.
  */
 function runState(run: Run, started: boolean): { status: Status; label?: string } {
   const { state } = run;
   switch (state.status) {
     case "queued":
-      if (state.waitingForProvider) return { status: "paused", label: "AI unavailable" };
       return { status: started ? "paused" : "waiting" };
     case "running":
       return { status: "running" };
@@ -128,9 +126,7 @@ export function RunHeader({
               {done} of {total} tasks done
             </span>
           )}
-          {state.status === "queued" && !state.waitingForProvider && (
-            <span>Place {state.position} in line</span>
-          )}
+          {state.status === "queued" && <span>Place {state.position} in line</span>}
           {toCheck > 0 && (
             <span className="font-semibold text-check-strong">
               {toCheck} {toCheck === 1 ? "item" : "items"} to check

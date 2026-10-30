@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { endClaim, isProgress, outageDelayMinutes, stalledError } from "./claim-progress";
+import { endClaim, isProgress, stalledError } from "./claim-progress";
 
 const run = (over: Partial<Parameters<typeof endClaim>[0]> = {}) => ({
   lastProgressSeq: 5,
@@ -30,21 +30,6 @@ describe("endClaim", () => {
   it("fails the run on the third counted claim", () => {
     expect(endClaim(run({ stalledClaims: 2 }), "lease-expired").exhausted).toBe(true);
     expect(endClaim(run({ stalledClaims: 1 }), "lease-expired").exhausted).toBe(false);
-  });
-});
-
-describe("provider-outage", () => {
-  it("counts like a stall, and the wait grows 1, 2 minutes with the count", () => {
-    expect(endClaim(run(), "provider-outage").stalledClaims).toBe(1);
-    expect(endClaim(run({ stalledClaims: 2 }), "provider-outage").exhausted).toBe(true);
-    expect([0, 1, 2].map(outageDelayMinutes)).toEqual([1, 1, 2]);
-  });
-
-  it("starts again at one minute after progress", () => {
-    const progressed = run({ lastProgressSeq: 9, stalledClaims: 2 });
-    const { stalledClaims } = endClaim(progressed, "provider-outage");
-    expect(stalledClaims).toBe(0);
-    expect(outageDelayMinutes(stalledClaims)).toBe(1);
   });
 });
 

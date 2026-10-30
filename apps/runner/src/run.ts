@@ -19,7 +19,7 @@
  * the conversion queue to drain (bounded by `DRAIN_MS`, the lease heartbeating meanwhile; every
  * output left without an `assets.*` event is recorded as failed; a stop during the wait ends it
  * and the run is released instead), then closes the sandboxes, then reports. A stop
- * (shutdown, self-stop, provider-outage) reports `released` with its reason first, so the run is recovered within
+ * (shutdown, self-stop) reports `released` with its reason first, so the run is recovered within
  * the platform's grace period, then closes the sandboxes; it does not drain, the next claim
  * resumes the queue. A stop by the server or a lost lease reports nothing.
  * None of these stops writes a `thread.ended`: the threads are cut off, and the next claim
@@ -80,11 +80,7 @@ import {
   systemPrompt,
   workerPrompt,
 } from "./prompts.ts";
-import {
-  isFatalProviderError,
-  isProviderError,
-  isTransientProviderError,
-} from "./provider-error.ts";
+import { providerFailure } from "./provider-error.ts";
 import { r2Evidence } from "./r2-evidence.ts";
 import { r2Files } from "./r2-files.ts";
 import { r2Outputs } from "./r2-outputs.ts";
@@ -136,7 +132,7 @@ export const layoutOf = (
   );
 
 /** "error": an error nobody caught reached the process handler while this run was working (`telemetry.ts`). */
-type Stopped = StopReason | "shutdown" | "provider-outage" | "error";
+type Stopped = StopReason | "shutdown" | "error";
 
 /** Which report a stop reason, a clean end or a failure becomes; undefined: say nothing more. */
 export function reportFor(
@@ -144,7 +140,7 @@ export function reportFor(
   error?: string,
 ): ReportRequest["report"] | undefined {
   if (stopped === "stop" || stopped === "lease-lost") return undefined;
-  if (stopped === "self-stop" || stopped === "shutdown" || stopped === "provider-outage")
+  if (stopped === "self-stop" || stopped === "shutdown")
     return { kind: "released", reason: stopped };
   return error === undefined
     ? { kind: "ended", outcome: "completed" }
@@ -461,15 +457,7 @@ async function claimBody(
       runId,
       plan: computed.tasks,
       previousClaim: claim.previousClaim?.reason,
-      providerError: isProviderError,
-      providerFatal: isFatalProviderError,
-      providerOutage: {
-        is: isTransientProviderError,
-        release: (error) => {
-          log(`model provider outage (${error}); releasing the run`);
-          stop("provider-outage");
-        },
-      },
+      providerError: providerFailure,
       workflow: definition.files,
       // The commit the files came from: the snapshot's, which a resume keeps.
       workflows: run.workflows.map((pin) => ({ ...pin, commit: definition.commit })),
