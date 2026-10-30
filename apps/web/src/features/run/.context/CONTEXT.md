@@ -16,7 +16,7 @@ is no runs list: Home (`features/study`) replaces it.
   (`run-header.tsx`): a crumb to the study (Home for a study of one: `getStudy` is read once for
   labels only), the scan as "OA6-1, right knee", group and workflow, "N of M tasks done", "K to
   check", a bar, Run details (started as a date, took or running for, settled cost, and "What
-  the AI decided"), Stop while live, and Open in 3D. A queued run with a plan lost its runner: it reads "Paused". Left: the plan as
+  the AI decided"), Stop while live, and Open in 3D. A queued run with a thread cut off lost its runner: it reads "Paused"; one a message queued has none open and reads "Waiting to start". Left: the plan as
   a flowchart (`task-flow.tsx`), rows by dependency depth and each row ordered by its parents'
   columns, so a plan change needs no layout table; below 1100 px a compact list, and the page
   scrolls as one. Right: Overview (`overview.tsx`: working on now, needs your eye, results by
@@ -67,6 +67,8 @@ is no runs list: Home (`features/study`) replaces it.
   its last event, until the runner's `thread.started` resumes it. The end applies only once the
   stream has closed (`useRunStream`'s `closed`), when the log is whole: the server ends an ended
   run's stream with `event: end`, so that is right after the backlog, with no reconnect. A
+  closed stream opens again only when a run read newer than the close says the run isn't ended
+  (a message reopened it; `useStreamReopen` in `@voluma/ui/run`, shared with the 3D panel). A
   reload therefore never shows a finished thread as Stopped while its backlog loads; during the
   load an open attempt reads "Waiting on the lead AI". Never decide "running" from the events
   alone.
