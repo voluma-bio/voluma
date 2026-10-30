@@ -102,6 +102,7 @@
 import { z } from "zod";
 import { userIdSchema } from "./auth";
 import { taskIdSchema } from "./ids";
+import { positionZyx } from "./output";
 import { voxelBoxSchema, voxelIndexSchema } from "./review";
 import { runStateSchema } from "./run";
 
@@ -112,8 +113,6 @@ export const MESSAGE_BODY_BYTES = 3 * 1024 * 1024;
 
 const MAX_MARKS = 20;
 const MAX_TEXT = 10_000;
-
-const positionZyx = z.tuple([z.number().min(0), z.number().min(0), z.number().min(0)]);
 
 /**
  * A line between two positions, voxel `[z, y, x]` (sub-voxel allowed), named as the AI's `line`
@@ -128,7 +127,7 @@ const lineMarkSchema = z.object({
 
 /**
  * A closed outline drawn on one slice: full `[z, y, x]` points that all share one value on
- * `axis` (0 z axial, 1 y coronal, 2 x sagittal); the last point joins the first. `areaMm2` is what
+ * `axis` (0 z, 1 y, 2 x: the array axis, not an anatomical plane); the last point joins the first. `areaMm2` is what
  * the browser showed; the server does not check it.
  */
 const outlineMarkSchema = z
