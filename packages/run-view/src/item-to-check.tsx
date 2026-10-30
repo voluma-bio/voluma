@@ -2,8 +2,8 @@
  * One item waiting for a person's decision: which task it belongs to, what the AI says about it,
  * what the second AI check found, the value it affects, and the two decisions (Looks right,
  * Something's wrong). The decision lives here only: other places (the AI panel, the report) refer
- * to the item, never draw it again. Data comes in as props, so the study's To check list and the
- * scan review's queue show the same card.
+ * to the item, never draw it again. Data comes in as props; the scan review's To check panel shows
+ * it today.
  */
 import { Button, cx, StatusGlyph, StatusMark } from "@voluma/ui";
 import { Check } from "lucide-react";

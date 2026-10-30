@@ -12,6 +12,7 @@ import {
   TaskGraph,
   type TaskView,
   taskStateWord,
+  useNow,
 } from "@voluma/run-view";
 import { EmptyState, List, Readout, Row, StatusGlyph, StatusMark, Table } from "@voluma/ui";
 import { Download, FileText } from "lucide-react";
@@ -77,10 +78,10 @@ export function ReportPanel({
 }
 
 /** Working time of a task's agents, together. */
-function took(task: TaskView): string | undefined {
+function took(task: TaskView, now: number): string | undefined {
   if (task.threads.length === 0) return undefined;
   const seconds = task.threads.reduce((sum, t) => {
-    const end = t.endedAt ? Date.parse(t.endedAt) : Date.now();
+    const end = t.endedAt ? Date.parse(t.endedAt) : now;
     return sum + t.workedBefore + Math.max(0, end - Date.parse(t.startedAt)) / 1000;
   }, 0);
   return formatDuration(seconds);
@@ -102,8 +103,8 @@ function TaskDetail({
   onItem: (item: NeedItem) => void;
 }) {
   const open = items.filter((n) => !n.accepted).length;
-  const time = took(task);
   const working = task.state === "running" || task.state === "checking";
+  const time = took(task, useNow(working));
   const references =
     reviewTask?.measurements.flatMap((m) => m.references.map((reference) => ({ m, reference }))) ??
     [];

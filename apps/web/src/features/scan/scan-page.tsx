@@ -98,20 +98,30 @@ function Scan({ runId }: { runId: string }) {
 }
 
 /**
- * The review payload: polled while the run has no plan (409) or goes, and for ten minutes after
- * it ends while its images are still being converted; one last fetch when the run ends, since
- * the payload carries no run state.
+ * The review payload, fetched again when the stream shows a task's state or results changing
+ * (`changed`) and when the run ends, since the payload carries no run state. Polled only while
+ * the run has no plan (409) and while its images are still being converted (until ten minutes
+ * after it ends): neither shows on the stream.
  */
-function useReviewRun(runId: string, run: Run) {
+function useReviewRun(runId: string, run: Run, changed: string) {
   const client = useQueryClient();
   const status = run.state.status;
   const endedAt = run.state.status === "ended" ? Date.parse(run.state.endedAt) : undefined;
-  const last = useRef(status);
+  const last = useRef({ status, changed });
+  const due = useRef(false);
   useEffect(() => {
-    if (last.current !== "ended" && status === "ended")
+    const before = last.current;
+    last.current = { status, changed };
+    if ((before.status !== "ended" && status === "ended") || before.changed !== changed)
+      due.current = true;
+    if (!due.current) return;
+    // Once things settle: a stream's backlog changes `changed` on every frame while it loads.
+    const timer = setTimeout(() => {
+      due.current = false;
       void client.invalidateQueries({ queryKey: reviewRunQuery(runId).queryKey });
-    last.current = status;
-  }, [status, runId, client]);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [status, changed, runId, client]);
   return useQuery({
     ...reviewRunQuery(runId),
     // Only a server error may pass on retry; a 404, a 409 or data the contract rejects won't.
@@ -120,8 +130,7 @@ function useReviewRun(runId: string, run: Run) {
       const cause = query.state.error;
       const data = query.state.data;
       return (cause instanceof ApiError && cause.status === 409) ||
-        status !== "ended" ||
-        (data && preparing(data) && endedAt !== undefined && Date.now() - endedAt < 10 * 60_000)
+        (data && preparing(data) && (endedAt === undefined || Date.now() - endedAt < 10 * 60_000))
         ? 5000
         : false;
     },
@@ -157,7 +166,13 @@ function useAccepting(run: Run) {
       );
     },
     onSettled: (_res, e, { checkId }) => {
-      if (e) setError({ id: checkId, text: e.message });
+      if (e)
+        setError({
+          id: checkId,
+          text:
+            (e instanceof ApiError && e.serverMessage) ||
+            "Couldn't save that. Check your connection and try again.",
+        });
     },
   });
   const readOnly = run.example
@@ -198,8 +213,12 @@ function ScanReview({
     staleTime: Number.POSITIVE_INFINITY,
   });
   const store = useRunStore();
-  const [generation, setGeneration] = useState(0);
-  useRunStream(run.id, generation, refetchRun);
+  const [reopened, setReopened] = useState(0);
+  useRunStream(run.id, {
+    reopened,
+    going: run.state.status !== "ended",
+    onClosed: refetchRun,
+  });
   const events = useEvents();
   const closed = useClosed();
   // Query's structural sharing keeps `state` the same object across polls that change nothing.
@@ -214,7 +233,12 @@ function ScanReview({
     () => store.set({ halt, baseThreads: view.threads }),
     [store, halt, view.threads],
   );
-  const review = useReviewRun(run.id, run);
+  // What the review payload follows: each task's state and how many results it has.
+  const changed = useMemo(
+    () => view.tasks.map((t) => `${t.id}:${t.state}:${t.results.length}`).join(),
+    [view.tasks],
+  );
+  const review = useReviewRun(run.id, run, changed);
   const accepting = useAccepting(run);
 
   const [params, setParams] = useSearchParams();
@@ -241,15 +265,24 @@ function ScanReview({
       ),
     [tasks, accepting.done],
   );
-  const itemId = params.get("item") ?? undefined;
-  const firstOpen = items.find((n) => !n.accepted);
-  const item = items.find((n) => n.id === itemId) ?? firstOpen ?? items[0];
-  const taskId = params.get("task") ?? item?.taskId ?? tasks[0]?.id;
+  // `item` (a check id) names its own task; without it the task in view comes from `task`, else
+  // the first open item's. The open item is always one of the task in view: its first open one
+  // when the URL names none, so the card and the views can't disagree.
+  const named = items.find((n) => n.id === params.get("item"));
+  const taskId =
+    named?.taskId ?? params.get("task") ?? items.find((n) => !n.accepted)?.taskId ?? tasks[0]?.id;
+  const ofTask = items.filter((n) => n.taskId === taskId);
+  const item = named ?? ofTask.find((n) => !n.accepted) ?? ofTask[0];
   const task = tasks.find((t) => t.id === taskId);
+  // A link whose `task` disagrees with its `item` is put right, so the URL says what is shown.
+  const wrongTask = named !== undefined && params.get("task") !== named.taskId;
+  useEffect(() => {
+    if (wrongTask && named) select({ task: named.taskId });
+  }, [wrongTask, named, select]);
   const agentId = params.get("agent") ?? undefined;
 
   const latest = review.data?.revisions.at(-1);
-  const reviewTask = latest?.tasks.find((t) => t.id === taskId) ?? latest?.tasks[0];
+  const reviewTask = latest?.tasks.find((t) => t.id === taskId);
   // The open item moves the crosshair, once per pick: a new object each time it is picked.
   const [picked, setPicked] = useState(0);
   const check =
@@ -277,6 +310,8 @@ function ScanReview({
     setAbout({ taskId: taskOf, at: Date.now() });
     openPanel("scan-ai");
   };
+  // It holds until the reader moves to another task or the message is sent.
+  useEffect(() => setAbout(undefined), [taskId]);
 
   const open = items.filter((n) => !n.accepted).length;
   const { title } = scanTitle(run, study.data);
@@ -306,8 +341,8 @@ function ScanReview({
   } else if (!latest || !reviewTask)
     main = (
       <Centered>
-        <EmptyState title="No views yet">
-          The views appear with the first task's results.
+        <EmptyState title={task ? `No views for ${task.title} yet` : "No views yet"}>
+          The views appear with this task's results.
         </EmptyState>
       </Centered>
     );
@@ -360,6 +395,7 @@ function ScanReview({
             items={items}
             tasks={tasks}
             current={item}
+            inView={task?.title}
             onPick={pickItem}
             accepting={accepting}
             onWrong={(n) => tellAi(n.taskId)}
@@ -398,6 +434,7 @@ function ScanReview({
           minWidth={360}
         >
           <AgentsPanel
+            tasks={tasks}
             agentId={agentId}
             onAgent={(id) => select({ agent: id })}
             ended={run.state.status === "ended"}
@@ -422,7 +459,8 @@ function ScanReview({
             task={task}
             about={about}
             onSent={() => {
-              setGeneration((g) => g + 1);
+              setAbout(undefined);
+              setReopened((g) => g + 1);
               refetchRun();
             }}
           />

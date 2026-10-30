@@ -9,16 +9,14 @@ import {
   agentLabel,
   agentTree,
   Elapsed,
+  type TaskView,
   THREAD_STATUS,
   type Thread,
   useThreads,
 } from "@voluma/run-view";
 import { EmptyState, List, Row, type Status, StatusGlyph } from "@voluma/ui";
-import { catalog } from "@voluma/workflow/bundled";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef } from "react";
-
-const { taskTitle } = catalog["mouse-oa"];
 
 /**
  * Which agent Follow live shows: the one it showed while that one still works, else the agent
@@ -54,10 +52,13 @@ function groups(agents: Thread[]) {
 }
 
 export function AgentsPanel({
+  tasks,
   agentId,
   onAgent,
   ended,
 }: {
+  /** The plan's tasks, for their titles. */
+  tasks: TaskView[];
   /** The agent picked; none follows the one working now. */
   agentId: string | undefined;
   /** Picks an agent, or with `null` follows live. */
@@ -65,6 +66,7 @@ export function AgentsPanel({
   ended: boolean;
 }) {
   const threads = useThreads();
+  const taskTitle = (id: string) => tasks.find((t) => t.id === id)?.title ?? id;
   // The tree holds the agents that run a model; reading it top down keeps the log's order.
   const agents = useMemo(() => agentTree(threads).flatMap(flatten), [threads]);
   const tree = useMemo(() => groups(agents), [agents]);

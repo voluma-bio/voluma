@@ -9,7 +9,7 @@ import { ApiError, cancelRun, resendKeys } from "@voluma/api-client";
 import { runQuery } from "@voluma/api-client/query";
 import type { Run } from "@voluma/contracts/run";
 import type { StudyDetail } from "@voluma/contracts/study";
-import { formatDuration, KeysForm, plainError, useNow } from "@voluma/run-view";
+import { formatDuration, KeysForm, plainError, scanLabel, useNow } from "@voluma/run-view";
 import { Button, Facts, Popover, ShellHeading, type Status, StatusMark } from "@voluma/ui";
 import { catalog, workflowName } from "@voluma/workflow/bundled";
 import { ChevronDown } from "lucide-react";
@@ -20,11 +20,7 @@ import { Link } from "react-router";
 export function scanTitle(run: Run, study: StudyDetail | undefined) {
   const scan = study?.scans.find((s) => s.scan.inputId === run.input.id)?.scan;
   if (!scan) return { title: run.input.name, group: null };
-  const knee = scan.attributes.knee;
-  return {
-    title: typeof knee === "string" ? `${scan.subject}, ${knee.toLowerCase()} knee` : scan.subject,
-    group: scan.group,
-  };
+  return { title: scanLabel(scan), group: scan.group };
 }
 
 /** The study's workflow by its name; a run pinned to an older path still names it. */

@@ -300,10 +300,20 @@ export function AppShell({
       isOpen: (id) => shown.left.includes(id) || shown.right.includes(id),
       toggle,
       // A screen opens one of its panels: it joins what is open on its side, as Shift-click
-      // stacks it, and leaves Full view.
+      // stacks it. From Full view it brings the saved layout back with the panel added.
       open: (id) => {
         const reg = regs.get(id);
-        if (reg && !shown[reg.side].includes(id)) toggle(reg, true);
+        if (!reg || reg.link) return;
+        setFull(false);
+        setLayout((l) =>
+          l.open[reg.side].includes(id)
+            ? l
+            : {
+                ...l,
+                open: { ...l.open, [reg.side]: [...l.open[reg.side], id].slice(-2) },
+                arranged: [...new Set([...l.arranged, reg.side])],
+              },
+        );
       },
     }),
     [register, unregister, slots, shown, toggle, regs],

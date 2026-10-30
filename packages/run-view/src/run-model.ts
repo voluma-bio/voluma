@@ -1,5 +1,5 @@
 /**
- * The run page's data, derived with no React from the run's events and state: the threads
+ * A run's data, derived with no React from the run's events and state: the threads
  * (main agent, workers, checks) with what each is doing now, and per plan task where it stands,
  * what the AI did, the second AI check's verdict, its To check items (open or accepted), its QC
  * image and its values. Built on `reviewState` (the shared fold plus accepted checks), so it
@@ -458,7 +458,7 @@ type RunView = {
 /** The fold's title for a To check flag set by a `task` event; the task's name says as much. */
 const GENERIC_CHECK = "Marked to check";
 
-/** Everything the run page shows about the run, from its durable events and state. */
+/** Everything a run's screen shows about the run, from its durable events and state. */
 export function runView(
   events: RunEvent[],
   state: RunState,

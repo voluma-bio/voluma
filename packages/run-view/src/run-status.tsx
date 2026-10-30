@@ -1,13 +1,13 @@
 /**
  * The status words of a run and of a study, from their read models alone (no events), shared by
- * Home, the study page and the run page so they read the same: Running, N to check, Checked,
+ * Home, the study page and the scan review so they read the same: Running, N to check, Checked,
  * Failed, Stopped, Waiting (queued), AI unavailable (queued, held after an outage),
  * Needs your keys, Not started. A completed run with no open
  * item reads "Checked" (a failed task raises an item), and "Reviewed" once someone marks it
- * reviewed, which is never inferred. Also where a run's row links (the scan review), and how its cost and time read.
- * The run page's header says "N items to check" instead, because it sits beside a count of tasks.
+ * reviewed, which is never inferred. Also where a run's row links (the scan review), how a scan
+ * is named, and how its cost and time read.
  */
-import type { StudyRunSummary } from "@voluma/contracts/study";
+import type { StudyRunSummary, StudyScan } from "@voluma/contracts/study";
 import type { Status } from "@voluma/ui";
 
 /** "1 run", "3 runs"; `many` for an irregular plural. */
@@ -28,6 +28,14 @@ export function formatDuration(seconds: number): string {
   if (s < 60) return `${s} s`;
   if (s < 3600) return `${Math.floor(s / 60)} min ${s % 60} s`;
   return `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min`;
+}
+
+/** A scan as people name it: its subject and knee ("OA6-1, right knee"), the subject alone without one. */
+export function scanLabel(scan: Pick<StudyScan, "subject" | "attributes">): string {
+  const knee = scan.attributes.knee;
+  return typeof knee === "string" && knee
+    ? `${scan.subject}, ${knee.toLowerCase()} knee`
+    : scan.subject;
 }
 
 /** Where a row leads: the scan review, live while the run goes and for review once it ends. */

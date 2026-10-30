@@ -16,6 +16,7 @@ export function ToCheckPanel({
   items,
   tasks,
   current,
+  inView,
   onPick,
   accepting,
   onWrong,
@@ -26,14 +27,17 @@ export function ToCheckPanel({
   /** Every item of the scan in task order, with what was accepted here. */
   items: NeedItem[];
   tasks: TaskView[];
+  /** The open item: one of the task in view's, none when that task has none. */
   current: NeedItem | undefined;
+  /** The task in view's title. */
+  inView: string | undefined;
   onPick: (item: NeedItem) => void;
   accepting: Accepting;
   onWrong: (item: NeedItem) => void;
   live: boolean;
 }) {
   const titleOf = (taskId: string) => tasks.find((t) => t.id === taskId)?.title ?? taskId;
-  if (!current)
+  if (items.length === 0)
     return (
       <div className="p-4">
         <EmptyState title={live ? "Nothing to check yet" : "Nothing to check on this scan"}>
@@ -47,14 +51,18 @@ export function ToCheckPanel({
   const handled = items.length - open.length;
   // Task order, kept as items are handled, so nothing moves under the reader.
   const queue = items;
-  const at = queue.indexOf(current);
-  const next = [...queue.slice(at + 1), ...queue.slice(0, at)].find((n) => !n.accepted);
-  const task = tasks.find((t) => t.id === current.taskId);
+  const at = current ? queue.indexOf(current) : -1;
+  const next = [...queue.slice(at + 1), ...queue.slice(0, Math.max(at, 0))].find(
+    (n) => !n.accepted && n !== current,
+  );
+  const task = current && tasks.find((t) => t.id === current.taskId);
   return (
     <div className="grid gap-3 p-3">
       <div className="flex items-center gap-2">
         <p className="flex-1 text-xs text-muted-foreground">
-          {at + 1} of {queue.length} on {scan}
+          {current
+            ? `${at + 1} of ${queue.length} on ${scan}`
+            : `Nothing to check in ${inView ?? "this task"}`}
         </p>
         <IconButton
           size="sm"
@@ -73,40 +81,42 @@ export function ToCheckPanel({
           <ChevronRight />
         </IconButton>
       </div>
-      <ItemToCheck
-        key={current.id}
-        className="inset-ring-select"
-        task={titleOf(current.taskId)}
-        title={current.title}
-        text={current.text}
-        found={
-          current.found ? (
-            <Disclosure label="What the second AI check found">
-              <p className="whitespace-pre-wrap">{current.found}</p>
-            </Disclosure>
-          ) : task?.check?.summary ? (
-            `Second AI check: ${task.check.summary}`
-          ) : undefined
-        }
-        evidence={
-          current.image && (
-            <Evidence runId={runId} name={current.image.name} sha256={current.image.sha256} />
-          )
-        }
-        state={current.accepted ? "accepted" : current.acceptable ? "open" : "info"}
-        onAccept={
-          accepting.accept &&
-          (() => {
-            // Keep this item open, to show it was decided, until the reader moves on.
-            onPick(current);
-            accepting.accept?.(current);
-          })
-        }
-        accepting={accepting.pending === current.id}
-        readOnly={accepting.readOnly}
-        onWrong={() => onWrong(current)}
-        error={accepting.error?.id === current.id ? accepting.error.text : undefined}
-      />
+      {current && (
+        <ItemToCheck
+          key={current.id}
+          className="inset-ring-select"
+          task={titleOf(current.taskId)}
+          title={current.title}
+          text={current.text}
+          found={
+            current.found ? (
+              <Disclosure label="What the second AI check found">
+                <p className="whitespace-pre-wrap">{current.found}</p>
+              </Disclosure>
+            ) : task?.check?.summary ? (
+              `Second AI check: ${task.check.summary}`
+            ) : undefined
+          }
+          evidence={
+            current.image && (
+              <Evidence runId={runId} name={current.image.name} sha256={current.image.sha256} />
+            )
+          }
+          state={current.accepted ? "accepted" : current.acceptable ? "open" : "info"}
+          onAccept={
+            accepting.accept &&
+            (() => {
+              // Keep this item open, to show it was decided, until the reader moves on.
+              onPick(current);
+              accepting.accept?.(current);
+            })
+          }
+          accepting={accepting.pending === current.id}
+          readOnly={accepting.readOnly}
+          onWrong={() => onWrong(current)}
+          error={accepting.error?.id === current.id ? accepting.error.text : undefined}
+        />
+      )}
       {next && (
         <button
           type="button"
@@ -133,7 +143,7 @@ export function ToCheckPanel({
           {queue.map((n) => (
             <Row
               key={n.id}
-              selected={n.id === current.id}
+              selected={n.id === current?.id}
               title={
                 <span className="flex min-w-0 items-center gap-2">
                   <StatusGlyph status={n.accepted ? "done" : "check"} />

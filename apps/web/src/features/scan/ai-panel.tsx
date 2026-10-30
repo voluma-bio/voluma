@@ -28,11 +28,14 @@ function closedBecause(run: Run, me: Me): string | undefined {
   return undefined;
 }
 
-/** The API's refusal in plain words; the text stays in the box. */
+/** The API's refusal in plain words (a 409 carries the server's own); the text stays in the box. */
 function refusal(error: Error): string {
   const status = error instanceof ApiError ? error.status : undefined;
   if (status === 409)
-    return "The AI is still answering, or the run can't be reopened. Try again once it finishes.";
+    return (
+      (error as ApiError).serverMessage ??
+      "The AI is still answering, or the run can't be reopened. Try again once it finishes."
+    );
   if (status === 403) return "You can read this run but not write to its AI.";
   if (status === 429) return "Too many runs are going right now. Try again shortly.";
   return "Couldn't send. Check your connection and try again.";
@@ -150,7 +153,11 @@ export function AiPanel({
           maxLength={10_000}
           value={text}
           disabled={closed !== undefined || send.isPending}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            // Edited after a failed send: a new message, not a retry of the one that may have landed.
+            if (send.isError) setId(crypto.randomUUID());
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && text.trim()) send.mutate(false);
           }}

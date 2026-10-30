@@ -1,6 +1,6 @@
 /**
  * One agent's thread, anywhere: `<AgentThread threadId>` reads its rows from the run
- * store (`run-store.tsx`, one per run page), and owns its header, its live
+ * store (`run-store.tsx`, one per run), and owns its header, its live
  * line and its own scroll, which sticks to the newest line while the reader is at the bottom.
  * It fills the box its caller gives it, so moving a thread to another place is one line.
  * Shape from Meridian Flow's `ChatView` (the caller names a thread; the container reads it).
