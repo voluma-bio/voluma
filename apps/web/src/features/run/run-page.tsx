@@ -259,6 +259,7 @@ function RunScreen({
         agentId={agentId}
         follow={agentId === undefined}
         select={openThread}
+        ended={ended}
       />
     );
   } else if (tasks.length === 0)

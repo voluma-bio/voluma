@@ -16,7 +16,8 @@ const { taskTitle } = catalog["mouse-oa"];
 
 /**
  * Which agent Follow live shows: the one it showed while that one still works, else the agent
- * that started working most recently and has no working agent under it, else the lead AI.
+ * that started working most recently and has no working agent under it, else the lead AI (a run
+ * from before the lead AI has none: then the first agent).
  */
 function followTarget(threads: Thread[], previous: string | undefined): Thread | undefined {
   const byId = new Map(threads.map((t) => [t.id, t]));
@@ -27,7 +28,12 @@ function followTarget(threads: Thread[], previous: string | undefined): Thread |
   const leaf = working
     .filter((t) => !busyParents.has(t.id))
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
-  return leaf ?? threads.find((t) => t.kind === "main") ?? kept;
+  return (
+    leaf ??
+    threads.find((t) => t.kind === "main") ??
+    kept ??
+    threads.find((t) => t.kind !== "supervisor")
+  );
 }
 
 /** What an agent is called among its siblings, where its task is already the group's heading. */
@@ -44,7 +50,7 @@ function agentLabel(t: Thread, tryOf: Map<string, { n: number; of: number }>): s
     case "chat":
       return "Chat";
     default:
-      return t.kind;
+      return "Agent";
   }
 }
 
@@ -68,6 +74,7 @@ export function AgentsView({
   agentId,
   follow,
   select,
+  ended,
 }: {
   threads: Thread[];
   events: RunEvent[];
@@ -78,6 +85,7 @@ export function AgentsView({
   follow: boolean;
   /** Picks an agent (and stops following), or with `null` turns Follow live on. */
   select: (threadId: string | null) => void;
+  ended: boolean;
 }) {
   const tree = useMemo(() => agentTree(threads), [threads]);
   const tryOf = useMemo(() => {
@@ -88,16 +96,21 @@ export function AgentsView({
       });
     return m;
   }, [threads]);
-  const followed = useRef<string | undefined>(undefined);
-  const target = follow ? followTarget(threads, followed.current) : undefined;
-  followed.current = target?.id;
-  const selected =
-    target ?? threads.find((t) => t.id === agentId) ?? followTarget(threads, undefined);
+  // The agent on screen at the last commit: turning Follow live on keeps it while it works.
+  const shown = useRef<string | undefined>(undefined);
+  const selected = follow
+    ? followTarget(threads, shown.current)
+    : (threads.find((t) => t.id === agentId) ?? followTarget(threads, undefined));
+  useEffect(() => {
+    shown.current = selected?.id;
+  });
 
   if (!selected)
     return (
       <p className="text-ui text-muted-foreground">
-        Nothing yet: the lead AI starts when the run does.
+        {ended
+          ? "No agent started in this run."
+          : "Nothing yet: the agents start when the run does."}
       </p>
     );
   return (
@@ -107,15 +120,13 @@ export function AgentsView({
         className="sticky top-0 max-h-[calc(100vh-12rem)] min-w-0 self-start overflow-y-auto max-[1100px]:static max-[1100px]:max-h-none"
       >
         <ul className="grid gap-0.5">
-          {tree.map((node) => (
-            <TreeNode
-              key={node.thread.id}
-              node={node}
-              selected={selected.id}
-              tryOf={tryOf}
-              select={select}
-            />
-          ))}
+          <Branch
+            nodes={tree}
+            selected={selected.id}
+            follow={follow}
+            tryOf={tryOf}
+            select={select}
+          />
         </ul>
       </nav>
       <Stream
@@ -136,62 +147,57 @@ export function AgentsView({
   );
 }
 
-function TreeNode({
-  node,
-  selected,
-  tryOf,
-  select,
-}: {
-  node: AgentNode;
+type TreeProps = {
   selected: string;
+  follow: boolean;
   tryOf: Map<string, { n: number; of: number }>;
   select: (threadId: string) => void;
-}) {
+};
+
+/** Sibling agents, those sharing a task under its title. */
+function Branch({ nodes, ...props }: TreeProps & { nodes: AgentNode[] }) {
+  return byTask(nodes).map((g) =>
+    g.taskId ? (
+      <li key={g.taskId} className="min-w-0">
+        <p className="truncate px-2 pt-2 pb-0.5 text-meta font-medium text-muted-foreground">
+          {taskTitle(g.taskId)}
+        </p>
+        <ul className="grid gap-0.5">
+          {g.nodes.map((n) => (
+            <TreeNode key={n.thread.id} node={n} {...props} />
+          ))}
+        </ul>
+      </li>
+    ) : (
+      g.nodes.map((n) => <TreeNode key={n.thread.id} node={n} {...props} />)
+    ),
+  );
+}
+
+function TreeNode({ node, ...props }: TreeProps & { node: AgentNode }) {
   const t = node.thread;
+  const current = t.id === props.selected;
+  const row = useRef<HTMLButtonElement>(null);
+  // Follow live can pick an agent below the tree's fold: bring it into view.
+  useEffect(() => {
+    if (current && props.follow) row.current?.scrollIntoView({ block: "nearest" });
+  }, [current, props.follow]);
   return (
     <li className="min-w-0">
       <button
+        ref={row}
         type="button"
-        aria-current={t.id === selected ? "true" : undefined}
-        onClick={() => select(t.id)}
+        aria-current={current ? "true" : undefined}
+        onClick={() => props.select(t.id)}
         className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-ui hover:bg-muted aria-[current]:bg-muted aria-[current]:font-medium"
       >
         <AgentMark thread={t} />
-        <span className="min-w-0 flex-1 truncate">{agentLabel(t, tryOf)}</span>
+        <span className="min-w-0 flex-1 truncate">{agentLabel(t, props.tryOf)}</span>
         <span className="sr-only">{STATUS_WORD[t.status]}</span>
       </button>
       {node.children.length > 0 && (
         <ul className="ml-3 grid gap-0.5 border-l border-border pl-2">
-          {byTask(node.children).map((g) =>
-            g.taskId ? (
-              <li key={g.taskId} className="min-w-0">
-                <p className="truncate px-2 pt-2 pb-0.5 text-meta font-medium text-muted-foreground">
-                  {taskTitle(g.taskId)}
-                </p>
-                <ul className="grid gap-0.5">
-                  {g.nodes.map((n) => (
-                    <TreeNode
-                      key={n.thread.id}
-                      node={n}
-                      selected={selected}
-                      tryOf={tryOf}
-                      select={select}
-                    />
-                  ))}
-                </ul>
-              </li>
-            ) : (
-              g.nodes.map((n) => (
-                <TreeNode
-                  key={n.thread.id}
-                  node={n}
-                  selected={selected}
-                  tryOf={tryOf}
-                  select={select}
-                />
-              ))
-            ),
-          )}
+          <Branch nodes={node.children} {...props} />
         </ul>
       )}
     </li>
@@ -232,9 +238,8 @@ function Stream({
   useEffect(() => {
     if (follow && running && rows.length > 0) end.current?.scrollIntoView({ block: "end" });
   }, [follow, running, rows]);
-  const answer = running
-    ? (thread.liveTool ?? thread.lastTool)
-    : (thread.error ?? thread.result?.text);
+  // Its latest milestone or result; what it is running now is the stream's last line.
+  const answer = running ? thread.result?.text : (thread.error ?? thread.result?.text);
   return (
     <section className="min-w-0">
       <header className="mb-4 grid gap-1 border-b border-border pb-3">
