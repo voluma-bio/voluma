@@ -153,6 +153,7 @@ async function claimBody(
   const keyFor = (provider: string) =>
     visitor ? (provider === "meta" ? keys.metaApiKey : undefined) : providerKey(provider);
   const modal = visitor ? keys.modal : config.modal;
+  const thinking = (!visitor && config.thinking) || "off";
   const redact: Redact = redactor([
     ...config.secrets,
     ...(visitor ? [keys.metaApiKey, keys.modal.tokenId, keys.modal.tokenSecret] : []),
@@ -427,6 +428,7 @@ async function claimBody(
       (primary: Model<Api>, modelRole: ModelRole, agent: "main" | "worker" | "checker"): RoleOf =>
       (thread, recorded) => ({
         model: threadModel(primary, recorded),
+        thinkingLevel: thinking,
         streamFn: streamFor(modelRole),
         systemPrompt: systemPrompt(definition, thread),
         tools: grant(agent),

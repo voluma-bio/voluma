@@ -303,7 +303,7 @@ script, from its docstring's first line; the loader reads it from the snapshot).
 (`run.ts` `grant`); `segment_sam` is also dropped when the run has no Meta key, and always for the checker (it calls out to Meta; `keepFailed` writes the run-wide scratch). `loadWorkflow`
 snapshots the role files with the workflow and reads them from the snapshot, so a resumed thread
 composes byte-identical text and an edited file reaches only new threads (a thread whose prompt
-changed is still `ThreadStale`). The main agent without `bash` gets its file's body alone. `review-chat.md` is
+changed is still `ThreadStale`). The main agent without `bash` gets its file's body, then the skill list and the tool index (no sandbox text). `review-chat.md` is
 `status: planned` and unused. Format: `workflows/core/agents/AGENTS.md`.
 
 A role's model is its file's `model` alias. `config.models` maps each alias to a provider model:
@@ -311,6 +311,13 @@ A role's model is its file's `model` alias. `config.models` maps each alias to a
 (no default; a run whose role file names an unset alias fails when it starts). `RUNNER_MODEL`, when
 set, forces every alias to one model. Each configured alias's provider key is required at start. A
 visitor run uses `RUNNER_VISITOR_MODEL` for every role except `main` on a visitor-safe model.
+
+`RUNNER_THINKING` (one of Pi's levels) is every thread's thinking level on a `voluma` run: `run.ts`
+passes it as the role's `thinkingLevel`, which `start-thread.ts` sets as the Pi agent's
+`initialState.thinkingLevel`, so Pi sends it as `reasoning` and records it on each History
+message. `main.ts` refuses to start when an alias's or the fallback's model lacks the level,
+because Pi clamps an unsupported level silently. Unset is `"off"`, which sends no level: for
+DeepSeek that means `thinking: disabled`. Visitor runs always use `"off"`.
 
 # Runner: a claim that ends is a cut-off, not a stop
 

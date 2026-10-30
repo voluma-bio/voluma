@@ -19,7 +19,7 @@
  * threads are aborted and the root ends `failed`, because the loop must not carry on from a
  * record the store does not hold. A runtime abort writes no end, like a crash.
  */
-import type { StreamFn } from "@earendil-works/pi-agent-core";
+import type { StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { By } from "@voluma/contracts/events";
 import { checkResult, type Folded, type FoldedTask, fold } from "@voluma/contracts/fold";
@@ -70,6 +70,8 @@ import type { Tool } from "./tools/tool";
 export interface RoleSetup {
   systemPrompt: string;
   model: Model<Api>;
+  /** The Pi agent's thinking level, which Pi sends as `reasoning` and records on each reply. */
+  thinkingLevel: ThinkingLevel;
   streamFn: StreamFn;
   /** The tool names the role's file grants (`TOOL_NAMES`). */
   tools: readonly string[];
@@ -201,6 +203,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       threadId: r.id,
       systemPrompt: role.systemPrompt,
       model: role.model,
+      thinkingLevel: role.thinkingLevel,
       streamFn: role.streamFn,
       tools: o.tools(thread, role.tools, agents),
       interrupted: (tool: string, toolCallId: string) =>

@@ -8,7 +8,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { createModels } from "@earendil-works/pi-ai";
+import { createModels, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { CLAIM_POLL_SECONDS } from "@voluma/contracts/runner";
 import { claimRun } from "@voluma/harness/adapters/http/hand-off";
 import { runnerConfig } from "./config.ts";
@@ -35,6 +35,19 @@ const resolve = (ref: { provider: string; id: string }) => {
 const aliases = Object.fromEntries(
   Object.entries(config.models).map(([alias, ref]) => [alias, resolve(ref)]),
 );
+
+// Pi clamps a level a model lacks to a neighbouring one, so a typo'd or unsupported level
+// would run silently at another. Every alias is checked, named by a role file or not.
+if (config.thinking) {
+  const fallback = config.fallbackModel && resolve(config.fallbackModel);
+  for (const [name, model] of Object.entries({ ...aliases, ...(fallback && { fallback }) })) {
+    const levels = getSupportedThinkingLevels(model);
+    if (!levels.includes(config.thinking))
+      throw new Error(
+        `RUNNER_THINKING=${config.thinking} is not a level ${model.provider}/${model.id} (${name}) supports: ${levels.join(", ")}`,
+      );
+  }
+}
 
 const runnerId = `runner-${randomUUID().slice(0, 8)}`;
 const ctx: RunnerContext = {
@@ -68,7 +81,7 @@ log(
     .map(([alias, m]) => `${alias} ${m.provider}/${m.id}`)
     .join(
       ", ",
-    )}${config.fallbackModel ? `, fallback ${config.fallbackModel.provider}/${config.fallbackModel.id}` : ""}, api ${config.api.baseUrl}`,
+    )}${config.fallbackModel ? `, fallback ${config.fallbackModel.provider}/${config.fallbackModel.id}` : ""}, thinking ${config.thinking ?? "unset"}, api ${config.api.baseUrl}`,
 );
 // After startup: a failure above must still kill the process, not be logged and survived.
 startTelemetry(log);
