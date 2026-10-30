@@ -46,13 +46,13 @@ const workflowLabel = (run: Run, study: StudyDetail | undefined) => {
 
 /**
  * The run's word for where it is, beside its progress. A queued run with a plan has started: it
- * lost its runner. One held after a model-provider outage says so; its retry time stays off screen.
+ * lost its runner. One held after the AI's provider failed says so (`waitingForProvider`); its retry time stays off screen.
  */
 function statusWord(run: Run, started: boolean): string {
   const { state } = run;
   switch (state.status) {
     case "queued":
-      if (state.waitingForProvider) return "Waiting for the model provider";
+      if (state.waitingForProvider) return "Waiting: the AI is unavailable";
       return started ? "Paused" : "Waiting to start";
     case "running":
       return "Running";
@@ -116,7 +116,9 @@ export function RunHeader({
               {done} of {total} tasks done
             </span>
           )}
-          {state.status === "queued" && <span>Place {state.position} in line</span>}
+          {state.status === "queued" && !state.waitingForProvider && (
+            <span>Place {state.position} in line</span>
+          )}
           {toCheck > 0 && (
             <span className="font-semibold text-check-strong">{toCheck} to check</span>
           )}
