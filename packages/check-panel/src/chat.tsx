@@ -225,7 +225,8 @@ export function Chat({
   const lastPerson = said.at(-1);
   // The AI has answered a note: it waits for another note, or a go.
   const waiting = !active && last?.from === "agent" && lastPerson?.go === false;
-  const redone = !active && lastPerson?.go === true;
+  // A go whose claim ended without a failure or a cancel.
+  const redone = !active && lastPerson?.go === true && last?.from !== "stop";
   const titleOf = (id: string) => review.revisions.at(-1)?.tasks.find((t) => t.id === id)?.title;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: scroll when the chat grows.
