@@ -149,8 +149,9 @@ export const studyScanDetailSchema = z.object({
   values: z.record(segmentSchema, studyValueSchema),
   toCheck: z.array(toCheckItemSchema),
   /**
-   * Task id → status in the newest run's latest revision; empty before it has a plan or with no
-   * run. A task outside the run's plan (not selected) is absent.
+   * Task id → its state in the newest run (`taskStates`): the run's latest revision read with
+   * the run's state now. Empty before the run has a plan, or with no run. A task outside the
+   * run's plan (not selected) is absent.
    */
   taskState: z.record(taskIdSchema, taskStateSchema),
 });
