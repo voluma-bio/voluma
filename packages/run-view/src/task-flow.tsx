@@ -24,8 +24,17 @@ const STATE_STATUS: Record<Exclude<TaskState, "skipped">, Status> = {
   "awaiting-ai": "waiting",
 };
 
+/** Where a state is more exact than its mark's word. */
+const STATE_WORD: Partial<Record<TaskState, string>> = {
+  ready: "Ready to start",
+  held: "Waiting on the lead AI",
+  failed: "Failed",
+  "awaiting-ai": "Waiting for the AI",
+  skipped: "Skipped",
+};
+
 const stateWord = (state: TaskState) =>
-  state === "skipped" ? "Skipped" : STATUS_WORD[STATE_STATUS[state]];
+  STATE_WORD[state] ?? STATUS_WORD[STATE_STATUS[state as keyof typeof STATE_STATUS]];
 
 /** A task's state as a small mark: hollow until it starts, spinning while it works, filled once it ends. */
 export function TaskMark({ state, className }: { state: TaskState; className?: string }) {

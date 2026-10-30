@@ -5,9 +5,8 @@
  * It fills the box its caller gives it, so moving a thread to another place is one line.
  * Shape from Meridian Flow's `ChatView` (the caller names a thread; the container reads it).
  */
-import { STATUS_WORD } from "@voluma/ui";
 import { type ReactNode, useLayoutEffect, useMemo, useRef } from "react";
-import { Elapsed, THREAD_STATUS, ThreadSpendInfo } from "./agents";
+import { Elapsed, ThreadSpendInfo, threadWord } from "./agents";
 import { agentLabel, agentTitle } from "./run-model";
 import { useThread, useThreadRows, useThreads } from "./run-store";
 import { TranscriptView } from "./transcript-view";
@@ -65,7 +64,7 @@ export function AgentThread({
             </h2>
           )}
           <span className="shrink-0 text-meta text-muted-foreground">
-            {STATUS_WORD[THREAD_STATUS[thread.status]]}
+            {threadWord(thread.status)}
           </span>
           <Elapsed thread={thread} />
           <ThreadSpendInfo thread={thread} />
