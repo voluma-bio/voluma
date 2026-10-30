@@ -12,7 +12,6 @@ import { createModels } from "@earendil-works/pi-ai";
 import { CLAIM_POLL_SECONDS } from "@voluma/contracts/runner";
 import { claimRun } from "@voluma/harness/adapters/http/hand-off";
 import { runnerConfig } from "./config.ts";
-import { modelFallback } from "./model-fallback.ts";
 import { PROVIDERS } from "./providers.ts";
 import { redactor } from "./redact.ts";
 import { type RunnerContext, runClaim } from "./run.ts";
@@ -39,12 +38,7 @@ const aliases = Object.fromEntries(
 
 // Pi clamps a level a model lacks to a neighbouring one, so a typo'd or unsupported level
 // would run silently at another. Every alias is checked, named by a role file or not.
-const fallbackModel = config.fallbackModel && resolve(config.fallbackModel);
-assertThinking(
-  config.thinking,
-  [...Object.values(aliases), ...(fallbackModel ? [fallbackModel] : [])],
-  "RUNNER_THINKING",
-);
+assertThinking(config.thinking, Object.values(aliases), "RUNNER_THINKING");
 
 const runnerId = `runner-${randomUUID().slice(0, 8)}`;
 const ctx: RunnerContext = {
@@ -52,7 +46,6 @@ const ctx: RunnerContext = {
   models,
   aliases,
   visitorModel: resolve(config.visitorModel),
-  fallback: modelFallback(fallbackModel, log),
   log,
 };
 
@@ -76,9 +69,7 @@ const sleep = (ms: number) => delay(ms, undefined, { signal: shutdown.signal }).
 log(
   `${runnerId} up: ${config.concurrency} slot(s), models ${Object.entries(config.models)
     .map(([alias, m]) => `${alias} ${m.provider}/${m.id}`)
-    .join(
-      ", ",
-    )}${config.fallbackModel ? `, fallback ${config.fallbackModel.provider}/${config.fallbackModel.id}` : ""}, thinking ${config.thinking ?? "unset"}, api ${config.api.baseUrl}`,
+    .join(", ")}, thinking ${config.thinking ?? "unset"}, api ${config.api.baseUrl}`,
 );
 // After startup: a failure above must still kill the process, not be logged and survived.
 startTelemetry(log);

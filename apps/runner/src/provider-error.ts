@@ -1,6 +1,6 @@
 /**
  * Which model-call errors mean the provider is failing, not that our request was bad. Used by the
- * call retry (`model-retry.ts`), the fallback breaker (`model-fallback.ts`) and the run loop's
+ * call retry (`model-retry.ts`) and the run loop's
  * redo (`run-loop.ts`). The error text is all that reaches us, in these shapes:
  * - Meta, OpenAI, Mistral via Pi: `<provider> API error (<status>): <body>`.
  * - Anthropic (SDK message): `<status> {"type":"error","error":{"type":"<type>",...}}`. An error

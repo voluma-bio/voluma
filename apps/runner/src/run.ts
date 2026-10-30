@@ -62,7 +62,6 @@ import { type Config, isVisitorSafe, providerKey } from "./config.ts";
 import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
 import { claimSandboxes, terminateClaim, terminateOtherClaims } from "./modal-sandbox.ts";
-import type { ModelFallback } from "./model-fallback.ts";
 import { retryTransient } from "./model-retry.ts";
 import {
   checkPrompt,
@@ -103,8 +102,6 @@ export interface RunnerContext {
   /** The model behind each alias the config sets (`config.models`), resolved at startup. */
   aliases: Record<string, Model<Api>>;
   visitorModel: Model<Api>;
-  /** Starts worker and check threads on the fallback model while their model is failing. */
-  fallback: ModelFallback;
   log(line: string): void;
 }
 
@@ -281,10 +278,7 @@ async function claimBody(
       const level = config.modelForced
         ? config.thinking
         : (definition.agents[role].thinking ?? config.thinking);
-      const fallback =
-        config.fallbackModel &&
-        ctx.models.getModel(config.fallbackModel.provider, config.fallbackModel.id);
-      assertThinking(level, fallback ? [model, fallback] : [model], `the ${role} role's`);
+      assertThinking(level, [model], `the ${role} role's`);
       return level ?? "off";
     };
     const workerModel = roleModel("worker");
@@ -392,25 +386,20 @@ async function claimBody(
     );
     const opened = session;
 
-    // A thread keeps the model it started on (the log records it); a new one starts on the
-    // fallback while the primary is failing. A visitor's run never falls back: their key and
-    // scan go to Standard-mode Meta only.
+    // A thread keeps the model it started on (the log records it).
     const threadModel = (primary: Model<Api>, recorded: string | undefined) => {
       if (recorded) {
-        // Only a model this run may use: a visitor's scan goes to Standard-mode Meta only, and
-        // a fallback that was switched off stays off for threads that started on it.
+        // Only a model this run may use: a visitor's scan goes to Standard-mode Meta only.
         const [provider = "", ...id] = recorded.split("/");
         const allowed = visitor
           ? isVisitorSafe({ provider, id: id.join("/") })
-          : [workerModel, checkModel, mainModel, config.fallbackModel].some(
-              (m) => m && `${m.provider}/${m.id}` === recorded,
-            );
+          : [workerModel, checkModel, mainModel].some((m) => `${m.provider}/${m.id}` === recorded);
         const model = allowed ? models.getModel(provider, id.join("/")) : undefined;
         if (!model)
           throw new Error(`the thread started on ${recorded}, which this run may not use`);
         return model;
       }
-      return visitor ? primary : ctx.fallback.pick(primary);
+      return primary;
     };
     const callModel = (role: ModelRole) =>
       retryTransient(
@@ -420,12 +409,10 @@ async function claimBody(
             apiKey: keyFor(m.provider),
             maxRetries: MODEL_RETRIES,
           }),
-        (m, attempt, delayMs, error) => {
+        (attempt, delayMs, error) => {
           log(
             `${role} model call failed (${error}); retry ${attempt} in ${Math.round(delayMs / 1000)}s`,
           );
-          // Threads that start while this one retries should not wait out the same outage.
-          if (!visitor) ctx.fallback.failed(m, error);
         },
       );
     const streamFor =
@@ -433,11 +420,7 @@ async function claimBody(
       (m, context, options) => {
         const stream = callModel(role)(m, context, options);
         stream.result().then(
-          (reply) => {
-            meter.addModelCall(role, usageOf(reply));
-            if (reply.stopReason === "error" && !visitor)
-              ctx.fallback.failed(m, reply.errorMessage);
-          },
+          (reply) => meter.addModelCall(role, usageOf(reply)),
           () => {},
         );
         return stream;
@@ -457,8 +440,7 @@ async function claimBody(
       plan: computed.tasks,
       previousClaim: claim.previousClaim?.reason,
       providerError: isProviderError,
-      // With a fallback model set, the redo starts on it, so even a refused key is not the end.
-      providerFatal: (error) => !config.fallbackModel && isFatalProviderError(error),
+      providerFatal: isFatalProviderError,
       workflow: definition.files,
       // The commit the files came from: the snapshot's, which a resume keeps.
       workflows: run.workflows.map((pin) => ({ ...pin, commit: definition.commit })),
