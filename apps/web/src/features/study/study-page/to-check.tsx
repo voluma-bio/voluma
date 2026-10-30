@@ -2,8 +2,7 @@
  * The study's To check tab: every open check of each scan's latest result, one heading per kind
  * (task and check title, `checkKinds`), one aligned row per item. "Looks right" accepts the check
  * against that result's revision; "Open in 3D" hands the row's kind, in this order, to
- * `openChecks`, and "Go through all N" (only with a real check panel, `walkthrough`) the same
- * queue from its start. There are no fix actions: corrections have no backend yet.
+ * `openChecks`, and "Go through all N" the same queue from its start. There are no fix actions: corrections have no backend yet.
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, acceptCheck } from "@voluma/api-client";
@@ -17,13 +16,10 @@ export function ToCheck({
   detail,
   workflow,
   openChecks,
-  walkthrough,
 }: {
   detail: StudyDetail;
   workflow: BundledWorkflow;
   openChecks: OpenChecks;
-  /** Whether `openChecks` walks a queue, so "Go through all N" does what it says. */
-  walkthrough: boolean;
 }) {
   const kinds = checkKinds(detail, workflow);
   if (kinds.length === 0)
@@ -47,7 +43,7 @@ export function ToCheck({
               <span className="text-meta text-fg-subtle tabular-nums">
                 {scans} {scans === 1 ? "scan" : "scans"}
               </span>
-              {walkthrough && queue.length > 1 && (
+              {queue.length > 1 && (
                 <Button size="sm" className="ml-auto" onClick={() => openChecks(queue, 0)}>
                   Go through all {kind.items.length} in 3D
                 </Button>

@@ -7,6 +7,7 @@
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, getRun, getStudy, subscribe } from "@voluma/api-client";
+import { type CheckItem, CheckPanel } from "@voluma/check-panel";
 import type { Me } from "@voluma/contracts/auth";
 import type { RunEvent } from "@voluma/contracts/events";
 import type { Run } from "@voluma/contracts/run";
@@ -222,7 +223,23 @@ function RunScreen({
       ? 0
       : view.progress.toCheck -
         needs.filter((n) => n.acceptable && !n.accepted && accepting.done.has(n.id)).length;
-  const firstOpen = needs.find((n) => !n.accepted && !accepting.done.has(n.id));
+  const [panel, setPanel] = useState<{ items: CheckItem[]; start: number }>();
+  // Every "Open in 3D" walks the run's open check items, from its own (the header's: from the
+  // task in view, else the first); a task with none opens alone. The panel shows "Looks right"
+  // only on a run that takes decisions.
+  const open3d = (taskId?: string, checkId?: string) => {
+    const items = needs
+      .filter((n) => n.acceptable && !n.accepted && !accepting.done.has(n.id))
+      .map((n) => ({ runId: run.id, taskId: n.taskId, checkId: n.id }));
+    const start = taskId
+      ? items.findIndex((i) => (checkId ? i.checkId === checkId : i.taskId === taskId))
+      : items.length > 0
+        ? 0
+        : -1;
+    const alone = taskId ?? tasks[0]?.id;
+    if (start !== -1) setPanel({ items, start });
+    else if (alone) setPanel({ items: [{ runId: run.id, taskId: alone }], start: 0 });
+  };
 
   let content: React.ReactNode;
   if (taskId && !task)
@@ -240,6 +257,7 @@ function RunScreen({
         task={task}
         titleOf={(t) => titles.get(t) ?? t}
         accepting={accepting}
+        open3d={open3d}
         search={search}
         events={events}
         live={live}
@@ -272,6 +290,7 @@ function RunScreen({
         ended={ended}
         example={run.example}
         accepting={accepting}
+        open3d={open3d}
         search={search}
       />
     );
@@ -285,7 +304,7 @@ function RunScreen({
             study={study}
             progress={{ ...view.progress, toCheck }}
             spend={view.spend}
-            openTask={task?.id ?? firstOpen?.taskId}
+            open3d={tasks.length > 0 ? () => open3d(task?.id) : undefined}
             decisions={search(undefined, "decisions")}
             onChange={setRun}
           />
@@ -307,6 +326,17 @@ function RunScreen({
             </div>
           </div>
         </main>
+        {panel && (
+          <CheckPanel
+            items={panel.items}
+            start={panel.start}
+            onClose={() => setPanel(undefined)}
+            onAccepted={(item) => {
+              if (item.checkId) accepting.markDone(item.checkId);
+              refetch();
+            }}
+          />
+        )}
       </ThreadNavigationProvider>
     </DisclosureProvider>
   );

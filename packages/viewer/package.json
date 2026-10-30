@@ -4,25 +4,29 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./grid": "./src/grid/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
   },
   "devDependencies": {
     "@types/react": "catalog:",
     "@types/three": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   },
   "dependencies": {
     "@cornerstonejs/core": "4.22.13",
     "@cornerstonejs/dicom-image-loader": "4.22.13",
-    "@zip.js/zip.js": "2.24.0",
     "@voluma/contracts": "workspace:*",
+    "@zip.js/zip.js": "2.24.0",
     "dicom-parser": "1.8.21",
     "lucide-react": "catalog:",
     "react": "catalog:",
     "react-resizable-panels": "catalog:",
-    "three": "catalog:"
+    "three": "catalog:",
+    "zarrita": "0.7.5"
   }
 }

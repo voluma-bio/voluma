@@ -14,12 +14,26 @@ import {
   reviewFileUrl,
 } from "@voluma/api-client";
 import { type DicomArchive, openDicomZip, ViewerWorkspace } from "@voluma/viewer";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Link, type RouteObject, useParams, useSearchParams } from "react-router";
 import { ReviewWorkspace } from "./report/ReviewWorkspace";
 
-export const reviewRoutes: RouteObject[] = [{ path: "/runs/:runId", element: <ReviewPage /> }];
+// three.js and the zarr reader load only with the grid page.
+const GridPage = lazy(() => import("./grid-page").then((m) => ({ default: m.GridPage })));
 const queryClient = new QueryClient();
+export const reviewRoutes: RouteObject[] = [
+  { path: "/runs/:runId", element: <ReviewPage /> },
+  {
+    path: "/runs/:runId/grid",
+    element: (
+      <QueryClientProvider client={queryClient}>
+        <Suspense>
+          <GridPage />
+        </Suspense>
+      </QueryClientProvider>
+    ),
+  },
+];
 
 function ReviewPage() {
   const { runId } = useParams();
