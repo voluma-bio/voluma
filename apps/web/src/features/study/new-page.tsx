@@ -242,7 +242,7 @@ export function NewPage() {
   const startLabel = several ? "Start the study" : "Start run";
 
   return (
-    <main className="mx-auto grid w-full max-w-[860px] content-start gap-4 px-6 pt-7 pb-16 max-[760px]:px-4">
+    <div className="mx-auto grid w-full max-w-[860px] content-start gap-4 px-6 pt-7 pb-16 max-[760px]:px-4">
       <h1 className="mb-1 text-2xl font-semibold">Run on new scans</h1>
 
       <Step n={1} title="Scans">
@@ -410,7 +410,7 @@ export function NewPage() {
           onClose={() => setPanel(undefined)}
         />
       ))}
-    </main>
+    </div>
   );
 }
 

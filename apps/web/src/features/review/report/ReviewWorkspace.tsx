@@ -6,7 +6,7 @@ import type { Focus, Revision } from "@voluma/contracts/review";
 import type { GridViewState, ReviewSnapshot } from "@voluma/contracts/snapshot";
 import { Button, EmptyState, ErrorState, StatusMark, TextField } from "@voluma/ui";
 import type { StructureDisplay } from "@voluma/viewer/grid";
-import { ArrowLeft, Download, History, Layers, ListChecks } from "lucide-react";
+import { Download, History, Layers, ListChecks } from "lucide-react";
 import { lazy, type ReactNode, Suspense, useEffect, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { downloadCsv, downloadReviewReport } from "./export";
@@ -101,13 +101,10 @@ export function ReviewWorkspace({
     onError: onRefresh,
   });
   return (
-    <div className="review-shell" data-theme="light">
+    <div className="review-shell">
       <div className="run-header">
         <div>
-          <div className="back-link">
-            <ArrowLeft size={14} />
-            {backLink}
-          </div>
+          {backLink}
           <div className="run-title">
             <h1 className="text-xl font-semibold">{run.sample ?? runId}</h1>
             {run.review && (
@@ -188,7 +185,7 @@ export function ReviewWorkspace({
       {revision && revision !== latest && (
         <div className="revision-notice">Earlier results are read-only.</div>
       )}
-      <main className="review-body">
+      <div className="review-body">
         <aside className="task-sidebar">
           <div className="sidebar-tabs">
             <button type="button" aria-pressed={tab === "tasks"} onClick={() => setTab("tasks")}>
@@ -393,7 +390,7 @@ export function ReviewWorkspace({
             </Panel>
           </Group>
         </div>
-      </main>
+      </div>
       <footer className="app-footer">
         <span>Research review</span>
         <span>Display settings do not change scientific results</span>

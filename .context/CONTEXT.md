@@ -6,7 +6,7 @@ commands are in [AGENTS.md](../AGENTS.md).
 ## Shape
 
 ```
-apps/web        React + Vite. shell/ mounts routes and draws the top bar; features/run and features/review own screens
+apps/web        React + Vite. shell/ mounts routes and the `AppShell` frame (one `QueryClient` in `SignedIn`; no top bar); features/run and features/review own screens
 apps/api        Node server on Postgres (Drizzle), each domain a Hono app. src/index.ts is the
                 composition root: the only code that reads env; it builds the adapters and
                 mounts domains/run at /api/run/ (runs, the queue, the event log) and domains/review at
