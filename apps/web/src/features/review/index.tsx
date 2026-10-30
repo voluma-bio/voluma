@@ -3,7 +3,8 @@
  * Light Review chrome. Owns its routes; the shell mounts them.
  */
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { ApiError, getReviewRun, getRun } from "@voluma/api-client";
+import { ApiError } from "@voluma/api-client";
+import { reviewRunQuery, runQuery } from "@voluma/api-client/query";
 import { Button, EmptyState, ErrorState, LoadingState } from "@voluma/ui";
 import { useEffect, useRef } from "react";
 import { Link, type RouteObject, useParams, useSearchParams } from "react-router";
@@ -26,8 +27,7 @@ function ReviewPage() {
 function RunReview({ runId }: { runId: string }) {
   const [search, setSearch] = useSearchParams();
   const execution = useQuery({
-    queryKey: ["run", runId],
-    queryFn: () => getRun(runId),
+    ...runQuery(runId),
     refetchInterval: (query) => {
       const data = query.state.data;
       return data && data.state.status !== "ended" ? 3000 : false;
@@ -42,12 +42,11 @@ function RunReview({ runId }: { runId: string }) {
   const lastStatus = useRef(runStatus);
   useEffect(() => {
     if (lastStatus.current !== undefined && lastStatus.current !== "ended" && runStatus === "ended")
-      void queryClient.invalidateQueries({ queryKey: ["review-run", runId] });
+      void queryClient.invalidateQueries({ queryKey: reviewRunQuery(runId).queryKey });
     lastStatus.current = runStatus;
   }, [runStatus, runId]);
   const review = useQuery({
-    queryKey: ["review-run", runId],
-    queryFn: () => getReviewRun(runId),
+    ...reviewRunQuery(runId),
     // Only a server error may pass on retry; a 404, a 409 or data the contract rejects won't.
     retry: (count, cause) => cause instanceof ApiError && cause.status >= 500 && count < 2,
     // A run with no plan yet gets one once the runner starts it; a live run's results fill in
@@ -114,7 +113,10 @@ function RunReview({ runId }: { runId: string }) {
       }}
       backLink={<Link to="/">Home</Link>}
       onRefresh={() =>
-        queryClient.invalidateQueries({ queryKey: ["review-run", runId] }, { throwOnError: true })
+        queryClient.invalidateQueries(
+          { queryKey: reviewRunQuery(runId).queryKey },
+          { throwOnError: true },
+        )
       }
     />
   );

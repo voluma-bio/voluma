@@ -3,6 +3,8 @@
 @import "@voluma/design-tokens/tokens.css";
 @import "@voluma/design-tokens/theme.css";
 @import "@voluma/design-tokens/fonts.css";
+@import "@voluma/run-view/styles.css";
+@source "../../../packages/run-view/src";
 @source "../../../packages/ui/src";
 
 html,

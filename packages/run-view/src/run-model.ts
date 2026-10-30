@@ -442,7 +442,7 @@ function stateOf(
   return blocked ? "waiting" : "ready";
 }
 
-export type RunView = {
+type RunView = {
   /** Without the tool calls still being written: `withLiveCalls` adds those per frame. */
   threads: Thread[];
   /** One per plan task, in plan order; empty until the run has a plan. */

@@ -1,6 +1,6 @@
 /** Task-scoped report and questions. Acceptance never changes scientific confidence. */
-import { useMutation } from "@tanstack/react-query";
-import { acceptCheck, reviewFileUrl } from "@voluma/api-client";
+import { reviewFileUrl } from "@voluma/api-client";
+import { useAcceptCheck } from "@voluma/api-client/query";
 import type { Focus } from "@voluma/contracts/review";
 import { Button, Chip, EmptyState, ErrorState, StatusMark, Table, TextAreaField } from "@voluma/ui";
 import {
@@ -99,7 +99,6 @@ export function TaskReport({
   revisionId,
   readOnly,
   onFocus,
-  onRefresh,
 }: {
   task: ReviewTask;
   /** A structure id to its name, for To check items that point at structures. */
@@ -111,14 +110,8 @@ export function TaskReport({
   revisionId: string;
   readOnly: boolean;
   onFocus(focus?: Focus): void;
-  onRefresh(): Promise<void>;
 }) {
-  const accept = useMutation({
-    mutationFn: (checkId: string) =>
-      acceptCheck(runId, checkId, { baseRevisionId: revisionId, taskId: task.id }),
-    onSuccess: onRefresh,
-    onError: onRefresh,
-  });
+  const accept = useAcceptCheck(runId, revisionId);
   const references = task.measurements.flatMap((m) =>
     m.references.map((reference) => ({ m, reference })),
   );
@@ -302,10 +295,10 @@ export function TaskReport({
                 <Button
                   size="sm"
                   disabled={readOnly || accept.isPending}
-                  onClick={() => accept.mutate(check.id)}
+                  onClick={() => accept.mutate({ checkId: check.id, taskId: task.id })}
                 >
                   <Check />
-                  {accept.isPending && accept.variables === check.id
+                  {accept.isPending && accept.variables?.checkId === check.id
                     ? "Accepting…"
                     : "Accept check"}
                 </Button>
@@ -318,9 +311,9 @@ export function TaskReport({
           </div>
         ))}
         {accept.error &&
-          task.checks.some((check) => check.id === accept.variables && check.status === "open") && (
-            <ErrorState title="Couldn't accept the check">{accept.error.message}</ErrorState>
-          )}
+          task.checks.some(
+            (check) => check.id === accept.variables?.checkId && check.status === "open",
+          ) && <ErrorState title="Couldn't accept the check">{accept.error.message}</ErrorState>}
       </section>
       <section>
         <div className="section-heading">

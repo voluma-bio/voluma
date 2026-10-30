@@ -7,16 +7,16 @@
  */
 
 import { cacheHitShare, type Spend } from "@voluma/contracts/spend";
-import { StatusMark } from "@voluma/ui";
-import { formatDuration, formatUsd } from "@voluma/ui/run";
+import { STATUS_WORD, type Status, StatusMark } from "@voluma/ui";
 import { Bot, ChevronDown, ShieldCheck } from "lucide-react";
 import { useDisclosure } from "./chat/disclosure-store";
 import { InfoButton, type InfoSection } from "./chat/info-button";
 import { Markdown } from "./chat/markdown";
 import { useOpenThread } from "./chat/thread-navigation";
-import { useRunLog } from "./run-log";
 import { agentTitle, type Thread } from "./run-model";
-import { useNow } from "./status";
+import { formatDuration, formatUsd } from "./run-status";
+import { useThreads } from "./run-store";
+import { useNow } from "./use-now";
 
 const count = (n: number) => n.toLocaleString();
 
@@ -107,9 +107,9 @@ export function AgentMark({ thread }: { thread: Thread }) {
 }
 
 /** The door: a thread's name, which opens its transcript. */
-export function AgentName({ thread, className = "" }: { thread: Thread; className?: string }) {
+function AgentName({ thread, className = "" }: { thread: Thread; className?: string }) {
   const open = useOpenThread();
-  const { threads } = useRunLog();
+  const threads = useThreads();
   return (
     <button
       type="button"
@@ -144,19 +144,20 @@ function ResultLine({ thread }: { thread: Thread }) {
   );
 }
 
-export const STATUS_WORD: Record<Thread["status"], string> = {
-  running: "Working",
-  paused: "Paused",
-  "awaiting-ai": "Waiting for the AI",
-  completed: "Finished",
-  failed: "Failed",
-  cancelled: "Stopped",
+/** A thread's status as the one status vocabulary of `@voluma/ui`. */
+export const THREAD_STATUS: Record<Thread["status"], Status> = {
+  running: "running",
+  paused: "paused",
+  "awaiting-ai": "waiting",
+  completed: "done",
+  failed: "stopped",
+  cancelled: "stopped",
 };
 
 /** A worker's or checker's card in the main thread. */
 export function AgentCard({ thread }: { thread: Thread }) {
   const [expanded, setExpanded] = useDisclosure(`card:${thread.id}`);
-  const { threads } = useRunLog();
+  const threads = useThreads();
   const running = thread.status === "running";
   const expandable = !running;
   return (
@@ -164,7 +165,7 @@ export function AgentCard({ thread }: { thread: Thread }) {
       <div className="relative flex min-w-0 items-center gap-2">
         <AgentMark thread={thread} />
         <AgentName thread={thread} className="text-ui" />
-        <span className="sr-only">{STATUS_WORD[thread.status]}</span>
+        <span className="sr-only">{STATUS_WORD[THREAD_STATUS[thread.status]]}</span>
         <span className="ml-auto" />
         <ThreadCost thread={thread} />
         <Elapsed thread={thread} />

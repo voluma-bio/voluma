@@ -285,6 +285,9 @@ importers:
       '@voluma/design-tokens':
         specifier: workspace:*
         version: link:../../packages/design-tokens
+      '@voluma/run-view':
+        specifier: workspace:*
+        version: link:../../packages/run-view
       '@voluma/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -312,21 +315,12 @@ importers:
       react-dom:
         specifier: 'catalog:'
         version: 19.3.1(react@19.3.1)
-      react-markdown:
-        specifier: 'catalog:'
-        version: 10.1.0(@types/react@19.3.0)(react@19.3.1)
       react-resizable-panels:
         specifier: 'catalog:'
         version: 4.15.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       react-router:
         specifier: ^8.5.0
         version: 8.5.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      remark-gfm:
-        specifier: 'catalog:'
-        version: 4.0.1
-      remend:
-        specifier: 'catalog:'
-        version: 1.4.0
     devDependencies:
       '@tailwindcss/vite':
         specifier: 'catalog:'
@@ -359,6 +353,9 @@ importers:
         specifier: workspace:*
         version: link:../contracts
     devDependencies:
+      '@tanstack/react-query':
+        specifier: 'catalog:'
+        version: 5.105.0(@types/react@19.3.0)(react@19.3.1)
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
@@ -438,11 +435,45 @@ importers:
         specifier: 'catalog:'
         version: 5.0.5(@types/node@24.19.2)(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.0))
 
-  packages/ui:
+  packages/run-view:
     dependencies:
       '@voluma/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@voluma/ui':
+        specifier: workspace:*
+        version: link:../ui
+      '@voluma/workflow':
+        specifier: workspace:*
+        version: link:../workflow
+      lucide-react:
+        specifier: 'catalog:'
+        version: 1.62.0(@types/react@19.3.0)(react@19.3.1)
+      radix-ui:
+        specifier: 1.8.1
+        version: 1.8.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      react-markdown:
+        specifier: 'catalog:'
+        version: 10.1.0(@types/react@19.3.0)(react@19.3.1)
+      remark-gfm:
+        specifier: 'catalog:'
+        version: 4.0.1
+      remend:
+        specifier: 'catalog:'
+        version: 1.4.0
+    devDependencies:
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.3.0
+      react:
+        specifier: 'catalog:'
+        version: 19.3.1
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+
+  packages/ui:
+    dependencies:
       lucide-react:
         specifier: 'catalog:'
         version: 1.62.0(@types/react@19.3.0)(react@19.3.1)

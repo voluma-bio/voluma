@@ -20,6 +20,7 @@
 import type { ModelUsage, RunEvent } from "@voluma/contracts/events";
 import type { LiveFrame } from "@voluma/contracts/stream";
 import { catalog } from "@voluma/workflow/bundled";
+import { plural } from "./run-status";
 
 const { taskTitle } = catalog["mouse-oa"];
 
@@ -168,7 +169,7 @@ export function settle(live: Live, e: RunEvent, settled: Settled): Live {
  * The value of a string field in JSON that may be cut off mid-string: `{"command":"ls -l` gives
  * `ls -l`. Enough to title a tool call, while the model still writes it.
  */
-export function partialJsonString(json: string, key: string): string | undefined {
+function partialJsonString(json: string, key: string): string | undefined {
   const at = json.search(new RegExp(`"${key}"\\s*:\\s*"`));
   if (at < 0) return undefined;
   let i = json.indexOf('"', json.indexOf(":", at)) + 1;
@@ -320,11 +321,10 @@ export function digest(steps: Step[]): string {
       if (s.status === "error") failed++;
     }
   }
-  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
   const parts = [
-    commands > 0 && `ran ${plural(commands, "command", "commands")}`,
-    images > 0 && `viewed ${plural(images, "image", "images")}`,
-    other > 0 && plural(other, "step", "steps"),
+    commands > 0 && `ran ${plural(commands, "command")}`,
+    images > 0 && `viewed ${plural(images, "image")}`,
+    other > 0 && plural(other, "step"),
     failed > 0 && `${failed} failed`,
   ].filter((p): p is string => Boolean(p));
   const text = parts.join(", ");

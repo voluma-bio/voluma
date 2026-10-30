@@ -349,7 +349,6 @@ export function ReviewWorkspace({
                         focus ? { revisionId: revision.id, taskId: task.id, focus } : undefined,
                       );
                     }}
-                    onRefresh={onRefresh}
                   />
                 ) : (
                   <EmptyState title="Result not available">

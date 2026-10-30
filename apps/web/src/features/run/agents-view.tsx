@@ -4,14 +4,19 @@
  * whichever agent is working now. The tree is `agentTree` (the log's own parent links); this file
  * groups siblings by task. Visuals are a thin debug layer on purpose: the redesign restyles it.
  */
-
-import { EmptyState } from "@voluma/ui";
+import {
+  AgentMark,
+  type AgentNode,
+  AgentThread,
+  agentLabel,
+  agentTree,
+  THREAD_STATUS,
+  type Thread,
+  useThreads,
+} from "@voluma/run-view";
+import { EmptyState, STATUS_WORD } from "@voluma/ui";
 import { catalog } from "@voluma/workflow/bundled";
 import { useEffect, useMemo, useRef } from "react";
-import { AgentThread } from "./agent-thread";
-import { AgentMark, STATUS_WORD } from "./agents";
-import { useRunLog } from "./run-log";
-import { type AgentNode, agentLabel, agentTree, type Thread } from "./run-model";
 
 const { taskTitle } = catalog["mouse-oa"];
 
@@ -57,7 +62,7 @@ export function AgentsView({
   select: (threadId: string | null) => void;
   ended: boolean;
 }) {
-  const { threads } = useRunLog();
+  const threads = useThreads();
   const follow = agentId === undefined;
   const tree = useMemo(() => agentTree(threads), [threads]);
   // The agent on screen at the last commit: turning Follow live on keeps it while it works.
@@ -153,7 +158,7 @@ function TreeNode({ node, ...props }: TreeProps & { node: AgentNode }) {
       >
         <AgentMark thread={t} />
         <span className="min-w-0 flex-1 truncate">{agentLabel(t, props.threads)}</span>
-        <span className="sr-only">{STATUS_WORD[t.status]}</span>
+        <span className="sr-only">{STATUS_WORD[THREAD_STATUS[t.status]]}</span>
       </button>
       {node.children.length > 0 && (
         <ul className="ml-3 grid gap-0.5 border-l border-border pl-2">

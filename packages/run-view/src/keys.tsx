@@ -4,8 +4,8 @@
  * user of the browser never sees them; the server holds them in memory only.
  */
 import { type VisitorKeys, visitorKeysSchema } from "@voluma/contracts/run";
+import { Button } from "@voluma/ui";
 import { type FormEvent, useState } from "react";
-import { Button } from "../button";
 
 const storageKey = (userId: string) => `voluma.visitor-keys.${userId}`;
 
@@ -26,10 +26,10 @@ export function loadKeys(userId: string): VisitorKeys | undefined {
   return undefined;
 }
 
-export const saveKeys = (userId: string, keys: VisitorKeys) =>
+const saveKeys = (userId: string, keys: VisitorKeys) =>
   localStorage.setItem(storageKey(userId), JSON.stringify(keys));
 
-export const forgetKeys = (userId: string) => localStorage.removeItem(storageKey(userId));
+const forgetKeys = (userId: string) => localStorage.removeItem(storageKey(userId));
 
 const inputClass =
   "h-9 w-full rounded-lg border border-input bg-card px-3 text-ui outline-none focus-visible:border-ring";

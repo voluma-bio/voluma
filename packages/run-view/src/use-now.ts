@@ -1,4 +1,4 @@
-/** A ticking clock for the live page. The status chip and the formatters are `@voluma/ui/run`. */
+/** A ticking clock for the live page. The status chip and the formatters are in `run-status.tsx`. */
 import { useEffect, useState } from "react";
 
 /** The time now, ticking each second while `active`. */

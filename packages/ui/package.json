@@ -4,8 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./run": "./src/run/index.ts"
+    ".": "./src/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"
@@ -20,7 +19,6 @@
     "typescript": "catalog:"
   },
   "dependencies": {
-    "@voluma/contracts": "workspace:*",
     "lucide-react": "catalog:",
     "radix-ui": "catalog:",
     "tailwind-merge": "catalog:"

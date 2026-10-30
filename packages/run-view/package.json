@@ -1,0 +1,31 @@
+{
+  "name": "@voluma/run-view",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./styles.css": "./src/styles.css"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "peerDependencies": {
+    "react": "^19"
+  },
+  "dependencies": {
+    "@voluma/contracts": "workspace:*",
+    "@voluma/ui": "workspace:*",
+    "@voluma/workflow": "workspace:*",
+    "lucide-react": "catalog:",
+    "radix-ui": "1.8.1",
+    "react-markdown": "catalog:",
+    "remark-gfm": "catalog:",
+    "remend": "catalog:"
+  },
+  "devDependencies": {
+    "@types/react": "catalog:",
+    "react": "catalog:",
+    "typescript": "catalog:"
+  }
+}

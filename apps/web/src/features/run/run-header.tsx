@@ -4,11 +4,20 @@
  * left to check; Run details (started, took, settled cost); Stop while it is live; Open in 3D.
  * Alerts: the visitor-keys form while the run waits for its starter's keys, and why it failed.
  */
+
 import { useMutation } from "@tanstack/react-query";
 import { ApiError, cancelRun, resendKeys } from "@voluma/api-client";
 import type { Run } from "@voluma/contracts/run";
 import type { RunSpend } from "@voluma/contracts/spend";
 import type { StudyDetail } from "@voluma/contracts/study";
+import {
+  formatDuration,
+  formatUsd,
+  KeysForm,
+  plainError,
+  shortDate,
+  useNow,
+} from "@voluma/run-view";
 import {
   Button,
   Facts,
@@ -18,19 +27,13 @@ import {
   type Status,
   StatusMark,
 } from "@voluma/ui";
-import { formatDuration, formatUsd, KeysForm } from "@voluma/ui/run";
 import { catalog, workflowName } from "@voluma/workflow/bundled";
 import { ChevronDown } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
 import { reviewHref } from "./overview";
-import { plainError } from "./run-model";
-import { useNow } from "./status";
 
 const { taskTitle } = catalog["mouse-oa"];
-
-const day = (iso: string) =>
-  new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 
 /** "OA6-1, right knee", from the study's scan; the scan's file name when the study can't say. */
 function scanTitle(run: Run, study: StudyDetail | undefined) {
@@ -177,7 +180,7 @@ function RunDetails({
   const endedAt = state.status === "ended" ? state.endedAt : undefined;
   const now = useNow(startedAt !== undefined && endedAt === undefined);
   const rows: [string, string][] = [
-    ["Started", startedAt ? day(startedAt) : "Not yet"],
+    ["Started", startedAt ? shortDate(startedAt) : "Not yet"],
     ...(startedAt
       ? ([
           [
