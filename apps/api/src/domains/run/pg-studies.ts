@@ -1,7 +1,7 @@
 /**
  * Postgres adapter for the browser's reads of studies (`@voluma/contracts/study`): Home's
  * list, which carries each scan's newest run in brief, and one study with its scans, runs,
- * headline values and open checks. Reads apply the caller's `ReadScope` as `pg-runs.ts` does, and
+ * values, open checks and each scan's task statuses. Reads apply the caller's `ReadScope` as `pg-runs.ts` does, and
  * derive through its `ResultsLoader`, so a run is derived once for both. Writes are the queue's.
  */
 import type { Run } from "@voluma/contracts/run";
@@ -12,7 +12,6 @@ import type {
   StudyScan,
   StudySummary,
 } from "@voluma/contracts/study";
-import { workflowById } from "@voluma/workflow/bundled";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { ReadScope } from "../../domain";
@@ -137,21 +136,15 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
           const found = await results(tx, and(readableRuns(reader), eq(runs.studyId, studyId)), {
             skipUnreadable: true,
           });
-          const { newestCompleted } = newestOf(found);
+          const { newest, newestCompleted } = newestOf(found);
           const runsOf = new Map<string, Run[]>();
           for (const { run } of found) {
             runsOf.set(run.input.id, [...(runsOf.get(run.input.id) ?? []), run]);
           }
-          const headline = workflowById(row.workflowId)?.headline ?? [];
           return {
             study: toStudy(row),
             scans: scans.map(({ scan, input }) => {
               const result = newestCompleted.get(scan.inputId);
-              const values: StudyDetail["scans"][number]["values"] = {};
-              for (const { id } of headline) {
-                const value = result?.values[id];
-                if (value) values[id] = value;
-              }
               return {
                 scan: {
                   inputId: scan.inputId,
@@ -162,10 +155,11 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
                 input: toInput(input),
                 runs: runsOf.get(scan.inputId) ?? [],
                 resultRunId: result?.run.id ?? null,
-                values,
+                values: result?.values ?? {},
                 toCheck: result
                   ? result.toCheck.map((item) => ({ ...item, runId: result.run.id }))
                   : [],
+                taskStatus: newest.get(scan.inputId)?.taskStatus ?? {},
               };
             }),
           };

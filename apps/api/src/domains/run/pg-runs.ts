@@ -5,6 +5,7 @@
  */
 
 import { runEventSchema } from "@voluma/contracts/events";
+import type { TaskStatus } from "@voluma/contracts/ids";
 import type { ReviewSummary } from "@voluma/contracts/review";
 import { progress, reviewState } from "@voluma/contracts/review-state";
 import { type Input, type Run, runSchema } from "@voluma/contracts/run";
@@ -250,7 +251,8 @@ export async function loadRecords(
 
 /**
  * What one `reviewState(log)` gives the reads: for a completed run the summary, and for
- * studies its measurement values and open checks; for a live run its task progress.
+ * studies its measurement values and open checks; for a live run its task progress; for any
+ * run each task's status (the study's scan-by-task grid).
  */
 type Derived = {
   summary: ReviewSummary | null;
@@ -258,9 +260,10 @@ type Derived = {
   /** Output id (`outputs.json`) → value, from the latest revision's tasks. */
   values: Record<string, StudyValue>;
   toCheck: Omit<ToCheckItem, "runId">[];
+  taskStatus: Record<string, TaskStatus>;
 };
 
-const NOTHING: Derived = { summary: null, tasks: null, values: {}, toCheck: [] };
+const NOTHING: Derived = { summary: null, tasks: null, values: {}, toCheck: [], taskStatus: {} };
 
 type Revision = ReturnType<typeof reviewState>["revisions"][number];
 
@@ -276,7 +279,9 @@ function derive(log: RunRecord["events"]): Derived {
   const latest = revisions.at(-1);
   const values: Derived["values"] = {};
   const toCheck: Derived["toCheck"] = [];
+  const taskStatus: Derived["taskStatus"] = {};
   for (const task of latest?.tasks ?? []) {
+    taskStatus[task.id] = task.status;
     for (const m of task.measurements) {
       // The fold names a measurement `taskId/outputId`; the workflow files know the output id.
       values[m.id.slice(task.id.length + 1)] = {
@@ -296,7 +301,7 @@ function derive(log: RunRecord["events"]): Derived {
       }
     }
   }
-  return { summary, tasks: progressOf(latest), values, toCheck };
+  return { summary, tasks: progressOf(latest), values, toCheck, taskStatus };
 }
 
 type SummaryCache = Map<string, { lastEventId: string | null; derived: Derived }>;
@@ -324,11 +329,13 @@ async function loadResults(
   { cache = new Map(), skipUnreadable = false }: LoadOptions = {},
 ): Promise<RunResult[]> {
   const rows = await loadRows(tx, where);
-  const ended = new Set(rows.filter(({ run }) => run.state === "ended").map(({ run }) => run.id));
-  const ids = rows
-    // A failed or cancelled run has nothing to derive; a live one has its `tasks`.
-    .filter(({ run }) => run.state !== "ended" || run.outcome === "completed")
-    .map(({ run }) => run.id);
+  const completed = new Set(
+    rows
+      .filter(({ run }) => run.state === "ended" && run.outcome === "completed")
+      .map(({ run }) => run.id),
+  );
+  // Every run is derived: a stopped one still shows where it stopped (`taskStatus`).
+  const ids = rows.map(({ run }) => run.id);
   const watermarks = ids.length
     ? await tx
         .selectDistinctOn([events.runId], { runId: events.runId, id: events.id })
@@ -341,7 +348,8 @@ async function loadResults(
   const cached = new Map(ids.map((id) => [id, cache.get(id)]));
   const missing = ids.filter((id) => cached.get(id)?.lastEventId !== (versions.get(id) ?? null));
   const { logs, unreadable } = await loadLogs(tx, missing, true);
-  const lost = [...unreadable].filter((id) => ended.has(id));
+  // Only a completed run needs its events; a live or stopped one unreadable reads as `NOTHING`.
+  const lost = [...unreadable].filter((id) => completed.has(id));
   if (!skipUnreadable && lost.length)
     throw new Error(`run ${lost.join(", ")}: stored events can't be read`);
   const derivedOf = new Map<string, Derived>();
