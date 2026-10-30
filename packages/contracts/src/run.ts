@@ -172,12 +172,6 @@ export const runStateSchema = z.discriminatedUnion("status", [
   z.object({
     status: z.literal("queued"),
     position: z.number().int().min(1),
-    /**
-     * Present while the run waits out a model-provider outage: its last claim was released
-     * because the provider kept failing (`provider-outage`, `runner.ts`). `retryAt` is the
-     * time before which no claim takes it.
-     */
-    waitingForProvider: z.object({ retryAt: z.iso.datetime() }).optional(),
   }),
   /** The first claim's time: a re-claim after a recovery keeps it. */
   z.object({ status: z.literal("running"), startedAt: z.iso.datetime() }),

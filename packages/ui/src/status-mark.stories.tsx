@@ -40,6 +40,6 @@ export const Running: Story = { args: { status: "running" } };
 export const Checking: Story = { args: { status: "checking" } };
 export const Done: Story = { args: { status: "done" } };
 export const Waiting: Story = { args: { status: "waiting" } };
-export const Paused: Story = { args: { status: "paused", label: "AI unavailable" } };
+export const Paused: Story = { args: { status: "paused", label: "Paused" } };
 export const Stopped: Story = { args: { status: "stopped" } };
 export const Failed: Story = { args: { status: "stopped", label: "Failed" } };

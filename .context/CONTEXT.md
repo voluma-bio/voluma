@@ -143,7 +143,7 @@ and check threads.
   agents list and task table; after `stuckLimit` such nudges in a row code skips the unfinished
   tasks (a root-written `plan.changed`) and ends the run. A main thread that cannot resume, or
   failed on a provider error, is replaced by `main.<n+1>` whose first message is built from the log.
-  A thread that throws or is refused before it starts (`ran` false), a fatal provider error, or an
+  A thread that throws or is refused before it starts (`ran` false), a fatal provider error (a retryable one resumes its thread once first), or an
   error in a step fails the run: threads aborted, the root ends `failed`. The loop never imports
   Pi; `superviseRun` (`packages/harness/src/supervise-run.ts`) wires it, and a host gives only
   adapters, each role's model/prompt/tool names (`RoleOf`) and the first messages (`Briefs`).
