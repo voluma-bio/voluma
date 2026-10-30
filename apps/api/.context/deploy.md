@@ -178,17 +178,20 @@ https://neon.com/pricing on 2026-10-30:
 
 What that means here:
 
-- **Size.** Staging held 183 MB on 2026-10-30, 141 MB of it `pi_messages`, and grows about
-  10 MB per run: about 80 runs from the limit. Check it (`select pg_size_pretty(pg_database_size(current_database()))`) now and then; [TODO.md](TODO.md) tracks it.
-- **Compute hours are the tighter limit.** The runner polls `claim` every 2 s, so with it
+- **Size is the tighter limit.** Staging held 256 MB on 2026-10-30 (`pi_messages` 234 MB). One
+  full mouse-oa run (9 tasks) added about 95 MB, nearly all model history: about 7 more full runs
+  reach 1 GB (#255 tracks storing less). Check it (`select pg_size_pretty(pg_database_size(current_database()))`) now and then; [TODO.md](TODO.md) tracks it.
+- **Compute hours.** The runner polls `claim` every 2 s, so with it
   running the compute never reaches its 5 idle minutes. At 0.25 CU that is about 6 CU-hours a
   day, about 180 a month against the 100 allowed; the 5 days to Nov 4 cost about 30. With the
-  runner suspended, the gateway's 5-minute sweep (`SWEEP_MS` in `apps/gateway/src/main.ts`) may
-  still keep it awake: unchecked. Past the cap compute pauses and every call fails. Launch
+  runner suspended the compute still never sleeps: the gateway's sweep (`SWEEP_MS` in
+  `apps/gateway/src/main.ts`) runs every 5 minutes, Neon's idle timeout, and an open web page
+  polls through the API (seen 2026-10-30). Past the cap compute pauses and every call fails. Launch
   (pay as you go) is $0.106 per CU-hour and $0.35 per GB-month. After Nov 4 check Neon's
   console usage ([TODO.md](TODO.md)).
-- **Scale to zero** costs the first query after 5 idle minutes a cold start. postgres.js is
-  expected to reconnect and succeed; it is a cutover check, not yet seen.
+- **Scale to zero** costs the first query after a suspend a cold start. Checked 2026-10-30: with
+  the compute suspended through Neon's API, the API's next sign-in and runs list answered in 1.2 s
+  with no connection error (postgres.js replaces the connections Neon closed).
 - **Backups** are the 6-hour history only. Take a `pg_dump` before anything risky.
 
 **A dump or restore** connects from the operator's machine to the direct URL (Neon has no
