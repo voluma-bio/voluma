@@ -159,11 +159,9 @@ export function metaClient(options: { url: string; token: string; log(line: stri
       await expectOk(res, "Meta request");
       if (!res.body) throw new Failure("Meta request: the reply had no body", true);
       const file = createWriteStream(out);
-      let first: number | undefined;
       const watch = streamWatch(started);
       try {
         for await (const chunk of res.body) {
-          first ??= Date.now();
           watch.add(chunk);
           if (!file.write(chunk)) await once(file, "drain");
         }
@@ -174,10 +172,12 @@ export function metaClient(options: { url: string; token: string; log(line: stri
       file.end();
       await once(file, "finish");
       const end = Date.now();
+      // Wait ends at the first `data:` line: the gateway's keepalive comments are not arrivals.
+      const waitMs = watch.stats.firstEventMs ?? end - started;
       return {
         requestId: res.headers.get("x-request-id") ?? undefined,
-        waitMs: (first ?? end) - started,
-        receiveMs: end - (first ?? end),
+        waitMs,
+        receiveMs: end - started - waitMs,
         stream: watch.stats,
       };
     },
@@ -201,16 +201,20 @@ function streamWatch(started: number) {
     stats,
     add(chunk: Buffer) {
       const now = Date.now();
-      if (now - last > stats.longestGapMs) {
-        stats.longestGapMs = now - last;
-        stats.longestGapAtMs = now - started;
-      }
-      last = now;
       stats.bytes += chunk.length;
       const joined = Buffer.concat([tail, chunk]);
       let seen = 0;
       for (let at = joined.indexOf(LINE); at >= 0; at = joined.indexOf(LINE, at + 1)) seen++;
-      if (seen) stats.firstEventMs ??= now - started;
+      // Keepalive comments (`: keepalive`) are bytes but not arrivals: only a chunk with a
+      // `data:` line ends a gap.
+      if (seen) {
+        if (now - last > stats.longestGapMs) {
+          stats.longestGapMs = now - last;
+          stats.longestGapAtMs = now - started;
+        }
+        last = now;
+        stats.firstEventMs ??= now - started;
+      }
       stats.events += seen;
       tail = joined.subarray(Math.max(joined.length - (LINE.length - 1), 0));
     },

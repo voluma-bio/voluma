@@ -98,7 +98,7 @@ export type Crop = [number, number, number, number, number, number];
 export interface StreamStats {
   /** The first `data:` event; keepalive comments do not count. Undefined if none came. */
   firstEventMs: number | undefined;
-  /** The longest time without a byte, the wait for the first byte included. */
+  /** The longest time without a `data:` event (keepalive comments do not end it), the wait for the first included. */
   longestGapMs: number;
   /** When that gap ended. */
   longestGapAtMs: number;
