@@ -45,8 +45,10 @@ export type Thread = {
   /** The attempts it opened, in order (`attempt.opened` ids): a redo resumes the same thread. */
   attempts: string[];
   model?: string;
-  /** Its latest start: a resumed thread's clock counts from its resume. */
+  /** Its latest start: the clock's running part counts from here. */
   startedAt: string;
+  /** Seconds it worked before its latest start (a resume after an end, a restart or a redo). */
+  workedBefore: number;
   /** Where its clock stops: its end, the run's end, or its last event while paused. */
   endedAt?: string;
   status: ThreadStatus;
@@ -94,6 +96,7 @@ function threadsOf(events: RunEvent[]): { threads: Thread[]; lastAt: Map<string,
   const own = new Map<string, RunEvent[]>();
   for (const e of events) {
     const t = threads.get(e.threadId);
+    const before = lastAt.get(e.threadId);
     lastAt.set(e.threadId, e.createdAt);
     const mine = own.get(e.threadId);
     if (mine) mine.push(e);
@@ -101,6 +104,9 @@ function threadsOf(events: RunEvent[]): { threads: Thread[]; lastAt: Map<string,
     switch (e.type) {
       case "thread.started":
         if (t) {
+          // The earlier part ran to its end or, cut off by a lost runner, to its last event.
+          const until = t.endedAt ?? before ?? t.startedAt;
+          t.workedBefore += Math.max(0, Date.parse(until) - Date.parse(t.startedAt)) / 1000;
           t.status = "running";
           t.startedAt = e.createdAt;
           t.endedAt = undefined;
@@ -114,6 +120,7 @@ function threadsOf(events: RunEvent[]): { threads: Thread[]; lastAt: Map<string,
             attempts: [],
             model: e.payload.model,
             startedAt: e.createdAt,
+            workedBefore: 0,
             status: "running",
             toolCalls: 0,
             toolErrors: 0,
