@@ -123,6 +123,8 @@ export const taskEntrySchema = z.strictObject({
   instructions: nonEmpty,
   /** Done criteria, shown to the worker and the check. */
   doneWhen: z.array(nonEmpty),
+  /** The task reads the raw scan in `/inputs`: its worker and check threads get it copied to local disk, the others read the mount (`layout.ts` says why). */
+  copyInputs: z.boolean().optional(),
 });
 export type TaskEntry = z.infer<typeof taskEntrySchema>;
 

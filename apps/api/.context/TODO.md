@@ -30,11 +30,6 @@
   delete `inputs/<id>/` for any id with no `ready` row: a complete cancelled or abandoned
   part way through its copy leaves files there.
 
-- **Drop the `runs.recoveries` column.** Nothing reads or writes it since the no-progress limit
-  (`claim-progress.ts`) replaced it, but it stays in `schema.ts` so the previous deploy's code,
-  which still selects it, keeps working while a migration runs. Drop it in a later PR, once that
-  code is drained.
-
 - **`seed:example --backfill` checks focus ids after its R2 writes.** `copyEvidence` and
   `uploadBackfill` run before `backfillRows`'s focus check, so a bad id uploads ~2 GB under an unused
   example id before refusing. Move the check into `readBackfill` and run it first; also check each
@@ -44,9 +39,7 @@
   `dev/` and reject empty, `.` and `..` segments. (p563)
 - `backfill.py`'s scan-grid ruler assert can't fail (both sides use the same transform); compare
   against the `points` `export.py`'s `ruler()` writes. (p563)
-- **Drop `runs.cost_cap_usd` and `provider_calls.reserved_usd`.** Nothing writes or reads either
-  (the spend cap and reservations are gone; both are nullable). The previous deploy's API and gateway still
-  select `cost_cap_usd` by name, so drop them in a PR once both the new API and the new gateway
-  (#226) are live, with both
-  columns out of `apps/api/src/domains/run/schema.ts` and `packages/provider-calls/src/schema.ts`,
-  and the migration check in `apps/gateway/src/main.ts` unchanged (it names neither).
+- **Drop the `runs.cost_cap_usd`, `runs.recoveries`, `runs.to_check` and `provider_calls.reserved_usd`
+  columns from Postgres.** All four are out of the Drizzle schemas and nothing names them. Once that code is deployed and the previous process is
+  drained (it runs `select()` on `runs`, which names `cost_cap_usd`), run
+  `pnpm --filter @voluma/api db:generate` and commit the migration it writes.
