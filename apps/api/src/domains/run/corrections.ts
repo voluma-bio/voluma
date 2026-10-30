@@ -62,10 +62,6 @@ export async function reopen(tx: Tx, runId: string, messageEventId: string, by: 
     type: "run.reopened",
     payload: { by },
   });
-  const [run] = await tx
-    .select({ modelCostUsd: runs.modelCostUsd })
-    .from(runs)
-    .where(eq(runs.id, runId));
   await tx
     .update(runs)
     .set({
@@ -75,7 +71,7 @@ export async function reopen(tx: Tx, runId: string, messageEventId: string, by: 
       error: null,
       lastClaimEnd: null,
       stalledClaims: 0,
-      correctionBaseUsd: run!.modelCostUsd + (await knownUsdOfRun(tx, runId)),
+      correctionBaseUsd: sql`${runs.modelCostUsd} + ${await knownUsdOfRun(tx, runId)}`,
       ...noLease,
     })
     .where(eq(runs.id, runId));
@@ -94,8 +90,9 @@ export async function endCorrection(
     .where(and(eq(events.runId, runId), eq(events.type, "run.reopened")))
     .orderBy(desc(events.seq))
     .limit(1);
+  if (!reopened) throw new Error(`run ${runId} is in a correction with no run.reopened`);
   await appendPersonEvent(tx, runId, {
-    id: `${reopened!.id.slice(0, -":reopened".length)}:ended`,
+    id: `${reopened.id.slice(0, -":reopened".length)}:ended`,
     type: "correction.ended",
     payload: { status, ...(error !== undefined && { error }) },
   });

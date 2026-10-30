@@ -10,8 +10,6 @@
  * so that holder is `lease-lost` (lease.ts).
  */
 import { randomBytes } from "node:crypto";
-import { runEventSchema } from "@voluma/contracts/events";
-import { fold } from "@voluma/contracts/fold";
 import type { PersonMessage } from "@voluma/contracts/messages";
 import type { Run, VisitorKeys } from "@voluma/contracts/run";
 import {
@@ -25,7 +23,6 @@ import { knownUsdOfRun } from "@voluma/provider-calls";
 import { and, asc, desc, eq, gt, inArray, notInArray, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { Reader } from "../../domain";
-import type { MessageRefusal, MessageResult } from "../../ports";
 import { admit, type Limits, type Refusal, refusalMessage, type Usage, usage } from "./admission";
 import { endClaim, stalledError } from "./claim-progress";
 import { decideMessage, endCorrection, eventLock, reopen } from "./corrections";
@@ -40,7 +37,6 @@ import {
   readableRuns,
   readableStudies,
   type Tx,
-  toRunEvent,
 } from "./pg-runs";
 import { events, inputs, runs, studies, studyScans } from "./schema";
 
