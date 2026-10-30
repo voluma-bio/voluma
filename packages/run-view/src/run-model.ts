@@ -7,13 +7,12 @@
  */
 import type { RunEvent } from "@voluma/contracts/events";
 import type { FoldedTask } from "@voluma/contracts/fold";
-import { abandonedEvents } from "@voluma/contracts/fold";
+import { abandonedEvents, isSatisfied } from "@voluma/contracts/fold";
 import type { Asset } from "@voluma/contracts/review";
 import { progress, reviewState } from "@voluma/contracts/review-state";
 import type { ProviderCalls, RunState } from "@voluma/contracts/run";
 import { type RunSpend, type Spend, spend } from "@voluma/contracts/spend";
 import { openThreads, threadName } from "@voluma/contracts/threads";
-import { isSatisfied } from "@voluma/workflow";
 import { catalog } from "@voluma/workflow/bundled";
 import { type Halt, type Live, toolTitle } from "./transcript";
 

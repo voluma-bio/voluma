@@ -539,7 +539,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
   }
   for (const t of value.view.tasks) {
     const worker = t.threads.worker;
-    if (worker && value.threads.get(worker)?.end?.status !== "cancelled") {
+    if (t.attemptId && worker && value.threads.get(worker)?.end?.status !== "cancelled") {
       value.holders.set(t.id, worker);
     }
   }

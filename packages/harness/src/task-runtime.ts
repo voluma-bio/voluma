@@ -15,7 +15,12 @@
  */
 
 import type { By } from "@voluma/contracts/events";
-import { abandonedEvents, type Folded, type FoldedTask } from "@voluma/contracts/fold";
+import {
+  abandonedEvents,
+  type Folded,
+  type FoldedTask,
+  transitiveDependents,
+} from "@voluma/contracts/fold";
 import type { EvidenceRef } from "@voluma/contracts/output";
 import type {
   AskInput,
@@ -25,7 +30,6 @@ import type {
   TaskToolResult,
 } from "@voluma/contracts/task-tools";
 import type { WorkflowPlan } from "@voluma/contracts/workflow";
-import { isSatisfied, transitiveDependents } from "@voluma/workflow";
 import type { ThreadLayout } from "./layout";
 import { declarationProblem, placementProblem, referenceProblem } from "./output-checks";
 import { type Evidence, EvidenceNotFound, EvidenceRefused } from "./ports/evidence";
@@ -322,7 +326,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
       throw new Refusal(`You work on ${c.taskId}; you can write only to it, not to ${taskId}.`);
     }
     const t = taskOf(taskId);
-    const status = t?.status ?? "pending";
+    const status = t?.status;
     if (t?.skipped) throw new Refusal(`${taskId} was skipped: ${t.skipped.reason}`);
     if (status === "under-review") {
       throw new Refusal(`${taskId} is under review: only the check thread writes to it.`);
@@ -351,7 +355,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
         throw new Refusal(`${taskId} is held by a newer worker (${latest.id}); stop here.`);
       }
     }
-    const waiting = known(taskId).dependsOn.filter((d) => !isSatisfied(taskOf(d)));
+    const waiting = known(taskId).dependsOn.filter((d) => !taskOf(d)?.satisfied);
     if (waiting.length > 0) {
       throw new Refusal(
         `${taskId} builds on ${waiting.join(", ")}, which has no usable result yet.`,

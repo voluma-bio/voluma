@@ -9,9 +9,14 @@
  *   `id` and `createdAt` are that event's. Revision *k* is the fold of every
  *   event before revision *k+1* starts, so a task's `status` there is its
  *   status at that point. The last revision is the fold of the whole log.
- * - A task has no row until it has an attempt (`attempt.opened`). Its current
- *   attempt is the latest one; events join the attempt they are stamped with.
- *   Attempt status: the latest stamped `task` event, otherwise `in-progress`.
+ * - Every task of the plan has a row, in plan order. Its current attempt is the latest
+ *   one (`attempt.opened`); events join the attempt they are stamped with. Attempt status:
+ *   the latest stamped `task` event, otherwise `in-progress`. A task with no attempt is
+ *   `pending` with a null `attemptId`, its latest worker thread if one started, nothing
+ *   reported and nothing owed (empty `missing` and `missingRequired`), and the run's first
+ *   revision as its `resultRevisionId`. `title` and `ask` are the plan's; `sentBack` lists
+ *   the attempts the check sent back (`rejected` when it did), and `satisfied` is
+ *   `isSatisfied` of the row.
  * - A check thread's checkpoints join the attempt it checks without changing
  *   its outputs. Outputs are the latest `output` per `outputId`; evidence is
  *   unique by sha256. A `verdict` counts only from a check thread.
@@ -44,8 +49,9 @@
  *   missing with the reason (the dependents' reason names the skipped task), one open To check
  *   item and `skipped` set. It needs no attempt: without one it has a row with a null
  *   `attemptId`. With one, reported outputs stay and only unreported ones are missing.
+ *   `skipped.from` is the task the plan skipped (the task itself, or the one it depends on).
  *   `rejected` is true when the task's latest `task` event is `check-result`'s `to-check` on a
- *   `needs-review` verdict; `isSatisfied` (`@voluma/workflow`) is false for it and for a skipped task.
+ *   `needs-review` verdict; `isSatisfied` is false for it and for a skipped task.
  * - A correction that ended unfinished (`correction.ended`: failed, cancelled or stalled)
  *   is abandoned from its `run.reopened`: `abandonedEvents` names its task-state events
  *   (attempts, task, checkpoints, outputs, plan changes, revisions) and every reader of the
@@ -64,8 +70,7 @@
  *   and are dropped if they don't resolve (a `label` goes with its `volumeId`);
  *   one left pointing at nothing is absent. "Marked to check" has no focus.
  *   `checkResult` turns a folded task into the status `check-result` gives.
- * - Not from these events (the API adds them): `title`, `ask`,
- *   revision labels; the API
+ * - Not from these events (the API adds them): revision labels; the API
  *   also sets each asset's `stage` to the task title (here the task id).
  */
 import type { RunEvent } from "./events";
@@ -116,7 +121,11 @@ type Check = ReviewTask["checks"][number];
 
 export type Milestone = {
   id: string;
+  /** The thread that wrote the checkpoint. */
+  threadId: string;
   text: string;
+  /** The checkpoint's one-sentence version for the researcher, when it has one. */
+  summary?: string;
   /** Set only on a check thread's checkpoint. */
   verdict?: "passed" | "needs-review";
   /** `Asset.id`s (sha256) of the files it cites. */
@@ -127,7 +136,8 @@ export type Milestone = {
 export type FoldedTask = Pick<
   ReviewTask,
   | "id"
-  | "dependsOn"
+  | "title"
+  | "ask"
   | "status"
   | "resultRevisionId"
   | "checker"
@@ -141,16 +151,20 @@ export type FoldedTask = Pick<
 > & {
   /** Null for a skipped task that never had an attempt. */
   attemptId: string | null;
-  /** Set when the task was skipped, or depends on one that was; `reason` is the same text. */
-  skipped?: { reason: string };
+  /** Set when the task was skipped, or depends on one that was; `reason` is the same text, `from` the skipped task. */
+  skipped?: { reason: string; from: string };
+  /** The attempts the check sent back, oldest first: a later attempt redoes them. */
+  sentBack: string[];
+  /** `isSatisfied(this row)`: a task that builds on this one may start. */
+  satisfied: boolean;
   /** The latest `task` event is the check's `to-check` on a `needs-review` verdict: the result was rejected, and a dependent must not build on it. */
   rejected: boolean;
   /** Ids of the required declared outputs, of any kind (structures too), the attempt hasn't reported. */
   missingRequired: string[];
   /** The latest `task` event's reason; null while the attempt has none. */
   reason: string | null;
-  threads: ReviewTask["threads"];
-  models: ReviewTask["models"];
+  threads: Pick<ReviewTask["threads"], "worker" | "check">;
+  models: Pick<ReviewTask["models"], "worker" | "check">;
   milestones: Milestone[];
   /** Paths (the part after `/scratch/`) of the scratch files its checkpoints and outputs cite. */
   citedScratch: string[];
@@ -183,8 +197,47 @@ export function checkResult(
     : "to-check";
 }
 
+/** What the plan graph needs of a task: `plan.tasks` entries fit it. */
+export interface GraphTask {
+  id: string;
+  /** Tasks this one builds on. */
+  dependsOn: readonly string[];
+}
+
+/** Every task that depends on `id`, directly or through others, in plan order. */
+export function transitiveDependents(tasks: readonly GraphTask[], id: string): string[] {
+  const hit = new Set([id]);
+  // A fixpoint pass per level: plans are small, and this needs no ordering of the plan.
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const t of tasks) {
+      if (!hit.has(t.id) && t.dependsOn.some((d) => hit.has(d))) {
+        hit.add(t.id);
+        grew = true;
+      }
+    }
+  }
+  return tasks.filter((t) => t.id !== id && hit.has(t.id)).map((t) => t.id);
+}
+
+/**
+ * Whether a task that builds on this one may start: it is `done`, or `to-check` with every
+ * required output present. A To check item is for the researcher in review; it must not
+ * stop the run, but a task with no usable result still blocks: one that is skipped or whose
+ * check rejected it (`needs-review`). `to-check` by `accept` or the `fix-limit` rule is satisfied.
+ * `undefined`: no attempt yet.
+ */
+export function isSatisfied(
+  task: Pick<FoldedTask, "status" | "missingRequired" | "skipped" | "rejected"> | undefined,
+): boolean {
+  if (!task || task.skipped || task.rejected) return false;
+  return (
+    task.status === "done" || (task.status === "to-check" && task.missingRequired.length === 0)
+  );
+}
+
 export type Folded = {
-  /** The run now: the last revision's tasks. */
+  /** The run now: the last revision's tasks, one per plan task in plan order. */
   tasks: FoldedTask[];
   /** The run's plan now. */
   plan: WorkflowPlan;
@@ -347,7 +400,7 @@ export function abandonedEvents(
   return abandoned;
 }
 
-type Skip = { reason: string; revisionId: string };
+type Skip = { reason: string; revisionId: string; from: string };
 
 type Attempt = {
   id: string | null;
@@ -382,19 +435,23 @@ export function fold(events: readonly RunEvent[], holdOpenCorrection = false): F
   const plan = new Map<string, Map<string, DeclaredOutput>>();
   // output id → the task that declares it; ids are unique in a plan, so links name bare ids.
   const owner = new Map<string, string>();
-  const dependsOn = new Map<string, string[]>();
   // The plan's tasks in order, with every change applied.
   const planTasks = new Map<string, PlanTask>();
   const planNow = (): WorkflowPlan => ({
     tasks: [...planTasks.values()].map((t) => structuredClone(t)),
   });
   // taskId → the `plan.changed.skip` that named it, across revisions.
-  const skips = new Map<string, Skip>();
+  const skips = new Map<string, { reason: string; revisionId: string }>();
+  // taskId → the attempts its check sent back, oldest first.
+  const sentBack = new Map<string, string[]>();
+  // taskId → its latest worker thread, whether or not it has opened an attempt yet.
+  const workerOf = new Map<string, string>();
+  // The run's first revision: where a task with no attempt anchors.
+  let runRevisionId = "";
   const setPlanTask = (t: PlanTask) => {
     planTasks.set(t.id, t);
     plan.set(t.id, new Map(t.outputs.map((o) => [o.id, o])));
     for (const o of t.outputs) owner.set(o.id, t.id);
-    dependsOn.set(t.id, t.dependsOn);
   };
   // The run's first event is `revision.started` (`task-tools.ts`).
   let revisionId = "";
@@ -558,52 +615,58 @@ export function fold(events: readonly RunEvent[], holdOpenCorrection = false): F
       }
     }
 
-    // Skipped tasks and, in plan order, every task that depends on one (reason names the skipped task).
-    const skipped = new Map<string, Skip & { origin?: string }>();
-    for (const [id, s] of skips) if (planTasks.has(id)) skipped.set(id, s);
+    // Skipped tasks and, in plan order, every task that depends on one, credited to its nearest
+    // skipped dependency (first in `dependsOn`). The derived `resultRevisionId` and check ids sit
+    // behind stored `check.accepted` events, so this rule must not move.
+    const skipped = new Map<string, Skip>();
+    const planList = [...planTasks.values()];
+    for (const [id, s] of skips) if (planTasks.has(id)) skipped.set(id, { ...s, from: id });
     for (let grew = true; grew; ) {
       grew = false;
-      for (const t of planTasks.values()) {
+      for (const t of planList) {
         const dep = t.dependsOn.find((d) => skipped.has(d));
-        const from = dep === undefined ? undefined : skipped.get(dep);
-        if (skipped.has(t.id) || !from) continue;
-        const origin = from.origin ?? (dep as string);
-        const root = skips.get(origin);
+        const near = dep === undefined ? undefined : skipped.get(dep);
+        if (skipped.has(t.id) || !near) continue;
         skipped.set(t.id, {
-          reason: `${origin} was skipped: ${root?.reason}`,
-          revisionId: from.revisionId,
-          origin,
+          reason: `${near.from} was skipped: ${skips.get(near.from)?.reason}`,
+          revisionId: near.revisionId,
+          from: near.from,
         });
         grew = true;
       }
     }
-    const rows = [...current.values()];
-    for (const id of skipped.keys())
-      if (!current.has(id))
-        rows.push({
-          id: null,
-          taskId: id,
-          workerThread: null,
-          checkThread: null,
-          status: "to-check",
-          reason: null,
-          rejected: false,
-          flag: null,
-          resultRevisionId: revisionId,
-          milestones: [],
-          toChecks: [],
-          checker: null,
-          outputs: new Map(),
-          evidence: new Map(),
-          citedScratch: new Set(),
-        });
+    const placeholder = (taskId: string): Attempt => ({
+      id: null,
+      taskId,
+      workerThread: workerOf.get(taskId) ?? null,
+      checkThread: null,
+      status: "pending",
+      reason: null,
+      rejected: false,
+      flag: null,
+      resultRevisionId: runRevisionId,
+      milestones: [],
+      toChecks: [],
+      checker: null,
+      outputs: new Map(),
+      evidence: new Map(),
+      citedScratch: new Set(),
+    });
+    // Plan order; an attempt of a task outside the plan (the tools refuse one) follows.
+    const rows = [
+      ...planList.map((p) => current.get(p.id) ?? placeholder(p.id)),
+      ...[...current.values()].filter((a) => !planTasks.has(a.taskId)),
+    ];
     const tasks = rows.map((a) => {
       const skip = skipped.get(a.taskId);
       const measurements: Measurement[] = [];
       const scores: Score[] = [];
       const files: Asset[] = [];
       const undeclared: string[] = [];
-      const declaredOutputs = [...(plan.get(a.taskId)?.values() ?? [])];
+      // A task with no attempt has reported nothing and owes nothing yet (a skipped one is owed
+      // its missing outputs, with the reason).
+      const owed = a.id !== null || skip !== undefined;
+      const declaredOutputs = owed ? [...(plan.get(a.taskId)?.values() ?? [])] : [];
       for (const [outputId, v] of a.outputs) {
         const { payload: p } = v;
         const { output: o } = p;
@@ -707,14 +770,16 @@ export function fold(events: readonly RunEvent[], holdOpenCorrection = false): F
           detail: a.flag.reason,
           status: "open",
         });
-      return {
+      const planned = planTasks.get(a.taskId);
+      const row = {
         id: a.taskId,
-        // Only dependencies that have a row: a worker can open a task before its dependency.
-        dependsOn: (dependsOn.get(a.taskId) ?? []).filter((d) => current.has(d) || skipped.has(d)),
+        title: planned?.title ?? a.taskId,
+        ask: planned?.instructions ?? "",
         attemptId: a.id,
         status: skip ? "to-check" : a.status,
         reason: skip ? skip.reason : a.reason,
-        ...(skip && { skipped: { reason: skip.reason } }),
+        ...(skip && { skipped: { reason: skip.reason, from: skip.from } }),
+        sentBack: [...(sentBack.get(a.taskId) ?? [])],
         rejected: !skip && a.rejected,
         resultRevisionId: skip ? skip.revisionId : a.resultRevisionId,
         checker: a.checker && { ...a.checker },
@@ -734,6 +799,7 @@ export function fold(events: readonly RunEvent[], holdOpenCorrection = false): F
         evidence: [...a.evidence.values()],
         citedScratch: [...a.citedScratch],
       };
+      return { ...row, satisfied: isSatisfied(row) };
     });
     return { tasks, volumes, structures, surfaces, annotations };
   };
@@ -744,6 +810,7 @@ export function fold(events: readonly RunEvent[], holdOpenCorrection = false): F
     switch (e.type) {
       case "thread.started": {
         if (e.payload.attemptId) checkThreads.add(e.threadId);
+        else if (e.payload.task) workerOf.set(e.payload.task, e.threadId);
         if (e.payload.model) threadModel.set(e.threadId, e.payload.model);
         const checked = e.payload.attemptId && attempts.get(e.payload.attemptId);
         // A resume re-emits `thread.started` for the same thread: only a new check thread resets the verdict.
@@ -757,7 +824,10 @@ export function fold(events: readonly RunEvent[], holdOpenCorrection = false): F
         if (header) revisions.push({ ...header, ...snapshot(), plan: planNow() });
         revisionId = e.id;
         const { payload: p } = e;
-        if (p.reason === "run") for (const t of p.plan.tasks) setPlanTask(structuredClone(t));
+        if (p.reason === "run") {
+          runRevisionId = e.id;
+          for (const t of p.plan.tasks) setPlanTask(structuredClone(t));
+        }
         header =
           p.reason === "run"
             ? { id: e.id, createdAt: e.createdAt, reason: p.reason }
@@ -797,6 +867,11 @@ export function fold(events: readonly RunEvent[], holdOpenCorrection = false): F
           by.kind === "rule" &&
           by.rule === "check-result" &&
           a.checker?.verdict === "needs-review";
+        if (a.rejected) {
+          const sent = sentBack.get(a.taskId) ?? [];
+          if (!sent.includes(e.payload.attemptId))
+            sentBack.set(a.taskId, [...sent, e.payload.attemptId]);
+        }
         if (status === "to-check") {
           if (!(by.kind === "rule" && by.rule === "check-result")) a.flag = { id: e.id, reason };
         } else if (status !== "under-review") a.flag = null;
@@ -806,12 +881,14 @@ export function fold(events: readonly RunEvent[], holdOpenCorrection = false): F
       case "checkpoint": {
         const a = attempts.get(e.payload.attemptId);
         if (!a) break;
-        const { text, verdict, toCheck, evidence } = e.payload;
+        const { text, summary, verdict, toCheck, evidence } = e.payload;
         const byCheck = checkThreads.has(e.threadId);
         addEvidence(a, e.runId, evidence);
         a.milestones.push({
           id: e.id,
+          threadId: e.threadId,
           text,
+          ...(summary && { summary }),
           ...(byCheck && verdict && { verdict }),
           evidenceIds: evidence.map((r) => r.sha256),
         });
