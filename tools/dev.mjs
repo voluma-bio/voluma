@@ -14,11 +14,12 @@
  * the runner reads when VOLUMA_API_URL is unset and the API's operator scripts read when
  * DATABASE_URL is unset. Ctrl-C stops everything
  * and removes it.
- * With VOLUMA_META_API_KEY set it also starts the provider gateway on a free port (same database,
+ * With `--sam` (`pnpm dev --sam`) and VOLUMA_META_API_KEY set it also starts the provider gateway on a free port (same database,
  * a random GATEWAY_TOKEN_SECRET per launch) and opens a Cloudflare quick tunnel to it: worker
  * sandboxes run on Modal and can reach only an https host, never localhost. The tunnel's URL and
  * the secret join env.json as { gatewayUrl, gatewaySecret }, which the runner reads when its own
- * VOLUMA_GATEWAY_URL is unset. Without the tunnel (no key, or cloudflared can't start) there is no
+ * VOLUMA_GATEWAY_URL is unset. SAM is opt-in because every SAM call costs money and needs Jimmy's yes.
+ * Without the tunnel (no `--sam`, no key, or cloudflared can't start) there is no
  * gateway URL: runs work except `segment_sam`, which is not offered. The gateway listens on 127.0.0.1 only. If it or the
  * tunnel dies later, the URL is removed from env.json the same way.
  * `pnpm db:reset` (`node tools/dev.mjs reset`) drops this worktree's database and exits;
@@ -101,7 +102,9 @@ const [apiPort, webPort] = [
   process.env.PUBLIC_URL ? Number(process.env.PORT) : await freePort(),
 ];
 const appUrl = new URL(process.env.PUBLIC_URL ?? `http://localhost:${webPort}`).origin;
-const metaKey = process.env.VOLUMA_META_API_KEY || dotenv.VOLUMA_META_API_KEY;
+// SAM is opt-in: each call is paid and needs Jimmy's yes, so a plain `pnpm dev` never offers it.
+const samOn = process.argv.includes("--sam");
+const metaKey = samOn ? process.env.VOLUMA_META_API_KEY || dotenv.VOLUMA_META_API_KEY : undefined;
 const gatewayPort = metaKey ? await freePort() : undefined;
 const env = {
   apiUrl: `http://localhost:${apiPort}`,
@@ -186,7 +189,11 @@ if (gatewayPort) {
   gateway.on("exit", (code) => gatewayOff(`the gateway exited with ${code}`));
   tunnel = await openGatewayTunnel(gatewayPort);
 } else {
-  console.log("gateway off: set VOLUMA_META_API_KEY in .env for segment_sam in local runs\n");
+  console.log(
+    samOn
+      ? "gateway off: set VOLUMA_META_API_KEY in .env for segment_sam in local runs\n"
+      : "gateway off: segment_sam is off (each SAM call is paid; with Jimmy's yes, run `pnpm dev --sam`)\n",
+  );
 }
 /** The gateway or its tunnel is gone: no gateway URL, so no new run gets segment_sam. */
 function gatewayOff(why) {

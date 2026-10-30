@@ -209,13 +209,14 @@ Why TypeScript: the decoder takes seconds there and minutes in Python.
 
 An agent in its own worktree tries a workflow change on the real system like this:
 
-1. `pnpm db:up` once, then `pnpm dev`. With `VOLUMA_META_API_KEY` in `.env` it also starts the gateway
+1. `pnpm db:up` once, then `pnpm dev`. That runs without SAM. **Every SAM call is paid and needs Jimmy's
+   yes first** (say how many calls and why); with it, `pnpm dev --sam` and `VOLUMA_META_API_KEY` in `.env` also start the gateway
    (this worktree's database, a per-launch secret) and a Cloudflare quick tunnel to it, and writes the
    tunnel's URL and the secret to `.dev/env.json`, where a local runner reads them. Wait for the
    `gateway https://…trycloudflare.com` line before starting the runner.
 2. `RUNNER_MODEL=deepseek/deepseek-flash pnpm --filter @voluma/runner start` (set in `.env` or the shell:
-   one cheap model for every role; `RUNNER_THINKING` as usual). Meta SAM is the only paid call and goes
-   through the local gateway, about $0.05 each.
+   one cheap model for every role; `RUNNER_THINKING` as usual). Test runs may use any model; production and
+   demo runs (staging) use Meta models only. Meta SAM is the only Meta call here, about $0.10 each.
 3. `pnpm --filter @voluma/runner try-run [--scan <inputId>] [--workflow <id>] [--outputs a,b] [--notes …]`
    (`src/try-run.ts`) signs in as `WORKOS_TEST_EMAIL`, starts a study and run on the reference scan,
    follows the run's event stream until it ends and prints per-task status, outputs reported and missing,
@@ -234,7 +235,7 @@ boot line says `gateway <url>` or `gateway off`), and quick tunnels are best eff
 gives no uptime promise). Tried and not chosen: Tailscale Funnel (ties it to one person's tailnet; fixed
 hostname and shared ports), Modal's own tunnel (exposes a port of a sandbox, it cannot reach back to this
 machine), localtunnel (no binary, but flaky and gates browsers behind a page).
-Without the tunnel (no Meta key, download or hash check failed, no network) `pnpm dev` says so and writes no gateway URL:
+Without the tunnel (no `--sam`, no Meta key, download or hash check failed, no network) `pnpm dev` says so and writes no gateway URL:
 runs work, sandboxes have no network and `segment_sam` is not offered.
 
 # Runner: `dev-sandbox` drives the real sandbox, tools and gateway without a model
