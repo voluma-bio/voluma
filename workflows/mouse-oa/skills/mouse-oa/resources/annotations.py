@@ -2,7 +2,7 @@
 
 Library, not a script: it imports `sidecar` and is imported by name, both through PYTHONPATH.
 A file carries the `grid_id` of the grid it was traced on (indices mean nothing on another grid);
-curves use the schema of `region_from_curves.py` (../SKILL.md).
+curves use the schema of `region_from_curves.py` (core `regions-and-landmarks/SKILL.md`).
 """
 
 import json

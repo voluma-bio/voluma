@@ -16,7 +16,7 @@ evidence, so the checker and the researcher see what you saw.
 | Question | View | Script |
 |---|---|---|
 | Which bone is which? Does this slice cut the joint? | one slice with a pixel grid | `render_slices.py` |
-| Is a box, a pick or a curve where I meant it? | the same slice with it drawn on | `render_slices.py --boxes/--points` |
+| Is a box or a pick where I meant it? | the same slice with it drawn on | `render_slices.py --boxes/--points` |
 | Is each label on the right bone? Is a mask, a face or a point where I meant, seen from every side? | quad view: 3D plus three slices through one crosshair you move, step, rotate and reslice; each call starts from the last view | `quad_view.py` |
 | Does one label cover two bones? Are there loose fragments? | 3D sheet: six views around the long axis, one colour per label | `render_surfaces.py` |
 | What is this small thing, and which label is it under? | crop sheet: three orthogonal cuts through the piece | `render_crops.py` |
