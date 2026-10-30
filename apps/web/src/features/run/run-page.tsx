@@ -45,7 +45,6 @@ function useRunStream(
   // A message reopens an ended run: the stream opens again after the events it already has.
   const [generation, setGeneration] = useState(0);
   const kept = useRef<RunEvent[]>([]);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `generation` reopens the stream.
   useEffect(() => {
     const events = kept.current;
     let published: RunEvent[] = [];
