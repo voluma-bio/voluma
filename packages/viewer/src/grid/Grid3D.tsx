@@ -35,6 +35,7 @@ import type { Contrast } from "./compose";
 import { CHIP, PANE } from "./pane-style";
 import { readLevel } from "./planes";
 import { capturePane, type GridMesh, type GridScene, type PaneHandle, type Zyx } from "./scene";
+import { tokenColor } from "./token-color";
 import { volumeBytes, volumeLevel, volumeMesh } from "./volume";
 
 export function Grid3D({
@@ -70,8 +71,7 @@ export function Grid3D({
     const element = host.current!;
     const renderer = new WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(globalThis.devicePixelRatio);
-    const style = getComputedStyle(document.documentElement);
-    renderer.setClearColor(style.getPropertyValue("--viewer-well").trim());
+    renderer.setClearColor(tokenColor("--viewer-well"));
     renderer.domElement.className = "absolute inset-0";
     element.append(renderer.domElement);
     const s = new Scene();
@@ -315,7 +315,7 @@ export function Grid3D({
       volumeBytes(shown.values, contrast),
       scene.image.levels[shown.k]!,
       scene.spacingZyx,
-      getComputedStyle(document.documentElement).getPropertyValue("--bone").trim(),
+      tokenColor("--bone"),
       t.depth,
     );
     t.volumes.add(volume);

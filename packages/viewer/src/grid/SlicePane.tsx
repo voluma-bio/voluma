@@ -32,11 +32,10 @@ import {
   planeAxes,
   type Zyx,
 } from "./scene";
+import { tokenColor } from "./token-color";
 
 export const axisColor = (axis: Axis) =>
-  getComputedStyle(document.documentElement).getPropertyValue(
-    axis === 0 ? "--axis-z" : axis === 1 ? "--axis-y" : "--axis-x",
-  );
+  tokenColor(axis === 0 ? "--axis-z" : axis === 1 ? "--axis-y" : "--axis-x");
 
 /** Pixels per mm, the zoom that fits the grid in the pane, and the pane centre in mm. */
 type View = { zoom: number; fit: number; center: [number, number] };
@@ -89,9 +88,7 @@ export function SlicePane({
     const element = host.current!;
     const renderer = new WebGLRenderer({ antialias: false });
     renderer.setPixelRatio(globalThis.devicePixelRatio);
-    renderer.setClearColor(
-      getComputedStyle(document.documentElement).getPropertyValue("--viewer-well").trim(),
-    );
+    renderer.setClearColor(tokenColor("--viewer-well"));
     element.append(renderer.domElement);
     renderer.domElement.className = "absolute inset-0";
     const camera = new OrthographicCamera(-1, 1, 1, -1, -10, 10);
@@ -294,7 +291,7 @@ export function SlicePane({
     const w = scene.shapeZyx[ca] * sc;
     const h = scene.shapeZyx[ra] * sr;
     const colorOf = (a: Axis) => {
-      const c = axisColor(a).trim();
+      const c = axisColor(a);
       const n = Number.parseInt(c.slice(1), 16);
       return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
     };

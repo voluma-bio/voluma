@@ -11,13 +11,11 @@ import {
   labelsMiddle,
   type StructureDisplay,
   taskGrid,
+  tokenColor,
   type ViewerState,
   type Zyx,
 } from "@voluma/viewer/grid";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-
-const token = (name: string) =>
-  getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 export function TaskViewer({
   runId,
@@ -54,7 +52,7 @@ export function TaskViewer({
         // The zarr reader resolves level paths against this, so it is absolute.
         assetBase: (sha256) =>
           new URL(reviewAssetUrl(runId, sha256, "x").slice(0, -1), location.href).href,
-        token,
+        token: tokenColor,
       }),
     [runId, revision, task, assets, display, focus],
   );
