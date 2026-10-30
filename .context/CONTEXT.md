@@ -21,7 +21,7 @@ packages/
                 adapter; runtime-neutral (no Node types)
   workflow      a workflow skill directory: snapshot it into the run's R2 prefix and read it (`load.ts`), build the plan from the selected outputs (`plan.ts`), task graph, stale tasks
   api-client    typed commands and event stream; the only way web features reach the API
-  viewer        in-browser DICOM ZIP parsing, Cornerstone acquired slices, persistent imaging slots
+  viewer        the grid viewer (three.js, zarr in a worker) and the grid a review task is shown on
   ui            shared React components, styled from tokens
   design-tokens tokens.css (raw values, two themes) and theme.css (Tailwind mapping)
 workflows/      `core/` (role files, generic micro-CT skills, Python requirements) and one directory per workflow (`outputs.json`, `tasks.json`, `skills/`), with their Python skill resources
@@ -307,10 +307,9 @@ the CSS stays the one source.
 
 ## Review integration
 
-The Review UI is in `apps/web/src/features/review`; persistent view slots are
-in `packages/viewer`. There is one Review route, `/runs/:runId`, with no demo
-route. The local workspace uses `runId=local` without creating a server run.
-No synthetic measurements or simulated services are mounted.
+The Review UI is in `apps/web/src/features/review`; the grid viewer is in
+`packages/viewer`. There is one Review route, `/runs/:runId`, with no demo
+route. No synthetic measurements or simulated services are mounted.
 
 `features/review/report/model.ts` is a presentation model, not the shared API
 contract. Reports, revision selection and command UI remain available for the
@@ -319,10 +318,10 @@ contracts and API client are unchanged from main. Report/viewer splits retain
 react-resizable-panels to preserve the verified nested maximize/restore behavior;
 the unrelated shared `SplitPanel` API and `/dev/ui` remain unchanged.
 
-Local DICOM intake and rendering work without the API. They do not populate
-analysis results or create server runs. The [Review specification][review-spec]
-describes the UI seam; the [viewer specification][viewer-spec] describes input
-support, geometry, limits, library integration and verification coverage.
+Images come only from the run: each task's grid and what is drawn on it are the
+run's published blocks and converted assets. The [Review specification][review-spec]
+describes the UI seam; the [viewer specification][viewer-spec] describes how a task's
+grid is chosen, the viewer's geometry, loading and verification coverage.
 
 [review-spec]: ../apps/web/src/features/review/.context/CONTEXT.md
 [viewer-spec]: ../packages/viewer/.context/CONTEXT.md

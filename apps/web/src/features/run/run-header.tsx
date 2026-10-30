@@ -120,7 +120,9 @@ export function RunHeader({
             <span>Place {state.position} in line</span>
           )}
           {toCheck > 0 && (
-            <span className="font-semibold text-check-strong">{toCheck} to check</span>
+            <span className="font-semibold text-check-strong">
+              {toCheck} {toCheck === 1 ? "item" : "items"} to check
+            </span>
           )}
         </p>
         <div

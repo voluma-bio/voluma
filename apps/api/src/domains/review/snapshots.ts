@@ -47,11 +47,13 @@ export function snapshotRoutes({ runs, files, snapshots }: ReviewDeps) {
     if (!revision?.tasks.some((t) => t.id === request.taskId))
       return c.json({ error: "Revision or task not found." }, 404);
     const state = request.viewState;
-    if (state.kind !== "acquired")
+    if (state.kind === "acquired")
       throw new HTTPException(400, {
-        message: "Only acquired-slice screenshots are supported yet.",
+        message: "Screenshots of the earlier DICOM viewer are no longer saved.",
       });
-    const structures = new Set(revision.structures.map((s) => s.id));
+    // The grid's shape is its image's; the point must lie on it.
+    const image = revision.volumes.find((v) => v.gridId === state.gridId && v.kind === "image");
+    const shown = new Set([...revision.structures, ...revision.surfaces].map((s) => s.id));
     const blocks = new Set(
       [
         ...revision.volumes,
@@ -61,7 +63,9 @@ export function snapshotRoutes({ runs, files, snapshots }: ReviewDeps) {
       ].map((block) => block.id),
     );
     if (
-      state.structures.some((s) => !structures.has(s.structureId)) ||
+      !image ||
+      state.point.some((p, i) => p >= (image.shapeZyx[i] ?? 0)) ||
+      state.structures.some((s) => !shown.has(s.structureId)) ||
       state.focus?.on.some((id) => !blocks.has(id)) ||
       (state.focus?.volumeId !== undefined &&
         !revision.volumes.some(

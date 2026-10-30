@@ -16,6 +16,7 @@
     "check:pr-body": "node tools/ci/check-pr-body.mjs",
     "prepare": "if [ \"${LEFTHOOK:-1}\" != \"0\" ] && git rev-parse --git-dir >/dev/null 2>&1; then lefthook install; fi",
     "db:reset": "node tools/dev.mjs reset",
+    "worktrees:clean": "node tools/worktrees-clean.mjs",
     "db:up": "docker start voluma-pg || docker run -d --name voluma-pg -p 127.0.0.1:54432:5432 -e POSTGRES_USER=voluma -e POSTGRES_PASSWORD=voluma -v voluma-pg-data:/var/lib/postgresql/data postgres:16-alpine"
   },
   "devDependencies": {
