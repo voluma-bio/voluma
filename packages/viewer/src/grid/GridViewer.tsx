@@ -33,21 +33,19 @@ export function GridViewer({
    */
   scene: GridScene;
   title?: string;
-  /** A voxel to centre the crosshair on, when it changes (a check's focus). */
-  focus?: Zyx;
+  /** A voxel to centre the crosshair on: each new object moves it there once (a check's focus). */
+  focus?: { at: Zyx };
   /** What the viewer should say it doesn't show. */
   notes?: string[];
   children?: ReactNode;
 }) {
   const [maximized, setMaximized] = useState<string | null>(null);
   const [point, setPoint] = useState<Zyx>(
-    () => focus ?? (scene.shapeZyx.map((n) => Math.floor(n / 2)) as unknown as Zyx),
+    () => focus?.at ?? (scene.shapeZyx.map((n) => Math.floor(n / 2)) as unknown as Zyx),
   );
-  const focusKey = focus?.join();
-  // biome-ignore lint/correctness/useExhaustiveDependencies: moves only when the voxel changes, not on each render's new tuple.
   useEffect(() => {
-    if (focus) setPoint(focus);
-  }, [focusKey]);
+    if (focus) setPoint(focus.at);
+  }, [focus]);
   const [contrast, setContrast] = useState<Contrast | null>(null);
   const [contrastError, setContrastError] = useState<string>();
   const [pictures, setPictures] = useState<Partial<Record<Axis, Picture>>>({});

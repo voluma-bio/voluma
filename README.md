@@ -1,8 +1,7 @@
 # Voluma
 
 Run and Review share `apps/web`. Review uses the light theme and the single
-`/runs/:runId` route. `/runs/local` opens the R2 reference scan workspace without creating
-a server run. No simulated results or agent responses are mounted.
+`/runs/:runId` route. No simulated results or agent responses are mounted.
 
 Use the Node version in `.tool-versions` and the pnpm version in `package.json`.
 Run `pnpm install`, then `pnpm dev`. In an Amp orb, run

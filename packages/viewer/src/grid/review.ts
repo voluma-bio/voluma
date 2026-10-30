@@ -11,7 +11,7 @@ import type { GridMesh, GridScene, Overlay, ZarrSource, Zyx } from "./scene";
 /** The Structures panel's settings, by structure id; opacity in percent. */
 export type StructureDisplay = Record<string, { visible: boolean; opacity: number }>;
 
-/** Label values of a labels volume on the grid. */
+/** Label values of a labels volume on the grid; none means every nonzero value. */
 export type FocusLabels = { source: ZarrSource; labels: number[] };
 
 export type TaskGrid =
@@ -73,8 +73,12 @@ export function taskGrid({
   ]);
   // The scan's grid is the first image volume's; a focus point or box is in its voxels.
   const scanGrid = revision.volumes.find((v) => v.kind === "image")?.gridId;
+  // A check's `volumeId` is a labels volume (a disagreement mask) it points into.
+  const focusVolume = focus?.volumeId ? volumes.get(focus.volumeId) : undefined;
   const gridId =
-    mostCommon((focus?.on ?? []).map(gridOf)) ?? mostCommon(named.map(gridOf)) ?? scanGrid;
+    mostCommon([...(focus?.on ?? []).map(gridOf), focusVolume?.gridId]) ??
+    mostCommon(named.map(gridOf)) ??
+    scanGrid;
   const image = revision.volumes.find(
     (v) => v.gridId === gridId && v.kind === "image" && v.data?.format === "npy",
   );
@@ -96,6 +100,8 @@ export function taskGrid({
     return null;
   };
   const focused = new Set(focus?.on ?? []);
+  const focusedLabel = (volume: Volume, label: number) =>
+    volume === focusVolume && (focus?.label === undefined || focus.label === label);
   // Hidden is opacity 0: the mesh stays loaded for when it's shown again.
   const paint = (id: string, color: string) => {
     if (focused.has(id)) return { color: token("--check-outline"), opacity: 1 };
@@ -167,11 +173,18 @@ export function taskGrid({
     const sha256 = volume.data.sha256;
     const a = ready(sha256, volume.name);
     if (!a) continue;
-    const wanted = labels.filter((l) => focused.has(l.id)).map((l) => l.label);
+    const wanted = labels
+      .filter((l) => focused.has(l.id) || focusedLabel(volume, l.label))
+      .map((l) => l.label);
     if (wanted.length && !focusLabels)
       focusLabels = { source: { base: assetBase(sha256), levels: a.levels }, labels: wanted };
     const looks = new Map(
-      labels.map((l) => [l.label, paint(l.id, token(`--label-${((l.label - 1) % 12) + 1}`))]),
+      labels.map((l) => [
+        l.label,
+        focusedLabel(volume, l.label)
+          ? { color: token("--check-outline"), opacity: 1 }
+          : paint(l.id, token(`--label-${((l.label - 1) % 12) + 1}`)),
+      ]),
     );
     const shown = [...looks].filter(([, look]) => look.opacity > 0);
     if (shown.length)
@@ -188,6 +201,35 @@ export function taskGrid({
       const look = m.label === undefined ? undefined : looks.get(m.label);
       const l = labels.find((x) => x.label === m.label);
       if (look && l) meshes.push(mesh(sha256, m, l.name, [0, 0, 0], look));
+    }
+  }
+  // A focused labels volume no structure brings (a disagreement mask): its region in the check colour.
+  if (focusVolume && focusVolume.kind === "labels" && !labelsOn.has(focusVolume)) {
+    if (focusVolume.gridId !== gridId) notes.elsewhere.push(focusVolume.name);
+    else if (focusVolume.data?.format !== "npy") notes.failed.push(focusVolume.name);
+    else {
+      const sha256 = focusVolume.data.sha256;
+      const a = ready(sha256, focusVolume.name);
+      if (a) {
+        const values =
+          focus?.label === undefined
+            ? Array.from({ length: 65535 }, (_, n) => n + 1)
+            : [focus.label];
+        const outline = token("--check-outline");
+        overlays.push({
+          id: focusVolume.id,
+          name: focusVolume.name,
+          base: assetBase(sha256),
+          levels: a.levels,
+          offsetZyx: [0, 0, 0],
+          color: Object.fromEntries(values.map((v) => [v, outline])),
+          opacity: 1,
+        });
+        focusLabels ??= {
+          source: { base: assetBase(sha256), levels: a.levels },
+          labels: focus?.label === undefined ? [] : [focus.label],
+        };
+      }
     }
   }
   // Surfaces: their meshes (the slices' trace of a surface is still to come).
@@ -231,9 +273,21 @@ export async function labelsMiddle(
   { source, labels }: FocusLabels,
   signal: AbortSignal,
 ): Promise<Zyx | undefined> {
-  const level = source.levels.at(-1);
-  if (!level) return;
-  const { data, shape } = await readLevel(source.base, level.path, signal);
+  // Downsampling can drop a thin region, so finer levels are tried up to about 32 M voxels.
+  for (const level of [...source.levels].reverse()) {
+    if (level.shapeZyx[0] * level.shapeZyx[1] * level.shapeZyx[2] > 2 ** 25) return;
+    const at = await middleOn(source.base, level, labels, signal);
+    if (at) return at;
+  }
+}
+
+async function middleOn(
+  base: string,
+  level: ZarrSource["levels"][number],
+  labels: number[],
+  signal: AbortSignal,
+): Promise<Zyx | undefined> {
+  const { data, shape } = await readLevel(base, level.path, signal);
   const [nz = 0, ny = 0, nx = 0] = shape;
   const wanted = new Set(labels);
   const lo = [nz, ny, nx];
@@ -241,7 +295,8 @@ export async function labelsMiddle(
   for (let z = 0, i = 0; z < nz; z++)
     for (let y = 0; y < ny; y++)
       for (let x = 0; x < nx; x++, i++) {
-        if (!wanted.has(data[i] as number)) continue;
+        const value = data[i] as number;
+        if (wanted.size ? !wanted.has(value) : !value) continue;
         const p = [z, y, x];
         for (let a = 0; a < 3; a++) {
           lo[a] = Math.min(lo[a]!, p[a]!);

@@ -33,6 +33,8 @@ function RunReview({ runId }: { runId: string }) {
     },
   });
   const runStatus = execution.data?.state.status;
+  const endedAt =
+    execution.data?.state.status === "ended" ? Date.parse(execution.data.state.endedAt) : undefined;
   const live = runStatus !== undefined && runStatus !== "ended";
   // The review payload carries no run status, so the run ending is the cue for one last fetch
   // (the polled snapshot is up to 5 s old and has no review summary yet).
@@ -49,14 +51,14 @@ function RunReview({ runId }: { runId: string }) {
     retry: (count, cause) => cause instanceof ApiError && cause.status >= 500 && count < 2,
     // A run with no plan yet gets one once the runner starts it; a live run's results fill in
     // as tasks report, and its images as they are converted, which may finish after it ends
-    // (for about ten minutes: a run from before conversion existed never gets them).
+    // (for ten minutes after: a run from before conversion existed never gets them).
     // The effect above makes the final fetch when the run ends.
     refetchInterval: (query) => {
       const cause = query.state.error;
       const data = query.state.data;
       return (cause instanceof ApiError && cause.status === 409) ||
         live ||
-        (data && preparing(data) && query.state.dataUpdateCount < 120)
+        (data && preparing(data) && endedAt !== undefined && Date.now() - endedAt < 10 * 60_000)
         ? 5000
         : false;
     },

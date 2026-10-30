@@ -11,7 +11,7 @@ import {
   taskGrid,
   type Zyx,
 } from "@voluma/viewer/grid";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const token = (name: string) =>
   getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -46,17 +46,31 @@ export function TaskViewer({
       }),
     [runId, revision, task, assets, display, focus],
   );
-  // A focused label has no extent in the run's data: find its middle on the grid.
+  // A focused label has no extent in the run's data: find its middle on the grid. Keyed by
+  // what it reads, since `grid` is rebuilt on every display change.
   const focusLabels = grid.state === "ready" ? grid.focusLabels : undefined;
-  const [labelsFocus, setLabelsFocus] = useState<{ for: typeof focusLabels; at?: Zyx }>();
+  const labelsKey = focusLabels && `${focusLabels.source.base}|${focusLabels.labels.join()}`;
+  const latestLabels = useRef(focusLabels);
+  latestLabels.current = focusLabels;
+  const [labelsFocus, setLabelsFocus] = useState<{ for: string; at?: Zyx }>();
   useEffect(() => {
-    if (!focusLabels) return;
+    const wanted = latestLabels.current;
+    if (!labelsKey || !wanted) return;
     const abort = new AbortController();
-    labelsMiddle(focusLabels, abort.signal)
-      .then((at) => setLabelsFocus({ for: focusLabels, at }))
+    labelsMiddle(wanted, abort.signal)
+      .then((at) => setLabelsFocus({ for: labelsKey, at }))
       .catch(() => {});
     return () => abort.abort();
-  }, [focusLabels]);
+  }, [labelsKey]);
+  // A new object per check selection (each "Show in viewer" click is a new `focus`) or found
+  // voxel, so the crosshair moves then and not when display settings change.
+  const at =
+    grid.state === "ready"
+      ? (grid.focus ?? (labelsFocus?.for === labelsKey ? labelsFocus?.at : undefined))
+      : undefined;
+  const atKey = at?.join();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `at` is a new tuple each render; its voxel is `atKey`.
+  const target = useMemo(() => (at ? { at } : undefined), [focus, atKey]);
   if (grid.state !== "ready")
     return (
       <section className="viewer-workspace" aria-label="Imaging workspace">
@@ -70,7 +84,7 @@ export function TaskViewer({
       key={grid.scene.image.base}
       scene={grid.scene}
       title={grid.name}
-      focus={grid.focus ?? (labelsFocus?.for === focusLabels ? labelsFocus?.at : undefined)}
+      focus={target}
       notes={grid.notes}
     />
   );

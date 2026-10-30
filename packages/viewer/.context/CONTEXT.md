@@ -11,7 +11,7 @@ The run publishes the geometry; the browser aligns nothing. Blocks share a grid 
 volumes share `gridId`, and a block on another grid is listed under the viewer ("On another grid,
 not shown here"), never resampled onto this one.
 
-- **Which grid.** The grid most of the focused check's `on` blocks sit on; else the grid most of
+- **Which grid.** The grid most of the focused check's `on` blocks and `volumeId` sit on; else the grid most of
   the task's named blocks sit on (measurements' and scores' `on`, then `context`, then blocks whose
   id starts with `<taskId>/`); else the scan's grid, the first image volume's. The grid's image is
   its `image` volume with `.npy` data; spacing is the norms of its affine's columns.
@@ -25,10 +25,13 @@ not shown here"), never resampled onto this one.
 - **Display.** The Structures panel's visibility and opacity scale the overlay's blend and the
   mesh; hidden is opacity 0, so a mesh stays loaded. A new scene on the same grid redraws in place.
 - **Focus.** A check's focused blocks are drawn in `--check-outline` at full opacity, whatever the
-  panel says. The crosshair goes to its `point`, or its `box` centre, only on the scan's grid (they
+  panel says; so is its `volumeId` labels volume (a disagreement mask), only its `label` if given,
+  drawn even when no structure brings it. The crosshair goes to its `point`, or its `box` centre, only on the scan's grid (they
   are scan voxels); else the middle of its cropped masks; else of its annotations (world mm through
   the grid's own affine, a projection on each orthogonal column); else, for labels, the middle of
-  their bounding box on the coarsest labels level (`labelsMiddle`). Surfaces give no point.
+  their bounding box on the coarsest labels level that has them, up to about 32 M voxels
+  (`labelsMiddle`). Surfaces give no point. Each check selection moves the crosshair once; display
+  changes never do.
 
 ## The viewer: one analysis grid from converted review assets
 
