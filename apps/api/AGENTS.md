@@ -107,16 +107,19 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   run whose keys its process doesn't hold to `awaiting-keys`. The vault holds at most 100
   runs per org (429), and `index.ts` caps ordinary `/api` bodies at 256 KB (8 MB on
   `/api/run/ingest/*`, the trusted runner; 12 MiB only on screenshot POSTs).
-- Operator CLIs (seed, export and import a run, `r2:put`, `upload:scan`) live in `scripts/`,
-  not in a domain; they read the database and R2 directly.
+- Operator CLIs (seed, archive, export and import a run, `r2:put`, `upload:scan`) live in
+  `src/ops/`, not in a domain.
 - **Limits come from env** (`RUN_LIMITS_<ORG>_*`, read in `index.ts`); the workflow catalog
   (`@voluma/workflow/bundled`) is code. `seed:example --from <runId> [--backfill <dir|r2:prefix>] [--remote]` makes an example run (it copies the source's `evidence/`, `review/`, `scratch/person/` and `outputs/` under the example's prefix)
-  (`scripts/seed-example.ts`; it needs `GUEST_ORGANIZATION_ID`, the Demo organization, in `.env`). To get a run into a fresh local database:
+  (`src/ops/seed-example.ts`; it needs `GUEST_ORGANIZATION_ID`, the Demo organization, in `.env`). To get a run into a fresh local database:
   `export:run --id <runId> --out <dir|r2:dev/…>` dumps its rows to `run.json`, and
   `import:run --from <dir|r2:prefix> [--replace]` loads them (events are checked with
   `runEventSchema`; an existing run is refused without `--replace`). Evidence stays in R2.
+  `archive:run --id <runId> [--out <dir>] --remote` (all three are in `src/ops/`, since they read both domains'
+  tables) copies an ended run's rows to `~/.local/share/voluma-backups/runs/<runId>/` and deletes
+  them; it refuses a non-local database without `--remote`, like `import:run`. See [.context/deploy.md](.context/deploy.md).
   `r2:put --from <dir> --to r2:dev/<prefix>` uploads a folder. An `r2:` location is a prefix in the
-  `R2_BUCKET` the dev servers use (`scripts/r2-dir.ts`). Operator scripts use `DATABASE_URL`, else the
+  `R2_BUCKET` the dev servers use (`src/ops/r2-dir.ts`). Operator scripts use `DATABASE_URL`, else the
   database `pnpm dev` wrote to `.dev/env.json`; each prints its database and bucket first, writes to
   R2 only under `dev/`, and `import:run` / `seed:example` refuse a non-local database without
   `--remote`. R2 is shared with staging, so a local seed names its example

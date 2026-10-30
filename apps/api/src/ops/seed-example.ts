@@ -36,7 +36,7 @@ import {
   studies,
   studyScans,
   threads,
-} from "../src/domains/run/schema";
+} from "../domains/run/schema";
 import { backfillRows, readBackfill, uploadBackfill } from "./backfill";
 import { databaseUrl } from "./operator";
 import { r2FromEnv, required, withLocalDir } from "./r2-dir";

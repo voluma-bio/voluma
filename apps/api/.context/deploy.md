@@ -159,7 +159,7 @@ An agent checks staging as a signed-in user with `POST /api/auth/password` (`WOR
 `WORKOS_TEST_PASSWORD`) sending `Origin: <APP_URL>` and `Content-Type: application/json`: the
 CSRF check answers any request that changes state without a bearer token, sign-in included,
 `403 forbidden origin` without the first and `415` without the second. Keep every `Set-Cookie`
-(`scripts/upload-scan.ts` shows how). Reading runs needs no sign-in: `Authorization: Bearer
+(`src/ops/upload-scan.ts` shows how). Reading runs needs no sign-in: `Authorization: Bearer
 $VOLUMA_DEBUG_TOKEN` reads every lab's runs.
 
 ## The database (Neon)
@@ -206,6 +206,17 @@ runner first (`r -X POST "$B/services/<ID>/suspend"` for each, so nothing writes
 tables are replaced), run `pg_restore --clean --if-exists --no-owner --no-acl -d "$NEON_DIRECT_URL" dump`, then resume the API and gateway
 (`.../resume`; the runner stays suspended until a run). Compare row counts with the source
 (`runs`, `run_events`, `provider_calls`) before trusting it. Never print the URL.
+
+**Archiving a run** frees space on the 1 GB database without losing the run. `archive:run --id <runId> --remote`
+(with `DATABASE_URL` set to the direct URL) refuses an example or a run that has not ended, writes the run's rows
+(`run.json`: run, input, study, events, threads, pi messages, review snapshots, provider calls) to
+`~/.local/share/voluma-backups/runs/<runId>/` (0600; refuses under 1 GB free), and does it all in one repeatable-read
+transaction: lock the run, read its rows, check them as `import:run` does, write and fsync the file, then delete, rolling back
+unless each table's deleted count equals the file's. Inputs stay (shared); the study goes with its
+scans only when no other run is in it. The run's R2 files are not copied or touched, so `import:run --from <that directory>`
+restores the run whole, with its study and scans when the study id is free and the scans' inputs exist (else a study of one,
+and it says so). The archive is one copy on one disk: copy the directory off this machine before archiving many runs.
+A `pg_dump` of the tables is still the backup for anything else.
 
 ## Rotating secrets
 

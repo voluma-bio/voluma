@@ -16,6 +16,6 @@ How a member's own scan becomes an input (`inputs.ts`; contract: `@voluma/contra
   without it upload routes answer 503. The API's key must be able to write objects. The
   bucket's CORS allows `PUT` from any origin (rule `scan-upload-put`, set through the
   Cloudflare API): the presigned URL is the credential, so the origin adds nothing.
-- **Scripts.** `scripts/upload-scan.ts` (`pnpm --filter @voluma/api upload:scan`) signs in with
+- **Scripts.** `src/ops/upload-scan.ts` (`pnpm --filter @voluma/api upload:scan`) signs in with
   `POST /api/auth/password` and calls the same routes; it keeps every response's
   `Set-Cookie`, since WorkOS rotates the refresh token.
