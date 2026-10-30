@@ -277,6 +277,8 @@ messages back from R2 (the only ones a request carries, `adapters/pi/elide-image
 Reads stop after the image's 1 MiB limit: its scratch object can be overwritten by a sandbox.
 Rows stored before this hold inline image blocks and use the same last-two-tool-results rule, even when newer
 references are unavailable; user images do not count toward that limit. Stored rows are not rewritten by a load.
+Request-time elision counts a successful `view_image` result even after hydration replaced every image with
+an unavailable note, so the next image call still displaces the older result. Failed calls do not consume a slot.
 The runner's resume is the only reader that
 parses history; `export:run`, `import:run` and the example seed copy rows as text, so a dump moved to another bucket
 keeps references that resolve only in the bucket that holds the objects (they load as the note elsewhere).
