@@ -68,6 +68,16 @@ there reaches every caller at once. Two shapes work:
 
 Either way the PR body names what breaks and which callers moved.
 
+Before merging a change that could stop a stored event from parsing (a new
+required field or a narrowed shape anywhere in a payload, recorded plans
+included), parse every staging run's events with the new `runEventSchema`:
+fetch each run's log from `GET /api/run/runs/:id/stream` with
+`VOLUMA_DEBUG_TOKEN` while it still parses (agents can't reach staging's
+database), and have a conversion ready for any that fail. The app gets no
+reader for an old shape; stored runs are converted by a one-off script kept
+out of the app. A query for the fields you think changed is not enough: it
+missed the recorded plans that took the runs list down after #177.
+
 ## Working in parallel
 
 One worktree and branch per agent, created from the primary checkout:
@@ -80,6 +90,9 @@ cd ../voluma.worktrees/<name> && pnpm i
 
 - Worktrees share nothing mutable: no fixed dev ports (`pnpm dev` picks
   free ones), no shared database (it makes one per worktree), Nx cache per worktree, no Nx daemon.
+  The exception is R2: every worktree and staging use one bucket, so a script
+  that writes R2 writes only keys staging never reads (`dev/…`, a local
+  example's `example-local-<runId>`); see `apps/api/AGENTS.md`.
 - Small PRs to `main`. Keep your branch current with
   `git merge origin/main`. Never rebase, force-push or commit to someone
   else's branch.
