@@ -108,6 +108,7 @@ export function Overview({
   const now = tasks.filter((t) => NOW.has(t.state));
   const working = now.some((t) => t.state === "running" || t.state === "checking");
   const paused = now.every((t) => t.state === "paused");
+  const awaitingAI = now.every((t) => t.state === "awaiting-ai");
   const failed = tasks.filter((t) => t.state === "failed");
   const needs = tasks.flatMap((t) => t.needs);
   const open = needs.filter((n) => !n.accepted && !accepting.done.has(n.id));
@@ -117,7 +118,17 @@ export function Overview({
   return (
     <>
       {now.length > 0 && (
-        <Section title={paused ? "Paused" : working ? "Working on now" : "In progress"}>
+        <Section
+          title={
+            awaitingAI
+              ? "Waiting for the AI"
+              : paused
+                ? "Paused"
+                : working
+                  ? "Working on now"
+                  : "In progress"
+          }
+        >
           <ul className="flex flex-wrap gap-2.5">
             {now.map((t) => (
               <li key={t.id}>
@@ -190,7 +201,13 @@ export function Overview({
 }
 
 /** The tasks the first section lists: under way, or stopped partway until something resumes them. */
-const NOW: ReadonlySet<TaskView["state"]> = new Set(["running", "checking", "held", "paused"]);
+const NOW: ReadonlySet<TaskView["state"]> = new Set([
+  "running",
+  "checking",
+  "held",
+  "paused",
+  "awaiting-ai",
+]);
 
 /** A started task's line: what the AI is doing on it, in the researcher's words. */
 export function doingNow(t: TaskView): string {
@@ -199,6 +216,8 @@ export function doingNow(t: TaskView): string {
       return "A second AI is checking the result";
     case "paused":
       return t.did ?? t.purpose ?? "Paused";
+    case "awaiting-ai":
+      return t.did ?? t.purpose ?? "Waiting for the AI";
     case "held":
       return "Waiting on the lead AI";
     default:
@@ -410,6 +429,7 @@ const NOT_YET: Partial<Record<TaskView["state"], string>> = {
   checking: "being checked",
   held: "in progress",
   paused: "paused",
+  "awaiting-ai": "waiting for the AI",
   stopped: "stopped before it finished",
   skipped: "skipped",
   failed: "failed",

@@ -6,7 +6,6 @@
 export { forgetKeys, KeysForm, loadKeys, saveKeys } from "./keys";
 export {
   formatDuration,
-  formatTime,
   formatUsd,
   RunBadge,
   type RunStatus,
