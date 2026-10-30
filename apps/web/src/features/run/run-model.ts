@@ -119,7 +119,8 @@ function threadsOf(events: RunEvent[]): { threads: Thread[]; lastAt: Map<string,
         break;
       case "tool.result":
         if (t) {
-          if (e.payload.isError) t.toolErrors++;
+          // A failure of Voluma's infrastructure isn't the agent's failed call.
+          if (e.payload.isError && !e.payload.infrastructure) t.toolErrors++;
           running.get(e.threadId)?.delete(e.payload.toolCallId);
         }
         break;

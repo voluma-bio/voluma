@@ -20,13 +20,12 @@ import {
 } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { type OutputEntry, unselectable } from "@voluma/contracts/workflow-files";
-import { knownUsdOfRun } from "@voluma/provider-calls";
 import { and, asc, desc, eq, gt, inArray, notInArray, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { Reader } from "../../domain";
 import { admit, type Limits, type Refusal, refusalMessage, type Usage, usage } from "./admission";
 import { endClaim, stalledError } from "./claim-progress";
-import { decideMessage, endCorrection, reopen } from "./corrections";
+import { decideMessage, endCorrection, openCorrection, reopen } from "./corrections";
 import type { KeyVault } from "./key-vault";
 import { LeaseLost, noLease } from "./lease";
 import type { Notifier } from "./notifier";
@@ -67,8 +66,6 @@ export type Claimed = {
   keys?: VisitorKeys;
   /** Present on every claim after the run's first. */
   previousClaim?: { reason: ClaimEndReason };
-  /** The spend cap this claim stored on the run. */
-  costCapUsd?: number;
 };
 
 /**
@@ -154,13 +151,10 @@ async function endUnfinished(
   error?: string,
   set: Partial<typeof runs.$inferInsert> = {},
 ) {
-  const [row] = await tx
-    .select({ base: runs.correctionBaseUsd })
-    .from(runs)
-    .where(eq(runs.id, runId));
-  const correcting = row?.base != null;
+  const reopenId = await openCorrection(tx, runId);
+  const correcting = reopenId !== null;
   if (status === "cancelled" || correcting) await cancelOpenThreads(tx, runId);
-  if (correcting) await endCorrection(tx, runId, status, error);
+  if (correcting) await endCorrection(tx, runId, reopenId, status, error);
   await tx
     .update(runs)
     .set({
@@ -477,7 +471,7 @@ export function pgRunQueue(
      * under the lock: a start that holds its keys before it commits is either in them or
      * not yet queued.
      */
-    claim: (runnerId: string, costCapUsd?: number, correctionCostCapUsd?: number) =>
+    claim: (runnerId: string) =>
       locked(async (tx): Promise<Claimed | null> => {
         await sweep(tx);
         await tx
@@ -524,14 +518,6 @@ export function pgRunQueue(
             }
           }
           const leaseToken = randomBytes(24).toString("hex");
-          // A correction's cap is on top of what the run had spent when reopened: its own cap, else the run's.
-          const correctionCap = correctionCostCapUsd ?? costCapUsd;
-          const cap =
-            run.correctionBaseUsd === null
-              ? costCapUsd
-              : correctionCap === undefined
-                ? undefined
-                : run.correctionBaseUsd + correctionCap;
           await tx
             .update(runs)
             .set({
@@ -542,7 +528,6 @@ export function pgRunQueue(
               leaseHolder: runnerId,
               leaseToken,
               leaseExpiresAt: leaseUntil,
-              costCapUsd: cap ?? null,
             })
             .where(eq(runs.id, run.id));
           const keys = run.credentials === "visitor" ? vault.take(run.id) : undefined;
@@ -551,15 +536,13 @@ export function pgRunQueue(
             leaseToken,
             ...(keys && { keys }),
             ...(run.lastClaimEnd && { previousClaim: { reason: run.lastClaimEnd } }),
-            ...(cap !== undefined && { costCapUsd: cap }),
           };
         }
         return null;
       }),
 
     /**
-     * Extends the lease and adds the usage; `stop` once the run has ended. `spentUsd` is the
-     * run's settled spend: its model cost plus its finished provider calls (open ones count nothing). Throws `LeaseLost`.
+     * Extends the lease and adds the usage; `stop` once the run has ended. Throws `LeaseLost`.
      */
     heartbeat: (runId: string, leaseToken: string, used: RunnerUsage) =>
       locked(async (tx) => {
@@ -571,8 +554,8 @@ export function pgRunQueue(
           .for("update");
         if (!run) throw new LeaseLost();
         if (run.state !== "running") return { stop: true };
-        const orgLimits = limits.get(run.labId);
-        if (!orgLimits) {
+        // An org dropped from config stops its running runs here (its queued ones fail at claim).
+        if (!limits.has(run.labId)) {
           await fail(tx, runId, NO_LIMITS);
           return { stop: true };
         }
@@ -584,15 +567,7 @@ export function pgRunQueue(
             sandboxSeconds: sql`${runs.sandboxSeconds} + ${used.sandboxSeconds}`,
           })
           .where(eq(runs.id, runId));
-        if (run.credentials === "voluma") {
-          const refused = admit("heartbeat", orgLimits, await usage(tx, run.labId), run);
-          if (refused) {
-            await fail(tx, runId, refusalMessage[refused]);
-            return { stop: true };
-          }
-        }
-        const gateway = await knownUsdOfRun(tx, runId);
-        return { stop: false, spentUsd: run.modelCostUsd + used.modelCostUsd + gateway };
+        return { stop: false };
       }),
 
     /**

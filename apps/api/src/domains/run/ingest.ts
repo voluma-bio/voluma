@@ -68,17 +68,16 @@ export function ingestRoutes({ queue, eventLog, history, notifier }: RunDeps) {
   });
 
   app.post("/ingest/claim", async (c) => {
-    const { runnerId, costCapUsd, correctionCostCapUsd } = await parseJson(c, claimRequestSchema);
-    const claimed = await queue.claim(runnerId, costCapUsd, correctionCostCapUsd);
+    const { runnerId } = await parseJson(c, claimRequestSchema);
+    const claimed = await queue.claim(runnerId);
     if (!claimed) return c.json({ claim: null } satisfies ClaimResponse);
-    const { run, leaseToken, keys, previousClaim, costCapUsd: cap } = claimed;
+    const { run, leaseToken, keys, previousClaim } = claimed;
     return c.json({
       claim: {
         run,
         leaseToken,
         ...(keys && { keys }),
         ...(previousClaim && { previousClaim }),
-        ...(cap !== undefined && { costCapUsd: cap }),
       },
     } satisfies ClaimResponse);
   });

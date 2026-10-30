@@ -28,6 +28,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { setTimeout } from "node:timers/promises";
 import {
   type CreateSandbox,
   type ExecChunk,
@@ -172,7 +173,9 @@ export function createModalSandbox(config: ModalSandboxConfig): CreateSandbox {
       ReturnType<typeof client.cloudBucketMounts.create>
     > = {};
     for (const mount of spec.mounts) {
-      const secret = await client.secrets.fromObject(await mintCredentials(config, spec, mount));
+      const secret = await client.secrets.fromObject(
+        await mintCredentials(config, spec, mount, signal),
+      );
       cloudBucketMounts[mountedAt(mount)] = client.cloudBucketMounts.create(config.r2.bucket, {
         secret,
         readOnly: mount.access === "read-only",
@@ -451,38 +454,68 @@ function validate(spec: SandboxSpec): void {
   }
 }
 
+// Cloudflare's mint endpoint sometimes answers 403 code 10042 ("Please enable R2") for an account
+// that has R2: seen once, gone 41 s later. A bad token is a different 403 and must not be retried.
+// 5 attempts with 1, 2, 4 and 8 s between them: at most ~15 s of waiting per mount.
+const MINT_ATTEMPTS = 5;
+const MINT_BACKOFF_MS = 1000;
+
+/** Whether a failed mint is worth another try: a server or rate-limit error, or the spurious 10042. */
+export function isTransientMintFailure(status: number, body: string): boolean {
+  if (status === 429 || status >= 500) return true;
+  return status === 403 && /"code"\s*:\s*10042\b/.test(body);
+}
+
 /** Mints a temporary R2 credential for one prefix, as the S3 variables Modal's mount expects. */
 async function mintCredentials(
   { r2 }: ModalSandboxConfig,
   spec: SandboxSpec,
   mount: SandboxMount,
+  signal?: AbortSignal,
 ): Promise<Record<string, string>> {
-  const response = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${r2.accountId}/r2/temp-access-credentials`,
-    {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${r2.cloudflareApiToken}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        bucket: r2.bucket,
-        parentAccessKeyId: r2.parentAccessKeyId,
-        permission: mount.access === "read-only" ? "object-read-only" : "object-read-write",
-        ttlSeconds: spec.lifetimeSeconds + CREDENTIAL_MARGIN_SECONDS,
-        prefixes: [mount.prefix],
-      }),
+  const request = {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${r2.cloudflareApiToken}`,
+      "content-type": "application/json",
     },
-  );
-  if (!response.ok) {
-    throw new Error(`minting R2 credentials failed: ${response.status} ${await response.text()}`);
+    body: JSON.stringify({
+      bucket: r2.bucket,
+      parentAccessKeyId: r2.parentAccessKeyId,
+      permission: mount.access === "read-only" ? "object-read-only" : "object-read-write",
+      ttlSeconds: spec.lifetimeSeconds + CREDENTIAL_MARGIN_SECONDS,
+      prefixes: [mount.prefix],
+    }),
+    signal,
+  };
+  const url = `https://api.cloudflare.com/client/v4/accounts/${r2.accountId}/r2/temp-access-credentials`;
+  for (let attempt = 1; ; attempt++) {
+    let failure: string;
+    let transient: boolean;
+    try {
+      const response = await fetch(url, request);
+      if (response.ok) {
+        const { result } = (await response.json()) as {
+          result: { accessKeyId: string; secretAccessKey: string; sessionToken: string };
+        };
+        return {
+          AWS_ACCESS_KEY_ID: result.accessKeyId,
+          AWS_SECRET_ACCESS_KEY: result.secretAccessKey,
+          AWS_SESSION_TOKEN: result.sessionToken,
+        };
+      }
+      const body = await response.text();
+      failure = `${response.status} ${body}`;
+      transient = isTransientMintFailure(response.status, body);
+    } catch (error) {
+      // A network error; an abort must end the creation, not be retried.
+      signal?.throwIfAborted();
+      failure = String(error);
+      transient = true;
+    }
+    if (!transient || attempt === MINT_ATTEMPTS) {
+      throw new Error(`minting R2 credentials failed: ${failure}`);
+    }
+    await setTimeout(MINT_BACKOFF_MS * 2 ** (attempt - 1), undefined, { signal });
   }
-  const { result } = (await response.json()) as {
-    result: { accessKeyId: string; secretAccessKey: string; sessionToken: string };
-  };
-  return {
-    AWS_ACCESS_KEY_ID: result.accessKeyId,
-    AWS_SECRET_ACCESS_KEY: result.secretAccessKey,
-    AWS_SESSION_TOKEN: result.sessionToken,
-  };
 }

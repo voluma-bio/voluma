@@ -71,13 +71,6 @@
       "when": 1793322466595,
       "tag": "0009_drop_wake_judgment",
       "breakpoints": true
-    },
-    {
-      "idx": 10,
-      "version": "7",
-      "when": 1793327235744,
-      "tag": "0010_corrections",
-      "breakpoints": true
     }
   ]
 }

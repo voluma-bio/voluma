@@ -3,11 +3,9 @@
  * it. `usage` reads every count from one query; `admit` judges a run at a stage with them.
  * Examples are seeded, not work, so no count includes them. A day is the last 24 hours by
  * the database's clock. A `voluma` run counts toward the day once, from its first claim
- * (`started_at`), so a recovered run isn't refused for a limit it passed. A reopened run
- * (a correction, `messages.ts`) counts its spend since the reopen toward the day it is claimed.
+ * (`started_at`), so a recovered run isn't refused for a limit it passed.
  */
 import type { Run } from "@voluma/contracts/run";
-import { knownUsdOf } from "@voluma/provider-calls";
 import { sql } from "drizzle-orm";
 import type { Tx } from "./pg-runs";
 
@@ -16,12 +14,11 @@ export type Limits = {
   perCaller: number;
   concurrent: number;
   perDay: number;
-  usdPerDay: number;
   /** Visitor runs queued or running, per org: the cap at start and `/keys`. */
   visitorActive: number;
 };
 
-export type Refusal = "concurrent" | "per-caller" | "visitor-active" | "daily" | "dollar";
+export type Refusal = "concurrent" | "per-caller" | "visitor-active" | "daily";
 
 /** One message per refusal: the API's answer and a failed run's stored error (a `concurrent` claim just leaves the run queued). */
 export const refusalMessage: Record<Refusal, string> = {
@@ -29,7 +26,6 @@ export const refusalMessage: Record<Refusal, string> = {
   "per-caller": "You already have a run in progress.",
   "visitor-active": "Too many runs with your own keys are active.",
   daily: "The organization's daily run limit was reached.",
-  dollar: "The organization's daily spending limit was reached.",
 };
 
 export type Usage = {
@@ -41,11 +37,6 @@ export type Usage = {
   waiting: number;
   /** Visitor runs queued or running. An `awaiting-keys` run holds neither keys nor a runner. */
   visitorActive: number;
-  /**
-   * Model and provider-call cost of `voluma` runs first claimed in the last day, and the cost
-   * since the latest reopen of those reopened and claimed in the last day.
-   */
-  spentToday: number;
   /** The caller's unfinished runs of the credentials kind being started (0 when no caller). */
   callerUnfinished: number;
 };
@@ -56,18 +47,12 @@ export async function usage(
   caller?: { userId: string; credentials: Run["credentials"] },
 ): Promise<Usage> {
   const today = sql`credentials = 'voluma' AND started_at > now() - interval '1 day'`;
-  const cost = sql`model_cost_usd + ${knownUsdOf(sql`runs.id`)}`;
   const [row] = await tx.execute<Usage>(sql`
     SELECT
       (count(*) FILTER (WHERE credentials = 'voluma' AND state = 'running'))::int AS "running",
       (count(*) FILTER (WHERE ${today}))::int AS "startedToday",
       (count(*) FILTER (WHERE credentials = 'voluma' AND state = 'queued' AND started_at IS NULL))::int AS "waiting",
       (count(*) FILTER (WHERE credentials = 'visitor' AND state IN ('queued', 'running')))::int AS "visitorActive",
-      coalesce(sum(CASE
-        WHEN ${today} THEN ${cost}
-        WHEN credentials = 'voluma' AND correction_base_usd IS NOT NULL AND claimed_at > now() - interval '1 day'
-          THEN greatest(${cost} - correction_base_usd, 0)
-        ELSE 0 END), 0)::float8 AS "spentToday",
       (count(*) FILTER (WHERE ${caller ? sql`started_by = ${caller.userId} AND credentials = ${caller.credentials} AND state <> 'ended'` : sql`false`}))::int AS "callerUnfinished"
     FROM runs WHERE lab_id = ${labId} AND NOT example`);
   return row as Usage;
@@ -75,12 +60,12 @@ export async function usage(
 
 /**
  * Why `run` may not go on at `stage`, or null. Start and resume admit either kind of run;
- * claim and heartbeat are for `voluma` runs, since a visitor run's cap was checked when it
+ * claim is for `voluma` runs, since a visitor run's cap was checked when it
  * was queued. A reopen (a correction) is judged as a start without the daily run count: it is
  * no new run. Checks run in this order.
  */
 export function admit(
-  stage: "start" | "resume" | "reopen" | "claim" | "heartbeat",
+  stage: "start" | "resume" | "reopen" | "claim",
   limits: Limits,
   u: Usage,
   run: { credentials: Run["credentials"]; firstClaim?: boolean },
@@ -93,6 +78,5 @@ export function admit(
   }
   if (stage === "start" && u.startedToday + u.waiting >= limits.perDay) return "daily";
   if (stage === "claim" && run.firstClaim && u.startedToday >= limits.perDay) return "daily";
-  if (u.spentToday >= limits.usdPerDay) return "dollar";
   return null;
 }

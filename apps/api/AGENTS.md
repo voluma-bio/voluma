@@ -94,16 +94,13 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   refuses a second `go` (409) while one since the latest `run.reopened` has no attempt of its task
   yet; plain messages go through. One `reopen`
   serves the route and `report()`'s requeue: it writes `run.reopened`, clears `lastClaimEnd`,
-  `stalledClaims` and the lease, and sets
-  `runs.correction_base_usd` (the spend at the reopen): that column is what makes a run's claims
-  corrections. A correction never ends a run worse than `completed`: every way the queue would
+  `stalledClaims` and the lease. A run is in a correction while the latest span of
+  `correctionSpans` is open (`openCorrection`: no `correction.ended` since the latest
+  `run.reopened`), so its claims are corrections. A correction never ends a run worse than `completed`: every way the queue would
   fail or cancel a run (`endUnfinished`: the runner's failed end, the no-progress limit, a refused
   claim or heartbeat, a user's cancel) ends it `completed` with `correction.ended` and its open
   threads cancelled. `report()` compares the larger of the runner's `lastSeq` and the claim's start seq with the log
-  and reopens a run whose claim missed a `person.message` (a failed claim is ended first). A
-  correction's claim cap is the base spend plus the runner's correction cap, else its run cap; `usage()` counts a reopened run's spend since the reopen toward the
-  day it is claimed in (it keeps only the latest reopen's base, so two corrections of one old run
-  inside a day count only the second's spend).
+  and reopens a run whose claim missed a `person.message` (a failed claim is ended first).
 - **Visitor keys live only in `key-vault.ts`**, in memory, and only `pg-queue.ts` touches it,
   under the lock. Never store, log or return them, and log no body on a route that takes
   them. A transition holds the keys before the write that makes the run claimable commits;

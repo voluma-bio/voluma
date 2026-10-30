@@ -12,7 +12,7 @@
  * WORKOS_LAB_ORGANIZATION_ID, and optionally WORKOS_JUDGES_ORGANIZATION_ID, and
  * GUEST_ORGANIZATION_ID with GUEST_SCOPE (lab|self, default lab) to let anyone in as a guest (the repo .env).
  * Run limits, per organization (LAB, JUDGES, DEMO) and number: RUN_LIMITS_<ORG>_PER_CALLER, _CONCURRENT,
- * _PER_DAY, _USD_PER_DAY, _VISITOR_ACTIVE; unset is no limit. Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
+ * _PER_DAY, _VISITOR_ACTIVE; unset is no limit. Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
  * R2_SECRET_ACCESS_KEY, R2_BUCKET: Review's reference download and scan uploads (the API
  * presigns PUTs; files never pass through it). UPLOAD_MAX_FILES, UPLOAD_MAX_BYTES per scan and UPLOAD_MAX_OPEN uploads in progress per member (defaults below). Fails at startup if the database is unreachable or not migrated.
  */
@@ -70,7 +70,6 @@ const limitsFromEnv = (org: "LAB" | "JUDGES" | "DEMO"): Limits => ({
   perCaller: limitNumber(`RUN_LIMITS_${org}_PER_CALLER`),
   concurrent: limitNumber(`RUN_LIMITS_${org}_CONCURRENT`),
   perDay: limitNumber(`RUN_LIMITS_${org}_PER_DAY`),
-  usdPerDay: limitNumber(`RUN_LIMITS_${org}_USD_PER_DAY`),
   visitorActive: limitNumber(`RUN_LIMITS_${org}_VISITOR_ACTIVE`),
 });
 

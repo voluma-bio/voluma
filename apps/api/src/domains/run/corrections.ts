@@ -8,10 +8,9 @@
  * a transaction that holds the row and then asks for the event lock can deadlock with it.
  */
 import { runEventSchema } from "@voluma/contracts/events";
-import { fold } from "@voluma/contracts/fold";
+import { correctionSpans, fold } from "@voluma/contracts/fold";
 import type { PersonMessage } from "@voluma/contracts/messages";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
-import { knownUsdOfRun } from "@voluma/provider-calls";
 import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import type { Reader } from "../../domain";
 import type { MessageRefusal, MessageResult } from "../../ports";
@@ -49,8 +48,7 @@ async function appendPersonEvent(
 
 /**
  * Reopens a run for the person's message `messageEventId`: `run.reopened` (id keyed to the
- * message), then the run to `queued` with its end, claim history and lease cleared and its spend
- * so far as the correction's base. The route calls it for a finished run, after admission;
+ * message), then the run to `queued` with its end, claim history and lease cleared. The route calls it for a finished run, after admission;
  * `report()` calls it for a claim that ended without seeing a message, which needs none.
  */
 export async function reopen(tx: Tx, runId: string, messageEventId: string, by: string) {
@@ -68,28 +66,36 @@ export async function reopen(tx: Tx, runId: string, messageEventId: string, by: 
       error: null,
       lastClaimEnd: null,
       stalledClaims: 0,
-      correctionBaseUsd: sql`${runs.modelCostUsd} + ${await knownUsdOfRun(tx, runId)}`,
       ...noLease,
     })
     .where(eq(runs.id, runId));
 }
 
-/** Writes `correction.ended`, keyed to the latest `run.reopened`; the caller has checked the run is in a correction. */
+/**
+ * The id of the run's open correction's `run.reopened`, or null: the latest span of
+ * `correctionSpans` is open (no `correction.ended` after the latest reopen). A run is in a
+ * correction exactly then.
+ */
+export async function openCorrection(tx: Tx, runId: string): Promise<string | null> {
+  const rows = await tx
+    .select()
+    .from(events)
+    .where(and(eq(events.runId, runId), inArray(events.type, ["run.reopened", "correction.ended"])))
+    .orderBy(asc(events.seq));
+  const latest = correctionSpans(rows.map(toRunEvent)).at(-1);
+  return latest?.closed === "open" ? latest.reopenId : null;
+}
+
+/** Writes `correction.ended`, keyed to the open correction's `run.reopened` (`openCorrection`). */
 export async function endCorrection(
   tx: Tx,
   runId: string,
+  reopenId: string,
   status: "failed" | "cancelled",
   error?: string,
 ) {
-  const [reopened] = await tx
-    .select({ id: events.id })
-    .from(events)
-    .where(and(eq(events.runId, runId), eq(events.type, "run.reopened")))
-    .orderBy(desc(events.seq))
-    .limit(1);
-  if (!reopened) throw new Error(`run ${runId} is in a correction with no run.reopened`);
   await appendPersonEvent(tx, runId, {
-    id: `${reopened.id.slice(0, -":reopened".length)}:ended`,
+    id: `${reopenId.slice(0, -":reopened".length)}:ended`,
     type: "correction.ended",
     payload: { status, ...(error !== undefined && { error }) },
   });
@@ -177,8 +183,9 @@ export async function decideMessage(
   const stateNow = async () => (await loadRun(tx, runId)).state;
   if (again) return { ok: { eventId, state: await stateNow(), duplicate: true } };
 
-  const reopened = run.correctionBaseUsd !== null;
-  const live = reopened && (run.state === "queued" || run.state === "running");
+  const live =
+    (run.state === "queued" || run.state === "running") &&
+    (await openCorrection(tx, runId)) !== null;
   const finished = run.state === "ended" && run.outcome === "completed";
   if (!live && !finished) {
     return refuse(

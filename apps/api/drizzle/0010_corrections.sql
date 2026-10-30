@@ -1,1 +1,0 @@
-ALTER TABLE "runs" ADD COLUMN "correction_base_usd" double precision;

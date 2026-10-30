@@ -103,10 +103,7 @@
  * start); 413: over the body or snapshot limit; 415: the snapshot is not a PNG; 503: no file
  * storage for the snapshot. A message to a `queued` or `running` reopened run is not refused.
  *
- * Spend. A correction's spend accrues on the same run and counts toward the org's day by claim
- * time (the claim that spends it, not the run's first claim), and each correction has its own cost
- * cap, a runner setting (else the run cap), on top of the spend at the reopen; the API
- * implements both.
+ * Spend. A correction's spend accrues on the same run and is recorded and shown; there is no cap.
  *
  * Stored data. All of this is additive: no stored event or run row changes shape.
  */
