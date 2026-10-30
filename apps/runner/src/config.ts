@@ -38,9 +38,20 @@ function positiveInt(name: string, fallback: number, min = 1): number {
   return value;
 }
 
+/** What `pnpm dev` started in this worktree (tools/dev.mjs writes `.dev/env.json`), or undefined. */
+function devEnv():
+  | { apiUrl: string; apiToken: string; gatewayUrl?: string; gatewaySecret?: string }
+  | undefined {
+  try {
+    return JSON.parse(readFileSync(resolve(import.meta.dirname, "../../../.dev/env.json"), "utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * The API to claim from: `VOLUMA_API_URL` and `VOLUMA_API_TOKEN`, else the local API
- * `pnpm dev` started in this worktree (tools/dev.mjs writes `.dev/env.json`).
+ * `pnpm dev` started in this worktree.
  */
 function apiEndpoint(): { baseUrl: string; token: string } {
   const baseUrl = optional("VOLUMA_API_URL");
@@ -53,13 +64,9 @@ function apiEndpoint(): { baseUrl: string; token: string } {
       token: required("VOLUMA_API_TOKEN"),
     };
   }
-  const path = resolve(import.meta.dirname, "../../../.dev/env.json");
-  try {
-    const { apiUrl, apiToken } = JSON.parse(readFileSync(path, "utf8"));
-    return { baseUrl: apiUrl, token: apiToken };
-  } catch {
-    throw new Error(`set VOLUMA_API_URL and VOLUMA_API_TOKEN, or run \`pnpm dev\` (${path})`);
-  }
+  const dev = devEnv();
+  if (!dev) throw new Error("set VOLUMA_API_URL and VOLUMA_API_TOKEN, or run `pnpm dev`");
+  return { baseUrl: dev.apiUrl, token: dev.apiToken };
 }
 
 /** A model as `provider/id`, e.g. `openai/gpt-5.6-luna`. */
@@ -166,8 +173,11 @@ export function runnerConfig() {
     required(`VOLUMA_${provider.toUpperCase()}_API_KEY`);
   const api = apiEndpoint();
   const metaApiKey = optional("VOLUMA_META_API_KEY");
-  const gatewayUrl = optional("VOLUMA_GATEWAY_URL");
-  const gatewaySecret = optional("GATEWAY_TOKEN_SECRET");
+  // A local runner (no API of its own, no gateway URL set) takes `pnpm dev`'s gateway, URL and
+  // secret together, once its tunnel is up.
+  const local = optional("VOLUMA_API_URL") || optional("VOLUMA_GATEWAY_URL") ? undefined : devEnv();
+  const gatewayUrl = local?.gatewayUrl ?? optional("VOLUMA_GATEWAY_URL");
+  const gatewaySecret = local?.gatewayUrl ? local.gatewaySecret : optional("GATEWAY_TOKEN_SECRET");
   if (!gatewayUrl !== !gatewaySecret)
     throw new Error("set VOLUMA_GATEWAY_URL and GATEWAY_TOKEN_SECRET together, or neither");
   const gateway =
