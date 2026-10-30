@@ -16,7 +16,6 @@ import { ChevronDown } from "lucide-react";
 import { Popover } from "radix-ui";
 import { useState } from "react";
 import { Link } from "react-router";
-import { reviewHref } from "./overview";
 import { plainError } from "./run-model";
 import { useNow } from "./status";
 
@@ -45,15 +44,18 @@ const workflowLabel = (run: Run, study: StudyDetail | undefined) => {
 };
 
 /**
- * The run's word for where it is, beside its progress. A queued run with a plan has started: it
- * lost its runner. One held after the AI's provider failed says so (`waitingForProvider`); its retry time stays off screen.
+ * The run's word for where it is, beside its progress. `paused`: a queued run with threads cut
+ * off, so it lost its runner mid-claim; one a message queued has none open. `waiting`: the AI
+ * answered the researcher. One held after the AI's provider failed says so
+ * (`waitingForProvider`); its retry time stays off screen.
  */
-function statusWord(run: Run, started: boolean): string {
+function statusWord(run: Run, paused: boolean, waiting: boolean): string {
   const { state } = run;
+  if (waiting && state.status === "ended") return "Waiting on you";
   switch (state.status) {
     case "queued":
       if (state.waitingForProvider) return "Waiting: the AI is unavailable";
-      return started ? "Paused" : "Waiting to start";
+      return paused ? "Paused" : "Waiting to start";
     case "running":
       return "Running";
     case "awaiting-keys":
@@ -72,20 +74,26 @@ export function RunHeader({
   study,
   progress: { done, total, toCheck },
   spend,
-  openTask,
+  open3d,
   decisions,
   onChange,
+  paused,
+  waiting,
 }: {
   run: Run;
   study: StudyDetail | undefined;
   /** `progress` (total is 0 before the run has a plan), less what was accepted on this page. */
   progress: { done: number; total: number; toCheck: number };
   spend: RunSpend;
-  /** The task "Open in 3D" opens: the one in view, else the first to check. */
-  openTask?: string;
+  /** "Open in 3D": the run's To check items from the task in view; absent before a plan. */
+  open3d?: () => void;
   /** Where "What the AI decided" goes. */
   decisions: string;
   onChange: (run: Run) => void;
+  /** A thread is paused: the runner is gone mid-claim. A run a message queued has none open. */
+  paused: boolean;
+  /** The AI of a reopened run answered and waits for the researcher. */
+  waiting: boolean;
 }) {
   const { title, group } = scanTitle(run, study);
   const { state } = run;
@@ -110,7 +118,7 @@ export function RunHeader({
 
       <div className="w-full max-w-lg justify-self-center max-[1100px]:justify-self-start">
         <p className="mb-1.5 flex flex-wrap items-baseline gap-x-3.5 text-ui">
-          <b className="font-semibold">{statusWord(run, total > 0)}</b>
+          <b className="font-semibold">{statusWord(run, paused, waiting)}</b>
           {total > 0 && (
             <span>
               {done} of {total} tasks done
@@ -147,13 +155,10 @@ export function RunHeader({
           decisions={decisions}
         />
         {live && <StopRun run={run} onChange={onChange} />}
-        {(state.status !== "queued" || run.tasks) && (
-          <Link
-            to={reviewHref(run.id, openTask)}
-            className={buttonClass({ variant: "primary", size: "sm" })}
-          >
+        {open3d && (
+          <Button variant="primary" size="sm" onClick={open3d}>
             Open in 3D
-          </Link>
+          </Button>
         )}
       </div>
     </header>

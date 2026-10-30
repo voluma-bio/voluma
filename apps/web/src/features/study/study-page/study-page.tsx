@@ -5,34 +5,42 @@
  * To check (every open check across scans, by kind) and Scans (a table of every scan). The
  * selected tab lives in `?tab=`. A study of one has no dashboard: it opens its run.
  *
- * Every "Open in 3D" (To check rows, Needs your eye, a plot's dot) calls `openChecks`. The check
- * panel (a later lane) passes its own; until then the default opens the first stop's run review
- * at its task, and "Go through all N" stays hidden since the default can't walk a queue.
+ * Every "Open in 3D" (To check rows, Needs your eye, a plot's dot) calls `openChecks`, which opens
+ * the check panel over the page on that queue. "Looks right" in the panel refreshes the study,
+ * as the row's own button does, so the item leaves To check.
  *
  * "Add scans" waits: adding scans to an existing study isn't designed, and `/new` makes a new one.
  */
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, getStudy } from "@voluma/api-client";
+import { CheckPanel } from "@voluma/check-panel";
 import type { StudyDetail } from "@voluma/contracts/study";
 import { Button, Tabs } from "@voluma/ui";
 import { formatUsd } from "@voluma/ui/run";
 import { type BundledWorkflow, workflowById } from "@voluma/workflow/bundled";
 import { ChevronDown } from "lucide-react";
 import { Popover } from "radix-ui";
-import { useCallback } from "react";
-import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router";
+import { useState } from "react";
+import { Link, Navigate, useParams, useSearchParams } from "react-router";
 import { Overview } from "./overview";
 import { ScansTable } from "./scans-table";
-import { isLive, type OpenChecks, scanHref, studyCounts, studySpend } from "./study-model";
+import {
+  type CheckStop,
+  isLive,
+  type OpenChecks,
+  scanHref,
+  studyCounts,
+  studySpend,
+} from "./study-model";
 import { ToCheck } from "./to-check";
 
 const TAB_IDS = ["overview", "check", "scans"] as const;
 type TabId = (typeof TAB_IDS)[number];
 const PANEL_ID = "study-panel";
 
-export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
+export function StudyPage() {
   const { id = "" } = useParams();
-  const navigate = useNavigate();
+  const client = useQueryClient();
   const [search, setSearch] = useSearchParams();
   const tabParam = search.get("tab");
   const tab: TabId = TAB_IDS.find((t) => t === tabParam) ?? "overview";
@@ -43,13 +51,8 @@ export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
     refetchInterval: (query) => (query.state.data?.scans.some(isLive) ? 5000 : false),
   });
 
-  const openReview = useCallback<OpenChecks>(
-    (queue, start) => {
-      const item = queue[start];
-      if (item) navigate(`/runs/${item.runId}?task=${encodeURIComponent(item.taskId)}`);
-    },
-    [navigate],
-  );
+  const [panel, setPanel] = useState<{ queue: CheckStop[]; start: number }>();
+  const openChecks: OpenChecks = (queue, start) => setPanel({ queue, start });
 
   const setTab = (next: TabId) =>
     setSearch(next === "overview" ? {} : { tab: next }, { preventScrollReset: true });
@@ -103,24 +106,22 @@ export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
       >
         <div className="mx-auto w-full max-w-[90rem] px-6 py-5 max-[760px]:px-3 max-[760px]:py-4">
           {tab === "overview" && (
-            <Overview
-              detail={detail}
-              workflow={workflow}
-              onTab={setTab}
-              openChecks={openChecks ?? openReview}
-            />
+            <Overview detail={detail} workflow={workflow} onTab={setTab} openChecks={openChecks} />
           )}
           {tab === "check" && (
-            <ToCheck
-              detail={detail}
-              workflow={workflow}
-              openChecks={openChecks ?? openReview}
-              walkthrough={openChecks !== undefined}
-            />
+            <ToCheck detail={detail} workflow={workflow} openChecks={openChecks} />
           )}
           {tab === "scans" && <ScansTable detail={detail} workflow={workflow} />}
         </div>
       </div>
+      {panel && (
+        <CheckPanel
+          items={panel.queue}
+          start={panel.start}
+          onClose={() => setPanel(undefined)}
+          onAccepted={() => void client.invalidateQueries({ queryKey: ["study"] })}
+        />
+      )}
     </div>
   );
 }

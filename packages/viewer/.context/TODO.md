@@ -18,3 +18,18 @@
 - Validate small-structure visibility and tune ray sampling / interactive render
   resolution using workstation evidence before increasing resource or intake
   limits. Nonlinear modality LUTs remain unsupported in 3D.
+
+## Grid viewer
+
+- Review picks the grid per task with `taskScene` (`review-scene.ts`, used by the check panel);
+  then `grid-page.tsx`'s URL parameters and the DICOM path, Cornerstone, zip.js and dicom-parser go.
+- Surfaces show only as meshes: a height field's line in the slices is not drawn.
+- Rulers and points (world mm through the grid's inverse affine), selection framing (frame the
+  `on` blocks, move the slices only on a user's selection), the amber outline under check,
+  structure visibility and opacity, 3D Slicer's mouse and keyboard map (#146).
+- Chunk reads cost one API redirect each. A full-resolution coronal plane of the scan plus its
+  labels is about 250 chunk requests; through the orb portal a cold scan grid took 26 s to first
+  paint and about 50 s to full resolution while 75 MB of bone meshes loaded beside it. If staging
+  is as slow, sign many asset paths in one call or shard the levels.
+- Measure scroll and 3D frame times on a hardware GPU: orb Chromium renders with SwiftShader, where
+  the 3D pane with the ROI meshes costs hundreds of milliseconds per frame.

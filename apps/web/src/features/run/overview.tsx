@@ -7,7 +7,7 @@ import { useMutation } from "@tanstack/react-query";
 import { ApiError, acceptCheck, reviewFileUrl } from "@voluma/api-client";
 import type { Asset } from "@voluma/contracts/review";
 import type { Run } from "@voluma/contracts/run";
-import { Button, buttonClass, cx, Lightbox } from "@voluma/ui";
+import { Button, cx, Lightbox } from "@voluma/ui";
 import { ChevronRight, ImageOff } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Link } from "react-router";
@@ -21,8 +21,10 @@ export type Accepting = {
   /** Only a completed run's latest result takes decisions, and an example takes none. */
   enabled: boolean;
   accept: (item: NeedItem) => void;
-  /** Accepted here, before the stream brings the decision back. */
+  /** Accepted here or in the check panel, before the stream brings the decision back. */
   done: ReadonlySet<string>;
+  /** Counts an item the check panel accepted. */
+  markDone: (id: string) => void;
   /** Sent and not answered yet. */
   pending: ReadonlySet<string>;
   /** The latest failure, by item. */
@@ -78,14 +80,14 @@ export function useAccepting(
     enabled: run.review !== null && !run.example,
     accept: (item) => mutation.mutate(item),
     done,
+    markDone: (id) => setDone((d) => new Set(d).add(id)),
     pending,
     error,
   };
 }
 
-/** Where "Open in 3D" goes until the review panel exists: the review, at the task. */
-export const reviewHref = (runId: string, taskId?: string) =>
-  `/runs/${runId}${taskId ? `?task=${encodeURIComponent(taskId)}` : ""}`;
+/** Opens the check panel at a task's To check item (`checkId`), else at the task alone. */
+export type Open3d = (taskId: string, checkId?: string) => void;
 
 export function Overview({
   runId,
@@ -94,6 +96,7 @@ export function Overview({
   ended,
   example,
   accepting,
+  open3d,
   search,
 }: {
   runId: string;
@@ -103,6 +106,7 @@ export function Overview({
   ended: boolean;
   example: boolean;
   accepting: Accepting;
+  open3d: Open3d;
   search: (taskId?: string) => string;
 }) {
   const now = tasks.filter((t) => NOW.has(t.state));
@@ -184,6 +188,7 @@ export function Overview({
                 item={n}
                 task={{ title: title.get(n.taskId) ?? n.taskId, to: search(n.taskId) }}
                 accepting={accepting}
+                open3d={open3d}
               />
             ))}
           </div>
@@ -309,12 +314,14 @@ export function NeedCard({
   item,
   task,
   accepting,
+  open3d,
 }: {
   runId: string;
   item: NeedItem;
   /** In the Overview: the task it belongs to, which links to the task. */
   task?: { title: string; to: string };
   accepting: Accepting;
+  open3d: Open3d;
 }) {
   const error = accepting.error?.id === item.id ? accepting.error.text : undefined;
   return (
@@ -348,9 +355,9 @@ export function NeedCard({
               {accepting.pending.has(item.id) ? "Saving…" : "Looks right"}
             </Button>
           )}
-          <Link to={reviewHref(runId, item.taskId)} className={buttonClass({ size: "sm" })}>
+          <Button size="sm" onClick={() => open3d(item.taskId, item.id)}>
             Open in 3D
-          </Link>
+          </Button>
         </div>
         {error && (
           <p role="alert" className="mt-2 text-meta text-destructive">

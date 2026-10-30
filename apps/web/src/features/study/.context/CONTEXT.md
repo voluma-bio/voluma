@@ -52,6 +52,7 @@ shown as its scan and linked straight to its run.
   the same mapping; don't add another.
 - **The study page** derives everything from one `StudyDetail` in `study-page/study-model.ts`
   (pure; its header states the far-from-group rule and the unit rule). Every "Open in 3D" calls
-  `StudyPage`'s `openChecks`, the check panel's one mount point; pass a real panel there rather
-  than adding links. Adding scans to an existing study isn't designed, so the page has no
+  `StudyPage`'s `openChecks`, which opens `@voluma/check-panel` over the page on that queue; add
+  entry points through it, never links. An accept in the panel invalidates `["study"]`, as a
+  row's "Looks right" does. Adding scans to an existing study isn't designed, so the page has no
   "Add scans". The knee reads from `attributes.knee`, as intake stores it.

@@ -1,0 +1,529 @@
+/**
+ * One slice pane of the grid viewer: the plane through the crosshair that holds `axis`
+ * constant, drawn by three.js with an orthographic camera in mm. It opens on the coarsest
+ * level and refines to the level the zoom needs. Left drag moves the crosshair, the wheel
+ * steps slices, Ctrl or ⌘ + wheel zooms at the pointer, Shift, middle or right drag pans.
+ * In mark mode a left click marks a voxel (and moves the crosshair to it) and a left drag marks
+ * a box; marks are drawn in `--mark` on every slice that passes through them.
+ */
+import { useEffect, useRef, useState } from "react";
+import {
+  BufferGeometry,
+  CircleGeometry,
+  Color,
+  Float32BufferAttribute,
+  Group,
+  LineBasicMaterial,
+  LineSegments,
+  Mesh,
+  MeshBasicMaterial,
+  OrthographicCamera,
+  Scene,
+  WebGLRenderer,
+} from "three";
+import { compose, type OverlayPlane, type Window } from "./compose";
+import { corners, type Picture, quad, texture } from "./picture";
+import { readPlane } from "./planes";
+import {
+  type Axis,
+  type GridMark,
+  type GridScene,
+  levelFor,
+  levelIndex,
+  planeAxes,
+  type Zyx,
+} from "./scene";
+
+export const axisColor = (axis: Axis) =>
+  getComputedStyle(document.documentElement).getPropertyValue(
+    axis === 0 ? "--axis-z" : axis === 1 ? "--axis-y" : "--axis-x",
+  );
+
+/** Pixels per mm, the zoom that fits the grid in the pane, and the pane centre in mm. */
+type View = { zoom: number; fit: number; center: [number, number] };
+
+/** A drag shorter than this (CSS px) is a click: in mark mode, a point. */
+const CLICK_PX = 4;
+/** A point mark's radius on screen, CSS px, whatever the zoom. */
+const DOT_PX = 4;
+
+/** Renders the pane now and returns its canvas, for a snapshot (WebGL clears it after compositing). */
+export type Capture = () => HTMLCanvasElement;
+
+export function SlicePane({
+  axis,
+  scene,
+  point,
+  onPoint,
+  window,
+  onPicture,
+  marking,
+  marks,
+  onMark,
+  onCapture,
+}: {
+  axis: Axis;
+  scene: GridScene;
+  point: Zyx;
+  onPoint(point: Zyx): void;
+  window: Window | null;
+  onPicture(picture: Picture): void;
+  marking: boolean;
+  marks: readonly GridMark[];
+  onMark(mark: GridMark): void;
+  onCapture(capture: Capture | null): void;
+}) {
+  const [ra, ca] = planeAxes(axis);
+  const sr = scene.spacingZyx[ra];
+  const sc = scene.spacingZyx[ca];
+  const host = useRef<HTMLDivElement>(null);
+  const three = useRef<{
+    renderer: WebGLRenderer;
+    camera: OrthographicCamera;
+    scene: Scene;
+    image: Mesh<BufferGeometry, MeshBasicMaterial>;
+    cross: LineSegments<BufferGeometry, LineBasicMaterial>;
+    marks: Group;
+    render(): void;
+  } | null>(null);
+  const view = useRef<View | null>(null);
+  const [level, setLevel] = useState(scene.image.levels.length - 1);
+  const [shown, setShown] = useState<{ level: number; index: number } | null>(null);
+  const [error, setError] = useState<string>();
+  // The box being dragged in mark mode, drawn with the marks until the drag ends.
+  const [dragged, setDragged] = useState<GridMark | null>(null);
+  const latest = useRef({ point, onPoint, marking, onMark });
+  latest.current = { point, onPoint, marking, onMark };
+
+  // Pane mm: columns run right, rows run down.
+  const toPane = (p: Zyx): [number, number] => [p[ca] * sc, -p[ra] * sr];
+
+  // The renderer lives as long as the pane; resizing only changes its size.
+  useEffect(() => {
+    const element = host.current!;
+    const renderer = new WebGLRenderer({ antialias: false });
+    renderer.setPixelRatio(globalThis.devicePixelRatio);
+    renderer.setClearColor(
+      getComputedStyle(document.documentElement).getPropertyValue("--viewer-well"),
+    );
+    element.append(renderer.domElement);
+    renderer.domElement.className = "grid-canvas";
+    const camera = new OrthographicCamera(-1, 1, 1, -1, -10, 10);
+    const s = new Scene();
+    const image = new Mesh(new BufferGeometry(), new MeshBasicMaterial());
+    const cross = new LineSegments(
+      new BufferGeometry(),
+      new LineBasicMaterial({ vertexColors: true, depthTest: false }),
+    );
+    cross.renderOrder = 1;
+    const marks = new Group();
+    marks.renderOrder = 2;
+    s.add(image, cross, marks);
+    const state = {
+      renderer,
+      camera,
+      scene: s,
+      image,
+      cross,
+      marks,
+      // One frame per animation frame, however many changes asked for it.
+      render() {
+        frame ||= requestAnimationFrame(paint);
+      },
+    };
+    let frame = 0;
+    const paint = () => {
+      frame = 0;
+      const { width, height } = element.getBoundingClientRect();
+      const v = view.current;
+      if (!width || !height || !v) return;
+      camera.left = v.center[0] - width / 2 / v.zoom;
+      camera.right = v.center[0] + width / 2 / v.zoom;
+      camera.top = v.center[1] + height / 2 / v.zoom;
+      camera.bottom = v.center[1] - height / 2 / v.zoom;
+      camera.updateProjectionMatrix();
+      // Dots keep their size on screen at any zoom.
+      for (const dot of marks.children) if (dot.userData.dot) dot.scale.setScalar(DOT_PX / v.zoom);
+      renderer.render(s, camera);
+    };
+    onCapture(() => {
+      paint();
+      return renderer.domElement;
+    });
+    const fitZoom = (width: number, height: number) =>
+      Math.min(width / (scene.shapeZyx[ca] * sc), height / (scene.shapeZyx[ra] * sr)) * 0.95;
+    three.current = state;
+    const observer = new ResizeObserver(() => {
+      const { width, height } = element.getBoundingClientRect();
+      if (!width || !height) return;
+      renderer.setSize(width, height);
+      // Keep the framing when the pane resizes or maximizes: zoom is relative to the fit.
+      const fitted = fitZoom(width, height);
+      if (view.current) view.current.zoom *= fitted / view.current.fit;
+      view.current ??= {
+        zoom: fitted,
+        fit: fitted,
+        center: [(scene.shapeZyx[ca] * sc) / 2, (-scene.shapeZyx[ra] * sr) / 2],
+      };
+      view.current.fit = fitted;
+      state.render();
+      pickLevel();
+    });
+    observer.observe(element);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      onCapture(null);
+      disposeMarks(marks);
+      image.geometry.dispose();
+      image.material.map?.dispose();
+      image.material.dispose();
+      cross.geometry.dispose();
+      cross.material.dispose();
+      renderer.dispose();
+      renderer.domElement.remove();
+      three.current = null;
+    };
+    // The scene's grid is fixed for the pane's life (the viewer remounts on a new grid).
+    // biome-ignore lint/correctness/useExhaustiveDependencies: see above.
+  }, []);
+
+  /** The level that gives each device pixel at least one voxel at the current zoom. */
+  function pickLevel() {
+    const v = view.current;
+    if (!v) return;
+    const mmPerPixel = 1 / (v.zoom * globalThis.devicePixelRatio);
+    setLevel(levelFor(scene.image.levels, mmPerPixel / Math.min(sr, sc)));
+  }
+
+  // Load the plane through the crosshair at the level the zoom needs. The coarsest level shows
+  // meanwhile, unless the finer one arrives almost as soon (it does from the worker's cache).
+  const index = point[axis];
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the overlays and levels are the scene's, fixed for the pane's life.
+  useEffect(() => {
+    if (!window) return;
+    const abort = new AbortController();
+    const load = async (k: number): Promise<Picture | null> => {
+      const lvl = scene.image.levels[k]!;
+      const s = lvl.scaleZyx[axis];
+      const at = levelIndex(index, scene.image.offsetZyx[axis], s, lvl.shapeZyx[axis]);
+      if (at < 0) return null;
+      const overlays = scene.overlays.map(async (overlay): Promise<OverlayPlane | null> => {
+        // The overlay level with the image level's scale, or its finest.
+        const o = overlay.levels.find((l) => l.scaleZyx[axis] === s) ?? overlay.levels[0]!;
+        const i = levelIndex(index, overlay.offsetZyx[axis], o.scaleZyx[axis], o.shapeZyx[axis]);
+        if (i < 0) return null;
+        const plane = await readPlane(overlay.base, o.path, axis, i, abort.signal);
+        return { overlay, plane, scale: o.scaleZyx[ra] };
+      });
+      const [plane, ...layers] = await Promise.all([
+        readPlane(scene.image.base, lvl.path, axis, at, abort.signal),
+        ...overlays,
+      ]);
+      const present = layers.filter((l): l is OverlayPlane => !!l);
+      return {
+        axis,
+        index: at * s + (s - 1) / 2,
+        rgba: compose(plane!, s, axis, window, present),
+        rows: plane!.rows,
+        cols: plane!.cols,
+        scale: s,
+      };
+    };
+    const show = (picture: Picture | null, k: number) => {
+      if (!picture || abort.signal.aborted) return;
+      draw(picture);
+      onPicture(picture);
+      setShown({ level: k, index });
+      setError(undefined);
+    };
+    const coarsest = scene.image.levels.length - 1;
+    (async () => {
+      const fine = load(level);
+      if (level !== coarsest) {
+        const settled = fine.then(
+          () => true,
+          () => true,
+        );
+        const coarse = await load(coarsest);
+        const quick = await Promise.race([settled, new Promise((go) => setTimeout(go, 80))]);
+        if (!quick) show(coarse, coarsest);
+      }
+      show(await fine, level);
+    })().catch((cause) => {
+      if (!abort.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
+    });
+    return () => abort.abort();
+  }, [index, level, window, axis]);
+
+  function draw(picture: Picture) {
+    const t = three.current;
+    if (!t) return;
+    t.image.geometry.dispose();
+    t.image.geometry = quad(corners(picture).map((p) => [...toPane(p), 0]));
+    t.image.material.map?.dispose();
+    t.image.material.map = texture(picture, false);
+    t.image.material.needsUpdate = true;
+    t.render();
+  }
+
+  // Crosshair: the other two planes' traces, each in its plane's colour.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: toPane depends only on the fixed grid.
+  useEffect(() => {
+    const t = three.current;
+    if (!t) return;
+    const [x, y] = toPane(point);
+    const w = scene.shapeZyx[ca] * sc;
+    const h = scene.shapeZyx[ra] * sr;
+    const colorOf = (a: Axis) => {
+      const c = axisColor(a).trim();
+      const n = Number.parseInt(c.slice(1), 16);
+      return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+    };
+    const rowColor = colorOf(ra);
+    const colColor = colorOf(ca);
+    t.cross.geometry.dispose();
+    const g = new BufferGeometry();
+    // A horizontal line holds the row axis constant; a vertical one, the column axis.
+    g.setAttribute(
+      "position",
+      new Float32BufferAttribute([0, y, 1, w, y, 1, x, 0, 1, x, -h, 1], 3),
+    );
+    g.setAttribute(
+      "color",
+      new Float32BufferAttribute([...rowColor, ...rowColor, ...colColor, ...colColor], 3),
+    );
+    t.cross.geometry = g;
+    t.render();
+  }, [point]);
+
+  // Marks: a dot on the slice through a point mark, a box's outline on every slice it spans.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: toPane depends only on the fixed grid.
+  useEffect(() => {
+    const t = three.current;
+    if (!t) return;
+    disposeMarks(t.marks);
+    const color = new Color(
+      getComputedStyle(document.documentElement).getPropertyValue("--mark").trim(),
+    );
+    const at = Math.round(point[axis]);
+    for (const mark of dragged ? [...marks, dragged] : marks) {
+      if ("point" in mark) {
+        if (mark.point[axis] !== at) continue;
+        const dot = new Mesh(
+          new CircleGeometry(1, 20),
+          new MeshBasicMaterial({ color, depthTest: false }),
+        );
+        dot.position.set(...toPane(mark.point), 2);
+        dot.userData.dot = true;
+        t.marks.add(dot);
+      } else {
+        const { min, max } = mark.box;
+        if (at < min[axis] || at > max[axis]) continue;
+        // Voxel i spans i ± ½: the outline goes round the boxed voxels.
+        const x0 = (min[ca] - 0.5) * sc;
+        const x1 = (max[ca] + 0.5) * sc;
+        const y0 = -(min[ra] - 0.5) * sr;
+        const y1 = -(max[ra] + 0.5) * sr;
+        const g = new BufferGeometry();
+        g.setAttribute(
+          "position",
+          new Float32BufferAttribute(
+            [
+              x0,
+              y0,
+              2,
+              x1,
+              y0,
+              2,
+              x1,
+              y0,
+              2,
+              x1,
+              y1,
+              2,
+              x1,
+              y1,
+              2,
+              x0,
+              y1,
+              2,
+              x0,
+              y1,
+              2,
+              x0,
+              y0,
+              2,
+            ],
+            3,
+          ),
+        );
+        t.marks.add(new LineSegments(g, new LineBasicMaterial({ color, depthTest: false })));
+      }
+    }
+    t.render();
+  }, [marks, dragged, point[axis]]);
+
+  // Pointer and wheel.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: handlers read the latest props through refs.
+  useEffect(() => {
+    const element = host.current!;
+    const toVoxel = (event: { clientX: number; clientY: number }): Zyx => {
+      const rect = element.getBoundingClientRect();
+      const v = view.current!;
+      const mmX = v.center[0] + (event.clientX - rect.left - rect.width / 2) / v.zoom;
+      const mmY = v.center[1] - (event.clientY - rect.top - rect.height / 2) / v.zoom;
+      const p = [...latest.current.point];
+      p[ca] = clamp(Math.round(mmX / sc), scene.shapeZyx[ca]);
+      p[ra] = clamp(Math.round(-mmY / sr), scene.shapeZyx[ra]);
+      return p as unknown as Zyx;
+    };
+    let drag: {
+      mode: "point" | "pan" | "mark";
+      x: number;
+      y: number;
+      from: Zyx;
+      box?: GridMark;
+    } | null = null;
+    const down = (event: PointerEvent) => {
+      element.setPointerCapture(event.pointerId);
+      const pan = event.button === 1 || event.button === 2 || event.shiftKey;
+      const mode = pan ? "pan" : latest.current.marking ? "mark" : "point";
+      drag = { mode, x: event.clientX, y: event.clientY, from: toVoxel(event) };
+      if (mode === "point") latest.current.onPoint(drag.from);
+    };
+    const move = (event: PointerEvent) => {
+      if (!drag) return;
+      if (drag.mode === "point") latest.current.onPoint(toVoxel(event));
+      else if (drag.mode === "mark") {
+        if (!drag.box && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < CLICK_PX)
+          return;
+        drag.box = boxMark(drag.from, toVoxel(event));
+        setDragged(drag.box);
+      } else {
+        const v = view.current!;
+        v.center = [
+          v.center[0] - (event.clientX - drag.x) / v.zoom,
+          v.center[1] + (event.clientY - drag.y) / v.zoom,
+        ];
+        drag.x = event.clientX;
+        drag.y = event.clientY;
+        three.current?.render();
+      }
+    };
+    const up = (event: PointerEvent) => {
+      if (drag?.mode === "mark" && event.type === "pointerup") {
+        if (drag.box) latest.current.onMark(drag.box);
+        else {
+          latest.current.onMark({ point: drag.from });
+          latest.current.onPoint(drag.from);
+        }
+      }
+      drag = null;
+      setDragged(null);
+    };
+    // A box dragged on one slice spans that slice's two axes; across the held axis it takes the
+    // smaller of the two dragged sides in mm, centred on the slice, so it reads as a region.
+    const boxMark = (a: Zyx, b: Zyx): GridMark => {
+      const min = [0, 0, 0];
+      const max = [0, 0, 0];
+      for (const i of [ra, ca]) {
+        min[i] = Math.min(a[i], b[i]);
+        max[i] = Math.max(a[i], b[i]);
+      }
+      const depthMm = Math.min((max[ra]! - min[ra]! + 1) * sr, (max[ca]! - min[ca]! + 1) * sc);
+      const half = Math.floor(depthMm / scene.spacingZyx[axis] / 2);
+      min[axis] = clamp(a[axis] - half, scene.shapeZyx[axis]);
+      max[axis] = clamp(a[axis] + half, scene.shapeZyx[axis]);
+      return { box: { min: min as unknown as Zyx, max: max as unknown as Zyx } };
+    };
+    const wheel = (event: WheelEvent) => {
+      event.preventDefault();
+      if (event.ctrlKey || event.metaKey) {
+        const v = view.current!;
+        const rect = element.getBoundingClientRect();
+        const dx = event.clientX - rect.left - rect.width / 2;
+        const dy = event.clientY - rect.top - rect.height / 2;
+        const before = [v.center[0] + dx / v.zoom, v.center[1] - dy / v.zoom];
+        v.zoom = Math.min(
+          v.fit * 64,
+          Math.max(v.fit / 2, v.zoom * Math.exp(-event.deltaY * 0.002)),
+        );
+        v.center = [before[0]! - dx / v.zoom, before[1]! + dy / v.zoom];
+        three.current?.render();
+        pickLevel();
+        return;
+      }
+      step(Math.sign(event.deltaY));
+    };
+    const step = (by: number) => {
+      const p = [...latest.current.point];
+      p[axis] = clamp(p[axis]! + by, scene.shapeZyx[axis]);
+      latest.current.onPoint(p as unknown as Zyx);
+    };
+    const key = (event: KeyboardEvent) => {
+      const by = { ArrowUp: -1, ArrowDown: 1, PageUp: -10, PageDown: 10 }[event.key];
+      if (by === undefined) return;
+      event.preventDefault();
+      step(by);
+    };
+    const menu = (event: Event) => event.preventDefault();
+    element.addEventListener("pointerdown", down);
+    element.addEventListener("pointermove", move);
+    element.addEventListener("pointerup", up);
+    element.addEventListener("pointercancel", up);
+    element.addEventListener("wheel", wheel, { passive: false });
+    element.addEventListener("keydown", key);
+    element.addEventListener("contextmenu", menu);
+    return () => {
+      element.removeEventListener("pointerdown", down);
+      element.removeEventListener("pointermove", move);
+      element.removeEventListener("pointerup", up);
+      element.removeEventListener("pointercancel", up);
+      element.removeEventListener("wheel", wheel);
+      element.removeEventListener("keydown", key);
+      element.removeEventListener("contextmenu", menu);
+    };
+  }, []);
+
+  const total = scene.shapeZyx[axis];
+  const refining = shown && (shown.level !== level || shown.index !== index);
+  const scale = shown ? scene.image.levels[shown.level]!.scaleZyx[axis] : null;
+  return (
+    <div
+      ref={host}
+      className={`grid-pane ${marking ? "marking" : ""}`}
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: the pane takes arrow keys to step slices.
+      tabIndex={0}
+      role="img"
+      aria-label={`Slice ${index + 1} of ${total}`}
+    >
+      <span className="grid-chip bottom-left">
+        {index + 1} / {total}
+        {scale && scale > 1 ? ` · 1:${scale}` : ""}
+      </span>
+      {(!shown || refining) && !error && (
+        <span className="grid-chip top-right" role="status">
+          {shown ? "Loading full resolution…" : "Loading…"}
+        </span>
+      )}
+      {error && (
+        <span className="grid-chip top-right" role="alert">
+          Couldn't load this slice: {error}
+        </span>
+      )}
+    </div>
+  );
+}
+
+const clamp = (n: number, size: number) => Math.max(0, Math.min(size - 1, n));
+
+function disposeMarks(group: Group) {
+  for (const child of [...group.children]) {
+    group.remove(child);
+    if (child instanceof Mesh || child instanceof LineSegments) {
+      child.geometry.dispose();
+      child.material.dispose();
+    }
+  }
+}

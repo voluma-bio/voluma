@@ -16,8 +16,7 @@ is no runs list: Home (`features/study`) replaces it.
   (`run-header.tsx`): a crumb to the study (Home for a study of one: `getStudy` is read once for
   labels only), the scan as "OA6-1, right knee", group and workflow, "N of M tasks done", "K to
   check", a bar, Run details (started as a date, took or running for, settled cost, and "What
-  the AI decided"), Stop while live, and Open in 3D (`/runs/:id?task=`, the review, until a 3D
-  panel exists). A queued run with a plan lost its runner: it reads "Paused"; one the API holds after
+  the AI decided"), Stop while live, and Open in 3D. A queued run with a thread cut off lost its runner: it reads "Paused"; one a message queued has none open and reads "Waiting to start"; one the API holds after
   the AI's provider failed (`waitingForProvider`) reads "Waiting: the AI is unavailable", with no
   place in line. Left: the plan as
   a flowchart (`task-flow.tsx`), rows by dependency depth and each row ordered by its parents'
@@ -42,6 +41,12 @@ is no runs list: Home (`features/study`) replaces it.
   so the page agrees with Home and the review: done or To check by fold status (a skipped task
   counts), and the open check items. The Overview's badge is the same K. Cards that can't be
   accepted (a task sent back, a value missing, a failed task) show but aren't counted.
+- **Open in 3D** (header, To check cards, task view) opens `@voluma/check-panel` over the page
+  on the run's open, acceptable check items: the header from the task in view (else the first),
+  a card at its item, the task view at its task's first open item. A task with no open item
+  opens alone (`{runId, taskId}`). An accept in the panel lands in `accepting.done` (`markDone`)
+  and refetches the run, so the counts drop and the page's own "Looks right" uses the new
+  revision. The panel hides "Looks right" itself on a run that takes no decisions.
 - **Needs your eye** comes from `reviewState` (the fold plus `check.accepted`): every check item
   of a task, open or accepted, live or finished. "Looks right" calls `acceptCheck` with
   `Run.review.revisionId`, only on a completed run that isn't an example. An ended run's stream has
@@ -65,6 +70,8 @@ is no runs list: Home (`features/study`) replaces it.
   frozen at its last event, until the runner's `thread.started` resumes it. The end applies only once the
   stream has closed (`useRunStream`'s `closed`), when the log is whole: the server ends an ended
   run's stream with `event: end`, so that is right after the backlog, with no reconnect. A
+  closed stream opens again only when a run read newer than the close says the run isn't ended
+  (a message reopened it; `useStreamReopen` in `@voluma/ui/run`, shared with the 3D panel). A
   reload therefore never shows a finished thread as Stopped while its backlog loads; during the
   load an open attempt reads "Waiting on the lead AI". Never decide "running" from the events
   alone.

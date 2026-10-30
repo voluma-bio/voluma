@@ -53,11 +53,15 @@ import {
   studyDetailSchema,
 } from "@voluma/contracts/study";
 
-/** A non-OK API response. Branch on `status` (403, 415, 5xx) rather than parsing the message. */
+/**
+ * A non-OK API response. Branch on `status` (403, 415, 5xx) rather than parsing the message;
+ * `detail` is the server's `error` text for a person to read, when it sent one.
+ */
 export class ApiError extends Error {
   constructor(
     readonly status: number,
     url: string,
+    readonly detail?: string,
   ) {
     super(`${url}: ${status}`);
     this.name = "ApiError";
@@ -90,16 +94,24 @@ async function request(
   });
 }
 
-function checkResponse(res: Response): Response {
+async function checkResponse(res: Response): Promise<Response> {
   if (res.status === 401) {
     for (const listener of signedOutListeners) listener();
   }
-  if (!res.ok) throw new ApiError(res.status, res.url);
+  if (!res.ok) throw new ApiError(res.status, res.url, await errorText(res));
   return res;
 }
 
+/** The `{ error }` text of a JSON error body; none when the body is another shape or already read. */
+async function errorText(res: Response): Promise<string | undefined> {
+  if (res.body?.locked || !res.headers.get("content-type")?.includes("application/json")) return;
+  const body: unknown = await res.json().catch(() => undefined);
+  const error = (body as { error?: unknown } | undefined)?.error;
+  return typeof error === "string" && error ? error : undefined;
+}
+
 async function json(res: Response): Promise<unknown> {
-  return checkResponse(res).json();
+  return (await checkResponse(res)).json();
 }
 
 /** Resolves a readable input's scan archive; the server chooses storage, never the caller. */
@@ -156,7 +168,7 @@ export async function downloadFile(
   const encoding = res.headers.get("content-encoding")?.trim().toLowerCase();
   const reader = res.body?.getReader();
   try {
-    checkResponse(res);
+    await checkResponse(res);
     if (!reader) throw new Error("The file response has no download body.");
     if (
       res.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !== download.mediaType ||
@@ -432,7 +444,7 @@ export async function completeUpload(inputId: string): Promise<Input> {
 
 /** Drops an uncompleted upload and its stored files. 409 once it is completed. */
 export async function cancelUpload(inputId: string): Promise<void> {
-  checkResponse(
+  await checkResponse(
     await request(`/run/inputs/${encodeURIComponent(inputId)}/cancel`, { method: "POST" }),
   );
 }
@@ -486,8 +498,11 @@ export function subscribe(
     onEvent: (event: RunEvent) => void;
     onLive?: (frame: LiveFrame) => void;
     onError?: (error: unknown) => void;
-    /** The stream will not reconnect: the run has ended, or the server refused it (404, 401). */
-    onClosed?: () => void;
+    /**
+     * The stream will not reconnect. `error`: the server refused or failed it (404, 401, 5xx);
+     * otherwise it sent the run's end (also at once for an ended run with nothing after `after`).
+     */
+    onClosed?: (error: boolean) => void;
   },
   after = 0,
 ): () => void {
@@ -514,10 +529,10 @@ export function subscribe(
   // The run ended and every event has been sent; closing here skips the reconnect.
   source.addEventListener(END_EVENT, () => {
     source.close();
-    handlers.onClosed?.();
+    handlers.onClosed?.(false);
   });
   source.onerror = () => {
-    if (source.readyState === EventSource.CLOSED) handlers.onClosed?.();
+    if (source.readyState === EventSource.CLOSED) handlers.onClosed?.(true);
   };
   return () => source.close();
 }

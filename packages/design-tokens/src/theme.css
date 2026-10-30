@@ -56,6 +56,7 @@
   --color-inverse: var(--inverse);
   --color-inverse-fg: var(--inverse-fg);
   --color-scrim: var(--scrim);
+  --color-backdrop: var(--backdrop);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
@@ -77,6 +78,7 @@
   --color-axis-y: var(--axis-y);
   --color-axis-z: var(--axis-z);
   --color-check-outline: var(--check-outline);
+  --color-mark: var(--mark);
 
   --font-sans: var(--sans);
   --font-mono: var(--mono);
