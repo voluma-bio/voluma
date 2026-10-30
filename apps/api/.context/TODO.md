@@ -1,5 +1,13 @@
 # TODO
 
+- **Archive only settled provider calls.** `ops/archive-run.ts` refuses `open` but permits `cut`.
+  `cutOwnCalls` can run after gateway HTTP drain while a handler is still settling, and
+  `settleCall` unconditionally updates `cut` rows. A local `cutOwnCalls → archive → settleCall`
+  probe lost the final cost (9) and kept null in the dump. Decide whether archives must require
+  gateway quiescence or whether provider calls need an enforceable terminal state; don't
+  silently freeze unknown cost or forbid all permanently cut calls as an accidental policy.
+  The fix must cover shutdown and stale-call sweeping, then exercise delayed settlement
+  across the archive commit. No shared database or gateway was changed by the review.
 - **Neon free-tier limits, after 2026-11-04.** Check CU-hours and storage in Neon's console
   (limits: 100 CU-hours a month, 1 GB; staging was 256 MB on 2026-10-30, about 95 MB per full
   run, #255). Storage will likely run out first.

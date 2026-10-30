@@ -10,6 +10,7 @@
  * Every row must belong to the run. Writes only to a local database unless `--remote` (see
  * `operator.ts`). Evidence is not copied: it stays in R2 under `runs/<id>/evidence/`, shared by every database.
  */
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isDeepStrictEqual, parseArgs } from "node:util";
@@ -67,7 +68,7 @@ const dump = await withLocalDir(
       threads: { runId: string }[];
       piMessages: { threadId: string }[];
       // Dumps from before these were exported have neither.
-      reviewSnapshots?: { runId: string }[];
+      reviewSnapshots?: { runId: string; generation: string }[];
       providerCalls?: { runId: string }[];
     },
 );
@@ -160,9 +161,15 @@ await db.transaction(async (tx) => {
   for (const input of dump.studyInputs ?? (dump.input ? [dump.input] : [])) {
     await tx.insert(inputs).values(revive(inputs, input)).onConflictDoNothing();
     const [stored] = await tx.select().from(inputs).where(eq(inputs.id, input.id));
-    if (dump.study) sameSharedRow(`input ${input.id}`, stored, input);
+    sameSharedRow(`input ${input.id}`, stored, input);
   }
   const run = revive(runs, dump.run);
+  // Import starts a new local lifetime, even when restoring an earlier dump of this run.
+  // A screenshot validated before replacement must not publish into the restored history.
+  run.generation = randomUUID();
+  const [runInput] = await tx.select().from(inputs).where(eq(inputs.id, run.inputId));
+  if (!runInput || runInput.labId !== run.labId)
+    throw new Error(`missing or conflicting run input ${run.inputId}`);
   const keep = existing?.studyId;
   if (dump.study) {
     await tx.insert(studies).values(revive(studies, dump.study)).onConflictDoNothing();
@@ -200,6 +207,17 @@ await db.transaction(async (tx) => {
     });
     run.studyId = studyId;
   } else {
+    const [study] = await tx.select().from(studies).where(eq(studies.id, keep));
+    sameSharedRow(`study ${keep}`, study, {
+      labId: run.labId,
+      workflowId: workflow.id,
+      example: run.example ?? false,
+    });
+    const [scan] = await tx
+      .select()
+      .from(studyScans)
+      .where(and(eq(studyScans.studyId, keep), eq(studyScans.inputId, run.inputId)));
+    if (!scan) throw new Error(`study ${keep} has no scan for input ${run.inputId}`);
     run.studyId = keep;
   }
   await tx.insert(runs).values(run);
@@ -212,7 +230,14 @@ await db.transaction(async (tx) => {
   await insertAll(events, dump.events);
   await insertAll(threads, dump.threads);
   await insertAll(piMessages, dump.piMessages);
-  await insertAll(reviewSnapshots, dump.reviewSnapshots ?? []);
+  await insertAll(
+    reviewSnapshots,
+    (dump.reviewSnapshots ?? []).map((snapshot) => ({
+      ...snapshot,
+      generation:
+        snapshot.generation === dump.run.generation ? run.generation : snapshot.generation,
+    })),
+  );
   await insertAll(providerCalls, dump.providerCalls ?? []);
 });
 console.log(`run ${runId}: ${describeCounts(countsOf(dump))} loaded`);

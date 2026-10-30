@@ -219,7 +219,16 @@ never deletes rows; an existing `run.json` is never overwritten. A failure may l
 inspection and use a new output directory when retrying.
 
 `import:run --from <that directory>` restores the original study identity and scan metadata, adding missing shared rows
-and refusing conflicts rather than overwriting them. Legacy dumps without study metadata still get a study of one.
+and refusing conflicts rather than overwriting them. Legacy dumps without study metadata get a study of one, or keep
+the replaced run's study only if its lab, workflow, example status and scan agree; input conflicts are refused too.
+Every import creates a fresh local run generation and moves the dump's current screenshots to it. Older screenshot
+generations stay historical. A save that validated before the import is refused instead of entering the restored run.
+
+**Provider settlement is not yet a safe archive boundary.** A `cut` call can still receive its final cost: gateway
+shutdown closes HTTP connections before all settlement work finishes, and `settleCall` updates `cut` rows too. The
+archive refuses `open` calls but cannot detect a pending settlement of a `cut` call. Do not archive these runs while
+their gateway can still settle calls. The terminal-call policy needs resolving before unattended archiving (see [TODO.md](TODO.md)).
+
 The run's R2 files are neither copied nor touched: this is a database archive, not an independent backup of evidence.
 Keep those R2 objects and the local archive; choose a persistent disk, not an ephemeral orb or `/tmp`, for an operational
 archive. Filesystem sync does not protect against losing that disk. A `pg_dump` remains the backup for the whole database.
