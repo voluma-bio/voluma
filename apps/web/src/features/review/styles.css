@@ -116,12 +116,6 @@
   .task-meta {
     @apply mt-1 block text-xs text-muted-foreground;
   }
-  .check-dot {
-    @apply ml-auto mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-check-solid;
-  }
-  .sidebar-note {
-    @apply mx-5 mt-10 border-t border-border pt-4 text-xs leading-relaxed text-muted-foreground;
-  }
   .review-panels {
     @apply min-w-0 flex-1;
   }
@@ -257,9 +251,6 @@
   }
   .axis {
     @apply font-mono text-muted-foreground;
-  }
-  .axis.axial {
-    @apply text-axis-z;
   }
   .axis.coronal {
     @apply text-axis-x;
@@ -444,10 +435,8 @@
     overflow: visible;
   }
   .sidebar-label,
-  .sidebar-note,
   .task-number,
-  .task-meta,
-  .check-dot {
+  .task-meta {
     display: none;
   }
   .sidebar-scroll nav {
