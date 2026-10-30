@@ -236,6 +236,9 @@ importers:
       '@voluma/design-tokens':
         specifier: workspace:*
         version: link:../../packages/design-tokens
+      '@voluma/run-view':
+        specifier: workspace:*
+        version: link:../../packages/run-view
       react:
         specifier: 'catalog:'
         version: 19.3.1
