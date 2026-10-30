@@ -578,7 +578,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
       const { taskId, text, summary, verdict, toCheck } = input;
       if (toCheck && isJson(toCheck.title))
         throw new Refusal(
-          "toCheck.title is JSON: call checkpoint once per item, each with a plain-sentence title.",
+          "toCheck holds JSON, not one item: call checkpoint once per item, with toCheck an object {title, focus} and title a plain sentence.",
         );
       return write(
         () =>
