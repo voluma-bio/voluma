@@ -10,11 +10,14 @@
  *   command therefore runs under `timeout -k` (which leads its own process group and
  *   signals all of it) and records that group;
  *   an abort kills that group with a second exec, or terminates the sandbox if that fails.
- * - Read-only inputs flagged `stage` are copied to local disk at their path at create: every
- *   directory first, then 32 parallel workers of 16 files (each `cp` killed after 30 s, the whole step after 300 s), then re-copies of only the files still
- *   missing or the wrong size, up to three more passes (`STAGE_SCRIPT`; the copy is writable: commands run as root, and a
- *   sandbox cannot remount or `chattr` a path or run as another user and still write the mounts);
- *   the bucket is mounted at a private path under /staged for the copy.
+ * - Read-only inputs flagged `stage` are copied to local disk at their path at create, in two
+ *   commands (`STAGE_PREPARE_SCRIPT` makes every directory and lists the source; `STAGE_COPY_SCRIPT`
+ *   copies it): 32 parallel workers, one file per `cp`, then re-copies of only the files still
+ *   missing or the wrong size, up to three more passes. Each `cp` and the whole copy are bounded by
+ *   a stall rate times their bytes, not a fixed time, so a multi-GB file still fits. The copy is
+ *   writable: commands run as root, and a sandbox cannot remount or `chattr` a path or run as
+ *   another user and still write the mounts; the bucket is mounted at a private path under
+ *   /staged for the copy.
  * - Network follows the spec: none (`blockNetwork`), or HTTPS to the listed hosts only
  *   (`outboundDomainAllowlist`; probed on 0.11.1: plain HTTP, other hosts and IPs are refused,
  *   but DNS lookups of any name still resolve).
@@ -66,34 +69,52 @@ const MAX_MODAL_NAME = 64;
 const STAGE_PARALLELISM = 32;
 // Copy passes after the first, over the files still missing or the wrong size.
 const STAGE_RETRIES = 3;
-// A `cp` of 16 files (a few MB each) normally takes well under a second; a full parallel copy of
-// OA7-1R (1,126 files, 535 MB) takes 7-16 s. One that outlasts this is stuck in the mount: it is
-// killed and the next pass re-copies its files.
+// Staging bounds a stall, not a duration: a stuck read is killed and retried, but a big file may
+// take as long as its bytes need. A full parallel copy of OA7-1R (1,126 files, 535 MB) takes
+// 7-16 s, so these rates are far below a healthy mount's.
+// Each `cp` gets this long plus its file's bytes at STAGE_FILE_BYTES_PER_SECOND (one stream).
 const STAGE_COPY_SECONDS = 30;
-// The whole staging step, passes included. A mount that never answers fails the sandbox start
-// here (the runner reports it as infrastructure) instead of holding the run for an hour.
-const STAGE_SECONDS = 300;
+const STAGE_FILE_BYTES_PER_SECOND = 5_000_000;
+// The copy step gets this long plus all bytes at STAGE_TOTAL_BYTES_PER_SECOND (32 streams) plus
+// the largest file at the per-file rate (a lone big file gets one stream, not 32). A mount that
+// never answers fails the sandbox start at that bound (the runner reports it as infrastructure)
+// instead of holding the run for an hour. The bound is only computed once the source is listed.
+const STAGE_BASE_SECONDS = 300;
+const STAGE_TOTAL_BYTES_PER_SECOND = 20_000_000;
+// Listing and making directories; a mount that never answers fails here.
+const STAGE_PREPARE_SECONDS = 120;
+// How long past `timeout -k` the TS side waits for the exit before giving up on the streams.
+const STAGE_STREAM_GRACE_SECONDS = 10;
 // Tail of the stage command's stderr kept in the error.
 const STAGE_STDERR_CHARS = 4000;
-// Copies the files under "$1" to "$2". Every directory is made first: parallel
-// `cp --parents` calls racing to create one parent fail with "File exists". Each later pass
-// re-copies only files whose destination is missing or a different size, found by comparing one
-// sorted "size path" listing per side. Paths are positional arguments, never spliced in.
-const STAGE_SCRIPT = `export LC_ALL=C; set -o pipefail
+// Both scripts take the source as "$1" and the destination as "$2". Every directory is made
+// first: parallel `cp --parents` calls racing to create one parent fail with "File exists".
+// Listings are sorted "size path" records, so comparing the source's with the copy's finds the
+// files missing or a different size. Paths are positional arguments, never spliced in.
+const STAGE_LIST = `list() { (cd "$1" && find . -type f -printf '%s %p\\0' | sort -z); }`;
+// Prints "<scratch dir> <total bytes> <largest file bytes>"; the scratch dir holds the listing.
+const STAGE_PREPARE_SCRIPT = `export LC_ALL=C; set -o pipefail
+${STAGE_LIST}
 mkdir -p "$2" || exit 1; cd "$1" || exit 1
-src=$(mktemp) && todo=$(mktemp) || exit 1; trap 'rm -f "$src" "$todo"' EXIT
 find . -type d -print0 | (cd "$2" && xargs -0 -r mkdir -p --) || exit 1
-list() { (cd "$1" && find . -type f -printf '%s %p\\0' | sort -z); }
+dir=$(mktemp -d) || exit 1
 # The source is listed once, checked: a listing that fails partway must not pass as complete.
-list . > "$src" || { echo "listing $1 failed" >&2; exit 1; }
-sed -z 's/^[0-9]* //' "$src" > "$todo"
+list . > "$dir/src" || { echo "listing $1 failed" >&2; exit 1; }
+echo "$dir $(cut -z -d' ' -f1 "$dir/src" | tr '\\0' '\\n' | awk '{t+=$1; if ($1>m) m=$1} END {print t+0, m+0}')"`;
+// "$3" is the scratch dir. One file per `cp` under its own timeout, so a stuck read costs one
+// file; `--foreground` keeps the wrapper in this script's process group, so the step's deadline
+// kills everything at once and one `-k` kill doesn't end the `xargs` pass.
+const STAGE_COPY_SCRIPT = `export LC_ALL=C; set -o pipefail
+${STAGE_LIST}
+cd "$1" || exit 1; dir=$3; trap 'rm -rf "$dir"' EXIT
+cp "$dir/src" "$dir/todo"
 for pass in $(seq 0 ${STAGE_RETRIES}); do
-  xargs -0 -r -P ${STAGE_PARALLELISM} -n 16 timeout -k 2 ${STAGE_COPY_SECONDS} cp --parents -t "$2" < "$todo"
+  xargs -0 -r -P ${STAGE_PARALLELISM} -n 1 sh -c 'timeout --foreground -k 2 "$((${STAGE_COPY_SECONDS} + \${1%% *} / ${STAGE_FILE_BYTES_PER_SECOND}))" cp --parents -t "$0" -- "\${1#* }"' "$2" < "$dir/todo"
   # A partial destination listing only causes extra re-copies, never a false pass.
-  comm -z -23 "$src" <(list "$2") | sed -z 's/^[0-9]* //' > "$todo"
-  [ -s "$todo" ] || exit 0
+  comm -z -23 "$dir/src" <(list "$2") > "$dir/todo"
+  [ -s "$dir/todo" ] || exit 0
 done
-printf 'could not copy %s files: %.1000s\\n' "$(tr -cd '\\0' < "$todo" | wc -c)" "$(tr '\\0' ' ' < "$todo")" >&2
+printf 'could not copy %s files: %.1000s\\n' "$(tr -cd '\\0' < "$dir/todo" | wc -c)" "$(sed -z 's/^[0-9]* //' "$dir/todo" | tr '\\0' ' ')" >&2
 exit 1`;
 const STAGE_ROOT = "/staged";
 const GROUP_DIR = "/tmp/voluma-exec";
@@ -239,34 +260,83 @@ class ModalSandboxAdapter implements Sandbox {
 
   async stage(): Promise<void> {
     for (const mount of this.#mounts.filter((m) => m.stage)) {
-      let code = -1;
-      let stderr = "";
-      // Under `timeout -k` like `exec()`, so the deadline kills the copies too, not just the shell.
-      for await (const chunk of this.#run(
-        [
-          "timeout",
-          "-k",
-          String(KILL_GRACE_SECONDS),
-          String(STAGE_SECONDS),
-          "bash",
-          "-c",
-          STAGE_SCRIPT,
-          "_",
-          mountedAt(mount),
-          mount.path,
-        ],
-        STAGE_SECONDS + KILL_GRACE_SECONDS,
-      )) {
+      const from = mountedAt(mount);
+      const prepared = await this.#stageStep(
+        mount.path,
+        STAGE_PREPARE_SCRIPT,
+        STAGE_PREPARE_SECONDS,
+        [from, mount.path],
+      );
+      const [dir, total, largest] = prepared.trim().split(" ");
+      const seconds =
+        STAGE_BASE_SECONDS +
+        Math.ceil(Number(total) / STAGE_TOTAL_BYTES_PER_SECOND) +
+        Math.ceil(Number(largest) / STAGE_FILE_BYTES_PER_SECOND);
+      if (!dir || !Number.isFinite(seconds)) {
+        throw new Error(`staging ${mount.path} failed (unreadable listing summary: ${prepared})`);
+      }
+      await this.#stageStep(mount.path, STAGE_COPY_SCRIPT, seconds, [from, mount.path, dir]);
+    }
+  }
+
+  /**
+   * Runs one staging script under `timeout -k` like `exec()` and returns its stdout. The TS side
+   * also stops reading at its own deadline: a `cp` stuck in an uninterruptible mount read can
+   * survive SIGKILL and hold the streams open, and the sandbox is destroyed on failure anyway.
+   */
+  async #stageStep(path: string, script: string, seconds: number, args: string[]): Promise<string> {
+    const steps = this.#run(
+      [
+        "timeout",
+        "-k",
+        String(KILL_GRACE_SECONDS),
+        String(seconds),
+        "bash",
+        "-c",
+        script,
+        "_",
+        ...args,
+      ],
+      seconds + KILL_GRACE_SECONDS,
+    )[Symbol.asyncIterator]();
+    const lateSeconds = seconds + KILL_GRACE_SECONDS + STAGE_STREAM_GRACE_SECONDS;
+    const cancel = new AbortController();
+    // An aborted timer must never resolve, so it can't win the race.
+    const late = setTimeout(lateSeconds * 1000, "late" as const, { signal: cancel.signal }).catch(
+      () => new Promise<never>(() => {}),
+    );
+    let code = -1;
+    let stdout = "";
+    let stderr = "";
+    try {
+      for (;;) {
+        const step = await Promise.race([steps.next(), late]);
+        if (step === "late") {
+          // Not awaited: the generator is parked on a read that may never return.
+          steps.return(undefined).catch(() => {});
+          code = 124;
+          break;
+        }
+        if (step.done) break;
+        const chunk = step.value;
         if (chunk.type === "exit") code = chunk.code;
+        else if (chunk.type === "stdout") stdout += chunk.data;
         else if (chunk.type === "stderr") stderr = (stderr + chunk.data).slice(-STAGE_STDERR_CHARS);
       }
-      if (code !== 0) {
-        const detail = stderr.trim();
-        const why =
-          code === 124 || code === 137 ? `timed out after ${STAGE_SECONDS} s` : `exit ${code}`;
-        throw new Error(`staging ${mount.path} failed (${why})${detail ? `: ${detail}` : ""}`);
-      }
+    } finally {
+      cancel.abort();
     }
+    if (code !== 0) {
+      const detail = stderr.trim();
+      const why =
+        code === 124
+          ? `timed out after ${seconds} s`
+          : code === 137
+            ? `killed after ${seconds} s`
+            : `exit ${code}`;
+      throw new Error(`staging ${path} failed (${why})${detail ? `: ${detail}` : ""}`);
+    }
+    return stdout;
   }
 
   async *exec(request: ExecRequest, signal?: AbortSignal): AsyncGenerator<ExecChunk> {
