@@ -112,12 +112,18 @@ export interface RunnerContext {
 }
 
 /** Where a run's files are: its scan (a reference scan or an upload), outputs and scratch. */
-export const layoutOf = (run: Claim["run"], skills: readonly Skill[], mainWorks: boolean) =>
+export const layoutOf = (
+  run: Claim["run"],
+  skills: readonly Skill[],
+  mainWorks: boolean,
+  copiesInputs: (taskId: string) => boolean,
+) =>
   runLayout(
     run.id,
     run.input.source === "reference" ? referencePrefix("scan") : inputPrefix(run.input.id),
     skills,
     mainWorks,
+    copiesInputs,
   );
 
 /** "error": an error nobody caught reached the process handler while this run was working (`telemetry.ts`). */
@@ -293,7 +299,11 @@ async function claimBody(
       return tools.filter((t) => t !== "segment_sam" || (config.gateway && sandboxed));
     };
 
-    const layout = layoutOf(run, definition.skills, grant("main").includes("bash"));
+    // From the workflow's task, so a task the main agent adds from it keeps the flag.
+    const copyInputs = new Set(definition.files.tasks.filter((t) => t.copyInputs).map((t) => t.id));
+    const layout = layoutOf(run, definition.skills, grant("main").includes("bash"), (id) =>
+      copyInputs.has(id),
+    );
     const createSandbox = claimSandboxes(config, modal, claimId);
     const stored = await client.storedEvents();
     live = liveBatcher((frames) => client.live(frames));

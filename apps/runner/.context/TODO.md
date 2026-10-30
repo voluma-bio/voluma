@@ -23,7 +23,6 @@ From the skillset move (`workflows/` in this repo):
   it closed the queue and rebuild the report only when it didn't. (p528)
 - An output appended after the drain's final scan (a thread stuck past the 5 s wind-down) gets no
   `assets.*` event. Narrow. (p529)
-- **A hung read on the mount blocks thread start for up to an hour.** `stage()` runs through `#run` with a 3600 s deadline and no `timeout -k`; a `cp` stuck in the R2 mount isn't killed and retries can't help. Wrap staging like `exec()` (process group under `timeout -k`) or run each `cp` under `timeout`.
 - **Thinking level isn't in the events.** Pi records each reply's level in History (`thinkingLevel` on the assistant message), and the runner's boot line prints `RUNNER_THINKING`, but a run's events don't say which level a thread used. Per-role levels have landed (role files' `thinking`); record the level with the model on `thread.started` (a contract change) so a resume keeps it.
 
 - **A correction's output backup (`runs/<id>/corrections/<reopen id>/`) is deleted only by the next claim after it, and a restored one stays.** A go's first claim copies the whole `/outputs` (`outputs-backup.ts`); the first claim of the next reopen after the correction finished deletes it, but a backup that was restored (the correction failed) is kept, and a run never reopened again keeps its last one. Delete restored backups too. Objects over 5 GB would need a multipart copy (`r2-outputs.ts` uses one `CopyObject`).
