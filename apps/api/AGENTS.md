@@ -61,15 +61,15 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   `pg-queue.ts` owns every state change of a run (start, resume, cancel, claim, lease,
   recovery) and the key vault, `pg-runs.ts` and `pg-studies.ts` the reads (one `resultsLoader` cache for both), and the lease-checked
   `pg-event-log.ts`/`pg-history.ts`; their port types are derived from them. `admission.ts`
-  is the one limits check and the one message per refusal.
+  is the one limits check and the one message per limit.
 - **Every run belongs to a study** (`studies`, `study_scans`; `runs.study_id` is not null), and
   the study owns the workflow. `readableStudies` (`pg-runs.ts`) is `readableRuns` on the study
   (guests share one lab, so `lab_id` alone is not enough); `queue.start` checks `studyId` with
   it. `queue.createStudy` inserts the study, its scans and the runs to start in one
-  transaction under the lock: any refusal throws `Refused` and rolls the whole call back, and
+  transaction under the lock: any refusal throws an `HTTPException` (status and text, where it is decided) and rolls the whole call back, and
   `startRuns` reads the counts once and raises them for each run it inserts. Every browser
-  write (start, create, cancel, resume) goes through `attempt`: a `Refused` rolls it back and
-  comes back as `{refused}`, and the visitor keys it held are dropped. `runs` has no workflow
+  write (start, create, cancel, resume) goes through `attempt`: a refusal rolls it back and reaches the
+  client (`onError` answers `{error}`), and `attempt` drops the visitor keys it held. `runs` has no workflow
   column: `pgRunQueue` gets `workflowOf` and resolves the pins and outputs from the study. The seeded example has
   its own study (`study-<exampleId>`, `example`), read-only like its run; `import:run` gives
   an imported run a study of one the same way.
