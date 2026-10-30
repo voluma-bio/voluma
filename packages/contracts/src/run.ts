@@ -8,7 +8,8 @@
  *   POST /api/run/runs             body `startRunRequestSchema` → 200 `runSchema`: one
  *                                  run of a scan of an existing study (404 for an
  *                                  unreadable `studyId` or an `inputId` the study lacks;
- *                                  409 and 429: see Limits). `POST /api/run/studies`
+ *                                  409 and 429: see Limits; 400 for a `selectedOutputs` id that is
+ *                                  not a measurement or score of the study's workflow). `POST /api/run/studies`
  *                                  (`study.ts`) creates a study and starts its first runs.
  *   GET  /api/run/runs             → 200 `listRunsResponseSchema`, newest first
  *   GET  /api/run/runs/:id         → 200 `runSchema`

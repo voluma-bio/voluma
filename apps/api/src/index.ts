@@ -20,7 +20,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
-import { pinsOf } from "@voluma/workflow/bundled";
+import { pinsOf, workflowById } from "@voluma/workflow/bundled";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -137,7 +137,11 @@ const queue = pgRunQueue(
   new KeyVault(),
   notifier,
   // The repo whose `workflows/` a run uses; the runner adds the commit its checkout was at.
-  (id) => pinsOf("voluma-bio/voluma", id),
+  (id) => {
+    const pins = pinsOf("voluma-bio/voluma", id);
+    const workflow = workflowById(id);
+    return pins && workflow && { pins, outputs: workflow.outputs };
+  },
 );
 const eventLog = pgEventLog(db, notifier);
 

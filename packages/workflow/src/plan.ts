@@ -13,6 +13,7 @@ import {
 import {
   isSelectable,
   type OutputEntry,
+  unselectable,
   type WorkflowFiles,
 } from "@voluma/contracts/workflow-files";
 import { WorkflowParseError } from "./definition";
@@ -57,14 +58,12 @@ export function planTask(
 export function computePlan(files: WorkflowFiles, selected?: readonly string[]): WorkflowPlan {
   const byId = new Map(files.outputs.map((o) => [o.id, o]));
   const wanted = new Set(selected ?? files.outputs.filter(isSelectable).map((o) => o.id));
-  for (const id of wanted) {
-    const entry = byId.get(id);
-    if (!entry || !isSelectable(entry)) {
-      throw new WorkflowParseError(
-        "outputs.json",
-        `the run selects "${id}", which is not a measurement or score`,
-      );
-    }
+  const [bad] = unselectable(files.outputs, [...wanted]);
+  if (bad !== undefined) {
+    throw new WorkflowParseError(
+      "outputs.json",
+      `the run selects "${bad}", which is not a measurement or score`,
+    );
   }
   const direct = new Set([...wanted].map((id) => byId.get(id)?.task as string));
   const tasks = new Map(files.tasks.map((t) => [t.id, t]));
