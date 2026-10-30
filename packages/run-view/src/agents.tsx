@@ -13,9 +13,9 @@ import { useDisclosure } from "./chat/disclosure-store";
 import { InfoButton, type InfoSection } from "./chat/info-button";
 import { Markdown } from "./chat/markdown";
 import { useOpenThread } from "./chat/thread-navigation";
-import { useRunLog } from "./run-log";
 import { agentTitle, type Thread } from "./run-model";
 import { formatDuration, formatUsd } from "./run-status";
+import { useThreads } from "./run-store";
 import { useNow } from "./use-now";
 
 const count = (n: number) => n.toLocaleString();
@@ -109,7 +109,7 @@ export function AgentMark({ thread }: { thread: Thread }) {
 /** The door: a thread's name, which opens its transcript. */
 function AgentName({ thread, className = "" }: { thread: Thread; className?: string }) {
   const open = useOpenThread();
-  const { threads } = useRunLog();
+  const threads = useThreads();
   return (
     <button
       type="button"
@@ -156,7 +156,7 @@ export const STATUS_WORD: Record<Thread["status"], string> = {
 /** A worker's or checker's card in the main thread. */
 export function AgentCard({ thread }: { thread: Thread }) {
   const [expanded, setExpanded] = useDisclosure(`card:${thread.id}`);
-  const { threads } = useRunLog();
+  const threads = useThreads();
   const running = thread.status === "running";
   const expandable = !running;
   return (

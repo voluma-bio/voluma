@@ -6,6 +6,7 @@
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, startRun } from "@voluma/api-client";
+import { allStudiesKey } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
 import type { VisitorKeys } from "@voluma/contracts/run";
 import type { StudyDetail, StudyScanDetail } from "@voluma/contracts/study";
@@ -149,7 +150,7 @@ function ScanStatusCell({
   const client = useQueryClient();
   const start = useMutation({
     mutationFn: () => startRun({ studyId: detail.study.id, inputId: scan.scan.inputId, keys }),
-    onSuccess: () => client.invalidateQueries({ queryKey: ["study"] }),
+    onSuccess: () => client.invalidateQueries({ queryKey: allStudiesKey }),
   });
   const { label, tone, progress } = scanStatus(scan);
   if (scan.runs.length > 0)

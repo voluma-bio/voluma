@@ -1,15 +1,14 @@
 /**
- * One agent's thread, anywhere: `<AgentThread threadId>` reads the run's stream from
- * `RunLogProvider` (`run-log.tsx`, one per run page), builds that agent's rows, and owns its header, its live
+ * One agent's thread, anywhere: `<AgentThread threadId>` reads its rows from the run
+ * store (`run-store.tsx`, one per run page), and owns its header, its live
  * line and its own scroll, which sticks to the newest line while the reader is at the bottom.
  * It fills the box its caller gives it, so moving a thread to another place is one line.
  * Shape from Meridian Flow's `ChatView` (the caller names a thread; the container reads it).
  */
 import { type ReactNode, useLayoutEffect, useMemo, useRef } from "react";
 import { Elapsed, STATUS_WORD, ThreadSpendInfo } from "./agents";
-import { useRunLog } from "./run-log";
 import { agentLabel, agentTitle } from "./run-model";
-import { mainRows, threadRows } from "./transcript";
+import { useThread, useThreadRows, useThreads } from "./run-store";
 import { TranscriptView } from "./transcript-view";
 
 /** How close to the bottom still counts as "at the bottom", in px. */
@@ -28,14 +27,10 @@ export function AgentThread({
   actions?: ReactNode;
   className?: string;
 }) {
-  const { events, live, halt, threads } = useRunLog();
-  const thread = threads.find((t) => t.id === threadId);
+  const threads = useThreads();
+  const thread = useThread(threadId);
   const kind = thread?.kind;
-  const rows = useMemo(
-    () =>
-      kind === "main" ? mainRows(events, live, halt) : threadRows(events, threadId, live, halt),
-    [kind, threadId, events, live, halt],
-  );
+  const rows = useThreadRows(threadId);
   const threadById = useMemo(() => new Map(threads.map((t) => [t.id, t])), [threads]);
   const running = thread?.status === "running";
 

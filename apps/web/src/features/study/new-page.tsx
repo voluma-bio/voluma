@@ -9,7 +9,8 @@
  * A guest can't upload (the API refuses), so a guest picks an earlier scan and gives keys.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiError, createStudy, listInputs, listRuns, signIn } from "@voluma/api-client";
+import { ApiError, createStudy, signIn } from "@voluma/api-client";
+import { inputsQuery, runsQuery, studiesQuery } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
 import type { Input, Run, VisitorKeys } from "@voluma/contracts/run";
 import type { CreateStudyRequest } from "@voluma/contracts/study";
@@ -94,8 +95,8 @@ export function NewPage() {
   const canUpload = me.kind === "member";
   const guest = me.kind === "visitor";
 
-  const inputs = useQuery({ queryKey: ["inputs"], queryFn: listInputs });
-  const runs = useQuery({ queryKey: ["runs"], queryFn: listRuns });
+  const inputs = useQuery(inputsQuery());
+  const runs = useQuery(runsQuery());
   const uploads = useUploads();
   const [rows, setRows] = useState<Row[]>([]);
   const [sheet, setSheet] = useState<SheetState>({ kind: "none" });
@@ -218,8 +219,8 @@ export function NewPage() {
       return createStudy(request);
     },
     onSuccess: (detail) => {
-      void queryClient.invalidateQueries({ queryKey: ["studies"] });
-      void queryClient.invalidateQueries({ queryKey: ["runs"] });
+      void queryClient.invalidateQueries({ queryKey: studiesQuery().queryKey });
+      void queryClient.invalidateQueries({ queryKey: runsQuery().queryKey });
       const run = detail.scans[0]?.runs[0];
       navigate(
         detail.scans.length === 1 && run ? `/runs/${run.id}/live` : `/studies/${detail.study.id}`,

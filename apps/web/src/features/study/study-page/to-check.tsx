@@ -5,9 +5,9 @@
  * `openChecks`, and "Go through all N" (only with a real check panel, `walkthrough`) the same
  * queue from its start. There are no fix actions: corrections have no backend yet.
  */
-import { useQueryClient } from "@tanstack/react-query";
+
+import { useAcceptCheck } from "@voluma/api-client/query";
 import type { StudyDetail, StudyScanDetail, ToCheckItem } from "@voluma/contracts/study";
-import { useAcceptCheck } from "@voluma/run-view";
 import { Button } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import { Link } from "react-router";
@@ -83,14 +83,10 @@ function CheckRow({
   readOnly: boolean;
   onOpen: () => void;
 }) {
-  const client = useQueryClient();
   // The study read's items belong to the scan's latest completed result, whose revision the
   // accept names; a result that changed since answers 409 and the refetch shows the new one.
   const revision = scan.runs.find((r) => r.id === item.runId)?.review?.revisionId;
-  const accept = useAcceptCheck(item.runId, revision, {
-    refetch: () => client.invalidateQueries({ queryKey: ["study"] }),
-    onSuccess: () => client.invalidateQueries({ queryKey: ["study"] }),
-  });
+  const accept = useAcceptCheck(item.runId, revision);
   const path = scanHref(scan);
   return (
     <li className="grid grid-cols-[8rem_minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 border-b border-line-subtle py-2.5 max-[760px]:grid-cols-[minmax(0,1fr)_auto]">

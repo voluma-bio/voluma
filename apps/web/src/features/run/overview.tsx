@@ -5,16 +5,10 @@
  */
 
 import { reviewFileUrl } from "@voluma/api-client";
+import { useAcceptCheck } from "@voluma/api-client/query";
 import type { Asset } from "@voluma/contracts/review";
 import type { Run } from "@voluma/contracts/run";
-import {
-  ClampedMarkdown,
-  Elapsed,
-  type NeedItem,
-  TaskMark,
-  type TaskView,
-  useAcceptCheck,
-} from "@voluma/run-view";
+import { ClampedMarkdown, Elapsed, type NeedItem, TaskMark, type TaskView } from "@voluma/run-view";
 import { Button, buttonClass, cx, Lightbox } from "@voluma/ui";
 import { ChevronRight, ImageOff } from "lucide-react";
 import { type ReactNode, useState } from "react";
@@ -39,16 +33,11 @@ const without = (set: ReadonlySet<string>, id: string) => {
   return next;
 };
 
-export function useAccepting(
-  run: Run,
-  onChange: (update: (run: Run) => Run) => void,
-  refetch: () => void,
-): Accepting {
+export function useAccepting(run: Run, onChange: (update: (run: Run) => Run) => void): Accepting {
   const [done, setDone] = useState<ReadonlySet<string>>(new Set());
   const [pending, setPending] = useState<ReadonlySet<string>>(new Set());
   const [error, setError] = useState<Accepting["error"]>();
   const mutation = useAcceptCheck(run.id, run.review?.revisionId, {
-    refetch,
     onMutate: ({ checkId }) => {
       setPending((p) => new Set(p).add(checkId));
       setError((e) => (e?.id === checkId ? undefined : e));

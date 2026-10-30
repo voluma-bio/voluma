@@ -5,7 +5,7 @@ the run page (`run-page.tsx`). Starting runs is `features/study` (Run on new sca
 is no runs list: Home (`features/study`) replaces it.
 
 The run's reusable parts live in `packages/run-view` (`@voluma/run-view`), so other features can
-show them without importing this one: `run-model.ts`, `transcript.ts`, `run-log.tsx`,
+show them without importing this one: `run-model.ts`, `transcript.ts`, `run-store.tsx`,
 `agent-thread.tsx`, `agents.tsx`, `transcript-view.tsx`, `task-flow.tsx`, `chat/`, `use-now.ts`
 (the clock), and the status and keys helpers. File names below refer to that package unless they
 are in this directory. The package has no router: `TaskFlow` takes the router `Link` as a prop.
@@ -58,7 +58,7 @@ are in this directory. The package has no router: `TaskFlow` takes the router `L
   accepted (a task sent back, a value missing, a failed task) show but aren't counted.
 - **Needs your eye** comes from `reviewState` (the fold plus `check.accepted`): every check item
   of a task, open or accepted, live or finished. "Looks right" calls `useAcceptCheck`
-  (`@voluma/run-view`, the one mutation and error rule the study page and review share) with
+  (`@voluma/api-client/query`, the one mutation and error rule the study page and review share; it also refetches the run, review and study reads) with
   `Run.review.revisionId`, only on a completed run that isn't an example. An ended run's stream has
   closed, so the page also counts what it accepted itself (`useAccepting`, which keeps a pending
   set per item). A To check task with no check item gets a card with no "Looks right"; a failed
@@ -69,8 +69,8 @@ are in this directory. The package has no router: `TaskFlow` takes the router `L
   when the file is missing (a copied run has no R2 files).
 - **One agent's thread is `<AgentThread threadId>`** (`agent-thread.tsx`), wherever it shows: the
   Agents view and "How the AI did it" today. The caller names the thread and gives it a box; the
-  container reads the run's log from `RunLogProvider` (events, live frames, halt, threads; one per
-  run page), builds its rows, and owns its header (name, status, clock, cost), its live line and
+  container reads its rows and thread from the run store (`run-store.tsx`: one per run page, fed by
+  the page's stream; selector hooks, so a thread re-renders only for its own frames), and owns its header (name, status, clock, cost), its live line and
   its own scroll, which sticks to the newest line while the reader is at the bottom. Hosts add
   header controls through `actions`. Shape from Meridian Flow's `ChatView`. Don't render a thread
   any other way; a new place for one is a new `<AgentThread>`.

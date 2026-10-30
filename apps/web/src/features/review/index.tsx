@@ -13,6 +13,7 @@ import {
   listInputs,
   reviewFileUrl,
 } from "@voluma/api-client";
+import { reviewRunQuery, runQuery } from "@voluma/api-client/query";
 import { type DicomArchive, openDicomZip, ViewerWorkspace } from "@voluma/viewer";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, type RouteObject, useParams, useSearchParams } from "react-router";
@@ -35,8 +36,7 @@ function ScanReview({ runId }: { runId: string }) {
   const [search, setSearch] = useSearchParams();
   const fileUrl = useCallback((sha256: string) => reviewFileUrl(runId, sha256), [runId]);
   const execution = useQuery({
-    queryKey: ["run", runId],
-    queryFn: () => getRun(runId),
+    ...runQuery(runId),
     enabled: runId !== "local",
     refetchInterval: (query) => {
       const data = query.state.data;
@@ -50,13 +50,12 @@ function ScanReview({ runId }: { runId: string }) {
   const lastStatus = useRef(runStatus);
   useEffect(() => {
     if (lastStatus.current !== undefined && lastStatus.current !== "ended" && runStatus === "ended")
-      void queryClient.invalidateQueries({ queryKey: ["review-run", runId] });
+      void queryClient.invalidateQueries({ queryKey: reviewRunQuery(runId).queryKey });
     lastStatus.current = runStatus;
   }, [runStatus, runId]);
   // `/runs/local` is the reference scan alone: no run, so no results.
   const review = useQuery({
-    queryKey: ["review-run", runId],
-    queryFn: () => getReviewRun(runId),
+    ...reviewRunQuery(runId),
     enabled: runId !== "local",
     // Only a server error may pass on retry; a 404, a 409 or data the contract rejects won't.
     retry: (count, cause) => cause instanceof ApiError && cause.status >= 500 && count < 2,
@@ -241,7 +240,10 @@ function ScanReview({ runId }: { runId: string }) {
         </ViewerWorkspace>
       )}
       onRefresh={() =>
-        queryClient.invalidateQueries({ queryKey: ["review-run", runId] }, { throwOnError: true })
+        queryClient.invalidateQueries(
+          { queryKey: reviewRunQuery(runId).queryKey },
+          { throwOnError: true },
+        )
       }
     />
   );

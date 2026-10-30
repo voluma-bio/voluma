@@ -7,9 +7,8 @@
  * reviewed, which is never inferred. Also where a run's row links, and how its cost and time read.
  * The run page's header says "N items to check" instead, because it sits beside a count of tasks.
  */
-import type { Run } from "@voluma/contracts/run";
 import type { StudyRunSummary } from "@voluma/contracts/study";
-import { StatusBadge, type StatusTone } from "@voluma/ui";
+import type { StatusTone } from "@voluma/ui";
 
 /** "1 run", "3 runs"; `many` for an irregular plural. */
 export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;

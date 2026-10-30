@@ -1,7 +1,7 @@
 /** Task-scoped report and questions. Acceptance never changes scientific confidence. */
 import { reviewFileUrl } from "@voluma/api-client";
+import { useAcceptCheck } from "@voluma/api-client/query";
 import type { Focus } from "@voluma/contracts/review";
-import { useAcceptCheck } from "@voluma/run-view";
 import { StatusBadge } from "@voluma/ui";
 import {
   ArrowUpRight,
@@ -109,7 +109,7 @@ export function TaskReport({
   onFocus(focus?: Focus): void;
   onRefresh(): Promise<void>;
 }) {
-  const accept = useAcceptCheck(runId, revisionId, { refetch: onRefresh, onSuccess: onRefresh });
+  const accept = useAcceptCheck(runId, revisionId);
   const references = task.measurements.flatMap((m) =>
     m.references.map((reference) => ({ m, reference })),
   );

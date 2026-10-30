@@ -12,7 +12,8 @@
  * "Add scans" waits: adding scans to an existing study isn't designed, and `/new` makes a new one.
  */
 import { useQuery } from "@tanstack/react-query";
-import { ApiError, getStudy } from "@voluma/api-client";
+import { ApiError } from "@voluma/api-client";
+import { studyQuery } from "@voluma/api-client/query";
 import type { StudyDetail } from "@voluma/contracts/study";
 import { formatUsd } from "@voluma/run-view";
 import { Button, Tabs } from "@voluma/ui";
@@ -38,8 +39,7 @@ export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
   const tab: TabId = TAB_IDS.find((t) => t === tabParam) ?? "overview";
 
   const study = useQuery({
-    queryKey: ["study", id],
-    queryFn: () => getStudy(id),
+    ...studyQuery(id),
     refetchInterval: (query) => (query.state.data?.scans.some(isLive) ? 5000 : false),
   });
 

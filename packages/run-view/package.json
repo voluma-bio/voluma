@@ -14,8 +14,6 @@
     "react": "^19"
   },
   "dependencies": {
-    "@tanstack/react-query": "catalog:",
-    "@voluma/api-client": "workspace:*",
     "@voluma/contracts": "workspace:*",
     "@voluma/ui": "workspace:*",
     "@voluma/workflow": "workspace:*",

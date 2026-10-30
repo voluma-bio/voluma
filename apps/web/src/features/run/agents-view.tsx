@@ -12,7 +12,7 @@ import {
   agentTree,
   STATUS_WORD,
   type Thread,
-  useRunLog,
+  useThreads,
 } from "@voluma/run-view";
 import { catalog } from "@voluma/workflow/bundled";
 import { useEffect, useMemo, useRef } from "react";
@@ -61,7 +61,7 @@ export function AgentsView({
   select: (threadId: string | null) => void;
   ended: boolean;
 }) {
-  const { threads } = useRunLog();
+  const threads = useThreads();
   const follow = agentId === undefined;
   const tree = useMemo(() => agentTree(threads), [threads]);
   // The agent on screen at the last commit: turning Follow live on keeps it while it works.
