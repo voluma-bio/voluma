@@ -2,8 +2,7 @@
  * Key redaction: the one function for text that leaves the process (stored events and
  * history rows, the console, a report's `error`). Apply it before any step that clips or
  * reshapes the text: a key cut in half no longer matches. It matches literal values only, so
- * a key a provider echoes back already masked or re-encoded passes through. A run's secrets are its model key and
- * Modal token, in memory for that run only (`@voluma/contracts/run`); their literal values
+ * a key a provider echoes back already masked or re-encoded passes through. A run's secrets are its model key, in memory for that run only (`@voluma/contracts/run`); their literal values
  * are replaced wherever they appear, including inside JSON strings.
  */
 

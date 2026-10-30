@@ -9,7 +9,14 @@
 import { randomUUID } from "node:crypto";
 import { type Run, resendKeysRequestSchema, startRunRequestSchema } from "@voluma/contracts/run";
 import { type Context, Hono } from "hono";
-import { type AppEnv, parseJson, readerOf, requireReader, requireUser } from "../../domain";
+import {
+  type AppEnv,
+  callerOf,
+  parseJson,
+  readerOf,
+  requireReader,
+  requireUser,
+} from "../../domain";
 import type { RunDeps } from ".";
 import { refusalMessage } from "./admission";
 import { GUEST_KEYS_MESSAGE } from "./corrections";
@@ -57,18 +64,14 @@ export function runsRoutes({ reads, queue }: RunDeps) {
       startRunRequestSchema,
     );
     const user = c.var.user;
-    const result = await queue.start(
-      readerOf(user),
-      { userId: user.userId, guest: user.account === "visitor" },
-      {
-        id: randomUUID(),
-        studyId,
-        inputId,
-        selectedOutputs,
-        notes,
-        keys,
-      },
-    );
+    const result = await queue.start(readerOf(user), callerOf(user), {
+      id: randomUUID(),
+      studyId,
+      inputId,
+      selectedOutputs,
+      notes,
+      keys,
+    });
     return "refused" in result
       ? refusal(c, result.refused, result.detail)
       : c.json(result.run satisfies Run);

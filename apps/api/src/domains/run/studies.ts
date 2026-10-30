@@ -6,7 +6,14 @@
 import { randomUUID } from "node:crypto";
 import { createStudyRequestSchema } from "@voluma/contracts/study";
 import { Hono } from "hono";
-import { type AppEnv, parseJson, readerOf, requireReader, requireUser } from "../../domain";
+import {
+  type AppEnv,
+  callerOf,
+  parseJson,
+  readerOf,
+  requireReader,
+  requireUser,
+} from "../../domain";
 import type { RunDeps } from ".";
 import { refusal } from "./runs";
 
@@ -17,30 +24,26 @@ export function studiesRoutes({ studies, queue }: RunDeps) {
     const body = await parseJson(c, createStudyRequestSchema);
     const user = c.var.user;
     const reader = readerOf(user);
-    const result = await queue.createStudy(
-      reader,
-      { userId: user.userId, guest: user.account === "visitor" },
-      {
-        study: {
-          id: randomUUID(),
-          name: body.name,
-          workflowId: body.workflowId,
-          budgetUsd: body.budgetUsd ?? null,
-        },
-        scans: body.scans.map(({ inputId, subject, group, attributes }) => ({
-          inputId,
-          subject,
-          group: group ?? null,
-          attributes: attributes ?? {},
-        })),
-        starts: {
-          runs: body.start.map((inputId) => ({ id: randomUUID(), inputId })),
-          selectedOutputs: body.selectedOutputs,
-          notes: body.notes,
-          keys: body.keys,
-        },
+    const result = await queue.createStudy(reader, callerOf(user), {
+      study: {
+        id: randomUUID(),
+        name: body.name,
+        workflowId: body.workflowId,
+        budgetUsd: body.budgetUsd ?? null,
       },
-    );
+      scans: body.scans.map(({ inputId, subject, group, attributes }) => ({
+        inputId,
+        subject,
+        group: group ?? null,
+        attributes: attributes ?? {},
+      })),
+      starts: {
+        runs: body.start.map((inputId) => ({ id: randomUUID(), inputId })),
+        selectedOutputs: body.selectedOutputs,
+        notes: body.notes,
+        keys: body.keys,
+      },
+    });
     if ("refused" in result) return refusal(c, result.refused, result.detail);
     const detail = await studies.get(reader, result.studyId);
     if (!detail) throw new Error(`study ${result.studyId} vanished after it was created`);

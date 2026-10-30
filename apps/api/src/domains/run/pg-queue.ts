@@ -35,7 +35,7 @@ import {
   sql,
 } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import type { Reader } from "../../domain";
+import type { Caller, Reader } from "../../domain";
 import { admit, type Limits, type Refusal, refusalMessage, type Usage, usage } from "./admission";
 import { endClaim, outageDelayMinutes, stalledError } from "./claim-progress";
 import { decideMessage, endCorrection, openCorrection } from "./corrections";
@@ -197,9 +197,6 @@ type Starts = {
   keys?: VisitorKeys;
 };
 
-/** Who starts runs; `guest` is a visitor principal. */
-export type Caller = { userId: string; guest: boolean };
-
 /** Why a write was refused; `Refusal` is a limit. */
 export type QueueRefusal =
   | Refusal
@@ -345,8 +342,8 @@ export function pgRunQueue(
         state: "queued",
       });
       used.callerUnfinished++;
+      used.waiting++;
       if (credentials === "visitor") used.visitorActive++;
-      else used.waiting++;
     }
   };
 

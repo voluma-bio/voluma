@@ -33,7 +33,7 @@ export type Usage = {
   running: number;
   /** Runs first claimed in the last day. */
   startedToday: number;
-  /** Runs queued and never claimed: they count toward the day when they start. */
+  /** Runs admitted and never claimed, queued or awaiting keys: each holds a daily slot until it starts. */
   waiting: number;
   /** Visitor runs queued or running. An `awaiting-keys` run holds neither keys nor a runner. */
   visitorActive: number;
@@ -51,7 +51,7 @@ export async function usage(
     SELECT
       (count(*) FILTER (WHERE credentials = 'voluma' AND state = 'running'))::int AS "running",
       (count(*) FILTER (WHERE ${today}))::int AS "startedToday",
-      (count(*) FILTER (WHERE state = 'queued' AND started_at IS NULL))::int AS "waiting",
+      (count(*) FILTER (WHERE state IN ('queued', 'awaiting-keys') AND started_at IS NULL))::int AS "waiting",
       (count(*) FILTER (WHERE credentials = 'visitor' AND state IN ('queued', 'running')))::int AS "visitorActive",
       (count(*) FILTER (WHERE ${caller ? sql`started_by = ${caller.userId} AND credentials = ${caller.credentials} AND state <> 'ended'` : sql`false`}))::int AS "callerUnfinished"
     FROM runs WHERE lab_id = ${labId} AND NOT example`);

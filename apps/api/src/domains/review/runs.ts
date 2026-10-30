@@ -26,7 +26,7 @@ import {
 import { type Context, Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { parseJson, readerOf, requireUser, type UserEnv } from "../../domain";
+import { callerOf, parseJson, readerOf, requireUser, type UserEnv } from "../../domain";
 import type { RunRecord } from "../../ports";
 import type { ReviewDeps } from ".";
 import { reviewRun } from "./review-run";
@@ -108,7 +108,7 @@ export function runRoutes({ runs, files, messages }: ReviewDeps) {
     const { runId } = c.req.param();
     const user = c.var.user;
     const reader = readerOf(user);
-    const caller = { userId: user.userId, guest: user.account === "visitor" };
+    const caller = callerOf(user);
     const refusedAs = (r: { status: 403 | 404 | 409 | 429; error: string }) =>
       c.json({ error: r.error }, r.status);
 
