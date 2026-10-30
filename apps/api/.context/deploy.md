@@ -184,9 +184,14 @@ What that means here:
 - **Compute hours.** The runner polls `claim` every 2 s, so with it
   running the compute never reaches its 5 idle minutes. At 0.25 CU that is about 6 CU-hours a
   day, about 180 a month against the 100 allowed; the 5 days to Nov 4 cost about 30. With the
-  runner suspended the compute still never sleeps: the gateway's sweep (`SWEEP_MS` in
-  `apps/gateway/src/main.ts`) runs every 5 minutes, Neon's idle timeout, and an open web page
-  polls through the API (seen 2026-10-30). Past the cap compute pauses and every call fails. Launch
+  runner suspended, Render's gateway health checks still query Postgres: `render.yaml` sets
+  `healthCheckPath: /health`, and `apps/gateway/src/gateway.ts` calls `isMigrated` (a SQL query)
+  on every probe. [Render probes running services every few seconds](https://render.com/docs/health-checks),
+  preventing five idle minutes even with no browser open. The gateway also sweeps every five
+  minutes (`SWEEP_MS` in `apps/gateway/src/main.ts`); live run and study pages poll through the
+  API. Lengthening the sweep alone cannot enable scale to zero: the health checks must stop
+  querying Postgres too, with the runner suspended and no other database traffic. Past the cap
+  compute pauses and every call fails. Launch
   (pay as you go) is $0.106 per CU-hour and $0.35 per GB-month. After Nov 4 check Neon's
   console usage ([TODO.md](TODO.md)).
 - **Scale to zero** costs the first query after a suspend a cold start. Checked 2026-10-30: with
