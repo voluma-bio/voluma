@@ -6,6 +6,7 @@
  */
 import type { RunEvent } from "@voluma/contracts/events";
 import { StatusBadge } from "@voluma/ui";
+import { catalog } from "@voluma/workflow/bundled";
 import {
   ArrowDown,
   Brain,
@@ -29,7 +30,8 @@ import { ProcessDisclosure } from "./chat/process-disclosure";
 import { useFollowScroll } from "./chat/use-follow-scroll";
 import type { Thread } from "./run-model";
 import type { Row, Step, ToolStep } from "./transcript";
-import { taskTitle } from "./workflows";
+
+const { taskTitle } = catalog["mouse-oa"];
 
 export function TranscriptView({
   rows,

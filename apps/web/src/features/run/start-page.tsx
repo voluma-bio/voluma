@@ -6,13 +6,27 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { ApiError, listInputs, listRuns, startRun } from "@voluma/api-client";
 import type { Me } from "@voluma/contracts/auth";
 import type { Input, VisitorKeys } from "@voluma/contracts/run";
+import { isSelectable, type OutputEntry } from "@voluma/contracts/workflow-files";
 import { Button, Card } from "@voluma/ui";
+import { catalog, workflowName } from "@voluma/workflow/bundled";
 import { useState } from "react";
 import { Link, useNavigate, useOutletContext } from "react-router";
 import { forgetKeys, KeysForm, loadKeys } from "./keys";
 import { ScanUpload } from "./scan-upload";
 import { RunBadge, runHref, runStatus } from "./status";
-import { ALL_OUTPUT_IDS, OUTPUT_GROUPS, WORKFLOW, workflowName } from "./workflows";
+
+const WORKFLOW = catalog["mouse-oa"];
+
+/** Only what can be selected (measurements and scores), in file order. */
+const selectable = WORKFLOW.outputs.filter(isSelectable);
+const ALL_OUTPUT_IDS = selectable.map((o) => o.id);
+
+/** The checklist: one group per producing task, in file order. */
+const OUTPUT_GROUPS = (() => {
+  const byTask = new Map<string, OutputEntry[]>();
+  for (const o of selectable) byTask.set(o.task, [...(byTask.get(o.task) ?? []), o]);
+  return [...byTask].map(([task, outputs]) => ({ title: WORKFLOW.taskTitle(task), outputs }));
+})();
 
 const NOTES_MAX = 4000;
 
@@ -59,7 +73,7 @@ export function StartPage() {
 
   return (
     // Not a <form>: the keys form lives inside it, and forms don't nest.
-    <div className="grid min-h-0 flex-1 grid-cols-[16rem_minmax(0,1fr)_22rem] max-[1100px]:block">
+    <div className="grid min-h-0 flex-1 grid-cols-[16rem_minmax(0,1fr)_22rem] max-[1100px]:block max-[1100px]:flex-none">
       <aside className="overflow-y-auto border-r border-border p-4 max-[1100px]:border-r-0 max-[1100px]:border-b">
         <h2 className="px-1 pb-3 text-meta font-semibold text-fg-subtle">Workflows</h2>
         <Card className="border-primary p-3">
@@ -285,12 +299,7 @@ function RecentRuns() {
   if (recent.length === 0) return null;
   return (
     <section>
-      <div className="mb-2 flex items-baseline justify-between">
-        <h2 className="text-meta font-semibold text-fg-subtle">Recent runs</h2>
-        <Link to="/runs" className="text-meta text-primary-text hover:underline">
-          All runs
-        </Link>
-      </div>
+      <h2 className="mb-2 text-meta font-semibold text-fg-subtle">Recent runs</h2>
       <ul className="grid gap-1">
         {recent.map((run) => (
           <li key={run.id}>

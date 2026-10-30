@@ -1,7 +1,9 @@
 /**
- * Small status label for lists and tables. It takes a tone, not a status: the
- * caller maps its own statuses (task, run, structure) to a tone, so this
- * component stays independent of the contracts.
+ * Status chip for lists, tables and headers: the one chip Home, the study
+ * page, the run page and the review share. It takes a tone, not a status: the
+ * caller maps its own statuses (task, run, structure) to a tone and label, so
+ * this component stays independent of the contracts (`features/run/status.tsx`
+ * maps a `Run`).
  */
 import type { ReactNode } from "react";
 import { cx } from "./cx";
@@ -27,7 +29,7 @@ export function StatusBadge({ tone, children, className }: StatusBadgeProps) {
   return (
     <span
       className={cx(
-        "inline-flex w-max items-center rounded-md px-2 py-px text-meta font-medium whitespace-nowrap",
+        "inline-flex w-max items-center rounded-full px-2.5 py-px text-meta font-medium whitespace-nowrap",
         tones[tone],
         className,
       )}

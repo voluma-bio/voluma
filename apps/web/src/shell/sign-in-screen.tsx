@@ -7,6 +7,7 @@ import { signIn } from "@voluma/api-client";
 import { type Me, signinOutcomeSchema } from "@voluma/contracts/auth";
 import { Button } from "@voluma/ui";
 import type { ReactNode } from "react";
+import { BrandLockup } from "./top-bar";
 
 // Back to this page after sign-in, without the outcome of the last attempt.
 function startSignIn() {
@@ -81,25 +82,5 @@ export function GateScreen({
         <div className="flex flex-wrap justify-center gap-3">{children}</div>
       </div>
     </main>
-  );
-}
-
-// The mark beside the wordmark, as in the mockups' top bar. The mark alone
-// reads as a face at large sizes, so it never appears without the wordmark.
-function BrandLockup({ className }: { className: string }) {
-  return (
-    <span className={`flex items-center font-semibold ${className}`}>
-      <svg viewBox="0 0 24 24" aria-hidden="true" className="text-primary">
-        <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.6" />
-        <path
-          d="M7 14c2-5 8-5 10 0"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-        />
-      </svg>
-      Voluma
-    </span>
   );
 }

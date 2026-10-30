@@ -21,6 +21,12 @@ export type Route = {
   kind: RouteKind;
   /** The only models this route accepts; absent: any model with a price. */
   models?: readonly string[];
+  /**
+   * Answer a call that sends `Accept: text/event-stream` with 200 and the stream's headers at
+   * once, reporting the upstream's outcome in the stream (see the gateway's CONTEXT.md). Only
+   * for callers that understand the `gateway-error` event; the others keep real statuses.
+   */
+  earlyStream?: boolean;
 };
 
 export type ProviderDef = {
@@ -44,7 +50,13 @@ export const PROVIDERS: Record<Provider, ProviderDef> = {
     auth: bearer,
     routes: [
       { method: "POST", path: "/v1/files", kind: "file-upload" },
-      { method: "POST", path: "/v1/responses", kind: "model", models: ["sam-3.1"] },
+      {
+        method: "POST",
+        path: "/v1/responses",
+        kind: "model",
+        models: ["sam-3.1"],
+        earlyStream: true,
+      },
       { method: "DELETE", path: "/v1/files/", kind: "file-delete" },
     ],
   },

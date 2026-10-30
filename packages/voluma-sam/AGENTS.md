@@ -14,9 +14,17 @@ stdout is one JSON line. Entry: `src/main.ts`; the steps are `src/run.ts`.
   digest in the same PR as any `src/input.ts` change.
 - The harness imports only `@voluma/sam/input` (a zod schema and a type). Nothing else is
   shared, and the runner imports none of this package.
+- The gateway answers the streaming request `200 text/event-stream` at once and reports a failed
+  Meta call as one `event: gateway-error` (`{upstreamStatus, body, requestId}`; Meta's own `event: error` is not it and passes through) after any `:` keepalive lines.
+  `streamReply` in `src/meta.ts` turns that back into a reply with Meta's status (null: 502), so
+  the 429 backoff, the 404 retry and the infrastructure rules work on statuses as before. A stream
+  that ends without `response.completed` is an infrastructure failure (`src/response.ts`).
 - Keep every pass over the reply linear (`src/response.ts`): responses are 100+ MB, and the
   quadratic version of this parse is what stopped staging runs.
 - `src/sam-mask.ts` is the one mask decoder. R2 mounts take whole files, so outputs are built in
   `/tmp` and `cp`ed, labels first and the sidecar last.
 - Test against the real thing: a saved real Meta response behind a local stub, the real
   OA6-1RK `oriented.npy`, labels compared with an independent decode. No unit fixtures.
+- The result's `stream` (first `data:` event, longest gap between chunks other than keepalive comments, bytes, `data:` lines) is
+  measured as the reply is written, per chunk and at constant cost. It exists to check real calls
+  against the gateway's host limits (Railway cuts a stream at 15 minutes, or after 5 without a byte).

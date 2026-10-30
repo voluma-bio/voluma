@@ -299,6 +299,7 @@ export function mainTools(deps: MainDeps) {
           toolCallId: ctx.toolCallId,
           kind: ctx.kind,
           batchSize: ctx.batchSize,
+          signal: ctx.signal,
         };
         // Files first, outside the section: a missing one refuses the call before anything is written.
         const files = await Promise.all(

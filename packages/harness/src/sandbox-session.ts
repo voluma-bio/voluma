@@ -19,9 +19,11 @@ export interface SandboxSession {
    * The calling thread's sandbox. When the thread held an earlier sandbox that has since been
    * replaced, its files outside the mounts are gone: the returned sandbox then puts the
    * restart note at the head of its next `exec` output, once, so the model reads it. A
-   * thread's first call gets no note.
+   * thread's first call gets no note. `{ note: false }` is for a command the host runs on its
+   * own account (hashing evidence): it never consumes the note, which stays owed to the
+   * model's next call.
    */
-  get(threadId: string): Promise<Sandbox>;
+  get(threadId: string, options?: { note?: boolean }): Promise<Sandbox>;
   /**
    * Destroys the thread's sandbox (the supervisor calls it when the thread ends) and sends
    * `stopped`. A thread resumed later gets a fresh sandbox and the restart note. A no-op once
@@ -96,7 +98,7 @@ function threadSandbox(
   };
 
   return {
-    async get(): Promise<Sandbox> {
+    async get(notify: boolean): Promise<Sandbox> {
       assertOpen();
       current ??= start();
       let entry = current;
@@ -110,8 +112,9 @@ function threadSandbox(
       let held = entry;
       // `lastSeen` moves on only once the note is yielded or none is owed, so a replacement
       // that no `exec` reports is still owed to the thread's next call.
-      let needsNote = previous !== undefined && previous !== entry.generation;
-      if (!needsNote) lastSeen = entry.generation;
+      const owed = previous !== undefined && previous !== entry.generation;
+      let needsNote = notify && owed;
+      if (!owed) lastSeen = entry.generation;
       let noted = false;
       // A command already ran on the sandbox this call is about to lose.
       let ran = false;
@@ -119,6 +122,8 @@ function threadSandbox(
       const swap = async () => {
         held = await replace(held);
         held.handedOut = true;
+        // A host-internal command leaves what the model is owed untouched.
+        if (!notify) return;
         needsNote = (previous !== undefined || ran) && !noted;
         if (!needsNote) lastSeen = held.generation;
       };
@@ -186,14 +191,14 @@ export function sandboxSession(
     if (closed) throw new Error("the sandbox session is closed");
   };
   return {
-    get(threadId) {
+    get(threadId, options) {
       assertOpen();
       let thread = threads.get(threadId);
       if (!thread) {
         thread = threadSandbox(threadId, create, onState, restartNote(threadId), assertOpen);
         threads.set(threadId, thread);
       }
-      return thread.get();
+      return thread.get(options?.note !== false);
     },
     async release(threadId) {
       if (!closed) await threads.get(threadId)?.close();

@@ -11,10 +11,17 @@
  * clipped. The function never rejects: every failure after `redact` exists is caught and
  * logged through it.
  *
- * End of the run, in order. A normal end closes the sandbox first, so its `stopped` event
- * and last seconds go out under the live lease, then reports. A stop (shutdown, self-stop)
- * reports `released` with its reason first, so the run is recovered within the platform's
- * grace period, then closes the sandbox. A stop by the server or a lost lease reports nothing.
+ * Beside the supervisor runs the conversion worker (`@voluma/harness/review-assets`): it turns
+ * the files tasks report into review assets in a `convert` sandbox as they appear. It stops when a stop will
+ * not end the run, not on the internal abort at the end of the run, which it must outlive.
+ *
+ * End of the run, in order. A normal end (a spend cap and an uncaught error included) waits for
+ * the conversion queue to drain (bounded by `DRAIN_MS`, the lease heartbeating meanwhile; every
+ * output left without an `assets.*` event is recorded as failed; a stop during the wait ends it
+ * and the run is released instead), then closes the sandboxes, then reports. A stop
+ * (shutdown, self-stop) reports `released` with its reason first, so the run is recovered within
+ * the platform's grace period, then closes the sandboxes; it does not drain, the next claim
+ * resumes the queue. A stop by the server or a lost lease reports nothing.
  * None of these stops writes a `thread.ended`: the threads are cut off, and the next claim
  * (which learns why from `claim.previousClaim`) resumes them (`run-loop.ts`). The exception
  * is a user's cancel, which the runner learns as `stop`: the API has already ended every
@@ -35,8 +42,17 @@ import { runLayout } from "@voluma/harness/layout";
 import { type LiveBatcher, liveBatcher } from "@voluma/harness/live";
 import { usageOf } from "@voluma/harness/model-usage";
 import { type Recorder, recorder } from "@voluma/harness/recorder";
+import {
+  convertMounts,
+  type ReviewAssetsWorker,
+  reviewAssetsWorker,
+} from "@voluma/harness/review-assets";
 import { type SandboxSession, sandboxSession } from "@voluma/harness/sandbox-session";
-import { checkerSandboxSpec, workerSandboxSpec } from "@voluma/harness/sandbox-specs";
+import {
+  checkerSandboxSpec,
+  convertSandboxSpec,
+  workerSandboxSpec,
+} from "@voluma/harness/sandbox-specs";
 import { type RoleOf, type RoleSetup, superviseRun } from "@voluma/harness/supervise-run";
 import { TOOL_NAMES } from "@voluma/harness/tools";
 import type { Skill } from "@voluma/workflow/definition";
@@ -75,6 +91,8 @@ const REPO_ROOT = resolve(import.meta.dirname, "../../..");
 const CLOSE_BUDGET_MS = { ended: 60_000, stopped: 15_000 };
 /** How long threads get to end after a stop before the run is reported anyway. */
 const WIND_DOWN_MS = 5_000;
+/** How long an ended run waits for the review assets still being converted before it reports. */
+const DRAIN_MS = 10 * 60_000;
 /** Pi's own retries of a model call (429 honours retry-after, 5xx, dropped connections). */
 const MODEL_RETRIES = 3;
 
@@ -143,6 +161,10 @@ async function claimBody(
   scope.log = log;
 
   const abort = new AbortController();
+  // The conversion worker's own signal: it ends when a stop will not end the run, not with the
+  // abort `finally` does to close it. `haltedBy` is the stop that did.
+  const halt = new AbortController();
+  let haltedBy: Stopped | undefined;
   // An object, so TypeScript does not narrow what the callbacks set.
   const why: { stopped?: Stopped } = {};
   // The first reason decides the report; every reason is logged, since a later one (a spend
@@ -150,6 +172,10 @@ async function claimBody(
   const reasons = new Set<Stopped>();
   const stop = (reason: Stopped) => {
     why.stopped ??= reason;
+    if (reportFor(reason)?.kind !== "ended") {
+      haltedBy ??= reason;
+      halt.abort();
+    }
     if (!reasons.has(reason)) {
       reasons.add(reason);
       log(`stop: ${reason}${reason === why.stopped ? "" : ` (first was ${why.stopped})`}`);
@@ -184,6 +210,7 @@ async function claimBody(
   let events: Recorder | undefined;
   let live: LiveBatcher | undefined;
   let session: SandboxSession | undefined;
+  let convert: ReviewAssetsWorker | undefined;
   let error: string | undefined;
   // An error nobody caught (`telemetry.ts`) is kept apart from `error`, so a later throw does
   // not replace it. Once `finally` fixes the report it can change nothing.
@@ -418,7 +445,7 @@ async function claimBody(
       layout,
       recorder: events,
       history: client,
-      sandbox: (id) => opened.get(id),
+      sandbox: (id, options) => opened.get(id, options),
       releaseSandbox: (id) =>
         opened.release(id).catch((e) => log(`releasing ${layout.forThread(id).name} failed: ${e}`)),
       evidence: r2Evidence(config.r2),
@@ -438,6 +465,40 @@ async function claimBody(
       config: config.loop,
       signal: abort.signal,
     });
+    convert = reviewAssetsWorker({
+      runId,
+      recorder: events,
+      signal: halt.signal,
+      log,
+      async createSandbox(signal) {
+        // Metered like the run's sandboxes: from the start of creation to destroy.
+        meter.sandboxUp();
+        try {
+          const sandbox = await createSandbox(
+            convertSandboxSpec({
+              runId,
+              name: "convert",
+              image: config.sandbox.image,
+              lifetimeSeconds: config.sandbox.lifetimeSeconds,
+              idleSeconds: config.sandbox.idleSeconds,
+              // The converter imports `sidecar` through the run's PYTHONPATH.
+              env: { PYTHONPATH: layout.pythonPath },
+              ...convertMounts(runId),
+            }),
+            signal,
+          );
+          return {
+            exec: (request, s) => sandbox.exec(request, s),
+            writeFile: (path, bytes, s) => sandbox.writeFile(path, bytes, s),
+            exitCode: () => sandbox.exitCode(),
+            destroy: () => sandbox.destroy().finally(() => meter.sandboxDown()),
+          };
+        } catch (e) {
+          meter.sandboxDown();
+          throw e;
+        }
+      },
+    });
     supervised.catch(() => {}); // an error after the race below is moot: the run is stopping
     // A stop does not wait for a thread stuck in a slow call (creating a sandbox takes a
     // minute): after a grace period the run is reported and the sandbox closed regardless.
@@ -451,14 +512,26 @@ async function claimBody(
     error = redact(e instanceof Error ? e.message : String(e));
     log(`failed: ${error}`);
   } finally {
-    shutdown.removeEventListener("abort", onShutdown);
-    // Frozen here: a stop that lands while the run is being closed does not change its report.
+    // Frozen here: a stop that lands while the run is being closed does not change its report,
+    // except during the drain below, where the queue is unfinished.
     const stopped = why.stopped;
     reportFixed = true;
-    const report = reportFor(stopped, stopped === "spend-cap" ? capError : (uncaught ?? error));
+    let report = reportFor(stopped, stopped === "spend-cap" ? capError : (uncaught ?? error));
     abort.abort();
-    // An ended run closes its sandbox while the lease is live; a released one reports first.
-    if (report?.kind === "ended") await closeSandbox(CLOSE_BUDGET_MS.ended);
+    if (report?.kind === "ended") {
+      // Every output gets an `assets.*` event, or the run is released to be resumed.
+      await convert?.drain(DRAIN_MS);
+      // A stop during the drain ends it at once: the run is released (nothing, for a server stop
+      // or a lost lease), so the next claim resumes the queue.
+      if (haltedBy) report = reportFor(haltedBy);
+      if (report?.kind === "ended") {
+        await Promise.all([
+          closeSandbox(CLOSE_BUDGET_MS.ended, session?.close.bind(session)),
+          closeSandbox(CLOSE_BUDGET_MS.ended, convert?.close.bind(convert)),
+        ]);
+      }
+    }
+    shutdown.removeEventListener("abort", onShutdown);
     await live?.flush();
     await events?.flush();
     await lease?.end(report !== undefined);
@@ -484,12 +557,17 @@ async function claimBody(
     } else {
       log(`stopped (${[...reasons].join(", ")}); nothing more to report`);
     }
-    if (report?.kind !== "ended") await closeSandbox(CLOSE_BUDGET_MS.stopped);
+    if (report?.kind !== "ended") {
+      await Promise.all([
+        closeSandbox(CLOSE_BUDGET_MS.stopped, session?.close.bind(session)),
+        closeSandbox(CLOSE_BUDGET_MS.stopped, convert?.close.bind(convert)),
+      ]);
+    }
   }
 
-  async function closeSandbox(budgetMs: number) {
-    if (!session) return;
-    const closed = session.close().then(
+  async function closeSandbox(budgetMs: number, close: (() => Promise<void>) | undefined) {
+    if (!close) return;
+    const closed = close().then(
       () => true,
       () => false,
     );

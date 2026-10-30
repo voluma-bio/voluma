@@ -16,9 +16,12 @@
  * and reasoning by `messageId` (the id of the durable `message`), a tool call's arguments by `toolCallId` (until its `tool.call`), its output by
  * `toolCallId` (until its `tool.result`).
  */
+
 import type { ModelUsage, RunEvent } from "@voluma/contracts/events";
 import type { LiveFrame } from "@voluma/contracts/stream";
-import { taskTitle } from "./workflows";
+import { catalog } from "@voluma/workflow/bundled";
+
+const { taskTitle } = catalog["mouse-oa"];
 
 type Ev<T extends RunEvent["type"]> = Extract<RunEvent, { type: T }>;
 

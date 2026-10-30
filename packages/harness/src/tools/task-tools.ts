@@ -11,7 +11,7 @@ import {
   reportOutputInputSchema,
   submitTaskInputSchema,
 } from "@voluma/contracts/task-tools";
-import { Refusal, type TaskRuntime } from "../task-runtime";
+import { Refusal, refOf, type TaskRuntime } from "../task-runtime";
 import type { Tool, ToolContext, ToolResult } from "./tool";
 
 export async function result(run: () => Promise<unknown>): Promise<ToolResult> {
@@ -25,6 +25,31 @@ export async function result(run: () => Promise<unknown>): Promise<ToolResult> {
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
+
+/**
+ * A script's `objects` entry goes to `report_output` unchanged, with its files as the sandbox paths the script
+ * printed. Every file the call names (the output's own, and `evidence`) given as a path becomes the ref the schema
+ * takes; a path that is no file of this task is refused with the reason.
+ */
+export function prepareReportOutput(args: unknown): unknown {
+  if (!isRecord(args) || !isRecord(args.output)) return args;
+  const { taskId, output, evidence } = args;
+  if (typeof taskId !== "string") return args;
+  const ref = (file: unknown) => (typeof file === "string" ? refOf(taskId, file) : file);
+  const { structure, surface, volume } = output;
+  return {
+    ...args,
+    ...(Array.isArray(evidence) && { evidence: evidence.map(ref) }),
+    output: {
+      ...output,
+      ...(isRecord(structure) &&
+        "mask" in structure && { structure: { ...structure, mask: ref(structure.mask) } }),
+      ...(isRecord(surface) && { surface: { ...surface, heights: ref(surface.heights) } }),
+      ...(isRecord(volume) && { volume: { ...volume, file: ref(volume.file) } }),
+      ...("file" in output && { file: ref(output.file) }),
+    },
+  };
+}
 
 /**
  * What models send to `checkpoint` by habit, reshaped to the schema without losing meaning.
@@ -76,6 +101,7 @@ export function taskTools(runtime: TaskRuntime) {
     toolCallId: ctx.toolCallId,
     batchSize: ctx.batchSize,
     kind: ctx.kind,
+    signal: ctx.signal,
     ...(ctx.taskId && { taskId: ctx.taskId }),
   });
   const checkpoint: Tool<typeof checkpointInputSchema> = {
@@ -92,6 +118,7 @@ export function taskTools(runtime: TaskRuntime) {
     description:
       "Report one result of a task: a measurement, score, structure, annotation, volume or file. Reuse the outputId when you redo the task.",
     input: reportOutputInputSchema,
+    prepare: prepareReportOutput,
     sequential: true,
     execute: (input, ctx) => result(() => runtime.reportOutput(caller(ctx), input)),
   };

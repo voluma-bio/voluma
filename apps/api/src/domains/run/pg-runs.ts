@@ -129,12 +129,13 @@ async function loadRows(tx: Tx, where: SQL | undefined): Promise<Row[]> {
   );
   return rows.map((row) => ({
     ...row,
-    calls: calls.get(row.run.id) ?? { costUsd: 0, calls: 0, bySandbox: [] },
+    calls: calls.get(row.run.id) ?? { costUsd: 0, calls: 0, unknownCostCalls: 0, bySandbox: [] },
   }));
 }
 
 async function loadLogs(tx: Tx, ids: string[], summaryOnly = false) {
   const logs = new Map<string, RunRecord["events"]>();
+  const unreadable = new Set<string>();
   if (ids.length) {
     const stored = await tx
       .select()
@@ -158,11 +159,9 @@ async function loadLogs(tx: Tx, ids: string[], summaryOnly = false) {
         ),
       )
       .orderBy(asc(events.seq));
-    // Rows an older build wrote cross a trust boundary. On the list path (`summaryOnly`)
-    // a run whose events no longer parse is left out, its summary null, instead of failing
-    // every run listed with it. A single run's load throws: its own page and API must
-    // fail loudly, not read as "no plan" (a 409 the web polls forever).
-    const unreadable = new Set<string>();
+    // Rows an older build wrote cross a trust boundary. With `summaryOnly` a run whose events
+    // no longer parse is reported in `unreadable` instead of throwing, so `loadRuns` decides
+    // what that means for its caller.
     for (const row of stored) {
       if (unreadable.has(row.runId)) continue;
       try {
@@ -177,7 +176,7 @@ async function loadLogs(tx: Tx, ids: string[], summaryOnly = false) {
       }
     }
   }
-  return logs;
+  return { logs, unreadable };
 }
 
 export async function loadRecords(
@@ -186,7 +185,7 @@ export async function loadRecords(
   includeUnfinished = false,
 ): Promise<RunRecord[]> {
   const rows = await loadRows(tx, where);
-  const logs = await loadLogs(
+  const { logs } = await loadLogs(
     tx,
     rows
       .filter(
@@ -203,10 +202,16 @@ export async function loadRecords(
 
 type SummaryCache = Map<string, { lastEventId: string | null; summary: ReviewSummary | null }>;
 
+/**
+ * With `skipUnreadable` (the list), a completed run whose events no longer parse is left out
+ * rather than failing every run listed with it. Without it (one run's read) it throws: the
+ * run's own page must fail loudly, not read as "no plan" (a 409 the web polls forever).
+ */
 export async function loadRuns(
   tx: Tx,
   where: SQL | undefined,
   cache: SummaryCache = new Map(),
+  skipUnreadable = false,
 ): Promise<Run[]> {
   const rows = await loadRows(tx, where);
   const ids = rows
@@ -225,9 +230,12 @@ export async function loadRuns(
   const missing = ids.filter(
     (id) => cachedSummaries.get(id)?.lastEventId !== (versions.get(id) ?? null),
   );
-  const logs = await loadLogs(tx, missing, true);
+  const { logs, unreadable } = await loadLogs(tx, missing, true);
+  if (!skipUnreadable && unreadable.size)
+    throw new Error(`run ${[...unreadable].join(", ")}: stored events can't be read`);
   const summaries = new Map<string, ReviewSummary | null>();
   for (const id of ids) {
+    if (unreadable.has(id)) continue;
     const lastEventId = versions.get(id) ?? null;
     const cached = cachedSummaries.get(id);
     const summary =
@@ -239,7 +247,9 @@ export async function loadRuns(
     // Bound retained summaries; evicted entries are derived again from the event log.
     if (cache.size > 256) cache.delete(cache.keys().next().value as string);
   }
-  return rows.map((row) => toRun(row, summaries.get(row.run.id) ?? null));
+  return rows
+    .filter(({ run }) => !unreadable.has(run.id))
+    .map((row) => toRun(row, summaries.get(row.run.id) ?? null));
 }
 
 /** The run just written, which must exist. */
@@ -254,7 +264,7 @@ export function pgRunReads(db: PostgresJsDatabase) {
   const summaries: SummaryCache = new Map();
   return {
     list: (reader: ReadScope) =>
-      db.transaction((tx) => loadRuns(tx, readableRuns(reader), summaries), {
+      db.transaction((tx) => loadRuns(tx, readableRuns(reader), summaries, true), {
         isolationLevel: "repeatable read",
       }),
 

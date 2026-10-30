@@ -41,6 +41,18 @@ named by the thread id without the run id). `RunLayout.forThread(threadId)`
   "<name>/x.png"}` resolves the same way (`r2Evidence`, the local evidence adapter). Before
   `evidence.keep`, `taskRuntime` checks each evidence path with the calling thread's
   `keyOf(..., "read")`, so a thread cites only what it can read.
+- **Evidence is hashed in the sandbox, not the runner.** The runner holds and moves no
+  scan-sized data (a run reports a ~943 MB scan and ~224 MB grid). For a path the calling
+  thread's sandbox mounts, `taskRuntime` runs `sha256sum` there (`bash`-style, through
+  `sandboxSession.get(id, { note: false })`, so the hash exec never consumes the restart note
+  owed to the model; the file goes in on stdin) and passes the hash to `keep` as a callback; `r2Evidence` HEADs the
+  source, calls it only on an ETag it has not seen for that key in this claim, then HEADs the
+  target and does the server-side `CopyObject`. It never GETs the body, except for a path the
+  caller's sandbox does not mount (a checker citing the worker's scratch), which it hashes by
+  streaming up to 64 MiB and refuses above that. The copy carries `CopySourceIfMatch: etag`, so
+  a file rewritten after the hash fails the call. A missing file is a `Refusal`. Content addressing, not tamper-proofing: the agent writes the bytes
+  anyway. Measured on 940 MB: host network in 1 GB per keep before, 8 MB on the first keep and
+  0.1 MB on a repeat after.
 - The sandbox's own `/scratch` directory exists in the container. A write outside
   `/scratch/<name>/` (say `/scratch/v1.jpg`) succeeds but is local and lost on restart. Nothing
   stops it: sandboxes run as root without `CAP_SYS_ADMIN` (`chmod a-w` does not bind root, no
@@ -76,13 +88,50 @@ Spend and the usage meter sum sandbox seconds over all sandboxes.
   `CAP_LINUX_IMMUTABLE`; `SCRATCH` and the exec `workdir` (`/scratch/t1.check`) take effect;
   `touch /scratch/outside.txt` succeeds, also after `chmod a-w /scratch`; `chattr` is absent.
 
+# Runner: review assets
+
+`packages/harness/src/review-assets.ts` converts every file a task reports as a volume, a
+structure mask or a surface (`convertJob`) into review assets while the run is live, and
+records `assets.ready` / `assets.failed` on the root thread (id `<runId>:assets:<sha256>`).
+`run.ts` starts it at claim beside `superviseRun`.
+
+- **Queue.** Every `output` event in the recorder's view, from the first (so a resume reads the
+  whole log), minus files with an `assets.*` event; new events are polled once a second.
+  One file at a time, in one `convert` sandbox per claim (created at the first file, metered
+  like the others). A failed conversion is recorded and the worker moves on; a sandbox that
+  dies or cannot be created is replaced once, then the file is recorded failed. `sourceSha256`
+  is the queue item's; a converter that prints another one has failed.
+- **Mounts.** `/evidence` (the run's evidence prefix) and `/workflow` read-only, `/review`
+  (`reviewAssetPrefix`) read-write, no network. The snapshot keeps repo paths and includes
+  `core/convert/`, so the command is `python /workflow/workflows/core/convert/review_assets.py` (not `-I`, which drops the `PYTHONPATH`
+  the converter imports `sidecar` through; the sandbox gets `RunLayout.pythonPath` alone).
+  A cloud-bucket mount cannot rename, which zarr's local store does for every file: the converter
+  builds in a fixed `/tmp` path it clears at the start, and copies, `manifest.json` last. A
+  non-zero exit from a sandbox that is gone counts as a sandbox failure (the one retry), not a
+  failed file.
+- **Signal.** One rule: the worker halts exactly when the stop will not end the run (server stop,
+  lost lease, self-stop, shutdown; `reportFor` is not `ended`). A spend cap and an uncaught
+  `error` end the run, so they drain, as does `finally`'s own `abort`, which the worker outlives.
+  `run.ts` remembers which stop halted it (`haltedBy`) and rebuilds the report from that one,
+  never from the first stop. A stopped worker records nothing; the next claim finds the files again and the
+  converter skips what has a `manifest.json` of its version and mode.
+- **Drain.** An `ended` report waits for the queue (`DRAIN_MS`, 10 minutes, the lease
+  heartbeating meanwhile), before the sandboxes close. Then every output still without an
+  `assets.*` event is recorded `assets.failed` ("timed out", or "the run ended before the file
+  was converted" for an output stored late), so an ended run leaves no file "preparing". Events go
+  through `emit` (retried) and count as done once stored. This is **permanent for the run**: the next claim
+  skips it and review shows the object without assets. A stop during the drain ends it at once and the run is reported `released` (nothing, for a server stop or a lost lease) instead of `ended`, so the next claim resumes the queue.
+  A `released` report does not drain.
+- **Not built.** Conversions run one at a time in one 2-CPU sandbox; the scan (about 1 GB of
+  float32) is the long pole. Add sandboxes if the drain times out in practice.
+
 # Runner: how sandboxes end
 
 Sandboxes cost money while up (a GPU one a lot), so every one must end. In order of
 who ends it:
 
 1. **The runner, normally.** `run.ts` closes the run's sandboxes (one per thread) when the run loop ends,
-   before it flushes events and reports, so the `stopped` event and the last sandbox seconds
+   draining the convert queue meanwhile (a close takes ~30 s) and then closing the convert sandbox, before it flushes events and reports, so the `stopped` event and the last sandbox seconds
    are stored under the live lease. If the close takes over 60 s (15 s after a stop) it asks Modal to terminate
    the sandboxes of this claim, by their `{run, claim}` tags (the claim is a per-claim id: a
    released run's old runner must not kill the sandbox of the runner that reclaimed it).
@@ -195,8 +244,8 @@ is not counted). Unset, the default, there is no cap: test runs have none, so le
 staging and locally (spend is still recorded and shown). When set it goes to the API with each
 claim and becomes `runs.cost_cap_usd` (null: no cap),
 which the provider gateway checks too ([apps/gateway](../../gateway/.context/CONTEXT.md)). The runner's
-total is the last heartbeat's `spentUsd` (model cost plus settled gateway calls; an open call
-counts nothing, the gateway holds its reservation itself) plus the model cost not yet sent, checked on each model cost and each acknowledged
+total is the last heartbeat's `spentUsd` (model cost plus the known cost of gateway calls; an open call
+or one with unknown cost counts nothing) plus the model cost not yet sent, checked on each model cost and each acknowledged
 heartbeat; at the cap `run.ts` stops the run and reports `ended failed` with
 `spend cap $X reached at $Y`. Calls in flight are aborted, not waited for. A claim of a run already over the cap stops before its first call. It applies to visitor runs too. The run loop ends the root thread `cancelled` in the event log while the run row says `failed` with the cap text.
 
@@ -204,6 +253,12 @@ heartbeat; at the cap `run.ts` stops the run and reports `ended failed` with
 and bills nothing for it. The adapter retries once on the uploaded file; a second 404 throws a
 message with Meta's body and every object asked for (name, box), saying the cause is this input or an outage and how to tell. It
 does not bisect: each successful probe costs a full SAM call ($0.07-0.10).
+
+# Runner: staging `/inputs`
+
+A mount marked `stage` is mounted privately under `/staged` while the sandbox starts, then copied to its public local path (for example `/staged/inputs` to `/inputs`) by `STAGE_SCRIPT` in `modal-sandbox.ts`. It makes every directory first, then runs `cp --parents` with up to 32 workers of 16 paths each. Making the directories first matters: parallel `cp --parents` calls that race to create one parent directory fail with `File exists`, which surfaced as `staging /inputs failed with exit code 123` (reproduced locally in 12 of 20 copies of an 800-file nested tree; 0 of 20 after). The source is listed once and the listing's exit status checked, so a listing that fails partway can't pass as complete. After each pass it compares that listing with a fresh one of the copy and re-copies only the files missing or the wrong size, up to three more passes, then fails naming them. The error keeps a bounded tail of the copy's stderr.
+
+Never replace this with a whole-copy retry: the input is about 943 MB and every thread stages its own copy.
 
 # Runner: what `/outputs` and `/scratch` support
 
@@ -213,12 +268,11 @@ Both are R2 bucket mounts (`modal-sandbox.ts`), so a file is written whole, once
 (local disk, lost on a sandbox restart) and `cp`s it in. The worker and check prompts
 (`prompts.ts`) and the bash tool description (`layout.ts`) say so.
 
-**`/scratch` stays an R2 mount**, though it is only intermediate files. Three things read it
-from the host, not from the sandbox: `segment_sam` reads its volume and writes its labels
-there (`RunLayout.keyOf`), a long bash output is stored there for the model to open
-(`toolOutputPath`), and a checkpoint's evidence may be a `scratch` file, which the host copies
-into the run's evidence (`r2-evidence.ts`). The restart note also promises it survives a restart.
-A local `/scratch` would break all three.
+**`/scratch` stays an R2 mount**, though it is only intermediate files. Two things need it to
+outlive a sandbox: a long bash output is stored there for the model to open (`toolOutputPath`),
+and a checkpoint's evidence may be a `scratch` file, which the host copies into the run's
+evidence (`r2-evidence.ts`, a server-side copy). The restart note also promises it survives a
+restart. A local `/scratch` would break all three.
 
 # Runner: who gets which task tools
 

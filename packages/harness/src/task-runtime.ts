@@ -28,7 +28,8 @@ import type { WorkflowPlan } from "@voluma/contracts/workflow";
 import { isSatisfied, transitiveDependents } from "@voluma/workflow";
 import type { ThreadLayout } from "./layout";
 import { declarationProblem, placementProblem, referenceProblem } from "./output-checks";
-import { type Evidence, EvidenceNotFound } from "./ports/evidence";
+import { type Evidence, EvidenceNotFound, EvidenceRefused } from "./ports/evidence";
+import type { Sandbox } from "./ports/sandbox";
 import type { PayloadOf, Recorder } from "./recorder";
 import { isThreadName, parseThreadId } from "./thread-id";
 import { startedFor, threadLog } from "./thread-log";
@@ -48,6 +49,8 @@ export interface Caller {
   taskId?: string;
   /** How many tool calls the reply that made this call holds (`ToolContext.batchSize`). */
   batchSize: number;
+  /** Aborts when the call is cancelled. */
+  signal: AbortSignal;
 }
 
 /** The call broke a rule; the message is what the model reads. */
@@ -62,6 +65,8 @@ export interface TaskRuntimeOptions {
    * layout asks `cited` for a checker's reads of the worker's scratch.
    */
   layoutOf(threadId: string, cited: (path: string) => boolean): ThreadLayout;
+  /** A thread's own sandbox (`sandboxSession.get`): evidence is hashed in it. */
+  sandbox(threadId: string, options?: { note?: boolean }): Promise<Sandbox>;
   /** The thread under which the run's first event is written. */
   rootThreadId: string;
   /** The plan the run starts with (written by `start`); later plans are `view().plan` (`plan.changed`). */
@@ -84,6 +89,21 @@ interface Target {
 
 type OutputInput = ReportOutputInput["output"];
 type FileInput = Extract<OutputInput, { kind: "file" }>["file"];
+
+/** The sandbox path of a file the task names: the inverse of `refOf`. */
+export const pathOf = (taskId: string, f: Pick<EvidenceRef, "root" | "path">): string =>
+  f.root === "scratch" ? `/scratch/${f.path}` : `/outputs/${taskId}/${f.path}`;
+
+/** The `{root, path}` of a sandbox path as a script prints it; only this task's outputs and the scratch have one. */
+export function refOf(taskId: string, path: string): Pick<EvidenceRef, "root" | "path"> {
+  const own = `/outputs/${taskId}/`;
+  if (path.startsWith(own)) return { root: "outputs", path: path.slice(own.length) };
+  if (path.startsWith("/scratch/"))
+    return { root: "scratch", path: path.slice("/scratch/".length) };
+  throw new Refusal(
+    `${path} is not a file this task can report: it is not under ${own} or /scratch/ (a file in another task's outputs is not yours to report).`,
+  );
+}
 
 /** The stored output: the file it names as its own is kept, and carries its sha256. */
 async function storedOutput(
@@ -112,7 +132,7 @@ async function storedOutput(
 }
 
 export function taskRuntime(options: TaskRuntimeOptions) {
-  const { recorder, evidence, runId, layoutOf, rootThreadId, abortThread } = options;
+  const { recorder, evidence, runId, layoutOf, sandbox, rootThreadId, abortThread } = options;
 
   let tail: Promise<unknown> = Promise.resolve();
   /** The per-run critical section: decisions run one at a time, each seeing every earlier write. */
@@ -340,6 +360,35 @@ export function taskRuntime(options: TaskRuntimeOptions) {
   }
 
   /**
+  /**
+   * The sha256 of a file, computed by the thread's sandbox: a scan-sized file stays off the
+   * host. The file goes in on stdin so the output never carries its name (GNU `sha256sum`
+   * escapes `\` and newline in names). `note: false`: this exec is the host's, so the restart
+   * note stays owed to the model's next command.
+   */
+  const sandboxHash = async (
+    threadId: string,
+    path: string,
+    signal: AbortSignal,
+  ): Promise<string> => {
+    let out = "";
+    let err = "";
+    let code = -1;
+    const command = `sha256sum < '${path.replaceAll("'", "'\\''")}'`;
+    const box = await sandbox(threadId, { note: false });
+    for await (const chunk of box.exec({ command, timeoutSeconds: 900 }, signal)) {
+      if (chunk.type === "exit") code = chunk.code;
+      else if (chunk.type === "stdout") out += chunk.data;
+      else if (chunk.type === "stderr") err += chunk.data;
+    }
+    const sha256 = /^[0-9a-f]{64}(?= )/.exec(out)?.[0];
+    if (code !== 0 || !sha256) {
+      throw new Error(`could not hash ${path} (exit ${code}): ${err.trim() || out.trim()}`);
+    }
+    return sha256;
+  };
+
+  /**
    * Keeps a file the calling thread named, if its own layout lets it read that path. A
    * `scratch` path is relative to the caller's own folder unless it starts with a thread name
    * of the run; the event stores the full form.
@@ -354,25 +403,31 @@ export function taskRuntime(options: TaskRuntimeOptions) {
       f.root === "scratch" && !isThreadName(f.path.split("/")[0] ?? "")
         ? { root: f.root, path: `${ownName}/${f.path}` }
         : { root: f.root, path: f.path };
-    const path =
-      file.root === "scratch" ? `/scratch/${file.path}` : `/outputs/${taskId}/${file.path}`;
+    const path = pathOf(taskId, file);
+    const layout = layoutOf(c.threadId, (p) => cites(taskId, p));
     try {
-      layoutOf(c.threadId, (p) => cites(taskId, p)).keyOf(path, "read");
+      layout.keyOf(path, "read");
     } catch (error) {
       throw new Refusal(
         `Evidence ${path} is not a file you can read: ${error instanceof Error ? error.message : error}`,
       );
     }
-    const sha256 = await evidence.keep(runId, taskId, file).catch((error) => {
-      if (!(error instanceof EvidenceNotFound)) throw error;
-      throw new Refusal(
-        `No file at ${path}. ${
-          file.root === "outputs"
-            ? `Cite an output file by its path inside /outputs/${taskId}/, e.g. {root: "outputs", path: "frame.json"}.`
-            : `Cite a file in your working folder as {root: "scratch", path: <path inside $SCRATCH>}.`
-        }`,
-      );
-    });
+    // Only a path the thread's sandbox mounts can be hashed there.
+    const mounted = layout.mounts.some((m) => path.startsWith(`${m.path}/`));
+    const hash = mounted ? () => sandboxHash(c.threadId, path, c.signal) : undefined;
+    const sha256 = await evidence
+      .keep(runId, taskId, file, { hash, signal: c.signal })
+      .catch((error) => {
+        if (error instanceof EvidenceRefused) throw new Refusal(error.message);
+        if (!(error instanceof EvidenceNotFound)) throw error;
+        throw new Refusal(
+          `No file at ${path}. ${
+            file.root === "outputs"
+              ? `Cite an output file by its path inside /outputs/${taskId}/, e.g. {root: "outputs", path: "frame.json"}.`
+              : `Cite a file in your working folder as {root: "scratch", path: <path inside $SCRATCH>}.`
+          }`,
+        );
+      });
     return { ...file, sha256 };
   };
 
