@@ -116,8 +116,6 @@ export function runRoutes({ runs, files, messages }: ReviewDeps) {
     const user = c.var.user;
     const reader = readerOf(user);
     const caller = callerOf(user);
-    const refusedAs = (r: { status: 403 | 404 | 409 | 429; error: string }) =>
-      c.json({ error: r.error }, r.status);
 
     let png: Uint8Array | undefined;
     if (snapshot) {
@@ -134,14 +132,11 @@ export function runRoutes({ runs, files, messages }: ReviewDeps) {
     const message = { id, payload };
 
     const checked = await messages.check(reader, caller, runId, message);
-    if ("refused" in checked) return refusedAs(checked.refused);
-    if (!checked.ok.duplicate && png) {
+    if (!checked.duplicate && png) {
       if (!files) throw new HTTPException(503, { message: "File storage is not configured." });
       await files.putSnapshot(runId, id, png);
     }
-    const sent = await messages.send(reader, caller, runId, message);
-    if ("refused" in sent) return refusedAs(sent.refused);
-    const { eventId, state } = sent.ok;
+    const { eventId, state } = await messages.send(reader, caller, runId, message);
     return c.json({ eventId, state } satisfies SendRunMessageResponse);
   });
 
