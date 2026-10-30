@@ -9,7 +9,7 @@
  * is sent, so a wake-up never carries data and a missed one is caught by the poll; that
  * also makes ordering, no gaps and no repeats a property of the cursor. Each read says
  * whether the run had ended in the same snapshot as its events (`eventLog.stream`), so a
- * short page from an ended run is the rest of the log and the stream closes.
+ * short page from an ended run is the rest of the log: the stream sends `event: end` and closes.
  *
  * Live frames (`notifier.publish`, from the runner's `/ingest/.../live`) are written between
  * log reads as `event: live` with no `id:`; they are not read from the log, and a frame is
@@ -22,7 +22,7 @@
  */
 
 import { setTimeout as sleep } from "node:timers/promises";
-import { LIVE_EVENT, type LiveFrame } from "@voluma/contracts/stream";
+import { END_EVENT, LIVE_EVENT, type LiveFrame } from "@voluma/contracts/stream";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { type AppEnv, requireReader } from "../../domain";
@@ -114,7 +114,11 @@ export function streamRoutes({ eventLog, notifier, shutdown }: RunDeps) {
                 break;
               }
             }
-            if (ended) break;
+            if (ended) {
+              // A browser that saw only the close would reconnect for its 204.
+              await stream.writeSSE({ event: END_EVENT, data: "end" });
+              break;
+            }
           }
           // No `id:`: a live frame must not move the browser's `Last-Event-ID` off the durable `seq`.
           const frames = live;

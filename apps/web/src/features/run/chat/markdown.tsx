@@ -48,8 +48,16 @@ export function StreamingText({ text, streaming }: { text: string; streaming: bo
   );
 }
 
-/** Markdown cut to a few lines, with "Show all" when there is more; `label` names what it is. */
-export function ClampedMarkdown({ text, label }: { text: string; label: string }) {
+/** Markdown cut to a few lines, with "Show all" when there is more; `label`, if given, names what it is. */
+export function ClampedMarkdown({
+  text,
+  label,
+  className = "",
+}: {
+  text: string;
+  label?: string;
+  className?: string;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [overflows, setOverflows] = useState(false);
@@ -63,11 +71,11 @@ export function ClampedMarkdown({ text, label }: { text: string; label: string }
     return () => observer.disconnect();
   }, []);
   return (
-    <section aria-label={label}>
-      <p className="text-meta font-medium text-muted-foreground">{label}</p>
+    <section aria-label={label} className={className}>
+      {label && <p className="text-meta font-medium text-muted-foreground">{label}</p>}
       {/* Four lines of `run-prose` (14 px at 1.625). */}
-      <div ref={ref} className={open ? "" : "max-h-[6.5em] overflow-hidden"}>
-        <Markdown text={text} />
+      <div ref={ref} className={open ? "text-sm" : "max-h-[6.5em] overflow-hidden text-sm"}>
+        <Markdown text={text} className="[color:inherit]" />
       </div>
       {(overflows || open) && (
         <button
