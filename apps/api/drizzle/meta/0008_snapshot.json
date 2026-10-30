@@ -1,6 +1,6 @@
 {
-  "id": "146079e2-0832-435a-99ff-02f744131422",
-  "prevId": "3d4daf36-3bc1-4827-8c83-60fd65513ec9",
+  "id": "2e640510-f052-49b5-92cf-661bbaa879cb",
+  "prevId": "5ab75a82-f93a-46c7-a187-38d847c0e537",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -210,12 +210,6 @@
         },
         "study_id": {
           "name": "study_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "workflow_id": {
-          "name": "workflow_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -729,7 +723,7 @@
           "name": "reserved_usd",
           "type": "double precision",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "cost_usd": {
           "name": "cost_usd",

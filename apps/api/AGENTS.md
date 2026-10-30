@@ -59,7 +59,7 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
 - `index.ts` is a mount list: `runs.ts` (browser routes: reads `requireReader`, writes `requireUser`), `studies.ts` (create, list, get), `ingest.ts` (runner
   routes, `requireService`), and a file per later route group. The Postgres adapters:
   `pg-queue.ts` owns every state change of a run (start, resume, cancel, claim, lease,
-  recovery) and the key vault, `pg-runs.ts` the reads, and the lease-checked
+  recovery) and the key vault, `pg-runs.ts` and `pg-studies.ts` the reads (one `resultsLoader` cache for both), and the lease-checked
   `pg-event-log.ts`/`pg-history.ts`; their port types are derived from them. `admission.ts`
   is the one limits check and the one message per refusal.
 - **Every run belongs to a study** (`studies`, `study_scans`; `runs.study_id` is not null), and
@@ -67,8 +67,12 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   (guests share one lab, so `lab_id` alone is not enough); `queue.start` checks `studyId` with
   it. `queue.createStudy` inserts the study, its scans and the runs to start in one
   transaction under the lock: any refusal throws `Refused` and rolls the whole call back, and
-  `startOne` counts the runs it already inserted against the limits. The seeded example has
-  its own study (`study-<exampleId>`, `example`), read-only like its run.
+  `startRuns` reads the counts once and raises them for each run it inserts. Every browser
+  write (start, create, cancel, resume) goes through `attempt`: a `Refused` rolls it back and
+  comes back as `{refused}`, and the visitor keys it held are dropped. `runs` has no workflow
+  column: `pgRunQueue` gets `pinsOf` and resolves the pins from the study. The seeded example has
+  its own study (`study-<exampleId>`, `example`), read-only like its run; `import:run` gives
+  an imported run a study of one the same way.
 - **Every transition holds one lock** (`QUEUE_LOCK`, a transaction advisory lock), so
   limit counts can't race. The lease is judged by the database's `now()`. An ingest write
   checks the run's lease token inside its own transaction (`assertLease`, `FOR SHARE`); a
@@ -84,8 +88,19 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   run whose keys its process doesn't hold to `awaiting-keys`. The vault holds at most 100
   runs per org (429), and `index.ts` caps every `/api` body at 256 KB (8 MB on `/api/run/ingest/*`, the trusted runner).
 - **Limits come from env** (`RUN_LIMITS_<ORG>_*`, read in `index.ts`); the workflow catalog
-  (`@voluma/workflow/bundled`) is code. `seed:example --from <runId>` makes an example run
-  (`src/domains/run/seed-example.ts`). Outage and restart behaviour: [.context/deploy.md](.context/deploy.md).
+  (`@voluma/workflow/bundled`) is code. `seed:example --from <runId> [--backfill <dir|r2:prefix>] [--remote]` makes an example run
+  (`src/domains/run/seed-example.ts`; it needs `GUEST_ORGANIZATION_ID`, the Demo organization, in `.env`). To get a run into a fresh local database:
+  `export:run --id <runId> --out <dir|r2:dev/…>` dumps its rows to `run.json`, and
+  `import:run --from <dir|r2:prefix> [--replace]` loads them (events are checked with
+  `runEventSchema`; an existing run is refused without `--replace`). Evidence stays in R2.
+  `r2:put --from <dir> --to r2:dev/<prefix>` uploads a folder. An `r2:` location is a prefix in the
+  `R2_BUCKET` the dev servers use (`r2-dir.ts`). Operator scripts use `DATABASE_URL`, else the
+  database `pnpm dev` wrote to `.dev/env.json`; each prints its database and bucket first, writes to
+  R2 only under `dev/`, and `import:run` / `seed:example` refuse a non-local database without
+  `--remote`. R2 is shared with staging, so a local seed names its example
+  `example-local-<runId>` (it refuses `example-<runId>`, the id staging reads, without `--remote`).
+  Shared dev data: `dev/runs/<runId>/` (dump) and `dev/backfill/<runId>/` (backfill folder) for
+  ce5a0f21-c948-4e20-a03f-04ff7f0e707b. Outage and restart behaviour: [.context/deploy.md](.context/deploy.md).
 
 ## Review domain (`src/domains/review`)
 
@@ -105,7 +120,7 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   `ReviewRun.review`; no persisted count is maintained. Unfinished/failed/cancelled runs
   have null summaries. Review mutations return/refetch snapshots; execution SSE closes
   at run end and does not continuously deliver human review changes.
-- Run list/get and study reads memoize at most 2048 derived results (`{summary, values, toCheck}`, all from one `reviewState(log)`), keyed by each run's latest
+- Run list/get and study reads memoize at most 2048 derived results (`{summary, tasks, values, toCheck}`, all from one `reviewState(log)`; least recently read out first), keyed by each run's latest
   event ID (ordered by sequence) in the same repeatable-read snapshot, including reseeded
   examples with reused sequence numbers. Cache misses load only fold/review
   events; hits load no event payloads. The event log remains the only durable review state.

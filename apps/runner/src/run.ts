@@ -445,7 +445,7 @@ async function claimBody(
       layout,
       recorder: events,
       history: client,
-      sandbox: (id) => opened.get(id),
+      sandbox: (id, options) => opened.get(id, options),
       releaseSandbox: (id) =>
         opened.release(id).catch((e) => log(`releasing ${layout.forThread(id).name} failed: ${e}`)),
       evidence: r2Evidence(config.r2),

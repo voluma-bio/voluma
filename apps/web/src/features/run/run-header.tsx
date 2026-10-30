@@ -181,7 +181,13 @@ function RunDetails({
           ],
         ] as [string, string][])
       : []),
-    ["Cost", formatUsd(spend.total.costUsd)],
+    [
+      "Cost",
+      // Paid tool calls cut off before their cost arrived add no dollars.
+      spend.total.unknownCostCalls > 0
+        ? `${formatUsd(spend.total.costUsd)} + ${spend.total.unknownCostCalls} unknown`
+        : formatUsd(spend.total.costUsd),
+    ],
     ...(budgetUsd !== null ? ([["Study budget", formatUsd(budgetUsd)]] as [string, string][]) : []),
     ["Workflow", workflow],
   ];

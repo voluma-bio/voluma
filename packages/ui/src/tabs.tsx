@@ -1,8 +1,10 @@
 /**
  * A row of tabs, each with an optional count, as in the study page's header
  * (Overview | To check 3 | Scans 5/8). It renders the tablist only: the page
- * renders the selected panel with `role="tabpanel"` and the id it passes as
- * `controls`. Arrow keys, Home and End move between tabs.
+ * renders the selected panel with `role="tabpanel"`, the id it passes as
+ * `controls`, and `aria-labelledby={tabId(controls, selected)}`. Arrow keys,
+ * Home and End move between tabs. The row never scrolls: on a narrow screen
+ * the page gives it a line of its own.
  */
 import { type KeyboardEvent, useRef } from "react";
 import { cx } from "./cx";
@@ -24,10 +26,13 @@ export type TabsProps<Id extends string> = {
   onChange: (id: Id) => void;
   /** Accessible name for the tab row. */
   label: string;
-  /** Id of the panel the page renders for the selected tab. */
-  controls?: string;
+  /** Id of the panel the page renders for the selected tab; the tabs' ids derive from it. */
+  controls: string;
   className?: string;
 };
+
+/** The id of tab `id` in the row whose panel is `controls`, for the panel's `aria-labelledby`. */
+export const tabId = (controls: string, id: string) => `${controls}-tab-${id}`;
 
 export function Tabs<Id extends string>({
   tabs,
@@ -60,7 +65,7 @@ export function Tabs<Id extends string>({
       role="tablist"
       aria-label={label}
       onKeyDown={onKeyDown}
-      className={cx("flex min-w-0 items-stretch gap-1 overflow-x-auto", className)}
+      className={cx("flex items-stretch gap-1", className)}
     >
       {tabs.map((tab) => {
         const selected = tab.id === value;
@@ -72,13 +77,14 @@ export function Tabs<Id extends string>({
               else refs.current.delete(tab.id);
             }}
             type="button"
+            id={tabId(controls, tab.id)}
             role="tab"
             aria-selected={selected}
             aria-controls={selected ? controls : undefined}
             tabIndex={selected ? 0 : -1}
             onClick={() => onChange(tab.id)}
             className={cx(
-              "relative -mb-px flex min-h-11 cursor-pointer items-center gap-2 border-b-2 px-3 text-sm font-medium whitespace-nowrap transition-colors",
+              "relative flex min-h-11 cursor-pointer items-center gap-2 border-b-2 px-3 text-sm font-medium whitespace-nowrap transition-colors",
               "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
               selected
                 ? "border-foreground text-foreground"

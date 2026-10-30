@@ -34,3 +34,17 @@
   (`claim-progress.ts`) replaced it, but it stays in `schema.ts` so the previous deploy's code,
   which still selects it, keeps working while a migration runs. Drop it in a later PR, once that
   code is drained.
+
+- **`seed:example --backfill` checks focus ids after its R2 writes.** `copyEvidence` and
+  `uploadBackfill` run before `backfillRows`'s focus check, so a bad id uploads ~2 GB under an unused
+  example id before refusing. Move the check into `readBackfill` and run it first; also check each
+  id's kind as the fold does (`volumeId` must be a labels volume). (review p563 of #178)
+- **`devWritePrefix` is a plain prefix match:** `r2:dev` writes at the root of `dev/`, and
+  `r2:dev//x` and `r2:dev/../runs/x` pass (R2's own 403 stopped the last). Require a segment after
+  `dev/` and reject empty, `.` and `..` segments. (p563)
+- `backfill.py`'s scan-grid ruler assert can't fail (both sides use the same transform); compare
+  against the `points` `export.py`'s `ruler()` writes. (p563)
+- **Drop `provider_calls.reserved_usd`.** Reservations are gone; nothing writes or reads the
+  column (0007 made it nullable so the old code still inserts during a deploy). Drop it in a
+  PR after the one that removed reservations is live, with the column out of
+  `packages/provider-calls/src/schema.ts`.

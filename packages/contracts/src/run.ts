@@ -200,24 +200,36 @@ export const selectedOutputsSchema = z
   .refine((ids) => new Set(ids).size === ids.length, "duplicate output id");
 
 /**
- * The provider gateway's per-call rows summed for one run. A finished call counts its cost,
- * a call cut off counts its reservation (the provider may still bill), an open call counts
- * nothing here (only the gateway's admission counts its reservation). `costUsd` and
- * `calls` cover every row; `bySandbox` covers the rows whose token was minted for a sandbox,
+ * The provider gateway's per-call rows summed for one run. `costUsd` is the sum of known
+ * costs. A call cut off before its usage arrived has an unknown cost (the provider may have
+ * billed it): it adds nothing to `costUsd` and is counted in `unknownCostCalls`, so a screen
+ * shows "cost unknown", not $0. A call still open counts nowhere. `costUsd`, `calls` and
+ * `unknownCostCalls` cover every row; `bySandbox` covers the rows whose token was minted for a sandbox,
  * by that sandbox's name (`<taskId>.worker[.n]`, as in its `sandbox` event).
  */
 export const providerCallsSchema = z.object({
   costUsd: z.number().nonnegative(),
   calls: z.number().int().nonnegative(),
+  unknownCostCalls: z.number().int().nonnegative().default(0),
   bySandbox: z.array(
     z.object({
       sandbox: z.string().min(1),
       costUsd: z.number().nonnegative(),
       calls: z.number().int().nonnegative(),
+      unknownCostCalls: z.number().int().nonnegative().default(0),
     }),
   ),
 });
 export type ProviderCalls = z.infer<typeof providerCallsSchema>;
+
+/**
+ * While a run is live (queued, running, awaiting keys): the tasks of its current plan that
+ * are finished (done or to check) out of all of them. Null before the plan is written and
+ * once the run has ended (its state and `review` say the rest).
+ */
+export const runTasksSchema = z
+  .object({ done: z.number().int().nonnegative(), total: z.number().int().nonnegative() })
+  .nullable();
 
 export const runSchema = z
   .object({
@@ -226,7 +238,7 @@ export const runSchema = z
     startedBy: userIdSchema,
     /** The study the run belongs to; its workflow is the run's. */
     studyId: studyIdSchema,
-    /** The pins the server resolved from the request's `workflowId`, as in `r2.ts`'s `workflowSnapshotPrefix`. */
+    /** The pins the server resolved from the study's workflow, as in `r2.ts`'s `workflowSnapshotPrefix`. */
     workflows: z.array(workflowPinSchema).min(1),
     input: inputSchema,
     /**
@@ -265,14 +277,7 @@ export const runSchema = z
     providerCalls: providerCallsSchema.optional(),
     /** Latest successfully completed results and their human review progress; null otherwise. */
     review: reviewSummarySchema.nullable(),
-    /**
-     * While the run is live (queued, running, awaiting keys): the tasks of its current plan
-     * that are finished (done or to check) out of all of them. Null before the plan is
-     * written and once the run has ended (its state and `review` say the rest).
-     */
-    tasks: z
-      .object({ done: z.number().int().nonnegative(), total: z.number().int().nonnegative() })
-      .nullable(),
+    tasks: runTasksSchema,
   })
   .refine(
     (run) =>

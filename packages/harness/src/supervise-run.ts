@@ -37,7 +37,7 @@ export interface SuperviseRunOptions {
   recorder: Recorder;
   history: History;
   /** A thread's own sandbox (`sandboxSession.get`). */
-  sandbox(threadId: string): Promise<Sandbox>;
+  sandbox(threadId: string, options?: { note?: boolean }): Promise<Sandbox>;
   /** Called when a thread ends: destroys its sandbox (`sandboxSession.release`). */
   releaseSandbox(threadId: string): void;
   evidence: Evidence;
@@ -84,6 +84,7 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
     evidence: options.evidence,
     runId,
     layoutOf: options.layout.forThread,
+    sandbox: options.sandbox,
     rootThreadId,
     plan: options.plan,
     abortThread: (id) => {

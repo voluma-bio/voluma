@@ -41,7 +41,7 @@ edit.
   researcher reads on the run page ("Segmented femur, tibia and patella; the fibula is outside the
   scan, so it is reported missing"): no grid ids, voxel boxes, paths or thresholds there; those go in
   its text.
-- `report_output` for every output the task declares: the value with its evidence, or null with the
-  reason.
+- `report_output` for every output the task declares: the value with its evidence; a measurement
+  that could not be made as null with the reason, anything else as `{kind: "missing", reason}`.
 - `submit_task` when all are reported. A checker inspects the task; if it finds a problem, the main
   agent sends it back to you with the finding, and you fix it in this session and submit again.

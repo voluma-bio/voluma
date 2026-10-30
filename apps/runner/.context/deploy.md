@@ -5,10 +5,14 @@ Railway's private network and runs them (sandboxes on Modal, files in R2). It se
 nothing. Project, environment and the `gql` helper are in
 [../../api/.context/deploy.md](../../api/.context/deploy.md); this file holds only what differs.
 
-## Temporary state (p540 staging plumbing run 3)
+## Staging plumbing run 3 (2026-10-29, p540)
 
-The staging runner is scaled from `numReplicas` 1 (recorded before the change) to 0 so it doesn't claim
-the test run. Restore it to 1 and confirm the runner is live in this session, even on failure.
+The runner was stopped (`deploymentStop` on its active deployment, 22:37:46 to 22:57:43 UTC) so it did
+not claim the test run, then restored with `deploymentRedeploy` once `dev-sandbox` held the run's
+lease; the log showed `up:` and the replica count was 1 throughout. Railway refuses `numReplicas`
+0 on both `serviceInstanceUpdate` and `environmentPatchCommit` (minimum 1). A commit to `main` that
+touches `apps/runner/**` (including this file) redeploys the runner, so a docs commit during a pause
+would restart it. Results of the run: [../../gateway/.context/deploy.md](../../gateway/.context/deploy.md).
 
 ## Staging plumbing probe (2026-10-29)
 

@@ -23,6 +23,11 @@ const count = (n: number) => n.toLocaleString();
 function spendRows(s: Spend): InfoSection["rows"] {
   const hit = cacheHitShare(s);
   const rows: InfoSection["rows"] = [["Cost", formatUsd(s.costUsd)]];
+  if (s.unknownCostCalls > 0)
+    rows.push([
+      "Cost unknown",
+      `${count(s.unknownCostCalls)} paid tool ${s.unknownCostCalls === 1 ? "call" : "calls"}`,
+    ]);
   if (s.toolCostUsd > 0) rows.push(["Paid tools", formatUsd(s.toolCostUsd)]);
   // `bash` calls only: the runs list's sandbox time is the sandbox's uptime, which is longer.
   rows.push(["Command time", formatDuration(s.sandboxSeconds)]);

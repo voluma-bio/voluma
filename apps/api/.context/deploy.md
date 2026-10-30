@@ -43,6 +43,8 @@ Variables on `@voluma/api`:
 | `WORKOS_COOKIE_PASSWORD` | `openssl rand -base64 32`; seals the session cookie |
 | `WORKOS_LAB_ORGANIZATION_ID` | the Yao Lab organization's id (`org_...`); its members get scope `lab` |
 | `GUEST_ORGANIZATION_ID`, `GUEST_SCOPE` | optional: let anyone in as a guest of this organization (`lab` or `self`, default `lab`). Staging runs open: the Demo organization (`WORKOS_DEMO_ORGANIZATION_ID`'s value) with `GUEST_SCOPE=self`; never the Yao Lab, whose data is for signed-in members only (startup throws if the guest organization is one members sign in to). Unset means the sign-in wall |
+
+**Guest sign-in is off on staging** (2026-10-29, Jimmy: closed when nobody is demoing, because a sandbox can reach the API through the gateway's domain and sign in as a guest). To open it for a demo, set `GUEST_ORGANIZATION_ID=org_01M609YS5PSWJSNT20NNKSTAA9` (the Demo organization) and `GUEST_SCOPE=self` on `@voluma/api`, then redeploy; to close it, delete both and redeploy. Check: `POST /api/auth/guest` with `Origin` and `content-type: application/json` answers 200 when open, 404 when closed. Judges sign in through `WORKOS_JUDGES_ORGANIZATION_ID` either way.
 | `WORKOS_JUDGES_ORGANIZATION_ID` | optional: the Judges organization's id; its members get scope `self`. Unset means no Judges sign-in |
 | `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | Optional as a group: enables Review's reference scan download, a run's files (`/api/review/runs/:runId/files/:sha256`, reads under `runs/<id>/evidence/`) and scan uploads. Use an Object Read & Write token scoped to `voluma-staging` (uploads presign PUTs to `uploads/` and move them to `inputs/`); only the server receives it. Missing or partial configuration leaves the API running and returns 503 for a reference scan download, a run file or an upload. `R2_BUCKET=voluma-staging`; object `reference/OA6-1RK/scan.zip` must be a plain ZIP with no `Content-Encoding` metadata. The descriptor's version pins the GET with `If-Match`; the API streams without buffering or redirecting to R2. The bucket's CORS has two rules, both for any origin: `scan-upload-put` allows `PUT` (the browser PUTs scan files straight to R2; the presigned URL is the credential) and `review-asset-get` allows `GET` and `HEAD` (review assets) |
 | `UPLOAD_MAX_FILES`, `UPLOAD_MAX_BYTES`, `UPLOAD_MAX_OPEN` | optional: files and bytes per scan upload (default 5000 and 20 GB), and uncompleted uploads per member (default 3) |
@@ -82,6 +84,8 @@ the old one, moves traffic once `/health` answers, then sends the old one SIGTER
 deployment then fails its healthcheck. So every migration must work with the code that is
 deployed now: expand first, contract in a later PR. The rule is in
 [../AGENTS.md](../AGENTS.md).
+
+**The studies migration (0008) is the one exception** (decisions.md): it adds `runs.study_id NOT NULL` and drops `runs.workflow_id` in one step, because there are no users and the nullable form would make the old code's run list throw. During the overlap every run read and write on the old process fails, because `workflow_id` is gone from the table (claim, heartbeat, list, get, start); runner heartbeats retry (`apps/runner/src/lease.ts`). If the new deployment fails `/health`, the whole run API is down until a fix deploys.
 
 ## What a restart or outage does to runs
 

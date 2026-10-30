@@ -101,6 +101,7 @@ export function taskTools(runtime: TaskRuntime) {
     toolCallId: ctx.toolCallId,
     batchSize: ctx.batchSize,
     kind: ctx.kind,
+    signal: ctx.signal,
     ...(ctx.taskId && { taskId: ctx.taskId }),
   });
   const checkpoint: Tool<typeof checkpointInputSchema> = {

@@ -18,7 +18,7 @@ import {
   type Usage as RunnerUsage,
 } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
-import { heldUsdOfRun } from "@voluma/provider-calls";
+import { knownUsdOfRun } from "@voluma/provider-calls";
 import { and, asc, desc, eq, gt, inArray, notInArray, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { Reader } from "../../domain";
@@ -145,40 +145,45 @@ const fail = (tx: Tx, runId: string, error: string) =>
 
 const NO_LIMITS = "This organization can no longer run work.";
 
-/** One run of a start call. `keys` present: a visitor run. */
-type RunRequest = {
-  id: string;
-  inputId: string;
+/** What the runs of one start call share: the credentials kind comes from `keys`. */
+type Starts = {
+  runs: { id: string; inputId: string }[];
   selectedOutputs?: string[];
   notes?: string;
   keys?: VisitorKeys;
 };
 
-export type StartRefusal =
+/** Why a write was refused; `Refusal` is a limit. */
+export type QueueRefusal =
   | Refusal
   | "no-input"
   | "input-not-ready"
   | "full"
   | "no-study"
   | "no-workflow"
-  | "example";
+  | "example"
+  | "not-found"
+  | "forbidden"
+  | "conflict";
 
-/** Thrown inside a start's transaction to roll it back whole. */
+/** Thrown inside a write's transaction to roll it back whole. */
 class Refused extends Error {
-  constructor(readonly reason: StartRefusal) {
+  constructor(readonly reason: QueueRefusal) {
     super(reason);
   }
 }
 
 /**
  * `limits` has every org the API serves (index.ts). An org missing from it is one no
- * longer configured: its queued runs fail and its running ones stop.
+ * longer configured: its queued runs fail and its running ones stop. `pinsOf` resolves a
+ * study's workflow id to the pins its runs record.
  */
 export function pgRunQueue(
   db: PostgresJsDatabase,
   limits: ReadonlyMap<string, Limits>,
   vault: KeyVault,
   notifier: Notifier,
+  pinsOf: (workflowId: string) => WorkflowPin[] | undefined,
 ) {
   const locked = <T>(work: (tx: Tx) => Promise<T>) =>
     db.transaction(async (tx) => {
@@ -193,18 +198,34 @@ export function pgRunQueue(
     return found;
   };
 
-  /** Runs a start under the lock; a `Refused` rolls it back, and any failure forgets the keys it held. */
+  type Hold = (runId: string, labId: string, keys: VisitorKeys) => boolean;
+
+  /**
+   * Runs a write of the browser under the lock. A `Refused` rolls it back and is the answer,
+   * `{ refused }`; any failure forgets the keys the work held through `hold`.
+   */
   const attempt = async <T>(
-    runIds: string[],
-    work: (tx: Tx) => Promise<T>,
-  ): Promise<T | { refused: StartRefusal }> => {
+    work: (tx: Tx, hold: Hold) => Promise<T>,
+  ): Promise<T | { refused: QueueRefusal }> => {
+    const held: string[] = [];
+    const hold: Hold = (runId, labId, keys) => {
+      const ok = vault.hold(runId, labId, keys);
+      if (ok) held.push(runId);
+      return ok;
+    };
     try {
-      return await locked(work);
+      return await locked((tx) => work(tx, hold));
     } catch (error) {
-      for (const id of runIds) vault.drop(id);
+      for (const id of held) vault.drop(id);
       if (error instanceof Refused) return { refused: error.reason };
       throw error;
     }
+  };
+
+  const pinsFor = (workflowId: string) => {
+    const pins = pinsOf(workflowId);
+    if (!pins) throw new Refused("no-workflow");
+    return pins;
   };
 
   /** Every input must be readable; an uncompleted upload exists only for its uploader. Returns them by id. */
@@ -229,38 +250,42 @@ export function pgRunQueue(
     return byId;
   };
 
-  /** Admits one run against the limits (counting the runs this transaction already inserted) and inserts it `queued`. */
-  const startOne = async (
+  /**
+   * Admits each of `starts.runs` against the limits and inserts it `queued`. The counts are
+   * read once, then raised by each run inserted, so the last run is judged with the others.
+   */
+  const startRuns = async (
     tx: Tx,
+    hold: Hold,
     reader: Reader,
     caller: { userId: string },
-    study: { id: string; workflowId: string; pins: WorkflowPin[] },
-    request: RunRequest,
+    study: { id: string },
+    pins: WorkflowPin[],
+    starts: Starts,
   ) => {
-    const credentials = request.keys ? "visitor" : "voluma";
-    const refused = admit(
-      "start",
-      limitsOf(reader.labId),
-      await usage(tx, reader.labId, { userId: caller.userId, credentials }),
-      { credentials },
-    );
-    if (refused) throw new Refused(refused);
-    if (request.keys && !vault.hold(request.id, reader.labId, request.keys)) {
-      throw new Refused("full");
+    if (starts.runs.length === 0) return;
+    const credentials = starts.keys ? "visitor" : "voluma";
+    const used = await usage(tx, reader.labId, { userId: caller.userId, credentials });
+    for (const { id, inputId } of starts.runs) {
+      const refused = admit("start", limitsOf(reader.labId), used, { credentials });
+      if (refused) throw new Refused(refused);
+      if (starts.keys && !hold(id, reader.labId, starts.keys)) throw new Refused("full");
+      await tx.insert(runs).values({
+        id,
+        labId: reader.labId,
+        startedBy: caller.userId,
+        studyId: study.id,
+        workflows: pins,
+        selectedOutputs: starts.selectedOutputs ?? null,
+        notes: starts.notes ?? null,
+        inputId,
+        credentials,
+        state: "queued",
+      });
+      used.callerUnfinished++;
+      if (credentials === "visitor") used.visitorActive++;
+      else used.waiting++;
     }
-    await tx.insert(runs).values({
-      id: request.id,
-      labId: reader.labId,
-      startedBy: caller.userId,
-      studyId: study.id,
-      workflowId: study.workflowId,
-      workflows: study.pins,
-      selectedOutputs: request.selectedOutputs ?? null,
-      notes: request.notes ?? null,
-      inputId: request.inputId,
-      credentials,
-      state: "queued",
-    });
   };
 
   return {
@@ -272,15 +297,11 @@ export function pgRunQueue(
     start: (
       reader: Reader,
       caller: { userId: string },
-      request: RunRequest & {
-        studyId: string;
-        /** The pins of a catalog workflow; the study says which. */
-        pinsOf: (workflowId: string) => WorkflowPin[] | undefined;
-      },
+      request: Omit<Starts, "runs"> & { id: string; studyId: string; inputId: string },
     ) =>
-      attempt([request.id], async (tx) => {
+      attempt(async (tx, hold) => {
         const [study] = await tx
-          .select({ workflowId: studies.workflowId, example: studies.example })
+          .select({ id: studies.id, workflowId: studies.workflowId, example: studies.example })
           .from(studies)
           .where(and(readableStudies(reader), eq(studies.id, request.studyId)));
         if (!study) throw new Refused("no-study");
@@ -292,84 +313,71 @@ export function pgRunQueue(
             and(eq(studyScans.studyId, request.studyId), eq(studyScans.inputId, request.inputId)),
           );
         if (!scan) throw new Refused("no-input");
-        const pins = request.pinsOf(study.workflowId);
-        if (!pins) throw new Refused("no-workflow");
         await checkInputs(tx, reader, caller, [request.inputId]);
-        await startOne(
-          tx,
-          reader,
-          caller,
-          { id: request.studyId, workflowId: study.workflowId, pins },
-          request,
-        );
+        await startRuns(tx, hold, reader, caller, study, pinsFor(study.workflowId), {
+          ...request,
+          runs: [{ id: request.id, inputId: request.inputId }],
+        });
         return { run: await loadRun(tx, request.id) };
       }),
 
     /**
-     * Creates a study, its scans and a `queued` run for each of `runs`, in one transaction:
-     * any refusal (an input, a limit, the vault) refuses the whole call and leaves nothing.
-     * Returns the study's id.
+     * Creates a study, its scans and a `queued` run for each of `starts.runs`, in one
+     * transaction: any refusal (an input, a limit, the vault) refuses the whole call and
+     * leaves nothing. Returns the study's id.
      */
     createStudy: (
       reader: Reader,
       caller: { userId: string },
       request: {
         study: Omit<typeof studies.$inferInsert, "labId" | "createdBy" | "example" | "createdAt">;
-        pins: WorkflowPin[];
         /** `subject` absent: the input's name. */
         scans: (Omit<typeof studyScans.$inferInsert, "studyId" | "position" | "subject"> & {
           subject?: string;
         })[];
         /** The runs to start now, one per scan to start. */
-        runs: (RunRequest & { inputId: string })[];
+        starts: Starts;
       },
     ) =>
-      attempt(
-        request.runs.map(({ id }) => id),
-        async (tx) => {
-          const found = await checkInputs(
-            tx,
-            reader,
-            caller,
-            request.scans.map((scan) => scan.inputId),
-          );
-          await tx.insert(studies).values({
-            ...request.study,
-            labId: reader.labId,
-            createdBy: caller.userId,
-          });
-          await tx.insert(studyScans).values(
-            request.scans.map((scan, position) => ({
-              ...scan,
-              subject: scan.subject ?? (found.get(scan.inputId)?.name as string),
-              studyId: request.study.id,
-              position,
-            })),
-          );
-          const study = {
-            id: request.study.id,
-            workflowId: request.study.workflowId,
-            pins: request.pins,
-          };
-          for (const run of request.runs) await startOne(tx, reader, caller, study, run);
-          return { studyId: request.study.id };
-        },
-      ),
+      attempt(async (tx, hold) => {
+        const pins = pinsFor(request.study.workflowId);
+        const found = await checkInputs(
+          tx,
+          reader,
+          caller,
+          request.scans.map((scan) => scan.inputId),
+        );
+        await tx.insert(studies).values({
+          ...request.study,
+          labId: reader.labId,
+          createdBy: caller.userId,
+        });
+        await tx.insert(studyScans).values(
+          request.scans.map((scan, position) => ({
+            ...scan,
+            subject: scan.subject ?? found.get(scan.inputId)!.name,
+            studyId: request.study.id,
+            position,
+          })),
+        );
+        await startRuns(tx, hold, reader, caller, request.study, pins, request.starts);
+        return { studyId: request.study.id };
+      }),
 
     /** Ends the run `cancelled` at once and forgets its keys. Example runs are read-only. */
     async cancel(reader: Reader, runId: string) {
-      const result = await locked(async (tx) => {
+      const result = await attempt(async (tx) => {
         const [run] = await loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId)));
-        if (!run) return "not-found" as const;
-        if (run.example) return "example" as const;
+        if (!run) throw new Refused("not-found");
+        if (run.example) throw new Refused("example");
         vault.drop(runId);
-        if (run.state.status === "ended") return run;
+        if (run.state.status === "ended") return { run };
         await cancelOpenThreads(tx, runId);
         await tx
           .update(runs)
           .set({ state: "ended", outcome: "cancelled", endedAt: sql`now()` })
           .where(eq(runs.id, runId));
-        return loadRun(tx, runId);
+        return { run: await loadRun(tx, runId) };
       });
       notifier.notify(runId);
       return result;
@@ -379,32 +387,21 @@ export function pgRunQueue(
      * `awaiting-keys` → `queued`, for the run's own starter, holding the new keys. The run
      * stays as it was when the visitor cap is reached or the vault is full.
      */
-    async resume(reader: Reader, userId: string, runId: string, keys: VisitorKeys) {
-      try {
-        return await locked(async (tx) => {
-          const [run] = await loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId)));
-          if (!run) return "not-found" as const;
-          if (run.startedBy !== userId) return "forbidden" as const;
-          if (run.state.status !== "awaiting-keys") return "conflict" as const;
-          const refused = admit(
-            "resume",
-            limitsOf(reader.labId),
-            await usage(tx, reader.labId),
-            run,
-          );
-          if (refused) return refused;
-          if (!vault.hold(runId, reader.labId, keys)) return "full" as const;
-          await tx
-            .update(runs)
-            .set({ state: "queued", awaitingSince: null })
-            .where(eq(runs.id, runId));
-          return loadRun(tx, runId);
-        });
-      } catch (error) {
-        vault.drop(runId);
-        throw error;
-      }
-    },
+    resume: (reader: Reader, userId: string, runId: string, keys: VisitorKeys) =>
+      attempt(async (tx, hold) => {
+        const [run] = await loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId)));
+        if (!run) throw new Refused("not-found");
+        if (run.startedBy !== userId) throw new Refused("forbidden");
+        if (run.state.status !== "awaiting-keys") throw new Refused("conflict");
+        const refused = admit("resume", limitsOf(reader.labId), await usage(tx, reader.labId), run);
+        if (refused) throw new Refused(refused);
+        if (!hold(runId, reader.labId, keys)) throw new Refused("full");
+        await tx
+          .update(runs)
+          .set({ state: "queued", awaitingSince: null })
+          .where(eq(runs.id, runId));
+        return { run: await loadRun(tx, runId) };
+      }),
 
     /**
      * One transaction: sweep expired leases, send the queued visitor runs whose keys this
@@ -518,7 +515,7 @@ export function pgRunQueue(
             return { stop: true };
           }
         }
-        const gateway = await heldUsdOfRun(tx, runId);
+        const gateway = await knownUsdOfRun(tx, runId);
         return { stop: false, spentUsd: run.modelCostUsd + used.modelCostUsd + gateway };
       }),
 

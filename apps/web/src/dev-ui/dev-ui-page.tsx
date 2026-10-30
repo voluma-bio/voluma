@@ -18,6 +18,7 @@ import {
   Table,
   type TableColumn,
   Tabs,
+  tabId,
 } from "@voluma/ui";
 import { type ReactNode, useState } from "react";
 
@@ -184,9 +185,12 @@ function TabsDemo({ theme }: { theme: string }) {
   const [tab, setTab] = useState<(typeof STUDY_TABS)[number]["id"]>("overview");
   return (
     <div className="grid grid-cols-1 gap-3">
-      <div className="flex h-13 items-stretch gap-6 border-b border-border bg-card px-4">
-        <h3 className="self-center font-semibold whitespace-nowrap">DMM knee study</h3>
+      <div className="flex flex-wrap items-stretch gap-x-6 border-b border-border bg-card px-4">
+        <h3 className="flex min-h-13 items-center font-semibold whitespace-nowrap">
+          DMM knee study
+        </h3>
         <Tabs
+          className="max-sm:-mx-4 max-sm:basis-[calc(100%+2rem)] max-sm:px-1"
           tabs={[...STUDY_TABS]}
           value={tab}
           onChange={setTab}
@@ -194,7 +198,12 @@ function TabsDemo({ theme }: { theme: string }) {
           controls={`study-panel-${theme}`}
         />
       </div>
-      <p id={`study-panel-${theme}`} role="tabpanel" className="text-ui text-muted-foreground">
+      <p
+        id={`study-panel-${theme}`}
+        role="tabpanel"
+        aria-labelledby={tabId(`study-panel-${theme}`, tab)}
+        className="text-ui text-muted-foreground"
+      >
         {STUDY_TABS.find((t) => t.id === tab)?.label} panel
       </p>
     </div>
@@ -245,6 +254,22 @@ const EQUAL: StripGroup[] = [
   },
 ];
 
+/* Integer grades, where many scans share a value. */
+const GRADES: StripGroup[] = [
+  {
+    name: "DMM",
+    points: [3, 3, 2, 3, 4, 3, 3, 2, 3, 3, 3, 4, 3, 3].map((value, i) => ({
+      id: `G${i}`,
+      label: `OA8-${i + 1}RK`,
+      value,
+    })),
+  },
+  {
+    name: "Sham",
+    points: [0, 1, 0, 0, 1, 0].map((value, i) => ({ id: `S${i}`, label: `OA8-${i + 1}LK`, value })),
+  },
+];
+
 function StripDemo() {
   const [opened, setOpened] = useState<string | null>(null);
   const open = (point: { label: string }) => setOpened(point.label);
@@ -270,6 +295,9 @@ function StripDemo() {
       </StripCard>
       <StripCard title="Ct.Th at 1000 µm, all equal" unit="mm">
         <StripPlot groups={EQUAL} unit="mm" label="Ct.Th at 1000 µm" digits={3} onSelect={open} />
+      </StripCard>
+      <StripCard title="OARSI grade, 14 against 6" unit="grade">
+        <StripPlot groups={GRADES} unit="grade" label="OARSI grade" digits={0} onSelect={open} />
       </StripCard>
       <p className="text-ui text-muted-foreground" role="status">
         {opened ? `Opened ${opened}` : "Select a dot"}

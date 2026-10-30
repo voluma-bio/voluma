@@ -20,6 +20,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
+import { pinsOf } from "@voluma/workflow/bundled";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -37,7 +38,8 @@ import { pgEventLog } from "./domains/run/pg-event-log";
 import { pgHistory } from "./domains/run/pg-history";
 import { pgRunQueue } from "./domains/run/pg-queue";
 import { pgRunRecords } from "./domains/run/pg-run-records";
-import { pgRunReads } from "./domains/run/pg-runs";
+import { pgRunReads, resultsLoader } from "./domains/run/pg-runs";
+import { pgStudyReads } from "./domains/run/pg-studies";
 import { pgUploads } from "./domains/run/pg-uploads";
 import { r2Uploads } from "./domains/run/r2-uploads";
 
@@ -125,9 +127,18 @@ const auth = createAuth({
 
 /** Aborts at SIGTERM so open event streams end and the drain isn't held. */
 const draining = new AbortController();
-const reads = pgRunReads(db);
+const results = resultsLoader();
+const reads = pgRunReads(db, results);
+const studies = pgStudyReads(db, results);
 const notifier = createNotifier();
-const queue = pgRunQueue(db, limits, new KeyVault(), notifier);
+const queue = pgRunQueue(
+  db,
+  limits,
+  new KeyVault(),
+  notifier,
+  // The repo whose `workflows/` a run uses; the runner adds the commit its checkout was at.
+  (id) => pinsOf("voluma-bio/voluma", id),
+);
 const eventLog = pgEventLog(db, notifier);
 
 const runRecords = pgRunRecords(db, notifier);
@@ -176,6 +187,7 @@ app.route(
   "/api/run",
   createRun({
     reads,
+    studies,
     queue,
     eventLog,
     notifier,
@@ -188,7 +200,6 @@ app.route(
       maxBytes: countFromEnv("UPLOAD_MAX_BYTES", 20_000_000_000),
       maxOpen: countFromEnv("UPLOAD_MAX_OPEN", 3),
     },
-    repo: "voluma-bio/voluma",
     shutdown: draining.signal,
   }),
 );

@@ -133,7 +133,7 @@ export function modalToken(): { tokenId: string; tokenSecret: string } | undefin
  * sandbox/Dockerfile by the "Sandbox image" workflow, which prints the new digest).
  */
 const SANDBOX_IMAGE =
-  "ghcr.io/voluma-bio/voluma-sandbox@sha256:b3ea9afcce0c839725afbea9dd15c4064f3d3a291665257be324d2b6c2c3f716";
+  "ghcr.io/voluma-bio/voluma-sandbox@sha256:659e2ce71c08dd232f7512672546d23f589596e41d061e2bf843e37211d3a4c2";
 
 /**
  * The commit this runner's checkout is at, which a run records as the source of its workflow
@@ -192,7 +192,7 @@ export function runnerConfig() {
     /**
      * A run whose spend (all claims, gateway calls included) reaches this is stopped and ends
      * `failed`. Unset: no cap (test runs have none). Sent with every claim when set: the gateway
-     * checks the same cap. A SAM call reserves $3 there, so the cap must leave room for it.
+     * checks the same cap against known spend before each call.
      */
     maxRunCostUsd: optionalPositiveNumber("RUNNER_MAX_RUN_COST_USD"),
     /** The run loop's limits (`LoopConfig`); the harness defaults are 2 fix rounds and 20 minutes. */

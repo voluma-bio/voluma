@@ -10,6 +10,7 @@
  *   to `costUsd` and `toolCostUsd`: `total` takes their `costUsd`, and each `bySandbox`
  *   entry's cost also goes to the task (or `main`) whose thread wrote the `sandbox` event with
  *   that `name`. They are not model calls, so `calls` stays the model calls that reported usage.
+ *   Calls whose cost is unknown (`unknownCostCalls`) add no dollars and are counted apart.
  * - A worker or check thread belongs to the task its `thread.started` names, so a task's
  *   spend covers all its attempts: worker, check and any redo. The root thread (the main
  *   agent's thread) belongs to no task: that is `main`. A chat thread counts only in `total`.
@@ -36,6 +37,8 @@ export type Spend = {
   costUsd: number;
   /** The paid tool calls' part of `costUsd`. */
   toolCostUsd: number;
+  /** Paid tool calls cut off before their usage arrived: their cost is unknown, and not in `costUsd`. */
+  unknownCostCalls: number;
   /** Model calls that reported usage. */
   calls: number;
   /** Uncached input tokens (`ModelUsage.input`). */
@@ -57,6 +60,7 @@ export type RunSpend = {
 const empty = (): Spend => ({
   costUsd: 0,
   toolCostUsd: 0,
+  unknownCostCalls: 0,
   calls: 0,
   input: 0,
   output: 0,
@@ -166,11 +170,13 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
   if (providerCalls) {
     total.costUsd += providerCalls.costUsd;
     total.toolCostUsd += providerCalls.costUsd;
-    for (const { sandbox, costUsd } of providerCalls.bySandbox) {
+    total.unknownCostCalls += providerCalls.unknownCostCalls;
+    for (const { sandbox, costUsd, unknownCostCalls } of providerCalls.bySandbox) {
       const s = owner.get(sandboxOwner.get(sandbox) ?? "");
       if (s) {
         s.costUsd += costUsd;
         s.toolCostUsd += costUsd;
+        s.unknownCostCalls += unknownCostCalls;
       }
     }
   }
