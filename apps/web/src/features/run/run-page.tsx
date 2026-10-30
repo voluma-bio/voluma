@@ -1,55 +1,33 @@
 /**
- * The live run (`/runs/:id/live`): the run's status with Stop, what needs attention, the main
- * thread's transcript (the run's orchestration, with each worker and checker as a card), the
- * workers and checkers running now, and the run's progress in a rail: each task's state and
- * outcome, and the values reported so far. `?thread=<id>` shows that thread's own transcript in
- * place of the main one. Everything is derived from the run's stream:
- * durable events (`run-model.ts`, `transcript.ts`, and `@voluma/contracts/fold` for task status)
- * plus live frames for the reply being written.
+ * The run page (`/runs/:id/live`): a header with where the run is and what is left to check, the
+ * plan's tasks as a flowchart, and beside it the Overview (working on now, needs your eye,
+ * results), one task (`?task=<id>`), or what the lead AI decided (`?view=decisions`).
+ * Everything is derived from the run's stream (`run-model.ts`, `transcript.ts`) and `getRun`,
+ * polled for what isn't an event (queue place, state, review progress).
  */
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiError, cancelRun, getRun, resendKeys, subscribe } from "@voluma/api-client";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ApiError, getRun, getStudy, subscribe } from "@voluma/api-client";
 import type { Me } from "@voluma/contracts/auth";
 import type { RunEvent } from "@voluma/contracts/events";
-import { fold } from "@voluma/contracts/fold";
 import type { Run } from "@voluma/contracts/run";
-import { Button } from "@voluma/ui";
-import { KeysForm, RunBadge, runStatus } from "@voluma/ui/run";
-import { workflowName } from "@voluma/workflow/bundled";
 import { ArrowLeft } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useOutletContext, useParams, useSearchParams } from "react-router";
-import { AgentMark, Elapsed, RunningStrip, ThreadCost, ThreadSpendInfo } from "./agents";
+import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from "react-router";
 import { DisclosureProvider } from "./chat/disclosure-store";
-import { ProcessDisclosure } from "./chat/process-disclosure";
-import { ThreadNavigationProvider, useOpenThread } from "./chat/thread-navigation";
-import {
-  type Attention,
-  haltOf,
-  runView,
-  type Thread,
-  threadName,
-  withLiveCalls,
-} from "./run-model";
-import { RunSpendSummary } from "./spend";
-import { OutputList, TaskList } from "./task-progress";
-import {
-  applyFrame,
-  type Live,
-  mainRows,
-  noLive,
-  type Settled,
-  settle,
-  threadRows,
-} from "./transcript";
+import { ThreadNavigationProvider } from "./chat/thread-navigation";
+import { Overview, useAccepting } from "./overview";
+import { RunAlerts, RunHeader } from "./run-header";
+import { haltOf, runView, withLiveCalls } from "./run-model";
+import { TaskFlow } from "./task-flow";
+import { TaskView } from "./task-view";
+import { applyFrame, type Live, mainRows, noLive, type Settled, settle } from "./transcript";
 import { TranscriptView } from "./transcript-view";
 
 /**
  * The run's stream as it arrives: durable events, and live frames folded until their durable
  * event lands. Published at most once per animation frame: a busy run sends many per second.
  * `events` keeps its identity while only frames arrive, so the event derivations don't rerun
- * per token. `closed` once the stream is over for good, when the log is whole; live partials are
- * dropped then: nothing will complete them.
+ * per token. Once the stream is over for good, live partials are dropped: nothing will complete them.
  */
 function useRunStream(
   runId: string,
@@ -105,45 +83,67 @@ function useRunStream(
   return state;
 }
 
+/** Keyed on the run: nothing of one run's stream or decisions carries over to the next. */
 export function RunPage() {
   const { id = "" } = useParams();
+  return <RunOf key={id} id={id} />;
+}
+
+function RunOf({ id }: { id: string }) {
   const me = useOutletContext<Me>();
   const queryClient = useQueryClient();
-  const [params, setParams] = useSearchParams();
+  const navigate = useNavigate();
+  const [params] = useSearchParams();
   const run = useQuery({
     queryKey: ["run", id],
     queryFn: () => getRun(id),
     // Queue position and state changes aren't events; the stream is the source for the rest.
     refetchInterval: (q) => (q.state.data?.state.status === "ended" ? false : 3000),
   });
+  const studyId = run.data?.studyId;
+  // Labels only (the study's name and size, the scan's mouse, knee and group): read once.
+  const study = useQuery({
+    queryKey: ["study", studyId],
+    queryFn: () => getStudy(studyId ?? ""),
+    enabled: studyId !== undefined,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
   const { events, live, closed } = useRunStream(id, () => void run.refetch());
   const state = run.data?.state;
   // Query's structural sharing keeps `state` the same object across polls that change nothing.
   const halt = useMemo(() => state && haltOf(state, closed), [state, closed]);
-  const folded = useMemo(() => fold(events), [events]);
   const providerCalls = run.data?.providerCalls;
+  // Not shown until the run has loaded; until then any state will do.
   const view = useMemo(
-    () => runView(events, folded, halt, providerCalls),
-    [events, folded, halt, providerCalls],
+    () => runView(events, state ?? { status: "queued", position: 1 }, providerCalls, halt),
+    [events, state, providerCalls, halt],
   );
   const threads = useMemo(() => withLiveCalls(view.threads, live), [view.threads, live]);
-  const threadById = useMemo(() => new Map(threads.map((t) => [t.id, t])), [threads]);
-  // The root thread spans the run; the main agent's threads (`main`, `main.2`, ...) are the page's transcript.
-  const root = threads.find((t) => t.kind === "supervisor");
-  const openId = params.get("thread");
-  const opened = openId ? threadById.get(openId) : undefined;
-  const open = opened?.kind === "main" || opened?.kind === "supervisor" ? undefined : opened;
-  const rows = useMemo(
-    () => (open ? threadRows(events, open.id, live, halt) : mainRows(events, live, halt)),
-    [events, live, halt, open],
+  const base = `/runs/${encodeURIComponent(id)}/live`;
+  const search = useCallback(
+    (taskId?: string, v?: "decisions") =>
+      taskId ? `${base}?task=${encodeURIComponent(taskId)}` : v ? `${base}?view=${v}` : base,
+    [base],
   );
+  // An agent card's name in the lead AI's transcript opens its task.
   const openThread = useCallback(
-    (threadId: string | null) => setParams(threadId ? { thread: threadId } : {}),
-    [setParams],
+    (threadId: string | null) => {
+      const taskId = threadId ? threads.find((t) => t.id === threadId)?.taskId : undefined;
+      navigate(search(taskId));
+    },
+    [threads, navigate, search],
   );
+  const setRun = useCallback(
+    (next: Run | ((run: Run) => Run)) =>
+      queryClient.setQueryData<Run>(["run", id], (run) =>
+        typeof next === "function" ? run && next(run) : next,
+      ),
+    [queryClient, id],
+  );
+  const refetch = useCallback(() => void run.refetch(), [run.refetch]);
 
   if (run.isPending) return <Message>Loading run…</Message>;
-  if (run.isError) {
+  if (!run.data) {
     return (
       <Message>
         {run.error instanceof ApiError && run.error.status === 404
@@ -155,103 +155,156 @@ export function RunPage() {
       </Message>
     );
   }
-
-  const data = run.data;
-  const ended = halt?.kind === "ended";
-  const { attention, plan, tasks, outputs, progress, spend } = view;
-  const setRun = (next: Run) => queryClient.setQueryData(["run", id], next);
-  const progressPanel = plan && (
-    <>
-      <TaskList tasks={tasks} />
-      <OutputList outputs={outputs} />
-    </>
+  return (
+    <RunScreen
+      run={run.data}
+      stale={run.isError}
+      study={study.data}
+      me={me}
+      events={events}
+      live={live}
+      halt={halt}
+      view={view}
+      threads={threads}
+      params={params}
+      search={search}
+      openThread={openThread}
+      setRun={setRun}
+      refetch={refetch}
+    />
   );
-  const tasksLabel = plan ? `Tasks: ${progress}` : "Tasks";
+}
+
+function RunScreen({
+  run,
+  stale,
+  study,
+  me,
+  events,
+  live,
+  halt,
+  view,
+  threads,
+  params,
+  search,
+  openThread,
+  setRun,
+  refetch,
+}: {
+  run: Run;
+  /** The last poll failed: what is shown may be out of date. */
+  stale: boolean;
+  study: Parameters<typeof RunHeader>[0]["study"];
+  me: Me;
+  events: RunEvent[];
+  live: Live;
+  halt: ReturnType<typeof haltOf>;
+  view: ReturnType<typeof runView>;
+  threads: ReturnType<typeof withLiveCalls>;
+  params: URLSearchParams;
+  search: (taskId?: string, v?: "decisions") => string;
+  openThread: (threadId: string | null) => void;
+  setRun: (next: Run | ((run: Run) => Run)) => void;
+  refetch: () => void;
+}) {
+  const accepting = useAccepting(run, setRun, refetch);
+  const { tasks } = view;
+  const taskId = params.get("task") ?? undefined;
+  const task = taskId ? tasks.find((t) => t.id === taskId) : undefined;
+  const decisions = !taskId && params.get("view") === "decisions";
+  const ended = run.state.status === "ended";
+  const titles = useMemo(() => new Map(tasks.map((t) => [t.id, t.title])), [tasks]);
+  const needs = tasks.flatMap((t) => t.needs);
+  // An ended run's stream is closed, so a "Looks right" made here counts from `accepting.done`.
+  // An ended run that takes no decisions (failed, cancelled, an example) has nothing to count.
+  const toCheck =
+    ended && !accepting.enabled
+      ? 0
+      : view.progress.toCheck -
+        needs.filter((n) => n.acceptable && !n.accepted && accepting.done.has(n.id)).length;
+  const firstOpen = needs.find((n) => !n.accepted && !accepting.done.has(n.id));
+
+  let content: React.ReactNode;
+  if (taskId && !task)
+    content = (
+      <Message>
+        {tasks.length === 0
+          ? "The tasks appear when the run starts."
+          : "This task isn't in the run's plan."}
+      </Message>
+    );
+  else if (task)
+    content = (
+      <TaskView
+        runId={run.id}
+        task={task}
+        titleOf={(t) => titles.get(t) ?? t}
+        accepting={accepting}
+        search={search}
+        events={events}
+        live={live}
+        halt={halt}
+      />
+    );
+  else if (decisions)
+    content = (
+      <Decisions
+        events={events}
+        live={live}
+        halt={halt}
+        threads={threads}
+        back={search()}
+        lead={view.hasLead}
+      />
+    );
+  else if (tasks.length === 0)
+    content = (
+      <p className="text-ui text-muted-foreground">
+        {ended ? "This run ended before it made a plan." : "The tasks appear when the run starts."}
+      </p>
+    );
+  else
+    content = (
+      <Overview
+        runId={run.id}
+        tasks={tasks}
+        toCheck={toCheck}
+        ended={ended}
+        example={run.example}
+        accepting={accepting}
+        search={search}
+      />
+    );
 
   return (
     <DisclosureProvider>
       <ThreadNavigationProvider onOpenThread={openThread}>
-        <main className="flex min-h-0 flex-1 flex-col">
-          <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-6 py-3 max-[1100px]:px-4">
-            <h1 className="text-lg font-semibold">{data.input.name}</h1>
-            <RunBadge run={data} />
-            <span className="min-w-0 truncate text-ui text-muted-foreground">
-              {workflowName(data.workflows[0]?.path)}
-              {runStatus(data).detail ? `, ${runStatus(data).detail}` : ""}
-            </span>
-            <span className="ml-auto flex items-center gap-2">
-              <RunSpendSummary
-                spend={spend}
-                since={root?.status === "running" ? events.at(-1)?.createdAt : undefined}
-              />
-              <RunActions run={data} onChange={setRun} />
-            </span>
-          </header>
-          <RunAlerts run={data} userId={me.userId} onChange={setRun} />
-
-          <div className="flex min-h-0 flex-1">
-            <section className="flex min-w-0 flex-1 flex-col">
-              <AttentionStrip items={attention} />
-              {plan && (
-                <div className="hidden border-b border-border px-4 py-1 max-[1100px]:block">
-                  <ProcessDisclosure label={tasksLabel}>
-                    <div className="max-h-[50dvh] overflow-y-auto pr-1 pb-2">{progressPanel}</div>
-                  </ProcessDisclosure>
-                </div>
-              )}
-              {open ? (
-                <ThreadBar thread={open} />
-              ) : (
-                <div className="px-6 max-[1100px]:px-4">
-                  <RunningStrip
-                    threads={threads.filter(
-                      (t) => t.status === "running" && (t.kind === "worker" || t.kind === "check"),
-                    )}
-                  />
-                </div>
-              )}
-              {openId && !opened ? (
-                <Message>This thread isn't in the run yet.</Message>
-              ) : (
-                <TranscriptView
-                  key={open?.id ?? "main"}
-                  rows={rows}
-                  threads={threadById}
-                  live={
-                    open
-                      ? open.status === "running"
-                        ? (open.liveTool ?? "Thinking")
-                        : null
-                      : !halt && events.length > 0
-                        ? ""
-                        : null
-                  }
-                  empty={
-                    ended
-                      ? "This run ended before it started."
-                      : open
-                        ? "Nothing has happened in this thread yet."
-                        : "The run's story appears here once it starts."
-                  }
-                />
-              )}
-            </section>
-            <aside
-              aria-label="Tasks"
-              className="w-[23rem] shrink-0 overflow-y-auto border-l border-border px-5 py-4 max-[1100px]:hidden"
+        <main className="flex min-h-0 flex-1 flex-col max-[1100px]:overflow-y-auto">
+          <RunHeader
+            run={run}
+            study={study}
+            progress={{ ...view.progress, toCheck }}
+            spend={view.spend}
+            openTask={task?.id ?? firstOpen?.taskId}
+            decisions={search(undefined, "decisions")}
+            onChange={setRun}
+          />
+          {stale && (
+            <p
+              role="status"
+              className="border-b border-border bg-muted px-6 py-1.5 text-meta text-muted-foreground max-[1100px]:px-4"
             >
-              <h2 className="mb-3 text-ui font-medium">
-                Tasks
-                {plan && <span className="ml-2 font-normal text-muted-foreground">{progress}</span>}
-              </h2>
-              {progressPanel ?? (
-                <p className="text-ui text-muted-foreground">
-                  {ended
-                    ? "This run ended before it made a plan."
-                    : "The tasks appear when the run starts."}
-                </p>
-              )}
-            </aside>
+              Couldn't reach the server. Showing what was loaded; retrying.
+            </p>
+          )}
+          <div className="flex min-h-0 flex-1 max-[1100px]:flex-col">
+            <TaskFlow tasks={tasks} selected={task?.id} search={search} />
+            <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-9 pt-6 pb-24 max-[1100px]:overflow-visible max-[1100px]:px-4 max-[1100px]:pt-4">
+              <div className="mx-auto max-w-[55rem]">
+                <RunAlerts run={run} userId={me.userId} onChange={setRun} />
+                {content}
+              </div>
+            </div>
           </div>
         </main>
       </ThreadNavigationProvider>
@@ -259,160 +312,49 @@ export function RunPage() {
   );
 }
 
-/** Above an opened thread: the way back, its name, state and clock, and its usage. */
-function ThreadBar({ thread }: { thread: Thread }) {
-  const open = useOpenThread();
-  return (
-    <div className="flex min-w-0 items-center gap-2 border-b border-border px-6 py-2 max-[1100px]:px-4">
-      <button
-        type="button"
-        onClick={() => open(null)}
-        className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-ui text-primary-text hover:bg-accent"
-      >
-        <ArrowLeft className="size-3.5" aria-hidden />
-        Main thread
-      </button>
-      <span className="text-fg-subtle" aria-hidden>
-        /
-      </span>
-      <AgentMark thread={thread} />
-      <h2 className="min-w-0 truncate text-ui font-medium">{threadName(thread)}</h2>
-      <span className="ml-auto" />
-      <ThreadCost thread={thread} />
-      <Elapsed thread={thread} />
-      <ThreadSpendInfo thread={thread} />
-    </div>
-  );
-}
-
-/** What needs a person first: failures, To check items and checks that want review. */
-function AttentionStrip({ items }: { items: Attention[] }) {
-  const open = useOpenThread();
-  if (items.length === 0) return null;
-  return (
-    <section
-      aria-label="Needs attention"
-      className="grid gap-1 border-b border-border px-6 py-2 max-[1100px]:px-4"
-    >
-      {items.map((i) => (
-        <button
-          key={i.id}
-          type="button"
-          onClick={() => open(i.threadId)}
-          className={`truncate rounded-lg px-3 py-1.5 text-left text-ui hover:underline ${
-            i.tone === "check"
-              ? "bg-check-tint text-check-strong"
-              : "bg-destructive-tint text-destructive"
-          }`}
-        >
-          {i.text}
-        </button>
-      ))}
-    </section>
-  );
-}
-
-function OpenReview({ runId, primary }: { runId: string; primary?: boolean }) {
-  return (
-    <Link
-      to={`/runs/${runId}`}
-      className={`inline-flex h-8 items-center rounded-lg px-3.5 text-ui font-medium ${
-        primary
-          ? "bg-primary text-primary-foreground hover:bg-primary-strong"
-          : "border border-border hover:bg-muted"
-      }`}
-    >
-      Open review
-    </Link>
-  );
-}
-
-/** Open review once the run has started, or once completed; Stop, with a confirm, while the run is not over. */
-function RunActions({ run, onChange }: { run: Run; onChange: (run: Run) => void }) {
-  const [confirming, setConfirming] = useState(false);
-  const cancel = useMutation({ mutationFn: () => cancelRun(run.id), onSuccess: onChange });
-  const { state } = run;
-  if (state.status === "ended")
-    return state.outcome === "completed" ? <OpenReview runId={run.id} primary /> : null;
+/** The lead AI's own thread: its briefs, its decisions with their reasons, plan changes. */
+function Decisions({
+  events,
+  live,
+  halt,
+  threads,
+  back,
+  lead,
+}: {
+  events: RunEvent[];
+  live: Live;
+  halt: ReturnType<typeof haltOf>;
+  threads: ReturnType<typeof withLiveCalls>;
+  back: string;
+  /** The run has a lead AI thread; older runs show only where each task's AI started. */
+  lead: boolean;
+}) {
+  const rows = useMemo(() => mainRows(events, live, halt), [events, live, halt]);
+  const threadById = useMemo(() => new Map(threads.map((t) => [t.id, t])), [threads]);
+  const leadRunning = threads.some((t) => t.kind === "main" && t.status === "running");
   return (
     <>
-      {state.status !== "queued" && state.startedAt && <OpenReview runId={run.id} />}
-      {cancel.isError && (
-        <span role="alert" className="text-ui text-destructive">
-          Couldn't stop the run. Try again.
-        </span>
+      <Link
+        to={back}
+        className="inline-flex items-center gap-1 text-ui font-medium text-primary-text hover:underline"
+      >
+        <ArrowLeft className="size-3.5" aria-hidden />
+        Overview
+      </Link>
+      <h2 className="mt-2 mb-4 text-xl font-semibold">What the AI decided</h2>
+      {!lead && rows.length > 0 && (
+        <p className="mb-4 text-ui text-muted-foreground">
+          This run predates the lead AI's own record: it shows where each task's AI started.
+        </p>
       )}
-      {confirming ? (
-        <>
-          <span className="text-ui">Stop this run?</span>
-          <Button
-            size="sm"
-            variant="quiet"
-            disabled={cancel.isPending}
-            onClick={() => cancel.mutate()}
-          >
-            {cancel.isPending ? "Stopping…" : "Stop run"}
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setConfirming(false)}>
-            Keep running
-          </Button>
-        </>
-      ) : (
-        <Button size="sm" onClick={() => setConfirming(true)}>
-          Stop run
-        </Button>
-      )}
+      <TranscriptView
+        rows={rows}
+        threads={threadById}
+        live={leadRunning ? "" : null}
+        empty="Nothing yet: the lead AI starts when the run does."
+      />
     </>
   );
-}
-
-/** The run's own problems: it is waiting for the keys of the user who started it, or it failed. */
-function RunAlerts({
-  run,
-  userId,
-  onChange,
-}: {
-  run: Run;
-  userId: string;
-  onChange: (run: Run) => void;
-}) {
-  const resend = useMutation({
-    mutationFn: (keys: Parameters<typeof resendKeys>[1]) => resendKeys(run.id, keys),
-    onSuccess: onChange,
-  });
-  const { state } = run;
-  if (state.status === "awaiting-keys" && run.startedBy === userId)
-    return (
-      <section className="mx-6 mt-3 max-w-sm rounded-xl border border-check-line bg-check-tint p-4">
-        <h2 className="font-medium text-check-strong">The run is waiting for your keys</h2>
-        <p className="mt-1 mb-3 text-ui text-check-strong">
-          The server restarted and no longer has them. Send them again to continue.
-        </p>
-        <KeysForm
-          userId={userId}
-          submitLabel="Continue the run"
-          busy={resend.isPending}
-          onSubmit={(keys) => resend.mutate(keys)}
-        />
-        {resend.isError && (
-          <p role="alert" className="mt-2 text-ui text-destructive">
-            {resend.error instanceof ApiError && resend.error.status === 429
-              ? "Too many runs are waiting right now. Try again shortly."
-              : "Couldn't send the keys. Try again."}
-          </p>
-        )}
-      </section>
-    );
-  if (state.status === "ended" && state.outcome === "failed" && state.error)
-    return (
-      <p
-        role="alert"
-        className="border-b border-border bg-destructive-tint px-6 py-2 text-ui text-destructive"
-      >
-        {state.error}
-      </p>
-    );
-  return null;
 }
 
 function Message({ children }: { children: React.ReactNode }) {

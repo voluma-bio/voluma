@@ -44,7 +44,7 @@ import {
   type ReviewSnapshot,
   reviewSnapshotSchema,
 } from "@voluma/contracts/snapshot";
-import { LIVE_EVENT, type LiveFrame, liveFrameSchema } from "@voluma/contracts/stream";
+import { END_EVENT, LIVE_EVENT, type LiveFrame, liveFrameSchema } from "@voluma/contracts/stream";
 import {
   type CreateStudyRequest,
   listStudiesResponseSchema,
@@ -511,6 +511,11 @@ export function subscribe(
       }
     });
   }
+  // The run ended and every event has been sent; closing here skips the reconnect for a 204.
+  source.addEventListener(END_EVENT, () => {
+    source.close();
+    handlers.onClosed?.();
+  });
   source.onerror = () => {
     if (source.readyState === EventSource.CLOSED) handlers.onClosed?.();
   };
