@@ -41,7 +41,7 @@ structure in two pieces is two components, each labelled. A model's name for a p
 
 The scan's notes come before any naming. A structure is **absent** when the notes put it
 outside the field or cut off (overrule them only with a render you cite), or when no candidate sits where the
-anatomy puts it after you looked; write the structure and the reason in the checkpoint. Its outputs: `null` with the
+anatomy puts it after you looked; write the structure and the reason in the checkpoint, and report the structure as `{kind: "missing", reason}`. Its measurements: `null` with the
 reason when nothing could be measured (outside the field, cut off); `0` with a note when its region is in the field
 and holds none. Never substitute a look-alike piece to fill an output. Raise a To check item when the notes and the
 CT disagree, or when the anatomy expects a structure, none is there and the notes say nothing.
@@ -74,5 +74,5 @@ checks, the quad view and the 3D sheet again.
 
 `checkpoint` with `toCheck: {title, focus: {on: [block ids], volumeId?, label?}}` (`on` required):
 the title gives the place and the question ("Joint face, slices 140-170: bone A or bone B?"), the text both methods'
-labels and the one kept. The focus resolves only when the task that made `disagreement.npy` reports it as a
-`volume` output of kind `labels`.
+labels and the one kept. The focus resolves only when `disagreement.npy` is reported: run `disagree.py` with `--object-id` set to the id
+the workflow declares for it, and pass its record's `objects` entry to `report_output`.

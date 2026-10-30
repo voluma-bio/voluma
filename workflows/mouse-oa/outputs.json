@@ -32,6 +32,14 @@
     "task": "segmentation"
   },
   {
+    "id": "disagreement",
+    "name": "Segmentation disagreement",
+    "kind": "volume",
+    "volumeKind": "labels",
+    "region": "disagreement.npy from disagree.py on the scan grid: the regions where your labels and the classic method's differ, for To check items to point at",
+    "task": "segmentation"
+  },
+  {
     "id": "femur",
     "name": "Femur",
     "kind": "structure",
