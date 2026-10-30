@@ -6,14 +6,15 @@
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, startRun } from "@voluma/api-client";
+import { allStudiesKey } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
 import type { VisitorKeys } from "@voluma/contracts/run";
 import type { StudyDetail, StudyScanDetail } from "@voluma/contracts/study";
-import { Button, StatusBadge, Table, type TableColumn } from "@voluma/ui";
-import { loadKeys, RunKeyLine } from "@voluma/ui/run";
+import { loadKeys, RunKeyLine } from "@voluma/run-view";
+import { Button, StatusMark, Table, type TableColumn } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import { useState } from "react";
-import { useNavigate, useOutletContext } from "react-router";
+import { Link, useOutletContext } from "react-router";
 import {
   digitsFor,
   farFromGroup,
@@ -36,7 +37,6 @@ export function ScansTable({
   detail: StudyDetail;
   workflow: BundledWorkflow;
 }) {
-  const navigate = useNavigate();
   const me = useOutletContext<Me>();
   const [keys, setKeys] = useState<VisitorKeys | undefined>(() => loadKeys(me.userId));
   const grouped = detail.scans.some((s) => s.scan.group !== null);
@@ -125,11 +125,11 @@ export function ScansTable({
               }
             : undefined
         }
-        onRowClick={(s) => {
+        rowLink={(s) => {
           const path = scanHref(s);
-          if (path) navigate(path);
+          return path ? (props) => <Link to={path} {...props} /> : undefined;
         }}
-        className="[&_td]:align-middle [&_td]:whitespace-nowrap [&_th]:align-bottom [&_th]:whitespace-nowrap"
+        className="[&_td]:whitespace-nowrap [&_th]:whitespace-nowrap"
       />
     </div>
   );
@@ -149,20 +149,20 @@ function ScanStatusCell({
   const client = useQueryClient();
   const start = useMutation({
     mutationFn: () => startRun({ studyId: detail.study.id, inputId: scan.scan.inputId, keys }),
-    onSuccess: () => client.invalidateQueries({ queryKey: ["study"] }),
+    onSuccess: () => client.invalidateQueries({ queryKey: allStudiesKey }),
   });
-  const { label, tone, progress } = scanStatus(scan);
+  const { label, status, progress } = scanStatus(scan);
   if (scan.runs.length > 0)
     return (
       <span className="flex items-center gap-2">
-        <StatusBadge tone={tone}>{label}</StatusBadge>
+        <StatusMark status={status} label={label} />
         {progress && <span className="text-meta text-fg-subtle tabular-nums">{progress}</span>}
       </span>
     );
   return (
     <span className="grid gap-1">
       <span className="flex items-center gap-2">
-        <StatusBadge tone={tone}>{label}</StatusBadge>
+        <StatusMark status={status} label={label} />
         <Button
           size="sm"
           className="-my-1 h-7 px-2.5"
@@ -177,6 +177,9 @@ function ScanStatusCell({
           {start.isPending || start.isSuccess ? "Starting…" : "Start"}
         </Button>
       </span>
+      {guest && !keys && !detail.study.example && (
+        <span className="text-meta text-muted-foreground">Add your Meta key first.</span>
+      )}
       {start.isError && (
         <span role="alert" className="text-meta whitespace-normal text-destructive">
           {startError(start.error)}

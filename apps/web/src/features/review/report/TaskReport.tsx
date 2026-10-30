@@ -1,8 +1,8 @@
 /** Task-scoped report and questions. Acceptance never changes scientific confidence. */
-import { useMutation } from "@tanstack/react-query";
-import { acceptCheck, reviewFileUrl } from "@voluma/api-client";
+import { reviewFileUrl } from "@voluma/api-client";
+import { useAcceptCheck } from "@voluma/api-client/query";
 import type { Focus } from "@voluma/contracts/review";
-import { StatusBadge } from "@voluma/ui";
+import { Button, Chip, EmptyState, ErrorState, StatusMark, Table, TextAreaField } from "@voluma/ui";
 import {
   ArrowUpRight,
   Check,
@@ -71,11 +71,15 @@ function Evidence({ runId, asset }: { runId: string; asset: Asset }) {
           </Dialog.Description>
           {!failed && <img className="lightbox-image" src={url} alt={asset.name} />}
           <div className="mt-6 flex justify-end gap-2">
-            <a className="button" href={url} download={fileName(asset)}>
-              <Download size={15} />
-              Download
-            </a>
-            <Dialog.Close className="button">Close evidence</Dialog.Close>
+            <Button asChild>
+              <a href={url} download={fileName(asset)}>
+                <Download />
+                Download
+              </a>
+            </Button>
+            <Dialog.Close asChild>
+              <Button>Close evidence</Button>
+            </Dialog.Close>
           </div>
         </Dialog.Content>
       </Dialog.Portal>
@@ -95,7 +99,6 @@ export function TaskReport({
   revisionId,
   readOnly,
   onFocus,
-  onRefresh,
 }: {
   task: ReviewTask;
   /** A structure id to its name, for To check items that point at structures. */
@@ -107,14 +110,8 @@ export function TaskReport({
   revisionId: string;
   readOnly: boolean;
   onFocus(focus?: Focus): void;
-  onRefresh(): Promise<void>;
 }) {
-  const accept = useMutation({
-    mutationFn: (checkId: string) =>
-      acceptCheck(runId, checkId, { baseRevisionId: revisionId, taskId: task.id }),
-    onSuccess: onRefresh,
-    onError: onRefresh,
-  });
+  const accept = useAcceptCheck(runId, revisionId);
   const references = task.measurements.flatMap((m) =>
     m.references.map((reference) => ({ m, reference })),
   );
@@ -126,7 +123,7 @@ export function TaskReport({
         <span>Task report</span>
         {task.status !== "pending" && <span className="ml-auto">Result {resultLabel}</span>}
         <span className={task.status === "pending" ? "ml-auto" : undefined}>
-          <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+          <StatusMark {...status} />
         </span>
       </div>
       <h1 className="text-2xl font-semibold mt-3">{task.title}</h1>
@@ -161,7 +158,7 @@ export function TaskReport({
         <div className="section-heading">
           <h2>Measurements</h2>
           {[...task.measurements, ...task.scores].some((m) => m.confidence === "provisional") && (
-            <span className="badge warning">Provisional</span>
+            <Chip>Provisional</Chip>
           )}
         </div>
         <p className="text-xs text-muted-foreground mb-3">
@@ -233,20 +230,26 @@ export function TaskReport({
           </tbody>
         </table>
         {task.measurements.length + task.scores.length + task.missing.length === 0 && (
-          <p className="notice">This task reported no measurements.</p>
+          <EmptyState title="No measurements" className="rounded-md bg-muted py-4">
+            This task reported none.
+          </EmptyState>
         )}
       </section>
       <section>
         <div className="section-heading">
           <h2>To check</h2>
-          <button type="button" className="text-button" onClick={() => onFocus()}>
+          <Button variant="link" onClick={() => onFocus()}>
             Clear viewer focus
-          </button>
+          </Button>
           <span className="text-sm text-muted-foreground">
             {task.checks.filter((c) => c.status === "open").length} open
           </span>
         </div>
-        {task.checks.length === 0 && <p className="notice">No checks were raised for this task.</p>}
+        {task.checks.length === 0 && (
+          <EmptyState title="No checks" className="rounded-md bg-muted py-4">
+            None were raised for this task.
+          </EmptyState>
+        )}
         {task.checks.map((check) => (
           <div
             className={`check-card ${check.status === "accepted" ? "accepted" : ""}`}
@@ -280,44 +283,37 @@ export function TaskReport({
             )}
             <div className="flex flex-wrap items-center gap-2 mt-4">
               {check.focus && (
-                <button
-                  type="button"
-                  className="button compact"
-                  onClick={() => onFocus({ ...check.focus! })}
-                >
+                <Button size="sm" onClick={() => onFocus({ ...check.focus! })}>
                   Show in viewer
-                </button>
+                </Button>
               )}
               {check.status === "accepted" ? (
                 <span className="font-medium text-primary-text">
                   Accepted · values remain provisional
                 </span>
               ) : (
-                <button
-                  type="button"
-                  className="button compact"
+                <Button
+                  size="sm"
                   disabled={readOnly || accept.isPending}
-                  onClick={() => accept.mutate(check.id)}
+                  onClick={() => accept.mutate({ checkId: check.id, taskId: task.id })}
                 >
-                  <Check size={14} />
-                  {accept.isPending && accept.variables === check.id
+                  <Check />
+                  {accept.isPending && accept.variables?.checkId === check.id
                     ? "Accepting…"
                     : "Accept check"}
-                </button>
+                </Button>
               )}
-              <button type="button" className="button compact" disabled>
+              <Button size="sm" disabled>
                 Request correction
-                <ArrowUpRight size={14} />
-              </button>
+                <ArrowUpRight />
+              </Button>
             </div>
           </div>
         ))}
         {accept.error &&
-          task.checks.some((check) => check.id === accept.variables && check.status === "open") && (
-            <p className="error-message" role="alert">
-              {accept.error.message}
-            </p>
-          )}
+          task.checks.some(
+            (check) => check.id === accept.variables?.checkId && check.status === "open",
+          ) && <ErrorState title="Couldn't accept the check">{accept.error.message}</ErrorState>}
       </section>
       <section>
         <div className="section-heading">
@@ -342,34 +338,49 @@ export function TaskReport({
           <div className="section-heading">
             <h2>Reference comparison</h2>
           </div>
-          <table className="references">
-            <thead>
-              <tr>
-                <th scope="col">Parameter / reader</th>
-                <th scope="col">Reference</th>
-                <th scope="col">Difference</th>
-              </tr>
-            </thead>
-            <tbody>
-              {references.map(({ m, reference }) => (
-                <tr key={`${m.id}-${reference.reader}`}>
-                  <th scope="row">
+          <Table
+            label="Reference comparison"
+            density="compact"
+            rows={references}
+            rowKey={({ m, reference }) => `${m.id}-${reference.reader}`}
+            columns={[
+              {
+                key: "parameter",
+                header: "Parameter / reader",
+                cell: ({ m, reference }) => (
+                  <>
                     {m.title ?? m.id}
-                    <span className="measurement-source">{reference.reader}</span>
-                  </th>
-                  <td className="font-mono">
-                    {reference.value.toFixed(3)}
-                    <span className="unit">{m.unit}</span>
-                  </td>
-                  <td className="font-mono">
+                    <span className="block text-xs font-normal text-fg-subtle">
+                      {reference.reader}
+                    </span>
+                  </>
+                ),
+              },
+              {
+                key: "reference",
+                header: "Reference",
+                align: "end",
+                cell: ({ m, reference }) => (
+                  <span className="font-mono">
+                    {reference.value.toFixed(3)}{" "}
+                    <span className="text-xs text-fg-subtle">{m.unit}</span>
+                  </span>
+                ),
+              },
+              {
+                key: "difference",
+                header: "Difference",
+                align: "end",
+                cell: ({ m, reference }) => (
+                  <span className="font-mono">
                     {m.value !== null && reference.value !== 0
                       ? `${((m.value / reference.value - 1) * 100).toFixed(2)}%`
-                      : "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                      : "–"}
+                  </span>
+                ),
+              },
+            ]}
+          />
           <p className="text-xs text-muted-foreground mt-3">
             Reference comparisons do not change a measurement's review status.
           </p>
@@ -399,7 +410,11 @@ export function TaskReport({
             </li>
           ))}
         </ul>
-        {task.files.length === 0 && <p className="notice">This task reported no data files.</p>}
+        {task.files.length === 0 && (
+          <EmptyState title="No data files" className="rounded-md bg-muted py-4">
+            This task reported none.
+          </EmptyState>
+        )}
       </section>
       <section className="task-assistant">
         <div className="section-heading">
@@ -408,12 +423,9 @@ export function TaskReport({
         </div>
         <p className="text-xs text-muted-foreground mb-4">A question never starts a rerun.</p>
         <form className="mt-4" onSubmit={(event) => event.preventDefault()}>
-          <label className="sr-only" htmlFor="task-question">
-            Question about {task.title}
-          </label>
-          <textarea
-            id="task-question"
-            className="text-input"
+          <TextAreaField
+            label={`Question about ${task.title}`}
+            hideLabel
             placeholder="What needs checking in this result?"
             rows={3}
             maxLength={2000}
@@ -421,13 +433,13 @@ export function TaskReport({
             disabled
           />
           <div className="flex justify-between items-center mt-3 gap-2">
-            <button type="button" className="text-button text-sm" disabled>
+            <Button variant="link" className="text-sm" disabled>
               Why provisional?
-            </button>
-            <button type="submit" className="button primary compact" disabled>
+            </Button>
+            <Button type="submit" variant="primary" size="sm" disabled>
               Ask question
-              <Send size={14} />
-            </button>
+              <Send />
+            </Button>
           </div>
         </form>
       </section>

@@ -4,10 +4,11 @@
 @import "@voluma/design-tokens/theme.css";
 @import "@voluma/design-tokens/fonts.css";
 @import "../features/review/styles.css";
-@import "../features/run/styles.css";
+@import "@voluma/run-view/styles.css";
 @import "../features/study/styles.css";
 
 /* Let Tailwind see the classes used inside the shared packages. */
+@source "../../../../packages/run-view/src";
 @source "../../../../packages/ui/src";
 @source "../../../../packages/viewer/src";
 
@@ -41,12 +42,5 @@
   h2,
   h3 {
     text-wrap: balance;
-  }
-}
-
-/* Fade-in for content that should appear only after a delay (slow loads). */
-@keyframes appear {
-  from {
-    opacity: 0;
   }
 }

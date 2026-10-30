@@ -15,7 +15,7 @@
  *   primary     the one main action on a view (ink-filled)
  *   select      selection, focus and crosshairs (ice); never a status
  *   check       To check (amber)
- *   info        Running (violet), and corrected
+ *   info        Running and Checking (violet)
  *   done        Done (green)
  *   destructive Stopped / failed (red)
  *   idle        Waiting / paused (grey)
@@ -170,9 +170,8 @@
   --toolstrip-h: 36px;
 
   /* Viewer: the same in both themes. The well is the darkest thing so the
-     bone is the brightest. Well, bone and check-outline also feed Three.js
-     Color, which needs sRGB syntax rather than OKLCH. */
-  --viewer-well: #070a10;
+     bone is the brightest. */
+  --viewer-well: oklch(0.145 0.014 255);
   --viewer-chip: oklch(0.145 0.014 255 / 0.72); /* view labels and value chips over images */
   --viewer-chip-fg: oklch(0.94 0.006 255);
   --scale-bar: oklch(0.86 0.008 255);
@@ -182,7 +181,7 @@
   --axis-y: #5ccf7a; /* sagittal plane (constant y) */
   --axis-z: #5aa6f2; /* axial plane (constant z) */
 
-  --bone: #d8d0c3;
+  --bone: oklch(0.86 0.02 82);
   --bone-alt: oklch(0.82 0.02 82); /* neighbouring bones, so adjacent surfaces separate */
   --bone-warm: oklch(0.88 0.025 80);
 
@@ -198,7 +197,7 @@
   --mark-ai: oklch(0.98 0 0);
 
   /* The one exception to "status never in mesh colour": the region under check */
-  --check-outline: #fbba4a;
+  --check-outline: oklch(0.83 0.145 78);
 
   /* Structure label colours. Clear of the axis colours, amber, ice and ivory. */
   --label-1: #c792ea;
