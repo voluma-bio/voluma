@@ -13,6 +13,7 @@ import type { RunEvent } from "@voluma/contracts/events";
 import type { Run } from "@voluma/contracts/run";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from "react-router";
+import { RunLogProvider } from "./agent-thread";
 import { AgentsView } from "./agents-view";
 import { DisclosureProvider } from "./chat/disclosure-store";
 import { ThreadNavigationProvider } from "./chat/thread-navigation";
@@ -210,6 +211,7 @@ function RunScreen({
   refetch: () => void;
 }) {
   const accepting = useAccepting(run, setRun, refetch);
+  const runLog = useMemo(() => ({ events, live, halt, threads }), [events, live, halt, threads]);
   const { tasks } = view;
   const taskId = params.get("task") ?? undefined;
   const task = taskId ? tasks.find((t) => t.id === taskId) : undefined;
@@ -243,25 +245,11 @@ function RunScreen({
         titleOf={(t) => titles.get(t) ?? t}
         accepting={accepting}
         search={search}
-        events={events}
-        live={live}
-        halt={halt}
       />
     );
   else if (agents) {
     const agentId = params.get("agent") ?? undefined;
-    content = (
-      <AgentsView
-        threads={threads}
-        events={events}
-        live={live}
-        halt={halt}
-        agentId={agentId}
-        follow={agentId === undefined}
-        select={openThread}
-        ended={ended}
-      />
-    );
+    content = <AgentsView agentId={agentId} select={openThread} ended={ended} />;
   } else if (tasks.length === 0)
     content = (
       <p className="text-ui text-muted-foreground">
@@ -282,38 +270,40 @@ function RunScreen({
     );
 
   return (
-    <DisclosureProvider>
-      <ThreadNavigationProvider onOpenThread={openThread}>
-        <main className="flex min-h-0 flex-1 flex-col max-[1100px]:overflow-y-auto">
-          <RunHeader
-            run={run}
-            study={study}
-            progress={{ ...view.progress, toCheck }}
-            spend={view.spend}
-            openTask={task?.id ?? firstOpen?.taskId}
-            agents={search(undefined, "agents")}
-            onChange={setRun}
-          />
-          {stale && (
-            <p
-              role="status"
-              className="border-b border-border bg-muted px-6 py-1.5 text-meta text-muted-foreground max-[1100px]:px-4"
-            >
-              Couldn't reach the server. Showing what was loaded; retrying.
-            </p>
-          )}
-          <div className="flex min-h-0 flex-1 max-[1100px]:flex-col">
-            <TaskFlow tasks={tasks} selected={task?.id} search={search} />
-            <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-9 pt-6 pb-24 max-[1100px]:overflow-visible max-[1100px]:px-4 max-[1100px]:pt-4">
-              <div className={`mx-auto ${agents ? "max-w-[80rem]" : "max-w-[55rem]"}`}>
-                <RunAlerts run={run} userId={me.userId} onChange={setRun} />
-                {content}
+    <RunLogProvider value={runLog}>
+      <DisclosureProvider>
+        <ThreadNavigationProvider onOpenThread={openThread}>
+          <main className="flex min-h-0 flex-1 flex-col max-[1100px]:overflow-y-auto">
+            <RunHeader
+              run={run}
+              study={study}
+              progress={{ ...view.progress, toCheck }}
+              spend={view.spend}
+              openTask={task?.id ?? firstOpen?.taskId}
+              agents={search(undefined, "agents")}
+              onChange={setRun}
+            />
+            {stale && (
+              <p
+                role="status"
+                className="border-b border-border bg-muted px-6 py-1.5 text-meta text-muted-foreground max-[1100px]:px-4"
+              >
+                Couldn't reach the server. Showing what was loaded; retrying.
+              </p>
+            )}
+            <div className="flex min-h-0 flex-1 max-[1100px]:flex-col">
+              <TaskFlow tasks={tasks} selected={task?.id} search={search} />
+              <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-9 pt-6 pb-24 max-[1100px]:overflow-visible max-[1100px]:px-4 max-[1100px]:pt-4">
+                <div className={`mx-auto ${agents ? "max-w-[80rem]" : "max-w-[55rem]"}`}>
+                  <RunAlerts run={run} userId={me.userId} onChange={setRun} />
+                  {content}
+                </div>
               </div>
             </div>
-          </div>
-        </main>
-      </ThreadNavigationProvider>
-    </DisclosureProvider>
+          </main>
+        </ThreadNavigationProvider>
+      </DisclosureProvider>
+    </RunLogProvider>
   );
 }
 

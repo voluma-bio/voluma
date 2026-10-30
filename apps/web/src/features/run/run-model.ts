@@ -215,6 +215,32 @@ export function agentTree(threads: Thread[]): AgentNode[] {
   return roots;
 }
 
+/**
+ * An agent's name where its task is already shown: "The AI's work, 2 tries", "Second AI check of
+ * try 1", "Lead AI". A check's try is its `attemptId`'s place among its worker's attempts.
+ */
+export function agentLabel(t: Thread, threads: Thread[]): string {
+  switch (t.kind) {
+    case "main":
+      return "Lead AI";
+    case "worker":
+      return t.attempts.length > 1 ? `The AI's work, ${t.attempts.length} tries` : "The AI's work";
+    case "check": {
+      const attemptId = t.attemptId;
+      const tries = attemptId
+        ? threads.find((w) => w.attempts.includes(attemptId))?.attempts
+        : undefined;
+      return tries && tries.length > 1 && attemptId
+        ? `Second AI check of try ${tries.indexOf(attemptId) + 1}`
+        : "Second AI check";
+    }
+    case "chat":
+      return "Chat";
+    default:
+      return "Agent";
+  }
+}
+
 /** "Segmentation: the AI's work", "Segmentation: second AI check", "Lead AI". */
 export const threadName = (t: Pick<Thread, "kind" | "taskId">) =>
   t.kind === "worker" && t.taskId

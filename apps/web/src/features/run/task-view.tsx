@@ -3,12 +3,12 @@
  * items, its QC image and values, and "How the AI did it": the task's own threads as transcripts,
  * built only when the reader opens it. Tool names may show there and nowhere else on the page.
  */
-import type { RunEvent } from "@voluma/contracts/events";
 import { buttonClass, cx } from "@voluma/ui";
 import { ArrowLeft, Check, ChevronRight } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router";
-import { Elapsed, ThreadCost } from "./agents";
+import { AgentThread } from "./agent-thread";
+import { Elapsed } from "./agents";
 import { ClampedMarkdown } from "./chat/markdown";
 import {
   type Accepting,
@@ -23,8 +23,6 @@ import {
 } from "./overview";
 import type { TaskView as Task, Thread } from "./run-model";
 import { TaskMark } from "./task-flow";
-import { type Halt, type Live, threadRows } from "./transcript";
-import { TranscriptView } from "./transcript-view";
 
 export function TaskView({
   runId,
@@ -32,18 +30,12 @@ export function TaskView({
   titleOf,
   accepting,
   search,
-  events,
-  live,
-  halt,
 }: {
   runId: string;
   task: Task;
   titleOf: (taskId: string) => string;
   accepting: Accepting;
   search: (taskId?: string) => string;
-  events: RunEvent[];
-  live: Live;
-  halt: Halt | undefined;
 }) {
   const { state } = task;
   const ended = state === "done" || state === "to-check" || state === "failed";
@@ -111,9 +103,6 @@ export function TaskView({
           key={task.id}
           threads={task.threads}
           working={state === "running" || state === "checking"}
-          events={events}
-          live={live}
-          halt={halt}
         />
       )}
     </>
@@ -205,24 +194,11 @@ const list = (names: string[]) =>
   names.length < 2 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 
 /**
- * The task's threads, each as its transcript: the AI's work (one per attempt) and the second
- * AI check. Closed unless the task is working; nothing is built until it opens.
+ * The task's agents, each as its thread (`AgentThread`): the AI's work, its tries in one thread,
+ * and a second AI check per try. Closed unless the task is working; nothing is built until it opens.
  */
-function HowTheAiDidIt({
-  threads,
-  working,
-  events,
-  live,
-  halt,
-}: {
-  threads: Thread[];
-  working: boolean;
-  events: RunEvent[];
-  live: Live;
-  halt: Halt | undefined;
-}) {
+function HowTheAiDidIt({ threads, working }: { threads: Thread[]; working: boolean }) {
   const [open, setOpen] = useState(working);
-  const workers = threads.filter((t) => t.kind === "worker");
   return (
     <section className="rounded-xl border border-border bg-card">
       <h2>
@@ -242,63 +218,10 @@ function HowTheAiDidIt({
       {open && (
         <div className="grid gap-6 border-t border-border px-4 pt-3 pb-4">
           {threads.map((t) => (
-            <ThreadTranscript
-              key={t.id}
-              thread={t}
-              label={
-                t.kind === "check"
-                  ? "Second AI check"
-                  : workers.length > 1
-                    ? `The AI's work, attempt ${workers.indexOf(t) + 1}`
-                    : "The AI's work"
-              }
-              events={events}
-              live={live}
-              halt={halt}
-            />
+            <AgentThread key={t.id} threadId={t.id} className="max-h-[36rem]" />
           ))}
         </div>
       )}
     </section>
-  );
-}
-
-function ThreadTranscript({
-  thread,
-  label,
-  events,
-  live,
-  halt,
-}: {
-  thread: Thread;
-  label: string;
-  events: RunEvent[];
-  live: Live;
-  halt: Halt | undefined;
-}) {
-  const rows = useMemo(
-    () => threadRows(events, thread.id, live, halt),
-    [events, thread.id, live, halt],
-  );
-  return (
-    <div>
-      <h3 className="mb-2 flex items-center gap-2 text-ui font-medium">
-        {label}
-        <span className="ml-auto" />
-        <ThreadCost thread={thread} />
-        <Elapsed thread={thread} />
-      </h3>
-      <TranscriptView
-        rows={rows}
-        live={thread.status === "running" ? (thread.liveTool ?? "Thinking") : null}
-        empty={
-          thread.status === "paused" ||
-          thread.status === "awaiting-ai" ||
-          thread.status === "cancelled"
-            ? "It was cut off before it wrote anything."
-            : "Nothing yet."
-        }
-      />
-    </div>
   );
 }
