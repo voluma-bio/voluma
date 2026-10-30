@@ -204,10 +204,12 @@ export function QcImage({
   runId,
   asset,
   className,
+  imageClassName = "size-full object-cover",
 }: {
   runId: string;
   asset: Asset;
   className?: string;
+  imageClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [broken, setBroken] = useState(false);
@@ -237,7 +239,7 @@ export function QcImage({
           loading="lazy"
           decoding="async"
           onError={() => setBroken(true)}
-          className="size-full object-cover"
+          className={imageClassName}
         />
       </button>
       <Lightbox open={open} onClose={() => setOpen(false)} caption={asset.name}>

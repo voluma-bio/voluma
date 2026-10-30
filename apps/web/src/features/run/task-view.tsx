@@ -91,7 +91,8 @@ export function TaskView({
           <QcImage
             runId={runId}
             asset={task.image}
-            className="block max-h-90 w-full max-w-xl [&_img]:object-contain"
+            className="block w-fit max-w-full"
+            imageClassName="max-h-90 w-auto max-w-full"
           />
           <figcaption className="mt-1.5 text-meta text-muted-foreground">QC image</figcaption>
         </figure>
