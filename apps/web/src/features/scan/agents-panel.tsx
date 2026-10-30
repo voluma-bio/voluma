@@ -22,21 +22,18 @@ const { taskTitle } = catalog["mouse-oa"];
 
 /**
  * Which agent Follow live shows: the one it showed while that one still works, else the agent
- * that started working most recently and has no working agent under it, else the lead AI (a run
- * from before the lead AI has none: then the first agent).
+ * that started working most recently and has no working agent under it, else the first agent of
+ * the tree (the lead AI). `agents` is the tree read top down.
  */
-function followTarget(threads: Thread[], previous: string | undefined): Thread | undefined {
-  const byId = new Map(threads.map((t) => [t.id, t]));
-  const kept = previous ? byId.get(previous) : undefined;
+function followTarget(agents: Thread[], previous: string | undefined): Thread | undefined {
+  const kept = previous ? agents.find((t) => t.id === previous) : undefined;
   if (kept?.status === "running") return kept;
-  const working = threads.filter((t) => t.kind !== "supervisor" && t.status === "running");
+  const working = agents.filter((t) => t.status === "running");
   const busyParents = new Set(working.map((t) => t.parentId));
   const leaf = working
     .filter((t) => !busyParents.has(t.id))
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
-  return (
-    leaf ?? threads.find((t) => t.kind === "main") ?? threads.find((t) => t.kind !== "supervisor")
-  );
+  return leaf ?? agents[0];
 }
 
 /** A node and everything under it, in start order. */
@@ -46,9 +43,9 @@ const flatten = (node: AgentNode): Thread[] => [node.thread, ...node.children.fl
  * The tree read top down, agents of one task gathered under it where its first agent started;
  * agents with no task (the lead AI) stand alone.
  */
-function groups(roots: AgentNode[]) {
+function groups(agents: Thread[]) {
   const out: { key: string; taskId?: string; threads: Thread[] }[] = [];
-  for (const t of roots.flatMap(flatten)) {
+  for (const t of agents) {
     const group = t.taskId ? out.find((g) => g.taskId === t.taskId) : undefined;
     if (group) group.threads.push(t);
     else out.push({ key: t.id, taskId: t.taskId, threads: [t] });
@@ -68,12 +65,14 @@ export function AgentsPanel({
   ended: boolean;
 }) {
   const threads = useThreads();
-  const tree = useMemo(() => groups(agentTree(threads)), [threads]);
+  // The tree holds the agents that run a model; reading it top down keeps the log's order.
+  const agents = useMemo(() => agentTree(threads).flatMap(flatten), [threads]);
+  const tree = useMemo(() => groups(agents), [agents]);
   const follow = agentId === undefined;
   const shown = useRef<string | undefined>(undefined);
   const selected = follow
-    ? followTarget(threads, shown.current)
-    : (threads.find((t) => t.id === agentId) ?? followTarget(threads, undefined));
+    ? followTarget(agents, shown.current)
+    : (agents.find((t) => t.id === agentId) ?? followTarget(agents, undefined));
   useEffect(() => {
     shown.current = selected?.id;
   });
@@ -85,7 +84,7 @@ export function AgentsPanel({
         </EmptyState>
       </div>
     );
-  const count = threads.filter((t) => t.kind !== "supervisor").length;
+  const count = agents.length;
   return (
     <div className="flex h-full flex-col">
       <div className="max-h-[45%] shrink-0 overflow-y-auto border-b border-border">

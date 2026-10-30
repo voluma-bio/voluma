@@ -1,7 +1,7 @@
 /**
  * To check: this scan's items, one open at a time. The open item's card (`ItemToCheck`) holds the
- * decision; Next names the item after it; the list below is every item of the scan, open first in
- * task order, handled after. Picking an item sets up the views on its task and place.
+ * decision; Next names the next open item; the list below is every item of the scan in task
+ * order. Picking an item sets up the views on its task and place.
  */
 import { reviewFileUrl } from "@voluma/api-client";
 import { ItemToCheck, type NeedItem, type TaskView } from "@voluma/run-view";
@@ -45,10 +45,10 @@ export function ToCheckPanel({
     );
   const open = items.filter((n) => !n.accepted);
   const handled = items.length - open.length;
-  // The order you work in: open items first, then those already handled.
-  const queue = [...open, ...items.filter((n) => n.accepted)];
+  // Task order, kept as items are handled, so nothing moves under the reader.
+  const queue = items;
   const at = queue.indexOf(current);
-  const next = queue.slice(at + 1).find((n) => !n.accepted);
+  const next = [...queue.slice(at + 1), ...queue.slice(0, at)].find((n) => !n.accepted);
   const task = tasks.find((t) => t.id === current.taskId);
   return (
     <div className="grid gap-3 p-3">
@@ -94,7 +94,14 @@ export function ToCheckPanel({
           )
         }
         state={current.accepted ? "accepted" : current.acceptable ? "open" : "info"}
-        onAccept={accepting.accept && (() => accepting.accept?.(current))}
+        onAccept={
+          accepting.accept &&
+          (() => {
+            // Keep this item open, to show it was decided, until the reader moves on.
+            onPick(current);
+            accepting.accept?.(current);
+          })
+        }
         accepting={accepting.pending === current.id}
         readOnly={accepting.readOnly}
         onWrong={() => onWrong(current)}
@@ -122,7 +129,7 @@ export function ToCheckPanel({
             {handled} handled
           </span>
         </h3>
-        <List boxed density="compact" columns="minmax(0,9rem)">
+        <List boxed density="compact" columns="minmax(0,7.5rem)">
           {queue.map((n) => (
             <Row
               key={n.id}

@@ -217,9 +217,9 @@ export function kneeOf(scan: StudyScanDetail): string | null {
 export const scanMeta = (scan: StudyScanDetail) =>
   [kneeOf(scan), scan.scan.group].filter((x): x is string => x !== null);
 
-/** Where a scan links: its newest run's review once completed, else its live page. */
+/** Where a scan links: its newest run's scan review. */
 export const scanHref = ({ runs: [run] }: StudyScanDetail) =>
-  run ? runHref({ runId: run.id, state: run.state }) : null;
+  run ? runHref({ runId: run.id }) : null;
 
 /**
  * Why a scan's run failed, in the researcher's words; the raw error stays on the run page. The
