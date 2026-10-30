@@ -349,10 +349,13 @@ cut-off text. That claim's `claim.started` carries `reopened: true` instead of `
 whose stored history cannot be resumed (a run made before `reply` existed, a changed prompt or tool
 list) or whose recorded model this runner no longer allows is refused as stale and started again
 (`main.<n>`); `threadModel` hands such a thread the role's model rather than failing the run. The
-report carries the highest event `seq` the claim read (`lastSeq`); the API requeues the run when a
-`person.message` came after it. A claim's spend cap is the claim's `costCapUsd`:
+report carries the highest event `seq` the claim read (`lastSeq`, 0 if it read nothing) and the claim's
+`claim.started` records the same as `readSeq`; the API reopens the run when a `person.message` came
+after it, and a message stored mid-claim is never counted as delivered or answered by that claim's
+events. A correction whose main agent stops moving fails the claim (the server records
+`correction.ended`) instead of skipping tasks. A claim's spend cap is the claim's `costCapUsd`:
 `RUNNER_MAX_RUN_COST_USD` for a run's first claims, and for a reopened run the spend at the reopen
-plus `RUNNER_MAX_CORRECTION_COST_USD`. A thread that ended `cancelled` is never
+plus `RUNNER_MAX_CORRECTION_COST_USD` (else `RUNNER_MAX_RUN_COST_USD`). A thread that ended `cancelled` is never
 resumed. A tool whose `tool.call` event was
 still queued when the runner died isn't named (the log lacks it), so a runner killed within
 milliseconds of a call gets the no-tool form.

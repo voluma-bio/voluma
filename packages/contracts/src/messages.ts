@@ -5,10 +5,11 @@
  *   POST /api/review/runs/:runId/messages   body `sendRunMessageRequestSchema` → 200 `sendRunMessageResponseSchema`
  *
  * One message, one claim. A run that ended `completed` is reopened by the message for ONE claim:
- * in one transaction, under the queue lock (taken first, as `cancel` does, then the event lock),
- * the route appends `run.reopened`, then `person.message`, resets `lastClaimEnd` and
- * `stalledClaims` (so `previousClaim` never reports a reason from before the reopen), and moves
- * the run to `queued` through admission. The main agent is resumed with the message (a new
+ * in one transaction, under the queue lock (taken first, then the event lock, then row locks:
+ * the order every transaction that changes a run takes, `corrections.ts`), the route appends
+ * `run.reopened`, then `person.message`, resets `lastClaimEnd` and `stalledClaims` (so
+ * `previousClaim` never reports a reason from before the reopen), and moves the run to
+ * `queued` through admission. The main agent is resumed with the message (a new
  * `main.<n>` thread when its stored history cannot resume: a run from before corrections, a
  * changed system prompt or tool list, or a recorded model the runner no longer allows; it never
  * fails the run for that), answers with `reply` (a `reply` event) and calls `finish_run`. On a
@@ -22,16 +23,21 @@
  * A message to a run that is `queued` or `running` (a reopened run, mid-claim) only appends the
  * `person.message`. The runner reads the log once per claim and cannot see it, so its `ended`
  * report carries `lastSeq` (`runner.ts`): `report()`, under the queue lock, finds a
- * `person.message` with a higher `seq`, does not record the report, appends `run.reopened` (the
- * same event, id keyed to that first unseen message) and sends the run back to `queued` as the
- * route does. A `released` report is recovered as always and the note waits for the next claim.
+ * `person.message` with a higher `seq` (than the larger of `lastSeq` and the claim's start seq,
+ * so a claim that failed before it read does not count the message that reopened the run), does
+ * not record a completed report as the run's end, and reopens the run exactly as the route does
+ * (one function, `reopen`: `run.reopened` with an id keyed to that first unseen message, the
+ * run to `queued`, the spend base reset; no admission). A failed report is recorded first
+ * (`correction.ended`, the run `completed`), then the run is reopened. A `released` report is recovered as always and the note waits for the next claim.
  * The note is answered by the next claim; the panel says a note sent mid-fix waits.
  *
  * `run.reopened` (server-authored, thread `<runId>.person`, id `<runId>.person:<id>:reopened`,
  * payload `runReopenedSchema`) is written by exactly these two paths: the route moving an ended
  * run to `queued`, and `report()`'s requeue. The harness's thread log clears the root thread's
  * ended flag on it (that flag otherwise ends the loop and refuses every main tool). On a requeue
- * it is stored AFTER the unseen message(s); nothing reads the order. `person.message` is on the
+ * it is stored AFTER the unseen message(s), and the harness does not take a message above its
+ * claim's `claim.started.readSeq` as delivered or answered by that claim's events, though they
+ * come later in the log. `person.message` is on the
  * same thread, id `<runId>.person:<id>`.
  *
  * Go. `go` requires `taskId`. When the loop's log shows a `go` the main agent has not been told
@@ -51,11 +57,14 @@
  * while a reopened run is `queued` or `running`, `runSchema` carries no `review` (it is present
  * only on an `ended`/`completed` run) and accept and mark-reviewed answer 409. The panel and Home
  * show that the run is being corrected; review returns when the claim ends. A failure or cancel of a correction claim
- * (a thread failure, the no-progress limit, a user cancel, a lease that cannot be recovered) is
+ * (a thread failure, the main agent stopping moving, the no-progress limit, a user cancel, a
+ * lease that cannot be recovered, a claim that cannot load the run's workflow) is
  * written as `correction.ended` (server-authored, thread `<runId>.person`, id
  * `<runId>.person:<id>:ended`, keyed to the latest `run.reopened`'s id, payload `correctionEndedSchema`)
  * and the run ends `completed` again. The run page shows the span from `run.reopened` to the next
- * root `thread.ended` or `correction.ended`.
+ * root `thread.ended` or `correction.ended`. The revisions that span opened (`revision.started`
+ * after the latest `run.reopened`) are not the run's result: review and progress use the revision
+ * before them (`reviewState`), so a failed redo never leaves a half-redone task as the review.
  *
  * Who may send: only the run's `startedBy` (403 otherwise; it also settles whose go counts).
  * Cookie auth and Origin rules are `run.ts`'s. Only this route's body limit is raised, to
@@ -63,8 +72,8 @@
  * server checks the decoded size and the PNG signature, not only the string. The server writes it
  * to `runs/<runId>/scratch/person/<id>.png` (the sandbox's `/scratch/person/<id>.png`, which the
  * main agent's and a worker's `view_image` can open) and puts that key in `snapshotKey`.
- * Marks name a review block id; the API resolves it to the output's `/outputs` file path in the
- * text the main agent gets.
+ * Marks name a review block id; the harness resolves it to the output's sandbox file path
+ * (`/outputs/...`, or `/scratch/...` for a scratch file) in the text the main agent gets.
  *
  * Idempotent: the caller keeps `id` across retries. A retry with the same `id` stores nothing new
  * and answers 200 with the original event id and the run's current state. The server stamps
@@ -75,13 +84,15 @@
  * are not kept, so a reopened run could not be resumed); 409: the run has not ended, or did not
  * end `completed` (a failed or cancelled run's threads were ended or cut: it is rerun, not
  * reopened), has no plan yet, or `taskId` names a skipped task (a skipped task cannot be
- * corrected); admission's refusal (`run.ts` Limits: the org's limits apply to a reopen as to a
+ * corrected), or the run was made on an older version of its workflow than the study's current
+ * one (the pinned paths differ: the runner could not load its files, so it is rerun); admission's refusal (`run.ts` Limits: the org's limits apply to a reopen as to a
  * start); 413: over the body or snapshot limit; 415: the snapshot is not a PNG; 503: no file
  * storage for the snapshot. A message to a `queued` or `running` reopened run is not refused.
  *
  * Spend. A correction's spend accrues on the same run and counts toward the org's day by claim
  * time (the claim that spends it, not the run's first claim), and each correction has its own cost
- * cap, a runner setting; the API implements both.
+ * cap, a runner setting (else the run cap), on top of the spend at the reopen; the API
+ * implements both.
  *
  * Stored data. All of this is additive: no stored event or run row changes shape.
  */

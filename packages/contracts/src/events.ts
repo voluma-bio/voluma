@@ -32,7 +32,9 @@
  * `person.message`, `run.reopened` and `correction.ended` are server-authored correction events
  * on thread `<runId>.person`, handled the same way (payloads, ids and rules in messages.ts).
  * `reply` is the main agent's side of the chat: the runner writes it from the `reply` tool on the
- * main thread. The fold ignores all four; `conversation` (conversation.ts) reads the chat.
+ * main thread. The fold ignores all four; `reviewState` reads `run.reopened` and
+ * `correction.ended` to leave out the revisions of a correction that ended unfinished.
+ * `conversation` (conversation.ts) reads the chat (nothing calls it yet).
  */
 import { z } from "zod";
 import {
@@ -227,6 +229,13 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         after: claimEndReasonSchema.optional(),
         /** This claim exists because a person's message reopened the run (`messages.ts`); not a claim-end reason. */
         reopened: z.literal(true).optional(),
+        /**
+         * The highest event `seq` of the log this claim read (the runner reads it once, at the
+         * start). A server-written event above it, a `person.message` stored mid-claim, was not
+         * seen by anything this claim did: the harness's thread log counts none of its deliveries
+         * or replies as covering or answering it. Absent on a log from before it was recorded.
+         */
+        readSeq: z.number().int().nonnegative().optional(),
       })
       .refine((p) => p.resumed === (p.after !== undefined || p.reopened === true), {
         path: ["after"],
@@ -240,10 +249,11 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
 
   /**
    * Every `thread.ended` is deliberate. A runtime abort (shutdown, self-stop, lost lease)
-   * writes none, so `cancelled` always means a stop someone chose (and is final; a `completed`
-   * end is resumable: a person message reopens a finished run with `run.reopened`, and the
-   * harness's thread log then clears the root's ended flag): `stop_worker`, the run
-   * loop's own stops, or a user's cancel of the run (which the server writes, `threads.ts`).
+   * writes none, so `cancelled` always means a stop someone chose: `stop_worker`, the run
+   * loop's own stops, or a user's cancel of the run (which the server writes, `threads.ts`). A
+   * stopped thread is not resumed (a correction's message to a stopped main agent starts a new
+   * `main.<n>`); a `completed` end is resumable: a person message reopens a finished run with
+   * `run.reopened`, and the harness's thread log then clears the root's ended flag.
    */
   const threadEnded = event(
     "thread.ended",

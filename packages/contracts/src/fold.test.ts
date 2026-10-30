@@ -6,7 +6,8 @@
 import { describe, expect, it } from "vitest";
 import { eventInputSchema, runEventSchema, runEventsResponseSchema } from "./events";
 import { fold } from "./fold";
-import { expectParses, log, need, rev, SHA, SUP, twoDone, W } from "./fold-test-log";
+import { expectParses, log, need, RUN, rev, SHA, SUP, twoDone, W } from "./fold-test-log";
+import { reviewState } from "./review-state";
 
 describe("fold", () => {
   it("event boundaries accept runs and corrections, but reject obsolete checker revisions", () => {
@@ -454,5 +455,26 @@ describe("fold", () => {
     l.status("m:1", "m", "a", "w:1:open", "to-check");
     const accepted = need(fold(l.events), "a");
     expect(accepted.rejected).toBe(false);
+  });
+
+  it("review skips the revisions of a correction that ended unfinished", () => {
+    const person = `${RUN}.person`;
+    const l = twoDone();
+    // A correction that finished: its revision is the result.
+    l.add("run.reopened", "p:1:reopened", person, { by: "u" });
+    l.revision("sup:1:revision", SUP, { reason: "correction", taskId: "a" });
+    l.add("run.reopened", "p:2:reopened", person, { by: "u" });
+    l.revision("sup:2:revision", SUP, { reason: "correction", taskId: "b" });
+    l.status("sup:2", SUP, "b", "w:4:open", "stale", l.rule("stale"));
+    expect(reviewState(l.events).revisions.map((r) => r.id)).toEqual([
+      "root:revision",
+      "sup:1:revision",
+      "sup:2:revision",
+    ]);
+    // The second one failed after its go: it is not the result, the first is.
+    l.add("correction.ended", "p:2:ended", person, { status: "failed", error: "boom" });
+    const state = reviewState(l.events);
+    expect(state.revisions.map((r) => r.id)).toEqual(["root:revision", "sup:1:revision"]);
+    expect(state.summary?.revisionId).toBe("sup:1:revision");
   });
 });

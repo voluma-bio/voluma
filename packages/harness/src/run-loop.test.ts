@@ -1145,7 +1145,12 @@ describe("run loop", () => {
       const claims = of(w.stored, "claim.started").map((e) =>
         e.type === "claim.started" ? e.payload : undefined,
       );
-      expect(claims).toEqual([{ resumed: false }, { resumed: true, reopened: true }]);
+      expect(claims.map((c) => c && { ...c, readSeq: undefined })).toEqual([
+        { resumed: false, readSeq: undefined },
+        { resumed: true, reopened: true, readSeq: undefined },
+      ]);
+      // Each claim records how far it read: nothing on the first, the whole first run on the second.
+      expect(claims.map((c) => c?.readSeq)).toEqual([0, expect.any(Number)]);
       expect(of(w.stored, "thread.started", "t1.worker")).toHaveLength(1);
       expect(of(w.stored, "thread.started", "main.2")).toHaveLength(0);
       // Main was resumed with the message and told no cut-off text.
@@ -1237,14 +1242,17 @@ describe("run loop", () => {
 
     it("a go that arrived mid-claim is answered by the next claim, which does the attempt", async () => {
       const goTold = (t: Turn) => t.users.some((u) => /They said go/.test(u));
-      const answer: Script = (t) =>
-        goTold(t)
-          ? undefined
-          : wrote(t)
-            ? call("reply", { text: "Looking." })
-            : sentReply(t)
-              ? call("finish_run", { summary: "Answered." })
-              : undefined;
+      let step = 0; // the second question: reply, reply, wait, finish after the liveness nudge
+      const answer: Script = (t) => {
+        if (goTold(t)) return undefined;
+        if (wrote(t)) return call("reply", { text: "Looking." });
+        const second = t.users.some((u) => /Anything else/.test(u));
+        if (second && sentReply(t)) {
+          return step++ === 0 ? call("reply", { text: "Still looking." }) : call("wait");
+        }
+        if (second && t.fresh) return call("finish_run", { summary: "Answered." });
+        return sentReply(t) ? call("finish_run", { summary: "Answered." }) : undefined;
+      };
       const redo: Script = (t) => {
         if (!talking(t)) return undefined;
         const last = t.results.at(-1) ?? "";
@@ -1259,22 +1267,31 @@ describe("run loop", () => {
       };
       const w = world({ plan: T1, main: first(answer, redo, chain(["t1", "t2"])) });
       await w.run();
-      // Claim 2 answers M1 (a question); M2, with a go, lands while it runs and is not in its
-      // read. The claim's end is not recorded: the run is requeued and `run.reopened` is written
-      // after M2 (the stored order of `report()`'s requeue).
+      // Claim 2 answers M1 (a question) with two replies and a wait. M2, with a go, is stored
+      // between the replies, so a reply, a liveness delivery and `finish_run` of claim 2 follow it
+      // in the log, yet it is above what the claim read: none of them covers or answers it. The claim's end is not recorded: the run is
+      // requeued and `run.reopened` is written after M2 (the stored order of `report()`'s requeue).
       await w.send({ text: "Why is t1 thin?" });
       const before = w.stored.length;
-      const folded = await w.send({ text: "Redo it.", go: true, taskId: "t1" }, undefined, true);
+      const folded = await w.send({ text: "Anything else?" }, undefined, {
+        message: { text: "Redo it.", go: true, taskId: "t1" },
+        after: (e) => e.type === "reply",
+      });
       expect(
         folded.tasks.map((t) => `${t.id}:${t.status}`),
         w.text(),
       ).toEqual(["t1:done", "t2:done"]);
       const after = w.stored.slice(before);
-      // The go arrived before the reopen yet still opens the correction, once.
+      // The go sits before claim 2's later events yet still opens the correction, once.
       expect(after.filter((e) => e.type === "revision.started")).toHaveLength(1);
       expect(of(after, "attempt.opened", "t1.worker")).toHaveLength(1);
       expect(errors(after), w.text()).toEqual([]);
-      expect(ended(w.stored, "supervisor")).toEqual(["completed", "completed", "completed"]);
+      expect(ended(w.stored, "supervisor")).toEqual([
+        "completed",
+        "completed",
+        "completed",
+        "completed",
+      ]);
     });
 
     it("a go on a task the fix limit left to check lets main send feedback again", async () => {

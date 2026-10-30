@@ -135,7 +135,7 @@ export const claimRequestSchema = z.object({
   /**
    * The runner's cap on one correction's spend (`RUNNER_MAX_CORRECTION_COST_USD`). For a
    * reopened run the claim stores the run's spend when it was reopened plus this as the spend
-   * cap, instead of `costCapUsd`. Absent: a correction has no cap of its own.
+   * cap, instead of `costCapUsd`. Absent: `costCapUsd` is used the same way.
    */
   correctionCostCapUsd: z.number().positive().optional(),
 });
@@ -191,13 +191,16 @@ export const reportRequestSchema = z.object({
   /**
    * The highest event `seq` of the log the runner read when the claim started (it reads the log
    * once per claim, so a later `person.message` is one it has not seen; the runner learns no
-   * seq of what it writes). Under the queue lock `report()` compares it with the run's events:
-   * for an `ended` report, a `person.message` above it means the report is not recorded; the
-   * server writes `run.reopened` and sends the run to `queued` (`messages.ts`), so a note sent
-   * mid-claim is never lost and the next claim answers it. A `released` report is recovered as
-   * always and the note waits for the next claim.
+   * seq of what it writes); 0 if it read nothing. `events.seq` is a Postgres integer, hence the
+   * bound. Under the queue lock `report()` compares the larger of this and the claim's start
+   * seq (so a claim that failed before reading does not make the message that reopened the run
+   * look unseen) with the run's events: for an `ended` report, a `person.message` above it means
+   * the report is not recorded as the run's end; a failed claim is first recorded as a failed
+   * correction (`correction.ended`), then the server writes `run.reopened` and sends the run to
+   * `queued` (`messages.ts`), so a note sent mid-claim is never lost and the next claim answers
+   * it. A `released` report is recovered as always and the note waits for the next claim.
    */
-  lastSeq: z.number().int().nonnegative(),
+  lastSeq: z.number().int().min(0).max(2_147_483_647),
   report: z.discriminatedUnion("kind", [
     z.object({
       kind: z.literal("ended"),

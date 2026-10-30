@@ -524,10 +524,8 @@ export function mainTools(deps: MainDeps) {
           );
           const problems = [
             ...(d.undelivered.some((n) => n.kind === "person") ? [UNDELIVERED] : []),
-            ...(d.lastReplyAt < d.lastPersonAt ? [UNANSWERED] : []),
-            ...(d.go && (d.attemptAt.get(d.go.taskId) ?? -1) < d.go.at
-              ? [goNotActedOn(d.go.taskId)]
-              : []),
+            ...(d.unanswered ? [UNANSWERED] : []),
+            ...(d.go && !d.go.redone ? [goNotActedOn(d.go.taskId)] : []),
             ...running.map((r) => `${r.id} (${r.role}, ${r.taskId}) is still running.`),
             ...unfinished(view).map((t) =>
               t.status === "pending"

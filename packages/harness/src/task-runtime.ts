@@ -32,7 +32,7 @@ import { type Evidence, EvidenceNotFound, EvidenceRefused } from "./ports/eviden
 import type { Sandbox } from "./ports/sandbox";
 import type { PayloadOf, Recorder } from "./recorder";
 import { isThreadName, parseThreadId } from "./thread-id";
-import { startedFor, threadLog } from "./thread-log";
+import { pathOf, startedFor, threadLog } from "./thread-log";
 import { effectId } from "./tools/effects";
 
 /** A check thread may ask the main agent this many questions. */
@@ -89,10 +89,6 @@ interface Target {
 
 type OutputInput = ReportOutputInput["output"];
 type FileInput = Extract<OutputInput, { kind: "file" }>["file"];
-
-/** The sandbox path of a file the task names: the inverse of `refOf`. */
-export const pathOf = (taskId: string, f: Pick<EvidenceRef, "root" | "path">): string =>
-  f.root === "scratch" ? `/scratch/${f.path}` : `/outputs/${taskId}/${f.path}`;
 
 /** The `{root, path}` of a sandbox path as a script prints it; only this task's outputs and the scratch have one. */
 export function refOf(taskId: string, path: string): Pick<EvidenceRef, "root" | "path"> {
@@ -188,22 +184,6 @@ export function taskRuntime(options: TaskRuntimeOptions) {
   };
 
   /**
-   * Whether a correction revision of `taskId` is already the latest and no attempt of the task
-   * has opened since: the researcher's go writes it (`run-loop.ts`), and the redo needs no second.
-   */
-  function correctionOpen(taskId: string): boolean {
-    const events = recorder.events();
-    for (let i = events.length - 1; i >= 0; i--) {
-      const e = events[i];
-      if (e?.type === "attempt.opened" && e.payload.taskId === taskId) return false;
-      if (e?.type === "revision.started") {
-        return e.payload.reason === "correction" && e.payload.taskId === taskId;
-      }
-    }
-    return false;
-  }
-
-  /**
    * The one way an attempt opens: `attempt.opened` under `holderThreadId`, id `eventId`. A task
    * that already had a result stops the live threads of every dependent (they may have read
    * its old files); if a dependent has an attempt, a correction revision first marks it stale.
@@ -212,7 +192,9 @@ export function taskRuntime(options: TaskRuntimeOptions) {
   async function openAttempt(taskId: string, holderThreadId: string, eventId: string) {
     if (taskOf(taskId)?.attemptId) {
       const dependents = transitiveDependents(planNow(), taskId);
-      if (dependents.some(attempted) && !correctionOpen(taskId)) {
+      // The researcher's go on this task wrote its correction revision already (`run-loop.ts`).
+      const go = threadLog(recorder.events()).go;
+      if (dependents.some(attempted) && !(go?.taskId === taskId && !go.redone)) {
         await recorder.append(
           holderThreadId,
           "revision.started",

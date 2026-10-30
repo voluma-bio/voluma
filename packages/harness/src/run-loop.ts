@@ -600,12 +600,17 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       });
       return true;
     }
-    await endStuckRun(view);
+    await endStuckRun(d, view);
     return true;
   }
 
-  /** The main agent stopped moving: skip every unfinished task and end the run. */
-  async function endStuckRun(view: Folded) {
+  /**
+   * The main agent stopped moving: skip every unfinished task and end the run. A correction is
+   * never ended that way, which would skip tasks that had results: the claim fails, and the
+   * server records the failed correction and leaves the earlier results as they were.
+   */
+  async function endStuckRun(d: ThreadLog, view: Folded) {
+    if (d.correcting) throw new Error("the main agent stopped moving in a correction");
     const left = unfinished(view);
     if (left.length > 0) {
       await recorder.append(

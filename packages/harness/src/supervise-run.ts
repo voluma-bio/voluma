@@ -60,6 +60,7 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
   // A stored log means an earlier claim ran. `previousClaim` says why it ended; a run claimed
   // before the API recorded reasons has none, and its resume says only "restarted".
   const resumed = recorder.events().length > 0;
+  const readSeq = recorder.events().at(-1)?.seq ?? 0;
   // Not a derived id: each invocation of the root is a thread start of its own.
   recorder.emit(rootThreadId, "thread.started", {
     parentThreadId: null,
@@ -71,6 +72,7 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
   const reopened = threadLog(recorder.events()).reopenPending && !options.previousClaim;
   recorder.emit(rootThreadId, "claim.started", {
     resumed,
+    readSeq,
     ...(options.previousClaim && { after: options.previousClaim }),
     ...(reopened && { reopened }),
   });

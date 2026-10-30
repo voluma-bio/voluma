@@ -1,8 +1,8 @@
 /**
  * The chat between a researcher and a run's main agent (`messages.ts`), read from the run's
- * events: the panel and the API both call `conversation` on what the run stream delivered
- * (`GET /api/run/runs/:id/stream`, the frames the run page already folds; `stream.ts`), so
- * they cannot disagree about what was said.
+ * events: the panel calls `conversation` on what the run stream delivered (`GET
+ * /api/run/runs/:id/stream`, the frames the run page already folds; `stream.ts`). The panel is
+ * not built yet, so nothing calls it.
  */
 import type { RunEvent } from "./events";
 import type { Mark } from "./messages";
