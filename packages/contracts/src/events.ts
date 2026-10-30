@@ -122,6 +122,23 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     z.object({ ...envelope, ...extra, type: z.literal(type), payload });
 
   /**
+   * Who sent a user message: another thread's tool (the main agent's `message`),
+   * the runtime (the restart note), or a person.
+   */
+  const userSender = z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("thread"), threadId: nonEmpty }),
+    z.object({
+      kind: z.literal("runtime"),
+      /**
+       * On a delivery to the main agent: the id of the last log event the delivery
+       * accounted for, so what follows it is undelivered. Optional; `fold` ignores it.
+       */
+      covers: nonEmpty.optional(),
+    }),
+    z.object({ kind: z.literal("person") }),
+  ]);
+
+  /**
    * A thread has one `thread.started` per invocation: the first run and each
    * resume after a restart. The latest one with no `thread.ended` after it
    * means the thread is running.
@@ -152,6 +169,13 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
          * becomes required on those kinds.
          */
         model: modelRefSchema.optional(),
+        /**
+         * The user message a resume starts with (an answer, feedback, a delivery, a nudge),
+         * stored with the start because the thread's own `message` event comes only after it
+         * loads its history. A start with no user message after it was cut off before it got
+         * its input, and the next claim resumes it with this. Absent on a thread's first start.
+         */
+        input: z.object({ text: z.string(), sender: userSender }).optional(),
       })
       .refine((p) => p.parentThreadId !== null || p.workflows !== undefined, {
         path: ["workflows"],
@@ -223,22 +247,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
       z.object({
         role: z.literal("user"),
         text: z.string(),
-        /**
-         * Who sent it: another thread's tool (the main agent's `message`),
-         * the runtime (the restart note), or a person.
-         */
-        sender: z.discriminatedUnion("kind", [
-          z.object({ kind: z.literal("thread"), threadId: nonEmpty }),
-          z.object({
-            kind: z.literal("runtime"),
-            /**
-             * On a delivery to the main agent: the id of the last log event the delivery
-             * accounted for, so what follows it is undelivered. Optional; `fold` ignores it.
-             */
-            covers: nonEmpty.optional(),
-          }),
-          z.object({ kind: z.literal("person") }),
-        ]),
+        sender: userSender,
       }),
       z.object({
         role: z.literal("assistant"),

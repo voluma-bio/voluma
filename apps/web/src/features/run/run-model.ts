@@ -8,7 +8,7 @@ import type { RunEvent } from "@voluma/contracts/events";
 import type { Folded, FoldedTask } from "@voluma/contracts/fold";
 import type { ProviderCalls, RunState } from "@voluma/contracts/run";
 import { type RunSpend, type Spend, spend } from "@voluma/contracts/spend";
-import { runningThreads } from "@voluma/contracts/threads";
+import { openThreads } from "@voluma/contracts/threads";
 import type { WorkflowPlan } from "@voluma/contracts/workflow";
 import { isSatisfied } from "@voluma/workflow";
 import { type Halt, type Live, toolTitle } from "./transcript";
@@ -43,9 +43,10 @@ export type Thread = {
 
 /**
  * When the runner is not running the run's threads (see `Halt`). A queued run with no threads
- * open is paused too, which changes nothing.
+ * open is paused too, which changes nothing. An ended run halts only once its stream has
+ * closed: until then the cancel's thread ends may still be on the way.
  */
-export function haltOf(state: RunState): Halt | undefined {
+export function haltOf(state: RunState, streamClosed: boolean): Halt | undefined {
   switch (state.status) {
     case "running":
       return undefined;
@@ -53,7 +54,9 @@ export function haltOf(state: RunState): Halt | undefined {
     case "awaiting-keys":
       return { kind: "paused" };
     case "ended":
-      return { kind: "ended", at: state.endedAt, outcome: state.outcome };
+      return streamClosed
+        ? { kind: "ended", at: state.endedAt, outcome: state.outcome }
+        : undefined;
   }
 }
 
@@ -132,18 +135,14 @@ function threadsOf(events: RunEvent[]): { threads: Thread[]; lastAt: Map<string,
 }
 
 /**
- * A thread still open when it is not running (`runningThreads`): a lost runner writes no end.
- * A cancel ends every thread in the API, so only a failed run leaves them here. It is stopped (failed, if the run failed)
- * at the run's end, or paused at its last event while the run waits to resume.
+ * A thread still open when the runner stopped: a lost runner writes no end, and a cancel's ends
+ * are all in the log once the stream has closed, so only a failed run leaves threads here.
+ * It is stopped (failed, if the run failed) at the run's end, or paused at its last event while
+ * the run waits to resume.
  */
-function halted(
-  threads: Thread[],
-  lastAt: Map<string, string>,
-  halt: Halt,
-  running: ReadonlySet<string>,
-): Thread[] {
+function halted(threads: Thread[], lastAt: Map<string, string>, halt: Halt): Thread[] {
   return threads.map((t) =>
-    t.status !== "running" || running.has(t.id)
+    t.status !== "running"
       ? t
       : halt.kind === "ended"
         ? {
@@ -272,15 +271,13 @@ function taskStates(
   plan: WorkflowPlan,
   tasks: FoldedTask[],
   threads: Thread[],
-  /** `runningThreads`: a worker the halt cut off still counts as working, then stopped. */
-  running: ReadonlySet<string>,
+  /** `openThreads`: a worker the log shows open counts as working, then stopped if the run is halted. */
+  open: ReadonlySet<string>,
   halt: Halt | undefined,
 ): Map<string, TaskState> {
   const byId = new Map(tasks.map((t) => [t.id, t]));
   const working = new Set(
-    threads.flatMap((t) =>
-      t.kind === "worker" && running.has(t.id) && t.taskId ? [t.taskId] : [],
-    ),
+    threads.flatMap((t) => (t.kind === "worker" && open.has(t.id) && t.taskId ? [t.taskId] : [])),
   );
   const states = new Map<string, TaskState>();
   for (const t of plan.tasks) {
@@ -442,19 +439,17 @@ export type RunView = {
 export function runView(
   events: RunEvent[],
   folded: Folded,
-  state: RunState,
+  halt: Halt | undefined,
   providerCalls: ProviderCalls | undefined,
 ): RunView {
   const logged = threadsOf(events);
-  const halt = haltOf(state);
-  const running = runningThreads(events, state);
-  const threads = halt ? halted(logged.threads, logged.lastAt, halt, running) : logged.threads;
+  const threads = halt ? halted(logged.threads, logged.lastAt, halt) : logged.threads;
   // No plan until the run's first `revision.started`.
   const plan = folded.revisions.length > 0 ? folded.plan : undefined;
   const attention = attentionOf(folded.tasks, logged.threads, events);
   const spent = spend(events, providerCalls);
   if (!plan) return { threads, attention, tasks: [], outputs: [], progress: "", spend: spent };
-  const states = taskStates(plan, folded.tasks, logged.threads, running, halt);
+  const states = taskStates(plan, folded.tasks, threads, new Set(openThreads(events)), halt);
   const latest = latestThreadByTask(threads);
   const lines = outcomes(events, folded.tasks, states);
   const taskSpend = new Map(spent.tasks.map((t) => [t.taskId, t.spend]));

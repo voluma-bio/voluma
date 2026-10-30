@@ -199,8 +199,9 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     try {
       const stored = (await history.load(threadId)).map((row) => JSON.parse(row) as AgentMessage);
       nextIdx = stored.length;
-      // Every check that can refuse the thread runs before `thread.started`: a refused
-      // re-invocation must not relabel a finished thread in the stream record.
+      // Every check that can refuse the thread runs before the thread's own events: a refused
+      // resume has its `thread.started` already (the run loop stores it first) and gets no more
+      // from here; the run loop then stops it.
       if (stored.length > 0 && !sameSystem(stored[0], system)) {
         throw new ThreadStale(
           "the stored system message differs from the current system prompt or tools; " +
@@ -225,8 +226,9 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       const finished = isFinished([...stored, ...repairs]);
       // A thread with no user message yet (new, or a crash before the first one was stored)
       // starts from the prompt. A finished one runs only for a new input. Each message
-      // carries its sender; the prompt is the runtime's (the supervisor's brief). The sandbox restart note reaches the model through
-      // the sandbox's command output (`sandbox-session.ts`), not as a message here.
+      // carries its sender; the prompt is the runtime's (the main agent's brief for a worker). The
+      // sandbox restart note reaches the model through the sandbox's command output
+      // (`sandbox-session.ts`), not as a message here.
       const prompts: AgentMessage[] = [];
       const addPrompt = (text: string | undefined, sender: UserSender) => {
         if (text) prompts.push(userMessage(text, sender));

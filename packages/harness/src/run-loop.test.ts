@@ -411,6 +411,96 @@ describe("run loop", () => {
     });
   });
 
+  // The resume's `thread.started` is stored before the thread loads its history, so a cut right
+  // after it (the load held at 50 ms) leaves a start with no message. The next claim resumes the
+  // thread with the input that start stored, not a bare "continue".
+  describe("a cut right after a resume's start", () => {
+    const slow = (thread: string) => (id: string) => (id === `${R}${thread}` ? 50 : 0);
+    const userTexts = (events: readonly RunEvent[], thread: string) =>
+      of(events, "message", thread).flatMap((e) =>
+        e.type === "message" && e.payload.role === "user" ? [e.payload.text] : [],
+      );
+    const states = (folded: { tasks: { id: string; status: string }[] }) =>
+      folded.tasks.map((t) => `${t.id}:${t.status}`);
+
+    it("an answer reaches the checker, which then judges", async () => {
+      const inner = checker();
+      const asking: Script = (t) => {
+        if (t.task !== "t2") return inner(t);
+        if (!t.calls.some((c) => c.name === "ask"))
+          return call("ask", { question: "Is the scan isotropic?" });
+        return told(t, /The main agent answers/) ? inner(t) : "I am waiting for the answer.";
+      };
+      const answering: Script = (t) => {
+        const [askId] = openAskIds(t);
+        return t.fresh && askId ? call("answer", { askId, text: "Yes, isotropic." }) : undefined;
+      };
+      const w = world({
+        plan: T1,
+        main: first(answering, chain(["t1", "t2"])),
+        check: asking,
+        delayLoad: slow("t2.check"),
+        cutAfter: (e) => e.id === `${R}t2.check:started:2`,
+      });
+      const folded = await w.run();
+      expect(w.wasCut).toBe(true);
+      expect(states(folded), w.text()).toEqual(["t1:done", "t2:done"]);
+      expect(userTexts(w.stored, "t2.check").filter((u) => /Yes, isotropic/.test(u))).toHaveLength(
+        1,
+      );
+      expect(taskEvents(w.stored, "t2")).toEqual(["under-review:agent", "done:check-result"]);
+      expect(duplicates(w.stored)).toEqual([]);
+    });
+
+    it("feedback reaches the worker once, and the new attempt is a fix", async () => {
+      const feedback: Script = (t) => {
+        const m = /The check of (t\d) found problems/.exec(t.lastUser);
+        return t.fresh && m
+          ? call("message", { threadId: `${R}${m[1]}.worker`, text: "Redo the placement." })
+          : undefined;
+      };
+      const w = world({
+        plan: T1,
+        main: first(feedback, chain(["t1", "t2"])),
+        check: checker((id, n) => (id === "t1" && n === 1 ? "needs-review" : "passed")),
+        delayLoad: slow("t1.worker"),
+        cutAfter: (e) => e.id === `${R}t1.worker:started:2`,
+      });
+      const folded = await w.run();
+      expect(w.wasCut).toBe(true);
+      expect(states(folded), w.text()).toEqual(["t1:done", "t2:done"]);
+      expect(of(w.stored, "attempt.opened", "t1.worker")).toHaveLength(2);
+      expect(
+        userTexts(w.stored, "t1.worker").filter((u) => /Redo the placement/.test(u)),
+      ).toHaveLength(1);
+      expect(duplicates(w.stored)).toEqual([]);
+    });
+
+    it("a plain message to an idle worker on a done task reaches it and reopens nothing", async () => {
+      const note: Script = (t) =>
+        t.fresh && passed(t, "t1") && !t.calls.some((c) => c.name === "message")
+          ? call("message", { threadId: `${R}t1.worker`, text: "Note: keep units in mm." })
+          : undefined;
+      const noted: Script = (t) => (/Note: keep units/.test(t.lastUser) ? "Noted." : worker(t));
+      const w = world({
+        plan: T1,
+        main: first(note, chain(["t1", "t2"])),
+        worker: noted,
+        delayLoad: slow("t1.worker"),
+        cutAfter: (e) => e.id === `${R}t1.worker:started:2`,
+      });
+      const folded = await w.run();
+      expect(w.wasCut).toBe(true);
+      expect(states(folded), w.text()).toEqual(["t1:done", "t2:done"]);
+      expect(
+        userTexts(w.stored, "t1.worker").filter((u) => /Note: keep units/.test(u)),
+      ).toHaveLength(1);
+      expect(of(w.stored, "attempt.opened", "t1.worker")).toHaveLength(1);
+      expect(taskEvents(w.stored, "t1")).toEqual(["under-review:agent", "done:check-result"]);
+      expect(duplicates(w.stored)).toEqual([]);
+    });
+  });
+
   it("a notice appended after a delivery was built is delivered next time, once", async () => {
     // t2's worker waits until main has been handed the delivery about t1, then submits.
     let release: () => void = () => {};
