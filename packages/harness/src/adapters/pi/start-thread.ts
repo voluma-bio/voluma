@@ -114,8 +114,6 @@ export interface ThreadOutcome {
   error?: string;
   /** The thread was refused because it cannot be resumed as stored (see `ThreadStale`). */
   stale?: true;
-  /** A model reply failed as a provider outage (`providerOutage`); the thread was left open. */
-  outage?: true;
   /** The text of the thread's last reply in this invocation; empty if it made none. */
   reply: string;
 }
@@ -318,6 +316,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
               message.stopReason === "error" &&
               !signal?.aborted &&
               !cutOff() &&
+              !historyError &&
               message.content.length === 0 &&
               options.providerOutage?.is(message.provider, message.errorMessage ?? "")
             ) {
@@ -388,7 +387,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       outcome = historyError
         ? historyFailure(historyError)
         : outage !== undefined
-          ? { status: "failed", error: outage, outage: true }
+          ? { status: "failed", error: outage }
           : signal?.aborted && !prompted
             ? { status: "cancelled" }
             : outcomeOf(agent.state.messages, signal?.aborted === true);
@@ -406,7 +405,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     }
     // The caller owns the recorder and flushes it. A stop stored its own end first (append-first):
     // the thread's end is then a second one for the same start, and is dropped.
-    if (started && !cutOff() && !outcome.outage) {
+    if (started && !cutOff() && outage === undefined) {
       await recorder.flush();
       if (!endedSinceStart()) emit("thread.ended", outcome);
     }

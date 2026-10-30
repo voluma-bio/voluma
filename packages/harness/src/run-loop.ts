@@ -588,11 +588,14 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       const error = m.end.error ?? "";
       if (o.providerFatal?.(error))
         throw new Error(`the main agent failed on a model provider error: ${error}`);
-      // Consecutive: a main thread that ended any other way starts the count again.
+      // Provider-failed main threads in a row, counting only those that ended after the run's
+      // latest task-state event: a main thread that ended any other way, or a task that moved
+      // since, starts the count again.
       let failures = 0;
       const mains = [...d.threads.values()].filter((r) => r.role === "main");
       for (const r of mains.reverse()) {
         if (r.end?.status !== "failed" || !providerError(r.end.error ?? "")) break;
+        if ((r.endedAt ?? -1) < d.progressAt) break;
         failures++;
       }
       if (failures > config.maxProviderRedos) {

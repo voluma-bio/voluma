@@ -252,7 +252,7 @@ with no status, its documented `error.type` (`overloaded_error` is 529, `rate_li
 (`isTransientProviderError`) and an empty reply after the retries above (the budget is spent; an
 error after content went out is not an outage), `start-thread.ts` does not store or emit
 that reply and writes no `thread.ended`: the thread stays open with its History an exact prefix,
-its outcome says `outage`, and `run.ts` stops the claim as `provider-outage`, which reports
+its `providerOutage.release` callback fires, and `run.ts` stops the claim as `provider-outage`, which reports
 `released`. Every running thread is cut off exactly as in a shutdown (an in-flight tool exec is
 not waited for: a `segment_sam` call cut this way has an unknown cost, like one cut by a deploy).
 The API requeues the run with `runs.claimable_after` set (1, then 2 minutes by the count of
@@ -265,7 +265,7 @@ progress resets it.
 **Other provider errors** (`provider-error.ts`: a transient error that came after content, such as
 a stream dropped mid-reply, and the neither-transient-nor-fatal ones, a non-Meta 404) kill the thread as before and are the run loop's to handle
 (`packages/harness/src/run-loop.ts`): a check is started again as a new check, the main agent as
-`main.<n+1>`, up to `maxProviderRedos` (2) times in a row for the main agent and per task for a check; a worker's failure is a notice to the main
+`main.<n+1>`, up to `maxProviderRedos` (2) times for the main agent and per task for a check; the main agent's count is the provider-failed main threads in a row that ended after the run's latest task-state event (`task`), so a task that moves, or a main thread that ended otherwise, starts it again; a worker's failure is a notice to the main
 agent. A fatal error (a refused key, out of money) fails the run at once, with the error in
 `state.error`, instead of leaving it `completed` with tasks that never started.
 

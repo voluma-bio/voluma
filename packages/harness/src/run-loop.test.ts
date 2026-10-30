@@ -1373,5 +1373,33 @@ describe("run loop", () => {
         w.text(),
       ).toEqual(["done"]);
     });
+
+    it("main's provider redo count starts again after a task moves", async () => {
+      // Two drops before any task state, then t1 passes, then two more drops: four in all, over the limit of 2 only if the count ignored progress.
+      const mains = new Set<string>();
+      const w = world({
+        plan: [task("t1")],
+        main: first(
+          (t) => {
+            if (t.role !== "main") return undefined;
+            mains.add(t.thread);
+            const nth = mains.size;
+            const drop = { dropped: "provider down", partial: "Let me" };
+            if (nth <= 2) return drop;
+            if (nth === 3 && passed(t, "t1")) return drop;
+            return nth === 4 && t.fresh ? drop : undefined;
+          },
+          chain(["t1"]),
+        ),
+        providerError: outage,
+        providerOutage: outage,
+      });
+      const folded = await w.run();
+      expect(
+        folded.tasks.map((t) => t.status),
+        w.text(),
+      ).toEqual(["done"]);
+      expect(ended(w.stored, "supervisor").at(-1)).toBe("completed");
+    });
   });
 });
