@@ -1,5 +1,55 @@
 #!/usr/bin/env bash
-# Amp supervises the declared preview; Postgres is enabled during setup.
+# Refresh reference repositories after activation/wake; Amp supervises the preview.
 set -euo pipefail
+
+repos="$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")")/../repos"
+
+refresh_repository() (
+  name="$1"
+  path="$repos/$name"
+  if [[ ! -e "$path/.git" ]]; then
+    printf 'Reference %s: missing checkout; check Amp additional repositories\n' "$name" >&2
+    return
+  fi
+  cd "$path"
+
+  # Both fetches run concurrently and are bounded to fit Amp's 10-second wait.
+  if ! GIT_TERMINAL_PROMPT=0 timeout --kill-after=1s 8s git fetch --quiet --no-tags --no-auto-maintenance origin \
+    '+refs/heads/*:refs/remotes/origin/*'; then
+    printf 'Reference %s: fetch failed or timed out; files unchanged, retry .agents/resume\n' "$name" >&2
+    return
+  fi
+
+  if [[ "$(git symbolic-ref --quiet --short HEAD || true)" != main ]]; then
+    printf 'Reference %s: refs refreshed; non-main checkout preserved\n' "$name"
+    return
+  fi
+  if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
+    printf 'Reference %s: refs refreshed; dirty checkout preserved\n' "$name"
+    return
+  fi
+  for state in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD rebase-merge rebase-apply sequencer; do
+    if [[ -e "$(git rev-parse --git-path "$state")" ]]; then
+      printf 'Reference %s: refs refreshed; Git operation in progress preserved\n' "$name"
+      return
+    fi
+  done
+  if ! git merge-base --is-ancestor HEAD refs/remotes/origin/main; then
+    printf 'Reference %s: refs refreshed; local or divergent commits preserved\n' "$name"
+    return
+  fi
+  if git -c merge.autoStash=false merge --ff-only --quiet refs/remotes/origin/main; then
+    printf 'Reference %s: main current at %s\n' "$name" "$(git rev-parse --short HEAD)"
+  else
+    printf 'Reference %s: fast-forward failed; inspect checkout before retrying\n' "$name" >&2
+  fi
+)
+
+refresh_repository docs &
+docs_pid=$!
+refresh_repository voluma-legacy &
+legacy_pid=$!
+wait "$docs_pid"
+wait "$legacy_pid"
 
 command -v meridian >/dev/null
