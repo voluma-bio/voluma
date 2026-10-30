@@ -303,7 +303,7 @@ export const startRunRequestSchema = z.object({
   studyId: studyIdSchema,
   /** One of the study's scans. */
   inputId: inputIdSchema,
-  /** As `runSchema.selectedOutputs`; an id the workflow's `outputs.json` lacks fails the run at start, with that message. */
+  /** As `runSchema.selectedOutputs`; an id that is not a measurement or score of the study's workflow is refused with 400. */
   selectedOutputs: selectedOutputsSchema.min(1).optional(),
   notes: z.string().max(4000).optional(),
   /** Present: the run uses these (`credentials: "visitor"`) and skips the org's runs-at-once count. */

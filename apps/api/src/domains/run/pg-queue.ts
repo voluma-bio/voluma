@@ -269,9 +269,9 @@ export function pgRunQueue(
     workflow: { pins: WorkflowPin[]; outputs: OutputEntry[] },
     starts: Starts,
   ) => {
-    if (starts.runs.length === 0) return;
     const bad = unselectable(workflow.outputs, starts.selectedOutputs ?? []);
     if (bad.length) throw new Refused("bad-selection", bad);
+    if (starts.runs.length === 0) return;
     const credentials = starts.keys ? "visitor" : "voluma";
     const used = await usage(tx, reader.labId, { userId: caller.userId, credentials });
     for (const { id, inputId } of starts.runs) {
