@@ -75,7 +75,7 @@ import {
   systemPrompt,
   workerPrompt,
 } from "./prompts.ts";
-import { isProviderError } from "./provider-error.ts";
+import { providerFailure } from "./provider-error.ts";
 import { r2Evidence } from "./r2-evidence.ts";
 import { r2Files } from "./r2-files.ts";
 import { r2Outputs } from "./r2-outputs.ts";
@@ -435,7 +435,7 @@ async function claimBody(
       runId,
       plan: computed.tasks,
       previousClaim: claim.previousClaim?.reason,
-      providerError: isProviderError,
+      providerError: providerFailure,
       workflow: definition.files,
       // The commit the files came from: the snapshot's, which a resume keeps.
       workflows: run.workflows.map((pin) => ({ ...pin, commit: definition.commit })),

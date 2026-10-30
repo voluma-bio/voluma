@@ -54,7 +54,7 @@ export interface SuperviseRunOptions {
   briefs: Briefs;
   config?: Partial<LoopConfig>;
   /** Whether a failed thread's error text says the model provider failed. */
-  providerError?(error: string): boolean;
+  providerError?(error: string): "retry" | "fatal" | undefined;
   signal: AbortSignal;
 }
 

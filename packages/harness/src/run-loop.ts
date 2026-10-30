@@ -126,8 +126,12 @@ export interface RunLoopOptions {
   config?: Partial<LoopConfig>;
   /** Builds the tools a thread's role names; the main agent's tools act through `agents`. */
   tools(thread: ThreadLayout, names: readonly string[], agents: Agents): Tool[];
-  /** Whether a failed thread's error text says the model provider failed (the host knows its texts); the run then fails at once. */
-  providerError?(error: string): boolean;
+  /**
+   * What a failed thread's error text means (the host knows its texts): `"fatal"` fails the run at
+   * once; `"retry"` (an error the host's own call retry could not redo, as one in mid-reply)
+   * resumes the thread once, then fails the run; `undefined` leaves it a failed thread.
+   */
+  providerError?(error: string): "retry" | "fatal" | undefined;
   signal?: AbortSignal;
 }
 
@@ -152,7 +156,8 @@ type Step = "acted" | "idle" | "done";
 export async function runLoop(o: RunLoopOptions): Promise<Folded> {
   const { runId, rootThreadId: root, recorder, runtime, threads, signal } = o;
   const config = { ...LOOP_DEFAULTS, ...o.config };
-  const providerError = (e: string) => o.providerError?.(e) === true;
+  /** A thread resumed after a retryable provider error → its start count then; the resumed start's own failure is fatal. */
+  const retriedAt = new Map<string, number>();
   let failure: unknown; // the first error that failed the run
   /** Threads whose refusal as unresumable the loop has dealt with. */
   const dealtWith = new Set<string>();
@@ -490,14 +495,21 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     return false;
   }
 
-  /** Throws when a thread this process ran failed on a provider error. */
-  function checkFatal(d: ThreadLog) {
+  /** Resumes a thread this process ran that failed on a retryable provider error (once); throws on any other provider error. */
+  async function checkFatal(d: ThreadLog): Promise<boolean> {
     for (const r of d.threads.values()) {
       const error = r.end?.status === "failed" ? (r.end.error ?? "") : undefined;
-      if (error !== undefined && threads.started(r.id) && providerError(error)) {
-        throw new Error(fatalText(r, error));
+      const kind =
+        error !== undefined && threads.started(r.id) ? o.providerError?.(error) : undefined;
+      if (!kind) continue;
+      if (kind === "retry" && r.starts > (retriedAt.get(r.id) ?? -1) + 1 && !threads.stale(r.id)) {
+        retriedAt.set(r.id, r.starts);
+        await resume(r, "The model provider failed during your last reply; continue.", RUNTIME);
+        return true;
       }
+      throw new Error(fatalText(r, error as string));
     }
+    return false;
   }
 
   /** The delivery message and the last event it covers. */
@@ -596,7 +608,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     const d = derive();
     if (d.root.ended) return "done";
     const view = d.view;
-    checkFatal(d);
+    if (await checkFatal(d)) return "acted";
     if (!d.main) {
       await startMain(d);
       return "acted";

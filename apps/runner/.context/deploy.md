@@ -66,7 +66,7 @@ Variables (names only; values never go in the repo):
 
 With `RUNNER_THINKING` unset, a role without a `thinking` key in its role file sends no level (Pi and the provider apply their default; DeepSeek runs with thinking off). Set it to one of `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; the runner will not start if a model alias lacks the level (a role file's own `thinking` is checked when a run starts), and the boot line prints it. With `RUNNER_MODEL` set (every role forced onto one model), the role files' levels are ignored and `RUNNER_THINKING` alone applies.
 
-There is no fallback model: a provider error fails the run: at once for a 4xx, after a minute of retries for a 5xx or a network error (see `CONTEXT.md`). Visitor runs use `RUNNER_VISITOR_MODEL` (default `meta/muse-spark-1.3`) with the visitor's key.
+There is no fallback model: a provider error fails the run: at once for a 4xx, after retries (a minute per call, one resume of the thread) for a 5xx or a network error (see `CONTEXT.md`). Visitor runs use `RUNNER_VISITOR_MODEL` (default `meta/muse-spark-1.3`) with the visitor's key.
 
 ## The sandbox image
 

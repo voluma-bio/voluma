@@ -279,9 +279,14 @@ not cut short), each retry logged with its role and attempt. The run's abort end
 other error, a 4xx included (Meta's `404 model_not_found` too), or the spent budget, ends the call
 at once. The failed reply is stored and the thread ends `failed` with the provider's message. The
 run loop (`packages/harness/src/run-loop.ts`) sees a thread this process ran that failed on a
-provider error (`isProviderError`: any 4xx or 5xx status, a connection failure, an empty account)
-and fails the run with it in `state.error`: "the main agent failed on a model provider error:
-<message>", or "<taskId>: its worker failed on a model provider error: <message>". Nothing
+provider error (`providerFailure` in `provider-error.ts`: any 4xx or 5xx status, a connection
+failure, an empty account) and fails the run with it in `state.error`: "the main agent failed on a
+model provider error: <message>", or "<taskId>: its worker failed on a model provider error:
+<message>". A retryable error (the set above) on a thread that already streamed content, or that
+outlasted the 60 s, resumes that thread once ("The model provider failed during your last reply;
+continue.") before the run fails; the resumed call has its own 60 s. A context overflow (400/413
+"prompt is too long", `context_length_exceeded`, `request_too_large`; Pi's `isContextOverflow`)
+is not a provider error: it fails that thread only, and main starts a fresh one. Nothing
 releases the run to wait or redoes the thread. `provider-error.ts` holds the classification: it
 reads the status in the text (Pi's `<provider> API error (<status>)`, or the Anthropic SDK's
 `<status> {...}`, `<status> <html>` or `<status> status code (no body)`) and, for an Anthropic error sent mid-stream

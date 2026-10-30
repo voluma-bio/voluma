@@ -1252,7 +1252,7 @@ describe("run loop", () => {
         main: () => {
           throw new Error("provider down");
         },
-        providerError: (e) => /provider down/.test(e),
+        providerError: (e) => (/provider down/.test(e) ? "fatal" : undefined),
       });
       await expect(w.run()).rejects.toThrow(
         "the main agent failed on a model provider error: provider down",
