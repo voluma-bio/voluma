@@ -25,8 +25,6 @@ export const providerCalls = pgTable(
     /** The gateway instance that admitted the call; it marks its own rows `cut` at shutdown. */
     instance: text().notNull(),
     status: text({ enum: ["open", "done", "failed", "cut"] }).notNull(),
-    /** Unused since reservations were removed; nullable so rows from the old code still insert. Drop it (`apps/api/.context/TODO.md`). */
-    reservedUsd: doublePrecision(),
     costUsd: doublePrecision(),
     /** A Meta file id: set on an upload's row, and a DELETE may name only these. */
     fileId: text(),

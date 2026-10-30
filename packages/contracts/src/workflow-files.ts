@@ -100,6 +100,15 @@ export type OutputEntry = z.infer<typeof outputEntrySchema>;
 export const isSelectable = (entry: OutputEntry) =>
   entry.kind === "measurement" || entry.kind === "score";
 
+/** The ids in `selected` that are not a measurement or score in `outputs` (a run can't select them). */
+export const unselectable = (outputs: readonly OutputEntry[], selected: readonly string[]) => {
+  const byId = new Map(outputs.map((o) => [o.id, o]));
+  return selected.filter((id) => {
+    const entry = byId.get(id);
+    return !entry || !isSelectable(entry);
+  });
+};
+
 export const taskEntrySchema = z.strictObject({
   id: taskIdSchema,
   /** Short plain-language name for people ("Scan intake"); the id stays the identity. */
@@ -114,6 +123,8 @@ export const taskEntrySchema = z.strictObject({
   instructions: nonEmpty,
   /** Done criteria, shown to the worker and the check. */
   doneWhen: z.array(nonEmpty),
+  /** The task reads the raw scan in `/inputs`: its worker and check threads get it copied to local disk, the others read the mount (`layout.ts` says why). */
+  copyInputs: z.boolean().optional(),
 });
 export type TaskEntry = z.infer<typeof taskEntrySchema>;
 

@@ -4,11 +4,11 @@
  * `x-api-key` Anthropic's SDK sends). In order: open the token; check the provider, our key (a
  * visitor's token has only its own keys and never falls back to ours), the exact route and, for
  * a model call, the model (read from the top level of the first 4 KB of the body); admit the call against the
- * database (`admitCall`: run live, lease matches, in-flight limit, spend cap, `open` row); forward with our key and the caller's auth headers stripped; stream the
+ * database (`admitCall`: run live, lease matches, in-flight limit, `open` row); forward with our key and the caller's auth headers stripped; stream the
  * reply back unbuffered while reading usage from its lines; settle the row.
  *
  * Gateway-made refusals are JSON `{error: {type: "gateway", message}}` with 401 (token or run
- * revoked), 402 (spend cap), 403 (route, model, provider or key not allowed), 429 (calls in
+ * revoked), 403 (route, model, provider or key not allowed), 429 (calls in
  * flight), 502 (provider unreachable) or 503 (database, or draining). A Meta model call that asks for
  * `text/event-stream` is instead answered 200 at once after admission, and an upstream failure
  * (status or unreachable) ends the stream with one `event: gateway-error`. A call lasts at most

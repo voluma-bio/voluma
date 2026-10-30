@@ -10,7 +10,9 @@
  * started once more. State changes go to `onState` with the thread they belong to (the
  * runner writes them as `sandbox` events).
  */
+
 import { type Sandbox, SandboxEndedError } from "./ports/sandbox";
+import { SandboxUnavailableError } from "./tools/tool";
 
 export type SandboxState = "starting" | "ready" | "stopped" | "failed";
 
@@ -68,7 +70,8 @@ function threadSandbox(
         } catch (error) {
           if (current?.generation === generation) current = undefined;
           onState(threadId, "failed", String(error));
-          throw error;
+          // Every creation path (first use, a replacement mid-command) fails the same way.
+          throw new SandboxUnavailableError(`the sandbox could not be started: ${String(error)}`);
         }
       })(),
     };
@@ -86,9 +89,17 @@ function threadSandbox(
         "stopped",
         code === undefined ? "ended by the provider" : `ended by the provider (exit code ${code})`,
       );
-      current = start();
+      const fresh = start();
+      current = fresh;
+      // Awaited below; until then a creation that fails before the destroy returns would be an
+      // unhandled rejection, which fails the whole run (the runner's handler).
+      fresh.sandbox.catch(() => {});
       await (await dead.sandbox).destroy();
       assertOpen();
+      // This caller's replacement, not a second one started because a failure cleared `current`.
+      await fresh.sandbox;
+      assertOpen();
+      return fresh;
     }
     current ??= start();
     const entry = current;

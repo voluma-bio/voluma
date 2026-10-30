@@ -58,7 +58,7 @@ const apiHost = new URL(config.api.baseUrl).hostname;
 if (!["localhost", "127.0.0.1", "[::1]"].includes(apiHost) && !values["allow-remote"])
   throw new Error(`${apiHost} is not this machine: pass --allow-remote to claim a run there`);
 
-const claim = await claimRun(config.api, "dev-sandbox", config.maxRunCostUsd);
+const claim = await claimRun(config.api, "dev-sandbox");
 if (!claim) throw new Error("no queued run: start one in the web app (pnpm dev) first");
 const { run, leaseToken } = claim;
 if (run.id !== values.run) {
@@ -81,7 +81,6 @@ const client = runClient(
 const meter = usageMeter();
 const beats = { count: 0, maxRoundTripMs: 0 };
 const lease = holdLease({
-  onSpent: (usd) => log(`run spend $${usd.toFixed(4)}`),
   client,
   onRoundTrip: (ms) => {
     beats.count++;
@@ -128,7 +127,7 @@ for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(signal
 
 let exitCode = 0;
 try {
-  const thread = layoutOf(run, [], false).forThread(`${run.id}.dev.worker`); // no workflow is loaded here, so no PYTHONPATH
+  const thread = layoutOf(run, [], false, () => true).forThread(`${run.id}.dev.worker`); // no workflow is loaded here, so no PYTHONPATH
   meter.sandboxUp();
   counted = true;
   sandbox = await claimSandboxes(

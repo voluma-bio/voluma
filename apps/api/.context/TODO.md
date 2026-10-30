@@ -30,11 +30,6 @@
   delete `inputs/<id>/` for any id with no `ready` row: a complete cancelled or abandoned
   part way through its copy leaves files there.
 
-- **Drop the `runs.recoveries` column.** Nothing reads or writes it since the no-progress limit
-  (`claim-progress.ts`) replaced it, but it stays in `schema.ts` so the previous deploy's code,
-  which still selects it, keeps working while a migration runs. Drop it in a later PR, once that
-  code is drained.
-
 - **`seed:example --backfill` checks focus ids after its R2 writes.** `copyEvidence` and
   `uploadBackfill` run before `backfillRows`'s focus check, so a bad id uploads ~2 GB under an unused
   example id before refusing. Move the check into `readBackfill` and run it first; also check each
@@ -44,7 +39,3 @@
   `dev/` and reject empty, `.` and `..` segments. (p563)
 - `backfill.py`'s scan-grid ruler assert can't fail (both sides use the same transform); compare
   against the `points` `export.py`'s `ruler()` writes. (p563)
-- **Drop `provider_calls.reserved_usd`.** Reservations are gone; nothing writes or reads the
-  column (0007 made it nullable so the old code still inserts during a deploy). Drop it in a
-  PR after the one that removed reservations is live, with the column out of
-  `packages/provider-calls/src/schema.ts`.
