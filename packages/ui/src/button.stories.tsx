@@ -114,7 +114,11 @@ export const Link: Story = {
     </p>
   ),
 };
-/** `asChild` gives the look to the one child, here an anchor (a router `Link` in the app). */
+/**
+ * `asChild` gives the look to one enabled child, here an anchor (a router `Link` in the app).
+ * An unavailable destination uses a native `<Button disabled reason="…">` instead; anchors
+ * cannot be disabled, and `asChild` therefore accepts neither `disabled` nor `reason`.
+ */
 export const AsChild: Story = {
   render: () => (
     <Button asChild size="sm">
