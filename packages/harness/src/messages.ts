@@ -32,6 +32,7 @@ const PLAIN_REASON: Record<ClaimEndReason, string> = {
   shutdown: "the runner restarted",
   "self-stop": "the runner lost contact with the server",
   "lease-expired": "the server lost contact with the runner",
+  "provider-outage": "the model provider was unavailable",
 };
 
 /** What the main agent is told when it calls a tool that waits for the researcher's go. */

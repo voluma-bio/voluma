@@ -31,7 +31,12 @@ export interface Call {
   name: string;
   input: unknown;
 }
-export type Reply = string | Call | Call[];
+/** A reply that breaks off after `partial` text with this provider error (an empty `partial` is a thrown error). */
+export interface Dropped {
+  dropped: string;
+  partial: string;
+}
+export type Reply = string | Call | Call[] | Dropped;
 export const call = (name: string, input: unknown = {}): Call => ({ name, input });
 
 /** One model request: the thread asking and what its history holds. */
@@ -196,6 +201,8 @@ export interface WorldOptions {
   delayLoad?: (threadId: string) => number;
   /** Whether a failed thread's error text says the model provider failed. */
   providerError?: (error: string) => boolean;
+  /** Whether a model error is a provider outage (`StartThreadOptions.providerOutage`); the world releases the run as the runner does. */
+  providerOutage?: (error: string) => boolean;
   /** Whether evidence storage holds this file (default: every file); `keep` rejects with `EvidenceNotFound` otherwise. */
   evidenceExists?: (root: "outputs" | "scratch", taskId: string, path: string) => boolean;
   /** Runs for every event the store accepts (for tests that need something to happen at that moment). */
@@ -221,6 +228,7 @@ export function world(o: WorldOptions) {
   let abort = new AbortController();
   let cut = false;
   let cancelled = false;
+  const released: string[] = [];
   let frozen = false;
   let n = 0;
   const callId = () => `c${++n}`;
@@ -244,6 +252,11 @@ export function world(o: WorldOptions) {
       if (reply === undefined)
         throw new Error(`no scripted reply for ${turn.thread} (${turn.steps} steps)`);
       if (typeof reply === "string") return fauxAssistantMessage(reply);
+      if ("dropped" in reply)
+        return fauxAssistantMessage(reply.partial, {
+          stopReason: "error",
+          errorMessage: reply.dropped,
+        });
       return fauxAssistantMessage(
         [reply].flat().map((c) => fauxToolCall(c.name, c.input as never, { id: callId() })),
       );
@@ -386,6 +399,13 @@ export function world(o: WorldOptions) {
       },
       config: o.config,
       providerError: o.providerError,
+      providerOutage: o.providerOutage && {
+        is: (_provider, error) => o.providerOutage?.(error) === true,
+        release: (error) => {
+          released.push(error);
+          abort.abort();
+        },
+      },
       // A reopen clears the claim-end reason (`messages.ts`).
       ...(stored.length > 0 && !reopened && { previousClaim: "shutdown" as const }),
       signal: abort.signal,
@@ -394,6 +414,8 @@ export function world(o: WorldOptions) {
 
   return {
     stored: stored as readonly RunEvent[],
+    /** The errors the world released the run for (`providerOutage`). */
+    released: released as readonly string[],
     /** Whether a claim was cut off by `cutAfter`. */
     get wasCut() {
       return cut;

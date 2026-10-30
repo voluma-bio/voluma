@@ -171,7 +171,11 @@ export const runs = pgTable(
     leaseToken: text(),
     leaseExpiresAt: timestamptz(),
     /** Why the last claim ended (`claimEndReasonSchema`); the next claim carries it. Null before the first end. */
-    lastClaimEnd: text({ enum: ["shutdown", "self-stop", "lease-expired"] }),
+    lastClaimEnd: text({
+      enum: ["shutdown", "self-stop", "lease-expired", "provider-outage"],
+    }),
+    /** A `provider-outage` release holds the queued run back until then; `claim` skips it, and clears it on taking the run. */
+    claimableAfter: timestamptz(),
     /** Seq of the latest progress event (`claim-progress.ts`), and the log's last seq when the current claim began. */
     lastProgressSeq: integer().notNull().default(0),
     claimStartSeq: integer().notNull().default(0),
