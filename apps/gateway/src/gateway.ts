@@ -85,6 +85,14 @@ const STRIPPED_REQUEST = new Set([
 /** Errors from a connection that never reached the provider: nothing was billed. */
 const CONNECT_ERRORS = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN"]);
 
+/** The migration lives in apps/api; until it has run, every call would fail. */
+export async function isMigrated(db: PostgresJsDatabase): Promise<boolean> {
+  const [row] = await db.execute<{ ok: boolean }>(
+    `SELECT to_regclass('provider_calls') IS NOT NULL AS ok`,
+  );
+  return row?.ok === true;
+}
+
 export type GatewayDeps = {
   db: PostgresJsDatabase;
   secrets: readonly TokenSecret[];
@@ -145,7 +153,7 @@ export function createGateway(deps: GatewayDeps) {
     const [path = "", query] = (req.url ?? "/").split("?", 2) as [string, string?];
     if (path === "/health") {
       if (draining) return reply(res, 503, "draining");
-      await db.execute("select 1");
+      if (!(await isMigrated(db))) return reply(res, 503, "not migrated");
       return reply(res, 200, "ok");
     }
     if (draining) {

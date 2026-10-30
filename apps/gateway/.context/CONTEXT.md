@@ -13,7 +13,7 @@ change it safely.
   (routes, auth header) and prices. The gateway imports nothing from `apps/api`; it reads the
   `runs` columns it needs by raw SQL (`calls.ts`). The migration is in `apps/api/drizzle/`.
 - `src/gateway.ts` is the whole request path; `src/main.ts` reads env, builds the handle (it must
-  use `drizzle(client, { casing: "snake_case" })`), checks the migration, cuts stale rows, drains.
+  use `drizzle(client, { casing: "snake_case" })`), waits for the migration, cuts stale rows, drains.
 - A request is `/<provider>/<upstream path>` with the gateway token as `Authorization: Bearer` or
   `x-api-key`. Order: open token, provider allowed, key (a visitor token has only its own keys),
   exact route, model (top level of the first 4 KB of the body) and its price, admit, forward,
@@ -77,7 +77,7 @@ change it safely.
   an event stream still gets keepalives after its headers.
 - **Boot and shutdown.** While draining, new calls get 503 with `Connection: close`. At SIGTERM
   the instance drains for `GATEWAY_DRAIN_SECONDS`, aborts what remains (those calls end `cut`),
-  then marks its own leftover `open` rows `cut`. The gateway exits at boot if `provider_calls` is missing.
+  then marks its own leftover `open` rows `cut`. If `provider_calls` is missing at boot (a new database, before the API's migration), the gateway serves `/health` 503 and retries with a backoff; the boot sweep runs once it exists.
 
 ## Known limits
 

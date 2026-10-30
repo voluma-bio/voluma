@@ -46,7 +46,12 @@ function apiEndpoint(): { baseUrl: string; token: string } {
   const baseUrl = optional("VOLUMA_API_URL");
   const token = optional("VOLUMA_API_TOKEN");
   if (baseUrl || token) {
-    return { baseUrl: required("VOLUMA_API_URL"), token: required("VOLUMA_API_TOKEN") };
+    // Render's `hostport` reference is `host:port` with no scheme.
+    const url = required("VOLUMA_API_URL");
+    return {
+      baseUrl: /^https?:\/\//.test(url) ? url : `http://${url}`,
+      token: required("VOLUMA_API_TOKEN"),
+    };
   }
   const path = resolve(import.meta.dirname, "../../../.dev/env.json");
   try {

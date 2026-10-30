@@ -62,9 +62,9 @@ runner reads it as `RENDER_EXTERNAL_URL`). Settings, all in `render.yaml`:
 |---|---|
 | Service | web service, GitHub repo `voluma-bio/voluma`, branch `main`, root `/` |
 | Build | `pnpm install --frozen-lockfile`; no build step; `tsx` is a runtime dependency |
-| Pre-deploy | none. The API's pre-deploy runs the migration; the gateway exits at boot until it has run, so deploy the API first on a new database |
+| Pre-deploy | none. The API's pre-deploy runs the migration; on a new database the gateway starts first, logs `waiting for the migration` with a backoff, and `/health` answers 503 until `provider_calls` exists |
 | Start | `cd apps/gateway && exec node --import tsx src/main.ts` (`exec`: node gets SIGTERM) |
-| Health check | `/health` (200 after `select 1`; 503 while draining) |
+| Health check | `/health` (200 once `provider_calls` exists; 503 while it doesn't or while draining) |
 | Shutdown delay | 90 s: above `GATEWAY_DRAIN_SECONDS` (60) plus the cleanup after it; calls still running when the drain ends are cut (cost unknown) |
 | Instances | one |
 | Build filter | `apps/gateway`, `packages/provider-calls`, and the root build files |

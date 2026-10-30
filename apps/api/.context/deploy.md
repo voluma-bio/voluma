@@ -14,7 +14,7 @@ file, and Render applies it when the Blueprint syncs (not on a service deploy). 
 | Service | State |
 |---|---|
 | `voluma-api` | Web service, auto-deployed from `main`. `https://voluma-api.onrender.com` until a custom domain (`app.voluma.bio`) exists |
-| `voluma-db` | Render Postgres, private network only (`ipAllowList: []`) |
+| `voluma-db` | Render Postgres, 5 GB disk ($1.50/month; it cannot shrink), private network only (`ipAllowList: []`) |
 | `voluma-gateway` | Web service: the provider gateway. Notes: [../../gateway/.context/deploy.md](../../gateway/.context/deploy.md) |
 | `voluma-runner` | Background worker: claims runs over the private network. Notes, variables and the sandbox image: [../../runner/.context/deploy.md](../../runner/.context/deploy.md) |
 
@@ -41,7 +41,6 @@ Variables on `voluma-api` (names in `render.yaml`; values never go in the repo):
 | Variable | Value |
 |---|---|
 | `DATABASE_URL` | `fromDatabase` `voluma-db` `connectionString` (the private URL; no pooler, so prepared statements work) |
-| `PORT` | `10000`, Render's default for web services, written out because the runner's `VOLUMA_API_URL` names it |
 | `VOLUMA_API_TOKEN` | random 32 bytes, hex. The runner reads it from here |
 | `VOLUMA_DEBUG_TOKEN` | optional; random 32 bytes, hex. Lets agents read every lab's runs (`GET /api/run/runs…`) and nothing else; unset turns it off |
 | `APP_URL` | the origin browsers use, no trailing slash: today the service's own `RENDER_EXTERNAL_URL` (self-reference in the yaml); with a custom domain, replace it with that origin as a literal. Must be https (the session cookie is then `Secure` and named `__Host-wos-session`). Builds the sign-in redirect and the `Origin` check |
@@ -131,11 +130,13 @@ r "$B/logs?ownerId=tea-d8maeebtqb8s73br9ev0&resource=$S&limit=100&direction=back
 
 # One variable. GET /env-vars lists the whole set, every secret in it. PUT /env-vars (no key)
 # REPLACES the whole set: use the per-key form
-r "$B/services/$S/env-vars/APP_URL"
-r -X PUT "$B/services/$S/env-vars/APP_URL" -d '{"value":"https://app.voluma.bio"}'
+r "$B/services/$S/env-vars/GUEST_SCOPE"
+r -X PUT "$B/services/$S/env-vars/GUEST_SCOPE" -d '{"value":"self"}'
 
-# Roll back: redeploy a previous live deploy (autodeploy is turned off by this; see below)
+# Roll back: redeploy a previous live deploy, then turn autodeploy off yourself (the API
+# does not; the dashboard's rollback does). Turn it back on once the fix is merged
 r -X POST "$B/services/$S/rollback" -d '{"deployId":"<id>"}'
+r -X PATCH "$B/services/$S" -d '{"autoDeploy":"no"}'
 
 # Restart (applies a changed variable)
 r -X POST "$B/services/$S/restart"
@@ -147,8 +148,9 @@ value on the next Blueprint sync, so change those in the yaml.
 
 A rollback restores the old code, not the old schema: migrations have already run and
 aren't reversed. It is safe only if the migrations since that deploy followed the
-expand-then-contract rule. Otherwise fix forward. Render turns autodeploy off for a service after a
-rollback (per its docs; not yet seen here): turn it back on in the dashboard (Settings, Build & Deploy) once the fix is merged.
+expand-then-contract rule. Otherwise fix forward. A rollback through the API leaves autodeploy on, so the next
+merge would deploy over it: the `PATCH` above turns it off (not yet run here). Turn it back on
+(`{"autoDeploy":"yes"}`, or the dashboard's Settings, Build & Deploy) once the fix is merged.
 
 The runner service (`pnpm --filter @voluma/runner start`) claims whatever is queued, so
 pointing a local one at staging (`VOLUMA_API_URL`) takes a visitor's run and their keys. Run
@@ -165,7 +167,14 @@ $VOLUMA_DEBUG_TOKEN` reads every lab's runs.
 (`ipAllowList: []`). Add the operator's address in the dashboard (`voluma-db`, Networking) or
 by setting `ipAllowList` in `render.yaml`, take the external URL from
 `r "$B/postgres/<DB_ID>/connection-info"` (never print it), run `pg_dump` or `pg_restore`, then
-remove the address. A restore into a new database: `pg_restore --no-owner --no-acl`.
+remove the address.
+
+**Restoring a dump into `voluma-db`:** the API's pre-deploy has already migrated it, so a plain
+restore collides with the existing tables. Suspend the API, gateway and runner first
+(`r -X POST "$B/services/<ID>/suspend"` for each, so nothing writes while the tables are
+replaced), run `pg_restore --clean --if-exists --no-owner --no-acl`, then resume the three
+(`.../resume`). Compare row counts with the source (`runs`, `run_events`, `provider_calls`)
+before trusting it.
 
 ## Rotating secrets
 
@@ -177,7 +186,7 @@ ends that exposure for what was only there.
 |---|---|---|
 | `VOLUMA_API_TOKEN` | `voluma-api` variables (the runner reads it from there) | New value (`openssl rand -hex 32`) on `voluma-api`; the restart applies it. Then the runner picks it up at the next Blueprint sync (`fromService`), or set it by hand and restart the runner. Old token stops working at once. A local runner updates its copy |
 | `VOLUMA_DEBUG_TOKEN` | `voluma-api` variables; the agents that debug runs | Same as `VOLUMA_API_TOKEN`; only the agents' copies change |
-| Postgres password | `voluma-db` (Render generates it; `DATABASE_URL` carries it) | Render has no documented password-rotation step for Postgres (untested: look in the dashboard, `voluma-db`, first; otherwise create a new database and restore into it). After a new password, sync the Blueprint (so `DATABASE_URL` on the API and gateway refreshes) and restart both, then check `/health` and one authenticated call. Never `ALTER USER` by hand: it changes the database and leaves `DATABASE_URL` stale |
+| Postgres password | `voluma-db` (Render generates it; `DATABASE_URL` carries it) | Dashboard, `voluma-db`, Credentials: "+ New default credential" (or the create-user endpoint, `POST /postgres/<DB_ID>/users`; neither run yet), then delete the old one. `fromDatabase` values follow on the next Blueprint sync; after it restart the API and gateway, then check `/health` and one authenticated call. Never `ALTER USER` by hand: it changes the database and leaves `DATABASE_URL` stale |
 | `RENDER_API_KEY` (`.env`) | the repo `.env` of whoever deploys | Dashboard, Account Settings, API Keys: create a new one, replace it in `.env`, delete the old |
 | `WORKOS_COOKIE_PASSWORD` | `voluma-api` variables; `.env` | New value on `voluma-api`; restart. Every session cookie stops unsealing, so everyone signs in again. Rotate it whenever it may have leaked: it is the key to forging a session cookie, though a forged one still needs a token WorkOS signed |
 | `WORKOS_API_KEY` | `voluma-api` variables; `.env` | Dashboard, API Keys: create a new key, replace it on `voluma-api` and restart, then delete the old one. It authorizes token refresh and session revocation |

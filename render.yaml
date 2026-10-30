@@ -8,13 +8,13 @@
 # A `sync: false` variable added later is not asked for: set it in the dashboard.
 #
 # Prices are per month, from https://render.com/pricing on 2026-10-30. The workspace is on the
-# Hobby tier ($0 plus compute); nothing here needs Pro. Compute total: $7 + $7 + $25 + $19 = $58.
+# Hobby tier ($0 plus compute); nothing here needs Pro. Compute $7 + $7 + $25 + $19 = $58, plus Postgres storage $1.50 (5 GB at $0.30/GB): $59.50.
 
 envVarGroups:
   - name: voluma-shared
     envVars:
       # Render's default Node is already this, but `engines` (>=24) is unbounded; pin it to
-      # .tool-versions.
+      # .tool-versions. Change both together.
       - key: NODE_VERSION
         value: 24.22.1
       # The root `prepare` script runs `lefthook install` when a .git exists; Render's build
@@ -28,6 +28,7 @@ databases:
   - name: voluma-db
     plan: 0.5c-1g # $19 (1 GB RAM, 100 connections; the API and gateway use about 20)
     region: virginia
+    diskSizeGB: 5 # $1.50 at $0.30/GB; Render allows 1 or a multiple of 5, and a disk cannot shrink
     databaseName: voluma
     user: voluma
     # Private network only: no external connection. For a dump or restore add the operator's
@@ -67,8 +68,6 @@ services:
         fromDatabase:
           name: voluma-db
           property: connectionString # private network, no pooler: prepared statements work
-      - key: PORT # Render's default for web services; the runner's VOLUMA_API_URL names it
-        value: "10000"
       # The origin browsers use. Replace with the custom domain's origin when there is one.
       - key: APP_URL
         fromService:
@@ -120,8 +119,8 @@ services:
     plan: 0.5c-512mb # $7
     numInstances: 1
     buildCommand: pnpm install --frozen-lockfile
-    # No pre-deploy: the gateway exits at boot until the API's migration has run, so the first
-    # deploy of a new database needs the API deployed first.
+    # No pre-deploy: at boot the gateway waits for the API's migration (/health answers 503 until
+    # `provider_calls` exists).
     startCommand: cd apps/gateway && exec node --import tsx src/main.ts
     healthCheckPath: /health # 200 after `select 1`; 503 while draining
     maxShutdownDelaySeconds: 90 # above GATEWAY_DRAIN_SECONDS (60) plus the row cleanup after it
@@ -177,21 +176,22 @@ services:
         - pnpm-workspace.yaml
     envVars:
       - fromGroup: voluma-shared
-      # The API on the private network. Render's `hostport` property has no scheme and there is
-      # no interpolation, so this is the literal: the service name and the API's PORT above.
+      # The API on the private network: host and port, no scheme (the runner adds http://).
       - key: VOLUMA_API_URL
-        value: http://voluma-api:10000
+        fromService:
+          type: web
+          name: voluma-api
+          property: hostport
       - key: VOLUMA_API_TOKEN
         fromService:
           type: web
           name: voluma-api
           envVarKey: VOLUMA_API_TOKEN
       # The gateway's public https origin (no port: the sandbox allowlist is built from it).
+      # A literal: must match the service's real subdomain, which Render may suffix; checked at
+      # cutover (RENDER_EXTERNAL_URL through fromService is the fallback, but is unverified).
       - key: VOLUMA_GATEWAY_URL
-        fromService:
-          type: web
-          name: voluma-gateway
-          envVarKey: RENDER_EXTERNAL_URL
+        value: https://voluma-gateway.onrender.com
       - key: GATEWAY_TOKEN_SECRET
         fromService:
           type: web

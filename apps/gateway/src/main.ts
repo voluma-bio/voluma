@@ -1,7 +1,7 @@
 /**
  * The gateway service (`pnpm --filter @voluma/gateway start`). Settings come from the
  * environment, the only place keys live:
- *   DATABASE_URL            the API's Postgres; the gateway refuses to start until its migration ran
+ *   DATABASE_URL            the API's Postgres; /health answers 503 until its migration ran
  *   GATEWAY_TOKEN_SECRET    `<kid>:<base64 of 32 bytes>[,…]`, the same value the runner mints with
  *   GATEWAY_META_API_KEY, GATEWAY_ANTHROPIC_API_KEY, GATEWAY_OPENAI_API_KEY   our keys (each optional)
  *   GATEWAY_<PROVIDER>_BASE_URL   optional: another upstream (tests use local stubs)
@@ -21,7 +21,7 @@ import {
 } from "@voluma/provider-calls";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { createGateway } from "./gateway.ts";
+import { createGateway, isMigrated } from "./gateway.ts";
 
 function required(name: string): string {
   const value = process.env[name];
@@ -36,12 +36,6 @@ const drainMs = Number(process.env.GATEWAY_DRAIN_SECONDS ?? 60) * 1000;
 
 const client = postgres(required("DATABASE_URL"), { max: 10, onnotice: () => {} });
 const db = drizzle(client, { casing: "snake_case" });
-
-// The migration lives in apps/api; a gateway that starts before it would fail every call.
-const [migrated] = await db.execute<{ ok: boolean }>(
-  `SELECT to_regclass('provider_calls') IS NOT NULL AS ok`,
-);
-if (!migrated?.ok) throw new Error("the database is not migrated (provider_calls)");
 
 const keys: Partial<Record<Provider, string>> = {};
 const baseUrls = {} as Record<Provider, string>;
@@ -66,8 +60,6 @@ const sweep = async () => {
     return 0;
   }
 };
-const staleCut = await sweep();
-setInterval(sweep, SWEEP_MS).unref();
 const gateway = createGateway({
   db,
   secrets: parseTokenSecrets(required("GATEWAY_TOKEN_SECRET")),
@@ -78,9 +70,7 @@ const gateway = createGateway({
 });
 const port = Number(process.env.PORT ?? 8080);
 gateway.server.listen(port, () => {
-  log(
-    `${instance} up on :${port}; keys for ${Object.keys(keys).join(", ") || "none"}; ${staleCut} stale open row(s) cut`,
-  );
+  log(`${instance} up on :${port}; keys for ${Object.keys(keys).join(", ") || "none"}`);
 });
 
 let signals = 0;
@@ -95,3 +85,12 @@ for (const name of ["SIGINT", "SIGTERM"] as const) {
     process.exit(0);
   });
 }
+
+// On a new database the API's migration (its pre-deploy) may run after this starts: /health
+// answers 503 until `provider_calls` exists, and the boot sweep waits for it.
+for (let wait = 1000; !(await isMigrated(db)); wait = Math.min(wait * 2, 30_000)) {
+  log(`waiting for the migration (provider_calls); retrying in ${wait / 1000}s`);
+  await new Promise((resolve) => setTimeout(resolve, wait));
+}
+log(`${await sweep()} stale open row(s) cut at boot`);
+setInterval(sweep, SWEEP_MS).unref();

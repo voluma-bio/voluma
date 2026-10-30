@@ -38,10 +38,11 @@ Variables (names only; values never go in the repo):
 
 | Variable | Source |
 |---|---|
-| `VOLUMA_API_URL` | literal `http://voluma-api:10000`: the API's private hostname and `PORT`. Render's `hostport` property has no scheme and there is no interpolation. Verify the hostname at cutover |
+| `VOLUMA_API_URL` | `fromService` `voluma-api`, `property: hostport` (`host:port` on the private network, no scheme; `apiEndpoint()` in `config.ts` adds `http://`). Check the value at cutover |
 | `VOLUMA_API_TOKEN` | `fromService` `voluma-api`'s variable: rotating it on the API reaches the runner at the next Blueprint sync |
 | `VOLUMA_META_API_KEY`, `RUNNER_CONCURRENCY` | the model key; 2 slots. Until Jimmy says the infrastructure is ready, staging is a test stack: `RUNNER_MODEL=meta/muse-spark-1.3-contributor` and `RUNNER_THINKING=medium` force every role onto cheap Spark contributor (Jimmy's choice, 30 Oct), both literals in `render.yaml`. Contributor mode lets Meta train on what it is sent, so put only cleared scans (OA6-1RK, OA7) on staging while it is set. For real runs, delete both from the yaml: each role then takes its role file's alias (`wonder` = `meta/muse-wonder-1.0`, Standard mode) and thinking level. Contributor is never right outside that test default |
-| `GATEWAY_TOKEN_SECRET`, `VOLUMA_GATEWAY_URL` | `fromService` `voluma-gateway`: its secret, and its `RENDER_EXTERNAL_URL` (public https, no port: the sandbox allowlist is built from it) |
+| `GATEWAY_TOKEN_SECRET` | `fromService` `voluma-gateway`: its secret |
+| `VOLUMA_GATEWAY_URL` | literal `https://voluma-gateway.onrender.com` (public https, no port: the sandbox allowlist is built from it). Must match the gateway's real subdomain, which Render can suffix: check at cutover |
 | `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` | the Modal profile in `~/.modal.toml` |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `CLOUDFLARE_API_TOKEN` | as in `.env`; `R2_BUCKET` comes from the env group `voluma-shared` |
 | `VOLUMA_<PROVIDER>_API_KEY` for any other provider | not in the yaml: add in the dashboard only when a role file or `RUNNER_MODEL_*` names that provider |
