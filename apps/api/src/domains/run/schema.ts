@@ -29,6 +29,7 @@ import {
   text,
   timestamp,
   unique,
+  uuid,
 } from "drizzle-orm/pg-core";
 
 const timestamptz = () => timestamp({ withTimezone: true });
@@ -114,6 +115,8 @@ export const runs = pgTable(
   "runs",
   {
     id: text().primaryKey(),
+    /** A replacement under the same id is a new lifetime, not the old run's screenshots. */
+    generation: uuid().notNull().defaultRandom(),
     labId: text().notNull(),
     startedBy: text().notNull(),
     workflowId: text().notNull(),

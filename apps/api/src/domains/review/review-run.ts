@@ -15,7 +15,11 @@ import {
 import type { RunRecord } from "../../ports";
 
 /** Null until the run's first `revision.started`: a run with no plan has nothing to review. */
-export function reviewRun({ run, events, results: { revisions } }: RunRecord): ReviewRun | null {
+export function reviewRun({
+  run,
+  events,
+  results: { revisions },
+}: Pick<RunRecord, "run" | "events" | "results">): ReviewRun | null {
   // Not `events[0]`: the supervisor's `thread.started` and the run-start `wake` come first.
   const start = events.find((e) => e.type === "revision.started" && e.payload.reason === "run");
   if (start?.type !== "revision.started" || start.payload.reason !== "run") return null;

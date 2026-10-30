@@ -183,7 +183,12 @@ export async function loadRecords(
   return rows.map((row) => {
     const log = logs.get(row.run.id) ?? [];
     const results = reviewState(log);
-    return { run: toRun(row, results.summary), events: log, results };
+    return {
+      generation: row.run.generation,
+      run: toRun(row, results.summary),
+      events: log,
+      results,
+    };
   });
 }
 

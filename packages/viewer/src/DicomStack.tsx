@@ -1,11 +1,18 @@
 /** Acquired-slice viewport. Cornerstone owns pixel decoding, modality/VOI transforms and pixel aspect ratio. */
 import { Enums, RenderingEngine, type Types } from "@cornerstonejs/core";
 import type { Focus, Structure } from "@voluma/contracts/review";
+import { Camera } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { DicomSeries } from "./dicom";
 import { acquireDicomSession, type DicomSession, initializeDicom } from "./dicomSession";
 import { drawLabels } from "./labelOverlay";
 import { type LabelVolume, type StructureDisplay, scanWorld } from "./labels";
+import {
+  type CapturedSnapshot,
+  captureAcquiredSnapshot,
+  type SnapshotControls,
+  scanGeometryFingerprint,
+} from "./snapshot";
 import { ZoomControls } from "./ZoomControls";
 
 export default function DicomStack({
@@ -15,6 +22,8 @@ export default function DicomStack({
   display,
   focus,
   labels,
+  snapshots,
+  labelsPending = false,
 }: {
   series: DicomSeries;
   layers: LabelVolume[];
@@ -22,12 +31,14 @@ export default function DicomStack({
   display: StructureDisplay;
   focus?: Focus;
   labels: boolean;
+  snapshots?: SnapshotControls;
+  labelsPending?: boolean;
 }) {
   const element = useRef<HTMLDivElement>(null);
   const overlay = useRef<HTMLCanvasElement>(null);
   const controls = useRef<{
     viewport: Types.IStackViewport;
-    seek(index: number): void;
+    seek(index: number): Promise<void>;
   } | null>(null);
   const [index, setIndex] = useState(0);
   const [status, setStatus] = useState("Preparing image viewer…");
@@ -35,9 +46,16 @@ export default function DicomStack({
   const [ready, setReady] = useState(false);
   const [window, setWindow] = useState({ width: "1", center: "0" });
   const [retry, setRetry] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [snapshotError, setSnapshotError] = useState<string>();
+  const [restoring, setRestoring] = useState(false);
+  const [frameRatio, setFrameRatio] = useState<number>();
+  const busy = useRef(false);
+  const pendingCapture = useRef<{ scopeKey: string; capture: CapturedSnapshot } | null>(null);
+  const restore = snapshots?.restore;
 
   useEffect(() => {
-    if (!ready || !focus?.point) return;
+    if (!ready || !focus?.point || restore) return;
     controls.current?.seek(focus.point[0]);
     const view = controls.current?.viewport;
     if (view) {
@@ -54,7 +72,104 @@ export default function DicomStack({
         });
       view.render();
     }
-  }, [focus, ready, series]);
+  }, [focus, ready, series, restore]);
+
+  useEffect(() => {
+    if (!restore || !ready || labelsPending) {
+      setRestoring(false);
+      if (!restore) setFrameRatio(undefined);
+      return;
+    }
+    let cancelled = false;
+    setRestoring(true);
+    setSnapshotError(undefined);
+    void (async () => {
+      const state = restore.viewState;
+      if (
+        state.kind !== "acquired" ||
+        state.seriesId !== series.id ||
+        state.scanGeometrySha256 !== (await scanGeometryFingerprint(series)) ||
+        state.sliceIndex >= series.slices.length
+      )
+        throw new Error("This snapshot does not match the open scan. Open its original series.");
+      if (cancelled) return;
+      setFrameRatio(state.viewport.width / state.viewport.height);
+      await controls.current?.seek(state.sliceIndex);
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      );
+      if (cancelled) return;
+      const view = controls.current?.viewport;
+      if (!view || view.getCurrentImageIdIndex() !== state.sliceIndex)
+        throw new Error("Could not load the saved slice. Try reopening the snapshot.");
+      view.setCamera(state.camera);
+      view.setProperties({ voiRange: state.window });
+      setWindow({
+        width: String(state.window.upper - state.window.lower),
+        center: String((state.window.upper + state.window.lower) / 2),
+      });
+      view.render();
+    })()
+      .catch((cause: Error) => {
+        if (!cancelled) setSnapshotError(cause.message);
+      })
+      .finally(() => {
+        if (!cancelled) setRestoring(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [restore, ready, labelsPending, series]);
+
+  async function saveSnapshot() {
+    if (!snapshots || !controls.current || !overlay.current || busy.current) return;
+    busy.current = true;
+    setSaving(true);
+    setSnapshotError(undefined);
+    try {
+      if (pendingCapture.current?.scopeKey !== snapshots.scopeKey) pendingCapture.current = null;
+      if (!pendingCapture.current) {
+        const view = controls.current.viewport;
+        drawLabels(
+          overlay.current,
+          view,
+          series,
+          view.getCurrentImageIdIndex(),
+          layers,
+          structures,
+          display,
+          focus,
+          labels,
+        );
+        pendingCapture.current = {
+          scopeKey: snapshots.scopeKey,
+          capture: await captureAcquiredSnapshot(
+            view,
+            overlay.current,
+            series,
+            structures,
+            display,
+            labels,
+            focus,
+          ),
+        };
+      }
+      // A failed save retries these exact pixels and UUID, never a newly selected slice.
+      await snapshots.save(pendingCapture.current.capture);
+      pendingCapture.current = null;
+    } catch (cause) {
+      setSnapshotError(
+        cause instanceof TypeError
+          ? "Could not save screenshot. Check your connection, then retry."
+          : cause instanceof Error
+            ? cause.message
+            : "Could not save screenshot.",
+      );
+    } finally {
+      busy.current = false;
+      setSaving(false);
+    }
+  }
 
   useEffect(() => {
     const canvas = overlay.current;
@@ -129,7 +244,7 @@ export default function DicomStack({
           seek(target) {
             desired = target;
             setIndex(target);
-            if (loading) return;
+            if (loading) return pending;
             loading = true;
             setError(false);
             setStatus("Loading slice…");
@@ -152,6 +267,7 @@ export default function DicomStack({
               .finally(() => {
                 loading = false;
               });
+            return pending;
           },
         };
         setReady(true);
@@ -195,28 +311,48 @@ export default function DicomStack({
 
   return (
     <section className="dicom-stack" aria-label="DICOM slice viewer">
-      <div className="dicom-canvas-wrap">
+      <div className="dicom-canvas-wrap" style={{ containerType: "size" }}>
         <div
-          ref={element}
-          className="dicom-canvas"
-          role="img"
-          aria-label={`Acquired DICOM image, slice ${index + 1} of ${series.slices.length}`}
-        />
-        <canvas
-          ref={overlay}
-          className="dicom-label-overlay"
-          aria-label="Segmentation labels and focused check region"
-        />
-        {status && (
-          <div className="dicom-status" role={error ? "alert" : "status"}>
-            <p>{status}</p>
-            {error && (
-              <button type="button" className="button mt-3" onClick={() => setRetry((n) => n + 1)}>
-                Retry image
-              </button>
-            )}
-          </div>
-        )}
+          className="dicom-snapshot-frame"
+          style={
+            frameRatio
+              ? {
+                  inset: "auto",
+                  left: "50%",
+                  top: "50%",
+                  transform: "translate(-50%, -50%)",
+                  width: `min(100cqw, calc(100cqh * ${frameRatio}))`,
+                  height: `min(100cqh, calc(100cqw / ${frameRatio}))`,
+                }
+              : undefined
+          }
+        >
+          <div
+            ref={element}
+            className="dicom-canvas"
+            role="img"
+            aria-label={`Acquired DICOM image, slice ${index + 1} of ${series.slices.length}`}
+          />
+          <canvas
+            ref={overlay}
+            className="dicom-label-overlay"
+            aria-label="Segmentation labels and focused check region"
+          />
+          {status && (
+            <div className="dicom-status" role={error ? "alert" : "status"}>
+              <p>{status}</p>
+              {error && (
+                <button
+                  type="button"
+                  className="button mt-3"
+                  onClick={() => setRetry((n) => n + 1)}
+                >
+                  Retry image
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       </div>
       <div className="slice-controls">
         <button
@@ -304,7 +440,27 @@ export default function DicomStack({
         >
           Reset view
         </button>
+        {snapshots && (
+          <button
+            type="button"
+            className="button"
+            disabled={saving || restoring || labelsPending}
+            onClick={() => void saveSnapshot()}
+          >
+            <Camera size={15} />
+            {saving
+              ? "Saving…"
+              : pendingCapture.current?.scopeKey === snapshots.scopeKey
+                ? "Retry save"
+                : "Screenshot"}
+          </button>
+        )}
       </fieldset>
+      {snapshotError && (
+        <p role="alert" className="error-message px-3 pb-2">
+          {snapshotError}
+        </p>
+      )}
     </section>
   );
 }

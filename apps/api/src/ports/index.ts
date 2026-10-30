@@ -25,6 +25,8 @@ export type ReferenceArchive = {
 };
 
 export type RunRecord = {
+  /** Opaque run lifetime; changes when an example is replaced under the same id. */
+  generation: string;
   run: Run;
   events: RunEvent[];
   results: ReturnType<typeof reviewState>;
@@ -50,6 +52,8 @@ export type RunRecords = {
 
 /** A run's content-addressed files (`evidenceKey`): evidence, data files, volumes, meshes. */
 export type RunFiles = {
+  /** Publish complete content-addressed bytes; rejects with 502 when storage fails. */
+  put(runId: string, sha256: string, bytes: Uint8Array, signal: AbortSignal): Promise<void>;
   /** Rejects with a 404 `HTTPException` when there is no such file, a 502 when storage fails. */
   open(
     runId: string,

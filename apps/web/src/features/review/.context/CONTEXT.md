@@ -84,8 +84,15 @@ sidebar's visibility and opacity. A spatial To check title or **Show in viewer**
 sets display-only focus for that task and revision, independent of mutation
 permissions. **Clear viewer focus** removes the target. Focus does not carry
 across tasks or revisions. Both acquired slices and an open raw 3D preview target
-the check; this does not produce segmented surfaces. Snapshot persistence needs
-a separate contract and API before its UI can be connected.
+the check; this does not produce segmented surfaces.
+**Screenshot** persists an acquired-slice PNG plus immutable view state through
+the Review API. The run-wide tray reopens its pinned task/revision and offers PNG
+and JSON downloads. The original scan must be open for geometry-checked restore.
+**Export review report** builds an offline ZIP containing escaped HTML,
+measurements CSV, revision JSON and hash-verified screenshot PNG/JSON pairs.
+`{snapshot:id}` references resolve only within that run and revision; unresolved
+references are marked. This is a review report, not a full scientific export:
+it includes no raw scan, masks or other analysis files.
 Coronal and sagittal slots remain unavailable. At narrow widths the existing
 layout stacks report and imaging areas; desktop panel sizes and image state
 remain independent.

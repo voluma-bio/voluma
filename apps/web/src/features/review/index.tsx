@@ -176,7 +176,7 @@ function ScanReview({ runId }: { runId: string }) {
         setSearch(next);
       }}
       backLink={<Link to="/runs">Back to runs</Link>}
-      viewer={(selected, display, revision, focus) => (
+      viewer={(selected, display, revision, focus, snapshots) => (
         <ViewerWorkspace
           series={series}
           selected={selected}
@@ -184,6 +184,7 @@ function ScanReview({ runId }: { runId: string }) {
           revision={revision}
           focus={focus}
           fileUrl={fileUrl}
+          snapshots={snapshots}
         >
           <div className="dicom-intake">
             <div className="flex flex-wrap items-center gap-3">

@@ -50,6 +50,13 @@
       "when": 1793304818022,
       "tag": "0006_simple_black_bird",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793307325368,
+      "tag": "0007_real_vulcan",
+      "breakpoints": true
     }
   ]
 }

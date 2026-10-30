@@ -20,6 +20,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
+import { REVIEW_SNAPSHOT_BODY_BYTES } from "@voluma/contracts/snapshot";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -27,6 +28,8 @@ import { HTTPException } from "hono/http-exception";
 import postgres from "postgres";
 import { createAuth } from "./auth";
 import { createReview } from "./domains/review";
+import { directoryRunFiles } from "./domains/review/directory-run-files";
+import { pgSnapshots } from "./domains/review/pg-snapshots";
 import { r2ReferenceArchive } from "./domains/review/r2-reference-archive";
 import { r2RunFiles } from "./domains/review/r2-run-files";
 import { createRun } from "./domains/run";
@@ -150,7 +153,9 @@ const r2 =
       }
     : null;
 const referenceArchive = r2 && r2ReferenceArchive(r2);
-const runFiles = r2 && r2RunFiles(r2);
+const runFiles = process.env.RUN_FILES_DIRECTORY
+  ? directoryRunFiles(resolve(process.env.RUN_FILES_DIRECTORY))
+  : r2 && r2RunFiles(r2);
 
 const app = new Hono();
 app.get("/health", (c) => c.text("ok"));
@@ -161,9 +166,12 @@ app.get("/health", (c) => c.text("ok"));
 const browserLimit = bodyLimit({ maxSize: 256 * 1024 });
 const fileListLimit = bodyLimit({ maxSize: 4 * 1024 * 1024 });
 const runnerLimit = bodyLimit({ maxSize: 8 * 1024 * 1024 });
+const snapshotLimit = bodyLimit({ maxSize: REVIEW_SNAPSHOT_BODY_BYTES });
 app.use("/api/*", (c, next) => {
   if (c.req.path.startsWith("/api/run/ingest/")) return runnerLimit(c, next);
   if (c.req.path === "/api/run/inputs") return fileListLimit(c, next);
+  if (c.req.method === "POST" && /^\/api\/review\/runs\/[^/]+\/snapshots$/.test(c.req.path))
+    return snapshotLimit(c, next);
   return browserLimit(c, next);
 });
 // Every /api request is authenticated here, in this order (auth.ts): the bearer and
@@ -196,7 +204,13 @@ app.route(
 );
 app.route(
   "/api/review",
-  createReview({ runs: runRecords, files: runFiles, inputs: reads, referenceArchive }),
+  createReview({
+    runs: runRecords,
+    snapshots: pgSnapshots(db),
+    files: runFiles,
+    inputs: reads,
+    referenceArchive,
+  }),
 );
 
 const isApi = (path: string) => path === "/api" || path.startsWith("/api/");

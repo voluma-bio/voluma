@@ -7,10 +7,13 @@ import { Hono } from "hono";
 import type { AppEnv } from "../../domain";
 import type { ReferenceArchive, ReviewInputs, RunFiles, RunRecords } from "../../ports";
 import { inputRoutes } from "./inputs";
+import type { pgSnapshots } from "./pg-snapshots";
 import { runRoutes } from "./runs";
+import { snapshotRoutes } from "./snapshots";
 
 export type ReviewDeps = {
   runs: RunRecords;
+  snapshots: ReturnType<typeof pgSnapshots>;
   /** Null without R2: run files are 503s. */
   files: RunFiles | null;
   inputs: ReviewInputs;
@@ -21,5 +24,6 @@ export function createReview(deps: ReviewDeps) {
   const app = new Hono<AppEnv>();
   app.route("/", runRoutes(deps));
   app.route("/", inputRoutes(deps));
+  app.route("/", snapshotRoutes(deps));
   return app;
 }
