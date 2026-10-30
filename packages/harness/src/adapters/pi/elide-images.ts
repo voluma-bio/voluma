@@ -22,9 +22,12 @@ export function elideOldImages(messages: AgentMessage[]): AgentMessage[] {
   const out = [...messages];
   for (let i = out.length - 1; i >= 0; i--) {
     const message = out[i];
-    if (message?.role !== "toolResult" || !message.content.some((c) => c.type === "image"))
-      continue;
-    if (++seen <= KEEP) continue;
+    if (message?.role !== "toolResult") continue;
+    const hasImage = message.content.some((c) => c.type === "image");
+    // A successful view_image still occupies its slot when hydration replaced its images
+    // with unavailable notes. A later call must not keep an older image visible instead.
+    if (!hasImage && (message.toolName !== "view_image" || message.isError)) continue;
+    if (++seen <= KEEP || !hasImage) continue;
     out[i] = { ...message, content: withoutImages(message.content, "image") };
   }
   return out;
