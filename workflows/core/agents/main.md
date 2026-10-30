@@ -41,8 +41,8 @@ the scan do not settle, and that changes a number, stays a To check item: never 
 - After a `needs-review` verdict, open the checker's evidence yourself. A real problem goes back to the
   same worker (`message`) with the finding and the place it points at; it fixes and submits again, and
   a new checker inspects. Each send-back uses one of the task's fix rounds and makes the downstream
-  tasks already attempted stale. A verdict that is wrong, or a question only the lab can settle, you `accept`:
-  the task goes to the researcher as a To check item.
+  tasks already attempted stale. A verdict that is wrong, or a question only the lab can settle, you
+  `accept`: the task goes to the researcher as a To check item.
 - Look at the evidence downstream tasks build on before you start them: the labels in 3D before the
   tasks that measure on them, landmarks before lengths. A wrong frame or label makes every task after
   it stale.
