@@ -11,7 +11,7 @@
 import { cx, Progress, STATUS_WORD, type Status, StatusGlyph } from "@voluma/ui";
 import { type CSSProperties, type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { THREAD_STATUS } from "./agents";
-import { agentLabel, type TaskState, type TaskView, type Thread } from "./run-model";
+import { agentLabel, type TaskState, type TaskView, type Thread, workedSeconds } from "./run-model";
 import { formatDuration } from "./run-status";
 
 /** One task as the graph places it. */
@@ -498,14 +498,14 @@ function AgentOutcome({ thread }: { thread: Thread }) {
   if (verdict === "passed") return <span className="text-muted-foreground">Agreed</span>;
   if (thread.status === "failed") return <span className="text-destructive">Failed</span>;
   if (thread.status === "running") return <span className="text-info">Running</span>;
-  const end = thread.endedAt ? Date.parse(thread.endedAt) : undefined;
-  if (end === undefined)
+  // A thread still open with no stop has no duration to show yet: its state says where it is.
+  if (thread.openSince && !thread.stoppedAt)
     return (
       <span className="text-muted-foreground">{STATUS_WORD[THREAD_STATUS[thread.status]]}</span>
     );
   return (
     <span className="text-muted-foreground tabular-nums">
-      {formatDuration(thread.workedBefore + Math.max(0, end - Date.parse(thread.startedAt)) / 1000)}
+      {formatDuration(workedSeconds(thread, Date.now()))}
     </span>
   );
 }

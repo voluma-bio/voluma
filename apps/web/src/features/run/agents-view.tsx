@@ -33,7 +33,7 @@ function followTarget(threads: Thread[], previous: string | undefined): Thread |
   const busyParents = new Set(working.map((t) => t.parentId));
   const leaf = working
     .filter((t) => !busyParents.has(t.id))
-    .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
+    .sort((a, b) => (b.openSince ?? "").localeCompare(a.openSince ?? ""))[0];
   return (
     leaf ?? threads.find((t) => t.kind === "main") ?? threads.find((t) => t.kind !== "supervisor")
   );
