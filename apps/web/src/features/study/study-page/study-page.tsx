@@ -142,6 +142,7 @@ function StudyHeader({
     `${c.done} of ${c.scans} done`,
     c.running && `${c.running} running`,
     c.waiting && `${c.waiting} waiting`,
+    c.waitingForAI && `${c.waitingForAI} waiting for the AI`,
     c.notStarted && `${c.notStarted} not started`,
   ]
     .filter(Boolean)

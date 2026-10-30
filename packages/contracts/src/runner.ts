@@ -56,11 +56,16 @@
  * claim carries no plan: the runner snapshots the run's workflow directory and builds the plan
  * itself (`packages/workflow`), and a resumed run keeps the plan its first `revision.started`
  * recorded (`task-tools.ts`). One limit stops a run that keeps costing its runner: the API
- * counts consecutive claims that end `self-stop` or `lease-expired` without run-state
+ * counts consecutive claims that end `self-stop`, `lease-expired` or `provider-outage` without run-state
  * progress (a `task`, `checkpoint`, `output`, `attempt.opened`, `assets.ready` or correcting
  * `revision.started` or `plan.changed` event), and the run ends
  * `failed` at 3, naming the call that was in flight; except a claim of a reopened run, which ends it `completed` and writes `correction.ended` instead (the correction rule in `messages.ts`). Progress resets the count. `shutdown`
- * never counts, so deploys don't fail a long run. A reopen (`messages.ts`) resets the count to 0
+ * never counts, so deploys don't fail a long run. A `provider-outage` release also holds the run
+ * back: the API sets `runs.claimable_after` (1, 2, then 5 minutes by the count of such claims in a
+ * row) and `claim` skips the run until then; the run stays `queued`, and the run page reads
+ * `state.waitingForProvider` of a queued run: the run page reads "Waiting: the AI is unavailable"
+ * (its open tasks and agents "Waiting for the AI"), its chip "AI unavailable", and no place in
+ * line or retry time shows. The claim that takes it clears the time. A reopen (`messages.ts`) resets the count to 0
  * and clears `lastClaimEnd`, so `previousClaim` never reports a reason from before it.
  *
  * There is no tokenless call: the runner service is the only claimer.
@@ -110,8 +115,12 @@ export const leaseLostSchema = z.object({ code: z.literal("lease-lost") });
  */
 export const runnerIdSchema = z.string().min(1);
 
-/** Why the runner gave up a lease. */
-export const releaseReasonSchema = z.enum(["shutdown", "self-stop"]);
+/**
+ * Why the runner gave up a lease. `provider-outage`: a model call kept failing on the provider's
+ * side past the call retry (`apps/runner/src/model-retry.ts`); the run is requeued with a delay
+ * (`runs.claimable_after`) and counts toward the no-progress limit.
+ */
+export const releaseReasonSchema = z.enum(["shutdown", "self-stop", "provider-outage"]);
 export type ReleaseReason = z.infer<typeof releaseReasonSchema>;
 
 /** Why a claim ended: a release reason, or the API swept its expired lease. */

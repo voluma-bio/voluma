@@ -8,7 +8,6 @@ export { forgetKeys, KeysForm, loadKeys, saveKeys } from "./keys";
 export { type StreamClosed, useStreamReopen, waitingOnYou } from "./reopen";
 export {
   formatDuration,
-  formatTime,
   formatUsd,
   RunBadge,
   type RunStatus,

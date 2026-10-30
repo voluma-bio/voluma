@@ -55,19 +55,27 @@ export type StudyCounts = {
   /** Scans with a completed result. */
   done: number;
   running: number;
+  /** Queued or needing keys, except runs held until the AI is back (`waitingForAI`). */
   waiting: number;
+  waitingForAI: number;
   notStarted: number;
   toCheck: number;
 };
 
 export function studyCounts(detail: StudyDetail): StudyCounts {
   const status = (s: StudyScanDetail) => s.runs[0]?.state.status;
+  const held = (s: StudyScanDetail) => {
+    const state = s.runs[0]?.state;
+    return state?.status === "queued" && state.waitingForProvider !== undefined;
+  };
   return {
     scans: detail.scans.length,
     done: detail.scans.filter((s) => s.resultRunId !== null).length,
     running: detail.scans.filter((s) => status(s) === "running").length,
-    waiting: detail.scans.filter((s) => status(s) === "queued" || status(s) === "awaiting-keys")
-      .length,
+    waiting: detail.scans.filter(
+      (s) => (status(s) === "queued" && !held(s)) || status(s) === "awaiting-keys",
+    ).length,
+    waitingForAI: detail.scans.filter(held).length,
     notStarted: detail.scans.filter((s) => s.runs.length === 0).length,
     toCheck: detail.scans.reduce((n, s) => n + s.toCheck.length, 0),
   };

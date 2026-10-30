@@ -83,6 +83,17 @@ export type StartThreadOptions = ThreadIdentity & {
   /** Aborting ends the thread as cancelled and kills a running command. */
   signal?: AbortSignal;
   /**
+   * A failed model reply with no content is an outage when `is` says so: the call retry spent its
+   * budget on a transient error. Such a reply is not stored or emitted and the thread writes no
+   * `thread.ended`: it stays open with its History an exact prefix, `release` tells the host, which
+   * releases the run (the next claim resumes the thread). A reply that failed after content
+   * is not an outage; it fails the thread as any provider error does.
+   */
+  providerOutage?: {
+    is(provider: string, error: string): boolean;
+    release(error: string): void;
+  };
+  /**
    * The run's own signal. When it aborts (shutdown, self-stop, lost lease), the thread is cut
    * off, not stopped: nothing more is stored or emitted for it, not even a `thread.ended`,
    * exactly as after a crash. The next claim resumes it from what was stored.
@@ -198,6 +209,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     let started = false;
     let outcome: Omit<ThreadOutcome, "ran" | "reply">;
     let unexpected: unknown;
+    let outage: string | undefined;
     const abort = () => agent.abort();
     signal?.addEventListener("abort", abort);
     try {
@@ -299,6 +311,21 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
             break;
           case "message_end": {
             const { message } = event;
+            if (
+              message.role === "assistant" &&
+              message.stopReason === "error" &&
+              !signal?.aborted &&
+              !cutOff() &&
+              !historyError &&
+              message.content.length === 0 &&
+              options.providerOutage?.is(message.provider, message.errorMessage ?? "")
+            ) {
+              if (outage === undefined) {
+                outage = message.errorMessage ?? "the model request failed";
+                options.providerOutage.release(outage);
+              }
+              break;
+            }
             const ok = await persist(message);
             if (message.role === "assistant") {
               reply = textOf(message);
@@ -350,7 +377,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
         if (message !== undefined) await agent.prompt(message);
         else await agent.continue();
         // A message steered in as the loop was ending is still queued.
-        while (!historyError && !signal?.aborted && agent.hasQueuedMessages()) {
+        while (!historyError && !outage && !signal?.aborted && agent.hasQueuedMessages()) {
           await agent.continue();
         }
       }
@@ -359,9 +386,11 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       // must not read as this invocation completing.
       outcome = historyError
         ? historyFailure(historyError)
-        : signal?.aborted && !prompted
-          ? { status: "cancelled" }
-          : outcomeOf(agent.state.messages, signal?.aborted === true);
+        : outage !== undefined
+          ? { status: "failed", error: outage }
+          : signal?.aborted && !prompted
+            ? { status: "cancelled" }
+            : outcomeOf(agent.state.messages, signal?.aborted === true);
     } catch (error) {
       outcome = {
         status: "failed",
@@ -376,7 +405,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     }
     // The caller owns the recorder and flushes it. A stop stored its own end first (append-first):
     // the thread's end is then a second one for the same start, and is dropped.
-    if (started && !cutOff()) {
+    if (started && !cutOff() && outage === undefined) {
       await recorder.flush();
       if (!endedSinceStart()) emit("thread.ended", outcome);
     }

@@ -199,18 +199,25 @@ function RunningRow({ view: v }: { view: StudyView }) {
   if (one) {
     detail =
       one.state.status === "queued"
-        ? one.state.position === 1
-          ? "Starts next"
-          : `Waiting, place ${one.state.position} in line`
+        ? one.state.waitingForProvider
+          ? "The AI is unavailable"
+          : one.state.position === 1
+            ? "Starts next"
+            : `Waiting, place ${one.state.position} in line`
         : one.state.status === "awaiting-keys"
           ? "Waiting for your keys"
           : "Running";
   } else {
     const live = study.newestRuns.filter(isLive);
     const running = live.filter((r) => r.state.status === "running").length;
+    const held = live.filter(
+      (r) => r.state.status === "queued" && r.state.waitingForProvider,
+    ).length;
+    const waiting = live.length - running - held;
     detail = [
       running > 0 && `${running} running`,
-      live.length > running && `${live.length - running} waiting`,
+      waiting > 0 && `${waiting} waiting`,
+      held > 0 && `${held} waiting for the AI`,
       study.scanCount > study.newestRuns.length &&
         `${study.scanCount - study.newestRuns.length} not started`,
     ]

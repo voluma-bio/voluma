@@ -16,7 +16,9 @@ is no runs list: Home (`features/study`) replaces it.
   (`run-header.tsx`): a crumb to the study (Home for a study of one: `getStudy` is read once for
   labels only), the scan as "OA6-1, right knee", group and workflow, "N of M tasks done", "K to
   check", a bar, Run details (started as a date, took or running for, settled cost, and "What
-  the AI decided"), Stop while live, and Open in 3D. A queued run with a thread cut off lost its runner: it reads "Paused"; one a message queued has none open and reads "Waiting to start". Left: the plan as
+  the AI decided"), Stop while live, and Open in 3D. A queued run with a thread cut off lost its runner: it reads "Paused"; one a message queued has none open and reads "Waiting to start"; one the API holds after
+  the AI's provider failed (`waitingForProvider`) reads "Waiting: the AI is unavailable", with no
+  place in line. Left: the plan as
   a flowchart (`task-flow.tsx`), rows by dependency depth and each row ordered by its parents'
   columns, so a plan change needs no layout table; below 1100 px a compact list, and the page
   scrolls as one. Right: Overview (`overview.tsx`: working on now, needs your eye, results by
@@ -63,8 +65,9 @@ is no runs list: Home (`features/study`) replaces it.
   keys), so threads can have a `thread.started` and no `thread.ended`. `haltOf(Run.state, closed)`
   says why the runner isn't running the threads, and is the one input `runView` and `threadRows`
   take: once ended, a thread, tool call or task still open shows as Stopped (Failed if the run
-  failed, at the run's end); while queued or awaiting keys it shows as Paused, its clock frozen at
-  its last event, until the runner's `thread.started` resumes it. The end applies only once the
+  failed, at the run's end); while queued or awaiting keys it shows as Paused (Waiting for the AI,
+  halt `awaiting-ai`, while held for the AI: the section title, task and agent cards), its clock
+  frozen at its last event, until the runner's `thread.started` resumes it. The end applies only once the
   stream has closed (`useRunStream`'s `closed`), when the log is whole: the server ends an ended
   run's stream with `event: end`, so that is right after the backlog, with no reconnect. A
   closed stream opens again only when a run read newer than the close says the run isn't ended
