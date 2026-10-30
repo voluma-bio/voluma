@@ -44,9 +44,7 @@
   `dev/` and reject empty, `.` and `..` segments. (p563)
 - `backfill.py`'s scan-grid ruler assert can't fail (both sides use the same transform); compare
   against the `points` `export.py`'s `ruler()` writes. (p563)
-- **Drop `runs.cost_cap_usd` and `provider_calls.reserved_usd`.** Nothing writes or reads either
-  (the spend cap and reservations are gone; both are nullable). The previous deploy's API and gateway still
-  select `cost_cap_usd` by name, so drop them in a PR once both the new API and the new gateway
-  (#226) are live, with both
-  columns out of `apps/api/src/domains/run/schema.ts` and `packages/provider-calls/src/schema.ts`,
-  and the migration check in `apps/gateway/src/main.ts` unchanged (it names neither).
+- **Drop the `runs.cost_cap_usd` and `provider_calls.reserved_usd` columns from Postgres.** Both are out
+  of the Drizzle schemas and nothing names them. Once that code is deployed and the previous process is
+  drained (it runs `select()` on `runs`, which names `cost_cap_usd`), run
+  `pnpm --filter @voluma/api db:generate` and commit the migration it writes.
