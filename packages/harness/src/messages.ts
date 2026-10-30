@@ -34,6 +34,17 @@ const PLAIN_REASON: Record<ClaimEndReason, string> = {
   "lease-expired": "the server lost contact with the runner",
 };
 
+/** What the main agent is told when it calls a tool that waits for the researcher's go. */
+export const GO_REFUSAL =
+  "The researcher has not said go yet. Answer them with `reply` (you may read files and open images); start no work, message no worker and change no plan until they do.";
+
+/** What `finish_run` is refused with while the researcher's go is not acted on. */
+export const goNotActedOn = (taskId: string) =>
+  `The researcher said go on ${taskId} and you have not redone it: send its worker feedback with \`message\` (or start a worker if it has none), then wait for the new attempt's check.`;
+
+export const UNANSWERED = "Answer the researcher with `reply` before you finish.";
+export const UNDELIVERED = "The researcher wrote again and you have not read it yet; wait for it.";
+
 /** What a cut-off thread is told on resume: the tool it was in, if any, and why, in plain words. */
 export function cutOffText(after: ClaimEndReason | undefined, tool: string | undefined): string {
   const when = after ? `when ${PLAIN_REASON[after]}` : "when the run was restarted";
@@ -122,6 +133,8 @@ export function noticeLine(n: Notice): string {
       return `- ${n.taskId} is stale: ${n.reason}`;
     case "stopped":
       return `- ${who} was stopped: ${n.reason}`;
+    case "person":
+      return personLine(n);
     case "check-result": {
       const detail = [n.summary, n.text].filter(Boolean).join("\n  ");
       switch (n.rule) {
@@ -139,6 +152,29 @@ export function noticeLine(n: Notice): string {
       }
     }
   }
+}
+
+const POINT_AXES = "[z, y, x]";
+
+function personLine(n: Extract<Notice, { kind: "person" }>): string {
+  const lines = [`- The researcher wrote${n.text ? `: "${n.text}"` : "."}`];
+  for (const m of n.marks) {
+    const where = m.point
+      ? `the voxel ${POINT_AXES} = [${m.point.join(", ")}]`
+      : `the box ${POINT_AXES} from [${m.box?.min.join(", ")}] to [${m.box?.max.join(", ")}] (inclusive)`;
+    lines.push(
+      `  Marked ${where} of volume ${m.volumeId}${m.file ? ` (file ${m.file}; open it with bash or read_file)` : ""}.`,
+    );
+  }
+  if (n.snapshot) {
+    lines.push(`  Their view of it is the image ${n.snapshot}: open it with view_image.`);
+  }
+  lines.push(
+    n.go
+      ? `  They said go on ${n.taskId}: you may now redo it. Send its worker feedback with \`message\` (it opens a new attempt), say in \`reply\` what you are doing, and finish the run once the new attempt is checked and the tasks that build on it are done.`
+      : "  Answer them with `reply`. They have not said go, so start no work.",
+  );
+  return lines.join("\n");
 }
 
 /** A plan task as the main agent sees it. The fold has a row only once a task has an attempt or is skipped. */

@@ -10,6 +10,9 @@
  * so that holder is `lease-lost` (lease.ts).
  */
 import { randomBytes } from "node:crypto";
+import { runEventSchema } from "@voluma/contracts/events";
+import { fold } from "@voluma/contracts/fold";
+import type { PersonMessage } from "@voluma/contracts/messages";
 import type { Run, VisitorKeys } from "@voluma/contracts/run";
 import {
   type ClaimEndReason,
@@ -22,12 +25,13 @@ import { knownUsdOfRun } from "@voluma/provider-calls";
 import { and, asc, desc, eq, gt, inArray, notInArray, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { Reader } from "../../domain";
+import type { MessageRefusal, MessageResult } from "../../ports";
 import { admit, type Limits, type Refusal, refusalMessage, type Usage, usage } from "./admission";
 import { endClaim, stalledError } from "./claim-progress";
 import type { KeyVault } from "./key-vault";
 import { LeaseLost } from "./lease";
 import type { Notifier } from "./notifier";
-import { cancelOpenThreads } from "./pg-event-log";
+import { cancelOpenThreads, EVENT_SEQ_LOCK, insertEvent } from "./pg-event-log";
 import {
   loadRun,
   loadRuns,
@@ -35,6 +39,7 @@ import {
   readableRuns,
   readableStudies,
   type Tx,
+  toRunEvent,
 } from "./pg-runs";
 import { events, inputs, runs, studies, studyScans } from "./schema";
 
@@ -45,6 +50,8 @@ const QUEUE_LOCK = 0x76_6f_6c_71;
 const KEYS_WAIT = sql`interval '24 hours'`;
 
 const leaseUntil = sql`now() + make_interval(secs => ${LEASE_SECONDS})`;
+
+const noLease = { leaseHolder: null, leaseToken: null, leaseExpiresAt: null };
 
 /** A report on a run that already ended: the first end wins. */
 export class RunEnded extends Error {
@@ -64,6 +71,8 @@ export type Claimed = {
   keys?: VisitorKeys;
   /** Present on every claim after the run's first. */
   previousClaim?: { reason: ClaimEndReason };
+  /** The spend cap this claim stored on the run. */
+  costCapUsd?: number;
 };
 
 /**
@@ -83,21 +92,16 @@ async function recover(tx: Tx, where: SQL, reason: ClaimEndReason) {
     const base = {
       lastClaimEnd: reason,
       stalledClaims,
-      leaseHolder: null,
-      leaseToken: null,
-      leaseExpiresAt: null,
+      ...noLease,
     };
     if (exhausted) {
-      await tx
-        .update(runs)
-        .set({
-          ...base,
-          state: "ended",
-          outcome: "failed",
-          endedAt: sql`now()`,
-          error: stalledError(reason, await inFlightTool(tx, run.id, run.claimStartSeq)),
-        })
-        .where(eq(runs.id, run.id));
+      await endUnfinished(
+        tx,
+        run.id,
+        "failed",
+        stalledError(reason, await inFlightTool(tx, run.id, run.claimStartSeq)),
+        base,
+      );
     } else {
       await tx
         .update(runs)
@@ -137,11 +141,81 @@ async function sweep(tx: Tx) {
     WHERE state = 'awaiting-keys' AND awaiting_since <= now() - ${KEYS_WAIT}`);
 }
 
-const fail = (tx: Tx, runId: string, error: string) =>
-  tx
-    .update(runs)
-    .set({ state: "ended", outcome: "failed", endedAt: sql`now()`, error })
+const fail = (tx: Tx, runId: string, error: string) => endUnfinished(tx, runId, "failed", error);
+
+const eventLock = (tx: Tx, runId: string) =>
+  tx.execute(sql`SELECT pg_advisory_xact_lock(${EVENT_SEQ_LOCK}, hashtext(${runId}))`);
+
+/** A server-authored correction event (`messages.ts`) on the run's `<runId>.person` thread. */
+async function appendPersonEvent(
+  tx: Tx,
+  runId: string,
+  event: {
+    id: string;
+    type: "person.message" | "run.reopened" | "correction.ended";
+    payload: unknown;
+  },
+) {
+  await eventLock(tx, runId);
+  return insertEvent(
+    tx,
+    runEventSchema.parse({
+      ...event,
+      runId,
+      threadId: personThread(runId),
+      seq: 0,
+      createdAt: new Date().toISOString(),
+    }),
+  );
+}
+
+const personThread = (runId: string) => `${runId}.person`;
+const personEventId = (runId: string, messageId: string) => `${personThread(runId)}:${messageId}`;
+
+/**
+ * Ends a run that did not finish, `failed` or `cancelled`. A run in a correction (reopened by a
+ * person's message, `messages.ts`) is never left worse than `completed`: its open threads end
+ * `cancelled`, `correction.ended` records what happened, and the run ends `completed` with its
+ * earlier results. `set` adds columns to the update (a recovery's lease reset).
+ */
+async function endUnfinished(
+  tx: Tx,
+  runId: string,
+  status: "failed" | "cancelled",
+  error?: string,
+  set: Partial<typeof runs.$inferInsert> = {},
+) {
+  const [row] = await tx
+    .select({ base: runs.correctionBaseUsd })
+    .from(runs)
     .where(eq(runs.id, runId));
+  const correcting = row?.base != null;
+  if (status === "cancelled" || correcting) await cancelOpenThreads(tx, runId);
+  if (correcting) {
+    const [reopen] = await tx
+      .select({ id: events.id })
+      .from(events)
+      .where(and(eq(events.runId, runId), eq(events.type, "run.reopened")))
+      .orderBy(desc(events.seq))
+      .limit(1);
+    const reopenedBy = reopen?.id.slice(0, -":reopened".length);
+    await appendPersonEvent(tx, runId, {
+      id: `${reopenedBy ?? personEventId(runId, "unknown")}:ended`,
+      type: "correction.ended",
+      payload: { status, ...(error !== undefined && { error }) },
+    });
+  }
+  await tx
+    .update(runs)
+    .set({
+      ...set,
+      state: "ended",
+      outcome: correcting ? "completed" : status,
+      endedAt: sql`now()`,
+      error: correcting ? null : (error ?? null),
+    })
+    .where(eq(runs.id, runId));
+}
 
 const NO_LIMITS = "This organization can no longer run work.";
 
@@ -220,6 +294,107 @@ export function pgRunQueue(
       if (error instanceof Refused) return { refused: error.reason };
       throw error;
     }
+  };
+
+  /**
+   * A researcher's message to a run (`messages.ts`), judged and written under the caller's
+   * checks in the order the contract lists them. `write` false judges only (nothing is stored,
+   * the queue lock is not taken): the route calls that first, so a refused message stores no
+   * snapshot, and `send` judges again under the lock. A run that ended `completed` is
+   * reopened for one claim through admission; a reopened run still queued or running only
+   * gets the message (its claim's report sees it, `report`).
+   */
+  const decideMessage = async (
+    tx: Tx,
+    reader: Reader,
+    userId: string,
+    runId: string,
+    msg: { id: string; payload: PersonMessage },
+    write: boolean,
+  ): Promise<MessageResult> => {
+    const refuse = (status: MessageRefusal["status"], error: string): MessageResult => ({
+      refused: { status, error },
+    });
+    const found = tx
+      .select()
+      .from(runs)
+      .where(and(readableRuns(reader), eq(runs.id, runId)));
+    const [run] = await (write ? found.for("update") : found);
+    if (!run) return refuse(404, "not found");
+    if (run.startedBy !== userId) {
+      return refuse(403, "Only the person who started the run can write to it.");
+    }
+    if (run.example) return refuse(403, "Examples are read-only.");
+    if (run.credentials === "visitor") {
+      return refuse(403, "A run with your own keys keeps no keys, so it cannot be reopened.");
+    }
+    const eventId = personEventId(runId, msg.id);
+    const [again] = await tx.select({ id: events.id }).from(events).where(eq(events.id, eventId));
+    const stateNow = async () => (await loadRun(tx, runId)).state;
+    if (again) return { ok: { eventId, state: await stateNow(), duplicate: true } };
+
+    const reopened = run.correctionBaseUsd !== null;
+    const live = reopened && (run.state === "queued" || run.state === "running");
+    const finished = run.state === "ended" && run.outcome === "completed";
+    if (!live && !finished) {
+      return refuse(
+        409,
+        run.state === "ended"
+          ? "Only a run that completed can be reopened; rerun this one."
+          : "The run has not finished yet.",
+      );
+    }
+    const log = (
+      await tx.select().from(events).where(eq(events.runId, runId)).orderBy(asc(events.seq))
+    ).map(toRunEvent);
+    const plan = fold(log).plan.tasks;
+    const { taskId } = msg.payload;
+    if (plan.length === 0) return refuse(409, "The run has no plan yet.");
+    if (taskId !== undefined) {
+      const task = plan.find((t) => t.id === taskId);
+      if (!task) return refuse(404, `${taskId} is not a task of this run.`);
+      if (fold(log).tasks.find((t) => t.id === taskId)?.skipped) {
+        return refuse(409, `${taskId} was skipped, so it cannot be corrected.`);
+      }
+    }
+    if (!live) {
+      const refused = admit(
+        "reopen",
+        limitsOf(reader.labId),
+        await usage(tx, reader.labId, { userId, credentials: run.credentials }),
+        run,
+      );
+      if (refused) return refuse(refused === "per-caller" ? 409 : 429, refusalMessage[refused]);
+    }
+    if (!write) return { ok: { eventId, state: await stateNow(), duplicate: false } };
+
+    if (!live) {
+      await appendPersonEvent(tx, runId, {
+        id: `${eventId}:reopened`,
+        type: "run.reopened",
+        payload: { by: userId },
+      });
+    }
+    await appendPersonEvent(tx, runId, {
+      id: eventId,
+      type: "person.message",
+      payload: msg.payload,
+    });
+    if (live) return { ok: { eventId, state: await stateNow(), duplicate: false } };
+    await tx
+      .update(runs)
+      .set({
+        state: "queued",
+        outcome: null,
+        endedAt: null,
+        error: null,
+        lastClaimEnd: null,
+        stalledClaims: 0,
+        correctionBaseUsd: run.modelCostUsd + (await knownUsdOfRun(tx, runId)),
+        ...noLease,
+      })
+      .where(eq(runs.id, runId));
+    return { ok: { eventId, state: await stateNow(), duplicate: false } };
   };
 
   const pinsFor = (workflowId: string) => {
@@ -364,7 +539,10 @@ export function pgRunQueue(
         return { studyId: request.study.id };
       }),
 
-    /** Ends the run `cancelled` at once and forgets its keys. Example runs are read-only. */
+    /**
+     * Ends the run `cancelled` at once and forgets its keys; a run in a correction ends
+     * `completed` with the cancel recorded (`endUnfinished`). Example runs are read-only.
+     */
     async cancel(reader: Reader, runId: string) {
       const result = await attempt(async (tx) => {
         const [run] = await loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId)));
@@ -372,14 +550,30 @@ export function pgRunQueue(
         if (run.example) throw new Refused("example");
         vault.drop(runId);
         if (run.state.status === "ended") return { run };
-        await cancelOpenThreads(tx, runId);
-        await tx
-          .update(runs)
-          .set({ state: "ended", outcome: "cancelled", endedAt: sql`now()` })
-          .where(eq(runs.id, runId));
+        await endUnfinished(tx, runId, "cancelled");
         return { run: await loadRun(tx, runId) };
       });
       notifier.notify(runId);
+      return result;
+    },
+
+    /** Whether `reader` may send this message now, without storing anything (`decideMessage`). */
+    checkMessage: (
+      reader: Reader,
+      userId: string,
+      runId: string,
+      msg: { id: string; payload: PersonMessage },
+    ) => db.transaction((tx) => decideMessage(tx, reader, userId, runId, msg, false)),
+
+    /** Stores the message, reopening the run if it had ended; one transaction under the queue lock. */
+    async sendMessage(
+      reader: Reader,
+      userId: string,
+      runId: string,
+      msg: { id: string; payload: PersonMessage },
+    ) {
+      const result = await locked((tx) => decideMessage(tx, reader, userId, runId, msg, true));
+      if ("ok" in result && !result.ok.duplicate) notifier.notify(runId);
       return result;
     },
 
@@ -411,7 +605,7 @@ export function pgRunQueue(
      * under the lock: a start that holds its keys before it commits is either in them or
      * not yet queued.
      */
-    claim: (runnerId: string, costCapUsd?: number) =>
+    claim: (runnerId: string, costCapUsd?: number, correctionCostCapUsd?: number) =>
       locked(async (tx): Promise<Claimed | null> => {
         await sweep(tx);
         await tx
@@ -458,6 +652,13 @@ export function pgRunQueue(
             }
           }
           const leaseToken = randomBytes(24).toString("hex");
+          // A correction has a cap of its own, on top of what the run had spent when reopened.
+          const cap =
+            run.correctionBaseUsd === null
+              ? costCapUsd
+              : correctionCostCapUsd === undefined
+                ? undefined
+                : run.correctionBaseUsd + correctionCostCapUsd;
           await tx
             .update(runs)
             .set({
@@ -468,7 +669,7 @@ export function pgRunQueue(
               leaseHolder: runnerId,
               leaseToken,
               leaseExpiresAt: leaseUntil,
-              costCapUsd: costCapUsd ?? null,
+              costCapUsd: cap ?? null,
             })
             .where(eq(runs.id, run.id));
           const keys = run.credentials === "visitor" ? vault.take(run.id) : undefined;
@@ -477,6 +678,7 @@ export function pgRunQueue(
             leaseToken,
             ...(keys && { keys }),
             ...(run.lastClaimEnd && { previousClaim: { reason: run.lastClaimEnd } }),
+            ...(cap !== undefined && { costCapUsd: cap }),
           };
         }
         return null;
@@ -519,11 +721,16 @@ export function pgRunQueue(
         return { stop: false, spentUsd: run.modelCostUsd + used.modelCostUsd + gateway };
       }),
 
-    /** Throws `LeaseLost` or `RunEnded`. */
-    async report(runId: string, leaseToken: string, report: RunnerReport) {
+    /**
+     * Throws `LeaseLost` or `RunEnded`. An `ended` report from a claim that had not seen a
+     * person's message (`lastSeq`, `messages.ts`) is not recorded: the run is reopened and
+     * queued, so the message is answered by the next claim. A failed claim of a reopened run
+     * ends it `completed` (`endUnfinished`).
+     */
+    async report(runId: string, leaseToken: string, report: RunnerReport, lastSeq: number) {
       await locked(async (tx) => {
         const [run] = await tx
-          .select({ state: runs.state })
+          .select({ state: runs.state, startedBy: runs.startedBy })
           .from(runs)
           .where(and(eq(runs.id, runId), eq(runs.leaseToken, leaseToken)))
           .for("update");
@@ -533,15 +740,36 @@ export function pgRunQueue(
           await recover(tx, sql`id = ${runId}`, report.reason);
           return;
         }
-        await tx
-          .update(runs)
-          .set({
-            state: "ended",
-            outcome: report.outcome,
-            endedAt: sql`now()`,
-            error: report.error ?? null,
-          })
-          .where(eq(runs.id, runId));
+        const [unseen] = await tx
+          .select({ id: events.id })
+          .from(events)
+          .where(
+            and(
+              eq(events.runId, runId),
+              eq(events.type, "person.message"),
+              gt(events.seq, lastSeq),
+            ),
+          )
+          .orderBy(asc(events.seq))
+          .limit(1);
+        if (unseen) {
+          await appendPersonEvent(tx, runId, {
+            id: `${unseen.id}:reopened`,
+            type: "run.reopened",
+            payload: { by: run.startedBy },
+          });
+          await tx
+            .update(runs)
+            .set({ state: "queued", lastClaimEnd: null, stalledClaims: 0, ...noLease })
+            .where(eq(runs.id, runId));
+        } else if (report.outcome === "failed") {
+          await endUnfinished(tx, runId, "failed", report.error);
+        } else {
+          await tx
+            .update(runs)
+            .set({ state: "ended", outcome: "completed", endedAt: sql`now()`, error: null })
+            .where(eq(runs.id, runId));
+        }
       });
       notifier.notify(runId);
     },

@@ -17,6 +17,7 @@ import type { Recorder } from "./recorder";
 import { type Briefs, type LoopConfig, type RoleOf, runLoop } from "./run-loop";
 import { type PlanTask, taskRuntime } from "./task-runtime";
 import { supervisorThreadId } from "./thread-id";
+import { threadLog } from "./thread-log";
 import { threads } from "./threads";
 import { buildTools } from "./tools/registry";
 
@@ -65,9 +66,13 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
     kind: "supervisor",
     workflows: options.workflows,
   });
+  // A reopen clears the claim-end reason (`messages.ts`); a claim cut off before it wrote its
+  // `claim.started` has one again, and says that instead.
+  const reopened = threadLog(recorder.events()).reopenPending && !options.previousClaim;
   recorder.emit(rootThreadId, "claim.started", {
     resumed,
     ...(options.previousClaim && { after: options.previousClaim }),
+    ...(reopened && { reopened }),
   });
   const pool = threads(
     {

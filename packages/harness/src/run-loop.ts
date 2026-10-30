@@ -12,7 +12,9 @@
  * string an agent is told); a delivery's
  * `covers` is the last event it accounted for, so notices after it are still undelivered.
  * The run ends when the root thread has a completed `thread.ended` (`finish_run`, or the
- * liveness rule); then every thread without an end is stopped.
+ * liveness rule); then every thread without an end is stopped. A researcher's message to a
+ * finished run reopens it (`run.reopened`, which clears the root's end): the message reaches the
+ * main agent as a notice, like any other, and the run ends again when the main agent finishes.
  *
  * A thread that throws or is refused before it starts, a store failure, a fatal provider
  * error, or a main agent failing on the provider too often fails the run on purpose: the
@@ -63,6 +65,7 @@ import {
 } from "./thread-log";
 import type { ThreadSpec, Threads } from "./threads";
 
+import { goMarkerId } from "./tools/effects";
 import type { Agents } from "./tools/main-tools";
 import type { Tool } from "./tools/tool";
 
@@ -535,9 +538,37 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     };
   }
 
+  /**
+   * The researcher's go opens a correction of its task: `revision.started` (keyed by the message),
+   * written when the log shows the go and before the main agent is told, so the gate that
+   * refuses its work tools opens with the notice and review has a boundary even when nothing
+   * depends on the task.
+   */
+  async function markGo(d: ThreadLog): Promise<boolean> {
+    for (const n of d.undelivered) {
+      if (n.kind !== "person" || !n.go || !n.taskId) continue;
+      const id = goMarkerId(n.eventId);
+      if (d.written.has(id)) continue;
+      await recorder.append(
+        d.main ?? root,
+        "revision.started",
+        { reason: "correction", taskId: n.taskId },
+        id,
+      );
+      return true;
+    }
+    return false;
+  }
+
   /** Main is idle: tell it what happened, restart it, or end a run it stopped moving. */
   async function main(d: ThreadLog, view: Folded): Promise<boolean> {
     const m = d.main ? d.threads.get(d.main) : undefined;
+    // A main agent stopped when an earlier correction ended is never resumed: the researcher's
+    // message goes to a new one.
+    if (m && stateOf(m) === "stopped" && d.undelivered.some((n) => n.kind === "person")) {
+      await startMain(d);
+      return true;
+    }
     if (!m || stateOf(m) !== "idle") return false;
     if (m.end?.status === "failed" && providerError(m.end.error ?? "")) {
       const error = m.end.error ?? "";
@@ -607,6 +638,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       return "acted";
     }
     if (await unresumable(d)) return "acted";
+    if (await markGo(d)) return "acted";
     if (await resumeFeedback(d)) return "acted";
     if (await resumeCutOff(d)) return "acted";
     if (await startChecks(d, view)) return "acted";

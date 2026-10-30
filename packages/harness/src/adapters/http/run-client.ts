@@ -16,7 +16,7 @@
  * port's `HistoryConflict`. `storedEvents` is the resume read, paged (`@voluma/contracts/events`).
  * `live` posts a batch of live frames (`live.ts`): one attempt, and the caller drops a failure.
  * `heartbeat` makes one attempt: the caller keeps the usage and resends it if this throws.
- * `report` ends or releases the run; a 409 means the server ended the run first or the lease
+ * `report` ends or releases the run, with the last event seq it read; a 409 means the server ended the run first or the lease
  * is no longer ours, so it returns false (the caller logs that nothing was stored). A network failure is retried for REPORT_BUDGET_MS; the
  * lease expires on its own after that.
  */
@@ -68,6 +68,12 @@ export function runClient(
   }
   const post = (path: string, body: unknown, retryForMs?: number) =>
     guarded(() => postJson(endpoint, path, body, { leaseToken, retryForMs, redact }));
+  /**
+   * The last seq `storedEvents` returned: the report carries it (`ReportRequest.lastSeq`). A
+   * claim that never read the log has not accounted for any message, but a failure before the
+   * read must not loop on a message it never saw, so it reports as having seen everything.
+   */
+  let lastSeq = Number.MAX_SAFE_INTEGER;
   const get = (path: string) =>
     guarded(() => send(endpoint, path, { leaseToken }, HISTORY_BUDGET_MS));
 
@@ -85,6 +91,7 @@ export function runClient(
         events.push(...page.events);
         more = page.more;
       }
+      lastSeq = events.at(-1)?.seq ?? 0;
       return events;
     },
     async load(threadId) {
@@ -111,7 +118,7 @@ export function runClient(
     },
     async report(report) {
       try {
-        await post(`${runPath}/report`, { report }, REPORT_BUDGET_MS);
+        await post(`${runPath}/report`, { report, lastSeq }, REPORT_BUDGET_MS);
         return true;
       } catch (error) {
         if (error instanceof LeaseLost || (error instanceof HttpError && error.status === 409)) {

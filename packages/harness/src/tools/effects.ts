@@ -24,6 +24,7 @@ const SUFFIX = {
   accept: ":accept",
   change_plan: ":change_plan",
   finish_run: ":finish_run",
+  reply: ":reply",
 } as const;
 
 export type EffectTool = keyof typeof SUFFIX;
@@ -32,3 +33,6 @@ export const isEffectTool = (name: string): name is EffectTool => Object.hasOwn(
 
 export const effectId = (tool: EffectTool, threadId: string, toolCallId: string) =>
   `${threadId}:${toolCallId}${SUFFIX[tool]}`;
+
+/** The `revision.started` the loop writes when the main agent is told of a researcher's go: it opens the correction and, being keyed by the message, tells the log the go was handled. */
+export const goMarkerId = (personMessageEventId: string) => `${personMessageEventId}:go`;

@@ -188,6 +188,22 @@ export function taskRuntime(options: TaskRuntimeOptions) {
   };
 
   /**
+   * Whether a correction revision of `taskId` is already the latest and no attempt of the task
+   * has opened since: the researcher's go writes it (`run-loop.ts`), and the redo needs no second.
+   */
+  function correctionOpen(taskId: string): boolean {
+    const events = recorder.events();
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i];
+      if (e?.type === "attempt.opened" && e.payload.taskId === taskId) return false;
+      if (e?.type === "revision.started") {
+        return e.payload.reason === "correction" && e.payload.taskId === taskId;
+      }
+    }
+    return false;
+  }
+
+  /**
    * The one way an attempt opens: `attempt.opened` under `holderThreadId`, id `eventId`. A task
    * that already had a result stops the live threads of every dependent (they may have read
    * its old files); if a dependent has an attempt, a correction revision first marks it stale.
@@ -196,7 +212,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
   async function openAttempt(taskId: string, holderThreadId: string, eventId: string) {
     if (taskOf(taskId)?.attemptId) {
       const dependents = transitiveDependents(planNow(), taskId);
-      if (dependents.some(attempted)) {
+      if (dependents.some(attempted) && !correctionOpen(taskId)) {
         await recorder.append(
           holderThreadId,
           "revision.started",

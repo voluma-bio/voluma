@@ -207,6 +207,12 @@ export function runnerConfig() {
      * checks the same cap against known spend before each call.
      */
     maxRunCostUsd: optionalPositiveNumber("RUNNER_MAX_RUN_COST_USD"),
+    /**
+     * The cap on one correction (a researcher's message reopening a finished run): the claim
+     * of a reopened run stores the run's spend at the reopen plus this, instead of
+     * `maxRunCostUsd`. Unset: a correction has no cap of its own.
+     */
+    maxCorrectionCostUsd: optionalPositiveNumber("RUNNER_MAX_CORRECTION_COST_USD"),
     /** The run loop's limits (`LoopConfig`); the harness defaults are 2 fix rounds and 20 minutes. */
     loop: {
       maxFixRounds: positiveInt("RUNNER_MAX_FIX_ROUNDS", 2),

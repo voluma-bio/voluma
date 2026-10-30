@@ -3,7 +3,8 @@
  * it. `usage` reads every count from one query; `admit` judges a run at a stage with them.
  * Examples are seeded, not work, so no count includes them. A day is the last 24 hours by
  * the database's clock. A `voluma` run counts toward the day once, from its first claim
- * (`started_at`), so a recovered run isn't refused for a limit it passed.
+ * (`started_at`), so a recovered run isn't refused for a limit it passed. A reopened run
+ * (a correction, `messages.ts`) counts its spend since the reopen toward the day it is claimed.
  */
 import type { Run } from "@voluma/contracts/run";
 import { knownUsdOf } from "@voluma/provider-calls";
@@ -40,7 +41,10 @@ export type Usage = {
   waiting: number;
   /** Visitor runs queued or running. An `awaiting-keys` run holds neither keys nor a runner. */
   visitorActive: number;
-  /** Model and provider-call cost of `voluma` runs first claimed in the last day. */
+  /**
+   * Model and provider-call cost of `voluma` runs first claimed in the last day, and the cost
+   * since the latest reopen of those reopened and claimed in the last day.
+   */
   spentToday: number;
   /** The caller's unfinished runs of the credentials kind being started (0 when no caller). */
   callerUnfinished: number;
@@ -52,13 +56,18 @@ export async function usage(
   caller?: { userId: string; credentials: Run["credentials"] },
 ): Promise<Usage> {
   const today = sql`credentials = 'voluma' AND started_at > now() - interval '1 day'`;
+  const cost = sql`model_cost_usd + ${knownUsdOf(sql`runs.id`)}`;
   const [row] = await tx.execute<Usage>(sql`
     SELECT
       (count(*) FILTER (WHERE credentials = 'voluma' AND state = 'running'))::int AS "running",
       (count(*) FILTER (WHERE ${today}))::int AS "startedToday",
       (count(*) FILTER (WHERE credentials = 'voluma' AND state = 'queued' AND started_at IS NULL))::int AS "waiting",
       (count(*) FILTER (WHERE credentials = 'visitor' AND state IN ('queued', 'running')))::int AS "visitorActive",
-      coalesce(sum(model_cost_usd + ${knownUsdOf(sql`runs.id`)}) FILTER (WHERE ${today}), 0)::float8 AS "spentToday",
+      coalesce(sum(CASE
+        WHEN ${today} THEN ${cost}
+        WHEN credentials = 'voluma' AND correction_base_usd IS NOT NULL AND claimed_at > now() - interval '1 day'
+          THEN greatest(${cost} - correction_base_usd, 0)
+        ELSE 0 END), 0)::float8 AS "spentToday",
       (count(*) FILTER (WHERE ${caller ? sql`started_by = ${caller.userId} AND credentials = ${caller.credentials} AND state <> 'ended'` : sql`false`}))::int AS "callerUnfinished"
     FROM runs WHERE lab_id = ${labId} AND NOT example`);
   return row as Usage;
@@ -67,16 +76,18 @@ export async function usage(
 /**
  * Why `run` may not go on at `stage`, or null. Start and resume admit either kind of run;
  * claim and heartbeat are for `voluma` runs, since a visitor run's cap was checked when it
- * was queued. Checks run in this order.
+ * was queued. A reopen (a correction) is judged as a start without the daily run count: it is
+ * no new run. Checks run in this order.
  */
 export function admit(
-  stage: "start" | "resume" | "claim" | "heartbeat",
+  stage: "start" | "resume" | "reopen" | "claim" | "heartbeat",
   limits: Limits,
   u: Usage,
   run: { credentials: Run["credentials"]; firstClaim?: boolean },
 ): Refusal | null {
   if (stage === "claim" && u.running >= limits.concurrent) return "concurrent";
-  if (stage === "start" && u.callerUnfinished >= limits.perCaller) return "per-caller";
+  if ((stage === "start" || stage === "reopen") && u.callerUnfinished >= limits.perCaller)
+    return "per-caller";
   if (run.credentials === "visitor") {
     return u.visitorActive >= limits.visitorActive ? "visitor-active" : null;
   }

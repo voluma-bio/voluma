@@ -16,7 +16,7 @@ import { type Folded, fold } from "@voluma/contracts/fold";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { UserSender } from "./adapters/pi/start-thread";
 import type { PayloadOf } from "./recorder";
-import { callKey, effectId } from "./tools/effects";
+import { callKey, effectId, goMarkerId } from "./tools/effects";
 
 /** The part of a verdict's checkpoint the main agent is told (`text` cut to this many characters). */
 const VERDICT_TEXT_MAX = 1500;
@@ -102,6 +102,23 @@ export type Notice = {
   | { kind: "stale"; reason: string }
   /** The loop stopped a thread the main agent did not ask to stop; `reason` says why. */
   | { kind: "stopped"; reason: string }
+  /**
+   * The researcher wrote (`person.message`); `eventId` is the message's. A mark names a volume
+   * block (`<taskId>/<outputId>`); `file` is that output's sandbox path, when the log has it.
+   * `snapshot` is the sandbox path of the view snapshot.
+   */
+  | {
+      kind: "person";
+      text: string;
+      marks: {
+        volumeId: string;
+        file?: string;
+        point?: number[];
+        box?: { min: number[]; max: number[] };
+      }[];
+      snapshot?: string;
+      go: boolean;
+    }
 );
 
 type NoticeBody = Notice extends infer N ? (N extends unknown ? Omit<N, "at"> : never) : never;
@@ -152,6 +169,23 @@ export interface ThreadLog {
   relayed: { from: string; to: string; text: string }[];
   /** The root thread (kind `supervisor`) and whether it has a completed end, ever and since its latest start. */
   root: { id: string | undefined; ended: boolean; endedThisClaim: boolean };
+  /**
+   * A researcher's message reopened the finished run (`run.reopened`) and the run has not ended
+   * since: this is a correction, and the main agent's work tools wait for a go.
+   */
+  correcting: boolean;
+  /** A reopen was stored after the latest `claim.started`: the next claim says it follows a reopen. */
+  reopenPending: boolean;
+  /**
+   * The researcher's go the main agent was told of since the latest reopen (the loop's
+   * `revision.started`, id `goMarkerId`): the task to redo, the message, and the marker's position.
+   */
+  go: { taskId: string; messageId: string; at: number } | undefined;
+  /** Log position of the latest `person.message` and of the latest `reply` (-1: none). */
+  lastPersonAt: number;
+  lastReplyAt: number;
+  /** Log position of each task's latest `attempt.opened`. */
+  attemptAt: Map<string, number>;
 }
 
 /**
@@ -220,7 +254,15 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
     calls: new Map(),
     relayed: [],
     root: { id: undefined, ended: false, endedThisClaim: false },
+    correcting: false,
+    reopenPending: false,
+    go: undefined,
+    lastPersonAt: -1,
+    lastReplyAt: -1,
+    attemptAt: new Map(),
   };
+  const volumeFiles = new Map<string, string>(); // volume block id -> its file's sandbox path
+  const goTasks = new Map<string, { taskId: string; messageId: string }>(); // marker id -> the go it marks
   const briefed = new Set<string>(); // threads whose brief (first user message) the log holds
   // Threads started again while their latest start had no end: the message that follows is a
   // cut-off resume, not a nudge (a nudge is the runtime asking a thread that stopped).
@@ -244,7 +286,60 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
     switch (e.type) {
       case "claim.started":
         value.after = e.payload.after;
+        value.reopenPending = false;
         break;
+      case "run.reopened":
+        value.root.ended = false;
+        value.correcting = true;
+        value.reopenPending = true;
+        value.go = undefined;
+        break;
+      case "person.message": {
+        const { text, marks, snapshotKey, go, taskId } = e.payload;
+        value.lastPersonAt = at;
+        if (go && taskId) goTasks.set(goMarkerId(e.id), { taskId, messageId: e.id });
+        notice(
+          {
+            eventId: e.id,
+            threadId: e.threadId,
+            kind: "person",
+            text: text ?? "",
+            marks: (marks ?? []).map((m) => ({
+              volumeId: m.volumeId,
+              ...(volumeFiles.has(m.volumeId) && { file: volumeFiles.get(m.volumeId) }),
+              ...(m.point && { point: m.point }),
+              ...(m.box && { box: m.box }),
+            })),
+            ...(snapshotKey && { snapshot: `/scratch/${snapshotKey.split("/scratch/")[1]}` }),
+            go: go === true,
+            ...(taskId && { taskId }),
+          },
+          at,
+        );
+        break;
+      }
+      case "reply":
+        value.lastReplyAt = at;
+        break;
+      case "revision.started": {
+        const go = goTasks.get(e.id);
+        if (go) {
+          value.go = { ...go, at };
+          value.fixRounds.set(go.taskId, 0);
+        }
+        break;
+      }
+      case "output": {
+        const { taskId, outputId, output } = e.payload;
+        if (output.kind === "volume") {
+          const { file } = output.volume;
+          volumeFiles.set(
+            `${taskId}/${outputId}`,
+            file.root === "scratch" ? `/scratch/${file.path}` : `/outputs/${taskId}/${file.path}`,
+          );
+        }
+        break;
+      }
       case "thread.started": {
         const { kind, task } = e.payload;
         if (kind === "supervisor") {
@@ -288,7 +383,10 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
       case "thread.ended": {
         if (e.threadId === value.root.id) {
           value.root.endedThisClaim = true;
-          if (e.payload.status === "completed") value.root.ended = true;
+          if (e.payload.status === "completed") {
+            value.root.ended = true;
+            value.correcting = false;
+          }
         }
         if (!record) break;
         const first = !record.end;
@@ -353,6 +451,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         break;
       case "attempt.opened":
         if (record) record.pendingFeedback = feedbackOpens.get(e.id);
+        value.attemptAt.set(e.payload.taskId, at);
         break;
       case "checkpoint": {
         const { verdict, summary, text } = e.payload;

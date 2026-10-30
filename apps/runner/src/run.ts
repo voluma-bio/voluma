@@ -189,14 +189,15 @@ async function claimBody(
   if (shutdown.aborted) stop("shutdown");
 
   // The run's dollars across every claim, gateway calls included: what the server last
-  // acknowledged (a heartbeat's `spentUsd`) plus the model cost not yet sent. Crossing the cap
-  // stops everything in flight; the run then ends `failed` naming it.
+  // acknowledged (a heartbeat's `spentUsd`) plus the model cost not yet sent. Crossing the claim's
+  // cap (the runner's setting, or the correction cap on top of the spend at a reopen) stops
+  // everything in flight; the run then ends `failed` naming it.
   let acknowledgedUsd = (run.usage?.modelCostUsd ?? 0) + (run.providerCalls?.costUsd ?? 0);
   let capError: string | undefined;
   const checkCap = () => {
     const total = acknowledgedUsd + meter.pendingModelCostUsd();
-    if (capError || config.maxRunCostUsd === undefined || total < config.maxRunCostUsd) return;
-    capError = `spend cap $${config.maxRunCostUsd} reached at $${total.toFixed(2)}`;
+    if (capError || claim.costCapUsd === undefined || total < claim.costCapUsd) return;
+    capError = `spend cap $${claim.costCapUsd} reached at $${total.toFixed(2)}`;
     log(capError);
     stop("spend-cap");
   };
@@ -396,17 +397,17 @@ async function claimBody(
     const threadModel = (primary: Model<Api>, recorded: string | undefined) => {
       if (recorded) {
         // Only a model this run may use: a visitor's scan goes to Standard-mode Meta only, and
-        // a fallback that was switched off stays off for threads that started on it.
+        // a fallback that was switched off stays off for threads that started on it. Any other
+        // thread (a run made on another model, reopened for a correction) gets the role's model:
+        // its stored history was written by another, so it is refused as unresumable and the run
+        // loop starts the work again (`run-loop.ts`), instead of the run failing.
         const [provider = "", ...id] = recorded.split("/");
         const allowed = visitor
           ? isVisitorSafe({ provider, id: id.join("/") })
           : [workerModel, checkModel, mainModel, config.fallbackModel].some(
               (m) => m && `${m.provider}/${m.id}` === recorded,
             );
-        const model = allowed ? models.getModel(provider, id.join("/")) : undefined;
-        if (!model)
-          throw new Error(`the thread started on ${recorded}, which this run may not use`);
-        return model;
+        return (allowed && models.getModel(provider, id.join("/"))) || primary;
       }
       return visitor ? primary : ctx.fallback.pick(primary);
     };

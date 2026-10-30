@@ -268,6 +268,7 @@ export function world(o: WorldOptions) {
       "answer",
       "accept",
       "change_plan",
+      "reply",
       "finish_run",
       ...(o.mainTools ?? []),
     ]),
@@ -299,7 +300,7 @@ export function world(o: WorldOptions) {
     },
   };
 
-  async function claim(): Promise<Folded> {
+  async function claim(reopened = false): Promise<Folded> {
     const rec = recorder(store as never, RUN, () => {}, 10, [...stored]);
     return superviseRun({
       runId: RUN,
@@ -347,7 +348,8 @@ export function world(o: WorldOptions) {
       },
       config: o.config,
       providerError: o.providerError,
-      ...(stored.length > 0 && { previousClaim: "shutdown" as const }),
+      // A reopen clears the claim-end reason (`messages.ts`).
+      ...(stored.length > 0 && !reopened && { previousClaim: "shutdown" as const }),
       signal: abort.signal,
     });
   }
@@ -367,6 +369,34 @@ export function world(o: WorldOptions) {
         folded = await claim();
       }
       return folded;
+    },
+    /**
+     * What the API does when the researcher writes to the finished run (`messages.ts`): stores
+     * `run.reopened` and `person.message` (server events, thread `<run>.person`), then the run is
+     * claimed once more. Returns the fold of that claim.
+     */
+    async send(
+      message: { text?: string; go?: true; taskId?: string; marks?: unknown[] },
+      id = `m${++n}`,
+    ): Promise<Folded> {
+      const at = new Date().toISOString();
+      const person = `${RUN}.person`;
+      for (const [type, eid, payload] of [
+        ["run.reopened", `${person}:${id}:reopened`, { by: "u1" }],
+        ["person.message", `${person}:${id}`, message],
+      ] as const) {
+        stored.push({
+          id: eid,
+          runId: RUN,
+          threadId: person,
+          seq: stored.length + 1,
+          type,
+          payload,
+          createdAt: at,
+        } as unknown as RunEvent);
+      }
+      abort = new AbortController();
+      return claim(true);
     },
     /** The log as one line per event, for a failure message. */
     text(): string {

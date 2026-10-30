@@ -132,6 +132,12 @@ export const claimRequestSchema = z.object({
    * the provider gateway checks. Absent: no cap (spend is still recorded).
    */
   costCapUsd: z.number().positive().optional(),
+  /**
+   * The runner's cap on one correction's spend (`RUNNER_MAX_CORRECTION_COST_USD`). For a
+   * reopened run the claim stores the run's spend when it was reopened plus this as the spend
+   * cap, instead of `costCapUsd`. Absent: a correction has no cap of its own.
+   */
+  correctionCostCapUsd: z.number().positive().optional(),
 });
 export type ClaimRequest = z.infer<typeof claimRequestSchema>;
 
@@ -145,6 +151,8 @@ export const claimSchema = z
     keys: visitorKeysSchema.optional(),
     /** Present on every claim after the run's first: why the previous claim ended. */
     previousClaim: z.object({ reason: claimEndReasonSchema }).optional(),
+    /** The run's spend cap in dollars, settled spend across every claim, as the claim stored it; absent: none. The runner stops the run when its spend reaches it. */
+    costCapUsd: z.number().positive().optional(),
   })
   .refine((c) => (c.run.credentials === "visitor") === (c.keys !== undefined), {
     path: ["keys"],
@@ -186,10 +194,10 @@ export const reportRequestSchema = z.object({
    * lock `report()` compares it with the run's events: a `person.message` after it sends the
    * run to `queued` instead of recording the end or the release (`messages.ts`), so a note
    * sent mid-claim is never lost. For a reopened run that means `completed` stays the outcome
-   * of the earlier work and the new claim answers the note. Optional only until the runner sends it
-   * (the implementation PR); `report()` skips the check when absent.
+   * of the earlier work and the new claim answers the note. The check applies to an `ended`
+   * report; a release is recovered as always and the note waits for the next claim.
    */
-  lastSeq: z.number().int().nonnegative().optional(),
+  lastSeq: z.number().int().nonnegative(),
   report: z.discriminatedUnion("kind", [
     z.object({
       kind: z.literal("ended"),

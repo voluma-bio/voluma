@@ -181,6 +181,13 @@ export const runs = pgTable(
     recoveries: integer().notNull().default(0),
     modelCostUsd: doublePrecision().notNull().default(0),
     sandboxSeconds: doublePrecision().notNull().default(0),
+    /**
+     * Null until a person's message reopens the run (`messages.ts`); then the run's spend
+     * (model and provider calls) at the latest reopen. A non-null value marks a run whose claims
+     * are corrections: they never end it worse than `completed`, the claim's cap is this plus the
+     * correction cap, and only spend above it counts toward the org's day by claim time.
+     */
+    correctionBaseUsd: doublePrecision(),
     /** The run's spend cap in dollars, set by each claim when the runner sends one; null: no cap. The provider gateway checks it. */
     costCapUsd: doublePrecision(),
     /** Retired, never read or written. Drop after servers using the old count are drained. */

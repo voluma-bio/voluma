@@ -10,7 +10,12 @@ export async function claimRun(
   endpoint: Endpoint,
   runnerId: string,
   costCapUsd: number | undefined,
+  correctionCostCapUsd: number | undefined,
 ): Promise<Claim | null> {
-  const response = await postJson(endpoint, "/api/run/ingest/claim", { runnerId, costCapUsd });
+  const response = await postJson(endpoint, "/api/run/ingest/claim", {
+    runnerId,
+    costCapUsd,
+    correctionCostCapUsd,
+  });
   return claimResponseSchema.parse(await response.json()).claim;
 }

@@ -216,7 +216,8 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
    * `thread.started` and before anything else the claim writes. `resumed` is false on the run's
    * first claim. On a resume, threads whose latest `thread.started` has no `thread.ended`
    * were cut off by infrastructure; the run page shows that as "Voluma restarted the run".
-   * `after` is why the previous claim ended, present exactly when `resumed`.
+   * `after` is why the previous claim ended; `reopened` says a person's message reopened the run
+   * instead (the reopen clears the claim-end reason). A resumed claim has exactly one of them.
    */
   const claimStarted = event(
     "claim.started",
@@ -227,9 +228,13 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         /** This claim exists because a person's message reopened the run (`messages.ts`); not a claim-end reason. */
         reopened: z.literal(true).optional(),
       })
-      .refine((p) => p.resumed === (p.after !== undefined), {
+      .refine((p) => p.resumed === (p.after !== undefined || p.reopened === true), {
         path: ["after"],
-        message: "after goes with a resumed claim and no other",
+        message: "a resumed claim says why: after a claim end, or after a reopen",
+      })
+      .refine((p) => !(p.after !== undefined && p.reopened === true), {
+        path: ["reopened"],
+        message: "a claim follows a claim end or a reopen, not both",
       }),
   );
 

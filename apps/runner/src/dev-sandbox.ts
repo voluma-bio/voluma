@@ -58,7 +58,12 @@ const apiHost = new URL(config.api.baseUrl).hostname;
 if (!["localhost", "127.0.0.1", "[::1]"].includes(apiHost) && !values["allow-remote"])
   throw new Error(`${apiHost} is not this machine: pass --allow-remote to claim a run there`);
 
-const claim = await claimRun(config.api, "dev-sandbox", config.maxRunCostUsd);
+const claim = await claimRun(
+  config.api,
+  "dev-sandbox",
+  config.maxRunCostUsd,
+  config.maxCorrectionCostUsd,
+);
 if (!claim) throw new Error("no queued run: start one in the web app (pnpm dev) first");
 const { run, leaseToken } = claim;
 if (run.id !== values.run) {

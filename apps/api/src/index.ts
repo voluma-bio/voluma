@@ -20,6 +20,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
+import { MESSAGE_BODY_BYTES } from "@voluma/contracts/messages";
 import { pinsOf } from "@voluma/workflow/bundled";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { type Context, Hono } from "hono";
@@ -165,15 +166,17 @@ const runFiles = r2 && r2RunFiles(r2);
 const app = new Hono();
 app.get("/health", (c) => c.text("ok"));
 // A body over the limit is a 413 before anything reads it. Browsers get 256 KB (the key
-// vault and the event log keep what they send), except an upload's file list (up to
+// vault and the event log keep what they send), except a message with its snapshot (3 MB) and an upload's file list (up to
 // 10,000 paths of 300 ASCII characters: 4 MB). The runner is trusted, and a model's
 // history row can be large (reasoning blobs, long tool calls), so /ingest/* gets 8 MB.
 const browserLimit = bodyLimit({ maxSize: 256 * 1024 });
+const messageLimit = bodyLimit({ maxSize: MESSAGE_BODY_BYTES });
 const fileListLimit = bodyLimit({ maxSize: 4 * 1024 * 1024 });
 const runnerLimit = bodyLimit({ maxSize: 8 * 1024 * 1024 });
 app.use("/api/*", (c, next) => {
   if (c.req.path.startsWith("/api/run/ingest/")) return runnerLimit(c, next);
   if (c.req.path === "/api/run/inputs") return fileListLimit(c, next);
+  if (/^\/api\/review\/runs\/[^/]+\/messages$/.test(c.req.path)) return messageLimit(c, next);
   return browserLimit(c, next);
 });
 // Every /api request is authenticated here, in this order (auth.ts): the bearer and
@@ -205,7 +208,13 @@ app.route(
 );
 app.route(
   "/api/review",
-  createReview({ runs: runRecords, files: runFiles, inputs: reads, referenceArchive }),
+  createReview({
+    runs: runRecords,
+    messages: { check: queue.checkMessage, send: queue.sendMessage },
+    files: runFiles,
+    inputs: reads,
+    referenceArchive,
+  }),
 );
 
 const isApi = (path: string) => path === "/api" || path.startsWith("/api/");
