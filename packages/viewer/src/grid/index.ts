@@ -2,3 +2,4 @@
 export { GridViewer, type PaneId, type ViewerState } from "./GridViewer";
 export { labelsMiddle, type StructureDisplay, type TaskGrid, taskGrid } from "./review";
 export type { AssetLevel, GridMesh, GridScene, Overlay, PaneView, Zyx } from "./scene";
+export { tokenColor } from "./token-color";

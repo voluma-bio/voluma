@@ -4,9 +4,9 @@ import { useMutation } from "@tanstack/react-query";
 import { markReviewed } from "@voluma/api-client";
 import type { Focus, Revision } from "@voluma/contracts/review";
 import type { GridViewState, ReviewSnapshot } from "@voluma/contracts/snapshot";
-import { StatusBadge } from "@voluma/ui";
+import { Button, EmptyState, ErrorState, StatusMark, TextField } from "@voluma/ui";
 import type { StructureDisplay } from "@voluma/viewer/grid";
-import { ArrowLeft, Download, History, Layers, ListChecks } from "lucide-react";
+import { Download, History, Layers, ListChecks } from "lucide-react";
 import { lazy, type ReactNode, Suspense, useEffect, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { downloadCsv, downloadReviewReport } from "./export";
@@ -29,13 +29,13 @@ export function ReviewWorkspace({
   onRefresh,
 }: {
   runId: string;
-  run?: ReviewRun;
+  run: ReviewRun;
   canReview?: boolean;
   taskId?: string;
   revisionId?: string;
   navigate(selection: { task?: string; revision?: string }): void;
   backLink: ReactNode;
-  /** Loading/unavailable state, or an actionable refresh failure above retained results. */
+  /** A line above the results: a failed refresh with its retry, or that the run is still going. */
   notice?: ReactNode;
   onRefresh(): Promise<void>;
 }) {
@@ -51,8 +51,8 @@ export function ReviewWorkspace({
     taskId: string;
     focus: Focus;
   }>();
-  const latest = run?.revisions.at(-1);
-  const revision = revisionId ? run?.revisions.find((item) => item.id === revisionId) : latest;
+  const latest = run.revisions.at(-1);
+  const revision = revisionId ? run.revisions.find((item) => item.id === revisionId) : latest;
   const task = taskId ? revision?.tasks.find((item) => item.id === taskId) : revision?.tasks[0];
   // A reopened screenshot, kept while its revision and task are open.
   const [restoredSnapshot, setRestoredSnapshot] = useState<
@@ -94,56 +94,53 @@ export function ReviewWorkspace({
       navigate({ revision: snapshot.revisionId, task: snapshot.taskId });
     },
   );
-  const readOnly = !canReview || !run?.review || revision !== latest;
+  const readOnly = !canReview || !run.review || revision !== latest;
   const complete = useMutation({
     mutationFn: () => markReviewed(runId, { baseRevisionId: latest?.id ?? "" }),
     onSuccess: onRefresh,
     onError: onRefresh,
   });
   return (
-    <div className="review-shell" data-theme="light">
+    <div className="review-shell">
       <div className="run-header">
         <div>
-          <div className="back-link">
-            <ArrowLeft size={14} />
-            {backLink}
-          </div>
+          {backLink}
           <div className="run-title">
-            <h1 className="text-xl font-semibold">{run?.sample ?? runId}</h1>
-            {run?.review && (
-              <StatusBadge tone={run.review.remainingToCheck ? "check" : "primary"}>
-                {run.review.reviewedAt
-                  ? "Reviewed"
-                  : run.review.remainingToCheck
-                    ? `${run.review.remainingToCheck} to check`
-                    : "Checked"}
-              </StatusBadge>
+            <h1 className="text-xl font-semibold">{run.sample ?? runId}</h1>
+            {run.review && (
+              <StatusMark
+                status={run.review.remainingToCheck ? "check" : "done"}
+                label={
+                  run.review.reviewedAt
+                    ? "Reviewed"
+                    : run.review.remainingToCheck
+                      ? `${run.review.remainingToCheck} to check`
+                      : "Checked"
+                }
+              />
             )}
           </div>
-          {run && (
-            <p className="text-sm text-muted-foreground">
-              {run.workflows
-                .map((w) =>
-                  [w.path?.split("/").at(-1) ?? w.repo, w.commit?.slice(0, 7)]
-                    .filter(Boolean)
-                    .join(" · "),
-                )
-                .join(", ")}
-            </p>
-          )}
+          <p className="text-sm text-muted-foreground">
+            {run.workflows
+              .map((w) =>
+                [w.path?.split("/").at(-1) ?? w.repo, w.commit?.slice(0, 7)]
+                  .filter(Boolean)
+                  .join(" · "),
+              )
+              .join(", ")}
+          </p>
         </div>
         <div className="run-actions">
-          {run?.review && !run.review.reviewedAt && (
-            <button
-              type="button"
-              className="button primary"
+          {run.review && !run.review.reviewedAt && (
+            <Button
+              variant="primary"
               disabled={readOnly || run.review.remainingToCheck !== 0 || complete.isPending}
               onClick={() => complete.mutate()}
             >
               {complete.isPending ? "Marking reviewed…" : "Mark reviewed"}
-            </button>
+            </Button>
           )}
-          {run && revision && (
+          {revision && (
             <>
               <label className="revision-select">
                 <History size={15} />
@@ -160,42 +157,35 @@ export function ReviewWorkspace({
                   ))}
                 </select>
               </label>
-              <button type="button" className="button" onClick={() => downloadCsv(run, revision)}>
-                <Download size={15} />
+              <Button onClick={() => downloadCsv(run, revision)}>
+                <Download />
                 Export CSV
-              </button>
-              <button
-                type="button"
-                className="button"
-                disabled={report.isPending}
-                onClick={() => report.mutate({ run, revision })}
-              >
-                <Download size={15} />
+              </Button>
+              <Button disabled={report.isPending} onClick={() => report.mutate({ run, revision })}>
+                <Download />
                 {report.isPending ? "Exporting report…" : "Export review report"}
-              </button>
+              </Button>
             </>
           )}
         </div>
       </div>
-      {run && notice && (
+      {notice && (
         <div className="revision-notice" role="alert">
           {notice}
         </div>
       )}
-      {complete.error && !run?.review?.reviewedAt && (
-        <p className="error-message" role="alert">
-          {complete.error.message}
-        </p>
+      {complete.error && !run.review?.reviewedAt && (
+        <ErrorState title="Couldn't mark the review done">{complete.error.message}</ErrorState>
       )}
       {report.error && (
-        <p className="error-message" role="alert">
-          Could not export the review report. Check your connection and try again.
-        </p>
+        <ErrorState title="Couldn't export the review report">
+          Check your connection and try again.
+        </ErrorState>
       )}
       {revision && revision !== latest && (
         <div className="revision-notice">Earlier results are read-only.</div>
       )}
-      <main className="review-body">
+      <div className="review-body">
         <aside className="task-sidebar">
           <div className="sidebar-tabs">
             <button type="button" aria-pressed={tab === "tasks"} onClick={() => setTab("tasks")}>
@@ -230,9 +220,7 @@ export function ReviewWorkspace({
                       <span>
                         {item.title}
                         <span className="task-meta">
-                          <StatusBadge tone={taskStatus(item).tone}>
-                            {taskStatus(item).label}
-                          </StatusBadge>
+                          <StatusMark {...taskStatus(item)} />
                           {item.status !== "pending" && (
                             <>
                               {" "}
@@ -247,19 +235,16 @@ export function ReviewWorkspace({
                 </nav>
                 {!revision?.tasks.length && (
                   <p className="px-5 text-sm text-muted-foreground" role="status">
-                    {notice ?? "Tasks appear when an analysis result is connected."}
+                    Tasks appear when an analysis result is connected.
                   </p>
                 )}
               </>
             ) : (
               <div className="structures-list">
-                <label className="sr-only" htmlFor="structure-filter">
-                  Find a structure
-                </label>
-                <input
-                  id="structure-filter"
-                  className="text-input"
-                  placeholder="Find a structure…"
+                <TextField
+                  label="Find a structure"
+                  hideLabel
+                  placeholder="Find a structure"
                   value={filter}
                   onChange={(event) => setFilter(event.target.value)}
                 />
@@ -339,7 +324,7 @@ export function ReviewWorkspace({
           <Group orientation="horizontal" id="review-split">
             <Panel id="report" defaultSize="42%" minSize="28%">
               <div className="report-scroll" key={`${revision?.id}-${task?.id}`}>
-                {task && revision && run ? (
+                {task && revision ? (
                   <TaskReport
                     task={task}
                     blockName={(id) =>
@@ -361,49 +346,17 @@ export function ReviewWorkspace({
                         focus ? { revisionId: revision.id, taskId: task.id, focus } : undefined,
                       );
                     }}
-                    onRefresh={onRefresh}
                   />
                 ) : (
-                  <article className="task-report">
-                    <p className="text-xs text-muted-foreground">Task report</p>
-                    <h2 className="text-xl font-semibold mt-3">
-                      {run ? "Result not available" : "No analysis results yet"}
-                    </h2>
-                    <p className="text-muted-foreground mt-4 leading-relaxed">
-                      {run
-                        ? "This task or revision does not exist."
-                        : notice
-                          ? notice
-                          : "Measurements, checks, evidence and images appear only after an analysis has produced them."}
-                    </p>
-                    <section>
-                      <h3 className="font-medium">Measurements</h3>
-                      <p className="text-sm text-muted-foreground mt-2">
-                        No measurements supplied.
-                      </p>
-                    </section>
-                    <section>
-                      <h3 className="font-medium">To check</h3>
-                      <p className="text-sm text-muted-foreground mt-2">
-                        No review decisions are available.
-                      </p>
-                    </section>
-                    <section>
-                      <h3 className="font-medium">Evidence</h3>
-                      <p className="text-sm text-muted-foreground mt-2">
-                        No analysis evidence is attached.
-                      </p>
-                    </section>
-                  </article>
+                  <EmptyState title="Result not available">
+                    This task or revision doesn't exist.
+                  </EmptyState>
                 )}
               </div>
             </Panel>
-            <Separator
-              className="resize-handle main-handle"
-              aria-label="Resize report and viewers"
-            />
+            <Separator className="main-handle" aria-label="Resize report and viewers" />
             <Panel id="imaging" minSize="28%">
-              {run && revision && task ? (
+              {revision && task ? (
                 <Suspense>
                   <TaskViewer
                     runId={run.id}
@@ -425,7 +378,10 @@ export function ReviewWorkspace({
                   />
                 </Suspense>
               ) : (
-                <section className="viewer-workspace" aria-label="Imaging workspace">
+                <section
+                  className="flex h-full min-h-0 flex-col bg-background p-4"
+                  aria-label="Imaging workspace"
+                >
                   <div className="view-empty" role="status">
                     Images appear with the task's results.
                   </div>
@@ -434,7 +390,7 @@ export function ReviewWorkspace({
             </Panel>
           </Group>
         </div>
-      </main>
+      </div>
       <footer className="app-footer">
         <span>Research review</span>
         <span>Display settings do not change scientific results</span>

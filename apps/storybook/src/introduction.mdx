@@ -1,0 +1,21 @@
+import { Meta } from "@storybook/addon-docs/blocks";
+
+<Meta title="Introduction" />
+
+# Voluma's component library
+
+Every shared component, in both themes, with what it is for and where it is used. The design it
+comes from is the "Imaging pro" redesign: light study pages, a dark 3D review, one frame on every
+screen.
+
+The library has four layers; lower layers never know about higher ones.
+
+| Layer | Holds | Package |
+|---|---|---|
+| Foundations | colours, type, spacing, radii, light and dark | `@voluma/design-tokens` |
+| Shell | the frame every screen sits in: header line, icon strips, docked panels, Full view | `@voluma/ui` |
+| Parts | buttons, status marks, rows, tables, popovers, empty and loading states | `@voluma/ui` |
+| Voluma pieces | task graph, item to check, agent threads, the viewer frame | `@voluma/run-view`, features |
+
+Before drawing anything new, check **Information map**: each kind of information has one
+component, and it is shown with that component everywhere.

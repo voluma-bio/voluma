@@ -5,9 +5,14 @@
   "type": "module",
   "exports": {
     "./tokens.css": "./src/tokens.css",
-    "./theme.css": "./src/theme.css"
+    "./theme.css": "./src/theme.css",
+    "./fonts.css": "./src/fonts.css"
   },
   "sideEffects": [
     "**/*.css"
-  ]
+  ],
+  "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5.2.7",
+    "@fontsource/instrument-sans": "^5.3.0"
+  }
 }

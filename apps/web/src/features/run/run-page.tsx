@@ -6,39 +6,45 @@
  * Everything is derived from the run's stream (`run-model.ts`, `transcript.ts`) and `getRun`,
  * polled for what isn't an event (queue place, state, review progress).
  */
+
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiError, getRun, getStudy, subscribe } from "@voluma/api-client";
+import { ApiError, subscribe } from "@voluma/api-client";
+import { runQuery, studyQuery } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
 import type { RunEvent } from "@voluma/contracts/events";
 import type { Run } from "@voluma/contracts/run";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  applyFrame,
+  DisclosureProvider,
+  haltOf,
+  noLive,
+  RunStoreProvider,
+  runView,
+  type Settled,
+  settle,
+  TaskFlow,
+  ThreadNavigationProvider,
+  useClosed,
+  useEvents,
+  useRunStore,
+} from "@voluma/run-view";
+import { Button, EmptyState, ErrorState, LoadingState } from "@voluma/ui";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from "react-router";
 import { AgentsView } from "./agents-view";
-import { DisclosureProvider } from "./chat/disclosure-store";
-import { ThreadNavigationProvider } from "./chat/thread-navigation";
 import { Overview, useAccepting } from "./overview";
 import { RunAlerts, RunHeader } from "./run-header";
-import { RunLogProvider } from "./run-log";
-import { haltOf, runView, withLiveCalls } from "./run-model";
-import { TaskFlow } from "./task-flow";
 import { TaskView } from "./task-view";
-import { applyFrame, type Live, noLive, type Settled, settle } from "./transcript";
 
 /**
- * The run's stream as it arrives: durable events, and live frames folded until their durable
- * event lands. Published at most once per animation frame: a busy run sends many per second.
- * `events` keeps its identity while only frames arrive, so the event derivations don't rerun
- * per token. Once the stream is over for good, live partials are dropped: nothing will complete them.
+ * Feeds the run's stream into the run store: durable events, and live frames folded until their
+ * durable event lands. Published at most once per animation frame: a busy run sends many per
+ * second. `events` keeps its identity while only frames arrive, so the event derivations don't
+ * rerun per token. Once the stream is over for good, live partials are dropped: nothing will
+ * complete them.
  */
-function useRunStream(
-  runId: string,
-  onClosed: () => void,
-): { events: RunEvent[]; live: Live; closed: boolean } {
-  const [state, setState] = useState<{ events: RunEvent[]; live: Live; closed: boolean }>({
-    events: [],
-    live: noLive,
-    closed: false,
-  });
+function useRunStream(runId: string, onClosed: () => void) {
+  const store = useRunStore();
   const onClosedRef = useRef(onClosed);
   onClosedRef.current = onClosed;
   useEffect(() => {
@@ -51,7 +57,7 @@ function useRunStream(
     const publish = () => {
       frame = undefined;
       if (published.length !== events.length) published = [...events];
-      setState({ events: published, live, closed });
+      store.set({ events: published, live, closed });
     };
     const schedule = () => {
       frame ??= requestAnimationFrame(publish);
@@ -80,14 +86,17 @@ function useRunStream(
       stop();
       if (frame !== undefined) cancelAnimationFrame(frame);
     };
-  }, [runId]);
-  return state;
+  }, [runId, store]);
 }
 
 /** Keyed on the run: nothing of one run's stream or decisions carries over to the next. */
 export function RunPage() {
   const { id = "" } = useParams();
-  return <RunOf key={id} id={id} />;
+  return (
+    <RunStoreProvider key={id}>
+      <RunOf id={id} />
+    </RunStoreProvider>
+  );
 }
 
 function RunOf({ id }: { id: string }) {
@@ -96,20 +105,21 @@ function RunOf({ id }: { id: string }) {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const run = useQuery({
-    queryKey: ["run", id],
-    queryFn: () => getRun(id),
+    ...runQuery(id),
     // Queue position and state changes aren't events; the stream is the source for the rest.
     refetchInterval: (q) => (q.state.data?.state.status === "ended" ? false : 3000),
   });
   const studyId = run.data?.studyId;
   // Labels only (the study's name and size, the scan's mouse, knee and group): read once.
   const study = useQuery({
-    queryKey: ["study", studyId],
-    queryFn: () => getStudy(studyId ?? ""),
+    ...studyQuery(studyId ?? ""),
     enabled: studyId !== undefined,
     staleTime: Number.POSITIVE_INFINITY,
   });
-  const { events, live, closed } = useRunStream(id, () => void run.refetch());
+  const store = useRunStore();
+  useRunStream(id, () => void run.refetch());
+  const events = useEvents();
+  const closed = useClosed();
   const state = run.data?.state;
   // Query's structural sharing keeps `state` the same object across polls that change nothing.
   const halt = useMemo(() => state && haltOf(state, closed), [state, closed]);
@@ -119,7 +129,11 @@ function RunOf({ id }: { id: string }) {
     () => runView(events, state ?? { status: "queued", position: 1 }, providerCalls, halt),
     [events, state, providerCalls, halt],
   );
-  const threads = useMemo(() => withLiveCalls(view.threads, live), [view.threads, live]);
+  // Layout effect: the agent views below read these from the store and must not paint without them.
+  useLayoutEffect(
+    () => store.set({ halt, baseThreads: view.threads }),
+    [store, halt, view.threads],
+  );
   const base = `/runs/${encodeURIComponent(id)}/live`;
   const search = useCallback(
     (taskId?: string, v?: "agents") =>
@@ -138,24 +152,35 @@ function RunOf({ id }: { id: string }) {
   );
   const setRun = useCallback(
     (next: Run | ((run: Run) => Run)) =>
-      queryClient.setQueryData<Run>(["run", id], (run) =>
+      queryClient.setQueryData<Run>(runQuery(id).queryKey, (run) =>
         typeof next === "function" ? run && next(run) : next,
       ),
     [queryClient, id],
   );
   const refetch = useCallback(() => void run.refetch(), [run.refetch]);
 
-  if (run.isPending) return <Message>Loading run…</Message>;
-  if (!run.data) {
+  if (run.isPending)
     return (
-      <Message>
-        {run.error instanceof ApiError && run.error.status === 404
-          ? "This run doesn't exist, or you can't open it."
-          : "Couldn't load this run."}{" "}
-        <Link to="/" className="text-primary-text hover:underline">
-          Go to Home
-        </Link>
-      </Message>
+      <div className={PAGE_STATE}>
+        <LoadingState label="Loading the run" rows={4} />
+      </div>
+    );
+  if (!run.data) {
+    const missing = run.error instanceof ApiError && run.error.status === 404;
+    return (
+      <div className={PAGE_STATE}>
+        <ErrorState
+          title={missing ? "This run isn't here" : "Couldn't load the run"}
+          onRetry={missing ? undefined : refetch}
+        >
+          {missing
+            ? "It may have been removed, or you can't open it. "
+            : "Check your connection, then try again. "}
+          <Button asChild variant="link">
+            <Link to="/">Go to Home</Link>
+          </Button>
+        </ErrorState>
+      </div>
     );
   }
   return (
@@ -164,16 +189,11 @@ function RunOf({ id }: { id: string }) {
       stale={run.isError}
       study={study.data}
       me={me}
-      events={events}
-      live={live}
-      halt={halt}
       view={view}
-      threads={threads}
       params={params}
       search={search}
       openThread={openThread}
       setRun={setRun}
-      refetch={refetch}
     />
   );
 }
@@ -183,35 +203,24 @@ function RunScreen({
   stale,
   study,
   me,
-  events,
-  live,
-  halt,
   view,
-  threads,
   params,
   search,
   openThread,
   setRun,
-  refetch,
 }: {
   run: Run;
   /** The last poll failed: what is shown may be out of date. */
   stale: boolean;
   study: Parameters<typeof RunHeader>[0]["study"];
   me: Me;
-  events: RunEvent[];
-  live: Live;
-  halt: ReturnType<typeof haltOf>;
   view: ReturnType<typeof runView>;
-  threads: ReturnType<typeof withLiveCalls>;
   params: URLSearchParams;
   search: (taskId?: string, v?: "agents") => string;
   openThread: (threadId: string | null) => void;
   setRun: (next: Run | ((run: Run) => Run)) => void;
-  refetch: () => void;
 }) {
-  const accepting = useAccepting(run, setRun, refetch);
-  const runLog = useMemo(() => ({ events, live, halt, threads }), [events, live, halt, threads]);
+  const accepting = useAccepting(run, setRun);
   const { tasks } = view;
   const taskId = params.get("task") ?? undefined;
   const task = taskId ? tasks.find((t) => t.id === taskId) : undefined;
@@ -231,11 +240,13 @@ function RunScreen({
   let content: React.ReactNode;
   if (taskId && !task)
     content = (
-      <Message>
-        {tasks.length === 0
-          ? "The tasks appear when the run starts."
-          : "This task isn't in the run's plan."}
-      </Message>
+      <div className={PAGE_STATE}>
+        {tasks.length === 0 ? (
+          <EmptyState title="No tasks yet">The tasks appear when the run starts.</EmptyState>
+        ) : (
+          <ErrorState title="This task isn't in the run's plan" />
+        )}
+      </div>
     );
   else if (task)
     content = (
@@ -252,9 +263,9 @@ function RunScreen({
     content = <AgentsView agentId={agentId} select={openThread} ended={ended} />;
   } else if (tasks.length === 0)
     content = (
-      <p className="text-ui text-muted-foreground">
-        {ended ? "This run ended before it made a plan." : "The tasks appear when the run starts."}
-      </p>
+      <EmptyState title={ended ? "This run ended before it made a plan" : "No tasks yet"}>
+        {ended ? undefined : "The tasks appear when the run starts."}
+      </EmptyState>
     );
   else
     content = (
@@ -270,48 +281,45 @@ function RunScreen({
     );
 
   return (
-    <RunLogProvider value={runLog}>
-      <DisclosureProvider>
-        <ThreadNavigationProvider onOpenThread={openThread}>
-          <main className="flex min-h-0 flex-1 flex-col max-[1100px]:overflow-y-auto">
-            <RunHeader
-              run={run}
-              study={study}
-              progress={{ ...view.progress, toCheck }}
-              spend={view.spend}
-              openTask={task?.id ?? firstOpen?.taskId}
-              agents={search(undefined, "agents")}
-              onChange={setRun}
-            />
-            {stale && (
-              <p
-                role="status"
-                className="border-b border-border bg-muted px-6 py-1.5 text-meta text-muted-foreground max-[1100px]:px-4"
-              >
-                Couldn't reach the server. Showing what was loaded; retrying.
-              </p>
-            )}
-            <div className="flex min-h-0 flex-1 max-[1100px]:flex-col">
-              <TaskFlow tasks={tasks} selected={task?.id} search={search} />
-              {/* The Agents view fills the column and its threads scroll themselves; the rest scroll here. */}
+    <DisclosureProvider>
+      <ThreadNavigationProvider onOpenThread={openThread}>
+        <div className="flex min-h-0 flex-1 flex-col max-[1100px]:overflow-y-auto">
+          <RunHeader
+            run={run}
+            study={study}
+            progress={{ ...view.progress, toCheck }}
+            spend={view.spend}
+            openTask={task?.id ?? firstOpen?.taskId}
+            agents={search(undefined, "agents")}
+            onChange={setRun}
+          />
+          {stale && (
+            <p
+              role="status"
+              className="border-b border-border bg-muted px-6 py-1.5 text-meta text-muted-foreground max-[1100px]:px-4"
+            >
+              Couldn't reach the server. Showing what was loaded; retrying.
+            </p>
+          )}
+          <div className="flex min-h-0 flex-1 max-[1100px]:flex-col">
+            <TaskFlow tasks={tasks} selected={task?.id} search={search} link={Link} />
+            {/* The Agents view fills the column and its threads scroll themselves; the rest scroll here. */}
+            <div
+              className={`min-h-0 min-w-0 flex-1 px-9 pt-6 max-[1100px]:overflow-visible max-[1100px]:px-4 max-[1100px]:pt-4 ${agents ? "flex flex-col overflow-hidden pb-6" : "overflow-y-auto pb-24"}`}
+            >
               <div
-                className={`min-h-0 min-w-0 flex-1 px-9 pt-6 max-[1100px]:overflow-visible max-[1100px]:px-4 max-[1100px]:pt-4 ${agents ? "flex flex-col overflow-hidden pb-6" : "overflow-y-auto pb-24"}`}
+                className={`mx-auto w-full ${agents ? "flex min-h-0 max-w-[80rem] flex-1 flex-col" : "max-w-[55rem]"}`}
               >
-                <div
-                  className={`mx-auto w-full ${agents ? "flex min-h-0 max-w-[80rem] flex-1 flex-col" : "max-w-[55rem]"}`}
-                >
-                  <RunAlerts run={run} userId={me.userId} onChange={setRun} />
-                  {content}
-                </div>
+                <RunAlerts run={run} userId={me.userId} onChange={setRun} />
+                {content}
               </div>
             </div>
-          </main>
-        </ThreadNavigationProvider>
-      </DisclosureProvider>
-    </RunLogProvider>
+          </div>
+        </div>
+      </ThreadNavigationProvider>
+    </DisclosureProvider>
   );
 }
 
-function Message({ children }: { children: React.ReactNode }) {
-  return <p className="px-10 py-8 text-ui text-muted-foreground">{children}</p>;
-}
+/** Where loading, empty and error states sit while there is no run or task to show. */
+const PAGE_STATE = "px-10 py-8";

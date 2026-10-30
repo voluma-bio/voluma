@@ -150,7 +150,8 @@ they need:
   boundaries above are rules to follow, not lint checks.
 - Colours come only from `packages/design-tokens`; components use token
   utilities (`bg-card`, `text-muted-foreground`). Visual rules: [DESIGN.md](DESIGN.md).
-  Check shared components at `/dev/ui` in both themes.
+  Every shared component has a story beside it (`*.stories.tsx`) shown in both themes in
+  Storybook: `pnpm --filter @voluma/storybook storybook`.
 - Workflows and analysis code live in `workflows/`. `workflows/core/` is shared
   by every run: the role files (`agents/`) and the generic micro-CT skills
   (`skills/`). A workflow is `workflows/<name>/`: `outputs.json` (every output

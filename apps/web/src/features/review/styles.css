@@ -1,66 +1,12 @@
 /* Review-specific layout; shared colors and typography come from design-tokens. */
 
 @layer components {
-  .button {
-    @apply inline-flex items-center justify-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm font-medium text-foreground transition-colors;
-  }
-  .button:hover {
-    @apply bg-accent;
-  }
-  .button:disabled {
-    @apply opacity-50;
-  }
-  .button.primary {
-    @apply bg-primary border-primary text-primary-foreground;
-  }
-  .button.primary:hover {
-    @apply bg-primary-strong;
-  }
-  .button.compact {
-    @apply px-2.5 py-1.5 text-xs;
-  }
-  .icon-button {
-    @apply flex shrink-0 items-center justify-center rounded p-1.5 text-muted-foreground;
-  }
-  .icon-button:hover {
-    @apply bg-accent text-foreground;
-  }
-  .text-button {
-    @apply inline-flex items-center gap-1 font-medium text-primary-text;
-  }
-  .text-button:hover {
-    @apply underline;
-  }
-  .text-button:disabled {
-    @apply opacity-40;
-  }
-  .text-input {
-    @apply w-full rounded-md border border-border bg-card p-3 text-sm text-foreground;
-  }
-  .text-input::placeholder {
-    @apply text-muted-foreground;
-  }
-  .text-input:disabled {
-    @apply bg-muted;
-  }
-  .badge {
-    @apply inline-flex items-center whitespace-nowrap rounded px-2 py-1 text-xs font-medium text-primary-text bg-muted;
-  }
-  .badge.warning {
-    @apply bg-check-tint text-check;
-  }
   /* Fills the space under the shell's top bar. */
   .review-shell {
     @apply flex min-h-0 flex-1 flex-col overflow-hidden;
   }
   .run-header {
     @apply flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-border bg-card px-6 py-4;
-  }
-  .back-link {
-    @apply flex items-center gap-1.5 text-xs text-muted-foreground;
-  }
-  .back-link a:hover {
-    @apply text-primary-text underline;
   }
   .run-title {
     @apply mt-2 flex flex-wrap items-center gap-3;
@@ -116,12 +62,6 @@
   .task-meta {
     @apply mt-1 block text-xs text-muted-foreground;
   }
-  .check-dot {
-    @apply ml-auto mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-check-solid;
-  }
-  .sidebar-note {
-    @apply mx-5 mt-10 border-t border-border pt-4 text-xs leading-relaxed text-muted-foreground;
-  }
   .review-panels {
     @apply min-w-0 flex-1;
   }
@@ -144,22 +84,17 @@
   .section-heading h2 {
     @apply text-sm font-semibold;
   }
-  .measurements,
-  .references {
+  .measurements {
     @apply w-full border-collapse text-sm;
   }
   .measurements th,
-  .measurements td,
-  .references th,
-  .references td {
+  .measurements td {
     @apply border-b border-border py-3 text-left;
   }
-  .measurements thead th,
-  .references thead th {
+  .measurements thead th {
     @apply py-2 text-xs font-normal text-muted-foreground;
   }
-  .measurements tbody th,
-  .references tbody th {
+  .measurements tbody th {
     @apply pr-2 font-normal;
   }
   .measurements th a {
@@ -168,19 +103,14 @@
   .measurements th a:hover {
     @apply underline;
   }
-  .measurements td,
-  .references td {
+  .measurements td {
     @apply pl-3 text-right whitespace-nowrap;
   }
-  .measurements thead th:not(:first-child),
-  .references thead th:not(:first-child) {
+  .measurements thead th:not(:first-child) {
     @apply text-right;
   }
   .measurement-source {
     @apply mt-1 block text-xs text-muted-foreground;
-  }
-  .unit {
-    @apply ml-1 text-xs text-muted-foreground;
   }
   .check-card {
     @apply mb-3 rounded-md border border-check-line bg-check-tint p-4 text-sm;
@@ -224,80 +154,6 @@
   .task-assistant {
     @apply border-t border-border pt-6 pb-4;
   }
-  .viewer-workspace {
-    @apply flex h-full min-h-0 flex-col bg-background p-4;
-  }
-  .viewer-heading {
-    @apply mb-4 flex shrink-0 flex-wrap items-center justify-between gap-2 text-sm;
-  }
-  .viewer-grid {
-    @apply relative min-h-0 flex-1;
-  }
-  .viewer-grid [data-group] {
-    height: 100%;
-  }
-  .view-slot {
-    @apply flex h-full flex-col overflow-hidden rounded-md border border-border bg-muted;
-  }
-  .view-slot[hidden] {
-    display: none;
-  }
-  .view-slot.maximized {
-    @apply absolute inset-0 z-10;
-  }
-  .is-maximized .viewer-grid [data-panel] {
-    /* biome-ignore lint/complexity/noImportantStyles: override library inline clipping without remounting view slots. */
-    overflow: visible !important;
-  }
-  .view-slot header {
-    @apply flex items-center justify-between gap-1 border-b border-border px-3 py-2;
-  }
-  .view-slot h3 {
-    @apply flex items-center gap-2 text-xs font-medium;
-  }
-  .axis {
-    @apply font-mono text-muted-foreground;
-  }
-  .axis.axial {
-    @apply text-axis-z;
-  }
-  .axis.coronal {
-    @apply text-axis-x;
-  }
-  .axis.sagittal {
-    @apply text-axis-y;
-  }
-  .grid-toolbar {
-    @apply flex flex-wrap items-center gap-3 text-xs text-muted-foreground;
-  }
-  .grid-toolbar label {
-    @apply flex items-center gap-1;
-  }
-  .grid-toolbar input {
-    @apply h-7 w-20 rounded border border-border bg-card px-1 font-mono text-foreground;
-  }
-  .grid-pane {
-    @apply relative min-h-0 flex-1 overflow-hidden outline-none;
-    background: var(--viewer-well);
-    touch-action: none;
-  }
-  .grid-pane:focus-visible {
-    @apply ring-2 ring-inset ring-ring;
-  }
-  .grid-canvas {
-    @apply absolute inset-0;
-  }
-  .grid-chip {
-    @apply pointer-events-none absolute z-10 rounded px-1.5 py-0.5 font-mono text-[11px];
-    background: var(--viewer-chip);
-    color: var(--viewer-chip-fg);
-  }
-  .grid-chip.bottom-left {
-    @apply bottom-2 left-2;
-  }
-  .grid-chip.top-right {
-    @apply top-2 right-2;
-  }
   .snapshot-tray {
     @apply mt-3 shrink-0 text-xs;
   }
@@ -323,28 +179,17 @@
   .view-empty {
     @apply flex min-h-0 flex-1 flex-col items-center justify-center px-3 text-center text-sm text-muted-foreground;
   }
-  .resize-handle {
-    @apply relative w-2 shrink-0;
+  /* The drag handle between the report and the viewer: a hairline lights on hover or focus. */
+  .main-handle {
+    @apply relative w-1 shrink-0 bg-border;
   }
-  .resize-handle.horizontal {
-    @apply h-2 w-full;
-  }
-  .resize-handle::after {
+  .main-handle::after {
     content: "";
     @apply absolute inset-y-0 left-1/2 w-px bg-transparent;
   }
-  .resize-handle.horizontal::after {
-    @apply inset-x-0 top-1/2 h-px w-full;
-  }
-  .resize-handle:hover::after,
-  .resize-handle:focus-visible::after {
+  .main-handle:hover::after,
+  .main-handle:focus-visible::after {
     @apply bg-primary;
-  }
-  .main-handle {
-    @apply w-1 bg-border;
-  }
-  .is-maximized .viewer-grid .resize-handle {
-    visibility: hidden;
   }
   .app-footer {
     @apply flex shrink-0 justify-between gap-2 border-t border-border px-5 py-1.5 text-[10px] text-muted-foreground;
@@ -374,11 +219,9 @@
   .dialog-content {
     @apply fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-border bg-card p-7 shadow-xl;
   }
+  /* Used by packages/viewer and the screenshot tray (its own layout); other errors use ErrorState. */
   .error-message {
     @apply rounded-md bg-destructive-tint p-3 text-sm text-destructive;
-  }
-  .notice {
-    @apply rounded-md bg-muted p-3 text-sm text-muted-foreground;
   }
 }
 
@@ -423,10 +266,8 @@
     overflow: visible;
   }
   .sidebar-label,
-  .sidebar-note,
   .task-number,
-  .task-meta,
-  .check-dot {
+  .task-meta {
     display: none;
   }
   .sidebar-scroll nav {
@@ -448,16 +289,12 @@
     height: auto;
     overflow: visible;
   }
-  .review-panels > [data-group] > .resize-handle {
+  .review-panels > [data-group] > .main-handle {
     display: none;
   }
   .report-scroll {
     overflow: visible;
     height: auto;
-  }
-  .viewer-workspace {
-    height: 620px;
-    border-top: 1px solid var(--border);
   }
   .dialog-content {
     padding: 20px;
