@@ -1,5 +1,5 @@
 /**
- * Shared by the operator scripts (`export:run`, `import:run`, `seed:example`): which database
+ * Shared by the operator scripts (`export:run`, `import:run`, `archive:run`, `seed:example`): which database
  * they write to, and the guard that keeps a local run from touching a shared one.
  */
 import { existsSync, readFileSync } from "node:fs";
@@ -12,7 +12,7 @@ const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
  * host and database name. With `writes`, a host that isn't this machine is refused without `--remote`.
  */
 export function databaseUrl({ writes, remote }: { writes: boolean; remote?: boolean }): string {
-  const file = resolve(import.meta.dirname, "../../../../../.dev/env.json");
+  const file = resolve(import.meta.dirname, "../../../../.dev/env.json");
   const url =
     process.env.DATABASE_URL ||
     (existsSync(file) ? JSON.parse(readFileSync(file, "utf8")).databaseUrl : undefined);

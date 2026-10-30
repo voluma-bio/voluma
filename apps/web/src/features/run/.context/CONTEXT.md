@@ -1,6 +1,6 @@
 # Run feature
 
-One screen under `RunLayout` (its query client; the top bar is the shell's): `/runs/:id/live`,
+One screen under the shell (`AppShell`, one `QueryClient` in `SignedIn`, no top bar): `/runs/:id/live`,
 the run page (`run-page.tsx`). Starting runs is `features/study` (Run on new scans, `/new`); there
 is no runs list: Home (`features/study`) replaces it.
 

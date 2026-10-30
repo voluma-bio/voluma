@@ -102,10 +102,10 @@ export function HomePage() {
   }
 
   return (
-    <main className="mx-auto grid w-full max-w-[1040px] content-start gap-8 px-6 pt-7 pb-16 max-[760px]:px-4">
+    <div className="mx-auto grid w-full max-w-[1040px] content-start gap-8 px-6 pt-7 pb-16 max-[760px]:px-4">
       {header}
       {body}
-    </main>
+    </div>
   );
 }
 

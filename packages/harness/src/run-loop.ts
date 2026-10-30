@@ -73,6 +73,9 @@ import type { ThreadSpec, Threads } from "./threads";
 import type { Agents } from "./tools/main-tools";
 import type { Tool } from "./tools/tool";
 
+/** Where a thread sits in the run: stored on its `thread.started` by `begin`, not part of how a thread runs. */
+type Lineage = { parentThreadId: string; attemptId?: string };
+
 /** What a host decides about a role's threads; the loop adds identity and the tools. */
 export interface RoleSetup {
   systemPrompt: string;
@@ -158,7 +161,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
   const { runId, rootThreadId: root, recorder, runtime, threads, signal } = o;
   const config = { ...LOOP_DEFAULTS, ...o.config };
   const providerError = (e: string) => o.providerError?.(e) === true;
-  let failure: unknown; // the first error that failed the run
+  let failure: unknown;
   /** Threads whose refusal as unresumable the loop has dealt with. */
   const dealtWith = new Set<string>();
 
@@ -186,8 +189,6 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
   const derive = () => threadLog(recorder.events());
   const stateOf = (r: ThreadRecord | undefined): ThreadState | undefined =>
     threadState(r, threads.running(r?.id ?? ""));
-
-  // ---- starting and resuming threads
 
   const planTask = (view: Folded, taskId: string): PlanTask => {
     const found = view.plan.tasks.find((t) => t.id === taskId);
@@ -233,7 +234,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
         kind: "main" as const,
         parentThreadId: root,
         ...mainFirstMessage(view, n, d),
-      } satisfies ThreadSpec;
+      } satisfies ThreadSpec & Lineage;
     }
     const task = planTask(view, r.taskId);
     const record = d.threads.get(r.id);
@@ -244,7 +245,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
         taskId: r.taskId,
         parentThreadId: d.main ?? root,
         prompt: o.briefs.worker(task, record?.brief ?? ""),
-      } satisfies ThreadSpec;
+      } satisfies ThreadSpec & Lineage;
     }
     const folded = runtime.taskOf(r.taskId);
     if (!folded) throw new Error(`${r.taskId} has no folded task to check`);
@@ -255,31 +256,32 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       parentThreadId: root,
       ...(folded.attemptId && { attemptId: folded.attemptId }),
       prompt: o.briefs.check(task, folded),
-    } satisfies ThreadSpec;
+    } satisfies ThreadSpec & Lineage;
   }
 
   /**
    * Starts or resumes a thread. Its `thread.started` is stored first (id given), so the log
    * counts it at once, a stop's `cancelled` lands after it, and a new thread's id is never
-   * reused; the thread's own emit is a no-op. The loop steps again when the thread settles and
+   * reused. The loop steps again when the thread settles and
    * its end is stored. Call inside `section`: a stop cannot come between the append and the start.
    */
-  async function begin(spec: ThreadSpec, startedEventId: string, spawnedBy?: string) {
+  async function begin(spec: ThreadSpec & Lineage, startedEventId: string, spawnedBy?: string) {
+    const { parentThreadId, attemptId, ...start } = spec;
     await recorder.append(
       spec.threadId,
       "thread.started",
       {
-        parentThreadId: spec.parentThreadId ?? null,
+        parentThreadId,
         kind: spec.kind,
         ...(spec.taskId && { task: spec.taskId }),
-        ...(spec.attemptId && { attemptId: spec.attemptId }),
+        ...(attemptId && { attemptId }),
         ...(spawnedBy && { spawnedBy }),
         model: `${spec.model.provider}/${spec.model.id}`,
         ...(spec.input && { input: spec.input }),
       },
       startedEventId,
     );
-    threads.start({ ...spec, startedEventId, ...(spawnedBy && { spawnedBy }) });
+    threads.start(start);
     void threads
       .idle(spec.threadId)
       .then(() => recorder.flush())
@@ -342,8 +344,6 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     },
     changed: nudge,
   };
-
-  // ---- steps
 
   /** Whether the main agent is still in charge of nothing but waiting: no worker or checker runs. */
   const anyRunning = (d: ThreadLog) =>
@@ -655,8 +655,6 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     if (await main(d, view)) return "acted";
     return "idle";
   }
-
-  // ---- the run
 
   const fail = (error: unknown) => {
     failure ??= error;

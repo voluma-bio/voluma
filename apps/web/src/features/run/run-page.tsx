@@ -283,7 +283,7 @@ function RunScreen({
   return (
     <DisclosureProvider>
       <ThreadNavigationProvider onOpenThread={openThread}>
-        <main className="flex min-h-0 flex-1 flex-col max-[1100px]:overflow-y-auto">
+        <div className="flex min-h-0 flex-1 flex-col max-[1100px]:overflow-y-auto">
           <RunHeader
             run={run}
             study={study}
@@ -315,7 +315,7 @@ function RunScreen({
               </div>
             </div>
           </div>
-        </main>
+        </div>
       </ThreadNavigationProvider>
     </DisclosureProvider>
   );
