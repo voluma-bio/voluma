@@ -129,7 +129,9 @@ export const checkpointInputSchema = z.object({
     .describe("Check threads only: your verdict on the task. Put it on one line."),
   toCheck: z
     .object({
-      title: nonEmpty.describe("What the reviewer should look at, in a few words."),
+      title: nonEmpty.describe(
+        "What the reviewer should look at, as one plain sentence. One item per checkpoint call.",
+      ),
       focus: focusSchema
         .optional()
         .describe(
