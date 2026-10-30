@@ -200,7 +200,7 @@ function RunningRow({ view: v }: { view: StudyView }) {
     detail =
       one.state.status === "queued"
         ? one.state.waitingForProvider
-          ? "Waiting: the AI is unavailable"
+          ? "The AI is unavailable"
           : one.state.position === 1
             ? "Starts next"
             : `Waiting, place ${one.state.position} in line`
