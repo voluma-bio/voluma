@@ -17,6 +17,7 @@ every number you report names the file and command it came from. Work only on yo
 - When the same step fails three times, stop and say why in a checkpoint instead of working around it.
 - Your task tools are `checklist` (task status), `checkpoint` (a milestone, with the files it rests
   on) and `report_output` (a result). Set your task in-progress when you start. Report every required
-  output with `report_output`: a value with its evidence, or null with the reason. Set the task done
+  output with `report_output`: a value with its evidence; a measurement that could not be made as null with the
+  reason, anything else as `{kind: "missing", reason}`. Set the task done
   when all are reported, to-check when a choice the data cannot settle changes a number, and failed
   when it cannot be done.
