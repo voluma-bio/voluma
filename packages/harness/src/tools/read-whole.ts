@@ -19,7 +19,7 @@ function missing(path: string, names: string[]) {
   const dir = path.slice(0, path.lastIndexOf("/") + 1) || "/";
   const visible = names.filter((n) => !n.startsWith("."));
   const shown = visible.slice(0, LISTED).join(", ") + (visible.length > LISTED ? ", ..." : "");
-  return `No file at ${path}. ${visible.length > 0 ? `${dir} holds: ${shown}` : `${dir} holds no files`}`;
+  return `No file at ${path}. ${visible.length > 0 ? `${dir} holds: ${shown}` : `No readable files listed in ${dir}`}`;
 }
 
 /** The file's bytes; throws a message for the model when it is missing, unreadable or over `maxBytes`. */
@@ -53,7 +53,16 @@ export async function readWhole(
   } catch (error) {
     if (error instanceof FileNotFound) {
       const names = await files.list(key.slice(0, key.lastIndexOf("/") + 1), FETCHED, signal);
-      throw new Error(missing(path, names));
+      const dir = path.slice(0, path.lastIndexOf("/") + 1);
+      const readable = names.filter((name) => {
+        try {
+          layout.keyOf(`${dir}${name.replace(/\/$/, "")}`, "read");
+          return true;
+        } catch {
+          return false;
+        }
+      });
+      throw new Error(missing(path, readable));
     }
     throw error;
   }
@@ -70,19 +79,20 @@ async function readInSandbox(
   const dir = path.slice(0, path.lastIndexOf("/") + 1) || "/";
   // The model's text appears only single-quoted; the messages are built here, from the exit code.
   const command =
-    `[ -f ${quote(path)} ] || { ls ${quote(dir)} 2>/dev/null; exit 3; }; ` +
-    `[ "$(stat -c %s ${quote(path)})" -le ${maxBytes} ] || exit 4; ` +
-    `base64 -w0 ${quote(path)}`;
+    `[ -f ${quote(path)} ] || { ls -- ${quote(dir)} 2>/dev/null | head -n ${LISTED + 1} | head -c 8192; exit 3; }; ` +
+    // stat is not a read limit: a file can grow, and /proc files report zero bytes.
+    `set -o pipefail; head -c ${maxBytes + 1} -- ${quote(path)} | base64 -w0`;
   let out = "";
   let err = "";
   let code = -1;
   for await (const chunk of sandbox.exec({ command, timeoutSeconds: 120 }, signal)) {
     if (chunk.type === "exit") code = chunk.code;
     else if (chunk.type === "stdout") out += chunk.data;
-    else err += chunk.data;
+    else err = (err + chunk.data).slice(0, 8192);
   }
   if (code === 3) throw new Error(missing(path, out.split("\n").filter(Boolean)));
-  if (code === 4) throw new Error(`${path} is over ${maxBytes} bytes`);
   if (code !== 0) throw new Error(err.trim() || `could not read ${path} (exit ${code})`);
-  return Buffer.from(out, "base64");
+  const bytes = Buffer.from(out, "base64");
+  if (bytes.length > maxBytes) throw new Error(`${path} is over ${maxBytes} bytes`);
+  return bytes;
 }
