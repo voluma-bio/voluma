@@ -261,7 +261,9 @@ async function claimBody(
     // A role's file may set its thinking level; else the runner's; else none is sent ("off").
     const roleThinking = (role: "worker" | "checker" | "main", model: Model<Api>) => {
       if (visitor) return "off";
-      const level = definition.agents[role].thinking ?? config.thinking;
+      const level = config.modelForced
+        ? config.thinking
+        : (definition.agents[role].thinking ?? config.thinking);
       const fallback =
         config.fallbackModel &&
         ctx.models.getModel(config.fallbackModel.provider, config.fallbackModel.id);

@@ -210,6 +210,11 @@ export function runnerConfig() {
      * level (DeepSeek: thinking disabled; other providers: their default). Visitor runs: "off".
      */
     thinking: thinkingLevel(),
+    /**
+     * `RUNNER_MODEL` forces every role onto one model (a plumbing check); the role files' thinking
+     * levels are chosen for their own models, so then `RUNNER_THINKING` alone sets the level.
+     */
+    modelForced: optional("RUNNER_MODEL") !== undefined,
     /** Where new worker and check threads go while their model is failing; absent: nowhere. */
     fallbackModel,
     /**

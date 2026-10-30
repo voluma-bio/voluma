@@ -50,12 +50,12 @@ Variables (names only; values never go in the repo):
 |---|---|
 | `VOLUMA_API_URL` | `http://${{@voluma/api.RAILWAY_PRIVATE_DOMAIN}}:${{@voluma/api.PORT}}` (the API's `PORT` is set to 8080 explicitly, since a private URL needs a known port) |
 | `VOLUMA_API_TOKEN` | reference `${{@voluma/api.VOLUMA_API_TOKEN}}`: rotating it on the API reaches the runner at its next deploy |
-| `VOLUMA_META_API_KEY`, `RUNNER_CONCURRENCY` | the model key; models are the role files' aliases (`wonder` = `meta/muse-wonder-1.0`, Standard mode). Leave `RUNNER_MODEL` unset: it forces every role onto one model. Never a `-contributor` model on a deployed runner, Meta may train on what it is sent; 2 slots |
+| `VOLUMA_META_API_KEY`, `RUNNER_CONCURRENCY` | the model key; 2 slots. Until Jimmy says the infrastructure is ready, staging is a test stack: `RUNNER_MODEL=meta/muse-spark-1.3-contributor` and `RUNNER_THINKING=medium` force every role onto cheap Spark contributor (Jimmy's choice, 30 Oct). Contributor mode lets Meta train on what it is sent, so put only cleared scans (OA6-1RK, OA7) on staging while it is set. For real runs, unset both: each role then takes its role file's alias (`wonder` = `meta/muse-wonder-1.0`, Standard mode) and thinking level. Contributor is never right outside that test default |
 | `GATEWAY_TOKEN_SECRET`, `VOLUMA_GATEWAY_URL` | the same secret as `@voluma/gateway`; the gateway's public domain (`https://volumagateway-staging.up.railway.app`). |
 | `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` | the Modal profile in `~/.modal.toml` |
 | `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `CLOUDFLARE_API_TOKEN` | as in `.env` |
 
-`RUNNER_THINKING` is unset on staging, so a role without a `thinking` key in its role file sends no level (Pi and the provider apply their default; DeepSeek runs with thinking off). Set it to one of `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; the runner will not start if a model alias or the fallback lacks the level (a role file's own `thinking` is checked when a run starts), and the boot line prints it.
+With `RUNNER_THINKING` unset, a role without a `thinking` key in its role file sends no level (Pi and the provider apply their default; DeepSeek runs with thinking off). Set it to one of `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; the runner will not start if a model alias or the fallback lacks the level (a role file's own `thinking` is checked when a run starts), and the boot line prints it. With `RUNNER_MODEL` set (every role forced onto one model), the role files' levels are ignored and `RUNNER_THINKING` alone applies.
 
 `RUNNER_FALLBACK_MODEL` (unset: no fallback) is Jimmy's per-deploy choice, since it sends lab data to another provider. It covers every role; see `src/model-fallback.ts`. Visitor runs use `RUNNER_VISITOR_MODEL` (default `meta/muse-spark-1.3`) with the visitor's key.
 

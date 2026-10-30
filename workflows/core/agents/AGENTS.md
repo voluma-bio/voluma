@@ -27,7 +27,9 @@ after it.
 - `thinking`: optional; Pi's thinking level for the role's threads (`off`, `minimal`, `low`, `medium`,
   `high`, `xhigh`, `max`). Unset: the runner's `RUNNER_THINKING`, else no level is sent. A run fails at start if
   the role's model lacks a level set here or in `RUNNER_THINKING`; Meta's Muse models take no `off`, so
-  leave `thinking` unset rather than writing `off` for them; a visitor run is always `off`. The level is not recorded in the
+  leave `thinking` unset rather than writing `off` for them; a visitor run is always `off`. When
+  `RUNNER_MODEL` forces every role onto one model (a plumbing check), the role files' levels are ignored
+  and `RUNNER_THINKING` alone sets the level. The level is not recorded in the
   log, so a resumed thread takes it from the snapshotted file and the runner's current
   `RUNNER_THINKING`.
 - `tools`: every tool the role holds, base tools included, from the harness registry. A tool not
