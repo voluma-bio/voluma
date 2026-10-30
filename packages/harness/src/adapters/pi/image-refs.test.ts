@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { FileNotFound, type Files } from "../../ports/files";
 import type { History } from "../../ports/history";
-import { elideOldImages, KEEP } from "./elide-images";
 import { withImageRefs } from "./image-refs";
 
 function world() {
@@ -70,16 +69,19 @@ describe("withImageRefs", () => {
     expect(loaded[1]).toMatch(/not available: its file changed/);
   });
 
-  it("fetches only the last KEEP image rows and elides the rest as a request does", async () => {
+  it("fetches only the images since the latest compaction", async () => {
     const w = world();
-    const inline = Array.from({ length: KEEP + 2 }, (_, i) =>
-      result(3, Buffer.from(`img${i}`).toString("base64")),
-    );
-    for (const [i, row] of inline.entries()) await w.wrapped.appendMessage("r1.t1.worker", i, row);
+    const marker = JSON.stringify({ role: "compaction", summary: "s", keptFrom: 2, at: 4 });
+    for (const [i, row] of [result(1, "AAAA"), result(1, "BBBB"), result(1, "CCCC")].entries()) {
+      await w.wrapped.appendMessage("r1.t1.worker", i, row);
+    }
+    await w.wrapped.appendMessage("r1.t1.worker", 3, marker);
     w.reads.length = 0;
     const loaded = (await w.wrapped.load("r1.t1.worker")).map((r) => JSON.parse(r));
-    expect(w.reads).toHaveLength(KEEP * 3);
-    const live = elideOldImages(inline.map((r) => JSON.parse(r)));
-    expect(loaded).toEqual(live);
+    expect(w.reads).toHaveLength(1);
+    expect(loaded[0].content[1].text).toMatch(/no longer shown/);
+    expect(loaded[1].content[1].text).toMatch(/no longer shown/);
+    expect(loaded[2].content[1].type).toBe("image");
+    expect(loaded[3].role).toBe("compaction");
   });
 });

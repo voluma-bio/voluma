@@ -7,15 +7,15 @@
  *
  * Rows written before this hold inline image blocks and load unchanged. An image whose object
  * is gone or no longer matches its sha256 comes back as a short text note. Only the images
- * the next request would carry are fetched (`KEEP` in `elide-images.ts`): older ones become the
- * note the request would have shown anyway.
+ * the next request would carry are fetched, those in the messages since the latest compaction
+ * (`compaction.ts`); the ones it summarized away become that note.
  */
 import { createHash } from "node:crypto";
 import { historyImageKey } from "@voluma/contracts/r2";
 import { FileNotFound, type Files } from "../../ports/files";
 import type { History } from "../../ports/history";
 import { parseThreadId } from "../../thread-id";
-import { KEEP, withoutImages } from "./elide-images";
+import { isCompactionRow, keptFromOf } from "./compaction";
 
 type Block = { type: string; [key: string]: unknown };
 type Row = { content?: unknown; [key: string]: unknown };
@@ -24,6 +24,8 @@ const blocksOf = (row: Row): Block[] | undefined =>
   Array.isArray(row.content) ? (row.content as Block[]) : undefined;
 
 const has = (row: Row, type: string) => blocksOf(row)?.some((b) => b.type === type) === true;
+
+const GONE_NOTE = "[the images are no longer shown; call view_image again to see them]";
 
 export function withImageRefs(history: History, files: Files, runId: string): History {
   const signal = new AbortController().signal;
@@ -60,17 +62,18 @@ export function withImageRefs(history: History, files: Files, runId: string): Hi
             ? (JSON.parse(text) as Row)
             : undefined,
       }));
-      const withImages = rows.filter(
-        (r) => r.row && (has(r.row, "image") || has(r.row, "imageRef")),
-      );
-      const shown = new Set(withImages.slice(-KEEP));
+      // `keptFrom` indexes the messages, the rows that are not compaction markers.
+      const keptFrom = keptFromOf(rows.map((r) => r.text));
+      let at = 0;
       return Promise.all(
         rows.map(async (r) => {
+          const index = isCompactionRow(r.text) ? -1 : at++;
           const blocks = r.row && blocksOf(r.row);
           if (!r.row || !blocks || !has(r.row, "imageRef")) return r.text;
-          const content = shown.has(r)
-            ? await Promise.all(blocks.map((b) => (b.type === "imageRef" ? fetchImage(b) : b)))
-            : withoutImages(blocks, "imageRef");
+          const content =
+            index >= keptFrom
+              ? await Promise.all(blocks.map((b) => (b.type === "imageRef" ? fetchImage(b) : b)))
+              : [...blocks.filter((b) => b.type !== "imageRef"), { type: "text", text: GONE_NOTE }];
           return JSON.stringify({ ...r.row, content });
         }),
       );

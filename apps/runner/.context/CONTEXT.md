@@ -283,12 +283,27 @@ result line says from what size. The `tool.result` event holds only text (path, 
 **Stored history keeps images by reference.** `adapters/pi/image-refs.ts` wraps the History port
 (`supervise-run.ts`): a message is stored with each image block replaced by `{type: "imageRef", key, sha256, mimeType}`,
 and the bytes the model saw (so the downscaled ones) are written to `historyImageKey` in the thread's scratch
-(`scratch/<thread name>/.images/<sha256>`, content-addressed). A resumed thread loads the images of its last 2 image
-messages back from R2 (the only ones a request carries, `adapters/pi/elide-images.ts`); older ones load as the
-"no longer shown" note, and an object that is gone or whose sha256 differs loads as a short "not available" note.
+(`scratch/<thread name>/.images/<sha256>`, content-addressed). A resumed thread loads the images of the messages since its
+latest compaction back from R2 (the only ones a request carries); earlier ones load as the "no longer shown" note, and an object that is gone or whose sha256 differs loads as a short "not available" note.
 Rows stored before this hold inline image blocks and load unchanged. The runner's resume is the only reader that
 parses history; `export:run`, `import:run` and the example seed copy rows as text, so a dump moved to another bucket
 keeps references that resolve only in the bucket that holds the objects (they load as the note elsewhere).
+
+**Context compaction.** `adapters/pi/compaction.ts`; nothing rewrites history between requests, so the provider's
+cache prefix stays intact. Before each request the thread's input is estimated (last reply's input, cache and output
+tokens plus the chars/4 of what came after). Trigger: min(400k, 0.9 x (model `contextWindow` - 64k output reserve));
+350k when the window is unknown. Past it, a runtime user message tells the thread to finish the step and write down
+what it needs, it gets 3 more turns, then its own model summarizes it on a warm branch (same messages, system message
+and tools, summary instruction appended; the call goes through the run's stream function, so it counts in spend).
+If another turn would not fit (input + 64k > window) the notice is skipped. A request refused as too large forces one
+compaction and one retry in the same thread (a second refusal ends it as before). The result is a marker row
+`{role: "compaction", summary, keptFrom, at}` appended to `pi_messages`; every earlier row stays. `keptFrom` indexes
+the thread's messages (rows that are not markers), `foldHistory` rebuilds them and the latest marker, and a request
+carries `[system, summary message, messages from keptFrom]` (the last ~20% of the trigger in tokens, starting at a user
+or assistant message, so a call keeps its results). The system prompt is untouched (resume compares it). Each
+compaction logs `compaction: thread …` with tokens before and after. Images stay in history until a compaction; the
+loader fetches only those from `keptFrom`. Risk: with no per-request trimming, a request is bounded by the token
+estimate, which counts an image as 1200 tokens, not by the provider's byte cap (Claude 32 MB).
 
 **Tools resolve paths the same way.** `ThreadLayout.resolve` reads a relative path from the thread's `dir`
 (`$SCRATCH`); `keyOf` resolves first. A missing file is refused as "No file at <path>" plus the files in its folder
