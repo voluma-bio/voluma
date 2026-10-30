@@ -144,6 +144,7 @@ function Lead({ task, titleOf }: { task: Task; titleOf: (taskId: string) => stri
     case "checking":
     case "held":
     case "paused":
+    case "awaiting-ai":
       return (
         <p className="flex items-center gap-2.5">
           <TaskMark state={task.state} />
@@ -291,7 +292,9 @@ function ThreadTranscript({
         rows={rows}
         live={thread.status === "running" ? (thread.liveTool ?? "Thinking") : null}
         empty={
-          thread.status === "paused" || thread.status === "cancelled"
+          thread.status === "paused" ||
+          thread.status === "awaiting-ai" ||
+          thread.status === "cancelled"
             ? "It was cut off before it wrote anything."
             : "Nothing yet."
         }

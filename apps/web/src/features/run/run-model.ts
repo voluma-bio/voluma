@@ -22,8 +22,17 @@ const { outputName, taskTitle, tasks: workflowTasks } = catalog["mouse-oa"];
 /** What each task is for, from `tasks.json`: a working task's line until its AI says more. */
 const purpose = new Map(workflowTasks.map((t) => [t.id, t.summary]));
 
-/** `paused`: open while the run waits for a runner or keys; it resumes with a `thread.started`. */
-export type ThreadStatus = "running" | "paused" | "completed" | "failed" | "cancelled";
+/**
+ * `paused`: open while the run waits for a runner or keys; `awaiting-ai`: open while the run is
+ * held until the AI is back. Either resumes with a `thread.started`.
+ */
+export type ThreadStatus =
+  | "running"
+  | "paused"
+  | "awaiting-ai"
+  | "completed"
+  | "failed"
+  | "cancelled";
 
 export type Thread = {
   id: string;
@@ -60,6 +69,7 @@ export function haltOf(state: RunState, closed: boolean): Halt | undefined {
     case "running":
       return undefined;
     case "queued":
+      return { kind: state.waitingForProvider ? "awaiting-ai" : "paused" };
     case "awaiting-keys":
       return { kind: "paused" };
     case "ended":
@@ -145,8 +155,8 @@ function threadsOf(events: RunEvent[]): { threads: Thread[]; lastAt: Map<string,
 /**
  * A thread still open when the runner is not running the run (`halt`): a lost runner writes no
  * end. A cancel ends every thread in the API, so only a failed run leaves them here. It is stopped
- * (failed, if the run failed) at the run's end, or paused at its last event while the run waits
- * to resume.
+ * (failed, if the run failed) at the run's end, or paused (`awaiting-ai`, if the run is held for
+ * the AI) at its last event while the run waits to resume.
  */
 function halted(threads: Thread[], lastAt: Map<string, string>, halt: Halt): Thread[] {
   return threads.map((t) =>
@@ -159,7 +169,7 @@ function halted(threads: Thread[], lastAt: Map<string, string>, halt: Halt): Thr
             endedAt: halt.at,
             liveTool: undefined,
           }
-        : { ...t, status: "paused", endedAt: lastAt.get(t.id), liveTool: undefined },
+        : { ...t, status: halt.kind, endedAt: lastAt.get(t.id), liveTool: undefined },
   );
 }
 
@@ -204,7 +214,9 @@ export type TaskState =
   /** Working or being checked when the run ended. */
   | "stopped"
   /** Working or being checked while the run waits for a runner or keys. */
-  | "paused";
+  | "paused"
+  /** Working or being checked while the run is held until the AI is back. */
+  | "awaiting-ai";
 
 /** One To check item, open or accepted: what the review would show for it. */
 export type NeedItem = {
@@ -364,7 +376,7 @@ function stateOf(
   // A fatal provider error fails the run with no task event: the task is the one it failed on.
   if (failedOn) return "failed";
   const started = status === "in-progress" || status === "under-review";
-  if (halt && started) return halt.kind === "ended" ? "stopped" : "paused";
+  if (halt && started) return halt.kind === "ended" ? "stopped" : halt.kind;
   if (now.working) return "running";
   if (status === "under-review" && now.checking) return "checking";
   if (started) return "held";
