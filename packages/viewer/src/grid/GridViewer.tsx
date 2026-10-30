@@ -22,15 +22,18 @@ const panes = [
 
 export function GridViewer({
   scene,
+  point: initialPoint,
   children,
 }: {
   /** Remount (`key`) for another grid: the panes keep their grid for life. */
   scene: GridScene;
+  /** Where the crosshair starts; the grid's centre when absent. */
+  point?: Zyx;
   children?: ReactNode;
 }) {
   const [maximized, setMaximized] = useState<string | null>(null);
   const [point, setPoint] = useState<Zyx>(
-    () => scene.shapeZyx.map((n) => Math.floor(n / 2)) as unknown as Zyx,
+    () => initialPoint ?? (scene.shapeZyx.map((n) => Math.floor(n / 2)) as unknown as Zyx),
   );
   const [window, setWindow] = useState<Window | null>(null);
   const [windowError, setWindowError] = useState<string>();

@@ -4,7 +4,7 @@
  * Names are shadcn/ui's semantic set, used with shadcn's meanings, so shadcn
  * components copied into the repo work unchanged; the values are our palette.
  * A token shadcn has no name for keeps ours (`check-*`, `info*`, `inverse*`,
- * `scrim`, `fg-subtle`, `line-subtle`, `line-strong`, the viewer and axis
+ * `scrim`, `backdrop`, `fg-subtle`, `line-subtle`, `line-strong`, the viewer and axis
  * tokens). Where shadcn names two roles that our palette fills with one
  * colour (card/popover, muted/secondary/accent, border/input), both are
  * declared with the same value so either can change alone.
@@ -86,6 +86,7 @@
   --inverse: #10211c; /* toasts and tooltips */
   --inverse-fg: #ffffff;
   --scrim: rgb(0 0 0 / 0.82);
+  --backdrop: rgb(16 33 28 / 0.25); /* the page under a panel, dimmed but readable */
 
   /* Charts: the status hues, then neutral */
   --chart-1: #1d6b57;
@@ -151,6 +152,7 @@
   --inverse: #000000;
   --inverse-fg: #e7ebed;
   --scrim: rgb(0 0 0 / 0.82);
+  --backdrop: rgb(0 0 0 / 0.5); /* derived */
 
   --chart-1: #62c7a4;
   --chart-2: #7fb2ff;

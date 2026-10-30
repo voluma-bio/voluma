@@ -34,6 +34,15 @@ GridViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
   pane's fit, so resizing and maximizing keep the framing. In 3D, orbit controls; a click (not a
   drag) on a mesh moves the crosshair to the voxel under it. Loading never moves the crosshair or camera.
 - **Window.** From the coarsest level, 1st to 99.9th percentile; editable.
+- **From review data.** `taskScene(run, taskId, checkId?, assetBase)` (`review-scene.ts`) builds a
+  task's scene from a `ReviewRun`: the blocks of the check's `focus.on` and of the task's values
+  (`on`, `context`), else the blocks the task made; the grid of the first focus block, else the
+  one most of them sit on, else the scan. Blocks on another grid are left out. A block without
+  assets is `preparing`, a failed conversion `failed`; rulers and landmarks are `unsupported`
+  (not drawn yet). The region under check is an `outline` overlay and an opaque mesh in
+  `--check-outline`; `point` starts the crosshair (`GridViewer`'s `point` prop) on the focus point,
+  box, mask or ruler, and `locate` finds labels with no point from their coarsest level. Used by
+  `packages/check-panel`; `grid-page.tsx` can build its scene the same way.
 
 Correctness evidence: `compose.test.ts` pins where a cropped, downsampled overlay lands; worker
 planes matched `labels.npy` of OA6-1RK exactly on all three axes ([#188](https://github.com/voluma-bio/voluma/pull/188)).

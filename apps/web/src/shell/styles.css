@@ -8,6 +8,7 @@
 /* Let Tailwind see the classes used inside the shared packages. */
 @source "../../../../packages/ui/src";
 @source "../../../../packages/viewer/src";
+@source "../../../../packages/check-panel/src";
 
 @layer base {
   html,

@@ -1,0 +1,29 @@
+{
+  "name": "@voluma/check-panel",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.tsx"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "peerDependencies": {
+    "react": "^19"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "catalog:",
+    "@voluma/api-client": "workspace:*",
+    "@voluma/contracts": "workspace:*",
+    "@voluma/ui": "workspace:*",
+    "@voluma/viewer": "workspace:*",
+    "lucide-react": "catalog:",
+    "react-router": "^8.5.0"
+  },
+  "devDependencies": {
+    "@types/react": "catalog:",
+    "react": "catalog:",
+    "typescript": "catalog:"
+  }
+}

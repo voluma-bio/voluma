@@ -23,6 +23,8 @@ export type Overlay = ZarrSource & {
   name: string;
   /** One colour for every nonzero voxel (a mask), or one per label value. */
   color: string | Readonly<Record<number, string>>;
+  /** Draw only the region's edge, opaque: the region under check. */
+  outline?: boolean;
 };
 
 /** float32 vertices (x, y, z) in source voxels, then uint32 indices, little-endian. */

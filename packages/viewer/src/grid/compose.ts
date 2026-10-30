@@ -1,4 +1,7 @@
-/** A slice pane's picture: the image plane in grey through the window, overlays blended on top. */
+/**
+ * A slice pane's picture: the image plane in grey through the window, overlays blended on top,
+ * or drawn as their edge (`Overlay.outline`).
+ */
 import { Color } from "three";
 import type { Plane } from "./planes";
 import { type Axis, type Overlay, planeAxes } from "./scene";
@@ -54,21 +57,34 @@ export function compose(
     const colOf = lookup(cols, imageScale, overlay.offsetZyx[ca], scale, plane.cols);
     const single = typeof overlay.color === "string" ? rgb(overlay.color) : null;
     const byLabel = typeof overlay.color === "string" ? null : overlay.color;
+    /** The overlay value under image pixel (r, c), 0 outside the crop or the picture. */
+    const at = (r: number, c: number) => {
+      const pr = r < 0 || r >= rows ? -1 : rowOf[r]!;
+      const pc = c < 0 || c >= cols ? -1 : colOf[c]!;
+      return pr < 0 || pc < 0 ? 0 : plane.data[pr * plane.cols + pc]!;
+    };
+    const alpha = overlay.outline ? 1 : OVERLAY_ALPHA;
     for (let r = 0; r < rows; r++) {
-      const pr = rowOf[r]!;
-      if (pr < 0) continue;
+      if (rowOf[r]! < 0) continue;
       for (let c = 0; c < cols; c++) {
-        const pc = colOf[c]!;
-        if (pc < 0) continue;
-        const value = plane.data[pr * plane.cols + pc]!;
+        const value = at(r, c);
         if (!value) continue;
         const hex = byLabel?.[value];
         const color = single ?? (hex ? rgb(hex) : null);
         if (!color) continue;
+        // An outline paints only the pixels whose region ends beside them.
+        if (
+          overlay.outline &&
+          at(r - 1, c) === value &&
+          at(r + 1, c) === value &&
+          at(r, c - 1) === value &&
+          at(r, c + 1) === value
+        )
+          continue;
         const o = (r * cols + c) * 4;
-        rgba[o] = rgba[o]! * (1 - OVERLAY_ALPHA) + color[0] * OVERLAY_ALPHA;
-        rgba[o + 1] = rgba[o + 1]! * (1 - OVERLAY_ALPHA) + color[1] * OVERLAY_ALPHA;
-        rgba[o + 2] = rgba[o + 2]! * (1 - OVERLAY_ALPHA) + color[2] * OVERLAY_ALPHA;
+        rgba[o] = rgba[o]! * (1 - alpha) + color[0] * alpha;
+        rgba[o + 1] = rgba[o + 1]! * (1 - alpha) + color[1] * alpha;
+        rgba[o + 2] = rgba[o + 2]! * (1 - alpha) + color[2] * alpha;
       }
     }
   }

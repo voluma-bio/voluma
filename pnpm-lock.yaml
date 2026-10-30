@@ -238,6 +238,9 @@ importers:
       '@voluma/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
+      '@voluma/check-panel':
+        specifier: workspace:*
+        version: link:../../packages/check-panel
       '@voluma/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -315,6 +318,40 @@ importers:
         specifier: workspace:*
         version: link:../contracts
     devDependencies:
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+
+  packages/check-panel:
+    dependencies:
+      '@tanstack/react-query':
+        specifier: 'catalog:'
+        version: 5.105.0(@types/react@19.3.0)(react@19.3.1)
+      '@voluma/api-client':
+        specifier: workspace:*
+        version: link:../api-client
+      '@voluma/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@voluma/ui':
+        specifier: workspace:*
+        version: link:../ui
+      '@voluma/viewer':
+        specifier: workspace:*
+        version: link:../viewer
+      lucide-react:
+        specifier: 'catalog:'
+        version: 1.62.0(@types/react@19.3.0)(react@19.3.1)
+      react-router:
+        specifier: ^8.5.0
+        version: 8.5.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+    devDependencies:
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.3.0
+      react:
+        specifier: 'catalog:'
+        version: 19.3.1
       typescript:
         specifier: 'catalog:'
         version: 6.0.3

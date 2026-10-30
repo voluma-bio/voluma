@@ -21,9 +21,9 @@
 
 ## Grid viewer
 
-- Review picks the grid per task from the run's blocks (`ReviewRun.assets`, a measurement's
-  `on`/`context`, volume `gridId`) once #177's data model, the conversion worker and the backfill
-  (#178) land; then delete the DICOM path, Cornerstone, zip.js and dicom-parser.
+- Review picks the grid per task with `taskScene` (`review-scene.ts`, used by the check panel);
+  then `grid-page.tsx`'s URL parameters and the DICOM path, Cornerstone, zip.js and dicom-parser go.
+- Surfaces show only as meshes: a height field's line in the slices is not drawn.
 - Rulers and points (world mm through the grid's inverse affine), selection framing (frame the
   `on` blocks, move the slices only on a user's selection), the amber outline under check,
   structure visibility and opacity, 3D Slicer's mouse and keyboard map (#146).
