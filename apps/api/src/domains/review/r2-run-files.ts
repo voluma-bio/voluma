@@ -1,8 +1,7 @@
 /** R2 access to a run's content-addressed files (`evidenceKey`), read streamed, never buffered, and its converted review assets (`reviewAssetKey`), by presigned URL; the one write is a message's view snapshot. */
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { messageSnapshotKey } from "@voluma/contracts/messages";
-import { evidenceKey, reviewAssetKey } from "@voluma/contracts/r2";
+import { evidenceKey, messageSnapshotKey, reviewAssetKey } from "@voluma/contracts/r2";
 import { HTTPException } from "hono/http-exception";
 import type { RunFiles } from "../../ports";
 

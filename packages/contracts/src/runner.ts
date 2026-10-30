@@ -59,7 +59,7 @@
  * counts consecutive claims that end `self-stop` or `lease-expired` without run-state
  * progress (a `task`, `checkpoint`, `output`, `attempt.opened`, `assets.ready` or correcting
  * `revision.started` or `plan.changed` event), and the run ends
- * `failed` at 3, naming the call that was in flight. Progress resets the count. `shutdown`
+ * `failed` at 3, naming the call that was in flight; except a claim of a reopened run, which ends it `completed` and writes `correction.ended` instead (the correction rule in `messages.ts`). Progress resets the count. `shutdown`
  * never counts, so deploys don't fail a long run. A reopen (`messages.ts`) resets the count to 0
  * and clears `lastClaimEnd`, so `previousClaim` never reports a reason from before it.
  *
@@ -189,13 +189,13 @@ export type HeartbeatResponse = z.infer<typeof heartbeatResponseSchema>;
 
 export const reportRequestSchema = z.object({
   /**
-   * The highest event `seq` the runner had read or written when it decided to stop (its log
-   * is read once per claim, so a later `person.message` is one it has not seen). Under the queue
-   * lock `report()` compares it with the run's events: a `person.message` after it sends the
-   * run to `queued` instead of recording the end or the release (`messages.ts`), so a note
-   * sent mid-claim is never lost. For a reopened run that means `completed` stays the outcome
-   * of the earlier work and the new claim answers the note. The check applies to an `ended`
-   * report; a release is recovered as always and the note waits for the next claim.
+   * The highest event `seq` of the log the runner read when the claim started (it reads the log
+   * once per claim, so a later `person.message` is one it has not seen; the runner learns no
+   * seq of what it writes). Under the queue lock `report()` compares it with the run's events:
+   * for an `ended` report, a `person.message` above it means the report is not recorded; the
+   * server writes `run.reopened` and sends the run to `queued` (`messages.ts`), so a note sent
+   * mid-claim is never lost and the next claim answers it. A `released` report is recovered as
+   * always and the note waits for the next claim.
    */
   lastSeq: z.number().int().nonnegative(),
   report: z.discriminatedUnion("kind", [

@@ -373,18 +373,20 @@ export function world(o: WorldOptions) {
     /**
      * What the API does when the researcher writes to the finished run (`messages.ts`): stores
      * `run.reopened` and `person.message` (server events, thread `<run>.person`), then the run is
-     * claimed once more. Returns the fold of that claim.
+     * claimed once more. Returns the fold of that claim. With `midClaim` the message arrived while
+     * a claim ran: the claim's report did not cover it, so `report()` requeued the run and wrote
+     * `run.reopened` after the message (the order is the only difference).
      */
     async send(
       message: { text?: string; go?: true; taskId?: string; marks?: unknown[] },
       id = `m${++n}`,
+      midClaim = false,
     ): Promise<Folded> {
       const at = new Date().toISOString();
       const person = `${RUN}.person`;
-      for (const [type, eid, payload] of [
-        ["run.reopened", `${person}:${id}:reopened`, { by: "u1" }],
-        ["person.message", `${person}:${id}`, message],
-      ] as const) {
+      const reopened = ["run.reopened", `${person}:${id}:reopened`, { by: "u1" }] as const;
+      const said = ["person.message", `${person}:${id}`, message] as const;
+      for (const [type, eid, payload] of midClaim ? [said, reopened] : [reopened, said]) {
         stored.push({
           id: eid,
           runId: RUN,

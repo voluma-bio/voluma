@@ -45,6 +45,9 @@ export const taskOutputPrefix = (runId: string, task: string) =>
 export const inputKey = (inputId: string, path: string) => `${inputPrefix(inputId)}${rel(path)}`;
 export const uploadKey = (inputId: string, path: string) => `${uploadPrefix(inputId)}${rel(path)}`;
 export const scratchKey = (runId: string, path: string) => `${scratchPrefix(runId)}${rel(path)}`;
+/** A researcher's view snapshot for a message (`messages.ts`): `scratch/person/` is readable by the main agent and workers. */
+export const messageSnapshotKey = (runId: string, messageId: string) =>
+  scratchKey(runId, `person/${messageId}.png`);
 export const outputKey = (runId: string, task: string, path: string) =>
   `${taskOutputPrefix(runId, task)}${rel(path)}`;
 

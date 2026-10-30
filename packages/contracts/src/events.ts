@@ -481,7 +481,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
 
   /**
    * The main agent's answer to the researcher, from its `reply` tool (`replyInputSchema`);
-   * id `<thread>:<toolCallId>:reply`. `fold` ignores it.
+   * id `<thread>:<toolCallId>:reply`; only on a main thread (`onMainThread`). `fold` ignores it.
    */
   const reply = event("reply", replySchema);
 
@@ -530,8 +530,17 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
   ]);
 };
 
+const onMainThread = (e: { type: string; runId: string; threadId: string }) =>
+  e.type !== "reply" ||
+  e.threadId === `${e.runId}.main` ||
+  e.threadId.startsWith(`${e.runId}.main.`);
+const mainThreadOnly = {
+  path: ["threadId"],
+  message: "a reply belongs to a main thread (<runId>.main or <runId>.main.<n>)",
+};
+
 /** What a runner appends: an event without `seq`, never a human review decision. */
-export const eventInputSchema = eventUnion({});
+export const eventInputSchema = eventUnion({}).refine(onMainThread, mainThreadOnly);
 export type EventInput = z.infer<typeof eventInputSchema>;
 
 const stored = { seq: z.number().int().nonnegative() };
@@ -582,7 +591,8 @@ export const runEventSchema = z
       (e.type !== "person.message" && e.type !== "run.reopened" && e.type !== "correction.ended") ||
       e.threadId === `${e.runId}.person`,
     { path: ["threadId"], message: "correction events belong to <runId>.person" },
-  );
+  )
+  .refine(onMainThread, mainThreadOnly);
 export type RunEvent = z.infer<typeof runEventSchema>;
 export type EventType = RunEvent["type"];
 

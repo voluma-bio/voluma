@@ -13,12 +13,11 @@
  */
 import {
   MAX_MESSAGE_SNAPSHOT_BYTES,
-  messageSnapshotKey,
   type PersonMessage,
   type SendRunMessageResponse,
   sendRunMessageRequestSchema,
 } from "@voluma/contracts/messages";
-import { relativePathSchema, sha256Schema } from "@voluma/contracts/r2";
+import { messageSnapshotKey, relativePathSchema, sha256Schema } from "@voluma/contracts/r2";
 import {
   acceptCheckRequestSchema,
   markReviewedRequestSchema,

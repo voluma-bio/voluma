@@ -1235,6 +1235,48 @@ describe("run loop", () => {
       expect(duplicates(w.stored)).toEqual([]);
     });
 
+    it("a go that arrived mid-claim is answered by the next claim, which does the attempt", async () => {
+      const goTold = (t: Turn) => t.users.some((u) => /They said go/.test(u));
+      const answer: Script = (t) =>
+        goTold(t)
+          ? undefined
+          : wrote(t)
+            ? call("reply", { text: "Looking." })
+            : sentReply(t)
+              ? call("finish_run", { summary: "Answered." })
+              : undefined;
+      const redo: Script = (t) => {
+        if (!talking(t)) return undefined;
+        const last = t.results.at(-1) ?? "";
+        if (t.fresh && /They said go on t1/.test(t.lastUser))
+          return call("message", { threadId: `${R}t1.worker`, text: "Redo t1." });
+        if (/Feedback sent/.test(last)) return call("reply", { text: "Redoing t1." });
+        if (t.fresh && /The check of t1 passed/.test(t.lastUser) && count(t, "start_worker") === 2)
+          return call("start_worker", { taskId: "t2", brief: "Redo t2." });
+        if (t.fresh && /The check of t2 passed/.test(t.lastUser))
+          return call("finish_run", { summary: "Redone." });
+        return call("wait");
+      };
+      const w = world({ plan: T1, main: first(answer, redo, chain(["t1", "t2"])) });
+      await w.run();
+      // Claim 2 answers M1 (a question); M2, with a go, lands while it runs and is not in its
+      // read. The claim's end is not recorded: the run is requeued and `run.reopened` is written
+      // after M2 (the stored order of `report()`'s requeue).
+      await w.send({ text: "Why is t1 thin?" });
+      const before = w.stored.length;
+      const folded = await w.send({ text: "Redo it.", go: true, taskId: "t1" }, undefined, true);
+      expect(
+        folded.tasks.map((t) => `${t.id}:${t.status}`),
+        w.text(),
+      ).toEqual(["t1:done", "t2:done"]);
+      const after = w.stored.slice(before);
+      // The go arrived before the reopen yet still opens the correction, once.
+      expect(after.filter((e) => e.type === "revision.started")).toHaveLength(1);
+      expect(of(after, "attempt.opened", "t1.worker")).toHaveLength(1);
+      expect(errors(after), w.text()).toEqual([]);
+      expect(ended(w.stored, "supervisor")).toEqual(["completed", "completed", "completed"]);
+    });
+
     it("a go on a task the fix limit left to check lets main send feedback again", async () => {
       const first1: Script = (t) => {
         if (talking(t) || !t.fresh) return undefined;
