@@ -103,11 +103,13 @@ echo "$dir"`;
 const STAGE_COPY_SCRIPT = `export LC_ALL=C; set -o pipefail
 ${STAGE_LIST}
 progress() { find "$1" -type f -printf '%s\\n' | awk '{t+=$1} END {print NR, t+0}'; }
-cd "$1" || exit 1; dir=$3; trap 'rm -rf "$dir"' EXIT
+cd / || exit 1; dir=$3; trap 'rm -rf "$dir"' EXIT
 cp "$dir/src" "$dir/todo"
 for pass in $(seq 0 ${STAGE_RETRIES}); do
   sed -z 's/^[0-9]* //' "$dir/todo" > "$dir/paths"
-  setsid xargs -0 -r -P ${STAGE_PARALLELISM} -n 16 cp --parents -t "$2" -- < "$dir/paths" &
+  # Only this shell writes to the exec's streams: a cp that survives SIGKILL must not hold them open.
+  # The copies alone run inside the mount, so the watchdog's find never opens it.
+  (cd "$1" && exec setsid xargs -0 -r -P ${STAGE_PARALLELISM} -n 16 cp --parents -t "$2" -- < "$dir/paths" >/dev/null 2>>"$dir/err") &
   pid=$!; last=$(progress "$2"); since=$SECONDS
   while kill -0 $pid 2>/dev/null; do
     sleep ${STAGE_POLL_SECONDS}; echo .
@@ -123,6 +125,7 @@ for pass in $(seq 0 ${STAGE_RETRIES}); do
   comm -z -23 "$dir/src" <(list "$2") > "$dir/todo"
   [ -s "$dir/todo" ] || exit 0
 done
+tail -c 4000 "$dir/err" >&2 2>/dev/null
 printf 'could not copy %s files: %.1000s\\n' "$(tr -cd '\\0' < "$dir/todo" | wc -c)" "$(sed -z 's/^[0-9]* //' "$dir/todo" | tr '\\0' ' ')" >&2
 exit 1`;
 const STAGE_ROOT = "/staged";
