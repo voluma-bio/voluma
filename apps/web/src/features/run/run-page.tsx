@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from "react-router";
 import { DisclosureProvider } from "./chat/disclosure-store";
 import { ThreadNavigationProvider } from "./chat/thread-navigation";
+import { Corrections, corrections, waitingOnYou } from "./corrections";
 import { Overview, useAccepting } from "./overview";
 import { RunAlerts, RunHeader } from "./run-header";
 import { haltOf, runView, withLiveCalls } from "./run-model";
@@ -32,7 +33,7 @@ import { TranscriptView } from "./transcript-view";
 function useRunStream(
   runId: string,
   onClosed: () => void,
-): { events: RunEvent[]; live: Live; closed: boolean } {
+): { events: RunEvent[]; live: Live; closed: boolean; reconnect: () => void } {
   const [state, setState] = useState<{ events: RunEvent[]; live: Live; closed: boolean }>({
     events: [],
     live: noLive,
@@ -40,8 +41,12 @@ function useRunStream(
   });
   const onClosedRef = useRef(onClosed);
   onClosedRef.current = onClosed;
+  // A message reopens an ended run: the stream opens again after the events it already has.
+  const [generation, setGeneration] = useState(0);
+  const kept = useRef<RunEvent[]>([]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `generation` reopens the stream.
   useEffect(() => {
-    const events: RunEvent[] = [];
+    const events = kept.current;
     let published: RunEvent[] = [];
     let live = noLive;
     let closed = false;
@@ -55,32 +60,40 @@ function useRunStream(
     const schedule = () => {
       frame ??= requestAnimationFrame(publish);
     };
-    const stop = subscribe(runId, {
-      onEvent: (event) => {
-        events.push(event);
-        live = settle(live, event, settled);
-        schedule();
+    const stop = subscribe(
+      runId,
+      {
+        onEvent: (event) => {
+          events.push(event);
+          live = settle(live, event, settled);
+          schedule();
+        },
+        onLive: (f) => {
+          const next = applyFrame(live, f, settled);
+          if (next === live) return;
+          live = next;
+          schedule();
+        },
+        onClosed: () => {
+          if (frame !== undefined) cancelAnimationFrame(frame);
+          live = noLive;
+          closed = true;
+          publish();
+          onClosedRef.current();
+        },
       },
-      onLive: (f) => {
-        const next = applyFrame(live, f, settled);
-        if (next === live) return;
-        live = next;
-        schedule();
-      },
-      onClosed: () => {
-        if (frame !== undefined) cancelAnimationFrame(frame);
-        live = noLive;
-        closed = true;
-        publish();
-        onClosedRef.current();
-      },
-    });
+      events.at(-1)?.seq ?? 0,
+    );
     return () => {
       stop();
       if (frame !== undefined) cancelAnimationFrame(frame);
     };
-  }, [runId]);
-  return state;
+  }, [runId, generation]);
+  const reconnect = useCallback(() => {
+    setState((s) => ({ ...s, closed: false }));
+    setGeneration((g) => g + 1);
+  }, []);
+  return { ...state, reconnect };
 }
 
 /** Keyed on the run: nothing of one run's stream or decisions carries over to the next. */
@@ -108,8 +121,12 @@ function RunOf({ id }: { id: string }) {
     enabled: studyId !== undefined,
     staleTime: Number.POSITIVE_INFINITY,
   });
-  const { events, live, closed } = useRunStream(id, () => void run.refetch());
+  const { events, live, closed, reconnect } = useRunStream(id, () => void run.refetch());
   const state = run.data?.state;
+  // Reopened by a message (from the 3D panel) after its stream closed.
+  useEffect(() => {
+    if (closed && state && state.status !== "ended") reconnect();
+  }, [closed, state, reconnect]);
   // Query's structural sharing keeps `state` the same object across polls that change nothing.
   const halt = useMemo(() => state && haltOf(state, closed), [state, closed]);
   const providerCalls = run.data?.providerCalls;
@@ -214,6 +231,7 @@ function RunScreen({
   const decisions = !taskId && params.get("view") === "decisions";
   const ended = run.state.status === "ended";
   const titles = useMemo(() => new Map(tasks.map((t) => [t.id, t.title])), [tasks]);
+  const spans = useMemo(() => corrections(events), [events]);
   const needs = tasks.flatMap((t) => t.needs);
   // An ended run's stream is closed, so a "Looks right" made here counts from `accepting.done`.
   // An ended run that takes no decisions (failed, cancelled, an example) has nothing to count.
@@ -288,6 +306,7 @@ function RunScreen({
             openTask={task?.id ?? firstOpen?.taskId}
             decisions={search(undefined, "decisions")}
             onChange={setRun}
+            waiting={waitingOnYou(spans)}
           />
           {stale && (
             <p
@@ -302,6 +321,9 @@ function RunScreen({
             <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-9 pt-6 pb-24 max-[1100px]:overflow-visible max-[1100px]:px-4 max-[1100px]:pt-4">
               <div className="mx-auto max-w-[55rem]">
                 <RunAlerts run={run} userId={me.userId} onChange={setRun} />
+                {!task && !decisions && spans.length > 0 && (
+                  <Corrections spans={spans} titleOf={(t) => titles.get(t) ?? t} search={search} />
+                )}
                 {content}
               </div>
             </div>

@@ -44,9 +44,13 @@ const workflowLabel = (run: Run, study: StudyDetail | undefined) => {
     : workflowName(run.workflows[0]?.path);
 };
 
-/** The run's word for where it is, beside its progress. A queued run with a plan has started: it lost its runner. */
-function statusWord(run: Run, started: boolean): string {
+/**
+ * The run's word for where it is, beside its progress. A queued run with a plan has started: it
+ * lost its runner, unless a message reopened it. `waiting`: the AI answered the researcher.
+ */
+function statusWord(run: Run, started: boolean, waiting: boolean): string {
   const { state } = run;
+  if (waiting && state.status === "ended") return "Waiting on you";
   switch (state.status) {
     case "queued":
       return started ? "Paused" : "Waiting to start";
@@ -71,6 +75,7 @@ export function RunHeader({
   openTask,
   decisions,
   onChange,
+  waiting,
 }: {
   run: Run;
   study: StudyDetail | undefined;
@@ -82,6 +87,8 @@ export function RunHeader({
   /** Where "What the AI decided" goes. */
   decisions: string;
   onChange: (run: Run) => void;
+  /** The AI of a reopened run answered and waits for the researcher. */
+  waiting: boolean;
 }) {
   const { title, group } = scanTitle(run, study);
   const { state } = run;
@@ -106,7 +113,7 @@ export function RunHeader({
 
       <div className="w-full max-w-lg justify-self-center max-[1100px]:justify-self-start">
         <p className="mb-1.5 flex flex-wrap items-baseline gap-x-3.5 text-ui">
-          <b className="font-semibold">{statusWord(run, total > 0)}</b>
+          <b className="font-semibold">{statusWord(run, total > 0, waiting)}</b>
           {total > 0 && (
             <span>
               {done} of {total} tasks done
