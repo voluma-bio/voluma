@@ -76,7 +76,7 @@ export const fileRefInputSchema = z.object({
 });
 
 /** A position in voxel coordinates `[z, y, x]` of a grid; fractional allowed. */
-const positionZyx = z.tuple([z.number().min(0), z.number().min(0), z.number().min(0)]);
+export const positionZyx = z.tuple([z.number().min(0), z.number().min(0), z.number().min(0)]);
 
 const gridIdField = volumeSchema.shape.gridId.describe(
   "The grid_id of the grid's sidecar, as reported on its volume.",

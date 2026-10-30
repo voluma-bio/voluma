@@ -25,10 +25,9 @@ import { evidenceKey, reviewAssetKey, sha256Schema } from "@voluma/contracts/r2"
 import { focusSchema, reviewAssetsManifestSchema } from "@voluma/contracts/review";
 import { workflowPlanSchema } from "@voluma/contracts/workflow";
 import { z } from "zod";
+import type { events } from "../domains/run/schema";
 import { filesUnder, pool, put } from "./r2-dir";
-import type { events } from "./schema";
 
-/** An event row before it has its `seq`. */
 export type EventRow = Omit<typeof events.$inferSelect, "seq">;
 
 const backfillSchema = z.object({

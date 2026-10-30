@@ -325,7 +325,6 @@ export function pgRunQueue(
         state: "queued",
       });
       used.callerUnfinished++;
-      used.waiting++;
       if (credentials === "visitor") used.visitorActive++;
     }
   };
@@ -520,10 +519,7 @@ export function pgRunQueue(
           if (run.credentials === "voluma") {
             const used = usages.get(run.labId) ?? (await usage(tx, run.labId));
             usages.set(run.labId, used);
-            const refused = admit("claim", orgLimits, used, {
-              credentials: "voluma",
-              firstClaim: run.startedAt === null,
-            });
+            const refused = admit("claim", orgLimits, used, { credentials: "voluma" });
             if (refused === "concurrent") continue;
             if (refused) {
               await fail(tx, run.id, refusalMessage[refused]);

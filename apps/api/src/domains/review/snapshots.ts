@@ -28,9 +28,9 @@ export function snapshotRoutes({ runs, files, snapshots }: ReviewDeps) {
   app.get("/runs/:runId/snapshots", async (c) => {
     if (c.req.method !== "GET") throw new HTTPException(405, { message: "Use GET." });
     const runId = c.req.param("runId");
-    const record = await runs.load(readerOf(c.var.user), runId);
-    if (!record) return c.json({ error: "not found" }, 404);
-    return c.json({ snapshots: await snapshots.list(runId, record.generation) });
+    const run = await runs.readable(readerOf(c.var.user), runId);
+    if (!run) return c.json({ error: "not found" }, 404);
+    return c.json({ snapshots: await snapshots.list(runId, run.generation) });
   });
   app.post("/runs/:runId/snapshots", async (c) => {
     const runId = c.req.param("runId");
@@ -128,7 +128,7 @@ export function snapshotRoutes({ runs, files, snapshots }: ReviewDeps) {
     if (!files) throw new HTTPException(503, { message: "File storage is not configured." });
     await files.put(runId, snapshot.png.sha256, bytes, c.req.raw.signal);
     const saved = await snapshots.insert(snapshot, record.generation);
-    if ((await runs.load(readerOf(c.var.user), runId))?.generation !== record.generation)
+    if ((await runs.readable(readerOf(c.var.user), runId))?.generation !== record.generation)
       throw new HTTPException(409, { message: "This run was replaced. Reload the run." });
     if (!sameCapture(saved.snapshot, snapshot))
       throw new HTTPException(409, { message: "Snapshot id already belongs to another capture." });

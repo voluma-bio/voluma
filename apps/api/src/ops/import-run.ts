@@ -21,8 +21,6 @@ import type { PgTable } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { reviewSnapshots } from "../domains/review/schema";
-import { databaseUrl } from "../domains/run/operator";
-import { withLocalDir } from "../domains/run/r2-dir";
 import {
   events,
   inputs,
@@ -32,6 +30,8 @@ import {
   studyScans,
   threads,
 } from "../domains/run/schema";
+import { databaseUrl } from "./operator";
+import { withLocalDir } from "./r2-dir";
 import { assertRestorable, countsOf, describeCounts, piMessagesOf } from "./run-dump";
 
 const { values } = parseArgs({

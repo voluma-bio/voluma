@@ -7,7 +7,6 @@ import type { z } from "zod";
 import type { Sandbox } from "../ports/sandbox";
 
 export interface ToolContext {
-  runId: string;
   threadId: string;
   /** The calling thread's kind and, for a worker or check thread, its task. */
   kind: ThreadKind;

@@ -15,7 +15,7 @@ import { z } from "zod";
 import { isObjectKind, taskIdSchema } from "./ids";
 import { outputEntrySchema } from "./workflow-files";
 
-// Lowercase and exactly 40 hex characters, so one commit has one key.
+// One lowercase path segment of `owner/name`.
 const part = z.string().regex(/^(?!\.+$)[a-z0-9._-]+$/);
 
 export const workflowPinSchema = z.object({

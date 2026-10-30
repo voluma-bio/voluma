@@ -11,8 +11,8 @@ import { parseArgs } from "node:util";
 import { runIdSchema } from "@voluma/contracts/ids";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { databaseUrl } from "../domains/run/operator";
-import { devWritePrefix, r2FromEnv, r2Prefix, uploadDir } from "../domains/run/r2-dir";
+import { databaseUrl } from "./operator";
+import { devWritePrefix, r2FromEnv, r2Prefix, uploadDir } from "./r2-dir";
 import { countsOf, describeCounts, readDump } from "./run-dump";
 
 const { values } = parseArgs({ options: { id: { type: "string" }, out: { type: "string" } } });

@@ -21,7 +21,7 @@ import { messageSnapshotKey, relativePathSchema, sha256Schema } from "@voluma/co
 import {
   acceptCheckRequestSchema,
   markReviewedRequestSchema,
-  reviewDecisionResponseSchema,
+  type ReviewDecisionResponse,
 } from "@voluma/contracts/review";
 import { type Context, Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -47,6 +47,13 @@ function currentReview(record: RunRecord, baseRevisionId: string) {
       message: "Results changed or are not completed. Reload the run.",
     });
   return review;
+}
+
+/** A decision's answer: the run's review data, whose `review` a decided run always has. */
+function decisionResponse(record: RunRecord): ReviewDecisionResponse {
+  const run = reviewRun(record);
+  if (!run?.review) throw new Error(`run ${record.run.id} has no review after a decision`);
+  return { ...run, review: run.review };
 }
 
 export function runRoutes({ runs, files, messages }: ReviewDeps) {
@@ -82,7 +89,7 @@ export function runRoutes({ runs, files, messages }: ReviewDeps) {
       };
     });
     if (!record) return c.json({ error: "not found" }, 404);
-    return c.json(reviewDecisionResponseSchema.parse(reviewRun(record)));
+    return c.json(decisionResponse(record));
   });
 
   app.post("/runs/:runId/mark-reviewed", async (c) => {
@@ -100,7 +107,7 @@ export function runRoutes({ runs, files, messages }: ReviewDeps) {
       };
     });
     if (!record) return c.json({ error: "not found" }, 404);
-    return c.json(reviewDecisionResponseSchema.parse(reviewRun(record)));
+    return c.json(decisionResponse(record));
   });
 
   app.post("/runs/:runId/messages", async (c) => {

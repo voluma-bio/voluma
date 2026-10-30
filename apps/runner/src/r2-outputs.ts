@@ -14,7 +14,6 @@ import {
 import { outputsBackupPrefix, outputsPrefix } from "@voluma/contracts/r2";
 import type { Outputs } from "@voluma/harness/ports/outputs";
 
-/** How many copies run at once. */
 const COPY_CONCURRENCY = 16;
 
 export function r2Outputs(config: {
