@@ -213,9 +213,13 @@ export function Grid3D({
     for (const axis of [0, 1, 2] as const) {
       const picture = pictures[axis];
       const plane = t.planes[axis]!;
-      // Only the plane whose picture changed uploads a texture.
-      if (!picture || plane.userData.picture === picture) continue;
+      // Only the plane whose picture changed uploads a texture; a cleared picture hides it.
+      if (plane.userData.picture === picture) continue;
       plane.userData.picture = picture;
+      if (!picture) {
+        plane.visible = false;
+        continue;
+      }
       plane.geometry.dispose();
       plane.geometry = quad(corners(picture).map((p) => toWorld(p).toArray()));
       plane.material.map?.dispose();

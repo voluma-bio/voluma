@@ -42,7 +42,8 @@ export function SlicePane({
   point: Zyx;
   onPoint(point: Zyx): void;
   contrast: Contrast | null;
-  onPicture(picture: Picture): void;
+  /** The picture drawn for `axis`, or null once none of the requested slice could be. */
+  onPicture(axis: Axis, picture: Picture | null): void;
 }) {
   const [ra, ca] = planeAxes(axis);
   const sr = scene.spacingZyx[ra];
@@ -189,29 +190,37 @@ export function SlicePane({
         scale: s,
       };
     };
+    // Whether this effect drew a picture of the requested slice; if none, the old one goes.
+    let current = false;
     const show = (picture: Picture | null, k: number) => {
       if (!picture || abort.signal.aborted) return;
       draw(picture);
-      onPicture(picture);
+      onPicture(axis, picture);
       setShown({ level: k, index });
       setError(undefined);
+      current = true;
     };
     const coarsest = scene.image.levels.length - 1;
     (async () => {
       const fine = load(level);
       if (level !== coarsest) {
-        const settled = fine.then(
+        // Only a fine picture that arrives skips the coarse one; a failed fine load doesn't.
+        const arrived = fine.then(
           () => true,
-          () => true,
+          () => false,
         );
-        const coarse = await load(coarsest);
-        const quick = await Promise.race([settled, new Promise((go) => setTimeout(go, 80))]);
+        const coarse = await load(coarsest).catch(() => null);
+        const quick = await Promise.race([arrived, new Promise((go) => setTimeout(go, 80))]);
         if (!quick) show(coarse, coarsest);
       }
       show(await fine, level);
-    })().catch((cause) => {
-      if (!abort.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
-    });
+    })()
+      .catch((cause) => {
+        if (!abort.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
+      })
+      .finally(() => {
+        if (!current && !abort.signal.aborted) clear();
+      });
     return () => abort.abort();
   }, [index, level, contrast, axis]);
 
@@ -223,7 +232,19 @@ export function SlicePane({
     t.image.material.map?.dispose();
     t.image.material.map = texture(picture, false);
     t.image.material.needsUpdate = true;
+    t.image.visible = true;
     t.render();
+  }
+
+  // Never leave another slice's picture labelled as the requested one, here or in 3D.
+  function clear() {
+    const t = three.current;
+    if (t) {
+      t.image.visible = false;
+      t.render();
+    }
+    onPicture(axis, null);
+    setShown(null);
   }
 
   // Crosshair: the other two planes' traces, each in its plane's colour.

@@ -36,7 +36,8 @@ export function GridViewer({
   const [contrastError, setContrastError] = useState<string>();
   const [pictures, setPictures] = useState<Partial<Record<Axis, Picture>>>({});
   const onPicture = useCallback(
-    (picture: Picture) => setPictures((all) => ({ ...all, [picture.axis]: picture })),
+    (axis: Axis, picture: Picture | null) =>
+      setPictures((all) => ({ ...all, [axis]: picture ?? undefined })),
     [],
   );
 
