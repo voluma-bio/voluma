@@ -207,6 +207,17 @@ tables are replaced), run `pg_restore --clean --if-exists --no-owner --no-acl -d
 (`.../resume`; the runner stays suspended until a run). Compare row counts with the source
 (`runs`, `run_events`, `provider_calls`) before trusting it. Never print the URL.
 
+**Archiving a run** frees space on the 1 GB database without losing the run. `archive:run --id <runId> --remote`
+(with `DATABASE_URL` set to the direct URL) refuses an example or a run that has not ended, writes the run's rows
+(`run.json`: run, input, study, events, threads, pi messages, review snapshots, provider calls) to
+`~/.local/share/voluma-backups/runs/<runId>/` (0600; refuses under 1 GB free), and does it all in one repeatable-read
+transaction: lock the run, read its rows, check them as `import:run` does, write and fsync the file, then delete, rolling back
+unless each table's deleted count equals the file's. Inputs stay (shared); the study goes with its
+scans only when no other run is in it. The run's R2 files are not copied or touched, so `import:run --from <that directory>`
+restores the run whole, with its study and scans when the study id is free and the scans' inputs exist (else a study of one,
+and it says so). The archive is one copy on one disk: copy the directory off this machine before archiving many runs.
+A `pg_dump` of the tables is still the backup for anything else.
+
 ## Rotating secrets
 
 Each takes minutes. After the Oct 2026 Railway incident, treat anything Railway held
