@@ -48,7 +48,7 @@ Variables on `voluma-api` (names in `render.yaml`; values never go in the repo):
 | `WORKOS_COOKIE_PASSWORD` | `openssl rand -base64 32`; seals the session cookie |
 | `WORKOS_LAB_ORGANIZATION_ID` | the Yao Lab organization's id (`org_...`); its members get scope `lab` |
 | `WORKOS_JUDGES_ORGANIZATION_ID` | the Judges organization's id; its members get scope `self`. Unset means no Judges sign-in |
-| `GUEST_ORGANIZATION_ID`, `GUEST_SCOPE` | not in `render.yaml`: guest sign-in is closed (below). Optional: let anyone in as a guest of this organization (`lab` or `self`, default `lab`). Never the Yao Lab, whose data is for signed-in members only (startup throws if the guest organization is one members sign in to). Unset means the sign-in wall |
+| `GUEST_ORGANIZATION_ID`, `GUEST_SCOPE` | set on `voluma-api`: guest sign-in is on (below). Optional: let anyone in as a guest of this organization (`lab` or `self`, default `lab`). Never the Yao Lab, whose data is for signed-in members only (startup throws if the guest organization is one members sign in to). Unset means the sign-in wall |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (and `R2_BUCKET=voluma-staging` from the group) | Optional as a group: enables Review's reference scan download, a run's files (`/api/review/runs/:runId/files/:sha256`, reads under `runs/<id>/evidence/`) and scan uploads. Use an Object Read & Write token scoped to `voluma-staging` (uploads presign PUTs to `uploads/` and move them to `inputs/`); only the server receives it. Missing or partial configuration leaves the API running and returns 503 for a reference scan download, a run file or an upload. Object `reference/OA6-1RK/scan.zip` must be a plain ZIP with no `Content-Encoding` metadata. The descriptor's version pins the GET with `If-Match`; the API streams without buffering or redirecting to R2. The bucket's CORS has two rules, both for any origin: `scan-upload-put` allows `PUT` (the browser PUTs scan files straight to R2; the presigned URL is the credential) and `review-asset-get` allows `GET` and `HEAD` (review assets) |
 | `UPLOAD_MAX_FILES`, `UPLOAD_MAX_BYTES`, `UPLOAD_MAX_OPEN` | not in `render.yaml`; optional: files and bytes per scan upload (default 5000 and 20 GB), and uncompleted uploads per member (default 3) |
 | `RUN_LIMITS_<ORG>_<LIMIT>` | what an organization may run, `<ORG>` one of `LAB`, `JUDGES`, `DEMO` (the guest organization) and `<LIMIT>` one of `PER_CALLER`, `CONCURRENT`, `PER_DAY`, `VISITOR_ACTIVE` (visitor runs queued or running, per org: a start or `/keys` past it is a 429; `awaiting-keys` runs don't count). `PER_DAY`, when set, counts runs of both kinds, since Voluma pays every sandbox. Unset is no limit, so they are literals in `render.yaml`: Yao Lab `CONCURRENT=4`; Judges `CONCURRENT=2`; Demo `PER_CALLER=1`, `CONCURRENT=1`, `VISITOR_ACTIVE=4`. No `PER_DAY` (2026-10-30, Jimmy): guests run on their own Meta key, so their only cost to Voluma is Modal sandbox time, which the runner's two slots (`RUNNER_CONCURRENCY=2`) and the Modal workspace's spend limit bound; Demo's `CONCURRENT=1` keeps guests from holding both slots. A removed key stays on the service until deleted there (a Blueprint sync doesn't delete it). Read at start: a change is a restart, not a deploy of code |
@@ -210,8 +210,8 @@ tables are replaced), run `pg_restore --clean --if-exists --no-owner --no-acl -d
 ## Rotating secrets
 
 Each takes minutes. After the Oct 2026 Railway incident, treat anything Railway held
-before 2026-10-21 as exposed and rotate it; the Railway project is deleted after the move, which
-ends that exposure for what was only there.
+before 2026-10-21 as exposed and rotate it; the Railway project was deleted on 2026-10-30, which
+ended that exposure for what was only there.
 
 | Secret | Lives in | Rotate |
 |---|---|---|
@@ -234,10 +234,6 @@ its own variables (names in [../../runner/.context/deploy.md](../../runner/.cont
 - A Render API key reaches every workspace of the account, not one environment; keep it in `.env` only.
 - Neon is reachable from the internet (TLS and the password only; no allow list on the free plan). Keep the direct URL in the two services' variables and the operator's shell, never in the repo or a log.
 - The API holds no model keys. Its R2 key reads and writes objects in `voluma-staging` only; no R2 key ever reaches the browser, which gets presigned URLs for one object each.
-
-## Checked on staging (2026-10-28, on Railway)
-
-- `RUN_LIMITS_*` were set as in the table above and applied: a guest's second concurrent start answered 409 (`DEMO_PER_CALLER=1`).
 
 ## Checked on Render (2026-10-30, at cutover)
 

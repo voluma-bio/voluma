@@ -77,12 +77,9 @@ boundaries, API domain factories and real-data policy. Review replaces the
 scaffold's Review placeholder, not its Run screens or `/dev/ui`. Shared contracts
 and API client match upstream. There is no competing `apps/app` application.
 
-Provenance matching between images and results, chat/corrections
-and continuous review event streaming remain unconnected. The cross-lane
-dependencies are listed in the [repository TODO][todo].
+Provenance matching between images and results remains unconnected.
 
 [viewer]: ../../../../../../packages/viewer/.context/CONTEXT.md
-[todo]: ../../../../../../.context/TODO.md
 [#1]: https://github.com/voluma-bio/voluma/pull/1
 [#2]: https://github.com/voluma-bio/voluma/pull/2
 [#3]: https://github.com/voluma-bio/voluma/pull/3
