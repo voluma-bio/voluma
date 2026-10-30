@@ -614,19 +614,25 @@ export function fold(events: readonly RunEvent[], holdOpenCorrection = false): F
       }
     }
 
-    // Skipped tasks and every task that depends on one (the reason names the skipped task).
+    // Skipped tasks and, in plan order, every task that depends on one, credited to its nearest
+    // skipped dependency (first in `dependsOn`). The derived `resultRevisionId` and check ids sit
+    // behind stored `check.accepted` events, so this rule must not move.
     const skipped = new Map<string, Skip>();
     const planList = [...planTasks.values()];
     for (const [id, s] of skips) if (planTasks.has(id)) skipped.set(id, { ...s, from: id });
-    for (const [id, s] of skips) {
-      if (!planTasks.has(id)) continue;
-      for (const d of transitiveDependents(planList, id))
-        if (!skipped.has(d))
-          skipped.set(d, {
-            reason: `${id} was skipped: ${s.reason}`,
-            revisionId: s.revisionId,
-            from: id,
-          });
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const t of planList) {
+        const dep = t.dependsOn.find((d) => skipped.has(d));
+        const near = dep === undefined ? undefined : skipped.get(dep);
+        if (skipped.has(t.id) || !near) continue;
+        skipped.set(t.id, {
+          reason: `${near.from} was skipped: ${skips.get(near.from)?.reason}`,
+          revisionId: near.revisionId,
+          from: near.from,
+        });
+        grew = true;
+      }
     }
     const placeholder = (taskId: string): Attempt => ({
       id: null,

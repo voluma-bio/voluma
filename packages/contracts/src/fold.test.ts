@@ -475,6 +475,45 @@ describe("fold", () => {
     expectParses(f);
   });
 
+  // `resultRevisionId` and the check ids sit behind stored `check.accepted` events: the nearest
+  // skipped dependency, not the first skip event, decides them (main's output).
+  it("a dependent is credited to its nearest skipped dependency, with that skip's revision", () => {
+    const l = log();
+    l.run({
+      tasks: [
+        { id: "a", dependsOn: [], outputs: [] },
+        { id: "b", dependsOn: ["a"], outputs: [] },
+        { id: "c", dependsOn: ["b"], outputs: [] },
+        { id: "x", dependsOn: [], outputs: [] },
+        { id: "d", dependsOn: ["x", "a"], outputs: [] },
+      ],
+    });
+    l.add("plan.changed", "m:1:change_plan", "m", {
+      reason: "r",
+      skip: [
+        { taskId: "a", reason: "no a" },
+        { taskId: "x", reason: "no x" },
+      ],
+    });
+    l.revision("sup:1:revision", SUP, { reason: "correction", taskId: "a" });
+    l.add("plan.changed", "m:2:change_plan", "m", {
+      reason: "r",
+      skip: [{ taskId: "b", reason: "no b" }],
+    });
+    const f = fold(l.events);
+    expect(
+      f.tasks
+        .filter((t) => t.skipped)
+        .map((t) => [t.id, t.skipped?.reason, t.skipped?.from, t.resultRevisionId]),
+    ).toEqual([
+      ["a", "no a", "a", "root:revision"],
+      ["b", "no b", "b", "sup:1:revision"],
+      ["c", "b was skipped: no b", "b", "sup:1:revision"],
+      ["x", "no x", "x", "root:revision"],
+      ["d", "x was skipped: no x", "x", "root:revision"],
+    ]);
+  });
+
   it("a missing output fills any declaration, with its reason, and counts as reported", () => {
     const l = log();
     l.run({

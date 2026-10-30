@@ -28,4 +28,19 @@ describe("spend per thread", () => {
     expect(s.main.wallSeconds).toBe(5);
     expect(s.total.wallSeconds).toBe(5);
   });
+
+  it("a resume with no end closes the open stretch at the thread's last event", () => {
+    const l = log();
+    const worker = { parentThreadId: null, kind: "worker", task: "a" } as const;
+    l.run(); // 0
+    l.thread("sup", "supervisor"); // 1
+    l.add("thread.started", "w:1", "w", worker); // 2
+    l.checkpoint("w:cp", "w", "a", "att"); // 3: cut off here, no end: 1 s
+    l.add("thread.started", "w:2", "w", worker); // 4: a resume
+    l.checkpoint("w:cp2", "w", "a", "att"); // 5: the new stretch, 1 s
+    const w = spend(l.events).threads.find((t) => t.threadId === "w");
+    expect(w?.endedSeconds).toBe(1);
+    expect(w?.spend.wallSeconds).toBe(2);
+    expect(w?.openSince).toBe(l.events[4]?.createdAt);
+  });
 });
