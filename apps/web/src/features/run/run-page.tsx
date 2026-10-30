@@ -1,7 +1,8 @@
 /**
  * The run page (`/runs/:id/live`): a header with where the run is and what is left to check, the
  * plan's tasks as a flowchart, and beside it the Overview (working on now, needs your eye,
- * results), one task (`?task=<id>`), or what the lead AI decided (`?view=decisions`).
+ * results), one task (`?task=<id>`), or every agent of the run with one agent's stream
+ * (`?view=agents`, `&agent=<threadId>`; none picked follows whoever works now).
  * Everything is derived from the run's stream (`run-model.ts`, `transcript.ts`) and `getRun`,
  * polled for what isn't an event (queue place, state, review progress).
  */
@@ -10,18 +11,18 @@ import { ApiError, getRun, getStudy, subscribe } from "@voluma/api-client";
 import type { Me } from "@voluma/contracts/auth";
 import type { RunEvent } from "@voluma/contracts/events";
 import type { Run } from "@voluma/contracts/run";
-import { ArrowLeft } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from "react-router";
+import { AgentsView } from "./agents-view";
 import { DisclosureProvider } from "./chat/disclosure-store";
 import { ThreadNavigationProvider } from "./chat/thread-navigation";
 import { Overview, useAccepting } from "./overview";
 import { RunAlerts, RunHeader } from "./run-header";
+import { RunLogProvider } from "./run-log";
 import { haltOf, runView, withLiveCalls } from "./run-model";
 import { TaskFlow } from "./task-flow";
 import { TaskView } from "./task-view";
-import { applyFrame, type Live, mainRows, noLive, type Settled, settle } from "./transcript";
-import { TranscriptView } from "./transcript-view";
+import { applyFrame, type Live, noLive, type Settled, settle } from "./transcript";
 
 /**
  * The run's stream as it arrives: durable events, and live frames folded until their durable
@@ -121,17 +122,19 @@ function RunOf({ id }: { id: string }) {
   const threads = useMemo(() => withLiveCalls(view.threads, live), [view.threads, live]);
   const base = `/runs/${encodeURIComponent(id)}/live`;
   const search = useCallback(
-    (taskId?: string, v?: "decisions") =>
+    (taskId?: string, v?: "agents") =>
       taskId ? `${base}?task=${encodeURIComponent(taskId)}` : v ? `${base}?view=${v}` : base,
     [base],
   );
-  // An agent card's name in the lead AI's transcript opens its task.
+  // Every door onto an agent (a card's name, the Agents tree) opens its stream; null follows live.
   const openThread = useCallback(
-    (threadId: string | null) => {
-      const taskId = threadId ? threads.find((t) => t.id === threadId)?.taskId : undefined;
-      navigate(search(taskId));
-    },
-    [threads, navigate, search],
+    (threadId: string | null) =>
+      navigate(
+        threadId
+          ? `${search(undefined, "agents")}&agent=${encodeURIComponent(threadId)}`
+          : search(undefined, "agents"),
+      ),
+    [navigate, search],
   );
   const setRun = useCallback(
     (next: Run | ((run: Run) => Run)) =>
@@ -202,16 +205,17 @@ function RunScreen({
   view: ReturnType<typeof runView>;
   threads: ReturnType<typeof withLiveCalls>;
   params: URLSearchParams;
-  search: (taskId?: string, v?: "decisions") => string;
+  search: (taskId?: string, v?: "agents") => string;
   openThread: (threadId: string | null) => void;
   setRun: (next: Run | ((run: Run) => Run)) => void;
   refetch: () => void;
 }) {
   const accepting = useAccepting(run, setRun, refetch);
+  const runLog = useMemo(() => ({ events, live, halt, threads }), [events, live, halt, threads]);
   const { tasks } = view;
   const taskId = params.get("task") ?? undefined;
   const task = taskId ? tasks.find((t) => t.id === taskId) : undefined;
-  const decisions = !taskId && params.get("view") === "decisions";
+  const agents = !taskId && params.get("view") === "agents";
   const ended = run.state.status === "ended";
   const titles = useMemo(() => new Map(tasks.map((t) => [t.id, t.title])), [tasks]);
   const needs = tasks.flatMap((t) => t.needs);
@@ -241,23 +245,12 @@ function RunScreen({
         titleOf={(t) => titles.get(t) ?? t}
         accepting={accepting}
         search={search}
-        events={events}
-        live={live}
-        halt={halt}
       />
     );
-  else if (decisions)
-    content = (
-      <Decisions
-        events={events}
-        live={live}
-        halt={halt}
-        threads={threads}
-        back={search()}
-        lead={view.hasLead}
-      />
-    );
-  else if (tasks.length === 0)
+  else if (agents) {
+    const agentId = params.get("agent") ?? undefined;
+    content = <AgentsView agentId={agentId} select={openThread} ended={ended} />;
+  } else if (tasks.length === 0)
     content = (
       <p className="text-ui text-muted-foreground">
         {ended ? "This run ended before it made a plan." : "The tasks appear when the run starts."}
@@ -277,83 +270,45 @@ function RunScreen({
     );
 
   return (
-    <DisclosureProvider>
-      <ThreadNavigationProvider onOpenThread={openThread}>
-        <main className="flex min-h-0 flex-1 flex-col max-[1100px]:overflow-y-auto">
-          <RunHeader
-            run={run}
-            study={study}
-            progress={{ ...view.progress, toCheck }}
-            spend={view.spend}
-            openTask={task?.id ?? firstOpen?.taskId}
-            decisions={search(undefined, "decisions")}
-            onChange={setRun}
-          />
-          {stale && (
-            <p
-              role="status"
-              className="border-b border-border bg-muted px-6 py-1.5 text-meta text-muted-foreground max-[1100px]:px-4"
-            >
-              Couldn't reach the server. Showing what was loaded; retrying.
-            </p>
-          )}
-          <div className="flex min-h-0 flex-1 max-[1100px]:flex-col">
-            <TaskFlow tasks={tasks} selected={task?.id} search={search} />
-            <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-9 pt-6 pb-24 max-[1100px]:overflow-visible max-[1100px]:px-4 max-[1100px]:pt-4">
-              <div className="mx-auto max-w-[55rem]">
-                <RunAlerts run={run} userId={me.userId} onChange={setRun} />
-                {content}
+    <RunLogProvider value={runLog}>
+      <DisclosureProvider>
+        <ThreadNavigationProvider onOpenThread={openThread}>
+          <main className="flex min-h-0 flex-1 flex-col max-[1100px]:overflow-y-auto">
+            <RunHeader
+              run={run}
+              study={study}
+              progress={{ ...view.progress, toCheck }}
+              spend={view.spend}
+              openTask={task?.id ?? firstOpen?.taskId}
+              agents={search(undefined, "agents")}
+              onChange={setRun}
+            />
+            {stale && (
+              <p
+                role="status"
+                className="border-b border-border bg-muted px-6 py-1.5 text-meta text-muted-foreground max-[1100px]:px-4"
+              >
+                Couldn't reach the server. Showing what was loaded; retrying.
+              </p>
+            )}
+            <div className="flex min-h-0 flex-1 max-[1100px]:flex-col">
+              <TaskFlow tasks={tasks} selected={task?.id} search={search} />
+              {/* The Agents view fills the column and its threads scroll themselves; the rest scroll here. */}
+              <div
+                className={`min-h-0 min-w-0 flex-1 px-9 pt-6 max-[1100px]:overflow-visible max-[1100px]:px-4 max-[1100px]:pt-4 ${agents ? "flex flex-col overflow-hidden pb-6" : "overflow-y-auto pb-24"}`}
+              >
+                <div
+                  className={`mx-auto w-full ${agents ? "flex min-h-0 max-w-[80rem] flex-1 flex-col" : "max-w-[55rem]"}`}
+                >
+                  <RunAlerts run={run} userId={me.userId} onChange={setRun} />
+                  {content}
+                </div>
               </div>
             </div>
-          </div>
-        </main>
-      </ThreadNavigationProvider>
-    </DisclosureProvider>
-  );
-}
-
-/** The lead AI's own thread: its briefs, its decisions with their reasons, plan changes. */
-function Decisions({
-  events,
-  live,
-  halt,
-  threads,
-  back,
-  lead,
-}: {
-  events: RunEvent[];
-  live: Live;
-  halt: ReturnType<typeof haltOf>;
-  threads: ReturnType<typeof withLiveCalls>;
-  back: string;
-  /** The run has a lead AI thread; older runs show only where each task's AI started. */
-  lead: boolean;
-}) {
-  const rows = useMemo(() => mainRows(events, live, halt), [events, live, halt]);
-  const threadById = useMemo(() => new Map(threads.map((t) => [t.id, t])), [threads]);
-  const leadRunning = threads.some((t) => t.kind === "main" && t.status === "running");
-  return (
-    <>
-      <Link
-        to={back}
-        className="inline-flex items-center gap-1 text-ui font-medium text-primary-text hover:underline"
-      >
-        <ArrowLeft className="size-3.5" aria-hidden />
-        Overview
-      </Link>
-      <h2 className="mt-2 mb-4 text-xl font-semibold">What the AI decided</h2>
-      {!lead && rows.length > 0 && (
-        <p className="mb-4 text-ui text-muted-foreground">
-          This run predates the lead AI's own record: it shows where each task's AI started.
-        </p>
-      )}
-      <TranscriptView
-        rows={rows}
-        threads={threadById}
-        live={leadRunning ? "" : null}
-        empty="Nothing yet: the lead AI starts when the run does."
-      />
-    </>
+          </main>
+        </ThreadNavigationProvider>
+      </DisclosureProvider>
+    </RunLogProvider>
   );
 }
 

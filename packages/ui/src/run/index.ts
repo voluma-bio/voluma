@@ -3,7 +3,7 @@
  * other): the status chip and link of a `Run`, and a visitor's keys. Unlike the rest of
  * `@voluma/ui` these read the contracts, so they sit behind their own export.
  */
-export { forgetKeys, KeysForm, loadKeys, saveKeys } from "./keys";
+export { KeysForm, loadKeys, RunKeyLine, saveKeys } from "./keys";
 export {
   formatDuration,
   formatUsd,

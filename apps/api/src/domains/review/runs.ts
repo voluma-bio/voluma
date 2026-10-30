@@ -26,7 +26,7 @@ import {
 import { type Context, Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { parseJson, readerOf, requireUser, type UserEnv } from "../../domain";
+import { callerOf, parseJson, readerOf, requireUser, type UserEnv } from "../../domain";
 import type { RunRecord } from "../../ports";
 import type { ReviewDeps } from ".";
 import { reviewRun } from "./review-run";
@@ -108,6 +108,7 @@ export function runRoutes({ runs, files, messages }: ReviewDeps) {
     const { runId } = c.req.param();
     const user = c.var.user;
     const reader = readerOf(user);
+    const caller = callerOf(user);
     const refusedAs = (r: { status: 403 | 404 | 409 | 429; error: string }) =>
       c.json({ error: r.error }, r.status);
 
@@ -125,13 +126,13 @@ export function runRoutes({ runs, files, messages }: ReviewDeps) {
     };
     const message = { id, payload };
 
-    const checked = await messages.check(reader, user.userId, runId, message);
+    const checked = await messages.check(reader, caller, runId, message);
     if ("refused" in checked) return refusedAs(checked.refused);
     if (!checked.ok.duplicate && png) {
       if (!files) throw new HTTPException(503, { message: "File storage is not configured." });
       await files.putSnapshot(runId, id, png);
     }
-    const sent = await messages.send(reader, user.userId, runId, message);
+    const sent = await messages.send(reader, caller, runId, message);
     if ("refused" in sent) return refusedAs(sent.refused);
     const { eventId, state } = sent.ok;
     return c.json({ eventId, state } satisfies SendRunMessageResponse);

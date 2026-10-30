@@ -69,7 +69,6 @@ if (run.id !== values.run) {
   throw new Error(`claimed run ${run.id}, not ${values.run}; gave it back`);
 }
 const claimId = randomUUID();
-const modal = claim.keys?.modal ?? config.modal;
 log(`claimed run ${run.id}`);
 
 const abort = new AbortController();
@@ -114,7 +113,7 @@ const close = () =>
     rl.close();
     await lease.end(true).catch(() => {});
     await sandbox?.destroy().catch((e) => log(`destroy failed: ${e}`));
-    await terminateClaim(modal, run.id, claimId).catch((e) => log(`terminate failed: ${e}`));
+    await terminateClaim(config.modal, run.id, claimId).catch((e) => log(`terminate failed: ${e}`));
     if (counted) meter.sandboxDown();
     await client
       .report({ kind: "ended", outcome: "failed", error: "closed by dev-sandbox" })
@@ -132,7 +131,7 @@ try {
   counted = true;
   sandbox = await claimSandboxes(
     config,
-    modal,
+    config.modal,
     claimId,
   )(
     workerSandboxSpec({

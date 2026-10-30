@@ -1,10 +1,11 @@
 /** Persistent viewport slots. Maximizing changes layout, never the identity of a view. */
 import type { Focus, Revision, Structure } from "@voluma/contracts/review";
 import { Box, Layers, Maximize2, Minimize2 } from "lucide-react";
-import { lazy, type ReactNode, Suspense, useMemo, useState } from "react";
+import { lazy, type ReactNode, Suspense, useEffect, useMemo, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import type { DicomSeries } from "./dicom";
 import { focusTarget, type LabelSource, type LabelVolume, type StructureDisplay } from "./labels";
+import type { SnapshotControls } from "./snapshot";
 import { useLabelVolumes } from "./useLabelVolumes";
 
 const DicomStack = lazy(() => import("./DicomStack"));
@@ -51,6 +52,7 @@ export function ViewerWorkspace({
   revision,
   focus,
   fileUrl,
+  snapshots,
 }: {
   selected: Structure[];
   display: StructureDisplay;
@@ -59,9 +61,16 @@ export function ViewerWorkspace({
   revision?: Revision;
   focus?: Focus;
   fileUrl?: (sha256: string) => string;
+  snapshots?: SnapshotControls;
 }) {
   const [maximized, setMaximized] = useState<string | null>(null);
   const [labels, setLabels] = useState(true);
+  useEffect(() => {
+    if (snapshots?.restore) {
+      setLabels(snapshots.restore.viewState.labelsEnabled);
+      setMaximized("acquired");
+    }
+  }, [snapshots?.restore]);
   const selectedKey = selected.map((s) => s.id).join("\n");
   const structures = useMemo(
     () =>
@@ -147,6 +156,7 @@ export function ViewerWorkspace({
           This check points outside the scan grid.
         </p>
       )}
+      {snapshots?.tray}
       <div className="viewer-grid">
         <Group orientation="vertical" id="viewer-rows">
           <Panel id="top" defaultSize="50%" minSize="20%">
@@ -160,6 +170,8 @@ export function ViewerWorkspace({
                   onMaximize={setMaximized}
                   series={series}
                   labelView={labelView}
+                  snapshots={snapshots}
+                  labelsPending={loaded.loading || loaded.layers.length !== sources.length}
                 />
               ))}
             </Group>
@@ -193,12 +205,16 @@ function ViewSlot({
   onMaximize,
   series,
   labelView,
+  snapshots,
+  labelsPending,
 }: {
   view: (typeof views)[number];
   showSeparator: boolean;
   maximized: string | null;
   onMaximize(id: string | null): void;
   series?: DicomSeries;
+  snapshots?: SnapshotControls;
+  labelsPending?: boolean;
   labelView: {
     layers: LabelVolume[];
     structures: Structure[];
@@ -244,7 +260,13 @@ function ViewSlot({
               }
             >
               {view.id === "acquired" ? (
-                <DicomStack key={series.id} series={series} {...labelView} />
+                <DicomStack
+                  key={series.id}
+                  series={series}
+                  {...labelView}
+                  snapshots={snapshots}
+                  labelsPending={labelsPending}
+                />
               ) : (
                 <DicomVolume key={series.id} series={series} focus={labelView.focus} />
               )}

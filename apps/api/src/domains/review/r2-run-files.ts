@@ -1,5 +1,10 @@
-/** R2 access to a run's content-addressed files (`evidenceKey`), read streamed, never buffered, and its converted review assets (`reviewAssetKey`), by presigned URL; the one write is a message's view snapshot. */
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+/** Run files and message snapshots in R2, plus presigned converted assets. Content-addressed writes never replace bytes. */
+import {
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client,
+  S3ServiceException,
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { evidenceKey, messageSnapshotKey, reviewAssetKey } from "@voluma/contracts/r2";
 import { HTTPException } from "hono/http-exception";
@@ -49,6 +54,24 @@ export function r2RunFiles(config: {
   }
 
   return {
+    async put(runId, sha256, bytes, signal) {
+      try {
+        await client.send(
+          new PutObjectCommand({
+            Bucket: config.bucket,
+            Key: evidenceKey(runId, sha256),
+            Body: bytes,
+            ContentType: "image/png",
+            IfNoneMatch: "*",
+          }),
+          { abortSignal: signal },
+        );
+      } catch (error) {
+        // The same content may already be evidence, or another save may have just written it.
+        if (error instanceof S3ServiceException && error.$metadata.httpStatusCode === 412) return;
+        throw new HTTPException(502, { message: "Could not save the screenshot." });
+      }
+    },
     async putSnapshot(runId, messageId, png) {
       await client.send(
         new PutObjectCommand({

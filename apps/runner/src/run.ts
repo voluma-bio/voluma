@@ -5,7 +5,7 @@
  * (`lease.ts`) and stops at once on any of: the server ending the run, a lost lease, a
  * self-stop, or the service shutting down. Then it reports.
  *
- * A visitor run uses the claim's keys for the model and for Modal, held in this function's
+ * A visitor run uses the claim's Meta key for the model, held in this function's
  * scope only. Everything that leaves the process goes through the run's `redact`: the
  * run client (`runClient`) redacts what it sends, the console line is redacted before it is
  * clipped. The function never rejects: every failure after `redact` exists is caught and
@@ -166,11 +166,7 @@ async function claimBody(
   /** The key for a provider: a visitor's Meta key is good for Meta alone. */
   const keyFor = (provider: string) =>
     visitor ? (provider === "meta" ? keys.metaApiKey : undefined) : providerKey(provider);
-  const modal = visitor ? keys.modal : config.modal;
-  const redact: Redact = redactor([
-    ...config.secrets,
-    ...(visitor ? [keys.metaApiKey, keys.modal.tokenId, keys.modal.tokenSecret] : []),
-  ]);
+  const redact: Redact = redactor([...config.secrets, ...(visitor ? [keys.metaApiKey] : [])]);
   const log = (line: string) => ctx.log(`[${runId}] ${redact(line)}`);
   scope.log = log;
 
@@ -238,7 +234,7 @@ async function claimBody(
     // of /outputs waits until they are gone (`awaitOtherClaimsGone`).
     for (let attempt = 1; attempt <= 2 && !abort.signal.aborted; attempt++) {
       try {
-        const orphans = await terminateOtherClaims(modal, runId, claimId, abort.signal);
+        const orphans = await terminateOtherClaims(config.modal, runId, claimId, abort.signal);
         if (orphans > 0)
           log(`ended ${orphans} sandbox${orphans === 1 ? "" : "es"} of an earlier claim`);
         break;
@@ -308,7 +304,7 @@ async function claimBody(
     const layout = layoutOf(run, definition.skills, grant("main").includes("bash"), (id) =>
       copyInputs.has(id),
     );
-    const createSandbox = claimSandboxes(config, modal, claimId);
+    const createSandbox = claimSandboxes(config, config.modal, claimId);
     const stored = await client.storedEvents();
     live = liveBatcher((frames) => client.live(frames));
     const recorded = recorder(
@@ -464,7 +460,7 @@ async function claimBody(
       evidence: r2Evidence(config.r2),
       files,
       outputs: r2Outputs(config.r2),
-      earlierClaimsEnded: (signal) => awaitOtherClaimsGone(modal, runId, claimId, signal),
+      earlierClaimsEnded: (signal) => awaitOtherClaimsGone(config.modal, runId, claimId, signal),
       roles: {
         main: role(mainModel, "main", "main"),
         worker: role(workerModel, "worker", "worker"),
@@ -589,7 +585,9 @@ async function claimBody(
     const timeout = new Promise<false>((resolve) => setTimeout(resolve, budgetMs, false));
     if (!(await Promise.race([closed, timeout]))) {
       log("sandbox did not close in time; terminating this claim's sandboxes");
-      await terminateClaim(modal, runId, claimId).catch((e) => log(`terminate failed: ${e}`));
+      await terminateClaim(config.modal, runId, claimId).catch((e) =>
+        log(`terminate failed: ${e}`),
+      );
     }
   }
 }

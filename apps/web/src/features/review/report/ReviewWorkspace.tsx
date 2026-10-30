@@ -3,14 +3,16 @@
 import { useMutation } from "@tanstack/react-query";
 import { markReviewed } from "@voluma/api-client";
 import type { Focus, Revision, Structure } from "@voluma/contracts/review";
+import type { ReviewSnapshot } from "@voluma/contracts/snapshot";
 import { StatusBadge } from "@voluma/ui";
-import type { StructureDisplay } from "@voluma/viewer";
+import type { SnapshotControls, StructureDisplay } from "@voluma/viewer";
 import { ArrowLeft, Download, History, Layers, ListChecks } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
-import { downloadCsv } from "./export";
+import { downloadCsv, downloadReviewReport } from "./export";
 import { type ReviewRun, structuresOf, taskStatus } from "./model";
 import { TaskReport } from "./TaskReport";
+import { useSnapshots } from "./useSnapshots";
 
 export function ReviewWorkspace({
   runId,
@@ -36,6 +38,7 @@ export function ReviewWorkspace({
     display: StructureDisplay,
     revision?: Revision,
     focus?: Focus,
+    snapshots?: SnapshotControls,
   ) => ReactNode;
   /** Loading/unavailable state, or an actionable refresh failure above retained results. */
   notice?: ReactNode;
@@ -44,6 +47,15 @@ export function ReviewWorkspace({
   const [tab, setTab] = useState<"tasks" | "structures">("tasks");
   const [display, setDisplay] = useState<Record<string, { visible: boolean; opacity: number }>>({});
   const [filter, setFilter] = useState("");
+  const [restoredSnapshot, setRestoredSnapshot] = useState<ReviewSnapshot>();
+  const report = useMutation({
+    mutationFn: ({ run, revision }: { run: ReviewRun; revision: Revision }) =>
+      downloadReviewReport(run, revision),
+  });
+  function select(selection: { task?: string; revision?: string }) {
+    setRestoredSnapshot(undefined);
+    navigate(selection);
+  }
   const [focusedCheck, setFocusedCheck] = useState<{
     revisionId: string;
     taskId: string;
@@ -52,26 +64,51 @@ export function ReviewWorkspace({
   const latest = run?.revisions.at(-1);
   const revision = revisionId ? run?.revisions.find((item) => item.id === revisionId) : latest;
   const task = taskId ? revision?.tasks.find((item) => item.id === taskId) : revision?.tasks[0];
+  const restored =
+    restoredSnapshot?.revisionId === revision?.id && restoredSnapshot?.taskId === task?.id
+      ? restoredSnapshot
+      : undefined;
+  useEffect(() => {
+    setRestoredSnapshot((snapshot) =>
+      snapshot?.revisionId === revision?.id && snapshot?.taskId === task?.id ? snapshot : undefined,
+    );
+  }, [revision?.id, task?.id]);
+  const snapshots = useSnapshots(runId, revision?.id, task?.id, (snapshot) => {
+    setRestoredSnapshot(snapshot);
+    setDisplay(
+      Object.fromEntries(
+        snapshot.viewState.structures.map((item) => [
+          item.structureId,
+          { visible: item.visible, opacity: item.opacity },
+        ]),
+      ),
+    );
+    setFocusedCheck(
+      snapshot.viewState.focus
+        ? {
+            revisionId: snapshot.revisionId,
+            taskId: snapshot.taskId,
+            focus: snapshot.viewState.focus,
+          }
+        : undefined,
+    );
+    navigate({ revision: snapshot.revisionId, task: snapshot.taskId });
+  });
   const readOnly = !canReview || !run?.review || revision !== latest;
   const complete = useMutation({
     mutationFn: () => markReviewed(runId, { baseRevisionId: latest?.id ?? "" }),
     onSuccess: onRefresh,
     onError: onRefresh,
   });
-  const selected = revision && task ? structuresOf(revision, task) : [];
+  const selected = restored
+    ? (revision?.structures.filter((item) =>
+        restored.viewState.structures.some((entry) => entry.structureId === item.id),
+      ) ?? [])
+    : revision && task
+      ? structuresOf(revision, task)
+      : [];
   return (
     <div className="review-shell" data-theme="light">
-      <header className="app-header">
-        <div className="brand">
-          <Layers size={23} />
-          <span>voluma</span>
-        </div>
-        <span className="header-divider" />
-        <span className="text-muted-foreground">Review</span>
-        <span className="ml-auto text-xs text-muted-foreground">
-          {run ? "Analysis results" : "No analysis results"}
-        </span>
-      </header>
       <div className="run-header">
         <div>
           <div className="back-link">
@@ -123,7 +160,7 @@ export function ReviewWorkspace({
                 <select
                   aria-label="Revision"
                   value={revision.id}
-                  onChange={(event) => navigate({ task: task?.id, revision: event.target.value })}
+                  onChange={(event) => select({ task: task?.id, revision: event.target.value })}
                 >
                   {run.revisions.map((item, i) => (
                     <option key={item.id} value={item.id}>
@@ -135,6 +172,15 @@ export function ReviewWorkspace({
               <button type="button" className="button" onClick={() => downloadCsv(run, revision)}>
                 <Download size={15} />
                 Export CSV
+              </button>
+              <button
+                type="button"
+                className="button"
+                disabled={report.isPending}
+                onClick={() => report.mutate({ run, revision })}
+              >
+                <Download size={15} />
+                {report.isPending ? "Exporting report…" : "Export review report"}
               </button>
             </>
           )}
@@ -148,6 +194,11 @@ export function ReviewWorkspace({
       {complete.error && !run?.review?.reviewedAt && (
         <p className="error-message" role="alert">
           {complete.error.message}
+        </p>
+      )}
+      {report.error && (
+        <p className="error-message" role="alert">
+          Could not export the review report. Check your connection and try again.
         </p>
       )}
       {revision && revision !== latest && (
@@ -182,7 +233,7 @@ export function ReviewWorkspace({
                       key={item.id}
                       className={`task-nav ${item === task ? "selected" : ""}`}
                       aria-current={item === task ? "step" : undefined}
-                      onClick={() => navigate({ task: item.id, revision: revisionId })}
+                      onClick={() => select({ task: item.id, revision: revisionId })}
                     >
                       <span className="task-number">{String(index + 1).padStart(2, "0")}</span>
                       <span>
@@ -301,11 +352,12 @@ export function ReviewWorkspace({
                     runId={run.id}
                     revisionId={revision.id}
                     readOnly={readOnly}
-                    onFocus={(focus) =>
+                    onFocus={(focus) => {
+                      setRestoredSnapshot(undefined);
                       setFocusedCheck(
                         focus ? { revisionId: revision.id, taskId: task.id, focus } : undefined,
-                      )
-                    }
+                      );
+                    }}
                     onRefresh={onRefresh}
                   />
                 ) : (
@@ -357,6 +409,7 @@ export function ReviewWorkspace({
                   focusedCheck.taskId === task?.id
                   ? focusedCheck.focus
                   : undefined,
+                snapshots ? { ...snapshots, restore: restored } : undefined,
               )}
             </Panel>
           </Group>

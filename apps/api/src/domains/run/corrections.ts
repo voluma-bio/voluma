@@ -100,6 +100,10 @@ export async function endCorrection(
   });
 }
 
+/** The 403 a guest gets for anything that would run on Voluma's keys. */
+export const GUEST_KEYS_MESSAGE =
+  "Guests run on their own keys. Add your keys to start a run, or sign in with an account to use Voluma's.";
+
 /**
  * A researcher's message to a run, judged in the order the contract lists the refusals. `write`
  * false judges only (nothing is stored, no lock is taken): the route calls that first, so a
@@ -112,7 +116,7 @@ export async function decideMessage(
   tx: Tx,
   o: { limits: Limits; pinsOf: (workflowId: string) => WorkflowPin[] | undefined },
   reader: Reader,
-  userId: string,
+  caller: { userId: string; guest: boolean },
   runId: string,
   msg: { id: string; payload: PersonMessage },
   write: boolean,
@@ -120,6 +124,7 @@ export async function decideMessage(
   const refuse = (status: MessageRefusal["status"], error: string): MessageResult => ({
     refused: { status, error },
   });
+  const { userId } = caller;
   if (write) await eventLock(tx, runId);
   const found = tx
     .select()
@@ -133,6 +138,10 @@ export async function decideMessage(
   if (run.example) return refuse(403, "Examples are read-only.");
   if (run.credentials === "visitor") {
     return refuse(403, "A run with your own keys keeps no keys, so it cannot be reopened.");
+  }
+  // Only a run on Voluma's keys is left here, and a guest has none of their own to reopen it on.
+  if (caller.guest) {
+    return refuse(403, GUEST_KEYS_MESSAGE);
   }
   const eventId = personEventId(runId, msg.id);
   const [again] = await tx.select({ id: events.id }).from(events).where(eq(events.id, eventId));
