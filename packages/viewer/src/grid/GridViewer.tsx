@@ -6,7 +6,7 @@
 import { Maximize2, Minimize2 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
-import { autoWindow, type Window } from "./compose";
+import { autoContrast, type Contrast } from "./compose";
 import { Grid3D } from "./Grid3D";
 import type { Picture } from "./picture";
 import { readLevel } from "./planes";
@@ -32,22 +32,22 @@ export function GridViewer({
   const [point, setPoint] = useState<Zyx>(
     () => scene.shapeZyx.map((n) => Math.floor(n / 2)) as unknown as Zyx,
   );
-  const [window, setWindow] = useState<Window | null>(null);
-  const [windowError, setWindowError] = useState<string>();
+  const [contrast, setContrast] = useState<Contrast | null>(null);
+  const [contrastError, setContrastError] = useState<string>();
   const [pictures, setPictures] = useState<Partial<Record<Axis, Picture>>>({});
   const onPicture = useCallback(
     (picture: Picture) => setPictures((all) => ({ ...all, [picture.axis]: picture })),
     [],
   );
 
-  // The window spans the coarsest level's values, so the first picture already uses it.
+  // The contrast spans the coarsest level's values, so the first picture already uses it.
   useEffect(() => {
     const abort = new AbortController();
     const coarsest = scene.image.levels.at(-1)!;
     readLevel(scene.image.base, coarsest.path, abort.signal)
-      .then((level) => setWindow(autoWindow(level.data)))
+      .then((level) => setContrast(autoContrast(level.data)))
       .catch((cause) => {
-        if (!abort.signal.aborted) setWindowError((cause as Error).message);
+        if (!abort.signal.aborted) setContrastError((cause as Error).message);
       });
     return () => abort.abort();
   }, [scene.image]);
@@ -91,7 +91,7 @@ export function GridViewer({
                 scene={scene}
                 point={point}
                 onPoint={setPoint}
-                window={window}
+                contrast={contrast}
                 onPicture={onPicture}
               />
             )}
@@ -112,38 +112,26 @@ export function GridViewer({
           <output className="font-mono" aria-label="Crosshair voxel (z, y, x)">
             z {point[0]} · y {point[1]} · x {point[2]}
           </output>
-          {window && (
+          {contrast && (
             <>
-              <label>
-                Window low
-                <input
-                  type="number"
-                  value={Math.round(window.low)}
-                  onChange={(e) => {
-                    const low = e.target.valueAsNumber;
-                    if (Number.isFinite(low)) setWindow({ ...window, low });
-                  }}
-                />
-              </label>
-              <label>
-                high
-                <input
-                  type="number"
-                  value={Math.round(window.high)}
-                  onChange={(e) => {
-                    const high = e.target.valueAsNumber;
-                    if (Number.isFinite(high)) setWindow({ ...window, high });
-                  }}
-                />
-              </label>
+              <NumberField
+                label="Window low"
+                value={contrast.low}
+                onCommit={(low) => setContrast({ ...contrast, low })}
+              />
+              <NumberField
+                label="high"
+                value={contrast.high}
+                onCommit={(high) => setContrast({ ...contrast, high })}
+              />
             </>
           )}
           {children}
         </div>
       </div>
-      {windowError && (
+      {contrastError && (
         <p className="error-message" role="alert">
-          Couldn't load the image: {windowError}
+          Couldn't load the image: {contrastError}
         </p>
       )}
       <div className="viewer-grid">
@@ -164,5 +152,43 @@ export function GridViewer({
         </Group>
       </div>
     </section>
+  );
+}
+
+/**
+ * A number typed freely (a lone "-", "0.") and applied on Enter or blur, so a half-typed value
+ * never redraws every pane or snaps back.
+ */
+function NumberField({
+  label,
+  value,
+  onCommit,
+}: {
+  label: string;
+  value: number;
+  onCommit(value: number): void;
+}) {
+  const shown = Number.isInteger(value) ? String(value) : String(Number(value.toPrecision(6)));
+  const [draft, setDraft] = useState<string | null>(null);
+  const commit = () => {
+    const n = Number(draft);
+    if (draft !== null && draft.trim() !== "" && Number.isFinite(n) && n !== value) onCommit(n);
+    setDraft(null);
+  };
+  return (
+    <label>
+      {label}
+      <input
+        type="text"
+        inputMode="decimal"
+        value={draft ?? shown}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+          if (e.key === "Escape") setDraft(null);
+        }}
+      />
+    </label>
   );
 }

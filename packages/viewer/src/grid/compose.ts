@@ -1,9 +1,9 @@
-/** A slice pane's picture: the image plane in grey through the window, overlays blended on top. */
+/** A slice pane's picture: the image plane in grey between its contrast limits, overlays blended on top. */
 import { Color } from "three";
 import type { Plane } from "./planes";
 import { type Axis, type Overlay, planeAxes } from "./scene";
 
-export type Window = { low: number; high: number };
+export type Contrast = { low: number; high: number };
 /** An overlay's plane, at its own level (`scale`) and crop offset. */
 export type OverlayPlane = { overlay: Overlay; plane: Plane; scale: number };
 
@@ -35,14 +35,14 @@ export function compose(
   image: Plane,
   imageScale: number,
   axis: Axis,
-  window: Window,
+  contrast: Contrast,
   overlays: OverlayPlane[],
 ): Uint8Array {
   const { rows, cols, data } = image;
   const rgba = new Uint8Array(rows * cols * 4);
-  const span = window.high - window.low || 1;
+  const span = contrast.high - contrast.low || 1;
   for (let i = 0; i < rows * cols; i++) {
-    const g = Math.max(0, Math.min(255, ((data[i]! - window.low) / span) * 255));
+    const g = Math.max(0, Math.min(255, ((data[i]! - contrast.low) / span) * 255));
     rgba[i * 4] = g;
     rgba[i * 4 + 1] = g;
     rgba[i * 4 + 2] = g;
@@ -75,8 +75,8 @@ export function compose(
   return rgba;
 }
 
-/** A window that spans the image's values: the 1st to the 99.9th percentile of a coarse level. */
-export function autoWindow(values: ArrayLike<number>): Window {
+/** Contrast limits that span the image's values: the 1st to the 99.9th percentile of a coarse level. */
+export function autoContrast(values: ArrayLike<number>): Contrast {
   const sample: number[] = [];
   const step = Math.max(1, Math.floor(values.length / 200_000));
   for (let i = 0; i < values.length; i += step) sample.push(values[i]!);

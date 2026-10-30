@@ -2,8 +2,8 @@
  * Reads OME-Zarr levels off the main thread: one plane through a level for a slice pane, or a
  * whole (coarse) level. Decoded chunks are kept in one bounded cache shared by every array, so
  * scrolling within a chunk's 64 planes and crossing panes reuse them. Fetches wait for one of a
- * few slots, newest request first; a chunk that every request asking for it has cancelled by the
- * time its slot comes is never fetched. A chunk already fetching finishes into the cache.
+ * few slots, newest request first; a chunk that no live request still wants when its slot comes
+ * is never fetched. A chunk already fetching finishes into the cache.
  */
 import * as zarr from "zarrita";
 import type { Axis } from "./scene";
@@ -25,7 +25,10 @@ const MAX_FETCHES = 12;
 const arrays = new Map<string, Promise<zarr.Array<zarr.DataType, zarr.Readable>>>();
 const chunks = new Map<string, Chunk>();
 const loading = new Map<string, { promise: Promise<Chunk>; wanted: Set<number> }>();
-const cancelled = new Set<number>();
+/** Requests not yet answered or cancelled. */
+const live = new Set<number>();
+/** zarrita's dtypes the panes can window and compose; int64 and float64 are refused. */
+const DTYPES = new Set(["int8", "uint8", "int16", "uint16", "int32", "float32"]);
 let cachedBytes = 0;
 let active = 0;
 const waiting: (() => void)[] = [];
@@ -34,7 +37,12 @@ function open(base: string, path: string) {
   const key = base + path;
   let array = arrays.get(key);
   if (!array) {
-    array = zarr.open.v2(zarr.root(new zarr.FetchStore(base)).resolve(path), { kind: "array" });
+    array = zarr.open
+      .v2(zarr.root(new zarr.FetchStore(base)).resolve(path), { kind: "array" })
+      .then((a) => {
+        if (!DTYPES.has(a.dtype)) throw new Error(`${a.dtype} levels are not supported.`);
+        return a;
+      });
     arrays.set(key, array);
     array.catch(() => arrays.delete(key));
   }
@@ -45,6 +53,7 @@ class Cancelled extends Error {}
 
 async function slot<T>(wanted: () => boolean, work: () => Promise<T>): Promise<T> {
   if (active >= MAX_FETCHES) await new Promise<void>((go) => waiting.push(go));
+  // Synchronous with the decision, so a request that asks after this starts a new fetch.
   if (!wanted()) {
     waiting.pop()?.();
     throw new Cancelled();
@@ -79,7 +88,11 @@ function chunk(
   }
   const wanted = new Set([request]);
   const promise = slot(
-    () => [...wanted].some((r) => !cancelled.has(r)),
+    () => {
+      if ([...wanted].some((r) => live.has(r))) return true;
+      loading.delete(id);
+      return false;
+    },
     () => array.getChunk(coords),
   ).then((c) => {
     const value = { data: c.data as Values, stride: c.stride };
@@ -93,7 +106,11 @@ function chunk(
     return value;
   });
   loading.set(id, { promise, wanted });
-  void promise.finally(() => loading.delete(id)).catch(() => {});
+  void promise
+    .finally(() => {
+      if (loading.get(id)?.promise === promise) loading.delete(id);
+    })
+    .catch(() => {});
   return promise;
 }
 
@@ -117,9 +134,9 @@ async function plane(id: number, base: string, path: string, axis: Axis, index: 
       coords[ca] = cc;
       work.push(
         (async () => {
-          if (cancelled.has(id)) return;
+          if (!live.has(id)) return;
           const { data, stride } = await chunk(id, base + path, array, coords);
-          if (cancelled.has(id)) return;
+          if (!live.has(id)) return;
           out ??= new (data.constructor as new (n: number) => Values)(rows * cols);
           const r0 = cr * size[ra]!;
           const c0 = cc * size[ca]!;
@@ -147,24 +164,25 @@ async function whole(base: string, path: string) {
 
 self.onmessage = async ({ data: request }: MessageEvent<PlaneRequest>) => {
   if ("cancel" in request) {
-    cancelled.add(request.cancel);
+    live.delete(request.cancel);
     return;
   }
   const { id } = request;
+  live.add(id);
   try {
     const result =
       "whole" in request
         ? await whole(request.base, request.path)
         : await plane(id, request.base, request.path, request.axis, request.index);
-    if (!result || cancelled.has(id)) return;
+    if (!result || !live.has(id)) return;
     postMessage({ id, ...result } satisfies PlaneResponse, { transfer: [result.data.buffer] });
   } catch (cause) {
-    if (cause instanceof Cancelled || cancelled.has(id)) return;
+    if (cause instanceof Cancelled || !live.has(id)) return;
     postMessage({
       id,
       error: cause instanceof Error ? cause.message : String(cause),
     } satisfies PlaneResponse);
   } finally {
-    cancelled.delete(id);
+    live.delete(id);
   }
 };

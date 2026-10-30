@@ -19,6 +19,15 @@ function post(request: PlaneRequest) {
       if ("error" in data) waiter.reject(new Error(data.error));
       else waiter.resolve(data);
     };
+    // A worker that fails to load or dies answers nothing: fail every request, start afresh next time.
+    worker.onerror = (event) => {
+      event.preventDefault();
+      const error = new Error(event.message || "The image reader stopped.");
+      for (const waiter of pending.values()) waiter.reject(error);
+      pending.clear();
+      worker?.terminate();
+      worker = undefined;
+    };
   }
   worker.postMessage(request);
 }
@@ -29,13 +38,25 @@ function request(
 ) {
   const id = nextId++;
   return new Promise<Plane>((resolve, reject) => {
-    pending.set(id, { resolve, reject });
-    post({ id, ...body } as PlaneRequest);
-    signal.addEventListener("abort", () => {
-      pending.delete(id);
+    const abort = () => {
+      // Only a request still waiting is cancelled; a settled one is already gone from the worker.
+      if (!pending.delete(id)) return;
       post({ cancel: id });
       reject(signal.reason);
+    };
+    const settle = () => signal.removeEventListener("abort", abort);
+    pending.set(id, {
+      resolve(plane) {
+        settle();
+        resolve(plane);
+      },
+      reject(error) {
+        settle();
+        reject(error);
+      },
     });
+    post({ id, ...body } as PlaneRequest);
+    signal.addEventListener("abort", abort, { once: true });
   });
 }
 

@@ -27,6 +27,7 @@ const token = (name: string) =>
 /** `sha256` or `sha256@z,y,x`. */
 function parseSource(value: string): { sha256: string; offsetZyx: Zyx } {
   const [sha256 = "", at] = value.split("@");
+  if (!/^[0-9a-f]{64}$/.test(sha256)) throw new Error(`"${value}" does not start with a sha256.`);
   const offset = at?.split(",").map(Number) ?? [0, 0, 0];
   if (offset.length !== 3 || offset.some((n) => !Number.isInteger(n) || n < 0))
     throw new Error(`"${value}": the offset must be three whole voxel counts, z,y,x.`);
@@ -37,6 +38,7 @@ async function loadScene(runId: string, search: URLSearchParams): Promise<GridSc
   const image = search.get("image");
   const spacing = Number(search.get("spacing"));
   if (!image) throw new Error("Name the grid's image: ?image=<sha256>.");
+  if (!/^[0-9a-f]{64}$/.test(image)) throw new Error(`"${image}" is not a sha256.`);
   if (!(spacing > 0)) throw new Error("Give the grid's voxel size in mm: &spacing=0.0105.");
   const base = (sha256: string) =>
     new URL(reviewAssetUrl(runId, sha256, "x").slice(0, -1), location.href).href;
@@ -105,7 +107,7 @@ async function loadScene(runId: string, search: URLSearchParams): Promise<GridSc
   return {
     shapeZyx: finest.shapeZyx,
     spacingZyx: [spacing, spacing, spacing],
-    image: { base: base(image), levels: imageManifest!.levels, offsetZyx: [0, 0, 0] },
+    image: { base: base(image), levels: imageManifest!.levels },
     overlays,
     meshes,
   };

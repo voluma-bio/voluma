@@ -47,13 +47,12 @@ export function Grid3D({
   const [sz, sy, sx] = scene.spacingZyx;
   const toWorld = (p: Zyx) => new Vector3(p[2] * sx, p[1] * sy, p[0] * sz);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the grid is fixed for the pane's life.
   useEffect(() => {
     const element = host.current!;
     const renderer = new WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(globalThis.devicePixelRatio);
     const style = getComputedStyle(document.documentElement);
-    renderer.setClearColor(style.getPropertyValue("--viewer-well"));
+    renderer.setClearColor(style.getPropertyValue("--viewer-well").trim());
     renderer.domElement.className = "grid-canvas";
     element.append(renderer.domElement);
     const s = new Scene();
@@ -105,10 +104,11 @@ export function Grid3D({
     });
     observer.observe(element);
 
-    // A click (not a drag) on a mesh moves the crosshair to the voxel under it.
+    // A left click (not a drag) on a mesh moves the crosshair to the voxel under it: the first
+    // opaque mesh, so a structure inside a see-through bone shell wins over the shell.
     let downAt: [number, number] | null = null;
     const down = (event: PointerEvent) => {
-      downAt = [event.clientX, event.clientY];
+      downAt = event.button === 0 ? [event.clientX, event.clientY] : null;
     };
     const up = (event: PointerEvent) => {
       if (!downAt || Math.hypot(event.clientX - downAt[0], event.clientY - downAt[1]) > 3) return;
@@ -122,7 +122,10 @@ export function Grid3D({
         ),
         camera,
       );
-      const hit = ray.intersectObjects(meshes.children, true).find((h) => h.object.visible);
+      const hits = ray.intersectObjects(meshes.children, true).filter((h) => h.object.visible);
+      const opaque = (h: (typeof hits)[number]) =>
+        ((h.object as Mesh).material as MeshStandardMaterial).opacity >= 1;
+      const hit = hits.find(opaque) ?? hits[0];
       if (!hit) return;
       const v = hit.point;
       const clamp = (n: number, axisSize: number) =>
@@ -146,6 +149,7 @@ export function Grid3D({
           object.material.dispose();
         }
       });
+      renderer.forceContextLoss();
       renderer.dispose();
       renderer.domElement.remove();
       three.current = null;
@@ -153,7 +157,6 @@ export function Grid3D({
   }, []);
 
   // Meshes load once each; a scene change adds or drops only what changed.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: toWorld depends only on the fixed grid.
   useEffect(() => {
     const t = three.current;
     if (!t) return;
@@ -204,7 +207,6 @@ export function Grid3D({
     return () => abort.abort();
   }, [scene.meshes]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: toWorld depends only on the fixed grid.
   useEffect(() => {
     const t = three.current;
     if (!t) return;

@@ -16,7 +16,7 @@ import {
   Scene,
   WebGLRenderer,
 } from "three";
-import { compose, type OverlayPlane, type Window } from "./compose";
+import { type Contrast, compose, type OverlayPlane } from "./compose";
 import { corners, type Picture, quad, texture } from "./picture";
 import { readPlane } from "./planes";
 import { type Axis, type GridScene, levelFor, levelIndex, planeAxes, type Zyx } from "./scene";
@@ -34,14 +34,14 @@ export function SlicePane({
   scene,
   point,
   onPoint,
-  window,
+  contrast,
   onPicture,
 }: {
   axis: Axis;
   scene: GridScene;
   point: Zyx;
   onPoint(point: Zyx): void;
-  window: Window | null;
+  contrast: Contrast | null;
   onPicture(picture: Picture): void;
 }) {
   const [ra, ca] = planeAxes(axis);
@@ -72,7 +72,7 @@ export function SlicePane({
     const renderer = new WebGLRenderer({ antialias: false });
     renderer.setPixelRatio(globalThis.devicePixelRatio);
     renderer.setClearColor(
-      getComputedStyle(document.documentElement).getPropertyValue("--viewer-well"),
+      getComputedStyle(document.documentElement).getPropertyValue("--viewer-well").trim(),
     );
     element.append(renderer.domElement);
     renderer.domElement.className = "grid-canvas";
@@ -137,12 +137,12 @@ export function SlicePane({
       image.material.dispose();
       cross.geometry.dispose();
       cross.material.dispose();
+      renderer.forceContextLoss();
       renderer.dispose();
       renderer.domElement.remove();
       three.current = null;
     };
-    // The scene's grid is fixed for the pane's life (the viewer remounts on a new grid).
-    // biome-ignore lint/correctness/useExhaustiveDependencies: see above.
+    // Runs once: the scene's grid is fixed for the pane's life (the viewer remounts on a new grid).
   }, []);
 
   /** The level that gives each device pixel at least one voxel at the current zoom. */
@@ -156,19 +156,21 @@ export function SlicePane({
   // Load the plane through the crosshair at the level the zoom needs. The coarsest level shows
   // meanwhile, unless the finer one arrives almost as soon (it does from the worker's cache).
   const index = point[axis];
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the overlays and levels are the scene's, fixed for the pane's life.
   useEffect(() => {
-    if (!window) return;
+    if (!contrast) return;
     const abort = new AbortController();
     const load = async (k: number): Promise<Picture | null> => {
       const lvl = scene.image.levels[k]!;
       const s = lvl.scaleZyx[axis];
-      const at = levelIndex(index, scene.image.offsetZyx[axis], s, lvl.shapeZyx[axis]);
+      const at = levelIndex(index, 0, s, lvl.shapeZyx[axis]);
+      // Overlays are sampled where the image voxel is centred, in-plane (compose) and across it.
+      const centre = at * s + (s - 1) / 2;
       if (at < 0) return null;
       const overlays = scene.overlays.map(async (overlay): Promise<OverlayPlane | null> => {
-        // The overlay level with the image level's scale, or its finest.
-        const o = overlay.levels.find((l) => l.scaleZyx[axis] === s) ?? overlay.levels[0]!;
-        const i = levelIndex(index, overlay.offsetZyx[axis], o.scaleZyx[axis], o.shapeZyx[axis]);
+        // The coarsest overlay level no coarser than the image's (labels never blend).
+        const o =
+          [...overlay.levels].reverse().find((l) => l.scaleZyx[axis] <= s) ?? overlay.levels[0]!;
+        const i = levelIndex(centre, overlay.offsetZyx[axis], o.scaleZyx[axis], o.shapeZyx[axis]);
         if (i < 0) return null;
         const plane = await readPlane(overlay.base, o.path, axis, i, abort.signal);
         return { overlay, plane, scale: o.scaleZyx[ra] };
@@ -181,7 +183,7 @@ export function SlicePane({
       return {
         axis,
         index: at * s + (s - 1) / 2,
-        rgba: compose(plane!, s, axis, window, present),
+        rgba: compose(plane!, s, axis, contrast, present),
         rows: plane!.rows,
         cols: plane!.cols,
         scale: s,
@@ -211,7 +213,7 @@ export function SlicePane({
       if (!abort.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
     });
     return () => abort.abort();
-  }, [index, level, window, axis]);
+  }, [index, level, contrast, axis]);
 
   function draw(picture: Picture) {
     const t = three.current;
@@ -225,7 +227,6 @@ export function SlicePane({
   }
 
   // Crosshair: the other two planes' traces, each in its plane's colour.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: toPane depends only on the fixed grid.
   useEffect(() => {
     const t = three.current;
     if (!t) return;
@@ -255,7 +256,6 @@ export function SlicePane({
   }, [point]);
 
   // Pointer and wheel.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: handlers read the latest props through refs.
   useEffect(() => {
     const element = host.current!;
     const toVoxel = (event: { clientX: number; clientY: number }): Zyx => {
