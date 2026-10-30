@@ -65,5 +65,4 @@ The roles are told none of these; code keeps them (why each holds:
   had begun;
 - one writer per task; the checker's `/outputs` is read-only;
 - `finish_run` is refused while a selected output is neither reported nor missing with a reason, or
-  while an agent runs; a run ended by code records each unreported selected output as missing;
-- the spend cap.
+  while an agent runs; a run ended by code records each unreported selected output as missing.

@@ -15,7 +15,7 @@
  * the files tasks report into review assets in a `convert` sandbox as they appear. It stops when a stop will
  * not end the run, not on the internal abort at the end of the run, which it must outlive.
  *
- * End of the run, in order. A normal end (a spend cap and an uncaught error included) waits for
+ * End of the run, in order. A normal end (an uncaught error included) waits for
  * the conversion queue to drain (bounded by `DRAIN_MS`, the lease heartbeating meanwhile; every
  * output left without an `assets.*` event is recorded as failed; a stop during the wait ends it
  * and the run is released instead), then closes the sandboxes, then reports. A stop
@@ -118,7 +118,7 @@ export const layoutOf = (run: Claim["run"], skills: readonly Skill[], mainWorks:
   );
 
 /** "error": an error nobody caught reached the process handler while this run was working (`telemetry.ts`). */
-type Stopped = StopReason | "shutdown" | "spend-cap" | "error";
+type Stopped = StopReason | "shutdown" | "error";
 
 /** Which report a stop reason, a clean end or a failure becomes; undefined: say nothing more. */
 export function reportFor(
@@ -168,8 +168,8 @@ async function claimBody(
   let haltedBy: Stopped | undefined;
   // An object, so TypeScript does not narrow what the callbacks set.
   const why: { stopped?: Stopped } = {};
-  // The first reason decides the report; every reason is logged, since a later one (a spend
-  // cap, an error) is what a self-stop would otherwise hide.
+  // The first reason decides the report; every reason is logged, since a later one (an
+  // error) is what a self-stop would otherwise hide.
   const reasons = new Set<Stopped>();
   const stop = (reason: Stopped) => {
     why.stopped ??= reason;
@@ -188,20 +188,7 @@ async function claimBody(
   shutdown.addEventListener("abort", onShutdown);
   if (shutdown.aborted) stop("shutdown");
 
-  // The run's dollars across every claim, gateway calls included: what the server last
-  // acknowledged (a heartbeat's `spentUsd`) plus the model cost not yet sent. Crossing the cap
-  // stops everything in flight; the run then ends `failed` naming it.
-  let acknowledgedUsd = (run.usage?.modelCostUsd ?? 0) + (run.providerCalls?.costUsd ?? 0);
-  let capError: string | undefined;
-  const checkCap = () => {
-    const total = acknowledgedUsd + meter.pendingModelCostUsd();
-    if (capError || config.maxRunCostUsd === undefined || total < config.maxRunCostUsd) return;
-    capError = `spend cap $${config.maxRunCostUsd} reached at $${total.toFixed(2)}`;
-    log(capError);
-    stop("spend-cap");
-  };
-  const meter = usageMeter(checkCap);
-  checkCap(); // a resumed run that is already over the cap makes no call
+  const meter = usageMeter();
   const client = runClient(
     config.api,
     { runId, leaseToken },
@@ -228,10 +215,6 @@ async function claimBody(
       client,
       meter,
       onStop: stop,
-      onSpent(usd) {
-        acknowledgedUsd = usd;
-        checkCap();
-      },
       onRoundTrip: heartbeatRoundTrip,
       log,
     });
@@ -534,7 +517,7 @@ async function claimBody(
     // except during the drain below, where the queue is unfinished.
     const stopped = why.stopped;
     reportFixed = true;
-    let report = reportFor(stopped, stopped === "spend-cap" ? capError : (uncaught ?? error));
+    let report = reportFor(stopped, uncaught ?? error);
     abort.abort();
     if (report?.kind === "ended") {
       // Every output gets an `assets.*` event, or the run is released to be resumed.

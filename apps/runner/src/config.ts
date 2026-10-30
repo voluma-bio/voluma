@@ -38,14 +38,6 @@ function positiveInt(name: string, fallback: number, min = 1): number {
   return value;
 }
 
-function optionalPositiveNumber(name: string): number | undefined {
-  const raw = optional(name);
-  if (raw === undefined) return undefined;
-  const value = Number(raw);
-  if (!Number.isFinite(value) || value <= 0) throw new Error(`${name} must be a positive number`);
-  return value;
-}
-
 /**
  * The API to claim from: `VOLUMA_API_URL` and `VOLUMA_API_TOKEN`, else the local API
  * `pnpm dev` started in this worktree (tools/dev.mjs writes `.dev/env.json`).
@@ -201,12 +193,6 @@ export function runnerConfig() {
     api,
     /** Runs at once. */
     concurrency: positiveInt("RUNNER_CONCURRENCY", 2),
-    /**
-     * A run whose spend (all claims, gateway calls included) reaches this is stopped and ends
-     * `failed`. Unset: no cap (test runs have none). Sent with every claim when set: the gateway
-     * checks the same cap against known spend before each call.
-     */
-    maxRunCostUsd: optionalPositiveNumber("RUNNER_MAX_RUN_COST_USD"),
     /** The run loop's limits (`LoopConfig`); the harness defaults are 2 fix rounds and 20 minutes. */
     loop: {
       maxFixRounds: positiveInt("RUNNER_MAX_FIX_ROUNDS", 2),

@@ -44,7 +44,8 @@
   `dev/` and reject empty, `.` and `..` segments. (p563)
 - `backfill.py`'s scan-grid ruler assert can't fail (both sides use the same transform); compare
   against the `points` `export.py`'s `ruler()` writes. (p563)
-- **Drop `provider_calls.reserved_usd`.** Reservations are gone; nothing writes or reads the
-  column (0007 made it nullable so the old code still inserts during a deploy). Drop it in a
-  PR after the one that removed reservations is live, with the column out of
-  `packages/provider-calls/src/schema.ts`.
+- **Drop `runs.cost_cap_usd` and `provider_calls.reserved_usd`.** Nothing writes or reads either
+  (the spend cap and reservations are gone; both are nullable). The previous deploy's API still selects
+  `cost_cap_usd` by name, so drop them in a PR after the no-spend-cap PR is live, with both
+  columns out of `apps/api/src/domains/run/schema.ts` and `packages/provider-calls/src/schema.ts`,
+  and the migration check in `apps/gateway/src/main.ts` unchanged (it names neither).
