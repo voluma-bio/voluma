@@ -12,6 +12,9 @@ holds rules, not experiment logs.
   (the planned tool index in the agent's prompt will list every script by its first docstring line). There are no per-workflow agent definitions: the roles shared by every workflow are in
   `agents/`, and a skill never addresses one role; what a workflow wants checked per task is in its `tasks.json` and
   `skills/<workflow>/examples/`.
+- Change a skill or role file only on evidence from runs on the models the workflow runs on. A run on a
+  cheap stand-in model (DeepSeek) checks plumbing only: never judge or change skill or role text by how it
+  behaved (Jimmy, 2026-10-29).
 - **Resource contract:** CLI scripts that take and return paths. `.npy` outputs get a JSON sidecar
   (`microct-core/resources/sidecar.py`: grid id, spacing, input sha256, params; it keeps the keys `segment_sam` wrote). One JSON line
   on stdout, never arrays, never NaN (`sidecar.emit` fails on it). A script that reports numbers uses one result record,
@@ -27,7 +30,7 @@ holds rules, not experiment logs.
   block of `hu.json` (`sidecar.bone_threshold_hu`); no script holds a literal HU value for it. BV is the region and HU above the
   threshold, never gated by a label; BV/TV is in %.
 - `convert/review_assets.py` is not a skill the run agent sees: the harness runs it in a `convert` sandbox to turn a reported file into
-  review assets (OME-Zarr levels, meshes; the header says how). Its `import sidecar` resolves through the same `PYTHONPATH` (the convert sandbox must get the run's `runLayout` env); labels and masks downsample by mode, tie to the foreground: a one-voxel sheet survives every level, a one-voxel rod does not. The scan is the intake task's `hu.npy`, converted with `--as image --int16`. Integer coordinates are voxel centres: level k voxel i is centred at source i·2^k + (2^k−1)/2 (the OME translation).
+  review assets (OME-Zarr levels, meshes; the header says how). Its `import sidecar` resolves through the same `PYTHONPATH` (the runner gives the convert sandbox `RunLayout.pythonPath` as its only env); labels and masks downsample by mode, tie to the foreground: a one-voxel sheet survives every level, a one-voxel rod does not. The scan is the intake task's `hu.npy`, converted with `--as image --int16`. Integer coordinates are voxel centres: level k voxel i is centred at source i·2^k + (2^k−1)/2 (the OME translation).
 - Python dependencies: `requirements.in` / `requirements.txt` in this directory (compiled with `uv`; the sandbox image installs
   it). 3D renders need pyvista on an off-screen VTK. Keep recipe numbers (box padding, trim rule) in one
   script each, so a recipe change touches one file.
