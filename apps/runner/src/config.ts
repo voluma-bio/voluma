@@ -8,8 +8,10 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseEnv } from "node:util";
+import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { modelRefSchema } from "@voluma/contracts/ids";
 import { parseTokenSecrets } from "@voluma/provider-calls/token";
+import { THINKING_LEVELS } from "@voluma/workflow/definition";
 import { PROVIDERS } from "./providers.ts";
 
 const file = process.env.VOLUMA_ENV_FILE ?? resolve(import.meta.dirname, "../../../.env");
@@ -113,6 +115,16 @@ function visitorModel(): ModelRef {
   return ref;
 }
 
+/** `RUNNER_THINKING`, one of Pi's thinking levels; unset: Pi sends none. */
+function thinkingLevel(): ModelThinkingLevel | undefined {
+  const raw = optional("RUNNER_THINKING");
+  if (raw === undefined) return undefined;
+  const level = THINKING_LEVELS.find((l) => l === raw);
+  if (!level)
+    throw new Error(`RUNNER_THINKING must be one of ${THINKING_LEVELS.join(", ")}, got "${raw}"`);
+  return level;
+}
+
 /** Whether a visitor's Meta key and scan may go to this model (see `visitorModel`). */
 export const isVisitorSafe = (ref: ModelRef) =>
   ref.provider === "meta" && !ref.id.endsWith("-contributor");
@@ -205,6 +217,13 @@ export function runnerConfig() {
      * for a `voluma` run. Our key for each provider is `VOLUMA_<PROVIDER>_API_KEY`.
      */
     models,
+    /**
+     * The thinking level of every thread of a `voluma` run (`RUNNER_THINKING`), set as each Pi
+     * agent's `thinkingLevel`; main.ts refuses a level an alias's or the fallback's model does
+     * not support, since Pi would quietly use another. Unset: "off", Pi's default, which sends no
+     * level (DeepSeek: thinking disabled; other providers: their default). Visitor runs: "off".
+     */
+    thinking: thinkingLevel(),
     /** Where new worker and check threads go while their model is failing; absent: nowhere. */
     fallbackModel,
     /**

@@ -17,6 +17,7 @@ import {
   type AgentMessage,
   type AgentTool,
   type StreamFn,
+  type ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
 import { type Api, type Model, type ToolResultMessage, Type } from "@earendil-works/pi-ai";
 import type { EventType } from "@voluma/contracts/events";
@@ -68,6 +69,8 @@ export type StartThreadOptions = ThreadIdentity & {
    */
   input?: { text: string; sender: UserSender };
   model: Model<Api>;
+  /** Sent as `reasoning` on each call ("off": none) and recorded on each reply. Default "off". */
+  thinkingLevel?: ThinkingLevel;
   /** `models.streamSimple.bind(models)` from pi-ai. */
   streamFn: StreamFn;
   /** Fixed for the thread's life: a resumed thread whose stored prompt or tools differ fails. */
@@ -124,6 +127,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     initialState: {
       systemPrompt: options.systemPrompt,
       model: options.model,
+      thinkingLevel: options.thinkingLevel,
       tools: options.tools.map((tool) => toAgentTool(tool, options, batchSize)),
       messages: [],
     },
