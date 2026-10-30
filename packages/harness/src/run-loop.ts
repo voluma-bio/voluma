@@ -2,8 +2,7 @@
  * The run loop: the code that keeps a run going while the main agent decides what to do.
  * It starts the main agent once and then, one step at a time inside the task runtime's
  * `section`, does the first applicable of: resume a thread a crash cut off, start the check
- * of a submitted task, write a finished check's result, enforce the check deadline, deliver
- * what happened to the main agent, and end a run whose main agent stops moving. It keeps no
+ * of a submitted task, write a finished check's result, deliver what happened to the main agent, and end a run whose main agent stops moving. It keeps no
  * state of its own: every step is a function of the stored events (`thread-log.ts`, `fold`)
  * plus which threads run in this process, so a resumed run and a first run are the same code.
  *
@@ -38,7 +37,6 @@ import {
   agentsList,
   answerText,
   CHECK_STOPPED,
-  CHECK_TIMED_OUT,
   changedTasks,
   checkReason,
   cutOffText,
@@ -60,7 +58,6 @@ import type { Recorder } from "./recorder";
 import type { PlanTask, TaskRuntime } from "./task-runtime";
 import { mainThreadId, threadId } from "./thread-id";
 import {
-  activeMs,
   fixLimitReached,
   openAsk,
   type Role,
@@ -108,8 +105,6 @@ export interface Briefs {
 export interface LoopConfig {
   /** `needs-review` rounds a task gets before it is left to-check. */
   maxFixRounds: number;
-  /** A check's active time before it is stopped. */
-  checkTimeoutMs: number;
   /** Deliveries with no notice in a row before code ends the run. */
   stuckLimit: number;
   /** Times in a row a thread is started again after a provider error that is neither fatal nor an outage (`startThread`'s `providerOutage`) before the run fails. */
@@ -118,7 +113,6 @@ export interface LoopConfig {
 
 export const LOOP_DEFAULTS: LoopConfig = {
   maxFixRounds: 2,
-  checkTimeoutMs: 20 * 60_000,
   stuckLimit: 2,
   maxProviderRedos: 2,
 };
@@ -148,8 +142,8 @@ const MAIN_GRACE_MS = 15_000;
 const rule = (r: Extract<By, { kind: "rule" }>["rule"]): By => ({ kind: "rule", rule: r });
 const RUNTIME: UserSender = { kind: "runtime" };
 
-/** What a step found: something done, nothing to do (wake after `wakeInMs` at the latest), or the run is over. */
-type Step = "acted" | "done" | { wakeInMs?: number };
+/** What a step found: something done, nothing to do until the log changes, or the run is over. */
+type Step = "acted" | "idle" | "done";
 
 export async function runLoop(o: RunLoopOptions): Promise<Folded> {
   const { runId, rootThreadId: root, recorder, runtime, threads, signal } = o;
@@ -167,16 +161,14 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     version++;
     for (const wake of waiters.splice(0)) wake();
   };
-  async function sleep(seen: number, ms: number | undefined) {
+  async function sleep(seen: number) {
     if (version !== seen || signal?.aborted) return;
     await new Promise<void>((resolve) => {
       const done = () => {
-        clearTimeout(timer);
         signal?.removeEventListener("abort", done);
         waiters = waiters.filter((w) => w !== done);
         resolve();
       };
-      const timer = ms === undefined ? undefined : setTimeout(done, ms);
       signal?.addEventListener("abort", done, { once: true });
       waiters.push(done);
     });
@@ -443,11 +435,11 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     d: ThreadLog,
     t: FoldedTask,
     c: ThreadRecord,
-    ruleName: "check-result" | "check-limit" | "fix-limit",
+    ruleName: "check-result" | "fix-limit",
     reason?: string,
   ) {
     if (!t.attemptId) throw new Error(`${t.id} has no attempt to give a result`);
-    const status = ruleName === "check-limit" ? "to-check" : checkResult(t);
+    const status = checkResult(t);
     const limit =
       ruleName === "check-result" &&
       t.checker?.verdict === "needs-review" &&
@@ -465,8 +457,8 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     );
   }
 
-  /** Check results and deadlines, one action per call. Also reports the next deadline. */
-  async function checks(d: ThreadLog, view: Folded, deadline: { next?: number }): Promise<boolean> {
+  /** Check results, one action per call. */
+  async function checks(d: ThreadLog, view: Folded): Promise<boolean> {
     for (const t of view.tasks) {
       if (t.status !== "under-review" || !t.threads.check) continue;
       const c = d.threads.get(t.threads.check);
@@ -478,16 +470,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
         await writeResult(d, t, c, "check-result", CHECK_STOPPED);
         return true;
       }
-      if (state === "running" || waiting || (state === "cut-off" && !verdict)) {
-        const left = config.checkTimeoutMs - activeMs(c, Date.now(), state === "running");
-        if (left <= 0) {
-          await runtime.stop(c.id, `${c.id}:limit`);
-          await writeResult(d, t, c, "check-limit", CHECK_TIMED_OUT);
-          return true;
-        }
-        deadline.next = Math.min(deadline.next ?? left, left);
-        continue;
-      }
+      if (state === "running" || waiting || (state === "cut-off" && !verdict)) continue;
       // Idle, or stopped/cut off with a verdict: the check is over.
       const last = c.asks.at(-1);
       if (
@@ -535,7 +518,11 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
         providerError(error) &&
         o.providerFatal?.(error)
       ) {
-        throw new Error(`${r.id} failed on a model provider error: ${error}`);
+        throw new Error(
+          r.role === "main"
+            ? `the main agent failed on a model provider error: ${error}`
+            : `${r.taskId}: its ${r.role} failed on a model provider error: ${error}`,
+        );
       }
     }
   }
@@ -668,10 +655,9 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     if (await resumeFeedback(d)) return "acted";
     if (await resumeCutOff(d)) return "acted";
     if (await startChecks(d, view)) return "acted";
-    const deadline: { next?: number } = {};
-    if (await checks(d, view, deadline)) return "acted";
+    if (await checks(d, view)) return "acted";
     if (await main(d, view)) return "acted";
-    return { wakeInMs: deadline.next };
+    return "idle";
   }
 
   // ---- the run
@@ -718,7 +704,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       const next = await runtime.section(step);
       if (next === "done") break;
       if (next === "acted") continue;
-      await sleep(seen, next.wakeInMs);
+      await sleep(seen);
     }
     if (!signal?.aborted && !failed()) await stopAll();
   } catch (error) {
