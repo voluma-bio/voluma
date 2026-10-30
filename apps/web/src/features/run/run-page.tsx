@@ -6,23 +6,32 @@
  * Everything is derived from the run's stream (`run-model.ts`, `transcript.ts`) and `getRun`,
  * polled for what isn't an event (queue place, state, review progress).
  */
+
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, getRun, getStudy, subscribe } from "@voluma/api-client";
 import type { Me } from "@voluma/contracts/auth";
 import type { RunEvent } from "@voluma/contracts/events";
 import type { Run } from "@voluma/contracts/run";
+import {
+  applyFrame,
+  DisclosureProvider,
+  haltOf,
+  type Live,
+  noLive,
+  RunLogProvider,
+  runView,
+  type Settled,
+  settle,
+  TaskFlow,
+  ThreadNavigationProvider,
+  withLiveCalls,
+} from "@voluma/run-view";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from "react-router";
 import { AgentsView } from "./agents-view";
-import { DisclosureProvider } from "./chat/disclosure-store";
-import { ThreadNavigationProvider } from "./chat/thread-navigation";
 import { Overview, useAccepting } from "./overview";
 import { RunAlerts, RunHeader } from "./run-header";
-import { RunLogProvider } from "./run-log";
-import { haltOf, runView, withLiveCalls } from "./run-model";
-import { TaskFlow } from "./task-flow";
 import { TaskView } from "./task-view";
-import { applyFrame, type Live, noLive, type Settled, settle } from "./transcript";
 
 /**
  * The run's stream as it arrives: durable events, and live frames folded until their durable
@@ -292,7 +301,7 @@ function RunScreen({
               </p>
             )}
             <div className="flex min-h-0 flex-1 max-[1100px]:flex-col">
-              <TaskFlow tasks={tasks} selected={task?.id} search={search} />
+              <TaskFlow tasks={tasks} selected={task?.id} search={search} link={Link} />
               {/* The Agents view fills the column and its threads scroll themselves; the rest scroll here. */}
               <div
                 className={`min-h-0 min-w-0 flex-1 px-9 pt-6 max-[1100px]:overflow-visible max-[1100px]:px-4 max-[1100px]:pt-4 ${agents ? "flex flex-col overflow-hidden pb-6" : "overflow-y-auto pb-24"}`}

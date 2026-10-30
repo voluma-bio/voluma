@@ -14,6 +14,7 @@
     "@voluma/api-client": "workspace:*",
     "@voluma/contracts": "workspace:*",
     "@voluma/design-tokens": "workspace:*",
+    "@voluma/run-view": "workspace:*",
     "@voluma/ui": "workspace:*",
     "@voluma/viewer": "workspace:*",
     "@voluma/workflow": "workspace:*",

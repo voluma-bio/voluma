@@ -4,12 +4,18 @@
  * whichever agent is working now. The tree is `agentTree` (the log's own parent links); this file
  * groups siblings by task. Visuals are a thin debug layer on purpose: the redesign restyles it.
  */
+import {
+  AgentMark,
+  type AgentNode,
+  AgentThread,
+  agentLabel,
+  agentTree,
+  STATUS_WORD,
+  type Thread,
+  useRunLog,
+} from "@voluma/run-view";
 import { catalog } from "@voluma/workflow/bundled";
 import { useEffect, useMemo, useRef } from "react";
-import { AgentThread } from "./agent-thread";
-import { AgentMark, STATUS_WORD } from "./agents";
-import { useRunLog } from "./run-log";
-import { type AgentNode, agentLabel, agentTree, type Thread } from "./run-model";
 
 const { taskTitle } = catalog["mouse-oa"];
 

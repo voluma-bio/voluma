@@ -6,7 +6,11 @@ import tailwindcss from "@tailwindcss/vite";
 
 const config: StorybookConfig = {
   framework: "@storybook/react-vite",
-  stories: ["../src/**/*.mdx", "../../../packages/ui/src/**/*.stories.tsx"],
+  stories: [
+    "../src/**/*.mdx",
+    "../../../packages/ui/src/**/*.stories.tsx",
+    "../../../packages/run-view/src/**/*.stories.tsx",
+  ],
   addons: ["@storybook/addon-docs"],
   core: { disableTelemetry: true },
   viteFinal: (vite) => ({ ...vite, plugins: [...(vite.plugins ?? []), tailwindcss()] }),

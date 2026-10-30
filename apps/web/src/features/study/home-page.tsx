@@ -8,8 +8,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { listStudies } from "@voluma/api-client";
 import type { StudyRunSummary, StudySummary } from "@voluma/contracts/study";
+import { runHref, studyStatus } from "@voluma/run-view";
 import { StatusBadge } from "@voluma/ui";
-import { runHref, studyStatus } from "@voluma/ui/run";
 import { workflowById } from "@voluma/workflow/bundled";
 import { Link } from "react-router";
 import { ButtonLink, Delayed, LoadError, ProgressBar } from "./parts";

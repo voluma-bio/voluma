@@ -3,18 +3,16 @@
  * the To check items as cards (the QC image, what's wrong, "Looks right", "Open in 3D"), and the
  * values grouped by task. Data: `TaskView`s from `runView`; accepting goes through `acceptCheck`.
  */
+
 import { useMutation } from "@tanstack/react-query";
 import { ApiError, acceptCheck, reviewFileUrl } from "@voluma/api-client";
 import type { Asset } from "@voluma/contracts/review";
 import type { Run } from "@voluma/contracts/run";
+import { ClampedMarkdown, Elapsed, type NeedItem, TaskMark, type TaskView } from "@voluma/run-view";
 import { Button, buttonClass, cx, Lightbox } from "@voluma/ui";
 import { ChevronRight, ImageOff } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Link } from "react-router";
-import { Elapsed } from "./agents";
-import { ClampedMarkdown } from "./chat/markdown";
-import type { NeedItem, TaskView } from "./run-model";
-import { TaskMark } from "./task-flow";
 
 /** "Looks right" on a completed run: accepts one check of the latest result. */
 export type Accepting = {

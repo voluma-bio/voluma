@@ -8,7 +8,6 @@
 
 import { cacheHitShare, type Spend } from "@voluma/contracts/spend";
 import { StatusBadge } from "@voluma/ui";
-import { formatDuration, formatUsd } from "@voluma/ui/run";
 import { Bot, ChevronDown, ShieldCheck } from "lucide-react";
 import { useDisclosure } from "./chat/disclosure-store";
 import { InfoButton, type InfoSection } from "./chat/info-button";
@@ -16,7 +15,8 @@ import { Markdown } from "./chat/markdown";
 import { useOpenThread } from "./chat/thread-navigation";
 import { useRunLog } from "./run-log";
 import { agentTitle, type Thread } from "./run-model";
-import { useNow } from "./status";
+import { formatDuration, formatUsd } from "./run-status";
+import { useNow } from "./use-now";
 
 const count = (n: number) => n.toLocaleString();
 

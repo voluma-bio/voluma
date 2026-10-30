@@ -4,21 +4,20 @@
  * left to check; Run details (started, took, settled cost); Stop while it is live; Open in 3D.
  * Alerts: the visitor-keys form while the run waits for its starter's keys, and why it failed.
  */
+
 import { useMutation } from "@tanstack/react-query";
 import { ApiError, cancelRun, resendKeys } from "@voluma/api-client";
 import type { Run } from "@voluma/contracts/run";
 import type { RunSpend } from "@voluma/contracts/spend";
 import type { StudyDetail } from "@voluma/contracts/study";
+import { formatDuration, formatUsd, KeysForm, plainError, useNow } from "@voluma/run-view";
 import { Button, buttonClass } from "@voluma/ui";
-import { formatDuration, formatUsd, KeysForm } from "@voluma/ui/run";
 import { catalog, workflowName } from "@voluma/workflow/bundled";
 import { ChevronDown } from "lucide-react";
 import { Popover } from "radix-ui";
 import { useState } from "react";
 import { Link } from "react-router";
 import { reviewHref } from "./overview";
-import { plainError } from "./run-model";
-import { useNow } from "./status";
 
 const { taskTitle } = catalog["mouse-oa"];
 

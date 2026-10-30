@@ -19,8 +19,8 @@
  */
 import type { StudyDetail, StudyScanDetail, ToCheckItem } from "@voluma/contracts/study";
 import type { OutputEntry } from "@voluma/contracts/workflow-files";
+import { runHref, runStatus } from "@voluma/run-view";
 import type { StatusTone } from "@voluma/ui";
-import { runHref, runStatus } from "@voluma/ui/run";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 
 /** Where "Open in 3D" lands: a To check item, or a run's task (a scan far from its group). */

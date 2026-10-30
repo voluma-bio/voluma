@@ -9,7 +9,7 @@
  */
 import type { Run } from "@voluma/contracts/run";
 import type { StudyRunSummary } from "@voluma/contracts/study";
-import { StatusBadge, type StatusTone } from "../status-badge";
+import { StatusBadge, type StatusTone } from "@voluma/ui";
 
 /** US dollars: cents, or a tenth of a cent under a dollar so a short run doesn't read $0.00. */
 export function formatUsd(usd: number): string {

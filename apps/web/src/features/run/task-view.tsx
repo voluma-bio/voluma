@@ -3,13 +3,18 @@
  * items, its QC image and values, and "How the AI did it": the task's own threads as transcripts,
  * built only when the reader opens it. Tool names may show there and nowhere else on the page.
  */
+import {
+  AgentThread,
+  ClampedMarkdown,
+  Elapsed,
+  type TaskView as Task,
+  TaskMark,
+  type Thread,
+} from "@voluma/run-view";
 import { buttonClass, cx } from "@voluma/ui";
 import { ArrowLeft, Check, ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
-import { AgentThread } from "./agent-thread";
-import { Elapsed } from "./agents";
-import { ClampedMarkdown } from "./chat/markdown";
 import {
   type Accepting,
   doingNow,
@@ -21,8 +26,6 @@ import {
   Section,
   WhatItFound,
 } from "./overview";
-import type { TaskView as Task, Thread } from "./run-model";
-import { TaskMark } from "./task-flow";
 
 export function TaskView({
   runId,

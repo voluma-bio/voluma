@@ -6,7 +6,7 @@
  */
 import { cx } from "@voluma/ui";
 import { ShieldCheck } from "lucide-react";
-import { Link } from "react-router";
+import type { ComponentType, ReactNode } from "react";
 import type { TaskState, TaskView } from "./run-model";
 
 export const STATE_WORD: Record<TaskState, string> = {
@@ -114,16 +114,28 @@ const NODE_MAX_W = 136;
 /** The flowchart's width inside the 320 px column. */
 const WIDTH = 296;
 
+/** The props TaskFlow gives the app's router link. */
+export type TaskLinkProps = {
+  to: string;
+  className: string;
+  title?: string;
+  "aria-current"?: "page";
+  children: ReactNode;
+};
+
 export function TaskFlow({
   tasks,
   selected,
   search,
+  link: Link,
 }: {
   tasks: TaskView[];
   /** The open task; none is Overview. */
   selected?: string;
   /** The page's other search params, kept when a node is opened. */
   search: (taskId?: string) => string;
+  /** The app's router link (react-router's `Link`); this package has no router. */
+  link: ComponentType<TaskLinkProps>;
 }) {
   const { rows, column, depth, width } = layout(tasks);
   const nodeW = Math.min(NODE_MAX_W, (WIDTH - (width - 1) * COL_GAP) / width);
@@ -137,7 +149,7 @@ export function TaskFlow({
         aria-label="Tasks"
         className="flex w-80 shrink-0 flex-col gap-3 overflow-y-auto border-r border-border bg-background px-3 pt-4 pb-16 max-[1100px]:hidden"
       >
-        <OverviewLink selected={!selected} to={search()} />
+        <OverviewLink selected={!selected} to={search()} link={Link} />
         <div className="relative mx-auto" style={{ width: WIDTH, height }}>
           <svg
             aria-hidden
@@ -207,7 +219,7 @@ export function TaskFlow({
       >
         <ol className="grid grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] gap-1">
           <li>
-            <OverviewLink selected={!selected} to={search()} />
+            <OverviewLink selected={!selected} to={search()} link={Link} />
           </li>
           {tasks.map((t) => (
             <li key={t.id}>
@@ -232,7 +244,15 @@ export function TaskFlow({
   );
 }
 
-function OverviewLink({ selected, to }: { selected: boolean; to: string }) {
+function OverviewLink({
+  selected,
+  to,
+  link: Link,
+}: {
+  selected: boolean;
+  to: string;
+  link: ComponentType<TaskLinkProps>;
+}) {
   return (
     <Link
       to={to}

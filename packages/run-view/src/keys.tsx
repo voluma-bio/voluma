@@ -4,8 +4,8 @@
  * user of the browser never sees them; the server holds them in memory only.
  */
 import { type VisitorKeys, visitorKeysSchema } from "@voluma/contracts/run";
+import { Button } from "@voluma/ui";
 import { type FormEvent, useState } from "react";
-import { Button } from "../button";
 
 const storageKey = (userId: string) => `voluma.visitor-keys.${userId}`;
 

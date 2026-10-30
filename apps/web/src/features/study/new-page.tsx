@@ -13,8 +13,8 @@ import { ApiError, createStudy, listInputs, listRuns, signIn } from "@voluma/api
 import type { Me } from "@voluma/contracts/auth";
 import type { Input, Run, VisitorKeys } from "@voluma/contracts/run";
 import type { CreateStudyRequest } from "@voluma/contracts/study";
+import { formatDuration, formatUsd, loadKeys, RunKeyLine } from "@voluma/run-view";
 import { Button } from "@voluma/ui";
-import { formatDuration, formatUsd, loadKeys, RunKeyLine } from "@voluma/ui/run";
 import { catalog } from "@voluma/workflow/bundled";
 import { FolderOpen, Upload, X } from "lucide-react";
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";

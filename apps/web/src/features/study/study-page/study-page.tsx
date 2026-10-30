@@ -14,8 +14,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { ApiError, getStudy } from "@voluma/api-client";
 import type { StudyDetail } from "@voluma/contracts/study";
+import { formatUsd } from "@voluma/run-view";
 import { Button, Tabs } from "@voluma/ui";
-import { formatUsd } from "@voluma/ui/run";
 import { type BundledWorkflow, workflowById } from "@voluma/workflow/bundled";
 import { ChevronDown } from "lucide-react";
 import { Popover } from "radix-ui";

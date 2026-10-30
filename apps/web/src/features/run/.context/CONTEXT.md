@@ -4,6 +4,12 @@ One screen under `RunLayout` (its query client; the top bar is the shell's): `/r
 the run page (`run-page.tsx`). Starting runs is `features/study` (Run on new scans, `/new`); there
 is no runs list: Home (`features/study`) replaces it.
 
+The run's reusable parts live in `packages/run-view` (`@voluma/run-view`), so other features can
+show them without importing this one: `run-model.ts`, `transcript.ts`, `run-log.tsx`,
+`agent-thread.tsx`, `agents.tsx`, `transcript-view.tsx`, `task-flow.tsx`, `chat/`, `use-now.ts`
+(the clock), and the status and keys helpers. File names below refer to that package unless they
+are in this directory. The package has no router: `TaskFlow` takes the router `Link` as a prop.
+
 - **Task titles** come from `workflows/mouse-oa/tasks.json`, read through `catalog["mouse-oa"]`
   from `@voluma/workflow/bundled` (JSON imports parsed with the contract's schemas; the API's
   workflow catalog is the same export; no endpoint serves it) by the bundle's `taskTitle` (a task
@@ -123,7 +129,7 @@ is no runs list: Home (`features/study`) replaces it.
   animation frame. The task list comes from
  the `revision.started` plan; a task not started yet is Ready when every task it builds on has a usable result (`isSatisfied` from `@voluma/workflow`, the supervisor's own rule: done, or To check with every required output), else "Waiting on" those tasks.
   Queue position and run state are not events, so `getRun` is polled every 3 s until the run ends.
-- **Visitor keys** (`@voluma/ui/run`, shared with `features/study`): a Meta key, the only
+- **Visitor keys** (`@voluma/run-view`, shared with `features/study`): a Meta key, the only
   way a guest runs (the API refuses a guest start without it, 403); a member may keep one too. A key
   in this browser is sent with every start, and `RunKeyLine` next to each Start says whose key the
   run uses and lets the user remove it. They live in localStorage under
@@ -132,7 +138,7 @@ is no runs list: Home (`features/study`) replaces it.
 - A completed run links to `/runs/:runId`, the review lane's route; the live page is `/runs/:id/live` so it never shadows it. Active runs open live; stopped and failed runs open live too (it shows the error).
 
 - **A run's status chip** (`RunBadge`, `runStatus`) and the formatters (`formatUsd`,
-  `formatDuration`) are `@voluma/ui/run`, shared with Home; `status.tsx` keeps the clock.
+  `formatDuration`) are `@voluma/run-view`, shared with Home; `use-now.ts` is the clock.
 - **Cost and time** come only from `spend(events, providerCalls)` (`@voluma/contracts/spend`), run
   in `runView` on durable events, never per live frame. Run details shows the run's settled total;
   each card in the lead AI's stream and each thread in "How the AI did it" shows that thread's own
