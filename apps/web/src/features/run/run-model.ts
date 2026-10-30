@@ -54,7 +54,6 @@ export function haltOf(state: RunState, streamClosed: boolean): Halt | undefined
       return undefined;
     case "queued":
     case "awaiting-keys":
-    case "awaiting-person":
       return { kind: "paused" };
     case "ended":
       return streamClosed

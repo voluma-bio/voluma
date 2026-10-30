@@ -5,7 +5,7 @@
  * they cannot disagree about what was said.
  */
 import type { RunEvent } from "./events";
-import type { Mark, MessageSnapshotRef } from "./messages";
+import type { Mark } from "./messages";
 
 export type ConversationItem =
   | {
@@ -16,7 +16,8 @@ export type ConversationItem =
       at: string;
       text: string;
       marks: Mark[];
-      snapshot?: MessageSnapshotRef;
+      /** The snapshot's R2 key (`messageSnapshotKey`). */
+      snapshotKey?: string;
       taskId?: string;
       go: boolean;
     }
@@ -34,7 +35,7 @@ export function conversation(events: readonly RunEvent[]): ConversationItem[] {
   const items: ConversationItem[] = [];
   for (const e of events) {
     if (e.type === "person.message") {
-      const { text, marks, snapshot, taskId, go } = e.payload;
+      const { text, marks, snapshotKey, taskId, go } = e.payload;
       items.push({
         from: "person",
         id: e.id,
@@ -42,7 +43,7 @@ export function conversation(events: readonly RunEvent[]): ConversationItem[] {
         at: e.createdAt,
         text: text ?? "",
         marks: marks ?? [],
-        ...(snapshot && { snapshot }),
+        ...(snapshotKey && { snapshotKey }),
         ...(taskId && { taskId }),
         go: go === true,
       });

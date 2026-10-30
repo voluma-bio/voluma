@@ -16,8 +16,8 @@
  *                                  at once, even if the runner is still stopping (the
  *                                  server records it and the runner obeys); cancelling
  *                                  an ended run is a no-op; 403 for an example run
- *   POST /api/review/runs/:id/messages (`messages.ts`) reopens a run that ended `completed`
- *                                  or is `awaiting-person`, moving it to `queued`
+ *   POST /api/review/runs/:id/messages (`messages.ts`) reopens a run that ended `completed`,
+ *                                  moving it to `queued` for one claim
  *   POST /api/run/runs/:id/keys    body `resendKeysRequestSchema` → 200 `runSchema`
  *                                  (409 unless the run is `awaiting-keys`; 403 unless
  *                                  the caller is its `startedBy`; 429: see Limits)
@@ -133,7 +133,7 @@
  *     recovered run isn't refused for a limit it already passed;
  *   - for `visitor` runs: at most this many `queued` or `running` in the org
  *     (those hold the visitor's keys in the server's memory, or a runner
- *     slot; an `awaiting-keys` or `awaiting-person` run holds neither and doesn't count). Starting
+ *     slot; an `awaiting-keys` run holds neither and doesn't count). Starting
  *     one, or `/keys`, answers 429 at the cap. Only those two calls add to the
  *     count, so the claim needn't check it again.
  * Which org's run a claim takes: `runner.ts`.
@@ -183,12 +183,6 @@ export const runStateSchema = z.discriminatedUnion("status", [
    * they're resent. `startedAt` is null if it was never claimed.
    */
   z.object({ status: z.literal("awaiting-keys"), startedAt: z.iso.datetime().nullable() }),
-  /**
-   * The main agent waits only on the researcher (a release with reason `awaiting-person`,
-   * `runner.ts`); shown "Waiting on you". Holds no runner and no keys. A person message queues
-   * it again (`messages.ts`); with none for 30 minutes the API ends the run as it was.
-   */
-  z.object({ status: z.literal("awaiting-person"), startedAt: z.iso.datetime() }),
   z.object({
     status: z.literal("ended"),
     outcome: z.enum(["completed", "failed", "cancelled"]),

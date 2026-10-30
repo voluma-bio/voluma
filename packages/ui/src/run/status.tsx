@@ -48,8 +48,6 @@ export function runStatus({ state, review }: Pick<StudyRunSummary, "state" | "re
       return { label: "Running", tone: "info", detail: `Started ${formatTime(state.startedAt)}` };
     case "awaiting-keys":
       return { label: "Needs your keys", tone: "check" };
-    case "awaiting-person":
-      return { label: "Waiting on you", tone: "check" };
     case "ended":
       if (state.outcome === "completed")
         return review?.reviewedAt

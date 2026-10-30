@@ -49,9 +49,7 @@
  * `released` with its reason, so the run is recovered without waiting out the lease.
  * When a lease expires, or the runner releases it, the run is recovered the
  * same way: a `voluma` run goes back to `queued`, ahead of newer runs; a
- * `visitor` run goes to `awaiting-keys`, because its keys are gone. A release with reason
- * `awaiting-person` instead moves the run to `awaiting-person` ("Waiting on you"): it holds no
- * runner, and a person message (`messages.ts`) moves it to `queued`. The runner
+ * `visitor` run goes to `awaiting-keys`, because its keys are gone. The runner
  * keeps its `events` already written, and the next claim resumes the thread
  * from them. That claim carries `previousClaim.reason`, why the claim before it ended
  * (`claimEndReasonSchema`); the API records `lease-expired` itself when it sweeps a lease. The
@@ -62,10 +60,8 @@
  * progress (a `task`, `checkpoint`, `output`, `attempt.opened`, `assets.ready` or correcting
  * `revision.started` or `plan.changed` event), and the run ends
  * `failed` at 3, naming the call that was in flight. Progress resets the count. `shutdown`
- * never counts, so deploys don't fail a long run, and `awaiting-person` never counts either (a run
- * waiting on the researcher is not stalled); it does not reset the count. Appending a
- * `person.message` (`messages.ts`) resets it to 0: the event lands between claims, so the next
- * claim's progress window never contains it.
+ * never counts, so deploys don't fail a long run. A reopen (`messages.ts`) resets the count to 0
+ * and clears `lastClaimEnd`, so `previousClaim` never reports a reason from before it.
  *
  * There is no tokenless call: the runner service is the only claimer.
  *
@@ -89,7 +85,7 @@
  * sees spend that did not come through its heartbeats.
  *
  * Reports. The runner ends the run with `ended`, or gives it up with
- * `released` (a shutdown, a self-stop or `awaiting-person`: its `reason`). Either one ends the
+ * `released` (a shutdown or a self-stop: its `reason`). Either one ends the
  * lease, and a `released` run is recovered as above, at once. The runner's
  * `ended` never says `cancelled`, which is the server's to record. The first
  * end wins: a report on a run that has ended, or that this lease no longer
@@ -122,24 +118,11 @@ export const leaseLostSchema = z.object({ code: z.literal("lease-lost") });
 export const runnerIdSchema = z.string().min(1);
 
 /** Why the runner gave up a lease. */
-export const releaseReasonSchema = z.enum([
-  "shutdown",
-  "self-stop",
-  // The main agent waits only on the person (`messages.ts`): the run moves to `awaiting-person`
-  // for every credentials kind, and a person message queues it again.
-  "awaiting-person",
-]);
+export const releaseReasonSchema = z.enum(["shutdown", "self-stop"]);
 export type ReleaseReason = z.infer<typeof releaseReasonSchema>;
 
 /** Why a claim ended: a release reason, or the API swept its expired lease. */
-export const claimEndReasonSchema = z.enum([
-  ...releaseReasonSchema.options,
-  "lease-expired",
-  // Not an end but the cause of the next claim: a person message reopened the run (an ended
-  // `completed` run, or an `awaiting-person` one). `claim.started.after` and `previousClaim.reason`
-  // carry it on that claim.
-  "person-message",
-]);
+export const claimEndReasonSchema = z.enum([...releaseReasonSchema.options, "lease-expired"]);
 export type ClaimEndReason = z.infer<typeof claimEndReasonSchema>;
 
 export const claimRequestSchema = z.object({
@@ -197,6 +180,16 @@ export const heartbeatResponseSchema = z.object({
 export type HeartbeatResponse = z.infer<typeof heartbeatResponseSchema>;
 
 export const reportRequestSchema = z.object({
+  /**
+   * The highest event `seq` the runner had read or written when it decided to stop (its log
+   * is read once per claim, so a later `person.message` is one it has not seen). Under the queue
+   * lock `report()` compares it with the run's events: a `person.message` after it sends the
+   * run to `queued` instead of recording the end or the release (`messages.ts`), so a note
+   * sent mid-claim is never lost. For a reopened run that means `completed` stays the outcome
+   * of the earlier work and the new claim answers the note. Optional only until the runner sends it
+   * (the implementation PR); `report()` skips the check when absent.
+   */
+  lastSeq: z.number().int().nonnegative().optional(),
   report: z.discriminatedUnion("kind", [
     z.object({
       kind: z.literal("ended"),
