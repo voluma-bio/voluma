@@ -95,7 +95,6 @@ export function TaskReport({
   revisionId,
   readOnly,
   onFocus,
-  onRefresh,
 }: {
   task: ReviewTask;
   /** A structure id to its name, for To check items that point at structures. */
@@ -107,7 +106,6 @@ export function TaskReport({
   revisionId: string;
   readOnly: boolean;
   onFocus(focus?: Focus): void;
-  onRefresh(): Promise<void>;
 }) {
   const accept = useAcceptCheck(runId, revisionId);
   const references = task.measurements.flatMap((m) =>
