@@ -36,7 +36,7 @@ report. The behavior is:
 | Header | Status sits beside the sample title. Mark reviewed, Revision and Export CSV share one header action row |
 | Chat/corrections | Disabled; no command adapter or simulated responses |
 | CSV | Available only with a real snapshot; includes task result revision and evidence identifiers, and escapes spreadsheet formulas |
-| Structures | Visibility/opacity are display state, not scientific edits |
+| Structures | Structures and surfaces, each with visibility/opacity: display state, not scientific edits |
 | Viewer layout | Resizable nested panels; maximizing changes CSS layout without remounting a pane |
 
 `report/model.ts` re-exports contract types and supplies scientific status labels.

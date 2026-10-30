@@ -214,7 +214,21 @@ export function ReviewWorkspace({
                   value={filter}
                   onChange={(event) => setFilter(event.target.value)}
                 />
-                {revision?.structures
+                {[
+                  ...(revision?.structures ?? []).map((item) => ({
+                    id: item.id,
+                    name: item.name,
+                    label: item.voxels && "label" in item.voxels ? item.voxels.label : undefined,
+                    note: item.missing ? `Missing · ${item.missing.reason}` : "Reported",
+                  })),
+                  // Surfaces draw as meshes in 3D, so they hide and fade the same way.
+                  ...(revision?.surfaces ?? []).map((item) => ({
+                    id: item.id,
+                    name: item.name,
+                    label: undefined,
+                    note: "Surface",
+                  })),
+                ]
                   .filter((item) => item.name.toLowerCase().includes(filter.toLowerCase()))
                   .map((item) => {
                     const settings = display[item.id] ?? { visible: true, opacity: 100 };
@@ -231,19 +245,17 @@ export function ReviewWorkspace({
                               })
                             }
                           />
-                          {item.voxels && "label" in item.voxels && (
+                          {item.label !== undefined && (
                             <span
                               className="inline-block h-2 w-2 self-center"
                               style={{
-                                background: `var(--label-${((item.voxels.label - 1) % 12) + 1})`,
+                                background: `var(--label-${((item.label - 1) % 12) + 1})`,
                               }}
                             />
                           )}
                           {item.name}
                         </label>
-                        <p className="mt-2 text-muted-foreground">
-                          {item.missing ? `Missing · ${item.missing.reason}` : "Reported"}
-                        </p>
+                        <p className="mt-2 text-muted-foreground">{item.note}</p>
                         <label className="opacity-control">
                           Opacity
                           <input
@@ -265,9 +277,9 @@ export function ReviewWorkspace({
                       </div>
                     );
                   })}
-                {!revision?.structures.length && (
+                {!revision?.structures.length && !revision?.surfaces.length && (
                   <p className="mt-4 text-sm text-muted-foreground">
-                    No segmentation structures are available.
+                    No structures or surfaces are available.
                   </p>
                 )}
               </div>

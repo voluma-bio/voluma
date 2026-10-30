@@ -22,7 +22,7 @@ not shown here"), never resampled onto this one.
 - **Assets.** From `ReviewRun.assets` by the file's sha256: absent is "Preparing…", `failed` is
   its error. For the image that replaces the viewer; for an overlay it is a note under the heading.
   Review refetches while a file of the latest revision has no entry (about ten minutes at most).
-- **Display.** The Structures panel's visibility and opacity scale the overlay's blend and the
+- **Display.** The Structures panel lists structures and surfaces; its visibility and opacity scale the overlay's blend and the
   mesh; hidden is opacity 0, so a mesh stays loaded. A new scene on the same grid redraws in place.
 - **Focus.** A check's focused blocks are drawn in `--check-outline` at full opacity, whatever the
   panel says; so is its `volumeId` labels volume (a disagreement mask), only its `label` if given,
