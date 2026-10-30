@@ -18,7 +18,7 @@ import {
   type Usage as RunnerUsage,
 } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
-import { heldUsdOfRun } from "@voluma/provider-calls";
+import { knownUsdOfRun } from "@voluma/provider-calls";
 import { and, asc, desc, eq, gt, notInArray, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { Reader } from "../../domain";
@@ -383,7 +383,7 @@ export function pgRunQueue(
             return { stop: true };
           }
         }
-        const gateway = await heldUsdOfRun(tx, runId);
+        const gateway = await knownUsdOfRun(tx, runId);
         return { stop: false, spentUsd: run.modelCostUsd + used.modelCostUsd + gateway };
       }),
 
