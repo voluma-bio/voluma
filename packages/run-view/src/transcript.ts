@@ -359,7 +359,7 @@ function rowBuilder() {
 const SHOWN_AS_ROWS = new Set(["checkpoint", "report_output"]);
 
 /**
- * The transcript of the threads in `ids` (one worker, checker or chat thread; or every main
+ * The transcript of the threads in `ids` (one worker or check thread; or every main
  * thread of the run): what it was told, its prose, its folded process, its milestones, then
  * whatever of its reply is still streaming. A tool call still running when its thread ended,
  * or when the runner stopped (`halt`), shows as stopped. `orchestration` adds what the main
@@ -383,12 +383,8 @@ function rowsOf(
   let root: string | undefined;
   for (const e of events) {
     if (orchestration) {
-      if (e.type === "thread.started" && e.payload.kind === "supervisor") root = e.threadId;
-      if (
-        e.type === "thread.started" &&
-        (e.payload.kind === "worker" || e.payload.kind === "check") &&
-        !seen.has(e.threadId)
-      ) {
+      if (e.type === "thread.started" && e.payload.parentThreadId === null) root = e.threadId;
+      if (e.type === "thread.started" && e.payload.task !== undefined && !seen.has(e.threadId)) {
         seen.add(e.threadId);
         b.row({ kind: "agent", id: `agent:${e.threadId}`, threadId: e.threadId });
       } else if (e.type === "revision.started" && e.payload.reason === "correction") {
@@ -518,7 +514,7 @@ function rowsOf(
   return b.done();
 }
 
-/** One worker, checker or chat thread's transcript. */
+/** One worker or check thread's transcript. */
 export const threadRows = (
   events: RunEvent[],
   threadId: string,
@@ -530,7 +526,11 @@ export const threadRows = (
 export function mainRows(events: RunEvent[], live: Live = noLive, halt?: Halt): Row[] {
   const mains = new Set(
     events.flatMap((e) =>
-      e.type === "thread.started" && e.payload.kind === "main" ? [e.threadId] : [],
+      e.type === "thread.started" &&
+      e.payload.parentThreadId !== null &&
+      e.payload.task === undefined
+        ? [e.threadId]
+        : [],
     ),
   );
   return rowsOf(events, mains, live, halt, true);

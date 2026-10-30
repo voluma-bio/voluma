@@ -11,7 +11,7 @@
  */
 import type { RunEvent } from "@voluma/contracts/events";
 import { createContext, type ReactNode, useContext, useState, useSyncExternalStore } from "react";
-import { type Thread, withLiveCalls } from "./run-model";
+import { isMain, type Thread, withLiveCalls } from "./run-model";
 import { type Halt, type Live, mainRows, noLive, type Row, threadRows } from "./transcript";
 
 type RunState = {
@@ -86,8 +86,8 @@ export function createRunStore() {
   /** The thread ids whose live frames a thread's transcript shows: all main threads, or itself. */
   function transcriptIds(threadId: string): Set<string> {
     const thread = state.baseThreads.find((t) => t.id === threadId);
-    return thread?.kind === "main"
-      ? new Set(state.baseThreads.filter((t) => t.kind === "main").map((t) => t.id))
+    return thread && isMain(thread)
+      ? new Set(state.baseThreads.filter(isMain).map((t) => t.id))
       : new Set([threadId]);
   }
 
@@ -119,7 +119,8 @@ export function createRunStore() {
   >();
   function rowsOf(threadId: string): Row[] {
     const live = liveOf(threadId);
-    const main = state.baseThreads.find((t) => t.id === threadId)?.kind === "main";
+    const thread = state.baseThreads.find((t) => t.id === threadId);
+    const main = thread !== undefined && isMain(thread);
     const held = rowsMemo.get(threadId);
     if (
       held &&

@@ -19,7 +19,6 @@ import type { Sandbox } from "./ports/sandbox";
 import type { Recorder } from "./recorder";
 import { type Briefs, type LoopConfig, type RoleOf, runLoop } from "./run-loop";
 import { type PlanTask, taskRuntime } from "./task-runtime";
-import { supervisorThreadId } from "./thread-id";
 import { threadLog } from "./thread-log";
 import { threads } from "./threads";
 import { buildTools } from "./tools/registry";
@@ -67,9 +66,12 @@ export interface SuperviseRunOptions {
   signal: AbortSignal;
 }
 
+/** The run's root thread. Ids are minted here and in `run-loop.ts` and read nowhere else. */
+export const rootThreadIdOf = (runId: string) => `${runId}.supervisor`;
+
 export async function superviseRun(options: SuperviseRunOptions): Promise<Folded> {
   const { runId, recorder, signal } = options;
-  const rootThreadId = supervisorThreadId(runId);
+  const rootThreadId = rootThreadIdOf(runId);
   // A stored log means an earlier claim ran. `previousClaim` says why it ended; a run claimed
   // before the API recorded reasons has none, and its resume says only "restarted".
   const resumed = recorder.events().length > 0;
@@ -100,7 +102,11 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
   const pool = threads(
     {
       recorder,
-      history: withImageRefs(options.history, options.files, runId),
+      history: withImageRefs(options.history, options.files, runId, (id) => {
+        const record = threadLog(recorder.events()).threads.get(id);
+        if (!record) throw new Error(`${id} has no thread.started`);
+        return record.name;
+      }),
       sandbox: options.sandbox,
       release: options.releaseSandbox,
       providerOutage: options.providerOutage,

@@ -7,7 +7,7 @@
  */
 import { type ReactNode, useLayoutEffect, useMemo, useRef } from "react";
 import { Elapsed, ThreadSpendInfo, threadWord } from "./agents";
-import { agentLabel, agentTitle } from "./run-model";
+import { agentLabel, agentTitle, isMain } from "./run-model";
 import { useThread, useThreadRows, useThreads } from "./run-store";
 import { TranscriptView } from "./transcript-view";
 
@@ -29,7 +29,6 @@ export function AgentThread({
 }) {
   const threads = useThreads();
   const thread = useThread(threadId);
-  const kind = thread?.kind;
   const rows = useThreadRows(threadId);
   const threadById = useMemo(() => new Map(threads.map((t) => [t.id, t])), [threads]);
   const running = thread?.status === "running";
@@ -89,7 +88,7 @@ export function AgentThread({
       >
         <TranscriptView
           rows={rows}
-          threads={kind === "main" ? threadById : undefined}
+          threads={thread && isMain(thread) ? threadById : undefined}
           live={running ? (thread.liveTool ?? "") : null}
           empty={
             running

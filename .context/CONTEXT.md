@@ -38,7 +38,7 @@ The agent loop is Pi's (`@earendil-works/pi-agent-core`), used as it comes;
 we add our own pieces only when a real run needs them. The agent runs
 outside the sandbox, so credentials never enter it. A run is a tree of
 threads: a supervisor (the root, code), the main agent, workers (one per task),
-check threads, and review chat threads.
+and check threads.
 - **Event log.** Ours, kept separately from Pi's history: the `threads` and
   `events` tables in Postgres, behind the run domain's API. Each event is saved
   before it is published, and `seq` (per run) is the stream cursor. Both the

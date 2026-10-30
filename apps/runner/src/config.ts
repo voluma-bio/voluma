@@ -187,7 +187,7 @@ export function runnerConfig() {
   // One snapshot: the launcher can replace or remove the manifest while we start.
   const dev = devEnv();
   const api = apiEndpoint(dev);
-  const metaApiKey = optional("VOLUMA_META_API_KEY");
+  const metaApiKey = optional("VOLUMA_META_API_KEY"); // redacted only; models read it as `providerKey("meta")`
   // The dev API's gateway comes only from its launcher: inherited settings must not bypass
   // `pnpm dev --sam`, or replace the tunnel and its per-launch secret with an older pair.
   const local = dev && apiOrigin(api.baseUrl) === apiOrigin(dev.apiUrl) ? dev : undefined;
@@ -239,8 +239,6 @@ export function runnerConfig() {
      */
     visitorModel: visitorModel(),
     modal,
-    /** Our Meta key, for the main thread's Muse Wonder (SAM goes through the gateway). */
-    metaApiKey,
     /**
      * The gateway sandboxes reach providers through, and the secrets their tokens are minted
      * with (`GATEWAY_TOKEN_SECRET`, the gateway's own; the first mints); absent: sandboxes have

@@ -32,9 +32,8 @@ export function reviewRun({
       status: t.status,
       resultRevisionId: t.resultRevisionId,
       checker: t.checker,
-      // No review chat yet: it is one thread per run, and its contract is still to come.
-      threads: { ...t.threads, chat: null },
-      models: { ...t.models, chat: null },
+      threads: t.threads,
+      models: t.models,
       measurements: t.measurements,
       scores: t.scores,
       missing: t.missing,
@@ -68,11 +67,7 @@ export function reviewRun({
       const nextRevisionId = revisions[index + 1]?.id;
       while (events[cursor] && events[cursor]?.id !== nextRevisionId) {
         const event = events[cursor++];
-        if (
-          event?.type === "thread.started" &&
-          event.payload.kind === "worker" &&
-          event.payload.task
-        )
+        if (event?.type === "thread.started" && event.payload.task && !event.payload.attemptId)
           workers.set(event.payload.task, event);
       }
       const planned = plannedIn(rev);
@@ -94,8 +89,8 @@ export function reviewRun({
             // There is no result yet; the required revision reference anchors the planned row.
             resultRevisionId: start.id,
             checker: null,
-            threads: { worker: worker?.threadId ?? null, check: null, chat: null },
-            models: { worker: worker?.payload.model ?? null, check: null, chat: null },
+            threads: { worker: worker?.threadId ?? null, check: null },
+            models: { worker: worker?.payload.model ?? null, check: null },
             measurements: [],
             scores: [],
             missing: [],

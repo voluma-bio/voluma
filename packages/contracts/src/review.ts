@@ -455,17 +455,15 @@ export const taskSchema = z.object({
   resultRevisionId: z.string(),
   /** Null when no second agent checked it. */
   checker: z.object({ verdict: z.enum(["passed", "needs-review"]), text: z.string() }).nullable(),
-  /** Threads in the run record: what the agent did, its check, the reviewer's chat. */
+  /** Threads in the run record: what the agent did, and its check. */
   threads: z.object({
     worker: z.string().min(1).nullable(),
     check: z.string().min(1).nullable(),
-    chat: z.string().min(1).nullable(),
   }),
   /** The model each thread called, `provider/id`; null where the thread is null or its start recorded none. */
   models: z.object({
     worker: modelRefSchema.nullable(),
     check: modelRefSchema.nullable(),
-    chat: modelRefSchema.nullable(),
   }),
   measurements: z.array(measurementSchema),
   scores: z.array(scoreSchema),

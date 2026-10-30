@@ -23,7 +23,6 @@ import { runLayout } from "./layout";
 import { EvidenceNotFound } from "./ports/evidence";
 import { recorder } from "./recorder";
 import { type LoopConfig, type PlanTask, superviseRun } from "./supervise-run";
-import { parseThreadId } from "./thread-id";
 
 export const RUN = "r1";
 
@@ -78,15 +77,16 @@ const textOf = (content: unknown): string =>
     ? content
     : ((content as { text?: string }[] | undefined) ?? []).map((b) => b.text ?? "").join("");
 
-function turnOf(messages: any[], thread: string, signal: AbortSignal | undefined): Turn {
-  const parsed = parseThreadId(RUN, thread);
+function turnOf(
+  messages: any[],
+  who: Pick<Turn, "thread" | "role" | "task">,
+  signal: AbortSignal | undefined,
+): Turn {
   const lastUserIdx = messages.map((m) => m.role).lastIndexOf("user");
   const users = messages.filter((m) => m.role === "user").map((m) => textOf(m.content));
   return {
-    thread,
+    ...who,
     signal,
-    role: parsed.kind,
-    task: parsed.kind === "main" ? undefined : parsed.taskId,
     users,
     lastUser: users.at(-1) ?? "",
     fresh: messages.at(-1)?.role === "user",
@@ -245,9 +245,12 @@ export function world(o: WorldOptions) {
     (typeof providers)[number],
   ];
   const factory =
-    (script: Script): FauxResponseFactory =>
+    (script: Script, role: Turn["role"]): FauxResponseFactory =>
     async (ctx, options) => {
-      const turn = turnOf(ctx.messages as any[], options?.sessionId as string, options?.signal);
+      const thread = options?.sessionId as string;
+      const started = stored.find((e) => e.type === "thread.started" && e.threadId === thread);
+      const task = started?.type === "thread.started" ? started.payload.task : undefined;
+      const turn = turnOf(ctx.messages as any[], { thread, role, task }, options?.signal);
       const reply = await script(turn);
       if (reply === undefined)
         throw new Error(`no scripted reply for ${turn.thread} (${turn.steps} steps)`);
@@ -261,9 +264,9 @@ export function world(o: WorldOptions) {
         [reply].flat().map((c) => fauxToolCall(c.name, c.input as never, { id: callId() })),
       );
     };
-  mainP.setResponses(Array(400).fill(factory(o.main)));
-  workerP.setResponses(Array(400).fill(factory(o.worker ?? worker)));
-  checkP.setResponses(Array(400).fill(factory(o.check ?? checker())));
+  mainP.setResponses(Array(400).fill(factory(o.main, "main")));
+  workerP.setResponses(Array(400).fill(factory(o.worker ?? worker, "worker")));
+  checkP.setResponses(Array(400).fill(factory(o.check ?? checker(), "check")));
 
   const role = (p: typeof mainP, tools: string[]) => () => ({
     model: p.getModel(),

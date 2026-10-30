@@ -38,8 +38,7 @@ export type UserSender = Extract<PayloadOf<"message">, { role: "user" }>["sender
  */
 type ThreadIdentity =
   | { kind: "worker" | "check"; taskId: string }
-  | { kind: "main"; taskId?: undefined }
-  | { kind: "chat"; taskId?: string };
+  | { kind: "main"; taskId?: undefined };
 
 export type StartThreadOptions = ThreadIdentity & {
   threadId: string;

@@ -40,8 +40,6 @@ export interface AgentDefinition {
   subagents: string[];
   /** The skills named in the role's prompt: names of the workflow's `skills`, its own first. */
   skills: string[];
-  /** `planned`: nothing uses the role yet, so its tools are not checked against the registry. */
-  planned: boolean;
   /** The role's job: the file after its frontmatter, trimmed. */
   body: string;
 }
@@ -59,13 +57,12 @@ export interface WorkflowDefinition {
   toolIndex: ToolIndexEntry[];
   /**
    * The role files of `workflows/core/agents/`, the same for every workflow. The loader requires
-   * `main`, `worker` and `checker`; `others` holds the rest by name.
+   * `main`, `worker` and `check`.
    */
   agents: {
     main: AgentDefinition;
     worker: AgentDefinition;
-    checker: AgentDefinition;
-    others: Record<string, AgentDefinition>;
+    check: AgentDefinition;
   };
 }
 

@@ -66,7 +66,7 @@ export function log() {
       add("revision.started", "root:revision", "root", { reason: "run", plan }),
     thread: (thread: string, kind: "worker" | "check" | "supervisor", attemptId?: string) =>
       add("thread.started", `${thread}:started`, thread, {
-        parentThreadId: null,
+        parentThreadId: kind === "supervisor" ? null : "root",
         workflows: [{ repo: "o/w", commit: "a".repeat(40) }],
         kind,
         ...(attemptId && { attemptId }),
@@ -174,8 +174,8 @@ export function expectParses(f: Folded) {
         ...t,
         title: t.id,
         ask: "",
-        threads: { ...t.threads, chat: null },
-        models: { ...t.models, chat: null },
+        threads: t.threads,
+        models: t.models,
       })),
     })),
   };

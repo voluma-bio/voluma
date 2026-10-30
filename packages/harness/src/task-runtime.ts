@@ -14,7 +14,7 @@
  * append hits one.
  */
 
-import type { By, ThreadKind } from "@voluma/contracts/events";
+import type { By } from "@voluma/contracts/events";
 import { abandonedEvents, type Folded, type FoldedTask } from "@voluma/contracts/fold";
 import type { EvidenceRef } from "@voluma/contracts/output";
 import type {
@@ -31,8 +31,7 @@ import { declarationProblem, placementProblem, referenceProblem } from "./output
 import { type Evidence, EvidenceNotFound, EvidenceRefused } from "./ports/evidence";
 import type { Sandbox } from "./ports/sandbox";
 import type { PayloadOf, Recorder } from "./recorder";
-import { isThreadName, parseThreadId } from "./thread-id";
-import { pathOf, startedFor, threadLog } from "./thread-log";
+import { pathOf, type Role, startedFor, type ThreadIdentity, threadLog } from "./thread-log";
 import { effectId } from "./tools/effects";
 
 /** A check thread may ask the main agent this many questions. */
@@ -45,7 +44,7 @@ export type PlanTask = WorkflowPlan["tasks"][number];
 export interface Caller {
   threadId: string;
   toolCallId: string;
-  kind: ThreadKind;
+  kind: "main" | Role;
   taskId?: string;
   /** How many tool calls the reply that made this call holds (`ToolContext.batchSize`). */
   batchSize: number;
@@ -76,7 +75,7 @@ export interface TaskRuntimeOptions {
    * The calling thread's view of the files: evidence it names must be readable through it. The
    * layout asks `cited` for a checker's reads of the worker's scratch.
    */
-  layoutOf(threadId: string, cited: (path: string) => boolean): ThreadLayout;
+  layoutOf(thread: ThreadIdentity, cited: (path: string) => boolean): ThreadLayout;
   /** A thread's own sandbox (`sandboxSession.get`): evidence is hashed in it. */
   sandbox(threadId: string, options?: { note?: boolean }): Promise<Sandbox>;
   /** The thread under which the run's first event is written. */
@@ -103,14 +102,18 @@ type OutputInput = ReportOutputInput["output"];
 type FileInput = Extract<OutputInput, { kind: "file" }>["file"];
 
 /** The `{root, path}` of a sandbox path as a script prints it; only this task's outputs and the scratch have one. */
-export function refOf(taskId: string, path: string): Pick<EvidenceRef, "root" | "path"> {
+export function refOf(
+  taskId: string,
+  path: string,
+  threadNames: ReadonlySet<string>,
+): Pick<EvidenceRef, "root" | "path"> {
   const own = `/outputs/${taskId}/`;
   if (path.startsWith(own)) return { root: "outputs", path: path.slice(own.length) };
   if (path.startsWith("/scratch/")) {
     const rest = path.slice("/scratch/".length);
     // A tool-call scratch path is relative to the caller's folder unless it starts with a thread name, so a file
     // printed at the scratch root cannot be named; a script writes in $SCRATCH, which is a thread folder.
-    if (!isThreadName(rest.split("/")[0] ?? "")) {
+    if (!threadNames.has(rest.split("/")[0] ?? "")) {
       throw new Refusal(
         `${path} is not in a thread's folder under /scratch/. Write files under $SCRATCH and report them by that path.`,
       );
@@ -161,6 +164,9 @@ export function taskRuntime(options: TaskRuntimeOptions) {
 
   const log = () => threadLog(recorder.events());
   const view = (): Folded => log().view;
+  /** The names of the run's threads: the folders under `/scratch`. */
+  const threadNames = (): ReadonlySet<string> =>
+    new Set([...log().threads.values()].map((t) => t.name));
   const taskOf = (id: string): FoldedTask | undefined => view().tasks.find((t) => t.id === id);
   /** The plan now, with every `plan.changed` applied. */
   const planNow = () => view().plan.tasks;
@@ -451,10 +457,11 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     taskId: string,
     f: Pick<EvidenceRef, "root" | "path">,
   ): Promise<EvidenceRef> => {
-    const ownName = parseThreadId(runId, c.threadId).name;
+    const record = log().threads.get(c.threadId);
+    if (!record) throw new Error(`${c.threadId} has no thread.started`);
     const file =
-      f.root === "scratch" && !log().threads.has(`${runId}.${f.path.split("/")[0]}`)
-        ? { root: f.root, path: `${ownName}/${f.path}` }
+      f.root === "scratch" && !threadNames().has(f.path.split("/")[0] ?? "")
+        ? { root: f.root, path: `${record.name}/${f.path}` }
         : { root: f.root, path: f.path };
     // `path` is inside the task's output folder; models often repeat the task id in front, so a
     // path that is missing as given is tried once more without it.
@@ -465,7 +472,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
         : undefined;
     const keepFile = async (file: Pick<EvidenceRef, "root" | "path">): Promise<EvidenceRef> => {
       const path = pathOf(taskId, file);
-      const layout = layoutOf(c.threadId, (p) => cites(taskId, p));
+      const layout = layoutOf(record, (p) => cites(taskId, p));
       try {
         layout.keyOf(path, "read");
       } catch (error) {
@@ -510,6 +517,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
 
   return {
     view,
+    threadNames,
     taskOf,
     cites,
     section,

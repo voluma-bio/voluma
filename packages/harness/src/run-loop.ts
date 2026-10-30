@@ -56,12 +56,12 @@ import {
 } from "./messages";
 import type { Recorder } from "./recorder";
 import type { PlanTask, TaskRuntime } from "./task-runtime";
-import { mainThreadId, threadId } from "./thread-id";
 import {
   fixLimitReached,
   openAsk,
   type Role,
   startedFor,
+  type ThreadIdentity,
   type ThreadLog,
   type ThreadRecord,
   type ThreadState,
@@ -211,12 +211,12 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
   }
 
   /** The start options for a thread; `prompt` is its first message, which a resumed thread uses only if it never stored one. */
-  function specFor(r: { id: string; kind: "main" } | { id: string; kind: Role; taskId: string }) {
+  function specFor(r: ThreadIdentity) {
     const d = derive();
     const view = runtime.view();
-    const taskId = r.kind === "main" ? undefined : r.taskId;
-    const thread = o.layout.forThread(r.id, taskId ? (p) => runtime.cites(taskId, p) : undefined);
-    const role = o.roles[r.kind](thread, d.threads.get(r.id)?.model);
+    const taskId = r.taskId;
+    const thread = o.layout.forThread(r, taskId ? (p) => runtime.cites(taskId, p) : undefined);
+    const role = o.roles[r.role](thread, d.threads.get(r.id)?.model);
     const common = {
       threadId: r.id,
       systemPrompt: role.systemPrompt,
@@ -227,8 +227,11 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       interrupted: (tool: string, toolCallId: string) =>
         interruptedResult(derive(), r.id, tool, toolCallId),
     };
-    if (r.kind === "main") {
-      const n = Number(/\.main(?:\.(\d+))?$/.exec(r.id)?.[1] ?? 1);
+    if (r.role === "main") {
+      // Which main this is: its place among the mains logged so far (a new one is the next).
+      const mains = [...d.threads.values()].filter((t) => t.role === "main");
+      const at = mains.findIndex((t) => t.id === r.id);
+      const n = (at === -1 ? mains.length : at) + 1;
       return {
         ...common,
         kind: "main" as const,
@@ -238,7 +241,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     }
     const task = planTask(view, r.taskId);
     const record = d.threads.get(r.id);
-    if (r.kind === "worker") {
+    if (r.role === "worker") {
       return {
         ...common,
         kind: "worker" as const,
@@ -291,49 +294,50 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
   /** Resumes a thread that is not running, from its History, with a message. Never a stopped one. */
   async function resume(r: ThreadRecord, text: string, sender: UserSender) {
     if (stateOf(r) === "stopped") throw new Error(`${r.id} was stopped and is never resumed`);
-    const spec =
-      r.role === "main"
-        ? specFor({ id: r.id, kind: "main" })
-        : specFor({ id: r.id, kind: r.role, taskId: r.taskId });
-    await begin({ ...spec, input: { text, sender } }, `${r.id}:started:${r.starts + 1}`);
+    await begin({ ...specFor(r), input: { text, sender } }, `${r.id}:started:${r.starts + 1}`);
   }
 
-  /** The next id of a task's thread; an id this process found unresumable is used up. */
-  function nextId(d: ThreadLog, taskId: string, role: Role) {
-    let n = startedFor(d, taskId, role).length + 1;
-    while (threads.stale(threadId(runId, taskId, role, n))) n++;
-    return threadId(runId, taskId, role, n);
-  }
-
-  function nextMainId(d: ThreadLog) {
-    let n = [...d.threads.values()].filter((r) => r.role === "main").length + 1;
-    while (threads.stale(mainThreadId(runId, n))) n++;
-    return mainThreadId(runId, n);
+  /**
+   * The next thread of a task (`<task>.<role>[.<n>]`) or of the main agent (`main[.<n>]`), after
+   * the `n` already logged; an id this process found unresumable is used up.
+   */
+  function nextThread(d: ThreadLog, role: "main"): ThreadIdentity;
+  function nextThread(d: ThreadLog, role: Role, taskId: string): ThreadIdentity;
+  function nextThread(d: ThreadLog, role: "main" | Role, taskId?: string): ThreadIdentity {
+    const base = role === "main" ? "main" : `${taskId}.${role}`;
+    let n =
+      (role === "main"
+        ? [...d.threads.values()].filter((r) => r.role === "main").length
+        : startedFor(d, taskId as string, role).length) + 1;
+    const nameOf = (n: number) => (n === 1 ? base : `${base}.${n}`);
+    while (threads.stale(`${runId}.${nameOf(n)}`)) n++;
+    const named = { id: `${runId}.${nameOf(n)}`, name: nameOf(n) };
+    return role === "main" ? { ...named, role } : { ...named, role, taskId: taskId as string };
   }
 
   const startMain = (d: ThreadLog) => {
-    const id = nextMainId(d);
-    return begin(specFor({ id, kind: "main" }), `${id}:started`);
+    const thread = nextThread(d, "main");
+    return begin(specFor(thread), `${thread.id}:started`);
   };
 
   const startCheck = (d: ThreadLog, taskId: string) => {
-    const id = nextId(d, taskId, "check");
-    return begin(specFor({ id, kind: "check", taskId }), `${id}:started`);
+    const thread = nextThread(d, "check", taskId);
+    return begin(specFor(thread), `${thread.id}:started`);
   };
 
   const agents: Agents = {
     state: (d, id) => threadState(d.threads.get(id), threads.running(id)),
     fixLimitReached: (d, taskId) => fixLimitReached(d, taskId, config.maxFixRounds),
     startWorker: async ({ taskId, brief, mainThreadId: main, spawnedBy, startedEventId }) => {
-      const id = nextId(derive(), taskId, "worker");
-      const spec = specFor({ id, kind: "worker", taskId });
+      const thread = nextThread(derive(), "worker", taskId);
+      const spec = specFor(thread);
       const task = planTask(runtime.view(), taskId);
       await begin(
         { ...spec, parentThreadId: main, prompt: o.briefs.worker(task, brief) },
         startedEventId,
         spawnedBy,
       );
-      return id;
+      return thread.id;
     },
     steer: (id, text, sender) => threads.send(id, text, sender),
     settled: (id) => threads.idle(id),

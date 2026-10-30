@@ -65,10 +65,10 @@
  *   one left pointing at nothing is absent. "Marked to check" has no focus.
  *   `checkResult` turns a folded task into the status `check-result` gives.
  * - Not from these events (the API adds them): `title`, `ask`,
- *   `threads.chat`, revision labels; the API
+ *   revision labels; the API
  *   also sets each asset's `stage` to the task title (here the task id).
  */
-import type { RunEvent, ThreadKind } from "./events";
+import type { RunEvent } from "./events";
 import type { TaskStatus } from "./ids";
 import { type EvidenceRef, fileRefsOf, type Output } from "./output";
 import { evidenceKey } from "./r2";
@@ -149,8 +149,8 @@ export type FoldedTask = Pick<
   missingRequired: string[];
   /** The latest `task` event's reason; null while the attempt has none. */
   reason: string | null;
-  threads: Pick<ReviewTask["threads"], "worker" | "check">;
-  models: Pick<ReviewTask["models"], "worker" | "check">;
+  threads: ReviewTask["threads"];
+  models: ReviewTask["models"];
   milestones: Milestone[];
   /** Paths (the part after `/scratch/`) of the scratch files its checkpoints and outputs cite. */
   citedScratch: string[];
@@ -286,7 +286,7 @@ export function corrections(events: readonly RunEvent[]): {
         if (span) span.replied = true;
         break;
       case "thread.started":
-        if (e.payload.kind === "supervisor") root = e.threadId;
+        if (e.payload.parentThreadId === null) root = e.threadId;
         break;
       case "thread.ended":
         if (span?.closed === "open" && e.threadId === root && e.payload.status === "completed")
@@ -370,7 +370,8 @@ type Attempt = {
 
 /** `holdOpenCorrection`: fold as of the last completed revision, skipping a correction still in progress (review). */
 export function fold(events: readonly RunEvent[], holdOpenCorrection = false): Folded {
-  const threadKind = new Map<string, ThreadKind>();
+  // Threads that check an attempt: the starts that name one.
+  const checkThreads = new Set<string>();
   const threadModel = new Map<string, string>();
   const attempts = new Map<string, Attempt>();
   const current = new Map<string, Attempt>();
@@ -742,11 +743,11 @@ export function fold(events: readonly RunEvent[], holdOpenCorrection = false): F
     if (abandoned.has(e.id)) continue;
     switch (e.type) {
       case "thread.started": {
-        threadKind.set(e.threadId, e.payload.kind);
+        if (e.payload.attemptId) checkThreads.add(e.threadId);
         if (e.payload.model) threadModel.set(e.threadId, e.payload.model);
         const checked = e.payload.attemptId && attempts.get(e.payload.attemptId);
         // A resume re-emits `thread.started` for the same thread: only a new check thread resets the verdict.
-        if (e.payload.kind === "check" && checked && checked.checkThread !== e.threadId) {
+        if (checked && checked.checkThread !== e.threadId) {
           checked.checkThread = e.threadId;
           checked.checker = null; // the verdict shown is this check's
         }
@@ -806,7 +807,7 @@ export function fold(events: readonly RunEvent[], holdOpenCorrection = false): F
         const a = attempts.get(e.payload.attemptId);
         if (!a) break;
         const { text, verdict, toCheck, evidence } = e.payload;
-        const byCheck = threadKind.get(e.threadId) === "check";
+        const byCheck = checkThreads.has(e.threadId);
         addEvidence(a, e.runId, evidence);
         a.milestones.push({
           id: e.id,

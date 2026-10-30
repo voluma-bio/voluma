@@ -11,9 +11,9 @@
  *   entry's cost also goes to the task (or `main`) whose thread wrote the `sandbox` event with
  *   that `name`. They are not model calls, so `calls` stays the model calls that reported usage.
  *   Calls whose cost is unknown (`unknownCostCalls`) add no dollars and are counted apart.
- * - A worker or check thread belongs to the task its `thread.started` names, so a task's
- *   spend covers all its attempts: worker, check and any redo. The root thread (the main
- *   agent's thread) belongs to no task: that is `main`. A chat thread counts only in `total`.
+ * - A thread belongs to the task its `thread.started` names, so a task's
+ *   spend covers all its attempts: worker, check and any redo. A thread with no task (the root,
+ *   the main agent) belongs to `main`.
  * - Wall time is per thread invocation, from `thread.started` to its `thread.ended`, or to
  *   the thread's latest event while it has none (running, or cut off by a crash). A task's is
  *   the sum over its threads. `main`'s and `total`'s are the root thread's, whose open span
@@ -27,7 +27,7 @@
  *
  * The runner's end-of-run log line sums the same model costs over the run's
  * threads, so without provider calls `total.costUsd` matches it for a run that didn't lose
- * events (a review chat thread is not the runner's).
+ * events.
  */
 import type { RunEvent } from "./events";
 import type { ProviderCalls } from "./run";
@@ -78,8 +78,8 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
   const tasks = new Map<string, Spend>();
   const main = empty();
   const total = empty();
-  // threadId → the Spend it counts in besides `total` (none for chat threads).
-  const owner = new Map<string, Spend | null>();
+  // threadId → the Spend it counts in besides `total`.
+  const owner = new Map<string, Spend>();
   const open = new Map<string, { since: number; last: number }>();
   // toolCallId → the `bash` call's thread and start.
   const bash = new Map<string, { threadId: string; at: number }>();
@@ -115,16 +115,16 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
     const at = Date.parse(e.createdAt);
     switch (e.type) {
       case "thread.started": {
-        const { kind, task, parentThreadId } = e.payload;
-        if (parentThreadId === null && kind === "supervisor") {
+        const { task, parentThreadId } = e.payload;
+        if (parentThreadId === null) {
           // The root starts again only after the runner restarted, which cut off every thread.
           root = e.threadId;
           for (const threadId of [...open.keys()]) close(threadId);
         } else close(e.threadId);
         if (!owner.has(e.threadId)) {
-          let s: Spend | null = null;
-          if (kind === "supervisor" || kind === "main") s = main;
-          else if (task !== undefined && (kind === "worker" || kind === "check")) {
+          // A thread with a task is that task's; any other (the root, the main agent) is `main`'s.
+          let s = main;
+          if (task !== undefined) {
             s = tasks.get(task) ?? empty();
             tasks.set(task, s);
           }
