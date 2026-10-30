@@ -453,10 +453,14 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     f: Pick<EvidenceRef, "root" | "path">,
   ): Promise<EvidenceRef> => {
     const ownName = parseThreadId(runId, c.threadId).name;
+    // `path` is inside the task's output folder; models often repeat the task id in front.
+    const own = `${taskId}/`;
+    const inside =
+      f.root === "outputs" && f.path.startsWith(own) ? f.path.slice(own.length) : f.path;
     const file =
       f.root === "scratch" && !log().threads.has(`${runId}.${f.path.split("/")[0]}`)
         ? { root: f.root, path: `${ownName}/${f.path}` }
-        : { root: f.root, path: f.path };
+        : { root: f.root, path: inside };
     const path = pathOf(taskId, file);
     const layout = layoutOf(c.threadId, (p) => cites(taskId, p));
     try {

@@ -262,12 +262,26 @@ thread takes its model from the log, so a base-URL override set for one model ca
 
 # Runner: `view_image` shows the model files the sandbox wrote
 
-`packages/harness/src/tools/view-image.ts` reads up to 4 PNG or JPEG files (1 MiB and 2000 px a side each, type
-checked by magic bytes) from the run's bucket and returns them as image content; a `ToolResult`
-may carry `images`, which the Pi adapter turns into image blocks. The `tool.result` event holds
-only text (path, type, size, sha256). The images are in the thread's history (resume needs
-them), but `adapters/pi/elide-images.ts` keeps image blocks only for the last 2 `view_image`
-calls in each request, so request size does not grow with the thread.
+`packages/harness/src/tools/view-image.ts` reads up to 4 PNG or JPEG files from the run's bucket (a path outside
+the mounts, such as the sandbox's `/tmp`, through the thread's sandbox: `tools/read-whole.ts`) and returns them as
+image content; a `ToolResult` may carry `images`, which the Pi adapter turns into image blocks. An image over
+1 MiB or 2000 px a side is downscaled with sharp (fit to 2000 px, JPEG, quality lowered until under 1 MiB) and the
+result line says from what size. The `tool.result` event holds only text (path, type, size, sha256).
+
+**Stored history keeps images by reference.** `adapters/pi/image-refs.ts` wraps the History port
+(`supervise-run.ts`): a message is stored with each image block replaced by `{type: "imageRef", key, sha256, mimeType}`,
+and the bytes the model saw (so the downscaled ones) are written to `historyImageKey` in the thread's scratch
+(`scratch/<thread name>/.images/<sha256>`, content-addressed). A resumed thread loads the images of its last 2 image
+messages back from R2 (the only ones a request carries, `adapters/pi/elide-images.ts`); older ones load as the
+"no longer shown" note, and an object that is gone or whose sha256 differs loads as a short "not available" note.
+Rows stored before this hold inline image blocks and load unchanged. The runner's resume is the only reader that
+parses history; `export:run`, `import:run` and the example seed copy rows as text, so a dump moved to another bucket
+keeps references that resolve only in the bucket that holds the objects (they load as the note elsewhere).
+
+**Tools resolve paths the same way.** `ThreadLayout.resolve` reads a relative path from the thread's `dir`
+(`$SCRATCH`); `keyOf` resolves first. A missing file is refused as "No file at <path>" plus the files in its folder
+(`Files.list`, `FileNotFound`), never the store's own error. Evidence may be given as a plain path
+(`/outputs/<task>/x`, `/scratch/<thread>/x`); `keep` drops a repeated `<task>/` in front of an outputs path.
 
 **Model calls retry.** `run.ts` passes `maxRetries: 3` to Pi, which retries a 408, 429 (waiting
 the server's `retry-after`), 5xx or dropped connection. `model-retry.ts` wraps every role's calls

@@ -9,7 +9,8 @@
  */
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
-const KEEP = 2;
+export const KEEP = 2;
+export const ELIDED_NOTE = "[the images are no longer shown; call view_image again to see them]";
 
 export function elideOldImages(messages: AgentMessage[]): AgentMessage[] {
   let seen = 0;
@@ -25,7 +26,7 @@ export function elideOldImages(messages: AgentMessage[]): AgentMessage[] {
         ...message.content.filter((c) => c.type !== "image"),
         {
           type: "text",
-          text: "[the images are no longer shown; call view_image again to see them]",
+          text: ELIDED_NOTE,
         },
       ],
     };
