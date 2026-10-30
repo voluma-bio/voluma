@@ -21,7 +21,6 @@ const STATE_STATUS: Record<Exclude<TaskState, "skipped">, Status> = {
   failed: "stopped",
   stopped: "stopped",
   paused: "paused",
-  "awaiting-ai": "waiting",
 };
 
 /** Where a state is more exact than its mark's word. */
@@ -29,7 +28,6 @@ const STATE_WORD: Partial<Record<TaskState, string>> = {
   ready: "Ready to start",
   held: "Waiting on the lead AI",
   failed: "Failed",
-  "awaiting-ai": "Waiting for the AI",
   skipped: "Skipped",
 };
 
@@ -67,7 +65,6 @@ export function TaskMark({ state, className }: { state: TaskState; className?: s
       return <span aria-hidden className={cx(base, "border-2 border-info")} />;
     case "stopped":
     case "paused":
-    case "awaiting-ai":
       return <span aria-hidden className={cx(base, "bg-muted-foreground")} />;
     case "skipped":
       return (
