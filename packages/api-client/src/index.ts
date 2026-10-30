@@ -319,7 +319,7 @@ export async function markReviewed(
 
 /**
  * Sends the main agent a message (and optional marks, a PNG snapshot, or Go) about a finished run;
- * reopens an ended or `awaiting-person` run. Keep `body.id` across retries. Refusals and limits:
+ * reopens a run that ended `completed`. Keep `body.id` across retries. Refusals and limits:
  * `messages.ts`. The chat comes back on the run's event stream: read it with `conversation`.
  */
 export async function sendRunMessage(

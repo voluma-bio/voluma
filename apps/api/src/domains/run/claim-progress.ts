@@ -47,9 +47,6 @@ const WHY: Record<ClaimEndReason, string> = {
   shutdown: "the runner restarted",
   "self-stop": "the runner lost contact with the server",
   "lease-expired": "the server lost contact with the runner",
-  // Never counted, so never in a stalled error; the entries keep the record total.
-  "awaiting-person": "the run waited for the researcher",
-  "person-message": "the researcher sent a message",
 };
 
 export const stalledError = (reason: ClaimEndReason, tool: string | undefined) =>

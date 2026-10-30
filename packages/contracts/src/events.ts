@@ -29,10 +29,10 @@
  * `check.accepted` and `review.completed` are server-authored human decisions:
  * readable in runEventSchema, rejected by the runner's eventInputSchema, and ignored
  * by the scientific fold. Their payloads and command rules live in review.ts.
- * `person.message` (server-authored, thread `<runId>.person`, id `<runId>.person:<id>`; payload
- * and route in messages.ts) is the researcher's side of a correction chat, handled the same way.
- * `reply` is the main agent's side: the runner writes it from the `reply` tool on the main thread.
- * The fold ignores both; `conversation` (conversation.ts) reads them.
+ * `person.message`, `run.reopened` and `correction.ended` are server-authored correction events
+ * on thread `<runId>.person`, handled the same way (payloads, ids and rules in messages.ts).
+ * `reply` is the main agent's side of the chat: the runner writes it from the `reply` tool on the
+ * main thread. The fold ignores all four; `conversation` (conversation.ts) reads the chat.
  */
 import { z } from "zod";
 import {
@@ -42,7 +42,12 @@ import {
   taskStatusSchema,
   toolCallIdSchema,
 } from "./ids";
-import { personMessageSchema, replySchema } from "./messages";
+import {
+  correctionEndedSchema,
+  personMessageSchema,
+  replySchema,
+  runReopenedSchema,
+} from "./messages";
 import { evidenceRefSchema, outputReportSchema } from "./output";
 import { sha256Schema } from "./r2";
 import {
@@ -216,7 +221,12 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
   const claimStarted = event(
     "claim.started",
     z
-      .object({ resumed: z.boolean(), after: claimEndReasonSchema.optional() })
+      .object({
+        resumed: z.boolean(),
+        after: claimEndReasonSchema.optional(),
+        /** This claim exists because a person's message reopened the run (`messages.ts`); not a claim-end reason. */
+        reopened: z.literal(true).optional(),
+      })
       .refine((p) => p.resumed === (p.after !== undefined), {
         path: ["after"],
         message: "after goes with a resumed claim and no other",
@@ -226,7 +236,8 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
   /**
    * Every `thread.ended` is deliberate. A runtime abort (shutdown, self-stop, lost lease)
    * writes none, so `cancelled` always means a stop someone chose (and is final; a `completed`
-   * end is idle and resumable, which is how a person message reopens a finished run): `stop_worker`, the run
+   * end is resumable: a person message reopens a finished run with `run.reopened`, and the
+   * harness's thread log then clears the root's ended flag): `stop_worker`, the run
    * loop's own stops, or a user's cancel of the run (which the server writes, `threads.ts`).
    */
   const threadEnded = event(
@@ -542,6 +553,18 @@ export const runEventSchema = z
       type: z.literal("person.message"),
       payload: personMessageSchema,
     }),
+    z.object({
+      ...envelope,
+      ...stored,
+      type: z.literal("run.reopened"),
+      payload: runReopenedSchema,
+    }),
+    z.object({
+      ...envelope,
+      ...stored,
+      type: z.literal("correction.ended"),
+      payload: correctionEndedSchema,
+    }),
   ])
   .refine(
     (e) =>
@@ -549,10 +572,12 @@ export const runEventSchema = z
       e.threadId === `${e.runId}.reviewer`,
     { path: ["threadId"], message: "human review decisions belong to <runId>.reviewer" },
   )
-  .refine((e) => e.type !== "person.message" || e.threadId === `${e.runId}.person`, {
-    path: ["threadId"],
-    message: "person messages belong to <runId>.person",
-  });
+  .refine(
+    (e) =>
+      (e.type !== "person.message" && e.type !== "run.reopened" && e.type !== "correction.ended") ||
+      e.threadId === `${e.runId}.person`,
+    { path: ["threadId"], message: "correction events belong to <runId>.person" },
+  );
 export type RunEvent = z.infer<typeof runEventSchema>;
 export type EventType = RunEvent["type"];
 

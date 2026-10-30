@@ -159,9 +159,7 @@ export const runs = pgTable(
     example: boolean().notNull().default(false),
     forkedFrom: text(),
     createdAt: timestamptz().notNull().defaultNow(),
-    state: text({
-      enum: ["queued", "running", "awaiting-keys", "awaiting-person", "ended"],
-    }).notNull(),
+    state: text({ enum: ["queued", "running", "awaiting-keys", "ended"] }).notNull(),
     startedAt: timestamptz(),
     awaitingSince: timestamptz(),
     /** The last claim, for the claim's round-robin across orgs. */
@@ -173,9 +171,7 @@ export const runs = pgTable(
     leaseToken: text(),
     leaseExpiresAt: timestamptz(),
     /** Why the last claim ended (`claimEndReasonSchema`); the next claim carries it. Null before the first end. */
-    lastClaimEnd: text({
-      enum: ["shutdown", "self-stop", "awaiting-person", "lease-expired", "person-message"],
-    }),
+    lastClaimEnd: text({ enum: ["shutdown", "self-stop", "lease-expired"] }),
     /** Seq of the latest progress event (`claim-progress.ts`), and the log's last seq when the current claim began. */
     lastProgressSeq: integer().notNull().default(0),
     claimStartSeq: integer().notNull().default(0),
