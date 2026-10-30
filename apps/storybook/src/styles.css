@@ -7,7 +7,6 @@
 @source "../../../packages/run-view/src";
 @source "../../../packages/ui/src";
 
-html,
 body {
   font-family: var(--sans);
   font-size: 14px;
