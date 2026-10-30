@@ -56,6 +56,7 @@ export function prepareReportOutput(args: unknown): unknown {
  * Only these habits are touched; any other unknown key stays for validation to refuse.
  * - A top-level `title` copied from `report_output` is dropped when `text` is there, and is
  *   the `text` when it is not.
+ * - An evidence entry given as a sandbox path (`/outputs/<task>/x`, `/scratch/<thread>/x`) becomes its `{root, path}`.
  * - An evidence `path` that is itself `{root, path}` is unwrapped, unless its root differs
  *   from the outer one.
  * - `toCheck` given as a string, or with its words under `text`, becomes the `title` it needs;
@@ -68,7 +69,9 @@ export function prepareCheckpoint(args: unknown): unknown {
   if (out.text === undefined && typeof title === "string") out.text = title;
   else if (title !== undefined && typeof title !== "string") out.title = title;
   if (Array.isArray(out.evidence)) {
+    const { taskId } = out;
     out.evidence = out.evidence.map((f) => {
+      if (typeof f === "string" && typeof taskId === "string") return refOf(taskId, f);
       if (!isRecord(f) || !isRecord(f.path)) return f;
       const root = f.path.root ?? f.root;
       return f.root !== undefined && f.path.root !== undefined && f.root !== f.path.root
@@ -107,7 +110,7 @@ export function taskTools(runtime: TaskRuntime) {
   const checkpoint: Tool<typeof checkpointInputSchema> = {
     name: "checkpoint",
     description:
-      'Record a milestone under a task, in plain language, with the files it rests on. Arguments: {taskId, text, summary, evidence: [{root, path}], verdict?, toCheck?: {title, focus?}}; there is no top-level title, and `text` is the milestone and `summary` one or two plain sentences for the researcher. Set toCheck when you are unsure of something a person should look at: `title` says what to look at in a few words, and `text` explains. A check thread sets verdict ("passed" or "needs-review") and puts the values it re-derived in `text`: it does not report outputs.',
+      'Record a milestone under a task, in plain language, with the files it rests on. Arguments: {taskId, text, summary, evidence: [path or {root, path}], verdict?, toCheck?: {title, focus?}}; there is no top-level title, and `text` is the milestone and `summary` one or two plain sentences for the researcher. Set toCheck when you are unsure of something a person should look at: `title` says what to look at in a few words, and `text` explains. A check thread sets verdict ("passed" or "needs-review") and puts the values it re-derived in `text`: it does not report outputs.',
     input: checkpointInputSchema,
     prepare: prepareCheckpoint,
     sequential: true,

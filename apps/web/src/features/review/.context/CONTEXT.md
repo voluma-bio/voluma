@@ -32,7 +32,7 @@ report. The behavior is:
 | Models | The worker's and checker's model, when the run recorded them |
 | Evidence/files | Checkpoint images (by `.jpg`/`.png` name) load lazily through `reviewFileUrl` and open in a lightbox with a download; other evidence and data files are download links. The server decides what renders inline from the bytes |
 | Checks | Accept check persists acceptance for the latest completed non-example result; earlier revisions, examples and unfinished runs are read-only. Acceptance does not change values, confidence, checker verdict or scientific task status |
-| Run review | The shared summary shows N to check, Checked at zero (the word Home and the study page use, `@voluma/ui/run`), and Reviewed only after explicit Mark reviewed. Mark reviewed is disabled until zero, and never inferred from acceptance |
+| Run review | The shared summary shows N to check, Checked at zero (the word Home and the study page use, `@voluma/run-view`), and Reviewed only after explicit Mark reviewed. Mark reviewed is disabled until zero, and never inferred from acceptance |
 | Header | Status sits beside the sample title. Mark reviewed, Revision and Export CSV share one header action row |
 | Chat/corrections | Disabled; no command adapter or simulated responses |
 | CSV | Available only with a real snapshot; includes task result revision and evidence identifiers, and escapes spreadsheet formulas |
@@ -77,12 +77,9 @@ boundaries, API domain factories and real-data policy. Review replaces the
 scaffold's Review placeholder, not its Run screens or `/dev/ui`. Shared contracts
 and API client match upstream. There is no competing `apps/app` application.
 
-Provenance matching between images and results, chat/corrections
-and continuous review event streaming remain unconnected. The cross-lane
-dependencies are listed in the [repository TODO][todo].
+Provenance matching between images and results remains unconnected.
 
 [viewer]: ../../../../../../packages/viewer/.context/CONTEXT.md
-[todo]: ../../../../../../.context/TODO.md
 [#1]: https://github.com/voluma-bio/voluma/pull/1
 [#2]: https://github.com/voluma-bio/voluma/pull/2
 [#3]: https://github.com/voluma-bio/voluma/pull/3

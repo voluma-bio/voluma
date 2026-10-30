@@ -11,6 +11,7 @@ import type {
   GridViewState,
   ReviewSnapshot,
 } from "@voluma/contracts/snapshot";
+import { Button } from "@voluma/ui";
 import { useState } from "react";
 
 const planeAxis = { axial: 0, sagittal: 1, coronal: 2 } as const;
@@ -80,18 +81,18 @@ export function useSnapshots(
                   : save.error.message
               }`}{" "}
           {failed && (
-            <button type="button" className="text-button" onClick={() => save.mutate(failed)}>
+            <Button variant="link" onClick={() => save.mutate(failed)}>
               Retry
-            </button>
+            </Button>
           )}
         </p>
       )}
       {query.isError && (
         <p role="alert">
           Couldn't load screenshots.{" "}
-          <button type="button" className="text-button" onClick={() => void query.refetch()}>
+          <Button variant="link" onClick={() => void query.refetch()}>
             Retry
-          </button>
+          </Button>
         </p>
       )}
       {items.length > 0 ? (
@@ -127,20 +128,22 @@ export function useSnapshots(
                     {label}
                   </button>
                 )}
-                <a
-                  className="text-button"
-                  href={reviewFileUrl(runId, snapshot.png.sha256)}
-                  download={`${snapshot.id}.png`}
-                >
-                  PNG
-                </a>
-                <a
-                  className="text-button"
-                  href={`data:application/json,${encodeURIComponent(JSON.stringify(snapshot, null, 2))}`}
-                  download={`${snapshot.id}.json`}
-                >
-                  View state
-                </a>
+                <Button asChild variant="link">
+                  <a
+                    href={reviewFileUrl(runId, snapshot.png.sha256)}
+                    download={`${snapshot.id}.png`}
+                  >
+                    PNG
+                  </a>
+                </Button>
+                <Button asChild variant="link">
+                  <a
+                    href={`data:application/json,${encodeURIComponent(JSON.stringify(snapshot, null, 2))}`}
+                    download={`${snapshot.id}.json`}
+                  >
+                    View state
+                  </a>
+                </Button>
               </li>
             );
           })}

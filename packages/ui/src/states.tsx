@@ -3,11 +3,11 @@
  * it), still loading (`LoadingState` keeps the rows' shapes) or failed (`ErrorState` says what
  * happened and offers a retry). One pattern each, everywhere.
  */
-import { OctagonX } from "lucide-react";
 import type { ReactNode } from "react";
 import { Button } from "./button";
 import { cx } from "./cx";
 import type { Density } from "./row";
+import { StatusGlyph } from "./status-mark";
 
 export type EmptyStateProps = {
   /** What isn't here, e.g. "Nothing to check yet". */
@@ -108,8 +108,7 @@ export function ErrorState({
         className,
       )}
     >
-      {/* Stands in for the Stopped StatusMark until it lands. */}
-      <OctagonX aria-hidden className="mt-0.5 size-4 shrink-0 text-destructive" />
+      <StatusGlyph status="stopped" className="mt-1" />
       <div className="min-w-0 flex-1">
         <p className="m-0 font-medium">{title}</p>
         {children && <p className="m-0 text-sm text-muted-foreground">{children}</p>}

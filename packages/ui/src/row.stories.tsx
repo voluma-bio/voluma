@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
-import { PlaceholderStatus } from "./placeholder-status";
 import { List, Row } from "./row";
+import { StatusMark } from "./status-mark";
 
 /**
  * **What:** the one list part. A row shows a title, a subtitle, a status and cells; a row with
@@ -11,8 +11,7 @@ import { List, Row } from "./row";
  * items to check, tasks, values, files, agents (study panel, To check, Scans, ScanQueue, Report,
  * Agents tree, Box bodies). Rows that go somewhere are `RowLink`.
  *
- * Keyboard: Tab or the arrow keys move between rows; Enter opens the focused row. Statuses here
- * are a stand-in until StatusMark lands.
+ * Keyboard: Tab or the arrow keys move between rows; Enter opens the focused row.
  */
 const meta = {
   title: "Parts/Row",
@@ -59,7 +58,7 @@ const values = (
 /** A closed row with a next layer: the summary answers "how is it going". */
 export const Collapsed: Story = {
   args: {
-    status: <PlaceholderStatus state="check" word="1 to check" />,
+    status: <StatusMark status="check" label="1 to check" />,
     cells: [
       <span key="t" className="ml-auto font-mono text-sm text-fg-subtle">
         10 min 2 s
@@ -72,7 +71,7 @@ export const Collapsed: Story = {
 /** Open: the next layer sits below, indented on a guide line. Its rows open too. */
 export const Open: Story = {
   args: {
-    status: <PlaceholderStatus state="done" />,
+    status: <StatusMark status="done" />,
     defaultOpen: true,
     children: values,
   },
@@ -83,7 +82,7 @@ export const Selected: Story = {
   args: {
     title: "Cortical thickness",
     subtitle: "Drives the other views",
-    status: <PlaceholderStatus state="check" />,
+    status: <StatusMark status="check" />,
     selected: true,
     onSelect: () => {},
   },
@@ -94,7 +93,7 @@ export const NotExpandable: Story = {
   args: {
     title: "Orientation",
     subtitle: "Waiting for Segmentation",
-    status: <PlaceholderStatus state="waiting" />,
+    status: <StatusMark status="waiting" />,
   },
 };
 
@@ -104,7 +103,7 @@ export const LongText: Story = {
     title: "Proximal tibial metaphysis trabecular thickness in the region below the growth plate",
     subtitle:
       "Measuring trabecular thickness in ROI-3 across every slice between the two landmarks",
-    status: <PlaceholderStatus state="running" word="Task 4 of 9" />,
+    status: <StatusMark status="running" label="Task 4 of 9" />,
     children: values,
   },
 };
@@ -141,7 +140,7 @@ export const InAList: Story = {
             key={t.id}
             title={t.title}
             subtitle={t.sub}
-            status={<PlaceholderStatus state={t.state} />}
+            status={<StatusMark status={t.state} />}
             selected={selected === t.id}
             onSelect={() => setSelected(t.id)}
           >
@@ -157,17 +156,13 @@ export const InAList: Story = {
 export const Compact: Story = {
   render: () => (
     <List columns="120px" density="compact" boxed>
-      <Row title="OA7-4" subtitle="DMM, left knee" status={<PlaceholderStatus state="check" />}>
+      <Row title="OA7-4" subtitle="DMM, left knee" status={<StatusMark status="check" />}>
         {values}
       </Row>
-      <Row title="OA7-6" subtitle="DMM, left knee" status={<PlaceholderStatus state="running" />}>
+      <Row title="OA7-6" subtitle="DMM, left knee" status={<StatusMark status="running" />}>
         {values}
       </Row>
-      <Row
-        title="OA7-15"
-        subtitle="Sham, right knee"
-        status={<PlaceholderStatus state="stopped" />}
-      />
+      <Row title="OA7-15" subtitle="Sham, right knee" status={<StatusMark status="stopped" />} />
     </List>
   ),
 };

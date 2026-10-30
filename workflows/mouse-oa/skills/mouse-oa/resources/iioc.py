@@ -53,7 +53,7 @@ import numpy as np
 import objects
 import sidecar
 from annotations import load_annotations, need, traced_surface
-from envelope import close_and_fill
+from envelope import close_and_fill, footprint
 from scipy import ndimage as ndi
 
 matplotlib.use('Agg')
@@ -313,7 +313,7 @@ def main():
     meta_files = {'like': a.frame, 'inputs': inputs, 'params': params}
     placed = {  # heights are along axis 0 (W) of the aligned grid
         'roi-iioc': objects.mask(out / 'roi-iioc.npy', roi, crop=True, **meta_files),
-        'growth-plate-proximal-face': objects.surface(out / 'growth-plate-proximal-face.npy', gp, 0, where=objects.footprint(tib), **meta_files),
+        'growth-plate-proximal-face': objects.surface(out / 'growth-plate-proximal-face.npy', gp, 0, where=footprint(tib), **meta_files),
         'articular-surface': objects.surface(out / 'articular-top-surface.npy', np.where(valid, top, np.nan), 0, **meta_files),
         **rulers,
     }

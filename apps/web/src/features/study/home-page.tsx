@@ -6,24 +6,27 @@
  * every 5 s while its last answer shows a live run.
  */
 import { useQuery } from "@tanstack/react-query";
-import { listStudies } from "@voluma/api-client";
+import { studiesQuery } from "@voluma/api-client/query";
 import type { StudyRunSummary, StudySummary } from "@voluma/contracts/study";
+import { plural, runHref, shortDate, studyStatus } from "@voluma/run-view";
 import {
   Box,
+  Button,
+  Count,
   EmptyState,
   ErrorState,
   type LinkRenderProps,
   List,
   LoadingState,
+  Progress,
   Row,
   RowLink,
-  StatusBadge,
+  type Status,
+  StatusMark,
   Table,
 } from "@voluma/ui";
-import { runHref, studyStatus } from "@voluma/ui/run";
 import { workflowById } from "@voluma/workflow/bundled";
 import { Link } from "react-router";
-import { ButtonLink, ProgressBar } from "./parts";
 
 const LIVE = 5000;
 
@@ -32,7 +35,7 @@ interface StudyView {
   /** A study of one's run, once it has one. */
   one: StudyRunSummary | undefined;
   /** A live study of one: its run's tasks done; else its scans with a completed run. */
-  progress: { done: number; total: number; label: string };
+  progress: { done: number; total: number };
   href: string;
 }
 
@@ -43,8 +46,8 @@ function view(study: StudySummary): StudyView {
     one,
     progress:
       one && isLive(one)
-        ? { done: one.tasks?.done ?? 0, total: one.tasks?.total ?? 0, label: "Tasks done" }
-        : { done: study.scansCompleted, total: study.scanCount, label: "Scans done" },
+        ? { done: one.tasks?.done ?? 0, total: one.tasks?.total ?? 0 }
+        : { done: study.scansCompleted, total: study.scanCount },
     href: one ? runHref(one) : `/studies/${study.id}`,
   };
 }
@@ -60,24 +63,21 @@ function relativeDay(iso: string): string {
   if (days <= 0) return "Today";
   if (days === 1) return "Yesterday";
   if (days < 7) return `${days} days ago`;
-  return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  return shortDate(iso);
 }
-
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 export function HomePage() {
   const studies = useQuery({
-    queryKey: ["studies"],
-    queryFn: listStudies,
+    ...studiesQuery(),
     refetchInterval: (q) => (q.state.data?.some((s) => s.newestRuns.some(isLive)) ? LIVE : false),
   });
 
   const header = (
     <div className="flex flex-wrap items-center gap-3">
       <h1 className="flex-1 text-2xl font-semibold">Home</h1>
-      <ButtonLink to="/new" variant="primary">
-        Run on new scans
-      </ButtonLink>
+      <Button asChild variant="primary">
+        <Link to="/new">Run on new scans</Link>
+      </Button>
     </div>
   );
 
@@ -102,10 +102,10 @@ export function HomePage() {
   }
 
   return (
-    <main className="mx-auto grid w-full max-w-[1040px] content-start gap-8 px-6 pt-7 pb-16 max-[760px]:px-4">
+    <div className="mx-auto grid w-full max-w-[1040px] content-start gap-8 px-6 pt-7 pb-16 max-[760px]:px-4">
       {header}
       {body}
-    </main>
+    </div>
   );
 }
 
@@ -117,13 +117,7 @@ function Dashboard({ views }: { views: StudyView[] }) {
       <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] items-start gap-6 max-[860px]:grid-cols-1">
         <Box
           title="Needs you"
-          count={
-            needs.length > 0 && (
-              <span className="rounded-full bg-check-tint px-1.5 font-mono text-xs font-medium text-check">
-                {needs.length}
-              </span>
-            )
-          }
+          count={needs.length > 0 && <Count tone="check">{needs.length}</Count>}
           className={BOXED}
         >
           {needs.length > 0 ? (
@@ -138,7 +132,7 @@ function Dashboard({ views }: { views: StudyView[] }) {
         </Box>
         <Box title="Running" className={BOXED}>
           {running.length > 0 ? (
-            <List columns="7rem 2.75rem" label="Running">
+            <List columns="10rem" label="Running">
               {running.map((v) => (
                 <RunningRow key={v.study.id} view={v} />
               ))}
@@ -171,9 +165,9 @@ function needsYou(v: StudyView): React.ReactNode[] {
         <span className={tone === "check" ? "text-check" : "text-destructive"}>{detail}</span>
       }
       cells={[
-        <ButtonLink key="action" to={to} size="sm">
-          {action}
-        </ButtonLink>,
+        <Button key="action" asChild size="sm">
+          <Link to={to}>{action}</Link>
+        </Button>,
       ]}
     />
   );
@@ -248,17 +242,16 @@ function RunningRow({ view: v }: { view: StudyView }) {
       to={linkTo(v.href)}
       title={one ? one.inputName : study.name}
       subtitle={detail}
-      cells={[<ProgressBar key="bar" {...progress} />, <Fraction key="n" {...progress} />]}
+      cells={[<DoneBar key="bar" {...progress} />]}
     />
   );
 }
 
-/** `3/9`; nothing before a run's plan exists. */
-function Fraction({ done, total }: { done: number; total: number }) {
+/** Scans (or a live run's tasks) done, out of all of them. */
+function DoneBar({ done, total }: { done: number; total: number }) {
+  const states: Status[] = Array.from({ length: total }, (_, i) => (i < done ? "done" : "waiting"));
   return (
-    <span className="min-w-8 text-right text-ui text-muted-foreground tabular-nums">
-      {total > 0 && `${done}/${total}`}
-    </span>
+    <Progress look="bar" states={states} label={total > 0 ? `${done} of ${total}` : undefined} />
   );
 }
 
@@ -290,8 +283,7 @@ function StudyTable({ views }: { views: StudyView[] }) {
             header: "Progress",
             cell: (v) => (
               <span className="flex min-w-28 items-center gap-2.5">
-                <ProgressBar {...v.progress} />
-                <Fraction {...v.progress} />
+                <DoneBar {...v.progress} />
               </span>
             ),
           },
@@ -304,7 +296,7 @@ function StudyTable({ views }: { views: StudyView[] }) {
                 newest: v.study.newestRuns,
                 toCheck: v.study.toCheck,
               });
-              return <StatusBadge tone={chip.tone}>{chip.label}</StatusBadge>;
+              return <StatusMark {...chip} />;
             },
           },
           {

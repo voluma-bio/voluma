@@ -1,26 +1,17 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Box } from "./box";
-import { PlaceholderStatus } from "./placeholder-status";
+import { Count } from "./count";
 import { List, Row, RowLink } from "./row";
 import { EmptyState } from "./states";
+import { StatusMark } from "./status-mark";
 
 /**
  * **What:** a titled dashboard block: a 36 px head with title, count and tools, a body (usually
  * a list) and a foot that links to the full section or says what comes next. **Why:** one block
  * in place of 18 card sites with 8 paddings. **Where:** the study dashboard and Home (Needs you,
- * Running now, Spent). The count here stands in for Count until it lands.
+ * Running now, Spent).
  */
-const count = (n: number, check?: boolean) => (
-  <span
-    className={
-      check
-        ? "rounded-full bg-check-tint px-1.5 font-mono text-xs font-medium text-check"
-        : "rounded-full bg-secondary px-1.5 font-mono text-xs font-medium text-muted-foreground"
-    }
-  >
-    {n}
-  </span>
-);
+const count = (n: number, check?: boolean) => <Count tone={check ? "check" : "neutral"}>{n}</Count>;
 
 const meta = {
   title: "Parts/Box",
@@ -35,12 +26,12 @@ const meta = {
         <Row
           title="OA7-6, Tibial IIOC"
           subtitle="Tracing the growth plate"
-          cells={[<PlaceholderStatus key="s" state="running" word="4 min" />]}
+          cells={[<StatusMark key="s" status="running" label="4 min" />]}
         />
         <Row
           title="OA7-18, Trabecular thickness"
           subtitle="Measuring in ROI-3"
-          cells={[<PlaceholderStatus key="s" state="running" word="9 min" />]}
+          cells={[<StatusMark key="s" status="running" label="9 min" />]}
         />
       </List>
     ),
@@ -70,13 +61,13 @@ export const NeedsYou: Story = {
           to="#oa7-4"
           title="OA7-4, left knee"
           subtitle="Osteophyte merges with the condyle"
-          cells={[<PlaceholderStatus key="s" state="check" word="2 to check" />]}
+          cells={[<StatusMark key="s" status="check" label="2 to check" />]}
         />
         <RowLink
           to="#oa7-15"
           title="OA7-15, right knee"
           subtitle="Stopped during Orientation"
-          cells={[<PlaceholderStatus key="s" state="stopped" />]}
+          cells={[<StatusMark key="s" status="stopped" />]}
         />
       </List>
     ),

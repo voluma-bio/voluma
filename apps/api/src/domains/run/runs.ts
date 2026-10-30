@@ -8,7 +8,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { type Run, resendKeysRequestSchema, startRunRequestSchema } from "@voluma/contracts/run";
-import { type Context, Hono } from "hono";
+import { Hono } from "hono";
 import {
   type AppEnv,
   callerOf,
@@ -18,42 +18,6 @@ import {
   requireUser,
 } from "../../domain";
 import type { RunDeps } from ".";
-import { refusalMessage } from "./admission";
-import { GUEST_KEYS_MESSAGE } from "./corrections";
-import type { QueueRefusal } from "./pg-queue";
-
-/** The answer to a write the queue refused. */
-export function refusal(c: Context, refused: QueueRefusal, detail?: string[]) {
-  switch (refused) {
-    case "not-found":
-      return c.json({ error: "not found" }, 404);
-    case "forbidden":
-      return c.json({ error: "Only the run's starter can resend keys." }, 403);
-    case "conflict":
-      return c.json({ error: "The run is not waiting for keys." }, 409);
-    case "guest-keys":
-      return c.json({ error: GUEST_KEYS_MESSAGE }, 403);
-    case "no-input":
-      return c.json({ error: "unknown input" }, 404);
-    case "no-study":
-      return c.json({ error: "unknown study" }, 404);
-    case "no-workflow":
-      return c.json({ error: "unknown workflow" }, 404);
-    case "bad-selection":
-      return c.json(
-        { error: `Not a measurement or score of this workflow: ${detail?.join(", ")}.` },
-        400,
-      );
-    case "example":
-      return c.json({ error: "Examples are read-only." }, 403);
-    case "input-not-ready":
-      return c.json({ error: "The scan is still uploading." }, 409);
-    case "full":
-      return c.json({ error: "Too many runs are waiting with keys; try again shortly." }, 429);
-    default:
-      return c.json({ error: refusalMessage[refused] }, refused === "per-caller" ? 409 : 429);
-  }
-}
 
 export function runsRoutes({ reads, queue }: RunDeps) {
   const app = new Hono<AppEnv>();
@@ -72,9 +36,7 @@ export function runsRoutes({ reads, queue }: RunDeps) {
       notes,
       keys,
     });
-    return "refused" in result
-      ? refusal(c, result.refused, result.detail)
-      : c.json(result.run satisfies Run);
+    return c.json(result.run satisfies Run);
   });
 
   app.get("/runs", requireReader, async (c) => c.json({ runs: await reads.list(c.var.reader) }));
@@ -86,14 +48,14 @@ export function runsRoutes({ reads, queue }: RunDeps) {
 
   app.post("/runs/:id/cancel", requireUser, async (c) => {
     const result = await queue.cancel(readerOf(c.var.user), c.req.param("id"));
-    return "refused" in result ? refusal(c, result.refused) : c.json(result.run satisfies Run);
+    return c.json(result.run satisfies Run);
   });
 
   app.post("/runs/:id/keys", requireUser, async (c) => {
     const { keys } = await parseJson(c, resendKeysRequestSchema);
     const user = c.var.user;
     const result = await queue.resume(readerOf(user), user.userId, c.req.param("id"), keys);
-    return "refused" in result ? refusal(c, result.refused) : c.json(result.run satisfies Run);
+    return c.json(result.run satisfies Run);
   });
 
   return app;

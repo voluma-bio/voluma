@@ -4,9 +4,9 @@ import { useMutation } from "@tanstack/react-query";
 import { markReviewed } from "@voluma/api-client";
 import type { Focus, Revision } from "@voluma/contracts/review";
 import type { GridViewState, ReviewSnapshot } from "@voluma/contracts/snapshot";
-import { EmptyState, ErrorState, StatusBadge, TextField } from "@voluma/ui";
+import { Button, EmptyState, ErrorState, StatusMark, TextField } from "@voluma/ui";
 import type { StructureDisplay } from "@voluma/viewer/grid";
-import { ArrowLeft, Download, History, Layers, ListChecks } from "lucide-react";
+import { Download, History, Layers, ListChecks } from "lucide-react";
 import { lazy, type ReactNode, Suspense, useEffect, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { downloadCsv, downloadReviewReport } from "./export";
@@ -101,23 +101,23 @@ export function ReviewWorkspace({
     onError: onRefresh,
   });
   return (
-    <div className="review-shell" data-theme="light">
+    <div className="review-shell">
       <div className="run-header">
         <div>
-          <div className="back-link">
-            <ArrowLeft size={14} />
-            {backLink}
-          </div>
+          {backLink}
           <div className="run-title">
             <h1 className="text-xl font-semibold">{run.sample ?? runId}</h1>
             {run.review && (
-              <StatusBadge tone={run.review.remainingToCheck ? "check" : "primary"}>
-                {run.review.reviewedAt
-                  ? "Reviewed"
-                  : run.review.remainingToCheck
-                    ? `${run.review.remainingToCheck} to check`
-                    : "Checked"}
-              </StatusBadge>
+              <StatusMark
+                status={run.review.remainingToCheck ? "check" : "done"}
+                label={
+                  run.review.reviewedAt
+                    ? "Reviewed"
+                    : run.review.remainingToCheck
+                      ? `${run.review.remainingToCheck} to check`
+                      : "Checked"
+                }
+              />
             )}
           </div>
           <p className="text-sm text-muted-foreground">
@@ -132,14 +132,13 @@ export function ReviewWorkspace({
         </div>
         <div className="run-actions">
           {run.review && !run.review.reviewedAt && (
-            <button
-              type="button"
-              className="button primary"
+            <Button
+              variant="primary"
               disabled={readOnly || run.review.remainingToCheck !== 0 || complete.isPending}
               onClick={() => complete.mutate()}
             >
               {complete.isPending ? "Marking reviewed…" : "Mark reviewed"}
-            </button>
+            </Button>
           )}
           {revision && (
             <>
@@ -158,19 +157,14 @@ export function ReviewWorkspace({
                   ))}
                 </select>
               </label>
-              <button type="button" className="button" onClick={() => downloadCsv(run, revision)}>
-                <Download size={15} />
+              <Button onClick={() => downloadCsv(run, revision)}>
+                <Download />
                 Export CSV
-              </button>
-              <button
-                type="button"
-                className="button"
-                disabled={report.isPending}
-                onClick={() => report.mutate({ run, revision })}
-              >
-                <Download size={15} />
+              </Button>
+              <Button disabled={report.isPending} onClick={() => report.mutate({ run, revision })}>
+                <Download />
                 {report.isPending ? "Exporting report…" : "Export review report"}
-              </button>
+              </Button>
             </>
           )}
         </div>
@@ -191,7 +185,7 @@ export function ReviewWorkspace({
       {revision && revision !== latest && (
         <div className="revision-notice">Earlier results are read-only.</div>
       )}
-      <main className="review-body">
+      <div className="review-body">
         <aside className="task-sidebar">
           <div className="sidebar-tabs">
             <button type="button" aria-pressed={tab === "tasks"} onClick={() => setTab("tasks")}>
@@ -226,9 +220,7 @@ export function ReviewWorkspace({
                       <span>
                         {item.title}
                         <span className="task-meta">
-                          <StatusBadge tone={taskStatus(item).tone}>
-                            {taskStatus(item).label}
-                          </StatusBadge>
+                          <StatusMark {...taskStatus(item)} />
                           {item.status !== "pending" && (
                             <>
                               {" "}
@@ -354,7 +346,6 @@ export function ReviewWorkspace({
                         focus ? { revisionId: revision.id, taskId: task.id, focus } : undefined,
                       );
                     }}
-                    onRefresh={onRefresh}
                   />
                 ) : (
                   <EmptyState title="Result not available">
@@ -363,10 +354,7 @@ export function ReviewWorkspace({
                 )}
               </div>
             </Panel>
-            <Separator
-              className="resize-handle main-handle"
-              aria-label="Resize report and viewers"
-            />
+            <Separator className="main-handle" aria-label="Resize report and viewers" />
             <Panel id="imaging" minSize="28%">
               {revision && task ? (
                 <Suspense>
@@ -390,7 +378,10 @@ export function ReviewWorkspace({
                   />
                 </Suspense>
               ) : (
-                <section className="viewer-workspace" aria-label="Imaging workspace">
+                <section
+                  className="flex h-full min-h-0 flex-col bg-background p-4"
+                  aria-label="Imaging workspace"
+                >
                   <div className="view-empty" role="status">
                     Images appear with the task's results.
                   </div>
@@ -399,7 +390,7 @@ export function ReviewWorkspace({
             </Panel>
           </Group>
         </div>
-      </main>
+      </div>
       <footer className="app-footer">
         <span>Research review</span>
         <span>Display settings do not change scientific results</span>

@@ -12,6 +12,7 @@
  */
 import { Tabs as T } from "radix-ui";
 import type { ReactNode } from "react";
+import { Count } from "./count";
 import { cx } from "./cx";
 
 export type TabItem<Id extends string> = {
@@ -69,16 +70,8 @@ export function TabList<Id extends string>({ tabs, label, className }: TabListPr
         >
           {tab.label}
           {tab.count !== undefined && (
-            <span
-              title={tab.countLabel}
-              aria-hidden={tab.countLabel !== undefined}
-              className={cx(
-                // The Count look; swap in Count once it lands.
-                "inline-flex h-[18px] min-w-5 items-center justify-center rounded-full px-1.5 font-mono text-xs font-medium tabular-nums",
-                tab.alert ? "bg-check-tint text-check" : "bg-secondary text-muted-foreground",
-              )}
-            >
-              {tab.count}
+            <span title={tab.countLabel} aria-hidden={tab.countLabel !== undefined}>
+              <Count tone={tab.alert ? "check" : "neutral"}>{tab.count}</Count>
             </span>
           )}
           {tab.countLabel && <span className="sr-only">{tab.countLabel}</span>}

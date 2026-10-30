@@ -2,32 +2,29 @@
  * Review lane: a run's results, task by task, beside the task's own analysis grid.
  * Light Review chrome. Owns its routes; the shell mounts them.
  */
-import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { ApiError, getReviewRun, getRun } from "@voluma/api-client";
-import { EmptyState, ErrorState, LoadingState } from "@voluma/ui";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ApiError } from "@voluma/api-client";
+import { reviewRunQuery, runQuery } from "@voluma/api-client/query";
+import { Button, EmptyState, ErrorState, LoadingState } from "@voluma/ui";
+import { ArrowLeft } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { Link, type RouteObject, useParams, useSearchParams } from "react-router";
 import { preparing } from "./report/model";
 import { ReviewWorkspace } from "./report/ReviewWorkspace";
 
-const queryClient = new QueryClient();
 export const reviewRoutes: RouteObject[] = [{ path: "/runs/:runId", element: <ReviewPage /> }];
 
 function ReviewPage() {
   const { runId = "" } = useParams();
   // A route change drops the previous run's state instead of showing it under another run.
-  return (
-    <QueryClientProvider client={queryClient}>
-      <RunReview key={runId} runId={runId} />
-    </QueryClientProvider>
-  );
+  return <RunReview key={runId} runId={runId} />;
 }
 
 function RunReview({ runId }: { runId: string }) {
+  const queryClient = useQueryClient();
   const [search, setSearch] = useSearchParams();
   const execution = useQuery({
-    queryKey: ["run", runId],
-    queryFn: () => getRun(runId),
+    ...runQuery(runId),
     refetchInterval: (query) => {
       const data = query.state.data;
       return data && data.state.status !== "ended" ? 3000 : false;
@@ -42,12 +39,11 @@ function RunReview({ runId }: { runId: string }) {
   const lastStatus = useRef(runStatus);
   useEffect(() => {
     if (lastStatus.current !== undefined && lastStatus.current !== "ended" && runStatus === "ended")
-      void queryClient.invalidateQueries({ queryKey: ["review-run", runId] });
+      void queryClient.invalidateQueries({ queryKey: reviewRunQuery(runId).queryKey });
     lastStatus.current = runStatus;
   }, [runStatus, runId]);
   const review = useQuery({
-    queryKey: ["review-run", runId],
-    queryFn: () => getReviewRun(runId),
+    ...reviewRunQuery(runId),
     // Only a server error may pass on retry; a 404, a 409 or data the contract rejects won't.
     retry: (count, cause) => cause instanceof ApiError && cause.status >= 500 && count < 2,
     // A run with no plan yet gets one once the runner starts it; a live run's results fill in
@@ -75,9 +71,9 @@ function RunReview({ runId }: { runId: string }) {
         ) : status === 404 ? (
           <ErrorState title="This run isn't here">
             It may have been removed, or you can't open it.{" "}
-            <Link to="/" className="text-primary-text hover:underline">
-              Go to Home
-            </Link>
+            <Button asChild variant="link">
+              <Link to="/">Go to Home</Link>
+            </Button>
           </ErrorState>
         ) : (
           <ErrorState title="Couldn't load the results" onRetry={() => void review.refetch()}>
@@ -91,14 +87,9 @@ function RunReview({ runId }: { runId: string }) {
   const notice = review.isError ? (
     <>
       Couldn't refresh the results. Decisions are off until they refresh.
-      <button
-        type="button"
-        className="button"
-        disabled={review.isFetching}
-        onClick={() => void review.refetch()}
-      >
+      <Button disabled={review.isFetching} onClick={() => void review.refetch()}>
         {review.isFetching ? "Trying again…" : "Try again"}
-      </button>
+      </Button>
     </>
   ) : live ? (
     "This run is still going. Results fill in as tasks report; you can accept checks and mark it reviewed once it completes."
@@ -117,9 +108,18 @@ function RunReview({ runId }: { runId: string }) {
         if (selection.revision) next.set("revision", selection.revision);
         setSearch(next);
       }}
-      backLink={<Link to="/">Home</Link>}
+      backLink={
+        <Button asChild variant="link">
+          <Link to="/">
+            <ArrowLeft aria-hidden /> Home
+          </Link>
+        </Button>
+      }
       onRefresh={() =>
-        queryClient.invalidateQueries({ queryKey: ["review-run", runId] }, { throwOnError: true })
+        queryClient.invalidateQueries(
+          { queryKey: reviewRunQuery(runId).queryKey },
+          { throwOnError: true },
+        )
       }
     />
   );

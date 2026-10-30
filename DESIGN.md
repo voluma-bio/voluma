@@ -20,10 +20,10 @@ where it is used.
 ## Status
 
 - **Status lives in the list, never in mesh colour.** Task, run and
-  structure status shows as a badge or dot in lists and reports.
+  structure status shows as a `StatusMark` (glyph and word) in lists and reports.
 - The one exception: the region under check is outlined in amber
   (`--check-outline`) on the slices and in 3D.
-- Amber always means To check; violet means running or corrected; green means
+- Amber always means To check; violet means running or checking; green means
   done; red stopped; grey waiting. Ice (`select`) means selection only. Don't reuse them for
   decoration.
 

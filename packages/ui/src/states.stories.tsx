@@ -5,8 +5,7 @@ import { EmptyState, ErrorState, LoadingState } from "./states";
  * **What:** what a list or panel shows instead of rows. Empty says what will fill it; Loading
  * keeps the rows' shapes so nothing jumps when they arrive; Error says what happened, what is
  * safe, and offers a retry. **Why:** one pattern each, in place of twelve empties and seven
- * loadings. **Where:** every list and panel. The error's mark stands in for the Stopped
- * StatusMark until it lands.
+ * loadings. **Where:** every list and panel. The error's mark is the Stopped glyph.
  */
 const meta = {
   title: "Parts/States",

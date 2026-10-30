@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { PlaceholderStatus } from "./placeholder-status";
+import { StatusMark } from "./status-mark";
 import { Table, type TableColumn } from "./table";
 
 /**
@@ -7,7 +7,7 @@ import { Table, type TableColumn } from "./table";
  * Comfortable rows are 40 px, compact 30 px. Rows can go somewhere (`rowLink`, arrow on hover),
  * open in place (`rowDetail`) or both, and sit under group heads (`groupOf`). **Why:** one table
  * for values and scan lists, in place of six table-like grids. **Where:** Scans, Results, a
- * task's values, the runs list. Statuses here are a stand-in until StatusMark lands.
+ * task's values, the runs list.
  */
 type Scan = {
   id: string;
@@ -32,7 +32,7 @@ const columns: TableColumn<Scan>[] = [
     key: "status",
     header: "Status",
     cell: (s) => (
-      <PlaceholderStatus state={s.state} word={s.checks ? `${s.checks} to check` : undefined} />
+      <StatusMark status={s.state} label={s.checks ? `${s.checks} to check` : undefined} />
     ),
   },
   {

@@ -3,8 +3,16 @@
  * through design-token utilities. An app that renders them must let Tailwind
  * scan this package: `@source "<path to>/packages/ui/src";` in its CSS entry.
  */
+
 export { Box, type BoxProps } from "./box";
-export { Button, type ButtonProps, buttonClass } from "./button";
+export {
+  Button,
+  type ButtonProps,
+  IconButton,
+  type IconButtonProps,
+} from "./button";
+export { Chip, type ChipProps } from "./chip";
+export { Count, type CountProps, type CountTone } from "./count";
 export { cx } from "./cx";
 export { Disclosure, type DisclosureProps } from "./disclosure";
 export {
@@ -27,6 +35,8 @@ export {
   MenuSeparator,
 } from "./menu";
 export { Facts, type FactsProps, Popover, PopoverClose, type PopoverProps } from "./popover";
+export { Progress, type ProgressProps } from "./progress";
+export { Readout, type ReadoutProps, type ReadoutValue } from "./readout";
 export {
   type Density,
   type LinkRenderProps,
@@ -40,6 +50,14 @@ export {
 } from "./row";
 export { SegmentedControl, type SegmentedControlProps } from "./segmented-control";
 export {
+  AppShell,
+  ShellHeading,
+  ShellLink,
+  ShellPanel,
+  type ShellPanelProps,
+  type ShellSide,
+} from "./shell/shell";
+export {
   EmptyState,
   type EmptyStateProps,
   ErrorState,
@@ -47,7 +65,13 @@ export {
   LoadingState,
   type LoadingStateProps,
 } from "./states";
-export { StatusBadge, type StatusBadgeProps, type StatusTone } from "./status-badge";
+export {
+  STATUS_WORD,
+  type Status,
+  StatusGlyph,
+  StatusMark,
+  type StatusMarkProps,
+} from "./status-mark";
 export {
   type StripGroup,
   StripPlot,
@@ -64,3 +88,4 @@ export {
   Tabs,
   type TabsProps,
 } from "./tabs";
+export { Tooltip, type TooltipProps } from "./tooltip";

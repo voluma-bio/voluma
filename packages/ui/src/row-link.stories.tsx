@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { PlaceholderStatus } from "./placeholder-status";
 import { List, RowLink } from "./row";
+import { StatusMark } from "./status-mark";
 
 /**
  * **What:** a row that is a place. The whole row navigates (an arrow shows on hover); its chevron
@@ -31,7 +31,7 @@ const meta = {
         title="OA7-6, left knee"
         subtitle="Tibial IIOC, task 4 of 9"
         to="#scan"
-        cells={[<PlaceholderStatus key="s" state="running" word="Task 4 of 9" />]}
+        cells={[<StatusMark key="s" status="running" label="Task 4 of 9" />]}
       />
     </List>
   ),

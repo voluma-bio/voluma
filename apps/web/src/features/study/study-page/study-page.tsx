@@ -12,8 +12,10 @@
  * "Add scans" waits: adding scans to an existing study isn't designed, and `/new` makes a new one.
  */
 import { useQuery } from "@tanstack/react-query";
-import { ApiError, getStudy } from "@voluma/api-client";
+import { ApiError } from "@voluma/api-client";
+import { studyQuery } from "@voluma/api-client/query";
 import type { StudyDetail } from "@voluma/contracts/study";
+import { formatUsd } from "@voluma/run-view";
 import {
   Button,
   ErrorState,
@@ -24,7 +26,6 @@ import {
   TabPanel,
   Tabs,
 } from "@voluma/ui";
-import { formatUsd } from "@voluma/ui/run";
 import { type BundledWorkflow, workflowById } from "@voluma/workflow/bundled";
 import { ChevronDown } from "lucide-react";
 import { useCallback } from "react";
@@ -37,9 +38,9 @@ import { ToCheck } from "./to-check";
 /** Where the page's loading and error states sit while there is no page to show. */
 const PAGE_STATE = "mx-auto w-full max-w-2xl px-6 py-8 max-[760px]:px-3";
 const homeLink = (
-  <Link to="/" className="text-primary-text hover:underline">
-    Go to Home
-  </Link>
+  <Button asChild variant="link">
+    <Link to="/">Go to Home</Link>
+  </Button>
 );
 
 const TAB_IDS = ["overview", "check", "scans"] as const;
@@ -53,8 +54,7 @@ export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
   const tab: TabId = TAB_IDS.find((t) => t === tabParam) ?? "overview";
 
   const study = useQuery({
-    queryKey: ["study", id],
-    queryFn: () => getStudy(id),
+    ...studyQuery(id),
     refetchInterval: (query) => (query.state.data?.scans.some(isLive) ? 5000 : false),
   });
 
@@ -71,14 +71,14 @@ export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
 
   if (study.isPending)
     return (
-      <main className={PAGE_STATE}>
+      <div className={PAGE_STATE}>
         <LoadingState label="Loading the study" rows={4} />
-      </main>
+      </div>
     );
   // A failed background refetch keeps its data (status "error"): the page stays, with a notice.
   if (!study.data)
     return (
-      <main className={PAGE_STATE}>
+      <div className={PAGE_STATE}>
         {study.error instanceof ApiError && study.error.status === 404 ? (
           <ErrorState title="This study isn't here">
             It may have been removed, or it belongs to another lab. {homeLink}
@@ -88,7 +88,7 @@ export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
             Check your connection, then try again. {homeLink}
           </ErrorState>
         )}
-      </main>
+      </div>
     );
 
   const detail = study.data;
@@ -99,11 +99,11 @@ export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
   const workflow = workflowById(detail.study.workflowId);
   if (!workflow)
     return (
-      <main className={PAGE_STATE}>
+      <div className={PAGE_STATE}>
         <ErrorState title="Can't show this study">
           Its workflow, {detail.study.workflowId}, isn't in this version of Voluma. {homeLink}
         </ErrorState>
-      </main>
+      </div>
     );
 
   return (
@@ -120,13 +120,9 @@ export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
             minute: "2-digit",
           })}
           .
-          <button
-            type="button"
-            onClick={() => void study.refetch()}
-            className="cursor-pointer text-primary-text hover:underline"
-          >
+          <Button variant="link" onClick={() => void study.refetch()}>
             Try again
-          </button>
+          </Button>
         </p>
       )}
       <TabPanel value={tab} className="min-h-0 flex-1 overflow-y-auto">
