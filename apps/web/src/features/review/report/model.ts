@@ -3,7 +3,7 @@
  * `getReviewRun`. Display helpers leave scientific task status unchanged.
  */
 import type { TaskStatus } from "@voluma/contracts/ids";
-import type { ReviewTask, Revision } from "@voluma/contracts/review";
+import type { ReviewRun, ReviewTask } from "@voluma/contracts/review";
 import type { StatusTone } from "@voluma/ui";
 
 export type {
@@ -32,12 +32,16 @@ export function taskStatus(task: ReviewTask): { label: string; tone: StatusTone 
     : statuses[task.status];
 }
 
-/** The structures a task reported, and those its numbers are shown with. */
-export function structuresOf(revision: Revision, task: ReviewTask) {
-  const shownWith = new Set(
-    [...task.measurements, ...task.scores].flatMap((m) => [...m.on, ...m.context]),
-  );
-  return revision.structures.filter(
-    (item) => item.id.startsWith(`${task.id}/`) || shownWith.has(item.id),
-  );
+/** Whether a file the latest results draw is still being converted for viewing (no entry yet). */
+export function preparing(run: ReviewRun): boolean {
+  const latest = run.revisions.at(-1);
+  if (!latest) return false;
+  const files = [
+    ...latest.volumes.flatMap((v) => (v.data?.format === "npy" ? [v.data.sha256] : [])),
+    ...latest.structures.flatMap((s) =>
+      s.voxels && "mask" in s.voxels ? [s.voxels.mask.sha256] : [],
+    ),
+    ...latest.surfaces.map((s) => s.heights.sha256),
+  ];
+  return files.some((sha256) => !run.assets[sha256]);
 }
