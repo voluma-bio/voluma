@@ -2,17 +2,20 @@
 
 import { useMutation } from "@tanstack/react-query";
 import { markReviewed } from "@voluma/api-client";
-import type { Focus, Revision, Structure } from "@voluma/contracts/review";
-import type { ReviewSnapshot } from "@voluma/contracts/snapshot";
+import type { Focus, Revision } from "@voluma/contracts/review";
+import type { GridViewState, ReviewSnapshot } from "@voluma/contracts/snapshot";
 import { Button, StatusMark } from "@voluma/ui";
-import type { SnapshotControls, StructureDisplay } from "@voluma/viewer";
+import type { StructureDisplay } from "@voluma/viewer/grid";
 import { ArrowLeft, Download, History, Layers, ListChecks } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { lazy, type ReactNode, Suspense, useEffect, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { downloadCsv, downloadReviewReport } from "./export";
-import { type ReviewRun, structuresOf, taskStatus } from "./model";
+import { type ReviewRun, taskStatus } from "./model";
 import { TaskReport } from "./TaskReport";
 import { useSnapshots } from "./useSnapshots";
+
+// three.js and the zarr reader load only once there is a task to show.
+const TaskViewer = lazy(() => import("./TaskViewer").then((m) => ({ default: m.TaskViewer })));
 
 export function ReviewWorkspace({
   runId,
@@ -22,7 +25,6 @@ export function ReviewWorkspace({
   revisionId,
   navigate,
   backLink,
-  viewer,
   notice,
   onRefresh,
 }: {
@@ -33,29 +35,17 @@ export function ReviewWorkspace({
   revisionId?: string;
   navigate(selection: { task?: string; revision?: string }): void;
   backLink: ReactNode;
-  viewer: (
-    selected: Structure[],
-    display: StructureDisplay,
-    revision?: Revision,
-    focus?: Focus,
-    snapshots?: SnapshotControls,
-  ) => ReactNode;
   /** Loading/unavailable state, or an actionable refresh failure above retained results. */
   notice?: ReactNode;
   onRefresh(): Promise<void>;
 }) {
   const [tab, setTab] = useState<"tasks" | "structures">("tasks");
-  const [display, setDisplay] = useState<Record<string, { visible: boolean; opacity: number }>>({});
+  const [display, setDisplay] = useState<StructureDisplay>({});
   const [filter, setFilter] = useState("");
-  const [restoredSnapshot, setRestoredSnapshot] = useState<ReviewSnapshot>();
   const report = useMutation({
     mutationFn: ({ run, revision }: { run: ReviewRun; revision: Revision }) =>
       downloadReviewReport(run, revision),
   });
-  function select(selection: { task?: string; revision?: string }) {
-    setRestoredSnapshot(undefined);
-    navigate(selection);
-  }
   const [focusedCheck, setFocusedCheck] = useState<{
     revisionId: string;
     taskId: string;
@@ -64,6 +54,10 @@ export function ReviewWorkspace({
   const latest = run?.revisions.at(-1);
   const revision = revisionId ? run?.revisions.find((item) => item.id === revisionId) : latest;
   const task = taskId ? revision?.tasks.find((item) => item.id === taskId) : revision?.tasks[0];
+  // A reopened screenshot, kept while its revision and task are open.
+  const [restoredSnapshot, setRestoredSnapshot] = useState<
+    ReviewSnapshot & { viewState: GridViewState }
+  >();
   const restored =
     restoredSnapshot?.revisionId === revision?.id && restoredSnapshot?.taskId === task?.id
       ? restoredSnapshot
@@ -73,40 +67,39 @@ export function ReviewWorkspace({
       snapshot?.revisionId === revision?.id && snapshot?.taskId === task?.id ? snapshot : undefined,
     );
   }, [revision?.id, task?.id]);
-  const snapshots = useSnapshots(runId, revision?.id, task?.id, (snapshot) => {
-    setRestoredSnapshot(snapshot);
-    setDisplay(
-      Object.fromEntries(
-        snapshot.viewState.structures.map((item) => [
-          item.structureId,
-          { visible: item.visible, opacity: item.opacity },
-        ]),
-      ),
-    );
-    setFocusedCheck(
-      snapshot.viewState.focus
-        ? {
-            revisionId: snapshot.revisionId,
-            taskId: snapshot.taskId,
-            focus: snapshot.viewState.focus,
-          }
-        : undefined,
-    );
-    navigate({ revision: snapshot.revisionId, task: snapshot.taskId });
-  });
+  const snapshots = useSnapshots(
+    runId,
+    revision?.id,
+    task?.id,
+    (id) => revision?.tasks.find((item) => item.id === id)?.title ?? id,
+    (snapshot) => {
+      setRestoredSnapshot(snapshot);
+      setDisplay(
+        Object.fromEntries(
+          snapshot.viewState.structures.map((item) => [
+            item.structureId,
+            { visible: item.visible, opacity: item.opacity },
+          ]),
+        ),
+      );
+      setFocusedCheck(
+        snapshot.viewState.focus
+          ? {
+              revisionId: snapshot.revisionId,
+              taskId: snapshot.taskId,
+              focus: snapshot.viewState.focus,
+            }
+          : undefined,
+      );
+      navigate({ revision: snapshot.revisionId, task: snapshot.taskId });
+    },
+  );
   const readOnly = !canReview || !run?.review || revision !== latest;
   const complete = useMutation({
     mutationFn: () => markReviewed(runId, { baseRevisionId: latest?.id ?? "" }),
     onSuccess: onRefresh,
     onError: onRefresh,
   });
-  const selected = restored
-    ? (revision?.structures.filter((item) =>
-        restored.viewState.structures.some((entry) => entry.structureId === item.id),
-      ) ?? [])
-    : revision && task
-      ? structuresOf(revision, task)
-      : [];
   return (
     <div className="review-shell" data-theme="light">
       <div className="run-header">
@@ -116,9 +109,7 @@ export function ReviewWorkspace({
             {backLink}
           </div>
           <div className="run-title">
-            <h1 className="text-xl font-semibold">
-              {run?.sample ?? (runId === "local" ? "Scan viewer" : runId)}
-            </h1>
+            <h1 className="text-xl font-semibold">{run?.sample ?? runId}</h1>
             {run?.review && (
               <StatusMark
                 status={run.review.remainingToCheck ? "check" : "done"}
@@ -162,7 +153,7 @@ export function ReviewWorkspace({
                 <select
                   aria-label="Revision"
                   value={revision.id}
-                  onChange={(event) => select({ task: task?.id, revision: event.target.value })}
+                  onChange={(event) => navigate({ task: task?.id, revision: event.target.value })}
                 >
                   {run.revisions.map((item, i) => (
                     <option key={item.id} value={item.id}>
@@ -230,7 +221,7 @@ export function ReviewWorkspace({
                       key={item.id}
                       className={`task-nav ${item === task ? "selected" : ""}`}
                       aria-current={item === task ? "step" : undefined}
-                      onClick={() => select({ task: item.id, revision: revisionId })}
+                      onClick={() => navigate({ task: item.id, revision: revisionId })}
                     >
                       <span className="task-number">{String(index + 1).padStart(2, "0")}</span>
                       <span>
@@ -267,7 +258,21 @@ export function ReviewWorkspace({
                   value={filter}
                   onChange={(event) => setFilter(event.target.value)}
                 />
-                {revision?.structures
+                {[
+                  ...(revision?.structures ?? []).map((item) => ({
+                    id: item.id,
+                    name: item.name,
+                    label: item.voxels && "label" in item.voxels ? item.voxels.label : undefined,
+                    note: item.missing ? `Missing · ${item.missing.reason}` : "Reported",
+                  })),
+                  // Surfaces draw as meshes in 3D, so they hide and fade the same way.
+                  ...(revision?.surfaces ?? []).map((item) => ({
+                    id: item.id,
+                    name: item.name,
+                    label: undefined,
+                    note: "Surface",
+                  })),
+                ]
                   .filter((item) => item.name.toLowerCase().includes(filter.toLowerCase()))
                   .map((item) => {
                     const settings = display[item.id] ?? { visible: true, opacity: 100 };
@@ -284,19 +289,17 @@ export function ReviewWorkspace({
                               })
                             }
                           />
-                          {item.voxels && "label" in item.voxels && (
+                          {item.label !== undefined && (
                             <span
                               className="inline-block h-2 w-2 self-center"
                               style={{
-                                background: `var(--label-${((item.voxels.label - 1) % 12) + 1})`,
+                                background: `var(--label-${((item.label - 1) % 12) + 1})`,
                               }}
                             />
                           )}
                           {item.name}
                         </label>
-                        <p className="mt-2 text-muted-foreground">
-                          {item.missing ? `Missing · ${item.missing.reason}` : "Reported"}
-                        </p>
+                        <p className="mt-2 text-muted-foreground">{item.note}</p>
                         <label className="opacity-control">
                           Opacity
                           <input
@@ -318,9 +321,9 @@ export function ReviewWorkspace({
                       </div>
                     );
                   })}
-                {!revision?.structures.length && (
+                {!revision?.structures.length && !revision?.surfaces.length && (
                   <p className="mt-4 text-sm text-muted-foreground">
-                    No segmentation structures are available.
+                    No structures or surfaces are available.
                   </p>
                 )}
               </div>
@@ -366,7 +369,7 @@ export function ReviewWorkspace({
                         ? "This task or revision does not exist."
                         : notice
                           ? notice
-                          : "Opening a scan displays its images. Measurements, checks and evidence appear only after an analysis has produced them."}
+                          : "Measurements, checks, evidence and images appear only after an analysis has produced them."}
                     </p>
                     <section>
                       <h3 className="font-medium">Measurements</h3>
@@ -390,21 +393,38 @@ export function ReviewWorkspace({
                 )}
               </div>
             </Panel>
-            <Separator
-              className="resize-handle main-handle"
-              aria-label="Resize report and viewers"
-            />
+            <Separator className="main-handle" aria-label="Resize report and viewers" />
             <Panel id="imaging" minSize="28%">
-              {viewer(
-                selected,
-                display,
-                revision,
-                focusedCheck &&
-                  focusedCheck.revisionId === revision?.id &&
-                  focusedCheck.taskId === task?.id
-                  ? focusedCheck.focus
-                  : undefined,
-                snapshots ? { ...snapshots, restore: restored } : undefined,
+              {run && revision && task ? (
+                <Suspense>
+                  <TaskViewer
+                    runId={run.id}
+                    revision={revision}
+                    task={task}
+                    assets={run.assets}
+                    display={display}
+                    focus={
+                      focusedCheck &&
+                      focusedCheck.revisionId === revision.id &&
+                      focusedCheck.taskId === task.id
+                        ? focusedCheck.focus
+                        : undefined
+                    }
+                    restore={restored?.viewState}
+                    onCapture={snapshots.capture}
+                    saving={snapshots.saving}
+                    footer={snapshots.tray}
+                  />
+                </Suspense>
+              ) : (
+                <section
+                  className="flex h-full min-h-0 flex-col bg-background p-4"
+                  aria-label="Imaging workspace"
+                >
+                  <div className="view-empty" role="status">
+                    Images appear with the task's results.
+                  </div>
+                </section>
               )}
             </Panel>
           </Group>

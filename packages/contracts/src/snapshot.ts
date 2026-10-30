@@ -20,14 +20,15 @@
  * PNG bytes are base64 (not a data URL), at most 8 MiB after decoding. The server
  * checks the decoded size and image validity, not only this string's syntax.
  *
- * Restore only after opening the pinned revision/task and matching the run input's
- * series and geometry fingerprint. Apply slice, camera and display settings after
- * images/labels load; focus must not subsequently recenter the saved camera. The
- * viewport's original aspect ratio is retained when reopening at another size.
- * The PNG is the original capture even if later display tokens/rendering change.
- * Export bundles keep this record and PNG under its id; {snapshot:id} resolves only
- * within the exported run/revision. These schemas prepare the routes; no handler
- * or report renderer is connected yet.
+ * A screenshot is one pane of the grid viewer (a slice plane or 3D) on the task's analysis
+ * grid. Restore only after opening the pinned revision/task on the saved `gridId`; apply the
+ * crosshair, contrast and the pane's view after the grid loads, and never let the restored
+ * focus move the saved crosshair again. The PNG is the original capture even if later
+ * display tokens/rendering change. Export bundles keep this record and PNG under its id;
+ * {snapshot:id} resolves only within the exported run/revision.
+ *
+ * `acquired` screenshots were taken in the earlier DICOM viewer (#241). They stay listed and
+ * exported but can't be reopened, and the server no longer accepts them.
  */
 import { z } from "zod";
 import { userIdSchema } from "./auth";
@@ -67,47 +68,80 @@ const cameraSchema = z
     return Math.hypot(y * w - z * v, z * u - x * w, x * v - y * u) > 0;
   }, "camera needs distinct position/focal point and a nonparallel view-up vector");
 
-const view = {
-  version: z.literal(1),
-  seriesId: id,
-  /**
-   * SHA-256 of UTF-8 JSON.stringify([rows, columns, spacing, orientation, positions]),
-   * using the acquired series' ascending slice order and every slice's world-mm
-   * position. This identifies geometry, not pixel content; the run input is immutable.
-   */
-  scanGeometrySha256: sha256Schema,
+const viewport = z
+  .object({
+    width: z.number().int().positive().max(8192),
+    height: z.number().int().positive().max(8192),
+  })
+  .refine((size) => size.width * size.height <= 16_777_216, "viewport exceeds 16 megapixels");
+
+const structuresSchema = z
+  .array(z.object({ structureId: id, visible: z.boolean(), opacity: percent }))
+  .max(4096)
+  .refine((items) => new Set(items.map((s) => s.structureId)).size === items.length, {
+    message: "duplicate structure",
+  });
+
+const voxel = z.number().int().nonnegative();
+
+/** What every grid pane saves: the grid, its crosshair, contrast and structure display. */
+const grid = {
+  version: z.literal(2),
+  /** The task's analysis grid (`Volume.gridId`); restore refuses another grid. */
+  gridId: id,
   /** Physical PNG pixels, including device pixel ratio. Maximum 16 megapixels. */
-  viewport: z
-    .object({
-      width: z.number().int().positive().max(8192),
-      height: z.number().int().positive().max(8192),
-    })
-    .refine((size) => size.width * size.height <= 16_777_216, "viewport exceeds 16 megapixels"),
-  camera: cameraSchema,
+  viewport,
+  /** The crosshair, in source voxels (z, y, x) of the grid. */
+  point: z.tuple([voxel, voxel, voxel]),
+  /** The image's display window, in its stored values. */
   window: windowSchema,
-  labelsEnabled: z.boolean(),
-  /** Every structure selected for display, including hidden ones; ids belong to the revision. */
-  structures: z
-    .array(z.object({ structureId: id, visible: z.boolean(), opacity: percent }))
-    .max(4096)
-    .refine((items) => new Set(items.map((s) => s.structureId)).size === items.length, {
-      message: "duplicate structure",
-    }),
-  /** Resolved focus preserves the highlighted mask/box/point, not a command to jump again. */
+  /** Structures and surfaces whose display was changed; any other is shown at full opacity. */
+  structures: structuresSchema,
+  /** Resolved focus preserves the highlighted blocks, not a command to jump again. */
   focus: focusSchema.optional(),
 };
 
+/** A view in the earlier DICOM viewer (#241): listed and exported, never reopened. */
+const acquiredSchema = z.object({
+  version: z.literal(1),
+  kind: z.literal("acquired"),
+  seriesId: id,
+  scanGeometrySha256: sha256Schema,
+  viewport,
+  camera: cameraSchema,
+  window: windowSchema,
+  labelsEnabled: z.boolean(),
+  structures: structuresSchema,
+  focus: focusSchema.optional(),
+  sliceIndex: z.number().int().nonnegative(),
+});
+
 export const reviewSnapshotViewStateSchema = z.discriminatedUnion("kind", [
-  z.object({ ...view, kind: z.literal("acquired"), sliceIndex: z.number().int().nonnegative() }),
+  acquiredSchema,
   z.object({
-    ...view,
-    kind: z.literal("volume3d"),
-    /** The raw-intensity rendering controls, not segmented-surface properties. */
-    threshold: percent,
-    opacity: percent,
+    ...grid,
+    kind: z.literal("slice"),
+    plane: z.enum(["axial", "coronal", "sagittal"]),
+    /** Pixels per mm as a multiple of the zoom that fits the grid in the pane. */
+    zoom: z.number().positive(),
+    /** The pane centre in pane mm: columns right, rows down as negative y. */
+    center: z.tuple([z.number(), z.number()]),
+  }),
+  z.object({
+    ...grid,
+    kind: z.literal("3d"),
+    /** In the grid's own mm (voxel × spacing, x y z). */
+    camera: z
+      .object({ position: vec3, target: vec3, up: vec3 })
+      .refine(
+        (c) => c.position.some((v, i) => v !== c.target[i]) && c.up.some((v) => v !== 0),
+        "camera needs distinct position and target and a nonzero up vector",
+      ),
   }),
 ]);
 export type ReviewSnapshotViewState = z.infer<typeof reviewSnapshotViewStateSchema>;
+/** A screenshot the grid viewer can take and reopen. */
+export type GridViewState = Exclude<ReviewSnapshotViewState, { kind: "acquired" }>;
 
 export const createReviewSnapshotRequestSchema = z.object({
   id: z.uuid(),

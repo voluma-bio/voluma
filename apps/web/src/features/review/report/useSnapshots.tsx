@@ -1,76 +1,133 @@
-/** Snapshot collection for this run; the viewer supplies pixels, not persistence. */
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createReviewSnapshot, listReviewSnapshots, reviewFileUrl } from "@voluma/api-client";
-import type { ReviewSnapshot } from "@voluma/contracts/snapshot";
+/** The run's saved screenshots: saving a captured pane, the tray that lists and reopens them. */
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  ApiError,
+  createReviewSnapshot,
+  listReviewSnapshots,
+  reviewFileUrl,
+} from "@voluma/api-client";
+import type {
+  CreateReviewSnapshotRequest,
+  GridViewState,
+  ReviewSnapshot,
+} from "@voluma/contracts/snapshot";
 import { Button } from "@voluma/ui";
-import type { SnapshotControls } from "@voluma/viewer";
+import { useState } from "react";
+
+const planeAxis = { axial: 0, sagittal: 1, coronal: 2 } as const;
+
+function describe({ viewState: v }: ReviewSnapshot) {
+  if (v.kind === "acquired") return `Slice ${v.sliceIndex + 1} · earlier viewer`;
+  if (v.kind === "3d") return "3D";
+  return `${v.plane[0]!.toUpperCase()}${v.plane.slice(1)} ${v.point[planeAxis[v.plane]] + 1}`;
+}
 
 export function useSnapshots(
   runId: string,
   revisionId: string | undefined,
   taskId: string | undefined,
-  onRestore: (snapshot: ReviewSnapshot) => void,
-): SnapshotControls | undefined {
+  taskName: (id: string) => string,
+  onRestore: (snapshot: ReviewSnapshot & { viewState: GridViewState }) => void,
+) {
   const client = useQueryClient();
   const key = ["review-snapshots", runId];
   const query = useQuery({
     queryKey: key,
     queryFn: ({ signal }) => listReviewSnapshots(runId, signal),
-    enabled: !!revisionId && !!taskId,
     retry: false,
   });
-  if (!revisionId || !taskId) return undefined;
-  const items = query.data ?? [];
-  return {
-    scopeKey: `${revisionId}/${taskId}`,
-    save: async (capture) => {
-      const saved = await createReviewSnapshot(runId, { ...capture, revisionId, taskId });
+  // A save that failed on the network or the server retries the same id and pixels, never a
+  // new capture; a refused one (4xx) would only be refused again.
+  const [failed, setFailed] = useState<CreateReviewSnapshotRequest>();
+  const save = useMutation({
+    mutationFn: (request: CreateReviewSnapshotRequest) => createReviewSnapshot(runId, request),
+    onMutate: () => setFailed(undefined),
+    onSuccess: (saved) =>
       client.setQueryData<ReviewSnapshot[]>(key, (old = []) => [
         ...old.filter((item) => item.id !== saved.id),
         saved,
-      ]);
-    },
-    tray: (
-      <details className="border-b border-border px-4 py-2 text-xs" open>
-        <summary className="cursor-pointer font-medium">Snapshots ({items.length})</summary>
-        {query.isPending && (
-          <p role="status" className="mt-2">
-            Loading snapshots…
-          </p>
-        )}
-        {query.isError && (
-          <p role="alert" className="mt-2">
-            Could not load snapshots.{" "}
-            <Button variant="link" onClick={() => void query.refetch()}>
+      ]),
+    onError: (error, request) =>
+      setFailed(
+        !(error instanceof ApiError) || error.status === 0 || error.status >= 500
+          ? request
+          : undefined,
+      ),
+  });
+  const items = query.data ?? [];
+  const capture =
+    revisionId && taskId
+      ? (viewState: GridViewState, png: { base64: string }) =>
+          save.mutate({
+            id: crypto.randomUUID(),
+            revisionId,
+            taskId,
+            viewState,
+            pngBase64: png.base64,
+          })
+      : undefined;
+  const tray = (
+    <details className="snapshot-tray" open>
+      <summary>
+        Screenshots ({items.length}){save.isPending && <span role="status"> · Saving…</span>}
+      </summary>
+      {save.isError && (
+        <p role="alert" className="error-message">
+          {failed
+            ? "Couldn't save the screenshot. Check your connection."
+            : `Couldn't save the screenshot: ${
+                save.error instanceof ApiError
+                  ? (save.error.serverMessage ?? save.error.message)
+                  : save.error.message
+              }`}{" "}
+          {failed && (
+            <Button variant="link" onClick={() => save.mutate(failed)}>
               Retry
             </Button>
-          </p>
-        )}
-        {!!items.length && (
-          <div className="mt-2 flex max-h-28 flex-wrap gap-3 overflow-y-auto pb-1">
-            {items.map((snapshot) => (
-              <div key={snapshot.id} className="flex shrink-0 items-center gap-2">
-                <button
-                  type="button"
-                  className="flex items-center gap-2 text-left"
-                  onClick={() => onRestore({ ...snapshot })}
-                  aria-label={`Reopen snapshot ${snapshot.id}`}
-                >
-                  <img
-                    src={reviewFileUrl(runId, snapshot.png.sha256)}
-                    alt=""
-                    className="h-12 w-16 border border-border object-contain"
-                  />
-                  <span>
-                    {snapshot.viewState.kind === "acquired"
-                      ? `Slice ${snapshot.viewState.sliceIndex + 1}`
-                      : "3D"}
-                    <br />
-                    <span className="text-muted-foreground">
-                      {new Date(snapshot.createdAt).toLocaleTimeString()}
-                    </span>
+          )}
+        </p>
+      )}
+      {query.isError && (
+        <p role="alert">
+          Couldn't load screenshots.{" "}
+          <Button variant="link" onClick={() => void query.refetch()}>
+            Retry
+          </Button>
+        </p>
+      )}
+      {items.length > 0 ? (
+        <ul>
+          {items.map((snapshot) => {
+            const { viewState } = snapshot;
+            const label = (
+              <>
+                <img src={reviewFileUrl(runId, snapshot.png.sha256)} alt="" />
+                <span>
+                  {describe(snapshot)}
+                  <br />
+                  <span className="text-muted-foreground">
+                    {snapshot.taskId === taskId ? "" : `${taskName(snapshot.taskId)} · `}
+                    {new Date(snapshot.createdAt).toLocaleTimeString()}
                   </span>
-                </button>
+                </span>
+              </>
+            );
+            return (
+              <li key={snapshot.id}>
+                {viewState.kind === "acquired" ? (
+                  <span className="snapshot-item" title="Taken in the earlier viewer">
+                    {label}
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    className="snapshot-item"
+                    aria-label={`Reopen ${describe(snapshot)} screenshot`}
+                    onClick={() => onRestore({ ...snapshot, viewState: { ...viewState } })}
+                  >
+                    {label}
+                  </button>
+                )}
                 <Button asChild variant="link">
                   <a
                     href={reviewFileUrl(runId, snapshot.png.sha256)}
@@ -79,26 +136,27 @@ export function useSnapshots(
                     PNG
                   </a>
                 </Button>
-                <Button
-                  variant="link"
-                  onClick={() => {
-                    const url = URL.createObjectURL(
-                      new Blob([JSON.stringify(snapshot, null, 2)], { type: "application/json" }),
-                    );
-                    const link = document.createElement("a");
-                    link.href = url;
-                    link.download = `${snapshot.id}.json`;
-                    link.click();
-                    setTimeout(() => URL.revokeObjectURL(url), 1000);
-                  }}
-                >
-                  View state
+                <Button asChild variant="link">
+                  <a
+                    href={`data:application/json,${encodeURIComponent(JSON.stringify(snapshot, null, 2))}`}
+                    download={`${snapshot.id}.json`}
+                  >
+                    View state
+                  </a>
                 </Button>
-              </div>
-            ))}
-          </div>
-        )}
-      </details>
-    ),
-  };
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        !query.isPending &&
+        !query.isError && (
+          <p className="text-muted-foreground">
+            Use the camera button on a pane to save what it shows.
+          </p>
+        )
+      )}
+    </details>
+  );
+  return { capture, tray, saving: save.isPending };
 }
