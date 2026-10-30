@@ -32,21 +32,19 @@ const resolve = (ref: { provider: string; id: string }) => {
   if (!model) throw new Error(`unknown model ${ref.provider}/${ref.id}`);
   return model;
 };
-const roles = {
-  worker: resolve(config.roles.worker),
-  check: resolve(config.roles.check),
-  main: resolve(config.roles.main),
-};
+const aliases = Object.fromEntries(
+  Object.entries(config.models).map(([alias, ref]) => [alias, resolve(ref)]),
+);
 
 // Pi clamps a level a model lacks to a neighbouring one, so a typo'd or unsupported level
-// would run silently at another.
+// would run silently at another. Every alias is checked, named by a role file or not.
 if (config.thinking) {
   const fallback = config.fallbackModel && resolve(config.fallbackModel);
-  for (const [role, model] of Object.entries({ ...roles, ...(fallback && { fallback }) })) {
+  for (const [name, model] of Object.entries({ ...aliases, ...(fallback && { fallback }) })) {
     const levels = getSupportedThinkingLevels(model);
     if (!levels.includes(config.thinking))
       throw new Error(
-        `RUNNER_THINKING=${config.thinking} is not a level ${model.provider}/${model.id} (${role}) supports: ${levels.join(", ")}`,
+        `RUNNER_THINKING=${config.thinking} is not a level ${model.provider}/${model.id} (${name}) supports: ${levels.join(", ")}`,
       );
   }
 }
@@ -55,7 +53,7 @@ const runnerId = `runner-${randomUUID().slice(0, 8)}`;
 const ctx: RunnerContext = {
   config,
   models,
-  roles,
+  aliases,
   visitorModel: resolve(config.visitorModel),
   fallback: modelFallback(config.fallbackModel && resolve(config.fallbackModel), log),
   log,
@@ -79,8 +77,8 @@ const shuttingDown = new Promise<void>((resolve) =>
 const sleep = (ms: number) => delay(ms, undefined, { signal: shutdown.signal }).catch(() => {});
 
 log(
-  `${runnerId} up: ${config.concurrency} slot(s), models ${Object.entries(config.roles)
-    .map(([role, m]) => `${role} ${m.provider}/${m.id}`)
+  `${runnerId} up: ${config.concurrency} slot(s), models ${Object.entries(config.models)
+    .map(([alias, m]) => `${alias} ${m.provider}/${m.id}`)
     .join(
       ", ",
     )}${config.fallbackModel ? `, fallback ${config.fallbackModel.provider}/${config.fallbackModel.id}` : ""}, thinking ${config.thinking ?? "unset"}, api ${config.api.baseUrl}`,

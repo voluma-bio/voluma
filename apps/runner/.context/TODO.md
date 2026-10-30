@@ -11,7 +11,7 @@ From the skillset move (`workflows/` in this repo):
 
 - **The sandbox image does not follow the pinned commit.** The image is one digest in config (`SANDBOX_IMAGE`), so an old pin runs on the newest image. To tie them: tag the image with the hash of `workflows/core/requirements.txt`, have the runner resolve that tag from the requirements at the run's pinned commit, and record the image in the run's first event. Needs the workflow-packages lane's pin and the `/workflow` mount to read that file.
 
-- **Models per role** are config (`RUNNER_MODEL` worker, `RUNNER_CHECK_MODEL`, `RUNNER_MAIN_MODEL`), not an alias table in `apps/api` as the format doc says, because the runner holds the keys. The per-workflow or per-org override is not built.
+- **Model aliases** are config (`RUNNER_MODEL_<ALIAS>`, see CONTEXT.md), not an alias table in `apps/api` as the format doc says, because the runner holds the keys. The per-workflow or per-org override is not built.
 - **The main thread has no tools or sandbox.** At run start it sees the plan, the selection and the user's notes, not the workflow skill's text; the skillset's `microct-lead` names `view_image` and skills it would read, which needs the thread to have a sandbox. The `review` role is not started.
 
 - **An ended run can leave review assets "preparing" when it fails before the conversion worker
@@ -24,4 +24,4 @@ From the skillset move (`workflows/` in this repo):
 - An output appended after the drain's final scan (a thread stuck past the 5 s wind-down) gets no
   `assets.*` event. Narrow. (p529)
 - **A hung read on the mount blocks thread start for up to an hour.** `stage()` runs through `#run` with a 3600 s deadline and no `timeout -k`; a `cp` stuck in the R2 mount isn't killed and retries can't help. Wrap staging like `exec()` (process group under `timeout -k`) or run each `cp` under `timeout`.
-- **Thinking level isn't recorded.** `RUNNER_THINKING` shows only on the runner's boot line; a run's events don't say which level its calls used. Record it with the model on `thread.started` (a contract change) when per-role levels land.
+- **Thinking level isn't in the events.** Pi records each reply's level in History (`thinkingLevel` on the assistant message), and the runner's boot line prints `RUNNER_THINKING`, but a run's events don't say which level a thread used. Record it with the model on `thread.started` (a contract change) when per-role levels land.

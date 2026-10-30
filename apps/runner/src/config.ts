@@ -65,7 +65,7 @@ function apiEndpoint(): { baseUrl: string; token: string } {
 }
 
 /** A model as `provider/id`, e.g. `openai/gpt-5.6-luna`. */
-type ModelRef = { provider: string; id: string };
+export type ModelRef = { provider: string; id: string };
 function modelRef(name: string, fallback?: string): ModelRef {
   const text = fallback ? (optional(name) ?? fallback) : required(name);
   const [provider, ...rest] = text.split("/");
@@ -75,6 +75,29 @@ function modelRef(name: string, fallback?: string): ModelRef {
     throw new Error(`${name} must be provider/model-id, got "${text}"`);
   }
   return { provider, id };
+}
+
+/** The aliases a role file may name, with the model each takes when its variable is unset. */
+const MODEL_ALIASES: Record<string, string | undefined> = {
+  wonder: "meta/muse-wonder-1.0",
+  opus: undefined,
+  astra: undefined,
+};
+
+/**
+ * The model of each alias: `RUNNER_MODEL_<ALIAS>`, else the alias's default, else the alias is
+ * absent (a run whose role file names it fails when it starts). `RUNNER_MODEL`, when set, forces
+ * every alias to one model (a plumbing check on a cheap provider).
+ */
+function modelAliases(): Record<string, ModelRef> {
+  const forced = optional("RUNNER_MODEL") ? modelRef("RUNNER_MODEL") : undefined;
+  const models: Record<string, ModelRef> = {};
+  for (const [alias, fallback] of Object.entries(MODEL_ALIASES)) {
+    const name = `RUNNER_MODEL_${alias.toUpperCase()}`;
+    if (forced) models[alias] = forced;
+    else if (fallback || optional(name)) models[alias] = modelRef(name, fallback);
+  }
+  return models;
 }
 
 /**
@@ -149,16 +172,7 @@ export type Config = ReturnType<typeof runnerConfig>;
 
 export function runnerConfig() {
   const modal = modalToken();
-  // Each role's model on a `voluma` run; a role left out takes the one before it.
-  const worker = modelRef("RUNNER_MODEL");
-  const check = optional("RUNNER_CHECK_MODEL") ? modelRef("RUNNER_CHECK_MODEL") : worker;
-  // Muse Wonder when a Meta key is set, else the worker's model, so OpenAI-only dev works.
-  const main = optional("RUNNER_MAIN_MODEL")
-    ? modelRef("RUNNER_MAIN_MODEL")
-    : optional("VOLUMA_META_API_KEY")
-      ? modelRef("RUNNER_MAIN_MODEL", "meta/muse-wonder-1.0")
-      : worker;
-  const roles = { worker, check, main };
+  const models = modelAliases();
   // Off unless set: lab data goes to Standard-mode Meta models by default, so a fallback to
   // another provider is a per-deploy choice (see model-fallback.ts).
   const fallbackModel = optional("RUNNER_FALLBACK_MODEL")
@@ -172,7 +186,7 @@ export function runnerConfig() {
       );
     }
   }
-  for (const { provider } of Object.values(roles))
+  for (const { provider } of Object.values(models))
     required(`VOLUMA_${provider.toUpperCase()}_API_KEY`);
   const api = apiEndpoint();
   const metaApiKey = optional("VOLUMA_META_API_KEY");
@@ -201,19 +215,21 @@ export function runnerConfig() {
      * checks the same cap against known spend before each call.
      */
     maxRunCostUsd: optionalPositiveNumber("RUNNER_MAX_RUN_COST_USD"),
+    /** The run loop's limits (`LoopConfig`); the harness defaults are 2 fix rounds and 20 minutes. */
+    loop: {
+      maxFixRounds: positiveInt("RUNNER_MAX_FIX_ROUNDS", 2),
+      checkTimeoutMs: positiveInt("RUNNER_CHECK_TIMEOUT_MINUTES", 20) * 60_000,
+    },
     /**
-     * The model of each role of a `voluma` run: `RUNNER_MODEL` (worker), `RUNNER_CHECK_MODEL`
-     * (the check threads; default the worker's) and `RUNNER_MAIN_MODEL` (the main thread;
-     * default Muse Wonder, Standard mode, when a Meta key is set, else the worker's). Our key for each provider is
-     * `VOLUMA_<PROVIDER>_API_KEY`.
+     * The model behind each alias a role file may name (`model:` in `workflows/core/agents/`),
+     * for a `voluma` run. Our key for each provider is `VOLUMA_<PROVIDER>_API_KEY`.
      */
-    roles,
+    models,
     /**
-     * The thinking level every model call of a `voluma` run asks for (`RUNNER_THINKING`): each
-     * role and the fallback; main.ts refuses a level one of those models does not support,
-     * since Pi would quietly use another. Unset: no level is sent, which Pi's adapters read as
-     * thinking off where the provider lets them turn it off (DeepSeek), else the provider's
-     * default. Visitor runs never send one.
+     * The thinking level of every thread of a `voluma` run (`RUNNER_THINKING`), set as each Pi
+     * agent's `thinkingLevel`; main.ts refuses a level an alias's or the fallback's model does
+     * not support, since Pi would quietly use another. Unset: "off", Pi's default, which sends no
+     * level (DeepSeek: thinking disabled; other providers: their default). Visitor runs: "off".
      */
     thinking: thinkingLevel(),
     /** Where new worker and check threads go while their model is failing; absent: nowhere. */

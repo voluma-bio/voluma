@@ -19,7 +19,7 @@
  * file counts as done only once its event is stored.
  */
 
-import { type RunEvent, WAKE_ERROR_MAX } from "@voluma/contracts/events";
+import { ASSET_ERROR_MAX, type RunEvent } from "@voluma/contracts/events";
 import { evidencePrefix, reviewAssetPrefix, workflowSnapshotPrefix } from "@voluma/contracts/r2";
 import { type ReviewAssetsManifest, reviewAssetsManifestSchema } from "@voluma/contracts/review";
 import { type Sandbox, SandboxEndedError, type SandboxMount } from "./ports/sandbox";
@@ -153,7 +153,7 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
     if ("manifest" in result)
       recorder.emit(root, "assets.ready", { ...result.manifest, sourceSha256: job.sha256 }, id);
     else {
-      const error = result.error.slice(-WAKE_ERROR_MAX) || "conversion failed";
+      const error = result.error.slice(-ASSET_ERROR_MAX) || "conversion failed";
       recorder.emit(root, "assets.failed", { sourceSha256: job.sha256, error }, id);
     }
   }
@@ -187,7 +187,7 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
     )) {
       if (chunk.type === "exit") code = chunk.code;
       else if (chunk.type === "stdout") stdout += chunk.data;
-      else stderr = (stderr + chunk.data).slice(-WAKE_ERROR_MAX * 2);
+      else stderr = (stderr + chunk.data).slice(-ASSET_ERROR_MAX * 2);
     }
     if (signal.aborted) throw signal.reason;
     if (code === undefined) throw new SandboxEndedError("the command stream ended without an exit");

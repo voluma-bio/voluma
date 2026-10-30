@@ -23,7 +23,9 @@
  * the platform's grace period, then closes the sandboxes; it does not drain, the next claim
  * resumes the queue. A stop by the server or a lost lease reports nothing.
  * None of these stops writes a `thread.ended`: the threads are cut off, and the next claim
- * (which learns why from `claim.previousClaim`) resumes them (`supervisor.ts`).
+ * (which learns why from `claim.previousClaim`) resumes them (`run-loop.ts`). The exception
+ * is a user's cancel, which the runner learns as `stop`: the API has already ended every
+ * thread `cancelled` with the run, and an ended run is never claimed again.
  */
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
@@ -38,7 +40,6 @@ import type { Claim, ReportRequest } from "@voluma/contracts/runner";
 import { runClient } from "@voluma/harness/adapters/http/run-client";
 import { runLayout } from "@voluma/harness/layout";
 import { type LiveBatcher, liveBatcher } from "@voluma/harness/live";
-import { llmMainThread, mainSystem, runBrief } from "@voluma/harness/main-thread";
 import { usageOf } from "@voluma/harness/model-usage";
 import { type Recorder, recorder } from "@voluma/harness/recorder";
 import {
@@ -52,8 +53,8 @@ import {
   convertSandboxSpec,
   workerSandboxSpec,
 } from "@voluma/harness/sandbox-specs";
-import { type RunRole, superviseRun } from "@voluma/harness/supervise-run";
-import { optionalTools } from "@voluma/harness/tools";
+import { type RoleOf, type RoleSetup, superviseRun } from "@voluma/harness/supervise-run";
+import { TOOL_NAMES } from "@voluma/harness/tools";
 import type { Skill } from "@voluma/workflow/definition";
 import { loadWorkflow } from "@voluma/workflow/load";
 import { computePlan } from "@voluma/workflow/plan";
@@ -63,7 +64,13 @@ import { eventLine } from "./log.ts";
 import { claimSandboxes, terminateClaim, terminateOtherClaims } from "./modal-sandbox.ts";
 import type { ModelFallback } from "./model-fallback.ts";
 import { retryTransient } from "./model-retry.ts";
-import { checkPrompt, systemPrompt, workerPrompt } from "./prompts.ts";
+import {
+  checkPrompt,
+  mainPrompt,
+  mainRestartPrompt,
+  systemPrompt,
+  workerPrompt,
+} from "./prompts.ts";
 import { isFatalProviderError, isProviderError } from "./provider-error.ts";
 import { r2Evidence } from "./r2-evidence.ts";
 import { r2Files } from "./r2-files.ts";
@@ -92,8 +99,8 @@ const MODEL_RETRIES = 3;
 export interface RunnerContext {
   config: Config;
   models: Models;
-  /** The models the config names for a `voluma` run's roles, resolved at startup. */
-  roles: Record<"worker" | "check" | "main", Model<Api>>;
+  /** The model behind each alias the config sets (`config.models`), resolved at startup. */
+  aliases: Record<string, Model<Api>>;
   visitorModel: Model<Api>;
   /** Starts worker and check threads on the fallback model while their model is failing. */
   fallback: ModelFallback;
@@ -101,11 +108,12 @@ export interface RunnerContext {
 }
 
 /** Where a run's files are: its scan (a reference scan or an upload), outputs and scratch. */
-export const layoutOf = (run: Claim["run"], skills: readonly Skill[]) =>
+export const layoutOf = (run: Claim["run"], skills: readonly Skill[], mainWorks: boolean) =>
   runLayout(
     run.id,
     run.input.source === "reference" ? referencePrefix("scan") : inputPrefix(run.input.id),
     skills,
+    mainWorks,
   );
 
 /** "error": an error nobody caught reached the process handler while this run was working (`telemetry.ts`). */
@@ -141,22 +149,11 @@ async function claimBody(
   const runId = run.id;
   const claimId = randomUUID();
   const visitor = keys !== undefined;
-  // A visitor's key and scan go to Standard-mode Meta models only: the main thread keeps its
-  // configured model when that is one, else the visitor model.
-  const roleModel = (role: "worker" | "check" | "main") =>
-    !visitor
-      ? ctx.roles[role]
-      : role === "main" && isVisitorSafe(config.roles.main)
-        ? ctx.roles.main
-        : ctx.visitorModel;
-  const workerModel = roleModel("worker");
-  const checkModel = roleModel("check");
-  const mainModel = roleModel("main");
   /** The key for a provider: a visitor's Meta key is good for Meta alone. */
   const keyFor = (provider: string) =>
     visitor ? (provider === "meta" ? keys.metaApiKey : undefined) : providerKey(provider);
   const modal = visitor ? keys.modal : config.modal;
-  const thinking = visitor ? undefined : config.thinking;
+  const thinking = (!visitor && config.thinking) || "off";
   const redact: Redact = redactor([
     ...config.secrets,
     ...(visitor ? [keys.metaApiKey, keys.modal.tokenId, keys.modal.tokenSecret] : []),
@@ -238,9 +235,7 @@ async function claimBody(
       onRoundTrip: heartbeatRoundTrip,
       log,
     });
-    log(
-      `claimed (${visitor ? "visitor" : "voluma"} keys, model ${workerModel.provider}/${workerModel.id})`,
-    );
+    log(`claimed (${visitor ? "visitor" : "voluma"} keys)`);
 
     // What an earlier claim of this run left running must not keep writing or spending.
     // Cleanup only: it never decides the run's outcome, and idle timeouts back it up.
@@ -266,16 +261,37 @@ async function claimBody(
       prefix: workflowSnapshotPrefix(runId),
       root: REPO_ROOT,
       commit: config.commit,
-      knownTools: Object.keys(optionalTools),
+      knownTools: TOOL_NAMES,
     });
+    // A role's model is its file's alias. A visitor's key and scan go to Standard-mode Meta
+    // models only: the main thread keeps its configured model when that is one, else the
+    // visitor model.
+    const roleModel = (role: "worker" | "checker" | "main") => {
+      const alias = definition.agents[role].model;
+      const model = ctx.aliases[alias];
+      if (!model)
+        throw new Error(
+          `the ${role} role names model "${alias}", which RUNNER_MODEL_${alias.toUpperCase()} does not set`,
+        );
+      return !visitor || (role === "main" && isVisitorSafe(model)) ? model : ctx.visitorModel;
+    };
+    const workerModel = roleModel("worker");
+    const checkModel = roleModel("checker");
+    const mainModel = roleModel("main");
+    log(`models: worker ${workerModel.id}, checker ${checkModel.id}, main ${mainModel.id}`);
     // The tasks that produce the selected outputs and what they need. The main thread may adapt
     // them to the run's notes when the run starts (`superviseRun`).
     const computed = computePlan(definition.files, run.selectedOutputs);
-    // Each role's optional tools are the ones its file lists; `segment_sam` also needs the gateway.
-    const grant = (role: "worker" | "checker") =>
-      definition.agents[role].tools.filter((t) => t !== "segment_sam" || config.gateway);
+    // Each role gets the tools its file lists. `segment_sam` also needs the gateway, and a
+    // sandbox to run in: workers have one, main only when its role holds `bash`; the checker
+    // never holds it (it does not redo the task).
+    const grant = (role: "main" | "worker" | "checker") => {
+      const { tools } = definition.agents[role];
+      const sandboxed = role === "worker" || (role === "main" && tools.includes("bash"));
+      return tools.filter((t) => t !== "segment_sam" || (config.gateway && sandboxed));
+    };
 
-    const layout = layoutOf(run, definition.skills);
+    const layout = layoutOf(run, definition.skills, grant("main").includes("bash"));
     const createSandbox = claimSandboxes(config, modal, claimId);
     const stored = await client.storedEvents();
     live = liveBatcher((frames) => client.live(frames));
@@ -324,13 +340,14 @@ async function claimBody(
           workdir: thread.dir,
         };
         return createSandbox(
-          thread.role === "worker"
+          thread.role === "worker" ||
+            thread.mounts.some((m) => m.path === "/outputs" && m.access === "read-write")
             ? workerSandboxSpec({
                 ...common,
                 mounts: thread.mounts,
                 // The network and the token follow the tool grant: a sandbox whose role cannot
                 // call `segment_sam` gets neither, since `voluma-sam` is on every sandbox's PATH.
-                gateway: grant("worker").includes("segment_sam")
+                gateway: grant(thread.role).includes("segment_sam")
                   ? sandboxGateway(
                       config,
                       { runId, leaseToken, visitorMetaKey: keys?.metaApiKey },
@@ -384,8 +401,6 @@ async function claimBody(
             ...options,
             apiKey: keyFor(m.provider),
             maxRetries: MODEL_RETRIES,
-            // Pi's agent sends no level of its own (its thinkingLevel stays "off").
-            ...(thinking && { reasoning: thinking }),
           }),
         (m, attempt, delayMs, error) => {
           log(
@@ -396,7 +411,7 @@ async function claimBody(
         },
       );
     const streamFor =
-      (role: ModelRole): RunRole["streamFn"] =>
+      (role: ModelRole): RoleSetup["streamFn"] =>
       (m, context, options) => {
         const stream = callModel(role)(m, context, options);
         stream.result().then(
@@ -409,26 +424,19 @@ async function claimBody(
         );
         return stream;
       };
-    const main = llmMainThread(
-      mainModel,
-      mainSystem(runBrief(run.selectedOutputs, computed.tasks)),
-      async (context, signal, onEvent) => {
-        const stream = callModel("main")(mainModel, context, { signal });
-        // The stream's events and its result are independent: draining one leaves the other.
-        const drained = (async () => {
-          if (onEvent) for await (const event of stream) onEvent(event);
-        })();
-        const [reply] = await Promise.all([stream.result(), drained]);
-        meter.addModelCall("main", usageOf(reply));
-        return reply;
-      },
-    );
+    const role =
+      (primary: Model<Api>, modelRole: ModelRole, agent: "main" | "worker" | "checker"): RoleOf =>
+      (thread, recorded) => ({
+        model: threadModel(primary, recorded),
+        thinkingLevel: thinking,
+        streamFn: streamFor(modelRole),
+        systemPrompt: systemPrompt(definition, thread),
+        tools: grant(agent),
+      });
     const files = r2Files(config.r2);
     const supervised = superviseRun({
       runId,
       plan: computed.tasks,
-      selectedOutputs: run.selectedOutputs,
-      notes: run.notes,
       previousClaim: claim.previousClaim?.reason,
       providerError: isProviderError,
       // With a fallback model set, the redo starts on it, so even a refused key is not the end.
@@ -444,21 +452,19 @@ async function claimBody(
         opened.release(id).catch((e) => log(`releasing ${layout.forThread(id).name} failed: ${e}`)),
       evidence: r2Evidence(config.r2),
       files,
-      main,
-      worker: (task, thread, notes, recorded) => ({
-        model: threadModel(workerModel, recorded),
-        streamFn: streamFor("worker"),
-        systemPrompt: systemPrompt(definition, "worker", thread),
-        prompt: workerPrompt(task, { user: run.notes, main: notes }),
-        tools: grant("worker"),
-      }),
-      check: (task, thread, notes, recorded) => ({
-        model: threadModel(checkModel, recorded),
-        streamFn: streamFor("check"),
-        systemPrompt: systemPrompt(definition, "checker", thread),
-        prompt: checkPrompt(task, { user: run.notes, main: notes }),
-        tools: grant("checker"),
-      }),
+      roles: {
+        main: role(mainModel, "main", "main"),
+        worker: role(workerModel, "worker", "worker"),
+        check: role(checkModel, "check", "checker"),
+      },
+      briefs: {
+        main: (view) => mainPrompt(view, run.selectedOutputs, definition.files, run.notes),
+        mainRestart: (view, state) =>
+          mainRestartPrompt(view, state, run.selectedOutputs, definition.files, run.notes),
+        worker: (task, brief) => workerPrompt(task, brief, run.notes),
+        check: (task, state) => checkPrompt(task, state, run.notes),
+      },
+      config: config.loop,
       signal: abort.signal,
     });
     convert = reviewAssetsWorker({
