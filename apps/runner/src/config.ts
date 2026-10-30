@@ -59,7 +59,7 @@ export function devEnv():
  * The API to claim from: `VOLUMA_API_URL` and `VOLUMA_API_TOKEN`, else the local API
  * `pnpm dev` started in this worktree.
  */
-function apiEndpoint(): { baseUrl: string; token: string } {
+function apiEndpoint(dev: ReturnType<typeof devEnv>): { baseUrl: string; token: string } {
   const baseUrl = optional("VOLUMA_API_URL");
   const token = optional("VOLUMA_API_TOKEN");
   if (baseUrl || token) {
@@ -70,9 +70,16 @@ function apiEndpoint(): { baseUrl: string; token: string } {
       token: required("VOLUMA_API_TOKEN"),
     };
   }
-  const dev = devEnv();
   if (!dev) throw new Error("set VOLUMA_API_URL and VOLUMA_API_TOKEN, or run `pnpm dev`");
   return { baseUrl: dev.apiUrl, token: dev.apiToken };
+}
+
+/** HTTP adapters use absolute paths, so only the origin selects the API. */
+function apiOrigin(baseUrl: string): string {
+  const url = new URL(baseUrl);
+  // The dev launcher advertises localhost and binds the API to 127.0.0.1.
+  if (url.hostname === "localhost") url.hostname = "127.0.0.1";
+  return url.origin;
 }
 
 /** A model as `provider/id`, e.g. `openai/gpt-5.6-luna`. */
@@ -177,13 +184,18 @@ export function runnerConfig() {
   const models = modelAliases();
   for (const { provider } of Object.values(models))
     required(`VOLUMA_${provider.toUpperCase()}_API_KEY`);
-  const api = apiEndpoint();
+  // One snapshot: the launcher can replace or remove the manifest while we start.
+  const dev = devEnv();
+  const api = apiEndpoint(dev);
   const metaApiKey = optional("VOLUMA_META_API_KEY");
-  // A local runner (no API of its own, no gateway URL set) takes `pnpm dev`'s gateway, URL and
-  // secret together, once its tunnel is up.
-  const local = optional("VOLUMA_API_URL") || optional("VOLUMA_GATEWAY_URL") ? undefined : devEnv();
-  const gatewayUrl = local?.gatewayUrl ?? optional("VOLUMA_GATEWAY_URL");
-  const gatewaySecret = local?.gatewayUrl ? local.gatewaySecret : optional("GATEWAY_TOKEN_SECRET");
+  // The dev API's gateway comes only from its launcher: inherited settings must not bypass
+  // `pnpm dev --sam`, or replace the tunnel and its per-launch secret with an older pair.
+  const local = dev && apiOrigin(api.baseUrl) === apiOrigin(dev.apiUrl) ? dev : undefined;
+  const gatewayUrl = local ? local.gatewayUrl : optional("VOLUMA_GATEWAY_URL");
+  // The launcher writes a secret before the tunnel is ready, and keeps it if the tunnel fails.
+  const gatewaySecret = local
+    ? gatewayUrl && local.gatewaySecret
+    : optional("GATEWAY_TOKEN_SECRET");
   if (!gatewayUrl !== !gatewaySecret)
     throw new Error("set VOLUMA_GATEWAY_URL and GATEWAY_TOKEN_SECRET together, or neither");
   const gateway =
