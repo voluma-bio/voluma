@@ -12,6 +12,7 @@ export {
   type ChatMessageProps,
   ChatThread,
 } from "./chat-thread";
+export { cx } from "./cx";
 export { Lightbox, type LightboxProps } from "./lightbox";
 export { SplitPanel, type SplitPanelProps } from "./split-panel";
 export { StatusBadge, type StatusBadgeProps, type StatusTone } from "./status-badge";

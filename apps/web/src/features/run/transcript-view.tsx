@@ -1,14 +1,11 @@
 /**
- * One transcript, the page's only scroller: the rows from `transcript.ts` rendered the way
- * Meridian Flow renders an assistant turn, with Flow's follow scroll and "Scroll to latest" pill.
- * Prose stays visible; process folds stay closed until the reader opens them; a running thread
- * ends in a live line naming what it is doing.
+ * One transcript: the rows from `transcript.ts` rendered the way Meridian Flow renders an
+ * assistant turn, in the page's own scroll. Prose stays visible; process folds stay closed until
+ * the reader opens them; a running thread ends in a live line naming what it is doing.
  */
 import type { RunEvent } from "@voluma/contracts/events";
 import { StatusBadge } from "@voluma/ui";
-import { catalog } from "@voluma/workflow/bundled";
 import {
-  ArrowDown,
   Brain,
   Cog,
   Flag,
@@ -19,19 +16,15 @@ import {
   PackageCheck,
   Terminal,
   Wand,
-  Workflow,
 } from "lucide-react";
-import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { AgentCard } from "./agents";
 import { ActivityRow } from "./chat/activity-row";
 import { InfoButton, usageRows } from "./chat/info-button";
-import { ClampedMarkdown, Markdown, StreamingText } from "./chat/markdown";
+import { Markdown, StreamingText } from "./chat/markdown";
 import { ProcessDisclosure } from "./chat/process-disclosure";
-import { useFollowScroll } from "./chat/use-follow-scroll";
 import type { Thread } from "./run-model";
 import type { Row, Step, ToolStep } from "./transcript";
-
-const { taskTitle } = catalog["mouse-oa"];
 
 export function TranscriptView({
   rows,
@@ -40,78 +33,41 @@ export function TranscriptView({
   empty,
 }: {
   rows: Row[];
-  threads: Map<string, Thread>;
+  /** For the lead AI's transcript: the threads its agent rows show as cards. */
+  threads?: Map<string, Thread>;
   /** While the thread works: what it is doing now, for the live line at the end. */
   live?: string | null;
   empty: string;
 }) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const [contentHeight, setContentHeight] = useState(0);
-  // Folds opening and text growing change the height without changing `rows`.
-  useLayoutEffect(() => {
-    const el = contentRef.current;
-    if (!el) return;
-    const observer = new ResizeObserver(() => setContentHeight(el.offsetHeight));
-    observer.observe(el);
-    setContentHeight(el.offsetHeight);
-    return () => observer.disconnect();
-  }, []);
-  const { mode, enterFollow } = useFollowScroll({ scrollRef, contentHeight });
-
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
-      <div
-        ref={scrollRef}
-        // Focusable so the keyboard can scroll it (and so ArrowUp/PageUp release follow).
-        tabIndex={-1}
-        className="min-h-0 flex-1 overflow-y-auto outline-none [overflow-anchor:none]"
-      >
-        <div ref={contentRef} className="mx-auto w-full max-w-3xl px-6 py-4 max-[1100px]:px-4">
-          {rows.length === 0 ? (
-            <p className="text-ui text-muted-foreground">{empty}</p>
-          ) : (
-            <ol className="grid gap-3">
-              {rows.map((row) => (
-                <li key={row.id} className="min-w-0">
-                  <RowView row={row} threads={threads} />
-                </li>
-              ))}
-            </ol>
-          )}
-          {live !== undefined && live !== null && (
-            <p className="mt-3 flex min-w-0 items-center gap-2 text-meta text-muted-foreground">
-              <span
-                className="size-2 shrink-0 rounded-full bg-info motion-safe:animate-pulse"
-                aria-hidden
-              />
-              <span className="min-w-0 truncate font-mono">
-                {live || <span className="sr-only">Running</span>}
-              </span>
-            </p>
-          )}
-        </div>
-      </div>
-      <div
-        className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center transition-[opacity,translate] duration-200 data-[hidden=true]:translate-y-full data-[hidden=true]:opacity-0"
-        data-hidden={mode === "follow"}
-        // `inert` takes the faded pill out of clicks, focus and the accessibility tree.
-        inert={mode === "follow"}
-      >
-        <button
-          type="button"
-          onClick={enterFollow}
-          className="pointer-events-auto grid size-8 place-items-center rounded-full border border-border bg-card text-foreground shadow-md hover:bg-accent"
-        >
-          <ArrowDown className="size-4" aria-hidden />
-          <span className="sr-only">Scroll to latest</span>
-        </button>
-      </div>
+    <div className="min-w-0">
+      {rows.length === 0 ? (
+        <p className="text-ui text-muted-foreground">{empty}</p>
+      ) : (
+        <ol className="grid gap-3">
+          {rows.map((row) => (
+            <li key={row.id} className="min-w-0">
+              <RowView row={row} threads={threads} />
+            </li>
+          ))}
+        </ol>
+      )}
+      {live !== undefined && live !== null && (
+        <p className="mt-3 flex min-w-0 items-center gap-2 text-meta text-muted-foreground">
+          <span
+            className="size-2 shrink-0 rounded-full bg-info motion-safe:animate-pulse"
+            aria-hidden
+          />
+          <span className="min-w-0 truncate font-mono">
+            {live || <span className="sr-only">Running</span>}
+          </span>
+        </p>
+      )}
     </div>
   );
 }
 
-function RowView({ row, threads }: { row: Row; threads: Map<string, Thread> }) {
+function RowView({ row, threads }: { row: Row; threads?: Map<string, Thread> }) {
   switch (row.kind) {
     case "prose":
       return (
@@ -157,7 +113,7 @@ function RowView({ row, threads }: { row: Row; threads: Map<string, Thread> }) {
         </p>
       );
     case "agent": {
-      const thread = threads.get(row.threadId);
+      const thread = threads?.get(row.threadId);
       return thread ? <AgentCard thread={thread} /> : null;
     }
   }
