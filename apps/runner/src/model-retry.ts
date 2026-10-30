@@ -1,11 +1,9 @@
 /**
  * Retries a model call that failed on the provider's side before streaming any content, for
- * every role (the main thread too). Pi's own retries (`maxRetries`, set in `run.ts`) cover 408,
- * 429, 5xx and dropped connections a few times and treat Meta's `404 model_not_found` as final;
- * that 404 hit about half of all calls on 2026-10-28, so this wrapper keeps going on those
- * errors and on that 404 (only from the `meta` provider) with exponential backoff capped at
- * MAX_DELAY_MS, until BUDGET_MS has passed since the first attempt (Pi's own tries inside an attempt
- * count against it, but an attempt in flight is not cut short). Then the last error ends the call.
+ * every role (the main thread too): a timeout, a rate limit, a 5xx or a dropped connection, with
+ * exponential backoff until BUDGET_MS has passed since the first attempt (Pi's own tries inside an
+ * attempt count against it, but an attempt in flight is not cut short). Any other error, a 4xx
+ * included, and the last error of a spent budget end the call at once; the run then fails with it.
  */
 import {
   type Api,
@@ -21,7 +19,7 @@ import { isTransientProviderError } from "./provider-error.ts";
 
 const BASE_DELAY_MS = 1000;
 const MAX_DELAY_MS = 30_000;
-const BUDGET_MS = 4 * 60_000;
+const BUDGET_MS = 60_000;
 
 type Stream = (
   model: Model<Api>,
@@ -65,7 +63,7 @@ export function retryTransient(
         if (
           Date.now() + delay > deadline ||
           signal?.aborted ||
-          !isTransientProviderError(model.provider, failed.errorMessage)
+          !isTransientProviderError(failed.errorMessage)
         ) {
           giveUp();
           return;

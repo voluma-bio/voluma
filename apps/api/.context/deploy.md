@@ -95,8 +95,8 @@ deployed now: expand first, contract in a later PR. The rule is in
 
 - **One API replica.** The visitor-key vault and the event stream's wake-ups (`notifier.ts`) are in this process's memory, which is correct only while there is one replica (the stream's 5 s poll would still catch events another replica appended). Do not scale the API out. Open event streams end at SIGTERM (`draining` in `src/index.ts`), so they don't hold the shutdown; `EventSource` reconnects with `Last-Event-ID`.
 - **A deploy or restart** empties the vault. Every claim moves the queued `visitor` runs whose keys its process doesn't hold to `awaiting-keys` (so a run started on the old process during a deploy overlap is held too), and the browser resends the keys (`/keys`). Running `voluma` runs are unaffected; their leases are in Postgres.
-- **An API outage of more than 45 s** (the runner's self-stop margin, `LEASE_SECONDS - HEARTBEAT_SECONDS`) stops every running run: the runner can't heartbeat. Both ways the claim ends are recovered, and the next claim resumes the cut-off threads. A `released` run (`shutdown`, `self-stop`) is recovered at once when the API returns; one whose lease the database expired is recovered at the next claim (`lease-expired`). `self-stop` and `lease-expired`, like `provider-outage`, count toward the no-progress limit (see "A run that keeps cutting off its runner" below); a deploy (`shutdown`) never does. A `visitor` run goes to `awaiting-keys` either way, because its keys are gone.
-- **A run that keeps cutting off its runner** ends `failed` after 3 claims in a row that end `self-stop`, `lease-expired` or `provider-outage` (the model provider kept failing past the runner's retries) with no run-state progress (`claim-progress.ts`; progress is a `task`, `checkpoint`, `output`, `attempt.opened`, `assets.ready`, `plan.changed` or correcting `revision.started` event; model turns, tool calls and the first plan are not). Except for `provider-outage`, the error names the call in flight: "Stopped: the server lost contact with the runner 3 times in a row without progress (last call: `segment_sam`)." A `provider-outage` release also sets `claimable_after` (1, then 2 minutes by `stalled_claims`; the claim query skips the queued run until then and clears it when it takes the run; a visitor run, which waits for keys, gets none; `endUnfinished` and a reopen clear it). The run row keeps `last_claim_end` (the next claim's `previousClaim`), `last_progress_seq` (moved by the event append), `claim_start_seq` (the log's last seq at the claim) and `stalled_claims`.
+- **An API outage of more than 45 s** (the runner's self-stop margin, `LEASE_SECONDS - HEARTBEAT_SECONDS`) stops every running run: the runner can't heartbeat. Both ways the claim ends are recovered, and the next claim resumes the cut-off threads. A `released` run (`shutdown`, `self-stop`) is recovered at once when the API returns; one whose lease the database expired is recovered at the next claim (`lease-expired`). `self-stop` and `lease-expired` count toward the no-progress limit (see "A run that keeps cutting off its runner" below); a deploy (`shutdown`) never does. A `visitor` run goes to `awaiting-keys` either way, because its keys are gone.
+- **A run that keeps cutting off its runner** ends `failed` after 3 claims in a row that end `self-stop` or `lease-expired` with no run-state progress (`claim-progress.ts`; progress is a `task`, `checkpoint`, `output`, `attempt.opened`, `assets.ready`, `plan.changed` or correcting `revision.started` event; model turns, tool calls and the first plan are not). The error names the call in flight: "Stopped: the server lost contact with the runner 3 times in a row without progress (last call: `segment_sam`)." A model provider's error is not a release: it fails the run (`apps/runner/.context/CONTEXT.md`). The run row keeps `last_claim_end` (the next claim's `previousClaim`), `last_progress_seq` (moved by the event append), `claim_start_seq` (the log's last seq at the claim) and `stalled_claims`. A run held "AI unavailable" before provider errors failed fast (`claimable_after` in the future, `last_claim_end` `provider-outage`) is claimed at the next claim after the deploy, and fails on the provider's next error if it persists.
 - **Guests share Demo's allowance.** Limits are per org, so a scripted guest (guests cost nothing to mint) can hold Demo's one runner slot for every other guest. That is the design, not a bug. The same goes for `VISITOR_ACTIVE`: scripted guests can fill Demo's visitor cap and leave honest guests a 429 until those runs end. Both are accepted for open staging. `VISITOR_ACTIVE` bounds the keys the API holds and the runner slots Demo's visitors take; the claim's round-robin across orgs (the org claimed from least recently goes first) keeps them from starving Yao Lab's runs; the vault's 100-runs-per-org cap is a backstop for an org with no cap set.
 - **A migration** takes no queue lock; the claim and the runs table follow the expand-first rule like any other.
 
@@ -208,15 +208,33 @@ tables are replaced), run `pg_restore --clean --if-exists --no-owner --no-acl -d
 (`runs`, `run_events`, `provider_calls`) before trusting it. Never print the URL.
 
 **Archiving a run** frees space on the 1 GB database without losing the run. `archive:run --id <runId> --remote`
-(with `DATABASE_URL` set to the direct URL) refuses an example or a run that has not ended, writes the run's rows
-(`run.json`: run, input, study, events, threads, pi messages, review snapshots, provider calls) to
-`~/.local/share/voluma-backups/runs/<runId>/` (0600; refuses under 1 GB free), and does it all in one repeatable-read
-transaction: lock the run, read its rows, check them as `import:run` does, write and fsync the file, then delete, rolling back
-unless each table's deleted count equals the file's. Inputs stay (shared); the study goes with its
-scans only when no other run is in it. The run's R2 files are not copied or touched, so `import:run --from <that directory>`
-restores the run whole, with its study and scans when the study id is free and the scans' inputs exist (else a study of one,
-and it says so). The archive is one copy on one disk: copy the directory off this machine before archiving many runs.
-A `pg_dump` of the tables is still the backup for anything else.
+(with `DATABASE_URL` set to the direct URL) refuses an example, an unfinished run, unsettled provider calls,
+or missing inputs/study metadata and unsupported workflows that prevent restoration. It reads one database snapshot
+(`run.json`: run, study, study scans and their inputs, events, threads, pi messages, review snapshots, provider calls),
+writes `~/.local/share/voluma-backups/runs/<runId>/` (0600; refuses under 1 GB free), syncs the file and directory entries
+to disk, and reads it back. Only then does it delete, holding the queue, event and run-row locks. Every deleted row,
+including the run and any deleted study/scans, must match the archive, not merely its count; any difference rolls back.
+Inputs stay (shared); the study and its scans go only when no other run is in it. A failed write, sync or validation
+never deletes rows; an existing `run.json` is never overwritten. A failure may leave an incomplete file: retain it for
+inspection and use a new output directory when retrying.
+
+`import:run --from <that directory>` restores the original study identity and scan metadata, adding missing shared rows
+and refusing conflicts rather than overwriting them. Legacy dumps without study metadata get a study of one, or keep
+the replaced run's study only if its lab, workflow, example status and scan agree; input conflicts are refused too.
+Every import creates a fresh local run generation and moves the dump's current screenshots to it. Older screenshot
+generations stay historical. A save that validated before the import is refused instead of entering the restored run.
+
+**Provider accounting must be final before archiving.** Only `settleCall` fills `duration_ms`, atomically with cost
+and usage, and it never updates an already-settled row. Archive refuses `open` calls and any call with null duration,
+including `cut` rows from shutdown or stale-call sweeping: those may still receive late settlement. A genuinely settled
+`cut` with unknown cost is archivable; its cost stays null. A crashed call that never settles blocks archiving indefinitely.
+Keep that run in the database (export is still available); do not fill a fake duration to bypass the guard. A separate
+operator reconciliation policy is needed for abandoned calls ([TODO.md](TODO.md)). Use this archive only after gateways
+have rolled onto the settle-once implementation.
+
+The run's R2 files are neither copied nor touched: this is a database archive, not an independent backup of evidence.
+Keep those R2 objects and the local archive; choose a persistent disk, not an ephemeral orb or `/tmp`, for an operational
+archive. Filesystem sync does not protect against losing that disk. A `pg_dump` remains the backup for the whole database.
 
 ## Rotating secrets
 

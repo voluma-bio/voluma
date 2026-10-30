@@ -10,6 +10,11 @@ screen today is the scan review (`apps/web/src/features/scan`).
 - **Task titles** are the plan's (`TaskView.title`, from the run's first `revision.started`); a
   task without one shows its id. `catalog["mouse-oa"]` (`@voluma/workflow/bundled`) is only for
   what the log doesn't carry.
+- **The agent tree** is `agentTree` (`run-model.ts`): each thread under its
+  `thread.started.parentThreadId`, the supervisor hidden. Never parse thread ids and never assume
+  one worker and one check per task: a redo resumes the same worker thread (its tries are its
+  `attempt.opened` ids, `Thread.attempts`), and each check is a new thread whose `attemptId` names
+  the try it checked. Every door onto an agent is `openThread`.
 - **Researcher words** everywhere but inside a transcript: the AI, a second AI check, the lead AI;
   never worker, checker or model, and no paths, file names or tool names outside "How the AI did
   it". A task's line is its current attempt's latest worker checkpoint `summary`, else its
@@ -41,8 +46,7 @@ screen today is the scan review (`apps/web/src/features/scan`).
   keys), so threads can have a `thread.started` and no `thread.ended`. `haltOf(Run.state, closed)`
   says why the runner isn't running the threads, and is the one input `runView` and `threadRows`
   take: once ended, a thread, tool call or task still open shows as Stopped (Failed if the run
-  failed, at the run's end); while queued or awaiting keys it shows as Paused (Waiting for the AI,
-  halt `awaiting-ai`, while held for the AI: the section title, task and agent cards), its clock
+  failed, at the run's end); while queued or awaiting keys it shows as Paused, its clock
   frozen at its last event, until the runner's `thread.started` resumes it. The end applies only once the
   stream has closed (`useRunStream`'s `closed`), when the log is whole: the server ends an ended
   run's stream with `event: end`, so that is right after the backlog, with no reconnect. A
@@ -87,7 +91,7 @@ screen today is the scan review (`apps/web/src/features/scan`).
   same tail repair Flow uses); raw HTML is skipped and images show as their alt text.
 - **Live tasks** come from the run's stream (`subscribe`), published at most once per
   animation frame. The task list comes from
- the `revision.started` plan; a task not started yet is Ready when every task it builds on has a usable result (`isSatisfied` from `@voluma/workflow`, the supervisor's own rule: done, or To check with every required output), else "Waiting on" those tasks.
+ the `revision.started` plan; a task not started yet is Ready when every task it builds on has a usable result (`isSatisfied` from `@voluma/contracts/fold`, the supervisor's own rule: done, or To check with every required output), else "Waiting on" those tasks.
   Queue position and run state are not events, so `getRun` is polled every 3 s until the run ends.
 - **Visitor keys** (`@voluma/run-view`, shared with `features/study`): a Meta key, the only
   way a guest runs (the API refuses a guest start without it, 403); a member may keep one too. A key

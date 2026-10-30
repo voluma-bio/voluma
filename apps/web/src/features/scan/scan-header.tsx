@@ -55,7 +55,6 @@ function where(
   const tasks = progress.total > 0 ? `${progress.done} of ${progress.total} tasks done` : "";
   switch (state.status) {
     case "queued":
-      if (state.waitingForProvider) return { status: "paused", text: "Waiting for the AI" };
       return progress.total > 0
         ? { status: "paused", text: `Paused, ${tasks}` }
         : { status: "waiting", text: `Waiting, place ${state.position} in line` };

@@ -6,13 +6,24 @@
  * runner, not the API, creates sandboxes. A refusal is an `HTTPException` thrown where it is
  * decided; a port method returns its success shape only.
  * A domain's own adapters live in the domain; adapters shared by domains go in
- * adapters/ (none yet). Only index.ts constructs adapters.
+ * adapters/. Only index.ts constructs adapters.
  */
 import type { RunEvent } from "@voluma/contracts/events";
 import type { PersonMessage } from "@voluma/contracts/messages";
 import type { reviewState } from "@voluma/contracts/review-state";
 import type { Run } from "@voluma/contracts/run";
+import type { ReviewSnapshot } from "@voluma/contracts/snapshot";
 import type { Caller, Reader } from "../domain";
+
+/** Immutable screenshots; writes require the same run lifetime to still exist. */
+export type ReviewSnapshots = {
+  find(runId: string, generation: string, id: string): Promise<ReviewSnapshot | null>;
+  list(runId: string, generation: string): Promise<ReviewSnapshot[]>;
+  insert(
+    snapshot: ReviewSnapshot,
+    generation: string,
+  ): Promise<{ snapshot: ReviewSnapshot; created: boolean }>;
+};
 
 /** The published reference archive; a version pins the bytes described by the lookup. */
 export type ReferenceArchive = {

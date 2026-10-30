@@ -58,7 +58,6 @@ export const TASK_STATUS: Record<TaskState, Status> = {
   failed: "stopped",
   stopped: "stopped",
   paused: "paused",
-  "awaiting-ai": "waiting",
   skipped: "waiting",
 };
 
@@ -67,7 +66,6 @@ const STATE_WORD: Partial<Record<TaskState, string>> = {
   ready: "Ready to start",
   held: "Waiting on the lead AI",
   failed: "Failed",
-  "awaiting-ai": "Waiting for the AI",
   skipped: "Skipped",
 };
 
