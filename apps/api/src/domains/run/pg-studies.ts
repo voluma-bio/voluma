@@ -69,12 +69,16 @@ function summarize(study: Study, scanCount: number, results: RunResult[]): Study
     toCheck,
     lastActivityAt,
     newestRuns: [...newest.values()].map(
-      ({ run, tasks }): StudyRunSummary => ({
+      ({ run }): StudyRunSummary => ({
         runId: run.id,
         inputId: run.input.id,
         inputName: run.input.name,
         state: run.state,
-        tasks,
+        tasks: run.tasks,
+        review: run.review && {
+          remainingToCheck: run.review.remainingToCheck,
+          reviewedAt: run.review.reviewedAt,
+        },
         example: run.example,
       }),
     ),
@@ -100,7 +104,7 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
           for (const result of await results(
             tx,
             and(readableRuns(reader), inArray(runs.studyId, ids)),
-            { skipUnreadable: true, progress: true },
+            { skipUnreadable: true },
           )) {
             const group = byStudy.get(result.run.studyId) ?? [];
             group.push(result);
@@ -134,6 +138,10 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
             skipUnreadable: true,
           });
           const { newestCompleted } = newestOf(found);
+          const runsOf = new Map<string, Run[]>();
+          for (const { run } of found) {
+            runsOf.set(run.input.id, [...(runsOf.get(run.input.id) ?? []), run]);
+          }
           const headline = workflowById(row.workflowId)?.headline ?? [];
           return {
             study: toStudy(row),
@@ -152,15 +160,12 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
                   attributes: scan.attributes,
                 } satisfies StudyScan,
                 input: toInput(input),
-                runs: found
-                  .filter(({ run }) => run.input.id === scan.inputId)
-                  .map(({ run }) => run),
+                runs: runsOf.get(scan.inputId) ?? [],
                 resultRunId: result?.run.id ?? null,
                 values,
-                toCheck: (result?.toCheck ?? []).map((item) => ({
-                  ...item,
-                  runId: result?.run.id as string,
-                })),
+                toCheck: result
+                  ? result.toCheck.map((item) => ({ ...item, runId: result.run.id }))
+                  : [],
               };
             }),
           };

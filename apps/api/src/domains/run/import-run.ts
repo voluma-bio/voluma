@@ -77,33 +77,41 @@ if (failed.length > 0) {
 const client = postgres(url);
 const db = drizzle(client, { casing: "snake_case" });
 await db.transaction(async (tx) => {
-  const [existing] = await tx.select({ id: runs.id }).from(runs).where(eq(runs.id, runId));
+  const [existing] = await tx
+    .select({ studyId: runs.studyId })
+    .from(runs)
+    .where(eq(runs.id, runId));
   if (existing && !values.replace) throw new Error(`run ${runId} exists; pass --replace`);
   await tx.delete(piMessages).where(sql`starts_with(${piMessages.threadId}, ${`${runId}.`})`);
   await tx.delete(threads).where(eq(threads.runId, runId));
   await tx.delete(events).where(eq(events.runId, runId));
   await tx.delete(runs).where(eq(runs.id, runId));
-  await tx.delete(studyScans).where(eq(studyScans.studyId, studyId));
-  await tx.delete(studies).where(eq(studies.id, studyId));
 
   if (dump.input) await tx.insert(inputs).values(revive(inputs, dump.input)).onConflictDoNothing();
-  const run = { ...revive(runs, dump.run), studyId };
-  await tx.insert(studies).values({
-    id: studyId,
-    labId: run.labId,
-    name: dump.input?.name ?? runId,
-    workflowId: workflow.id,
-    createdBy: run.startedBy,
-    example: run.example ?? false,
-    createdAt: run.createdAt,
-  });
-  await tx.insert(studyScans).values({
-    studyId,
-    inputId: run.inputId,
-    subject: dump.input?.name ?? runId,
-    attributes: {},
-    position: 0,
-  });
+  const run = revive(runs, dump.run);
+  // A replaced run keeps the study it is in; anything else gets a study of one.
+  const keep = existing?.studyId;
+  if (!keep) {
+    await tx.delete(studyScans).where(eq(studyScans.studyId, studyId));
+    await tx.delete(studies).where(eq(studies.id, studyId));
+    await tx.insert(studies).values({
+      id: studyId,
+      labId: run.labId,
+      name: dump.input?.name ?? runId,
+      workflowId: workflow.id,
+      createdBy: run.startedBy,
+      example: run.example ?? false,
+      createdAt: run.createdAt,
+    });
+    await tx.insert(studyScans).values({
+      studyId,
+      inputId: run.inputId,
+      subject: dump.input?.name ?? runId,
+      attributes: {},
+      position: 0,
+    });
+  }
+  run.studyId = keep ?? studyId;
   await tx.insert(runs).values(run);
   // Postgres caps a statement's parameters, so insert in batches.
   const insertAll = async <T extends PgTable>(table: T, rows: unknown[]) => {

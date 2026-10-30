@@ -21,7 +21,7 @@ import smokeOutputs from "../../../workflows/smoke/outputs.json" with { type: "j
 import smokeTasks from "../../../workflows/smoke/tasks.json" with { type: "json" };
 
 export interface BundledWorkflow {
-  /** The catalog id `startRun` takes. */
+  /** The catalog id `createStudy` takes. */
   id: string;
   /** The directory a run pins, relative to the repo root. */
   path: string;

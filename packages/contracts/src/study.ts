@@ -39,6 +39,7 @@ import {
   inputSchema,
   runSchema,
   runStateSchema,
+  runTasksSchema,
   selectedOutputsSchema,
   visitorKeysSchema,
   workflowIdSchema,
@@ -79,9 +80,14 @@ export const studyRunSummarySchema = z.object({
   inputName: z.string(),
   /** As `runSchema.state`: the queue position of a queued run, the `error` of a failed one. */
   state: runStateSchema,
-  /** A live run's finished tasks out of all of them; null before its plan exists and once it has ended. */
-  tasks: z
-    .object({ done: z.number().int().nonnegative(), total: z.number().int().nonnegative() })
+  /** As `runSchema.tasks`: a live run's finished tasks out of its plan's. */
+  tasks: runTasksSchema,
+  /** As `runSchema.review`: the open checks and review time of a completed run; null otherwise. */
+  review: z
+    .object({
+      remainingToCheck: z.number().int().nonnegative(),
+      reviewedAt: z.iso.datetime().nullable(),
+    })
     .nullable(),
   example: z.boolean(),
 });
