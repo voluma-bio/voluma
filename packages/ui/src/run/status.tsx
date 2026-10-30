@@ -69,7 +69,9 @@ export function RunBadge({ run }: { run: Run }) {
 /**
  * A study's status from each scan's newest run (`newest`, one per scan that has run) and its
  * open checks (`StudySummary.toCheck`): what most needs the researcher, else how far it got.
- * "Not started" counts only scans with no run. A study of one reads as its run.
+ * "Not started" counts only scans with no run. A study of one reads as its run, except that
+ * open checks outrank a rerun that hasn't failed: `toCheck` is the newest *completed* run's,
+ * which stay acceptable while a rerun is live.
  */
 export function studyStatus({
   scans,
@@ -80,7 +82,12 @@ export function studyStatus({
   newest: Pick<StudyRunSummary, "state" | "review">[];
   toCheck: number;
 }): RunStatus {
-  if (scans === 1 && newest[0]) return runStatus(newest[0]);
+  if (scans === 1 && newest[0]) {
+    const own = runStatus(newest[0]);
+    return toCheck > 0 && own.tone !== "destructive"
+      ? { label: `${toCheck} to check`, tone: "check" }
+      : own;
+  }
   // A live run by its status, an ended one by its outcome.
   const count = (
     kind: "queued" | "running" | "awaiting-keys" | "completed" | "failed" | "cancelled",
@@ -93,10 +100,17 @@ export function studyStatus({
   if (count("running") > 0) return { label: "Running", tone: "info" };
   if (count("awaiting-keys") > 0) return { label: "Needs your keys", tone: "check" };
   if (count("queued") > 0) return { label: "Waiting", tone: "neutral" };
-  if (count("completed") === scans) return { label: "Checked", tone: "primary" };
+  // What is left: completed, stopped, or never run.
   const stopped = count("cancelled");
-  if (stopped > 0) return { label: `${stopped} stopped`, tone: "neutral" };
   const notStarted = scans - newest.length;
-  if (notStarted < scans) return { label: `${notStarted} not started`, tone: "neutral" };
-  return { label: "Not started", tone: "neutral" };
+  if (notStarted === scans) return { label: "Not started", tone: "neutral" };
+  if (stopped + notStarted === 0)
+    return newest.every((r) => r.review?.reviewedAt)
+      ? { label: "Reviewed", tone: "primary" }
+      : { label: "Checked", tone: "primary" };
+  const parts = [
+    stopped > 0 && `${stopped} stopped`,
+    notStarted > 0 && `${notStarted} not started`,
+  ];
+  return { label: parts.filter(Boolean).join(", "), tone: "neutral" };
 }
