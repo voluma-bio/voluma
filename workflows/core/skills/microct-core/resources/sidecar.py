@@ -63,6 +63,25 @@ class _Parser(argparse.ArgumentParser):
     def error(self, message):
         fail(message)  # one sentence, not argparse's usage text and prog prefix
 
+    def parse_known_args(self, args=None, namespace=None):
+        # argparse reads `--window -500,6000` as a flag followed by another flag. Join an option that takes exactly
+        # one value with the token after it (`--window=-500,6000`), unless that token is itself an option of this parser.
+        args = sys.argv[1:] if args is None else list(args)
+        one_value = {o for act in self._actions if act.nargs is None for o in act.option_strings}
+        known = {o for act in self._actions for o in act.option_strings}
+        joined, i = [], 0
+        while i < len(args):
+            if args[i] == '--':
+                joined += args[i:]
+                break
+            if args[i] in one_value and i + 1 < len(args) and args[i + 1] not in known and args[i + 1] != '--':
+                joined.append(f'{args[i]}={args[i + 1]}')
+                i += 2
+            else:
+                joined.append(args[i])
+                i += 1
+        return super().parse_known_args(joined, namespace)
+
 
 def existing(path):
     """`type=` of an argument that names an input: a path that must exist (a file or a directory)."""
@@ -72,8 +91,9 @@ def existing(path):
 
 
 def parser(doc, **kwargs):
-    """The parser of a resource: `doc` is its module docstring, printed whole by `--help`."""
-    return _Parser(description=doc, formatter_class=HelpFormatter, **kwargs)
+    """The parser of a resource: `doc` is its module docstring, printed whole by `--help`. Options are never abbreviated,
+    so a flag's missing value cannot swallow an abbreviated flag (`--out --h`) as that value."""
+    return _Parser(description=doc, formatter_class=HelpFormatter, allow_abbrev=False, **kwargs)
 
 
 def sha256_file(path):
@@ -262,7 +282,7 @@ def _value(s):
 
 
 if __name__ == '__main__':
-    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
+    ap = parser(__doc__)
     ap.add_argument('--array', required=True)
     ap.add_argument('--like', required=True, help='hu.json or another sidecar: the grid this array is on')
     ap.add_argument('--input', action='append', default=[])
