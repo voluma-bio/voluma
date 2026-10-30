@@ -44,5 +44,4 @@ edit.
 - `report_output` for every output the task declares: the value with its evidence; a measurement that
   could not be made as null with the reason, anything else as `{kind: "missing", reason}`.
 - `submit_task` when all are reported. A checker inspects the task; if it finds a problem, the main
-  agent sends it back to you with the finding, and you fix it in this session. That starts a new attempt:
-  report every output again, not only the ones you changed, then submit.
+  agent sends it back to you with the finding, and you fix it in this session, then submit again.
