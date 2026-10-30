@@ -6,6 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@voluma/api-client";
 import { reviewRunQuery, runQuery } from "@voluma/api-client/query";
 import { Button, EmptyState, ErrorState, LoadingState } from "@voluma/ui";
+import { ArrowLeft } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { Link, type RouteObject, useParams, useSearchParams } from "react-router";
 import { preparing } from "./report/model";
@@ -70,9 +71,9 @@ function RunReview({ runId }: { runId: string }) {
         ) : status === 404 ? (
           <ErrorState title="This run isn't here">
             It may have been removed, or you can't open it.{" "}
-            <Link to="/" className="text-primary-text hover:underline">
-              Go to Home
-            </Link>
+            <Button asChild variant="link">
+              <Link to="/">Go to Home</Link>
+            </Button>
           </ErrorState>
         ) : (
           <ErrorState title="Couldn't load the results" onRetry={() => void review.refetch()}>
@@ -107,7 +108,13 @@ function RunReview({ runId }: { runId: string }) {
         if (selection.revision) next.set("revision", selection.revision);
         setSearch(next);
       }}
-      backLink={<Link to="/">Home</Link>}
+      backLink={
+        <Button asChild variant="link">
+          <Link to="/">
+            <ArrowLeft aria-hidden /> Home
+          </Link>
+        </Button>
+      }
       onRefresh={() =>
         queryClient.invalidateQueries(
           { queryKey: reviewRunQuery(runId).queryKey },

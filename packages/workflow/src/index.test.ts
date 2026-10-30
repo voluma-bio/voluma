@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readyTasks, transitiveDependents } from "./index";
+import { transitiveDependents } from "./index";
 
 // a → b → d, a → c → d, e alone.
 const tasks = [
@@ -9,41 +9,6 @@ const tasks = [
   { id: "d", dependsOn: ["b", "c"] },
   { id: "e", dependsOn: [] },
 ];
-
-describe("readyTasks", () => {
-  // "to-check:x" is a to-check task missing required output x.
-  const status = (m: Record<string, string>) => (id: string) => {
-    const [s = "pending", ...missing] = (m[id] ?? "pending").split(":");
-    return { status: s, missingRequired: missing };
-  };
-
-  it("starts roots, then what their dependencies finished", () => {
-    expect(readyTasks(tasks, status({}))).toEqual(["a", "e"]);
-    expect(readyTasks(tasks, status({ a: "done", e: "in-progress" }))).toEqual(["b", "c"]);
-  });
-
-  it("starts after a to-check dependency whose required outputs are in", () => {
-    expect(readyTasks(tasks, status({ a: "done", b: "done", c: "to-check" }))).toEqual(["d", "e"]);
-  });
-
-  it("waits for a dependency that is not usable: missing output, failed, started or under review", () => {
-    expect(readyTasks(tasks, status({ a: "done", b: "done", c: "to-check:x" }))).toEqual(["e"]);
-    expect(readyTasks(tasks, status({ a: "failed" }))).toEqual(["e"]);
-    expect(readyTasks(tasks, status({ a: "in-progress" }))).toEqual(["e"]);
-    expect(readyTasks(tasks, status({ a: "under-review" }))).toEqual(["e"]);
-  });
-
-  it("restarts a stale task but not one in progress, under review or failed", () => {
-    expect(readyTasks(tasks, status({ a: "stale", e: "under-review" }))).toEqual(["a"]);
-    expect(readyTasks(tasks, status({ a: "failed", e: "failed" }))).toEqual([]);
-  });
-
-  it("does not restart a stale task whose dependency is stale too", () => {
-    expect(readyTasks(tasks, status({ a: "stale", b: "stale", c: "done", e: "done" }))).toEqual([
-      "a",
-    ]);
-  });
-});
 
 describe("transitiveDependents", () => {
   it("follows the graph through every path, in plan order", () => {

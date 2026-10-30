@@ -18,11 +18,11 @@ export function pgRunRecords(db: PostgresJsDatabase, notifier: Notifier): RunRec
         { isolationLevel: "repeatable read" },
       ),
     readable: async (reader, runId) => {
-      const rows = await db
-        .select({ id: runs.id })
+      const [row] = await db
+        .select({ generation: runs.generation })
         .from(runs)
         .where(and(readableRuns(reader), eq(runs.id, runId)));
-      return rows.length > 0;
+      return row ?? null;
     },
     async decide(reader, runId, decision) {
       // A run that has not ended has no review to decide on: judge it without the event lock,

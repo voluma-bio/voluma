@@ -5,7 +5,7 @@
  * run's root thread. Review fetches the files by `reviewAssetKey`.
  *
  * Queue: every `output` event in the recorder's view, from the first (a resume reads the whole
- * log, as `run-start.ts` does), minus the files that already have an `assets.*` event; new
+ * log), minus the files that already have an `assets.*` event; new
  * outputs join as the recorder stores them (polled, one cheap scan of the new events). One file at a
  * time, in one `convert` sandbox per claim, created at the first file. A conversion that
  * fails is recorded and the worker moves on; one whose sandbox dies (or cannot be created) is

@@ -28,10 +28,11 @@ const run: Run = {
   },
   credentials: "voluma",
   example: false,
-  forkedFrom: null,
   tasks: null,
   createdAt: at,
   state: { status: "ended", outcome: "failed", startedAt: at, endedAt: at },
+  usage: { modelCostUsd: 0, sandboxSeconds: 0 },
+  providerCalls: { costUsd: 0, calls: 0, unknownCostCalls: 0, bySandbox: [] },
   review: null,
 };
 const plan = computePlan(workflowFilesSchema.parse({ outputs, tasks }));

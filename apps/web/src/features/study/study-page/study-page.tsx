@@ -38,9 +38,9 @@ import { ToCheck } from "./to-check";
 /** Where the page's loading and error states sit while there is no page to show. */
 const PAGE_STATE = "mx-auto w-full max-w-2xl px-6 py-8 max-[760px]:px-3";
 const homeLink = (
-  <Link to="/" className="text-primary-text hover:underline">
-    Go to Home
-  </Link>
+  <Button asChild variant="link">
+    <Link to="/">Go to Home</Link>
+  </Button>
 );
 
 const TAB_IDS = ["overview", "check", "scans"] as const;
@@ -71,14 +71,14 @@ export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
 
   if (study.isPending)
     return (
-      <main className={PAGE_STATE}>
+      <div className={PAGE_STATE}>
         <LoadingState label="Loading the study" rows={4} />
-      </main>
+      </div>
     );
   // A failed background refetch keeps its data (status "error"): the page stays, with a notice.
   if (!study.data)
     return (
-      <main className={PAGE_STATE}>
+      <div className={PAGE_STATE}>
         {study.error instanceof ApiError && study.error.status === 404 ? (
           <ErrorState title="This study isn't here">
             It may have been removed, or it belongs to another lab. {homeLink}
@@ -88,7 +88,7 @@ export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
             Check your connection, then try again. {homeLink}
           </ErrorState>
         )}
-      </main>
+      </div>
     );
 
   const detail = study.data;
@@ -99,11 +99,11 @@ export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
   const workflow = workflowById(detail.study.workflowId);
   if (!workflow)
     return (
-      <main className={PAGE_STATE}>
+      <div className={PAGE_STATE}>
         <ErrorState title="Can't show this study">
           Its workflow, {detail.study.workflowId}, isn't in this version of Voluma. {homeLink}
         </ErrorState>
-      </main>
+      </div>
     );
 
   return (

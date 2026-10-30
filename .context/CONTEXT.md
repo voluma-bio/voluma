@@ -6,7 +6,7 @@ commands are in [AGENTS.md](../AGENTS.md).
 ## Shape
 
 ```
-apps/web        React + Vite. shell/ mounts routes and draws the top bar; features/run and features/review own screens
+apps/web        React + Vite. shell/ mounts routes and the `AppShell` frame (one `QueryClient` in `SignedIn`; no top bar); features/run and features/review own screens
 apps/api        Node server on Postgres (Drizzle), each domain a Hono app. src/index.ts is the
                 composition root: the only code that reads env; it builds the adapters and
                 mounts domains/run at /api/run/ (runs, the queue, the event log) and domains/review at
@@ -192,8 +192,7 @@ user, no email) in the demo entrance PR. No WorkOS user signs into a Demo organi
 none is in the list. WorkOS does not enforce the `organizationId` pin on sign-in, so the
 per-request allow-list is the only control. `scope` is server-internal: `/me` returns only the contract shape.
 
-**Guests.** With `GUEST_ORGANIZATION_ID` (and `GUEST_SCOPE`, `lab` or `self`, default `lab`; the
-Demo org runs `self`) set, a request with no session cookie, no bearer and a valid guest cookie
+**Guests.** With `GUEST_ORGANIZATION_ID` (and `GUEST_SCOPE`, `self` or `lab`, default `self`) set, a request with no session cookie, no bearer and a valid guest cookie
 is a guest: a `user` principal with `account: "visitor"`, no email, and that organization and
 scope, so domains and `readerOf` treat it like any member. Its id (`guest_…`) is minted by
 `POST /api/auth/guest` (same-origin, behind the CSRF guard; it returns the `/me` body) into its
@@ -345,6 +344,29 @@ The pre-commit hook lives in the shared `.git`, so every worktree runs the
 same hook.
 
 ## Amp orb preview
+
+Amp supplies `voluma-bio/docs` and `voluma-bio/voluma-legacy` as additional
+repositories in `../repos/`. `.agents/resume` fetches both repositories' origin
+branch refs after initial activation (including cached snapshots) and every
+wake, then fast-forwards only clean `main` checkouts without local commits or
+an in-progress Git operation. Dirty files (including untracked files), other
+branches and detached HEADs are left alone. The primary checkout stays under
+Amp's control; the hook never switches or updates the agent's working branch.
+Ignored local files also survive: if an incoming tracked path would overwrite
+one, the fast-forward aborts and prints a warning. Nonconflicting ignored files
+do not block the refresh.
+
+The two fetches run concurrently, each with an 8-second timeout and a 1-second
+kill grace. A failed fetch leaves files unchanged and prints a warning; it does
+not prevent the other repository from refreshing. Check
+`~/.cache/amp/logs/resume.log` for status and rerun `.agents/resume` to retry or
+refresh during a long session. Amp waits only 10 seconds for resume; a slow
+checkout can finish after the agent starts. This is a start/wake refresh, not
+a hook on arbitrary `git fetch` commands. Git has no general post-fetch hook.
+Pre-clone and pre-setup project scripts do not run on every wake, and setup
+lacks personal GitHub credentials, so refresh belongs in resume. Existing
+orbs on older branches must pick up this hook before they gain the behavior.
+Lifecycle reference: [Customizing Orbs](https://ampcode.com/docs/orbs/customizing).
 
 `.agents/setup` installs and enables native Postgres on loopback port 5432,
 with a local-only `voluma` role that can create each worktree's database.

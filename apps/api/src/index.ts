@@ -10,9 +10,9 @@
  * Env: DATABASE_URL, VOLUMA_API_TOKEN, APP_URL, PORT, optionally HOST (`pnpm dev` sets
  * them; see tools/dev.mjs), and WORKOS_CLIENT_ID, WORKOS_API_KEY, WORKOS_COOKIE_PASSWORD,
  * WORKOS_LAB_ORGANIZATION_ID, and optionally WORKOS_JUDGES_ORGANIZATION_ID, and
- * GUEST_ORGANIZATION_ID with GUEST_SCOPE (lab|self, default lab) to let anyone in as a guest (the repo .env).
+ * GUEST_ORGANIZATION_ID with GUEST_SCOPE (self|lab, default self) to let anyone in as a guest (the repo .env).
  * Run limits, per organization (LAB, JUDGES, DEMO) and number: RUN_LIMITS_<ORG>_PER_CALLER, _CONCURRENT,
- * _PER_DAY, _VISITOR_ACTIVE; unset is no limit. Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
+ * _VISITOR_ACTIVE; unset is no limit. Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
  * R2_SECRET_ACCESS_KEY, R2_BUCKET: Review's reference download and scan uploads (the API
  * presigns PUTs; files never pass through it). UPLOAD_MAX_FILES, UPLOAD_MAX_BYTES per scan and UPLOAD_MAX_OPEN uploads in progress per member (defaults below). Fails at startup if the database is unreachable or not migrated.
  */
@@ -54,7 +54,7 @@ const required = (name: string) => {
 };
 
 function guestScope(): "lab" | "self" {
-  const scope = process.env.GUEST_SCOPE ?? "lab";
+  const scope = process.env.GUEST_SCOPE || "self";
   if (scope !== "lab" && scope !== "self") throw new Error("GUEST_SCOPE must be lab or self");
   return scope;
 }
@@ -72,7 +72,6 @@ function limitNumber(name: string): number {
 const limitsFromEnv = (org: "LAB" | "JUDGES" | "DEMO"): Limits => ({
   perCaller: limitNumber(`RUN_LIMITS_${org}_PER_CALLER`),
   concurrent: limitNumber(`RUN_LIMITS_${org}_CONCURRENT`),
-  perDay: limitNumber(`RUN_LIMITS_${org}_PER_DAY`),
   visitorActive: limitNumber(`RUN_LIMITS_${org}_VISITOR_ACTIVE`),
 });
 
@@ -228,7 +227,6 @@ app.route(
     snapshots: pgSnapshots(db),
     messages: { check: queue.checkMessage, send: queue.sendMessage },
     files: runFiles,
-    inputs: reads,
     referenceArchive,
   }),
 );

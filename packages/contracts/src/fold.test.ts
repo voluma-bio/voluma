@@ -451,7 +451,6 @@ describe("fold", () => {
     l.checkpoint("c1:1", "c1", "a", "w:1:open", { verdict: "needs-review" });
     l.result("c1", "a", "w:1:open");
     expect(need(fold(l.events), "a")).toMatchObject({ status: "to-check", rejected: true });
-    // Main accepts it.
     l.status("m:1", "m", "a", "w:1:open", "to-check");
     const accepted = need(fold(l.events), "a");
     expect(accepted.rejected).toBe(false);
