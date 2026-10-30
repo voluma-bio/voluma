@@ -28,8 +28,9 @@ import type { WorkflowPlan } from "@voluma/contracts/workflow";
 import { isSatisfied, transitiveDependents } from "@voluma/workflow";
 import type { ThreadLayout } from "./layout";
 import { declarationProblem, placementProblem, referenceProblem } from "./output-checks";
-import type { Evidence } from "./ports/evidence";
+import { type Evidence, EvidenceNotFound } from "./ports/evidence";
 import type { PayloadOf, Recorder } from "./recorder";
+import { isThreadName, parseThreadId } from "./thread-id";
 import { startedFor, threadLog } from "./thread-log";
 import { effectId } from "./tools/effects";
 
@@ -338,13 +339,23 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     }
   }
 
-  /** Keeps a file the calling thread named, if its own layout lets it read that path. */
+  /**
+   * Keeps a file the calling thread named, if its own layout lets it read that path. A
+   * `scratch` path is relative to the caller's own folder unless it starts with a thread name
+   * of the run; the event stores the full form.
+   */
   const keep = async (
     c: Caller,
     taskId: string,
     f: Pick<EvidenceRef, "root" | "path">,
   ): Promise<EvidenceRef> => {
-    const path = f.root === "scratch" ? `/scratch/${f.path}` : `/outputs/${taskId}/${f.path}`;
+    const ownName = parseThreadId(runId, c.threadId).name;
+    const file =
+      f.root === "scratch" && !isThreadName(f.path.split("/")[0] ?? "")
+        ? { root: f.root, path: `${ownName}/${f.path}` }
+        : { root: f.root, path: f.path };
+    const path =
+      file.root === "scratch" ? `/scratch/${file.path}` : `/outputs/${taskId}/${file.path}`;
     try {
       layoutOf(c.threadId, (p) => cites(taskId, p)).keyOf(path, "read");
     } catch (error) {
@@ -352,7 +363,17 @@ export function taskRuntime(options: TaskRuntimeOptions) {
         `Evidence ${path} is not a file you can read: ${error instanceof Error ? error.message : error}`,
       );
     }
-    return { root: f.root, path: f.path, sha256: await evidence.keep(runId, taskId, f) };
+    const sha256 = await evidence.keep(runId, taskId, file).catch((error) => {
+      if (!(error instanceof EvidenceNotFound)) throw error;
+      throw new Refusal(
+        `No file at ${path}. ${
+          file.root === "outputs"
+            ? `Cite an output file by its path inside /outputs/${taskId}/, e.g. {root: "outputs", path: "frame.json"}.`
+            : `Cite a file in your working folder as {root: "scratch", path: <path inside $SCRATCH>}.`
+        }`,
+      );
+    });
+    return { ...file, sha256 };
   };
 
   const done = (message: string, eventId?: string): TaskToolResult => ({

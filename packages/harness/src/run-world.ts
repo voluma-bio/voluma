@@ -20,6 +20,7 @@ import type { Folded } from "@voluma/contracts/fold";
 import { cancelEnds } from "@voluma/contracts/threads";
 import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
 import { runLayout } from "./layout";
+import { EvidenceNotFound } from "./ports/evidence";
 import { recorder } from "./recorder";
 import { type LoopConfig, type PlanTask, superviseRun } from "./supervise-run";
 import { parseThreadId } from "./thread-id";
@@ -195,6 +196,8 @@ export interface WorldOptions {
   delayLoad?: (threadId: string) => number;
   /** Whether a failed thread's error text says the model provider failed. */
   providerError?: (error: string) => boolean;
+  /** Whether evidence storage holds this file (default: every file); `keep` rejects with `EvidenceNotFound` otherwise. */
+  evidenceExists?: (root: "outputs" | "scratch", taskId: string, path: string) => boolean;
   /** Runs for every event the store accepts (for tests that need something to happen at that moment). */
   onStored?: (e: RunEvent) => void;
 }
@@ -321,7 +324,13 @@ export function world(o: WorldOptions) {
         throw new Error("these runs call no sandbox");
       },
       releaseSandbox: () => {},
-      evidence: { keep: async () => "0".repeat(64) },
+      evidence: {
+        keep: async (_run, taskId, f) => {
+          if (o.evidenceExists?.(f.root, taskId, f.path) === false)
+            throw new EvidenceNotFound(f.path);
+          return "0".repeat(64);
+        },
+      },
       files: {
         read: () => {
           throw new Error("these runs read no files");

@@ -8,11 +8,12 @@ import {
   CopyObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  NoSuchKey,
   NotFound,
   S3Client,
 } from "@aws-sdk/client-s3";
 import { evidenceKey, outputKey, scratchKey } from "@voluma/contracts/r2";
-import type { Evidence } from "@voluma/harness/ports/evidence";
+import { type Evidence, EvidenceNotFound } from "@voluma/harness/ports/evidence";
 
 export function r2Evidence(config: {
   accountId: string;
@@ -32,8 +33,12 @@ export function r2Evidence(config: {
         file.root === "outputs"
           ? outputKey(runId, taskId, file.path)
           : scratchKey(runId, file.path);
-      // Rejects with NoSuchKey when the file does not exist: nothing is stored then.
-      const { Body } = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+      // Nothing is stored when the file does not exist.
+      const { Body } = await s3
+        .send(new GetObjectCommand({ Bucket: bucket, Key: key }))
+        .catch((error) => {
+          throw error instanceof NoSuchKey ? new EvidenceNotFound(key) : error;
+        });
       if (!Body) throw new Error(`${key} has no body`);
       const hash = createHash("sha256");
       for await (const chunk of Body as AsyncIterable<Uint8Array>) hash.update(chunk);

@@ -53,8 +53,9 @@ const nonEmpty = z.string().min(1);
  * A file the agent named, as recorded: copied to `evidenceKey(runId, sha256)`
  * before the event is appended, so a rerun can't erase it. `path` is under
  * `root`: `outputs` is the task's output folder (`outputKey`), `scratch` the
- * run's scratch (`scratchKey`), where a check thread keeps its reproductions.
- * The runtime scopes every path to this run.
+ * run's scratch (`scratchKey`), where a check thread keeps its reproductions. A tool call's
+ * scratch path is relative to the caller's own folder unless it starts with a thread name;
+ * the event holds the full form. The runtime scopes every path to this run.
  */
 export const evidenceRefSchema = z.object({
   root: z.enum(["outputs", "scratch"]),
@@ -68,7 +69,9 @@ export const fileRefInputSchema = z.object({
   root: z
     .enum(["outputs", "scratch"])
     .default("outputs")
-    .describe("`outputs` is this task's output folder; `scratch` is the run's scratch."),
+    .describe(
+      "`outputs`: `path` is inside /outputs/<task id>/. `scratch`: `path` is inside your working folder $SCRATCH.",
+    ),
   path: relativePathSchema,
 });
 

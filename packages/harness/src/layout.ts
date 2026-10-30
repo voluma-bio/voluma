@@ -173,7 +173,9 @@ export function runLayout(
             throw new Error(`${path} is not a valid path`);
           if (role === "checker" && hostOnly.includes(mount)) {
             if (!cited(relative))
-              throw new Error(`${path} is not a file the worker cited as evidence`);
+              throw new Error(
+                `${path} is in the worker's folder and the worker did not cite it as evidence. A check can open the files the worker cited, and its own folder ${dir}.`,
+              );
           }
           return `${mount.prefix}${relative}`;
         },

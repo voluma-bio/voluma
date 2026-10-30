@@ -7,7 +7,10 @@
  */
 import type { EvidenceRef } from "@voluma/contracts/output";
 
+/** `keep` rejects with this when the named file is not in storage. */
+export class EvidenceNotFound extends Error {}
+
 export interface Evidence {
-  /** Rejects if the file does not exist; nothing is stored then. */
+  /** Rejects with `EvidenceNotFound` if the file does not exist; nothing is stored then. */
   keep(runId: string, taskId: string, file: Pick<EvidenceRef, "root" | "path">): Promise<string>;
 }

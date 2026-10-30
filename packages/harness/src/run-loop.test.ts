@@ -687,6 +687,94 @@ describe("run loop", () => {
     expect(taskEvents(w.stored, "t1")).toEqual(["under-review:agent", "done:check-result"]);
   });
 
+  describe("evidence paths", () => {
+    const citing = (evidence: object[]): Script => {
+      const pass = checker();
+      return (t) =>
+        t.steps === 0
+          ? call("checkpoint", {
+              taskId: t.task,
+              text: "Re-derived.",
+              summary: "Looks passed.",
+              evidence,
+              verdict: "passed",
+            })
+          : pass(t);
+    };
+
+    it("a scratch path relative to the caller's folder is accepted and stored in full", async () => {
+      const w = world({
+        plan: [task("t1")],
+        main: chain(["t1"]),
+        check: citing([{ root: "scratch", path: "re/frame.json" }]),
+      });
+      await w.run();
+      const [cp] = of(w.stored, "checkpoint", "t1.check");
+      expect(cp?.type === "checkpoint" && cp.payload.evidence, w.text()).toMatchObject([
+        { root: "scratch", path: "t1.check/re/frame.json" },
+      ]);
+    });
+
+    it("a scratch path that starts with a thread name is taken as given", async () => {
+      const w = world({
+        plan: [task("t1")],
+        main: chain(["t1"]),
+        // The check may open a file the worker cited; a worker's report cites it first.
+        worker: (t) =>
+          t.steps === 0
+            ? call("report_output", {
+                taskId: "t1",
+                outputId: "m1",
+                title: "M",
+                output: measurement(1),
+                evidence: [{ root: "scratch", path: "x.png" }],
+              })
+            : worker({ ...t, steps: t.steps }),
+        check: citing([{ root: "scratch", path: "t1.worker/x.png" }]),
+      });
+      await w.run();
+      const [cp] = of(w.stored, "checkpoint", "t1.check");
+      expect(cp?.type === "checkpoint" && cp.payload.evidence, w.text()).toMatchObject([
+        { root: "scratch", path: "t1.worker/x.png" },
+      ]);
+    });
+
+    it("a wrong outputs path is refused with a plain message", async () => {
+      const seen: string[] = [];
+      const w = world({
+        plan: [task("t1")],
+        main: chain(["t1"]),
+        evidenceExists: (root, _task, path) => root !== "outputs" || path === "frame.json",
+        check: (t) => {
+          seen.push(...t.results);
+          return t.steps === 0
+            ? call("checkpoint", {
+                taskId: "t1",
+                text: "Re-derived.",
+                summary: "Looks passed.",
+                evidence: [{ root: "outputs", path: "t1/frame.json" }],
+                verdict: "passed",
+              })
+            : t.steps === 1
+              ? call("checkpoint", {
+                  taskId: "t1",
+                  text: "Re-derived.",
+                  summary: "Looks passed.",
+                  evidence: [{ root: "outputs", path: "frame.json" }],
+                  verdict: "passed",
+                })
+              : "Verdict written.";
+        },
+      });
+      await w.run();
+      const refusal = seen.find((r) => r.includes("No file at"));
+      expect(refusal, w.text()).toContain(
+        'No file at /outputs/t1/t1/frame.json. Cite an output file by its path inside /outputs/t1/, e.g. {root: "outputs", path: "frame.json"}.',
+      );
+      expect(refusal).not.toMatch(/key does not exist/i);
+    });
+  });
+
   // The four scenarios below are the guarantees a log that runs behind the process would break.
   describe("what the log says is what the loop acts on", () => {
     const userTexts = (events: readonly RunEvent[], thread: string) =>
