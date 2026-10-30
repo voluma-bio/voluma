@@ -2,7 +2,9 @@
  * Operator script: load a run dumped by `export-run.ts` into DATABASE_URL.
  *   pnpm --filter @voluma/api import:run --from <dir|r2:prefix> [--replace] [--remote]
  * Refuses when the run already exists unless `--replace`, which deletes it and its events,
- * threads and pi messages first. Every event is checked against `runEventSchema` and the ones
+ * threads and pi messages first. The run gets its own study of one scan (`study-<runId>`, named
+ * after the scan, as the migration that introduced studies did). The study's workflow is the dump's own `workflowId` when it has one (older dumps do, and
+ * their pinned paths may predate a rename), else the bundled workflow at the pinned path. Every event is checked against `runEventSchema` and the ones
  * that fail are listed, with nothing written. The run's input row is added if it is missing.
  * Every row must belong to the run. Writes only to a local database unless `--remote` (see
  * `operator.ts`). Evidence is not copied: it stays in R2 under `runs/<id>/evidence/`, shared by every database.
@@ -12,13 +14,14 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { runEventSchema } from "@voluma/contracts/events";
 import { runIdSchema } from "@voluma/contracts/ids";
+import { catalog, workflowById } from "@voluma/workflow/bundled";
 import { eq, getTableColumns, sql } from "drizzle-orm";
 import type { PgTable } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { databaseUrl } from "./operator";
 import { withLocalDir } from "./r2-dir";
-import { events, inputs, piMessages, runs, threads } from "./schema";
+import { events, inputs, piMessages, runs, studies, studyScans, threads } from "./schema";
 
 const { values } = parseArgs({
   options: { from: { type: "string" }, replace: { type: "boolean" }, remote: { type: "boolean" } },
@@ -40,14 +43,26 @@ const dump = await withLocalDir(
   values.from,
   async (dir) =>
     JSON.parse(await readFile(join(dir, "run.json"), "utf8")) as {
-      run: { id: string };
-      input: unknown;
+      // `workflowId` is the column dumps carried before studies took it over.
+      run: { id: string; workflowId?: string; workflows: { path: string }[] };
+      input: { id: string; name: string } | null;
       events: { id: string; seq: number; runId: string }[];
       threads: { runId: string }[];
       piMessages: { threadId: string }[];
     },
 );
 const runId = runIdSchema.parse(dump.run.id);
+const studyId = `study-${runId}`;
+
+const workflowPath = dump.run.workflows[0]?.path;
+const workflow =
+  (dump.run.workflowId ? workflowById(dump.run.workflowId) : undefined) ??
+  Object.values(catalog).find((w) => w.path === workflowPath);
+if (!workflow) {
+  throw new Error(
+    `run ${runId} used ${dump.run.workflowId ?? workflowPath}, which is not a bundled workflow`,
+  );
+}
 
 const strays = [
   ...dump.events.filter((e) => e.runId !== runId).map((e) => `event ${e.id}`),
@@ -69,7 +84,10 @@ if (failed.length > 0) {
 const client = postgres(url);
 const db = drizzle(client, { casing: "snake_case" });
 await db.transaction(async (tx) => {
-  const [existing] = await tx.select({ id: runs.id }).from(runs).where(eq(runs.id, runId));
+  const [existing] = await tx
+    .select({ studyId: runs.studyId })
+    .from(runs)
+    .where(eq(runs.id, runId));
   if (existing && !values.replace) throw new Error(`run ${runId} exists; pass --replace`);
   await tx.delete(piMessages).where(sql`starts_with(${piMessages.threadId}, ${`${runId}.`})`);
   await tx.delete(threads).where(eq(threads.runId, runId));
@@ -77,7 +95,31 @@ await db.transaction(async (tx) => {
   await tx.delete(runs).where(eq(runs.id, runId));
 
   if (dump.input) await tx.insert(inputs).values(revive(inputs, dump.input)).onConflictDoNothing();
-  await tx.insert(runs).values(revive(runs, dump.run));
+  const run = revive(runs, dump.run);
+  // A replaced run keeps the study it is in; anything else gets a study of one.
+  const keep = existing?.studyId;
+  if (!keep) {
+    await tx.delete(studyScans).where(eq(studyScans.studyId, studyId));
+    await tx.delete(studies).where(eq(studies.id, studyId));
+    await tx.insert(studies).values({
+      id: studyId,
+      labId: run.labId,
+      name: dump.input?.name ?? runId,
+      workflowId: workflow.id,
+      createdBy: run.startedBy,
+      example: run.example ?? false,
+      createdAt: run.createdAt,
+    });
+    await tx.insert(studyScans).values({
+      studyId,
+      inputId: run.inputId,
+      subject: dump.input?.name ?? runId,
+      attributes: {},
+      position: 0,
+    });
+  }
+  run.studyId = keep ?? studyId;
+  await tx.insert(runs).values(run);
   // Postgres caps a statement's parameters, so insert in batches.
   const insertAll = async <T extends PgTable>(table: T, rows: unknown[]) => {
     for (let i = 0; i < rows.length; i += 500) {

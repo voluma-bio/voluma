@@ -13,6 +13,7 @@
  *
  * JSON imports (`with { type: "json" }`) work in Vite, Node (tsx) and `tsc` alike.
  */
+import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { type OutputEntry, workflowFilesSchema } from "@voluma/contracts/workflow-files";
 import mouseOaOutputs from "../../../workflows/mouse-oa/outputs.json" with { type: "json" };
 import mouseOaTasks from "../../../workflows/mouse-oa/tasks.json" with { type: "json" };
@@ -20,7 +21,7 @@ import smokeOutputs from "../../../workflows/smoke/outputs.json" with { type: "j
 import smokeTasks from "../../../workflows/smoke/tasks.json" with { type: "json" };
 
 export interface BundledWorkflow {
-  /** The catalog id `startRun` takes. */
+  /** The catalog id `createStudy` takes. */
   id: string;
   /** The directory a run pins, relative to the repo root. */
   path: string;
@@ -28,6 +29,8 @@ export interface BundledWorkflow {
   description: string;
   /** Every output a run can produce, in file order. */
   outputs: OutputEntry[];
+  /** The outputs a summary leads with (`headline` in `outputs.json`), in file order. */
+  headline: OutputEntry[];
   /** A task's title; a task without one shows its id. */
   taskTitle: (id: string) => string;
   /** An output's name; one the workflow doesn't list shows its id. */
@@ -45,6 +48,8 @@ function bundle(
   return {
     ...meta,
     outputs,
+    // `headline` is optional in the schema; an output without it is not a headline.
+    headline: outputs.filter((o) => "headline" in o && o.headline === true),
     taskTitle: (id) => titles.get(id) ?? id,
     outputName: (id) => names.get(id) ?? id,
   };
@@ -80,6 +85,12 @@ type WorkflowId = keyof typeof catalog;
 /** The catalog entry for a request's `workflowId`, or undefined for an id the catalog lacks. */
 export const workflowById = (id: string): BundledWorkflow | undefined =>
   Object.hasOwn(catalog, id) ? catalog[id as WorkflowId] : undefined;
+
+/** The pins a run of `workflowId` records, or undefined for an id the catalog lacks. */
+export function pinsOf(repo: string, workflowId: string): WorkflowPin[] | undefined {
+  const entry = workflowById(workflowId);
+  return entry && [{ repo, path: entry.path }];
+}
 
 /** A run's pinned workflow path as a name; a path outside the catalog shows its directory name. */
 export function workflowName(path: string | undefined): string {

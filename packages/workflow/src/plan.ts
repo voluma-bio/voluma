@@ -20,6 +20,7 @@ import { WorkflowParseError } from "./definition";
 /** The entry less what only the file keeps (`declaredOutputSchema`). */
 function declared(entry: OutputEntry, required: boolean): DeclaredOutput {
   const { task: _task, region: _region, sourceRef: _sourceRef, ...rest } = entry;
+  if (rest.kind === "measurement") delete rest.headline;
   return { ...rest, required };
 }
 
