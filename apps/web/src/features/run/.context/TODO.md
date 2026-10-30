@@ -17,3 +17,7 @@
   acceptance.
 - **A thumbnail rendition of QC images.** Each is 80 to 360 KB and the Needs your eye cards draw
   them at 88 px; lazy loading keeps it to what is on screen.
+- **Tag script warnings.** The prototype tags a Needs your eye item "Script warning" when a
+  skill's script raised it. The stream can't say so: a checkpoint's `toCheck` has a title, a
+  detail and a focus, and nothing records that a script raised it. It needs a field on `toCheck`
+  (a contracts PR), and the skills' scripts' warnings written through it.

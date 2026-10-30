@@ -14,6 +14,7 @@ export const STATE_WORD: Record<TaskState, string> = {
   ready: "Ready to start",
   running: "Working",
   checking: "A second AI is checking",
+  held: "Waiting on the lead AI",
   done: "Done",
   "to-check": "To check",
   skipped: "Skipped",
@@ -49,6 +50,8 @@ export function TaskMark({ state, className }: { state: TaskState; className?: s
       return <span aria-hidden className={cx(base, "bg-check-solid")} />;
     case "failed":
       return <span aria-hidden className={cx(base, "bg-destructive")} />;
+    case "held":
+      return <span aria-hidden className={cx(base, "border-2 border-info")} />;
     case "stopped":
     case "paused":
       return <span aria-hidden className={cx(base, "bg-muted-foreground")} />;
@@ -172,7 +175,7 @@ export function TaskFlow({
                   title={`${t.title}: ${STATE_WORD[t.state]}`}
                   aria-current={selected === t.id ? "page" : undefined}
                   className={cx(
-                    "relative flex h-full items-center justify-center rounded-lg border bg-card px-1.5 text-center text-[0.6875rem] leading-tight font-medium shadow-xs hover:border-primary",
+                    "relative flex h-full items-center justify-center rounded-lg border bg-card px-1.5 text-center text-meta leading-tight font-medium shadow-xs hover:border-primary",
                     selected === t.id
                       ? "border-primary ring-1 ring-primary"
                       : t.state === "running" || t.state === "checking"

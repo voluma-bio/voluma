@@ -8,7 +8,7 @@
 import type { RunEvent } from "@voluma/contracts/events";
 import type { FoldedTask } from "@voluma/contracts/fold";
 import type { Asset } from "@voluma/contracts/review";
-import { reviewState } from "@voluma/contracts/review-state";
+import { progress, reviewState } from "@voluma/contracts/review-state";
 import type { ProviderCalls, RunState } from "@voluma/contracts/run";
 import { type RunSpend, type Spend, spend } from "@voluma/contracts/spend";
 import { runningThreads } from "@voluma/contracts/threads";
@@ -16,7 +16,10 @@ import { isSatisfied } from "@voluma/workflow";
 import { catalog } from "@voluma/workflow/bundled";
 import { type Halt, type Live, toolTitle } from "./transcript";
 
-const { outputName, taskTitle } = catalog["mouse-oa"];
+const { outputName, taskTitle, tasks: workflowTasks } = catalog["mouse-oa"];
+
+/** What each task is for, from `tasks.json`: a working task's line until its AI says more. */
+const purpose = new Map(workflowTasks.map((t) => [t.id, t.summary]));
 
 /** `paused`: open while the run waits for a runner or keys; it resumes with a `thread.started`. */
 export type ThreadStatus = "running" | "paused" | "completed" | "failed" | "cancelled";
@@ -47,9 +50,11 @@ export type Thread = {
 
 /**
  * When the runner is not running the run's threads (see `Halt`). A queued run with no threads
- * open is paused too, which changes nothing.
+ * open is paused too, which changes nothing. An ended run halts only once its stream has
+ * `closed`: until then its log may still be loading, and a thread open in the part loaded so
+ * far may have ended in the rest.
  */
-export function haltOf(state: RunState): Halt | undefined {
+export function haltOf(state: RunState, closed: boolean): Halt | undefined {
   switch (state.status) {
     case "running":
       return undefined;
@@ -57,7 +62,7 @@ export function haltOf(state: RunState): Halt | undefined {
     case "awaiting-keys":
       return { kind: "paused" };
     case "ended":
-      return { kind: "ended", at: state.endedAt, outcome: state.outcome };
+      return closed ? { kind: "ended", at: state.endedAt, outcome: state.outcome } : undefined;
   }
 }
 
@@ -186,13 +191,17 @@ export type TaskState =
   | "waiting"
   /** Not started, and every task it builds on has a usable result (`isSatisfied`). */
   | "ready"
+  /** An AI is working on it now. */
   | "running"
-  /** A second AI is checking the result. */
+  /** A second AI is checking the result now. */
   | "checking"
+  /** Started, and no AI is working on it or checking it: the lead AI decides what's next. */
+  | "held"
   | "done"
   | "to-check"
   /** Skipped by the plan, or builds on a skipped task. */
   | "skipped"
+  /** Failed, or its AI failed on the error that failed the run. */
   | "failed"
   /** Working or being checked when the run ended. */
   | "stopped"
@@ -204,14 +213,18 @@ export type NeedItem = {
   /** The check's id (`acceptCheck`). */
   id: string;
   taskId: string;
-  title: string;
+  /** None for the fold's generic "Marked to check": the task's name says as much. */
+  title?: string;
   /** What is wrong, in the checkpoint's researcher sentence when it has one. */
   text: string;
+  /** The second AI check's full text, behind "What it found". */
+  found?: string;
   image?: Asset;
   accepted: boolean;
   /**
-   * A check item "Looks right" can accept. A task left To check with no item (its check sent it
-   * back, or a required value is missing) still needs the researcher, with nothing to accept.
+   * A check item "Looks right" can accept; "K to check" counts these (`progress`). A task left
+   * To check with no item (its check sent it back, or a required value is missing) still gets
+   * a card, with nothing to accept.
    */
   acceptable: boolean;
 };
@@ -219,6 +232,7 @@ export type NeedItem = {
 /** One value in a task's results. */
 export type ResultRow = {
   id: string;
+  /** The workflow's name for it (`outputs.json`); the AI's title for an output it doesn't list. */
   title: string;
   /** "0.824", a score's level; null when there is none. */
   value: string | null;
@@ -238,15 +252,17 @@ export type TaskView = {
   threads: Thread[];
   /** Its newest thread: its clock while it works. */
   latest?: Thread;
-  /** More than one worker attempt: the result was sent back and redone. */
+  /** Its current attempt redoes one the second AI check sent back. */
   redone: boolean;
-  /** What the AI did: the current attempt's latest worker checkpoint, its summary first. */
+  /** What the AI did: the `summary` of the current attempt's latest worker checkpoint. */
   did?: string;
-  /** The second AI check's verdict on the current attempt. */
-  check?: { verdict: "passed" | "needs-review"; text: string };
+  /** What the task is for (`tasks.json`): its line while working, until `did` says more. */
+  purpose?: string;
+  /** The second AI check's verdict on the current attempt: its sentence, and its full text. */
+  check?: { verdict: "passed" | "needs-review"; summary?: string; text: string };
   /** The fold's `rejected`: the check sent the result back. */
   rejected: boolean;
-  /** Why it failed or was skipped. */
+  /** Why it failed or was skipped, task ids named by their titles. */
   reason?: string;
   needs: NeedItem[];
   image?: Asset;
@@ -274,21 +290,31 @@ const formatNumber = (value: number) =>
     ...(Math.abs(value) >= 1000 ? { maximumFractionDigits: 0 } : { maximumSignificantDigits: 3 }),
   }).format(value);
 
+/** An error's first line, without the provider's raw response: "OpenAI API error (401)". */
+export const plainError = (error: string) =>
+  error.split(/\s*[{\n]/)[0]?.replace(/[:\s]+$/, "") || error;
+
 /**
  * A task's values: each measurement and score of the current attempt (files, volumes,
  * structures and annotations have no value to read here; the review shows them), then, once
  * the task has finished, each required one it never reported.
  */
 function resultRows(t: FoldedTask, state: TaskState): ResultRow[] {
+  // The fold names a value `taskId/outputId`; the workflow names the output.
+  const nameOf = (id: string, title: string | undefined) => {
+    const output = id.slice(t.id.length + 1);
+    const name = outputName(output);
+    return name !== output ? name : (title ?? id);
+  };
   const rows: ResultRow[] = [
     ...t.measurements.map((m) => ({
       id: m.id,
-      title: m.title ?? m.id,
+      title: nameOf(m.id, m.title),
       value: m.value === null ? null : formatNumber(m.value),
       unit: unitText(m.unit),
       ...(m.value === null && { note: m.note ?? "No value given" }),
     })),
-    ...t.scores.map((s) => ({ id: s.id, title: s.title ?? s.id, value: s.level, unit: "" })),
+    ...t.scores.map((s) => ({ id: s.id, title: nameOf(s.id, s.title), value: s.level, unit: "" })),
   ];
   // A task made stale by a change upstream keeps its old attempt until it is redone.
   if (t.status === "stale")
@@ -307,14 +333,15 @@ function resultRows(t: FoldedTask, state: TaskState): ResultRow[] {
 }
 
 /** The card for a task left To check with no check item: why it is there, in plain words. */
-function unexplained(
-  t: FoldedTask,
-  checkText: string | undefined,
-  image: Asset | undefined,
-): NeedItem {
+function unexplained(t: FoldedTask, check: TaskView["check"], image: Asset | undefined): NeedItem {
   const base = { id: `${t.id}/to-check`, taskId: t.id, image, accepted: false, acceptable: false };
-  if (t.rejected || t.checker?.verdict === "needs-review")
-    return { ...base, title: "Sent back by the second AI", text: checkText ?? t.reason ?? "" };
+  if (t.rejected || check?.verdict === "needs-review")
+    return {
+      ...base,
+      title: "Sent back by the second AI",
+      text: check?.summary ?? "The second AI check sent the result back.",
+      found: check?.text,
+    };
   if (t.missingRequired.length > 0)
     return {
       ...base,
@@ -327,25 +354,23 @@ function unexplained(
 function stateOf(
   t: FoldedTask | undefined,
   blocked: boolean,
-  working: boolean,
+  /** Its worker, and its check, is running now (`runningThreads`). */
+  now: { working: boolean; checking: boolean },
   halt: Halt | undefined,
+  /** A thread of its current attempt ended failed, and the run failed. */
+  failedOn: boolean,
 ): TaskState {
   const status = t?.status;
-  const state: TaskState = t?.skipped
-    ? "skipped"
-    : status === "in-progress" ||
-        ((status === undefined || status === "pending" || status === "stale") && working)
-      ? "running"
-      : status === "under-review"
-        ? "checking"
-        : status === "done" || status === "to-check" || status === "failed"
-          ? status
-          : blocked
-            ? "waiting"
-            : "ready";
-  if (halt && (state === "running" || state === "checking"))
-    return halt.kind === "ended" ? "stopped" : "paused";
-  return state;
+  if (t?.skipped) return "skipped";
+  if (status === "done" || status === "to-check" || status === "failed") return status;
+  // A fatal provider error fails the run with no task event: the task is the one it failed on.
+  if (failedOn) return "failed";
+  const started = status === "in-progress" || status === "under-review";
+  if (halt && started) return halt.kind === "ended" ? "stopped" : "paused";
+  if (now.working) return "running";
+  if (status === "under-review" && now.checking) return "checking";
+  if (started) return "held";
+  return blocked ? "waiting" : "ready";
 }
 
 export type RunView = {
@@ -353,43 +378,79 @@ export type RunView = {
   threads: Thread[];
   /** One per plan task, in plan order; empty until the run has a plan. */
   tasks: TaskView[];
-  /** Tasks done or to check, of all. */
-  done: number;
+  /** `progress` of the latest revision: tasks done of all, and the open check items. */
+  progress: { done: number; total: number; toCheck: number };
   spend: RunSpend;
   /** The lead AI's own thread has started (runs before the main agent had none). */
   hasLead: boolean;
 };
+
+/** The fold's title for a To check flag set by a `task` event; the task's name says as much. */
+const GENERIC_CHECK = "Marked to check";
 
 /** Everything the run page shows about the run, from its durable events and state. */
 export function runView(
   events: RunEvent[],
   state: RunState,
   providerCalls: ProviderCalls | undefined,
+  halt: Halt | undefined,
 ): RunView {
   const logged = threadsOf(events);
-  const halt = haltOf(state);
   const running = runningThreads(events, state);
   const threads = halt ? halted(logged.threads, logged.lastAt, halt, running) : logged.threads;
   const spent = spend(events, providerCalls);
   const hasLead = threads.some((t) => t.kind === "main");
   // No plan until the run's first `revision.started`.
   const latest = reviewState(events).revisions.at(-1);
-  if (!latest) return { threads, tasks: [], done: 0, spend: spent, hasLead };
+  if (!latest)
+    return {
+      threads,
+      tasks: [],
+      progress: { done: 0, total: 0, toCheck: 0 },
+      spend: spent,
+      hasLead,
+    };
 
   const byId = new Map(latest.tasks.map((t) => [t.id, t]));
+  const titles = new Map(latest.plan.tasks.map((p) => [p.id, p.title ?? taskTitle(p.id)]));
+  // "tibia-frame was skipped: …", as the fold writes a dependent's reason, with the task's title.
+  const skipText = (reason: string) =>
+    reason.replace(
+      /^([\w-]+) was skipped: /,
+      (_, id: string) => `${titles.get(id) ?? id} was skipped: `,
+    );
+  const loggedById = new Map(logged.threads.map((t) => [t.id, t]));
   // Checkpoints by event id: their researcher sentence, and the thread that wrote them.
   const summaries = new Map<string, string>();
   const writer = new Map<string, string>();
+  // Attempts the second AI check sent back, by task: a later attempt is a redo.
+  const verdicts = new Map<string, "passed" | "needs-review">();
+  const sentBack = new Map<string, Set<string>>();
   for (const e of events)
     if (e.type === "checkpoint") {
       writer.set(e.id, e.threadId);
       if (e.payload.summary) summaries.set(e.id, e.payload.summary);
+      if (e.payload.verdict && loggedById.get(e.threadId)?.kind === "check")
+        verdicts.set(e.payload.attemptId, e.payload.verdict);
+    } else if (
+      e.type === "task" &&
+      e.payload.status === "to-check" &&
+      e.payload.by.kind === "rule" &&
+      e.payload.by.rule === "check-result" &&
+      verdicts.get(e.payload.attemptId) === "needs-review"
+    ) {
+      const set = sentBack.get(e.payload.taskId) ?? new Set();
+      sentBack.set(e.payload.taskId, set.add(e.payload.attemptId));
     }
-  const working = new Set(
-    logged.threads.flatMap((t) =>
-      t.kind === "worker" && running.has(t.id) && t.taskId ? [t.taskId] : [],
-    ),
-  );
+  const runningOf = (kind: Thread["kind"]) =>
+    new Set(
+      logged.threads.flatMap((t) =>
+        t.kind === kind && running.has(t.id) && t.taskId ? [t.taskId] : [],
+      ),
+    );
+  const working = runningOf("worker");
+  const checking = runningOf("check");
+  const runFailed = halt?.kind === "ended" && halt.outcome === "failed";
   const taskSpend = new Map(spent.tasks.map((t) => [t.taskId, t.spend]));
   const corrections = new Set(
     events.flatMap((e) =>
@@ -400,7 +461,19 @@ export function runView(
   const tasks = latest.plan.tasks.map((p, i): TaskView => {
     const t = byId.get(p.id);
     const blocked = p.dependsOn.some((d) => !isSatisfied(byId.get(d)));
-    const state = stateOf(t, blocked, working.has(p.id), halt);
+    // The logged end, not `halted`'s: a thread cut off by a failed run didn't fail itself.
+    const failedThread = runFailed
+      ? [t?.threads.worker, t?.threads.check]
+          .map((id) => (id ? loggedById.get(id) : undefined))
+          .find((th) => th?.status === "failed")
+      : undefined;
+    const state = stateOf(
+      t,
+      blocked,
+      { working: working.has(p.id), checking: checking.has(p.id) },
+      halt,
+      failedThread !== undefined,
+    );
     const own = threads.filter((th) => th.taskId === p.id);
     const assets = new Map((t?.evidence ?? []).map((a) => [a.id, a]));
     const imageOf = (ids: string[]) =>
@@ -413,45 +486,47 @@ export function runView(
         .map((m) => imageOf(m.evidenceIds))
         .find(Boolean) ?? [...(t?.evidence ?? [])].reverse().find(isImage);
     const lastVerdict = t?.milestones.filter((m) => m.verdict).at(-1);
+    const check: TaskView["check"] =
+      t?.checker && lastVerdict
+        ? {
+            verdict: t.checker.verdict,
+            summary: summaries.get(lastVerdict.id),
+            text: t.checker.text,
+          }
+        : undefined;
+    const items: NeedItem[] = (t?.checks ?? []).map((c) => ({
+      id: c.id,
+      taskId: p.id,
+      title: c.title === GENERIC_CHECK ? undefined : c.title,
+      text: summaries.get(c.id) ?? (t?.skipped ? skipText(c.detail) : c.detail),
+      image: imageOf(t?.milestones.find((m) => m.id === c.id)?.evidenceIds ?? []) ?? image,
+      accepted: c.status === "accepted",
+      acceptable: true,
+    }));
+    const reason =
+      state === "skipped"
+        ? t?.reason && skipText(t.reason)
+        : state === "failed"
+          ? failedThread
+            ? failedThread.error && plainError(failedThread.error)
+            : t?.reason
+          : undefined;
     return {
       id: p.id,
-      title: p.title ?? taskTitle(p.id),
+      title: titles.get(p.id) ?? p.id,
       number: i + 1,
       dependsOn: p.dependsOn,
       state,
       threads: own,
       latest: own.at(-1),
-      redone: own.filter((th) => th.kind === "worker").length > 1,
-      did: lastWorker && (summaries.get(lastWorker.id) ?? lastWorker.text),
-      check:
-        t?.checker && lastVerdict
-          ? {
-              verdict: t.checker.verdict,
-              text: summaries.get(lastVerdict.id) ?? t.checker.text,
-            }
-          : undefined,
+      redone: [...(sentBack.get(p.id) ?? [])].some((a) => a !== t?.attemptId),
+      did: lastWorker && summaries.get(lastWorker.id),
+      purpose: purpose.get(p.id),
+      check,
       rejected: Boolean(t?.rejected),
-      reason: state === "failed" || state === "skipped" ? (t?.reason ?? undefined) : undefined,
+      reason: reason ?? undefined,
       needs:
-        t?.status !== "to-check"
-          ? []
-          : t.checks.length > 0
-            ? t.checks.map((c) => ({
-                id: c.id,
-                taskId: p.id,
-                title: c.title,
-                text: summaries.get(c.id) ?? c.detail,
-                image: imageOf(t.milestones.find((m) => m.id === c.id)?.evidenceIds ?? []) ?? image,
-                accepted: c.status === "accepted",
-                acceptable: true,
-              }))
-            : [
-                unexplained(
-                  t,
-                  lastVerdict && (summaries.get(lastVerdict.id) ?? lastVerdict.text),
-                  image,
-                ),
-              ],
+        t?.status === "to-check" && items.length === 0 ? [unexplained(t, check, image)] : items,
       image,
       results: t ? resultRows(t, state) : [],
       valued: p.outputs.some((o) => o.kind === "measurement" || o.kind === "score"),
@@ -460,11 +535,5 @@ export function runView(
       spend: taskSpend.get(p.id),
     };
   });
-  return {
-    threads,
-    tasks,
-    done: tasks.filter((t) => t.state === "done" || t.state === "to-check").length,
-    spend: spent,
-    hasLead,
-  };
+  return { threads, tasks, progress: progress(latest), spend: spent, hasLead };
 }

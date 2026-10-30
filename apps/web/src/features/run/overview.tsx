@@ -8,30 +8,41 @@ import { ApiError, acceptCheck, reviewFileUrl } from "@voluma/api-client";
 import type { Asset } from "@voluma/contracts/review";
 import type { Run } from "@voluma/contracts/run";
 import { Button, buttonClass, cx, Lightbox } from "@voluma/ui";
-import { ImageOff } from "lucide-react";
+import { ChevronRight, ImageOff } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Link } from "react-router";
 import { Elapsed } from "./agents";
+import { ClampedMarkdown } from "./chat/markdown";
 import type { NeedItem, TaskView } from "./run-model";
 import { TaskMark } from "./task-flow";
 
 /** "Looks right" on a completed run: accepts one check of the latest result. */
 export type Accepting = {
-  /** Only a completed run's latest result takes decisions. */
+  /** Only a completed run's latest result takes decisions, and an example takes none. */
   enabled: boolean;
   accept: (item: NeedItem) => void;
   /** Accepted here, before the stream brings the decision back. */
   done: ReadonlySet<string>;
-  pending?: string;
+  /** Sent and not answered yet. */
+  pending: ReadonlySet<string>;
+  /** The latest failure, by item. */
   error?: { id: string; text: string };
+};
+
+const without = (set: ReadonlySet<string>, id: string) => {
+  const next = new Set(set);
+  next.delete(id);
+  return next;
 };
 
 export function useAccepting(
   run: Run,
-  onChange: (run: Run) => void,
+  onChange: (update: (run: Run) => Run) => void,
   refetch: () => void,
 ): Accepting {
   const [done, setDone] = useState<ReadonlySet<string>>(new Set());
+  const [pending, setPending] = useState<ReadonlySet<string>>(new Set());
+  const [error, setError] = useState<Accepting["error"]>();
   const mutation = useMutation({
     mutationFn: (item: NeedItem) => {
       if (!run.review) throw new Error("no completed result");
@@ -40,30 +51,35 @@ export function useAccepting(
         taskId: item.taskId,
       });
     },
+    onMutate: (item) => {
+      setPending((p) => new Set(p).add(item.id));
+      setError((e) => (e?.id === item.id ? undefined : e));
+    },
     onSuccess: (res, item) => {
       setDone((d) => new Set(d).add(item.id));
-      onChange({ ...run, review: res.review });
+      onChange((r) => ({ ...r, review: res.review }));
     },
-    onError: (e) => {
-      if (e instanceof ApiError && e.status === 409) refetch();
+    onError: (e, item) => {
+      const status = e instanceof ApiError ? e.status : undefined;
+      if (status === 409) refetch();
+      setError({
+        id: item.id,
+        text:
+          status === 403
+            ? "This example is read-only."
+            : status === 409
+              ? "The result changed since this page loaded. Reload to see it."
+              : "Couldn't save that. Try again.",
+      });
     },
+    onSettled: (_res, _e, item) => setPending((p) => without(p, item.id)),
   });
-  const failed = mutation.isError ? mutation.variables : undefined;
-  const status = mutation.error instanceof ApiError ? mutation.error.status : undefined;
   return {
-    enabled: run.review !== null,
+    enabled: run.review !== null && !run.example,
     accept: (item) => mutation.mutate(item),
     done,
-    pending: mutation.isPending ? mutation.variables?.id : undefined,
-    error: failed && {
-      id: failed.id,
-      text:
-        status === 403
-          ? "This example is read-only."
-          : status === 409
-            ? "The result changed since this page loaded. Reload to see it."
-            : "Couldn't save that. Try again.",
-    },
+    pending,
+    error,
   };
 }
 
@@ -74,19 +90,21 @@ export const reviewHref = (runId: string, taskId?: string) =>
 export function Overview({
   runId,
   tasks,
+  toCheck,
   ended,
   accepting,
   search,
 }: {
   runId: string;
   tasks: TaskView[];
+  /** The header's number: open items "Looks right" can accept. */
+  toCheck: number;
   ended: boolean;
   accepting: Accepting;
-  search: (taskId?: string, view?: "decisions") => string;
+  search: (taskId?: string) => string;
 }) {
-  const now = tasks.filter(
-    (t) => t.state === "running" || t.state === "checking" || t.state === "paused",
-  );
+  const now = tasks.filter((t) => NOW.has(t.state));
+  const paused = now.every((t) => t.state === "paused");
   const failed = tasks.filter((t) => t.state === "failed");
   const needs = tasks.flatMap((t) => t.needs);
   const open = needs.filter((n) => !n.accepted && !accepting.done.has(n.id));
@@ -96,7 +114,7 @@ export function Overview({
   return (
     <>
       {now.length > 0 && (
-        <Section title="Working on now">
+        <Section title={paused ? "Paused" : "Working on now"}>
           <ul className="flex flex-wrap gap-2.5">
             {now.map((t) => (
               <li key={t.id}>
@@ -104,18 +122,18 @@ export function Overview({
                   to={search(t.id)}
                   className={cx(
                     "flex min-w-60 items-start gap-3 rounded-xl px-3.5 py-2.5 text-ui hover:ring-1",
-                    t.state === "paused"
-                      ? "bg-muted hover:ring-line-strong"
-                      : "bg-info-tint hover:ring-info",
+                    t.state === "running" || t.state === "checking"
+                      ? "bg-info-tint hover:ring-info"
+                      : "bg-muted hover:ring-line-strong",
                   )}
                 >
                   <TaskMark state={t.state} className="mt-1" />
                   <span className="min-w-0">
                     <span className="block font-medium text-foreground">{t.title}</span>
-                    <span className="flex gap-2 text-muted-foreground">
-                      {doingNow(t)}
-                      {t.latest && t.state !== "paused" && <Elapsed thread={t.latest} />}
-                    </span>
+                    <span className="block text-muted-foreground">{doingNow(t)}</span>
+                    {(t.state === "running" || t.state === "checking") && t.latest && (
+                      <Elapsed thread={t.latest} />
+                    )}
                   </span>
                 </Link>
               </li>
@@ -124,7 +142,7 @@ export function Overview({
         </Section>
       )}
 
-      <Section title="Needs your eye" count={open.length + failed.length}>
+      <Section title="Needs your eye" count={toCheck}>
         {open.length + failed.length === 0 ? (
           <p className="text-ui text-muted-foreground">
             {looked.length > 0
@@ -157,19 +175,27 @@ export function Overview({
           <ResultsTable tasks={valued} search={search} />
         </Section>
       )}
-
-      <Link to={search(undefined, "decisions")} className={buttonClass({ size: "sm" })}>
-        What the AI decided
-      </Link>
     </>
   );
 }
 
-/** A running task's line: what kind of work is under way, in the researcher's words. */
+/** The tasks "Working on now" lists: under way, or stopped partway until something resumes them. */
+const NOW: ReadonlySet<TaskView["state"]> = new Set(["running", "checking", "held", "paused"]);
+
+/** A started task's line: what the AI is doing on it, in the researcher's words. */
 export function doingNow(t: TaskView): string {
-  if (t.state === "checking") return "A second AI is checking the result";
-  if (t.state === "paused") return "Paused until the run resumes";
-  return t.redone ? "Redoing it after the second AI check" : "Working";
+  switch (t.state) {
+    case "checking":
+      return "A second AI is checking the result";
+    case "paused":
+      return t.did ?? t.purpose ?? "Paused";
+    case "held":
+      return "Waiting on the lead AI";
+    default:
+      return (
+        t.did ?? (t.redone ? "Redoing it after the second AI check" : (t.purpose ?? "Working"))
+      );
+  }
 }
 
 export function Section({
@@ -275,21 +301,22 @@ export function NeedCard({
             {task.title}
           </Link>
         ) : null}
-        <p className="text-ui font-medium text-check-strong">{item.title}</p>
+        {item.title && <p className="text-ui font-medium text-check-strong">{item.title}</p>}
         <p
           title={item.text}
           className="mt-1 mb-2.5 line-clamp-4 text-ui text-foreground [overflow-wrap:anywhere]"
         >
           {plain(item.text)}
         </p>
+        {item.found && <WhatItFound text={item.found} className="mb-2.5" />}
         <div className="flex flex-wrap gap-2">
           {accepting.enabled && item.acceptable && (
             <Button
               size="sm"
-              disabled={accepting.pending === item.id}
+              disabled={accepting.pending.has(item.id)}
               onClick={() => accepting.accept(item)}
             >
-              {accepting.pending === item.id ? "Saving…" : "Looks right"}
+              {accepting.pending.has(item.id) ? "Saving…" : "Looks right"}
             </Button>
           )}
           <Link to={reviewHref(runId, item.taskId)} className={buttonClass({ size: "sm" })}>
@@ -303,6 +330,22 @@ export function NeedCard({
         )}
       </div>
     </article>
+  );
+}
+
+/**
+ * The second AI check's own words, folded: they name files and tools, which the researcher
+ * reads only when they ask.
+ */
+export function WhatItFound({ text, className }: { text: string; className?: string }) {
+  return (
+    <details className={cx("group text-ui", className)}>
+      <summary className="inline-flex cursor-pointer items-center gap-1 font-medium text-primary-text hover:underline [&::-webkit-details-marker]:hidden">
+        <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" aria-hidden />
+        What it found
+      </summary>
+      <ClampedMarkdown text={text} className="mt-1.5 text-muted-foreground" />
+    </details>
   );
 }
 
@@ -342,7 +385,7 @@ export function LookedRight({
           <span className="shrink-0 font-medium text-primary-text">Looked right</span>
           <span className="min-w-0 truncate">
             {title ? `${title.get(n.taskId) ?? n.taskId}: ` : ""}
-            {n.title}
+            {n.title ?? plain(n.text)}
           </span>
         </li>
       ))}
@@ -355,6 +398,8 @@ const NOT_YET: Partial<Record<TaskView["state"], string>> = {
   ready: "not started",
   running: "in progress",
   checking: "being checked",
+  held: "in progress",
+
   paused: "paused",
   stopped: "stopped before it finished",
   skipped: "skipped",

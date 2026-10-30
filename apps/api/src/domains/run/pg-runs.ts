@@ -6,7 +6,7 @@
 
 import { runEventSchema } from "@voluma/contracts/events";
 import type { ReviewSummary } from "@voluma/contracts/review";
-import { reviewState } from "@voluma/contracts/review-state";
+import { progress, reviewState } from "@voluma/contracts/review-state";
 import { type Input, type Run, runSchema } from "@voluma/contracts/run";
 import type {
   Study,
@@ -242,12 +242,9 @@ const NOTHING: Derived = { summary: null, tasks: null, values: {}, toCheck: [] }
 function derive(log: RunRecord["events"]): Derived {
   const { summary, revisions } = reviewState(log);
   const latest = revisions.at(-1);
-  // The fold has a row only for a task that started; the plan lists them all. "Finished"
-  // counts To check tasks: their work is done (the run page counts the same).
-  const tasks = latest && {
-    done: latest.tasks.filter((t) => t.status === "done" || t.status === "to-check").length,
-    total: latest.plan.tasks.length,
-  };
+  // The run page counts with the same `progress`.
+  const counted = latest && progress(latest);
+  const tasks = counted && { done: counted.done, total: counted.total };
   const values: Derived["values"] = {};
   const toCheck: Derived["toCheck"] = [];
   for (const task of latest?.tasks ?? []) {

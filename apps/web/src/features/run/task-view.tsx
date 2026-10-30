@@ -4,7 +4,7 @@
  * built only when the reader opens it. Tool names may show there and nowhere else on the page.
  */
 import type { RunEvent } from "@voluma/contracts/events";
-import { buttonClass } from "@voluma/ui";
+import { buttonClass, cx } from "@voluma/ui";
 import { ArrowLeft, Check, ChevronRight } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router";
@@ -19,6 +19,7 @@ import {
   ResultsTable,
   reviewHref,
   Section,
+  WhatItFound,
 } from "./overview";
 import type { TaskView as Task, Thread } from "./run-model";
 import { TaskMark } from "./task-flow";
@@ -62,7 +63,7 @@ export function TaskView({
         {task.number}. {task.title}
       </h2>
 
-      <div className="mb-6 grid max-w-[65ch] gap-2 text-[0.9375rem]">
+      <div className="mb-6 grid max-w-[65ch] gap-2 text-sm">
         <Lead task={task} titleOf={titleOf} />
         <CheckLine task={task} />
       </div>
@@ -89,6 +90,7 @@ export function TaskView({
       {task.image && !imageShown && (
         <figure className="mb-8">
           <QcImage
+            key={task.image.id}
             runId={runId}
             asset={task.image}
             className="block w-fit max-w-full"
@@ -128,15 +130,27 @@ function Lead({ task, titleOf }: { task: Task; titleOf: (taskId: string) => stri
     case "ready":
       return <p className="text-muted-foreground">Starts when the AI gets to it.</p>;
     case "skipped":
-      return <p className="text-muted-foreground">Skipped: {task.reason ?? "no reason given"}</p>;
+      // A dependent's reason already says which task was skipped.
+      return (
+        <p className="text-muted-foreground">
+          {task.reason
+            ? / was skipped: /.test(task.reason)
+              ? task.reason
+              : `Skipped: ${task.reason}`
+            : "Skipped."}
+        </p>
+      );
     case "running":
     case "checking":
+    case "held":
     case "paused":
       return (
         <p className="flex items-center gap-2.5">
           <TaskMark state={task.state} />
           {doingNow(task)}
-          {task.latest && task.state !== "paused" && <Elapsed thread={task.latest} />}
+          {(task.state === "running" || task.state === "checking") && task.latest && (
+            <Elapsed thread={task.latest} />
+          )}
         </p>
       );
     case "stopped":
@@ -148,17 +162,31 @@ function Lead({ task, titleOf }: { task: Task; titleOf: (taskId: string) => stri
         </p>
       );
     default:
-      return task.did ? <ClampedMarkdown text={task.did} /> : null;
+      return task.did ? (
+        <ClampedMarkdown text={task.did} />
+      ) : task.purpose ? (
+        <p className="text-muted-foreground">{task.purpose}</p>
+      ) : null;
   }
 }
 
-/** The second AI check's verdict on the current result, with what it found. */
+/**
+ * The second AI check's verdict on the current result: its sentence, with its own words behind
+ * "What it found". A task sent back shows them on its card instead.
+ */
 function CheckLine({ task }: { task: Task }) {
-  if (!task.check || task.state === "running" || task.state === "checking") return null;
-  const passed = task.check.verdict === "passed";
+  const { check } = task;
+  if (!check || task.state === "running" || task.state === "checking") return null;
+  const passed = check.verdict === "passed";
+  const onCard = task.needs.some((n) => n.found === check.text);
   return (
-    <div className={passed ? "text-primary-text" : "text-check-strong"}>
-      <p className="flex items-center gap-1.5 font-medium">
+    <div>
+      <p
+        className={cx(
+          "flex items-center gap-1.5 font-medium",
+          passed ? "text-primary-text" : "text-check-strong",
+        )}
+      >
         {passed && <Check className="size-4" aria-hidden />}
         {passed
           ? "A second AI checked this and agrees."
@@ -166,10 +194,8 @@ function CheckLine({ task }: { task: Task }) {
             ? "A second AI checked this and sent it back."
             : "A second AI checked this and has doubts."}
       </p>
-      {/* A task sent back shows the check's words on its card instead. */}
-      {!task.needs.some((n) => n.text === task.check?.text) && (
-        <ClampedMarkdown text={task.check.text} className="text-muted-foreground" />
-      )}
+      {!onCard && check.summary && <p className="mt-0.5">{check.summary}</p>}
+      {!onCard && <WhatItFound text={check.text} className="mt-1" />}
     </div>
   );
 }

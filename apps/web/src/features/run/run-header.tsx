@@ -17,6 +17,7 @@ import { Popover } from "radix-ui";
 import { useState } from "react";
 import { Link } from "react-router";
 import { reviewHref } from "./overview";
+import { plainError } from "./run-model";
 import { useNow } from "./status";
 
 const { taskTitle } = catalog["mouse-oa"];
@@ -43,12 +44,12 @@ const workflowLabel = (run: Run, study: StudyDetail | undefined) => {
     : workflowName(run.workflows[0]?.path);
 };
 
-/** The run's word for where it is, beside its progress. */
-function statusWord(run: Run): string {
+/** The run's word for where it is, beside its progress. A queued run with a plan has started: it lost its runner. */
+function statusWord(run: Run, started: boolean): string {
   const { state } = run;
   switch (state.status) {
     case "queued":
-      return "Waiting to start";
+      return started ? "Paused" : "Waiting to start";
     case "running":
       return "Running";
     case "awaiting-keys":
@@ -65,22 +66,21 @@ function statusWord(run: Run): string {
 export function RunHeader({
   run,
   study,
-  done,
-  total,
-  toCheck,
+  progress: { done, total, toCheck },
   spend,
   openTask,
+  decisions,
   onChange,
 }: {
   run: Run;
   study: StudyDetail | undefined;
-  done: number;
-  /** Plan tasks; 0 before the run has a plan. */
-  total: number;
-  toCheck: number;
+  /** `progress` (total is 0 before the run has a plan), less what was accepted on this page. */
+  progress: { done: number; total: number; toCheck: number };
   spend: RunSpend;
   /** The task "Open in 3D" opens: the one in view, else the first to check. */
   openTask?: string;
+  /** Where "What the AI decided" goes. */
+  decisions: string;
   onChange: (run: Run) => void;
 }) {
   const { title, group } = scanTitle(run, study);
@@ -106,16 +106,13 @@ export function RunHeader({
 
       <div className="w-full max-w-lg justify-self-center max-[1100px]:justify-self-start">
         <p className="mb-1.5 flex flex-wrap items-baseline gap-x-3.5 text-ui">
-          <b className="font-semibold">{statusWord(run)}</b>
-          {state.status === "queued" ? (
-            <span>Place {state.position} in line</span>
-          ) : (
-            total > 0 && (
-              <span>
-                {done} of {total} tasks done
-              </span>
-            )
+          <b className="font-semibold">{statusWord(run, total > 0)}</b>
+          {total > 0 && (
+            <span>
+              {done} of {total} tasks done
+            </span>
           )}
+          {state.status === "queued" && <span>Place {state.position} in line</span>}
           {toCheck > 0 && (
             <span className="font-semibold text-check-strong">{toCheck} to check</span>
           )}
@@ -141,6 +138,7 @@ export function RunHeader({
           spend={spend}
           workflow={workflow}
           budgetUsd={study?.study.budgetUsd ?? null}
+          decisions={decisions}
         />
         {live && <StopRun run={run} onChange={onChange} />}
         {(state.status !== "queued" || run.tasks) && (
@@ -161,11 +159,13 @@ function RunDetails({
   spend,
   workflow,
   budgetUsd,
+  decisions,
 }: {
   run: Run;
   spend: RunSpend;
   workflow: string;
   budgetUsd: number | null;
+  decisions: string;
 }) {
   const { state } = run;
   const startedAt = state.status === "queued" ? undefined : state.startedAt;
@@ -205,6 +205,14 @@ function RunDetails({
               </div>
             ))}
           </dl>
+          <Popover.Close asChild>
+            <Link
+              to={decisions}
+              className="mt-3 block border-t border-border pt-3 font-medium text-primary-text hover:underline"
+            >
+              What the AI decided
+            </Link>
+          </Popover.Close>
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>
@@ -301,8 +309,7 @@ export function RunAlerts({
  */
 function failureText(error: string | undefined): string {
   if (!error) return "The run failed.";
-  const cut = error.split(/\s*[{\n]/)[0]?.replace(/[:\s]+$/, "") || error;
-  const words = cut.replace(
+  const words = plainError(error).replace(
     /^([\w-]+): its (worker|check|checker)\b/,
     (_, task: string, role: string) =>
       `${taskTitle(task)}: ${role === "worker" ? "the AI" : "the second AI check"}`,

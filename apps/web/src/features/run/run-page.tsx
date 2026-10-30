@@ -29,10 +29,14 @@ import { TranscriptView } from "./transcript-view";
  * `events` keeps its identity while only frames arrive, so the event derivations don't rerun
  * per token. Once the stream is over for good, live partials are dropped: nothing will complete them.
  */
-function useRunStream(runId: string, onClosed: () => void): { events: RunEvent[]; live: Live } {
-  const [state, setState] = useState<{ events: RunEvent[]; live: Live }>({
+function useRunStream(
+  runId: string,
+  onClosed: () => void,
+): { events: RunEvent[]; live: Live; closed: boolean } {
+  const [state, setState] = useState<{ events: RunEvent[]; live: Live; closed: boolean }>({
     events: [],
     live: noLive,
+    closed: false,
   });
   const onClosedRef = useRef(onClosed);
   onClosedRef.current = onClosed;
@@ -40,12 +44,13 @@ function useRunStream(runId: string, onClosed: () => void): { events: RunEvent[]
     const events: RunEvent[] = [];
     let published: RunEvent[] = [];
     let live = noLive;
+    let closed = false;
     const settled: Settled = new Set();
     let frame: number | undefined;
     const publish = () => {
       frame = undefined;
       if (published.length !== events.length) published = [...events];
-      setState({ events: published, live });
+      setState({ events: published, live, closed });
     };
     const schedule = () => {
       frame ??= requestAnimationFrame(publish);
@@ -65,6 +70,7 @@ function useRunStream(runId: string, onClosed: () => void): { events: RunEvent[]
       onClosed: () => {
         if (frame !== undefined) cancelAnimationFrame(frame);
         live = noLive;
+        closed = true;
         publish();
         onClosedRef.current();
       },
@@ -77,8 +83,13 @@ function useRunStream(runId: string, onClosed: () => void): { events: RunEvent[]
   return state;
 }
 
+/** Keyed on the run: nothing of one run's stream or decisions carries over to the next. */
 export function RunPage() {
   const { id = "" } = useParams();
+  return <RunOf key={id} id={id} />;
+}
+
+function RunOf({ id }: { id: string }) {
   const me = useOutletContext<Me>();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -97,15 +108,15 @@ export function RunPage() {
     enabled: studyId !== undefined,
     staleTime: Number.POSITIVE_INFINITY,
   });
-  const { events, live } = useRunStream(id, () => void run.refetch());
+  const { events, live, closed } = useRunStream(id, () => void run.refetch());
   const state = run.data?.state;
   // Query's structural sharing keeps `state` the same object across polls that change nothing.
-  const halt = useMemo(() => state && haltOf(state), [state]);
+  const halt = useMemo(() => state && haltOf(state, closed), [state, closed]);
   const providerCalls = run.data?.providerCalls;
   // Not shown until the run has loaded; until then any state will do.
   const view = useMemo(
-    () => runView(events, state ?? { status: "queued", position: 1 }, providerCalls),
-    [events, state, providerCalls],
+    () => runView(events, state ?? { status: "queued", position: 1 }, providerCalls, halt),
+    [events, state, providerCalls, halt],
   );
   const threads = useMemo(() => withLiveCalls(view.threads, live), [view.threads, live]);
   const base = `/runs/${encodeURIComponent(id)}/live`;
@@ -123,7 +134,10 @@ export function RunPage() {
     [threads, navigate, search],
   );
   const setRun = useCallback(
-    (next: Run) => queryClient.setQueryData(["run", id], next),
+    (next: Run | ((run: Run) => Run)) =>
+      queryClient.setQueryData<Run>(["run", id], (run) =>
+        typeof next === "function" ? run && next(run) : next,
+      ),
     [queryClient, id],
   );
   const refetch = useCallback(() => void run.refetch(), [run.refetch]);
@@ -190,7 +204,7 @@ function RunScreen({
   params: URLSearchParams;
   search: (taskId?: string, v?: "decisions") => string;
   openThread: (threadId: string | null) => void;
-  setRun: (run: Run) => void;
+  setRun: (next: Run | ((run: Run) => Run)) => void;
   refetch: () => void;
 }) {
   const accepting = useAccepting(run, setRun, refetch);
@@ -200,10 +214,12 @@ function RunScreen({
   const decisions = !taskId && params.get("view") === "decisions";
   const ended = run.state.status === "ended";
   const titles = useMemo(() => new Map(tasks.map((t) => [t.id, t.title])), [tasks]);
+  const needs = tasks.flatMap((t) => t.needs);
   // An ended run's stream is closed, so a "Looks right" made here counts from `accepting.done`.
-  const open = tasks
-    .flatMap((t) => t.needs)
-    .filter((n) => !n.accepted && !accepting.done.has(n.id));
+  const toCheck =
+    view.progress.toCheck -
+    needs.filter((n) => n.acceptable && !n.accepted && accepting.done.has(n.id)).length;
+  const firstOpen = needs.find((n) => !n.accepted && !accepting.done.has(n.id));
 
   let content: React.ReactNode;
   if (taskId && !task)
@@ -246,7 +262,14 @@ function RunScreen({
     );
   else
     content = (
-      <Overview runId={run.id} tasks={tasks} ended={ended} accepting={accepting} search={search} />
+      <Overview
+        runId={run.id}
+        tasks={tasks}
+        toCheck={toCheck}
+        ended={ended}
+        accepting={accepting}
+        search={search}
+      />
     );
 
   return (
@@ -256,11 +279,10 @@ function RunScreen({
           <RunHeader
             run={run}
             study={study}
-            done={view.done}
-            total={tasks.length}
-            toCheck={open.length}
+            progress={{ ...view.progress, toCheck }}
             spend={view.spend}
-            openTask={task?.id ?? open[0]?.taskId}
+            openTask={task?.id ?? firstOpen?.taskId}
+            decisions={search(undefined, "decisions")}
             onChange={setRun}
           />
           {stale && (
@@ -316,6 +338,7 @@ function Decisions({
         Overview
       </Link>
       <h2 className="mt-2 mb-4 text-xl font-semibold">What the AI decided</h2>
+
       {!lead && rows.length > 0 && (
         <p className="mb-4 text-ui text-muted-foreground">
           This run predates the lead AI's own record: it shows where each task's AI started.
