@@ -19,7 +19,17 @@ import {
 import { type Contrast, compose, type OverlayPlane } from "./compose";
 import { corners, type Picture, quad, texture } from "./picture";
 import { readPlane } from "./planes";
-import { type Axis, type GridScene, levelFor, levelIndex, planeAxes, type Zyx } from "./scene";
+import {
+  type Axis,
+  capturePane,
+  type GridScene,
+  levelFor,
+  levelIndex,
+  type PaneHandle,
+  type PaneView,
+  planeAxes,
+  type Zyx,
+} from "./scene";
 
 export const axisColor = (axis: Axis) =>
   getComputedStyle(document.documentElement).getPropertyValue(
@@ -35,12 +45,15 @@ export function SlicePane({
   point,
   onPoint,
   contrast,
+  handle,
 }: {
   axis: Axis;
   scene: GridScene;
   point: Zyx;
   onPoint(point: Zyx): void;
   contrast: Contrast | null;
+  /** Set while the pane is mounted, for screenshots. */
+  handle: { current: PaneHandle | null };
 }) {
   const [ra, ca] = planeAxes(axis);
   const sr = scene.spacingZyx[ra];
@@ -55,6 +68,8 @@ export function SlicePane({
     render(): void;
   } | null>(null);
   const view = useRef<View | null>(null);
+  // A saved view shown before the pane had a size: applied when it gets one.
+  const pending = useRef<{ zoom: number; center: [number, number] } | null>(null);
   const [level, setLevel] = useState(scene.image.levels.length - 1);
   const [shown, setShown] = useState<{ level: number; index: number } | null>(null);
   const [error, setError] = useState<string>();
@@ -110,6 +125,26 @@ export function SlicePane({
     const fitZoom = (width: number, height: number) =>
       Math.min(width / (scene.shapeZyx[ca] * sc), height / (scene.shapeZyx[ra] * sr)) * 0.95;
     three.current = state;
+    handle.current = {
+      capture() {
+        const v = view.current!;
+        return {
+          ...capturePane(renderer.domElement, paint),
+          view: { zoom: v.zoom / v.fit, center: [v.center[0], v.center[1]] },
+        };
+      },
+      show(saved: PaneView) {
+        if (!("zoom" in saved)) return;
+        if (!view.current) {
+          pending.current = saved;
+          return;
+        }
+        view.current.zoom = saved.zoom * view.current.fit;
+        view.current.center = [saved.center[0], saved.center[1]];
+        state.render();
+        pickLevel();
+      },
+    };
     const observer = new ResizeObserver(() => {
       const { width, height } = element.getBoundingClientRect();
       if (!width || !height) return;
@@ -118,9 +153,12 @@ export function SlicePane({
       const fitted = fitZoom(width, height);
       if (view.current) view.current.zoom *= fitted / view.current.fit;
       view.current ??= {
-        zoom: fitted,
+        zoom: fitted * (pending.current?.zoom ?? 1),
         fit: fitted,
-        center: [(scene.shapeZyx[ca] * sc) / 2, (-scene.shapeZyx[ra] * sr) / 2],
+        center: pending.current?.center ?? [
+          (scene.shapeZyx[ca] * sc) / 2,
+          (-scene.shapeZyx[ra] * sr) / 2,
+        ],
       };
       view.current.fit = fitted;
       state.render();
@@ -139,6 +177,7 @@ export function SlicePane({
       renderer.dispose();
       renderer.domElement.remove();
       three.current = null;
+      handle.current = null;
     };
     // Runs once: the scene's grid is fixed for the pane's life (the viewer remounts on a new grid).
   }, []);

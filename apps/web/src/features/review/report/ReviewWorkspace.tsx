@@ -3,14 +3,16 @@
 import { useMutation } from "@tanstack/react-query";
 import { markReviewed } from "@voluma/api-client";
 import type { Focus, Revision } from "@voluma/contracts/review";
+import type { GridViewState, ReviewSnapshot } from "@voluma/contracts/snapshot";
 import { StatusBadge } from "@voluma/ui";
 import type { StructureDisplay } from "@voluma/viewer/grid";
 import { ArrowLeft, Download, History, Layers, ListChecks } from "lucide-react";
-import { lazy, type ReactNode, Suspense, useState } from "react";
+import { lazy, type ReactNode, Suspense, useEffect, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { downloadCsv, downloadReviewReport } from "./export";
 import { type ReviewRun, taskStatus } from "./model";
 import { TaskReport } from "./TaskReport";
+import { useSnapshots } from "./useSnapshots";
 
 // three.js and the zarr reader load only once there is a task to show.
 const TaskViewer = lazy(() => import("./TaskViewer").then((m) => ({ default: m.TaskViewer })));
@@ -52,6 +54,46 @@ export function ReviewWorkspace({
   const latest = run?.revisions.at(-1);
   const revision = revisionId ? run?.revisions.find((item) => item.id === revisionId) : latest;
   const task = taskId ? revision?.tasks.find((item) => item.id === taskId) : revision?.tasks[0];
+  // A reopened screenshot, kept while its revision and task are open.
+  const [restoredSnapshot, setRestoredSnapshot] = useState<
+    ReviewSnapshot & { viewState: GridViewState }
+  >();
+  const restored =
+    restoredSnapshot?.revisionId === revision?.id && restoredSnapshot?.taskId === task?.id
+      ? restoredSnapshot
+      : undefined;
+  useEffect(() => {
+    setRestoredSnapshot((snapshot) =>
+      snapshot?.revisionId === revision?.id && snapshot?.taskId === task?.id ? snapshot : undefined,
+    );
+  }, [revision?.id, task?.id]);
+  const snapshots = useSnapshots(
+    runId,
+    revision?.id,
+    task?.id,
+    (id) => revision?.tasks.find((item) => item.id === id)?.title ?? id,
+    (snapshot) => {
+      setRestoredSnapshot(snapshot);
+      setDisplay(
+        Object.fromEntries(
+          snapshot.viewState.structures.map((item) => [
+            item.structureId,
+            { visible: item.visible, opacity: item.opacity },
+          ]),
+        ),
+      );
+      setFocusedCheck(
+        snapshot.viewState.focus
+          ? {
+              revisionId: snapshot.revisionId,
+              taskId: snapshot.taskId,
+              focus: snapshot.viewState.focus,
+            }
+          : undefined,
+      );
+      navigate({ revision: snapshot.revisionId, task: snapshot.taskId });
+    },
+  );
   const readOnly = !canReview || !run?.review || revision !== latest;
   const complete = useMutation({
     mutationFn: () => markReviewed(runId, { baseRevisionId: latest?.id ?? "" }),
@@ -313,11 +355,12 @@ export function ReviewWorkspace({
                     runId={run.id}
                     revisionId={revision.id}
                     readOnly={readOnly}
-                    onFocus={(focus) =>
+                    onFocus={(focus) => {
+                      setRestoredSnapshot(undefined);
                       setFocusedCheck(
                         focus ? { revisionId: revision.id, taskId: task.id, focus } : undefined,
-                      )
-                    }
+                      );
+                    }}
                     onRefresh={onRefresh}
                   />
                 ) : (
@@ -375,6 +418,9 @@ export function ReviewWorkspace({
                         ? focusedCheck.focus
                         : undefined
                     }
+                    restore={restored?.viewState}
+                    onCapture={snapshots.capture}
+                    footer={snapshots.tray}
                   />
                 </Suspense>
               ) : (

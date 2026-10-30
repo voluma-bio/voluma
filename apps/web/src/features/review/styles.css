@@ -298,6 +298,28 @@
   .grid-chip.top-right {
     @apply top-2 right-2;
   }
+  .snapshot-tray {
+    @apply mt-3 shrink-0 text-xs;
+  }
+  .snapshot-tray summary {
+    @apply cursor-pointer font-medium;
+  }
+  .snapshot-tray p {
+    @apply mt-2;
+  }
+  .snapshot-tray ul {
+    @apply mt-2 flex max-h-28 flex-wrap gap-3 overflow-y-auto pb-1;
+  }
+  .snapshot-tray li {
+    @apply flex shrink-0 items-center gap-2;
+  }
+  .snapshot-item {
+    @apply flex items-center gap-2 text-left;
+  }
+  .snapshot-item img {
+    @apply h-12 w-16 border border-border object-contain;
+    background: var(--viewer-well);
+  }
   .view-empty {
     @apply flex min-h-0 flex-1 flex-col items-center justify-center px-3 text-center text-sm text-muted-foreground;
   }

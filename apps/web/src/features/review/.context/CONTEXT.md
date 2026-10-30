@@ -61,9 +61,14 @@ narrow widths the layout stacks report and imaging areas.
 **Export review report** builds an offline ZIP containing escaped HTML, measurements CSV,
 revision JSON and hash-verified screenshot PNG/JSON pairs already saved for the run.
 `{snapshot:id}` references resolve only within that run and revision; unresolved references are
-marked. It includes no raw scan, masks or other analysis files. Taking new screenshots was built on
-the removed DICOM viewer and waits for a grid view state
-([#257](https://github.com/voluma-bio/voluma/issues/257)).
+marked. It includes no raw scan, masks or other analysis files.
+
+**Screenshots**: the camera button on a viewer pane saves that pane's pixels with its view state
+(grid, crosshair, window, structure display, focus, and the slice zoom/centre or 3D camera)
+through `useSnapshots`. A failed save retries the same id and pixels. The tray under the viewer
+lists the run's screenshots; reopening one switches to its revision and task and restores the
+view only on the same `gridId`. Screenshots from the earlier DICOM viewer (`acquired`) are listed
+and exported but can't be reopened.
 
 ## Integration with the Run lane
 

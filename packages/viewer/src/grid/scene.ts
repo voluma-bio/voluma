@@ -75,3 +75,29 @@ export function levelIndex(p: number, offset: number, scale: number, size: numbe
   const i = Math.floor((p - offset) / scale);
   return i >= 0 && i < size ? i : -1;
 }
+
+type Vec3 = [number, number, number];
+
+/**
+ * A pane's own view: a slice pane's zoom (× the zoom that fits the grid) and centre in pane mm,
+ * or the 3D camera in the grid's mm (x, y, z).
+ */
+export type PaneView =
+  | { zoom: number; center: [number, number] }
+  | { camera: { position: Vec3; target: Vec3; up: Vec3 } };
+
+/** What a pane does for screenshots: its pixels as drawn now, and showing a saved view. */
+export type PaneHandle = {
+  capture(): { pngBase64: string; width: number; height: number; view: PaneView };
+  show(view: PaneView): void;
+};
+
+/** Draws the pane now and reads its canvas, before the browser clears the drawing buffer. */
+export function capturePane(canvas: HTMLCanvasElement, draw: () => void) {
+  draw();
+  return {
+    pngBase64: canvas.toDataURL("image/png").slice("data:image/png;base64,".length),
+    width: canvas.width,
+    height: canvas.height,
+  };
+}

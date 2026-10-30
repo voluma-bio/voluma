@@ -1,16 +1,17 @@
 /**
  * Review of one analysis grid: 3D plus three slice panes through one crosshair, all from the
  * grid's converted review assets. Panes resize and maximize without remounting. The crosshair
- * moves when the user moves it or a new `focus` arrives; loading data never moves it or the camera.
+ * moves when the user moves it, a new `focus` arrives or a saved view is restored; loading data
+ * never moves it or the camera. Each pane can be captured as a screenshot with its view.
  */
-import { Maximize2, Minimize2 } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { Camera, Maximize2, Minimize2 } from "lucide-react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { autoContrast, type Contrast } from "./compose";
 import { Grid3D } from "./Grid3D";
 import { readLevel } from "./planes";
 import { SlicePane } from "./SlicePane";
-import type { GridScene, Zyx } from "./scene";
+import type { GridScene, PaneHandle, PaneView, Zyx } from "./scene";
 
 const panes = [
   { id: "3d", label: "3D", axis: null },
@@ -19,12 +20,20 @@ const panes = [
   { id: "sagittal", label: "Sagittal", axis: 1, letter: "Y" },
 ] as const;
 
+export type PaneId = (typeof panes)[number]["id"];
+
+/** One pane's view with the crosshair and contrast: what a screenshot saves and restores. */
+export type ViewerState = { pane: PaneId; point: Zyx; contrast: Contrast; view: PaneView };
+
 export function GridViewer({
   scene,
   title = "Imaging workspace",
   focus,
   notes = [],
   children,
+  footer,
+  restore,
+  onCapture,
 }: {
   /**
    * Remount (`key`) for another grid: the panes keep their grid for life. On the same grid,
@@ -36,24 +45,44 @@ export function GridViewer({
   focus?: { at: Zyx };
   /** What the viewer should say it doesn't show. */
   notes?: string[];
+  /** Toolbar controls. */
   children?: ReactNode;
+  /** Below the panes. */
+  footer?: ReactNode;
+  /** A saved view on this grid: each new object is applied once, over any `focus`. */
+  restore?: ViewerState;
+  /** Shows a screenshot button on each pane; the PNG is the pane's canvas in device pixels. */
+  onCapture?(state: ViewerState, png: { base64: string; width: number; height: number }): void;
 }) {
   const [maximized, setMaximized] = useState<string | null>(null);
   const [point, setPoint] = useState<Zyx>(
-    () => focus?.at ?? (scene.shapeZyx.map((n) => Math.floor(n / 2)) as unknown as Zyx),
+    () =>
+      restore?.point ??
+      focus?.at ??
+      (scene.shapeZyx.map((n) => Math.floor(n / 2)) as unknown as Zyx),
   );
   useEffect(() => {
     if (focus) setPoint(focus.at);
   }, [focus]);
-  const [contrast, setContrast] = useState<Contrast | null>(null);
+  const [contrast, setContrast] = useState<Contrast | null>(restore?.contrast ?? null);
   const [contrastError, setContrastError] = useState<string>();
+  const handles = useRef(
+    Object.fromEntries(panes.map((p) => [p.id, { current: null as PaneHandle | null }])),
+  ).current;
+  // After the focus effect, so a restored crosshair wins when both arrive together.
+  useEffect(() => {
+    if (!restore) return;
+    setPoint(restore.point);
+    setContrast(restore.contrast);
+    handles[restore.pane]!.current?.show(restore.view);
+  }, [restore, handles]);
 
   // The contrast spans the coarsest level's values, so the first picture already uses it.
   useEffect(() => {
     const abort = new AbortController();
     const coarsest = scene.image.levels.at(-1)!;
     readLevel(scene.image.base, coarsest.path, abort.signal)
-      .then((level) => setContrast(autoContrast(level.data)))
+      .then((level) => setContrast((had) => had ?? autoContrast(level.data)))
       .catch((cause) => {
         if (!abort.signal.aborted) setContrastError((cause as Error).message);
       });
@@ -82,17 +111,43 @@ export function GridViewer({
                 {pane.axis !== null && <span className={`axis ${pane.id}`}>{pane.letter}</span>}
                 {pane.label}
               </h3>
-              <button
-                type="button"
-                className="icon-button"
-                aria-label={`${isMax ? "Restore" : "Maximize"} ${pane.label}`}
-                onClick={() => setMaximized(isMax ? null : pane.id)}
-              >
-                {isMax ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-              </button>
+              <div className="flex">
+                {onCapture && (
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label={`Save screenshot of ${pane.label}`}
+                    title="Save screenshot"
+                    disabled={!contrast}
+                    onClick={() => {
+                      const shot = handles[pane.id]!.current?.capture();
+                      if (shot && contrast)
+                        onCapture(
+                          { pane: pane.id, point, contrast, view: shot.view },
+                          { base64: shot.pngBase64, width: shot.width, height: shot.height },
+                        );
+                    }}
+                  >
+                    <Camera size={15} />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label={`${isMax ? "Restore" : "Maximize"} ${pane.label}`}
+                  onClick={() => setMaximized(isMax ? null : pane.id)}
+                >
+                  {isMax ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+                </button>
+              </div>
             </header>
             {pane.axis === null ? (
-              <Grid3D scene={scene} contrast={contrast} onPoint={setPoint} />
+              <Grid3D
+                scene={scene}
+                contrast={contrast}
+                onPoint={setPoint}
+                handle={handles[pane.id]!}
+              />
             ) : (
               <SlicePane
                 axis={pane.axis}
@@ -100,6 +155,7 @@ export function GridViewer({
                 point={point}
                 onPoint={setPoint}
                 contrast={contrast}
+                handle={handles[pane.id]!}
               />
             )}
           </section>
@@ -163,6 +219,7 @@ export function GridViewer({
           </Panel>
         </Group>
       </div>
+      {footer}
     </section>
   );
 }

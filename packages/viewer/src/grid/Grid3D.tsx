@@ -32,17 +32,20 @@ import {
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import type { Contrast } from "./compose";
 import { readLevel } from "./planes";
-import type { GridMesh, GridScene, Zyx } from "./scene";
+import { capturePane, type GridMesh, type GridScene, type PaneHandle, type Zyx } from "./scene";
 import { volumeBytes, volumeLevel, volumeMesh } from "./volume";
 
 export function Grid3D({
   scene,
   contrast,
   onPoint,
+  handle,
 }: {
   scene: GridScene;
   contrast: Contrast | null;
   onPoint(point: Zyx): void;
+  /** Set while the pane is mounted, for screenshots. */
+  handle: { current: PaneHandle | null };
 }) {
   const host = useRef<HTMLDivElement>(null);
   const three = useRef<{
@@ -100,32 +103,54 @@ export function Grid3D({
     controls.enableDamping = false;
     // One frame per animation frame, however many changes asked for it.
     let frame = 0;
+    const draw = () => {
+      frame = 0;
+      renderer.setRenderTarget(target);
+      renderer.render(s, camera);
+      renderer.setRenderTarget(null);
+      renderer.render(copy, flat);
+      renderer.getDrawingBufferSize(size2);
+      for (const child of volumes.children) {
+        const v = child as ReturnType<typeof volumeMesh>;
+        v.updateMatrixWorld();
+        const u = v.material.uniforms;
+        u.cameraLocal!.value.copy(v.worldToLocal(camera.position.clone()));
+        u.localToView!.value.multiplyMatrices(camera.matrixWorldInverse, v.matrixWorld);
+        u.resolution!.value.copy(size2);
+        u.near!.value = camera.near;
+        u.far!.value = camera.far;
+      }
+      renderer.autoClear = false;
+      renderer.render(volumes, camera);
+      renderer.autoClear = true;
+    };
     const render = () => {
-      frame ||= requestAnimationFrame(() => {
-        frame = 0;
-        renderer.setRenderTarget(target);
-        renderer.render(s, camera);
-        renderer.setRenderTarget(null);
-        renderer.render(copy, flat);
-        renderer.getDrawingBufferSize(size2);
-        for (const child of volumes.children) {
-          const v = child as ReturnType<typeof volumeMesh>;
-          v.updateMatrixWorld();
-          const u = v.material.uniforms;
-          u.cameraLocal!.value.copy(v.worldToLocal(camera.position.clone()));
-          u.localToView!.value.multiplyMatrices(camera.matrixWorldInverse, v.matrixWorld);
-          u.resolution!.value.copy(size2);
-          u.near!.value = camera.near;
-          u.far!.value = camera.far;
-        }
-        renderer.autoClear = false;
-        renderer.render(volumes, camera);
-        renderer.autoClear = true;
-      });
+      frame ||= requestAnimationFrame(draw);
     };
     controls.addEventListener("change", render);
     controls.update();
     three.current = { meshes, volumes, depth, render };
+    const xyz = (v: Vector3): [number, number, number] => [v.x, v.y, v.z];
+    handle.current = {
+      capture: () => ({
+        ...capturePane(renderer.domElement, draw),
+        view: {
+          camera: {
+            position: xyz(camera.position),
+            target: xyz(controls.target),
+            up: xyz(camera.up),
+          },
+        },
+      }),
+      show(saved) {
+        if (!("camera" in saved)) return;
+        camera.position.set(...saved.camera.position);
+        camera.up.set(...saved.camera.up);
+        controls.target.set(...saved.camera.target);
+        controls.update();
+        render();
+      },
+    };
     const observer = new ResizeObserver(() => {
       const { width, height } = element.getBoundingClientRect();
       if (!width || !height) return;
@@ -189,6 +214,7 @@ export function Grid3D({
       renderer.dispose();
       renderer.domElement.remove();
       three.current = null;
+      handle.current = null;
     };
   }, []);
 
