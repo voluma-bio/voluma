@@ -8,7 +8,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { createModels, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import { createModels } from "@earendil-works/pi-ai";
 import { CLAIM_POLL_SECONDS } from "@voluma/contracts/runner";
 import { claimRun } from "@voluma/harness/adapters/http/hand-off";
 import { runnerConfig } from "./config.ts";
@@ -17,6 +17,7 @@ import { PROVIDERS } from "./providers.ts";
 import { redactor } from "./redact.ts";
 import { type RunnerContext, runClaim } from "./run.ts";
 import { startTelemetry } from "./telemetry.ts";
+import { assertThinking } from "./thinking.ts";
 
 /** How long a shutdown waits for runs to report before it exits anyway. */
 const SHUTDOWN_BUDGET_MS = 30_000;
@@ -38,16 +39,12 @@ const aliases = Object.fromEntries(
 
 // Pi clamps a level a model lacks to a neighbouring one, so a typo'd or unsupported level
 // would run silently at another. Every alias is checked, named by a role file or not.
-if (config.thinking) {
-  const fallback = config.fallbackModel && resolve(config.fallbackModel);
-  for (const [name, model] of Object.entries({ ...aliases, ...(fallback && { fallback }) })) {
-    const levels = getSupportedThinkingLevels(model);
-    if (!levels.includes(config.thinking))
-      throw new Error(
-        `RUNNER_THINKING=${config.thinking} is not a level ${model.provider}/${model.id} (${name}) supports: ${levels.join(", ")}`,
-      );
-  }
-}
+const fallbackModel = config.fallbackModel && resolve(config.fallbackModel);
+assertThinking(
+  config.thinking,
+  [...Object.values(aliases), ...(fallbackModel ? [fallbackModel] : [])],
+  "RUNNER_THINKING",
+);
 
 const runnerId = `runner-${randomUUID().slice(0, 8)}`;
 const ctx: RunnerContext = {
@@ -55,7 +52,7 @@ const ctx: RunnerContext = {
   models,
   aliases,
   visitorModel: resolve(config.visitorModel),
-  fallback: modelFallback(config.fallbackModel && resolve(config.fallbackModel), log),
+  fallback: modelFallback(fallbackModel, log),
   log,
 };
 

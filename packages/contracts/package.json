@@ -24,6 +24,8 @@
     "./output": "./src/output.ts",
     "./run": "./src/run.ts",
     "./runner": "./src/runner.ts",
+    "./messages": "./src/messages.ts",
+    "./conversation": "./src/conversation.ts",
     "./study": "./src/study.ts",
     "./workflow-files": "./src/workflow-files.ts"
   },

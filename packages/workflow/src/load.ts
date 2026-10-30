@@ -19,6 +19,7 @@ import { z } from "zod";
 import {
   type AgentDefinition,
   type Skill,
+  THINKING_LEVELS,
   type ToolIndexEntry,
   type WorkflowDefinition,
   WorkflowParseError,
@@ -69,6 +70,7 @@ const agentSchema = z.strictObject({
   name: z.string().min(1),
   description: z.string().min(1),
   model: z.string().min(1),
+  thinking: z.enum(THINKING_LEVELS).optional(),
   tools: z.array(z.string().min(1)),
   subagents: z.array(z.string().min(1)).default([]),
   skills: z.array(z.string().min(1)).optional(),
@@ -121,6 +123,7 @@ function parseAgent(path: string, text: string, knownTools: readonly string[]): 
     name,
     description: data.description.replace(/\s+/g, " ").trim(),
     model: data.model,
+    thinking: data.thinking,
     tools: data.tools,
     subagents: data.subagents,
     skills: data.skills,

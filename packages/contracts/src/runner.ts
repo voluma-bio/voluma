@@ -49,7 +49,9 @@
  * `released` with its reason, so the run is recovered without waiting out the lease.
  * When a lease expires, or the runner releases it, the run is recovered the
  * same way: a `voluma` run goes back to `queued`, ahead of newer runs; a
- * `visitor` run goes to `awaiting-keys`, because its keys are gone. The runner
+ * `visitor` run goes to `awaiting-keys`, because its keys are gone. A release with reason
+ * `awaiting-person` instead moves the run to `awaiting-person` ("Waiting on you"): it holds no
+ * runner, and a person message (`messages.ts`) moves it to `queued`. The runner
  * keeps its `events` already written, and the next claim resumes the thread
  * from them. That claim carries `previousClaim.reason`, why the claim before it ended
  * (`claimEndReasonSchema`); the API records `lease-expired` itself when it sweeps a lease. The
@@ -60,7 +62,10 @@
  * progress (a `task`, `checkpoint`, `output`, `attempt.opened`, `assets.ready` or correcting
  * `revision.started` or `plan.changed` event), and the run ends
  * `failed` at 3, naming the call that was in flight. Progress resets the count. `shutdown`
- * never counts, so deploys don't fail a long run.
+ * never counts, so deploys don't fail a long run, and `awaiting-person` never counts either (a run
+ * waiting on the researcher is not stalled); it does not reset the count. Appending a
+ * `person.message` (`messages.ts`) resets it to 0: the event lands between claims, so the next
+ * claim's progress window never contains it.
  *
  * There is no tokenless call: the runner service is the only claimer.
  *
@@ -84,7 +89,7 @@
  * sees spend that did not come through its heartbeats.
  *
  * Reports. The runner ends the run with `ended`, or gives it up with
- * `released` (a shutdown or a self-stop: its `reason`). Either one ends the
+ * `released` (a shutdown, a self-stop or `awaiting-person`: its `reason`). Either one ends the
  * lease, and a `released` run is recovered as above, at once. The runner's
  * `ended` never says `cancelled`, which is the server's to record. The first
  * end wins: a report on a run that has ended, or that this lease no longer
@@ -117,11 +122,24 @@ export const leaseLostSchema = z.object({ code: z.literal("lease-lost") });
 export const runnerIdSchema = z.string().min(1);
 
 /** Why the runner gave up a lease. */
-export const releaseReasonSchema = z.enum(["shutdown", "self-stop"]);
+export const releaseReasonSchema = z.enum([
+  "shutdown",
+  "self-stop",
+  // The main agent waits only on the person (`messages.ts`): the run moves to `awaiting-person`
+  // for every credentials kind, and a person message queues it again.
+  "awaiting-person",
+]);
 export type ReleaseReason = z.infer<typeof releaseReasonSchema>;
 
 /** Why a claim ended: a release reason, or the API swept its expired lease. */
-export const claimEndReasonSchema = z.enum([...releaseReasonSchema.options, "lease-expired"]);
+export const claimEndReasonSchema = z.enum([
+  ...releaseReasonSchema.options,
+  "lease-expired",
+  // Not an end but the cause of the next claim: a person message reopened the run (an ended
+  // `completed` run, or an `awaiting-person` one). `claim.started.after` and `previousClaim.reason`
+  // carry it on that claim.
+  "person-message",
+]);
 export type ClaimEndReason = z.infer<typeof claimEndReasonSchema>;
 
 export const claimRequestSchema = z.object({

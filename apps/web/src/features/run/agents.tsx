@@ -6,6 +6,7 @@
  * expands to the report (built only on open). Rows expand, names navigate.
  */
 import { StatusBadge } from "@voluma/ui";
+import { formatUsd } from "@voluma/ui/run";
 import { Bot, ChevronDown, ShieldCheck } from "lucide-react";
 import { useDisclosure } from "./chat/disclosure-store";
 import { InfoButton } from "./chat/info-button";
@@ -13,7 +14,7 @@ import { Markdown } from "./chat/markdown";
 import { useOpenThread } from "./chat/thread-navigation";
 import { type Thread, threadName } from "./run-model";
 import { spendRows } from "./spend";
-import { formatUsd, useNow } from "./status";
+import { useNow } from "./status";
 
 /** A duration as the reader says it: "45 s", "4 min 10 s", "2 h 5 min". */
 function duration(ms: number): string {

@@ -24,6 +24,12 @@ after it.
 - `name`: the file name without `.md`.
 - `description`: what the role is, for whoever reads the file.
 - `model`: an alias (`wonder`, `opus`, `astra`) the runner's config maps to a provider model.
+- `thinking`: optional; Pi's thinking level for the role's threads (`off`, `minimal`, `low`, `medium`,
+  `high`, `xhigh`, `max`). Unset: the runner's `RUNNER_THINKING`, else no level is sent. A run fails at start if
+  the role's model lacks a level set here or in `RUNNER_THINKING`; Meta's Muse models take no `off`, so
+  leave `thinking` unset rather than writing `off` for them; a visitor run is always `off`. The level is not recorded in the
+  log, so a resumed thread takes it from the snapshotted file and the runner's current
+  `RUNNER_THINKING`.
 - `tools`: every tool the role holds, base tools included, from the harness registry. A tool not
   listed is not granted: that, not prose, is how the checker holds no `segment_sam` (its role still
   has to say it does not redo the task, since bash can run the classic segmentation).
@@ -45,16 +51,18 @@ only, so they survive a change of sandbox or harness.
 
 ## What code enforces
 
-The roles are told none of these; code keeps them (design: `design/run-model.md` under
-`work/iterate-and-review/` in the `voluma-bio-docs` repo):
+The roles are told none of these; code keeps them (why each holds:
+`archive/voluma/kb/run-model.md` in the docs repo, `voluma-bio/docs`):
 
 - every effect is an event appended before it is visible, so a resumed run replays it;
 - a checker on every submitted task, by an agent that did not do it; a task is done only on a passed
   verdict;
-- a check ends: a wall-clock limit and an ask limit; ending without a verdict makes the task to-check;
+- a check ends: a limit on the checker's active time (a runner outage does not use it up) and an ask
+  limit; ending without a verdict makes the task to-check;
 - fix rounds are bounded: after N `needs-review` verdicts on one task (default 2, runner config), it
   is to-check;
-- feedback to a task with attempted dependents makes them stale and stops their agents;
+- feedback to a task stops the agents of every task that depends on it, and marks stale those that
+  had begun;
 - one writer per task; the checker's `/outputs` is read-only;
 - `finish_run` is refused while a selected output is neither reported nor missing with a reason, or
   while an agent runs; a run ended by code records each unreported selected output as missing;

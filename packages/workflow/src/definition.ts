@@ -3,6 +3,7 @@
  * the data files the plan is built from. The format is `workflow-format.md` in the docs repo
  * (`work/mvp-contracts-and-data/design`).
  */
+import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
 
 export interface Skill {
@@ -20,6 +21,11 @@ export interface ToolIndexEntry {
   summary: string;
 }
 
+/** Pi's thinking levels, `off` included; the check below fails the build if Pi adds one. */
+export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+const _complete: ModelThinkingLevel extends (typeof THINKING_LEVELS)[number] ? true : never = true;
+void _complete;
+
 /** One role file of `workflows/core/agents/`, read from the run's snapshot. */
 export interface AgentDefinition {
   /** The file's name without `.md`. */
@@ -27,6 +33,8 @@ export interface AgentDefinition {
   description: string;
   /** An alias (`wonder`) the runner's config maps to a provider model. */
   model: string;
+  /** The role's thinking level; unset: the runner's `RUNNER_THINKING`. */
+  thinking?: ModelThinkingLevel;
   /** Every tool the role holds, base tools included (names in the harness's tool registry). */
   tools: string[];
   /** The roles this role may start; each exists. `start_worker` starts `worker`, so a role holding it lists it. */
