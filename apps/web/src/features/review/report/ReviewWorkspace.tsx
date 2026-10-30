@@ -61,17 +61,6 @@ export function ReviewWorkspace({
   const selected = revision && task ? structuresOf(revision, task) : [];
   return (
     <div className="review-shell" data-theme="light">
-      <header className="app-header">
-        <div className="brand">
-          <Layers size={23} />
-          <span>voluma</span>
-        </div>
-        <span className="header-divider" />
-        <span className="text-muted-foreground">Review</span>
-        <span className="ml-auto text-xs text-muted-foreground">
-          {run ? "Analysis results" : "No analysis results"}
-        </span>
-      </header>
       <div className="run-header">
         <div>
           <div className="back-link">

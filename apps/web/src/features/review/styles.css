@@ -53,15 +53,6 @@
   .review-shell {
     @apply flex min-h-0 flex-1 flex-col overflow-hidden;
   }
-  .app-header {
-    @apply flex shrink-0 items-center gap-5 border-b border-border bg-card px-6 py-3;
-  }
-  .brand {
-    @apply flex items-center gap-2.5 text-xl font-semibold tracking-tight text-primary-text;
-  }
-  .header-divider {
-    @apply h-5 w-px bg-border;
-  }
   .run-header {
     @apply flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-border bg-card px-6 py-4;
   }
@@ -424,13 +415,6 @@
   .review-shell {
     flex: none;
     overflow: visible;
-  }
-  .app-header {
-    padding: 12px 16px;
-    gap: 12px;
-  }
-  .header-divider {
-    display: none;
   }
   .run-header {
     padding: 16px;
