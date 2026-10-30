@@ -44,8 +44,9 @@ const workflowLabel = (run: Run, study: StudyDetail | undefined) => {
 };
 
 /**
- * The run's word for where it is, beside its progress. `paused`: it lost its runner mid-claim
- * (`haltOf`). `waiting`: the AI answered the researcher.
+ * The run's word for where it is, beside its progress. `paused`: a queued run with threads cut
+ * off, so it lost its runner mid-claim; one a message queued has none open. `waiting`: the AI
+ * answered the researcher.
  */
 function statusWord(run: Run, paused: boolean, waiting: boolean): string {
   const { state } = run;
@@ -87,7 +88,7 @@ export function RunHeader({
   /** Where "What the AI decided" goes. */
   decisions: string;
   onChange: (run: Run) => void;
-  /** Its runner is gone mid-claim (`haltOf`); a run queued by a message isn't. */
+  /** A thread is paused: the runner is gone mid-claim. A run a message queued has none open. */
   paused: boolean;
   /** The AI of a reopened run answered and waits for the researcher. */
   waiting: boolean;

@@ -5,7 +5,7 @@
 import type { RunEvent } from "@voluma/contracts/events";
 import { corrections } from "@voluma/contracts/fold";
 import type { RunState } from "@voluma/contracts/run";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 /** When a run's stream closed, and how many closes in a row were errors with no event between. */
 export type StreamClosed = { at: number; failures: number };
@@ -16,6 +16,10 @@ export type StreamClosed = { at: number; failures: number };
  * mid-claim. A run read from before the close can't say, so the stream never reopens on it:
  * a claim's end reaches the stream before the next poll does. Errors in a row (a 502 while
  * the API deploys) wait 1 s, 2 s, 4 s… up to 30 s after the first.
+ *
+ * Once the run has ended, a stream that closed on an error reopens once more, for the events
+ * it missed if it failed before the claim ended. Only once: the server answers 204 when nothing
+ * was missed, which `EventSource` reports as an error too.
  */
 export function useStreamReopen(
   closed: StreamClosed | null,
@@ -23,10 +27,20 @@ export function useStreamReopen(
   readAt: number,
   reopen: () => void,
 ) {
+  const retriedEnded = useRef(false);
   useEffect(() => {
-    if (!closed || status === undefined || status === "ended" || readAt <= closed.at) return;
+    if (status !== "ended") retriedEnded.current = false;
+    if (!closed || status === undefined || readAt <= closed.at) return;
+    const ended = status === "ended";
+    if (ended && (closed.failures === 0 || retriedEnded.current)) return;
     const wait = closed.failures > 1 ? Math.min(30_000, 1000 * 2 ** (closed.failures - 2)) : 0;
-    const timer = setTimeout(reopen, closed.at + wait - Date.now());
+    const timer = setTimeout(
+      () => {
+        retriedEnded.current = ended;
+        reopen();
+      },
+      closed.at + wait - Date.now(),
+    );
     return () => clearTimeout(timer);
   }, [closed, status, readAt, reopen]);
 }

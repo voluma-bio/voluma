@@ -60,14 +60,6 @@ export function correctionViews(events: readonly RunEvent[], live: boolean): Cor
   });
 }
 
-/** A message queued the run again and no runner has started on it yet. */
-export function reopenUnclaimed(events: readonly RunEvent[]): boolean {
-  const { open } = corrections(events);
-  return (
-    open !== undefined && !events.slice(open.reopened).some((e) => e.type === "thread.started")
-  );
-}
-
 export function Corrections({
   spans,
   titleOf,

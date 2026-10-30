@@ -17,7 +17,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from "react-router";
 import { DisclosureProvider } from "./chat/disclosure-store";
 import { ThreadNavigationProvider } from "./chat/thread-navigation";
-import { Corrections, correctionViews, reopenUnclaimed } from "./corrections";
+import { Corrections, correctionViews } from "./corrections";
 import { Overview, useAccepting } from "./overview";
 import { RunAlerts, RunHeader } from "./run-header";
 import { haltOf, runView, withLiveCalls } from "./run-model";
@@ -132,9 +132,8 @@ function RunOf({ id }: { id: string }) {
   });
   const { events, live, closed } = useRunStream(id, run);
   const state = run.data?.state;
-  const unclaimed = useMemo(() => reopenUnclaimed(events), [events]);
   // Query's structural sharing keeps `state` the same object across polls that change nothing.
-  const halt = useMemo(() => state && haltOf(state, closed, unclaimed), [state, closed, unclaimed]);
+  const halt = useMemo(() => state && haltOf(state, closed), [state, closed]);
   const providerCalls = run.data?.providerCalls;
   // Not shown until the run has loaded; until then any state will do.
   const view = useMemo(
@@ -331,7 +330,7 @@ function RunScreen({
             open3d={tasks.length > 0 ? () => open3d(task?.id) : undefined}
             decisions={search(undefined, "decisions")}
             onChange={setRun}
-            paused={halt?.kind === "paused" && tasks.length > 0}
+            paused={threads.some((t) => t.status === "paused")}
             waiting={waiting}
           />
           {stale && (
