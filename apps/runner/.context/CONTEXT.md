@@ -313,11 +313,11 @@ set, forces every alias to one model. Each configured alias's provider key is re
 visitor run uses `RUNNER_VISITOR_MODEL` for every role except `main` on a visitor-safe model.
 
 A role's thinking level is its role file's `thinking` key, else `RUNNER_THINKING` (one of Pi's
-levels), else `"off"`. `run.ts` passes it as the role's `thinkingLevel`, which `start-thread.ts` sets
+levels), else none (`"off"`). `run.ts` passes it as the role's `thinkingLevel`, which `start-thread.ts` sets
 as the Pi agent's `initialState.thinkingLevel`, so Pi sends it as `reasoning` and records it on each
 History message. Pi clamps an unsupported level silently, so two checks refuse one: `main.ts` at boot
 checks `RUNNER_THINKING` against every alias and the fallback; `run.ts` at run start checks each
-role's resolved level against its model and the fallback (the role files load per run). `"off"` sends
+role's set level against its model and the fallback (the role files load per run); both use `thinking.ts`, and a level nobody set is not checked. `"off"` sends
 no level: for DeepSeek that means `thinking: disabled`. Visitor runs always use `"off"`. The level is
 not in the log, so a resumed thread takes it from the snapshotted role file and the current config.
 

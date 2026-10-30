@@ -29,12 +29,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
-import {
-  type Api,
-  getSupportedThinkingLevels,
-  type Model,
-  type Models,
-} from "@earendil-works/pi-ai";
+import type { Api, Model, Models } from "@earendil-works/pi-ai";
 import {
   inputPrefix,
   referencePrefix,
@@ -83,6 +78,7 @@ import { r2Workflows } from "./r2-workflows.ts";
 import { type Redact, redactor } from "./redact.ts";
 import { sandboxGateway } from "./sandbox-gateway.ts";
 import { heartbeatRoundTrip, inRunScope, type RunScope } from "./telemetry.ts";
+import { assertThinking } from "./thinking.ts";
 import { type ModelRole, usageMeter } from "./usage.ts";
 
 /**
@@ -279,22 +275,15 @@ async function claimBody(
         );
       return !visitor || (role === "main" && isVisitorSafe(model)) ? model : ctx.visitorModel;
     };
-    // A role's file may set its thinking level; else the runner's. Pi clamps a level a model lacks
-    // to a neighbour, so a mismatch fails the run here, not silently at another level.
+    // A role's file may set its thinking level; else the runner's; else none is sent ("off").
     const roleThinking = (role: "worker" | "checker" | "main", model: Model<Api>) => {
       if (visitor) return "off";
-      const level = definition.agents[role].thinking ?? config.thinking ?? "off";
+      const level = definition.agents[role].thinking ?? config.thinking;
       const fallback =
         config.fallbackModel &&
         ctx.models.getModel(config.fallbackModel.provider, config.fallbackModel.id);
-      for (const m of fallback ? [model, fallback] : [model]) {
-        const levels = getSupportedThinkingLevels(m);
-        if (!levels.includes(level))
-          throw new Error(
-            `the ${role} role's thinking level "${level}" is not one ${m.provider}/${m.id} supports: ${levels.join(", ")}`,
-          );
-      }
-      return level;
+      assertThinking(level, fallback ? [model, fallback] : [model], `the ${role} role's`);
+      return level ?? "off";
     };
     const workerModel = roleModel("worker");
     const checkModel = roleModel("checker");
