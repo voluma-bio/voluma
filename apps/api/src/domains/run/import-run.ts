@@ -3,7 +3,8 @@
  *   pnpm --filter @voluma/api import:run --from <dir|r2:prefix> [--replace] [--remote]
  * Refuses when the run already exists unless `--replace`, which deletes it and its events,
  * threads and pi messages first. The run gets its own study of one scan (`study-<runId>`, named
- * after the scan, as the migration that introduced studies did). Every event is checked against `runEventSchema` and the ones
+ * after the scan, as the migration that introduced studies did). The study's workflow is the dump's own `workflowId` when it has one (older dumps do, and
+ * their pinned paths may predate a rename), else the bundled workflow at the pinned path. Every event is checked against `runEventSchema` and the ones
  * that fail are listed, with nothing written. The run's input row is added if it is missing.
  * Every row must belong to the run. Writes only to a local database unless `--remote` (see
  * `operator.ts`). Evidence is not copied: it stays in R2 under `runs/<id>/evidence/`, shared by every database.
@@ -13,7 +14,7 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { runEventSchema } from "@voluma/contracts/events";
 import { runIdSchema } from "@voluma/contracts/ids";
-import { catalog } from "@voluma/workflow/bundled";
+import { catalog, workflowById } from "@voluma/workflow/bundled";
 import { eq, getTableColumns, sql } from "drizzle-orm";
 import type { PgTable } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -42,7 +43,8 @@ const dump = await withLocalDir(
   values.from,
   async (dir) =>
     JSON.parse(await readFile(join(dir, "run.json"), "utf8")) as {
-      run: { id: string; workflows: { path: string }[] };
+      // `workflowId` is the column dumps carried before studies took it over.
+      run: { id: string; workflowId?: string; workflows: { path: string }[] };
       input: { id: string; name: string } | null;
       events: { id: string; seq: number; runId: string }[];
       threads: { runId: string }[];
@@ -53,9 +55,14 @@ const runId = runIdSchema.parse(dump.run.id);
 const studyId = `study-${runId}`;
 
 const workflowPath = dump.run.workflows[0]?.path;
-const workflow = Object.values(catalog).find((w) => w.path === workflowPath);
-if (!workflow)
-  throw new Error(`run ${runId} used ${workflowPath}, which is not a bundled workflow`);
+const workflow =
+  (dump.run.workflowId ? workflowById(dump.run.workflowId) : undefined) ??
+  Object.values(catalog).find((w) => w.path === workflowPath);
+if (!workflow) {
+  throw new Error(
+    `run ${runId} used ${dump.run.workflowId ?? workflowPath}, which is not a bundled workflow`,
+  );
+}
 
 const strays = [
   ...dump.events.filter((e) => e.runId !== runId).map((e) => `event ${e.id}`),
