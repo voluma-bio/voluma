@@ -1,5 +1,5 @@
 /** Acquired-slice viewport. Cornerstone owns pixel decoding, modality/VOI transforms and pixel aspect ratio. */
-import { Enums, RenderingEngine, type Types } from "@cornerstonejs/core";
+import { Enums, getShouldUseCPURendering, RenderingEngine, type Types } from "@cornerstonejs/core";
 import type { Focus, Structure } from "@voluma/contracts/review";
 import { Camera } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -103,6 +103,8 @@ export default function DicomStack({
       if (!view || view.getCurrentImageIdIndex() !== state.sliceIndex)
         throw new Error("Could not load the saved slice. Try reopening the snapshot.");
       view.setCamera(state.camera);
+      // CPU snapshots use a synthetic eye distance; GPU clipping must follow the restored camera.
+      if (!getShouldUseCPURendering()) view.getRenderer().resetCameraClippingRange();
       view.setProperties({ voiRange: state.window });
       setWindow({
         width: String(state.window.upper - state.window.lower),

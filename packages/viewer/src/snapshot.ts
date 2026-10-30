@@ -41,13 +41,22 @@ export async function captureAcquiredSnapshot(
   focus?: Focus,
 ): Promise<CapturedSnapshot> {
   const source = viewport.getCanvas();
+  const camera = structuredClone(viewport.getCamera());
+  if (camera.parallelProjection && camera.viewAngle === undefined) {
+    // CPU stacks omit the perspective angle and return a placeholder eye at the origin.
+    // For an orthographic view, eye distance and perspective angle do not affect projection.
+    camera.viewAngle = 90;
+    camera.position = camera.focalPoint!.map(
+      (n, i) => n + camera.viewPlaneNormal![i]! * camera.parallelScale!,
+    ) as Types.Point3;
+  }
   const state = {
     version: 1,
     kind: "acquired",
     seriesId: series.id,
     sliceIndex: viewport.getCurrentImageIdIndex(),
     viewport: { width: source.width, height: source.height },
-    camera: structuredClone(viewport.getCamera()),
+    camera,
     window: viewport.getProperties().voiRange,
     labelsEnabled,
     structures: structures.map((s) => ({
