@@ -12,8 +12,9 @@ puts a and b across the notch and DFL comes out a third of its size); and SI (b 
 refused: a missing landmark, coincident landmarks, a points file on another grid.
 
 Writes: <out>/femoral.json  the result record of `microct-core/resources/sidecar.py` (ids distal-femoral-length-dfl,
-        distal-femoral-width-dfw, width-length-ratio; mm, mm, 1), plus landmarks_zyx, frame (ml, si, normal vectors, zyx) and checks
-Prints: one JSON line {out, values: {id: {value, unit, definition, kind}}}
+        distal-femoral-width-dfw, width-length-ratio; mm, mm, 1), plus landmarks_zyx, frame (ml, si, normal vectors, zyx) and checks;
+        `objects` holds dfl-ruler (a to b) and dfw-ruler (c to d), lines on the scan grid
+Prints: one JSON line {out, values: {id: {value, unit, definition, kind}}, objects}
 Example: python femoral_frame.py --landmarks points-ab.json points-cd.json --hu-json hu.json --labels labels.npy --out femoral/
 Exits 2 with one sentence on bad input, before writing anything.
 """
@@ -21,6 +22,7 @@ Exits 2 with one sentence on bad input, before writing anything.
 from pathlib import Path
 
 import numpy as np
+import objects
 import sidecar
 from scipy import ndimage as ndi
 
@@ -118,6 +120,7 @@ def main():
         out / 'femoral.json',
         values,
         meta={'landmarks_zyx': lm, 'frame': frame, 'checks': checks},
+        objects={'dfl-ruler': objects.line(p['a'], p['b'], grid['grid_id']), 'dfw-ruler': objects.line(p['c'], p['d'], grid['grid_id'])},
     )
 
 

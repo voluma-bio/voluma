@@ -4,17 +4,28 @@
  *   GET /runs/:runId                the run's review data (`@voluma/contracts/review`),
  *                                   built from its event log on each read
  *   GET /runs/:runId/files/:sha256  one of its files (`evidenceKey`), streamed from storage
- *   GET /runs/:runId/assets/:sha256/<path>  one converted review asset (`reviewAssetKey`):
- *                                   a 302 to a presigned GET
+ *   GET /runs/:runId/assets/:sha256/*  a converted review asset (`reviewAssetKey`): a 302 to
+ *                                   a presigned GET, the browser fetches the bytes from storage
+ *   GET /runs/:runId/messages/:messageId/snapshot  the PNG attached to a message (`messageSnapshotKey`)
+ *   POST /runs/:runId/messages      a researcher's message to the run (`@voluma/contracts/messages`):
+ *                                   the snapshot is checked and stored here, the Run domain judges
+ *                                   and stores the message
  */
-import { relativePathSchema, sha256Schema } from "@voluma/contracts/r2";
+import {
+  MAX_MESSAGE_SNAPSHOT_BYTES,
+  type PersonMessage,
+  type SendRunMessageResponse,
+  sendRunMessageRequestSchema,
+} from "@voluma/contracts/messages";
+import { messageSnapshotKey, relativePathSchema, sha256Schema } from "@voluma/contracts/r2";
 import {
   acceptCheckRequestSchema,
   markReviewedRequestSchema,
   reviewDecisionResponseSchema,
 } from "@voluma/contracts/review";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
+import { z } from "zod";
 import { parseJson, readerOf, requireUser, type UserEnv } from "../../domain";
 import type { RunRecord } from "../../ports";
 import type { ReviewDeps } from ".";
@@ -28,16 +39,6 @@ function imageType(head: Uint8Array): string | null {
   return null;
 }
 
-/** A URL path segment decoded, or null when it is malformed or decodes to more than one segment. */
-function decodeSegment(segment: string) {
-  try {
-    const decoded = decodeURIComponent(segment);
-    return decoded.includes("/") ? null : decoded;
-  } catch {
-    return null;
-  }
-}
-
 function currentReview(record: RunRecord, baseRevisionId: string) {
   if (record.run.example) throw new HTTPException(403, { message: "Example runs are read-only." });
   const review = record.run.review;
@@ -48,7 +49,7 @@ function currentReview(record: RunRecord, baseRevisionId: string) {
   return review;
 }
 
-export function runRoutes({ runs, files }: ReviewDeps) {
+export function runRoutes({ runs, files, messages }: ReviewDeps) {
   const app = new Hono<UserEnv>();
   app.use("/runs/*", requireUser);
 
@@ -102,18 +103,47 @@ export function runRoutes({ runs, files }: ReviewDeps) {
     return c.json(reviewDecisionResponseSchema.parse(reviewRun(record)));
   });
 
-  app.get("/runs/:runId/files/:sha256", async (c) => {
-    // Hono runs GET for HEAD and drops the body without cancelling the storage read.
-    if (c.req.method !== "GET") throw new HTTPException(405, { message: "Use GET." });
-    const { runId, sha256 } = c.req.param();
-    if (!sha256Schema.safeParse(sha256).success) return c.json({ error: "not found" }, 404);
-    if (!(await runs.readable(readerOf(c.var.user), runId)))
-      return c.json({ error: "not found" }, 404);
-    if (!files) throw new HTTPException(503, { message: "File storage is not configured." });
+  app.post("/runs/:runId/messages", async (c) => {
+    const { id, snapshot, ...rest } = await parseJson(c, sendRunMessageRequestSchema);
+    const { runId } = c.req.param();
+    const user = c.var.user;
+    const reader = readerOf(user);
+    const refusedAs = (r: { status: 403 | 404 | 409 | 429; error: string }) =>
+      c.json({ error: r.error }, r.status);
 
-    const { body, byteLength } = await files.open(runId, sha256, c.req.raw.signal);
-    // The stored content type is whatever the sandbox's mount wrote, so the bytes decide.
-    const reader = body.getReader();
+    let png: Uint8Array | undefined;
+    if (snapshot) {
+      png = Buffer.from(snapshot.data, "base64");
+      if (png.length > MAX_MESSAGE_SNAPSHOT_BYTES)
+        return c.json({ error: "The snapshot is too large." }, 413);
+      if (imageType(png) !== "image/png")
+        return c.json({ error: "The snapshot is not a PNG." }, 415);
+    }
+    const payload: PersonMessage = {
+      ...rest,
+      ...(png && { snapshotKey: messageSnapshotKey(runId, id) }),
+    };
+    const message = { id, payload };
+
+    const checked = await messages.check(reader, user.userId, runId, message);
+    if ("refused" in checked) return refusedAs(checked.refused);
+    if (!checked.ok.duplicate && png) {
+      if (!files) throw new HTTPException(503, { message: "File storage is not configured." });
+      await files.putSnapshot(runId, id, png);
+    }
+    const sent = await messages.send(reader, user.userId, runId, message);
+    if ("refused" in sent) return refusedAs(sent.refused);
+    const { eventId, state } = sent.ok;
+    return c.json({ eventId, state } satisfies SendRunMessageResponse);
+  });
+
+  /** Streams a stored file to the browser; the bytes decide whether it renders inline. */
+  async function serveFile(
+    c: Context<UserEnv>,
+    file: { body: ReadableStream<Uint8Array>; byteLength: number },
+    cacheControl: string,
+  ) {
+    const reader = file.body.getReader();
     const first = await reader.read();
     const head = first.value ?? new Uint8Array();
     const type = imageType(head);
@@ -130,32 +160,68 @@ export function runRoutes({ runs, files }: ReviewDeps) {
       cancel: (reason) => reader.cancel(reason),
     });
     c.header("Content-Type", type ?? "application/octet-stream");
-    c.header("Content-Length", String(byteLength));
+    c.header("Content-Length", String(file.byteLength));
     c.header("X-Content-Type-Options", "nosniff");
     if (!type) c.header("Content-Disposition", "attachment");
-    // Content-addressed: the bytes never change. A day, so a revoked reader's copy doesn't linger.
-    c.header("Cache-Control", "private, max-age=86400, immutable");
+    c.header("Cache-Control", cacheControl);
     return c.body(stream);
-  });
+  }
 
-  app.get("/runs/:runId/assets/:sha256/*", async (c) => {
+  app.get("/runs/:runId/files/:sha256", async (c) => {
+    // Hono runs GET for HEAD and drops the body without cancelling the storage read.
     if (c.req.method !== "GET") throw new HTTPException(405, { message: "Use GET." });
     const { runId, sha256 } = c.req.param();
     if (!sha256Schema.safeParse(sha256).success) return c.json({ error: "not found" }, 404);
-    // Segment by segment from the raw URL, so an encoded "/" can't pass as a separator.
-    const pathname = new URL(c.req.url).pathname;
-    const at = pathname.indexOf(`/assets/${sha256}/`);
-    if (at < 0) return c.json({ error: "not found" }, 404);
-    const tail = pathname.slice(at + `/assets/${sha256}/`.length).split("/");
-    const path = tail.map((segment) => decodeSegment(segment) ?? "/").join("/");
-    if (!relativePathSchema.safeParse(path).success) return c.json({ error: "not found" }, 404);
     if (!(await runs.readable(readerOf(c.var.user), runId)))
       return c.json({ error: "not found" }, 404);
     if (!files) throw new HTTPException(503, { message: "File storage is not configured." });
-    // The presigned URL expires; the asset doesn't. Never cache the redirect.
-    c.header("Cache-Control", "no-store");
-    return c.redirect(await files.assetUrl(runId, sha256, path), 302);
+    // The stored content type is whatever the sandbox's mount wrote, so the bytes decide.
+    // Content-addressed: the bytes never change. A day, so a revoked reader's copy doesn't linger.
+    return serveFile(
+      c,
+      await files.open(runId, sha256, c.req.raw.signal),
+      "private, max-age=86400, immutable",
+    );
+  });
+
+  app.get("/runs/:runId/messages/:messageId/snapshot", async (c) => {
+    const { runId, messageId } = c.req.param();
+    if (!z.uuid().safeParse(messageId).success) return c.json({ error: "not found" }, 404);
+    if (!(await runs.readable(readerOf(c.var.user), runId)))
+      return c.json({ error: "not found" }, 404);
+    if (!files) throw new HTTPException(503, { message: "File storage is not configured." });
+    // Written once under the message's id, never rewritten.
+    return serveFile(
+      c,
+      await files.openSnapshot(runId, messageId, c.req.raw.signal),
+      "private, max-age=86400, immutable",
+    );
+  });
+
+  app.get("/runs/:runId/assets/:sha256/*", async (c) => {
+    const { runId, sha256 } = c.req.param();
+    // Assets are keyed by run (`reviewAssetKey`), so the read check on the run is the whole scope check.
+    const marker = `/assets/${sha256}/`;
+    const tail = decodeTail(c.req.path.slice(c.req.path.indexOf(marker) + marker.length));
+    if (!sha256Schema.safeParse(sha256).success || !relativePathSchema.safeParse(tail).success)
+      return c.json({ error: "not found" }, 404);
+    if (!(await runs.readable(readerOf(c.var.user), runId)))
+      return c.json({ error: "not found" }, 404);
+    if (!files) throw new HTTPException(503, { message: "File storage is not configured." });
+    const { url, validSeconds } = await files.assetUrl(runId, sha256, tail);
+    // The browser may reuse the redirect while its URL is still good (the same file asked for
+    // again gets the same URL), with a margin to follow it.
+    c.header("Cache-Control", `private, max-age=${Math.max(0, validSeconds - 30)}`);
+    return c.redirect(url, 302);
   });
 
   return app;
+}
+
+function decodeTail(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return "";
+  }
 }

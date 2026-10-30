@@ -22,9 +22,14 @@ description: >
   refuse an array whose grid they cannot read. A **points file** names its grid, for example
   `{"grid_id": "scan-3f2a", "points": [{"name": "a", "zyx": [170, 330, 128]}]}`: indices mean nothing on another
   grid, so scripts refuse a file without one.
+- A thing you place in 3D (a slab mask, a surface, a point, a ruler) is saved with `objects.py` (this skill's resources, a
+  library): its writer makes the file and returns the entry that `report_output` takes, on a named grid. Scripts that
+  place something write it as `objects` in their result record; `quad_view.py --objects <record>.json` draws it. Every
+  structure, surface and annotation is reported on the grid `outputs.json` declares for it, in voxel indices, never
+  world mm (a point or line end may be fractional).
 - The names later tasks look for in `/outputs/<task>/`: `hu.npy`, `hu.json`, `scan-notes.md` (intake);
   `frame.json`, `oriented.npy`, `keyframe.jpg` (orientation); `labels.npy`, the final labels on the scan grid
-  (segmentation). Working files go in `/scratch/`.
+  (segmentation). Working files go in `$SCRATCH`.
 
 ## Scripts
 

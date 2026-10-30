@@ -2,6 +2,7 @@
  * Run lane's API domain, mounted at /api/run/ (paths are relative to the mount). A short
  * mount list: each file owns its routes and its guard.
  *   runs.ts    the run routes (users and guests; the reads also take the debug token)
+ *   studies.ts the browser's study routes: create (with its first runs), list, get
  *   inputs.ts  the browser's scans: list, and upload (members); `upload-scan.ts` is the CLI for it
  *   stream.ts  the server-sent event stream of a run's stored events (users, debug token)
  *   ingest.ts  the runner's claim, heartbeat, report, events and history (bearer token)
@@ -11,7 +12,6 @@
  */
 import { Hono } from "hono";
 import type { AppEnv } from "../../domain";
-import type { Catalog } from "./catalog";
 import { ingestRoutes } from "./ingest";
 import { inputsRoutes, type UploadLimits } from "./inputs";
 import type { Notifier } from "./notifier";
@@ -19,25 +19,25 @@ import type { LeasedEventLog } from "./pg-event-log";
 import type { LeasedHistory } from "./pg-history";
 import type { RunQueue } from "./pg-queue";
 import type { RunReads } from "./pg-runs";
+import type { StudyReads } from "./pg-studies";
 import type { PgUploads } from "./pg-uploads";
 import type { Uploads } from "./r2-uploads";
 import { runsRoutes } from "./runs";
 import { streamRoutes } from "./stream";
+import { studiesRoutes } from "./studies";
 
 export interface RunDeps {
   reads: RunReads;
+  studies: StudyReads;
   queue: RunQueue;
   eventLog: LeasedEventLog;
   history: LeasedHistory;
   /** Wakes open streams when a run's events or state change. */
   notifier: Notifier;
-  catalog: Catalog;
   /** Upload rows, and the object store their files go to (presigned, never through the API); null when R2 is not configured. */
   uploadStore: PgUploads;
   objects: Uploads | null;
   uploadLimits: UploadLimits;
-  /** The repo whose `workflows/` a run uses. The runner adds the commit its checkout was at. */
-  repo: string;
   /** Aborts when the API starts draining; open streams end so the drain isn't held. */
   shutdown: AbortSignal;
 }
@@ -45,6 +45,7 @@ export interface RunDeps {
 export function createRun(deps: RunDeps) {
   const app = new Hono<AppEnv>();
   app.route("/", runsRoutes(deps));
+  app.route("/", studiesRoutes(deps));
   app.route("/", inputsRoutes(deps));
   app.route("/", streamRoutes(deps));
   app.route("/", ingestRoutes(deps));

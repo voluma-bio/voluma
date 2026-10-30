@@ -1,8 +1,7 @@
 /**
  * The no-progress limit: a run whose claims keep ending in infrastructure trouble without
  * changing run state ends `failed` instead of looping. Progress is a change to run state
- * (a task, checkpoint, output, attempt or revision, or a judgment while the supervisor still
- * writes those); model turns and tool calls are not, since a loop that kills the runner every
+ * (a task, checkpoint, output, attempt, revision or plan change); model turns and tool calls are not, since a loop that kills the runner every
  * time still makes them. The run row keeps `last_progress_seq` (set on append) and the
  * current claim's `claim_start_seq`; `endClaim` judges a claim when it ends.
  */
@@ -14,7 +13,7 @@ const PROGRESS_EVENT_TYPES: ReadonlySet<string> = new Set([
   "output",
   "attempt.opened",
   "revision.started",
-  "judgment",
+  "plan.changed",
   // Phase 1's review-asset conversion, after the supervisor: a run whose only work left is
   // conversion is not stalled. Matched by type string; the event joins the contract with phase 1.
   "assets.ready",
@@ -33,7 +32,18 @@ export const isProgress = (event: { type: string; payload: unknown }) =>
 export const STALLED_CLAIMS_LIMIT = 3;
 
 /** A deploy (`shutdown`) is nobody's fault: never counted. */
-const COUNTED_REASONS: ReadonlySet<ClaimEndReason> = new Set(["self-stop", "lease-expired"]);
+const COUNTED_REASONS: ReadonlySet<ClaimEndReason> = new Set([
+  "self-stop",
+  "lease-expired",
+  "provider-outage",
+]);
+
+/**
+ * Minutes a run waits before its next claim after a `provider-outage` release that left
+ * `stalledClaims` (0: it had made progress, so a new outage): 1, then 2. The limit fails the run
+ * on the third.
+ */
+export const outageDelayMinutes = (stalledClaims: number) => Math.max(stalledClaims, 1);
 
 export function endClaim(
   run: { lastProgressSeq: number; claimStartSeq: number; stalledClaims: number },
@@ -48,7 +58,10 @@ const WHY: Record<ClaimEndReason, string> = {
   shutdown: "the runner restarted",
   "self-stop": "the runner lost contact with the server",
   "lease-expired": "the server lost contact with the runner",
+  "provider-outage": "the AI was unavailable", // researcher-facing (runs.error); stalledError words it apart
 };
 
 export const stalledError = (reason: ClaimEndReason, tool: string | undefined) =>
-  `Stopped: ${WHY[reason]} ${STALLED_CLAIMS_LIMIT} times in a row without progress${tool ? ` (last call: \`${tool}\`)` : ""}.`;
+  reason === "provider-outage"
+    ? "Stopped: the AI was unavailable for about 15 minutes. Start a new run to try again."
+    : `Stopped: ${WHY[reason]} ${STALLED_CLAIMS_LIMIT} times in a row without progress${tool ? ` (last call: \`${tool}\`)` : ""}.`;

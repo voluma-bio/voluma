@@ -105,10 +105,43 @@ export const referenceInput = (labId: string): typeof inputs.$inferInsert => ({
 });
 
 /**
+ * A group of runs of one workflow, one per scan (`studySchema`, `@voluma/contracts/study`).
+ * `example` marks the seeded example's study. Like `runs`, no foreign keys: the rows are
+ * checked where they are written (pg-queue.ts, and the operator scripts import-run.ts and seed-example.ts).
+ */
+export const studies = pgTable(
+  "studies",
+  {
+    id: text().primaryKey(),
+    labId: text().notNull(),
+    name: text().notNull(),
+    workflowId: text().notNull(),
+    budgetUsd: doublePrecision(),
+    createdBy: text().notNull(),
+    example: boolean().notNull().default(false),
+    createdAt: timestamptz().notNull().defaultNow(),
+  },
+  (t) => [index("studies_lab").on(t.labId, t.createdAt)],
+);
+
+/** A scan of a study: the confirmed intake row. `subject` is never empty (the input's name when none was given). */
+export const studyScans = pgTable(
+  "study_scans",
+  {
+    studyId: text().notNull(),
+    inputId: text().notNull(),
+    subject: text().notNull(),
+    group: text(),
+    attributes: json().notNull().$type<Record<string, string | number | boolean>>(),
+    position: integer().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.studyId, t.inputId] })],
+);
+
+/**
  * The run record (`runSchema`) plus the server's own columns. `state` is the
- * `runStateSchema` status; `queued`'s position is computed at read time. `workflow_id`
- * names the catalog entry the run was started from; `workflows` are the
- * pins resolved at start. The lease columns are null unless the run is held.
+ * `runStateSchema` status; `queued`'s position is computed at read time. The study names
+ * the catalog workflow; `workflows` are the pins resolved at start. The lease columns are null unless the run is held.
  */
 export const runs = pgTable(
   "runs",
@@ -116,7 +149,7 @@ export const runs = pgTable(
     id: text().primaryKey(),
     labId: text().notNull(),
     startedBy: text().notNull(),
-    workflowId: text().notNull(),
+    studyId: text().notNull(),
     workflows: json().notNull(),
     /** The output ids the user selected (`runSchema.selectedOutputs`); null: every output. */
     selectedOutputs: json(),
@@ -138,23 +171,22 @@ export const runs = pgTable(
     leaseToken: text(),
     leaseExpiresAt: timestamptz(),
     /** Why the last claim ended (`claimEndReasonSchema`); the next claim carries it. Null before the first end. */
-    lastClaimEnd: text({ enum: ["shutdown", "self-stop", "lease-expired"] }),
+    lastClaimEnd: text({
+      enum: ["shutdown", "self-stop", "lease-expired", "provider-outage"],
+    }),
+    /** A `provider-outage` release holds the queued run back until then; `claim` skips it, and clears it on taking the run. */
+    claimableAfter: timestamptz(),
     /** Seq of the latest progress event (`claim-progress.ts`), and the log's last seq when the current claim began. */
     lastProgressSeq: integer().notNull().default(0),
     claimStartSeq: integer().notNull().default(0),
     /** Consecutive claims that ended in infrastructure trouble without progress. */
     stalledClaims: integer().notNull().default(0),
-    /** Retired, never read or written (`stalledClaims` replaced it). Dropped in a later PR, once the code that read it is drained. */
-    recoveries: integer().notNull().default(0),
     modelCostUsd: doublePrecision().notNull().default(0),
     sandboxSeconds: doublePrecision().notNull().default(0),
-    /** The run's spend cap in dollars, set by each claim when the runner sends one; null: no cap. The provider gateway checks it. */
-    costCapUsd: doublePrecision(),
-    /** Retired, never read or written. Drop after servers using the old count are drained. */
-    toCheck: integer(),
   },
   (t) => [
     index("runs_lab_state").on(t.labId, t.state, t.createdAt),
     index("runs_started_by").on(t.startedBy),
+    index("runs_study").on(t.studyId),
   ],
 );

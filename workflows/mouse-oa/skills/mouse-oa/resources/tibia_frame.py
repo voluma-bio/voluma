@@ -14,7 +14,8 @@ Writes: <out>/<name>-hu.npy  float32 HU on the aligned grid (linear interpolatio
         <out>/<name>-mask.npy  bool bone mask on the aligned grid (nearest), with its sidecar
         <out>/<name>-frame.json  the frame, mapping aligned indices back to the scan grid
         <out>/<name>-frame-qc.jpg  six coronal sections of the aligned stack with the mask outlined: check the axes here
-Prints: one JSON line {hu, mask, frame, qc, grid_id, shape_wvu, mask_volume_mm3, shaft_z, epiphysis_z}
+        <out>/<name>.json  the result record: `objects` holds the aligned grid as `tibia-grid` (a volume on the frame's affine)
+Prints: one JSON line {out, values, objects, hu, mask, frame, qc, grid_id, shape_wvu, mask_volume_mm3, shaft_z, epiphysis_z}
 Example: python tibia_frame.py --hu hu.npy --hu-json hu.json --labels labels.npy --label 2 --out tibia/ --joint-end low
 Exits 2 with one sentence on bad input, before writing anything.
 """
@@ -24,6 +25,7 @@ from pathlib import Path
 import frame as fr
 import matplotlib
 import numpy as np
+import objects
 import sidecar
 from envelope import close_and_fill
 
@@ -179,7 +181,10 @@ def main():
     qc = out / f'{a.name}-frame-qc.jpg'
     sidecar.save_image(fig, qc)
     plt.close(fig)
-    sidecar.emit(
+    sidecar.emit_values(
+        out / f'{a.name}.json',
+        {},
+        objects={'tibia-grid': objects.volume(out / f'{a.name}-hu.npy', out / f'{a.name}-frame.json', kind='image', unit='HU')},
         hu=str(out / f'{a.name}-hu.npy'),
         mask=str(out / f'{a.name}-mask.npy'),
         frame=str(out / f'{a.name}-frame.json'),

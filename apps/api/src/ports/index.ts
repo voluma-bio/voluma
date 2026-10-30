@@ -8,6 +8,7 @@
  * Owned by both lanes; change in small PRs.
  */
 import type { RunEvent } from "@voluma/contracts/events";
+import type { PersonMessage } from "@voluma/contracts/messages";
 import type { reviewState } from "@voluma/contracts/review-state";
 import type { Input, Run } from "@voluma/contracts/run";
 import type { Reader } from "../domain";
@@ -48,17 +49,68 @@ export type RunRecords = {
   readable(reader: Reader, runId: string): Promise<boolean>;
 };
 
-/** A run's content-addressed files (`evidenceKey`): evidence, data files, volumes, meshes. */
+/** Why a message to a run was refused, as the route answers it. */
+export type MessageRefusal = { status: 403 | 404 | 409 | 429; error: string };
+export type MessageResult =
+  | {
+      ok: {
+        /** The stored `person.message` event. */
+        eventId: string;
+        /** The run's state after the message. */
+        state: Run["state"];
+        /** The caller sent this message id before: nothing was stored. */
+        duplicate: boolean;
+      };
+    }
+  | { refused: MessageRefusal };
+
+/**
+ * A researcher's message to a run, which the Run domain stores and answers for (`contracts/messages.ts`:
+ * who may send, the refusals, the reopen). Review parses the request and stores the snapshot.
+ */
+export type RunMessages = {
+  /** Judges the message without storing anything, so a refused one leaves no snapshot behind. */
+  check(
+    reader: Reader,
+    userId: string,
+    runId: string,
+    msg: { id: string; payload: PersonMessage },
+  ): Promise<MessageResult>;
+  /** Judges again under the queue lock and stores it, reopening a finished run. */
+  send(
+    reader: Reader,
+    userId: string,
+    runId: string,
+    msg: { id: string; payload: PersonMessage },
+  ): Promise<MessageResult>;
+};
+
+/** A run's content-addressed files (`evidenceKey`), its converted review assets (`reviewAssetKey`) and the snapshots researchers attach to messages. */
 export type RunFiles = {
+  /**
+   * A short-lived URL for one converted asset of the run (`reviewAssetKey(runId, sha256,
+   * path)`), with the seconds it stays valid for. The same file asked for again soon gets the
+   * same URL (signed at a window's start), so the browser's cache can serve the repeat. The
+   * object is immutable; storage tells the browser to cache it for a day. Does not check that
+   * the object exists.
+   */
+  assetUrl(
+    runId: string,
+    sha256: string,
+    path: string,
+  ): Promise<{ url: string; validSeconds: number }>;
+  /** Stores a researcher's view snapshot (`messageSnapshotKey`); the caller has checked it is a PNG. */
+  putSnapshot(runId: string, messageId: string, png: Uint8Array): Promise<void>;
+  /** A message's view snapshot (`messageSnapshotKey`); rejects like `open`. */
+  openSnapshot(
+    runId: string,
+    messageId: string,
+    signal: AbortSignal,
+  ): Promise<{ body: ReadableStream<Uint8Array>; byteLength: number }>;
   /** Rejects with a 404 `HTTPException` when there is no such file, a 502 when storage fails. */
   open(
     runId: string,
     sha256: string,
     signal: AbortSignal,
   ): Promise<{ body: ReadableStream<Uint8Array>; byteLength: number }>;
-  /**
-   * A short-lived GET URL for one converted review asset (`reviewAssetKey`). Not checked for
-   * existence: a zarr reader asks for chunks that were never written and reads the 404 as empty.
-   */
-  assetUrl(runId: string, sha256: string, path: string): Promise<string>;
 };

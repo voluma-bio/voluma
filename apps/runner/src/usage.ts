@@ -8,8 +8,7 @@ import type { Usage } from "@voluma/contracts/runner";
 
 export type ModelRole = "main" | "worker" | "check";
 
-/** `onCost` is called after each model cost is added. */
-export function usageMeter(onCost?: () => void) {
+export function usageMeter() {
   let modelCostUsd = 0;
   let sandboxSeconds = 0;
   // Sandbox seconds are summed over the sandboxes (each thread holds one): `settle` books
@@ -45,11 +44,8 @@ export function usageMeter(onCost?: () => void) {
     addModelCost(usd: number) {
       modelCostUsd += usd;
       totalCostUsd += usd;
-      onCost?.();
     },
     totalModelCostUsd: () => totalCostUsd,
-    /** Model dollars the server has not yet acknowledged in a heartbeat. */
-    pendingModelCostUsd: () => modelCostUsd,
     sandboxUp() {
       settle();
       up++;

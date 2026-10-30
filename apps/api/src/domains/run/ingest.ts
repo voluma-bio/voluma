@@ -2,7 +2,7 @@
  * The runner's routes, under /ingest/ and guarded for the runner (`service` principal);
  * the hand-off is `@voluma/contracts/runner`:
  *   POST /ingest/claim                                   take the oldest run the limits allow
- *   POST /ingest/runs/:runId/heartbeat | /report         extend the lease; end or release the run
+ *   POST /ingest/runs/:runId/heartbeat | /report         extend the lease; end or release the run (a report carries the last event seq the runner read)
  *   POST /ingest/runs/:runId/events                      append an event (EventInput)
  *   POST /ingest/runs/:runId/live                        a batch of live frames, fanned out to the run's open streams, not stored
  *   GET  /ingest/runs/:runId/events?after=               stored events after a seq, one page of 1000 (RunEventsResponse)
@@ -68,12 +68,17 @@ export function ingestRoutes({ queue, eventLog, history, notifier }: RunDeps) {
   });
 
   app.post("/ingest/claim", async (c) => {
-    const { runnerId, costCapUsd } = await parseJson(c, claimRequestSchema);
-    const claimed = await queue.claim(runnerId, costCapUsd);
+    const { runnerId } = await parseJson(c, claimRequestSchema);
+    const claimed = await queue.claim(runnerId);
     if (!claimed) return c.json({ claim: null } satisfies ClaimResponse);
     const { run, leaseToken, keys, previousClaim } = claimed;
     return c.json({
-      claim: { run, leaseToken, ...(keys && { keys }), ...(previousClaim && { previousClaim }) },
+      claim: {
+        run,
+        leaseToken,
+        ...(keys && { keys }),
+        ...(previousClaim && { previousClaim }),
+      },
     } satisfies ClaimResponse);
   });
 

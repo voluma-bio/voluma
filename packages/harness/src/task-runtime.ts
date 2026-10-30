@@ -1,33 +1,42 @@
 /**
- * The runtime behind the task tools: every write of a `task`, `checkpoint`, `output`,
+ * The runtime behind the task tools: every write of a `task`, `checkpoint`, `output`, `ask`,
  * `attempt.opened` or `revision.started` event by a thread's tool call, under the rules in
- * `@voluma/contracts/task-tools`. The supervisor writes its own `task` events through
- * `setStatus` and `staleDependents`, inside the same `section`. Its only view of the run is
- * `fold` of the recorder's events, folded once per change of the log; it keeps no second
+ * `@voluma/contracts/task-tools`. The run loop and the main agent's tools write their own
+ * events through `setStatus`, `openAttempt` and `stop`, inside the same `section`. Its only view of the run is
+ * `threadLog` of the recorder's events (the fold and the thread facts), derived once per change of the log; it keeps no second
  * record. Each decision and its appends run inside one per-run critical section (`section`),
  * whichever thread asks, and the recorder adds an event to the view only once it is stored.
  * Slow work (hashing and copying evidence) happens outside the section, and the decision is
  * checked again inside. A thread's kind and task come from the call (`Caller`), not from the
  * log, which may not yet hold its `thread.started`. A refusal is thrown as a `Refusal`: the
  * tool turns it into the error the model reads, and nothing is appended. A store failure is
- * an ordinary error: the tool call fails, and the supervisor fails the run when its own
+ * an ordinary error: the tool call fails, and the run loop fails the run when its own
  * append hits one.
  */
 
 import type { By, ThreadKind } from "@voluma/contracts/events";
-import { type Folded, type FoldedTask, fold } from "@voluma/contracts/fold";
+import { abandonedEvents, type Folded, type FoldedTask } from "@voluma/contracts/fold";
 import type { EvidenceRef } from "@voluma/contracts/output";
 import type {
-  ChecklistInput,
+  AskInput,
   CheckpointInput,
   ReportOutputInput,
+  SubmitTaskInput,
   TaskToolResult,
 } from "@voluma/contracts/task-tools";
 import type { WorkflowPlan } from "@voluma/contracts/workflow";
 import { isSatisfied, transitiveDependents } from "@voluma/workflow";
-import { declarationProblem, referenceProblem } from "./output-checks";
-import type { Evidence } from "./ports/evidence";
+import type { ThreadLayout } from "./layout";
+import { declarationProblem, placementProblem, referenceProblem } from "./output-checks";
+import { type Evidence, EvidenceNotFound, EvidenceRefused } from "./ports/evidence";
+import type { Sandbox } from "./ports/sandbox";
 import type { PayloadOf, Recorder } from "./recorder";
+import { isThreadName, parseThreadId } from "./thread-id";
+import { pathOf, startedFor, threadLog } from "./thread-log";
+import { effectId } from "./tools/effects";
+
+/** A check thread may ask the main agent this many questions. */
+export const MAX_ASKS = 3;
 
 /** A plan task as the workflow declares it (`workflowPlanSchema`). */
 export type PlanTask = WorkflowPlan["tasks"][number];
@@ -38,6 +47,10 @@ export interface Caller {
   toolCallId: string;
   kind: ThreadKind;
   taskId?: string;
+  /** How many tool calls the reply that made this call holds (`ToolContext.batchSize`). */
+  batchSize: number;
+  /** Aborts when the call is cancelled. */
+  signal: AbortSignal;
 }
 
 /** The call broke a rule; the message is what the model reads. */
@@ -47,11 +60,22 @@ export interface TaskRuntimeOptions {
   recorder: Recorder;
   evidence: Evidence;
   runId: string;
+  /**
+   * The calling thread's view of the files: evidence it names must be readable through it. The
+   * layout asks `cited` for a checker's reads of the worker's scratch.
+   */
+  layoutOf(threadId: string, cited: (path: string) => boolean): ThreadLayout;
+  /** A thread's own sandbox (`sandboxSession.get`): evidence is hashed in it. */
+  sandbox(threadId: string, options?: { note?: boolean }): Promise<Sandbox>;
   /** The thread under which the run's first event is written. */
   rootThreadId: string;
+  /** The plan the run starts with (written by `start`); later plans are `view().plan` (`plan.changed`). */
   plan: readonly PlanTask[];
-  /** Called for a thread whose task a stale mark has just taken from it (a check or a worker). */
-  stopThread(threadId: string): void;
+  /**
+   * Aborts the thread if it runs here; never waits for it. The runtime has stored its end
+   * first (`stop`), so its next write is refused whatever it was doing.
+   */
+  abortThread(threadId: string): void;
 }
 
 const AGENT: By = { kind: "agent" };
@@ -59,10 +83,32 @@ const AGENT: By = { kind: "agent" };
 /** Who a call writes as, and the attempt it writes to. */
 interface Target {
   attempt(): Promise<string>;
+  /** The call opens a new attempt, so the fold's view of the current one does not apply. */
+  fresh: boolean;
 }
 
 type OutputInput = ReportOutputInput["output"];
 type FileInput = Extract<OutputInput, { kind: "file" }>["file"];
+
+/** The `{root, path}` of a sandbox path as a script prints it; only this task's outputs and the scratch have one. */
+export function refOf(taskId: string, path: string): Pick<EvidenceRef, "root" | "path"> {
+  const own = `/outputs/${taskId}/`;
+  if (path.startsWith(own)) return { root: "outputs", path: path.slice(own.length) };
+  if (path.startsWith("/scratch/")) {
+    const rest = path.slice("/scratch/".length);
+    // A tool-call scratch path is relative to the caller's folder unless it starts with a thread name, so a file
+    // printed at the scratch root cannot be named; a script writes in $SCRATCH, which is a thread folder.
+    if (!isThreadName(rest.split("/")[0] ?? "")) {
+      throw new Refusal(
+        `${path} is not in a thread's folder under /scratch/. Write files under $SCRATCH and report them by that path.`,
+      );
+    }
+    return { root: "scratch", path: rest };
+  }
+  throw new Refusal(
+    `${path} is not a file this task can report: it is not under ${own} or /scratch/ (a file in another task's outputs is not yours to report).`,
+  );
+}
 
 /** The stored output: the file it names as its own is kept, and carries its sha256. */
 async function storedOutput(
@@ -71,9 +117,16 @@ async function storedOutput(
 ): Promise<PayloadOf<"output">["output"]> {
   switch (output.kind) {
     case "structure": {
-      const { mesh, ...rest } = output;
-      return mesh ? { ...rest, mesh: { ...mesh, file: await keepFile(mesh.file) } } : rest;
+      const s = output.structure;
+      return "mask" in s
+        ? { ...output, structure: { ...s, mask: await keepFile(s.mask) } }
+        : (output as PayloadOf<"output">["output"]);
     }
+    case "surface":
+      return {
+        ...output,
+        surface: { ...output.surface, heights: await keepFile(output.surface.heights) },
+      };
     case "volume":
       return { ...output, volume: { ...output.volume, file: await keepFile(output.volume.file) } };
     case "file":
@@ -84,8 +137,7 @@ async function storedOutput(
 }
 
 export function taskRuntime(options: TaskRuntimeOptions) {
-  const { recorder, evidence, runId, rootThreadId, plan, stopThread } = options;
-  const planned = new Map(plan.map((t) => [t.id, t]));
+  const { recorder, evidence, runId, layoutOf, sandbox, rootThreadId, abortThread } = options;
 
   let tail: Promise<unknown> = Promise.resolve();
   /** The per-run critical section: decisions run one at a time, each seeing every earlier write. */
@@ -95,17 +147,21 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     return result;
   };
 
-  // The log only grows, so its length says whether the fold is current.
-  let folded: { length: number; value: Folded } | undefined;
-  const view = (): Folded => {
-    const events = recorder.events();
-    if (folded?.length !== events.length) folded = { length: events.length, value: fold(events) };
-    return folded.value;
-  };
+  const log = () => threadLog(recorder.events());
+  const view = (): Folded => log().view;
   const taskOf = (id: string): FoldedTask | undefined => view().tasks.find((t) => t.id === id);
+  /** The plan now, with every `plan.changed` applied. */
+  const planNow = () => view().plan.tasks;
+
+  /**
+   * Whether the attempt of `taskId` cites this scratch file (the path after `/scratch/`): a
+   * checkpoint or output of it, or a file the main agent attached to an answer for its check.
+   */
+  const cites = (taskId: string, path: string) =>
+    !!taskOf(taskId)?.citedScratch.includes(path) || !!log().answeredScratch.get(taskId)?.has(path);
 
   const known = (taskId: string) => {
-    const t = planned.get(taskId);
+    const t = planNow().find((p) => p.id === taskId);
     if (!t) throw new Refusal(`${taskId} is not a task of this run's plan`);
     return t;
   };
@@ -121,25 +177,110 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     by: By,
   ) => recorder.append(threadId, "task", { taskId, attemptId, status, reason, by }, id);
 
-  async function openAttempt(c: Caller, taskId: string): Promise<string> {
-    const id = `${c.threadId}:${c.toolCallId}:open`;
-    await recorder.append(c.threadId, "attempt.opened", { taskId }, id);
-    return id;
+  /** Whether a dependent has a result a correction of what it builds on would invalidate. */
+  const attempted = (dep: string) => {
+    const t = taskOf(dep);
+    return !!t?.attemptId && t.status !== "stale";
+  };
+
+  /**
+   * The one way an attempt opens: `attempt.opened` under `holderThreadId`, id `eventId`. A task
+   * that already had a result stops the live threads of every dependent (they may have read
+   * its old files); if a dependent has an attempt, a correction revision first marks it stale.
+   * Call inside `section`.
+   */
+  async function openAttempt(taskId: string, holderThreadId: string, eventId: string) {
+    if (taskOf(taskId)?.attemptId) {
+      const dependents = transitiveDependents(planNow(), taskId);
+      // The researcher's go on this task wrote its correction revision already (`run-loop.ts`).
+      const go = threadLog(recorder.events()).go;
+      if (dependents.some(attempted) && !(go?.taskId === taskId && !go.redone)) {
+        await recorder.append(
+          holderThreadId,
+          "revision.started",
+          { reason: "correction", taskId },
+          `${eventId}:revision`,
+        );
+      }
+      await staleDependents(holderThreadId, eventId, taskId, dependents);
+    }
+    await recorder.append(holderThreadId, "attempt.opened", { taskId }, eventId);
+    return eventId;
   }
 
   /**
-   * Who a call writes as and where. A worker writes only to its own task, and its target
-   * opens a new attempt when the task has none (or is `stale` or `failed` and `redo`),
-   * only once every task this one builds on is satisfied (the rule `readyTasks` uses), so a
-   * refusal later in the call leaves no `attempt.opened` behind. A check thread writes to the
-   * attempt under review; only it sets a verdict.
+   * The declared outputs the task's previous attempt reported (the latest earlier attempt handed
+   * to a check, whatever it reported, `missing` included) that its current attempt has not: only
+   * the current attempt's reports count, so each would otherwise vanish. An attempt that was never
+   * submitted (a stopped half-redo) is not the baseline. `fresh`: the current attempt
+   * is not opened yet, so every attempt in the log is earlier. Read from the events, which the
+   * fold keeps only for the current attempt.
+   */
+  function droppedOutputs(taskId: string, fresh: boolean): string[] {
+    const reported = new Map<string, Set<string>>();
+    const opened: string[] = [];
+    const checked = new Set<string>();
+    const events = recorder.events();
+    const abandoned = abandonedEvents(events);
+    for (const e of events) {
+      if (abandoned.has(e.id)) continue;
+      if (e.type === "attempt.opened" && e.payload.taskId === taskId) opened.push(e.id);
+      if (e.type === "task" && e.payload.taskId === taskId && e.payload.status === "under-review")
+        checked.add(e.payload.attemptId);
+      if (e.type === "output" && e.payload.taskId === taskId) {
+        const ids = reported.get(e.payload.attemptId) ?? new Set<string>();
+        reported.set(e.payload.attemptId, ids.add(e.payload.outputId));
+      }
+    }
+    const earlier = fresh ? opened : opened.slice(0, -1);
+    const previous = earlier.filter((a) => checked.has(a)).at(-1);
+    const now = fresh ? undefined : opened.at(-1);
+    const declared = known(taskId).outputs;
+    return declared
+      .map((o) => o.id)
+      .filter(
+        (id) => previous && reported.get(previous)?.has(id) && !reported.get(now ?? "")?.has(id),
+      );
+  }
+
+  /**
+   * Stores the thread's end as cancelled, then aborts it without waiting: it is stopped from
+   * this moment, and its own later end is dropped. A thread already stopped is left alone.
+   * Call inside `section`; `eventId` derives from what stops it. A `reason` is a stop the main
+   * agent did not ask for and must be told of.
+   */
+  async function stop(threadId: string, eventId: string, reason?: string) {
+    const record = log().threads.get(threadId);
+    if (record && record.end?.status !== "cancelled") {
+      await recorder.append(
+        threadId,
+        "thread.ended",
+        { status: "cancelled", ...(reason && { summary: reason }) },
+        eventId,
+      );
+    }
+    abortThread(threadId);
+  }
+
+  /**
+   * Who a call writes as and where. A check thread writes to the attempt under review; only it
+   * sets a verdict. A worker writes only to its own task, the main agent to any it may hold.
+   * The current attempt takes the write when the caller opened it, it has no verdict yet and
+   * the task is not stale or failed. Otherwise the caller's write opens a new attempt, if the
+   * caller is eligible (the task's latest non-stopped worker; the main agent when no worker of
+   * the task is live) and every task this one builds on is satisfied. Nothing is opened until
+   * the call is sure to write (`attempt()`), so a refusal later leaves no `attempt.opened` behind.
    */
   function writeTarget(
     c: Caller,
     taskId: string,
-    { redo, verdict, what }: { redo: boolean; verdict: boolean; what: string },
+    { verdict, what }: { verdict: boolean; what: string },
   ): Target {
     known(taskId);
+    const d = log();
+    if (d.threads.get(c.threadId)?.end?.status === "cancelled") {
+      throw new Refusal("You were stopped; stop here.");
+    }
     if (c.kind === "check") {
       if (c.taskId !== taskId) {
         throw new Refusal(
@@ -151,25 +292,46 @@ export function taskRuntime(options: TaskRuntimeOptions) {
       if (t?.status !== "under-review" || (t.threads.check && t.threads.check !== c.threadId)) {
         throw new Refusal(`${taskId} is no longer under review; stop here.`);
       }
-      return { attempt: async () => t.attemptId };
+      const attemptId = t.attemptId;
+      if (!attemptId) throw new Refusal(`${taskId} has no attempt to check.`);
+      return { attempt: async () => attemptId, fresh: false };
     }
-    if (c.kind !== "worker") throw new Refusal(`Only a worker or a check thread ${what}.`);
+    if (c.kind !== "worker" && c.kind !== "main") {
+      throw new Refusal(`Only a worker, the main agent or a check thread ${what}.`);
+    }
     if (verdict) throw new Refusal("Only a check thread sets a verdict.");
-    if (c.taskId !== taskId) {
+    if (c.kind === "worker" && c.taskId !== taskId) {
       throw new Refusal(`You work on ${c.taskId}; you can write only to it, not to ${taskId}.`);
     }
     const t = taskOf(taskId);
     const status = t?.status ?? "pending";
+    if (t?.skipped) throw new Refusal(`${taskId} was skipped: ${t.skipped.reason}`);
     if (status === "under-review") {
       throw new Refusal(`${taskId} is under review: only the check thread writes to it.`);
     }
-    if ((status === "stale" || status === "failed") && !redo) {
-      throw new Refusal(
-        `${taskId} is ${status}${t?.reason ? ` (${t.reason})` : ""}: call checklist in-progress to redo it, then write to it.`,
-      );
+    const attemptId = t?.attemptId;
+    if (
+      attemptId &&
+      d.holders.get(taskId) === c.threadId &&
+      !t.checker &&
+      status !== "stale" &&
+      status !== "failed"
+    ) {
+      return { attempt: async () => attemptId, fresh: false };
     }
-    if (t && status !== "stale" && status !== "failed") {
-      return { attempt: async () => t.attemptId };
+    const workers = startedFor(d, taskId, "worker").filter((r) => r.end?.status !== "cancelled");
+    if (c.kind === "main") {
+      if (workers.length > 0) {
+        throw new Refusal(
+          `${taskId} has a worker (${workers[0]?.id}); it is not yours to write to.`,
+        );
+      }
+    } else {
+      // Its own `thread.started` may not be stored yet: a thread not in the log is the newest.
+      const latest = workers.at(-1);
+      if (latest && latest.id !== c.threadId && d.threads.has(c.threadId)) {
+        throw new Refusal(`${taskId} is held by a newer worker (${latest.id}); stop here.`);
+      }
     }
     const waiting = known(taskId).dependsOn.filter((d) => !isSatisfied(taskOf(d)));
     if (waiting.length > 0) {
@@ -177,7 +339,10 @@ export function taskRuntime(options: TaskRuntimeOptions) {
         `${taskId} builds on ${waiting.join(", ")}, which has no usable result yet.`,
       );
     }
-    return { attempt: () => openAttempt(c, taskId) };
+    return {
+      attempt: () => openAttempt(taskId, c.threadId, effectId("open", c.threadId, c.toolCallId)),
+      fresh: true,
+    };
   }
 
   /**
@@ -194,34 +359,122 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     return section(() => append(target(), prepared));
   }
 
-  /** Stale marks on each transitive dependent that has an attempt and isn't stale yet. */
-  async function staleDependents(threadId: string, prefix: string, taskId: string, why: string) {
-    const current = view().tasks;
-    const marked: string[] = [];
-    for (const dep of transitiveDependents(plan, taskId)) {
-      const t = current.find((x) => x.id === dep);
-      if (!t || t.status === "stale") continue;
-      await setStatus(threadId, `${prefix}:stale:${dep}`, dep, t.attemptId, "stale", why, {
-        kind: "rule",
-        rule: "stale",
-      });
-      // A stale mark stops the dependent's live thread: a check (no check-result follows) or
-      // a worker, which must not redo the task ahead of what it builds on.
-      if (t.status === "under-review" && t.threads.check) stopThread(t.threads.check);
-      else if (t.status === "in-progress" && t.threads.worker) stopThread(t.threads.worker);
-      marked.push(dep);
+  /**
+   * The correction of `taskId` reaches each of its dependents: its live threads are stopped
+   * first, append-first, whatever the task's status and whether or not it has an attempt (a
+   * worker may have read the old files; idle ones too, which would otherwise block
+   * `start_worker` on the stale task; a check has no result to write). A dependent with an
+   * attempt that isn't stale yet is then marked stale, and that mark tells the main agent; the
+   * stop of a dependent without one says why itself.
+   */
+  async function staleDependents(
+    threadId: string,
+    prefix: string,
+    taskId: string,
+    dependents: readonly string[],
+  ) {
+    for (const dep of dependents) {
+      const t = taskOf(dep);
+      const mark = attempted(dep);
+      const d = log();
+      const holders = [...startedFor(d, dep, "worker"), ...startedFor(d, dep, "check")];
+      for (const h of holders) {
+        if (h.end?.status !== "cancelled") {
+          await stop(
+            h.id,
+            `${prefix}:stale:${dep}:end:${h.id}`,
+            mark ? undefined : `${taskId} was corrected, so it may have read files that changed.`,
+          );
+        }
+      }
+      if (mark && t?.attemptId) {
+        await setStatus(
+          threadId,
+          `${prefix}:stale:${dep}`,
+          dep,
+          t.attemptId,
+          "stale",
+          `${taskId} was corrected, so this result may no longer hold.`,
+          { kind: "rule", rule: "stale" },
+        );
+      }
     }
-    return marked;
   }
 
+  /**
+  /**
+   * The sha256 of a file, computed by the thread's sandbox: a scan-sized file stays off the
+   * host. The file goes in on stdin so the output never carries its name (GNU `sha256sum`
+   * escapes `\` and newline in names). `note: false`: this exec is the host's, so the restart
+   * note stays owed to the model's next command.
+   */
+  const sandboxHash = async (
+    threadId: string,
+    path: string,
+    signal: AbortSignal,
+  ): Promise<string> => {
+    let out = "";
+    let err = "";
+    let code = -1;
+    const command = `sha256sum < '${path.replaceAll("'", "'\\''")}'`;
+    const box = await sandbox(threadId, { note: false });
+    for await (const chunk of box.exec({ command, timeoutSeconds: 900 }, signal)) {
+      if (chunk.type === "exit") code = chunk.code;
+      else if (chunk.type === "stdout") out += chunk.data;
+      else if (chunk.type === "stderr") err += chunk.data;
+    }
+    const sha256 = /^[0-9a-f]{64}(?= )/.exec(out)?.[0];
+    if (code !== 0 || !sha256) {
+      throw new Error(`could not hash ${path} (exit ${code}): ${err.trim() || out.trim()}`);
+    }
+    return sha256;
+  };
+
+  /**
+   * Keeps a file the calling thread named, if its own layout lets it read that path. A
+   * `scratch` path is relative to the caller's own folder unless it starts with the name of a
+   * thread in the log; the event stores the full form.
+   */
   const keep = async (
+    c: Caller,
     taskId: string,
     f: Pick<EvidenceRef, "root" | "path">,
-  ): Promise<EvidenceRef> => ({
-    root: f.root,
-    path: f.path,
-    sha256: await evidence.keep(runId, taskId, f),
-  });
+  ): Promise<EvidenceRef> => {
+    const ownName = parseThreadId(runId, c.threadId).name;
+    const file =
+      f.root === "scratch" && !log().threads.has(`${runId}.${f.path.split("/")[0]}`)
+        ? { root: f.root, path: `${ownName}/${f.path}` }
+        : { root: f.root, path: f.path };
+    const path = pathOf(taskId, file);
+    const layout = layoutOf(c.threadId, (p) => cites(taskId, p));
+    try {
+      layout.keyOf(path, "read");
+    } catch (error) {
+      throw new Refusal(
+        `Evidence ${path} is not a file you can read: ${error instanceof Error ? error.message : error}`,
+      );
+    }
+    // Only a path the thread's sandbox mounts can be hashed there.
+    const mounted = layout.mounts.some((m) => path.startsWith(`${m.path}/`));
+    const hash = mounted ? () => sandboxHash(c.threadId, path, c.signal) : undefined;
+    const sha256 = await evidence
+      .keep(runId, taskId, file, { hash, signal: c.signal })
+      .catch((error) => {
+        if (error instanceof EvidenceRefused) throw new Refusal(error.message);
+        if (error instanceof EvidenceNotFound) {
+          throw new Refusal(
+            `No file at ${path}. ${
+              file.root === "outputs"
+                ? `Cite an output file by its path inside /outputs/${taskId}/, e.g. {root: "outputs", path: "frame.json"}.`
+                : `Cite a file in your working folder as {root: "scratch", path: <path inside $SCRATCH>}.`
+            }`,
+          );
+        }
+        if (error instanceof Refusal || c.signal.aborted) throw error;
+        throw new Refusal(`could not keep ${f.path}; try again`);
+      });
+    return { ...file, sha256 };
+  };
 
   const done = (message: string, eventId?: string): TaskToolResult => ({
     message,
@@ -231,9 +484,12 @@ export function taskRuntime(options: TaskRuntimeOptions) {
   return {
     view,
     taskOf,
+    cites,
     section,
     setStatus,
-    staleDependents,
+    openAttempt,
+    stop,
+    keep,
 
     /** Writes the run's first event, carrying the plan. A resumed run already has it. */
     start: () =>
@@ -244,62 +500,79 @@ export function taskRuntime(options: TaskRuntimeOptions) {
           {
             reason: "run",
             plan: {
-              tasks: [...plan],
+              tasks: [...options.plan],
             },
           },
           `${rootThreadId}:revision`,
         ),
       ),
 
-    checklist: (c: Caller, input: ChecklistInput) =>
+    /**
+     * The holder hands its task to the check: `task under-review` with the summary as its
+     * reason. The caller ends its turn. Refused with other tools in the batch (the turn would
+     * not end), while a required output is unreported, and while an output the previous attempt
+     * reported is not reported again (`droppedOutputs`).
+     */
+    submitTask: (c: Caller, input: SubmitTaskInput) =>
       section(async () => {
-        const { taskId, status, reason } = input;
-        known(taskId);
-        if (c.kind !== "worker") throw new Refusal("Only a worker sets a task's status.");
-        if (status === "stale") throw new Refusal("Only the supervisor marks a task stale.");
-        const current = taskOf(taskId)?.status ?? "pending";
-        if (status === "in-progress") {
-          if (current === "in-progress") return done(`${taskId} is already in progress.`);
-          if (current === "done" || current === "to-check") {
-            throw new Refusal(
-              `${taskId} is ${current}: a redo goes through a stale mark from the supervisor.`,
-            );
-          }
-        }
-        if (status === "done") {
-          const missing =
-            taskOf(taskId)?.missingRequired ??
-            known(taskId)
+        const { taskId, summary } = input;
+        if (c.batchSize > 1) throw new Refusal("Call submit_task alone, not with other tools.");
+        const target = writeTarget(c, taskId, { verdict: false, what: "submits tasks" });
+        const missing = target.fresh
+          ? known(taskId)
               .outputs.filter((o) => o.required)
-              .map((o) => o.id);
-          if (missing.length > 0) {
-            throw new Refusal(
-              `${taskId} cannot be done: required outputs not reported: ${missing.join(", ")}. Report them with report_output, or set to-check or failed.`,
-            );
-          }
+              .map((o) => o.id)
+          : (taskOf(taskId)?.missingRequired ?? []);
+        if (missing.length > 0) {
+          throw new Refusal(
+            `${taskId} cannot be submitted: required outputs not reported: ${missing.join(", ")}. Report them with report_output, or report them missing with the reason.`,
+          );
         }
-        const target = writeTarget(c, taskId, {
-          redo: status === "in-progress",
-          verdict: false,
-          what: "sets a task's status",
-        });
-        const id = `${c.threadId}:${c.toolCallId}`;
-        await setStatus(c.threadId, id, taskId, await target.attempt(), status, reason, AGENT);
-        return done(`${taskId} is ${status}.`, id);
+        const dropped = droppedOutputs(taskId, target.fresh);
+        if (dropped.length > 0) {
+          throw new Refusal(
+            `${taskId} cannot be submitted: the previous attempt of ${taskId} reported ${dropped.join(", ")}, and this one has not. Report each again with report_output, or report it missing with the reason (a measurement: value null with the reason).`,
+          );
+        }
+        const id = effectId("submit_task", c.threadId, c.toolCallId);
+        await setStatus(
+          c.threadId,
+          id,
+          taskId,
+          await target.attempt(),
+          "under-review",
+          summary,
+          AGENT,
+        );
+        return done(`${taskId} is submitted for checking. Your turn ends here.`, id);
+      }),
+
+    /** A check thread's question to the main agent; it ends its turn and the answer resumes it. */
+    ask: (c: Caller, input: AskInput) =>
+      section(async () => {
+        if (c.kind !== "check" || !c.taskId) throw new Refusal("Only a check thread asks.");
+        if (c.batchSize > 1) throw new Refusal("Call ask alone, not with other tools.");
+        writeTarget(c, c.taskId, { verdict: false, what: "asks" });
+        const asked = log().threads.get(c.threadId)?.asks.length ?? 0;
+        if (asked >= MAX_ASKS) {
+          throw new Refusal(`You have asked ${MAX_ASKS} questions; give your verdict now.`);
+        }
+        const id = effectId("ask", c.threadId, c.toolCallId);
+        await recorder.append(c.threadId, "ask", { question: input.question }, id);
+        return done("Question sent. Your turn ends here; the answer resumes you.", id);
       }),
 
     checkpoint: (c: Caller, input: CheckpointInput) => {
-      const { taskId, text, verdict, toCheck } = input;
+      const { taskId, text, summary, verdict, toCheck } = input;
       return write(
         () =>
           writeTarget(c, taskId, {
-            redo: false,
             verdict: verdict !== undefined,
             what: "writes checkpoints",
           }),
-        () => Promise.all(input.evidence.map((f) => keep(taskId, f))),
+        () => Promise.all(input.evidence.map((f) => keep(c, taskId, f))),
         async (target, refs) => {
-          const id = `${c.threadId}:${c.toolCallId}`;
+          const id = effectId("checkpoint", c.threadId, c.toolCallId);
           await recorder.append(
             c.threadId,
             "checkpoint",
@@ -307,6 +580,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
               taskId,
               attemptId: await target.attempt(),
               text,
+              summary,
               by: AGENT,
               evidence: refs,
               ...(verdict && { verdict }),
@@ -327,23 +601,24 @@ export function taskRuntime(options: TaskRuntimeOptions) {
             "A check thread does not report outputs: put the values you re-derived in your checkpoint's text.",
           );
         }
-        const t = writeTarget(c, taskId, { redo: false, verdict: false, what: "reports outputs" });
+        const t = writeTarget(c, taskId, { verdict: false, what: "reports outputs" });
         const declared = known(taskId).outputs.find((o) => o.id === outputId);
         const problem =
           declarationProblem(declared, { title, output }) ??
-          referenceProblem(view(), taskId, output);
+          referenceProblem(view(), taskId, output) ??
+          placementProblem(view(), planNow(), { outputId, output });
         if (problem) throw new Refusal(problem);
         return t;
       };
       // Files first, outside the section: a missing one fails the call before anything is
       // appended, and a copy does not hold up the run's other task writes.
       const prepare = async () => ({
-        evidenceRefs: await Promise.all(input.evidence.map((f) => keep(taskId, f))),
-        output: await storedOutput(output, (f) => keep(taskId, f)),
+        evidenceRefs: await Promise.all(input.evidence.map((f) => keep(c, taskId, f))),
+        output: await storedOutput(output, (f) => keep(c, taskId, f)),
       });
       return write(target, prepare, async (t, prepared) => {
         const attemptId = await t.attempt();
-        const id = `${c.threadId}:${c.toolCallId}`;
+        const id = effectId("report_output", c.threadId, c.toolCallId);
         await recorder.append(
           c.threadId,
           "output",

@@ -6,7 +6,8 @@
 import { describe, expect, it } from "vitest";
 import { eventInputSchema, runEventSchema, runEventsResponseSchema } from "./events";
 import { fold } from "./fold";
-import { expectParses, log, need, rev, SHA, SUP, twoDone, W } from "./fold-test-log";
+import { expectParses, log, need, RUN, rev, SHA, SUP, twoDone, W } from "./fold-test-log";
+import { reviewState } from "./review-state";
 
 describe("fold", () => {
   it("event boundaries accept runs and corrections, but reject obsolete checker revisions", () => {
@@ -321,5 +322,164 @@ describe("fold", () => {
     l.checkpoint("chk:1", "chk", "c", "w:1:open", { verdict: "passed" });
     l.thread("chk", "check", "w:1:open"); // a wake: same thread, started again
     expect(need(fold(l.events), "c").checker?.verdict).toBe("passed");
+  });
+
+  it("plan.changed adds tasks and appends done-when and instructions; a colliding id keeps the first", () => {
+    const l = log();
+    const width = {
+      id: "width",
+      kind: "measurement",
+      unit: "mm",
+      on: [] as string[],
+      required: true,
+    } as const;
+    l.run({
+      tasks: [
+        { id: "a", dependsOn: [], doneWhen: ["one"], instructions: "do a", outputs: [width] },
+      ],
+    });
+    l.add("plan.changed", "m:1:change_plan", "m", {
+      reason: "check the placement too",
+      add: [{ id: "c", dependsOn: ["a"], outputs: [{ ...width, id: "len" }] }],
+      adHoc: [
+        { id: "audit", title: "Audit", instructions: "audit it", dependsOn: ["a"] },
+        { id: "a", title: "Imposter", instructions: "x", dependsOn: [] },
+      ],
+      doneWhen: [{ taskId: "a", lines: ["two"] }],
+      instructions: [{ taskId: "a", text: "and more" }],
+    });
+    l.add("plan.changed", "m:2:change_plan", "m", {
+      reason: "again",
+      add: [{ id: "c", dependsOn: [], outputs: [] }],
+    });
+    l.open("w:1:open", W, "a");
+    const f = fold(l.events);
+    const t = (id: string) => f.plan.tasks.find((x) => x.id === id);
+    expect(f.plan.tasks.map((x) => x.id)).toEqual(["a", "c", "audit"]);
+    expect(t("a")).toMatchObject({ doneWhen: ["one", "two"], instructions: "do a\n\nand more" });
+    expect(t("a")?.outputs).toEqual([width]);
+    expect(t("c")?.dependsOn).toEqual(["a"]);
+    expect(t("audit")).toMatchObject({ title: "Audit", outputs: [] });
+    expect(rev(f, 0).plan).toEqual(f.plan);
+    expect(need(f, "a").missingRequired).toEqual(["width"]);
+    expectParses(f);
+    const dup = {
+      reason: "r",
+      add: [{ id: "x", dependsOn: [], outputs: [] }],
+      adHoc: [{ id: "x", title: "X", instructions: "i", dependsOn: [] }],
+    };
+    expect(runEventSchema.safeParse({ ...l.events[1], payload: dup }).success).toBe(false);
+  });
+
+  it("a skip cascades to dependents and folds as to-check with every output missing", () => {
+    const l = log();
+    const out = (id: string) => [
+      { id, kind: "measurement", unit: "mm", on: [] as string[], required: true } as const,
+    ];
+    l.run({
+      tasks: [
+        { id: "a", dependsOn: [], outputs: out("x") },
+        { id: "b", dependsOn: ["a"], outputs: out("y") },
+        { id: "c", dependsOn: ["b"], outputs: out("z") },
+        { id: "d", dependsOn: [], outputs: out("w") },
+      ],
+    });
+    // b has an attempt with y reported; a and c have none.
+    l.open("w:1:open", W, "b");
+    l.measurement("w:2", W, "b", "w:1:open", "y", 1);
+    l.add("plan.changed", "m:1:change_plan", "m", {
+      reason: "r",
+      skip: [{ taskId: "a", reason: "no sample" }],
+    });
+    const f = fold(l.events);
+    expect(f.tasks.map((t) => [t.id, t.status, t.skipped?.reason])).toEqual([
+      ["b", "to-check", "a was skipped: no sample"],
+      ["a", "to-check", "no sample"],
+      ["c", "to-check", "a was skipped: no sample"],
+    ]);
+    const a = need(f, "a");
+    expect(a).toMatchObject({ attemptId: null, missingRequired: [], rejected: false });
+    expect(a.missing).toEqual([
+      { outputId: "x", kind: "measurement", required: true, reason: "no sample" },
+    ]);
+    expect(a.checks).toHaveLength(1);
+    // The attempt's reported output stays; nothing else is missing.
+    expect(need(f, "b").measurements).toHaveLength(1);
+    expect(need(f, "b").missing).toEqual([]);
+    expectParses(f);
+  });
+
+  it("a missing output fills any declaration, with its reason, and counts as reported", () => {
+    const l = log();
+    l.run({
+      tasks: [
+        {
+          id: "a",
+          dependsOn: [],
+          outputs: [
+            { id: "fig", kind: "file", mediaType: "image/png", required: true },
+            { id: "scan", kind: "volume", volumeKind: "labels", required: false },
+            { id: "bone", kind: "structure", grid: "scan", required: true },
+            { id: "gone", kind: "score", levels: ["0", "1"], on: [], required: true },
+          ],
+        },
+      ],
+    });
+    l.open("w:1:open", W, "a");
+    l.output("w:2", W, "a", "w:1:open", "fig", { kind: "missing", reason: "no figure" });
+    l.output("w:3", W, "a", "w:1:open", "bone", { kind: "missing", reason: "not in the scan" });
+    const f = fold(l.events);
+    const t = need(f, "a");
+    expect(t.missingRequired).toEqual(["gone"]);
+    expect(t.undeclared).toEqual([]);
+    expect(t.missing.map((m) => [m.outputId, m.reason])).toEqual([
+      ["fig", "no figure"],
+      ["scan", undefined],
+      ["gone", undefined],
+    ]);
+    expect(rev(f, 0).structures).toMatchObject([
+      { id: "a/bone", missing: { reason: "not in the scan" } },
+    ]);
+    expectParses(f);
+  });
+
+  it("a result the check rejected is not satisfied; accepting or the fix limit satisfy it", () => {
+    const l = log();
+    l.run({ tasks: [{ id: "a", dependsOn: [], outputs: [] }] });
+    l.open("w:1:open", W, "a");
+    l.thread("c1", "check", "w:1:open");
+    l.checkpoint("c1:1", "c1", "a", "w:1:open", { verdict: "needs-review" });
+    l.result("c1", "a", "w:1:open");
+    expect(need(fold(l.events), "a")).toMatchObject({ status: "to-check", rejected: true });
+    // Main accepts it.
+    l.status("m:1", "m", "a", "w:1:open", "to-check");
+    const accepted = need(fold(l.events), "a");
+    expect(accepted.rejected).toBe(false);
+  });
+
+  it("review skips the revisions of a correction that ended unfinished", () => {
+    const person = `${RUN}.person`;
+    const l = twoDone();
+    // A correction that finished: its revision is the result.
+    l.add("run.reopened", "p:1:reopened", person, { by: "u" });
+    l.revision("sup:1:revision", SUP, { reason: "correction", taskId: "a" });
+    l.add("run.reopened", "p:2:reopened", person, { by: "u" });
+    l.revision("sup:2:revision", SUP, { reason: "correction", taskId: "b" });
+    l.status("sup:2", SUP, "b", "w:4:open", "stale", l.rule("stale"));
+    // While the last one is in progress review keeps the last completed revision.
+    expect(reviewState(l.events).revisions.map((r) => r.id)).toEqual([
+      "root:revision",
+      "sup:1:revision",
+    ]);
+    expect(reviewState(l.events, { live: true }).revisions.map((r) => r.id)).toEqual([
+      "root:revision",
+      "sup:1:revision",
+      "sup:2:revision",
+    ]);
+    // The second one failed after its go: it is not the result, the first is.
+    l.add("correction.ended", "p:2:ended", person, { status: "failed", error: "boom" });
+    const state = reviewState(l.events);
+    expect(state.revisions.map((r) => r.id)).toEqual(["root:revision", "sup:1:revision"]);
+    expect(state.summary?.revisionId).toBe("sup:1:revision");
   });
 });

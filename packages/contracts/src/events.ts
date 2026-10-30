@@ -29,6 +29,12 @@
  * `check.accepted` and `review.completed` are server-authored human decisions:
  * readable in runEventSchema, rejected by the runner's eventInputSchema, and ignored
  * by the scientific fold. Their payloads and command rules live in review.ts.
+ * `person.message`, `run.reopened` and `correction.ended` are server-authored correction events
+ * on thread `<runId>.person`, handled the same way (payloads, ids and rules in messages.ts).
+ * `reply` is the main agent's side of the chat: the runner writes it from the `reply` tool on the
+ * main thread. The fold ignores all four; it reads `run.reopened` and `correction.ended` only to
+ * skip the task-state events of a correction that ended unfinished (`abandonedEvents`, fold.ts).
+ * `conversation` (conversation.ts) reads the chat (nothing calls it yet).
  */
 import { z } from "zod";
 import {
@@ -38,6 +44,12 @@ import {
   taskStatusSchema,
   toolCallIdSchema,
 } from "./ids";
+import {
+  correctionEndedSchema,
+  personMessageSchema,
+  replySchema,
+  runReopenedSchema,
+} from "./messages";
 import { evidenceRefSchema, outputReportSchema } from "./output";
 import { sha256Schema } from "./r2";
 import {
@@ -47,13 +59,12 @@ import {
   reviewCompletedSchema,
 } from "./review";
 import { claimEndReasonSchema } from "./runner";
-import { recordedPinSchema, workflowPlanSchema } from "./workflow";
+import { planTaskSchema, recordedPinSchema, workflowPlanSchema } from "./workflow";
 
 const nonEmpty = z.string().min(1);
 
-/** Bounds on what a `wake` stores, in UTF-16 code units: the notes block goes into every later worker's prompt. */
-export const WAKE_NOTE_MAX = 6000;
-export const WAKE_ERROR_MAX = 1000;
+/** The bound on an `assets.failed` error, in UTF-16 code units. */
+export const ASSET_ERROR_MAX = 1000;
 
 /**
  * What one model call used, as Pi reports it: `input` is the uncached input tokens only, so
@@ -72,20 +83,26 @@ export const modelUsageSchema = z.object({
 });
 export type ModelUsage = z.infer<typeof modelUsageSchema>;
 
-export const threadKindSchema = z.enum(["supervisor", "worker", "check", "chat"]);
+export const threadKindSchema = z.enum(["supervisor", "main", "worker", "check", "chat"]);
 export type ThreadKind = z.infer<typeof threadKindSchema>;
 
-/**
- * Who made a decision: a tool call, a named runtime rule (`task-tools.ts`), or
- * a judgment seam (the experiment's arm name).
- */
+/** Who made a decision: a tool call or a named runtime rule (`task-tools.ts`). */
 export const bySchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("agent") }),
   z.object({
     kind: z.literal("rule"),
-    rule: z.enum(["stuck", "stale", "check-start", "check-result"]),
+    rule: z.enum([
+      "stuck",
+      "stale",
+      "check-start",
+      "check-result",
+      // A check hit its time or ask limit; a task reached its fix-round limit.
+      "check-limit",
+      "fix-limit",
+      // The main agent stopped with work unfinished and code ended it.
+      "liveness",
+    ]),
   }),
-  z.object({ kind: z.literal("judgment"), arm: nonEmpty }),
 ]);
 export type By = z.infer<typeof bySchema>;
 
@@ -117,6 +134,23 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     z.object({ ...envelope, ...extra, type: z.literal(type), payload });
 
   /**
+   * Who sent a user message: another thread's tool (the main agent's `message`),
+   * the runtime (the restart note), or a person.
+   */
+  const userSender = z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("thread"), threadId: nonEmpty }),
+    z.object({
+      kind: z.literal("runtime"),
+      /**
+       * On a delivery to the main agent: the id of the last log event the delivery
+       * accounted for, so what follows it is undelivered. Optional; `fold` ignores it.
+       */
+      covers: nonEmpty.optional(),
+    }),
+    z.object({ kind: z.literal("person") }),
+  ]);
+
+  /**
    * A thread has one `thread.started` per invocation: the first run and each
    * resume after a restart. The latest one with no `thread.ended` after it
    * means the thread is running.
@@ -128,7 +162,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         /** Null on a run's root thread. */
         parentThreadId: z.string().nullable(),
         kind: threadKindSchema,
-        /** The task a worker or check thread works on; required for those, absent on the supervisor. */
+        /** The task a worker or check thread works on; required for those, absent on the supervisor and the main agent. */
         task: taskIdSchema.optional(),
         /** The attempt a check thread checks; set on check threads only. */
         attemptId: nonEmpty.optional(),
@@ -138,15 +172,22 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         workflows: z.array(recordedPinSchema).min(1).optional(),
         /**
          * The model this thread calls, as the runner names it: `provider/id`
-         * (`meta/muse-spark-1.3`). Worker, check and chat threads call one and
-         * should set it. The supervisor thread sets none: the main thread's calls run on
-         * it and each `wake` records the model that answered. A thread's model is
+         * (`meta/muse-spark-1.3`). Main, worker, check and chat threads call one and
+         * should set it. The supervisor thread sets none: it runs no model (the `main` thread,
+         * its child, is the run's main agent). A thread's model is
          * fixed for its life: every `thread.started` of a thread names the same one, and
          * the harness fails a resume on a different model, as it does for a differing
          * system prompt. Optional in the schema until the harness writes it; then it
          * becomes required on those kinds.
          */
         model: modelRefSchema.optional(),
+        /**
+         * The user message a resume starts with (an answer, feedback, a delivery, a nudge),
+         * stored with the start because the thread's own `message` event comes only after it
+         * loads its history. A start with no user message after it was cut off before it got
+         * its input, and the next claim resumes it with this. Absent on a thread's first start.
+         */
+        input: z.object({ text: z.string(), sender: userSender }).optional(),
       })
       .refine((p) => p.parentThreadId !== null || p.workflows !== undefined, {
         path: ["workflows"],
@@ -160,12 +201,16 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         (p) =>
           p.kind === "worker" || p.kind === "check"
             ? p.task !== undefined
-            : p.kind !== "supervisor" || p.task === undefined,
+            : (p.kind !== "supervisor" && p.kind !== "main") || p.task === undefined,
         {
           path: ["task"],
-          message: "task goes with worker and check threads, and not the supervisor",
+          message: "task goes with worker and check threads, and not the supervisor or main agent",
         },
-      ),
+      )
+      .refine((p) => p.kind !== "main" || p.model !== undefined, {
+        path: ["model"],
+        message: "the main agent calls a model, so it records which",
+      }),
   );
 
   /**
@@ -173,27 +218,46 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
    * `thread.started` and before anything else the claim writes. `resumed` is false on the run's
    * first claim. On a resume, threads whose latest `thread.started` has no `thread.ended`
    * were cut off by infrastructure; the run page shows that as "Voluma restarted the run".
-   * `after` is why the previous claim ended, present exactly when `resumed`.
+   * `after` is why the previous claim ended; `reopened` says a person's message reopened the run
+   * instead (the reopen clears the claim-end reason). A resumed claim has exactly one of them.
    */
   const claimStarted = event(
     "claim.started",
     z
-      .object({ resumed: z.boolean(), after: claimEndReasonSchema.optional() })
-      .refine((p) => p.resumed === (p.after !== undefined), {
+      .object({
+        resumed: z.boolean(),
+        after: claimEndReasonSchema.optional(),
+        /** This claim exists because a person's message reopened the run (`messages.ts`); not a claim-end reason. */
+        reopened: z.literal(true).optional(),
+      })
+      .refine((p) => p.resumed === (p.after !== undefined || p.reopened === true), {
         path: ["after"],
-        message: "after goes with a resumed claim and no other",
+        message: "a resumed claim says why: after a claim end, or after a reopen",
+      })
+      .refine((p) => !(p.after !== undefined && p.reopened === true), {
+        path: ["reopened"],
+        message: "a claim follows a claim end or a reopen, not both",
       }),
   );
 
   /**
    * Every `thread.ended` is deliberate. A runtime abort (shutdown, self-stop, lost lease)
-   * writes none, so `cancelled` always means a stop someone chose.
+   * writes none, so `cancelled` always means a stop someone chose: `stop_worker`, the run
+   * loop's own stops, or a user's cancel of the run (which the server writes, `threads.ts`). A
+   * stopped thread is not resumed (a correction's message to a stopped main agent starts a new
+   * `main.<n>`); a `completed` end is resumable: a person message reopens a finished run with
+   * `run.reopened`, and the harness's thread log then clears the root's ended flag.
    */
   const threadEnded = event(
     "thread.ended",
     z.object({
       status: z.enum(["completed", "failed", "cancelled"]),
       error: z.string().optional(),
+      /**
+       * The root's, from `finish_run`: one or two plain sentences for the researcher. On a
+       * `cancelled` end of a worker or check: why the run loop stopped it, which the main agent is told.
+       */
+      summary: nonEmpty.optional(),
     }),
   );
 
@@ -208,15 +272,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
       z.object({
         role: z.literal("user"),
         text: z.string(),
-        /**
-         * Who sent it: another thread's `thread_message` (`thread-message.ts`),
-         * the runtime (the restart note), or a person.
-         */
-        sender: z.discriminatedUnion("kind", [
-          z.object({ kind: z.literal("thread"), threadId: nonEmpty }),
-          z.object({ kind: z.literal("runtime") }),
-          z.object({ kind: z.literal("person") }),
-        ]),
+        sender: userSender,
       }),
       z.object({
         role: z.literal("assistant"),
@@ -250,15 +306,12 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         isError: z.boolean(),
         /** What the model saw: head and tail only when `truncated`. */
         output: z.string(),
-        /** When true the full output is at `toolOutputKey(runId, toolCallId)`. */
-        truncated: z.boolean(),
         /**
-         * What the call was billed in US dollars, for a tool that pays a provider, even when it
-         * then failed; absent for a free tool. The run's model cost includes it (`Run.usage`).
-         * Not written for `segment_sam` once SAM runs in the sandbox: its spend is the run's
-         * provider calls (`Run.providerCalls`).
+         * When true the full output is at `toolOutputKey(runId, threadName, toolCallId)`: under
+         * the calling thread's own folder of the run's scratch, `threadName` being its id
+         * without the run id.
          */
-        costUsd: z.number().nonnegative().optional(),
+        truncated: z.boolean(),
         /**
          * True when the call failed because of Voluma's infrastructure (gateway or provider 5xx,
          * a cut stream, a revoked token, the in-flight limit), not the agent's input; only on
@@ -307,9 +360,9 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
   const attemptOpened = event("attempt.opened", z.object({ taskId: taskIdSchema }));
 
   /**
-   * A checklist task changed status. Written when a `checklist` tool call
-   * succeeds (`by` agent) or by the runtime's own code (`by` rule or judgment);
-   * the envelope `threadId` is the thread whose tool or wake produced it.
+   * A task changed status. Written when a task tool call succeeds (`by` agent)
+   * or by the runtime's own code (`by` rule); the envelope `threadId` is the thread whose
+   * tool or rule produced it.
    */
   const task = event(
     "task",
@@ -333,7 +386,10 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     z.object({
       taskId: taskIdSchema,
       attemptId: nonEmpty,
+      /** Working detail, for the next agent and the check. */
       text: nonEmpty,
+      /** One or two plain sentences for the researcher. Optional so logs written before it parse. */
+      summary: nonEmpty.optional(),
       by: bySchema,
       evidence: z.array(evidenceRefSchema),
       /** The check thread's verdict line; only check threads may set it. */
@@ -353,81 +409,84 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
   );
 
   /**
-   * One judgment point and what came of it, written by the runtime so the
-   * judgment experiment's data comes from the record. `point` is what the arm
-   * was given; `decision` is its raw answer (absent when it threw); `applied`
-   * is the action the runtime took, which differs from `decision` on a
-   * fallback. `fold` ignores it for results.
+   * The main agent changed the plan, written by the main thread before the change applies;
+   * id `<thread>:<toolCallId>:change_plan`. The fold applies it over the plan so far, without
+   * reading the workflow: `add` carries full plan entries (declarations copied from the workflow's
+   * `tasks.json`), `adHoc` tasks have no outputs, `doneWhen` and `instructions` are appended
+   * to the task's. `skip` is fold state (`fold.ts`): the task and its transitive dependents
+   * fold as `to-check` with every declared output missing and the reason; the runtime writes
+   * no attempt for it.
+   *
+   * Rules. A task id is unique in the plan: no id repeats across `add` and `adHoc` (refused
+   * here), and the fold applies an `add` or `adHoc` only when its id is not already in the plan
+   * (the first wins), so a collision can never replace a task's outputs. The schema can't see
+   * the plan, so the runtime refuses a collision itself and validates the resulting plan with
+   * `workflowPlanSchema` (no cycles, every dependency exists) before it writes this event.
+   * `doneWhen` and `instructions` for an unknown task are ignored.
    */
-  const judgment = event(
-    "judgment",
-    z.object({
-      point: z.object({ kind: nonEmpty, input: z.unknown() }),
-      arm: nonEmpty,
-      taskId: taskIdSchema.optional(),
-      decision: z.unknown().optional(),
-      applied: z.object({
-        action: nonEmpty,
-        /** Why `applied` is not `decision`: the arm threw (taken as accept), or the redo cap was reached. */
-        fallback: z.enum(["error", "redo-cap"]).optional(),
+  const planChanged = event(
+    "plan.changed",
+    z
+      .object({
+        reason: nonEmpty,
+        add: z.array(planTaskSchema).optional(),
+        adHoc: z
+          .array(
+            z.object({
+              id: taskIdSchema,
+              title: nonEmpty,
+              instructions: nonEmpty,
+              dependsOn: z.array(taskIdSchema),
+            }),
+          )
+          .optional(),
+        doneWhen: z
+          .array(z.object({ taskId: taskIdSchema, lines: z.array(nonEmpty).min(1) }))
+          .optional(),
+        instructions: z.array(z.object({ taskId: taskIdSchema, text: nonEmpty })).optional(),
+        skip: z.array(z.object({ taskId: taskIdSchema, reason: nonEmpty })).optional(),
+      })
+      .superRefine((p, ctx) => {
+        const seen = new Set<string>();
+        for (const [key, tasks] of [
+          ["add", p.add],
+          ["adHoc", p.adHoc],
+        ] as const)
+          tasks?.forEach((t, i) => {
+            if (seen.has(t.id))
+              ctx.addIssue({
+                code: "custom",
+                path: [key, i, "id"],
+                message: `duplicate task id "${t.id}"`,
+              });
+            seen.add(t.id);
+          });
       }),
+  );
+
+  /** A check thread asked the main agent a question; id `<thread>:<toolCallId>:ask`. `fold` ignores it. */
+  const ask = event("ask", z.object({ question: nonEmpty }));
+
+  /**
+   * The main agent answered a check thread's `ask`; id `<thread>:<toolCallId>:answer`. `askId` is
+   * that `ask` event's id (a check may ask up to three times). `files` are kept like evidence.
+   * `fold` ignores it.
+   */
+  const answer = event(
+    "answer",
+    z.object({
+      checkThreadId: nonEmpty,
+      askId: nonEmpty,
+      text: nonEmpty,
+      files: z.array(evidenceRefSchema).optional(),
     }),
   );
 
   /**
-   * One wake of the run's main thread: what it was told (`point`), what it answered, and
-   * which model (`provider/id`). Written before the runtime applies the answer, so a resumed
-   * run applies this and does not ask again. The main thread runs on the root thread, which
-   * has no `model` on `thread.started`: each wake names the model that answered, and a
-   * resume may run on another one (the thread's context is rebuilt from the recorded
-   * answers, not from a provider-side session).
-   *
-   * Points: `run-started` (the run's first wake: the main thread may adapt the computed plan;
-   * `plan` is the plan it chose, absent when it kept the computed one, and
-   * `revision.started.plan` stays the record of what was applied), `task-checked` (a task's
-   * check passed), and the judgment points `check-disagreed` and `thread-failed`, which
-   * need a `decision`; a `judgment` event records what was applied. `note` is the whole
-   * notes block in force from here on (absent: unchanged), at most `WAKE_NOTE_MAX` UTF-16
-   * code units; the supervisor passes it into later workers' and checkers' prompts. `error`
-   * (the writer truncates it to `WAKE_ERROR_MAX`): the model did not answer, so there is no
-   * note, decision or plan. `fold` ignores it.
+   * The main agent's answer to the researcher, from its `reply` tool (`replyInputSchema`);
+   * id `<thread>:<toolCallId>:reply`; only on a main thread (`onMainThread`). `fold` ignores it.
    */
-  const wakePoint = z.discriminatedUnion("kind", [
-    z.object({ kind: z.literal("run-started"), input: z.unknown() }),
-    z.object({ kind: z.literal("task-checked"), taskId: taskIdSchema, input: z.unknown() }),
-    z.object({ kind: z.literal("check-disagreed"), taskId: taskIdSchema, input: z.unknown() }),
-    z.object({ kind: z.literal("thread-failed"), taskId: taskIdSchema, input: z.unknown() }),
-  ]);
-  const wake = event(
-    "wake",
-    z
-      .object({
-        point: wakePoint,
-        model: modelRefSchema,
-        /** The call's usage; absent when the model did not answer at all, or on an older wake. */
-        usage: modelUsageSchema.optional(),
-        note: z.string().max(WAKE_NOTE_MAX).optional(),
-        decision: z
-          .object({ action: z.enum(["accept", "redo", "fail"]), reason: nonEmpty })
-          .optional(),
-        plan: workflowPlanSchema.optional(),
-        error: z.string().max(WAKE_ERROR_MAX).optional(),
-      })
-      .superRefine((p, ctx) => {
-        const judged = p.point.kind === "check-disagreed" || p.point.kind === "thread-failed";
-        const issue = (message: string) => ctx.addIssue({ code: "custom", message });
-        if (p.error !== undefined) {
-          if (p.note !== undefined || p.decision !== undefined || p.plan !== undefined) {
-            issue("a wake the model did not answer has no note, decision or plan");
-          }
-        } else if (judged !== (p.decision !== undefined)) {
-          issue("a decision goes with, and only with, a judgment point the model answered");
-        }
-        if (p.plan !== undefined && p.point.kind !== "run-started") {
-          issue("only the run-started wake carries a plan");
-        }
-      }),
-  );
+  const reply = event("reply", replySchema);
 
   /**
    * Review assets (OME-Zarr levels, meshes) for one reported file were converted: the
@@ -446,11 +505,23 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     reviewAssetsManifestSchema.extend({ sourceSha256: sha256Schema }),
   );
 
-  /** Conversion of the file with this `sourceSha256` failed (or timed out at the end of the run); same id as `assets.ready`. Permanent for the run. The writer truncates `error` to `WAKE_ERROR_MAX`. */
+  /** Conversion of the file with this `sourceSha256` failed (or timed out at the end of the run); same id as `assets.ready`. Permanent for the run. The writer truncates `error` to `ASSET_ERROR_MAX`. */
   const assetsFailed = event(
     "assets.failed",
-    z.object({ sourceSha256: sha256Schema, error: z.string().min(1).max(WAKE_ERROR_MAX) }),
+    z.object({ sourceSha256: sha256Schema, error: z.string().min(1).max(ASSET_ERROR_MAX) }),
   );
+
+  /**
+   * The runner's copy of `/outputs` taken at the start of the first claim of a correction that
+   * holds a researcher's go (`run.reopened` `reopenId`), before any thread runs; the put-back of
+   * that copy at the first claim after the correction ended unfinished (`correction.ended`); and
+   * the deletion of it at the first claim after the correction finished (a completed root end
+   * with no `correction.ended`). Each is written once per reopen, after the work is done, on the
+   * root thread. See `outputs-backup.ts` in the harness.
+   */
+  const outputsBackedUp = event("outputs.backed-up", z.object({ reopenId: nonEmpty }));
+  const outputsRestored = event("outputs.restored", z.object({ reopenId: nonEmpty }));
+  const outputsDiscarded = event("outputs.discarded", z.object({ reopenId: nonEmpty }));
 
   return z.discriminatedUnion("type", [
     claimStarted,
@@ -465,15 +536,29 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     task,
     checkpoint,
     output,
-    judgment,
-    wake,
+    planChanged,
+    ask,
+    answer,
+    reply,
     assetsReady,
     assetsFailed,
+    outputsBackedUp,
+    outputsRestored,
+    outputsDiscarded,
   ]);
 };
 
+const onMainThread = (e: { type: string; runId: string; threadId: string }) =>
+  e.type !== "reply" ||
+  e.threadId === `${e.runId}.main` ||
+  e.threadId.startsWith(`${e.runId}.main.`);
+const mainThreadOnly = {
+  path: ["threadId"],
+  message: "a reply belongs to a main thread (<runId>.main or <runId>.main.<n>)",
+};
+
 /** What a runner appends: an event without `seq`, never a human review decision. */
-export const eventInputSchema = eventUnion({});
+export const eventInputSchema = eventUnion({}).refine(onMainThread, mainThreadOnly);
 export type EventInput = z.infer<typeof eventInputSchema>;
 
 const stored = { seq: z.number().int().nonnegative() };
@@ -494,13 +579,38 @@ export const runEventSchema = z
       type: z.literal("review.completed"),
       payload: reviewCompletedSchema,
     }),
+    z.object({
+      ...envelope,
+      ...stored,
+      type: z.literal("person.message"),
+      payload: personMessageSchema,
+    }),
+    z.object({
+      ...envelope,
+      ...stored,
+      type: z.literal("run.reopened"),
+      payload: runReopenedSchema,
+    }),
+    z.object({
+      ...envelope,
+      ...stored,
+      type: z.literal("correction.ended"),
+      payload: correctionEndedSchema,
+    }),
   ])
   .refine(
     (e) =>
       (e.type !== "check.accepted" && e.type !== "review.completed") ||
       e.threadId === `${e.runId}.reviewer`,
     { path: ["threadId"], message: "human review decisions belong to <runId>.reviewer" },
-  );
+  )
+  .refine(
+    (e) =>
+      (e.type !== "person.message" && e.type !== "run.reopened" && e.type !== "correction.ended") ||
+      e.threadId === `${e.runId}.person`,
+    { path: ["threadId"], message: "correction events belong to <runId>.person" },
+  )
+  .refine(onMainThread, mainThreadOnly);
 export type RunEvent = z.infer<typeof runEventSchema>;
 export type EventType = RunEvent["type"];
 

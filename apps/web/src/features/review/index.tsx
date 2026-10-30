@@ -189,7 +189,7 @@ function ScanReview({ runId }: { runId: string }) {
         if (selection.revision) next.set("revision", selection.revision);
         setSearch(next);
       }}
-      backLink={<Link to="/runs">Back to runs</Link>}
+      backLink={<Link to="/">Home</Link>}
       viewer={(selected, display, revision, focus) => (
         <ViewerWorkspace
           series={series}

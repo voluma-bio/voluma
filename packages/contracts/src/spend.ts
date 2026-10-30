@@ -4,16 +4,16 @@
  * log gives the spend so far.
  *
  * - Cost and tokens: the `usage` on each assistant `message` and each `wake`, plus a
- *   `tool.result`'s `costUsd` (a `segment_sam` call's Meta charge). Each counts for the
- *   thread that wrote the event; an event from a thread with no `thread.started` before it
- *   counts only in `total`.
+ *   Each counts for the thread that wrote the event; an event from a thread with no
+ *   `thread.started` before it counts only in `total`.
  * - Provider calls (the gateway's, `Run.providerCalls`) are passed in separately and added
  *   to `costUsd` and `toolCostUsd`: `total` takes their `costUsd`, and each `bySandbox`
  *   entry's cost also goes to the task (or `main`) whose thread wrote the `sandbox` event with
  *   that `name`. They are not model calls, so `calls` stays the model calls that reported usage.
+ *   Calls whose cost is unknown (`unknownCostCalls`) add no dollars and are counted apart.
  * - A worker or check thread belongs to the task its `thread.started` names, so a task's
  *   spend covers all its attempts: worker, check and any redo. The root thread (the main
- *   thread's wakes) belongs to no task: that is `main`. A chat thread counts only in `total`.
+ *   agent's thread) belongs to no task: that is `main`. A chat thread counts only in `total`.
  * - Wall time is per thread invocation, from `thread.started` to its `thread.ended`, or to
  *   the thread's latest event while it has none (running, or cut off by a crash). A task's is
  *   the sum over its threads. `main`'s and `total`'s are the root thread's, whose open span
@@ -25,7 +25,7 @@
  *   bill is the uptime of all the run's sandboxes (`Run.usage.sandboxSeconds`), which is longer:
  *   each thread's sandbox idles between its calls.
  *
- * The runner's end-of-run log line sums the same model and tool costs over the run's
+ * The runner's end-of-run log line sums the same model costs over the run's
  * threads, so without provider calls `total.costUsd` matches it for a run that didn't lose
  * events (a review chat thread is not the runner's).
  */
@@ -37,6 +37,8 @@ export type Spend = {
   costUsd: number;
   /** The paid tool calls' part of `costUsd`. */
   toolCostUsd: number;
+  /** Paid tool calls cut off before their usage arrived: their cost is unknown, and not in `costUsd`. */
+  unknownCostCalls: number;
   /** Model calls that reported usage. */
   calls: number;
   /** Uncached input tokens (`ModelUsage.input`). */
@@ -58,6 +60,7 @@ export type RunSpend = {
 const empty = (): Spend => ({
   costUsd: 0,
   toolCostUsd: 0,
+  unknownCostCalls: 0,
   calls: 0,
   input: 0,
   output: 0,
@@ -101,7 +104,8 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
       open.delete(threadId);
       const wall = seconds(span.since, at ?? (threadId === root ? latest : span.last));
       const s = owner.get(threadId);
-      if (s) s.wallSeconds += wall;
+      // The main agent's calls charge `main`, but its wall time is the root's, which spans the run.
+      if (s && (s !== main || threadId === root)) s.wallSeconds += wall;
       if (threadId === root) total.wallSeconds += wall;
     }
     for (const [id, call] of bash) if (call.threadId === threadId) bash.delete(id);
@@ -119,7 +123,7 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
         } else close(e.threadId);
         if (!owner.has(e.threadId)) {
           let s: Spend | null = null;
-          if (kind === "supervisor") s = main;
+          if (kind === "supervisor" || kind === "main") s = main;
           else if (task !== undefined && (kind === "worker" || kind === "check")) {
             s = tasks.get(task) ?? empty();
             tasks.set(task, s);
@@ -132,14 +136,8 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
       case "thread.ended":
         close(e.threadId, at);
         break;
-      case "message":
-      case "wake": {
-        const used =
-          e.type === "wake"
-            ? e.payload.usage
-            : e.payload.role === "assistant"
-              ? e.payload.usage
-              : undefined;
+      case "message": {
+        const used = e.payload.role === "assistant" ? e.payload.usage : undefined;
         if (!used) break;
         add(e.threadId, (s) => {
           s.costUsd += used.costUsd;
@@ -158,16 +156,9 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
         if (e.payload.name === "bash") bash.set(e.payload.toolCallId, { threadId: e.threadId, at });
         break;
       case "tool.result": {
-        const { costUsd, toolCallId } = e.payload;
-        const call = bash.get(toolCallId);
-        bash.delete(toolCallId);
-        add(e.threadId, (s) => {
-          if (costUsd !== undefined) {
-            s.costUsd += costUsd;
-            s.toolCostUsd += costUsd;
-          }
-          if (call) s.sandboxSeconds += seconds(call.at, at);
-        });
+        const call = bash.get(e.payload.toolCallId);
+        bash.delete(e.payload.toolCallId);
+        if (call) add(e.threadId, (s) => (s.sandboxSeconds += seconds(call.at, at)));
         break;
       }
     }
@@ -179,11 +170,13 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
   if (providerCalls) {
     total.costUsd += providerCalls.costUsd;
     total.toolCostUsd += providerCalls.costUsd;
-    for (const { sandbox, costUsd } of providerCalls.bySandbox) {
+    total.unknownCostCalls += providerCalls.unknownCostCalls;
+    for (const { sandbox, costUsd, unknownCostCalls } of providerCalls.bySandbox) {
       const s = owner.get(sandboxOwner.get(sandbox) ?? "");
       if (s) {
         s.costUsd += costUsd;
         s.toolCostUsd += costUsd;
+        s.unknownCostCalls += unknownCostCalls;
       }
     }
   }

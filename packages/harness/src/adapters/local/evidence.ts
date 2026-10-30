@@ -9,19 +9,21 @@ import { createHash } from "node:crypto";
 import { copyFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { evidenceKey, outputKey, scratchKey } from "@voluma/contracts/r2";
-import type { Evidence } from "../../ports/evidence";
+import { type Evidence, EvidenceNotFound } from "../../ports/evidence";
 
 export function localEvidence(dir: string): Evidence {
   return {
-    async keep(runId, taskId, file) {
+    async keep(runId, taskId, file, options) {
       const key =
         file.root === "outputs"
           ? outputKey(runId, taskId, file.path)
           : scratchKey(runId, file.path);
       const source = join(dir, key);
-      const sha256 = createHash("sha256")
-        .update(await readFile(source))
-        .digest("hex");
+      // A file the sandbox hashes must exist all the same: nothing is stored otherwise.
+      const bytes = await readFile(source).catch((error) => {
+        throw error?.code === "ENOENT" ? new EvidenceNotFound(key) : error;
+      });
+      const sha256 = (await options?.hash?.()) ?? createHash("sha256").update(bytes).digest("hex");
       const target = join(dir, evidenceKey(runId, sha256));
       await mkdir(dirname(target), { recursive: true });
       // COPYFILE_EXCL: content-addressed and never overwritten.

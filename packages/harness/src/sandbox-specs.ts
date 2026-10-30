@@ -24,8 +24,10 @@ interface Common {
   image: string;
   lifetimeSeconds: number;
   idleSeconds: number;
-  /** Set on every command: the run layout's `env` (`PYTHONPATH`); secrets do not belong here. */
+  /** Set on every command: the thread layout's `env` (`PYTHONPATH`, `SCRATCH`); secrets do not belong here. */
   env: Record<string, string>;
+  /** The working directory of every command: the thread's `scratch.path`. */
+  workdir?: string;
 }
 
 const base = (c: Common) => ({
@@ -37,6 +39,7 @@ const base = (c: Common) => ({
   lifetimeSeconds: c.lifetimeSeconds,
   idleSeconds: c.idleSeconds,
   env: c.env,
+  workdir: c.workdir,
 });
 
 const withAccess = (mounts: SandboxMount[], access: SandboxMount["access"]): SandboxMount[] =>

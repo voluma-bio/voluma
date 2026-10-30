@@ -7,6 +7,12 @@ import { logoutResponseSchema, type Me, meResponseSchema } from "@voluma/contrac
 import { type DownloadDescriptor, downloadDescriptorSchema } from "@voluma/contracts/download";
 import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
 import {
+  type SendRunMessageRequest,
+  type SendRunMessageResponse,
+  sendRunMessageRequestSchema,
+  sendRunMessageResponseSchema,
+} from "@voluma/contracts/messages";
+import {
   type AcceptCheckRequest,
   acceptCheckRequestSchema,
   type MarkReviewedRequest,
@@ -38,7 +44,14 @@ import {
   type ReviewSnapshot,
   reviewSnapshotSchema,
 } from "@voluma/contracts/snapshot";
-import { LIVE_EVENT, type LiveFrame, liveFrameSchema } from "@voluma/contracts/stream";
+import { END_EVENT, LIVE_EVENT, type LiveFrame, liveFrameSchema } from "@voluma/contracts/stream";
+import {
+  type CreateStudyRequest,
+  listStudiesResponseSchema,
+  type StudyDetail,
+  type StudySummary,
+  studyDetailSchema,
+} from "@voluma/contracts/study";
 
 /** A non-OK API response. Branch on `status` (403, 415, 5xx) rather than parsing the message. */
 export class ApiError extends Error {
@@ -219,9 +232,28 @@ export async function signOut(): Promise<void> {
   location.href = logoutUrl;
 }
 
-/** Starts a run on an input the caller can read. With `keys` it runs on the caller's own credentials and skips the org's runs-at-once count; either way it waits for the runner to claim it. 409 and 429: the org's limits (see `@voluma/contracts/run`). */
+/** Starts a run on a scan of one of the caller's studies (`req.studyId`, `req.inputId`). With `keys` it runs on the caller's own credentials and skips the org's runs-at-once count; either way it waits for the runner to claim it. 409 and 429: the org's limits (see `@voluma/contracts/run`). */
 export async function startRun(req: StartRunRequest): Promise<Run> {
   return runSchema.parse(await json(await request("/run/runs", { method: "POST", body: req })));
+}
+
+/** Creates a study and starts the runs for `req.start` in one call; a refusal (409, 429) leaves no study. See `@voluma/contracts/study`. */
+export async function createStudy(req: CreateStudyRequest): Promise<StudyDetail> {
+  return studyDetailSchema.parse(
+    await json(await request("/run/studies", { method: "POST", body: req })),
+  );
+}
+
+/** The caller's readable studies, newest activity first. */
+export async function listStudies(): Promise<StudySummary[]> {
+  return listStudiesResponseSchema.parse(await json(await request("/run/studies"))).studies;
+}
+
+/** A study with its scans, their runs, and the workflow's headline values. */
+export async function getStudy(id: string): Promise<StudyDetail> {
+  return studyDetailSchema.parse(
+    await json(await request(`/run/studies/${encodeURIComponent(id)}`)),
+  );
 }
 
 export async function getRun(id: string): Promise<Run> {
@@ -284,6 +316,32 @@ export async function markReviewed(
     ),
   );
 }
+
+/**
+ * Sends the main agent a message (and optional marks, a PNG snapshot, or Go) about a finished run;
+ * reopens a run that ended `completed`. Keep `body.id` across retries. Refusals and limits:
+ * `messages.ts`. The chat comes back on the run's event stream: read it with `conversation`.
+ */
+export async function sendRunMessage(
+  runId: string,
+  body: SendRunMessageRequest,
+): Promise<SendRunMessageResponse> {
+  return sendRunMessageResponseSchema.parse(
+    await json(
+      await request(`/review/runs/${encodeURIComponent(runId)}/messages`, {
+        method: "POST",
+        body: sendRunMessageRequestSchema.parse(body),
+      }),
+    ),
+  );
+}
+
+/**
+ * Where the browser reads the view snapshot of a message (`person.message`'s `snapshotKey`,
+ * by the message's id: the `id` the panel sent). A PNG; 404: unreadable run or no such snapshot.
+ */
+export const runMessageSnapshotUrl = (runId: string, messageId: string) =>
+  `/api/review/runs/${encodeURIComponent(runId)}/messages/${encodeURIComponent(messageId)}/snapshot`;
 
 /**
  * Where the browser reads one of a run's files: evidence, a data file, a volume or a mesh,
@@ -453,6 +511,11 @@ export function subscribe(
       }
     });
   }
+  // The run ended and every event has been sent; closing here skips the reconnect.
+  source.addEventListener(END_EVENT, () => {
+    source.close();
+    handlers.onClosed?.();
+  });
   source.onerror = () => {
     if (source.readyState === EventSource.CLOSED) handlers.onClosed?.();
   };

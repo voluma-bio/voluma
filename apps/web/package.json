@@ -6,7 +6,8 @@
   "scripts": {
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.2.7",
@@ -18,6 +19,7 @@
     "@voluma/ui": "workspace:*",
     "@voluma/viewer": "workspace:*",
     "@voluma/workflow": "workspace:*",
+    "fflate": "^0.8.3",
     "lucide-react": "catalog:",
     "radix-ui": "1.8.1",
     "react": "catalog:",
@@ -37,6 +39,7 @@
     "@vitejs/plugin-react": "catalog:",
     "tailwindcss": "catalog:",
     "typescript": "catalog:",
-    "vite": "catalog:"
+    "vite": "catalog:",
+    "vitest": "catalog:"
   }
 }

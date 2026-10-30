@@ -6,6 +6,9 @@ import { and, eq } from "drizzle-orm";
 import type { Tx } from "./pg-runs";
 import { runs } from "./schema";
 
+/** The columns of a run nobody holds. */
+export const noLease = { leaseHolder: null, leaseToken: null, leaseExpiresAt: null };
+
 /** The write's lease token is stale, or the run is not running. The runner stops. */
 export class LeaseLost extends Error {
   constructor() {

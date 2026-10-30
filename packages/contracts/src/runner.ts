@@ -56,29 +56,31 @@
  * claim carries no plan: the runner snapshots the run's workflow directory and builds the plan
  * itself (`packages/workflow`), and a resumed run keeps the plan its first `revision.started`
  * recorded (`task-tools.ts`). One limit stops a run that keeps costing its runner: the API
- * counts consecutive claims that end `self-stop` or `lease-expired` without run-state
+ * counts consecutive claims that end `self-stop`, `lease-expired` or `provider-outage` without run-state
  * progress (a `task`, `checkpoint`, `output`, `attempt.opened`, `assets.ready` or correcting
- * `revision.started` event; `judgment` while the old supervisor runs), and the run ends
- * `failed` at 3, naming the call that was in flight. Progress resets the count. `shutdown`
- * never counts, so deploys don't fail a long run.
+ * `revision.started` or `plan.changed` event), and the run ends
+ * `failed` at 3, naming the call that was in flight; except a claim of a reopened run, which ends it `completed` and writes `correction.ended` instead (the correction rule in `messages.ts`). Progress resets the count. `shutdown`
+ * never counts, so deploys don't fail a long run. A `provider-outage` release also holds the run
+ * back: the API sets `runs.claimable_after` (1, 2, then 5 minutes by the count of such claims in a
+ * row) and `claim` skips the run until then; the run stays `queued`, and the run page reads
+ * `state.waitingForProvider` of a queued run: the run page reads "Waiting: the AI is unavailable"
+ * (its open tasks and agents "Waiting for the AI"), its chip "AI unavailable", and no place in
+ * line or retry time shows. The claim that takes it clears the time. A reopen (`messages.ts`) resets the count to 0
+ * and clears `lastClaimEnd`, so `previousClaim` never reports a reason from before it.
  *
  * There is no tokenless call: the runner service is the only claimer.
  *
  * Cancel. The runner learns a run is over from the heartbeat: `stop` is true
- * once the server has ended it (cancelled by the user, or `failed` by the
- * dollar ceiling). The runner stops its threads and sandboxes and reports
- * nothing more; the server has recorded the end already (`run.ts`).
+ * once the server has ended it (cancelled by the user). The runner stops its threads and sandboxes and reports
+ * nothing more; the server has recorded the end already (`run.ts`). A cancel also ends
+ * every open thread `cancelled` and the root last, in the same transaction (`cancelEnds` in
+ * `threads.ts`): the runner's writes are refused once the run has ended, so the server writes
+ * them, and a run cancelled while no runner holds it is left just as consistent.
  *
  * Usage. The heartbeat carries the usage since the previous acknowledged
  * heartbeat (`usageSchema`): the dollars of model calls and the seconds of
- * sandbox time. The server adds them up per run, and that sum is what the org's
- * dollar ceiling counts. A heartbeat the server did not acknowledge is resent
- * with its usage added to the next one. The runner sends `costCapUsd` (its
- * `RUNNER_MAX_RUN_COST_USD`) with the claim only when that is set, and the claim
- * stores it as the run's spend cap for the provider gateway to check. Unset, the
- * run has no cap. The heartbeat answers with `spentUsd`,
- * the run's settled spend including its provider calls, so the runner's own cap
- * sees spend that did not come through its heartbeats.
+ * sandbox time. The server adds them up per run. A heartbeat the server did not acknowledge is resent
+ * with its usage added to the next one. Spend is recorded, never limited.
  *
  * Reports. The runner ends the run with `ended`, or gives it up with
  * `released` (a shutdown or a self-stop: its `reason`). Either one ends the
@@ -113,8 +115,12 @@ export const leaseLostSchema = z.object({ code: z.literal("lease-lost") });
  */
 export const runnerIdSchema = z.string().min(1);
 
-/** Why the runner gave up a lease. */
-export const releaseReasonSchema = z.enum(["shutdown", "self-stop"]);
+/**
+ * Why the runner gave up a lease. `provider-outage`: a model call kept failing on the provider's
+ * side past the call retry (`apps/runner/src/model-retry.ts`); the run is requeued with a delay
+ * (`runs.claimable_after`) and counts toward the no-progress limit.
+ */
+export const releaseReasonSchema = z.enum(["shutdown", "self-stop", "provider-outage"]);
 export type ReleaseReason = z.infer<typeof releaseReasonSchema>;
 
 /** Why a claim ended: a release reason, or the API swept its expired lease. */
@@ -123,11 +129,6 @@ export type ClaimEndReason = z.infer<typeof claimEndReasonSchema>;
 
 export const claimRequestSchema = z.object({
   runnerId: runnerIdSchema,
-  /**
-   * The runner's `RUNNER_MAX_RUN_COST_USD`; the claim stores it as the run's spend cap, which
-   * the provider gateway checks. Absent: no cap (spend is still recorded).
-   */
-  costCapUsd: z.number().positive().optional(),
 });
 export type ClaimRequest = z.infer<typeof claimRequestSchema>;
 
@@ -153,7 +154,7 @@ export type ClaimResponse = z.infer<typeof claimResponseSchema>;
 
 /** Spend since the previous acknowledged heartbeat. */
 export const usageSchema = z.object({
-  /** Model calls and paid tool calls (`tool.result.costUsd`), in US dollars. */
+  /** Model calls, in US dollars. */
   modelCostUsd: z.number().nonnegative(),
   sandboxSeconds: z.number().nonnegative(),
 });
@@ -165,14 +166,6 @@ export type HeartbeatRequest = z.infer<typeof heartbeatRequestSchema>;
 export const heartbeatResponseSchema = z.object({
   /** The server has ended the run; stop it. */
   stop: z.boolean(),
-  /**
-   * The run's settled spend in US dollars: heartbeat-reported model cost, plus each finished
-   * provider call's cost, or its reservation if it was cut off. A call still open counts
-   * nothing (the gateway holds its reservation against the cap itself, so the runner does not
-   * stop a run for a reservation). The same provider-call sum as `Run.providerCalls`. Optional
-   * until the API sends it.
-   */
-  spentUsd: z.number().nonnegative().optional(),
 });
 export type HeartbeatResponse = z.infer<typeof heartbeatResponseSchema>;
 

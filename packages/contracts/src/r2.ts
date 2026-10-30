@@ -39,26 +39,41 @@ export const workflowSnapshotPrefix = (runId: string) => `${runPrefix(runId)}wor
 export const scratchPrefix = (runId: string) => `${runPrefix(runId)}scratch/`;
 /** All tasks' outputs; the sandbox mounts this read-write at `/outputs`. */
 export const outputsPrefix = (runId: string) => `${runPrefix(runId)}outputs/`;
+/**
+ * A copy of the run's outputs taken when the first claim of a correction with a go starts
+ * (`outputs.backed-up`, keyed to that `run.reopened`'s id), so a correction that ends unfinished
+ * can put them back (`outputs.restored`); deleted at the next reopen's first claim once it finished (`outputs.discarded`). Never read as outputs; the sandbox mounts none of it.
+ */
+export const outputsBackupPrefix = (runId: string, reopenId: string) =>
+  `${runPrefix(runId)}corrections/${seg(reopenId)}/`;
 export const taskOutputPrefix = (runId: string, task: string) =>
   `${outputsPrefix(runId)}${seg(task)}/`;
 
 export const inputKey = (inputId: string, path: string) => `${inputPrefix(inputId)}${rel(path)}`;
 export const uploadKey = (inputId: string, path: string) => `${uploadPrefix(inputId)}${rel(path)}`;
 export const scratchKey = (runId: string, path: string) => `${scratchPrefix(runId)}${rel(path)}`;
+/** A researcher's view snapshot for a message (`messages.ts`): `scratch/person/` is readable by the main agent and workers. */
+export const messageSnapshotKey = (runId: string, messageId: string) =>
+  scratchKey(runId, `person/${messageId}.png`);
 export const outputKey = (runId: string, task: string, path: string) =>
   `${taskOutputPrefix(runId, task)}${rel(path)}`;
 
-/** Full output of a `bash` call that was truncated for the model. */
-export const toolOutputKey = (runId: string, toolCallId: string) =>
-  `${scratchPrefix(runId)}.tool-output/${seg(toolCallId)}`;
+/**
+ * Full output of a `bash` call that was truncated for the model. `threadName` is the thread
+ * id without the run id (`<taskId>.worker`, `<taskId>.check.2`, `main`): every thread spills
+ * under its own folder of the run's scratch, `/scratch/<threadName>/.tool-output/<id>`.
+ */
+export const toolOutputKey = (runId: string, threadName: string, toolCallId: string) =>
+  `${scratchPrefix(runId)}${seg(threadName)}/.tool-output/${seg(toolCallId)}`;
 
 /**
  * Content-addressed evidence: a file that backs a stored number, copied here
  * once and never overwritten, so a rerun of a task can't change what an
  * earlier revision points at. Inside the run prefix, so mounts stay isolated.
  */
+export const evidencePrefix = (runId: string) => `${runPrefix(runId)}evidence/`;
 export const evidenceKey = (runId: string, sha256: string) =>
-  `${runPrefix(runId)}evidence/${sha256Schema.parse(sha256)}`;
+  `${evidencePrefix(runId)}${sha256Schema.parse(sha256)}`;
 
 /**
  * What the review converter made from one reported file (`events.ts`, `assets.ready`): zarr
