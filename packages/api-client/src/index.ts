@@ -243,11 +243,10 @@ export async function listStudies(): Promise<StudySummary[]> {
   return listStudiesResponseSchema.parse(await json(await request("/run/studies"))).studies;
 }
 
-/** A study with its scans and runs; `outputs` are the output ids whose values to include (the bundle's `headline` ids). */
-export async function getStudy(id: string, outputs: readonly string[] = []): Promise<StudyDetail> {
-  const query = outputs.length ? `?outputs=${outputs.map(encodeURIComponent).join(",")}` : "";
+/** A study with its scans, their runs, and the workflow's headline values. */
+export async function getStudy(id: string): Promise<StudyDetail> {
   return studyDetailSchema.parse(
-    await json(await request(`/run/studies/${encodeURIComponent(id)}${query}`)),
+    await json(await request(`/run/studies/${encodeURIComponent(id)}`)),
   );
 }
 

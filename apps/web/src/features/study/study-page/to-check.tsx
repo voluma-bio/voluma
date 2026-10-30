@@ -120,7 +120,7 @@ function CheckRow({
           disabled={readOnly || !revision || accept.isPending || accept.isSuccess}
           onClick={() => accept.mutate()}
         >
-          {accept.isPending || accept.isSuccess ? "Saving…" : "Looks right"}
+          {accept.isPending ? "Saving…" : accept.isSuccess ? "Accepted" : "Looks right"}
         </Button>
         <Button size="sm" onClick={onOpen}>
           Open in 3D

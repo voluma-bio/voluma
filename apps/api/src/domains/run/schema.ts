@@ -140,9 +140,8 @@ export const studyScans = pgTable(
 
 /**
  * The run record (`runSchema`) plus the server's own columns. `state` is the
- * `runStateSchema` status; `queued`'s position is computed at read time. `workflow_id`
- * names the catalog entry the run was started from; `workflows` are the
- * pins resolved at start. The lease columns are null unless the run is held.
+ * `runStateSchema` status; `queued`'s position is computed at read time. The study names
+ * the catalog workflow; `workflows` are the pins resolved at start. The lease columns are null unless the run is held.
  */
 export const runs = pgTable(
   "runs",
@@ -151,7 +150,6 @@ export const runs = pgTable(
     labId: text().notNull(),
     startedBy: text().notNull(),
     studyId: text().notNull(),
-    workflowId: text().notNull(),
     workflows: json().notNull(),
     /** The output ids the user selected (`runSchema.selectedOutputs`); null: every output. */
     selectedOutputs: json(),

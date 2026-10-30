@@ -97,6 +97,7 @@ export function taskTools(runtime: TaskRuntime, kind: "worker" | "check"): Tool[
     threadId: ctx.threadId,
     toolCallId: ctx.toolCallId,
     kind: ctx.kind,
+    signal: ctx.signal,
     ...(ctx.taskId && { taskId: ctx.taskId }),
   });
   const checklist: Tool<typeof checklistInputSchema> = {

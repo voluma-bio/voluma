@@ -77,7 +77,7 @@ export function HomePage() {
     queryKey: ["studies"],
     queryFn: listStudies,
     refetchInterval: (q) =>
-      live || q.state.data?.some(({ runCounts: c }) => c.queued + c.running + c.awaitingKeys > 0)
+      live || q.state.data?.some((s) => s.newestRuns.some((r) => r.state.status !== "ended"))
         ? LIVE
         : false,
   });

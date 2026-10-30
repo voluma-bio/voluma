@@ -9,9 +9,11 @@
  * two never flags. With n = 3-8 per group a standard deviation is unstable; the range reads in
  * one sentence ("the other DMM scans measure 2.47-2.51 mm").
  *
- * Units: a value counts only in the unit `outputs.json` declares. One the agent reported in another
- * unit (210 µm beside 0.21 mm) stays out of the plot and the far rule and shows as "reported in
- * µm", since nothing upstream converts or rejects it.
+ * Units: a value counts only in the unit today's `outputs.json` declares. `report_output` already
+ * refuses a unit that differs from the run's own plan, but that plan is the snapshot taken when
+ * the run started: a run from before a unit change in `outputs.json` carries the old unit
+ * (210 µm beside 0.21 mm). Such a value stays out of the plot and the far rule and shows as
+ * "reported in µm"; converting would guess what the agent meant.
  *
  * To check kinds: items group by task and check title, in workflow task order, then title.
  */

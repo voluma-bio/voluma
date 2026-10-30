@@ -8,21 +8,14 @@ import { runEventSchema } from "@voluma/contracts/events";
 import type { ReviewSummary } from "@voluma/contracts/review";
 import { reviewState } from "@voluma/contracts/review-state";
 import { type Input, type Run, runSchema } from "@voluma/contracts/run";
-import type {
-  Study,
-  StudyDetail,
-  StudyScan,
-  StudySummary,
-  StudyValue,
-  ToCheckItem,
-} from "@voluma/contracts/study";
+import type { StudyValue, ToCheckItem } from "@voluma/contracts/study";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { callsOfRuns, type RunCalls } from "@voluma/provider-calls";
 import { and, asc, desc, eq, inArray, or, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { EVERY_LAB, type Reader, type ReadScope } from "../../domain";
 import type { RunRecord } from "../../ports";
-import { events, inputs, referenceInput, runs, studies, studyScans } from "./schema";
+import { events, inputs, referenceInput, runs, studies } from "./schema";
 
 export type Tx = Parameters<Parameters<PostgresJsDatabase["transaction"]>[0]>[0];
 
@@ -157,7 +150,7 @@ async function loadRows(tx: Tx, where: SQL | undefined): Promise<Row[]> {
   }));
 }
 
-/** The event types `reviewState` reads: the summary, a study's values and a live run's progress. */
+/** The event types `reviewState` reads, so a live run changes its derived results only when one of them is written. */
 const SUMMARY_TYPES = [
   "thread.started",
   "revision.started",
@@ -275,20 +268,20 @@ function derive(log: RunRecord["events"]): Derived {
 
 type SummaryCache = Map<string, { lastEventId: string | null; derived: Derived }>;
 
-/** The most derived results kept; evicted ones are derived again from the event log. */
+/** The most derived results kept, least recently read out first; evicted ones are derived again from the event log. */
 const CACHE_CAP = 2048;
 
-type RunResult = { run: Run } & Derived;
+export type RunResult = { run: Run } & Derived;
 
 interface LoadOptions {
   cache?: SummaryCache;
   /**
-   * The lists and the study read: a completed run whose events no longer parse is left out rather than failing
-   * every run listed with it. Without it (one run's read) it throws: the run's own page must
-   * fail loudly, not read as "no plan" (a 409 the web polls forever).
+   * The lists and the study reads: a completed run whose events no longer parse is left out
+   * rather than failing every run listed with it. Without it (one run's read) it throws: the
+   * run's own page must fail loudly, not read as "no plan" (a 409 the web polls forever).
    */
   skipUnreadable?: boolean;
-  /** Derive a live run's `tasks` (Home and the study page show them); else it reads null. */
+  /** Also derive a live run's `tasks`; else only completed runs are derived. */
   progress?: boolean;
 }
 
@@ -325,6 +318,8 @@ async function loadResults(
     const hit = cached.get(id);
     const derived = hit?.lastEventId === lastEventId ? hit.derived : derive(logs.get(id) ?? []);
     derivedOf.set(id, derived);
+    // Delete first, so the entry goes last in the map's insertion order.
+    cache.delete(id);
     cache.set(id, { lastEventId, derived });
     if (cache.size > CACHE_CAP) cache.delete(cache.keys().next().value as string);
   }
@@ -336,12 +331,16 @@ async function loadResults(
     });
 }
 
-export async function loadRuns(
-  tx: Tx,
-  where: SQL | undefined,
-  options?: LoadOptions,
-): Promise<Run[]> {
-  return (await loadResults(tx, where, options)).map(({ run }) => run);
+/** `loadResults` through one cache, so the run and study reads derive a run once between them. */
+export function resultsLoader() {
+  const cache: SummaryCache = new Map();
+  return (tx: Tx, where: SQL | undefined, options: Omit<LoadOptions, "cache"> = {}) =>
+    loadResults(tx, where, { ...options, cache });
+}
+export type ResultsLoader = ReturnType<typeof resultsLoader>;
+
+export async function loadRuns(tx: Tx, where: SQL | undefined): Promise<Run[]> {
+  return (await loadResults(tx, where)).map(({ run }) => run);
 }
 
 /** The run just written, which must exist. */
@@ -351,173 +350,27 @@ export async function loadRun(tx: Tx, runId: string): Promise<Run> {
   return run;
 }
 
-const toStudy = (row: typeof studies.$inferSelect): Study => ({
-  id: row.id,
-  labId: row.labId,
-  name: row.name,
-  workflowId: row.workflowId,
-  budgetUsd: row.budgetUsd,
-  createdBy: row.createdBy,
-  example: row.example,
-  createdAt: row.createdAt.toISOString(),
-});
-
-function pickValues(values: Derived["values"] = {}, outputs: readonly string[]): Derived["values"] {
-  const picked: Derived["values"] = {};
-  for (const id of outputs) {
-    const value = values[id];
-    if (value) picked[id] = value;
-  }
-  return picked;
-}
-
-/** Each scan's newest completed run: `results` is newest first, so the first completed one seen. */
-function newestCompleted(results: RunResult[]): Map<string, RunResult> {
-  const newest = new Map<string, RunResult>();
-  for (const result of results) {
-    const { state, input } = result.run;
-    if (state.status === "ended" && state.outcome === "completed" && !newest.has(input.id)) {
-      newest.set(input.id, result);
-    }
-  }
-  return newest;
-}
-
-function summarize(study: Study, scanCount: number, results: RunResult[]): StudySummary {
-  const runCounts = {
-    queued: 0,
-    running: 0,
-    awaitingKeys: 0,
-    completed: 0,
-    failed: 0,
-    cancelled: 0,
-  };
-  let lastActivity = study.createdAt;
-  for (const { run } of results) {
-    const { state } = run;
-    if (state.status === "ended") runCounts[state.outcome]++;
-    else if (state.status === "awaiting-keys") runCounts.awaitingKeys++;
-    else runCounts[state.status]++;
-    for (const at of [
-      run.createdAt,
-      "startedAt" in state && state.startedAt,
-      "endedAt" in state && state.endedAt,
-    ]) {
-      if (at && at > lastActivity) lastActivity = at;
-    }
-  }
-  let toCheck = 0;
-  for (const { toCheck: items } of newestCompleted(results).values()) toCheck += items.length;
-  return { ...study, scanCount, runCounts, toCheck, lastActivityAt: lastActivity };
-}
-
-export function pgRunReads(db: PostgresJsDatabase) {
-  // A watermark is read in the same snapshot as the rows/logs, never a TTL or local invalidation.
-  const summaries: SummaryCache = new Map();
+export function pgRunReads(db: PostgresJsDatabase, results: ResultsLoader) {
   return {
     list: (reader: ReadScope) =>
       db.transaction(
-        (tx) =>
-          loadRuns(tx, readableRuns(reader), {
-            cache: summaries,
-            skipUnreadable: true,
-            progress: true,
-          }),
-        {
-          isolationLevel: "repeatable read",
-        },
+        async (tx) =>
+          (await results(tx, readableRuns(reader), { skipUnreadable: true, progress: true })).map(
+            ({ run }) => run,
+          ),
+        { isolationLevel: "repeatable read" },
       ),
 
     get: async (reader: ReadScope, runId: string) =>
       (
         await db.transaction(
-          (tx) => loadRuns(tx, and(readableRuns(reader), eq(runs.id, runId)), { cache: summaries }),
-          {
-            isolationLevel: "repeatable read",
-          },
+          async (tx) =>
+            (
+              await results(tx, and(readableRuns(reader), eq(runs.id, runId)))
+            ).map(({ run }) => run),
+          { isolationLevel: "repeatable read" },
         )
       )[0] ?? null,
-
-    /** The caller's readable studies, newest activity first. */
-    studies: (reader: ReadScope) =>
-      db.transaction(
-        async (tx): Promise<StudySummary[]> => {
-          const rows = await tx.select().from(studies).where(readableStudies(reader));
-          if (rows.length === 0) return [];
-          const ids = rows.map((row) => row.id);
-          const counts = await tx
-            .select({ studyId: studyScans.studyId, n: sql<number>`count(*)::int` })
-            .from(studyScans)
-            .where(inArray(studyScans.studyId, ids))
-            .groupBy(studyScans.studyId);
-          const scanCount = new Map(counts.map(({ studyId, n }) => [studyId, n]));
-          const results = await loadResults(
-            tx,
-            and(readableRuns(reader), inArray(runs.studyId, ids)),
-            { cache: summaries, skipUnreadable: true },
-          );
-          return rows
-            .map((row) =>
-              summarize(
-                toStudy(row),
-                scanCount.get(row.id) ?? 0,
-                results.filter(({ run }) => run.studyId === row.id),
-              ),
-            )
-            .sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt));
-        },
-        { isolationLevel: "repeatable read" },
-      ),
-
-    /** One study with its scans and runs; `outputs` picks the values to include. Null when absent or unreadable. */
-    study: (reader: ReadScope, studyId: string, outputs: readonly string[]) =>
-      db.transaction(
-        async (tx): Promise<StudyDetail | null> => {
-          const [row] = await tx
-            .select()
-            .from(studies)
-            .where(and(readableStudies(reader), eq(studies.id, studyId)));
-          if (!row) return null;
-          const scans = await tx
-            .select({ scan: studyScans, input: inputs })
-            .from(studyScans)
-            .innerJoin(inputs, eq(studyScans.inputId, inputs.id))
-            .where(eq(studyScans.studyId, studyId))
-            .orderBy(asc(studyScans.position));
-          const results = await loadResults(
-            tx,
-            and(readableRuns(reader), eq(runs.studyId, studyId)),
-            { cache: summaries, skipUnreadable: true, progress: true },
-          );
-          const newest = newestCompleted(results);
-          return {
-            study: toStudy(row),
-            scans: scans.map(({ scan, input }) => {
-              const result = newest.get(scan.inputId);
-              return {
-                scan: {
-                  inputId: scan.inputId,
-                  subject: scan.subject,
-                  group: scan.group,
-                  attributes: scan.attributes,
-                  position: scan.position,
-                } satisfies StudyScan,
-                input: toInput(input),
-                runs: results
-                  .filter(({ run }) => run.input.id === scan.inputId)
-                  .map(({ run }) => run),
-                resultRunId: result?.run.id ?? null,
-                values: pickValues(result?.values, outputs),
-                toCheck: (result?.toCheck ?? []).map((item) => ({
-                  ...item,
-                  runId: result?.run.id as string,
-                })),
-              };
-            }),
-          };
-        },
-        { isolationLevel: "repeatable read" },
-      ),
 
     /** Inputs a run can start on: an upload only once completed. */
     async listInputs({ labId, ownerId }: Reader) {

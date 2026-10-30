@@ -1,6 +1,7 @@
 /**
- * A value reported in a unit other than the declared one would plot and flag silently wrong
- * (210 µm drawn as 210 mm): it must stay out of the values, the far rule and the plot.
+ * A run whose plan predates a unit change in `outputs.json` reports in the old unit, which would
+ * plot and flag silently wrong (210 µm drawn as 210 mm): it must stay out of the values, the far
+ * rule and the plot.
  */
 import type { StudyDetail, StudyScanDetail } from "@voluma/contracts/study";
 import type { OutputEntry } from "@voluma/contracts/workflow-files";

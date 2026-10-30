@@ -16,7 +16,7 @@ import { ApiError, getStudy } from "@voluma/api-client";
 import type { StudyDetail } from "@voluma/contracts/study";
 import { Button, Tabs } from "@voluma/ui";
 import { formatUsd } from "@voluma/ui/run";
-import { type BundledWorkflow, catalog, workflowById } from "@voluma/workflow/bundled";
+import { type BundledWorkflow, workflowById } from "@voluma/workflow/bundled";
 import { ChevronDown } from "lucide-react";
 import { Popover } from "radix-ui";
 import { useCallback } from "react";
@@ -30,12 +30,6 @@ const TAB_IDS = ["overview", "check", "scans"] as const;
 type TabId = (typeof TAB_IDS)[number];
 const PANEL_ID = "study-panel";
 
-// Every bundled workflow's headline ids, so one read serves a study of any of them: the API
-// returns only the ids a run reported, and the page reads only its own workflow's.
-const HEADLINE_IDS = [
-  ...new Set(Object.values(catalog).flatMap((w) => w.headline.map((o) => o.id))),
-];
-
 export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
   const { id = "" } = useParams();
   const navigate = useNavigate();
@@ -45,7 +39,7 @@ export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
 
   const study = useQuery({
     queryKey: ["study", id],
-    queryFn: () => getStudy(id, HEADLINE_IDS),
+    queryFn: () => getStudy(id),
     refetchInterval: (query) => (query.state.data?.scans.some(isLive) ? 5000 : false),
   });
 
@@ -70,7 +64,13 @@ export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
   if (onlyRun) return <Navigate to={onlyRun} replace />;
 
   const workflow = workflowById(detail.study.workflowId);
-  if (!workflow) return <LoadError error={new Error("unknown workflow")} retry={() => {}} />;
+  if (!workflow)
+    return (
+      <Notice
+        title="Can't show this study"
+        body={`Its workflow, ${detail.study.workflowId}, isn't in this version of Voluma.`}
+      />
+    );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -241,19 +241,27 @@ function Loading() {
 }
 
 function LoadError({ error, retry }: { error: Error; retry: () => void }) {
-  const missing = error instanceof ApiError && error.status === 404;
+  return error instanceof ApiError && error.status === 404 ? (
+    <Notice
+      title="This study isn't here"
+      body="It may have been removed, or it belongs to another lab."
+    />
+  ) : (
+    <Notice
+      title="Couldn't load the study"
+      body="Check your connection, then try again."
+      retry={retry}
+    />
+  );
+}
+
+function Notice({ title, body, retry }: { title: string; body: string; retry?: () => void }) {
   return (
     <main className="grid flex-1 place-content-center gap-3 text-center">
-      <h1 className="text-lg font-semibold">
-        {missing ? "This study isn't here" : "Couldn't load the study"}
-      </h1>
-      <p className="text-ui text-muted-foreground">
-        {missing
-          ? "It may have been removed, or it belongs to another lab."
-          : "Check your connection, then try again."}
-      </p>
+      <h1 className="text-lg font-semibold">{title}</h1>
+      <p className="text-ui text-muted-foreground">{body}</p>
       <div className="flex justify-center gap-2">
-        {!missing && (
+        {retry && (
           <Button variant="primary" size="sm" onClick={retry}>
             Try again
           </Button>
