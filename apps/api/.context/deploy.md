@@ -136,6 +136,13 @@ The runner service (`pnpm --filter @voluma/runner start`) claims whatever is que
 pointing a local one at staging (`VOLUMA_API_URL`) takes a visitor's run and their keys. Run
 it locally only against `pnpm dev`.
 
+An agent checks staging as a signed-in user with `POST /api/auth/password` (`WORKOS_TEST_EMAIL`,
+`WORKOS_TEST_PASSWORD`) sending `Origin: <APP_URL>` and `Content-Type: application/json`: the
+CSRF check answers any request that changes state without a bearer token, sign-in included,
+`403 forbidden origin` without the first and `415` without the second. Keep every `Set-Cookie`
+(`upload-scan.ts` shows how). Reading runs needs no sign-in: `Authorization: Bearer
+$VOLUMA_DEBUG_TOKEN` reads every lab's runs.
+
 ## Rotating secrets
 
 Each takes minutes. After the Oct 2026 Railway incident, treat anything Railway held
