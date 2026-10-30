@@ -1,7 +1,7 @@
 /** Coherent Review reads and serialized human decisions over the Run-owned event log. */
 import { randomUUID } from "node:crypto";
 import { runEventSchema } from "@voluma/contracts/events";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { RunRecords } from "../../ports";
 import type { Notifier } from "./notifier";
