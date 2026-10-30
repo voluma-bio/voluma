@@ -10,15 +10,15 @@ function scan(body: string, window = 4096) {
 }
 
 describe("BodyScanner", () => {
-  it("ignores model and max_tokens keys nested in a tool schema", () => {
+  it("ignores model keys nested in a tool schema", () => {
     const body =
       '{"tools":[{"name":"t","input_schema":{"type":"object","model":"claude-haiku-4-5","max_tokens":1}}],"model":"claude-opus-4-1","max_tokens":32000,"messages":[]}';
-    expect(scan(body).fields).toEqual({ model: "claude-opus-4-1", maxTokens: 32000 });
+    expect(scan(body).fields).toEqual({ model: "claude-opus-4-1" });
   });
 
   it("handles brackets and quotes inside strings", () => {
     const body = '{"text":"} {\\" \\"model\\":\\"x\\" [","model":"sam-3.1"}';
-    expect(scan(body).fields).toEqual({ model: "sam-3.1", maxTokens: undefined });
+    expect(scan(body).fields).toEqual({ model: "sam-3.1" });
   });
 
   it("refuses a repeated key, an escaped key, and a missing model", () => {
@@ -31,7 +31,7 @@ describe("BodyScanner", () => {
   it("catches a second model after the admission window", () => {
     const body = `{"model":"sam-3.1","pad":"${"x".repeat(5000)}","model":"llama"}`;
     const { fields, later } = scan(body);
-    expect(fields).toEqual({ model: "sam-3.1", maxTokens: undefined });
+    expect(fields).toEqual({ model: "sam-3.1" });
     expect(later).toMatch(/repeats the key "model"/);
   });
 
@@ -46,7 +46,7 @@ describe("BodyScanner", () => {
     const body = '{"model":"sam-3.1","messages" : [], "x": 1}';
     for (let cut = body.indexOf(","); cut <= body.length; cut++) {
       const { fields, later } = scan(body, cut);
-      expect(fields).toEqual({ model: "sam-3.1", maxTokens: undefined });
+      expect(fields).toEqual({ model: "sam-3.1" });
       expect(later).toBeUndefined();
     }
   });

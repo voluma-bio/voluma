@@ -166,11 +166,10 @@ export const heartbeatResponseSchema = z.object({
   /** The server has ended the run; stop it. */
   stop: z.boolean(),
   /**
-   * The run's settled spend in US dollars: heartbeat-reported model cost, plus each finished
-   * provider call's cost, or its reservation if it was cut off. A call still open counts
-   * nothing (the gateway holds its reservation against the cap itself, so the runner does not
-   * stop a run for a reservation). The same provider-call sum as `Run.providerCalls`. Optional
-   * until the API sends it.
+   * The run's known spend in US dollars: heartbeat-reported model cost, plus the cost of each
+   * provider call that has one. A call cut off with no usage (cost unknown) and a call still
+   * open count nothing. The same provider-call sum as `Run.providerCalls`. Optional until the
+   * API sends it.
    */
   spentUsd: z.number().nonnegative().optional(),
 });

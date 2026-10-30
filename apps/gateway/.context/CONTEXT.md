@@ -25,28 +25,29 @@ change it safely.
 - **Take the run lock in its own statement.** `admitCall` runs `SELECT … FOR UPDATE` on the run
   and only then, in later statements, sums `provider_calls`. A statement that waits for a lock
   reads other tables as of its start, so one that locks and sums together lets concurrent calls
-  all pass the cap (seen: 8 calls admitted against $10 with $3 reservations).
-- **A call counts its cost, else its reservation** (`cost_usd` null = unknown, may still be
-  billed). `open` and `cut` rows keep the reservation. A reply that was cut short is never priced
-  from the usage seen so far; it keeps the reservation.
+  all pass the cap (seen: 8 calls admitted against a $10 cap).
+- **Nothing is held at admission.** A call counts its `cost_usd`; null on an ended call (`cut`)
+  means the cost is unknown (the provider may have billed it). A reply that was cut short is never
+  priced from the usage seen so far. Spend is the sum of known costs; unknown-cost calls are
+  counted apart (`providerCalls.unknownCostCalls`) and shown as "cost unknown", never as $0.
 - **Only Meta is enabled** (`ProviderDef.enabled`); Anthropic and OpenAI have definitions but
   every route is a 403 until the gate in [TODO.md](TODO.md) is met.
-- **The body is the caller's.** `body.ts` reads `model` and `max_tokens` as top-level keys only,
+- **The body is the caller's.** `body.ts` reads `model` as a top-level key only,
   and one scanner runs over the whole body as it is forwarded, in constant memory. The first 4 KB
-  must hold a top-level `model` (else 403); a repeated `model` or token key anywhere, or an
+  must hold a top-level `model` (else 403); a repeated `model` key anywhere, or an
   escaped top-level key, refuses at admission or, past 4 KB, errors the upstream stream so the
   call settles `cut`. Never read a price-relevant field from a body by regex.
 - **A null `runs.cost_cap_usd` is no spend cap.** Admission skips the spend check; the in-flight
-  limit, exact routes and model allowlist still apply, and every call is still recorded.
-- **Reservations gate admission only.** Admission counts `open` rows at their reservation; the
-  heartbeat's `spentUsd`, `providerCalls` and the org's daily total count settled rows only, so
-  the runner never stops a run for a reservation the gateway already holds against the cap.
+  limit, exact routes and model allowlist still apply, and every call is still recorded. With a
+  cap, admission refuses (402) once known spend (model cost plus known call costs) has reached it;
+  calls in flight and cut calls count nothing, so the cap can be passed by what is already running.
+  The heartbeat's `spentUsd`, `providerCalls` and the org's daily total use the same known sum.
+  `provider_calls.reserved_usd` is unused (drop: `apps/api/.context/TODO.md`).
 - **Exact routes** (`providers.ts`). A path with `%`, `..`, `.` or `//` segments is refused, not
   normalized. Anthropic and OpenAI have message routes only; their Files and Batches APIs stay
   closed because every run shares the account. A Meta `DELETE /v1/files/{id}` needs an id this
   run uploaded (recorded on the upload's row).
-- **A model without a price is refused** (Pi's catalog, plus SAM by frame). The reservation is
-  `max_tokens` at the output price (SAM: 15,000 frames, $3).
+- **A model without a price is refused** (Pi's catalog, plus SAM by frame).
 - **Reading usage is bounded** (`scan.ts`, `observe.ts`): an event stream is read by line, any
   other reply as one text, each cut to its last 64 KB, and numbers are read by pattern (whitespace
   allowed) from the last unescaped `"usage":{`. An Anthropic or Responses stream that ends before
@@ -83,11 +84,10 @@ change it safely.
 ## Known limits
 
 - The model name must appear in the first 4 KB. A `model` repeated after that cuts the call
-  mid-upload, so the provider has seen part of the body and may have billed it (the row keeps
-  its reservation).
+  mid-upload, so the provider has seen part of the body and may have billed it (its cost stays unknown).
 - The row for a call exists once admitted; if the database is down the call is refused (503).
-  A settle that still fails after its retries leaves the row `open` (counting its reservation)
-  until the stale sweep.
+  A settle that still fails after its retries leaves the row `open` (counting nothing)
+  until the stale sweep, which cuts it.
 
 ## Not built yet
 

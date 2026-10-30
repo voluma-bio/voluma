@@ -13,7 +13,6 @@ import type { Provider } from "./token";
 export const SAM_MODEL = "sam-3.1";
 export const SAM_USD_PER_FRAME = 0.0002;
 export const SAM_MIN_FRAMES = 50;
-export const SAM_MAX_FRAMES = 15_000;
 
 let catalog: ReturnType<typeof createModels> | undefined;
 function models() {
@@ -39,31 +38,12 @@ export type Observed = {
 type Rates = { input: number; output: number; cacheRead: number; cacheWrite: number };
 type Priced = Rates & { tiers?: (Rates & { inputTokensAbove: number })[] };
 
-function priceOf(provider: Provider, id: string): { cost: Priced; maxTokens: number } | undefined {
-  const model = models().getModel(provider, id);
-  return model && { cost: model.cost, maxTokens: model.maxTokens };
-}
+const priceOf = (provider: Provider, id: string): Priced | undefined =>
+  models().getModel(provider, id)?.cost;
 
 /** Whether a model call to this id has a price; SAM is priced by frame. */
 export const hasPrice = (provider: Provider, id: string) =>
   (provider === "meta" && id === SAM_MODEL) || priceOf(provider, id) !== undefined;
-
-/**
- * Dollars held when a call is admitted. SAM: the 15,000-frame maximum, which the caller cannot
- * lower. A model call: `maxTokens` (the request's, else the model's maximum) at the output price
- * of the most expensive tier. Null: the model has no price.
- */
-export function reservationUsd(
-  provider: Provider,
-  model: string,
-  maxTokens: number | undefined,
-): number | null {
-  if (provider === "meta" && model === SAM_MODEL) return SAM_MAX_FRAMES * SAM_USD_PER_FRAME;
-  const priced = priceOf(provider, model);
-  if (!priced) return null;
-  const output = Math.max(priced.cost.output, ...(priced.cost.tiers ?? []).map((t) => t.output));
-  return ((maxTokens ?? priced.maxTokens) * output) / 1e6;
-}
 
 /** What the call cost, from what it reported; null when it reported nothing to price. */
 export function costUsd(provider: Provider, model: string, seen: Observed): number | null {
@@ -78,8 +58,8 @@ export function costUsd(provider: Provider, model: string, seen: Observed): numb
   const uncached =
     provider === "anthropic" ? seen.inputTokens : Math.max(0, seen.inputTokens - cacheRead);
   const promptTokens = uncached + cacheRead + cacheWrite;
-  const tier = (priced.cost.tiers ?? []).filter((t) => promptTokens > t.inputTokensAbove).at(-1);
-  const rate = tier ?? priced.cost;
+  const tier = (priced.tiers ?? []).filter((t) => promptTokens > t.inputTokensAbove).at(-1);
+  const rate = tier ?? priced;
   return (
     (uncached * rate.input +
       cacheRead * rate.cacheRead +

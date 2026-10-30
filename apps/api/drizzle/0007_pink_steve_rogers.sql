@@ -1,0 +1,1 @@
+ALTER TABLE "provider_calls" ALTER COLUMN "reserved_usd" DROP NOT NULL;
