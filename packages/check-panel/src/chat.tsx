@@ -5,7 +5,13 @@
  * talks to a finished run; everyone else sees one line saying why.
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ApiError, runMessageSnapshotUrl, sendRunMessage, subscribe } from "@voluma/api-client";
+import {
+  ApiError,
+  cancelRun,
+  runMessageSnapshotUrl,
+  sendRunMessage,
+  subscribe,
+} from "@voluma/api-client";
 import type { Me } from "@voluma/contracts/auth";
 import { type ConversationItem, conversation } from "@voluma/contracts/conversation";
 import type { RunEvent } from "@voluma/contracts/events";
@@ -200,6 +206,13 @@ export function Chat({
     },
   });
 
+  // Abandons the correction: its threads end, its files are restored, the run keeps its
+  // earlier results.
+  const cancel = useMutation({
+    mutationFn: () => cancelRun(run.id),
+    onSuccess: (next) => client.setQueryData<Run>(["run", run.id], next),
+  });
+
   const { items } = log;
   const last = items.at(-1);
   const active = run.state.status === "queued" || run.state.status === "running";
@@ -224,7 +237,7 @@ export function Chat({
   if (send.isPending) status = "Sending…";
   else if (redoing)
     status = `Redoing ${titleOf(lastGo.taskId ?? taskId) ?? "the task"}. The new result shows here when it's checked.`;
-  else if (active) status = "Thinking…";
+  else if (active) status = "The AI is answering…";
   else if (waiting) status = "Waiting on you";
   else if (redone)
     status = `Redone ${titleOf(lastPerson.taskId ?? taskId) ?? "the task"}. Its new result is in To check.`;
@@ -247,7 +260,6 @@ export function Chat({
                   item={item}
                   runId={run.id}
                   about={item.taskId !== taskId && item.taskId ? titleOf(item.taskId) : undefined}
-                  queued={redoing && item.seq > lastGo.seq}
                 />
               )}
             </li>
@@ -322,12 +334,18 @@ export function Chat({
           className="w-full resize-y rounded-md border border-input bg-card px-2.5 py-2 text-ui text-foreground placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         />
         <div className="flex items-center justify-end gap-2">
-          {send.isError && (
+          {(send.isError || cancel.isError) && (
             <p role="alert" className="mr-auto text-meta text-destructive">
-              {sendError(send.error)}
+              {send.error ? sendError(send.error) : `Couldn't cancel: ${cancel.error?.message}`}
             </p>
           )}
-          <Button type="submit" size="sm" disabled={!note.trim() || send.isPending}>
+          {active && (
+            <Button size="sm" disabled={cancel.isPending} onClick={() => cancel.mutate()}>
+              {redoing ? "Cancel the redo" : "Cancel"}
+            </Button>
+          )}
+          {/* One message per claim: the draft waits while the AI answers. */}
+          <Button type="submit" size="sm" disabled={!note.trim() || send.isPending || active}>
             Send
           </Button>
         </div>
@@ -341,14 +359,11 @@ function Said({
   item,
   runId,
   about,
-  queued,
 }: {
   item: Extract<ConversationItem, { from: "person" }>;
   runId: string;
   /** Another task's title, when the message was about that one. */
   about?: string;
-  /** Sent while a redo runs: the AI reads it after. */
-  queued: boolean;
 }) {
   return (
     <div className="ml-6 flex flex-col gap-1.5 rounded-lg bg-muted px-3 py-2">
@@ -376,9 +391,6 @@ function Said({
           className="max-h-28 self-start rounded border border-border"
         />
       )}
-      {queued && (
-        <p className="text-meta text-muted-foreground">The AI reads this after the redo.</p>
-      )}
     </div>
   );
 }
@@ -404,7 +416,7 @@ function sendError(error: Error) {
   if (error instanceof ApiError && error.status === 403)
     return "You can't change this run: only its starter can, and never an example.";
   if (error instanceof ApiError && error.status === 409)
-    return "This run can't be reopened right now.";
+    return "The AI is still answering your last message. Wait for its reply, or cancel it.";
   if (error instanceof ApiError && error.status === 413) return "The view snapshot is too large.";
   return `Couldn't send: ${error.message}`;
 }
