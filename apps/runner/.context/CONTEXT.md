@@ -280,7 +280,7 @@ thread takes its model from the log, so a base-URL override set for one model ca
 `packages/harness/src/tools/view-image.ts` reads up to 4 PNG or JPEG files from the run's bucket (a path outside
 the mounts, such as the sandbox's `/tmp`, through the thread's sandbox: `tools/read-whole.ts`) and returns them as
 image content; a `ToolResult` may carry `images`, which the Pi adapter turns into image blocks. An image over
-1 MiB or 2000 px a side is downscaled with sharp (fit to 2000 px, JPEG, quality lowered until under 1 MiB) and the
+1 MiB or 2000 px a side is downscaled with sharp (EXIF orientation applied, fit to 2000 px, JPEG, quality lowered until under 1 MiB) and the
 result line says from what size. The `tool.result` event holds only text (path, type, size, sha256).
 
 **Stored history keeps images by reference.** `adapters/pi/image-refs.ts` wraps the History port
@@ -289,14 +289,26 @@ and the bytes the model saw (so the downscaled ones) are written to `historyImag
 (`scratch/<thread name>/.images/<sha256>`, content-addressed). A resumed thread loads the images of its last 2 image
 messages back from R2 (the only ones a request carries, `adapters/pi/elide-images.ts`); older ones load as the
 "no longer shown" note, and an object that is gone or whose sha256 differs loads as a short "not available" note.
-Rows stored before this hold inline image blocks and load unchanged. The runner's resume is the only reader that
+Reads stop after the image's 1 MiB limit: its scratch object can be overwritten by a sandbox.
+Rows stored before this hold inline image blocks and use the same last-two-tool-results rule, even when newer
+references are unavailable; user images do not count toward that limit. Stored rows are not rewritten by a load.
+Request-time elision counts a successful `view_image` result even after hydration replaced every image with
+an unavailable note, so the next image call still displaces the older result. Failed calls do not consume a slot.
+The runner's resume is the only reader that
 parses history; `export:run`, `import:run` and the example seed copy rows as text, so a dump moved to another bucket
 keeps references that resolve only in the bucket that holds the objects (they load as the note elsewhere).
+The example seed retains the source run's image keys, not copies under the example. History rows are trusted:
+the loader reads the key in each reference, even when it names another run. A database export or archive alone
+is therefore not an independent image backup. Retaining those objects, remapping them for portable copies,
+and rolling back to a runner that cannot decode `imageRef` need an operator policy before cleanup or rollback;
+there is no automatic conversion to inline rows.
 
 **Tools resolve paths the same way.** `ThreadLayout.resolve` reads a relative path from the thread's `dir`
 (`$SCRATCH`); `keyOf` resolves first. A missing file is refused as "No file at <path>" plus the files in its folder
-(`Files.list`, `FileNotFound`), never the store's own error. Evidence may be given as a plain path
-(`/outputs/<task>/x`, `/scratch/<thread>/x`); `keep` drops a repeated `<task>/` in front of an outputs path.
+that this thread can read (`Files.list`, `FileNotFound`), never the store's own error or a checker's uncited sibling
+files. Sandbox reads bound the bytes read, not the size reported by `stat` (files can grow; `/proc` reports zero).
+Evidence may be given as a plain path (`/outputs/<task>/x`, `/scratch/<thread>/x`). An outputs `{root, path}` ref
+is always relative to `/outputs/<task>/`: `keep` never strips another task-id segment, which could name a real subfolder.
 
 **Provider errors fail fast.** `run.ts` passes `maxRetries: 3` to Pi, which retries a 408, 429
 (waiting the server's `retry-after`), 5xx or dropped connection. `model-retry.ts` wraps every
