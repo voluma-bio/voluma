@@ -92,5 +92,6 @@ for (let wait = 1000; !(await isMigrated(db)); wait = Math.min(wait * 2, 30_000)
   log(`waiting for the migration (provider_calls); retrying in ${wait / 1000}s`);
   await new Promise((resolve) => setTimeout(resolve, wait));
 }
-log(`${await sweep()} stale open row(s) cut at boot`);
+await sweep();
+log("boot sweep done");
 setInterval(sweep, SWEEP_MS).unref();

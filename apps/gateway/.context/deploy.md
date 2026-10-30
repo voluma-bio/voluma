@@ -87,7 +87,7 @@ Keys live in this service's env only. The runner has `VOLUMA_GATEWAY_URL` and th
 `GATEWAY_TOKEN_SECRET`.
 
 Checks at cutover: `/health` 200; a POST on a route with no or a bad token 401; a path outside
-the routes 403; boot log `up on :10000; keys for meta` (so the API's migrations had run).
+the routes 403; boot log `up on :10000; keys for meta`, then `boot sweep done` (the API's migration had run).
 
 Things only the deployed Render service can show: whether its proxy routes by `Host` (the
 Railway result is above: a sandbox reached the API with the gateway's SNI and the API's `Host`;

@@ -115,7 +115,7 @@ services:
     # No pre-deploy: at boot the gateway waits for the API's migration (/health answers 503 until
     # `provider_calls` exists).
     startCommand: cd apps/gateway && exec node --import tsx src/main.ts
-    healthCheckPath: /health # 200 after `select 1`; 503 while draining
+    healthCheckPath: /health # 200 once `provider_calls` exists; 503 before the migration and while draining
     maxShutdownDelaySeconds: 90 # above GATEWAY_DRAIN_SECONDS (60) plus the row cleanup after it
     buildFilter:
       paths:
