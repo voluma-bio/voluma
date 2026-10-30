@@ -113,6 +113,9 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   `export:run --id <runId> --out <dir|r2:dev/…>` dumps its rows to `run.json`, and
   `import:run --from <dir|r2:prefix> [--replace]` loads them (events are checked with
   `runEventSchema`; an existing run is refused without `--replace`). Evidence stays in R2.
+  `archive:run --id <runId> [--out <dir>] --remote` (all three are in `src/ops/`, since they read both domains'
+  tables) copies an ended run's rows to `~/.local/share/voluma-backups/runs/<runId>/` and deletes
+  them; it refuses a non-local database without `--remote`, like `import:run`. See [.context/deploy.md](.context/deploy.md).
   `r2:put --from <dir> --to r2:dev/<prefix>` uploads a folder. An `r2:` location is a prefix in the
   `R2_BUCKET` the dev servers use (`r2-dir.ts`). Operator scripts use `DATABASE_URL`, else the
   database `pnpm dev` wrote to `.dev/env.json`; each prints its database and bucket first, writes to
@@ -160,9 +163,10 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   metadata is inserted. Retries keep the same UUID/pixels and return the original actor/time;
   conflicting captures return 409. Run's internal `generation` changes on example replacement:
   every snapshot query and insert uses it, so late saves cannot attach to the replacement.
-- Screenshot geometry is checked against the actual scan in the browser on restore, not by
-  decoding DICOM on the server. The API validates references against the pinned Review
-  projection and currently rejects 3D capture. `RUN_FILES_DIRECTORY` selects local run-file
+- A screenshot is one grid-viewer pane (`slice` or `3d`) on a `gridId`. The API checks the
+  grid has an image volume in the pinned revision, the crosshair lies on it, and every
+  structure and focus reference belongs to the revision; it refuses new `acquired` (DICOM
+  viewer) saves, which stay listed. `RUN_FILES_DIRECTORY` selects local run-file
   storage at the composition root; it never redirects the read-only reference archive.
 - `runs.ts` serves `GET /runs/:runId/assets/:sha256/*`: a converted review asset
   (`reviewAssetKey`, written by the runner's conversion worker) as a 302 to a presigned R2 GET

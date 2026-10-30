@@ -209,13 +209,14 @@ Why TypeScript: the decoder takes seconds there and minutes in Python.
 
 An agent in its own worktree tries a workflow change on the real system like this:
 
-1. `pnpm db:up` once, then `pnpm dev`. With `VOLUMA_META_API_KEY` in `.env` it also starts the gateway
+1. `pnpm db:up` once, then `pnpm dev`. That runs without SAM. **Every SAM call is paid and needs Jimmy's
+   yes first** (say how many calls and why); with it, `pnpm dev --sam` and `VOLUMA_META_API_KEY` in `.env` also start the gateway
    (this worktree's database, a per-launch secret) and a Cloudflare quick tunnel to it, and writes the
    tunnel's URL and the secret to `.dev/env.json`, where a local runner reads them. Wait for the
    `gateway https://…trycloudflare.com` line before starting the runner.
 2. `RUNNER_MODEL=deepseek/deepseek-flash pnpm --filter @voluma/runner start` (set in `.env` or the shell:
-   one cheap model for every role; `RUNNER_THINKING` as usual). Meta SAM is the only paid call and goes
-   through the local gateway, about $0.05 each.
+   one cheap model for every role; `RUNNER_THINKING` as usual). Test runs may use any model; production and
+   demo runs (staging) use Meta models only. Meta SAM is the only Meta call here, about $0.10 each.
 3. `pnpm --filter @voluma/runner try-run [--scan <inputId>] [--workflow <id>] [--outputs a,b] [--notes …]`
    (`src/try-run.ts`) signs in as `WORKOS_TEST_EMAIL`, starts a study and run on the reference scan,
    follows the run's event stream until it ends and prints per-task status, outputs reported and missing,
@@ -234,7 +235,7 @@ boot line says `gateway <url>` or `gateway off`), and quick tunnels are best eff
 gives no uptime promise). Tried and not chosen: Tailscale Funnel (ties it to one person's tailnet; fixed
 hostname and shared ports), Modal's own tunnel (exposes a port of a sandbox, it cannot reach back to this
 machine), localtunnel (no binary, but flaky and gates browsers behind a page).
-Without the tunnel (no Meta key, download or hash check failed, no network) `pnpm dev` says so and writes no gateway URL:
+Without the tunnel (no `--sam`, no Meta key, download or hash check failed, no network) `pnpm dev` says so and writes no gateway URL:
 runs work, sandboxes have no network and `segment_sam` is not offered.
 
 # Runner: `dev-sandbox` drives the real sandbox, tools and gateway without a model
@@ -262,12 +263,26 @@ thread takes its model from the log, so a base-URL override set for one model ca
 
 # Runner: `view_image` shows the model files the sandbox wrote
 
-`packages/harness/src/tools/view-image.ts` reads up to 4 PNG or JPEG files (1 MiB and 2000 px a side each, type
-checked by magic bytes) from the run's bucket and returns them as image content; a `ToolResult`
-may carry `images`, which the Pi adapter turns into image blocks. The `tool.result` event holds
-only text (path, type, size, sha256). The images are in the thread's history (resume needs
-them), but `adapters/pi/elide-images.ts` keeps image blocks only for the last 2 `view_image`
-calls in each request, so request size does not grow with the thread.
+`packages/harness/src/tools/view-image.ts` reads up to 4 PNG or JPEG files from the run's bucket (a path outside
+the mounts, such as the sandbox's `/tmp`, through the thread's sandbox: `tools/read-whole.ts`) and returns them as
+image content; a `ToolResult` may carry `images`, which the Pi adapter turns into image blocks. An image over
+1 MiB or 2000 px a side is downscaled with sharp (fit to 2000 px, JPEG, quality lowered until under 1 MiB) and the
+result line says from what size. The `tool.result` event holds only text (path, type, size, sha256).
+
+**Stored history keeps images by reference.** `adapters/pi/image-refs.ts` wraps the History port
+(`supervise-run.ts`): a message is stored with each image block replaced by `{type: "imageRef", key, sha256, mimeType}`,
+and the bytes the model saw (so the downscaled ones) are written to `historyImageKey` in the thread's scratch
+(`scratch/<thread name>/.images/<sha256>`, content-addressed). A resumed thread loads the images of its last 2 image
+messages back from R2 (the only ones a request carries, `adapters/pi/elide-images.ts`); older ones load as the
+"no longer shown" note, and an object that is gone or whose sha256 differs loads as a short "not available" note.
+Rows stored before this hold inline image blocks and load unchanged. The runner's resume is the only reader that
+parses history; `export:run`, `import:run` and the example seed copy rows as text, so a dump moved to another bucket
+keeps references that resolve only in the bucket that holds the objects (they load as the note elsewhere).
+
+**Tools resolve paths the same way.** `ThreadLayout.resolve` reads a relative path from the thread's `dir`
+(`$SCRATCH`); `keyOf` resolves first. A missing file is refused as "No file at <path>" plus the files in its folder
+(`Files.list`, `FileNotFound`), never the store's own error. Evidence may be given as a plain path
+(`/outputs/<task>/x`, `/scratch/<thread>/x`); `keep` drops a repeated `<task>/` in front of an outputs path.
 
 **Model calls retry.** `run.ts` passes `maxRetries: 3` to Pi, which retries a 408, 429 (waiting
 the server's `retry-after`), 5xx or dropped connection. `model-retry.ts` wraps every role's calls
