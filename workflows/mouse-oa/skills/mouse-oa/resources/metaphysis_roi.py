@@ -13,7 +13,7 @@ It writes regions only: TV, BV and BV/TV of ROI-3 (deck #16-18) and Tb.N/Th/Sp, 
 `morphometry.py trabecular` on roi3-tissue.npy, and Ct.Th is `morphometry.py cortical` on cortex.npy with the distal face as --surface.
 
 --annotations is a JSON file of indices on the aligned grid. It needs "grid_id" (the grid_id of tibia-frame.json; a file without it
-or from another grid is refused). This script reads one key, other sections of the file are ignored:
+or from another grid is refused). This script reads one key; any other key is refused, and so is a value of the wrong form or an index outside the grid:
   growth_plate_distal_curves  required: the distal face of the growth-plate band (the side facing the shaft), curves (below),
                               traced on the coronal sections of tibia-hu.npy
 Curves (every traced surface): {"axis": 1, "height": "row", "slices": {"<v>": [[w, u], ...]}}: the coronal section at
@@ -30,21 +30,23 @@ which face and sections. It also stops on an empty ROI-3.
 
 Writes: <out>/roi3-tissue.npy  ROI-3, bool, on the aligned grid, with its sidecar
         <out>/cortex.npy  the cortex mask for Ct.Th, bool, with its sidecar
-        <out>/growth-plate-distal-face.npy  W index of the distal face per (V,U), float32, with its sidecar
-        <out>/roi3.json  the parameters used and the cortex estimate (cortex_estimate_mm, cortex_mm_used, threshold)
+        <out>/growth-plate-distal-face.npy  W index of the distal face per (V,U), float32, NaN off the tibia's footprint, with its sidecar (a surface object)
+        <out>/roi-metaphyseal.npy, cortex-object.npy  the same two masks cropped to their bounding boxes, uint8 (the mask objects)
+        <out>/roi3.json  the result record: the parameters used and the cortex estimate (cortex_estimate_mm, cortex_mm_used, threshold);
+                         `objects` holds roi-metaphyseal, cortex and growth-plate-distal-face
         <out>/qc-roi3.jpg  coronal and axial sections: ROI-3 cyan, cortex orange
-Prints: one JSON line {params, qc, roi3_tissue, cortex, distal_face, cortex_estimate_mm, roi3_voxels}
+Prints: one JSON line {out, values, objects, qc, roi3_tissue, cortex, distal_face, cortex_estimate_mm, roi3_voxels}
 Example: python metaphysis_roi.py --hu-aligned tibia-hu.npy --mask tibia-mask.npy --hu-json hu.json --annotations annotations.json --proximal-face iioc/growth-plate-proximal-face.npy --proximal-valid iioc/growth-plate-proximal-valid.npy --out roi3/
 Exits 2 with one sentence on bad input, before writing anything.
 """
 
-import json
 from pathlib import Path
 
 import matplotlib
 import numpy as np
+import objects
 import sidecar
-from annotations import load_annotations, traced_surface
+from annotations import load_annotations, need, traced_surface
 from envelope import close_and_fill
 from scipy import ndimage as ndi
 
@@ -69,7 +71,7 @@ def check_below_proximal(gd, dv, dlo, dhi, prox, pv, tib, vox):
                      'face is not known over the whole proximal one: '
                      + ' and '.join(f'trace the distal face on a section near V={v} too'
                                     for v, miss in ((plo, dlo > plo), (phi, dhi < phi)) if miss))
-    footprint = ndi.binary_fill_holes(tib.any(axis=0))
+    footprint = objects.footprint(tib)
     vs = np.arange(gd.shape[0])[:, None]
     cross = (gd <= prox) & footprint & (vs >= max(plo, dlo)) & (vs <= min(phi, dhi))
     bad = cross & pv & dv
@@ -128,22 +130,23 @@ def main():
     ap.add_argument('--cortex-search-factor', type=float, default=2.0, help='the cortex mask reaches this multiple of the cortex depth in from the outer edge')
     a = ap.parse_args()
     g = sidecar.grid(sidecar.sidecar_path(a.mask))
-    ann = load_annotations(a.annotations, g['grid_id'])
+    ann = load_annotations(a.annotations, g)
     vox = g['spacing_zyx_mm'][0]
     h = np.load(a.hu_aligned, mmap_mode='r')
     tib = np.load(a.mask)
-    if 'growth_plate_distal_curves' not in ann:
-        sidecar.fail(
-            'annotations.json has no "growth_plate_distal_curves": trace the distal face of the growth-plate band on coronal '
-            'sections of tibia-hu.npy (the side facing the shaft, like the proximal face in section A) and run again'
-        )
     a.threshold = sidecar.bone_threshold_hu(a.hu_json, a.threshold)
-    gd = traced_surface(ann['growth_plate_distal_curves'], 'growth_plate_distal_curves', h.shape)[0].astype(np.float32)
+    gd_spec = need(
+        ann,
+        'growth_plate_distal_curves',
+        'trace the distal face of the growth-plate band on coronal sections of tibia-hu.npy (the side facing the shaft, '
+        'like the proximal face in section A) and run again',
+    )
+    gd, dv = traced_surface(gd_spec, 'growth_plate_distal_curves', h.shape)
+    gd = gd.astype(np.float32)
     prox = np.load(a.proximal_face)
     if prox.shape != gd.shape:
         sidecar.fail(f'--proximal-face is {prox.shape} but the distal face is {gd.shape}: pass the face of the same tibia frame')
-    dv = traced_surface(ann['growth_plate_distal_curves'], 'growth_plate_distal_curves', h.shape)[1]
-    dlo, dhi = (f(int(k) for k in ann['growth_plate_distal_curves']['slices']) for f in (min, max))
+    dlo, dhi = (f(int(k) for k in gd_spec['slices']) for f in (min, max))
     check_below_proximal(gd, dv, dlo, dhi, prox, np.load(a.proximal_valid), tib, vox)
     w = np.arange(h.shape[0])[:, None, None]
     rel = (w - gd[None]) * vox * 1000  # um below the distal face
@@ -174,21 +177,16 @@ def main():
         cortex_clearance_um=a.cortex_clearance_um,
         cortex_search_factor=a.cortex_search_factor,
     )
-    for name, arr in (
-        ('roi3-tissue.npy', roi),
-        ('cortex.npy', cortex),
-        ('growth-plate-distal-face.npy', gd),
-    ):
+    for name, arr in (('roi3-tissue.npy', roi), ('cortex.npy', cortex)):
         np.save(out / name, arr)
-        sidecar.write(
-            out / name,
-            grid_id=g['grid_id'],
-            spacing_zyx_mm=g['spacing_zyx_mm'],
-            inputs=inputs,
-            params=params,
-            script='metaphysis_roi.py',
-        )
-    (out / 'roi3.json').write_text(json.dumps(params, indent=1) + '\n')
+        sidecar.write(out / name, grid_id=g['grid_id'], spacing_zyx_mm=g['spacing_zyx_mm'], inputs=inputs, params=params)
+    like = sidecar.sidecar_path(a.mask)
+    meta = {'inputs': inputs, 'params': params}
+    placed = {
+        'roi-metaphyseal': objects.mask(out / 'roi-metaphyseal.npy', roi, like=like, **meta),
+        'cortex': objects.mask(out / 'cortex-object.npy', cortex, like=like, **meta),
+        'growth-plate-distal-face': objects.surface(out / 'growth-plate-distal-face.npy', gd, 0, like=like, where=objects.footprint(tib), **meta),  # heights along W
+    }
     vs = np.linspace(*np.flatnonzero(roi.any(axis=(0, 2)))[[0, -1]], 4).astype(int)
     fig, axs = plt.subplots(2, 4, figsize=(20, 10))
     for v, ax in zip(vs, axs[0]):
@@ -207,8 +205,11 @@ def main():
     qc = out / 'qc-roi3.jpg'
     sidecar.save_image(fig, qc)
     plt.close(fig)
-    sidecar.emit(
-        params=str(out / 'roi3.json'),
+    sidecar.emit_values(
+        out / 'roi3.json',
+        {},
+        params,
+        objects=placed,
         qc=str(qc),
         roi3_tissue=str(out / 'roi3-tissue.npy'),
         cortex=str(out / 'cortex.npy'),

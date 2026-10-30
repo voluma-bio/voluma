@@ -8,7 +8,10 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseEnv } from "node:util";
+import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { modelRefSchema } from "@voluma/contracts/ids";
+import { parseTokenSecrets } from "@voluma/provider-calls/token";
+import { THINKING_LEVELS } from "@voluma/workflow/definition";
 import { PROVIDERS } from "./providers.ts";
 
 const file = process.env.VOLUMA_ENV_FILE ?? resolve(import.meta.dirname, "../../../.env");
@@ -35,14 +38,6 @@ function positiveInt(name: string, fallback: number, min = 1): number {
   return value;
 }
 
-function optionalPositiveNumber(name: string): number | undefined {
-  const raw = optional(name);
-  if (raw === undefined) return undefined;
-  const value = Number(raw);
-  if (!Number.isFinite(value) || value <= 0) throw new Error(`${name} must be a positive number`);
-  return value;
-}
-
 /**
  * The API to claim from: `VOLUMA_API_URL` and `VOLUMA_API_TOKEN`, else the local API
  * `pnpm dev` started in this worktree (tools/dev.mjs writes `.dev/env.json`).
@@ -63,7 +58,7 @@ function apiEndpoint(): { baseUrl: string; token: string } {
 }
 
 /** A model as `provider/id`, e.g. `openai/gpt-5.6-luna`. */
-type ModelRef = { provider: string; id: string };
+export type ModelRef = { provider: string; id: string };
 function modelRef(name: string, fallback?: string): ModelRef {
   const text = fallback ? (optional(name) ?? fallback) : required(name);
   const [provider, ...rest] = text.split("/");
@@ -73,6 +68,29 @@ function modelRef(name: string, fallback?: string): ModelRef {
     throw new Error(`${name} must be provider/model-id, got "${text}"`);
   }
   return { provider, id };
+}
+
+/** The aliases a role file may name, with the model each takes when its variable is unset. */
+const MODEL_ALIASES: Record<string, string | undefined> = {
+  wonder: "meta/muse-wonder-1.0",
+  opus: undefined,
+  astra: undefined,
+};
+
+/**
+ * The model of each alias: `RUNNER_MODEL_<ALIAS>`, else the alias's default, else the alias is
+ * absent (a run whose role file names it fails when it starts). `RUNNER_MODEL`, when set, forces
+ * every alias to one model (a plumbing check on a cheap provider).
+ */
+function modelAliases(): Record<string, ModelRef> {
+  const forced = optional("RUNNER_MODEL") ? modelRef("RUNNER_MODEL") : undefined;
+  const models: Record<string, ModelRef> = {};
+  for (const [alias, fallback] of Object.entries(MODEL_ALIASES)) {
+    const name = `RUNNER_MODEL_${alias.toUpperCase()}`;
+    if (forced) models[alias] = forced;
+    else if (fallback || optional(name)) models[alias] = modelRef(name, fallback);
+  }
+  return models;
 }
 
 /**
@@ -87,6 +105,16 @@ function visitorModel(): ModelRef {
     );
   }
   return ref;
+}
+
+/** `RUNNER_THINKING`, one of Pi's thinking levels; unset: Pi sends none. */
+function thinkingLevel(): ModelThinkingLevel | undefined {
+  const raw = optional("RUNNER_THINKING");
+  if (raw === undefined) return undefined;
+  const level = THINKING_LEVELS.find((l) => l === raw);
+  if (!level)
+    throw new Error(`RUNNER_THINKING must be one of ${THINKING_LEVELS.join(", ")}, got "${raw}"`);
+  return level;
 }
 
 /** Whether a visitor's Meta key and scan may go to this model (see `visitorModel`). */
@@ -109,7 +137,7 @@ export function modalToken(): { tokenId: string; tokenSecret: string } | undefin
  * sandbox/Dockerfile by the "Sandbox image" workflow, which prints the new digest).
  */
 const SANDBOX_IMAGE =
-  "ghcr.io/voluma-bio/voluma-sandbox@sha256:00ee4e57a712f19b44e4ead17572083f558e31c229d396778dbbe04d33d525d1";
+  "ghcr.io/voluma-bio/voluma-sandbox@sha256:659e2ce71c08dd232f7512672546d23f589596e41d061e2bf843e37211d3a4c2";
 
 /**
  * The commit this runner's checkout is at, which a run records as the source of its workflow
@@ -128,33 +156,19 @@ export type Config = ReturnType<typeof runnerConfig>;
 
 export function runnerConfig() {
   const modal = modalToken();
-  // Each role's model on a `voluma` run; a role left out takes the one before it.
-  const worker = modelRef("RUNNER_MODEL");
-  const check = optional("RUNNER_CHECK_MODEL") ? modelRef("RUNNER_CHECK_MODEL") : worker;
-  // Muse Wonder when a Meta key is set, else the worker's model, so OpenAI-only dev works.
-  const main = optional("RUNNER_MAIN_MODEL")
-    ? modelRef("RUNNER_MAIN_MODEL")
-    : optional("VOLUMA_META_API_KEY")
-      ? modelRef("RUNNER_MAIN_MODEL", "meta/muse-wonder-1.0")
-      : worker;
-  const roles = { worker, check, main };
-  // Off unless set: lab data goes to Standard-mode Meta models by default, so a fallback to
-  // another provider is a per-deploy choice (see model-fallback.ts).
-  const fallbackModel = optional("RUNNER_FALLBACK_MODEL")
-    ? modelRef("RUNNER_FALLBACK_MODEL")
-    : undefined;
-  if (fallbackModel) {
-    required(`VOLUMA_${fallbackModel.provider.toUpperCase()}_API_KEY`);
-    if (fallbackModel.provider === "meta" && fallbackModel.id.endsWith("-contributor")) {
-      throw new Error(
-        "RUNNER_FALLBACK_MODEL must not be a -contributor model: Meta may train on lab data",
-      );
-    }
-  }
-  for (const { provider } of Object.values(roles))
+  const models = modelAliases();
+  for (const { provider } of Object.values(models))
     required(`VOLUMA_${provider.toUpperCase()}_API_KEY`);
   const api = apiEndpoint();
   const metaApiKey = optional("VOLUMA_META_API_KEY");
+  const gatewayUrl = optional("VOLUMA_GATEWAY_URL");
+  const gatewaySecret = optional("GATEWAY_TOKEN_SECRET");
+  if (!gatewayUrl !== !gatewaySecret)
+    throw new Error("set VOLUMA_GATEWAY_URL and GATEWAY_TOKEN_SECRET together, or neither");
+  const gateway =
+    gatewayUrl && gatewaySecret
+      ? { url: gatewayUrl, secrets: parseTokenSecrets(gatewaySecret) }
+      : undefined;
   const r2 = {
     accountId: required("R2_ACCOUNT_ID"),
     bucket: required("R2_BUCKET"),
@@ -166,29 +180,42 @@ export function runnerConfig() {
     api,
     /** Runs at once. */
     concurrency: positiveInt("RUNNER_CONCURRENCY", 2),
+    /** The run loop's limits (`LoopConfig`); the harness defaults are 2 fix rounds and 20 minutes. */
+    loop: {
+      maxFixRounds: positiveInt("RUNNER_MAX_FIX_ROUNDS", 2),
+      checkTimeoutMs: positiveInt("RUNNER_CHECK_TIMEOUT_MINUTES", 20) * 60_000,
+    },
     /**
-     * A run whose spend (all claims, gateway calls included) reaches this is stopped and ends
-     * `failed`. Unset: no cap (test runs have none). Sent with every claim when set: the gateway
-     * checks the same cap. A SAM call reserves $3 there, so the cap must leave room for it.
+     * The model behind each alias a role file may name (`model:` in `workflows/core/agents/`),
+     * for a `voluma` run. Our key for each provider is `VOLUMA_<PROVIDER>_API_KEY`.
      */
-    maxRunCostUsd: optionalPositiveNumber("RUNNER_MAX_RUN_COST_USD"),
+    models,
     /**
-     * The model of each role of a `voluma` run: `RUNNER_MODEL` (worker), `RUNNER_CHECK_MODEL`
-     * (the check threads; default the worker's) and `RUNNER_MAIN_MODEL` (the main thread;
-     * default Muse Wonder, Standard mode, when a Meta key is set, else the worker's). Our key for each provider is
-     * `VOLUMA_<PROVIDER>_API_KEY`.
+     * The thinking level of every thread of a `voluma` run (`RUNNER_THINKING`), set as each Pi
+     * agent's `thinkingLevel`; main.ts refuses a level an alias's model does
+     * not support, since Pi would quietly use another. Unset: "off", Pi's default, which sends no
+     * level (DeepSeek: thinking disabled; other providers: their default). Visitor runs: "off".
      */
-    roles,
-    /** Where new worker and check threads go while their model is failing; absent: nowhere. */
-    fallbackModel,
+    thinking: thinkingLevel(),
+    /**
+     * `RUNNER_MODEL` forces every role onto one model (a plumbing check); the role files' thinking
+     * levels are chosen for their own models, so then `RUNNER_THINKING` alone sets the level.
+     */
+    modelForced: optional("RUNNER_MODEL") !== undefined,
     /**
      * The model of a `visitor` run, which uses the visitor's Meta key. Standard mode: a
      * `-contributor` model lets Meta train on what it is sent, the visitor's scan included.
      */
     visitorModel: visitorModel(),
     modal,
-    /** Meta's key for SAM (`segment_sam`) on a `voluma` run; absent: the tool is not offered. A visitor's run uses the visitor's own key. */
+    /** Our Meta key, for the main thread's Muse Wonder (SAM goes through the gateway). */
     metaApiKey,
+    /**
+     * The gateway sandboxes reach providers through, and the secrets their tokens are minted
+     * with (`GATEWAY_TOKEN_SECRET`, the gateway's own; the first mints); absent: sandboxes have
+     * no network and `segment_sam` is not offered.
+     */
+    gateway,
     r2,
     commit: checkoutCommit(),
     /** Every secret of ours, to redact from anything that leaves the process. */
@@ -199,6 +226,7 @@ export function runnerConfig() {
       r2.secretAccessKey,
       r2.cloudflareApiToken,
       metaApiKey,
+      gatewaySecret,
       modal?.tokenId,
       modal?.tokenSecret,
     ].filter((s): s is string => s !== undefined),

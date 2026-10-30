@@ -17,6 +17,7 @@
  * an unsupported historical event fails the read rather than being reinterpreted.
  */
 import type { EventInput, RunEvent } from "@voluma/contracts/events";
+import { cancelEnds } from "@voluma/contracts/threads";
 import { and, asc, eq, gt, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { ReadScope } from "../../domain";
@@ -36,7 +37,14 @@ export class EventIdTaken extends Error {
 /** First key of the advisory lock pair; the second is the run. Distinguishes our locks from others'. */
 export const EVENT_SEQ_LOCK = 0x76_6f_6c_75;
 
-/** Caller holds EVENT_SEQ_LOCK and has authorized the write under the run-row lock. */
+/**
+ * The run's event lock. Lock order, everywhere: the queue lock, then this, then row locks
+ * (`corrections.ts`).
+ */
+export const eventLock = (tx: Tx, runId: string) =>
+  tx.execute(sql`SELECT pg_advisory_xact_lock(${EVENT_SEQ_LOCK}, hashtext(${runId}))`);
+
+/** Caller holds the event lock and has authorized the write under the run-row lock. */
 export async function insertEvent(tx: Tx, event: Omit<RunEvent, "seq">) {
   return tx
     .insert(events)
@@ -47,6 +55,24 @@ export async function insertEvent(tx: Tx, event: Omit<RunEvent, "seq">) {
     })
     .onConflictDoNothing({ target: events.id })
     .returning({ id: events.id, seq: events.seq });
+}
+
+/**
+ * A user's cancel, run inside the queue's transaction before the run row ends: every open
+ * thread ends `cancelled` and the root last, ids `<runId>:cancel:end:<threadId>`. Once the row
+ * has ended the runner's writes are refused, so this is the only moment the server can leave
+ * the log consistent, whether a runner holds the run or none does (a recovered or queued run).
+ */
+export async function cancelOpenThreads(tx: Tx, runId: string) {
+  await eventLock(tx, runId);
+  const log = (
+    await tx.select().from(events).where(eq(events.runId, runId)).orderBy(asc(events.seq))
+  ).map(toRunEvent);
+  const createdAt = new Date();
+  for (const ended of cancelEnds(runId, log, createdAt)) {
+    await insertEvent(tx, ended);
+    await projectThread(tx, ended, createdAt);
+  }
 }
 
 export function pgEventLog(db: PostgresJsDatabase, notifier: Notifier) {
@@ -114,9 +140,7 @@ export function pgEventLog(db: PostgresJsDatabase, notifier: Notifier) {
     /** Throws `LeaseLost`, or `EventIdTaken` for an id stored under another run. */
     async append(event: EventInput, leaseToken: string) {
       await db.transaction(async (tx) => {
-        await tx.execute(
-          sql`SELECT pg_advisory_xact_lock(${EVENT_SEQ_LOCK}, hashtext(${event.runId}))`,
-        );
+        await eventLock(tx, event.runId);
         await assertLease(tx, event.runId, leaseToken);
         const createdAt = new Date(event.createdAt);
         const inserted = await insertEvent(tx, event);

@@ -49,8 +49,9 @@
   .badge.warning {
     @apply bg-check-tint text-check;
   }
+  /* Fills the space under the shell's top bar. */
   .review-shell {
-    @apply flex h-dvh flex-col overflow-hidden;
+    @apply flex min-h-0 flex-1 flex-col overflow-hidden;
   }
   .app-header {
     @apply flex shrink-0 items-center gap-5 border-b border-border bg-card px-6 py-3;
@@ -409,12 +410,6 @@
   .notice {
     @apply rounded-md bg-muted p-3 text-sm text-muted-foreground;
   }
-  .load-state {
-    @apply flex min-h-dvh flex-col items-center justify-center gap-5 p-8 text-center text-muted-foreground;
-  }
-  .load-state h1 {
-    @apply text-xl font-semibold text-foreground;
-  }
 }
 
 @media (max-width: 1000px) {
@@ -430,8 +425,7 @@
 }
 @media (max-width: 760px) {
   .review-shell {
-    height: auto;
-    min-height: 100dvh;
+    flex: none;
     overflow: visible;
   }
   .app-header {

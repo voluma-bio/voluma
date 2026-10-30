@@ -53,7 +53,7 @@ export function focusTarget(
     (box?.min.map((n, i) => Math.round((n + box!.max[i]!) / 2)) as Point3 | undefined);
   if (!point && series) {
     const positions = annotations
-      .filter((a) => focus.annotationIds.includes(a.id))
+      .filter((a) => focus.on.includes(a.id))
       .flatMap((a) => (a.kind === "point" ? [a.position] : [a.a, a.b]));
     const points = positions.map((world): Point3 => {
       let closest = 0;
@@ -93,8 +93,12 @@ export function focusTarget(
   const refs = focus.volumeId
     ? [{ volumeId: focus.volumeId, label: focus.label }]
     : structures
-        .filter((s) => focus.structureIds.includes(s.id))
-        .flatMap((s) => (s.voxels ? [s.voxels] : []));
+        .filter((s) => focus.on.includes(s.id))
+        .flatMap((s) =>
+          s.volumeId !== null && s.voxels && "label" in s.voxels
+            ? [{ volumeId: s.volumeId, label: s.voxels.label }]
+            : [],
+        );
   for (const ref of refs) {
     const layer = layers.find((l) => l.volume.id === ref.volumeId);
     if (!layer) continue;

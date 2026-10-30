@@ -10,7 +10,6 @@
     "./download": "./src/download.ts",
     "./events": "./src/events.ts",
     "./stream": "./src/stream.ts",
-    "./thread-message": "./src/thread-message.ts",
     "./task-tools": "./src/task-tools.ts",
     "./auth": "./src/auth.ts",
     "./history": "./src/history.ts",
@@ -20,10 +19,14 @@
     "./snapshot": "./src/snapshot.ts",
     "./workflow": "./src/workflow.ts",
     "./fold": "./src/fold.ts",
+    "./threads": "./src/threads.ts",
     "./spend": "./src/spend.ts",
     "./output": "./src/output.ts",
     "./run": "./src/run.ts",
     "./runner": "./src/runner.ts",
+    "./messages": "./src/messages.ts",
+    "./conversation": "./src/conversation.ts",
+    "./study": "./src/study.ts",
     "./workflow-files": "./src/workflow-files.ts"
   },
   "scripts": {

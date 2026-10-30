@@ -39,12 +39,9 @@ const db = drizzle(client, { casing: "snake_case" });
 
 // The migration lives in apps/api; a gateway that starts before it would fail every call.
 const [migrated] = await db.execute<{ ok: boolean }>(
-  `SELECT to_regclass('provider_calls') IS NOT NULL AND EXISTS (
-     SELECT 1 FROM information_schema.columns
-     WHERE table_name = 'runs' AND column_name = 'cost_cap_usd') AS ok`,
+  `SELECT to_regclass('provider_calls') IS NOT NULL AS ok`,
 );
-if (!migrated?.ok)
-  throw new Error("the database is not migrated (provider_calls, runs.cost_cap_usd)");
+if (!migrated?.ok) throw new Error("the database is not migrated (provider_calls)");
 
 const keys: Partial<Record<Provider, string>> = {};
 const baseUrls = {} as Record<Provider, string>;

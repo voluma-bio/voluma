@@ -16,10 +16,13 @@
  * browser needs no dedupe.
  *
  * The stream has an end. Once the run has ended and the hub has sent every stored event,
- * it closes the response; a request for an ended run with nothing after the cursor is
- * answered 204, which stops `EventSource` for good (it reconnects after any other close).
- * A non-200 status or a non-`text/event-stream` response also stops it. The browser sees
- * that as `readyState === CLOSED` and can then refetch the run, or call `getMe` to tell a
+ * it sends one `event: end` message (`END_EVENT`; its `data` means nothing) and closes the
+ * response, also when nothing is left after the cursor (a request for an ended run is
+ * answered 200 with `end` alone). The browser closes its `EventSource` on it: the log it
+ * holds is whole. Without that, `EventSource` would take the close for a drop and
+ * reconnect after its retry delay (about 3 s). A non-200 status (404, 401) or a
+ * non-`text/event-stream` response stops it for good. The browser sees that as
+ * `readyState === CLOSED` and can then refetch the run, or call `getMe` to tell a
  * sign-out from an ended run.
  *
  * Live frames (`liveFrameSchema` below) ride the same response as a *named* SSE event,
@@ -84,4 +87,6 @@ export const liveFrameSchema = z.discriminatedUnion("type", [
 ]);
 /** The SSE event name that carries a `LiveFrame`. */
 export const LIVE_EVENT = "live";
+/** The SSE event name that ends an ended run's stream: every stored event has been sent. */
+export const END_EVENT = "end";
 export type LiveFrame = z.infer<typeof liveFrameSchema>;

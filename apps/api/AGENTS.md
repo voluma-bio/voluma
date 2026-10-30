@@ -56,20 +56,50 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
 
 ## Run domain (`src/domains/run`)
 
-- `index.ts` is a mount list: `runs.ts` (browser routes: reads `requireReader`, writes `requireUser`), `ingest.ts` (runner
+- `index.ts` is a mount list: `runs.ts` (browser routes: reads `requireReader`, writes `requireUser`), `studies.ts` (create, list, get), `ingest.ts` (runner
   routes, `requireService`), and a file per later route group. The Postgres adapters:
   `pg-queue.ts` owns every state change of a run (start, resume, cancel, claim, lease,
-  recovery) and the key vault, `pg-runs.ts` the reads, and the lease-checked
+  recovery) and the key vault, `pg-runs.ts` and `pg-studies.ts` the reads (one `resultsLoader` cache for both), and the lease-checked
   `pg-event-log.ts`/`pg-history.ts`; their port types are derived from them. `admission.ts`
   is the one limits check and the one message per refusal.
+- **Every run belongs to a study** (`studies`, `study_scans`; `runs.study_id` is not null), and
+  the study owns the workflow. `readableStudies` (`pg-runs.ts`) is `readableRuns` on the study
+  (guests share one lab, so `lab_id` alone is not enough); `queue.start` checks `studyId` with
+  it. `queue.createStudy` inserts the study, its scans and the runs to start in one
+  transaction under the lock: any refusal throws `Refused` and rolls the whole call back, and
+  `startRuns` reads the counts once and raises them for each run it inserts. Every browser
+  write (start, create, cancel, resume) goes through `attempt`: a `Refused` rolls it back and
+  comes back as `{refused}`, and the visitor keys it held are dropped. `runs` has no workflow
+  column: `pgRunQueue` gets `workflowOf` and resolves the pins and outputs from the study. The seeded example has
+  its own study (`study-<exampleId>`, `example`), read-only like its run; `import:run` gives
+  an imported run a study of one the same way.
 - **Every transition holds one lock** (`QUEUE_LOCK`, a transaction advisory lock), so
   limit counts can't race. The lease is judged by the database's `now()`. An ingest write
   checks the run's lease token inside its own transaction (`assertLease`, `FOR SHARE`); a
   late write can't land after a takeover.
-- **Recovery ends a claim with a reason** (`shutdown`, `self-stop` from the runner's `released`;
+- **Recovery ends a claim with a reason** (`shutdown`, `self-stop`, `provider-outage` from the runner's `released`;
   `lease-expired` when the claim's sweep finds the lease gone). `recover` in `pg-queue.ts` stores it
   for the next claim's `previousClaim` and applies the no-progress limit (`claim-progress.ts`:
-  the counting rule and the progress events). There is no other restart counter.
+  the counting rule and the progress events). There is no other restart counter. A
+  `provider-outage` release also sets `runs.claimable_after` (the delay rule is `outageDelayMinutes`);
+  `claim` takes only runs with it null or past, and clears it.
+- **A researcher's message reopens a finished run** (`messages.ts` in contracts is the rulebook;
+  `queue.checkMessage`/`sendMessage` in `pg-queue.ts` call `corrections.ts`, which holds the
+  rules; Review's `POST /runs/:id/messages` calls them through the `RunMessages` port after it
+  checks and stores the snapshot PNG). `decideMessage` judges in the contract's order, under the
+  queue lock for `sendMessage`. **Lock order, everywhere: the queue lock, then the run's event lock
+  (`eventLock`), then row locks** (a runner's append takes the event lock before it shares the run
+  row, so a transaction holding the row and then asking for the event lock deadlocks with it:
+  `recover`, `heartbeat`, `report` and `decideMessage` take the event lock first, through the one
+  `eventLock` in `pg-event-log.ts`; `decide` (review decisions) checks the run has ended before
+  taking it, so an accept on a running run never holds it while loading the log). `decideMessage` refuses a message
+  to a queued or running run (409: one message, one claim) and reopens an ended `completed` one: it
+  writes `run.reopened`, clears `lastClaimEnd`, `stalledClaims` and the lease. A run is in a
+  correction while `corrections(events).open` (`@voluma/contracts/fold`; `openCorrection`: no
+  `correction.ended` since the latest `run.reopened`), so its claims are corrections. A correction never ends a run worse than `completed`: every way the queue would
+  fail or cancel a run (`endUnfinished`: the runner's failed end, the no-progress limit, a refused
+  claim or heartbeat, a user's cancel) ends it `completed` with `correction.ended` and its threads
+  cancelled, the open ones and those that finished inside the correction (`cancelEnds`).
 - **Visitor keys live only in `key-vault.ts`**, in memory, and only `pg-queue.ts` touches it,
   under the lock. Never store, log or return them, and log no body on a route that takes
   them. A transition holds the keys before the write that makes the run claimable commits;
@@ -78,8 +108,19 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   runs per org (429), and `index.ts` caps ordinary `/api` bodies at 256 KB (8 MB on
   `/api/run/ingest/*`, the trusted runner; 12 MiB only on screenshot POSTs).
 - **Limits come from env** (`RUN_LIMITS_<ORG>_*`, read in `index.ts`); the workflow catalog
-  (`catalog.ts`) is code. `seed:example --from <runId>` makes an example run
-  (`src/domains/run/seed-example.ts`). Outage and restart behaviour: [.context/deploy.md](.context/deploy.md).
+  (`@voluma/workflow/bundled`) is code. `seed:example --from <runId> [--backfill <dir|r2:prefix>] [--remote]` makes an example run (it copies the source's `evidence/` and `outputs/` under the example's prefix)
+  (`src/domains/run/seed-example.ts`; it needs `GUEST_ORGANIZATION_ID`, the Demo organization, in `.env`). To get a run into a fresh local database:
+  `export:run --id <runId> --out <dir|r2:dev/…>` dumps its rows to `run.json`, and
+  `import:run --from <dir|r2:prefix> [--replace]` loads them (events are checked with
+  `runEventSchema`; an existing run is refused without `--replace`). Evidence stays in R2.
+  `r2:put --from <dir> --to r2:dev/<prefix>` uploads a folder. An `r2:` location is a prefix in the
+  `R2_BUCKET` the dev servers use (`r2-dir.ts`). Operator scripts use `DATABASE_URL`, else the
+  database `pnpm dev` wrote to `.dev/env.json`; each prints its database and bucket first, writes to
+  R2 only under `dev/`, and `import:run` / `seed:example` refuse a non-local database without
+  `--remote`. R2 is shared with staging, so a local seed names its example
+  `example-local-<runId>` (it refuses `example-<runId>`, the id staging reads, without `--remote`).
+  Shared dev data: `dev/runs/<runId>/` (dump) and `dev/backfill/<runId>/` (backfill folder) for
+  ce5a0f21-c948-4e20-a03f-04ff7f0e707b. Outage and restart behaviour: [.context/deploy.md](.context/deploy.md).
 
 ## Review domain (`src/domains/review`)
 
@@ -99,7 +140,7 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   `ReviewRun.review`; no persisted count is maintained. Unfinished/failed/cancelled runs
   have null summaries. Review mutations return/refetch snapshots; execution SSE closes
   at run end and does not continuously deliver human review changes.
-- Run list/get reads memoize at most 256 derived summaries, keyed by each run's latest
+- Run list/get and study reads memoize at most 2048 derived results (`{summary, tasks, values, toCheck}`, all from one `reviewState(log)`; least recently read out first), keyed by each run's latest
   event ID (ordered by sequence) in the same repeatable-read snapshot, including reseeded
   examples with reused sequence numbers. Cache misses load only fold/review
   events; hits load no event payloads. The event log remains the only durable human-decision state.
@@ -123,5 +164,14 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   decoding DICOM on the server. The API validates references against the pinned Review
   projection and currently rejects 3D capture. `RUN_FILES_DIRECTORY` selects local run-file
   storage at the composition root; it never redirects the read-only reference archive.
+- `runs.ts` serves `GET /runs/:runId/assets/:sha256/*`: a converted review asset
+  (`reviewAssetKey`, written by the runner's conversion worker) as a 302 to a presigned R2 GET
+  (`RunFiles.assetUrl`: signed at the start of a 4-minute window and valid 5 minutes, so repeat
+  requests get the same URL; `ResponseCacheControl` makes R2's own response `immutable`, capped
+  at a day like the files route). The 302 is `private` with a `max-age` 30 s below the URL's
+  remaining validity, so the browser's cache serves the repeats (a viewer asks per chunk). Assets live under the
+  run's own prefix, so the read check on the run is the whole scope check, and the route reads
+  no event log (a viewer sends one request per chunk). The tail goes through `relativePathSchema`;
+  the route does not check the object exists, so a missing chunk is R2's 404 on the redirect.
 - `r2-reference-archive.ts` serves only the published reference scan. Deferred work:
   [.context/TODO.md](src/domains/review/.context/TODO.md).

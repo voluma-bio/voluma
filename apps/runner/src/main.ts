@@ -6,30 +6,22 @@
  * a sandbox it leaves is ended by Modal's idle timeout, or by `sandboxes:clean`.
  * Settings: config.ts and `.env.example`.
  */
-import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { createModels } from "@earendil-works/pi-ai";
 import { CLAIM_POLL_SECONDS } from "@voluma/contracts/runner";
 import { claimRun } from "@voluma/harness/adapters/http/hand-off";
 import { runnerConfig } from "./config.ts";
-import { modelFallback } from "./model-fallback.ts";
 import { PROVIDERS } from "./providers.ts";
 import { redactor } from "./redact.ts";
 import { type RunnerContext, runClaim } from "./run.ts";
+import { startTelemetry } from "./telemetry.ts";
+import { assertThinking } from "./thinking.ts";
 
 /** How long a shutdown waits for runs to report before it exits anyway. */
 const SHUTDOWN_BUDGET_MS = 30_000;
 
 const config = runnerConfig();
-// `segment_sam` encodes with ffmpeg: a host without it should fail here, not in a run.
-if (config.metaApiKey) {
-  const probe = spawnSync("ffmpeg", ["-version"], { stdio: "ignore" });
-  if (probe.status !== 0)
-    throw new Error(
-      "VOLUMA_META_API_KEY is set, but `ffmpeg -version` failed: install ffmpeg on this host",
-    );
-}
 const redact = redactor(config.secrets);
 const log = (line: string) => console.log(`${new Date().toISOString()} ${redact(line)}`);
 
@@ -40,19 +32,20 @@ const resolve = (ref: { provider: string; id: string }) => {
   if (!model) throw new Error(`unknown model ${ref.provider}/${ref.id}`);
   return model;
 };
-const roles = {
-  worker: resolve(config.roles.worker),
-  check: resolve(config.roles.check),
-  main: resolve(config.roles.main),
-};
+const aliases = Object.fromEntries(
+  Object.entries(config.models).map(([alias, ref]) => [alias, resolve(ref)]),
+);
+
+// Pi clamps a level a model lacks to a neighbouring one, so a typo'd or unsupported level
+// would run silently at another. Every alias is checked, named by a role file or not.
+assertThinking(config.thinking, Object.values(aliases), "RUNNER_THINKING");
 
 const runnerId = `runner-${randomUUID().slice(0, 8)}`;
 const ctx: RunnerContext = {
   config,
   models,
-  roles,
+  aliases,
   visitorModel: resolve(config.visitorModel),
-  fallback: modelFallback(config.fallbackModel && resolve(config.fallbackModel), log),
   log,
 };
 
@@ -74,32 +67,39 @@ const shuttingDown = new Promise<void>((resolve) =>
 const sleep = (ms: number) => delay(ms, undefined, { signal: shutdown.signal }).catch(() => {});
 
 log(
-  `${runnerId} up: ${config.concurrency} slot(s), models ${Object.entries(config.roles)
-    .map(([role, m]) => `${role} ${m.provider}/${m.id}`)
-    .join(
-      ", ",
-    )}${config.fallbackModel ? `, fallback ${config.fallbackModel.provider}/${config.fallbackModel.id}` : ""}, api ${config.api.baseUrl}`,
+  `${runnerId} up: ${config.concurrency} slot(s), models ${Object.entries(config.models)
+    .map(([alias, m]) => `${alias} ${m.provider}/${m.id}`)
+    .join(", ")}, thinking ${config.thinking ?? "unset"}, api ${config.api.baseUrl}`,
 );
-while (!shutdown.signal.aborted) {
-  if (active.size >= config.concurrency) {
-    await Promise.race([...active, shuttingDown]);
-    continue;
+// After startup: a failure above must still kill the process, not be logged and survived.
+startTelemetry(log);
+// The process handlers (`telemetry.ts`) keep the process alive past a stray error, so a loop
+// that dies must exit non-zero itself, or a restart-on-failure policy never sees it.
+try {
+  while (!shutdown.signal.aborted) {
+    if (active.size >= config.concurrency) {
+      await Promise.race([...active, shuttingDown]);
+      continue;
+    }
+    let claim: Awaited<ReturnType<typeof claimRun>>;
+    try {
+      claim = await claimRun(config.api, runnerId);
+    } catch (error) {
+      log(`claim failed: ${error instanceof Error ? error.message : error}`);
+      await sleep(CLAIM_POLL_SECONDS * 1000);
+      continue;
+    }
+    if (!claim) {
+      await sleep(CLAIM_POLL_SECONDS * 1000);
+      continue;
+    }
+    // `runClaim` never rejects: it logs its own failures through the run's redaction.
+    const done = runClaim(ctx, claim, shutdown.signal).finally(() => active.delete(done));
+    active.add(done);
   }
-  let claim: Awaited<ReturnType<typeof claimRun>>;
-  try {
-    claim = await claimRun(config.api, runnerId, config.maxRunCostUsd);
-  } catch (error) {
-    log(`claim failed: ${error instanceof Error ? error.message : error}`);
-    await sleep(CLAIM_POLL_SECONDS * 1000);
-    continue;
-  }
-  if (!claim) {
-    await sleep(CLAIM_POLL_SECONDS * 1000);
-    continue;
-  }
-  // `runClaim` never rejects: it logs its own failures through the run's redaction.
-  const done = runClaim(ctx, claim, shutdown.signal).finally(() => active.delete(done));
-  active.add(done);
+} catch (error) {
+  log(`claim loop died: ${error instanceof Error ? (error.stack ?? error.message) : error}`);
+  process.exit(1);
 }
 
 await Promise.race([

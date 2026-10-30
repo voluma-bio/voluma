@@ -10,7 +10,7 @@ and in sign from one height to the next. Plate-run bone is the ROI and aligned H
 2.16/cm in this scan's HU, from hu.json's calibration); no label gates it.
 
 --annotations is a JSON file of indices on the aligned grid. It needs "grid_id" (the grid_id of tibia-frame.json; a file without it
-or from another grid is refused). This script reads these keys, other sections of the file are ignored:
+or from another grid is refused). This script reads these keys; any other key is refused, and so is a value of the wrong form or an index outside the grid:
   growth_plate_curves     required: the proximal face of the growth plate, curves (below) on at least two V sections
   articular_corrections   optional list of {"u_range": [lo, hi], "v_range": [lo, hi], "curves": curves}: where part of the
                           tibia label is really femur or fibula above the articular surface, `curves` mark the true
@@ -32,12 +32,14 @@ V between traced sections (constant past the first and last). A point is [w, u],
 anything but axis 1 and height row is refused.
 
 Writes: in <out>, on the aligned grid (array axes W,V,U), each .npy with its sidecar:
-  iioc-tissue.npy  ROI-1, bool                         growth-plate-proximal-face.npy  W index per (V,U), float32
+  iioc-tissue.npy  ROI-1, bool                         growth-plate-proximal-face.npy  W index per (V,U), float32, NaN off the tibia (a surface object)
   growth-plate-proximal-valid.npy  2D bool: where the face is traced, not held constant past its first and last section or its curves' ends
-  articular-top-surface.npy  W index of the ROI-1 top per (V,U)        <side>-plate-run.npy  bool, the first bone run of each compartment's patch
+  articular-top-surface.npy  W index of the ROI-1 top per (V,U) (a surface object)       <side>-plate-run.npy  bool, the first bone run of each compartment's patch
   iioc-tissue-scan.npy  ROI-1 on the scan grid (the scan's sidecar)    width-points-scan.json  the two width points as a points file on the scan grid, for amira_landmarks.py
-  iioc.json  the result record (every value with its definition: heights, width, diagnostics)   qc-coronal.jpg, qc-heights.jpg  QC images
-Prints: the result record {out, values: {id: {value, unit, definition, kind}}} with the paths of the files above (qc, tissue, tissue_scan, width_points_scan, growth_plate_face, growth_plate_traced, articular_top, plate_runs, removed_disconnected_voxels)
+  roi-iioc.npy  ROI-1 cropped to its bounding box, uint8 (the mask object; iioc-tissue.npy is the same voxels for the next scripts)
+  iioc.json  the result record (every value with its definition: heights, width, diagnostics; `objects`: roi-iioc, the two surfaces
+  and the four rulers, in the shapes `report_output` takes)   qc-coronal.jpg, qc-heights.jpg  QC images
+Prints: the result record {out, values: {id: {value, unit, definition, kind}}, objects} with the paths of the files above (qc, tissue, tissue_scan, width_points_scan, growth_plate_face, growth_plate_traced, articular_top, plate_runs, removed_disconnected_voxels)
 Example: python iioc.py --hu-aligned tibia-hu.npy --mask tibia-mask.npy --frame tibia-frame.json --hu-json hu.json --annotations annotations.json --out iioc/
 Exits 2 with one sentence on bad input, before writing anything.
 """
@@ -48,6 +50,7 @@ from pathlib import Path
 import frame as fr
 import matplotlib
 import numpy as np
+import objects
 import sidecar
 from annotations import load_annotations, need, traced_surface
 from envelope import close_and_fill
@@ -137,7 +140,7 @@ def main():
     )
     a = ap.parse_args()
     frame = fr.load(a.frame)
-    ann = load_annotations(a.annotations, frame['grid_id'])
+    ann = load_annotations(a.annotations, frame)
     g = sidecar.grid(a.hu_json)
     a.threshold = sidecar.bone_threshold_hu(a.hu_json, a.threshold)
     vox = frame['spacing_zyx_mm'][0]
@@ -195,8 +198,9 @@ def main():
         tilt_deg=float(np.degrees(np.arccos(-normal[0]))),
     )
     height_ids = []
+    rulers = {}  # object id -> line entry, on the aligned grid
 
-    def height(key, u, deck, what):
+    def height(key, ruler, u, deck, what):
         v = v_star
         if not (0 <= u < valid.shape[1] and 0 <= v < valid.shape[0]) or not interior[v, u]:
             sidecar.fail(
@@ -221,11 +225,12 @@ def main():
             'does not enter ROI-1 within 3 voxels, so check the traced face there',
             kind='diagnostic',
         )
+        rulers[ruler] = objects.line([top[v, u], v, u], [gp[v, u], v, u], frame['grid_id'])  # as long as the value above
         height_ids.append(key)
 
-    height('iioc-height', u_mid, '#7', 'IIOC height at the middle of the growth plate')
-    height('iioc-height-medial-compartment', mids['medial'], '#8', 'IIOC height, medial compartment')
-    height('iioc-height-lateral-compartment', mids['lateral'], '#9', 'IIOC height, lateral compartment')
+    height('iioc-height', 'iioc-height-ruler', u_mid, '#7', 'IIOC height at the middle of the growth plate')
+    height('iioc-height-medial-compartment', 'iioc-medial-ruler', mids['medial'], '#8', 'IIOC height, medial compartment')
+    height('iioc-height-lateral-compartment', 'iioc-lateral-ruler', mids['lateral'], '#9', 'IIOC height, lateral compartment')
     values['iioc-max-local-height'] = sidecar.value(
         local_height[vmax, umax] * vox,
         'mm',
@@ -243,6 +248,7 @@ def main():
         'the other side)',
         points_uvw=wp.tolist(),
     )
+    rulers['tibial-width-ruler'] = objects.line(wp[0, ::-1], wp[1, ::-1], frame['grid_id'])  # [u, v, w] -> aligned (w, v, u)
     width_points_zyx = fr.to_scan_points(wp[:, ::-1], frame)  # [u, v, w] -> aligned (w, v, u) -> scan (z, y, x)
     width_points = {'grid_id': g['grid_id'], 'points': [{'name': n, 'zyx': p.tolist()} for n, p in zip(('width_a', 'width_b'), width_points_zyx)]}
     plates = {}
@@ -252,6 +258,9 @@ def main():
         if patch is None:
             c = int(mids[side])
             patch = {'u': [c - half, c + half], 'v': [v_star - half, v_star + half]}
+            for key, n, axis in (('u', h.shape[2], 'U'), ('v', h.shape[1], 'V')):
+                if patch[key][0] < 0 or patch[key][1] > n:
+                    sidecar.fail(f'the default {side} plate patch ({key} {patch[key][0]} to {patch[key][1]}, from the midpoint and height section) leaves the grid ({n} {axis} indices, 0 to {n}): set "plate_patches" or move the midpoint inside the grid')
         run = np.zeros(h.shape, bool)
         th = []
         for vi in range(*patch['v']):
@@ -289,12 +298,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     inputs = [a.hu_aligned, a.mask, a.frame, a.annotations]
     params = {'threshold': a.threshold, 'gp_shift_mm': a.gp_shift_mm}
-    arrays = {
-        'iioc-tissue.npy': roi,
-        'growth-plate-proximal-face.npy': gp.astype(np.float32),
-        'growth-plate-proximal-valid.npy': gp_traced,
-        'articular-top-surface.npy': np.where(valid, top, np.nan).astype(np.float32),
-    }
+    arrays = {'iioc-tissue.npy': roi, 'growth-plate-proximal-valid.npy': gp_traced}
     arrays.update({f'{s}-plate-run.npy': m for s, m in plates.items()})
     for name, arr in arrays.items():
         np.save(out / name, arr)
@@ -306,6 +310,13 @@ def main():
             params=params,
             script='iioc.py',
         )
+    meta_files = {'like': a.frame, 'inputs': inputs, 'params': params}
+    placed = {  # heights are along axis 0 (W) of the aligned grid
+        'roi-iioc': objects.mask(out / 'roi-iioc.npy', roi, crop=True, **meta_files),
+        'growth-plate-proximal-face': objects.surface(out / 'growth-plate-proximal-face.npy', gp, 0, where=objects.footprint(tib), **meta_files),
+        'articular-surface': objects.surface(out / 'articular-top-surface.npy', np.where(valid, top, np.nan), 0, **meta_files),
+        **rulers,
+    }
     (out / 'width-points-scan.json').write_text(json.dumps(width_points, indent=1) + '\n')
     np.save(out / 'iioc-tissue-scan.npy', scan_roi)
     sidecar.write(
@@ -316,6 +327,7 @@ def main():
         out / 'iioc.json',
         values,
         meta,
+        objects=placed,
         qc=qc,
         tissue=str(out / 'iioc-tissue.npy'),
         tissue_scan=str(out / 'iioc-tissue-scan.npy'),

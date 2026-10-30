@@ -41,7 +41,7 @@ structure in two pieces is two components, each labelled. A model's name for a p
 
 The scan's notes come before any naming. A structure is **absent** when the notes put it
 outside the field or cut off (overrule them only with a render you cite), or when no candidate sits where the
-anatomy puts it after you looked; write the structure and the reason in the checkpoint. Its outputs: `null` with the
+anatomy puts it after you looked; write the structure and the reason in the checkpoint, and report the structure as `{kind: "missing", reason}`. Its measurements: `null` with the
 reason when nothing could be measured (outside the field, cut off); `0` with a note when its region is in the field
 and holds none. Never substitute a look-alike piece to fill an output. Raise a To check item when the notes and the
 CT disagree, or when the anatomy expects a structure, none is there and the notes say nothing.
@@ -51,7 +51,9 @@ CT disagree, or when the anatomy expects a structure, none is there and the note
 `classic_segment.py` runs a seeded watershed inside the bone threshold, seeded from your labels' cores. It shares
 your idea of which bone is which, so it checks **where boundaries run, not identity**; it floods every bone voxel
 connected to a seed, so label every bone you want kept apart before you run it. `disagree.py` ranks the regions
-where the two differ and renders a panel for the largest. For each region above the floor:
+where the two differ and renders a panel for the largest; run it with `--object-id` set to the id the workflow
+declares for the disagreement volume and report its record's `objects` entry, settled or not. For each region above
+the floor:
 
 | You see | Do |
 |---|---|
@@ -72,7 +74,7 @@ checks, the quad view and the 3D sheet again.
 
 ## 5. A To check item that points at the region
 
-`checkpoint` with `toCheck: {title, focus: {structureIds, annotationIds, volumeId, label}}` (both arrays required):
+`checkpoint` with `toCheck: {title, focus: {on: [block ids], volumeId?, label?}}` (`on` required):
 the title gives the place and the question ("Joint face, slices 140-170: bone A or bone B?"), the text both methods'
-labels and the one kept. The focus resolves only when the task that made `disagreement.npy` reports it as a
-`volume` output of kind `labels`.
+labels and the one kept. `volumeId` is the id the disagreement volume is reported under and `label` the region's
+`id` in `regions.json`; the focus resolves because the volume is always reported (section 3).

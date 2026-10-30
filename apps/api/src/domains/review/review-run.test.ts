@@ -17,6 +17,7 @@ const run: Run = {
   id: "review-111",
   labId: "review-tests",
   startedBy: "review-tests",
+  studyId: "review-study",
   workflows,
   input: {
     id: "reference-review-tests",
@@ -28,6 +29,7 @@ const run: Run = {
   credentials: "voluma",
   example: false,
   forkedFrom: null,
+  tasks: null,
   createdAt: at,
   state: { status: "ended", outcome: "failed", startedAt: at, endedAt: at },
   review: null,
@@ -106,7 +108,6 @@ describe("reviewRun", () => {
       checks: [],
       evidence: [],
       files: [],
-      structureIds: [],
     });
     expect(pending?.ask).toBe(tasks.find((t) => t.id === "segmentation")?.instructions);
     expect(result?.revisions[0]?.structures).toEqual([]);

@@ -17,6 +17,7 @@ import {
   type AgentMessage,
   type AgentTool,
   type StreamFn,
+  type ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
 import { type Api, type Model, type ToolResultMessage, Type } from "@earendil-works/pi-ai";
 import type { EventType } from "@voluma/contracts/events";
@@ -26,17 +27,18 @@ import { usageOf } from "../../model-usage";
 import type { History } from "../../ports/history";
 import type { Sandbox } from "../../ports/sandbox";
 import type { PayloadOf, Recorder } from "../../recorder";
-import type { Tool } from "../../tools/tool";
+import { SandboxUnavailableError, type Tool, type ToolResult } from "../../tools/tool";
 import { elideOldImages } from "./elide-images";
 
 export type UserSender = Extract<PayloadOf<"message">, { role: "user" }>["sender"];
 
 /**
- * The `thread.started` rule on `task`, in types: a worker or check thread has a task. The
- * supervisor is the root and runs no agent loop, so it is not started here.
+ * The `thread.started` rule on `task`, in types: a worker or check thread has a task, the main
+ * agent none. The supervisor is the root and runs no agent loop, so it is not started here.
  */
 type ThreadIdentity =
   | { kind: "worker" | "check"; taskId: string }
+  | { kind: "main"; taskId?: undefined }
   | { kind: "chat"; taskId?: string };
 
 export type StartThreadOptions = ThreadIdentity & {
@@ -47,14 +49,28 @@ export type StartThreadOptions = ThreadIdentity & {
   attemptId?: string;
   /** The tool call in the parent thread that started this thread. */
   spawnedBy?: string;
+  /**
+   * The id of this invocation's `thread.started`, when the caller (a tool) has already appended
+   * it: the thread's own emit then does nothing.
+   */
+  startedEventId?: string;
+  /**
+   * Builds the result of a tool call that a crash cut off, from the log (the caller knows what
+   * the call did). `undefined` keeps the cautious default text.
+   */
+  interrupted?: (toolName: string, toolCallId: string) => string | undefined;
   /** The thread's first user message; also sent if a resumed thread never stored one. */
   prompt: string;
+  /** The delivery cursor of a main agent's first message built from the log (`message.sender.covers`). */
+  promptCovers?: string;
   /**
    * A new user message for a thread that already has history. A thread whose last reply
    * ended its turn does nothing without one (`ran` is false in the outcome).
    */
   input?: { text: string; sender: UserSender };
   model: Model<Api>;
+  /** Sent as `reasoning` on each call ("off": none) and recorded on each reply. Default "off". */
+  thinkingLevel?: ThinkingLevel;
   /** `models.streamSimple.bind(models)` from pi-ai. */
   streamFn: StreamFn;
   /** Fixed for the thread's life: a resumed thread whose stored prompt or tools differ fails. */
@@ -66,6 +82,17 @@ export type StartThreadOptions = ThreadIdentity & {
   sandbox: (threadId: string) => Promise<Sandbox>;
   /** Aborting ends the thread as cancelled and kills a running command. */
   signal?: AbortSignal;
+  /**
+   * A failed model reply with no content is an outage when `is` says so: the call retry spent its
+   * budget on a transient error. Such a reply is not stored or emitted and the thread writes no
+   * `thread.ended`: it stays open with its History an exact prefix, `release` tells the host, which
+   * releases the run (the next claim resumes the thread). A reply that failed after content
+   * is not an outage; it fails the thread as any provider error does.
+   */
+  providerOutage?: {
+    is(provider: string, error: string): boolean;
+    release(error: string): void;
+  };
   /**
    * The run's own signal. When it aborts (shutdown, self-stop, lost lease), the thread is cut
    * off, not stopped: nothing more is stored or emitted for it, not even a `thread.ended`,
@@ -94,18 +121,25 @@ export interface ThreadOutcome {
 export function startThread(options: StartThreadOptions): ThreadHandle {
   const { threadId, recorder, history, signal, runSignal } = options;
   const cutOff = () => runSignal?.aborted === true;
-  const emit = <T extends EventType>(type: T, payload: PayloadOf<T>) =>
-    recorder.emit(threadId, type, payload);
-  // What each running tool call has been billed (`ToolContext.bill`), until its result is emitted.
-  const billed = new Map<string, number>();
-  const bill = (toolCallId: string, usd: number) =>
-    billed.set(toolCallId, (billed.get(toolCallId) ?? 0) + usd);
+  const emit = <T extends EventType>(type: T, payload: PayloadOf<T>, id?: string) =>
+    recorder.emit(threadId, type, payload, id);
 
-  const agent = new Agent({
+  // The reply holding the call is in the agent's messages before any of its tools runs.
+  const batchSize = (toolCallId: string): number => {
+    for (const m of agent.state.messages.slice().reverse()) {
+      if (m.role !== "assistant") continue;
+      const calls = m.content.filter((b) => b.type === "toolCall");
+      if (calls.some((b) => b.id === toolCallId)) return calls.length;
+    }
+    return 1;
+  };
+
+  const agent: Agent = new Agent({
     initialState: {
       systemPrompt: options.systemPrompt,
       model: options.model,
-      tools: options.tools.map((tool) => toAgentTool(tool, options, bill)),
+      thinkingLevel: options.thinkingLevel,
+      tools: options.tools.map((tool) => toAgentTool(tool, options, batchSize)),
       messages: [],
     },
     streamFn: options.streamFn,
@@ -133,15 +167,26 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     }
   };
   const emitToolResult = (result: ToolResultMessage) => {
-    const costUsd = billed.get(result.toolCallId);
-    billed.delete(result.toolCallId);
+    const details = result.details as { truncated?: boolean; infrastructure?: true } | undefined;
     emit("tool.result", {
       toolCallId: result.toolCallId,
       isError: result.isError,
       output: textOf(result),
-      truncated: (result.details as { truncated?: boolean } | undefined)?.truncated === true,
-      ...(costUsd !== undefined && { costUsd }),
+      truncated: details?.truncated === true,
+      ...(details?.infrastructure && { infrastructure: true as const }),
     });
+  };
+
+  /** Whether the log already holds an end after this thread's latest start. */
+  const endedSinceStart = () => {
+    const events = recorder.events();
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i];
+      if (e?.threadId !== threadId) continue;
+      if (e.type === "thread.started") return false;
+      if (e.type === "thread.ended") return true;
+    }
+    return false;
   };
 
   // The sender of each user message we prompt with, kept with the message itself.
@@ -164,13 +209,15 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     let started = false;
     let outcome: Omit<ThreadOutcome, "ran" | "reply">;
     let unexpected: unknown;
+    let outage: string | undefined;
     const abort = () => agent.abort();
     signal?.addEventListener("abort", abort);
     try {
       const stored = (await history.load(threadId)).map((row) => JSON.parse(row) as AgentMessage);
       nextIdx = stored.length;
-      // Every check that can refuse the thread runs before `thread.started`: a refused
-      // re-invocation must not relabel a finished thread in the stream record.
+      // Every check that can refuse the thread runs before the thread's own events: a refused
+      // resume has its `thread.started` already (the run loop stores it first) and gets no more
+      // from here; the run loop then stops it.
       if (stored.length > 0 && !sameSystem(stored[0], system)) {
         throw new ThreadStale(
           "the stored system message differs from the current system prompt or tools; " +
@@ -190,13 +237,14 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
             "a resumed thread keeps its model",
         );
       }
-      const repairs = interruptedToolResults(stored);
+      const repairs = interruptedToolResults(stored, options.interrupted);
       const hasUser = stored.some((m) => m.role === "user");
-      const finished = isFinished([...stored, ...repairs].at(-1));
+      const finished = isFinished([...stored, ...repairs]);
       // A thread with no user message yet (new, or a crash before the first one was stored)
       // starts from the prompt. A finished one runs only for a new input. Each message
-      // carries its sender; the prompt is the runtime's (the supervisor's brief). The sandbox restart note reaches the model through
-      // the sandbox's command output (`sandbox-session.ts`), not as a message here.
+      // carries its sender; the prompt is the runtime's (the main agent's brief for a worker). The
+      // sandbox restart note reaches the model through the sandbox's command output
+      // (`sandbox-session.ts`), not as a message here.
       const prompts: AgentMessage[] = [];
       const addPrompt = (text: string | undefined, sender: UserSender) => {
         if (text) prompts.push(userMessage(text, sender));
@@ -204,7 +252,10 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       if (hasUser) {
         if (options.input) addPrompt(options.input.text, options.input.sender);
       } else {
-        addPrompt(options.prompt, { kind: "runtime" });
+        addPrompt(options.prompt, {
+          kind: "runtime",
+          ...(options.promptCovers && { covers: options.promptCovers }),
+        });
       }
       for (const { text, sender } of early.splice(0)) addPrompt(text, sender);
       const message = prompts.length > 0 ? prompts : undefined;
@@ -218,14 +269,18 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       }
 
       started = true;
-      emit("thread.started", {
-        parentThreadId: options.parentThreadId ?? null,
-        kind: options.kind,
-        ...(options.taskId && { task: options.taskId }),
-        ...(options.attemptId && { attemptId: options.attemptId }),
-        ...(options.spawnedBy && { spawnedBy: options.spawnedBy }),
-        model: `${options.model.provider}/${options.model.id}`,
-      });
+      emit(
+        "thread.started",
+        {
+          parentThreadId: options.parentThreadId ?? null,
+          kind: options.kind,
+          ...(options.taskId && { task: options.taskId }),
+          ...(options.attemptId && { attemptId: options.attemptId }),
+          ...(options.spawnedBy && { spawnedBy: options.spawnedBy }),
+          model: `${options.model.provider}/${options.model.id}`,
+        },
+        options.startedEventId,
+      );
       if (stored.length === 0) {
         // A new thread: store the system message before anything else.
         if (system && (await persist(system))) {
@@ -256,6 +311,21 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
             break;
           case "message_end": {
             const { message } = event;
+            if (
+              message.role === "assistant" &&
+              message.stopReason === "error" &&
+              !signal?.aborted &&
+              !cutOff() &&
+              !historyError &&
+              message.content.length === 0 &&
+              options.providerOutage?.is(message.provider, message.errorMessage ?? "")
+            ) {
+              if (outage === undefined) {
+                outage = message.errorMessage ?? "the model request failed";
+                options.providerOutage.release(outage);
+              }
+              break;
+            }
             const ok = await persist(message);
             if (message.role === "assistant") {
               reply = textOf(message);
@@ -299,20 +369,28 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
         }
       });
 
+      let prompted = false;
       if (!historyError && !signal?.aborted) {
+        prompted = true;
         accepting = true;
         for (const { text, sender } of early.splice(0)) agent.steer(userMessage(text, sender));
         if (message !== undefined) await agent.prompt(message);
         else await agent.continue();
         // A message steered in as the loop was ending is still queued.
-        while (!historyError && !signal?.aborted && agent.hasQueuedMessages()) {
+        while (!historyError && !outage && !signal?.aborted && agent.hasQueuedMessages()) {
           await agent.continue();
         }
       }
       accepting = false;
+      // Stopped before its first prompt, it did nothing this invocation: its turn from before
+      // must not read as this invocation completing.
       outcome = historyError
         ? historyFailure(historyError)
-        : outcomeOf(agent.state.messages.at(-1), signal?.aborted === true);
+        : outage !== undefined
+          ? { status: "failed", error: outage }
+          : signal?.aborted && !prompted
+            ? { status: "cancelled" }
+            : outcomeOf(agent.state.messages, signal?.aborted === true);
     } catch (error) {
       outcome = {
         status: "failed",
@@ -325,8 +403,12 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       ended = true;
       signal?.removeEventListener("abort", abort);
     }
-    // The caller owns the recorder and flushes it.
-    if (started && !cutOff()) emit("thread.ended", outcome);
+    // The caller owns the recorder and flushes it. A stop stored its own end first (append-first):
+    // the thread's end is then a second one for the same start, and is dropped.
+    if (started && !cutOff() && outage === undefined) {
+      await recorder.flush();
+      if (!endedSinceStart()) emit("thread.ended", outcome);
+    }
     if (unexpected) throw unexpected;
     return { ...outcome, ran: started, reply };
   }
@@ -363,7 +445,7 @@ const historyFailure = (error: unknown): Omit<ThreadOutcome, "ran" | "reply"> =>
 function toAgentTool(
   tool: Tool,
   { runId, threadId, kind, taskId, sandbox, recorder }: StartThreadOptions,
-  bill: (toolCallId: string, usd: number) => void,
+  batchSize: (toolCallId: string) => number,
 ): AgentTool {
   const { $schema: _, ...jsonSchema } = z.toJSONSchema(tool.input, { io: "input" });
   return {
@@ -374,25 +456,39 @@ function toAgentTool(
     ...(tool.prepare && { prepareArguments: tool.prepare }),
     ...(tool.sequential && { executionMode: "sequential" as const }),
     execute: async (toolCallId, params, signal) => {
-      const result = await tool.execute(tool.input.parse(params), {
-        runId,
-        threadId,
-        kind,
-        ...(taskId && { taskId }),
-        toolCallId,
-        signal: signal ?? new AbortController().signal,
-        sandbox: () => sandbox(threadId),
-        output: (stream, text) =>
-          recorder.live({ type: "tool.output", threadId, toolCallId, stream, text }),
-        bill: (usd) => bill(toolCallId, usd),
-      });
+      let result: ToolResult;
+      try {
+        result = await tool.execute(tool.input.parse(params), {
+          runId,
+          threadId,
+          kind,
+          ...(taskId && { taskId }),
+          toolCallId,
+          batchSize: batchSize(toolCallId),
+          signal: signal ?? new AbortController().signal,
+          sandbox: () => sandbox(threadId),
+          output: (stream, text) =>
+            recorder.live({ type: "tool.output", threadId, toolCallId, stream, text }),
+        });
+      } catch (error) {
+        // Voluma's failure, not the call's: recorded as `infrastructure`, and the run page
+        // doesn't count it as the agent's failed call.
+        if (!(error instanceof SandboxUnavailableError)) throw error;
+        result = { output: error.message, isError: true, infrastructure: true, truncated: false };
+      }
       return {
         content: [
           { type: "text" as const, text: result.output },
           ...(result.images ?? []).map((i) => ({ type: "image" as const, ...i })),
         ],
-        details: { truncated: result.truncated },
+        // `details` is stored with the message: a terminating batch is told from it on resume (`isFinished`).
+        details: {
+          truncated: result.truncated,
+          terminate: result.terminate === true,
+          ...(result.infrastructure && { infrastructure: true }),
+        },
         isError: result.isError,
+        ...(result.terminate && { terminate: true }),
       };
     },
   };
@@ -430,7 +526,10 @@ function sameSystem(stored: AgentMessage | undefined, current: AgentMessage | un
  * (a failed write stops all writing), so the history is not trusted.
  * Errored and aborted assistant messages are skipped: Pi drops them from requests.
  */
-function interruptedToolResults(messages: AgentMessage[]): ToolResultMessage[] {
+function interruptedToolResults(
+  messages: AgentMessage[],
+  interrupted: StartThreadOptions["interrupted"],
+): ToolResultMessage[] {
   const kept = messages.filter(
     (m) => !(m.role === "assistant" && (m.stopReason === "error" || m.stopReason === "aborted")),
   );
@@ -450,19 +549,24 @@ function interruptedToolResults(messages: AgentMessage[]): ToolResultMessage[] {
   ) {
     throw new ThreadFailure("the stored history has a tool call without a result in its middle");
   }
-  return unanswered.map(({ block }) => ({
-    role: "toolResult" as const,
-    toolCallId: block.id,
-    toolName: block.name,
-    content: [
-      {
-        type: "text" as const,
-        text: "No result was recorded; the command may have run. Check its effects before running it again.",
-      },
-    ],
-    isError: true,
-    timestamp: Date.now(),
-  }));
+  return unanswered.map(({ block }) => {
+    const built = interrupted?.(block.name, block.id);
+    return {
+      role: "toolResult" as const,
+      toolCallId: block.id,
+      toolName: block.name,
+      content: [
+        {
+          type: "text" as const,
+          text:
+            built ??
+            "No result was recorded; the command may have run. Check its effects before running it again.",
+        },
+      ],
+      isError: built === undefined,
+      timestamp: Date.now(),
+    };
+  });
 }
 
 /** Pi continues a thread only from a user or tool-result message; otherwise it needs a new user message. */
@@ -471,20 +575,39 @@ function needsUserTurn(messages: AgentMessage[]): boolean {
   return last === undefined || last.role === "system" || last.role === "assistant";
 }
 
-/** The turn ended with a reply, not mid-way through tool calls or on an error. */
-const isFinished = (last: AgentMessage | undefined) =>
-  last?.role === "assistant" && last.stopReason === "stop";
+/**
+ * The turn ended: with a reply, or with a batch whose every result set `terminate` (stored in
+ * the result's `details`) and that answers every call of the reply before it. Not mid-way
+ * through tool calls, and not on an error.
+ */
+function isFinished(messages: AgentMessage[]): boolean {
+  const last = messages.at(-1);
+  if (last?.role === "assistant") return last.stopReason === "stop";
+  if (last?.role !== "toolResult") return false;
+  const at = messages.map((m) => m.role).lastIndexOf("assistant");
+  const reply = messages[at];
+  if (reply?.role !== "assistant") return false;
+  const results = messages.slice(at + 1);
+  const calls = reply.content.filter((b) => b.type === "toolCall").length;
+  return (
+    results.length === calls &&
+    results.every(
+      (m) =>
+        m.role === "toolResult" && (m.details as { terminate?: boolean } | undefined)?.terminate,
+    )
+  );
+}
 
 // A reply that ended the turn counts even if an abort came after it. Any other ending
 // during an abort is a cancel: Pi records an abort that surfaces as an exception in
 // the model call (after a command was killed) as an ordinary error message.
 function outcomeOf(
-  last: AgentMessage | undefined,
+  messages: AgentMessage[],
   aborted: boolean,
 ): Omit<ThreadOutcome, "ran" | "reply"> {
-  if (aborted && !(last?.role === "assistant" && last.stopReason === "stop")) {
-    return { status: "cancelled" };
-  }
+  const last = messages.at(-1);
+  if (isFinished(messages)) return { status: "completed" };
+  if (aborted) return { status: "cancelled" };
   if (last?.role !== "assistant")
     return { status: "failed", error: "the thread ended without a reply" };
   switch (last.stopReason) {

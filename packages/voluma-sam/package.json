@@ -1,0 +1,22 @@
+{
+  "name": "@voluma/sam",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./input": "./src/input.ts"
+  },
+  "scripts": {
+    "build": "esbuild src/main.ts --bundle --platform=node --target=node24 --format=esm --banner:js=\"import{createRequire}from'node:module';const require=createRequire(import.meta.url);\" --outfile=dist/voluma-sam.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "undici": "^7.16.0",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.25.12",
+    "typescript": "catalog:"
+  }
+}

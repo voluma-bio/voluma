@@ -10,7 +10,7 @@ import { ArrowLeft, Download, History, Layers, ListChecks } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { downloadCsv, downloadReviewReport } from "./export";
-import { type ReviewRun, taskStatus } from "./model";
+import { type ReviewRun, structuresOf, taskStatus } from "./model";
 import { TaskReport } from "./TaskReport";
 import { useSnapshots } from "./useSnapshots";
 
@@ -100,12 +100,13 @@ export function ReviewWorkspace({
     onSuccess: onRefresh,
     onError: onRefresh,
   });
-  const selected =
-    revision?.structures.filter((item) =>
-      restored
-        ? restored.viewState.structures.some((entry) => entry.structureId === item.id)
-        : task?.structureIds.includes(item.id),
-    ) ?? [];
+  const selected = restored
+    ? (revision?.structures.filter((item) =>
+        restored.viewState.structures.some((entry) => entry.structureId === item.id),
+      ) ?? [])
+    : revision && task
+      ? structuresOf(revision, task)
+      : [];
   return (
     <div className="review-shell" data-theme="light">
       <header className="app-header">
@@ -135,7 +136,7 @@ export function ReviewWorkspace({
                   ? "Reviewed"
                   : run.review.remainingToCheck
                     ? `${run.review.remainingToCheck} to check`
-                    : "Completed"}
+                    : "Checked"}
               </StatusBadge>
             )}
           </div>
@@ -299,7 +300,7 @@ export function ReviewWorkspace({
                               })
                             }
                           />
-                          {item.voxels?.label && (
+                          {item.voxels && "label" in item.voxels && (
                             <span
                               className="inline-block h-2 w-2 self-center"
                               style={{
@@ -310,7 +311,7 @@ export function ReviewWorkspace({
                           {item.name}
                         </label>
                         <p className="mt-2 text-muted-foreground">
-                          {[item.status ?? "No status", item.reason].filter(Boolean).join(" · ")}
+                          {item.missing ? `Missing · ${item.missing.reason}` : "Reported"}
                         </p>
                         <label className="opacity-control">
                           Opacity
@@ -349,8 +350,13 @@ export function ReviewWorkspace({
                 {task && revision && run ? (
                   <TaskReport
                     task={task}
-                    structureName={(id) =>
-                      revision.structures.find((item) => item.id === id)?.name ?? id
+                    blockName={(id) =>
+                      [
+                        ...revision.volumes,
+                        ...revision.structures,
+                        ...revision.surfaces,
+                        ...revision.annotations,
+                      ].find((item) => item.id === id)?.name ?? id
                     }
                     resultLabel={`R${run.revisions.findIndex((item) => item.id === task.resultRevisionId) + 1}`}
                     taskNumber={revision.tasks.indexOf(task) + 1}

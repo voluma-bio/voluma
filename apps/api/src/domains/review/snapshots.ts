@@ -52,13 +52,23 @@ export function snapshotRoutes({ runs, files, snapshots }: ReviewDeps) {
         message: "Only acquired-slice screenshots are supported yet.",
       });
     const structures = new Set(revision.structures.map((s) => s.id));
-    const annotations = new Set(revision.annotations.map((a) => a.id));
+    const blocks = new Set(
+      [
+        ...revision.volumes,
+        ...revision.structures,
+        ...revision.surfaces,
+        ...revision.annotations,
+      ].map((block) => block.id),
+    );
     if (
       state.structures.some((s) => !structures.has(s.structureId)) ||
-      state.focus?.structureIds.some((id) => !structures.has(id)) ||
-      state.focus?.annotationIds.some((id) => !annotations.has(id)) ||
+      state.focus?.on.some((id) => !blocks.has(id)) ||
       (state.focus?.volumeId !== undefined &&
-        !revision.volumes.some((v) => v.id === state.focus?.volumeId && v.kind === "labels"))
+        !revision.volumes.some(
+          (v) =>
+            v.id === state.focus?.volumeId &&
+            (state.focus?.label === undefined || v.kind === "labels"),
+        ))
     )
       throw new HTTPException(400, { message: "Snapshot references are outside this revision." });
 

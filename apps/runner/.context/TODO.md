@@ -1,19 +1,29 @@
 # Runner TODO
 
+- **Measure the live `/inputs` staging rate after #198.** Run a before/after A/B on the staging OA6-1RK prefix with the staging runner environment, recording `cp` stderr and elapsed time. The parent-directory race is reproduced and fixed locally; a real-Modal count would confirm it was the only cause. Do not lower `-P 32` without that measurement.
+
 From the round-2 review of #40 (`voluma-bio/docs` `work/mvp-contracts-and-data/research/review-pr40-round2.md`):
 
 - **`released` can miss Railway's 30 s drain under a slow API.** `lease.end` waits for an in-flight heartbeat and sends one more (up to 15 s each) before the report. Skip or shorten the final heartbeat when the report is `released`.
 - **`redact.ts` header:** say that a run resumed from stored, redacted events can differ from the live one when a key appeared in content.
-- **`segment_sam` holds the volume in runner memory** (~1.3 GB peak per call on an OA6-1RK-sized stack, review of #56). If staging shows memory pressure, move the heavy parts into the sandbox: the sandbox encodes the slice stack to MP4 in `/scratch`, the runner only uploads it to Meta and writes the raw response to `/scratch`, and the sandbox decodes and pastes the masks in Python. The key still never enters the sandbox. Workers or Durable Objects don't fit (128 MB per isolate, no native ffmpeg).
 
 From the skillset move (`workflows/` in this repo):
 
 - **The sandbox image does not follow the pinned commit.** The image is one digest in config (`SANDBOX_IMAGE`), so an old pin runs on the newest image. To tie them: tag the image with the hash of `workflows/core/requirements.txt`, have the runner resolve that tag from the requirements at the run's pinned commit, and record the image in the run's first event. Needs the workflow-packages lane's pin and the `/workflow` mount to read that file.
 
-- **Models per role** are config (`RUNNER_MODEL` worker, `RUNNER_CHECK_MODEL`, `RUNNER_MAIN_MODEL`), not an alias table in `apps/api` as the format doc says, because the runner holds the keys. The per-workflow or per-org override is not built.
+- **Model aliases** are config (`RUNNER_MODEL_<ALIAS>`, see CONTEXT.md), not an alias table in `apps/api` as the format doc says, because the runner holds the keys. The per-workflow or per-org override is not built.
 - **The main thread has no tools or sandbox.** At run start it sees the plan, the selection and the user's notes, not the workflow skill's text; the skillset's `microct-lead` names `view_image` and skills it would read, which needs the thread to have a sandbox. The `review` role is not started.
 
-From the run-costs review (#103):
+- **An ended run can leave review assets "preparing" when it fails before the conversion worker
+  starts** (e.g. `loadWorkflow` throws on a resume whose log already holds outputs). Create the
+  recorder and worker right after `storedEvents()`, or record `assets.failed` for pending outputs in
+  `finally` when the report is `ended` and the worker is undefined. (review p528 of #184)
+- **A stop between `drain`'s last abort check and its final flush** releases the run with its
+  leftovers already `assets.failed`, so the next claim won't retry them. Have `drain` return whether
+  it closed the queue and rebuild the report only when it didn't. (p528)
+- An output appended after the drain's final scan (a thread stuck past the 5 s wind-down) gets no
+  `assets.*` event. Narrow. (p529)
+- **Thinking level isn't in the events.** Pi records each reply's level in History (`thinkingLevel` on the assistant message), and the runner's boot line prints `RUNNER_THINKING`, but a run's events don't say which level a thread used. Per-role levels have landed (role files' `thinking`); record the level with the model on `thread.started` (a contract change) so a resume keeps it.
 
-- **A paid tool reports its charge twice.** `meta-segmenter.ts` calls the run meter's `addCost` and the call's `bill` with the same amount. Have `ToolContext.bill` also feed the meter (a run-level `onBill` through `superviseRun` to `startThread`) and drop `addCost`, so a new paid tool calls one thing.
-- **Heartbeats timed out during `segment_sam` on a loaded dev box** (load ~47, 2026-10-28): diagnosed. The runner's own thread decoded Meta's 100+ MB reply and pasted its masks in one synchronous block of minutes, so heartbeats could not get through and the runner stopped its own run (`voluma-bio/docs` `work/iterate-and-review/design/evidence/findings.md` §6). `segment_sam` moves into the sandbox (the infrastructure design, step 3); until it lands the failure stands. The local API's `tsx watch` restarts on `node_modules` changes are a separate nuisance.
+- **A correction's output backup (`runs/<id>/corrections/<reopen id>/`) is deleted only by the next claim after it, and a restored one stays.** A go's first claim copies the whole `/outputs` (`outputs-backup.ts`); the first claim of the next reopen after the correction finished deletes it, but a backup that was restored (the correction failed) is kept, and a run never reopened again keeps its last one. Delete restored backups too. Objects over 5 GB would need a multipart copy (`r2-outputs.ts` uses one `CopyObject`).
+- **Per-attempt output folders** would end the restore: an attempt writes `/outputs/<task>/<attempt>/`, so an abandoned attempt never touches the kept one's files and nothing is copied or put back. Too large for the corrections PR (every path that names an output file, the sandbox mount, the prompts, the converter); revisit after the Nov 4 demo.

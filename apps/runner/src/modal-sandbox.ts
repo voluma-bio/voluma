@@ -10,9 +10,14 @@
  *   command therefore runs under `timeout -k` (which leads its own process group and
  *   signals all of it) and records that group;
  *   an abort kills that group with a second exec, or terminates the sandbox if that fails.
- * - Read-only inputs flagged `stage` are copied to local disk at their path at create, 32
- *   files at a time (the copy is writable: commands run as root, and a sandbox cannot
- *   remount or `chattr` a path or run as another user and still write the mounts); the bucket is mounted at a private path under /staged for the copy.
+ * - Read-only inputs flagged `stage` are copied to local disk at their path at create, in two
+ *   commands (`STAGE_PREPARE_SCRIPT` makes every directory and lists the source; `STAGE_COPY_SCRIPT`
+ *   copies it): 32 parallel workers, 16 files per `cp`, then re-copies of only the files still
+ *   missing or the wrong size, up to three more passes. A watchdog kills a pass whose destination
+ *   stops growing for 60 s; no bound scales with size, so a multi-GB file still fits. The copy is
+ *   writable: commands run as root, and a sandbox cannot remount or `chattr` a path or run as
+ *   another user and still write the mounts; the bucket is mounted at a private path under
+ *   /staged for the copy.
  * - Network follows the spec: none (`blockNetwork`), or HTTPS to the listed hosts only
  *   (`outboundDomainAllowlist`; probed on 0.11.1: plain HTTP, other hosts and IPs are refused,
  *   but DNS lookups of any name still resolve).
@@ -26,6 +31,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { setTimeout } from "node:timers/promises";
 import {
   type CreateSandbox,
   type ExecChunk,
@@ -36,6 +42,7 @@ import {
   type SandboxSpec,
 } from "@voluma/harness/ports/sandbox";
 import { ModalClient, type Sandbox as ModalSandbox, NotFoundError } from "modal";
+import type { Config } from "./config.ts";
 
 export interface ModalSandboxConfig {
   /** Modal API credentials; absent: the SDK uses ~/.modal.toml. */
@@ -60,6 +67,67 @@ export interface ModalSandboxConfig {
 
 const MAX_MODAL_NAME = 64;
 const STAGE_PARALLELISM = 32;
+// Copy passes after the first, over the files still missing or the wrong size.
+const STAGE_RETRIES = 3;
+// Staging detects a stall, not a duration: a big scan may take as long as its bytes need, so no
+// bound scales with size. The copy step's watchdog kills a pass whose destination has not grown
+// for STAGE_STALL_SECONDS while copies still run; the next pass re-copies what is missing.
+const STAGE_STALL_SECONDS = 60;
+const STAGE_POLL_SECONDS = 2;
+// The watchdog prints a heartbeat each poll. The TS side gives up on a copy step silent this long
+// (the script itself wedged, e.g. a `cp` in an uninterruptible read that SIGKILL cannot end).
+const STAGE_SILENCE_SECONDS = 90;
+// Listing and making directories; a mount that never answers fails here.
+const STAGE_PREPARE_SECONDS = 120;
+// How long past `timeout -k` the TS side waits for the exit before giving up on the streams.
+const STAGE_STREAM_GRACE_SECONDS = 10;
+// Tail of the stage command's stderr kept in the error.
+const STAGE_STDERR_CHARS = 4000;
+// Both scripts take the source as "$1" and the destination as "$2". Every directory is made
+// first: parallel `cp --parents` calls racing to create one parent fail with "File exists".
+// Listings are sorted "size path" records, so comparing the source's with the copy's finds the
+// files missing or a different size. Paths are positional arguments, never spliced in.
+const STAGE_LIST = `list() { (cd "$1" && find . -type f -printf '%s %p\\0' | sort -z); }`;
+// Prints the scratch directory, which holds the listing.
+const STAGE_PREPARE_SCRIPT = `export LC_ALL=C; set -o pipefail
+${STAGE_LIST}
+mkdir -p "$2" || exit 1; cd "$1" || exit 1
+find . -type d -print0 | (cd "$2" && xargs -0 -r mkdir -p --) || exit 1
+dir=$(mktemp -d) || exit 1
+# The source is listed once, checked: a listing that fails partway must not pass as complete.
+list . > "$dir/src" || { echo "listing $1 failed" >&2; exit 1; }
+echo "$dir"`;
+// "$3" is the scratch dir. Each pass runs in its own process group (setsid) so the watchdog can
+// kill it whole. Progress is the file count and bytes under the local destination, which the
+// watchdog reads without touching the mount; empty files still count.
+const STAGE_COPY_SCRIPT = `export LC_ALL=C; set -o pipefail
+${STAGE_LIST}
+progress() { find "$1" -type f -printf '%s\\n' | awk '{t+=$1} END {print NR, t+0}'; }
+cd / || exit 1; dir=$3; trap 'rm -rf "$dir"' EXIT
+cp "$dir/src" "$dir/todo"
+for pass in $(seq 0 ${STAGE_RETRIES}); do
+  sed -z 's/^[0-9]* //' "$dir/todo" > "$dir/paths"
+  # Only this shell writes to the exec's streams: a cp that survives SIGKILL must not hold them open.
+  # The copies alone run inside the mount, so the watchdog's find never opens it.
+  (cd "$1" && exec setsid xargs -0 -r -P ${STAGE_PARALLELISM} -n 16 cp --parents -t "$2" -- < "$dir/paths" >/dev/null 2>>"$dir/err") &
+  pid=$!; last=$(progress "$2"); since=$SECONDS
+  while kill -0 $pid 2>/dev/null; do
+    sleep ${STAGE_POLL_SECONDS}; echo .
+    now=$(progress "$2")
+    if [ "$now" != "$last" ]; then last=$now; since=$SECONDS
+    elif [ $((SECONDS - since)) -ge ${STAGE_STALL_SECONDS} ]; then
+      echo "pass $pass: no progress for ${STAGE_STALL_SECONDS} s, killed" >&2
+      kill -TERM -- -$pid 2>/dev/null; sleep 2; kill -KILL -- -$pid 2>/dev/null; break
+    fi
+  done
+  wait $pid
+  # A partial destination listing only causes extra re-copies, never a false pass.
+  comm -z -23 "$dir/src" <(list "$2") > "$dir/todo"
+  [ -s "$dir/todo" ] || exit 0
+done
+tail -c 4000 "$dir/err" >&2 2>/dev/null
+printf 'could not copy %s files: %.1000s\\n' "$(tr -cd '\\0' < "$dir/todo" | wc -c)" "$(sed -z 's/^[0-9]* //' "$dir/todo" | tr '\\0' ' ')" >&2
+exit 1`;
 const STAGE_ROOT = "/staged";
 const GROUP_DIR = "/tmp/voluma-exec";
 const KILL_GRACE_SECONDS = 5;
@@ -83,12 +151,30 @@ export async function terminateClaim(
   for await (const sandbox of live) await sandbox.terminate();
 }
 
+/** The live sandboxes of the run that another claim started. The app is created by the first sandbox, so none yet means none. */
+async function* otherClaims(
+  modal: ModalSandboxConfig["modal"],
+  runId: string,
+  claim: string,
+  signal?: AbortSignal,
+) {
+  const client = new ModalClient(modal);
+  const app = await client.apps.fromName(RUNS_APP).catch((error) => {
+    if (error instanceof NotFoundError) return undefined;
+    throw error;
+  });
+  if (!app) return;
+  for await (const sandbox of client.sandboxes.list({ appId: app.appId, tags: { run: runId } })) {
+    signal?.throwIfAborted();
+    if ((await sandbox.getTags()).claim !== claim) yield sandbox;
+  }
+}
+
 /**
  * Asks Modal to terminate every live sandbox of the run that another claim started, without
  * waiting for it to stop; returns how many. Called right after a claim succeeds: the claim holds
  * the lease, so what an earlier claim left running (a crashed or lost runner) must not keep
- * writing the run's mounts or spending. The app is created by the first sandbox, so none yet
- * means nothing to end.
+ * writing the run's mounts or spending.
  */
 export async function terminateOtherClaims(
   modal: ModalSandboxConfig["modal"],
@@ -96,20 +182,59 @@ export async function terminateOtherClaims(
   claim: string,
   signal?: AbortSignal,
 ): Promise<number> {
-  const client = new ModalClient(modal);
-  const app = await client.apps.fromName(RUNS_APP).catch((error) => {
-    if (error instanceof NotFoundError) return undefined;
-    throw error;
-  });
-  if (!app) return 0;
   let ended = 0;
-  for await (const sandbox of client.sandboxes.list({ appId: app.appId, tags: { run: runId } })) {
-    signal?.throwIfAborted();
-    if ((await sandbox.getTags()).claim === claim) continue;
+  for await (const sandbox of otherClaims(modal, runId, claim, signal)) {
     await sandbox.terminate();
     ended++;
   }
   return ended;
+}
+
+/**
+ * Resolves once no sandbox of the run from another claim is live (a terminated one drops out of
+ * the listing); throws if some remain after `timeoutMs`. Needed before `/outputs` is put back:
+ * a sandbox still running could write over the restored files.
+ */
+export async function awaitOtherClaimsGone(
+  modal: ModalSandboxConfig["modal"],
+  runId: string,
+  claim: string,
+  signal?: AbortSignal,
+  timeoutMs = 60_000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    let live = false;
+    for await (const _ of otherClaims(modal, runId, claim, signal)) {
+      live = true;
+      break;
+    }
+    if (!live) return;
+    if (Date.now() >= deadline)
+      throw new Error(
+        "an earlier claim's sandboxes are still running, so /outputs cannot be put back",
+      );
+    await setTimeout(2000, undefined, { signal });
+  }
+}
+
+/** The sandbox factory of one claim of a run: `run.ts` and `dev-sandbox.ts` build theirs here. */
+export function claimSandboxes(
+  config: Config,
+  modal: ModalSandboxConfig["modal"],
+  claim: string,
+): CreateSandbox {
+  return createModalSandbox({
+    appName: RUNS_APP,
+    claim,
+    modal,
+    r2: {
+      accountId: config.r2.accountId,
+      bucket: config.r2.bucket,
+      parentAccessKeyId: config.r2.accessKeyId,
+      cloudflareApiToken: config.r2.cloudflareApiToken,
+    },
+  });
 }
 
 export function createModalSandbox(config: ModalSandboxConfig): CreateSandbox {
@@ -126,7 +251,9 @@ export function createModalSandbox(config: ModalSandboxConfig): CreateSandbox {
       ReturnType<typeof client.cloudBucketMounts.create>
     > = {};
     for (const mount of spec.mounts) {
-      const secret = await client.secrets.fromObject(await mintCredentials(config, spec, mount));
+      const secret = await client.secrets.fromObject(
+        await mintCredentials(config, spec, mount, signal),
+      );
       cloudBucketMounts[mountedAt(mount)] = client.cloudBucketMounts.create(config.r2.bucket, {
         secret,
         readOnly: mount.access === "read-only",
@@ -159,7 +286,7 @@ export function createModalSandbox(config: ModalSandboxConfig): CreateSandbox {
     const sandbox = new ModalSandboxAdapter(modal, spec);
     try {
       signal?.throwIfAborted();
-      await sandbox.stage();
+      await sandbox.stage(signal);
     } catch (error) {
       await sandbox.destroy();
       throw error;
@@ -172,30 +299,108 @@ class ModalSandboxAdapter implements Sandbox {
   readonly #modal: ModalSandbox;
   readonly #mounts: SandboxMount[];
   readonly #lifetimeSeconds: number;
+  readonly #workdir: string | undefined;
 
   constructor(modal: ModalSandbox, spec: SandboxSpec) {
     this.#modal = modal;
+    this.#workdir = spec.workdir;
     this.#lifetimeSeconds = spec.lifetimeSeconds;
     this.#mounts = spec.mounts;
   }
 
-  async stage(): Promise<void> {
+  async stage(signal?: AbortSignal): Promise<void> {
     for (const mount of this.#mounts.filter((m) => m.stage)) {
-      // Paths are positional arguments, never spliced into the script.
-      const script =
-        'set -eo pipefail; mkdir -p "$2"; cd "$1"; find . -type f -print0 | ' +
-        `xargs -0 -r -P ${STAGE_PARALLELISM} -n 16 cp --parents -t "$2"; ` +
-        // A partial listing must not pass as a complete copy.
-        'test "$(find . -type f | wc -l)" = "$(cd "$2" && find . -type f | wc -l)"';
-      let code = -1;
-      for await (const chunk of this.#run(
-        ["bash", "-c", script, "_", mountedAt(mount), mount.path],
-        3600,
-      )) {
-        if (chunk.type === "exit") code = chunk.code;
-      }
-      if (code !== 0) throw new Error(`staging ${mount.path} failed with exit code ${code}`);
+      const from = mountedAt(mount);
+      const dir = (
+        await this.#stageStep(
+          mount.path,
+          STAGE_PREPARE_SCRIPT,
+          STAGE_PREPARE_SECONDS,
+          STAGE_PREPARE_SECONDS + KILL_GRACE_SECONDS + STAGE_STREAM_GRACE_SECONDS,
+          [from, mount.path],
+          signal,
+        )
+      ).trim();
+      if (!dir) throw new Error(`staging ${mount.path} failed (no scratch directory)`);
+      // The copy step has no duration bound: its watchdog ends stalls, the sandbox lifetime ends the rest.
+      await this.#stageStep(
+        mount.path,
+        STAGE_COPY_SCRIPT,
+        this.#lifetimeSeconds,
+        STAGE_SILENCE_SECONDS,
+        [from, mount.path, dir],
+        signal,
+      );
     }
+  }
+
+  /**
+   * Runs one staging script under `timeout -k` like `exec()` and returns its stdout. The TS side
+   * also gives up when the script is silent for `silenceSeconds` (a process stuck in an
+   * uninterruptible mount read can survive SIGKILL and hold the streams open) or when `signal`
+   * aborts; the failed start destroys the sandbox, which ends whatever still runs.
+   */
+  async #stageStep(
+    path: string,
+    script: string,
+    seconds: number,
+    silenceSeconds: number,
+    args: string[],
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const silent = new AbortController();
+    let timer: ReturnType<typeof globalThis.setTimeout> | undefined;
+    const arm = () => {
+      globalThis.clearTimeout(timer);
+      timer = globalThis.setTimeout(
+        () =>
+          silent.abort(
+            new Error(`staging ${path} failed (no output for ${silenceSeconds} s, gave up)`),
+          ),
+        silenceSeconds * 1000,
+      );
+    };
+    const steps = this.#run(
+      [
+        "timeout",
+        "-k",
+        String(KILL_GRACE_SECONDS),
+        String(seconds),
+        "bash",
+        "-c",
+        script,
+        "_",
+        ...args,
+      ],
+      seconds + KILL_GRACE_SECONDS,
+      undefined,
+      signal ? AbortSignal.any([signal, silent.signal]) : silent.signal,
+    );
+    let code = -1;
+    let stdout = "";
+    let stderr = "";
+    arm();
+    try {
+      for await (const chunk of steps) {
+        arm();
+        if (chunk.type === "exit") code = chunk.code;
+        else if (chunk.type === "stdout") stdout += chunk.data;
+        else if (chunk.type === "stderr") stderr = (stderr + chunk.data).slice(-STAGE_STDERR_CHARS);
+      }
+    } finally {
+      globalThis.clearTimeout(timer);
+    }
+    if (code !== 0) {
+      const detail = stderr.trim();
+      const why =
+        code === 124
+          ? `timed out after ${seconds} s`
+          : code === 137
+            ? `killed after ${seconds} s`
+            : `exit ${code}`;
+      throw new Error(`staging ${path} failed (${why})${detail ? `: ${detail}` : ""}`);
+    }
+    return stdout;
   }
 
   async *exec(request: ExecRequest, signal?: AbortSignal): AsyncGenerator<ExecChunk> {
@@ -210,8 +415,9 @@ class ModalSandboxAdapter implements Sandbox {
     // A command must not outlive the sandbox that Modal ends at its lifetime.
     const timeoutSeconds = Math.min(request.timeoutSeconds, this.#lifetimeSeconds);
     const id = randomUUID();
-    // The inner shell records its process group, then becomes the command.
-    const script = `mkdir -p ${GROUP_DIR}; awk '{print $5}' /proc/$$/stat > ${GROUP_DIR}/${id}; exec bash -c "$0"`;
+    // The inner shell records its process group, enters the working folder (made first: on a
+    // bucket mount an empty prefix is no directory), then becomes the command.
+    const script = `mkdir -p ${GROUP_DIR}; awk '{print $5}' /proc/$$/stat > ${GROUP_DIR}/${id}; mkdir -p -- "$1" && cd -- "$1" || exit 1; exec bash -c "$0"`;
     const argv = [
       "timeout",
       "-k",
@@ -221,6 +427,7 @@ class ModalSandboxAdapter implements Sandbox {
       "-c",
       script,
       request.command,
+      this.#workdir ?? ".",
     ];
     let killing: Promise<void> | undefined;
     const kill = () => {
@@ -279,7 +486,9 @@ class ModalSandboxAdapter implements Sandbox {
     argv: string[],
     deadlineSeconds: number,
     env?: Record<string, string>,
+    signal?: AbortSignal,
   ): AsyncGenerator<ExecChunk> {
+    signal?.throwIfAborted();
     const process = await this.#modal
       .exec(argv, {
         env,
@@ -298,16 +507,21 @@ class ModalSandboxAdapter implements Sandbox {
       ["stdout", next("stdout")],
       ["stderr", next("stderr")],
     ]);
+    // An abort rejects every wait below, so a reader parked on a silent stream stops at once.
+    const aborted = new Promise<never>((_, reject) =>
+      signal?.addEventListener("abort", () => reject(signal.reason), { once: true }),
+    );
+    aborted.catch(() => {});
     try {
       while (live.size > 0) {
-        const { type, result } = await Promise.race(live.values());
+        const { type, result } = await Promise.race([...live.values(), aborted]);
         if (result.done) live.delete(type);
         else {
           live.set(type, next(type));
           yield { type, data: result.value };
         }
       }
-      yield { type: "exit", code: await process.wait() };
+      yield { type: "exit", code: await Promise.race([process.wait(), aborted]) };
     } finally {
       // A reader that stops early, or a stream that errors later, must not leave
       // an unhandled rejection that ends the runner.
@@ -400,38 +614,68 @@ function validate(spec: SandboxSpec): void {
   }
 }
 
+// Cloudflare's mint endpoint sometimes answers 403 code 10042 ("Please enable R2") for an account
+// that has R2: seen once, gone 41 s later. A bad token is a different 403 and must not be retried.
+// 5 attempts with 1, 2, 4 and 8 s between them: at most ~15 s of waiting per mount.
+const MINT_ATTEMPTS = 5;
+const MINT_BACKOFF_MS = 1000;
+
+/** Whether a failed mint is worth another try: a server or rate-limit error, or the spurious 10042. */
+export function isTransientMintFailure(status: number, body: string): boolean {
+  if (status === 429 || status >= 500) return true;
+  return status === 403 && /"code"\s*:\s*10042\b/.test(body);
+}
+
 /** Mints a temporary R2 credential for one prefix, as the S3 variables Modal's mount expects. */
 async function mintCredentials(
   { r2 }: ModalSandboxConfig,
   spec: SandboxSpec,
   mount: SandboxMount,
+  signal?: AbortSignal,
 ): Promise<Record<string, string>> {
-  const response = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${r2.accountId}/r2/temp-access-credentials`,
-    {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${r2.cloudflareApiToken}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        bucket: r2.bucket,
-        parentAccessKeyId: r2.parentAccessKeyId,
-        permission: mount.access === "read-only" ? "object-read-only" : "object-read-write",
-        ttlSeconds: spec.lifetimeSeconds + CREDENTIAL_MARGIN_SECONDS,
-        prefixes: [mount.prefix],
-      }),
+  const request = {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${r2.cloudflareApiToken}`,
+      "content-type": "application/json",
     },
-  );
-  if (!response.ok) {
-    throw new Error(`minting R2 credentials failed: ${response.status} ${await response.text()}`);
+    body: JSON.stringify({
+      bucket: r2.bucket,
+      parentAccessKeyId: r2.parentAccessKeyId,
+      permission: mount.access === "read-only" ? "object-read-only" : "object-read-write",
+      ttlSeconds: spec.lifetimeSeconds + CREDENTIAL_MARGIN_SECONDS,
+      prefixes: [mount.prefix],
+    }),
+    signal,
+  };
+  const url = `https://api.cloudflare.com/client/v4/accounts/${r2.accountId}/r2/temp-access-credentials`;
+  for (let attempt = 1; ; attempt++) {
+    let failure: string;
+    let transient: boolean;
+    try {
+      const response = await fetch(url, request);
+      if (response.ok) {
+        const { result } = (await response.json()) as {
+          result: { accessKeyId: string; secretAccessKey: string; sessionToken: string };
+        };
+        return {
+          AWS_ACCESS_KEY_ID: result.accessKeyId,
+          AWS_SECRET_ACCESS_KEY: result.secretAccessKey,
+          AWS_SESSION_TOKEN: result.sessionToken,
+        };
+      }
+      const body = await response.text();
+      failure = `${response.status} ${body}`;
+      transient = isTransientMintFailure(response.status, body);
+    } catch (error) {
+      // A network error; an abort must end the creation, not be retried.
+      signal?.throwIfAborted();
+      failure = String(error);
+      transient = true;
+    }
+    if (!transient || attempt === MINT_ATTEMPTS) {
+      throw new Error(`minting R2 credentials failed: ${failure}`);
+    }
+    await setTimeout(MINT_BACKOFF_MS * 2 ** (attempt - 1), undefined, { signal });
   }
-  const { result } = (await response.json()) as {
-    result: { accessKeyId: string; secretAccessKey: string; sessionToken: string };
-  };
-  return {
-    AWS_ACCESS_KEY_ID: result.accessKeyId,
-    AWS_SECRET_ACCESS_KEY: result.secretAccessKey,
-    AWS_SESSION_TOKEN: result.sessionToken,
-  };
 }

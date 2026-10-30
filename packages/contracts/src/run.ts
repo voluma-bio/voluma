@@ -5,15 +5,22 @@
  * every org's runs. The bearer-authenticated ingest routes under the same prefix are a
  * different contract.
  *
- *   POST /api/run/runs             body `startRunRequestSchema` → 200 `runSchema`
- *                                  (404 for an unknown `workflowId` or an `inputId`
- *                                  the caller can't read; 409 and 429: see Limits)
+ *   POST /api/run/runs             body `startRunRequestSchema` → 200 `runSchema`: one
+ *                                  run of a scan of an existing study (404 for an
+ *                                  unreadable `studyId` or an `inputId` the study lacks;
+ *                                  409 and 429: see Limits; 400 for a `selectedOutputs` id that is
+ *                                  not a measurement or score of the study's workflow). `POST /api/run/studies`
+ *                                  (`study.ts`) creates a study and starts its first runs.
  *   GET  /api/run/runs             → 200 `listRunsResponseSchema`, newest first
  *   GET  /api/run/runs/:id         → 200 `runSchema`
  *   POST /api/run/runs/:id/cancel  → 200 `runSchema` with state `ended`/`cancelled`
  *                                  at once, even if the runner is still stopping (the
  *                                  server records it and the runner obeys); cancelling
- *                                  an ended run is a no-op; 403 for an example run
+ *                                  an ended run is a no-op; 403 for an example run.
+ *                                  A reopened run (`messages.ts`) stays `completed`; the
+ *                                  server writes `correction.ended {cancelled}`
+ *   POST /api/review/runs/:id/messages (`messages.ts`) reopens a run that ended `completed`,
+ *                                  moving it to `queued` for one claim
  *   POST /api/run/runs/:id/keys    body `resendKeysRequestSchema` → 200 `runSchema`
  *                                  (409 unless the run is `awaiting-keys`; 403 unless
  *                                  the caller is its `startedBy`; 429: see Limits)
@@ -73,10 +80,8 @@
  *     operator script, under a dedicated operator id) sets `example`, never
  *     `startRun` or a fork, and it never changes afterwards; to change an
  *     example, re-seed it. An example always reads its org's reference scan.
- *     A correction on one never changes it: the server
- *     creates the caller's own run with `forkedFrom` set (the corrections
- *     contract), which reads the same input. One caller has at most one fork
- *     per example; later corrections apply to it.
+ *     A message to one is refused (403, `messages.ts`) for now; whether a
+ *     researcher may correct an example is open.
  *   - Run-scoped records (events, corrections) inherit `labId` from their run
  *     and do not repeat it; read access to them is read access to the run.
  *     An input exists before any run and can serve several, so it carries its
@@ -85,13 +90,13 @@
  *     can't read answers 404, so a visitor can't start a run on another
  *     visitor's input by guessing its id.
  *
- * Workflows: the request names a workflow from the server's catalog, never raw
+ * Workflows: a study names a workflow from the server's catalog, never raw
  * pins, so a caller can't make the server import an arbitrary repo. The server
- * resolves the id to pinned packages and records them on the run.
+ * resolves the id to pinned packages and records them on each run of the study.
+ * Every run belongs to a study (`studyId`); a run's `input` is one of the study's scans.
  *
  * Starting work. The rules below hold for every call that creates a run or
- * makes one run again: `startRun`, a fork or a rerun after a correction (the
- * corrections contract), `/keys`, and any added later.
+ * makes one run again: `startRun`, a reopen by a message (`messages.ts`), `/keys`, and any added later.
  *
  * Who pays (`credentials`): `visitor` when the request that creates the run
  * carries `keys`, else `voluma`. It never changes afterwards, and a `visitor`
@@ -119,12 +124,9 @@
  *     kind (none for an org whose members share one account); another answers
  *     409;
  *   - for `voluma` runs only: runs at once (a claim takes a `queued` run only
- *     while the org is under it), runs per day, and a dollar ceiling counted
- *     from the usage the runner reports with its heartbeats (`runner.ts`), whose
- *     sum the run record shows as `usage`. The daily and dollar limits answer
- *     429 when work starts and are checked again when a claim dequeues a run; a
- *     run refused at dequeue, or a running one that crosses the dollar ceiling,
- *     ends `failed` with an `error`. The daily limit counts a run once, so a
+ *     while the org is under it) and runs per day. The daily limit answers
+ *     429 when work starts and is checked again when a claim dequeues a run; a
+ *     run refused at dequeue ends `failed` with an `error`. The daily limit counts a run once, so a
  *     recovered run isn't refused for a limit it already passed;
  *   - for `visitor` runs: at most this many `queued` or `running` in the org
  *     (those hold the visitor's keys in the server's memory, or a runner
@@ -137,7 +139,7 @@
  */
 import { z } from "zod";
 import { userIdSchema } from "./auth";
-import { inputIdSchema, runIdSchema, segmentSchema } from "./ids";
+import { inputIdSchema, runIdSchema, segmentSchema, studyIdSchema } from "./ids";
 import { relativePathSchema } from "./r2";
 import { reviewSummarySchema } from "./review";
 import { workflowPinSchema } from "./workflow";
@@ -170,7 +172,16 @@ export const runStateSchema = z.discriminatedUnion("status", [
    * A `visitor` run is not held by the org's runs-at-once limit, so its
    * position is always 1: it waits only for a free runner.
    */
-  z.object({ status: z.literal("queued"), position: z.number().int().min(1) }),
+  z.object({
+    status: z.literal("queued"),
+    position: z.number().int().min(1),
+    /**
+     * Present while the run waits out a model-provider outage: its last claim was released
+     * because the provider kept failing (`provider-outage`, `runner.ts`). `retryAt` is the
+     * time before which no claim takes it.
+     */
+    waitingForProvider: z.object({ retryAt: z.iso.datetime() }).optional(),
+  }),
   /** The first claim's time: a re-claim after a recovery keeps it. */
   z.object({ status: z.literal("running"), startedAt: z.iso.datetime() }),
   /**
@@ -191,37 +202,51 @@ export const runStateSchema = z.discriminatedUnion("status", [
 export type RunState = z.infer<typeof runStateSchema>;
 
 /** Output ids the user selected; at most 200, each once. */
-const selectedOutputsSchema = z
+export const selectedOutputsSchema = z
   .array(segmentSchema)
   .max(200)
   .refine((ids) => new Set(ids).size === ids.length, "duplicate output id");
 
 /**
- * The provider gateway's per-call rows summed for one run. A finished call counts its cost,
- * a call cut off counts its reservation (the provider may still bill), an open call counts
- * nothing here (only the gateway's admission counts its reservation). `costUsd` and
- * `calls` cover every row; `bySandbox` covers the rows whose token was minted for a sandbox,
+ * The provider gateway's per-call rows summed for one run. `costUsd` is the sum of known
+ * costs. A call cut off before its usage arrived has an unknown cost (the provider may have
+ * billed it): it adds nothing to `costUsd` and is counted in `unknownCostCalls`, so a screen
+ * shows "cost unknown", not $0. A call still open counts nowhere. `costUsd`, `calls` and
+ * `unknownCostCalls` cover every row; `bySandbox` covers the rows whose token was minted for a sandbox,
  * by that sandbox's name (`<taskId>.worker[.n]`, as in its `sandbox` event).
  */
 export const providerCallsSchema = z.object({
   costUsd: z.number().nonnegative(),
   calls: z.number().int().nonnegative(),
+  unknownCostCalls: z.number().int().nonnegative().default(0),
   bySandbox: z.array(
     z.object({
       sandbox: z.string().min(1),
       costUsd: z.number().nonnegative(),
       calls: z.number().int().nonnegative(),
+      unknownCostCalls: z.number().int().nonnegative().default(0),
     }),
   ),
 });
 export type ProviderCalls = z.infer<typeof providerCallsSchema>;
+
+/**
+ * While a run is live (queued, running, awaiting keys): the tasks of its current plan that
+ * are finished (done or to check) out of all of them. Null before the plan is written and
+ * once the run has ended (its state and `review` say the rest).
+ */
+export const runTasksSchema = z
+  .object({ done: z.number().int().nonnegative(), total: z.number().int().nonnegative() })
+  .nullable();
 
 export const runSchema = z
   .object({
     id: runIdSchema,
     labId: z.string(),
     startedBy: userIdSchema,
-    /** The pins the server resolved from the request's `workflowId`, as in `r2.ts`'s `workflowSnapshotPrefix`. */
+    /** The study the run belongs to; its workflow is the run's. */
+    studyId: studyIdSchema,
+    /** The pins the server resolved from the study's workflow, as in `r2.ts`'s `workflowSnapshotPrefix`. */
     workflows: z.array(workflowPinSchema).min(1),
     input: inputSchema,
     /**
@@ -245,7 +270,7 @@ export const runSchema = z
     state: runStateSchema,
     /**
      * What the run has spent so far: the sum of the usage its heartbeats reported (`runner.ts`).
-     * `modelCostUsd` is model calls and paid tool calls (`tool.result.costUsd`), in US dollars;
+     * `modelCostUsd` is model calls, in US dollars;
      * `sandboxSeconds` is sandbox time summed over its sandboxes (one per thread, so concurrent
      * threads add up and it can exceed wall time). Per task: `spend` in `spend.ts`.
      * Optional until the API writes it.
@@ -260,6 +285,7 @@ export const runSchema = z
     providerCalls: providerCallsSchema.optional(),
     /** Latest successfully completed results and their human review progress; null otherwise. */
     review: reviewSummarySchema.nullable(),
+    tasks: runTasksSchema,
   })
   .refine(
     (run) =>
@@ -281,9 +307,10 @@ export const visitorKeysSchema = z.object({
 export type VisitorKeys = z.infer<typeof visitorKeysSchema>;
 
 export const startRunRequestSchema = z.object({
-  workflowId: workflowIdSchema,
+  studyId: studyIdSchema,
+  /** One of the study's scans. */
   inputId: inputIdSchema,
-  /** As `runSchema.selectedOutputs`; an id the workflow's `outputs.json` lacks fails the run at start, with that message. */
+  /** As `runSchema.selectedOutputs`; an id that is not a measurement or score of the study's workflow is refused with 400. */
   selectedOutputs: selectedOutputsSchema.min(1).optional(),
   notes: z.string().max(4000).optional(),
   /** Present: the run uses these (`credentials: "visitor"`) and skips the org's runs-at-once count. */

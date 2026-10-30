@@ -1,24 +1,22 @@
 /**
- * Reads `model` and `max_tokens` from a model call's JSON body, as the provider's own parser
+ * Reads `model` from a model call's JSON body, as the provider's own parser
  * would: only keys of the top-level object count. A sandbox controls the whole body (tool
- * schemas can hold any JSON), so a regex over the text would price a decoy nested key.
+ * schemas can hold any JSON), so a regex over the text would take a decoy nested key.
  *
  * `BodyScanner` is a small tokenizer that tracks depth and string state, one chunk at a time, in
  * constant memory. The gateway feeds it the first 4 KB to decide admission (`fields()`), then
- * keeps feeding it the rest of the body as it is forwarded: a `model` or token key that appears
+ * keeps feeding it the rest of the body as it is forwarded: a `model` key that appears
  * twice (parsers disagree on which wins) or a top-level key spelled with an escape is a
  * violation, and the caller aborts the upstream request, so the call settles `cut`. Other
- * repeated keys change no price and are not tracked.
+ * repeated keys change nothing the gateway decides on and are not tracked.
  */
 
-export type BodyFields = { model: string; maxTokens: number | undefined };
+export type BodyFields = { model: string };
 
-const MAX_TOKENS_KEYS = new Set(["max_tokens", "max_output_tokens"]);
-const TRACKED_KEYS = new Set(["model", ...MAX_TOKENS_KEYS]);
 const MODEL_LENGTH = 200;
-/** Longest top-level key kept to compare; a longer one is none of the tracked keys. */
+/** Longest top-level key kept to compare; a longer one is not `model`. */
 const KEY_LENGTH = 40;
-/** Longest value kept; a longer one cannot be a model name or a token count. */
+/** Longest value kept; a longer one cannot be a model name. */
 const VALUE_LENGTH = MODEL_LENGTH + 10;
 
 type Mode = "open" | "key" | "keyString" | "colon" | "value" | "done";
@@ -35,10 +33,9 @@ export class BodyScanner {
   private rawOverflow = false;
   private seen = new Set<string>();
   private model: string | undefined;
-  private maxTokens: number | undefined;
   private violation: string | undefined;
-  /** The key whose value is being read, when it is a tracked one. */
-  private valueKey: string | undefined;
+  /** `model` while its value is being read. */
+  private valueKey: "model" | undefined;
 
   /** Feeds the next bytes (as Latin-1, so no multibyte byte can look like a quote). The violation, if any. */
   push(chunk: Buffer | string): string | undefined {
@@ -57,7 +54,7 @@ export class BodyScanner {
         ? "the model name is cut off by the 4 KB window"
         : "no top-level model in the first 4 KB of the request";
     }
-    return { model, maxTokens: this.maxTokens };
+    return { model };
   }
 
   private fail(reason: string) {
@@ -112,13 +109,13 @@ export class BodyScanner {
   }
 
   private startValue() {
-    const tracked = !this.keyOverflow && TRACKED_KEYS.has(this.key);
+    const tracked = !this.keyOverflow && this.key === "model";
     if (tracked) {
       if (this.seen.has(this.key))
         return this.fail(`the request body repeats the key "${this.key}"`);
       this.seen.add(this.key);
     }
-    this.valueKey = tracked ? this.key : undefined;
+    this.valueKey = tracked ? "model" : undefined;
     this.raw = "";
     this.rawOverflow = false;
     this.depth = 1;
@@ -154,18 +151,12 @@ export class BodyScanner {
   }
 
   private endValue() {
-    const key = this.valueKey;
-    if (key === undefined) return;
-    const raw = this.raw.trim();
-    if (key === "model") {
-      const model = this.rawOverflow ? undefined : modelOf(raw);
-      if (model === undefined) {
-        return this.fail(`the model must be a plain string of up to ${MODEL_LENGTH} characters`);
-      }
-      this.model = model;
-    } else if (!this.rawOverflow && /^\d+$/.test(raw)) {
-      this.maxTokens = Number(raw);
+    if (this.valueKey === undefined) return;
+    const model = this.rawOverflow ? undefined : modelOf(this.raw);
+    if (model === undefined) {
+      return this.fail(`the model must be a plain string of up to ${MODEL_LENGTH} characters`);
     }
+    this.model = model;
     this.valueKey = undefined;
   }
 }

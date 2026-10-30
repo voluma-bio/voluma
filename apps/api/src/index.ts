@@ -12,7 +12,7 @@
  * WORKOS_LAB_ORGANIZATION_ID, and optionally WORKOS_JUDGES_ORGANIZATION_ID, and
  * GUEST_ORGANIZATION_ID with GUEST_SCOPE (lab|self, default lab) to let anyone in as a guest (the repo .env).
  * Run limits, per organization (LAB, JUDGES, DEMO) and number: RUN_LIMITS_<ORG>_PER_CALLER, _CONCURRENT,
- * _PER_DAY, _USD_PER_DAY, _VISITOR_ACTIVE; unset is no limit. Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
+ * _PER_DAY, _VISITOR_ACTIVE; unset is no limit. Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
  * R2_SECRET_ACCESS_KEY, R2_BUCKET: Review's reference download and scan uploads (the API
  * presigns PUTs; files never pass through it). UPLOAD_MAX_FILES, UPLOAD_MAX_BYTES per scan and UPLOAD_MAX_OPEN uploads in progress per member (defaults below). Fails at startup if the database is unreachable or not migrated.
  */
@@ -20,7 +20,9 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
+import { MESSAGE_BODY_BYTES } from "@voluma/contracts/messages";
 import { REVIEW_SNAPSHOT_BODY_BYTES } from "@voluma/contracts/snapshot";
+import { workflowById } from "@voluma/workflow/bundled";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -34,14 +36,14 @@ import { r2ReferenceArchive } from "./domains/review/r2-reference-archive";
 import { r2RunFiles } from "./domains/review/r2-run-files";
 import { createRun } from "./domains/run";
 import type { Limits } from "./domains/run/admission";
-import { catalog } from "./domains/run/catalog";
 import { KeyVault } from "./domains/run/key-vault";
 import { createNotifier } from "./domains/run/notifier";
 import { pgEventLog } from "./domains/run/pg-event-log";
 import { pgHistory } from "./domains/run/pg-history";
 import { pgRunQueue } from "./domains/run/pg-queue";
 import { pgRunRecords } from "./domains/run/pg-run-records";
-import { pgRunReads } from "./domains/run/pg-runs";
+import { pgRunReads, resultsLoader } from "./domains/run/pg-runs";
+import { pgStudyReads } from "./domains/run/pg-studies";
 import { pgUploads } from "./domains/run/pg-uploads";
 import { r2Uploads } from "./domains/run/r2-uploads";
 
@@ -71,7 +73,6 @@ const limitsFromEnv = (org: "LAB" | "JUDGES" | "DEMO"): Limits => ({
   perCaller: limitNumber(`RUN_LIMITS_${org}_PER_CALLER`),
   concurrent: limitNumber(`RUN_LIMITS_${org}_CONCURRENT`),
   perDay: limitNumber(`RUN_LIMITS_${org}_PER_DAY`),
-  usdPerDay: limitNumber(`RUN_LIMITS_${org}_USD_PER_DAY`),
   visitorActive: limitNumber(`RUN_LIMITS_${org}_VISITOR_ACTIVE`),
 });
 
@@ -129,9 +130,26 @@ const auth = createAuth({
 
 /** Aborts at SIGTERM so open event streams end and the drain isn't held. */
 const draining = new AbortController();
-const reads = pgRunReads(db);
+const results = resultsLoader();
+const reads = pgRunReads(db, results);
+const studies = pgStudyReads(db, results);
 const notifier = createNotifier();
-const queue = pgRunQueue(db, limits, new KeyVault(), notifier);
+const queue = pgRunQueue(
+  db,
+  limits,
+  new KeyVault(),
+  notifier,
+  // The repo whose `workflows/` a run uses; the runner adds the commit its checkout was at.
+  (id) => {
+    const workflow = workflowById(id);
+    return (
+      workflow && {
+        pins: [{ repo: "voluma-bio/voluma", path: workflow.path }],
+        outputs: workflow.outputs,
+      }
+    );
+  },
+);
 const eventLog = pgEventLog(db, notifier);
 
 const runRecords = pgRunRecords(db, notifier);
@@ -160,10 +178,11 @@ const runFiles = process.env.RUN_FILES_DIRECTORY
 const app = new Hono();
 app.get("/health", (c) => c.text("ok"));
 // A body over the limit is a 413 before anything reads it. Browsers get 256 KB (the key
-// vault and the event log keep what they send), except an upload's file list (up to
+// vault and the event log keep what they send), except a message with its snapshot (3 MB) and an upload's file list (up to
 // 10,000 paths of 300 ASCII characters: 4 MB). The runner is trusted, and a model's
 // history row can be large (reasoning blobs, long tool calls), so /ingest/* gets 8 MB.
 const browserLimit = bodyLimit({ maxSize: 256 * 1024 });
+const messageLimit = bodyLimit({ maxSize: MESSAGE_BODY_BYTES });
 const fileListLimit = bodyLimit({ maxSize: 4 * 1024 * 1024 });
 const runnerLimit = bodyLimit({ maxSize: 8 * 1024 * 1024 });
 const snapshotLimit = bodyLimit({ maxSize: REVIEW_SNAPSHOT_BODY_BYTES });
@@ -172,6 +191,7 @@ app.use("/api/*", (c, next) => {
   if (c.req.path === "/api/run/inputs") return fileListLimit(c, next);
   if (c.req.method === "POST" && /^\/api\/review\/runs\/[^/]+\/snapshots$/.test(c.req.path))
     return snapshotLimit(c, next);
+  if (/^\/api\/review\/runs\/[^/]+\/messages$/.test(c.req.path)) return messageLimit(c, next);
   return browserLimit(c, next);
 });
 // Every /api request is authenticated here, in this order (auth.ts): the bearer and
@@ -185,11 +205,11 @@ app.route(
   "/api/run",
   createRun({
     reads,
+    studies,
     queue,
     eventLog,
     notifier,
     history: pgHistory(db),
-    catalog,
     uploadStore: pgUploads(db),
     objects: r2 && r2Uploads(r2),
     // A prepared scan is a few hundred files and a few hundred MB; a raw one, a few thousand.
@@ -198,7 +218,6 @@ app.route(
       maxBytes: countFromEnv("UPLOAD_MAX_BYTES", 20_000_000_000),
       maxOpen: countFromEnv("UPLOAD_MAX_OPEN", 3),
     },
-    repo: "voluma-bio/voluma",
     shutdown: draining.signal,
   }),
 );
@@ -207,6 +226,7 @@ app.route(
   createReview({
     runs: runRecords,
     snapshots: pgSnapshots(db),
+    messages: { check: queue.checkMessage, send: queue.sendMessage },
     files: runFiles,
     inputs: reads,
     referenceArchive,

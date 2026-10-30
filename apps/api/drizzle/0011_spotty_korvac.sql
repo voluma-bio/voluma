@@ -1,0 +1,1 @@
+ALTER TABLE "runs" ADD COLUMN "claimable_after" timestamp with time zone;

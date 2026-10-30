@@ -6,18 +6,62 @@ its size (2 CPUs, 8192 MiB), its network and which mounts it holds. Tags on ever
 
 | Role | Mounts | Network | Name |
 |---|---|---|---|
-| `worker` | as the caller says (today `RunLayout.mounts`) | the gateway host over HTTPS (`outboundDomainAllowlist`), if the spec has a `gateway`; else none | `<taskId>.worker[.n]` |
+| `worker` | as the caller says (today the worker `ThreadLayout.mounts`) | the gateway host over HTTPS (`outboundDomainAllowlist`), if the spec has a `gateway`; else none | `<taskId>.worker[.n]` |
 | `checker` | `readOnly` mounts read-only, one writable `scratch` prefix | none | `<taskId>.check[.n]` |
 | `convert` | `evidence` read-only, `review` writable | none | the job's |
 
 The builder sets the access of each mount, and the Modal adapter refuses a network on a
 non-worker role. The runner makes one sandbox per thread (`sandboxSession.get(threadId)`,
-named by the thread id without the run id). **Check threads still run on a worker-role
-sandbox**: the checker spec exists, but the run-wide `/scratch` is assumed by the check skills
-(`/scratch/recheck/`), by checkpoint evidence `{root: "scratch", path}` (`r2Evidence`), by the
-`bash` spill (`toolOutputPath`) and by `view_image`/`segment_sam` (`RunLayout.keyOf`). Moving them
-to `/scratch/<check thread>/` needs those four to take the thread, and the skill text to change.
-The checker's other writes: none (`workflows/core/agents/checker.md` says it changes nothing).
+named by the thread id without the run id). `RunLayout.forThread(threadId)`
+(`packages/harness/src/layout.ts`) gives each thread its role, mounts, tool description, restart note,
+`keyOf` and bash-spill path, so a worker and a checker each see their own files:
+
+- A worker mounts `/inputs` and `/workflow` read-only and `/scratch` (the run's whole scratch) and
+  `/outputs` read-write, and works in `/scratch/<its name>/` like every role, so parallel workers
+  don't overwrite each other's fixed-name files.
+- A checker mounts `/inputs`, `/workflow` and `/outputs` read-only and one writable folder,
+  `/scratch/<its name>/` (the name is the sandbox name, e.g. `t1.check`), which is the R2 prefix
+  `scratch/<name>/` under the run. Its bash does not see the rest of `/scratch`. Host-side
+  (`keyOf`, so `view_image`) it also reads, read-only, the files in the run's `/scratch` that the
+  attempt under review cites (`{root: "scratch"}` refs on its checkpoints and outputs, and the
+  `root: "scratch"` files in an output's own payload, `fileRefsOf`), and no others: the worker's
+  scripts, logs and notes stay unread. Cited means the path, not the bytes. `keyOf` asks the
+  `(path) => boolean` that `forThread(threadId, cited)` takes; callers pass
+  `(p) => runtime.cites(taskId, p)`, answered from the fold (`FoldedTask.citedScratch`).
+  The same `keyOf` check validates the evidence a checker names. The main agent
+  (`<runId>.main[.n]`) has the same mounts and reads the run's whole `/scratch` host-side; it has
+  no sandbox today.
+- Every thread spills a truncated bash output to `/scratch/<name>/.tool-output/<id>`
+  (`toolOutputKey(runId, threadName, toolCallId)`), a worker too.
+- Every sandbox has env `SCRATCH` (`/scratch/<name>` for every role) and runs
+  its commands there (`SandboxSpec.workdir`); the prompt tells the model to write working files
+  under `$SCRATCH`.
+- The path namespace is the same for every thread: `/scratch/<name>/x.png` is the key
+  `scratchKey(runId, "<name>/x.png")`, so a checkpoint's evidence `{root: "scratch", path:
+  "<name>/x.png"}` resolves the same way (`r2Evidence`, the local evidence adapter). Before
+  `evidence.keep`, `taskRuntime` checks each evidence path with the calling thread's
+  `keyOf(..., "read")`, so a thread cites only what it can read.
+- **Evidence is hashed in the sandbox, not the runner.** The runner holds and moves no
+  scan-sized data (a run reports a ~943 MB scan and ~224 MB grid). For a path the calling
+  thread's sandbox mounts, `taskRuntime` runs `sha256sum` there (`bash`-style, through
+  `sandboxSession.get(id, { note: false })`, so the hash exec never consumes the restart note
+  owed to the model; the file goes in on stdin) and passes the hash to `keep` as a callback; `r2Evidence` HEADs the
+  source, calls it only on an ETag it has not seen for that key in this claim, then HEADs the
+  target and does the server-side `CopyObject`. It never GETs the body, except for a path the
+  caller's sandbox does not mount (a checker citing the worker's scratch), which it hashes by
+  streaming up to 64 MiB and refuses above that. The copy carries `CopySourceIfMatch: etag`, so
+  a file rewritten after the hash fails the call. A missing file is a `Refusal`. Content addressing, not tamper-proofing: the agent writes the bytes
+  anyway. Measured on 940 MB: host network in 1 GB per keep before, 8 MB on the first keep and
+  0.1 MB on a repeat after.
+- The sandbox's own `/scratch` directory exists in the container. A write outside
+  `/scratch/<name>/` (say `/scratch/v1.jpg`) succeeds but is local and lost on restart. Nothing
+  stops it: sandboxes run as root without `CAP_SYS_ADMIN` (`chmod a-w` does not bind root, no
+  `chattr`, no remount), and a mount over `/scratch` would be the worker's scratch. The fence is
+  `$SCRATCH` as the working directory and in the prompt. A checker that writes `/scratch/v1.jpg`
+  locally and cites `v1.jpg` is refused unless the worker cited `v1.jpg`, in which case the
+  citation resolves to the worker's file.
+- Thread ids are built and parsed in `packages/harness/src/thread-id.ts`.
+
 Spend and the usage meter sum sandbox seconds over all sandboxes.
 
 **Probed 2026-10-29 (Modal SDK 0.11.1, run p414), the facts the design relied on:**
@@ -36,14 +80,72 @@ Spend and the usage meter sum sandbox seconds over all sandboxes.
   mounts as readable by anything the worker's code does.
 - The sandbox's `/proc/meminfo` shows the host, not the 8 GiB request; the limit is not
   observable from inside.
+- A checker sandbox with a read-write mount at `/scratch/<name>` (prefix `scratch/<name>/`) beside
+  read-only `/outputs` (run p470): a write under `/scratch/<name>/` reached R2 at
+  `runs/<run>/scratch/<name>/`; a write to `/outputs` failed with `Read-only file system`; DNS
+  failed (no network); no gateway variable. `/scratch` itself is a container directory, not a mount.
+- Same sandbox shape (run p483): commands run as uid 0 with `CapEff` lacking `CAP_SYS_ADMIN` and
+  `CAP_LINUX_IMMUTABLE`; `SCRATCH` and the exec `workdir` (`/scratch/t1.check`) take effect;
+  `touch /scratch/outside.txt` succeeds, also after `chmod a-w /scratch`; `chattr` is absent.
+- **What an R2 mount accepts (run p659, a worker sandbox, `/scratch` vs local disk).** A file created
+  or replaced by writing it whole in one pass works (`open(...,'wb')`, `np.save`, PIL, matplotlib,
+  json, `cp`/`shutil.copy` from `/tmp`, a 200 MB sequential write, `>` over an existing file). These
+  fail: seeking back (`EINVAL`: `np.savez`, `tifffile`, `f.seek` while writing), reopening to update
+  (`r+`, `w+`: `EBADF`; `open_memmap(mode='w+')` also leaves a 128-byte stub), append (`>>`, `'a'`:
+  `EPERM`), `truncate`, `rename`/`os.replace`/`mv`/`sed -i` within the mount (`ENOSYS`), `cp -p`/`-a`
+  and `shutil.copy2`/`move` from `/tmp` (the copy lands, then setting times is `EPERM`; `mv` also
+  removes the source). VTK savers (pyvista `.save`) with the output on the mount crash Python
+  (`.vtp`: segfault or `double free`) or fail (`.stl`); `.vtk` and `.ply` happen to work. The working
+  directory on the mount is harmless by itself: reading from it and saving to `/tmp` works. A
+  written key was visible to a host `HEAD` within ~100 ms of the writer closing the file (fsync
+  changed nothing). Modal's SDK 0.11.1 offers no cache or write-mode option on `CloudBucketMount`
+  (read-only, requester-pays, endpoint, prefix, OIDC role only), so the rule is told to the model
+  in `ThreadLayout.description` and any script writes locally and copies.
+
+# Runner: review assets
+
+`packages/harness/src/review-assets.ts` converts every file a task reports as a volume, a
+structure mask or a surface (`convertJob`) into review assets while the run is live, and
+records `assets.ready` / `assets.failed` on the root thread (id `<runId>:assets:<sha256>`).
+`run.ts` starts it at claim beside `superviseRun`.
+
+- **Queue.** Every `output` event in the recorder's view, from the first (so a resume reads the
+  whole log), minus files with an `assets.*` event; new events are polled once a second.
+  One file at a time, in one `convert` sandbox per claim (created at the first file, metered
+  like the others). A failed conversion is recorded and the worker moves on; a sandbox that
+  dies or cannot be created is replaced once, then the file is recorded failed. `sourceSha256`
+  is the queue item's; a converter that prints another one has failed.
+- **Mounts.** `/evidence` (the run's evidence prefix) and `/workflow` read-only, `/review`
+  (`reviewAssetPrefix`) read-write, no network. The snapshot keeps repo paths and includes
+  `core/convert/`, so the command is `python /workflow/workflows/core/convert/review_assets.py` (not `-I`, which drops the `PYTHONPATH`
+  the converter imports `sidecar` through; the sandbox gets `RunLayout.pythonPath` alone).
+  A cloud-bucket mount cannot rename, which zarr's local store does for every file: the converter
+  builds in a fixed `/tmp` path it clears at the start, and copies, `manifest.json` last. A
+  non-zero exit from a sandbox that is gone counts as a sandbox failure (the one retry), not a
+  failed file.
+- **Signal.** One rule: the worker halts exactly when the stop will not end the run (server stop,
+  lost lease, self-stop, shutdown; `reportFor` is not `ended`). An uncaught
+  `error` ends the run, so the worker drains, as it does on `finally`'s own `abort`, which the worker outlives.
+  `run.ts` remembers which stop halted it (`haltedBy`) and rebuilds the report from that one,
+  never from the first stop. A stopped worker records nothing; the next claim finds the files again and the
+  converter skips what has a `manifest.json` of its version and mode.
+- **Drain.** An `ended` report waits for the queue (`DRAIN_MS`, 10 minutes, the lease
+  heartbeating meanwhile), before the sandboxes close. Then every output still without an
+  `assets.*` event is recorded `assets.failed` ("timed out", or "the run ended before the file
+  was converted" for an output stored late), so an ended run leaves no file "preparing". Events go
+  through `emit` (retried) and count as done once stored. This is **permanent for the run**: the next claim
+  skips it and review shows the object without assets. A stop during the drain ends it at once and the run is reported `released` (nothing, for a server stop or a lost lease) instead of `ended`, so the next claim resumes the queue.
+  A `released` report does not drain.
+- **Not built.** Conversions run one at a time in one 2-CPU sandbox; the scan (about 1 GB of
+  float32) is the long pole. Add sandboxes if the drain times out in practice.
 
 # Runner: how sandboxes end
 
 Sandboxes cost money while up (a GPU one a lot), so every one must end. In order of
 who ends it:
 
-1. **The runner, normally.** `run.ts` closes the run's sandboxes (one per thread) when the supervisor ends,
-   before it flushes events and reports, so the `stopped` event and the last sandbox seconds
+1. **The runner, normally.** `run.ts` closes the run's sandboxes (one per thread) when the run loop ends,
+   draining the convert queue meanwhile (a close takes ~30 s) and then closing the convert sandbox, before it flushes events and reports, so the `stopped` event and the last sandbox seconds
    are stored under the live lease. If the close takes over 60 s (15 s after a stop) it asks Modal to terminate
    the sandboxes of this claim, by their `{run, claim}` tags (the claim is a per-claim id: a
    released run's old runner must not kill the sandbox of the runner that reclaimed it).
@@ -73,20 +175,58 @@ who ends it:
 
 Run `sandboxes:clean --run <your run>` before finishing any work that started sandboxes.
 
-# Runner: `segment_sam` runs on the host
+**Starting one can fail.** The R2 credential mint (`mintCredentials`) retries 429, 5xx, network errors
+and Cloudflare's spurious `403` code `10042` ("enable R2", seen once, gone 41 s later) up to 5 tries
+with 1, 2, 4 and 8 s between them; any other 4xx (a bad token) fails at once. When creation still
+fails, the Pi adapter returns the tool call as an error result with `infrastructure: true`
+(`SandboxUnavailableError`), so the model and the run page see Voluma's failure, not the agent's;
+the session forgets the failed creation, and the model's next call tries again.
 
-The tool (`packages/harness/src/tools/segment-sam.ts`) runs in the runner process, never in
-the sandbox: the sandbox has no network and Meta's key must not enter it. It reads the
-volume and writes the labels straight to the run's bucket (`Files` port, `r2-files.ts`;
-`RunLayout.keyOf` maps the sandbox path the model names to its key), so a file the
-sandbox just wrote is visible to it and the labels are visible to the sandbox after the call.
-The Meta adapter (`meta-segmenter.ts`) shells out to `ffmpeg` for the lossless H.264 stack, so
-the runner host needs it on PATH; it deletes its upload from Meta's file store when the call
-ends (a failed delete is logged). Its response masks (`!` one_bit and `~` lossless) decode in `sam-mask.ts`, a port of
-Meta's decoder, because `meta-sam-parser` takes minutes per response. The tool is offered only
-when a Meta key exists (`VOLUMA_META_API_KEY`, or the visitor's key on a visitor run). What a
-call costs goes to the run's usage meter and to the call's own `bill`, which the harness records as the `tool.result`'s `costUsd` so `spend` can charge the task (the adapter reports it as soon as Meta gives the frame count, so a failed call is still billed). The tool also writes a sidecar `<labels>.json` (prompt frames and per-slice confidence per object). The runner checks `ffmpeg -version` at start when a Meta key is set. How agents should use it (orientation, boxes,
-which structures share a call) is the `sam-segmentation` skill's job, not the tool's.
+# Runner: `segment_sam` runs in the worker's sandbox
+
+The tool (`packages/harness/src/tools/segment-sam.ts`) checks the paths and runs `voluma-sam`
+(`packages/voluma-sam`, baked into the sandbox image with Node 24 and `ffmpeg`) in the calling
+thread's sandbox, with the run's abort signal and a 30-minute timeout; the runner holds no
+volume and does none of the work. The program reads the `.npy` by position (never whole), crops it (`subVolume`, else
+the tissue plus a margin, always including the boxes), encodes lossless H.264, sends it to Meta
+through the gateway (`$VOLUMA_GATEWAY_URL/meta/v1/...`, the sandbox's token as the bearer; the
+sandbox's network is that host only; only a sandbox whose role is granted `segment_sam` gets the
+network and the token, so a check sandbox stays `network: none` with no token), decodes the masks (`sam-mask.ts`, a port of Meta's
+decoder, because `meta-sam-parser` takes minutes per response) and writes the labels on the
+full grid and the sidecar `<labels>.json`: built in `/tmp`, then `cp`ed, because an R2 mount takes
+whole files only. An old sidecar is deleted first and the new one, written last, carries the call's
+`requestId` (the result repeats it): the labels are complete when the sidecar exists with that id.
+The tool returns its one JSON line; a gateway or network failure comes back as an error result
+with `infrastructure: true`. Nothing in the runner meters SAM: its spend is the gateway's
+`provider_calls` rows. The tool is offered when `VOLUMA_GATEWAY_URL` is set. How agents should
+use it (orientation, boxes, which structures share a call) is the `sam-segmentation` skill's job.
+
+Why not in the runner: its one Node thread receiving and decoding Meta's 100+ MB reply starved
+the heartbeat and the run stopped itself (design `infrastructure.md` §6 and `evidence/findings.md` in voluma-bio/docs).
+Why TypeScript: the decoder takes seconds there and minutes in Python.
+
+# Runner: `dev-sandbox` drives the real sandbox, tools and gateway without a model
+
+`pnpm --filter @voluma/runner dev-sandbox --run <id> [--role worker]` (`src/dev-sandbox.ts`) claims the next
+queued run and gives it back unless it is `<id>` (start one in the web app, or insert one in the
+local database); it refuses an API that is not on this machine unless `--allow-remote` is given, holds its lease with
+the real heartbeat, opens the role's sandbox through the real adapter and reads commands from
+stdin: `exec <command>`, `segment <json>` (the real `segment_sam` tool) and `close` (ends the
+run `failed` with "closed by dev-sandbox", terminates the claim's sandboxes by tag). It needs the
+runner's `.env` plus `VOLUMA_GATEWAY_URL`. After each command it prints this process's event-loop
+delay and the heartbeat count and slowest round trip: that is how to check that a call leaves the
+runner's thread alone. Sandbox seconds are metered like a run's, the gateway counts the provider
+calls against the run's cap. Run `sandboxes:clean --run <id>` after, as for any sandbox.
+
+To try `voluma-sam` without a live Meta call, point `VOLUMA_GATEWAY_URL` at a stub gateway in front
+of a stub Meta that replays a saved response. Modal must reach it over HTTPS (its host is the
+worker's allowlist), so host it in a Modal sandbox on an encrypted tunnel. The reference scan's
+input is DICOM: put the `.npy` under the run's `scratch/` prefix first.
+
+To run the real runner against a stub model provider (a fake that returns 503s or canned replies),
+set every `VOLUMA_<PROVIDER>_API_KEY` in that runner's environment to a dummy value, not a real key. A
+model call the stub misses then fails closed with a 401 instead of reaching the provider. A resumed
+thread takes its model from the log, so a base-URL override set for one model can miss it.
 
 # Runner: `view_image` shows the model files the sandbox wrote
 
@@ -103,45 +243,57 @@ the server's `retry-after`), 5xx or dropped connection. `model-retry.ts` wraps e
 treats as final (about half of all calls on 2026-10-28), when the call failed before streaming
 any content: backoff from 1 s doubling to a 30 s cap, until 4 minutes have passed since the first
 attempt (Pi's own tries count against it; an attempt in flight is not cut short), each retry
-logged with its role and attempt and reported to the fallback breaker. The run's abort ends the
-wait. Any other error, or the spent budget, ends the call. A main-thread wake is also bounded
-by the supervisor's `wakeTimeoutMs`. `provider-error.ts` holds the one error classification (retry, redo and breaker):
-it reads the status in the text (Pi's `<provider> API error (<status>)`, or the Anthropic SDK's
+logged with its role and attempt. The run's abort ends the wait. Any other error, or the spent budget, ends the call.
+`provider-error.ts` holds the one error classification (retry and redo): it reads the status in the text (Pi's `<provider> API error (<status>)`, or the Anthropic SDK's
 `<status> {...}`, `<status> <html>` or `<status> status code (no body)`) and, for an Anthropic error sent mid-stream
 with no status, its documented `error.type` (`overloaded_error` is 529, `rate_limit_error` 429).
 
-**A worker or check that dies on a provider error** (`provider-error.ts`, after the retries above
-gave up) is started again by the supervisor with no main-thread call, since the main thread uses
-the same provider: a worker's task on a fresh thread (a code-made `redo` judgment, arm
-`code:provider-error`), a check as a new check. Twice per task and role; the third failure fails
-the run, with the error in `state.error`, instead of leaving it `completed` with tasks that never
-started. A main-thread call that fails is recorded as that call's error in the `wake` and in the
-judgment's reason.
+**A provider outage releases the run.** When a model call still fails with a transient error
+(`isTransientProviderError`) and an empty reply after the retries above (the budget is spent; an
+error after content went out is not an outage), `start-thread.ts` does not store or emit
+that reply and writes no `thread.ended`: the thread stays open with its History an exact prefix,
+its `providerOutage.release` callback fires, and `run.ts` stops the claim as `provider-outage`, which reports
+`released`. Every running thread is cut off exactly as in a shutdown (an in-flight tool exec is
+not waited for: a `segment_sam` call cut this way has an unknown cost, like one cut by a deploy).
+The API requeues the run with `runs.claimable_after` set (1, then 2 minutes by the count of
+such claims in a row without progress) and counts the claim toward the no-progress limit, so a
+provider that stays down fails the run after 3 claims. The next claim's `previousClaim` is
+`provider-outage`, and each cut-off thread is resumed with "…cut off when the model provider was
+unavailable; continue." There is no in-claim redo for these, so the API's `stalledClaims` is the count, and run-state
+progress resets it.
+
+**Other provider errors** (`provider-error.ts`: a transient error that came after content, such as
+a stream dropped mid-reply, and the neither-transient-nor-fatal ones, a non-Meta 404) kill the thread as before and are the run loop's to handle
+(`packages/harness/src/run-loop.ts`): a check is started again as a new check, the main agent as
+`main.<n+1>`, up to `maxProviderRedos` (2) times for the main agent and per task for a check; the main agent's count is the provider-failed main threads in a row that ended after the run's latest task-state event (`task`), so a task that moves, or a main thread that ended otherwise, starts it again; a worker's failure is a notice to the main
+agent. A fatal error (a refused key, out of money) fails the run at once, with the error in
+`state.error`, instead of leaving it `completed` with tasks that never started.
+
+**Loop limits** are `config.loop`: `RUNNER_MAX_FIX_ROUNDS` (default 2 `needs-review` rounds per
+task before it is left to check) and `RUNNER_CHECK_TIMEOUT_MINUTES` (default 20 of a checker's
+active time). The harness defaults the rest (`LoopConfig`).
 
 Cost is Pi's per-reply price, summed per claim; the log prints it
 when a claim reports (`model cost this claim`), and the API stores it as `runs.model_cost_usd`.
 On 2026-10-28 the claims' lines summed to the run's `model_cost_usd` and to `spend(events).total`
 ($0.9763 over five claims of one run).
 
-**Spend cap.** `RUNNER_MAX_RUN_COST_USD` caps a run's dollars across all its claims (sandbox time
-is not counted). Unset, the default, there is no cap: test runs have none, so leave it unset on
-staging and locally (spend is still recorded and shown). When set it goes to the API with each
-claim and becomes `runs.cost_cap_usd` (null: no cap),
-which the provider gateway checks too ([apps/gateway](../../gateway/.context/CONTEXT.md)). The runner's
-total is the last heartbeat's `spentUsd` (model cost plus settled gateway calls; an open call
-counts nothing, the gateway holds its reservation itself) plus the model cost not yet sent, checked on each model cost and each acknowledged
-heartbeat; at the cap `run.ts` stops the run and reports `ended failed` with
-`spend cap $X reached at $Y`. Calls in flight are aborted, not waited for. A claim of a run already over the cap stops before its first call. It applies to visitor runs too. The supervisor ends the root thread `cancelled` in the event log while the run row says `failed` with the cap text.
-
-**A main-thread reply that does not parse.** `llmMainThread` escapes raw control characters inside
-JSON strings, and otherwise sends the reply back once with what was wrong (appended after the
-cached prefix); if that fails too, the wake records both errors and the cost of both calls, and the judgment falls back as for
-any failed main thread.
+**No spend cap.** Spend is recorded and shown, never limited: no run, claim or gateway call is refused or stopped for cost (removed 2026-10-30; [decisions](../../../.context/decisions.md)).
 
 **`segment_sam` 404.** Meta answers `404 model_not_found` for some inputs (seen: a small box prompt)
 and bills nothing for it. The adapter retries once on the uploaded file; a second 404 throws a
 message with Meta's body and every object asked for (name, box), saying the cause is this input or an outage and how to tell. It
 does not bisect: each successful probe costs a full SAM call ($0.07-0.10).
+
+# Runner: staging `/inputs`
+
+A mount marked `stage` is mounted privately under `/staged` while the sandbox starts, then copied to its public local path (for example `/staged/inputs` to `/inputs`) by `STAGE_PREPARE_SCRIPT` and `STAGE_COPY_SCRIPT` in `modal-sandbox.ts`. It runs as two commands. The first makes every directory first and lists the source once, with its exit status checked, so a listing that fails partway can't pass as complete; it prints the scratch directory. The second runs `cp --parents` in batches of 16 files, 32 at a time. Making the directories first matters: parallel `cp --parents` calls that race to create one parent directory fail with `File exists`, which surfaced as `staging /inputs failed with exit code 123` (reproduced locally in 12 of 20 copies of an 800-file nested tree; 0 of 20 after). After each pass it compares the source listing with a fresh one of the copy and re-copies only the files missing or the wrong size, up to three more passes, then fails naming them.
+
+Staging detects a stall; it never measures elapsed time against size, because a scan can be one multi-GB file or 30,000 tiny slices (the contract allows 5 GB per file, 20 GB per scan), and every rate-derived bound failed one of them (a per-`cp` rate kills healthy large files when 32 streams share the mount's bandwidth; one `cp` per file is 10-17x slower on 30k slices). Each copy pass runs in its own process group (`setsid`), and a watchdog polls the file count and bytes under the *local* destination every 2 s, from `/`, so it never opens the mount; only the copies run inside it. The copies write their output to a file, not the exec's streams, so a `cp` that survives SIGKILL can't keep the streams open after the script exits; the file's tail goes into the error when staging fails. A pass whose progress has not changed for 60 s while copies still run is killed whole, and the next pass re-copies only the missing or wrong-size files; a pass with one stuck `cp` is caught once the other copies finish and growth stops. After the last pass staging fails naming the files. The listing step has a fixed 120 s, the one remaining duration bound (a LIST page holds 1,000 objects, so 30k files is about 30 pages); the copy step has no duration bound beyond the sandbox lifetime. The watchdog prints a heartbeat each poll, and the TS side gives up on a copy step silent for 90 s (a `cp` in an uninterruptible mount read can survive SIGKILL and hold the streams open; the script itself wedged) and on the lease `signal` aborting: `#run` takes an `AbortSignal` that rejects its pending stream reads. The failed start destroys the sandbox. Exit 124 reads `timed out after N s`, 137 `killed after N s`. The error keeps a bounded tail of the copy's stderr.
+
+Never replace this with a whole-copy retry: the input is about 943 MB and every thread that stages gets its own copy.
+
+Only the threads of a task whose `tasks.json` entry sets `copyInputs` stage `/inputs` (`runLayout`'s `copiesInputs`); every other thread, main included, gets the same mount read-only and uncopied (writes are refused; reads and mmap work). Reading the DICOM from a cold mount takes minutes against seconds for the parallel copy (the measurements are beside `runLayout` in `packages/harness/src/layout.ts`), but only the intake task reads it, so the copy would cost every other start and idle restart 5-16 s for nothing. A task the main agent adds takes the flag from the workflow's task of the same id.
 
 # Runner: what `/outputs` and `/scratch` support
 
@@ -151,27 +303,25 @@ Both are R2 bucket mounts (`modal-sandbox.ts`), so a file is written whole, once
 (local disk, lost on a sandbox restart) and `cp`s it in. The worker and check prompts
 (`prompts.ts`) and the bash tool description (`layout.ts`) say so.
 
-**`/scratch` stays an R2 mount**, though it is only intermediate files. Three things read it
-from the host, not from the sandbox: `segment_sam` reads its volume and writes its labels
-there (`RunLayout.keyOf`), a long bash output is stored there for the model to open
-(`toolOutputPath`), and a checkpoint's evidence may be a `scratch` file, which the host copies
-into the run's evidence (`r2-evidence.ts`). The restart note also promises it survives a restart.
-A local `/scratch` would break all three.
+**`/scratch` stays an R2 mount**, though it is only intermediate files. Two things need it to
+outlive a sandbox: a long bash output is stored there for the model to open (`toolOutputPath`),
+and a checkpoint's evidence may be a `scratch` file, which the host copies into the run's
+evidence (`r2-evidence.ts`, a server-side copy). The restart note also promises it survives a
+restart. A local `/scratch` would break all three.
 
 # Runner: who gets which task tools
 
-A worker has `checklist`, `checkpoint` and `report_output`; a check thread only `checkpoint`
-(`supervise-run.ts`). A check re-derives values to compare and gives them in its checkpoint's
+A worker has `checkpoint`, `report_output` and `submit_task`; a check thread `checkpoint` and
+`ask` (its role file's `tools`). A check re-derives values to compare and gives them in its checkpoint's
 text with its verdict (the review shows the checker's verdict and text); it never replaces the
-worker's outputs, so the runtime refuses its `report_output`. Only a worker redo after a
-supervisor correction opens another revision.
+worker's outputs, so the runtime refuses its `report_output`. Only a redo of a task with attempted dependents opens another revision.
 `checkpoint`'s arguments go through `prepareCheckpoint` before validation, so the habits of
 models (a top-level `title`, `toCheck` as a string or with `text`, a nested `{root, path}`)
 don't cost a turn.
 
 # Runner: sandbox memory
 
-Each thread has its own sandbox (`sandboxSession`), destroyed when the supervisor sees the thread end (`release`; a resumed thread gets a fresh one and the restart note), so only the heavy steps of one thread share
+Each thread has its own sandbox (`sandboxSession`), destroyed when the run loop sees the thread end (`release`; a resumed thread gets a fresh one and the restart note), so only the heavy steps of one thread share
 its memory and 2 CPUs. Every role's sandbox has 8192 MiB (`sandbox-specs.ts`). `classic_segment` measured 2.8-3.1 GB anonymous memory and
 about 4.0-4.25 GB RSS with the memory-mapped scan, so 4096 MiB risked an OOM kill in a
 full run.
@@ -180,42 +330,101 @@ file is shared page cache, not counted twice. The `stopped` event of a sandbox M
 sandbox, so an out-of-memory kill or a terminate call), so a restart's cause is in the run's record. In the 2026-10-28 local run the sandbox ended at 1 h 0 min (the
 lifetime) and once more 23 min into the replacement, before the exit code was logged.
 
-# Runner: role text and tool grants come from `workflows/core/agents/`
+# Runner: role text, tool grants and models come from `workflows/core/agents/`
 
-The worker's and checker's system prompts are `workflows/core/agents/<role>.md`'s body, then `COMMON`
-(sandbox text, `prompts.ts`), then the skill list. Their optional tools are the file's `tools`
-(`run.ts` `grant`); `segment_sam` is also dropped when the run has no Meta key. `loadWorkflow`
+The worker's, checker's and (when its file grants `bash`) main's system prompts are `workflows/core/agents/<role>.md`'s body, then `COMMON`
+(sandbox text per role, `prompts.ts` `systemPrompt`), then the role's skill list and the tool index (one line per skill
+script, from its docstring's first line; the loader reads it from the snapshot). Their optional tools are the file's `tools`
+(`run.ts` `grant`); `segment_sam` is also dropped when the run has no Meta key, and always for the checker (it calls out to Meta; `keepFailed` writes the run-wide scratch). `loadWorkflow`
 snapshots the role files with the workflow and reads them from the snapshot, so a resumed thread
 composes byte-identical text and an edited file reaches only new threads (a thread whose prompt
-changed is still `ThreadStale`). The main thread still uses `MAIN_SYSTEM`; `lead.md` and
-`review-chat.md` are `status: planned` and unused. Format: `workflows/core/agents/AGENTS.md`. Models stay
-config (`RUNNER_MODEL`, `RUNNER_CHECK_MODEL`, `RUNNER_MAIN_MODEL`).
+changed is still `ThreadStale`). The main agent without `bash` gets its file's body, then the skill list and the tool index (no sandbox text). `review-chat.md` is
+`status: planned` and unused. Format: `workflows/core/agents/AGENTS.md`.
+
+A role's model is its file's `model` alias. `config.models` maps each alias to a provider model:
+`RUNNER_MODEL_WONDER` (default `meta/muse-wonder-1.0`), `RUNNER_MODEL_OPUS`, `RUNNER_MODEL_ASTRA`
+(no default; a run whose role file names an unset alias fails when it starts). `RUNNER_MODEL`, when
+set, forces every alias to one model. Each configured alias's provider key is required at start. A
+visitor run uses `RUNNER_VISITOR_MODEL` for every role except `main` on a visitor-safe model.
+
+A role's thinking level is its role file's `thinking` key, else `RUNNER_THINKING` (one of Pi's
+levels), else none (`"off"`). With `RUNNER_MODEL` set (every role forced onto one model, a plumbing
+check), the role files' levels are ignored and `RUNNER_THINKING` alone applies (`config.modelForced`). `run.ts` passes it as the role's `thinkingLevel`, which `start-thread.ts` sets
+as the Pi agent's `initialState.thinkingLevel`, so Pi sends it as `reasoning` and records it on each
+History message. Pi clamps an unsupported level silently, so two checks refuse one: `main.ts` at boot
+checks `RUNNER_THINKING` against every alias; `run.ts` at run start checks each
+role's set level against its model (the role files load per run); both use `thinking.ts`, and a level nobody set is not checked. `"off"` sends
+no level: for DeepSeek that means `thinking: disabled`. Visitor runs always use `"off"`. The level is
+not in the log, so a resumed thread takes it from the snapshotted role file and the current config.
 
 # Runner: a claim that ends is a cut-off, not a stop
 
 A stop the runtime chooses (shutdown, a heartbeat that wasn't acknowledged for 45 s, a lost
 lease, the server ending the run) aborts the run's signal. Threads see it as `runSignal`
 (`start-thread.ts`): from that moment they store nothing more and write no `thread.ended`,
-exactly as after a crash, and the supervisor writes none for the root, even if a step threw
+exactly as after a crash, and the run loop writes none for the root, even if a step threw
 while the signal was aborting. So a `thread.ended {cancelled}` is a stop someone chose and is
 never resumed: a stale dependent's thread stopped (`task-runtime.ts` `staleDependents`), or a
-failing run aborting its threads (`abortAll`). A stop aimed at a thread this process has not
-started (cut off by an earlier claim) writes that `cancelled` end itself (`supervise-run.ts`
-`stopThread`), so "open" always means "cut off". A self-stop reports `released` with reason `self-stop`; a signal, `shutdown`.
+failing run aborting its threads (`abortAll`). A stop stores that `cancelled` end first
+(`task-runtime.ts` `stop`, inside `section`) and then aborts without waiting; the thread's own
+later end is dropped (`start-thread.ts`). So a stopped thread's next write is refused at once,
+and "open" always means "cut off". A self-stop reports `released` with reason `self-stop`; a signal, `shutdown`; a provider outage, `provider-outage`.
 
 The next claim learns why from `claim.previousClaim` (the API records `lease-expired` itself)
 and writes `claim.started {resumed, after}` right after the root's `thread.started`. The
-supervisor then resumes the thread in charge of each task, if its latest `thread.started` has
-no `thread.ended` and this process hasn't started it: the worker only when it is the task's
-current worker (or the task has no attempt yet), the check only when the task is
-`under-review` and it is the current check. It resumes with the message of
-`supervisor.ts` `cutOffText`, naming the tool the log shows with no result, or the no-tool
-form. A cut-off resume is not a wake, so it spends none of the stuck guard's two and counts
-no redo; the main thread isn't asked. The "You stopped, but ... is not finished" wake is for a
-thread that ended `completed` with its task unfinished. A worker that ended `cancelled` with
-its task `in-progress` gets a fresh worker; a check that ended `cancelled` gets a new check. A tool whose `tool.call` event was
+run loop then resumes each thread still in charge, if its latest `thread.started` has no
+`thread.ended` and this process hasn't started it: the worker only when it holds its task, the
+check only when the task is `under-review` and it is the current check, the latest main. It
+resumes with the message of `cutOffText`, naming the tool the log shows with no result, or the
+no-tool form, and a tool the cut-off interrupted is answered from the log (`tools/effects.ts`).
+A cut-off resume counts as no delivery and no redo.
+
+A researcher's message reopens a finished run (`run.reopened`, `packages/contracts/src/messages.ts`)
+and the next claim resumes the main agent with it, as a notice: nothing is cut off, so there is no
+cut-off text. That claim's `claim.started` carries `reopened: true` instead of `after`. A thread
+whose stored history cannot be resumed (a run made before `reply` existed, a changed prompt or tool
+list) or whose recorded model this runner no longer allows is refused as stale and started again
+(`main.<n>`); `threadModel` hands such a thread the role's model rather than failing the run. A claim answers one message: the API refuses a message to a run that is
+queued or running, so no message arrives mid-claim. A correction whose main agent stops moving fails the claim (the server records
+`correction.ended`) instead of skipping tasks. `/outputs` is one R2 prefix shared by every claim, so
+`superviseRun` first calls `keepOutputs` (`packages/harness/src/outputs-backup.ts`, before any thread or
+sandbox): the first claim of a correction whose span holds a go (only a go can lead to a write: main
+has no `bash` and its work tools wait for a go; a message-only correction gets no backup, unless
+the main role holds `bash`, which then backs up every span) copies the whole prefix to
+`runs/<id>/corrections/<reopen id>/` (server-side `CopyObject`, `r2-outputs.ts`; a worker writes
+files before it reports anything, so claim start is the earliest point that precedes every
+writer) and records `outputs.backed-up`; the first claim after `correction.ended` clears
+`/outputs`, copies the backup back, checks that `/outputs` matches it (key and ETag per key, both
+sides `CopyObject` copies) and records `outputs.restored`. Before a restore the claim
+calls `awaitOtherClaimsGone`, which re-lists the run's sandboxes of other claims until none is
+live (up to 60 s): a stale sandbox could write over the restored files, so if some remain the
+claim fails. Only a pending restore waits; `terminateOtherClaims` at claim start does not. A failed check throws too, and the next claim repeats the restore. The first claim of the
+next `run.reopened` after a correction finished (no `correction.ended` before it) deletes its
+backup and records `outputs.discarded`. `corrections` (`@voluma/contracts/fold`) is the one
+reader of a correction's state (its message and go, how it closed, its backup). A thread that ended `cancelled` is never
+resumed; the server cancels every thread that ran in an abandoned correction, finished ones too, so the next correction starts them fresh. A tool whose `tool.call` event was
 still queued when the runner died isn't named (the log lacks it), so a runner killed within
 milliseconds of a call gets the no-tool form.
 
 The API bounds restarts with one limit (`apps/api/.context/deploy.md`); the runner has no
 restart counter of its own.
+
+# Runner: telemetry, and what an uncaught error does
+
+`telemetry.ts` starts after startup (a failure before it still kills the process). Every line starts
+with `telemetry`; on Railway search the deploy logs for these:
+
+| grep | Line | Means |
+|---|---|---|
+| `telemetry loop-delay` | once a minute: `p99=…ms max=…ms` | event-loop delay over the last minute; p99 includes the 10 ms sampling interval (an idle loop reads about 11 ms). A healthy runner stays well under 1 s; the heartbeat deadline is `LEASE_SECONDS - HEARTBEAT_SECONDS` |
+| `telemetry heartbeat-rtt` | once a minute: `p50`, `max`, `n` | send-to-answer time of the acknowledged heartbeats (absent when none were acknowledged) |
+| `telemetry loop-block` | when a 100 ms timer fires over 1 s late: `…ms; in flight: <run> <thread> <tool>; …` | the loop was held that long, and the tool calls recorded as started and not yet resulted at that moment (`no tool`: none) |
+| `[<run>] telemetry unhandledRejection in this run` / `uncaughtException in this run` | on the error | an error nobody caught, tied to its run and logged through its redacting log: that run stops (`stop: error`) and ends `failed` with the error's message; other runs go on. After the run's report is fixed the line says `after its report was fixed` and nothing changes |
+| `telemetry … outside any run` | on the error | tied to no run; logged and the process stays up |
+| `stop: <reason>` | per run, once per reason | every stop reason (the console is the only record of the later ones), with the first (the one that decides the report) named when it differs |
+| `release not stored` / `end not stored` | after a `report` | the server answered 409: the run ended first or the lease is gone |
+
+An error is tied to its run by `AsyncLocalStorage` (`runScope`), set around each `runClaim`: the
+async context an error was raised in survives into the process handler, so it names the run
+without parsing messages. An error raised from a timer or callback created inside a run's work
+belongs to that run; one raised by the main loop's own code (claiming) belongs to none.
