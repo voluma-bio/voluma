@@ -13,6 +13,9 @@
  * `/scratch/<name>/x.png` is the key `scratchKey(runId, "<name>/x.png")` whoever wrote it, so
  * evidence `{root: "scratch", path: "<name>/x.png"}` resolves the same way.
  *
+ * `/inputs` is mounted read-only in every sandbox. Only a thread of a task whose `tasks.json`
+ * entry sets `copyInputs` gets it copied to local disk (`stage`); the others read the mount.
+ *
  * Every sandbox gets `SCRATCH`, its own folder `/scratch/<name>` (`ThreadLayout.dir`).
  */
 import {
@@ -44,6 +47,8 @@ export interface ThreadLayout {
   dir: string;
   /** The sandbox's env: the run's `PYTHONPATH` and `SCRATCH` (`dir`). */
   env: Record<string, string>;
+  /** `/inputs` is copied to local disk in this thread's sandbox; otherwise it is the read-only mount. */
+  copiesInputs: boolean;
   /** The mounts, as bullet lines for the tool description. */
   description: string;
   /** Tells a model that resumes a thread which of its files survived in a new sandbox. */
@@ -74,7 +79,13 @@ export interface RunLayout {
 }
 
 /**
- * `inputPrefix` is the R2 prefix of the run's read-only inputs; it is staged to local disk.
+ * `inputPrefix` is the R2 prefix of the run's read-only inputs. `copiesInputs(taskId)` says the
+ * task's threads get them copied to local disk, which the workflow declares (`copyInputs`):
+ * reading the DICOM straight from a cold mount is slow (measured on Modal: OA7-1R, 1,126 files,
+ * 535 MB, intake took 179-302 s on the mount against a 7-16 s copy plus 6 s on local disk;
+ * OA6-1RK 62-187 s against 5 s plus 4 s), while the 32-way copy hides the per-file latency. Only
+ * the task that reads the DICOM is worth it: later tasks read `hu.npy` from `/outputs`, and the
+ * copy costs every start and idle restart 5-16 s. The main thread never copies.
  * `skills` is `WorkflowDefinition.skills`: `PYTHONPATH` lets one skill's script import another
  * skill's module (module names are unique across skills, a test enforces it).
  */
@@ -84,15 +95,16 @@ export function runLayout(
   skills: readonly Skill[],
   /** The main agent's role holds `bash`: it does tasks itself, so its `/outputs` is writable. */
   mainWorks = false,
+  copiesInputs: (taskId: string) => boolean = () => false,
 ): RunLayout {
   const scratch = scratchPrefix(runId);
   const pythonPath = skills.map((s) => `${s.path}/resources`).join(":");
-  const inputs: SandboxMount = {
+  const inputs = (copy: boolean): SandboxMount => ({
     path: INPUTS,
     prefix: inputPrefix,
     access: "read-only",
-    stage: true,
-  };
+    ...(copy && { stage: true }),
+  });
   const workflow: SandboxMount = {
     path: WORKFLOW,
     prefix: workflowSnapshotPrefix(runId),
@@ -103,27 +115,28 @@ export function runLayout(
     prefix: outputsPrefix(runId),
     access,
   });
-  const common =
-    `- ${INPUTS} is a local copy of the input data: read it, do not modify it.\n` +
+  const common = (copy: boolean) =>
+    `- ${INPUTS} is the input data${copy ? ", copied to local disk" : ", read from the bucket (not copied)"}: read it, do not modify it.\n` +
     `- ${WORKFLOW} holds the workflow's skills and resources, under their repo paths: read them, do not modify them.\n`;
 
   // What differs by role. `hostOnly` entries are readable by host-side tools, not mounted.
-  const worker = (dir: string): RoleParts => {
+  const worker = (dir: string, copy: boolean): RoleParts => {
     const writable: SandboxMount = { path: SCRATCH, prefix: scratch, access: "read-write" };
     return {
-      mounts: [inputs, workflow, writable, outputs("read-write")],
+      mounts: [inputs(copy), workflow, writable, outputs("read-write")],
       scratch: writable,
       hostOnly: [],
       description:
-        `${common}- ${OUTPUTS} is for files you produce; they are kept.\n` +
+        `${common(copy)}- ${OUTPUTS} is for files you produce; they are kept.\n` +
         `- ${SCRATCH} is for intermediate files and is kept too; the other threads' folders are there as well. Work in $SCRATCH (${dir}) and write nothing else under ${SCRATCH}.`,
-      restartNote: `The sandbox was restarted. ${OUTPUTS} and ${SCRATCH} were kept, ${INPUTS} was copied again, and local files elsewhere (including /tmp) are gone.`,
+      restartNote: `The sandbox was restarted. ${OUTPUTS} and ${SCRATCH} were kept, ${copy ? `${INPUTS} was copied again, ` : ""}and local files elsewhere (including /tmp) are gone.`,
     };
   };
   const confined = (
     name: string,
     dir: string,
     outputsAccess: SandboxMount["access"],
+    copy: boolean,
   ): RoleParts => {
     const writable: SandboxMount = {
       path: dir,
@@ -131,33 +144,36 @@ export function runLayout(
       access: "read-write",
     };
     return {
-      mounts: [inputs, workflow, outputs(outputsAccess), writable],
+      mounts: [inputs(copy), workflow, outputs(outputsAccess), writable],
       scratch: writable,
       // After `mounts`: the more specific writable folder matches first.
       hostOnly: [{ path: SCRATCH, prefix: scratch, access: "read-only" }],
       description:
-        `${common}- ${OUTPUTS} holds the worker's files: ${outputsAccess === "read-write" ? "the files you produce go here too" : "read them, do not modify them"}.\n` +
+        `${common(copy)}- ${OUTPUTS} holds the worker's files: ${outputsAccess === "read-write" ? "the files you produce go here too" : "read them, do not modify them"}.\n` +
         `- ${dir} is for your intermediate files; it is kept. $SCRATCH is ${dir}. Write nothing else under ${SCRATCH}. ` +
         `bash sees only your folder there; view_image also opens the files under ${SCRATCH}/ that the worker cited as evidence (read-only).`,
-      restartNote: `The sandbox was restarted. ${dir} was kept, ${INPUTS} was copied again, and local files elsewhere (including /tmp) are gone.`,
+      restartNote: `The sandbox was restarted. ${dir} was kept, ${copy ? `${INPUTS} was copied again, ` : ""}and local files elsewhere (including /tmp) are gone.`,
     };
   };
 
   return {
     pythonPath,
     forThread(threadId, cited = () => false) {
-      const { name, kind } = parseThreadId(runId, threadId);
+      const parsed = parseThreadId(runId, threadId);
+      const { name, kind } = parsed;
+      const copy = parsed.kind !== "main" && copiesInputs(parsed.taskId);
       const role = kind === "worker" ? "worker" : kind === "check" ? "checker" : "main";
       const dir = `${SCRATCH}/${name}`;
       const parts =
         role === "worker"
-          ? worker(dir)
-          : confined(name, dir, role === "main" && mainWorks ? "read-write" : "read-only");
+          ? worker(dir, copy)
+          : confined(name, dir, role === "main" && mainWorks ? "read-write" : "read-only", copy);
       const { hostOnly, ...rest } = parts;
       return {
         ...rest,
         role,
         name,
+        copiesInputs: copy,
         dir,
         env: { PYTHONPATH: pythonPath, SCRATCH: dir },
         toolOutputPath: (toolCallId) =>

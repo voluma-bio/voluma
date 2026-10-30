@@ -4,6 +4,7 @@
     "title": "Scan intake",
     "summary": "Read the scan: voxel size, dimensions, calibration, and anything wrong with the files.",
     "dependsOn": [],
+    "copyInputs": true,
     "outputs": ["header", "scan"],
     "instructions": "Read the scan header and the files in /inputs: voxel spacing, size, orientation, and any problem with the data. Write what you found for the later tasks, and the notes' account of the field in /outputs/intake/scan-notes.md (scan-intake skill).",
     "doneWhen": [

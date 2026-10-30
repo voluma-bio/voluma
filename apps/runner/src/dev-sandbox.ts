@@ -128,7 +128,7 @@ for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(signal
 
 let exitCode = 0;
 try {
-  const thread = layoutOf(run, [], false).forThread(`${run.id}.dev.worker`); // no workflow is loaded here, so no PYTHONPATH
+  const thread = layoutOf(run, [], false, () => true).forThread(`${run.id}.dev.worker`); // no workflow is loaded here, so no PYTHONPATH
   meter.sandboxUp();
   counted = true;
   sandbox = await claimSandboxes(

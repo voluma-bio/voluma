@@ -258,7 +258,9 @@ does not bisect: each successful probe costs a full SAM call ($0.07-0.10).
 
 A mount marked `stage` is mounted privately under `/staged` while the sandbox starts, then copied to its public local path (for example `/staged/inputs` to `/inputs`) by `STAGE_SCRIPT` in `modal-sandbox.ts`. It makes every directory first, then runs `cp --parents` with up to 32 workers of 16 paths each. Making the directories first matters: parallel `cp --parents` calls that race to create one parent directory fail with `File exists`, which surfaced as `staging /inputs failed with exit code 123` (reproduced locally in 12 of 20 copies of an 800-file nested tree; 0 of 20 after). The source is listed once and the listing's exit status checked, so a listing that fails partway can't pass as complete. After each pass it compares that listing with a fresh one of the copy and re-copies only the files missing or the wrong size, up to three more passes, then fails naming them. The error keeps a bounded tail of the copy's stderr.
 
-Never replace this with a whole-copy retry: the input is about 943 MB and every thread stages its own copy.
+Never replace this with a whole-copy retry: the input is about 943 MB and every thread that stages gets its own copy.
+
+Only the threads of a task whose `tasks.json` entry sets `copyInputs` stage `/inputs` (`runLayout`'s `copiesInputs`); every other thread, main included, gets the same mount read-only and uncopied (writes are refused; reads and mmap work). Reading the DICOM from a cold mount is slow (OA7-1R, 1,126 files: 179-302 s against a 7-16 s copy plus 6 s intake; OA6-1RK 62-187 s against 5 s plus 4 s), but only the intake task reads it, so the copy would cost every other start and idle restart 5-16 s for nothing. A task the main agent adds takes the flag from the workflow's task of the same id.
 
 # Runner: what `/outputs` and `/scratch` support
 
