@@ -20,3 +20,6 @@ stdout is one JSON line. Entry: `src/main.ts`; the steps are `src/run.ts`.
   `/tmp` and `cp`ed, labels first and the sidecar last.
 - Test against the real thing: a saved real Meta response behind a local stub, the real
   OA6-1RK `oriented.npy`, labels compared with an independent decode. No unit fixtures.
+- The result's `stream` (first `data:` event, longest gap between chunks other than keepalive comments, bytes, `data:` lines) is
+  measured as the reply is written, per chunk and at constant cost. It exists to check real calls
+  against the gateway's host limits (Railway cuts a stream at 15 minutes, or after 5 without a byte).

@@ -235,6 +235,7 @@ export async function run(
       requestId,
       crop: sidecar.crop as Crop,
       timings,
+      stream: tracked.stream,
     };
   } finally {
     if (fileId) await meta.remove(fileId);
