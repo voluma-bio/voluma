@@ -4,7 +4,7 @@ import { useMutation } from "@tanstack/react-query";
 import { markReviewed } from "@voluma/api-client";
 import type { Focus, Revision, Structure } from "@voluma/contracts/review";
 import type { ReviewSnapshot } from "@voluma/contracts/snapshot";
-import { StatusBadge } from "@voluma/ui";
+import { ErrorState, StatusBadge, TextField } from "@voluma/ui";
 import type { SnapshotControls, StructureDisplay } from "@voluma/viewer";
 import { ArrowLeft, Download, History, Layers, ListChecks } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
@@ -192,14 +192,12 @@ export function ReviewWorkspace({
         </div>
       )}
       {complete.error && !run?.review?.reviewedAt && (
-        <p className="error-message" role="alert">
-          {complete.error.message}
-        </p>
+        <ErrorState title="Couldn't mark the review done">{complete.error.message}</ErrorState>
       )}
       {report.error && (
-        <p className="error-message" role="alert">
-          Could not export the review report. Check your connection and try again.
-        </p>
+        <ErrorState title="Couldn't export the review report">
+          Check your connection and try again.
+        </ErrorState>
       )}
       {revision && revision !== latest && (
         <div className="revision-notice">Earlier results are read-only.</div>
@@ -262,13 +260,10 @@ export function ReviewWorkspace({
               </>
             ) : (
               <div className="structures-list">
-                <label className="sr-only" htmlFor="structure-filter">
-                  Find a structure
-                </label>
-                <input
-                  id="structure-filter"
-                  className="text-input"
-                  placeholder="Find a structure…"
+                <TextField
+                  label="Find a structure"
+                  hideLabel
+                  placeholder="Find a structure"
                   value={filter}
                   onChange={(event) => setFilter(event.target.value)}
                 />

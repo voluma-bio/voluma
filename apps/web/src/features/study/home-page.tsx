@@ -8,7 +8,18 @@
 import { useQuery } from "@tanstack/react-query";
 import { listStudies } from "@voluma/api-client";
 import type { StudyRunSummary, StudySummary } from "@voluma/contracts/study";
-import { EmptyState, ErrorState, LoadingState, StatusBadge } from "@voluma/ui";
+import {
+  Box,
+  EmptyState,
+  ErrorState,
+  type LinkRenderProps,
+  List,
+  LoadingState,
+  Row,
+  RowLink,
+  StatusBadge,
+  Table,
+} from "@voluma/ui";
 import { runHref, studyStatus } from "@voluma/ui/run";
 import { workflowById } from "@voluma/workflow/bundled";
 import { Link } from "react-router";
@@ -104,60 +115,67 @@ function Dashboard({ views }: { views: StudyView[] }) {
   return (
     <>
       <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] items-start gap-6 max-[860px]:grid-cols-1">
-        <section aria-labelledby="needs-you" className="grid gap-3">
-          <h2 id="needs-you" className="flex items-center gap-2 text-lg font-semibold">
-            Needs you
-            {needs.length > 0 && (
-              <span className="rounded-full bg-check-tint px-2 text-meta font-semibold text-check tabular-nums">
+        <Box
+          title="Needs you"
+          count={
+            needs.length > 0 && (
+              <span className="rounded-full bg-check-tint px-1.5 font-mono text-xs font-medium text-check">
                 {needs.length}
               </span>
-            )}
-          </h2>
+            )
+          }
+          className={BOXED}
+        >
           {needs.length > 0 ? (
-            <ul className="overflow-hidden rounded-xl border border-border bg-card">{needs}</ul>
+            <List columns="auto" label="Needs you">
+              {needs}
+            </List>
           ) : (
-            <p className="text-muted-foreground">Nothing needs you.</p>
+            <EmptyState title="Nothing needs you">
+              Runs that fail or wait for your check show here.
+            </EmptyState>
           )}
-        </section>
-        <section aria-labelledby="running" className="grid gap-3">
-          <h2 id="running" className="text-lg font-semibold">
-            Running
-          </h2>
+        </Box>
+        <Box title="Running" className={BOXED}>
           {running.length > 0 ? (
-            <ul className="overflow-hidden rounded-xl border border-border bg-card">
+            <List columns="7rem 2.75rem" label="Running">
               {running.map((v) => (
                 <RunningRow key={v.study.id} view={v} />
               ))}
-            </ul>
+            </List>
           ) : (
-            <p className="text-muted-foreground">Nothing running.</p>
+            <EmptyState title="Nothing running" />
           )}
-        </section>
+        </Box>
       </div>
       <StudyTable views={views} />
     </>
   );
 }
 
+/** Home's boxes stand alone on the page, so each draws its own frame. */
+const BOXED = "overflow-hidden rounded-lg border border-border";
+
+/** A study's row as a link through the router. */
+const linkTo = (href: string) => (props: LinkRenderProps) => <Link to={href} {...props} />;
+
 /** A study's one "Needs you" row, or none. Example studies are read-only, so they ask nothing. */
 function needsYou(v: StudyView): React.ReactNode[] {
   const { study, one } = v;
   if (study.example) return [];
   const row = (tone: "check" | "destructive", detail: string, action: string, to: string) => (
-    <li
+    <Row
       key={study.id}
-      className={`flex items-center gap-4 border-b border-l-3 border-b-line-subtle px-4 py-2.5 last:border-b-0 max-[520px]:flex-wrap ${
-        tone === "check" ? "border-l-check" : "border-l-destructive"
-      }`}
-    >
-      <div className="min-w-0 flex-1">
-        <p className="truncate font-medium">{one ? one.inputName : study.name}</p>
-        <p className="line-clamp-2 text-ui text-muted-foreground">{detail}</p>
-      </div>
-      <ButtonLink to={to} size="sm">
-        {action}
-      </ButtonLink>
-    </li>
+      title={one ? one.inputName : study.name}
+      subtitle={
+        <span className={tone === "check" ? "text-check" : "text-destructive"}>{detail}</span>
+      }
+      cells={[
+        <ButtonLink key="action" to={to} size="sm">
+          {action}
+        </ButtonLink>,
+      ]}
+    />
   );
   if (one) {
     if (one.state.status === "ended" && one.state.outcome === "failed")
@@ -226,19 +244,12 @@ function RunningRow({ view: v }: { view: StudyView }) {
       .join(", ");
   }
   return (
-    <li className="border-b border-line-subtle last:border-b-0">
-      <Link
-        to={v.href}
-        className="grid grid-cols-[minmax(0,1fr)_7rem_2.75rem] items-center gap-3 px-4 py-3 hover:bg-background"
-      >
-        <span className="min-w-0">
-          <span className="block truncate font-medium">{one ? one.inputName : study.name}</span>
-          <span className="block truncate text-ui text-muted-foreground">{detail}</span>
-        </span>
-        <ProgressBar {...progress} />
-        <Fraction {...progress} />
-      </Link>
-    </li>
+    <RowLink
+      to={linkTo(v.href)}
+      title={one ? one.inputName : study.name}
+      subtitle={detail}
+      cells={[<ProgressBar key="bar" {...progress} />, <Fraction key="n" {...progress} />]}
+    />
   );
 }
 
@@ -251,64 +262,72 @@ function Fraction({ done, total }: { done: number; total: number }) {
   );
 }
 
-const COLUMNS =
-  "grid grid-cols-[minmax(0,1.6fr)_minmax(7rem,1fr)_minmax(6.5rem,auto)_minmax(0,1fr)_6.5rem] items-center gap-4 max-[760px]:grid-cols-[minmax(0,1fr)_auto]";
-
 function StudyTable({ views }: { views: StudyView[] }) {
   return (
-    <section aria-labelledby="studies" className="grid gap-3">
-      <h2 id="studies" className="text-lg font-semibold">
-        Studies
-      </h2>
-      <div className="overflow-hidden rounded-xl border border-border bg-card">
-        <div
-          aria-hidden
-          className={`${COLUMNS} border-b border-border px-4 py-2.5 text-meta font-medium text-fg-subtle max-[760px]:hidden`}
-        >
-          <span>Study</span>
-          <span>Progress</span>
-          <span>Status</span>
-          <span>Workflow</span>
-          <span className="text-right">Last activity</span>
-        </div>
-        <ul>
-          {views.map((v) => {
-            const chip = studyStatus({
-              scans: v.study.scanCount,
-              newest: v.study.newestRuns,
-              toCheck: v.study.toCheck,
-            });
-            return (
-              <li key={v.study.id} className="border-b border-line-subtle last:border-b-0">
-                <Link to={v.href} className={`${COLUMNS} px-4 py-3 hover:bg-background`}>
-                  <span className="min-w-0">
-                    <span className="block truncate font-medium">
-                      {v.one ? v.one.inputName : v.study.name}
-                    </span>
-                    <span className="block truncate text-ui text-muted-foreground">
-                      {v.study.scanCount === 1 ? "One scan" : plural(v.study.scanCount, "scan")}
-                      {v.study.example && ", an example"}
-                    </span>
-                  </span>
-                  <span className="flex items-center gap-2.5 max-[760px]:hidden">
-                    <ProgressBar {...v.progress} />
-                    <Fraction {...v.progress} />
-                  </span>
-                  <span>
-                    <StatusBadge tone={chip.tone}>{chip.label}</StatusBadge>
-                  </span>
-                  <span className="truncate text-ui text-muted-foreground max-[760px]:hidden">
-                    {workflowById(v.study.workflowId)?.name ?? v.study.workflowId}
-                  </span>
-                  <span className="text-right text-ui text-muted-foreground max-[760px]:hidden">
-                    {relativeDay(v.study.lastActivityAt)}
-                  </span>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      </div>
-    </section>
+    <Box title="Studies" className={BOXED}>
+      <Table
+        label="Studies"
+        rows={views}
+        rowKey={(v) => v.study.id}
+        rowLink={(v) => linkTo(v.href)}
+        className="rounded-none border-0"
+        columns={[
+          {
+            key: "study",
+            header: "Study",
+            cell: (v) => (
+              <>
+                <span className="block truncate">{v.one ? v.one.inputName : v.study.name}</span>
+                <span className="block truncate text-sm font-normal text-fg-subtle">
+                  {v.study.scanCount === 1 ? "One scan" : plural(v.study.scanCount, "scan")}
+                  {v.study.example && ", an example"}
+                </span>
+              </>
+            ),
+          },
+          {
+            key: "progress",
+            header: "Progress",
+            cell: (v) => (
+              <span className="flex min-w-28 items-center gap-2.5">
+                <ProgressBar {...v.progress} />
+                <Fraction {...v.progress} />
+              </span>
+            ),
+          },
+          {
+            key: "status",
+            header: "Status",
+            cell: (v) => {
+              const chip = studyStatus({
+                scans: v.study.scanCount,
+                newest: v.study.newestRuns,
+                toCheck: v.study.toCheck,
+              });
+              return <StatusBadge tone={chip.tone}>{chip.label}</StatusBadge>;
+            },
+          },
+          {
+            key: "workflow",
+            header: "Workflow",
+            cell: (v) => (
+              <span className="text-sm text-muted-foreground">
+                {workflowById(v.study.workflowId)?.name ?? v.study.workflowId}
+              </span>
+            ),
+          },
+          {
+            key: "activity",
+            header: "Last activity",
+            align: "end",
+            cell: (v) => (
+              <span className="text-sm whitespace-nowrap text-muted-foreground">
+                {relativeDay(v.study.lastActivityAt)}
+              </span>
+            ),
+          },
+        ]}
+      />
+    </Box>
   );
 }

@@ -7,7 +7,7 @@ import { useMutation } from "@tanstack/react-query";
 import { ApiError, acceptCheck, reviewFileUrl } from "@voluma/api-client";
 import type { Asset } from "@voluma/contracts/review";
 import type { Run } from "@voluma/contracts/run";
-import { Button, buttonClass, cx, Lightbox } from "@voluma/ui";
+import { Button, buttonClass, cx, EmptyState, Lightbox } from "@voluma/ui";
 import { ChevronRight, ImageOff } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Link } from "react-router";
@@ -158,13 +158,19 @@ export function Overview({
 
       <Section title="Needs your eye" count={toCheck}>
         {open.length + failed.length === 0 ? (
-          <p className="text-ui text-muted-foreground">
-            {looked.length > 0
-              ? "You've looked at everything."
-              : ended
-                ? "Nothing to check."
-                : "Nothing yet."}
-          </p>
+          <EmptyState
+            title={
+              looked.length > 0
+                ? "You've looked at everything"
+                : ended
+                  ? "Nothing to check"
+                  : "Nothing yet"
+            }
+          >
+            {looked.length === 0 && !ended
+              ? "Items appear as the AI finishes each task."
+              : undefined}
+          </EmptyState>
         ) : (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,24rem),1fr))] gap-2.5">
             {ended && !accepting.enabled && open.length > 0 && (

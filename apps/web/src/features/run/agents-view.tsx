@@ -4,6 +4,8 @@
  * whichever agent is working now. The tree is `agentTree` (the log's own parent links); this file
  * groups siblings by task. Visuals are a thin debug layer on purpose: the redesign restyles it.
  */
+
+import { EmptyState } from "@voluma/ui";
 import { catalog } from "@voluma/workflow/bundled";
 import { useEffect, useMemo, useRef } from "react";
 import { AgentThread } from "./agent-thread";
@@ -69,11 +71,9 @@ export function AgentsView({
 
   if (!selected)
     return (
-      <p className="text-ui text-muted-foreground">
-        {ended
-          ? "No agent started in this run."
-          : "Nothing yet: the agents start when the run does."}
-      </p>
+      <EmptyState title={ended ? "No agent started in this run" : "No agents yet"}>
+        {ended ? undefined : "The agents start when the run does."}
+      </EmptyState>
     );
   return (
     <div className="grid min-h-0 flex-1 grid-cols-[17rem_minmax(0,1fr)] gap-6 max-[1100px]:grid-cols-1">

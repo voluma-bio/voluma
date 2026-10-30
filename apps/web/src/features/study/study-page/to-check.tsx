@@ -8,7 +8,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, acceptCheck } from "@voluma/api-client";
 import type { StudyDetail, StudyScanDetail, ToCheckItem } from "@voluma/contracts/study";
-import { Button } from "@voluma/ui";
+import { Button, EmptyState } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import { Link } from "react-router";
 import { checkKinds, type OpenChecks, scanHref, scanMeta } from "./study-model";
@@ -28,11 +28,16 @@ export function ToCheck({
   const kinds = checkKinds(detail, workflow);
   if (kinds.length === 0)
     return (
-      <p className="mx-auto max-w-3xl text-ui text-muted-foreground">
+      <EmptyState
+        className="mx-auto max-w-3xl"
+        title={
+          detail.scans.some((s) => s.resultRunId !== null) ? "Nothing to check" : "Nothing yet"
+        }
+      >
         {detail.scans.some((s) => s.resultRunId !== null)
-          ? "Nothing to check. Every finished scan's checks are done."
-          : "Nothing yet. Items appear here as each scan's run finishes."}
-      </p>
+          ? "Every finished scan's checks are done."
+          : "Items appear here as each scan's run finishes."}
+      </EmptyState>
     );
   return (
     <div className="mx-auto grid max-w-3xl gap-6">

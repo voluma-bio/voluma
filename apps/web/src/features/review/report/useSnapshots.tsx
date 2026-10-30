@@ -2,6 +2,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createReviewSnapshot, listReviewSnapshots, reviewFileUrl } from "@voluma/api-client";
 import type { ReviewSnapshot } from "@voluma/contracts/snapshot";
+import { Disclosure, ErrorState, LoadingState } from "@voluma/ui";
 import type { SnapshotControls } from "@voluma/viewer";
 
 export function useSnapshots(
@@ -30,20 +31,14 @@ export function useSnapshots(
       ]);
     },
     tray: (
-      <details className="border-b border-border px-4 py-2 text-xs" open>
-        <summary className="cursor-pointer font-medium">Snapshots ({items.length})</summary>
-        {query.isPending && (
-          <p role="status" className="mt-2">
-            Loading snapshots…
-          </p>
-        )}
+      <Disclosure
+        label={`Snapshots (${items.length})`}
+        defaultOpen
+        className="border-t-0 border-b px-4 text-xs"
+      >
+        {query.isPending && <LoadingState rows={1} density="compact" label="Loading snapshots" />}
         {query.isError && (
-          <p role="alert" className="mt-2">
-            Could not load snapshots.{" "}
-            <button type="button" className="text-button" onClick={() => void query.refetch()}>
-              Retry
-            </button>
-          </p>
+          <ErrorState title="Couldn't load snapshots" onRetry={() => void query.refetch()} />
         )}
         {!!items.length && (
           <div className="mt-2 flex max-h-28 flex-wrap gap-3 overflow-y-auto pb-1">
@@ -97,7 +92,7 @@ export function useSnapshots(
             ))}
           </div>
         )}
-      </details>
+      </Disclosure>
     ),
   };
 }

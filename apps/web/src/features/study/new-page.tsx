@@ -13,7 +13,7 @@ import { ApiError, createStudy, listInputs, listRuns, signIn } from "@voluma/api
 import type { Me } from "@voluma/contracts/auth";
 import type { Input, Run, VisitorKeys } from "@voluma/contracts/run";
 import type { CreateStudyRequest } from "@voluma/contracts/study";
-import { Button, EmptyState, ErrorState, LoadingState } from "@voluma/ui";
+import { Button, Disclosure, EmptyState, ErrorState, LoadingState, TextField } from "@voluma/ui";
 import { formatDuration, formatUsd, loadKeys, RunKeyLine } from "@voluma/ui/run";
 import { catalog } from "@voluma/workflow/bundled";
 import { FolderOpen, Upload, X } from "lucide-react";
@@ -329,16 +329,14 @@ export function NewPage() {
 
       {several && (
         <Step n={3} title="Study">
-          <label className="grid max-w-md gap-1">
-            <span className="text-ui text-muted-foreground">Name</span>
-            <input
-              value={studyName}
-              maxLength={200}
-              onChange={(e) => setStudyName(e.target.value)}
-              placeholder="DMM knee study, Oct 2026"
-              className="h-9 rounded-lg border border-input bg-card px-3 outline-none focus-visible:border-ring"
-            />
-          </label>
+          <TextField
+            label="Name"
+            className="max-w-md"
+            value={studyName}
+            maxLength={200}
+            onChange={(e) => setStudyName(e.target.value)}
+            placeholder="DMM knee study, Oct 2026"
+          />
           {table.length > 2 && (
             <fieldset className="grid gap-2">
               <legend className="sr-only">What runs now</legend>
@@ -806,11 +804,13 @@ function Earlier({
 }) {
   const list = inputs.data?.filter((i) => !hidden.has(i.id));
   return (
-    <details open={open} className="group">
-      <summary className="cursor-pointer py-1 text-muted-foreground hover:text-foreground">
-        Or use a scan you uploaded before{list && ` (${list.length})`}
-      </summary>
-      <div className="mt-2">
+    // Opens again whenever uploading becomes impossible (`open`), as the page's way in.
+    <Disclosure
+      key={String(open)}
+      defaultOpen={open}
+      label={`Or use a scan you uploaded before${list ? ` (${list.length})` : ""}`}
+    >
+      <div>
         {inputs.isPending && <LoadingState rows={2} density="compact" label="Loading your scans" />}
         {inputs.isError && (
           <ErrorState title="Couldn't load your scans" onRetry={() => void inputs.refetch()} />
@@ -835,6 +835,6 @@ function Earlier({
           ))}
         </ul>
       </div>
-    </details>
+    </Disclosure>
   );
 }

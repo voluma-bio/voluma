@@ -266,9 +266,9 @@ function RunScreen({
     content = <AgentsView agentId={agentId} select={openThread} ended={ended} />;
   } else if (tasks.length === 0)
     content = (
-      <p className="text-ui text-muted-foreground">
-        {ended ? "This run ended before it made a plan." : "The tasks appear when the run starts."}
-      </p>
+      <EmptyState title={ended ? "This run ended before it made a plan" : "No tasks yet"}>
+        {ended ? undefined : "The tasks appear when the run starts."}
+      </EmptyState>
     );
   else
     content = (

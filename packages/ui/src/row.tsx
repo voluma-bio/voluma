@@ -214,9 +214,12 @@ export const stretchedClass = cx(
   "after:absolute after:inset-0 after:content-['']",
   "focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-ring",
 );
-/** Lifts the controls inside a cell above the row's stretched control. */
+/**
+ * Lifts the controls inside a cell above the row's stretched control (not the row's own control,
+ * which `Table` puts in its first cell: positioning it would shrink its stretch to the cell).
+ */
 export const raiseControls =
-  "[&_:is(a,button,input,select,textarea,[tabindex])]:relative [&_:is(a,button,input,select,textarea,[tabindex])]:z-[1]";
+  "[&_:is(a,button,input,select,textarea,[tabindex]):not([data-row-control])]:relative [&_:is(a,button,input,select,textarea,[tabindex]):not([data-row-control])]:z-[1]";
 const cellClass = cx("flex min-w-0 items-center gap-2", raiseControls);
 
 export function Chevron({ open }: { open: boolean }) {

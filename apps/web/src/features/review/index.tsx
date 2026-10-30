@@ -13,6 +13,7 @@ import {
   listInputs,
   reviewFileUrl,
 } from "@voluma/api-client";
+import { ErrorState } from "@voluma/ui";
 import { type DicomArchive, openDicomZip, ViewerWorkspace } from "@voluma/viewer";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, type RouteObject, useParams, useSearchParams } from "react-router";
@@ -232,11 +233,7 @@ function ScanReview({ runId }: { runId: string }) {
                 Skipped {archive.ignoredFiles} non-image files.
               </p>
             )}
-            {error && (
-              <p className="error-message mt-2" role="alert">
-                {error}
-              </p>
-            )}
+            {error && <ErrorState className="mt-2" title={error} />}
           </div>
         </ViewerWorkspace>
       )}

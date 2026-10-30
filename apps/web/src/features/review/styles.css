@@ -34,15 +34,6 @@
   .text-button:disabled {
     @apply opacity-40;
   }
-  .text-input {
-    @apply w-full rounded-md border border-border bg-card p-3 text-sm text-foreground;
-  }
-  .text-input::placeholder {
-    @apply text-muted-foreground;
-  }
-  .text-input:disabled {
-    @apply bg-muted;
-  }
   .badge {
     @apply inline-flex items-center whitespace-nowrap rounded px-2 py-1 text-xs font-medium text-primary-text bg-muted;
   }
@@ -138,22 +129,17 @@
   .section-heading h2 {
     @apply text-sm font-semibold;
   }
-  .measurements,
-  .references {
+  .measurements {
     @apply w-full border-collapse text-sm;
   }
   .measurements th,
-  .measurements td,
-  .references th,
-  .references td {
+  .measurements td {
     @apply border-b border-border py-3 text-left;
   }
-  .measurements thead th,
-  .references thead th {
+  .measurements thead th {
     @apply py-2 text-xs font-normal text-muted-foreground;
   }
-  .measurements tbody th,
-  .references tbody th {
+  .measurements tbody th {
     @apply pr-2 font-normal;
   }
   .measurements th a {
@@ -162,19 +148,14 @@
   .measurements th a:hover {
     @apply underline;
   }
-  .measurements td,
-  .references td {
+  .measurements td {
     @apply pl-3 text-right whitespace-nowrap;
   }
-  .measurements thead th:not(:first-child),
-  .references thead th:not(:first-child) {
+  .measurements thead th:not(:first-child) {
     @apply text-right;
   }
   .measurement-source {
     @apply mt-1 block text-xs text-muted-foreground;
-  }
-  .unit {
-    @apply ml-1 text-xs text-muted-foreground;
   }
   .check-card {
     @apply mb-3 rounded-md border border-check-line bg-check-tint p-4 text-sm;
@@ -386,11 +367,9 @@
   .dialog-content {
     @apply fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-border bg-card p-7 shadow-xl;
   }
+  /* Used by packages/viewer only; the app's own errors use ErrorState. */
   .error-message {
     @apply rounded-md bg-destructive-tint p-3 text-sm text-destructive;
-  }
-  .notice {
-    @apply rounded-md bg-muted p-3 text-sm text-muted-foreground;
   }
 }
 
