@@ -37,7 +37,7 @@ change it safely.
   must hold a top-level `model` (else 403); a repeated `model` key anywhere, or an
   escaped top-level key, refuses at admission or, past 4 KB, errors the upstream stream so the
   call settles `cut`. Never read a price-relevant field from a body by regex.
-- **No spend limit.** Admission checks the run is live, the lease, the in-flight limit, exact routes and the model allowlist; every call is recorded and its known cost summed for `providerCalls`. `provider_calls.reserved_usd` and `runs.cost_cap_usd` are unused (drop: `apps/api/.context/TODO.md`).
+- **No spend limit.** Admission checks the run is live, the lease, the in-flight limit, exact routes and the model allowlist; every call is recorded and its known cost summed for `providerCalls`.
 - **Exact routes** (`providers.ts`). A path with `%`, `..`, `.` or `//` segments is refused, not
   normalized. Anthropic and OpenAI have message routes only; their Files and Batches APIs stay
   closed because every run shares the account. A Meta `DELETE /v1/files/{id}` needs an id this
