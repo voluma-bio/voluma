@@ -315,7 +315,8 @@
     "unit": "%",
     "region": "ROI-1",
     "task": "iioc",
-    "sourceRef": "deck #6"
+    "sourceRef": "deck #6",
+    "headline": true
   },
   {
     "id": "iioc-height",
@@ -524,7 +525,8 @@
     "unit": "mm",
     "region": "as #24",
     "task": "cortical",
-    "sourceRef": "deck #25"
+    "sourceRef": "deck #25",
+    "headline": true
   },
   {
     "id": "distal-femoral-length-dfl",
@@ -534,7 +536,8 @@
     "unit": "mm",
     "region": "midpoint (a) of the upper line of the intercondylar groove to the intercondylar notch (b)",
     "task": "femoral-geometry",
-    "sourceRef": "deck #26"
+    "sourceRef": "deck #26",
+    "headline": true
   },
   {
     "id": "distal-femoral-width-dfw",

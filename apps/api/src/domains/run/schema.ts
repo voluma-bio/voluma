@@ -105,10 +105,43 @@ export const referenceInput = (labId: string): typeof inputs.$inferInsert => ({
 });
 
 /**
+ * A group of runs of one workflow, one per scan (`studySchema`, `@voluma/contracts/study`).
+ * `example` marks the seeded example's study. Like `runs`, no foreign keys: the rows are
+ * checked where they are written (pg-queue.ts, and the operator scripts import-run.ts and seed-example.ts).
+ */
+export const studies = pgTable(
+  "studies",
+  {
+    id: text().primaryKey(),
+    labId: text().notNull(),
+    name: text().notNull(),
+    workflowId: text().notNull(),
+    budgetUsd: doublePrecision(),
+    createdBy: text().notNull(),
+    example: boolean().notNull().default(false),
+    createdAt: timestamptz().notNull().defaultNow(),
+  },
+  (t) => [index("studies_lab").on(t.labId, t.createdAt)],
+);
+
+/** A scan of a study: the confirmed intake row. `subject` is never empty (the input's name when none was given). */
+export const studyScans = pgTable(
+  "study_scans",
+  {
+    studyId: text().notNull(),
+    inputId: text().notNull(),
+    subject: text().notNull(),
+    group: text(),
+    attributes: json().notNull().$type<Record<string, string | number | boolean>>(),
+    position: integer().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.studyId, t.inputId] })],
+);
+
+/**
  * The run record (`runSchema`) plus the server's own columns. `state` is the
- * `runStateSchema` status; `queued`'s position is computed at read time. `workflow_id`
- * names the catalog entry the run was started from; `workflows` are the
- * pins resolved at start. The lease columns are null unless the run is held.
+ * `runStateSchema` status; `queued`'s position is computed at read time. The study names
+ * the catalog workflow; `workflows` are the pins resolved at start. The lease columns are null unless the run is held.
  */
 export const runs = pgTable(
   "runs",
@@ -116,7 +149,7 @@ export const runs = pgTable(
     id: text().primaryKey(),
     labId: text().notNull(),
     startedBy: text().notNull(),
-    workflowId: text().notNull(),
+    studyId: text().notNull(),
     workflows: json().notNull(),
     /** The output ids the user selected (`runSchema.selectedOutputs`); null: every output. */
     selectedOutputs: json(),
@@ -156,5 +189,6 @@ export const runs = pgTable(
   (t) => [
     index("runs_lab_state").on(t.labId, t.state, t.createdAt),
     index("runs_started_by").on(t.startedBy),
+    index("runs_study").on(t.studyId),
   ],
 );

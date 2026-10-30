@@ -27,6 +27,7 @@ const dotFreeSegmentSchema = segmentSchema.refine((s) => !s.includes("."), {
 
 export const runIdSchema = dotFreeSegmentSchema;
 export const inputIdSchema = segmentSchema;
+export const studyIdSchema = segmentSchema;
 /** `main` and `supervisor` are thread roles in ids (`<runId>.main`, `<runId>.supervisor`), so no task takes them. */
 export const taskIdSchema = dotFreeSegmentSchema.refine((s) => s !== "main" && s !== "supervisor", {
   message: "'main' and 'supervisor' are reserved",

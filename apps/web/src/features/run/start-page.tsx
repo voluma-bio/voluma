@@ -3,7 +3,7 @@
  * and optional notes. Run starts it and opens the live run.
  */
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ApiError, listInputs, listRuns, startRun } from "@voluma/api-client";
+import { ApiError, createStudy, listInputs, listRuns } from "@voluma/api-client";
 import type { Me } from "@voluma/contracts/auth";
 import type { Input, VisitorKeys } from "@voluma/contracts/run";
 import { isSelectable, type OutputEntry } from "@voluma/contracts/workflow-files";
@@ -55,9 +55,12 @@ export function StartPage() {
   const inputId = picked ?? inputs.data?.[0]?.id;
   const start = useMutation({
     mutationFn: () =>
-      startRun({
+      // A study of one, named after the scan.
+      createStudy({
+        name: inputs.data?.find((input) => input.id === inputId)?.name ?? "Study",
         workflowId: WORKFLOW.id,
-        inputId: inputId as string,
+        scans: [{ inputId: inputId as string }],
+        start: [inputId as string],
         // Absent means every output, so a default run doesn't depend on this build's list.
         selectedOutputs:
           selected.size === ALL_OUTPUT_IDS.length
@@ -66,7 +69,7 @@ export function StartPage() {
         notes: notes.trim() === "" ? undefined : notes,
         keys: needsKeys ? keys : undefined,
       }),
-    onSuccess: (run) => navigate(`/runs/${run.id}/live`),
+    onSuccess: ({ scans }) => navigate(`/runs/${scans[0]?.runs[0]?.id}/live`),
   });
 
   const canRun = inputId !== undefined && selected.size > 0 && (!needsKeys || keys !== undefined);

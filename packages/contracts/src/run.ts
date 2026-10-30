@@ -5,9 +5,11 @@
  * every org's runs. The bearer-authenticated ingest routes under the same prefix are a
  * different contract.
  *
- *   POST /api/run/runs             body `startRunRequestSchema` → 200 `runSchema`
- *                                  (404 for an unknown `workflowId` or an `inputId`
- *                                  the caller can't read; 409 and 429: see Limits)
+ *   POST /api/run/runs             body `startRunRequestSchema` → 200 `runSchema`: one
+ *                                  run of a scan of an existing study (404 for an
+ *                                  unreadable `studyId` or an `inputId` the study lacks;
+ *                                  409 and 429: see Limits). `POST /api/run/studies`
+ *                                  (`study.ts`) creates a study and starts its first runs.
  *   GET  /api/run/runs             → 200 `listRunsResponseSchema`, newest first
  *   GET  /api/run/runs/:id         → 200 `runSchema`
  *   POST /api/run/runs/:id/cancel  → 200 `runSchema` with state `ended`/`cancelled`
@@ -85,9 +87,10 @@
  *     can't read answers 404, so a visitor can't start a run on another
  *     visitor's input by guessing its id.
  *
- * Workflows: the request names a workflow from the server's catalog, never raw
+ * Workflows: a study names a workflow from the server's catalog, never raw
  * pins, so a caller can't make the server import an arbitrary repo. The server
- * resolves the id to pinned packages and records them on the run.
+ * resolves the id to pinned packages and records them on each run of the study.
+ * Every run belongs to a study (`studyId`); a run's `input` is one of the study's scans.
  *
  * Starting work. The rules below hold for every call that creates a run or
  * makes one run again: `startRun`, a fork or a rerun after a correction (the
@@ -137,7 +140,7 @@
  */
 import { z } from "zod";
 import { userIdSchema } from "./auth";
-import { inputIdSchema, runIdSchema, segmentSchema } from "./ids";
+import { inputIdSchema, runIdSchema, segmentSchema, studyIdSchema } from "./ids";
 import { relativePathSchema } from "./r2";
 import { reviewSummarySchema } from "./review";
 import { workflowPinSchema } from "./workflow";
@@ -191,7 +194,7 @@ export const runStateSchema = z.discriminatedUnion("status", [
 export type RunState = z.infer<typeof runStateSchema>;
 
 /** Output ids the user selected; at most 200, each once. */
-const selectedOutputsSchema = z
+export const selectedOutputsSchema = z
   .array(segmentSchema)
   .max(200)
   .refine((ids) => new Set(ids).size === ids.length, "duplicate output id");
@@ -219,12 +222,23 @@ export const providerCallsSchema = z.object({
 });
 export type ProviderCalls = z.infer<typeof providerCallsSchema>;
 
+/**
+ * While a run is live (queued, running, awaiting keys): the tasks of its current plan that
+ * are finished (done or to check) out of all of them. Null before the plan is written and
+ * once the run has ended (its state and `review` say the rest).
+ */
+export const runTasksSchema = z
+  .object({ done: z.number().int().nonnegative(), total: z.number().int().nonnegative() })
+  .nullable();
+
 export const runSchema = z
   .object({
     id: runIdSchema,
     labId: z.string(),
     startedBy: userIdSchema,
-    /** The pins the server resolved from the request's `workflowId`, as in `r2.ts`'s `workflowSnapshotPrefix`. */
+    /** The study the run belongs to; its workflow is the run's. */
+    studyId: studyIdSchema,
+    /** The pins the server resolved from the study's workflow, as in `r2.ts`'s `workflowSnapshotPrefix`. */
     workflows: z.array(workflowPinSchema).min(1),
     input: inputSchema,
     /**
@@ -263,6 +277,7 @@ export const runSchema = z
     providerCalls: providerCallsSchema.optional(),
     /** Latest successfully completed results and their human review progress; null otherwise. */
     review: reviewSummarySchema.nullable(),
+    tasks: runTasksSchema,
   })
   .refine(
     (run) =>
@@ -284,7 +299,8 @@ export const visitorKeysSchema = z.object({
 export type VisitorKeys = z.infer<typeof visitorKeysSchema>;
 
 export const startRunRequestSchema = z.object({
-  workflowId: workflowIdSchema,
+  studyId: studyIdSchema,
+  /** One of the study's scans. */
   inputId: inputIdSchema,
   /** As `runSchema.selectedOutputs`; an id the workflow's `outputs.json` lacks fails the run at start, with that message. */
   selectedOutputs: selectedOutputsSchema.min(1).optional(),

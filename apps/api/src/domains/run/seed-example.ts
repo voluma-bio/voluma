@@ -5,7 +5,8 @@
  *
  * The example gets the source's events, threads and history under its own run id (thread
  * ids are `<runId>.…`, so they are renamed), `startedBy: "voluma-examples"`, `example: true`,
- * and the Demo org's reference-scan input. The source's evidence objects in R2 are copied
+ * and the Demo org's reference-scan input. It belongs to its own study of one scan
+ * (`study-<exampleId>`, `example: true`), replaced with it. The source's evidence objects in R2 are copied
  * under the example's own prefix (`evidenceKey` builds a key from the run being read, so an
  * example can't point at another run's files). `--backfill` adds the objects a run recorded before
  * they existed (`backfill.ts`). Re-seeding the same `--id` replaces the
@@ -29,6 +30,8 @@ import {
   piMessages,
   referenceInput,
   runs,
+  studies,
+  studyScans,
   threads,
 } from "./schema";
 
@@ -52,6 +55,7 @@ if (!values.remote && values.id === stagingId) {
 const exampleId = runIdSchema.parse(
   values.id ?? (values.remote ? stagingId : `example-local-${source}`),
 );
+const studyId = `study-${exampleId}`;
 const demoLabId = required("GUEST_ORGANIZATION_ID");
 
 const client = postgres(databaseUrl({ writes: true, remote: values.remote }));
@@ -103,6 +107,9 @@ if (src.input.source !== "reference") throw new Error("an example reads the refe
 if (src.run.example) throw new Error(`run ${source} is itself an example`);
 
 // Replace an earlier seeding of this example, and nothing else.
+const [sourceStudy] = await db.select().from(studies).where(eq(studies.id, src.run.studyId));
+if (!sourceStudy) throw new Error(`run ${source}'s study ${src.run.studyId} not found`);
+
 const [existing] = await db.select().from(runs).where(eq(runs.id, exampleId));
 if (existing && !(existing.example && existing.startedBy === EXAMPLES_OPERATOR)) {
   throw new Error(`run ${exampleId} exists and is not an example; pick another --id`);
@@ -150,14 +157,31 @@ await db.transaction(async (tx) => {
   await tx.delete(threads).where(eq(threads.runId, exampleId));
   await tx.delete(events).where(eq(events.runId, exampleId));
   await tx.delete(runs).where(eq(runs.id, exampleId));
+  await tx.delete(studyScans).where(eq(studyScans.studyId, studyId));
+  await tx.delete(studies).where(eq(studies.id, studyId));
 
   const reference = referenceInput(demoLabId);
   await tx.insert(inputs).values(reference).onConflictDoNothing();
+  await tx.insert(studies).values({
+    id: studyId,
+    labId: demoLabId,
+    name: reference.name,
+    workflowId: sourceStudy.workflowId,
+    createdBy: EXAMPLES_OPERATOR,
+    example: true,
+  });
+  await tx.insert(studyScans).values({
+    studyId,
+    inputId: reference.id as string,
+    subject: reference.name,
+    attributes: {},
+    position: 0,
+  });
   await tx.insert(runs).values({
     id: exampleId,
     labId: demoLabId,
     startedBy: EXAMPLES_OPERATOR,
-    workflowId: src.run.workflowId,
+    studyId,
     workflows: src.run.workflows,
     selectedOutputs: src.run.selectedOutputs ?? null,
     notes: src.run.notes ?? null,
