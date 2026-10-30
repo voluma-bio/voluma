@@ -1,24 +1,25 @@
 /**
  * A reopened run's corrections, each as its own span on the run page: when it started, what the
- * researcher asked, the task it redid, how long it took and what it cost. A span runs from a
- * `run.reopened` to the root thread's next `thread.ended`, or to a `correction.ended` when the
- * correction failed or was stopped (the run keeps its earlier results). Cost is the spend of the
- * log up to the span's end less the spend up to its start (`spend` is prefix-additive).
+ * researcher asked, the task it redid, how long it took and what it cost. The spans are
+ * `corrections` (`@voluma/contracts/fold`), the one reader of correction state; this adds what
+ * the page shows. Cost is the spend of the log up to the span's end less the spend up to its
+ * start (`spend` is prefix-additive).
  */
 
 import type { RunEvent } from "@voluma/contracts/events";
+import { corrections } from "@voluma/contracts/fold";
 import { spend } from "@voluma/contracts/spend";
 import { formatDuration, formatUsd } from "@voluma/ui/run";
 import { Link } from "react-router";
 import { Section } from "./overview";
 
-export type Correction = {
+export type CorrectionView = {
   id: string;
   startedAt: string;
   /** Absent while it runs. */
   endedAt?: string;
-  /** The researcher's notes in this span, oldest first; a go is "Go ahead". */
-  asked: { text: string; go: boolean }[];
+  /** The researcher's message; a go reads "Go ahead". */
+  asked?: { text: string; go: boolean };
   /** The task a go redid. */
   redid?: string;
   /** The AI's answers in this span. */
@@ -28,63 +29,43 @@ export type Correction = {
   costUsd: number;
 };
 
-export function corrections(events: readonly RunEvent[]): Correction[] {
-  const spans: Correction[] = [];
-  let root: string | undefined;
-  let open: (Correction & { from: number }) | undefined;
+/** `live`: the run is queued or running, so its open span is still being worked on. */
+export function correctionViews(events: readonly RunEvent[], live: boolean): CorrectionView[] {
   const cost = (to: number) => spend(events.slice(0, to)).total.costUsd;
-  const close = (i: number, outcome: Correction["outcome"], error?: string) => {
-    if (!open) return;
-    const { from, ...span } = open;
-    spans.push({
-      ...span,
-      endedAt: events[i]?.createdAt,
-      outcome,
-      ...(error && { error }),
-      costUsd: cost(i + 1) - cost(from),
-    });
-    open = undefined;
-  };
-  events.forEach((e, i) => {
-    if (e.type === "thread.started" && e.payload.kind === "supervisor") root ??= e.threadId;
-    else if (e.type === "run.reopened")
-      open = {
-        id: e.id,
-        from: i,
-        startedAt: e.createdAt,
-        asked: [],
-        replies: [],
-        outcome: "running",
-        costUsd: 0,
-      };
-    else if (!open) return;
-    else if (e.type === "person.message")
-      open.asked.push({
-        text: e.payload.go ? "Go ahead" : (e.payload.text ?? ""),
-        go: !!e.payload.go,
-      });
-    else if (e.type === "reply") open.replies.push(e.payload.text);
-    else if (e.type === "revision.started" && e.payload.reason === "correction")
-      open.redid = e.payload.taskId;
-    else if (e.type === "correction.ended") close(i, e.payload.status, e.payload.error);
-    else if (e.type === "thread.ended" && e.threadId === root) close(i, "done");
+  const root = events.find((e) => e.type === "thread.started" && e.payload.kind === "supervisor");
+  return corrections(events).spans.map((span) => {
+    const slice = events.slice(span.reopened, span.to);
+    const said = slice.find((e) => e.type === "person.message");
+    const stop = span.closed === "abandoned" ? events[span.to] : undefined;
+    const running = span.closed === "open" && live;
+    const rootEnd = [...slice]
+      .reverse()
+      .find((e) => e.type === "thread.ended" && e.threadId === root?.threadId);
+    const endAt = stop ? span.to + 1 : span.to;
+    return {
+      id: span.reopenId,
+      startedAt: events[span.reopened]!.createdAt,
+      ...(!running && { endedAt: (stop ?? rootEnd)?.createdAt }),
+      ...(said?.type === "person.message" && {
+        asked: {
+          text: said.payload.go ? "Go ahead" : (said.payload.text ?? ""),
+          go: !!said.payload.go,
+        },
+      }),
+      ...(span.go && { redid: span.go.taskId }),
+      replies: slice.flatMap((e) => (e.type === "reply" ? [e.payload.text] : [])),
+      outcome:
+        stop?.type === "correction.ended" ? stop.payload.status : running ? "running" : "done",
+      ...(stop?.type === "correction.ended" && stop.payload.error && { error: stop.payload.error }),
+      costUsd: cost(endAt) - cost(span.reopened),
+    };
   });
-  if (open) {
-    const { from, ...span } = open;
-    spans.push({ ...span, costUsd: cost(events.length) - cost(from) });
-  }
-  return spans;
 }
 
 /** The AI answered the latest note, nothing runs, and no go followed: the next move is the researcher's. */
-export const waitingOnYou = (spans: readonly Correction[]) => {
+export const waitingOnYou = (spans: readonly CorrectionView[]) => {
   const last = spans.at(-1);
-  return (
-    last?.outcome === "done" &&
-    last.redid === undefined &&
-    last.replies.length > 0 &&
-    !last.asked.at(-1)?.go
-  );
+  return last?.outcome === "done" && last.redid === undefined && last.replies.length > 0;
 };
 
 const when = (iso: string) =>
@@ -100,7 +81,7 @@ export function Corrections({
   titleOf,
   search,
 }: {
-  spans: Correction[];
+  spans: CorrectionView[];
   titleOf: (taskId: string) => string;
   search: (taskId?: string) => string;
 }) {
@@ -124,13 +105,9 @@ export function Corrections({
                 {formatUsd(c.costUsd)}
               </span>
             </p>
-            <ul className="flex flex-col gap-1">
-              {c.asked.map((a, i) => (
-                <li key={i} className={a.go ? "font-medium" : "whitespace-pre-wrap"}>
-                  {a.text}
-                </li>
-              ))}
-            </ul>
+            {c.asked && (
+              <p className={c.asked.go ? "font-medium" : "whitespace-pre-wrap"}>{c.asked.text}</p>
+            )}
             {c.redid && (
               <Link to={search(c.redid)} className="self-start text-primary-text hover:underline">
                 Open {titleOf(c.redid)}
@@ -144,7 +121,7 @@ export function Corrections({
   );
 }
 
-function outcomeWord(c: Correction, titleOf: (taskId: string) => string) {
+function outcomeWord(c: CorrectionView, titleOf: (taskId: string) => string) {
   const task = c.redid ? titleOf(c.redid) : undefined;
   switch (c.outcome) {
     case "running":

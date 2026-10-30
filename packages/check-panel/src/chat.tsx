@@ -15,15 +15,16 @@ import {
 import type { Me } from "@voluma/contracts/auth";
 import { type ConversationItem, conversation } from "@voluma/contracts/conversation";
 import type { RunEvent } from "@voluma/contracts/events";
+import { corrections } from "@voluma/contracts/fold";
 import { MAX_MESSAGE_SNAPSHOT_BYTES, type Mark } from "@voluma/contracts/messages";
 import type { ReviewRun } from "@voluma/contracts/review";
 import type { Run } from "@voluma/contracts/run";
 import { Button } from "@voluma/ui";
 import type { GridViewerHandle } from "@voluma/viewer/grid";
 import { X } from "lucide-react";
-import { type RefObject, useEffect, useRef, useState } from "react";
+import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
 
-/** A correction claim that failed or was stopped; the run kept its earlier results. */
+/** A correction that failed or was stopped; the run kept its earlier results. */
 type Stopped = {
   from: "stop";
   id: string;
@@ -34,43 +35,31 @@ type Stopped = {
   error?: string;
 };
 
-/** The chat as the stream has told it so far. */
-type ChatLog = {
-  items: (ConversationItem | Stopped)[];
-  /** The root thread, whose `thread.ended` ends each claim of the run. */
-  root?: string;
-  /** The `seq` of the latest claim end (the root's end or a `correction.ended`), 0 for none. */
-  endedAt: number;
-  /** A message has reopened the run: it is being corrected, not on its first pass. */
-  reopened: boolean;
-};
-
-const EMPTY: ChatLog = { items: [], endedAt: 0, reopened: false };
-
-function fold(log: ChatLog, e: RunEvent): ChatLog {
-  if (e.type === "person.message" || e.type === "reply")
-    return { ...log, items: [...log.items, ...conversation([e])] };
-  if (e.type === "correction.ended")
-    return {
-      ...log,
-      endedAt: e.seq,
-      items: [
-        ...log.items,
-        {
-          from: "stop",
-          id: e.id,
-          seq: e.seq,
-          cancelled: e.payload.status === "cancelled",
-          redo: log.items.filter((i) => i.from === "person").at(-1)?.go === true,
-          ...(e.payload.error && { error: e.payload.error }),
-        },
-      ],
-    };
-  if (e.type === "run.reopened") return { ...log, reopened: true };
-  if (e.type === "thread.started" && e.payload.kind === "supervisor" && !log.root)
-    return { ...log, root: e.threadId };
-  if (e.type === "thread.ended" && e.threadId === log.root) return { ...log, endedAt: e.seq };
-  return log;
+/**
+ * The chat as the stream has told it so far: the conversation with each abandoned correction's
+ * end in place, and the latest correction unless it was abandoned (`corrections` in
+ * `@voluma/contracts/fold`, the one reader of correction state).
+ */
+function chatLog(events: readonly RunEvent[]) {
+  const { spans, open } = corrections(events);
+  const stops = spans.flatMap((span): Stopped[] => {
+    const e = events[span.to];
+    if (span.closed !== "abandoned" || e?.type !== "correction.ended") return [];
+    return [
+      {
+        from: "stop",
+        id: e.id,
+        seq: e.seq,
+        cancelled: e.payload.status === "cancelled",
+        redo: span.go !== undefined,
+        ...(e.payload.error && { error: e.payload.error }),
+      },
+    ];
+  });
+  const items: (ConversationItem | Stopped)[] = [...conversation(events), ...stops].sort(
+    (x, y) => x.seq - y.seq,
+  );
+  return { items, open, reopened: spans.length > 0 };
 }
 
 export type RunChat = ReturnType<typeof useRunChat>;
@@ -81,7 +70,7 @@ export type RunChat = ReturnType<typeof useRunChat>;
  * ended (a message reopened it). `onActivity` hears of every event.
  */
 export function useRunChat(runId: string, run: Run | null, onActivity: () => void) {
-  const [log, setLog] = useState<ChatLog>(EMPTY);
+  const [events, setEvents] = useState<RunEvent[]>([]);
   const [closed, setClosed] = useState(false);
   const [generation, setGeneration] = useState(0);
   const after = useRef(0);
@@ -96,9 +85,9 @@ export function useRunChat(runId: string, run: Run | null, onActivity: () => voi
     let frame = 0;
     const flush = () => {
       frame = 0;
-      const events = pending;
+      const batch = pending;
       pending = [];
-      setLog((l) => events.reduce(fold, l));
+      setEvents((all) => [...all, ...batch]);
       latest.current();
     };
     const close = subscribe(
@@ -133,12 +122,13 @@ export function useRunChat(runId: string, run: Run | null, onActivity: () => voi
   useEffect(() => {
     if (closed && status !== undefined && status !== "ended") reconnect();
   }, [closed, status]);
+  const log = useMemo(() => chatLog(events), [events]);
   return { log, reconnect };
 }
 
 /**
  * Why this run's AI can't be asked here, or null when it may be. A run still on its first pass
- * is told apart from a reopened one by the log (`ChatLog.reopened`): its `Run.review` is null
+ * is told apart from a reopened one by the log (`reopened`): its `Run.review` is null
  * either way.
  */
 export function chatBlocked(run: Run, me: Me | null): string | null {
@@ -216,17 +206,12 @@ export function Chat({
   const { items } = log;
   const last = items.at(-1);
   const active = run.state.status === "queued" || run.state.status === "running";
-  const said = items.filter(
-    (i): i is Extract<ConversationItem, { from: "person" }> => i.from === "person",
-  );
-  const lastGo = said.filter((i) => i.go).at(-1);
-  // A go whose claim hasn't ended yet: the task is being redone.
-  const redoing = active && lastGo !== undefined && lastGo.seq > log.endedAt;
-  const lastPerson = said.at(-1);
+  // The latest correction asked for a go: the task is being redone, or was.
+  const go = log.open?.go;
+  const redoing = active && go !== undefined;
   // The AI has answered a note: it waits for another note, or a go.
-  const waiting = !active && last?.from === "agent" && lastPerson?.go === false;
-  // A go whose claim ended without a failure or a cancel.
-  const redone = !active && lastPerson?.go === true && last?.from !== "stop";
+  const waiting = !active && log.open !== undefined && go === undefined && last?.from === "agent";
+  const redone = !active && go !== undefined;
   const titleOf = (id: string) => review.revisions.at(-1)?.tasks.find((t) => t.id === id)?.title;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: scroll when the chat grows.
@@ -237,11 +222,11 @@ export function Chat({
   let status: string | undefined;
   if (send.isPending) status = "Sending…";
   else if (redoing)
-    status = `Redoing ${titleOf(lastGo.taskId ?? taskId) ?? "the task"}. The new result shows here when it's checked.`;
+    status = `Redoing ${titleOf(go.taskId) ?? "the task"}. The new result shows here when it's checked.`;
   else if (active) status = "The AI is answering…";
   else if (waiting) status = "Waiting on you";
   else if (redone)
-    status = `Redone ${titleOf(lastPerson.taskId ?? taskId) ?? "the task"}. Its new result is in To check.`;
+    status = `Redone ${titleOf(go.taskId) ?? "the task"}. Its new result is in To check.`;
 
   return (
     <section className="flex flex-col gap-3" aria-label="Talk to the run's AI">
@@ -384,10 +369,9 @@ function Said({
           ))}
         </ul>
       )}
-      {item.snapshotKey && (
+      {item.hasSnapshot && (
         <img
-          // The event id is `<runId>.person:<the id the panel sent>`.
-          src={runMessageSnapshotUrl(runId, item.id.slice(item.id.indexOf(".person:") + 8))}
+          src={runMessageSnapshotUrl(runId, item.messageId)}
           alt="The view sent with this message"
           className="max-h-28 self-start rounded border border-border"
         />

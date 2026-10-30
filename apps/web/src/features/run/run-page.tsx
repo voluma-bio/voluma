@@ -16,7 +16,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from "react-router";
 import { DisclosureProvider } from "./chat/disclosure-store";
 import { ThreadNavigationProvider } from "./chat/thread-navigation";
-import { Corrections, corrections, waitingOnYou } from "./corrections";
+import { Corrections, correctionViews, waitingOnYou } from "./corrections";
 import { Overview, useAccepting } from "./overview";
 import { RunAlerts, RunHeader } from "./run-header";
 import { haltOf, runView, withLiveCalls } from "./run-model";
@@ -232,7 +232,7 @@ function RunScreen({
   const decisions = !taskId && params.get("view") === "decisions";
   const ended = run.state.status === "ended";
   const titles = useMemo(() => new Map(tasks.map((t) => [t.id, t.title])), [tasks]);
-  const spans = useMemo(() => corrections(events), [events]);
+  const spans = useMemo(() => correctionViews(events, !ended), [events, ended]);
   const needs = tasks.flatMap((t) => t.needs);
   // An ended run's stream is closed, so a "Looks right" made here counts from `accepting.done`.
   // An ended run that takes no decisions (failed, cancelled, an example) has nothing to count.
