@@ -93,7 +93,7 @@ export function RunKeyLine({
   onChange: (keys: VisitorKeys | undefined) => void;
 }) {
   const [adding, setAdding] = useState(false);
-  const link = "text-primary-text hover:underline";
+  const link = "text-primary-text underline";
   return (
     <div className="grid max-w-sm gap-2 text-ui text-muted-foreground">
       {keys ? (
@@ -109,10 +109,11 @@ export function RunKeyLine({
           >
             Remove it
           </button>
+          .
         </p>
       ) : guest ? (
         <>
-          <p>Guests run on their own Meta key. Sign in with an account to use Voluma's.</p>
+          <p>Runs on your Meta key. Sign in to use Voluma's instead.</p>
           <KeysForm userId={userId} submitLabel="Save key" onSubmit={onChange} />
         </>
       ) : adding ? (
@@ -130,6 +131,7 @@ export function RunKeyLine({
           <button type="button" className={link} onClick={() => setAdding(true)}>
             Use your own Meta key
           </button>
+          .
         </p>
       )}
     </div>

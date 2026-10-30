@@ -5,6 +5,7 @@
  * Needs your keys, Not started. A completed run with no open
  * item reads "Checked" (a failed task raises an item), and "Reviewed" once someone marks it
  * reviewed, which is never inferred. Also where a run's row links, and how its cost and time read.
+ * The run page's header says "N items to check" instead, because it sits beside a count of tasks.
  */
 import type { Run } from "@voluma/contracts/run";
 import type { StudyRunSummary } from "@voluma/contracts/study";
