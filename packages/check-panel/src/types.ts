@@ -10,4 +10,6 @@ export type CheckPanelProps = {
   onClose: () => void;
   /** After "Looks right" saved, so the page can refresh what it shows. */
   onAccepted?: (item: CheckItem) => void;
+  /** After a message or a cancel from the chat changed a run's state (the panel has its own cache). */
+  onRunChanged?: (runId: string) => void;
 };

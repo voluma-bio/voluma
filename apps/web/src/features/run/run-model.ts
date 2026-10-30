@@ -51,15 +51,17 @@ export type Thread = {
 
 /**
  * When the runner is not running the run's threads (see `Halt`). A queued run with no threads
- * open is paused too, which changes nothing. An ended run halts only once its stream has
- * `closed`: until then its log may still be loading, and a thread open in the part loaded so
- * far may have ended in the rest.
+ * open is paused too, which changes nothing, except one a message just queued (`reopened`, no
+ * runner has taken it yet): it is waiting to start, not paused. An ended run halts only once its
+ * stream has `closed`: until then its log may still be loading, and a thread open in the part
+ * loaded so far may have ended in the rest.
  */
-export function haltOf(state: RunState, closed: boolean): Halt | undefined {
+export function haltOf(state: RunState, closed: boolean, reopened: boolean): Halt | undefined {
   switch (state.status) {
     case "running":
       return undefined;
     case "queued":
+      return reopened ? undefined : { kind: "paused" };
     case "awaiting-keys":
       return { kind: "paused" };
     case "ended":

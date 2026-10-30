@@ -33,7 +33,7 @@ export type GridViewerHandle = {
   snapshot(maxBytes: number): Promise<Blob | null>;
 };
 
-/** Widths, CSS px, a snapshot tries in turn until its PNG fits. */
+/** Widths, CSS px, a snapshot tries in turn until its PNG fits; each is drawn when tried. */
 const SNAPSHOT_WIDTHS = [1600, 1200, 800, 560];
 const NO_MARKS: readonly GridMark[] = [];
 
@@ -94,40 +94,40 @@ export function GridViewer({
   );
   useImperativeHandle(ref, () => ({
     async snapshot(maxBytes) {
-      const host = grid.current!.getBoundingClientRect();
-      // Render every pane once, then copy them while their buffers still hold the frame.
-      const shots = [...captures.current].flatMap(([, capture]) => {
-        const canvas = capture();
-        const rect = canvas.getBoundingClientRect();
-        return rect.width && rect.height ? [{ canvas, rect }] : [];
-      });
-      const sheets = SNAPSHOT_WIDTHS.map((width) => {
-        const scale = Math.min(1, width / host.width) * globalThis.devicePixelRatio;
-        const sheet = document.createElement("canvas");
-        sheet.width = Math.round(host.width * scale);
-        sheet.height = Math.round(host.height * scale);
-        const ctx = sheet.getContext("2d")!;
-        ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue(
-          "--viewer-well",
-        );
-        ctx.fillRect(0, 0, sheet.width, sheet.height);
-        for (const { canvas, rect } of shots)
-          ctx.drawImage(
-            canvas,
-            (rect.left - host.left) * scale,
-            (rect.top - host.top) * scale,
-            rect.width * scale,
-            rect.height * scale,
-          );
-        return sheet;
-      });
-      for (const sheet of sheets) {
-        const blob = await new Promise<Blob | null>((done) => sheet.toBlob(done, "image/png"));
+      for (const [i, width] of SNAPSHOT_WIDTHS.entries()) {
+        // The last size is CSS px at 1x, whatever the screen, so it is the smallest PNG on offer.
+        const dpr = i < SNAPSHOT_WIDTHS.length - 1 ? globalThis.devicePixelRatio : 1;
+        const blob = await sheetPng(width, dpr);
         if (blob && blob.size <= maxBytes) return blob;
       }
       return null;
     },
   }));
+  /** The panes as one PNG at most `width` CSS px wide, times `dpr`. */
+  const sheetPng = (width: number, dpr: number) => {
+    const host = grid.current!.getBoundingClientRect();
+    const scale = Math.min(1, width / host.width) * dpr;
+    const sheet = document.createElement("canvas");
+    sheet.width = Math.round(host.width * scale);
+    sheet.height = Math.round(host.height * scale);
+    const ctx = sheet.getContext("2d")!;
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--viewer-well");
+    ctx.fillRect(0, 0, sheet.width, sheet.height);
+    // Each pane renders and is copied in the same task: a WebGL buffer doesn't outlive it.
+    for (const [, capture] of captures.current) {
+      const canvas = capture();
+      const rect = canvas.getBoundingClientRect();
+      if (!rect.width || !rect.height) continue;
+      ctx.drawImage(
+        canvas,
+        (rect.left - host.left) * scale,
+        (rect.top - host.top) * scale,
+        rect.width * scale,
+        rect.height * scale,
+      );
+    }
+    return new Promise<Blob | null>((done) => sheet.toBlob(done, "image/png"));
+  };
 
   // The window spans the coarsest level's values, so the first picture already uses it.
   useEffect(() => {

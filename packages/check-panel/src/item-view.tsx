@@ -3,12 +3,12 @@
  * "Looks right"), the task's values, what the view holds, and the chat with the run's AI beside
  * it. "Mark" turns clicks and drags on the slices into marks for the next message. Objects whose
  * 3D assets aren't ready show as preparing or couldn't prepare; they are never drawn from
- * anything else. Values that differ from the task's previous attempt are blue (corrected).
+ * anything else. Values a correction changed are blue, with what they were.
  */
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { ApiError, reviewAssetUrl } from "@voluma/api-client";
-import type { Me } from "@voluma/contracts/auth";
-import type { Mark } from "@voluma/contracts/messages";
+import { goMarkerId } from "@voluma/contracts/fold";
+import { MAX_MARKS, type Mark } from "@voluma/contracts/messages";
 import type { ReviewDecisionResponse, ReviewRun, ReviewTask } from "@voluma/contracts/review";
 import type { Run } from "@voluma/contracts/run";
 import { Button } from "@voluma/ui";
@@ -22,7 +22,7 @@ import {
 } from "@voluma/viewer/grid";
 import { Check } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { Chat, chatBlocked, useRunChat } from "./chat";
+import { Chat, markLabel, type RunChat } from "./chat";
 import type { CheckItem } from "./types";
 
 /** How often a view still preparing asks whether its assets have arrived. */
@@ -41,7 +41,8 @@ export function ItemView({
   item,
   review,
   runInfo,
-  me,
+  blocked,
+  chat,
   canAccept,
   example,
   accepted,
@@ -52,7 +53,10 @@ export function ItemView({
   review: UseQueryResult<ReviewRun>;
   /** The run's record, for who may talk to its AI; undefined while it loads. */
   runInfo: Run | undefined;
-  me: Me | null | undefined;
+  /** Why the chat isn't offered (`chatBlocked`); null when it is, undefined while loading. */
+  blocked: string | null | undefined;
+  /** The run's chat stream, held by the panel. */
+  chat: RunChat;
   canAccept: boolean;
   example: boolean;
   /** Signed off in this panel. */
@@ -76,8 +80,6 @@ export function ItemView({
         : undefined,
     [run, task, item, checkId],
   );
-  const blocked = runInfo && me !== undefined ? chatBlocked(runInfo, me) : undefined;
-  const chat = useRunChat(item.runId, blocked === null ? (runInfo ?? null) : null, onRunChanged);
   // A run on its first pass has no results to talk about yet; a reopened one does.
   const firstPass = runInfo?.state.status !== "ended" && !chat.log.reopened;
   const talk = blocked === null && !firstPass;
@@ -88,6 +90,9 @@ export function ItemView({
     () => marks.map((m): GridMark => (m.point ? { point: m.point } : { box: m.box! })),
     [marks],
   );
+  // A redo can move the item to another image: marks name the one they were made on.
+  const imageId = view?.state === "ready" ? view.imageId : undefined;
+  useEffect(() => setMarks((all) => all.filter((m) => m.volumeId === imageId)), [imageId]);
 
   // The region under check, when only its voxels say where it is; the grid's centre if it fails.
   const [located, setLocated] = useState<Zyx | null>();
@@ -127,15 +132,21 @@ export function ItemView({
     stage = <Notice>Finding the region to check…</Notice>;
   else if (view?.state === "ready")
     stage = (
-      // Remounts per item (the parent's key): the crosshair starts on this item's focus.
+      // Remounts per item (the parent's key) and per image: the crosshair starts on its focus.
       <GridViewer
+        key={view.imageId}
         ref={viewer}
         scene={view.scene}
         point={located ?? view.point}
         marking={marking}
         marks={gridMarks}
         onMark={(m) =>
-          setMarks((all) => [...all, { volumeId: view.gridId, ...m } as Mark].slice(-20))
+          setMarks((all) => {
+            const mark = { volumeId: view.imageId, ...m } as Mark;
+            return all.some((a) => markLabel(a) === markLabel(mark))
+              ? all
+              : [...all, mark].slice(-MAX_MARKS);
+          })
         }
       >
         {talk && (
@@ -213,6 +224,7 @@ export function ItemView({
               removeMark={(i) => setMarks((all) => all.filter((_, j) => j !== i))}
               viewer={viewer}
               chat={chat}
+              onRunChanged={onRunChanged}
             />
           ) : (
             (blocked || (blocked === null && firstPass)) && (
@@ -285,8 +297,16 @@ function CheckCard({
   );
 }
 
-/** The task as its attempt before the latest one left it, if it had one. */
+/**
+ * The task as its attempt before the latest one left it, when the latest came from a researcher's
+ * correction. Revisions before the first go are the first pass's own (the lead AI redoing a task
+ * opens one too), so a result from those has nothing to compare: a reopen comes only after the
+ * first pass, and every revision from the first go on is a correction's.
+ */
 function previousAttempt(run: ReviewRun, task: ReviewTask): ReviewTask | undefined {
+  const firstGo = run.revisions.findIndex((r) => r.id.endsWith(goMarkerId("")));
+  const latest = run.revisions.findIndex((r) => r.id === task.resultRevisionId);
+  if (firstGo === -1 || latest < firstGo) return undefined;
   for (const rev of [...run.revisions].reverse()) {
     const earlier = rev.tasks.find((t) => t.id === task.id);
     if (earlier && earlier.resultRevisionId !== task.resultRevisionId) return earlier;

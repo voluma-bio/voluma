@@ -5,18 +5,19 @@
  * Everything is derived from the run's stream (`run-model.ts`, `transcript.ts`) and `getRun`,
  * polled for what isn't an event (queue place, state, review progress).
  */
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { type UseQueryResult, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, getRun, getStudy, subscribe } from "@voluma/api-client";
 import { type CheckItem, CheckPanel } from "@voluma/check-panel";
 import type { Me } from "@voluma/contracts/auth";
 import type { RunEvent } from "@voluma/contracts/events";
 import type { Run } from "@voluma/contracts/run";
+import { type StreamClosed, useStreamReopen, waitingOnYou } from "@voluma/ui/run";
 import { ArrowLeft } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from "react-router";
 import { DisclosureProvider } from "./chat/disclosure-store";
 import { ThreadNavigationProvider } from "./chat/thread-navigation";
-import { Corrections, correctionViews, waitingOnYou } from "./corrections";
+import { Corrections, correctionViews, reopenUnclaimed } from "./corrections";
 import { Overview, useAccepting } from "./overview";
 import { RunAlerts, RunHeader } from "./run-header";
 import { haltOf, runView, withLiveCalls } from "./run-model";
@@ -30,26 +31,33 @@ import { TranscriptView } from "./transcript-view";
  * event lands. Published at most once per animation frame: a busy run sends many per second.
  * `events` keeps its identity while only frames arrive, so the event derivations don't rerun
  * per token. Once the stream is over for good, live partials are dropped: nothing will complete them.
+ * When it closes, `run` is read again; it opens again after the events it has once a read newer
+ * than the close says the run isn't ended (`useStreamReopen`: a message reopened it).
  */
 function useRunStream(
   runId: string,
-  onClosed: () => void,
-): { events: RunEvent[]; live: Live; closed: boolean; reconnect: () => void } {
-  const [state, setState] = useState<{ events: RunEvent[]; live: Live; closed: boolean }>({
+  run: UseQueryResult<Run>,
+): { events: RunEvent[]; live: Live; closed: boolean } {
+  const [state, setState] = useState<{
+    events: RunEvent[];
+    live: Live;
+    closed: StreamClosed | null;
+  }>({
     events: [],
     live: noLive,
-    closed: false,
+    closed: null,
   });
-  const onClosedRef = useRef(onClosed);
-  onClosedRef.current = onClosed;
-  // A message reopens an ended run: the stream opens again after the events it already has.
+  const refetch = useRef(run.refetch);
+  refetch.current = run.refetch;
   const [generation, setGeneration] = useState(0);
   const kept = useRef<RunEvent[]>([]);
+  const failures = useRef(0);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `generation` reopens the stream.
   useEffect(() => {
     const events = kept.current;
     let published: RunEvent[] = [];
     let live = noLive;
-    let closed = false;
+    let closed: StreamClosed | null = null;
     const settled: Settled = new Set();
     let frame: number | undefined;
     const publish = () => {
@@ -60,11 +68,13 @@ function useRunStream(
     const schedule = () => {
       frame ??= requestAnimationFrame(publish);
     };
+    setState((s) => (s.closed ? { ...s, closed: null } : s));
     const stop = subscribe(
       runId,
       {
         onEvent: (event) => {
           events.push(event);
+          failures.current = 0;
           live = settle(live, event, settled);
           schedule();
         },
@@ -74,12 +84,13 @@ function useRunStream(
           live = next;
           schedule();
         },
-        onClosed: () => {
+        onClosed: (error) => {
           if (frame !== undefined) cancelAnimationFrame(frame);
+          failures.current = error ? failures.current + 1 : 0;
           live = noLive;
-          closed = true;
+          closed = { at: Date.now(), failures: failures.current };
           publish();
-          onClosedRef.current();
+          void refetch.current({ cancelRefetch: false });
         },
       },
       events.at(-1)?.seq ?? 0,
@@ -89,11 +100,9 @@ function useRunStream(
       if (frame !== undefined) cancelAnimationFrame(frame);
     };
   }, [runId, generation]);
-  const reconnect = useCallback(() => {
-    setState((s) => ({ ...s, closed: false }));
-    setGeneration((g) => g + 1);
-  }, []);
-  return { ...state, reconnect };
+  const [reopen] = useState(() => () => setGeneration((g) => g + 1));
+  useStreamReopen(state.closed, run.data?.state.status, run.dataUpdatedAt, reopen);
+  return { events: state.events, live: state.live, closed: state.closed !== null };
 }
 
 /** Keyed on the run: nothing of one run's stream or decisions carries over to the next. */
@@ -121,14 +130,11 @@ function RunOf({ id }: { id: string }) {
     enabled: studyId !== undefined,
     staleTime: Number.POSITIVE_INFINITY,
   });
-  const { events, live, closed, reconnect } = useRunStream(id, () => void run.refetch());
+  const { events, live, closed } = useRunStream(id, run);
   const state = run.data?.state;
-  // Reopened by a message (from the 3D panel) after its stream closed.
-  useEffect(() => {
-    if (closed && state && state.status !== "ended") reconnect();
-  }, [closed, state, reconnect]);
+  const unclaimed = useMemo(() => reopenUnclaimed(events), [events]);
   // Query's structural sharing keeps `state` the same object across polls that change nothing.
-  const halt = useMemo(() => state && haltOf(state, closed), [state, closed]);
+  const halt = useMemo(() => state && haltOf(state, closed, unclaimed), [state, closed, unclaimed]);
   const providerCalls = run.data?.providerCalls;
   // Not shown until the run has loaded; until then any state will do.
   const view = useMemo(
@@ -232,6 +238,7 @@ function RunScreen({
   const ended = run.state.status === "ended";
   const titles = useMemo(() => new Map(tasks.map((t) => [t.id, t.title])), [tasks]);
   const spans = useMemo(() => correctionViews(events, !ended), [events, ended]);
+  const waiting = useMemo(() => waitingOnYou(run.state.status, events), [run.state.status, events]);
   const needs = tasks.flatMap((t) => t.needs);
   // An ended run's stream is closed, so a "Looks right" made here counts from `accepting.done`.
   // An ended run that takes no decisions (failed, cancelled, an example) has nothing to count.
@@ -324,7 +331,8 @@ function RunScreen({
             open3d={tasks.length > 0 ? () => open3d(task?.id) : undefined}
             decisions={search(undefined, "decisions")}
             onChange={setRun}
-            waiting={waitingOnYou(spans)}
+            paused={halt?.kind === "paused" && tasks.length > 0}
+            waiting={waiting}
           />
           {stale && (
             <p
@@ -352,6 +360,7 @@ function RunScreen({
             items={panel.items}
             start={panel.start}
             onClose={() => setPanel(undefined)}
+            onRunChanged={refetch}
             onAccepted={(item) => {
               if (item.checkId) accepting.markDone(item.checkId);
               refetch();

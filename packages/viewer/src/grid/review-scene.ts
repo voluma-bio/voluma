@@ -30,7 +30,8 @@ export type SceneObject = {
 export type TaskScene =
   | {
       state: "ready";
-      gridId: string;
+      /** The shown image's volume block id (`${taskId}/${outputId}`): what a mark names. */
+      imageId: string;
       scene: GridScene;
       /** Where the crosshair starts, when the review data says. */
       point: Zyx;
@@ -219,7 +220,7 @@ export function taskScene(
   const labelled = overlays.find((o) => o.outline && typeof o.color !== "string");
   return {
     state: "ready",
-    gridId: grid.gridId,
+    imageId: image.id,
     scene,
     point: located ?? (shapeZyx.map((n) => Math.floor(n / 2)) as unknown as Zyx),
     locate:

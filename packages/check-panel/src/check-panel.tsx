@@ -16,10 +16,11 @@ import { Button } from "@voluma/ui";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
+import { chatBlocked, useRunChat } from "./chat";
 import { ItemView } from "./item-view";
 import type { CheckItem, CheckPanelProps } from "./types";
 
-// The panel's own cache: pages hear of changes through `onAccepted`.
+// The panel's own cache: pages hear of changes through `onAccepted` and `onRunChanged`.
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false, staleTime: 30_000 } },
 });
@@ -49,7 +50,7 @@ export function CheckPanel(props: CheckPanelProps) {
   );
 }
 
-function Panel({ items, start, onClose, onAccepted }: CheckPanelProps) {
+function Panel({ items, start, onClose, onAccepted, onRunChanged }: CheckPanelProps) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [index, setIndex] = useState(() => Math.min(Math.max(0, start), items.length - 1));
   const [maximized, setMaximized] = useState(false);
@@ -78,6 +79,9 @@ function Panel({ items, start, onClose, onAccepted }: CheckPanelProps) {
     void client.invalidateQueries({ queryKey: ["run", item.runId] });
     void client.invalidateQueries({ queryKey: ["review-run", item.runId] });
   }, 1500);
+  const blocked = run.data && me.data !== undefined ? chatBlocked(run.data, me.data) : undefined;
+  // Per run, not per item: stepping through the queue keeps the stream and its log.
+  const chat = useRunChat(item.runId, run, blocked === null, runChanged);
 
   const accept = useMutation({
     mutationFn: ({ item, revisionId }: { item: CheckItem; revisionId: string }) =>
@@ -175,8 +179,9 @@ function Panel({ items, start, onClose, onAccepted }: CheckPanelProps) {
           item={item}
           review={review}
           runInfo={run.data}
-          me={me.data}
-          onRunChanged={runChanged}
+          blocked={blocked}
+          chat={chat}
+          onRunChanged={() => onRunChanged?.(item.runId)}
           canAccept={run.data?.example === false && review.data?.review != null}
           example={run.data?.example === true}
           accepted={done.has(keyOf(item))}

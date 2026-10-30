@@ -1,9 +1,7 @@
 /**
- * A reopened run's corrections, each as its own span on the run page: when it started, what the
- * researcher asked, the task it redid, how long it took and what it cost. The spans are
- * `corrections` (`@voluma/contracts/fold`), the one reader of correction state; this adds what
- * the page shows. Cost is the spend of the log up to the span's end less the spend up to its
- * start (`spend` is prefix-additive).
+ * A reopened run's corrections, each as its own span on the run page: what the researcher asked,
+ * the task it redid, how long it took and what it cost. The spans are `corrections`
+ * (`@voluma/contracts/fold`), the one reader of correction state; this adds what the page shows.
  */
 
 import type { RunEvent } from "@voluma/contracts/events";
@@ -15,15 +13,12 @@ import { Section } from "./overview";
 
 export type CorrectionView = {
   id: string;
-  startedAt: string;
-  /** Absent while it runs. */
-  endedAt?: string;
+  /** How long it took, in seconds; absent while it runs. */
+  tookSeconds?: number;
   /** The researcher's message; a go reads "Go ahead". */
   asked?: { text: string; go: boolean };
   /** The task a go redid. */
   redid?: string;
-  /** The AI's answers in this span. */
-  replies: string[];
   outcome: "running" | "done" | "failed" | "cancelled";
   error?: string;
   costUsd: number;
@@ -31,21 +26,24 @@ export type CorrectionView = {
 
 /** `live`: the run is queued or running, so its open span is still being worked on. */
 export function correctionViews(events: readonly RunEvent[], live: boolean): CorrectionView[] {
-  const cost = (to: number) => spend(events.slice(0, to)).total.costUsd;
-  const root = events.find((e) => e.type === "thread.started" && e.payload.kind === "supervisor");
+  // The root thread's id changes when the lead AI starts again as a new thread.
+  const roots = new Set(
+    events.flatMap((e) =>
+      e.type === "thread.started" && e.payload.kind === "supervisor" ? [e.threadId] : [],
+    ),
+  );
   return corrections(events).spans.map((span) => {
-    const slice = events.slice(span.reopened, span.to);
-    const said = slice.find((e) => e.type === "person.message");
     const stop = span.closed === "abandoned" ? events[span.to] : undefined;
+    // The span with its end, when a `correction.ended` closed it.
+    const slice = events.slice(span.reopened, stop ? span.to + 1 : span.to);
+    const said = slice.find((e) => e.type === "person.message");
     const running = span.closed === "open" && live;
-    const rootEnd = [...slice]
-      .reverse()
-      .find((e) => e.type === "thread.ended" && e.threadId === root?.threadId);
-    const endAt = stop ? span.to + 1 : span.to;
+    const end =
+      stop ?? [...slice].reverse().find((e) => e.type === "thread.ended" && roots.has(e.threadId));
+    const start = Date.parse(events[span.reopened]!.createdAt);
     return {
       id: span.reopenId,
-      startedAt: events[span.reopened]!.createdAt,
-      ...(!running && { endedAt: (stop ?? rootEnd)?.createdAt }),
+      ...(!running && end && { tookSeconds: (Date.parse(end.createdAt) - start) / 1000 }),
       ...(said?.type === "person.message" && {
         asked: {
           text: said.payload.go ? "Go ahead" : (said.payload.text ?? ""),
@@ -53,28 +51,22 @@ export function correctionViews(events: readonly RunEvent[], live: boolean): Cor
         },
       }),
       ...(span.go && { redid: span.go.taskId }),
-      replies: slice.flatMap((e) => (e.type === "reply" ? [e.payload.text] : [])),
       outcome:
         stop?.type === "correction.ended" ? stop.payload.status : running ? "running" : "done",
       ...(stop?.type === "correction.ended" && stop.payload.error && { error: stop.payload.error }),
-      costUsd: cost(endAt) - cost(span.reopened),
+      // Each usage counts in the total whatever its thread, so a span's slice is its cost.
+      costUsd: spend(slice).total.costUsd,
     };
   });
 }
 
-/** The AI answered the latest note, nothing runs, and no go followed: the next move is the researcher's. */
-export const waitingOnYou = (spans: readonly CorrectionView[]) => {
-  const last = spans.at(-1);
-  return last?.outcome === "done" && last.redid === undefined && last.replies.length > 0;
-};
-
-const when = (iso: string) =>
-  new Date(iso).toLocaleString(undefined, {
-    day: "numeric",
-    month: "short",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+/** A message queued the run again and no runner has started on it yet. */
+export function reopenUnclaimed(events: readonly RunEvent[]): boolean {
+  const { open } = corrections(events);
+  return (
+    open !== undefined && !events.slice(open.reopened).some((e) => e.type === "thread.started")
+  );
+}
 
 export function Corrections({
   spans,
@@ -95,11 +87,8 @@ export function Corrections({
           >
             <p className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
               <b className="font-semibold">{outcomeWord(c, titleOf)}</b>
-              <span className="text-muted-foreground">{when(c.startedAt)}</span>
-              {c.endedAt && (
-                <span className="text-muted-foreground">
-                  took {formatDuration((Date.parse(c.endedAt) - Date.parse(c.startedAt)) / 1000)}
-                </span>
+              {c.tookSeconds !== undefined && (
+                <span className="text-muted-foreground">took {formatDuration(c.tookSeconds)}</span>
               )}
               <span className="font-mono text-muted-foreground tabular-nums">
                 {formatUsd(c.costUsd)}
