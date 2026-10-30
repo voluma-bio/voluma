@@ -51,7 +51,9 @@ CT disagree, or when the anatomy expects a structure, none is there and the note
 `classic_segment.py` runs a seeded watershed inside the bone threshold, seeded from your labels' cores. It shares
 your idea of which bone is which, so it checks **where boundaries run, not identity**; it floods every bone voxel
 connected to a seed, so label every bone you want kept apart before you run it. `disagree.py` ranks the regions
-where the two differ and renders a panel for the largest. For each region above the floor:
+where the two differ and renders a panel for the largest; run it with `--object-id` set to the id the workflow
+declares for the disagreement volume and report its record's `objects` entry, settled or not. For each region above
+the floor:
 
 | You see | Do |
 |---|---|
@@ -74,5 +76,5 @@ checks, the quad view and the 3D sheet again.
 
 `checkpoint` with `toCheck: {title, focus: {on: [block ids], volumeId?, label?}}` (`on` required):
 the title gives the place and the question ("Joint face, slices 140-170: bone A or bone B?"), the text both methods'
-labels and the one kept. The focus resolves only when `disagreement.npy` is reported: run `disagree.py` with `--object-id` set to the id
-the workflow declares for it, and pass its record's `objects` entry to `report_output`.
+labels and the one kept. `volumeId` is the id the disagreement volume is reported under and `label` the region's
+`id` in `regions.json`; the focus resolves because the volume is always reported (section 3).

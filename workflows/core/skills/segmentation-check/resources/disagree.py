@@ -7,8 +7,8 @@ drawn for the `--render` largest regions: three side-by-side cuts, the CT alone,
 label colours of `visual-check` with a legend, and the region outlined in white and, inside it, each side's label in a strong
 tint, with the region's assignment printed on top. (Overlaid outlines of two near-identical segmentations cannot be told
 apart.) The panels cut the scan grid along axis 0 through the region's centre, or the oriented keyframe direction with
-`--frame`. To let a To check item point at a region you cannot settle (`focus.volumeId`, `focus.label` = the region
-id), pass `--object-id` with the id the workflow declares for this volume and report the record's `objects` entry.
+`--frame`. `--object-id` names the volume as the workflow declares it; report the record's `objects` entry every run,
+so a To check item can point at a region (`focus.volumeId` = that id, `focus.label` = the region id).
 Refuses volumes of different shapes.
 
 Writes: <out>/disagreement.npy  uint16 region id by rank, on the grid of --labels, with its sidecar
@@ -114,8 +114,12 @@ if __name__ == '__main__':
     if not (hu.shape == labels.shape == classic.shape):
         sidecar.fail('hu, labels and classic must be on the same grid: map them to the scan first')
     sp = sidecar.grid(str(sidecar.sidecar_path(a.labels)))['spacing_zyx_mm']
-    if a.object_id and 'affine_xyz_to_world_mm' not in sidecar.grid(str(sidecar.sidecar_path(a.hu))):
-        sidecar.fail(f'{sidecar.sidecar_path(a.hu)} has no affine_xyz_to_world_mm: --object-id needs the hu.json scan-intake wrote')
+    if a.object_id:
+        scan = sidecar.grid(str(sidecar.sidecar_path(a.hu)))
+        if 'affine_xyz_to_world_mm' not in scan:
+            sidecar.fail(f'{sidecar.sidecar_path(a.hu)} has no affine_xyz_to_world_mm: --object-id needs the hu.json scan-intake wrote')
+        if sidecar.grid(str(sidecar.sidecar_path(a.labels)))['grid_id'] != scan['grid_id']:
+            sidecar.fail(f'{a.labels} is not on the scan grid of {a.hu}: map it to the scan first (to_scan.py)')
     vox = float(np.prod(sp))
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
