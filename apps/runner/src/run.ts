@@ -156,6 +156,7 @@ async function claimBody(
   const keyFor = (provider: string) =>
     visitor ? (provider === "meta" ? keys.metaApiKey : undefined) : providerKey(provider);
   const modal = visitor ? keys.modal : config.modal;
+  const thinking = visitor ? undefined : config.thinking;
   const redact: Redact = redactor([
     ...config.secrets,
     ...(visitor ? [keys.metaApiKey, keys.modal.tokenId, keys.modal.tokenSecret] : []),
@@ -383,6 +384,8 @@ async function claimBody(
             ...options,
             apiKey: keyFor(m.provider),
             maxRetries: MODEL_RETRIES,
+            // Pi's agent sends no level of its own (its thinkingLevel stays "off").
+            ...(thinking && { reasoning: thinking }),
           }),
         (m, attempt, delayMs, error) => {
           log(

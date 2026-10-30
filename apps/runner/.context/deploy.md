@@ -55,6 +55,8 @@ Variables (names only; values never go in the repo):
 | `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` | the Modal profile in `~/.modal.toml` |
 | `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `CLOUDFLARE_API_TOKEN` | as in `.env` |
 
+`RUNNER_THINKING` is unset on staging (no thinking level sent; DeepSeek then runs with thinking off). Set it to one of `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; the runner will not start if a configured model lacks the level, and the boot line prints it.
+
 `RUNNER_FALLBACK_MODEL` (unset: no fallback) is Jimmy's per-deploy choice, since it sends lab data to another provider. It covers worker and check threads only, not the main thread; see `src/model-fallback.ts`. Visitor runs use `RUNNER_VISITOR_MODEL` (default `meta/muse-spark-1.3`) with the visitor's key.
 
 ## The sandbox image

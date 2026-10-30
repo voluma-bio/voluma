@@ -8,7 +8,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { createModels } from "@earendil-works/pi-ai";
+import { createModels, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { CLAIM_POLL_SECONDS } from "@voluma/contracts/runner";
 import { claimRun } from "@voluma/harness/adapters/http/hand-off";
 import { runnerConfig } from "./config.ts";
@@ -37,6 +37,19 @@ const roles = {
   check: resolve(config.roles.check),
   main: resolve(config.roles.main),
 };
+
+// Pi clamps a level a model lacks to a neighbouring one, so a typo'd or unsupported level
+// would run silently at another.
+if (config.thinking) {
+  const fallback = config.fallbackModel && resolve(config.fallbackModel);
+  for (const [role, model] of Object.entries({ ...roles, ...(fallback && { fallback }) })) {
+    const levels = getSupportedThinkingLevels(model);
+    if (!levels.includes(config.thinking))
+      throw new Error(
+        `RUNNER_THINKING=${config.thinking} is not a level ${model.provider}/${model.id} (${role}) supports: ${levels.join(", ")}`,
+      );
+  }
+}
 
 const runnerId = `runner-${randomUUID().slice(0, 8)}`;
 const ctx: RunnerContext = {
@@ -70,7 +83,7 @@ log(
     .map(([role, m]) => `${role} ${m.provider}/${m.id}`)
     .join(
       ", ",
-    )}${config.fallbackModel ? `, fallback ${config.fallbackModel.provider}/${config.fallbackModel.id}` : ""}, api ${config.api.baseUrl}`,
+    )}${config.fallbackModel ? `, fallback ${config.fallbackModel.provider}/${config.fallbackModel.id}` : ""}, thinking ${config.thinking ?? "unset"}, api ${config.api.baseUrl}`,
 );
 // After startup: a failure above must still kill the process, not be logged and survived.
 startTelemetry(log);

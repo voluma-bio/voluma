@@ -8,6 +8,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseEnv } from "node:util";
+import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { modelRefSchema } from "@voluma/contracts/ids";
 import { parseTokenSecrets } from "@voluma/provider-calls/token";
 import { PROVIDERS } from "./providers.ts";
@@ -88,6 +89,25 @@ function visitorModel(): ModelRef {
     );
   }
   return ref;
+}
+
+const THINKING_LEVELS: readonly ThinkingLevel[] = [
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+];
+
+/** `RUNNER_THINKING`, one of Pi's thinking levels; unset: Pi sends none. */
+function thinkingLevel(): ThinkingLevel | undefined {
+  const raw = optional("RUNNER_THINKING");
+  if (raw === undefined) return undefined;
+  const level = THINKING_LEVELS.find((l) => l === raw);
+  if (!level)
+    throw new Error(`RUNNER_THINKING must be one of ${THINKING_LEVELS.join(", ")}, got "${raw}"`);
+  return level;
 }
 
 /** Whether a visitor's Meta key and scan may go to this model (see `visitorModel`). */
@@ -188,6 +208,14 @@ export function runnerConfig() {
      * `VOLUMA_<PROVIDER>_API_KEY`.
      */
     roles,
+    /**
+     * The thinking level every model call of a `voluma` run asks for (`RUNNER_THINKING`): each
+     * role and the fallback; main.ts refuses a level one of those models does not support,
+     * since Pi would quietly use another. Unset: no level is sent, which Pi's adapters read as
+     * thinking off where the provider lets them turn it off (DeepSeek), else the provider's
+     * default. Visitor runs never send one.
+     */
+    thinking: thinkingLevel(),
     /** Where new worker and check threads go while their model is failing; absent: nowhere. */
     fallbackModel,
     /**

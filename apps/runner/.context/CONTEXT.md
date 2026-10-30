@@ -308,7 +308,11 @@ snapshots the role files with the workflow and reads them from the snapshot, so 
 composes byte-identical text and an edited file reaches only new threads (a thread whose prompt
 changed is still `ThreadStale`). The main thread still uses `MAIN_SYSTEM`; `lead.md` and
 `review-chat.md` are `status: planned` and unused. Format: `workflows/core/agents/AGENTS.md`. Models stay
-config (`RUNNER_MODEL`, `RUNNER_CHECK_MODEL`, `RUNNER_MAIN_MODEL`).
+config (`RUNNER_MODEL`, `RUNNER_CHECK_MODEL`, `RUNNER_MAIN_MODEL`). `RUNNER_THINKING` (one of Pi's levels) is sent as Pi's
+`reasoning` option on every model call of a `voluma` run (`run.ts` `callModel`); `main.ts`
+refuses to start when a role's or the fallback's model lacks the level, because Pi clamps an
+unsupported level silently. Unset sends none: Pi's agent never sends one itself (its
+`thinkingLevel` defaults to `"off"`), and for DeepSeek no level means `thinking: disabled`.
 
 # Runner: a claim that ends is a cut-off, not a stop
 
