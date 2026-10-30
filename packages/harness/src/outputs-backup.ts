@@ -18,7 +18,9 @@
  *    write over the restored files) and throws if some still are, which fails the claim. Only
  *    a pending restore waits.
  * 2. For each finished span (the next `run.reopened` came with no end) whose backup is neither
- *    restored nor discarded: `discard` it and record `outputs.discarded`.
+ *    restored nor discarded: `discard` it and record `outputs.discarded`. So is an abandoned
+ *    span with no `outputs.backed-up`: a cancel can land between the copy and the event, leaving
+ *    a copy no event names (nothing ran yet, so there is nothing to restore).
  * 3. If the latest span is open, needs a backup and has none: `backup` and record
  *    `outputs.backed-up`. The copy is taken here, not when an attempt opens, because a worker
  *    writes into `/outputs` before it reports anything. A claim answers one message, so the go
@@ -50,7 +52,10 @@ export async function keepOutputs(o: {
       await o.earlierClaimsEnded(signal);
       await outputs.restore(runId, reopenId, signal);
       await recorder.append(rootThreadId, "outputs.restored", { reopenId }, `${reopenId}:restored`);
-    } else if (closed === "finished" && backup === "backed-up") {
+    } else if (
+      (closed === "finished" && backup === "backed-up") ||
+      (closed === "abandoned" && backup === "none")
+    ) {
       await outputs.discard(runId, reopenId, signal);
       await recorder.append(
         rootThreadId,

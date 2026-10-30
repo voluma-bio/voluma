@@ -76,6 +76,19 @@ describe("corrections", () => {
     expect(corrections(l.events).open?.go).toMatchObject({ markerAt: 2, redone: true });
   });
 
+  it("only a completed root end finishes the claim; a failed one does not, whatever starts after", () => {
+    const l = log();
+    message(l, "m1", true);
+    const claim = () => corrections(l.events).open?.claimEnded;
+    l.add("thread.started", "root:s1", `${RUN}.supervisor`, { kind: "supervisor" } as never);
+    l.add("thread.ended", "root:e1", `${RUN}.supervisor`, { status: "failed" } as never);
+    expect(claim()).toBe(false);
+    l.add("thread.started", "root:s2", `${RUN}.supervisor`, { kind: "supervisor" } as never);
+    expect(claim()).toBe(false);
+    rootEnds(l, "root:e2");
+    expect(claim()).toBe(true);
+  });
+
   it("the backup state follows the latest outputs event of each reopen", () => {
     const l = log();
     message(l, "m1", true);

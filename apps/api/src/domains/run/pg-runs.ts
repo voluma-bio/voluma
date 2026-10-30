@@ -163,6 +163,7 @@ const SUMMARY_TYPES = [
   "review.completed",
   "run.reopened",
   "correction.ended",
+  "thread.ended",
 ] as const;
 
 async function loadLogs(tx: Tx, ids: string[], summaryOnly = false) {
