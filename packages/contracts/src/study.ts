@@ -10,8 +10,7 @@
  *                              429: the other limits, see `run.ts`; 400: `start` names a
  *                              scan the study lacks, or a scan twice)
  *   GET  /api/run/studies      → 200 `listStudiesResponseSchema`, newest activity first
- *   GET  /api/run/studies/:id  `?outputs=a,b` → 200 `studyDetailSchema` (404 when absent
- *                              or unreadable)
+ *   GET  /api/run/studies/:id  → 200 `studyDetailSchema` (404 when absent or unreadable)
  *
  * Creating a study stores it, its scans and one `queued` run for each `start` scan in one
  * transaction under the queue's lock. A refusal (a limit, a vault that is full) refuses the
@@ -28,8 +27,10 @@
  * `values` and `toCheck` come from each scan's **newest completed run** only (`resultRunId`):
  * accepting a check needs the latest completed result, so a live run's items would answer 409.
  * `values` is keyed by output id (the `outputs.json` id, not the fold's `taskId/outputId`)
- * and holds only the ids the request's `outputs` names that the run reported; the API reads
- * no workflow files, so the client sends the bundle's `headline` ids.
+ * and holds the study workflow's `headline` outputs that the run reported.
+ *
+ * The list is what Home renders: per study its counts and each scan's newest run in brief
+ * (`studyRunSummarySchema`), so Home reads no run list.
  */
 import { z } from "zod";
 import { inputIdSchema, runIdSchema, segmentSchema, studyIdSchema, taskIdSchema } from "./ids";
@@ -37,6 +38,7 @@ import { measurementSchema } from "./review";
 import {
   inputSchema,
   runSchema,
+  runStateSchema,
   selectedOutputsSchema,
   visitorKeysSchema,
   workflowIdSchema,
@@ -55,40 +57,47 @@ export const studyScanSchema = z.object({
   subject: label,
   group: label.nullable(),
   attributes: attributesSchema,
-  /** Order in the study, from 0. */
-  position: z.number().int().nonnegative(),
 });
 export type StudyScan = z.infer<typeof studyScanSchema>;
 
 export const studySchema = z.object({
   id: studyIdSchema,
-  labId: z.string(),
   name: label,
   workflowId: workflowIdSchema,
   /** Shown, never enforced. */
   budgetUsd: z.number().nonnegative().nullable(),
-  createdBy: z.string(),
   /** The seeded, read-only example's study. */
   example: z.boolean(),
   createdAt: z.iso.datetime(),
 });
 export type Study = z.infer<typeof studySchema>;
 
-/** A row of Home's study table. Counts cover every run of the study. */
+/** A scan's newest run in brief, whatever its state: what Home shows of a study. */
+export const studyRunSummarySchema = z.object({
+  runId: runIdSchema,
+  inputId: inputIdSchema,
+  inputName: z.string(),
+  /** As `runSchema.state`: the queue position of a queued run, the `error` of a failed one. */
+  state: runStateSchema,
+  /** A live run's finished tasks out of all of them; null before its plan exists and once it has ended. */
+  tasks: z
+    .object({ done: z.number().int().nonnegative(), total: z.number().int().nonnegative() })
+    .nullable(),
+  example: z.boolean(),
+});
+export type StudyRunSummary = z.infer<typeof studyRunSummarySchema>;
+
+/** A row of Home's study list. */
 export const studySummarySchema = studySchema.extend({
   scanCount: z.number().int().nonnegative(),
-  runCounts: z.object({
-    queued: z.number().int().nonnegative(),
-    running: z.number().int().nonnegative(),
-    awaitingKeys: z.number().int().nonnegative(),
-    completed: z.number().int().nonnegative(),
-    failed: z.number().int().nonnegative(),
-    cancelled: z.number().int().nonnegative(),
-  }),
+  /** Scans with a completed run, whether or not it is the newest. */
+  scansCompleted: z.number().int().nonnegative(),
   /** Open checks of each scan's newest completed run, summed. */
   toCheck: z.number().int().nonnegative(),
   /** The latest of the study's creation and its runs' creation, start and end. */
   lastActivityAt: z.iso.datetime(),
+  /** Each scan's newest run, newest first; a scan with no run is absent. */
+  newestRuns: z.array(studyRunSummarySchema),
 });
 export type StudySummary = z.infer<typeof studySummarySchema>;
 export const listStudiesResponseSchema = z.object({ studies: z.array(studySummarySchema) });
@@ -119,7 +128,7 @@ export const studyScanDetailSchema = z.object({
   runs: z.array(runSchema),
   /** The newest completed run, which `values` and `toCheck` read; null when none has completed. */
   resultRunId: runIdSchema.nullable(),
-  /** Output id → value, for the requested outputs that run reported. */
+  /** Output id → value, for the workflow's headline outputs that run reported. */
   values: z.record(segmentSchema, studyValueSchema),
   toCheck: z.array(toCheckItemSchema),
 });
@@ -131,9 +140,6 @@ export const studyDetailSchema = z.object({
   scans: z.array(studyScanDetailSchema),
 });
 export type StudyDetail = z.infer<typeof studyDetailSchema>;
-
-/** `?outputs=` of the detail read: at most 200 ids, comma separated. */
-export const studyOutputsQuerySchema = selectedOutputsSchema;
 
 export const createStudyRequestSchema = z
   .object({

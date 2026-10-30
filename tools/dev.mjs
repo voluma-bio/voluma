@@ -10,8 +10,9 @@
  *  - APP_URL, the Vite origin, which the API uses for the sign-in redirect and the Origin check.
  *    PUBLIC_URL supplies the external origin in a supervised Amp portal.
  * The API also reads the repo .env (--env-file-if-exists), as it would read Railway's
- * variables. It writes { apiUrl, apiToken } to the git-ignored .dev/env.json, which
- * the runner reads when VOLUMA_API_URL is unset. Ctrl-C stops everything
+ * variables. It writes { apiUrl, apiToken, databaseUrl } to the git-ignored .dev/env.json, which
+ * the runner reads when VOLUMA_API_URL is unset and the API's operator scripts read when
+ * DATABASE_URL is unset. Ctrl-C stops everything
  * and removes it.
  * `pnpm db:reset` (`node tools/dev.mjs reset`) drops this worktree's database and exits;
  * the next `pnpm dev` recreates and migrates it.
@@ -61,6 +62,7 @@ const appUrl = new URL(process.env.PUBLIC_URL ?? `http://localhost:${webPort}`).
 const env = {
   apiUrl: `http://localhost:${apiPort}`,
   apiToken: randomBytes(24).toString("hex"),
+  databaseUrl: databaseUrl.href,
 };
 const envPath = resolve(root, ".dev/env.json");
 mkdirSync(resolve(root, ".dev"), { recursive: true });

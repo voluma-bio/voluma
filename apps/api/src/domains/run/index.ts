@@ -19,6 +19,7 @@ import type { LeasedEventLog } from "./pg-event-log";
 import type { LeasedHistory } from "./pg-history";
 import type { RunQueue } from "./pg-queue";
 import type { RunReads } from "./pg-runs";
+import type { StudyReads } from "./pg-studies";
 import type { PgUploads } from "./pg-uploads";
 import type { Uploads } from "./r2-uploads";
 import { runsRoutes } from "./runs";
@@ -27,6 +28,7 @@ import { studiesRoutes } from "./studies";
 
 export interface RunDeps {
   reads: RunReads;
+  studies: StudyReads;
   queue: RunQueue;
   eventLog: LeasedEventLog;
   history: LeasedHistory;
@@ -36,8 +38,6 @@ export interface RunDeps {
   uploadStore: PgUploads;
   objects: Uploads | null;
   uploadLimits: UploadLimits;
-  /** The repo whose `workflows/` a run uses. The runner adds the commit its checkout was at. */
-  repo: string;
   /** Aborts when the API starts draining; open streams end so the drain isn't held. */
   shutdown: AbortSignal;
 }

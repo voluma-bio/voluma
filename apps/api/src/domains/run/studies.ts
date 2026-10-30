@@ -4,64 +4,55 @@
  * takes `requireUser`; the queue holds visitor keys, so no handler logs a body.
  */
 import { randomUUID } from "node:crypto";
-import { createStudyRequestSchema, studyOutputsQuerySchema } from "@voluma/contracts/study";
-import { pinsOf } from "@voluma/workflow/bundled";
+import { createStudyRequestSchema } from "@voluma/contracts/study";
 import { Hono } from "hono";
-import { HTTPException } from "hono/http-exception";
 import { type AppEnv, parseJson, readerOf, requireReader, requireUser } from "../../domain";
 import type { RunDeps } from ".";
 import { refusal } from "./runs";
 
-export function studiesRoutes({ reads, queue, repo }: RunDeps) {
+export function studiesRoutes({ studies, queue }: RunDeps) {
   const app = new Hono<AppEnv>();
 
   app.post("/studies", requireUser, async (c) => {
     const body = await parseJson(c, createStudyRequestSchema);
-    const pins = pinsOf(repo, body.workflowId);
-    if (!pins) return c.json({ error: "unknown workflow" }, 404);
     const user = c.var.user;
     const reader = readerOf(user);
-    const studyId = randomUUID();
     const result = await queue.createStudy(
       reader,
       { userId: user.userId },
       {
         study: {
-          id: studyId,
+          id: randomUUID(),
           name: body.name,
           workflowId: body.workflowId,
           budgetUsd: body.budgetUsd ?? null,
         },
-        pins,
         scans: body.scans.map(({ inputId, subject, group, attributes }) => ({
           inputId,
           subject,
           group: group ?? null,
           attributes: attributes ?? {},
         })),
-        runs: body.start.map((inputId) => ({
-          id: randomUUID(),
-          inputId,
+        starts: {
+          runs: body.start.map((inputId) => ({ id: randomUUID(), inputId })),
           selectedOutputs: body.selectedOutputs,
           notes: body.notes,
           keys: body.keys,
-        })),
+        },
       },
     );
     if ("refused" in result) return refusal(c, result.refused);
-    const detail = await reads.study(reader, result.studyId, []);
+    const detail = await studies.get(reader, result.studyId);
+    if (!detail) throw new Error(`study ${result.studyId} vanished after it was created`);
     return c.json(detail);
   });
 
   app.get("/studies", requireReader, async (c) =>
-    c.json({ studies: await reads.studies(c.var.reader) }),
+    c.json({ studies: await studies.list(c.var.reader) }),
   );
 
   app.get("/studies/:id", requireReader, async (c) => {
-    const query = c.req.query("outputs");
-    const outputs = studyOutputsQuerySchema.safeParse(query ? query.split(",") : []);
-    if (!outputs.success) throw new HTTPException(400, { message: outputs.error.message });
-    const study = await reads.study(c.var.reader, c.req.param("id"), outputs.data);
+    const study = await studies.get(c.var.reader, c.req.param("id"));
     return study ? c.json(study) : c.json({ error: "not found" }, 404);
   });
 
