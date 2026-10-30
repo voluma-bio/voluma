@@ -91,9 +91,10 @@ export const reviewAssetPrefix = (runId: string) => `${runPrefix(runId)}review/`
 export const reviewAssetKey = (runId: string, sha256: string, path: string) =>
   `${reviewAssetPrefix(runId)}${sha256Schema.parse(sha256)}/${rel(path)}`;
 
-/** Reference data for the OA6-1RK sample: the raw scan and the reference run. */
 /** The id of an org's one reference-scan input (`reference-<labId>`). */
 export const referenceInputId = (labId: string) => `reference-${labId}`;
+
+/** Reference data for the OA6-1RK sample: the raw scan and the reference run. */
 export const referencePrefix = (part: "scan" | "run") => `reference/OA6-1RK/${part}/`;
 
 /** The existing ZIP is beside scan/, not inside the sandbox's DICOM mount. */

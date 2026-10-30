@@ -54,7 +54,7 @@ const required = (name: string) => {
 };
 
 function guestScope(): "lab" | "self" {
-  const scope = process.env.GUEST_SCOPE ?? "self";
+  const scope = process.env.GUEST_SCOPE || "self";
   if (scope !== "lab" && scope !== "self") throw new Error("GUEST_SCOPE must be lab or self");
   return scope;
 }

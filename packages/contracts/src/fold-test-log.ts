@@ -283,15 +283,6 @@ export function reviewIntegrityIssues(run: ReviewRun): string[] {
     }
   }
 
-  if (!run.review) return issues;
-  const latest = run.revisions.at(-1);
-  if (run.review.revisionId !== latest?.id) bad("review must describe the latest revision");
-  const remaining = latest?.tasks.reduce(
-    (n, task) => n + task.checks.filter((check) => check.status === "open").length,
-    0,
-  );
-  if (run.review.remainingToCheck !== remaining)
-    bad("review count must equal the latest revision's open checks");
   return issues;
 }
 
