@@ -33,13 +33,23 @@ type Session =
 export function SignedIn() {
   const [session, setSession] = useState<Session>({ state: "loading" });
   const request = useRef(0);
+  const pendingGuest = useRef<Promise<Me | null> | null>(null);
 
   const load = useCallback(async () => {
     const current = ++request.current;
     try {
+      // A superseded guest response still writes its cookie. Wait even if it fails,
+      // then read the browser's resulting identity instead of racing another mint.
+      await pendingGuest.current?.catch(() => {});
+      if (current !== request.current) return;
       let me = await getMe();
       if (current !== request.current) return;
-      me ??= await startGuest();
+      if (!me) {
+        pendingGuest.current = startGuest().finally(() => {
+          pendingGuest.current = null;
+        });
+        me = await pendingGuest.current;
+      }
       if (current !== request.current) return;
       setSession(me ? { state: "signed-in", me } : { state: "signed-out" });
     } catch (error) {
