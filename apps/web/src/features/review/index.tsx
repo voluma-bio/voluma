@@ -2,7 +2,7 @@
  * Review lane: a run's results, task by task, beside the task's own analysis grid.
  * Light Review chrome. Owns its routes; the shell mounts them.
  */
-import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@voluma/api-client";
 import { reviewRunQuery, runQuery } from "@voluma/api-client/query";
 import { Button, EmptyState, ErrorState, LoadingState } from "@voluma/ui";
@@ -11,20 +11,16 @@ import { Link, type RouteObject, useParams, useSearchParams } from "react-router
 import { preparing } from "./report/model";
 import { ReviewWorkspace } from "./report/ReviewWorkspace";
 
-const queryClient = new QueryClient();
 export const reviewRoutes: RouteObject[] = [{ path: "/runs/:runId", element: <ReviewPage /> }];
 
 function ReviewPage() {
   const { runId = "" } = useParams();
   // A route change drops the previous run's state instead of showing it under another run.
-  return (
-    <QueryClientProvider client={queryClient}>
-      <RunReview key={runId} runId={runId} />
-    </QueryClientProvider>
-  );
+  return <RunReview key={runId} runId={runId} />;
 }
 
 function RunReview({ runId }: { runId: string }) {
+  const queryClient = useQueryClient();
   const [search, setSearch] = useSearchParams();
   const execution = useQuery({
     ...runQuery(runId),

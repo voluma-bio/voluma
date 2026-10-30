@@ -50,6 +50,14 @@ export {
 } from "./row";
 export { SegmentedControl, type SegmentedControlProps } from "./segmented-control";
 export {
+  AppShell,
+  ShellHeading,
+  ShellLink,
+  ShellPanel,
+  type ShellPanelProps,
+  type ShellSide,
+} from "./shell/shell";
+export {
   EmptyState,
   type EmptyStateProps,
   ErrorState,
