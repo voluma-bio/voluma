@@ -6,7 +6,7 @@
  * The example gets the source's events, threads and history under its own run id (thread
  * ids are `<runId>.…`, so they are renamed), `startedBy: "voluma-examples"`, `example: true`,
  * and the Demo org's reference-scan input. It belongs to its own study of one scan
- * (`study-<exampleId>`, `example: true`), replaced with it. The source's evidence objects in R2 are copied
+ * (`study-<exampleId>`, `example: true`), replaced with it. The source's evidence and `outputs/` objects in R2 are copied
  * under the example's own prefix (`evidenceKey` builds a key from the run being read, so an
  * example can't point at another run's files). `--backfill` adds the objects a run recorded before
  * they existed (`backfill.ts`). Re-seeding the same `--id` replaces the
@@ -14,9 +14,9 @@
  * outputs are untrusted (`@voluma/contracts/run`), and an example's scan is shown to everyone.
  */
 import { parseArgs } from "node:util";
-import { CopyObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import { CopyObjectCommand, DeleteObjectsCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { runIdSchema } from "@voluma/contracts/ids";
-import { evidenceKey, runPrefix } from "@voluma/contracts/r2";
+import { evidencePrefix, outputsPrefix, runPrefix } from "@voluma/contracts/r2";
 import { asc, eq, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
@@ -55,6 +55,10 @@ if (!values.remote && values.id === stagingId) {
 const exampleId = runIdSchema.parse(
   values.id ?? (values.remote ? stagingId : `example-local-${source}`),
 );
+// `outputs/` is overwritten below, and the bucket is shared with staging.
+if (!values.remote && !exampleId.startsWith("example-local-")) {
+  throw new Error(`without --remote the id must start with example-local- (got ${exampleId})`);
+}
 const studyId = `study-${exampleId}`;
 const demoLabId = required("GUEST_ORGANIZATION_ID");
 
@@ -63,25 +67,46 @@ const db = drizzle(client, { casing: "snake_case" });
 const { r2, bucket } = r2FromEnv();
 console.log(`example ${exampleId} -> bucket ${bucket}, prefix ${runPrefix(exampleId)}`);
 
-// Objects are content-addressed and never overwritten, so a repeat copy is harmless.
-async function copyEvidence(): Promise<number> {
+// Copies every object under one of the source run's prefixes to the same place under the
+// example's. Evidence is content-addressed and never overwritten, so a repeat copy is harmless.
+// `outputs/` is copied so the example is a whole run for the walkthrough's clone flow; it is
+// emptied first, so a re-seed leaves no object of the previous one.
+async function copyPrefix(
+  prefixOf: (runId: string) => string,
+  { replace = false } = {},
+): Promise<number> {
   let copied = 0;
-  const evidencePrefix = `${runPrefix(source)}evidence/`;
+  const fromPrefix = prefixOf(source);
+  if (replace) {
+    for (let token: string | undefined; ; ) {
+      const page = await r2.send(
+        new ListObjectsV2Command({
+          Bucket: bucket,
+          Prefix: prefixOf(exampleId),
+          ContinuationToken: token,
+        }),
+      );
+      const Objects = (page.Contents ?? []).map((o) => ({ Key: o.Key as string }));
+      if (Objects.length > 0) {
+        await r2.send(
+          new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects, Quiet: true } }),
+        );
+      }
+      token = page.NextContinuationToken;
+      if (!token) break;
+    }
+  }
   for (let token: string | undefined; ; ) {
     const page = await r2.send(
-      new ListObjectsV2Command({
-        Bucket: bucket,
-        Prefix: evidencePrefix,
-        ContinuationToken: token,
-      }),
+      new ListObjectsV2Command({ Bucket: bucket, Prefix: fromPrefix, ContinuationToken: token }),
     );
     for (const object of page.Contents ?? []) {
-      const sha = (object.Key as string).slice(evidencePrefix.length);
+      const rest = (object.Key as string).slice(fromPrefix.length);
       await r2.send(
         new CopyObjectCommand({
           Bucket: bucket,
           CopySource: `${bucket}/${object.Key}`,
-          Key: evidenceKey(exampleId, sha),
+          Key: `${prefixOf(exampleId)}${rest}`,
         }),
       );
       copied++;
@@ -140,7 +165,8 @@ const renamed = sourceEvents.map(({ seq: _seq, ...event }) => ({
   ) as typeof event.payload,
 }));
 
-const copied = await copyEvidence();
+const copied = await copyPrefix(evidencePrefix);
+const copiedOutputs = await copyPrefix(outputsPrefix, { replace: true });
 const rows = values.backfill
   ? await withLocalDir(values.backfill, async (dir) =>
       backfillRows(
@@ -216,6 +242,6 @@ await db.transaction(async (tx) => {
 });
 
 console.log(
-  `example run ${exampleId} seeded from ${source} in ${demoLabId}; ${copied} evidence objects copied`,
+  `example run ${exampleId} seeded from ${source} in ${demoLabId}; ${copied} evidence and ${copiedOutputs} output objects copied`,
 );
 await client.end();

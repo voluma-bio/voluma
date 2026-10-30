@@ -466,7 +466,12 @@ describe("fold", () => {
     l.add("run.reopened", "p:2:reopened", person, { by: "u" });
     l.revision("sup:2:revision", SUP, { reason: "correction", taskId: "b" });
     l.status("sup:2", SUP, "b", "w:4:open", "stale", l.rule("stale"));
+    // While the last one is in progress review keeps the last completed revision.
     expect(reviewState(l.events).revisions.map((r) => r.id)).toEqual([
+      "root:revision",
+      "sup:1:revision",
+    ]);
+    expect(reviewState(l.events, { live: true }).revisions.map((r) => r.id)).toEqual([
       "root:revision",
       "sup:1:revision",
       "sup:2:revision",

@@ -112,6 +112,7 @@ export function r2Outputs(config: {
       await mirror(backup, outputsPrefix(runId), signal);
       await expectSame(backup, outputsPrefix(runId), signal);
     },
+    // Best effort: a cancelled claim still mirroring can write after this clear and orphan a copy.
     discard: (runId, reopenId, signal) => clear(outputsBackupPrefix(runId, reopenId), signal),
   };
 }

@@ -4,8 +4,12 @@ import { fold } from "./fold";
 import type { TaskStatus } from "./ids";
 import type { ReviewSummary } from "./review";
 
-export function reviewState(events: readonly RunEvent[]) {
-  const folded = fold(events);
+/**
+ * `live`: include a correction still in progress (the run page's progress). Without it review
+ * keeps the last completed revision until the correction finishes (`abandonedEvents`, fold.ts).
+ */
+export function reviewState(events: readonly RunEvent[], { live = false } = {}) {
+  const folded = fold(events, !live);
   const accepted = new Set<string>();
   const key = (task: string, result: string, check: string) =>
     JSON.stringify([task, result, check]);
