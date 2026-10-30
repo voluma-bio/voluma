@@ -7,6 +7,7 @@
  */
 
 import type { Folded, FoldedTask } from "@voluma/contracts/fold";
+import type { Mark } from "@voluma/contracts/messages";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import {
   type Notice,
@@ -159,12 +160,39 @@ export function noticeLine(n: Notice): string {
 
 const POINT_AXES = "[z, y, x]";
 
+/** At most this many outline points are listed; a longer outline is summarised. */
+const OUTLINE_LISTED_POINTS = 20;
+
+const round = (n: number) => Math.round(n * 10) / 10;
+const at = (p: number[]) => `[${p.map(round).join(", ")}]`;
+
+/** A mark in words; a line's length and an outline's area are the values the researcher read. */
+function markWhere(m: Mark): string {
+  if (m.point) return `the voxel ${POINT_AXES} = ${at(m.point)}`;
+  if (m.box) return `the box ${POINT_AXES} from ${at(m.box.min)} to ${at(m.box.max)} (inclusive)`;
+  if (m.line)
+    return `the line ${POINT_AXES} from ${at(m.line.aZyx)} to ${at(m.line.bZyx)}, which they measured as ${m.line.lengthMm} mm`;
+  const o = m.outline;
+  if (!o) throw new Error("a mark has no point, box, line or outline");
+  const axis = "zyx"[o.axis];
+  const slice = `a closed outline of ${o.zyx.length} points on the slice ${axis} = ${o.zyx[0]?.[o.axis]}`;
+  const area = `which they measured as ${o.areaMm2} mm²`;
+  if (o.zyx.length > OUTLINE_LISTED_POINTS) {
+    const range = [0, 1, 2]
+      .filter((i) => i !== o.axis)
+      .map((i) => {
+        const v = o.zyx.map((p) => p[i] ?? 0);
+        return `${"zyx"[i]} ${round(Math.min(...v))} to ${round(Math.max(...v))}`;
+      });
+    return `${slice}, spanning ${range.join(" and ")}, ${area}`;
+  }
+  return `${slice}, through ${o.zyx.map((p) => at(p)).join(" → ")} ${POINT_AXES} (the last joins the first), ${area}`;
+}
+
 function personLine(n: Extract<Notice, { kind: "person" }>): string {
   const lines = [`- The researcher wrote${n.text ? `: "${n.text}"` : "."}`];
   for (const m of n.marks) {
-    const where = m.point
-      ? `the voxel ${POINT_AXES} = [${m.point.join(", ")}]`
-      : `the box ${POINT_AXES} from [${m.box?.min.join(", ")}] to [${m.box?.max.join(", ")}] (inclusive)`;
+    const where = markWhere(m);
     lines.push(
       `  Marked ${where} of volume ${m.volumeId}${m.file ? ` (file ${m.file}: a binary array, which \`read_file\` cannot open; you have no tool for it, so work from the marked position, the task's evidence and their view image)` : ""}.`,
     );
