@@ -33,8 +33,6 @@ import type { Row, Step, ToolStep } from "./transcript";
 
 const { taskTitle } = catalog["mouse-oa"];
 
-type Wake = Extract<RunEvent, { type: "wake" }>;
-
 export function TranscriptView({
   rows,
   threads,
@@ -158,8 +156,6 @@ function RowView({ row, threads }: { row: Row; threads: Map<string, Thread> }) {
           {row.text}
         </p>
       );
-    case "wake":
-      return <WakeTurn event={row.event} partial={row.partial} />;
     case "agent": {
       const thread = threads.get(row.threadId);
       return thread ? <AgentCard thread={thread} /> : null;
@@ -170,10 +166,13 @@ function RowView({ row, threads }: { row: Row; threads: Map<string, Thread> }) {
 const TOOL_ICON: Record<string, LucideIcon> = {
   bash: Terminal,
   view_image: Image,
-  checklist: ListChecks,
+  start_worker: ListChecks,
+  submit_task: ListChecks,
   checkpoint: Flag,
   report_output: PackageCheck,
-  thread_message: MessageSquare,
+  message: MessageSquare,
+  answer: MessageSquare,
+  ask: MessageSquare,
   segment_sam: Wand,
 };
 
@@ -299,77 +298,5 @@ function OutputRow({ event }: { event: Extract<RunEvent, { type: "output" }> }) 
       </span>
       {value && <span className="shrink-0 font-mono text-meta tabular-nums">{value}</span>}
     </p>
-  );
-}
-
-const POINTS: Record<Wake["payload"]["point"]["kind"], (task: string) => string> = {
-  "run-started": () => "read the plan before the run started",
-  "task-checked": (t) => `woke after the ${t} check`,
-  "check-disagreed": (t) => `woke because the checker disagreed on ${t}`,
-  "thread-failed": (t) => `woke because the ${t} worker failed`,
-};
-
-const DECISION = {
-  accept: { label: "Accepted", tone: "primary" },
-  redo: { label: "Redo", tone: "info" },
-  fail: { label: "Failed the task", tone: "destructive" },
-} as const;
-
-function MainMark() {
-  return (
-    <span className="grid size-6 shrink-0 place-items-center rounded-full bg-primary-tint text-primary-strong">
-      <Workflow className="size-3.5" aria-hidden />
-    </span>
-  );
-}
-
-/** A turn of the main thread: who and why it woke, what it decided, then its notes, clamped. */
-function WakeTurn({ event, partial }: { event?: Wake; partial?: string }) {
-  if (!event)
-    return (
-      <div>
-        <p className="mb-1 flex items-center gap-2 text-ui">
-          <MainMark />
-          <span className="font-medium">Main thread</span>
-          <span className="text-muted-foreground">is writing</span>
-        </p>
-        <div className="pl-8">
-          <StreamingText text={partial ?? ""} streaming />
-        </div>
-      </div>
-    );
-  const { point, note, decision, error, plan, usage, model } = event.payload;
-  const verdict = decision && DECISION[decision.action];
-  return (
-    <div>
-      <div className="flex min-w-0 items-center gap-2 text-ui">
-        <MainMark />
-        <span className="shrink-0 font-medium">Main thread</span>
-        <span className="min-w-0 truncate text-muted-foreground">
-          {POINTS[point.kind]("taskId" in point ? taskTitle(point.taskId) : "")}
-        </span>
-        {verdict && <StatusBadge tone={verdict.tone}>{verdict.label}</StatusBadge>}
-        <span className="ml-auto" />
-        {usage && (
-          <InfoButton
-            label="Usage"
-            sections={[{ title: "This wake", rows: usageRows(usage, model) }]}
-          />
-        )}
-      </div>
-      <div className="mt-1 grid gap-1.5 pl-8">
-        {error && (
-          <p
-            role="alert"
-            className="rounded-xl bg-destructive-tint px-3 py-2 text-ui text-destructive"
-          >
-            It did not answer: {error}
-          </p>
-        )}
-        {decision && <p className="text-sm">{decision.reason}</p>}
-        {plan && <p className="text-sm">It changed the plan.</p>}
-        {note && <ClampedMarkdown text={note} label="Notes for later threads" />}
-      </div>
-    </div>
   );
 }

@@ -12,13 +12,27 @@ export interface Skill {
   path: string;
 }
 
+/** One script of a skill's `resources/`, with the first line of its docstring. */
+export interface ToolIndexEntry {
+  skill: string;
+  /** The file name, e.g. `intake.py`. */
+  script: string;
+  summary: string;
+}
+
 /** One role file of `workflows/core/agents/`, read from the run's snapshot. */
 export interface AgentDefinition {
   /** The file's name without `.md`. */
   name: string;
   description: string;
-  /** The optional tools the role is granted (names in the harness's tool registry). */
+  /** An alias (`wonder`) the runner's config maps to a provider model. */
+  model: string;
+  /** Every tool the role holds, base tools included (names in the harness's tool registry). */
   tools: string[];
+  /** The roles this role may start; each exists. `start_worker` starts `worker`, so a role holding it lists it. */
+  subagents: string[];
+  /** The skills named in the role's prompt: names of the workflow's `skills`, its own first. */
+  skills: string[];
   /** `planned`: nothing uses the role yet, so its tools are not checked against the registry. */
   planned: boolean;
   /** The role's job: the file after its frontmatter, trimmed. */
@@ -34,11 +48,14 @@ export interface WorkflowDefinition {
   files: WorkflowFiles;
   /** The workflow's own skills first, then those of `workflows/core/skills/`. */
   skills: Skill[];
+  /** Every skill's scripts, in `skills` order, each with its docstring's first line. */
+  toolIndex: ToolIndexEntry[];
   /**
-   * The role files of `workflows/core/agents/`, the same for every workflow. A run starts the worker and
-   * the checker, so the loader requires both; `others` holds the rest by name.
+   * The role files of `workflows/core/agents/`, the same for every workflow. The loader requires
+   * `main`, `worker` and `checker`; `others` holds the rest by name.
    */
   agents: {
+    main: AgentDefinition;
     worker: AgentDefinition;
     checker: AgentDefinition;
     others: Record<string, AgentDefinition>;
