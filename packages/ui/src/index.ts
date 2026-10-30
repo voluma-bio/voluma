@@ -6,6 +6,14 @@
 export { Button, type ButtonProps, buttonClass } from "./button";
 export { cx } from "./cx";
 export { Lightbox, type LightboxProps } from "./lightbox";
+export {
+  AppShell,
+  ShellHeading,
+  ShellLink,
+  ShellPanel,
+  type ShellPanelProps,
+  type ShellSide,
+} from "./shell/shell";
 export { StatusBadge, type StatusBadgeProps, type StatusTone } from "./status-badge";
 export {
   type StripGroup,

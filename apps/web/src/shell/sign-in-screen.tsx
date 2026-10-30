@@ -7,7 +7,7 @@ import { signIn } from "@voluma/api-client";
 import { type Me, signinOutcomeSchema } from "@voluma/contracts/auth";
 import { Button } from "@voluma/ui";
 import type { ReactNode } from "react";
-import { BrandLockup } from "./top-bar";
+import { BrandLockup } from "./account";
 
 // Back to this page after sign-in, without the outcome of the last attempt.
 function startSignIn() {

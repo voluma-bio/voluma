@@ -3,7 +3,7 @@
  * does not create an analysis run or populate reports. Light Review chrome.
  * Owns its routes; the shell mounts them.
  */
-import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ApiError,
   downloadFile,
@@ -19,19 +19,15 @@ import { Link, type RouteObject, useParams, useSearchParams } from "react-router
 import { ReviewWorkspace } from "./report/ReviewWorkspace";
 
 export const reviewRoutes: RouteObject[] = [{ path: "/runs/:runId", element: <ReviewPage /> }];
-const queryClient = new QueryClient();
 
 function ReviewPage() {
   const { runId } = useParams();
   // A route change releases the scan instead of showing it under a different run.
-  return (
-    <QueryClientProvider client={queryClient}>
-      <ScanReview key={runId} runId={runId ?? "local"} />
-    </QueryClientProvider>
-  );
+  return <ScanReview key={runId} runId={runId ?? "local"} />;
 }
 
 function ScanReview({ runId }: { runId: string }) {
+  const queryClient = useQueryClient();
   const [search, setSearch] = useSearchParams();
   const fileUrl = useCallback((sha256: string) => reviewFileUrl(runId, sha256), [runId]);
   const execution = useQuery({
