@@ -420,6 +420,7 @@ export function ReviewWorkspace({
                     }
                     restore={restored?.viewState}
                     onCapture={snapshots.capture}
+                    saving={snapshots.saving}
                     footer={snapshots.tray}
                   />
                 </Suspense>

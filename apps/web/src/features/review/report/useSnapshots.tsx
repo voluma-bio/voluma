@@ -1,6 +1,11 @@
 /** The run's saved screenshots: saving a captured pane, the tray that lists and reopens them. */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createReviewSnapshot, listReviewSnapshots, reviewFileUrl } from "@voluma/api-client";
+import {
+  ApiError,
+  createReviewSnapshot,
+  listReviewSnapshots,
+  reviewFileUrl,
+} from "@voluma/api-client";
 import type {
   CreateReviewSnapshotRequest,
   GridViewState,
@@ -30,7 +35,8 @@ export function useSnapshots(
     queryFn: ({ signal }) => listReviewSnapshots(runId, signal),
     retry: false,
   });
-  // A failed save retries the same id and pixels, never a new capture.
+  // A save that failed on the network or the server retries the same id and pixels, never a
+  // new capture; a refused one (4xx) would only be refused again.
   const [failed, setFailed] = useState<CreateReviewSnapshotRequest>();
   const save = useMutation({
     mutationFn: (request: CreateReviewSnapshotRequest) => createReviewSnapshot(runId, request),
@@ -40,35 +46,44 @@ export function useSnapshots(
         ...old.filter((item) => item.id !== saved.id),
         saved,
       ]),
-    onError: (_, request) => setFailed(request),
+    onError: (error, request) =>
+      setFailed(
+        !(error instanceof ApiError) || error.status === 0 || error.status >= 500
+          ? request
+          : undefined,
+      ),
   });
   const items = query.data ?? [];
   const capture =
     revisionId && taskId
-      ? (viewState: GridViewState, png: { base64: string }) => {
-          if (save.isPending) return;
+      ? (viewState: GridViewState, png: { base64: string }) =>
           save.mutate({
             id: crypto.randomUUID(),
             revisionId,
             taskId,
             viewState,
             pngBase64: png.base64,
-          });
-        }
+          })
       : undefined;
   const tray = (
     <details className="snapshot-tray" open>
       <summary>
         Screenshots ({items.length}){save.isPending && <span role="status"> · Saving…</span>}
       </summary>
-      {failed && (
+      {save.isError && (
         <p role="alert" className="error-message">
-          {save.error instanceof TypeError
+          {failed
             ? "Couldn't save the screenshot. Check your connection."
-            : `Couldn't save the screenshot: ${save.error?.message}`}{" "}
-          <button type="button" className="text-button" onClick={() => save.mutate(failed)}>
-            Retry
-          </button>
+            : `Couldn't save the screenshot: ${
+                save.error instanceof ApiError
+                  ? (save.error.serverMessage ?? save.error.message)
+                  : save.error.message
+              }`}{" "}
+          {failed && (
+            <button type="button" className="text-button" onClick={() => save.mutate(failed)}>
+              Retry
+            </button>
+          )}
         </p>
       )}
       {query.isError && (
@@ -140,5 +155,5 @@ export function useSnapshots(
       )}
     </details>
   );
-  return { capture, tray };
+  return { capture, tray, saving: save.isPending };
 }

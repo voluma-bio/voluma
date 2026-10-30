@@ -64,7 +64,7 @@ export function snapshotRoutes({ runs, files, snapshots }: ReviewDeps) {
     );
     if (
       !image ||
-      state.point.some((p, i) => p >= image.shapeZyx[i]!) ||
+      state.point.some((p, i) => p >= (image.shapeZyx[i] ?? 0)) ||
       state.structures.some((s) => !shown.has(s.structureId)) ||
       state.focus?.on.some((id) => !blocks.has(id)) ||
       (state.focus?.volumeId !== undefined &&

@@ -40,12 +40,15 @@ export function Grid3D({
   contrast,
   onPoint,
   handle,
+  onLoading,
 }: {
   scene: GridScene;
   contrast: Contrast | null;
   onPoint(point: Zyx): void;
   /** Set while the pane is mounted, for screenshots. */
   handle: { current: PaneHandle | null };
+  /** Whether the volume or a mesh is still loading or failed. */
+  onLoading(loading: boolean): void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const three = useRef<{
@@ -325,6 +328,10 @@ export function Grid3D({
   }, [shown, contrast]);
 
   const chip = volumeStatus ?? status;
+  const latestLoading = useRef(onLoading);
+  latestLoading.current = onLoading;
+  const loading = !!chip || !shown;
+  useEffect(() => latestLoading.current(loading), [loading]);
   return (
     <div ref={host} className="grid-pane">
       {chip && (

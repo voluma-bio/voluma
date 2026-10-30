@@ -46,6 +46,7 @@ export function SlicePane({
   onPoint,
   contrast,
   handle,
+  onLoading,
 }: {
   axis: Axis;
   scene: GridScene;
@@ -54,6 +55,8 @@ export function SlicePane({
   contrast: Contrast | null;
   /** Set while the pane is mounted, for screenshots. */
   handle: { current: PaneHandle | null };
+  /** Whether the pane is short of its full picture (loading, refining or failed). */
+  onLoading(loading: boolean): void;
 }) {
   const [ra, ca] = planeAxes(axis);
   const sr = scene.spacingZyx[ra];
@@ -73,8 +76,8 @@ export function SlicePane({
   const [level, setLevel] = useState(scene.image.levels.length - 1);
   const [shown, setShown] = useState<{ level: number; index: number } | null>(null);
   const [error, setError] = useState<string>();
-  const latest = useRef({ point, onPoint });
-  latest.current = { point, onPoint };
+  const latest = useRef({ point, onPoint, onLoading });
+  latest.current = { point, onPoint, onLoading };
 
   // Pane mm: columns run right, rows run down.
   const toPane = (p: Zyx): [number, number] => [p[ca] * sc, -p[ra] * sr];
@@ -398,6 +401,8 @@ export function SlicePane({
 
   const total = scene.shapeZyx[axis];
   const refining = shown && (shown.level !== level || shown.index !== index);
+  const loading = !shown || !!refining || !!error;
+  useEffect(() => latest.current.onLoading(loading), [loading]);
   const scale = shown ? scene.image.levels[shown.level]!.scaleZyx[axis] : null;
   return (
     <div

@@ -34,6 +34,7 @@ export function GridViewer({
   footer,
   restore,
   onCapture,
+  saving = false,
 }: {
   /**
    * Remount (`key`) for another grid: the panes keep their grid for life. On the same grid,
@@ -53,6 +54,8 @@ export function GridViewer({
   restore?: ViewerState;
   /** Shows a screenshot button on each pane; the PNG is the pane's canvas in device pixels. */
   onCapture?(state: ViewerState, png: { base64: string; width: number; height: number }): void;
+  /** A screenshot is being saved: the screenshot buttons wait. */
+  saving?: boolean;
 }) {
   const [maximized, setMaximized] = useState<string | null>(null);
   const [point, setPoint] = useState<Zyx>(
@@ -66,6 +69,8 @@ export function GridViewer({
   }, [focus]);
   const [contrast, setContrast] = useState<Contrast | null>(restore?.contrast ?? null);
   const [contrastError, setContrastError] = useState<string>();
+  // Panes short of their full picture: a screenshot would keep that state for good.
+  const [loading, setLoading] = useState<Record<string, boolean>>({});
   const handles = useRef(
     Object.fromEntries(panes.map((p) => [p.id, { current: null as PaneHandle | null }])),
   ).current;
@@ -74,6 +79,7 @@ export function GridViewer({
     if (!restore) return;
     setPoint(restore.point);
     setContrast(restore.contrast);
+    setMaximized((m) => (m && m !== restore.pane ? null : m));
     handles[restore.pane]!.current?.show(restore.view);
   }, [restore, handles]);
 
@@ -118,7 +124,12 @@ export function GridViewer({
                     className="icon-button"
                     aria-label={`Save screenshot of ${pane.label}`}
                     title="Save screenshot"
-                    disabled={!contrast}
+                    disabled={
+                      !contrast ||
+                      contrast.low >= contrast.high ||
+                      loading[pane.id] !== false ||
+                      saving
+                    }
                     onClick={() => {
                       const shot = handles[pane.id]!.current?.capture();
                       if (shot && contrast)
@@ -147,6 +158,9 @@ export function GridViewer({
                 contrast={contrast}
                 onPoint={setPoint}
                 handle={handles[pane.id]!}
+                onLoading={(b) =>
+                  setLoading((l) => (l[pane.id] === b ? l : { ...l, [pane.id]: b }))
+                }
               />
             ) : (
               <SlicePane
@@ -156,6 +170,9 @@ export function GridViewer({
                 onPoint={setPoint}
                 contrast={contrast}
                 handle={handles[pane.id]!}
+                onLoading={(b) =>
+                  setLoading((l) => (l[pane.id] === b ? l : { ...l, [pane.id]: b }))
+                }
               />
             )}
           </section>

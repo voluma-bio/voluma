@@ -28,6 +28,7 @@ export function TaskViewer({
   focus,
   restore,
   onCapture,
+  saving,
   footer,
 }: {
   runId: string;
@@ -39,6 +40,7 @@ export function TaskViewer({
   /** A screenshot to reopen; its focus is `focus`, which then highlights without moving. */
   restore?: GridViewState;
   onCapture?(state: GridViewState, png: { base64: string; width: number; height: number }): void;
+  saving?: boolean;
   footer?: ReactNode;
 }) {
   const grid = useMemo(
@@ -79,8 +81,6 @@ export function TaskViewer({
       ? (grid.focus ?? (labelsFocus?.for === labelsKey ? labelsFocus?.at : undefined))
       : undefined;
   const atKey = at?.join();
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `at` is a new tuple each render; its voxel is `atKey`.
-  const target = useMemo(() => (at && !restore ? { at } : undefined), [focus, atKey, restore]);
   // Display settings are kept across revisions; a screenshot names only this one's.
   const shown = new Set([...revision.structures, ...revision.surfaces].map((s) => s.id));
   const shape = grid.state === "ready" ? grid.scene.shapeZyx : undefined;
@@ -89,9 +89,13 @@ export function TaskViewer({
     grid.state === "ready" &&
     (restore.gridId !== grid.gridId
       ? "This screenshot was taken on another grid, so its view can't be reopened."
-      : restore.point.some((p, i) => p >= shape![i]!)
+      : restore.point.some((p, i) => p >= (shape?.[i] ?? 0))
         ? "This screenshot's crosshair is outside this grid, so its view can't be reopened."
         : undefined);
+  // A restored view keeps its crosshair; a refused one falls back to the focus.
+  const restoring = !!restore && !restoreProblem;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `at` is a new tuple each render; its voxel is `atKey`.
+  const target = useMemo(() => (at && !restoring ? { at } : undefined), [focus, atKey, restoring]);
   const restoreState = useMemo<ViewerState | undefined>(
     () =>
       restore && {
@@ -123,6 +127,7 @@ export function TaskViewer({
       notes={restoreProblem ? [restoreProblem, ...grid.notes] : grid.notes}
       restore={restoreProblem ? undefined : restoreState}
       footer={footer}
+      saving={saving}
       onCapture={
         onCapture &&
         ((state, png) => {
