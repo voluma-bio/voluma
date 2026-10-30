@@ -413,7 +413,7 @@ restart counter of its own.
 # Runner: telemetry, and what an uncaught error does
 
 `telemetry.ts` starts after startup (a failure before it still kills the process). Every line starts
-with `telemetry`; on Railway search the deploy logs for these:
+with `telemetry`; on Render search the service's logs for these:
 
 | grep | Line | Means |
 |---|---|---|

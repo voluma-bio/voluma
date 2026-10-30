@@ -21,6 +21,7 @@ import { resolve } from "node:path";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { MESSAGE_BODY_BYTES } from "@voluma/contracts/messages";
+import { REVIEW_SNAPSHOT_BODY_BYTES } from "@voluma/contracts/snapshot";
 import { workflowById } from "@voluma/workflow/bundled";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { type Context, Hono } from "hono";
@@ -29,6 +30,8 @@ import { HTTPException } from "hono/http-exception";
 import postgres from "postgres";
 import { createAuth } from "./auth";
 import { createReview } from "./domains/review";
+import { directoryRunFiles } from "./domains/review/directory-run-files";
+import { pgSnapshots } from "./domains/review/pg-snapshots";
 import { r2ReferenceArchive } from "./domains/review/r2-reference-archive";
 import { r2RunFiles } from "./domains/review/r2-run-files";
 import { createRun } from "./domains/run";
@@ -168,7 +171,9 @@ const r2 =
       }
     : null;
 const referenceArchive = r2 && r2ReferenceArchive(r2);
-const runFiles = r2 && r2RunFiles(r2);
+const runFiles = process.env.RUN_FILES_DIRECTORY
+  ? directoryRunFiles(resolve(process.env.RUN_FILES_DIRECTORY))
+  : r2 && r2RunFiles(r2);
 
 const app = new Hono();
 app.get("/health", (c) => c.text("ok"));
@@ -180,9 +185,12 @@ const browserLimit = bodyLimit({ maxSize: 256 * 1024 });
 const messageLimit = bodyLimit({ maxSize: MESSAGE_BODY_BYTES });
 const fileListLimit = bodyLimit({ maxSize: 4 * 1024 * 1024 });
 const runnerLimit = bodyLimit({ maxSize: 8 * 1024 * 1024 });
+const snapshotLimit = bodyLimit({ maxSize: REVIEW_SNAPSHOT_BODY_BYTES });
 app.use("/api/*", (c, next) => {
   if (c.req.path.startsWith("/api/run/ingest/")) return runnerLimit(c, next);
   if (c.req.path === "/api/run/inputs") return fileListLimit(c, next);
+  if (c.req.method === "POST" && /^\/api\/review\/runs\/[^/]+\/snapshots$/.test(c.req.path))
+    return snapshotLimit(c, next);
   if (/^\/api\/review\/runs\/[^/]+\/messages$/.test(c.req.path)) return messageLimit(c, next);
   return browserLimit(c, next);
 });
@@ -217,6 +225,7 @@ app.route(
   "/api/review",
   createReview({
     runs: runRecords,
+    snapshots: pgSnapshots(db),
     messages: { check: queue.checkMessage, send: queue.sendMessage },
     files: runFiles,
     inputs: reads,
@@ -264,7 +273,7 @@ const server = serve(
   ({ address, port }) => console.log(`api listening on ${address}:${port}`),
 );
 
-// Stay under the host's drain period (Railway's draining period, 30 s: apps/api/.context/deploy.md).
+// Stay under the host's shutdown delay (30 s on Render: render.yaml, apps/api/.context/deploy.md).
 const DRAIN_MS = 10_000;
 let stopping = false;
 process.once("SIGTERM", shutdown);

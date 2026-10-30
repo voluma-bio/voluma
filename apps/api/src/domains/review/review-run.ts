@@ -13,7 +13,7 @@ export function reviewRun({
   run,
   events,
   results: { revisions, assets },
-}: RunRecord): ReviewRun | null {
+}: Pick<RunRecord, "run" | "events" | "results">): ReviewRun | null {
   // Not `events[0]`: the root's `thread.started` comes first.
   const start = events.find((e) => e.type === "revision.started" && e.payload.reason === "run");
   if (start?.type !== "revision.started" || start.payload.reason !== "run") return null;

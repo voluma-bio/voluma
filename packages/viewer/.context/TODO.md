@@ -13,3 +13,6 @@
   is as slow, sign many asset paths in one call or shard the levels.
 - Measure scroll and 3D frame times on a hardware GPU: orb Chromium renders with SwiftShader, where
   the 3D pane with the ROI meshes costs hundreds of milliseconds per frame.
+- Screenshots: capture and restore on the grid viewer need a grid view state in the snapshot
+  contract; the acquired-slice capture went with the DICOM viewer
+  ([#257](https://github.com/voluma-bio/voluma/issues/257)).

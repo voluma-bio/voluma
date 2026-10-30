@@ -11,16 +11,16 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   migration and cannot apply the new one; `db:reset` drops it and `pnpm dev` rebuilds it. Two branches that generate from the same base collide on the
   migration number, the journal and the snapshots.
 - Migrations run from one place, `src/migrate.ts` (`pnpm db:migrate`): `pnpm dev` runs it
-  locally, Railway's pre-deploy step in production. Never at server start: `migrate()`
-  takes no lock. It is not drizzle-kit, a devDependency that Railway prunes.
-- **A migration must work with the code that is deployed now.** Railway migrates, then
+  locally, Render's pre-deploy command in production. Never at server start: `migrate()`
+  takes no lock. It is not drizzle-kit, a devDependency.
+- **A migration must work with the code that is deployed now.** Render migrates, then
   starts the new deployment beside the old one, which keeps serving until `/health`
   passes, and the migration stays applied if that deploy fails. So expand first (add
   nullable columns or tables, columns with defaults), and contract (drop, rename, add
   `NOT NULL`) in a later PR, after the code that stopped using the old shape is deployed.
   See [.context/deploy.md](.context/deploy.md).
 - Anything the server or `migrate.ts` runs in production belongs in `dependencies`
-  (Railway prunes dev dependencies after the build).
+  (Render doesn't prune today, but a host that builds once and prunes would).
 - When `apps/web/dist` exists, `index.ts` also serves it (hashed `assets/` immutable,
   everything else `no-cache`, the app shell for extensionless non-`/api` GETs). Deploying to staging:
   [.context/deploy.md](.context/deploy.md).
@@ -105,7 +105,8 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   them. A transition holds the keys before the write that makes the run claimable commits;
   cancel, failure and the claim drop or hand them out; the claim moves any queued visitor
   run whose keys its process doesn't hold to `awaiting-keys`. The vault holds at most 100
-  runs per org (429), and `index.ts` caps every `/api` body at 256 KB (8 MB on `/api/run/ingest/*`, the trusted runner).
+  runs per org (429), and `index.ts` caps ordinary `/api` bodies at 256 KB (8 MB on
+  `/api/run/ingest/*`, the trusted runner; 12 MiB only on screenshot POSTs).
 - **Limits come from env** (`RUN_LIMITS_<ORG>_*`, read in `index.ts`); the workflow catalog
   (`@voluma/workflow/bundled`) is code. `seed:example --from <runId> [--backfill <dir|r2:prefix>] [--remote]` makes an example run (it copies the source's `evidence/`, `review/`, `scratch/person/` and `outputs/` under the example's prefix)
   (`src/domains/run/seed-example.ts`; it needs `GUEST_ORGANIZATION_ID`, the Demo organization, in `.env`). To get a run into a fresh local database:
@@ -142,7 +143,7 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
 - Run list/get and study reads memoize at most 2048 derived results (`{summary, tasks, values, toCheck}`, all from one `reviewState(log)`; least recently read out first), keyed by each run's latest
   event ID (ordered by sequence) in the same repeatable-read snapshot, including reseeded
   examples with reused sequence numbers. Cache misses load only fold/review
-  events; hits load no event payloads. The event log remains the only durable review state.
+  events; hits load no event payloads. The event log remains the only durable human-decision state.
 - `inputs.ts` owns `/inputs/:inputId/download` and `/inputs/:inputId/file`, guarded by
   `requireUser` only under `/inputs/:inputId/*`. Both authorize through `ReviewInputs`
   and `readerOf` before using `ReferenceArchive`. Reject HEAD before opening R2; keep
@@ -153,6 +154,16 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   a day). The leading bytes pick the type: JPEG and PNG inline, anything else an attachment,
   always `nosniff`, since the stored content type is whatever the sandbox mount wrote. HEAD is
   a 405 before storage is opened.
+- `snapshots.ts` owns immutable screenshots, separate from scientific results and human
+  decision events. Authorized readers may save them, including on examples and historical
+  revisions. Review owns metadata; `RunFiles.put` publishes validated static PNGs before
+  metadata is inserted. Retries keep the same UUID/pixels and return the original actor/time;
+  conflicting captures return 409. Run's internal `generation` changes on example replacement:
+  every snapshot query and insert uses it, so late saves cannot attach to the replacement.
+- Screenshot geometry is checked against the actual scan in the browser on restore, not by
+  decoding DICOM on the server. The API validates references against the pinned Review
+  projection and currently rejects 3D capture. `RUN_FILES_DIRECTORY` selects local run-file
+  storage at the composition root; it never redirects the read-only reference archive.
 - `runs.ts` serves `GET /runs/:runId/assets/:sha256/*`: a converted review asset
   (`reviewAssetKey`, written by the runner's conversion worker) as a 302 to a presigned R2 GET
   (`RunFiles.assetUrl`: signed at the start of a 4-minute window and valid 5 minutes, so repeat

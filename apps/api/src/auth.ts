@@ -258,6 +258,14 @@ function setCookies(c: Context, cookies: string[]) {
   for (const cookie of cookies) c.header("Set-Cookie", cookie, { append: true });
 }
 
+/**
+ * The header WorkOS gets as the caller's address: one the host's proxy sets and a client cannot
+ * override. Render's edge (Cloudflare) overwrites `true-client-ip` with the caller's address; it
+ * passes a client's own `x-real-ip` through unchanged and keeps a client's `x-forwarded-for`
+ * entries. Checked on 2026-10-30 with forged values against a Render service in Virginia.
+ */
+const CLIENT_IP_HEADER = "true-client-ip";
+
 /** Failed password sign-ins allowed per email in each window. */
 const PASSWORD_ATTEMPTS = 10;
 const PASSWORD_WINDOW_MS = 15 * 60 * 1000;
@@ -602,8 +610,7 @@ export function createAuth(config: AuthConfig) {
         clientId: config.clientId,
         email,
         password,
-        // Railway's proxy sets x-real-ip; a client can't override it there.
-        ipAddress: c.req.header("x-real-ip"),
+        ipAddress: c.req.header(CLIENT_IP_HEADER),
         userAgent: c.req.header("user-agent"),
       });
     } catch (error) {

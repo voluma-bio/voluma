@@ -9,9 +9,17 @@
 import { randomUUID } from "node:crypto";
 import { type Run, resendKeysRequestSchema, startRunRequestSchema } from "@voluma/contracts/run";
 import { type Context, Hono } from "hono";
-import { type AppEnv, parseJson, readerOf, requireReader, requireUser } from "../../domain";
+import {
+  type AppEnv,
+  callerOf,
+  parseJson,
+  readerOf,
+  requireReader,
+  requireUser,
+} from "../../domain";
 import type { RunDeps } from ".";
 import { refusalMessage } from "./admission";
+import { GUEST_KEYS_MESSAGE } from "./corrections";
 import type { QueueRefusal } from "./pg-queue";
 
 /** The answer to a write the queue refused. */
@@ -23,6 +31,8 @@ export function refusal(c: Context, refused: QueueRefusal, detail?: string[]) {
       return c.json({ error: "Only the run's starter can resend keys." }, 403);
     case "conflict":
       return c.json({ error: "The run is not waiting for keys." }, 409);
+    case "guest-keys":
+      return c.json({ error: GUEST_KEYS_MESSAGE }, 403);
     case "no-input":
       return c.json({ error: "unknown input" }, 404);
     case "no-study":
@@ -54,18 +64,14 @@ export function runsRoutes({ reads, queue }: RunDeps) {
       startRunRequestSchema,
     );
     const user = c.var.user;
-    const result = await queue.start(
-      readerOf(user),
-      { userId: user.userId },
-      {
-        id: randomUUID(),
-        studyId,
-        inputId,
-        selectedOutputs,
-        notes,
-        keys,
-      },
-    );
+    const result = await queue.start(readerOf(user), callerOf(user), {
+      id: randomUUID(),
+      studyId,
+      inputId,
+      selectedOutputs,
+      notes,
+      keys,
+    });
     return "refused" in result
       ? refusal(c, result.refused, result.detail)
       : c.json(result.run satisfies Run);

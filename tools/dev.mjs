@@ -9,7 +9,7 @@
  *  - a random API token per launch;
  *  - APP_URL, the Vite origin, which the API uses for the sign-in redirect and the Origin check.
  *    PUBLIC_URL supplies the external origin in a supervised Amp portal.
- * The API also reads the repo .env (--env-file-if-exists), as it would read Railway's
+ * The API also reads the repo .env (--env-file-if-exists), as it would read the host's
  * variables. It writes { apiUrl, apiToken, databaseUrl } to the git-ignored .dev/env.json, which
  * the runner reads when VOLUMA_API_URL is unset and the API's operator scripts read when
  * DATABASE_URL is unset. Ctrl-C stops everything

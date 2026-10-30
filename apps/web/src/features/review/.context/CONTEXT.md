@@ -58,6 +58,13 @@ blocks are drawn in the check colour and the crosshair moves to them where the r
 they are. **Clear viewer focus** removes it. Focus does not carry across tasks or revisions. At
 narrow widths the layout stacks report and imaging areas.
 
+**Export review report** builds an offline ZIP containing escaped HTML, measurements CSV,
+revision JSON and hash-verified screenshot PNG/JSON pairs already saved for the run.
+`{snapshot:id}` references resolve only within that run and revision; unresolved references are
+marked. It includes no raw scan, masks or other analysis files. Taking new screenshots was built on
+the removed DICOM viewer and waits for a grid view state
+([#257](https://github.com/voluma-bio/voluma/issues/257)).
+
 ## Integration with the Run lane
 
 Jimmy's scaffold PRs [#1], [#2] and [#3] supply the application shell, package

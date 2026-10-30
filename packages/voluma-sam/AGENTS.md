@@ -27,4 +27,4 @@ stdout is one JSON line. Entry: `src/main.ts`; the steps are `src/run.ts`.
   OA6-1RK `oriented.npy`, labels compared with an independent decode. No unit fixtures.
 - The result's `stream` (first `data:` event, longest gap between chunks other than keepalive comments, bytes, `data:` lines) is
   measured as the reply is written, per chunk and at constant cost. It exists to check real calls
-  against the gateway's host limits (Railway cuts a stream at 15 minutes, or after 5 without a byte).
+  against the gateway's host limits (a proxy may cut a stream after minutes without a byte or at a total length: Railway's did at 5 and 15 minutes, Render documents 100 minutes total).

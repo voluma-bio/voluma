@@ -1,6 +1,6 @@
 /**
  * Applies the committed Drizzle migrations to DATABASE_URL. The one migration path:
- * `pnpm db:migrate` locally, the Railway pre-deploy step in production.
+ * `pnpm db:migrate` locally, the Render pre-deploy command in production.
  * Not drizzle-kit, which is a devDependency and exits 1 without the error text.
  */
 import { resolve } from "node:path";

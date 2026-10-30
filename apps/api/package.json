@@ -28,6 +28,7 @@
     "hono": "^4.13.14",
     "jose": "^6.1.3",
     "postgres": "catalog:",
+    "sharp": "0.34.5",
     "tsx": "^4.23.15",
     "zod": "catalog:"
   },

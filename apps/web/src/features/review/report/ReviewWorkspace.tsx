@@ -2,13 +2,13 @@
 
 import { useMutation } from "@tanstack/react-query";
 import { markReviewed } from "@voluma/api-client";
-import type { Focus } from "@voluma/contracts/review";
+import type { Focus, Revision } from "@voluma/contracts/review";
 import { StatusBadge } from "@voluma/ui";
 import type { StructureDisplay } from "@voluma/viewer/grid";
 import { ArrowLeft, Download, History, Layers, ListChecks } from "lucide-react";
 import { lazy, type ReactNode, Suspense, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
-import { downloadCsv } from "./export";
+import { downloadCsv, downloadReviewReport } from "./export";
 import { type ReviewRun, taskStatus } from "./model";
 import { TaskReport } from "./TaskReport";
 
@@ -40,6 +40,10 @@ export function ReviewWorkspace({
   const [tab, setTab] = useState<"tasks" | "structures">("tasks");
   const [display, setDisplay] = useState<StructureDisplay>({});
   const [filter, setFilter] = useState("");
+  const report = useMutation({
+    mutationFn: ({ run, revision }: { run: ReviewRun; revision: Revision }) =>
+      downloadReviewReport(run, revision),
+  });
   const [focusedCheck, setFocusedCheck] = useState<{
     revisionId: string;
     taskId: string;
@@ -56,17 +60,6 @@ export function ReviewWorkspace({
   });
   return (
     <div className="review-shell" data-theme="light">
-      <header className="app-header">
-        <div className="brand">
-          <Layers size={23} />
-          <span>voluma</span>
-        </div>
-        <span className="header-divider" />
-        <span className="text-muted-foreground">Review</span>
-        <span className="ml-auto text-xs text-muted-foreground">
-          {run ? "Analysis results" : "No analysis results"}
-        </span>
-      </header>
       <div className="run-header">
         <div>
           <div className="back-link">
@@ -129,6 +122,15 @@ export function ReviewWorkspace({
                 <Download size={15} />
                 Export CSV
               </button>
+              <button
+                type="button"
+                className="button"
+                disabled={report.isPending}
+                onClick={() => report.mutate({ run, revision })}
+              >
+                <Download size={15} />
+                {report.isPending ? "Exporting report…" : "Export review report"}
+              </button>
             </>
           )}
         </div>
@@ -141,6 +143,11 @@ export function ReviewWorkspace({
       {complete.error && !run?.review?.reviewedAt && (
         <p className="error-message" role="alert">
           {complete.error.message}
+        </p>
+      )}
+      {report.error && (
+        <p className="error-message" role="alert">
+          Could not export the review report. Check your connection and try again.
         </p>
       )}
       {revision && revision !== latest && (

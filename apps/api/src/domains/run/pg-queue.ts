@@ -35,7 +35,7 @@ import {
   sql,
 } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import type { Reader } from "../../domain";
+import type { Caller, Reader } from "../../domain";
 import { admit, type Limits, type Refusal, refusalMessage, type Usage, usage } from "./admission";
 import { endClaim, outageDelayMinutes, stalledError } from "./claim-progress";
 import { decideMessage, endCorrection, openCorrection } from "./corrections";
@@ -200,6 +200,7 @@ type Starts = {
 /** Why a write was refused; `Refusal` is a limit. */
 export type QueueRefusal =
   | Refusal
+  | "guest-keys"
   | "no-input"
   | "input-not-ready"
   | "full"
@@ -312,7 +313,7 @@ export function pgRunQueue(
     tx: Tx,
     hold: Hold,
     reader: Reader,
-    caller: { userId: string },
+    caller: Caller,
     study: { id: string },
     workflow: { pins: WorkflowPin[]; outputs: OutputEntry[] },
     starts: Starts,
@@ -320,6 +321,8 @@ export function pgRunQueue(
     const bad = unselectable(workflow.outputs, starts.selectedOutputs ?? []);
     if (bad.length) throw new Refused("bad-selection", bad);
     if (starts.runs.length === 0) return;
+    // A guest runs only on their own keys: Voluma's are for signed-in accounts.
+    if (caller.guest && !starts.keys) throw new Refused("guest-keys");
     const credentials = starts.keys ? "visitor" : "voluma";
     const used = await usage(tx, reader.labId, { userId: caller.userId, credentials });
     for (const { id, inputId } of starts.runs) {
@@ -339,8 +342,8 @@ export function pgRunQueue(
         state: "queued",
       });
       used.callerUnfinished++;
+      used.waiting++;
       if (credentials === "visitor") used.visitorActive++;
-      else used.waiting++;
     }
   };
 
@@ -352,7 +355,7 @@ export function pgRunQueue(
      */
     start: (
       reader: Reader,
-      caller: { userId: string },
+      caller: Caller,
       request: Omit<Starts, "runs"> & { id: string; studyId: string; inputId: string },
     ) =>
       attempt(async (tx, hold) => {
@@ -384,7 +387,7 @@ export function pgRunQueue(
      */
     createStudy: (
       reader: Reader,
-      caller: { userId: string },
+      caller: Caller,
       request: {
         study: Omit<typeof studies.$inferInsert, "labId" | "createdBy" | "example" | "createdAt">;
         /** `subject` absent: the input's name. */
@@ -441,23 +444,23 @@ export function pgRunQueue(
     /** Whether `reader` may send this message now, without storing anything (`decideMessage`). */
     checkMessage: (
       reader: Reader,
-      userId: string,
+      caller: { userId: string; guest: boolean },
       runId: string,
       msg: { id: string; payload: PersonMessage },
     ) =>
       db.transaction((tx) =>
-        decideMessage(tx, messageContext(reader), reader, userId, runId, msg, false),
+        decideMessage(tx, messageContext(reader), reader, caller, runId, msg, false),
       ),
 
     /** Stores the message, reopening the run if it had ended; one transaction under the queue lock. */
     async sendMessage(
       reader: Reader,
-      userId: string,
+      caller: { userId: string; guest: boolean },
       runId: string,
       msg: { id: string; payload: PersonMessage },
     ) {
       const result = await locked((tx) =>
-        decideMessage(tx, messageContext(reader), reader, userId, runId, msg, true),
+        decideMessage(tx, messageContext(reader), reader, caller, runId, msg, true),
       );
       if ("ok" in result && !result.ok.duplicate) notifier.notify(runId);
       return result;

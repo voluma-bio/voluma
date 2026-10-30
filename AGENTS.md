@@ -26,7 +26,7 @@ reasons behind the setup: [.context/CONTEXT.md](.context/CONTEXT.md).
 
 An agent that starts sandboxes runs `pnpm --filter @voluma/runner sandboxes:clean --run <id>` for each of its runs before it finishes (without `--run` it ends every agent's sandboxes).
 
-Merging to `main` deploys to Railway staging each service whose watch paths it touches: the API
+Merging to `main` deploys to Render staging each service whose build filter (`render.yaml`) it touches: the API
 (which serves the web app), the runner and the gateway, together and in no fixed order; see
 [apps/api/.context/deploy.md](apps/api/.context/deploy.md).
 
