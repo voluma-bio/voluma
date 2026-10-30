@@ -13,14 +13,13 @@ import { ApiError, createStudy, listInputs, listRuns, signIn } from "@voluma/api
 import type { Me } from "@voluma/contracts/auth";
 import type { Input, Run, VisitorKeys } from "@voluma/contracts/run";
 import type { CreateStudyRequest } from "@voluma/contracts/study";
-import { Button } from "@voluma/ui";
+import { Button, EmptyState, ErrorState, LoadingState } from "@voluma/ui";
 import { formatDuration, formatUsd, loadKeys, RunKeyLine } from "@voluma/ui/run";
 import { catalog } from "@voluma/workflow/bundled";
 import { FolderOpen, Upload, X } from "lucide-react";
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router";
 import { intake, type Knee, readSheet, type Sample, type Sheet, sheetRecognised } from "./intake";
-import { Delayed, LoadError } from "./parts";
 import { type Dropped, fromDataTransfer, fromFileList, groupDropped } from "./scan-files";
 import { formatBytes, type Progress, type UploadState, useSent, useUploads } from "./uploads";
 import { measuredBy, measurementsOf, WorkflowPanel } from "./workflow-tasks";
@@ -553,7 +552,7 @@ function SheetLine({
   onRemove: () => void;
 }) {
   if (sheet.kind === "none") return null;
-  if (sheet.kind === "reading") return <Delayed>Reading {sheet.name}…</Delayed>;
+  if (sheet.kind === "reading") return <LoadingState rows={1} label={`Reading ${sheet.name}`} />;
   if (sheet.kind === "error")
     return (
       <p role="alert" className="text-ui text-destructive">
@@ -812,9 +811,11 @@ function Earlier({
         Or use a scan you uploaded before{list && ` (${list.length})`}
       </summary>
       <div className="mt-2">
-        {inputs.isPending && <Delayed>Loading your scans…</Delayed>}
-        {inputs.isError && <LoadError what="your scans" retry={() => void inputs.refetch()} />}
-        {list?.length === 0 && <p className="text-ui text-muted-foreground">No earlier scans.</p>}
+        {inputs.isPending && <LoadingState rows={2} density="compact" label="Loading your scans" />}
+        {inputs.isError && (
+          <ErrorState title="Couldn't load your scans" onRetry={() => void inputs.refetch()} />
+        )}
+        {list?.length === 0 && <EmptyState title="No earlier scans" />}
         <ul className="grid">
           {list?.map((input) => (
             <li key={input.id} className="border-t border-line-subtle first:border-t-0">

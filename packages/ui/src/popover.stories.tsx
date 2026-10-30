@@ -1,32 +1,27 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Download } from "lucide-react";
 import { Button } from "./button";
-import { Popover } from "./popover";
+import { Facts, Popover } from "./popover";
 
 /**
  * **What:** facts about a thing, one click away. Escape or a click outside closes it.
  * **Why:** detail without leaving the page, in place of four hand-rolled popovers. **Where:**
- * Run details, a scan's facts, Study details, matrix hover.
+ * Run details, a scan's facts, Study details, matrix hover. `Facts` lays out label and value
+ * pairs.
  */
-const facts: [string, string, boolean?][] = [
-  ["Scan file", "OA7-4LK.ISQ", true],
-  ["Scanner", "Scanco vivaCT 40"],
-  ["Size", "870 × 512 × 512 at 10.5 µm", true],
-  ["Workflow", "Mouse OA knee, 28 Oct"],
-  ["Took", "52 min"],
-  ["Run id", "8f3c21a0", true],
-];
-
+const mono = (v: string) => <span className="font-mono text-xs">{v}</span>;
 const runDetails = (
   <>
-    <dl className="m-0 grid grid-cols-[110px_1fr] gap-x-4 gap-y-1.5 text-sm">
-      {facts.map(([k, v, mono]) => (
-        <div key={k} className="contents">
-          <dt className="text-fg-subtle">{k}</dt>
-          <dd className={mono ? "m-0 font-mono text-xs leading-[18px]" : "m-0"}>{v}</dd>
-        </div>
-      ))}
-    </dl>
+    <Facts
+      items={[
+        ["Scan file", mono("OA7-4LK.ISQ")],
+        ["Scanner", "Scanco vivaCT 40"],
+        ["Size", mono("870 × 512 × 512 at 10.5 µm")],
+        ["Workflow", "Mouse OA knee, 28 Oct"],
+        ["Took", "52 min"],
+        ["Run id", mono("8f3c21a0")],
+      ]}
+    />
     <div className="mt-3 flex gap-2">
       <Button size="sm">
         <Download aria-hidden className="size-3.5" />

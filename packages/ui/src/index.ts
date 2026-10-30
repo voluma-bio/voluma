@@ -26,7 +26,7 @@ export {
   type MenuRadioItemProps,
   MenuSeparator,
 } from "./menu";
-export { Popover, type PopoverProps } from "./popover";
+export { Facts, type FactsProps, Popover, PopoverClose, type PopoverProps } from "./popover";
 export {
   type Density,
   type LinkRenderProps,

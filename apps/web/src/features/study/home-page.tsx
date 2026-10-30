@@ -8,11 +8,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { listStudies } from "@voluma/api-client";
 import type { StudyRunSummary, StudySummary } from "@voluma/contracts/study";
-import { StatusBadge } from "@voluma/ui";
+import { EmptyState, ErrorState, LoadingState, StatusBadge } from "@voluma/ui";
 import { runHref, studyStatus } from "@voluma/ui/run";
 import { workflowById } from "@voluma/workflow/bundled";
 import { Link } from "react-router";
-import { ButtonLink, Delayed, LoadError, ProgressBar } from "./parts";
+import { ButtonLink, ProgressBar } from "./parts";
 
 const LIVE = 5000;
 
@@ -73,17 +73,18 @@ export function HomePage() {
   let body: React.ReactNode;
   // A failed refetch keeps what is on screen; only a first load that fails shows the error.
   if (studies.isError && !studies.data) {
-    body = <LoadError what="your studies" retry={() => void studies.refetch()} />;
+    body = (
+      <ErrorState title="Couldn't load your studies" onRetry={() => void studies.refetch()}>
+        Check your connection, then try again.
+      </ErrorState>
+    );
   } else if (!studies.data) {
-    body = <Delayed>Loading your studies…</Delayed>;
+    body = <LoadingState label="Loading your studies" />;
   } else if (studies.data.length === 0) {
     body = (
-      <section className="grid justify-items-start gap-1 rounded-xl border border-border bg-card px-5 py-6">
-        <h2 className="font-semibold">No studies yet</h2>
-        <p className="text-muted-foreground">
-          Drop one scan or a whole study's scans, with your sample sheet if you have one.
-        </p>
-      </section>
+      <EmptyState title="No studies yet" className="rounded-lg border border-border bg-card">
+        Drop one scan or a whole study's scans, with your sample sheet if you have one.
+      </EmptyState>
     );
   } else {
     body = <Dashboard views={studies.data.map(view)} />;

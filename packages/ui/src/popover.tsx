@@ -1,6 +1,8 @@
 /**
  * Facts about a thing, one click away (Run details, a scan's facts). Radix underneath: the
  * trigger toggles it, Escape and a click outside close it, and focus moves in and back.
+ * `Facts` is the label and value list most popovers hold; wrap a link in `PopoverClose` to close
+ * the popover as it navigates.
  */
 import { Popover as P } from "radix-ui";
 import type { ReactElement, ReactNode } from "react";
@@ -55,5 +57,26 @@ export function Popover({
         </P.Content>
       </P.Portal>
     </P.Root>
+  );
+}
+
+export const PopoverClose = P.Close;
+
+export type FactsProps = {
+  /** Label and value pairs, in reading order. */
+  items: [label: string, value: ReactNode][];
+  className?: string;
+};
+
+export function Facts({ items, className }: FactsProps) {
+  return (
+    <dl className={cx("m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm", className)}>
+      {items.map(([label, value]) => (
+        <div key={label} className="contents">
+          <dt className="text-fg-subtle">{label}</dt>
+          <dd className="m-0 tabular-nums">{value}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
