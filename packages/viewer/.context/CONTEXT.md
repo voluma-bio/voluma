@@ -1,3 +1,43 @@
+# Viewer specification
+
+Two viewers live here. The **grid viewer** (`src/grid/`) reviews one analysis grid from the run's
+converted review assets and replaces the DICOM viewer once Review picks its grid from the run's
+blocks. The **DICOM viewer** (the rest of this file, after the grid section) still serves
+Review's "Open run scan".
+
+## Grid viewer: one analysis grid from converted review assets
+
+`GridViewer` takes a `GridScene`: the grid's shape and voxel size, its image, overlays and meshes
+made on that same grid, each a converted asset (`assets.ready`: OME-Zarr 0.4 levels, finest first,
+level k = 2^k source voxels per axis; raw meshes, float32 voxel (x, y, z) then uint32 indices).
+Every position is a source voxel (z, y, x) of the grid; source voxel i is centred on i, level voxel j
+spans source [j·2^k, (j+1)·2^k). A cropped mask carries `offsetZyx` and its levels and mesh are in
+crop voxels. The run publishes all geometry; the viewer never resamples between grids, and 3D is
+drawn in the grid's own mm (voxel × spacing), not rotated into the scan.
+
+```diagram
+GridViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane ──► zarr.worker (zarrita, chunk cache)
+    │                                     │ compose (window, overlays) → RGBA picture
+    └─► Grid3D ◄── pictures ──────────────┘   meshes fetched once each
+```
+
+- **Panes.** Axial holds array axis 0, coronal axis 2, sagittal axis 1 (DESIGN.md's axis colours).
+  Rows run down, so z runs down in every slice pane and in 3D (`camera.up` = −z).
+- **Levels.** A pane opens on the coarsest level and loads the level whose voxel still covers at
+  least one device pixel at its zoom; the coarse picture shows meanwhile unless the finer one lands
+  within 80 ms. Overlays load at the image level's scale (nearest: a label never blends).
+- **Worker.** One module worker reads every plane. Decoded 64³ chunks share one LRU cache
+  (384 MiB); fetches wait for 12 slots, newest first, and a chunk no live request still wants is
+  never fetched. A 404 chunk is the fill value (zarr v2 omits empty chunks).
+- **Interaction.** Left drag sets the crosshair; wheel, arrows and Page Up/Down step slices;
+  Ctrl/⌘ + wheel zooms at the pointer; Shift, middle or right drag pans; zoom is relative to the
+  pane's fit, so resizing and maximizing keep the framing. In 3D, orbit controls; a click (not a
+  drag) on a mesh moves the crosshair to the voxel under it. Loading never moves the crosshair or camera.
+- **Window.** From the coarsest level, 1st to 99.9th percentile; editable.
+
+Correctness evidence: `compose.test.ts` pins where a cropped, downsampled overlay lands; worker
+planes matched `labels.npy` of OA6-1RK exactly on all three axes ([#188](https://github.com/voluma-bio/voluma/pull/188)).
+
 # DICOM viewer specification
 
 The viewer parses a ZIP of DICOM Part 10 images for acquired-slice viewing
