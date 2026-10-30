@@ -242,11 +242,12 @@ export function Grid3D({
     const color = new Color(
       getComputedStyle(document.documentElement).getPropertyValue("--mark").trim(),
     );
+    // Transparent, so they draw after the see-through slice planes and stay on top.
     for (const mark of marks) {
       if ("point" in mark) {
         const dot = new Mesh(
           new SphereGeometry(t.radius * 0.012, 16, 12),
-          new MeshBasicMaterial({ color, depthTest: false }),
+          new MeshBasicMaterial({ color, depthTest: false, transparent: true }),
         );
         dot.position.copy(toWorld(mark.point));
         dot.renderOrder = 2;
@@ -260,7 +261,7 @@ export function Grid3D({
         const box = new BoxGeometry(size.x, size.y, size.z);
         const edges = new LineSegments(
           new EdgesGeometry(box),
-          new LineBasicMaterial({ color, depthTest: false }),
+          new LineBasicMaterial({ color, depthTest: false, transparent: true }),
         );
         box.dispose();
         edges.position.copy(lo.add(hi).multiplyScalar(0.5));

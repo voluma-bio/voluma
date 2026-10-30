@@ -5,7 +5,7 @@
  * talks to a finished run; everyone else sees one line saying why.
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ApiError, reviewFileUrl, sendRunMessage, subscribe } from "@voluma/api-client";
+import { ApiError, sendRunMessage, subscribe } from "@voluma/api-client";
 import type { Me } from "@voluma/contracts/auth";
 import { type ConversationItem, conversation } from "@voluma/contracts/conversation";
 import type { RunEvent } from "@voluma/contracts/events";
@@ -17,12 +17,15 @@ import type { GridViewerHandle } from "@voluma/viewer/grid";
 import { X } from "lucide-react";
 import { type RefObject, useEffect, useRef, useState } from "react";
 
+/** A correction claim that failed or was stopped; the run kept its earlier results. */
+type Stopped = { from: "stop"; id: string; seq: number; cancelled: boolean; error?: string };
+
 /** The chat as the stream has told it so far. */
 type ChatLog = {
-  items: ConversationItem[];
+  items: (ConversationItem | Stopped)[];
   /** The root thread, whose `thread.ended` ends each claim of the run. */
   root?: string;
-  /** The `seq` of the root's latest end, 0 for none. */
+  /** The `seq` of the latest claim end (the root's end or a `correction.ended`), 0 for none. */
   endedAt: number;
 };
 
@@ -31,6 +34,21 @@ const EMPTY: ChatLog = { items: [], endedAt: 0 };
 function fold(log: ChatLog, e: RunEvent): ChatLog {
   if (e.type === "person.message" || e.type === "reply")
     return { ...log, items: [...log.items, ...conversation([e])] };
+  if (e.type === "correction.ended")
+    return {
+      ...log,
+      endedAt: e.seq,
+      items: [
+        ...log.items,
+        {
+          from: "stop",
+          id: e.id,
+          seq: e.seq,
+          cancelled: e.payload.status === "cancelled",
+          ...(e.payload.error && { error: e.payload.error }),
+        },
+      ],
+    };
   if (e.type === "thread.started" && e.payload.kind === "supervisor" && !log.root)
     return { ...log, root: e.threadId };
   if (e.type === "thread.ended" && e.threadId === log.root) return { ...log, endedAt: e.seq };
@@ -86,7 +104,7 @@ function useRunChat(runId: string, onActivity: () => void) {
     setClosed(false);
     setGeneration((g) => g + 1);
   };
-  return { log, reconnect };
+  return { log, closed, reconnect };
 }
 
 /** Why this run's AI can't be asked here, or null when it can. */
@@ -132,7 +150,23 @@ export function Chat({
   onRunChanged: () => void;
 }) {
   const client = useQueryClient();
-  const { log, reconnect } = useRunChat(run.id, onRunChanged);
+  const { log, closed, reconnect } = useRunChat(run.id, onRunChanged);
+  // The stream closes when a claim ends; a note sent mid-claim queues the run again at once.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reconnect is fresh each render.
+  useEffect(() => {
+    if (closed && run.state.status !== "ended") reconnect();
+  }, [closed, run.state.status]);
+  // The views sent from this page, by message event id: the server keeps them where the AI reads
+  // them, which the browser can't.
+  const [sentViews, setSentViews] = useState<ReadonlyMap<string, string>>(new Map());
+  const views = useRef(sentViews);
+  views.current = sentViews;
+  useEffect(
+    () => () => {
+      for (const url of views.current.values()) URL.revokeObjectURL(url);
+    },
+    [],
+  );
   const [note, setNote] = useState("");
   // Kept across retries of one message, so a retry stores nothing twice.
   const [messageId, setMessageId] = useState(() => crypto.randomUUID());
@@ -140,17 +174,20 @@ export function Chat({
 
   const send = useMutation({
     mutationFn: async ({ go }: { go: boolean }) => {
-      const snapshot = go ? undefined : await snapshotOf(viewer.current);
-      return sendRunMessage(run.id, {
+      const blob = go ? null : await viewer.current?.snapshot(MAX_MESSAGE_SNAPSHOT_BYTES);
+      const response = await sendRunMessage(run.id, {
         id: messageId,
         taskId,
         ...(go ? { go: true } : { text: note.trim() }),
         ...(!go && marks.length > 0 && { marks }),
-        ...(snapshot && { snapshot: { mimeType: "image/png", data: snapshot } }),
+        ...(blob && { snapshot: { mimeType: "image/png", data: await base64(blob) } }),
       });
+      return { response, blob };
     },
-    onSuccess: (response, { go }) => {
+    onSuccess: ({ response, blob }, { go }) => {
       client.setQueryData<Run>(["run", run.id], (r) => r && { ...r, state: response.state });
+      if (blob)
+        setSentViews((all) => new Map(all).set(response.eventId, URL.createObjectURL(blob)));
       setMessageId(crypto.randomUUID());
       if (!go) {
         setNote("");
@@ -163,7 +200,9 @@ export function Chat({
   const { items } = log;
   const last = items.at(-1);
   const active = run.state.status === "queued" || run.state.status === "running";
-  const said = items.filter((i) => i.from === "person");
+  const said = items.filter(
+    (i): i is Extract<ConversationItem, { from: "person" }> => i.from === "person",
+  );
   const lastGo = said.filter((i) => i.go).at(-1);
   // A go whose claim hasn't ended yet: the task is being redone.
   const redoing = active && lastGo !== undefined && lastGo.seq > log.endedAt;
@@ -196,10 +235,15 @@ export function Chat({
             <li key={item.id}>
               {item.from === "agent" ? (
                 <p className="text-ui whitespace-pre-wrap text-foreground">{item.text}</p>
+              ) : item.from === "stop" ? (
+                <p role="alert" className="text-ui text-destructive">
+                  {item.cancelled ? "The redo was stopped" : "The redo failed"}
+                  {item.error ? `: ${item.error}` : ""}. The run keeps its earlier results.
+                </p>
               ) : (
                 <Said
                   item={item}
-                  run={run}
+                  view={sentViews.get(item.id)}
                   about={item.taskId !== taskId && item.taskId ? titleOf(item.taskId) : undefined}
                   queued={redoing && item.seq > lastGo.seq}
                 />
@@ -293,12 +337,13 @@ export function Chat({
 
 function Said({
   item,
-  run,
+  view,
   about,
   queued,
 }: {
   item: Extract<ConversationItem, { from: "person" }>;
-  run: Run;
+  /** The view sent with it, when it was sent from this page. */
+  view?: string;
   /** Another task's title, when the message was about that one. */
   about?: string;
   /** Sent while a redo runs: the AI reads it after. */
@@ -322,14 +367,14 @@ function Said({
           ))}
         </ul>
       )}
-      {item.snapshot && (
-        <a href={reviewFileUrl(run.id, item.snapshot.sha256)} target="_blank" rel="noreferrer">
-          <img
-            src={reviewFileUrl(run.id, item.snapshot.sha256)}
-            alt="The view sent with this message"
-            className="max-h-28 rounded border border-border"
-          />
-        </a>
+      {view ? (
+        <img
+          src={view}
+          alt="The view sent with this message"
+          className="max-h-28 self-start rounded border border-border"
+        />
+      ) : (
+        item.snapshotKey && <p className="text-meta text-muted-foreground">Sent with the view</p>
       )}
       {queued && (
         <p className="text-meta text-muted-foreground">The AI reads this after the redo.</p>
@@ -338,10 +383,8 @@ function Said({
   );
 }
 
-/** The view as base64 PNG under the contract's cap, or undefined when there is no view. */
-async function snapshotOf(viewer: GridViewerHandle | null): Promise<string | undefined> {
-  const blob = await viewer?.snapshot(MAX_MESSAGE_SNAPSHOT_BYTES);
-  if (!blob) return undefined;
+/** A blob's bytes as plain base64 (not a data URL). */
+async function base64(blob: Blob): Promise<string> {
   const url = await new Promise<string>((done, fail) => {
     const reader = new FileReader();
     reader.onload = () => done(reader.result as string);
