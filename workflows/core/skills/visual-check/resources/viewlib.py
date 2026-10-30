@@ -3,6 +3,7 @@
 Coordinates on every image the agent reads: x is the column (labelled along the top), y is the row (labelled down the
 left side), both in pixels of the slice. A box is [row0, col0, row1, col1] = [y0, x0, y1, x1], ends inclusive.
 """
+import argparse
 import hashlib
 import json
 import math
@@ -30,12 +31,17 @@ def colour(label):
     return PALETTE[(int(label) - 1) % len(PALETTE)]
 
 
-def parse_window(s):
-    """'lo,hi' in HU, or the path of a workflow's anatomy.json (its `window_hu`)."""
-    if s.endswith('.json'):
-        lo, hi = json.loads(Path(s).read_text())['window_hu']
-    else:
-        lo, hi = (float(x) for x in s.split(','))
+def window_arg(s):
+    """`type=` of a `--window` option: 'lo,hi' in HU, or the path of a workflow's anatomy.json (its `window_hu`). Returns (lo, hi)."""
+    try:
+        if s.endswith('.json'):
+            lo, hi = json.loads(Path(s).read_text())['window_hu']
+        else:
+            lo, hi = (float(x) for x in s.split(','))
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        raise argparse.ArgumentTypeError(f'{s!r} is not "lo,hi" in HU or a json file with "window_hu": [lo, hi] ({type(e).__name__})') from e
+    if not lo < hi:
+        raise argparse.ArgumentTypeError(f'{s!r}: the low end must be below the high end')
     return lo, hi
 
 

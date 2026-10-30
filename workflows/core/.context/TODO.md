@@ -11,7 +11,7 @@ From the structural review of PR #62 (`review-pr62` p231, structure) and the cor
   sign rule and crop defaults are the mouse tibia protocol's: moving it to `orient-joint` needs the sign rule behind an argument.
 - **Fold the other slice renderers into `quad_view` (left from the quad-view PR).** Boxes as a layer would let `render_slices` (`--boxes`, `--points`; `orient_joint.py` imports its `render()`) and `render_crops` go, with `sam-segmentation` taking its keyframe from a quad pane. The 6-view sheet stays (4 of 4 catches). Also open: `quad_view` draws a point's name in 3D even where the surface hides it; a new mask's surface costs ~9 s cold (marching cubes and smoothing on the aligned grid), later calls reuse the cache.
 - **One `--anatomy` profile (p231 M1), what is left.** The QC windows are done: every mouse QC sheet goes through `viewlib.slice_sheet` and
-  takes `--window anatomy.json` (`viewlib.parse_window` reads the file's `window_hu`, as every renderer's `--window` now does). Still flags:
+  takes `--window anatomy.json` (`viewlib.window_arg` reads the file's `window_hu`, as every renderer's `--window` now does). Still flags:
   `--names 1=femur,...` (`quad_view`, `render_surfaces`), the required `--threshold-hu` in six scripts, and the speck size, 0.01 mm³ in `unlabelled`
   and `label_stats` and 0.005 in `disagree`; `orient_joint`'s lengths are required flags (the anatomy reference gives them). Direction: one
   `--anatomy` argument read through a `sidecar` helper supplies these defaults (flags only override), so a rat knee needs one new

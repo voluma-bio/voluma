@@ -1,18 +1,12 @@
 {
   "patella-volume": {
-    "labels": [3],
-    "volume": "bone-labels",
-    "definition": "deck #1: patella label (label 12, the proximal patellar ossification, is not included)"
+    "definition": "deck #1: the patella label alone (the proximal patellar ossification is a separate label and is not included)"
   },
   "lateral-meniscus-osteophyte-volume": {
-    "labels": [6],
-    "volume": "bone-labels",
-    "definition": "deck #2: label 6, the lab's working reading of meniscus plus spurs on the lateral side (not anatomically checked)"
+    "definition": "deck #2: the lab's working reading of meniscus plus spurs on the lateral side (not anatomically checked)"
   },
   "medial-meniscus-osteophyte-volume": {
-    "labels": [5],
-    "volume": "bone-labels",
-    "definition": "deck #3: label 5, the lab's working reading of meniscus plus spurs on the medial side (not anatomically checked)"
+    "definition": "deck #3: the lab's working reading of meniscus plus spurs on the medial side (not anatomically checked)"
   },
 
   "roi-iioc": {

@@ -15,14 +15,17 @@ and, for `iioc.py`, the geometry that needs the protocol's own steps (heights, w
 BV/TV, and the thickness and node measures, come from `morphometry.py` (`bone-morphometry`). BV uses the measurement threshold (`microct-core`), which `morphometry.py` computes from
 `--hu-json`, kept apart from `--grid`, the grid the region is on.
 
-**One spec for the numbers.** `resources/protocol.json` is keyed by output id (`outputs.json`'s ids) and holds every number the
-protocol fixes and the output ids a script writes its values under: ROI-3's start, length and clearance, Ct.Th's depth and slab,
-the plate patch width, the clearances of ROI-2, the label ids of #1–3, the points each femoral distance joins. A script takes
-`--spec protocol.json` and reads its entry; there is no flag for a protocol number or an output id, and the record's `params` say
-what was used. A region script reads the entry of its own region (`roi-iioc`, `roi-iioc-trabecular`, `roi-metaphyseal`);
-`morphometry.py` and `measure.py` take `--output <id>`, the region's id (or the slab's, or the values' own) whose entry they read.
-Change a protocol number there, once; prose here and in the examples names the quantity, not its value. The display window of every
-QC image is `anatomy.json`'s (`--window anatomy.json`).
+**One spec for the numbers.** `/workflow/workflows/mouse-oa/skills/mouse-oa/resources/protocol.json` is keyed by output id
+(`outputs.json`'s ids) and holds every number the protocol fixes and the output ids a script writes its values under: ROI-3's
+start, length and clearance, Ct.Th's depth and slab, the plate patch width, the clearances of ROI-2, the points each femoral
+distance joins. A script takes that path as `--spec` and reads its entry; there is no flag for a protocol number or an output id, and
+the record says what was used (the spec's hash in `inputs`, and its numbers in `params`). A label volume (#1-3) takes its label ids
+from `/workflow/workflows/mouse-oa/outputs.json` (`measure.py --outputs`), the one place the labels are declared. A region script
+reads the entry of its own region (`roi-iioc`, `roi-iioc-trabecular`, `roi-metaphyseal`); `morphometry.py` and `measure.py` take
+`--output <id>`, the region's id (or the slab's, or the values' own) whose entry they read. Change a protocol number there, once;
+prose here and in the examples names the quantity, not its value. Every QC image uses the workflow's display window: pass
+`--window /workflow/workflows/mouse-oa/skills/mouse-oa/references/anatomy.json` to `tibia_frame.py`, `iioc.py`,
+`tibial_trabecular.py`, `metaphysis_roi.py`, `morphometry.py trabecular` and `region_from_curves.py` (the first four require it).
 
 **Grid rule.** A volume is counted where the region is defined: a region traced on the aligned stack is counted on
 the aligned stack, on `tibia-hu.npy`, a linear resampling of the scan. Counting ROI-1 on the unresampled scan grid
@@ -41,8 +44,8 @@ on.
 | 6 | Trace the growth plate's distal face (annotation C), then ROI-3 and the cortex under the plate (`--out meta`: the `cortical` task reads `/outputs/metaphyseal-roi/meta/`) | `metaphysis_roi.py` | `qc-roi3.jpg` and `qc-roi3-axial.jpg` against `examples/README.md` (metaphyseal-roi) |
 | 7 | TV, BV, BV/TV of ROI-1 and ROI-2 (#4–6, #13–15); TV, BV, BV/TV, Tb.N, Tb.Th, Tb.Sp, nodes and ends of ROI-3 (#16–23) | `morphometry.py volumes --output roi-iioc` and `roi-iioc-trabecular`; `trabecular --output roi-metaphyseal` | the QC images `trabecular` writes (`bone-morphometry`) |
 | 8 | Ct.Th at the two levels below the distal face (#24, #25), on the cortex mask and face `metaphyseal-roi` wrote (the face is traced once; `metaphysis_roi.py` is not run again); plate thickness per compartment (#11, #12) on the plate runs `iioc.py` wrote, under the articular top surface | `morphometry.py cortical --output roi-cortex-100um`, `roi-cortex-1000um`, `roi-subchondral-plate-medial` or `-lateral` (the slab's declared id; its depth and thickness are in the spec) | its QC image against `examples/README.md` (cortical, subchondral-plate) |
-| 9 | Femoral landmarks: four points on a 3D render of the femur (`regions-and-landmarks`, picks named `a` to `d`), then compute | `femoral_frame.py --spec` on the `points.json` files `pick.py` wrote | each `pick-check.jpg` against `examples/README.md` (femoral-geometry); the script refuses a bad landmark (D) |
-| 10 | Volumes of labels 3, 5 and 6 (#1–3) | `measure.py --spec resources/protocol.json --output patella-volume lateral-meniscus-osteophyte-volume medial-meniscus-osteophyte-volume --labels labels.npy` | the 3D sheet (`visual-check`) |
+| 9 | Femoral landmarks: four points on a 3D render of the femur (`regions-and-landmarks`, picks named `a` to `d`), then compute | `femoral_frame.py --spec <protocol.json>` on the `points.json` files `pick.py` wrote | each `pick-check.jpg` against `examples/README.md` (femoral-geometry); the script refuses a bad landmark (D) |
+| 10 | Volumes of labels 3, 5 and 6 (#1–3) | `measure.py --spec <protocol.json> --outputs /workflow/workflows/mouse-oa/outputs.json --output patella-volume lateral-meniscus-osteophyte-volume medial-meniscus-osteophyte-volume --labels labels.npy` | the 3D sheet (`visual-check`) |
 | 11 | Hand the points to the lab | `amira_landmarks.py` | the lab opens it in Amira |
 
 `iioc.py --gp-shift-mm` and `tibial_trabecular.py --upper-shift-mm` rerun with a moved trace, to see how much a

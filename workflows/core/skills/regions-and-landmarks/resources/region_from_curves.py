@@ -171,7 +171,7 @@ morphs smoothly; it is not an extrusion. Trace slices where the shape changes, a
             '--clearance-mm', type=float, default=0, help='mm: also drop voxels closer than this to the outer surface of the bone mask you pass (periosteum for a filled bone, not the inner surface of the cortex)'
         )
         q.add_argument('--hu', type=sidecar.existing, help='hu.npy: background for the check image, and the grid shape')
-        q.add_argument('--window', metavar='lo,hi', help="check image display window in HU, or the workflow's anatomy.json (default: automatic)")
+        q.add_argument('--window', type=vl.window_arg, metavar='lo,hi', help="check image display window in HU, or the workflow's anatomy.json (default: automatic)")
         q.add_argument('--out', required=True, help='output directory (created)')
     a = ap.parse_args()
 
@@ -230,7 +230,7 @@ morphs smoothly; it is not an extrusion. Trace slices where the shape changes, a
         ),
     )
     check = out / 'region-check.jpg'
-    check_figure(check, region, bone, hu if a.hu else None, axis, curves, vl.parse_window(a.window) if a.window else None, sp[0])
+    check_figure(check, region, bone, hu if a.hu else None, axis, curves, a.window, sp[0])
     nz = np.argwhere(region)
     sidecar.emit(
         region=str(out / 'region.npy'),

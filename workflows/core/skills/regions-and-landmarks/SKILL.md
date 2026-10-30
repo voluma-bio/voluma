@@ -28,7 +28,7 @@ where it has one; use that instead of assembling the region here.
 ## Regions from curves
 
 `region_from_curves.py` builds a region between two traced surfaces, or inside a polygon swept between slices,
-clipped to a bone mask with an optional clearance from its outer surface, and writes `region-check.jpg` (`--window anatomy.json` sets its display window). Its curve
+clipped to a bone mask with an optional clearance from its outer surface, and writes `region-check.jpg` (`--window` sets its display window: `lo,hi`, or a workflow's `anatomy.json` by its full path). Its curve
 schema (`{"axis", "height", "slices": {"<index>": [[row, col], ...]}}`) is the one way a surface is traced in any
 script: a workflow's own region scripts read the same schema, so a trace means the same thing everywhere. Trace on
 slices you have looked at with a pixel grid, where the shape changes and at the ends of the region; fewer than about

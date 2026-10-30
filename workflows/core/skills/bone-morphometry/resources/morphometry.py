@@ -254,7 +254,7 @@ def trabecular(a):
     rows_ax, cols_ax = (d for d in range(3) if d != axis)
     lo, hi = box[axis].start, box[axis].stop
     idx = [int(lo + (hi - lo) * f) for f in (0.25, 0.5, 0.75)]
-    window = vl.parse_window(a.window) if a.window else vl.auto_window(np.asarray(hu[hu.shape[0] // 2]))
+    window = a.window or vl.auto_window(np.asarray(hu[hu.shape[0] // 2]))
     qc = [
         vl.slice_sheet(out / 'qc.jpg', hu, [(roi, 'cyan'), (bone, 'orange')], axis, idx, window,
                        crops=[(box[rows_ax].start, box[cols_ax].start, box[rows_ax].stop, box[cols_ax].stop)] * 3,
@@ -269,6 +269,7 @@ def trabecular(a):
             'spacing_zyx_mm': g['spacing_zyx_mm'],
             'inputs': {str(q): sidecar.sha256_file(q) for q in inputs + [a.grid or sidecar.sidecar_path(a.roi)]},
             'threshold_hu': threshold,
+            'params': {k: v for k, v in entry.items() if k not in ('values', 'region')},
             'skeleton_counts': counts,
             'crop_slices_zyx': [[s.start, s.stop] for s in box],
         },
@@ -388,6 +389,7 @@ def cortical(a):
             'grid_id': g['grid_id'],
             'spacing_zyx_mm': g['spacing_zyx_mm'],
             'inputs': {str(q): sidecar.sha256_file(q) for q in (a.cortex, a.surface, a.grid, a.spec)},
+            'params': {k: v for k, v in entry.items() if k != 'value'},
         },
         qc=str(qc),
         objects={a.output: slab_entry},
@@ -415,7 +417,7 @@ def main():
                        description='TV, BV, BV/TV, Tb.Th, Tb.Sp, Tb.N [, Tb.Nd, Tb.Tm] of an ROI, two QC images and the thickness and separation maps. '
                        'Writes <out>/morphometry.json, qc.jpg, qc-maps.jpg, thickness-mm.npy, separation-mm.npy.')
     t.add_argument('--qc-axis', type=int, default=1, choices=[0, 1, 2], help='axis the QC slices are cut across')
-    t.add_argument('--window', metavar='lo,hi', help="QC display window in HU, or the workflow's anatomy.json (default: automatic)")
+    t.add_argument('--window', type=vl.window_arg, metavar='lo,hi', help="QC display window in HU, or the workflow's anatomy.json (default: automatic)")
     t.set_defaults(fn=trabecular)
     c = sub.add_parser('cortical', parents=[proto], formatter_class=fmt, help='Ct.Th in a slab at a depth below a reference surface',
                        description='Ct.Th: mean largest-contained-sphere diameter over the cortical voxels of a slab at a depth below a '

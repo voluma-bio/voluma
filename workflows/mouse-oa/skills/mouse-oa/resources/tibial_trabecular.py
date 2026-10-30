@@ -61,7 +61,7 @@ def compartment(parent, gp, ann, vox, shell_mm, growth_mm, upper_shift=0.0):
 def main():
     ap = sidecar.parser(__doc__)
     ap.add_argument('--spec', type=sidecar.existing, required=True, help="the workflow's protocol.json: the entry roi-iioc-trabecular gives the clearances")
-    ap.add_argument('--window', metavar='lo,hi', required=True, help="QC display window in HU, or the workflow's anatomy.json")
+    ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', required=True, help="QC display window in HU, or the workflow's anatomy.json")
     ap.add_argument('--iioc-tissue', type=sidecar.existing, required=True, help='iioc-tissue.npy from iioc.py (ROI-1), with its sidecar beside it')
     ap.add_argument('--growth-plate-face', type=sidecar.existing, required=True, help='growth-plate-proximal-face.npy from iioc.py')
     ap.add_argument('--hu-aligned', type=sidecar.existing, required=True, help='tibia-hu.npy from tibia_frame.py (for the QC image)')
@@ -89,7 +89,7 @@ def main():
         'upper_shift_mm': a.upper_shift_mm,
     }
     np.save(out / 'iioc-trab-tissue.npy', roi)
-    meta = {'inputs': [a.iioc_tissue, a.growth_plate_face, a.annotations], 'params': params}
+    meta = {'inputs': [a.iioc_tissue, a.growth_plate_face, a.annotations, a.spec], 'params': params}
     sidecar.write(out / 'iioc-trab-tissue.npy', grid_id=g['grid_id'], spacing_zyx_mm=g['spacing_zyx_mm'], **meta)
     like = sidecar.sidecar_path(a.iioc_tissue)
     placed = {
@@ -98,7 +98,7 @@ def main():
     }
     vs = sorted(map(int, ann['under_plate_curves']['slices']))
     picks = [vs[i] for i in np.linspace(0, len(vs) - 1, 6).astype(int)]
-    qc = vl.slice_sheet(out / 'qc-coronal.jpg', hu, [(parent, 'lime'), (roi, 'cyan')], 1, picks, vl.parse_window(a.window),
+    qc = vl.slice_sheet(out / 'qc-coronal.jpg', hu, [(parent, 'lime'), (roi, 'cyan')], 1, picks, a.window,
                         axis_names=('W', 'V', 'U'), voxel_mm=vox,
                         titles=[f'ROI-2 (cyan) inside ROI-1 (green), V={v}' for v in picks])
     sidecar.emit_values(

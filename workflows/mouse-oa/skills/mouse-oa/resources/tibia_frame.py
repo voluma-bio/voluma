@@ -86,7 +86,7 @@ def main():
     ap.add_argument('--hu-json', type=sidecar.existing, required=True, help='hu.json that scan-intake wrote: grid id and spacing')
     ap.add_argument('--labels', type=sidecar.existing, required=True, help='labels.npy on the scan grid')
     ap.add_argument('--label', type=int, required=True, help='label id of the bone (tibia = 2)')
-    ap.add_argument('--window', metavar='lo,hi', required=True, help="QC display window in HU, or the workflow's anatomy.json")
+    ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', required=True, help="QC display window in HU, or the workflow's anatomy.json")
     ap.add_argument('--out', required=True, help='output directory (created)')
     ap.add_argument('--name', default='tibia', help='prefix of the output files')
     ap.add_argument(
@@ -170,7 +170,7 @@ def main():
         )
     fr.save(frame, out / f'{a.name}-frame.json')
     vs = [int(v) for v in np.linspace(shape_zyx[1] * 0.2, shape_zyx[1] * 0.8, 6)]
-    qc = vl.slice_sheet(out / f'{a.name}-frame-qc.jpg', aligned, [(amask, 'cyan')], 1, vs, vl.parse_window(a.window),
+    qc = vl.slice_sheet(out / f'{a.name}-frame-qc.jpg', aligned, [(amask, 'cyan')], 1, vs, a.window,
                         axis_names=('W index (joint at top)', 'V index', 'U index'), titles=[f'coronal V={v}' for v in vs], voxel_mm=sp[0])
     sidecar.emit_values(
         out / f'{a.name}.json',

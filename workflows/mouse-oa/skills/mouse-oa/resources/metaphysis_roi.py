@@ -115,7 +115,7 @@ def cortex_depth(bone, dist, roi_slices, max_layers=40):
 def main():
     ap = sidecar.parser(__doc__)
     ap.add_argument('--spec', type=sidecar.existing, required=True, help="the workflow's protocol.json: the entry roi-metaphyseal gives the slab's start, length and clearance")
-    ap.add_argument('--window', metavar='lo,hi', required=True, help="QC display window in HU, or the workflow's anatomy.json")
+    ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', required=True, help="QC display window in HU, or the workflow's anatomy.json")
     ap.add_argument('--hu-aligned', type=sidecar.existing, required=True, help='tibia-hu.npy from tibia_frame.py')
     ap.add_argument('--mask', type=sidecar.existing, required=True, help='tibia-mask.npy from tibia_frame.py')
     ap.add_argument('--hu-json', type=sidecar.existing, required=True, help='hu.json of the scan: the lab threshold in HU comes from its calibration')
@@ -167,7 +167,7 @@ def main():
     meta = {'distal_face': 'traced distal curves', 'cortex_estimate_mm': est, 'cortex_mm_used': cortex_mm, 'threshold': a.threshold}
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    inputs = [a.hu_aligned, a.mask, a.annotations, a.proximal_face, a.proximal_valid]
+    inputs = [a.hu_aligned, a.mask, a.annotations, a.proximal_face, a.proximal_valid, a.spec]
     params = dict(meta, **{k: p[k] for k in ('start_um', 'length_um', 'cortex_clearance_um', 'cortex_search_factor')})
     for name, arr in (('roi3-tissue.npy', roi), ('cortex.npy', cortex)):
         np.save(out / name, arr)
@@ -179,7 +179,7 @@ def main():
         'cortex': objects.mask(out / 'cortex-object.npy', cortex, like=like, **meta),
         'growth-plate-distal-face': objects.surface(out / 'growth-plate-distal-face.npy', gd, 0, like=like, where=footprint(tib), **meta),  # heights along W
     }
-    window = vl.parse_window(a.window)
+    window = a.window
     overlays = [(roi, 'cyan'), (cortex, 'orange')]
     vs = [int(v) for v in np.linspace(*np.flatnonzero(roi.any(axis=(0, 2)))[[0, -1]], 4)]
     wm = int(np.median(np.argwhere(roi)[:, 0]))

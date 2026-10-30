@@ -124,7 +124,7 @@ def first_run(bone, v, u):
 def main():
     ap = sidecar.parser(__doc__)
     ap.add_argument('--spec', type=sidecar.existing, required=True, help="the workflow's protocol.json: the entry roi-iioc gives the plate patch width")
-    ap.add_argument('--window', metavar='lo,hi', required=True, help="QC display window in HU, or the workflow's anatomy.json")
+    ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', required=True, help="QC display window in HU, or the workflow's anatomy.json")
     ap.add_argument('--hu-aligned', type=sidecar.existing, required=True, help='tibia-hu.npy from tibia_frame.py')
     ap.add_argument('--mask', type=sidecar.existing, required=True, help='tibia-mask.npy from tibia_frame.py')
     ap.add_argument('--frame', type=sidecar.existing, required=True, help='tibia-frame.json from tibia_frame.py')
@@ -297,7 +297,7 @@ def main():
     }
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    inputs = [a.hu_aligned, a.mask, a.frame, a.annotations]
+    inputs = [a.hu_aligned, a.mask, a.frame, a.annotations, a.spec]
     params = {'threshold': a.threshold, 'gp_shift_mm': a.gp_shift_mm}
     arrays = {'iioc-tissue.npy': roi, 'growth-plate-proximal-valid.npy': gp_traced}
     arrays.update({f'{s}-plate-run.npy': m for s, m in plates.items()})
@@ -323,7 +323,7 @@ def main():
     sidecar.write(
         out / 'iioc-tissue-scan.npy', like=a.hu_json, inputs=[a.hu_json, a.frame, a.mask], params=params, script='iioc.py'
     )
-    qc = qc_images(out, h, roi, gp, plates, values, height_ids, v_star, vox, vl.parse_window(a.window))
+    qc = qc_images(out, h, roi, gp, plates, values, height_ids, v_star, vox, a.window)
     sidecar.emit_values(
         out / 'iioc.json',
         values,

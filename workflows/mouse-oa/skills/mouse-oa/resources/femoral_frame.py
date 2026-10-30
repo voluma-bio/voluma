@@ -1,7 +1,7 @@
 """Measure the distal femur from four landmarks (DFL, DFW, W/L), check them and build the landmark frame.
 
 Landmarks (points files on the scan grid, as `pick.py` writes them, one per view or all four in one; each name once; zyx voxel indices, floats allowed;
-see ../references/oa-protocol.md for how to place them). The spec (--spec, protocol.json) names the pair each distance joins:
+see ../references/oa-protocol.md for how to place them). The spec (--spec, protocol.json) says which pair each distance joins (a-b and c-d) and gives the definitions and ruler ids:
   a  midpoint of the upper line of the intercondylar groove      c  midpoint of the ridge on the lateral condyle
   b  intercondylar notch                                         d  vertex of the medial condyle
 DFL = |a - b|, DFW = |c - d|, W/L = DFW / DFL (deck #26-28), all straight 3D distances through physical spacing, computed by
@@ -19,7 +19,6 @@ Example: python femoral_frame.py --spec protocol.json --landmarks points-ab.json
 Exits 2 with one sentence on bad input, before writing anything.
 """
 
-import json
 from pathlib import Path
 
 import measure
@@ -27,6 +26,7 @@ import numpy as np
 import sidecar
 from scipy import ndimage as ndi
 
+NAMES = ('a', 'b', 'c', 'd')
 DFL_ID, DFW_ID, RATIO_ID = 'distal-femoral-length-dfl', 'distal-femoral-width-dfw', 'width-length-ratio'
 SNAP_BOX = 40  # voxels either side of a landmark searched for the nearest femur voxel
 MAX_OFF_BONE_MM = 0.05  # a landmark further than this from femur bone fails the check
@@ -61,18 +61,18 @@ def main():
     ap.add_argument('--label', type=int, default=1, help='femur label id')
     a = ap.parse_args()
     grid = sidecar.grid(a.hu_json)
-    spec = json.loads(Path(a.spec).read_text())
     lm = sidecar.load_points(a.landmarks, grid['grid_id'])
-    values, _, placed = measure.measure(spec, [DFL_ID, DFW_ID, RATIO_ID], a.hu_json, points=lm)
-    (a_, b_), (c_, d_) = spec[DFL_ID]['points'], spec[DFW_ID]['points']  # a, b, c, d
-    names = (a_, b_, c_, d_)
+    if any(n not in lm for n in NAMES):
+        sidecar.fail(f'place a, b (length) and c, d (width); the points files hold {sorted(lm)}')
+    values, _, placed = measure.measure(a.spec, [DFL_ID, DFW_ID, RATIO_ID], a.hu_json, points=lm)
+    names = NAMES
     sp = np.array(grid['spacing_zyx_mm'], float)
     p = {i: np.array(lm[i], float) for i in names}
     dfl, dfw = values[DFL_ID]['value'], values[DFW_ID]['value']
     pm = {i: p[i] * sp for i in names}  # mm, zyx
     checks = {}
-    si_seed = pm[a_] - pm[b_]
-    ml = unit(pm[c_] - pm[d_])
+    si_seed = pm['a'] - pm['b']
+    ml = unit(pm['c'] - pm['d'])
     si_perp = si_seed - (si_seed @ ml) * ml
     if np.linalg.norm(si_perp) < 0.01:
         sidecar.fail('the length axis a-b is parallel to the width axis c-d: re-place the landmarks')
@@ -96,7 +96,7 @@ def main():
                      'end-on view of the joint face, so a-b runs across the notch. Render a view along the shaft '
                      '(regions-and-landmarks) and re-place a and b on it')
     centroid = np.argwhere(femur[::4, ::4, ::4]).mean(axis=0) * 4 * sp
-    if (centroid - (pm[c_] + pm[d_]) / 2) @ si <= 0:
+    if (centroid - (pm['c'] + pm['d']) / 2) @ si <= 0:
         sidecar.fail('SI (b toward a) points away from the femoral bulk: a is not the groove end nearer the shaft, or the '
                      'points are on the wrong view. Re-place a and b; do not explain this away')
     out = Path(a.out)
@@ -104,7 +104,7 @@ def main():
     sidecar.emit_values(
         out / 'femoral.json',
         values,
-        meta={'landmarks_zyx': lm, 'frame': frame, 'checks': checks},
+        meta={'landmarks_zyx': lm, 'frame': frame, 'checks': checks, 'inputs': {a.spec: sidecar.sha256_file(a.spec)}},
         objects=placed,
     )
 

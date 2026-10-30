@@ -29,7 +29,7 @@ holds rules, not experiment logs.
   and the ids its values are written under (`mouse-oa`: ROI offsets and clearances, Ct.Th depth and slab, label ids, the points of a distance).
   A script reads its entry through `sidecar.protocol` from `--spec`; a core script keeps no default for a protocol number or an output id, and
   a protocol number is never a flag or prose the agent retypes. A QC image's window is `--window` (`lo,hi` or the workflow's `anatomy.json`,
-  `viewlib.parse_window`), and a sheet of slices with overlays is drawn by `viewlib.slice_sheet`, not by hand.
+  `viewlib.window_arg`), and a sheet of slices with overlays is drawn by `viewlib.slice_sheet`, not by hand.
 - **Thresholds:** two, and they are not interchangeable. The segmentation threshold (mask building) is a flag the caller passes,
   from the workflow's anatomy reference. The measurement threshold (BV, BV/TV) is the lab's 2.16/cm converted with the calibration
   block of `hu.json` (`sidecar.bone_threshold_hu`); no script holds a literal HU value for it. BV is the region and HU above the
