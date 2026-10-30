@@ -7,8 +7,8 @@ is no runs list: Home (`features/study`) replaces it.
 - **Task titles** come from `workflows/mouse-oa/tasks.json`, read through `catalog["mouse-oa"]`
   from `@voluma/workflow/bundled` (JSON imports parsed with the contract's schemas; the API's
   workflow catalog is the same export; no endpoint serves it) by the bundle's `taskTitle` (a task
-  without a title shows its id); don't add another copy. The API's Railway watch paths include
-  `/workflows/*/tasks.json` and `outputs.json` (see `apps/api/.context/deploy.md`), so a change
+  without a title shows its id); don't add another copy. The API's build filter in `render.yaml` includes
+  `workflows/*/tasks.json` and `outputs.json` (see `apps/api/.context/deploy.md`), so a change
   redeploys the web app. The page reads the plan from the first
   `revision.started` itself because `fold` doesn't expose it.
 - **The page** (`run-page.tsx`) is the R2 run screen of the full-flow prototype: a researcher sees

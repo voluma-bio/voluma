@@ -264,7 +264,7 @@ const server = serve(
   ({ address, port }) => console.log(`api listening on ${address}:${port}`),
 );
 
-// Stay under the host's drain period (Railway's draining period, 30 s: apps/api/.context/deploy.md).
+// Stay under the host's shutdown delay (30 s on Render: render.yaml, apps/api/.context/deploy.md).
 const DRAIN_MS = 10_000;
 let stopping = false;
 process.once("SIGTERM", shutdown);

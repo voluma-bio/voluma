@@ -52,8 +52,9 @@ const UPSTREAM_TIMEOUT_MS = MAX_CALL_MS;
 
 /**
  * Quiet time on an upstream event stream before the gateway writes a comment line to the client.
- * Railway's edge cuts a response that sends no byte for 300 s (measured), and a SAM call can be
- * quiet that long while Meta processes the video.
+ * The host's proxy limits how long a response may stay silent (Railway's cut at 300 s, measured;
+ * Render documents only a 100-minute cap on a whole response), and a SAM call can be quiet for
+ * minutes while Meta processes the video. A comment line keeps any such idle limit from firing.
  */
 const KEEPALIVE_MS = 60_000;
 /** Tries to write a call's end to the database before leaving the row for the stale sweep. */
@@ -264,8 +265,8 @@ export function createGateway(deps: GatewayDeps) {
     const url = `${baseUrls[provider]}${call.upstreamPath}${call.query ? `?${call.query}` : ""}`;
 
     // A model call that asks for an event stream is answered at once with 200 and the stream's
-    // headers, so Railway's edge (which cuts a response with no byte for 300 s) sees bytes
-    // while Meta holds its own headers. The upstream's outcome then travels in the stream: its
+    // headers, so the host's proxy (which may cut a response that sends no byte for a while)
+    // sees bytes while Meta holds its own headers. The upstream's outcome then travels in the stream: its
     // body on 2xx, one `gateway-error` event otherwise.
     const early =
       matched.route.earlyStream === true &&

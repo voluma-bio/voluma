@@ -1,6 +1,6 @@
 /**
  * The runner's settings: the repo's `.env` (or the file `VOLUMA_ENV_FILE` names) if there
- * is one, over which the process environment (Railway's variables) takes precedence. Read
+ * is one, over which the process environment (the host's variables) takes precedence. Read
  * into a plain object, never written to `process.env`, so keys are not inherited by child
  * processes or picked up by other libraries; callers pass each one on explicitly.
  */
@@ -141,12 +141,12 @@ const SANDBOX_IMAGE =
 
 /**
  * The commit this runner's checkout is at, which a run records as the source of its workflow
- * files: Railway's (the build has no `.git`), else the checkout's (`pnpm dev`; uncommitted edits
+ * files: the host's (Render sets `RENDER_GIT_COMMIT`), else the checkout's (`pnpm dev`; uncommitted edits
  * to `workflows/` are not in it).
  */
 function checkoutCommit(): string {
   const sha =
-    optional("RAILWAY_GIT_COMMIT_SHA") ??
+    optional("RENDER_GIT_COMMIT") ??
     execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error(`the checkout's commit is not a SHA: ${sha}`);
   return sha;

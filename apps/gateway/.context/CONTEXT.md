@@ -58,8 +58,8 @@ change it safely.
 - **Early stream headers and keepalive.** A Meta model call (route flag `earlyStream` in `providers.ts`; Anthropic and OpenAI keep real
   429/529 and `retry-after`) with `Accept: text/event-stream` (what
   `voluma-sam` sends; the gateway does not read `stream` from the body) is answered with `200
-  text/event-stream` right after admission, before the upstream is called. Railway's edge cuts a
-  response with no byte for 300 s and Meta can hold its headers longer. Every refusal made before
+  text/event-stream` right after admission, before the upstream is called. A host proxy may
+  cut a response with no byte for minutes (Railway's did at 300 s) and Meta can hold its headers longer. Every refusal made before
   admission still carries a normal status.
   After that the upstream's outcome travels in the stream: on 2xx its body is piped; on a non-2xx
   or a network error the gateway writes one terminal `event: gateway-error`

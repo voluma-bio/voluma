@@ -30,7 +30,7 @@ function required(name: string): string {
 }
 
 const log = (line: string) => console.log(`${new Date().toISOString()} ${line}`);
-const instance = `${process.env.RAILWAY_DEPLOYMENT_ID ?? "local"}-${randomUUID().slice(0, 8)}`;
+const instance = `${process.env.RENDER_INSTANCE_ID ?? "local"}-${randomUUID().slice(0, 8)}`;
 const SWEEP_MS = 5 * 60_000;
 const drainMs = Number(process.env.GATEWAY_DRAIN_SECONDS ?? 60) * 1000;
 

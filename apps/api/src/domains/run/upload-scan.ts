@@ -2,7 +2,7 @@
  * Uploads a local scan folder as a lab member, through the same API the browser uses
  * (`@voluma/contracts/run`, Uploads), so a prepared scan reaches staging without a browser.
  *   pnpm --filter @voluma/api upload:scan --dir <folder> --name "<scan name>"
- * Reads VOLUMA_URL (the app's origin, e.g. https://volumaapi-staging.up.railway.app),
+ * Reads VOLUMA_URL (the app's origin, e.g. https://voluma-api.onrender.com),
  * VOLUMA_EMAIL and VOLUMA_PASSWORD (a member's own WorkOS password sign-in) from the
  * environment or the repo .env, and never prints the password. Prints the new input's id;
  * the scan then shows in the start screen's picker.
