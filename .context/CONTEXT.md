@@ -6,7 +6,7 @@ commands are in [AGENTS.md](../AGENTS.md).
 ## Shape
 
 ```
-apps/web        React + Vite. shell/ mounts routes and draws the top bar; features/run and features/review own screens
+apps/web        React + Vite. shell/ mounts routes and the `AppShell` frame (one `QueryClient` in `SignedIn`; no top bar); features/run and features/review own screens
 apps/api        Node server on Postgres (Drizzle), each domain a Hono app. src/index.ts is the
                 composition root: the only code that reads env; it builds the adapters and
                 mounts domains/run at /api/run/ (runs, the queue, the event log) and domains/review at
@@ -288,8 +288,8 @@ Import boundaries are written rules in `AGENTS.md`; Biome uses its recommended r
 `[data-theme="light"]`, and again under `[data-theme="dark"]`. `theme.css`
 maps them into Tailwind with `@theme inline`, so a utility reads the token
 where it is used and `data-theme` on any element themes its subtree. That is
-how `/dev/ui` shows both themes side by side. Review now selects light, following
-Andrew's implementation direction. Tailwind's default palette is removed.
+how Storybook shows both themes side by side. The app is light on home and study
+pages and dark in the 3D review. Tailwind's default palette is removed.
 
 The token names are shadcn/ui's (`background`, `card`, `muted`, `accent`,
 `primary`, `destructive`, `border`, `ring`, `chart-*`, `sidebar-*`), with
@@ -314,8 +314,7 @@ route. No synthetic measurements or simulated services are mounted.
 contract. Reports, revision selection and command UI remain available for the
 real adapter; until it exists the workspace shows explicit empty states. Shared
 contracts and API client are unchanged from main. Report/viewer splits retain
-react-resizable-panels to preserve the verified nested maximize/restore behavior;
-the unrelated shared `SplitPanel` API and `/dev/ui` remain unchanged.
+react-resizable-panels to preserve the verified nested maximize/restore behavior.
 
 Images come only from the run: each task's grid and what is drawn on it are the
 run's published blocks and converted assets. The [Review specification][review-spec]

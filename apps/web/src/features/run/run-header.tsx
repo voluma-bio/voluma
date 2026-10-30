@@ -4,26 +4,36 @@
  * left to check; Run details (started, took, settled cost); Stop while it is live; Open in 3D.
  * Alerts: the visitor-keys form while the run waits for its starter's keys, and why it failed.
  */
+
 import { useMutation } from "@tanstack/react-query";
 import { ApiError, cancelRun, resendKeys } from "@voluma/api-client";
 import type { Run } from "@voluma/contracts/run";
 import type { RunSpend } from "@voluma/contracts/spend";
 import type { StudyDetail } from "@voluma/contracts/study";
-import { Button, buttonClass } from "@voluma/ui";
-import { formatDuration, formatUsd, KeysForm } from "@voluma/ui/run";
+import {
+  formatDuration,
+  formatUsd,
+  KeysForm,
+  plainError,
+  shortDate,
+  useNow,
+} from "@voluma/run-view";
+import {
+  Button,
+  Facts,
+  Popover,
+  PopoverClose,
+  Progress,
+  type Status,
+  StatusMark,
+} from "@voluma/ui";
 import { catalog, workflowName } from "@voluma/workflow/bundled";
 import { ChevronDown } from "lucide-react";
-import { Popover } from "radix-ui";
 import { useState } from "react";
 import { Link } from "react-router";
 import { reviewHref } from "./overview";
-import { plainError } from "./run-model";
-import { useNow } from "./status";
 
 const { taskTitle } = catalog["mouse-oa"];
-
-const day = (iso: string) =>
-  new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 
 /** "OA6-1, right knee", from the study's scan; the scan's file name when the study can't say. */
 function scanTitle(run: Run, study: StudyDetail | undefined) {
@@ -45,25 +55,27 @@ const workflowLabel = (run: Run, study: StudyDetail | undefined) => {
 };
 
 /**
- * The run's word for where it is, beside its progress. A queued run with a plan has started: it
- * lost its runner. One held after the AI's provider failed says so (`waitingForProvider`); its retry time stays off screen.
+ * Where the run is, as a status mark beside its progress; the header counts items to check
+ * beside it, so the word carries no count. A queued run with a plan has started (it lost its
+ * runner), so it reads Paused. One held after the AI's provider failed says so
+ * (`waitingForProvider`); its retry time stays off screen.
  */
-function statusWord(run: Run, started: boolean): string {
+function runState(run: Run, started: boolean): { status: Status; label?: string } {
   const { state } = run;
   switch (state.status) {
     case "queued":
-      if (state.waitingForProvider) return "Waiting: the AI is unavailable";
-      return started ? "Paused" : "Waiting to start";
+      if (state.waitingForProvider) return { status: "paused", label: "AI unavailable" };
+      return { status: started ? "paused" : "waiting" };
     case "running":
-      return "Running";
+      return { status: "running" };
     case "awaiting-keys":
-      return "Waiting for your keys";
+      return { status: "check", label: "Needs your keys" };
     case "ended":
       return state.outcome === "completed"
-        ? "Finished"
+        ? { status: "done" }
         : state.outcome === "failed"
-          ? "Failed"
-          : "Stopped";
+          ? { status: "stopped", label: "Failed" }
+          : { status: "stopped" };
   }
 }
 
@@ -98,9 +110,9 @@ export function RunHeader({
   return (
     <header className="grid grid-cols-[minmax(0,auto)_minmax(0,1fr)_auto] items-center gap-7 border-b border-border bg-card px-6 py-3 max-[1100px]:grid-cols-1 max-[1100px]:gap-3 max-[1100px]:px-4">
       <div className="min-w-0">
-        <Link to={crumb.to} className="text-meta font-medium text-primary-text hover:underline">
-          {crumb.label}
-        </Link>
+        <Button asChild variant="link" className="text-meta">
+          <Link to={crumb.to}>{crumb.label}</Link>
+        </Button>
         <h1 className="mt-0.5 truncate text-lg font-semibold">{title}</h1>
         <p className="flex flex-wrap gap-x-4 text-ui text-muted-foreground">
           {group && <span>{group}</span>}
@@ -110,7 +122,7 @@ export function RunHeader({
 
       <div className="w-full max-w-lg justify-self-center max-[1100px]:justify-self-start">
         <p className="mb-1.5 flex flex-wrap items-baseline gap-x-3.5 text-ui">
-          <b className="font-semibold">{statusWord(run, total > 0)}</b>
+          <StatusMark {...runState(run, total > 0)} className="self-center font-semibold" />
           {total > 0 && (
             <span>
               {done} of {total} tasks done
@@ -125,19 +137,10 @@ export function RunHeader({
             </span>
           )}
         </p>
-        <div
-          role="progressbar"
-          aria-label="Tasks done"
-          aria-valuemin={0}
-          aria-valuemax={total}
-          aria-valuenow={done}
-          className="h-2 overflow-hidden rounded-full bg-muted"
-        >
-          <div
-            className="h-full rounded-full bg-primary transition-[width] duration-500 motion-reduce:transition-none"
-            style={{ width: total ? `${(done / total) * 100}%` : 0 }}
-          />
-        </div>
+        <Progress
+          look="bar"
+          states={Array.from({ length: total }, (_, i) => (i < done ? "done" : "waiting"))}
+        />
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -150,12 +153,9 @@ export function RunHeader({
         />
         {live && <StopRun run={run} onChange={onChange} />}
         {(state.status !== "queued" || run.tasks) && (
-          <Link
-            to={reviewHref(run.id, openTask)}
-            className={buttonClass({ variant: "primary", size: "sm" })}
-          >
-            Open in 3D
-          </Link>
+          <Button asChild variant="primary" size="sm">
+            <Link to={reviewHref(run.id, openTask)}>Open in 3D</Link>
+          </Button>
         )}
       </div>
     </header>
@@ -180,7 +180,7 @@ function RunDetails({
   const endedAt = state.status === "ended" ? state.endedAt : undefined;
   const now = useNow(startedAt !== undefined && endedAt === undefined);
   const rows: [string, string][] = [
-    ["Started", startedAt ? day(startedAt) : "Not yet"],
+    ["Started", startedAt ? shortDate(startedAt) : "Not yet"],
     ...(startedAt
       ? ([
           [
@@ -200,36 +200,25 @@ function RunDetails({
     ["Workflow", workflow],
   ];
   return (
-    <Popover.Root>
-      <Popover.Trigger className={buttonClass({ variant: "ghost", size: "sm" })}>
-        Run details
-        <ChevronDown className="size-3.5" aria-hidden />
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Content
-          align="end"
-          sideOffset={6}
-          className="z-50 w-72 rounded-xl border border-border bg-popover p-4 text-ui text-popover-foreground shadow-md"
-        >
-          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5">
-            {rows.map(([k, v]) => (
-              <div key={k} className="contents">
-                <dt className="text-muted-foreground">{k}</dt>
-                <dd>{v}</dd>
-              </div>
-            ))}
-          </dl>
-          <Popover.Close asChild>
-            <Link
-              to={agents}
-              className="mt-3 block border-t border-border pt-3 font-medium text-primary-text hover:underline"
-            >
-              What the AI did
-            </Link>
-          </Popover.Close>
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
+    <Popover
+      label="Run details"
+      className="w-72"
+      trigger={
+        <Button variant="ghost" size="sm">
+          Run details
+          <ChevronDown className="size-3.5" aria-hidden />
+        </Button>
+      }
+    >
+      <Facts items={rows} />
+      <PopoverClose asChild>
+        <div className="mt-3 border-t border-border pt-3">
+          <Button asChild variant="link">
+            <Link to={agents}>What the AI did</Link>
+          </Button>
+        </div>
+      </PopoverClose>
+    </Popover>
   );
 }
 

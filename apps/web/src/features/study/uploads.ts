@@ -19,6 +19,7 @@ import {
   putUploadFile,
   UploadIncompleteError,
 } from "@voluma/api-client";
+import { inputsQuery } from "@voluma/api-client/query";
 import {
   type CreateUploadResponse,
   createUploadRequestSchema,
@@ -206,7 +207,7 @@ export function useUploads() {
         job.done = true;
         if (signal.aborted) return;
         settle({ kind: "ready", input });
-        void queryClient.invalidateQueries({ queryKey: ["inputs"] });
+        void queryClient.invalidateQueries({ queryKey: inputsQuery().queryKey });
       } catch (error) {
         if (signal.aborted || isAbort(error)) return;
         if (error instanceof UploadIncompleteError) {

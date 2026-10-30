@@ -1,0 +1,16 @@
+import { Meta } from "@storybook/addon-docs/blocks";
+import { Swatches } from "./swatches";
+
+<Meta title="Foundations/Colour" />
+
+# Colour
+
+Components name what a colour means, never the colour: `bg-card`, `text-check`, `border-select`.
+Raw values live only in `packages/design-tokens/src/tokens.css`. The whole app is light on home and
+study pages and dark in the 3D review; nothing else changes between the two.
+
+Each status has three forms: a **solid** for marks and filled cells (`bg-check-solid`), an **ink**
+for text on a panel (`text-check`) and a **tint** for a quiet fill behind it (`bg-check-tint`).
+Status colours mean status only; ice (`select`) means selection only.
+
+<Swatches />
