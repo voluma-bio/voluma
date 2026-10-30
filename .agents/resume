@@ -38,7 +38,7 @@ refresh_repository() (
     printf 'Reference %s: refs refreshed; local or divergent commits preserved\n' "$name"
     return
   fi
-  if git -c merge.autoStash=false merge --ff-only --quiet refs/remotes/origin/main; then
+  if git -c merge.autoStash=false merge --ff-only --no-overwrite-ignore --quiet refs/remotes/origin/main; then
     printf 'Reference %s: main current at %s\n' "$name" "$(git rev-parse --short HEAD)"
   else
     printf 'Reference %s: fast-forward failed; inspect checkout before retrying\n' "$name" >&2

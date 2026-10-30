@@ -355,6 +355,9 @@ wake, then fast-forwards only clean `main` checkouts without local commits or
 an in-progress Git operation. Dirty files (including untracked files), other
 branches and detached HEADs are left alone. The primary checkout stays under
 Amp's control; the hook never switches or updates the agent's working branch.
+Ignored local files also survive: if an incoming tracked path would overwrite
+one, the fast-forward aborts and prints a warning. Nonconflicting ignored files
+do not block the refresh.
 
 The two fetches run concurrently, each with an 8-second timeout and a 1-second
 kill grace. A failed fetch leaves files unchanged and prints a warning; it does
