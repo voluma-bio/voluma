@@ -55,8 +55,8 @@ export type AcceptVars = { checkId: string; taskId: string };
  *
  * `revisionId` is the result the check belongs to; without one the mutation can't run (the
  * callers disable their button). A 409 means the result changed since the page loaded: the run,
- * review and study reads are refetched to show the new one, as they are after a success (the
- * mutation stays pending until they land).
+ * review and study reads are refetched in the background to show the new one. After a success
+ * the mutation stays pending until they land.
  */
 export function useAcceptCheck(
   runId: string,

@@ -104,7 +104,11 @@ import { focusSchema } from "./review";
 
 const nonEmpty = z.string().min(1);
 
-const evidencePaths = z.array(fileRefInputSchema).describe("Files the line rests on.");
+const evidencePaths = z
+  .array(fileRefInputSchema)
+  .describe(
+    "Files the line rests on: `{root, path}` or a plain path (/outputs/<task id>/x, /scratch/<thread>/x).",
+  );
 
 /** Every tool answers the same way: a short line, and the id of the event it wrote. */
 export const taskToolResultSchema = z.object({

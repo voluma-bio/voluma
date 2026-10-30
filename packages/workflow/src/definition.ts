@@ -1,7 +1,6 @@
 /**
  * What a run takes from its workflow skill beyond the plan: the skills every role may read and
- * the data files the plan is built from. The format is `workflow-format.md` in the docs repo
- * (`work/mvp-contracts-and-data/design`).
+ * the data files the plan is built from.
  */
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
