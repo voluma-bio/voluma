@@ -41,7 +41,7 @@ import {
 import { events, inputs, runs, studies, studyScans } from "./schema";
 
 /** Serializes every transaction that changes a run, so the limit counts can't race a claim. */
-const QUEUE_LOCK = 0x76_6f_6c_71;
+export const QUEUE_LOCK = 0x76_6f_6c_71;
 
 /** How long a visitor run waits for its keys. */
 const KEYS_WAIT = sql`interval '24 hours'`;

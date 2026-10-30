@@ -208,15 +208,33 @@ tables are replaced), run `pg_restore --clean --if-exists --no-owner --no-acl -d
 (`runs`, `run_events`, `provider_calls`) before trusting it. Never print the URL.
 
 **Archiving a run** frees space on the 1 GB database without losing the run. `archive:run --id <runId> --remote`
-(with `DATABASE_URL` set to the direct URL) refuses an example or a run that has not ended, writes the run's rows
-(`run.json`: run, input, study, events, threads, pi messages, review snapshots, provider calls) to
-`~/.local/share/voluma-backups/runs/<runId>/` (0600; refuses under 1 GB free), and does it all in one repeatable-read
-transaction: lock the run, read its rows, check them as `import:run` does, write and fsync the file, then delete, rolling back
-unless each table's deleted count equals the file's. Inputs stay (shared); the study goes with its
-scans only when no other run is in it. The run's R2 files are not copied or touched, so `import:run --from <that directory>`
-restores the run whole, with its study and scans when the study id is free and the scans' inputs exist (else a study of one,
-and it says so). The archive is one copy on one disk: copy the directory off this machine before archiving many runs.
-A `pg_dump` of the tables is still the backup for anything else.
+(with `DATABASE_URL` set to the direct URL) refuses an example, an unfinished run, unsettled provider calls,
+or missing inputs/study metadata and unsupported workflows that prevent restoration. It reads one database snapshot
+(`run.json`: run, study, study scans and their inputs, events, threads, pi messages, review snapshots, provider calls),
+writes `~/.local/share/voluma-backups/runs/<runId>/` (0600; refuses under 1 GB free), syncs the file and directory entries
+to disk, and reads it back. Only then does it delete, holding the queue, event and run-row locks. Every deleted row,
+including the run and any deleted study/scans, must match the archive, not merely its count; any difference rolls back.
+Inputs stay (shared); the study and its scans go only when no other run is in it. A failed write, sync or validation
+never deletes rows; an existing `run.json` is never overwritten. A failure may leave an incomplete file: retain it for
+inspection and use a new output directory when retrying.
+
+`import:run --from <that directory>` restores the original study identity and scan metadata, adding missing shared rows
+and refusing conflicts rather than overwriting them. Legacy dumps without study metadata get a study of one, or keep
+the replaced run's study only if its lab, workflow, example status and scan agree; input conflicts are refused too.
+Every import creates a fresh local run generation and moves the dump's current screenshots to it. Older screenshot
+generations stay historical. A save that validated before the import is refused instead of entering the restored run.
+
+**Provider accounting must be final before archiving.** Only `settleCall` fills `duration_ms`, atomically with cost
+and usage, and it never updates an already-settled row. Archive refuses `open` calls and any call with null duration,
+including `cut` rows from shutdown or stale-call sweeping: those may still receive late settlement. A genuinely settled
+`cut` with unknown cost is archivable; its cost stays null. A crashed call that never settles blocks archiving indefinitely.
+Keep that run in the database (export is still available); do not fill a fake duration to bypass the guard. A separate
+operator reconciliation policy is needed for abandoned calls ([TODO.md](TODO.md)). Use this archive only after gateways
+have rolled onto the settle-once implementation.
+
+The run's R2 files are neither copied nor touched: this is a database archive, not an independent backup of evidence.
+Keep those R2 objects and the local archive; choose a persistent disk, not an ephemeral orb or `/tmp`, for an operational
+archive. Filesystem sync does not protect against losing that disk. A `pg_dump` remains the backup for the whole database.
 
 ## Rotating secrets
 
