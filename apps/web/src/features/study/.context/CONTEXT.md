@@ -6,12 +6,11 @@ Home (`/`, `home-page.tsx`), Run on new scans (`/new`, `new-page.tsx`) and Workf
 belongs to a study (`@voluma/contracts/study`); a study of one is a study whose scan count is 1,
 shown as its scan and linked straight to its run.
 
-- **Home's data** is `listStudies` plus `listRuns`. The summary has no run ids, so the runs say
-  which run a study of one opens, which runs failed or wait for keys, and a live run's tasks done
-  (`Run.tasks`, counted by the API from the plan; only the list and the study read derive it).
-  Each refetches every 5 s while its own last answer shows a live run, and `studies` also while
-  `runs` does: the two polls are independent, so stopping on the other's answer left a stale
-  to-check count once the last run ended.
+- **Home's data** is `listStudies` alone: each study carries each scan's newest run in brief
+  (`newestRuns`: run id, state, a live run's tasks done) and its `scansCompleted` and `toCheck`.
+  It refetches every 5 s while any newest run is live. The summary has no per-run review, so a
+  study of one never reads "Reviewed" on Home, and Needs you can't say how many scans have
+  checks open.
   Needs you has one row per study with one action; example studies are read-only and ask nothing.
   "Last activity" is a relative day, never a time.
 - **Run on new scans** keeps no outputs checklist and no notes: a study runs every output (the
@@ -40,5 +39,8 @@ shown as its scan and linked straight to its run.
   `DOMParser`, loaded only when an `.xlsx` is dropped.
 - **Shared with `features/run`** through `@voluma/ui/run`: the run and study status words
   (`runStatus`, `RunBadge`, `studyStatus`: Running, N to check, Checked, Reviewed, Failed,
-  Waiting, Needs your keys, Not started), the run link, the formatters, and visitor keys. The
-  study page uses the same mapping; don't add another.
+  Stopped, Waiting, Needs your keys, Not started), the run link, the formatters, and visitor
+  keys. `runStatus` and `RunBadge` take a full `Run` (they need its review); `studyStatus` and
+  `runHref` take the summary's `newestRuns`, and Home uses only those, a study of one included.
+  "Not started" is only a scan with no run; a stopped one reads "N stopped". The study page uses
+  the same mapping; don't add another.

@@ -112,7 +112,10 @@ export function NewPage() {
   const read = sheet.kind === "read" ? sheet.sheet : undefined;
 
   async function addDropped(dropped: Dropped[]) {
-    const grouped = groupDropped(dropped);
+    const grouped = groupDropped(
+      dropped,
+      rows.map((r) => r.name),
+    );
     setSkipped(grouped.skipped);
     const added = grouped.scans.map((scan) => {
       const id = `drop-${nextId.current++}`;

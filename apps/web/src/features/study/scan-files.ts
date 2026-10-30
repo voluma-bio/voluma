@@ -11,7 +11,8 @@
  *     `OA6-1RK/DICOM/` of slices), with its whole subtree. Otherwise each of its subfolders is
  *     looked at the same way (a folder of scans).
  *   - A folder with slices of its own and one `*_rec` folder of slices is a Skyscan export: the
- *     scan is the folder without the projections beside the reconstruction.
+ *     scan is the folder without the projections beside the reconstruction, and any other
+ *     folder of slices in it (a CTAn `*_VOI`) is looked at on its own.
  *   - Loose slices dropped together, outside any folder, are one scan.
  *   - Preview folders (`thumbs`, `preview`...) and documents (`.pdf`, `.txt`, `.docx`...) are
  *     not used, except that documents inside a scan's folder go with it.
@@ -19,6 +20,7 @@
  *
  * A folder scan is named after its nearest folder that isn't a generic one (`DICOM`, `rec`,
  * `images`...), without a `_rec` suffix: `OA6-1RK/DICOM/` and `M1_rec/` give `OA6-1RK` and `M1`.
+ * A name already used, by this drop or an earlier one, gets `-2`, `-3`...
  *
  * A scan's paths are relative to its folder (the folder becomes the name): what the run sees
  * under `/inputs`.
@@ -127,7 +129,8 @@ const relativeTo = (files: Dropped[], dir: Dropped["path"]) =>
     .map((f) => ({ file: f.file, path: dir ? f.path.slice(dir.length + 1) : f.path }))
     .sort((a, b) => a.path.localeCompare(b.path));
 
-export function groupDropped(dropped: Dropped[]): Grouped {
+/** `taken`: names already in use (scans added from an earlier drop). */
+export function groupDropped(dropped: Dropped[], taken: Iterable<string> = []): Grouped {
   const out: Grouped = { scans: [], sheets: [], skipped: [] };
   const used: Dropped[] = [];
   for (const d of dropped) {
@@ -138,7 +141,8 @@ export function groupDropped(dropped: Dropped[]): Grouped {
 
   /** `dir` (at `path`) as one scan, less `drop`: its sheets go to the sheets, the rest is the scan. */
   function whole(dir: Dir, path: string, name: string, drop: Dropped[] = []) {
-    const files = everyFile(dir).filter((f) => !drop.includes(f));
+    const dropped = new Set(drop);
+    const files = everyFile(dir).filter((f) => !dropped.has(f));
     out.sheets.push(...files.filter((f) => kindOf(f.file.name) === "sheet").map((f) => f.file));
     const scan = files.filter((f) => kindOf(f.file.name) !== "sheet");
     out.scans.push({ name, files: relativeTo(scan, path) });
@@ -153,10 +157,13 @@ export function groupDropped(dropped: Dropped[]): Grouped {
     const subs = [...dir.dirs.values()];
     const rec = subs.filter((d) => REC.test(d.name) && sliceFolders(d) === 1);
     const own = dir.files.filter((f) => kindOf(f.file.name) === "slice");
-    if (!isRoot && rec.length === 1 && rec[0] && own.length > 0 && folders === 2) {
+    if (!isRoot && rec.length === 1 && own.length > 0) {
       out.skipped.push(...own.map((f) => f.path));
+      const others = subs.filter((d) => !rec.includes(d) && sliceFolders(d) > 0);
       // The rest of the folder (Skyscan's `.log` holds the pixel size) goes with the scan.
-      return whole(dir, path, scanName(path), own);
+      whole(dir, path, scanName(path), [...own, ...others.flatMap(everyFile)]);
+      for (const sub of others) visit(sub, `${path}/${sub.name}`);
+      return;
     }
     const loose: Dropped[] = [];
     for (const f of dir.files) {
@@ -179,6 +186,13 @@ export function groupDropped(dropped: Dropped[]): Grouped {
 
   visit(tree(used), "");
   out.scans.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  const names = new Set(taken);
+  for (const scan of out.scans) {
+    let name = scan.name;
+    for (let n = 2; names.has(name); n++) name = `${scan.name}-${n}`;
+    names.add(name);
+    scan.name = name;
+  }
   return out;
 }
 
