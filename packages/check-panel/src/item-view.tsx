@@ -184,7 +184,9 @@ export function ItemView({
                     <p className="text-meta text-muted-foreground">
                       {example
                         ? "Examples are read-only."
-                        : "You can sign off checks once the run has finished."}
+                        : runInfo?.state.status === "ended" && runInfo.state.outcome !== "completed"
+                          ? "This run didn't finish, so nothing here can be marked as looked at."
+                          : "You can sign off checks once the run has finished."}
                     </p>
                   )
                 }
