@@ -7,7 +7,7 @@ import { useMutation } from "@tanstack/react-query";
 import { ApiError, acceptCheck, reviewFileUrl } from "@voluma/api-client";
 import type { Asset } from "@voluma/contracts/review";
 import type { Run } from "@voluma/contracts/run";
-import { Button, buttonClass, cx, Lightbox } from "@voluma/ui";
+import { Button, cx, Lightbox } from "@voluma/ui";
 import { ChevronRight, ImageOff } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Link } from "react-router";
