@@ -1,19 +1,17 @@
 /**
  * Router shell. Each feature owns its routes and its theme; the shell only
  * collects them, so the run and review lanes never edit this file to add a
- * screen. Every feature route sits behind the sign-in gate; /dev/ui does not,
- * because it is a dev page.
+ * screen. Every feature route sits behind the sign-in gate. Shared components are
+ * shown in Storybook (apps/storybook), not in the app.
  */
 import { createBrowserRouter, Link } from "react-router";
 import { RouterProvider } from "react-router/dom";
-import { DevUiPage } from "../dev-ui/dev-ui-page";
 import { reviewRoutes } from "../features/review";
 import { runRoutes } from "../features/run";
 import { studyRoutes } from "../features/study";
 import { SignedIn } from "./signed-in";
 
 const router = createBrowserRouter([
-  { path: "/dev/ui", element: <DevUiPage /> },
   {
     element: <SignedIn />,
     children: [...studyRoutes, ...runRoutes, ...reviewRoutes, { path: "*", element: <NotFound /> }],

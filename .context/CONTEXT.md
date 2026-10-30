@@ -289,8 +289,8 @@ Import boundaries are written rules in `AGENTS.md`; Biome uses its recommended r
 `[data-theme="light"]`, and again under `[data-theme="dark"]`. `theme.css`
 maps them into Tailwind with `@theme inline`, so a utility reads the token
 where it is used and `data-theme` on any element themes its subtree. That is
-how `/dev/ui` shows both themes side by side. Review now selects light, following
-Andrew's implementation direction. Tailwind's default palette is removed.
+how Storybook shows both themes side by side. The app is light on home and study
+pages and dark in the 3D review. Tailwind's default palette is removed.
 
 The token names are shadcn/ui's (`background`, `card`, `muted`, `accent`,
 `primary`, `destructive`, `border`, `ring`, `chart-*`, `sidebar-*`), with
@@ -317,7 +317,7 @@ contract. Reports, revision selection and command UI remain available for the
 real adapter; until it exists the workspace shows explicit empty states. Shared
 contracts and API client are unchanged from main. Report/viewer splits retain
 react-resizable-panels to preserve the verified nested maximize/restore behavior;
-the unrelated shared `SplitPanel` API and `/dev/ui` remain unchanged.
+the unrelated shared `SplitPanel` API remains unchanged.
 
 Local DICOM intake and rendering work without the API. They do not populate
 analysis results or create server runs. The [Review specification][review-spec]

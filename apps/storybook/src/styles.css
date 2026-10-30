@@ -1,0 +1,17 @@
+/* The app's global styles, minus the features: Tailwind over the tokens, scanning packages/ui. */
+@import "tailwindcss";
+@import "@voluma/design-tokens/tokens.css";
+@import "@voluma/design-tokens/theme.css";
+@import "@voluma/design-tokens/fonts.css";
+@source "../../../packages/ui/src";
+
+html,
+body {
+  font-family: var(--sans);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+[data-theme] {
+  color: var(--foreground);
+}

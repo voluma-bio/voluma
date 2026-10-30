@@ -2,204 +2,235 @@
  * Voluma design tokens: the only place raw colour values live.
  *
  * Names are shadcn/ui's semantic set, used with shadcn's meanings, so shadcn
- * components copied into the repo work unchanged; the values are our palette.
- * A token shadcn has no name for keeps ours (`check-*`, `info*`, `inverse*`,
- * `scrim`, `fg-subtle`, `line-subtle`, `line-strong`, the viewer and axis
- * tokens). Where shadcn names two roles that our palette fills with one
- * colour (card/popover, muted/secondary/accent, border/input), both are
- * declared with the same value so either can change alone.
+ * components copied into the repo work unchanged; the values are the
+ * redesign's "Imaging pro" palette (mockup redesign-r9.html). A role shadcn
+ * has no name for keeps ours (`select*`, `check-*`, `info-*`, `done*`,
+ * `idle`, `mark-*`, the viewer and axis tokens).
  *
- * Two themes share one set of names. Light (the default, and
- * `[data-theme="light"]`) is used by workflows, runs and Review. Dark
- * (`[data-theme="dark"]`) remains available to shared components. A theme applies to
- * the subtree under the attribute, so one page can show both (see /dev/ui).
+ * Two themes share one set of names, and the whole app switches between
+ * them: light on home and study pages, dark in the 3D scan review. A theme
+ * applies to the subtree under `data-theme`, so Storybook shows both side by
+ * side.
  *
- * Names map from the mockups as follows:
- *   start.html (light)            review-live.html (dark)     token
- *   --paper                       --bg                        --background
- *   --card                        --chrome                    --card
- *   --line-2 (as hover fill)      --raised                    --muted / --accent
- *   --line-2 / --line / #b9cfc6   (new) / --line / --line-2   --line-subtle / --border / --line-strong
- *   --ink / --ink-2 / --ink-3     --fg / --fg-2 / --fg-3      --foreground / --muted-foreground / --fg-subtle
- *   --pine / --pine-deep          --accent                    --primary / --primary-strong
- *   --pine-ink / --pine-tint      --accent-ink                --primary-foreground / --primary-tint
- *   --amber / -tint / -line       --check                     --check / --check-tint / --check-line
- *   --blue / --blue-tint          --fixed                     --info / --info-tint
- * Values marked "derived" exist in only one mockup and were filled in for the
- * other theme.
- *
- * Viewer tokens (axes, bone, rulers, labels) do not change with the theme:
- * the 3D view and slices always sit on the dark imaging well.
+ * Colour roles carry one meaning each:
+ *   primary     the one main action on a view (ink-filled)
+ *   select      selection, focus and crosshairs (ice); never a status
+ *   check       To check (amber)
+ *   info        Running (violet), and corrected
+ *   done        Done (green)
+ *   destructive Stopped / failed (red)
+ *   idle        Waiting / paused (grey)
+ * Each status has a solid (marks, filled cells), an ink (text on a surface)
+ * and a tint (a quiet fill behind it).
  */
 
 :root,
 [data-theme="light"] {
   color-scheme: light;
 
-  /* Surfaces, from back to front */
-  --background: #f7faf8;
-  --foreground: #10211c;
-  --card: #ffffff;
-  --card-foreground: #10211c;
-  --popover: #ffffff;
-  --popover-foreground: #10211c;
+  /* Surfaces, from back to front. The background is the chassis: the seams
+     between panels. Every panel is a card. */
+  --background: oklch(0.905 0.007 255);
+  --foreground: oklch(0.205 0.013 255);
+  --card: oklch(0.993 0.002 255);
+  --card-foreground: oklch(0.205 0.013 255);
+  --popover: oklch(0.993 0.002 255);
+  --popover-foreground: oklch(0.205 0.013 255);
 
-  /* Quiet fills: muted is a resting fill (inputs off, badges), accent
-     the hover fill, secondary a secondary button's fill */
-  --muted: #eaf0ed;
-  --muted-foreground: #44594f;
-  --accent: #eaf0ed;
-  --accent-foreground: #10211c;
-  --secondary: #eaf0ed;
-  --secondary-foreground: #10211c;
+  /* muted: sunken wells (readouts, list heads); accent: hover fill;
+     secondary: raised fills (secondary button, selected row, inputs) */
+  --muted: oklch(0.966 0.004 255);
+  --muted-foreground: oklch(0.43 0.014 255);
+  --accent: oklch(0.962 0.006 255);
+  --accent-foreground: oklch(0.205 0.013 255);
+  --secondary: oklch(0.942 0.007 255);
+  --secondary-foreground: oklch(0.205 0.013 255);
 
-  --border: #dce7e2;
-  --input: #dce7e2;
-  --ring: #1d6b57;
-  --line-subtle: #eaf0ed;
-  --line-strong: #b9cfc6;
-  --fg-subtle: #5c6f66;
+  --border: oklch(0.912 0.006 255);
+  --input: oklch(0.83 0.008 255);
+  --ring: oklch(0.53 0.105 232);
+  --line-subtle: oklch(0.94 0.005 255);
+  --line-strong: oklch(0.83 0.008 255);
+  --fg-subtle: oklch(0.52 0.014 255); /* 5.9:1 on a card */
 
-  /* Pine: primary actions, done, links */
-  --primary: #1d6b57;
-  --primary-foreground: #f7faf8; /* text on --primary */
-  --primary-strong: #124839; /* hover fill, and text on --primary-tint */
-  --primary-tint: #e3efe9;
-  --primary-text: #1d6b57;
+  --primary: oklch(0.205 0.013 255);
+  --primary-foreground: oklch(0.985 0.003 255);
+  --primary-strong: oklch(0.3 0.016 255); /* hover */
+  --primary-tint: oklch(0.942 0.007 255);
+  --primary-text: oklch(0.47 0.1 235); /* links */
 
-  /* Amber: To check */
-  --check: #7d5408; /* text and icons on surfaces */
-  --check-solid: #c48a1c; /* dots and filled markers */
-  --check-solid-fg: #231803;
-  --check-strong: #4b3405; /* text on --check-tint */
-  --check-tint: #fff7df;
-  --check-line: #ead8a2;
+  --select: oklch(0.53 0.105 232);
+  --select-text: oklch(0.47 0.1 235);
+  --select-dim: oklch(0.53 0.105 232 / 0.5);
+  --select-tint: oklch(0.53 0.105 232 / 0.09);
 
-  /* Blue: running, corrected, saved to the task list */
-  --info: #2856a8;
-  --info-tint: #eaf1fd;
+  --check: oklch(0.5 0.115 62);
+  --check-solid: oklch(0.79 0.15 76);
+  --check-solid-fg: oklch(0.22 0.04 65);
+  --check-strong: oklch(0.42 0.1 62);
+  --check-tint: oklch(0.79 0.15 76 / 0.18);
+  --check-line: oklch(0.79 0.15 76 / 0.45);
 
-  /* Red: failed (derived; neither mockup shows a failure) */
-  --destructive: #a3342a;
-  --destructive-tint: #fbeceb;
+  --info: oklch(0.49 0.17 295);
+  --info-solid: oklch(0.56 0.17 295);
+  --info-tint: oklch(0.56 0.17 295 / 0.12);
 
-  --inverse: #10211c; /* toasts and tooltips */
-  --inverse-fg: #ffffff;
-  --scrim: rgb(0 0 0 / 0.82);
+  --done: oklch(0.45 0.11 155);
+  --done-solid: oklch(0.6 0.135 155);
+  --done-tint: oklch(0.6 0.135 155 / 0.14);
 
-  /* Charts: the status hues, then neutral */
-  --chart-1: #1d6b57;
-  --chart-2: #2856a8;
-  --chart-3: #c48a1c;
-  --chart-4: #a3342a;
-  --chart-5: #44594f;
+  --destructive: oklch(0.5 0.18 25);
+  --destructive-solid: oklch(0.58 0.19 25);
+  --destructive-solid-fg: oklch(0.99 0 0);
+  --destructive-tint: oklch(0.58 0.19 25 / 0.1);
 
-  /* Sidebar: the review's task list sits on the canvas */
-  --sidebar: #f7faf8;
-  --sidebar-foreground: #10211c;
-  --sidebar-primary: #1d6b57;
-  --sidebar-primary-foreground: #f7faf8;
-  --sidebar-accent: #eaf0ed;
-  --sidebar-accent-foreground: #10211c;
-  --sidebar-border: #dce7e2;
-  --sidebar-ring: #1d6b57;
+  --idle: oklch(0.62 0.012 255);
+
+  --inverse: oklch(0.205 0.013 255); /* tooltips and toasts */
+  --inverse-fg: oklch(0.985 0.003 255);
+  --scrim: oklch(0.12 0.01 255 / 0.82);
+
+  --chart-1: oklch(0.6 0.135 155);
+  --chart-2: oklch(0.56 0.17 295);
+  --chart-3: oklch(0.79 0.15 76);
+  --chart-4: oklch(0.58 0.19 25);
+  --chart-5: oklch(0.62 0.012 255);
+
+  --sidebar: oklch(0.993 0.002 255);
+  --sidebar-foreground: oklch(0.205 0.013 255);
+  --sidebar-primary: oklch(0.205 0.013 255);
+  --sidebar-primary-foreground: oklch(0.985 0.003 255);
+  --sidebar-accent: oklch(0.942 0.007 255);
+  --sidebar-accent-foreground: oklch(0.205 0.013 255);
+  --sidebar-border: oklch(0.912 0.006 255);
+  --sidebar-ring: oklch(0.53 0.105 232);
+
+  --elevation-pop: 0 1px 2px oklch(0.2 0.02 255 / 0.08), 0 10px 28px oklch(0.2 0.02 255 / 0.16);
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --background: #0b0e10;
-  --foreground: #e7ebed;
-  --card: #13171a;
-  --card-foreground: #e7ebed;
-  --popover: #13171a;
-  --popover-foreground: #e7ebed;
+  --background: oklch(0.17 0.013 255);
+  --foreground: oklch(0.94 0.006 255);
+  --card: oklch(0.205 0.013 255);
+  --card-foreground: oklch(0.94 0.006 255);
+  --popover: oklch(0.235 0.014 255);
+  --popover-foreground: oklch(0.94 0.006 255);
 
-  --muted: #1a1f23;
-  --muted-foreground: #a3adb3;
-  --accent: #1a1f23;
-  --accent-foreground: #e7ebed;
-  --secondary: #1a1f23;
-  --secondary-foreground: #e7ebed;
+  --muted: oklch(0.18 0.013 255);
+  --muted-foreground: oklch(0.78 0.012 255);
+  --accent: oklch(0.235 0.014 255);
+  --accent-foreground: oklch(0.94 0.006 255);
+  --secondary: oklch(0.255 0.014 255);
+  --secondary-foreground: oklch(0.94 0.006 255);
 
-  --border: #242a2f;
-  --input: #242a2f;
-  --ring: #62c7a4;
-  --line-subtle: #1d2226; /* derived */
-  --line-strong: #30373d;
-  --fg-subtle: #808c94; /* 4.8:1 on --muted, the lightest surface it sits on */
+  --border: oklch(0.3 0.013 255);
+  --input: oklch(0.38 0.013 255);
+  --ring: oklch(0.82 0.095 228);
+  --line-subtle: oklch(0.255 0.013 255);
+  --line-strong: oklch(0.38 0.013 255);
+  --fg-subtle: oklch(0.66 0.014 255); /* 5.8:1 on a card */
 
-  --primary: #62c7a4;
-  --primary-foreground: #06231a;
-  --primary-strong: #7fd4b5; /* derived: actives lighten on dark ground */
-  --primary-tint: #15302a; /* derived */
-  --primary-text: #62c7a4;
+  --primary: oklch(0.94 0.006 255);
+  --primary-foreground: oklch(0.145 0.014 255);
+  --primary-strong: oklch(1 0 0);
+  --primary-tint: oklch(0.255 0.014 255);
+  --primary-text: oklch(0.82 0.095 228);
 
-  --check: #e9b75b;
-  --check-solid: #e9b75b;
-  --check-solid-fg: #231803;
-  --check-strong: #f0c66a;
-  --check-tint: #2a2414; /* derived */
-  --check-line: #5c4a22; /* derived */
+  --select: oklch(0.82 0.095 228);
+  --select-text: oklch(0.82 0.095 228);
+  --select-dim: oklch(0.82 0.095 228 / 0.45);
+  --select-tint: oklch(0.82 0.095 228 / 0.1);
 
-  --info: #7fb2ff;
-  --info-tint: #162338; /* derived */
+  --check: oklch(0.83 0.145 78);
+  --check-solid: oklch(0.83 0.145 78);
+  --check-solid-fg: oklch(0.2 0.03 70);
+  --check-strong: oklch(0.88 0.13 80);
+  --check-tint: oklch(0.83 0.145 78 / 0.16);
+  --check-line: oklch(0.83 0.145 78 / 0.4);
 
-  --destructive: #ef7a6c; /* derived */
-  --destructive-tint: #33191a; /* derived */
+  --info: oklch(0.76 0.13 295);
+  --info-solid: oklch(0.76 0.13 295);
+  --info-tint: oklch(0.76 0.13 295 / 0.16);
 
-  --inverse: #000000;
-  --inverse-fg: #e7ebed;
-  --scrim: rgb(0 0 0 / 0.82);
+  --done: oklch(0.79 0.135 155);
+  --done-solid: oklch(0.79 0.135 155);
+  --done-tint: oklch(0.79 0.135 155 / 0.1);
 
-  --chart-1: #62c7a4;
-  --chart-2: #7fb2ff;
-  --chart-3: #e9b75b;
-  --chart-4: #ef7a6c;
-  --chart-5: #a3adb3;
+  --destructive: oklch(0.74 0.15 25);
+  --destructive-solid: oklch(0.71 0.165 25);
+  --destructive-solid-fg: oklch(0.18 0.03 25);
+  --destructive-tint: oklch(0.71 0.165 25 / 0.14);
 
-  --sidebar: #0b0e10;
-  --sidebar-foreground: #e7ebed;
-  --sidebar-primary: #62c7a4;
-  --sidebar-primary-foreground: #06231a;
-  --sidebar-accent: #1a1f23;
-  --sidebar-accent-foreground: #e7ebed;
-  --sidebar-border: #242a2f;
-  --sidebar-ring: #62c7a4;
+  --idle: oklch(0.56 0.012 255);
+
+  --inverse: oklch(0.94 0.006 255);
+  --inverse-fg: oklch(0.145 0.014 255);
+  --scrim: oklch(0 0 0 / 0.82);
+
+  --chart-1: oklch(0.79 0.135 155);
+  --chart-2: oklch(0.76 0.13 295);
+  --chart-3: oklch(0.83 0.145 78);
+  --chart-4: oklch(0.71 0.165 25);
+  --chart-5: oklch(0.56 0.012 255);
+
+  --sidebar: oklch(0.205 0.013 255);
+  --sidebar-foreground: oklch(0.94 0.006 255);
+  --sidebar-primary: oklch(0.94 0.006 255);
+  --sidebar-primary-foreground: oklch(0.145 0.014 255);
+  --sidebar-accent: oklch(0.255 0.014 255);
+  --sidebar-accent-foreground: oklch(0.94 0.006 255);
+  --sidebar-border: oklch(0.3 0.013 255);
+  --sidebar-ring: oklch(0.82 0.095 228);
+
+  --elevation-pop: 0 1px 2px oklch(0 0 0 / 0.3), 0 12px 32px oklch(0 0 0 / 0.5);
 }
 
 :root {
-  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --sans: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
-  /* Viewer: the same in both themes */
-  --viewer-well: #0b0e10; /* 3D and slice background */
-  --viewer-chip: rgb(11 14 16 / 0.72); /* view labels and value chips over images */
-  --viewer-chip-fg: #ffffff;
-  --scale-bar: #cfd6da;
+  /* The shell's fixed sizes: header line, icon strips, panel heads, rows,
+     the viewer's tool strip */
+  --header-h: 40px;
+  --strip-w: 64px;
+  --panel-head-h: 36px;
+  --row-h: 40px;
+  --row-compact-h: 30px;
+  --toolstrip-h: 36px;
 
-  /* Slice planes, in the 3D view and as crosshair lines */
+  /* Viewer: the same in both themes. The well is the darkest thing so the
+     bone is the brightest. */
+  --viewer-well: oklch(0.145 0.014 255);
+  --viewer-chip: oklch(0.145 0.014 255 / 0.72); /* view labels and value chips over images */
+  --viewer-chip-fg: oklch(0.94 0.006 255);
+  --scale-bar: oklch(0.86 0.008 255);
+
+  /* Slice planes: badges, frames, 3D planes */
   --axis-x: #ef6a5e; /* coronal plane (constant x) */
   --axis-y: #5ccf7a; /* sagittal plane (constant y) */
   --axis-z: #5aa6f2; /* axial plane (constant z) */
 
-  /* Bone renders ivory by default so lighting carries the shape */
-  --bone: #e6dcc8;
-  --bone-alt: #ddd3bf; /* neighbouring bones, so adjacent surfaces separate */
-  --bone-warm: #e9ddc8;
+  --bone: oklch(0.86 0.02 82);
+  --bone-alt: oklch(0.82 0.02 82); /* neighbouring bones, so adjacent surfaces separate */
+  --bone-warm: oklch(0.88 0.025 80);
 
-  /* Rulers and landmarks */
+  /* Rulers and landmarks the AI drew */
   --ruler: #ffd166;
   --ruler-fg: #1b1404;
-  --ruler-edit: #7fb2ff; /* a ruler being corrected */
-  --ruler-edit-fg: #04142b;
-  --landmark-warn: #ff9f6e; /* landmark more than 0.03 mm off the surface */
+  --ruler-edit: oklch(0.82 0.095 228);
+  --ruler-edit-fg: oklch(0.145 0.014 255);
+  --landmark-warn: #ff9f6e;
+
+  /* Marks on the scan: yours and the AI's */
+  --mark-mine: #ff4fd8;
+  --mark-ai: oklch(0.98 0 0);
 
   /* The one exception to "status never in mesh colour": the region under check */
-  --check-outline: #e9b75b;
+  --check-outline: oklch(0.83 0.145 78);
 
-  /* Structure label colours, shown when the label toggle is on. Chosen to
-     stay clear of the axis colours, amber and ivory. */
+  /* Structure label colours. Clear of the axis colours, amber, ice and ivory. */
   --label-1: #c792ea;
   --label-2: #4fc1c9;
   --label-3: #f78fb3;

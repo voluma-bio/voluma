@@ -2,19 +2,19 @@
 
 Visual rules the code can't show, from the [visual direction][direction].
 They are review points, not CI failures. The components live in
-`packages/ui`, the tokens in `packages/design-tokens`, and `/dev/ui` shows
-both in each theme.
+`packages/ui`, the tokens in `packages/design-tokens`, and Storybook
+(`apps/storybook`) shows each component in both themes with what it is for and
+where it is used.
 
 ## Two themes, one token set
 
-- **Light** (the default) is for workflows, runs and Review: Warm Organic, pine primary.
-- **Dark** remains available to shared components and `/dev/ui`. Actual grayscale
-  images can use the dark viewer well inside the light Review chrome.
+- **Light** for home and study pages; **dark** for the 3D scan review. The whole app switches,
+  the frame included; nothing else differs between the two ("Imaging pro" in the redesign).
 - Components use semantic token utilities (`bg-card`, `text-muted-foreground`,
   `border-border`), never raw colours. The names are shadcn/ui's, with our palette as the values;
-  `accent` is shadcn's hover fill and the brand green is `primary`. A colour a screen needs goes into
+  `accent` is shadcn's hover fill and `primary` the ink-filled main action. A colour a screen needs goes into
   `tokens.css` with a role name and a value for both themes.
-- Type is IBM Plex Sans, with IBM Plex Mono for values, units and ids.
+- Type is Instrument Sans, with IBM Plex Mono for values, units and ids. Body is 14px.
   Numbers in columns use tabular figures.
 
 ## Status
@@ -23,8 +23,9 @@ both in each theme.
   structure status shows as a badge or dot in lists and reports.
 - The one exception: the region under check is outlined in amber
   (`--check-outline`) on the slices and in 3D.
-- Amber always means To check; blue means running or corrected; pine means
-  done. Don't reuse them for decoration.
+- Amber always means To check; violet means running or corrected; green means
+  done; red stopped; grey waiting. Ice (`select`) means selection only. Don't reuse them for
+  decoration.
 
 ## Comparing scans
 

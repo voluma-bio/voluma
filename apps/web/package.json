@@ -10,8 +10,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@fontsource/ibm-plex-mono": "^5.2.7",
-    "@fontsource/ibm-plex-sans": "^5.2.8",
     "@tanstack/react-query": "catalog:",
     "@voluma/api-client": "workspace:*",
     "@voluma/contracts": "workspace:*",
