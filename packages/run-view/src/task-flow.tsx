@@ -9,7 +9,7 @@ import { ShieldCheck } from "lucide-react";
 import type { ComponentType, ReactNode } from "react";
 import type { TaskState, TaskView } from "./run-model";
 
-export const STATE_WORD: Record<TaskState, string> = {
+const STATE_WORD: Record<TaskState, string> = {
   waiting: "Not started",
   ready: "Ready to start",
   running: "Working",

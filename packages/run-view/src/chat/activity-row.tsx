@@ -7,7 +7,7 @@
 import { ChevronRight, type LucideIcon } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
 
-export type ActivityRowStatus = "running" | "done" | "error" | "stopped";
+type ActivityRowStatus = "running" | "done" | "error" | "stopped";
 
 // The chip sits on the title's first line: the line box of `text-ui`.
 const LINE_BOX = "box-content min-h-[calc(var(--text-ui)*var(--text-ui--line-height))]";

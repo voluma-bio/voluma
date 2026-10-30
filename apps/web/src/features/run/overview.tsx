@@ -1,14 +1,20 @@
 /**
  * The run's Overview, and the parts the task view shares with it: what the AI is working on now,
  * the To check items as cards (the QC image, what's wrong, "Looks right", "Open in 3D"), and the
- * values grouped by task. Data: `TaskView`s from `runView`; accepting goes through `acceptCheck`.
+ * values grouped by task. Data: `TaskView`s from `runView`; accepting goes through `useAcceptCheck`.
  */
 
-import { useMutation } from "@tanstack/react-query";
-import { ApiError, acceptCheck, reviewFileUrl } from "@voluma/api-client";
+import { reviewFileUrl } from "@voluma/api-client";
 import type { Asset } from "@voluma/contracts/review";
 import type { Run } from "@voluma/contracts/run";
-import { ClampedMarkdown, Elapsed, type NeedItem, TaskMark, type TaskView } from "@voluma/run-view";
+import {
+  ClampedMarkdown,
+  Elapsed,
+  type NeedItem,
+  TaskMark,
+  type TaskView,
+  useAcceptCheck,
+} from "@voluma/run-view";
 import { Button, buttonClass, cx, Lightbox } from "@voluma/ui";
 import { ChevronRight, ImageOff } from "lucide-react";
 import { type ReactNode, useState } from "react";
@@ -41,40 +47,24 @@ export function useAccepting(
   const [done, setDone] = useState<ReadonlySet<string>>(new Set());
   const [pending, setPending] = useState<ReadonlySet<string>>(new Set());
   const [error, setError] = useState<Accepting["error"]>();
-  const mutation = useMutation({
-    mutationFn: (item: NeedItem) => {
-      if (!run.review) throw new Error("no completed result");
-      return acceptCheck(run.id, item.id, {
-        baseRevisionId: run.review.revisionId,
-        taskId: item.taskId,
-      });
+  const mutation = useAcceptCheck(run.id, run.review?.revisionId, {
+    refetch,
+    onMutate: ({ checkId }) => {
+      setPending((p) => new Set(p).add(checkId));
+      setError((e) => (e?.id === checkId ? undefined : e));
     },
-    onMutate: (item) => {
-      setPending((p) => new Set(p).add(item.id));
-      setError((e) => (e?.id === item.id ? undefined : e));
-    },
-    onSuccess: (res, item) => {
-      setDone((d) => new Set(d).add(item.id));
+    onSuccess: (res, { checkId }) => {
+      setDone((d) => new Set(d).add(checkId));
       onChange((r) => ({ ...r, review: res.review }));
     },
-    onError: (e, item) => {
-      const status = e instanceof ApiError ? e.status : undefined;
-      if (status === 409) refetch();
-      setError({
-        id: item.id,
-        text:
-          status === 403
-            ? "This example is read-only."
-            : status === 409
-              ? "The result changed since this page loaded. Reload to see it."
-              : "Couldn't save that. Try again.",
-      });
+    onSettled: (_res, e, { checkId }) => {
+      setPending((p) => without(p, checkId));
+      if (e) setError({ id: checkId, text: e.message });
     },
-    onSettled: (_res, _e, item) => setPending((p) => without(p, item.id)),
   });
   return {
     enabled: run.review !== null && !run.example,
-    accept: (item) => mutation.mutate(item),
+    accept: (item) => mutation.mutate({ checkId: item.id, taskId: item.taskId }),
     done,
     pending,
     error,

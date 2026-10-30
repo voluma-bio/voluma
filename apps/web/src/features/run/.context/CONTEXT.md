@@ -57,7 +57,8 @@ are in this directory. The package has no router: `TaskFlow` takes the router `L
   counts), and the open check items. The Overview's badge is the same K. Cards that can't be
   accepted (a task sent back, a value missing, a failed task) show but aren't counted.
 - **Needs your eye** comes from `reviewState` (the fold plus `check.accepted`): every check item
-  of a task, open or accepted, live or finished. "Looks right" calls `acceptCheck` with
+  of a task, open or accepted, live or finished. "Looks right" calls `useAcceptCheck`
+  (`@voluma/run-view`, the one mutation and error rule the study page and review share) with
   `Run.review.revisionId`, only on a completed run that isn't an example. An ended run's stream has
   closed, so the page also counts what it accepted itself (`useAccepting`, which keeps a pending
   set per item). A To check task with no check item gets a card with no "Looks right"; a failed
@@ -137,8 +138,8 @@ are in this directory. The package has no router: `TaskFlow` takes the router `L
   (`resendKeys`) only to the user who started it.
 - A completed run links to `/runs/:runId`, the review lane's route; the live page is `/runs/:id/live` so it never shadows it. Active runs open live; stopped and failed runs open live too (it shows the error).
 
-- **A run's status chip** (`RunBadge`, `runStatus`) and the formatters (`formatUsd`,
-  `formatDuration`) are `@voluma/run-view`, shared with Home; `use-now.ts` is the clock.
+- **A run's status chip** (`runStatus`) and the formatters (`formatUsd`,
+  `formatDuration`, `plural`, `shortDate`) are `@voluma/run-view`, shared with Home; `use-now.ts` is the clock.
 - **Cost and time** come only from `spend(events, providerCalls)` (`@voluma/contracts/spend`), run
   in `runView` on durable events, never per live frame. Run details shows the run's settled total;
   each card in the lead AI's stream and each thread in "How the AI did it" shows that thread's own

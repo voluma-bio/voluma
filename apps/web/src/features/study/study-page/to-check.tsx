@@ -5,9 +5,9 @@
  * `openChecks`, and "Go through all N" (only with a real check panel, `walkthrough`) the same
  * queue from its start. There are no fix actions: corrections have no backend yet.
  */
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ApiError, acceptCheck } from "@voluma/api-client";
+import { useQueryClient } from "@tanstack/react-query";
 import type { StudyDetail, StudyScanDetail, ToCheckItem } from "@voluma/contracts/study";
+import { useAcceptCheck } from "@voluma/run-view";
 import { Button } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import { Link } from "react-router";
@@ -87,13 +87,9 @@ function CheckRow({
   // The study read's items belong to the scan's latest completed result, whose revision the
   // accept names; a result that changed since answers 409 and the refetch shows the new one.
   const revision = scan.runs.find((r) => r.id === item.runId)?.review?.revisionId;
-  const accept = useMutation({
-    mutationFn: () =>
-      acceptCheck(item.runId, item.checkId, {
-        baseRevisionId: revision as string,
-        taskId: item.taskId,
-      }),
-    onSettled: () => client.invalidateQueries({ queryKey: ["study"] }),
+  const accept = useAcceptCheck(item.runId, revision, {
+    refetch: () => client.invalidateQueries({ queryKey: ["study"] }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["study"] }),
   });
   const path = scanHref(scan);
   return (
@@ -110,7 +106,7 @@ function CheckRow({
         <span className="text-meta text-muted-foreground">{scanMeta(scan).join(", ")}</span>
         {accept.isError && (
           <span role="alert" className="block text-destructive">
-            {acceptError(accept.error)}
+            {accept.error.message}
           </span>
         )}
       </span>
@@ -118,7 +114,7 @@ function CheckRow({
         <Button
           size="sm"
           disabled={readOnly || !revision || accept.isPending || accept.isSuccess}
-          onClick={() => accept.mutate()}
+          onClick={() => accept.mutate({ checkId: item.checkId, taskId: item.taskId })}
         >
           {accept.isPending ? "Saving…" : accept.isSuccess ? "Accepted" : "Looks right"}
         </Button>
@@ -128,11 +124,4 @@ function CheckRow({
       </span>
     </li>
   );
-}
-
-function acceptError(error: Error): string {
-  if (error instanceof ApiError) {
-    if (error.status === 409) return "The result changed since this loaded. It's up to date now.";
-  }
-  return "Couldn't save that. Try again.";
 }

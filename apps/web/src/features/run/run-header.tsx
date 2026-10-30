@@ -10,7 +10,14 @@ import { ApiError, cancelRun, resendKeys } from "@voluma/api-client";
 import type { Run } from "@voluma/contracts/run";
 import type { RunSpend } from "@voluma/contracts/spend";
 import type { StudyDetail } from "@voluma/contracts/study";
-import { formatDuration, formatUsd, KeysForm, plainError, useNow } from "@voluma/run-view";
+import {
+  formatDuration,
+  formatUsd,
+  KeysForm,
+  plainError,
+  shortDate,
+  useNow,
+} from "@voluma/run-view";
 import { Button, buttonClass } from "@voluma/ui";
 import { catalog, workflowName } from "@voluma/workflow/bundled";
 import { ChevronDown } from "lucide-react";
@@ -20,9 +27,6 @@ import { Link } from "react-router";
 import { reviewHref } from "./overview";
 
 const { taskTitle } = catalog["mouse-oa"];
-
-const day = (iso: string) =>
-  new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 
 /** "OA6-1, right knee", from the study's scan; the scan's file name when the study can't say. */
 function scanTitle(run: Run, study: StudyDetail | undefined) {
@@ -179,7 +183,7 @@ function RunDetails({
   const endedAt = state.status === "ended" ? state.endedAt : undefined;
   const now = useNow(startedAt !== undefined && endedAt === undefined);
   const rows: [string, string][] = [
-    ["Started", startedAt ? day(startedAt) : "Not yet"],
+    ["Started", startedAt ? shortDate(startedAt) : "Not yet"],
     ...(startedAt
       ? ([
           [

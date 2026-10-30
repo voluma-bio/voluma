@@ -1,4 +1,4 @@
-/* Run lane: the model's prose in transcripts (`chat/markdown.tsx`) and the streaming caret. */
+/* The model's prose in transcripts (`chat/markdown.tsx`) and the streaming caret. An app imports this after Tailwind. */
 
 @layer components {
   .run-prose {

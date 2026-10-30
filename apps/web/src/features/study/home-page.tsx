@@ -8,7 +8,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { listStudies } from "@voluma/api-client";
 import type { StudyRunSummary, StudySummary } from "@voluma/contracts/study";
-import { runHref, studyStatus } from "@voluma/run-view";
+import { plural, runHref, shortDate, studyStatus } from "@voluma/run-view";
 import { StatusBadge } from "@voluma/ui";
 import { workflowById } from "@voluma/workflow/bundled";
 import { Link } from "react-router";
@@ -49,10 +49,8 @@ function relativeDay(iso: string): string {
   if (days <= 0) return "Today";
   if (days === 1) return "Yesterday";
   if (days < 7) return `${days} days ago`;
-  return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  return shortDate(iso);
 }
-
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 export function HomePage() {
   const studies = useQuery({

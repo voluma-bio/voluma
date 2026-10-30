@@ -1,7 +1,7 @@
 /** Task-scoped report and questions. Acceptance never changes scientific confidence. */
-import { useMutation } from "@tanstack/react-query";
-import { acceptCheck, reviewFileUrl } from "@voluma/api-client";
+import { reviewFileUrl } from "@voluma/api-client";
 import type { Focus } from "@voluma/contracts/review";
+import { useAcceptCheck } from "@voluma/run-view";
 import { StatusBadge } from "@voluma/ui";
 import {
   ArrowUpRight,
@@ -109,12 +109,7 @@ export function TaskReport({
   onFocus(focus?: Focus): void;
   onRefresh(): Promise<void>;
 }) {
-  const accept = useMutation({
-    mutationFn: (checkId: string) =>
-      acceptCheck(runId, checkId, { baseRevisionId: revisionId, taskId: task.id }),
-    onSuccess: onRefresh,
-    onError: onRefresh,
-  });
+  const accept = useAcceptCheck(runId, revisionId, { refetch: onRefresh, onSuccess: onRefresh });
   const references = task.measurements.flatMap((m) =>
     m.references.map((reference) => ({ m, reference })),
   );
@@ -297,10 +292,10 @@ export function TaskReport({
                   type="button"
                   className="button compact"
                   disabled={readOnly || accept.isPending}
-                  onClick={() => accept.mutate(check.id)}
+                  onClick={() => accept.mutate({ checkId: check.id, taskId: task.id })}
                 >
                   <Check size={14} />
-                  {accept.isPending && accept.variables === check.id
+                  {accept.isPending && accept.variables?.checkId === check.id
                     ? "Accepting…"
                     : "Accept check"}
                 </button>
@@ -313,7 +308,9 @@ export function TaskReport({
           </div>
         ))}
         {accept.error &&
-          task.checks.some((check) => check.id === accept.variables && check.status === "open") && (
+          task.checks.some(
+            (check) => check.id === accept.variables?.checkId && check.status === "open",
+          ) && (
             <p className="error-message" role="alert">
               {accept.error.message}
             </p>

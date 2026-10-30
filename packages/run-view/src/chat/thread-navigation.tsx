@@ -5,7 +5,7 @@
  */
 import { createContext, type ReactNode, useContext } from "react";
 
-export type OpenThread = (threadId: string | null) => void;
+type OpenThread = (threadId: string | null) => void;
 
 const ThreadNavigationContext = createContext<OpenThread>(() => {});
 

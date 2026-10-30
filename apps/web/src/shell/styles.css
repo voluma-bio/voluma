@@ -4,7 +4,7 @@
 @import "@voluma/design-tokens/theme.css";
 @import "@voluma/design-tokens/fonts.css";
 @import "../features/review/styles.css";
-@import "../features/run/styles.css";
+@import "@voluma/run-view/styles.css";
 @import "../features/study/styles.css";
 
 /* Let Tailwind see the classes used inside the shared packages. */

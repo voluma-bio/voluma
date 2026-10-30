@@ -11,6 +11,13 @@ import type { Run } from "@voluma/contracts/run";
 import type { StudyRunSummary } from "@voluma/contracts/study";
 import { StatusBadge, type StatusTone } from "@voluma/ui";
 
+/** "1 run", "3 runs"; `many` for an irregular plural. */
+export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/** A date as "12 Mar". */
+export const shortDate = (iso: string) =>
+  new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+
 /** US dollars: cents, or a tenth of a cent under a dollar so a short run doesn't read $0.00. */
 export function formatUsd(usd: number): string {
   return `$${usd.toFixed(usd < 1 ? 3 : 2)}`;
@@ -51,11 +58,6 @@ export function runStatus({ state, review }: Pick<StudyRunSummary, "state" | "re
       if (state.outcome === "failed") return { label: "Failed", tone: "destructive" };
       return { label: "Stopped", tone: "neutral" };
   }
-}
-
-export function RunBadge({ run }: { run: Run }) {
-  const { label, tone } = runStatus(run);
-  return <StatusBadge tone={tone}>{label}</StatusBadge>;
 }
 
 /**

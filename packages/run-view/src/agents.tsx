@@ -107,7 +107,7 @@ export function AgentMark({ thread }: { thread: Thread }) {
 }
 
 /** The door: a thread's name, which opens its transcript. */
-export function AgentName({ thread, className = "" }: { thread: Thread; className?: string }) {
+function AgentName({ thread, className = "" }: { thread: Thread; className?: string }) {
   const open = useOpenThread();
   const { threads } = useRunLog();
   return (
