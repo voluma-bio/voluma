@@ -24,7 +24,13 @@
 import type { StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { By } from "@voluma/contracts/events";
-import { checkResult, type Folded, type FoldedTask, fold } from "@voluma/contracts/fold";
+import {
+  checkResult,
+  type Folded,
+  type FoldedTask,
+  fold,
+  goMarkerId,
+} from "@voluma/contracts/fold";
 import type { UserSender } from "./adapters/pi/start-thread";
 import type { RunLayout, ThreadLayout } from "./layout";
 import {
@@ -65,7 +71,6 @@ import {
 } from "./thread-log";
 import type { ThreadSpec, Threads } from "./threads";
 
-import { goMarkerId } from "./tools/effects";
 import type { Agents } from "./tools/main-tools";
 import type { Tool } from "./tools/tool";
 
@@ -547,8 +552,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
   async function markGo(d: ThreadLog): Promise<boolean> {
     for (const n of d.undelivered) {
       if (n.kind !== "person" || n.go !== "live" || !n.taskId) continue;
-      if (!d.reopenId) continue;
-      const id = goMarkerId(n.eventId, d.reopenId);
+      const id = goMarkerId(n.eventId);
       if (d.written.has(id)) continue;
       await recorder.append(
         d.main ?? root,

@@ -16,7 +16,7 @@ import {
   fauxToolCall,
 } from "@earendil-works/pi-ai";
 import type { RunEvent } from "@voluma/contracts/events";
-import { correctionSpans, type Folded } from "@voluma/contracts/fold";
+import { corrections, type Folded } from "@voluma/contracts/fold";
 import { cancelEnds } from "@voluma/contracts/threads";
 import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
 import { runLayout } from "./layout";
@@ -222,7 +222,6 @@ export function world(o: WorldOptions) {
   let cut = false;
   let cancelled = false;
   let frozen = false;
-  let whileClaimed: ((e: RunEvent) => void) | undefined;
   let n = 0;
   const callId = () => `c${++n}`;
 
@@ -286,7 +285,6 @@ export function world(o: WorldOptions) {
       const event = { ...e, seq: stored.length + 1 } as unknown as RunEvent;
       stored.push(event);
       o.onStored?.(event);
-      whileClaimed?.(event);
       if (!cut && o.cutAfter?.(event)) {
         cut = true;
         frozen = true;
@@ -299,8 +297,8 @@ export function world(o: WorldOptions) {
           stored.push({ ...ended, seq: stored.length + 1 } as unknown as RunEvent);
         }
         // A cancel inside a correction also records how it ended (`correction.ended`).
-        const open = correctionSpans(stored).at(-1);
-        if (open?.closed === "open") {
+        const { open } = corrections(stored);
+        if (open) {
           stored.push({
             id: open.reopenId.replace(/:reopened$/, ":ended"),
             runId: RUN,
@@ -317,8 +315,8 @@ export function world(o: WorldOptions) {
 
   type Message = { text?: string; go?: true; taskId?: string; marks?: unknown[] };
 
-  /** The API's writes for a message `id`: `run.reopened` (unless `reopen` is false), then the message when there is one. */
-  function serverEvents(id: string, message: Message | undefined, reopen = true) {
+  /** The API's writes for a message `id`: `run.reopened`, then the message. */
+  function serverEvents(id: string, message: Message) {
     const person = `${RUN}.person`;
     const add = (type: string, eid: string, payload: unknown) =>
       stored.push({
@@ -330,8 +328,8 @@ export function world(o: WorldOptions) {
         payload,
         createdAt: new Date().toISOString(),
       } as unknown as RunEvent);
-    if (reopen) add("run.reopened", `${person}:${id}:reopened`, { by: "u1" });
-    if (message) add("person.message", `${person}:${id}`, message);
+    add("run.reopened", `${person}:${id}:reopened`, { by: "u1" });
+    add("person.message", `${person}:${id}`, message);
   }
 
   async function claim(reopened = false): Promise<Folded> {
@@ -413,35 +411,13 @@ export function world(o: WorldOptions) {
     /**
      * What the API does when the researcher writes to the finished run (`messages.ts`): stores
      * `run.reopened` and `person.message` (server events, thread `<run>.person`), then the run is
-     * claimed once more. Returns the fold of the last claim. With `during`, a second message
-     * lands while that claim runs, right after the store accepts the event `after` matches, so it
-     * sits between the claim's own events and above what the claim read. The claim's end is then
-     * not recorded: `report()` writes `run.reopened` after the message and the run is claimed again.
+     * claimed once more. Returns the fold of the last claim.
      */
-    async send(
-      message: Message,
-      id = `m${++n}`,
-      during?: { message: Message; after: (e: RunEvent) => boolean },
-    ): Promise<Folded> {
+    async send(message: Message, id = `m${++n}`): Promise<Folded> {
       cut = frozen = false; // a cancelled correction does not stop the next one
       serverEvents(id, message);
-      let landed: string | undefined;
-      if (during) {
-        whileClaimed = (e) => {
-          if (landed || !during.after(e)) return;
-          landed = `m${++n}`;
-          serverEvents(landed, during.message, false);
-        };
-      }
       abort = new AbortController();
-      let folded = await claim(true);
-      whileClaimed = undefined;
-      if (landed) {
-        serverEvents(landed, undefined);
-        abort = new AbortController();
-        folded = await claim(true);
-      }
-      return folded;
+      return claim(true);
     },
     /** The log as one line per event, for a failure message. */
     text(): string {

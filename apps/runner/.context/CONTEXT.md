@@ -361,11 +361,8 @@ and the next claim resumes the main agent with it, as a notice: nothing is cut o
 cut-off text. That claim's `claim.started` carries `reopened: true` instead of `after`. A thread
 whose stored history cannot be resumed (a run made before `reply` existed, a changed prompt or tool
 list) or whose recorded model this runner no longer allows is refused as stale and started again
-(`main.<n>`); `threadModel` hands such a thread the role's model rather than failing the run. The
-report carries the highest event `seq` the claim read (`lastSeq`, 0 if it read nothing) and the claim's
-`claim.started` records the same as `readSeq`; the API reopens the run when a `person.message` came
-after it, and a message stored mid-claim is never counted as delivered or answered by that claim's
-events. A correction whose main agent stops moving fails the claim (the server records
+(`main.<n>`); `threadModel` hands such a thread the role's model rather than failing the run. A claim answers one message: the API refuses a message to a run that is
+queued or running, so no message arrives mid-claim. A correction whose main agent stops moving fails the claim (the server records
 `correction.ended`) instead of skipping tasks. `/outputs` is one R2 prefix shared by every claim, so
 `superviseRun` first calls `keepOutputs` (`packages/harness/src/outputs-backup.ts`, before any thread or
 sandbox): the first claim of a correction whose span holds a go (only a go can lead to a write: main
@@ -380,9 +377,9 @@ calls `awaitOtherClaimsGone`, which re-lists the run's sandboxes of other claims
 live (up to 60 s): a stale sandbox could write over the restored files, so if some remain the
 claim fails. Only a pending restore waits; `terminateOtherClaims` at claim start does not. A failed check throws too, and the next claim repeats the restore. The first claim of the
 next `run.reopened` after a correction finished (no `correction.ended` before it) deletes its
-backup and records `outputs.discarded`. `correctionSpans` (`@voluma/contracts/fold`) is the one
-reader of where a span starts and how it closed (abandoned, finished or open). A thread that ended `cancelled` is never
-resumed. A tool whose `tool.call` event was
+backup and records `outputs.discarded`. `corrections` (`@voluma/contracts/fold`) is the one
+reader of a correction's state (its message and go, how it closed, its backup). A thread that ended `cancelled` is never
+resumed; the server cancels every thread that ran in an abandoned correction, finished ones too, so the next correction starts them fresh. A tool whose `tool.call` event was
 still queued when the runner died isn't named (the log lacks it), so a runner killed within
 milliseconds of a call gets the no-tool form.
 

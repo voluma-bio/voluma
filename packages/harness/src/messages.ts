@@ -136,8 +136,7 @@ export function noticeLine(n: Notice): string {
     case "person":
       return personLine(n);
     case "correction-ended": {
-      const what =
-        n.taskIds.length > 0 ? `The correction of ${n.taskIds.join(", ")}` : "A correction";
+      const what = n.taskId ? `The correction of ${n.taskId}` : "A correction";
       return `- ${what} was ${n.status}${n.error ? ` (${n.error})` : ""} before it finished. Its work was discarded: the tasks, the results and /outputs are back at the revision before it. Nothing it did counts; do not report it as done.`;
     }
     case "check-result": {

@@ -229,13 +229,6 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
         after: claimEndReasonSchema.optional(),
         /** This claim exists because a person's message reopened the run (`messages.ts`); not a claim-end reason. */
         reopened: z.literal(true).optional(),
-        /**
-         * The highest event `seq` of the log this claim read (the runner reads it once, at the
-         * start). A server-written event above it, a `person.message` stored mid-claim, was not
-         * seen by anything this claim did: the harness's thread log counts none of its deliveries
-         * or replies as covering or answering it. Absent on a log from before it was recorded.
-         */
-        readSeq: z.number().int().nonnegative().optional(),
       })
       .refine((p) => p.resumed === (p.after !== undefined || p.reopened === true), {
         path: ["after"],

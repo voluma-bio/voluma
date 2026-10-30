@@ -25,7 +25,7 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { Reader } from "../../domain";
 import { admit, type Limits, type Refusal, refusalMessage, type Usage, usage } from "./admission";
 import { endClaim, stalledError } from "./claim-progress";
-import { decideMessage, endCorrection, openCorrection, reopen } from "./corrections";
+import { decideMessage, endCorrection, openCorrection } from "./corrections";
 import type { KeyVault } from "./key-vault";
 import { LeaseLost, noLease } from "./lease";
 import type { Notifier } from "./notifier";
@@ -571,20 +571,14 @@ export function pgRunQueue(
       }),
 
     /**
-     * Throws `LeaseLost` or `RunEnded`. A report from a claim that had not seen a person's
-     * message (`lastSeq`, `messages.ts`) does not end the run as the claim says: a failed claim
-     * of a reopened run ends it `completed` (`endUnfinished`), and the run is then reopened and
-     * queued, so the next claim answers the message.
+     * Throws `LeaseLost` or `RunEnded`. A failed claim of a reopened run ends it `completed`
+     * (`endUnfinished`).
      */
-    async report(runId: string, leaseToken: string, report: RunnerReport, lastSeq: number) {
+    async report(runId: string, leaseToken: string, report: RunnerReport) {
       await locked(async (tx) => {
-        await eventLock(tx, runId);
+        await eventLock(tx, runId); // before the row lock: `endUnfinished` appends events
         const [run] = await tx
-          .select({
-            state: runs.state,
-            startedBy: runs.startedBy,
-            claimStartSeq: runs.claimStartSeq,
-          })
+          .select({ state: runs.state })
           .from(runs)
           .where(and(eq(runs.id, runId), eq(runs.leaseToken, leaseToken)))
           .for("update");
@@ -592,31 +586,14 @@ export function pgRunQueue(
         if (run.state !== "running") throw new RunEnded();
         if (report.kind === "released") {
           await recover(tx, sql`id = ${runId}`, report.reason);
-          return;
-        }
-        // What the claim could have seen: its reading of the log, or the log at its start when it
-        // failed before reading (the message that reopened the run is not an unseen one).
-        const [unseen] = await tx
-          .select({ id: events.id })
-          .from(events)
-          .where(
-            and(
-              eq(events.runId, runId),
-              eq(events.type, "person.message"),
-              gt(events.seq, Math.max(lastSeq, run.claimStartSeq)),
-            ),
-          )
-          .orderBy(asc(events.seq))
-          .limit(1);
-        if (report.outcome === "failed") {
+        } else if (report.outcome === "failed") {
           await endUnfinished(tx, runId, "failed", report.error);
-        } else if (!unseen) {
+        } else {
           await tx
             .update(runs)
             .set({ state: "ended", outcome: "completed", endedAt: sql`now()`, error: null })
             .where(eq(runs.id, runId));
         }
-        if (unseen) await reopen(tx, runId, unseen.id, run.startedBy);
       });
       notifier.notify(runId);
     },

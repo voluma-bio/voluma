@@ -7,6 +7,7 @@
  * page asks here instead of guessing from a thread's last event.
  */
 import type { EventInput, RunEvent } from "./events";
+import { corrections } from "./fold";
 import type { RunState } from "./run";
 
 /** Ids of the threads left open, in the order they first started; the root thread (kind `supervisor`) among them. */
@@ -20,17 +21,42 @@ export function openThreads(events: readonly RunEvent[]): string[] {
 }
 
 /**
- * A user's cancel is a deliberate stop, so it ends every open thread `cancelled` and the root
- * last, ids `<runId>:cancel:end:<threadId>`. The server writes them in the transaction that
- * ends the run: after that it refuses the runner's writes. A runtime abort writes none.
+ * The server's cancel of a run that did not finish (a user's cancel, or a failure it records as
+ * one): every open thread ends `cancelled` and the root last. The server writes the ends in the
+ * transaction that ends the run: after that it refuses the runner's writes. A runtime abort
+ * writes none. Ids are `<the thread's latest thread.started id>:cancel:end`: a thread, the root
+ * above all, has one id for every claim, so an id keyed to the thread would collide with the
+ * end of an earlier correction.
+ *
+ * In a correction (`corrections`) the ends also cover the threads that already finished inside
+ * it, root excepted: the correction is discarded, and an agent that resumed would believe its
+ * reverted work stands. The next correction starts them fresh (`messages.ts`).
  */
 export function cancelEnds(runId: string, events: readonly RunEvent[], at: Date): EventInput[] {
   const root = events.find((e) => e.type === "thread.started" && e.payload.kind === "supervisor");
   const isRoot = (id: string) => id === root?.threadId;
-  return openThreads(events)
+  const start = new Map<string, string>(); // thread -> its latest thread.started id
+  const stopped = new Set<string>(); // threads whose latest end is `cancelled`
+  for (const e of events) {
+    if (e.type === "thread.started") {
+      start.set(e.threadId, e.id);
+      stopped.delete(e.threadId);
+    } else if (e.type === "thread.ended" && e.payload.status === "cancelled") {
+      stopped.add(e.threadId);
+    }
+  }
+  const ending = new Set(openThreads(events));
+  const open = corrections(events).open;
+  if (open) {
+    for (const e of events.slice(open.reopened)) {
+      if (start.has(e.threadId) && !isRoot(e.threadId) && !stopped.has(e.threadId))
+        ending.add(e.threadId);
+    }
+  }
+  return [...ending]
     .sort((a, b) => Number(isRoot(a)) - Number(isRoot(b)))
     .map((threadId) => ({
-      id: `${runId}:cancel:end:${threadId}`,
+      id: `${start.get(threadId)}:cancel:end`,
       runId,
       threadId,
       type: "thread.ended",
