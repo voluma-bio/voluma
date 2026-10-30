@@ -12,12 +12,12 @@ Render bills a running worker per second (about $0.035/hour at `1c-2g`). **Until
 runner stays on**: hackathon visitors start runs while nobody watches, and a suspended runner
 would leave them queued. After Nov 4 it is **suspended unless a run is queued or running**. The
 Blueprint has no field to create a service suspended, so suspend it by hand. With `r` and `$B`
-from the API's deploy.md and `<RUNNER_ID>` from its table (both paths are in Render's API
+from the API's deploy.md and `srv-dbideabl550s73bu5120` from its table (both paths are in Render's API
 reference):
 
 ```bash
-r -X POST "$B/services/<RUNNER_ID>/resume"    # before starting a run
-r -X POST "$B/services/<RUNNER_ID>/suspend"   # when no run is queued or running
+r -X POST "$B/services/srv-dbideabl550s73bu5120/resume"    # before starting a run
+r -X POST "$B/services/srv-dbideabl550s73bu5120/suspend"   # when no run is queued or running
 ```
 
 A run started while the runner is suspended is created `queued` and stays that way: nothing
@@ -34,7 +34,7 @@ in [../../gateway/.context/deploy.md](../../gateway/.context/deploy.md).
 
 ## How it is set up
 
-Service `voluma-runner` (`<RUNNER_ID>`), same workspace and region as the API. Settings (the
+Service `voluma-runner` (`srv-dbideabl550s73bu5120`), same workspace and region as the API. Settings (the
 yaml has them):
 
 | Setting | Value |
@@ -55,7 +55,7 @@ Variables (names only; values never go in the repo):
 
 | Variable | Source |
 |---|---|
-| `VOLUMA_API_URL` | `fromService` `voluma-api`, `property: hostport` (`host:port` on the private network, no scheme; `apiEndpoint()` in `config.ts` adds `http://`). Check the value at cutover |
+| `VOLUMA_API_URL` | `fromService` `voluma-api`, `property: hostport` (`host:port` on the private network, no scheme; `apiEndpoint()` in `config.ts` adds `http://`). Checked at cutover: the runner reaches `http://voluma-api:10000` |
 | `VOLUMA_API_TOKEN` | `fromService` `voluma-api`'s variable: rotating it on the API reaches the runner at the next Blueprint sync |
 | `VOLUMA_META_API_KEY`, `RUNNER_CONCURRENCY` | the model key; 2 slots. Until Jimmy says the infrastructure is ready, staging is a test stack: `RUNNER_MODEL=meta/muse-spark-1.3-contributor` and `RUNNER_THINKING=medium` force every role onto cheap Spark contributor (Jimmy's choice, 30 Oct), both literals in `render.yaml`. Contributor mode lets Meta train on what it is sent, so put only cleared scans (OA6-1RK, OA7) on staging while it is set. For real runs, delete both from the yaml: each role then takes its role file's alias (`wonder` = `meta/muse-wonder-1.0`, Standard mode) and thinking level. Contributor is never right outside that test default |
 | `GATEWAY_TOKEN_SECRET` | `fromService` `voluma-gateway`: its secret |
