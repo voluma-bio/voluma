@@ -13,12 +13,12 @@ import type { RunEvent } from "@voluma/contracts/events";
 import type { Run } from "@voluma/contracts/run";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from "react-router";
-import { RunLogProvider } from "./agent-thread";
 import { AgentsView } from "./agents-view";
 import { DisclosureProvider } from "./chat/disclosure-store";
 import { ThreadNavigationProvider } from "./chat/thread-navigation";
 import { Overview, useAccepting } from "./overview";
 import { RunAlerts, RunHeader } from "./run-header";
+import { RunLogProvider } from "./run-log";
 import { haltOf, runView, withLiveCalls } from "./run-model";
 import { TaskFlow } from "./task-flow";
 import { TaskView } from "./task-view";
@@ -293,8 +293,13 @@ function RunScreen({
             )}
             <div className="flex min-h-0 flex-1 max-[1100px]:flex-col">
               <TaskFlow tasks={tasks} selected={task?.id} search={search} />
-              <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-9 pt-6 pb-24 max-[1100px]:overflow-visible max-[1100px]:px-4 max-[1100px]:pt-4">
-                <div className={`mx-auto ${agents ? "max-w-[80rem]" : "max-w-[55rem]"}`}>
+              {/* The Agents view fills the column and its threads scroll themselves; the rest scroll here. */}
+              <div
+                className={`min-h-0 min-w-0 flex-1 px-9 pt-6 max-[1100px]:overflow-visible max-[1100px]:px-4 max-[1100px]:pt-4 ${agents ? "flex flex-col overflow-hidden pb-6" : "overflow-y-auto pb-24"}`}
+              >
+                <div
+                  className={`mx-auto w-full ${agents ? "flex min-h-0 max-w-[80rem] flex-1 flex-col" : "max-w-[55rem]"}`}
+                >
                   <RunAlerts run={run} userId={me.userId} onChange={setRun} />
                   {content}
                 </div>

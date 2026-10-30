@@ -6,8 +6,9 @@
  */
 import { catalog } from "@voluma/workflow/bundled";
 import { useEffect, useMemo, useRef } from "react";
-import { AgentThread, useRunLog } from "./agent-thread";
+import { AgentThread } from "./agent-thread";
 import { AgentMark, STATUS_WORD } from "./agents";
+import { useRunLog } from "./run-log";
 import { type AgentNode, agentLabel, agentTree, type Thread } from "./run-model";
 
 const { taskTitle } = catalog["mouse-oa"];
@@ -75,7 +76,7 @@ export function AgentsView({
       </p>
     );
   return (
-    <div className="grid h-[calc(100vh-14rem)] min-h-[24rem] grid-cols-[17rem_minmax(0,1fr)] gap-6 max-[1100px]:h-auto max-[1100px]:grid-cols-1">
+    <div className="grid min-h-0 flex-1 grid-cols-[17rem_minmax(0,1fr)] gap-6 max-[1100px]:grid-cols-1">
       <nav aria-label="Agents" className="min-h-0 min-w-0 overflow-y-auto max-[1100px]:max-h-80">
         <ul className="grid gap-0.5">
           <Branch
@@ -90,7 +91,7 @@ export function AgentsView({
       <AgentThread
         key={selected.id}
         threadId={selected.id}
-        className="max-[1100px]:h-[36rem]"
+        className="max-[1100px]:max-h-[36rem]"
         actions={
           <label className="flex items-center gap-1.5 text-meta">
             <input

@@ -14,7 +14,8 @@ import { useDisclosure } from "./chat/disclosure-store";
 import { InfoButton, type InfoSection } from "./chat/info-button";
 import { Markdown } from "./chat/markdown";
 import { useOpenThread } from "./chat/thread-navigation";
-import { type Thread, threadName } from "./run-model";
+import { useRunLog } from "./run-log";
+import { agentTitle, type Thread } from "./run-model";
 import { useNow } from "./status";
 
 const count = (n: number) => n.toLocaleString();
@@ -52,7 +53,7 @@ export function Elapsed({ thread }: { thread: Thread }) {
 }
 
 /** A worker's or checker's own cost so far, once a model call reports one. */
-export function ThreadCost({ thread }: { thread: Thread }) {
+function ThreadCost({ thread }: { thread: Thread }) {
   if (!thread.spend?.calls) return null;
   return (
     <span className="shrink-0 text-meta text-muted-foreground tabular-nums">
@@ -106,13 +107,14 @@ export function AgentMark({ thread }: { thread: Thread }) {
 /** The door: a thread's name, which opens its transcript. */
 export function AgentName({ thread, className = "" }: { thread: Thread; className?: string }) {
   const open = useOpenThread();
+  const { threads } = useRunLog();
   return (
     <button
       type="button"
       onClick={() => open(thread.id)}
       className={`relative z-10 min-w-0 truncate text-left font-medium text-foreground hover:text-primary-text hover:underline ${className}`}
     >
-      {threadName(thread)}
+      {agentTitle(thread, threads)}
     </button>
   );
 }
@@ -152,6 +154,7 @@ export const STATUS_WORD: Record<Thread["status"], string> = {
 /** A worker's or checker's card in the main thread. */
 export function AgentCard({ thread }: { thread: Thread }) {
   const [expanded, setExpanded] = useDisclosure(`card:${thread.id}`);
+  const { threads } = useRunLog();
   const running = thread.status === "running";
   const expandable = !running;
   return (
@@ -172,7 +175,7 @@ export function AgentCard({ thread }: { thread: Thread }) {
             <button
               type="button"
               aria-expanded={expanded}
-              aria-label={`${expanded ? "Hide" : "Show"} the report of ${threadName(thread)}`}
+              aria-label={`${expanded ? "Hide" : "Show"} the report of ${agentTitle(thread, threads)}`}
               onClick={() => setExpanded(!expanded)}
               className="absolute -inset-1 rounded-md"
             />

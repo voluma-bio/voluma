@@ -241,15 +241,9 @@ export function agentLabel(t: Thread, threads: Thread[]): string {
   }
 }
 
-/** "Segmentation: the AI's work", "Segmentation: second AI check", "Lead AI". */
-export const threadName = (t: Pick<Thread, "kind" | "taskId">) =>
-  t.kind === "worker" && t.taskId
-    ? `${taskTitle(t.taskId)}: the AI's work`
-    : t.kind === "check" && t.taskId
-      ? `${taskTitle(t.taskId)}: second AI check`
-      : t.kind === "chat"
-        ? "Chat"
-        : "Lead AI";
+/** An agent's name anywhere: "Segmentation: Second AI check of try 2", "Lead AI". */
+export const agentTitle = (t: Thread, threads: Thread[]) =>
+  t.taskId ? `${taskTitle(t.taskId)}: ${agentLabel(t, threads)}` : agentLabel(t, threads);
 
 export type TaskState =
   /** Not started, and a task it builds on has no usable result yet. */

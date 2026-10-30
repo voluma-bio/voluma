@@ -218,7 +218,7 @@ function HowTheAiDidIt({ threads, working }: { threads: Thread[]; working: boole
       {open && (
         <div className="grid gap-6 border-t border-border px-4 pt-3 pb-4">
           {threads.map((t) => (
-            <AgentThread key={t.id} threadId={t.id} className="max-h-[36rem]" />
+            <AgentThread key={t.id} threadId={t.id} inTask className="max-h-[36rem]" />
           ))}
         </div>
       )}
