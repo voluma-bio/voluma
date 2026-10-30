@@ -2,9 +2,9 @@
  * Operator script: load a run dumped by `export-run.ts` into DATABASE_URL.
  *   pnpm --filter @voluma/api import:run --from <dir|r2:prefix> [--replace] [--remote]
  * Refuses when the run already exists unless `--replace`, which deletes it and its events,
- * threads and pi messages first. The run gets its own study of one scan (`study-<runId>`, named
- * after the scan, as the migration that introduced studies did). The study's workflow is the dump's own `workflowId` when it has one (older dumps do, and
- * their pinned paths may predate a rename), else the bundled workflow at the pinned path. Every event is checked against `runEventSchema` and the ones
+ * threads, pi messages, snapshots and provider calls first. The run gets its own study of one scan (`study-<runId>`, named
+ * after the scan, as the migration that introduced studies did). The study's workflow is the one the dump names (the run's `workflowId` in older dumps, else its study's; their
+ * pinned paths may predate a rename), else the bundled workflow at the pinned path. Every event is checked against `runEventSchema` and the ones
  * that fail are listed, with nothing written. The run's input row is added if it is missing.
  * Every row must belong to the run. Writes only to a local database unless `--remote` (see
  * `operator.ts`). Evidence is not copied: it stays in R2 under `runs/<id>/evidence/`, shared by every database.
@@ -14,14 +14,25 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { runEventSchema } from "@voluma/contracts/events";
 import { runIdSchema } from "@voluma/contracts/ids";
+import { providerCalls } from "@voluma/provider-calls";
 import { catalog, workflowById } from "@voluma/workflow/bundled";
-import { eq, getTableColumns, sql } from "drizzle-orm";
+import { eq, getTableColumns } from "drizzle-orm";
 import type { PgTable } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { databaseUrl } from "./operator";
-import { withLocalDir } from "./r2-dir";
-import { events, inputs, piMessages, runs, studies, studyScans, threads } from "./schema";
+import { reviewSnapshots } from "../domains/review/schema";
+import { databaseUrl } from "../domains/run/operator";
+import { withLocalDir } from "../domains/run/r2-dir";
+import {
+  events,
+  inputs,
+  piMessages,
+  runs,
+  studies,
+  studyScans,
+  threads,
+} from "../domains/run/schema";
+import { countsOf, describeCounts, piMessagesOf } from "./run-dump";
 
 const { values } = parseArgs({
   options: { from: { type: "string" }, replace: { type: "boolean" }, remote: { type: "boolean" } },
@@ -46,21 +57,26 @@ const dump = await withLocalDir(
       // `workflowId` is the column dumps carried before studies took it over.
       run: { id: string; workflowId?: string; workflows: { path: string }[] };
       input: { id: string; name: string } | null;
+      study?: { workflowId: string };
       events: { id: string; seq: number; runId: string }[];
       threads: { runId: string }[];
       piMessages: { threadId: string }[];
+      // Dumps from before these were exported have neither.
+      reviewSnapshots?: { runId: string }[];
+      providerCalls?: { runId: string }[];
     },
 );
 const runId = runIdSchema.parse(dump.run.id);
 const studyId = `study-${runId}`;
 
+const workflowId = dump.run.workflowId ?? dump.study?.workflowId;
 const workflowPath = dump.run.workflows[0]?.path;
 const workflow =
-  (dump.run.workflowId ? workflowById(dump.run.workflowId) : undefined) ??
+  (workflowId ? workflowById(workflowId) : undefined) ??
   Object.values(catalog).find((w) => w.path === workflowPath);
 if (!workflow) {
   throw new Error(
-    `run ${runId} used ${dump.run.workflowId ?? workflowPath}, which is not a bundled workflow`,
+    `run ${runId} used ${workflowId ?? workflowPath}, which is not a bundled workflow`,
   );
 }
 
@@ -68,6 +84,10 @@ const strays = [
   ...dump.events.filter((e) => e.runId !== runId).map((e) => `event ${e.id}`),
   ...dump.threads.filter((t) => t.runId !== runId).map((t) => `thread of ${t.runId}`),
   ...dump.piMessages.filter((m) => !m.threadId.startsWith(`${runId}.`)).map((m) => m.threadId),
+  ...(dump.reviewSnapshots ?? [])
+    .filter((s) => s.runId !== runId)
+    .map((s) => `snapshot of ${s.runId}`),
+  ...(dump.providerCalls ?? []).filter((c) => c.runId !== runId).map((c) => `call of ${c.runId}`),
 ];
 if (strays.length > 0) {
   throw new Error(`${strays.length} rows are not run ${runId}'s: ${strays.slice(0, 5).join(", ")}`);
@@ -89,7 +109,9 @@ await db.transaction(async (tx) => {
     .from(runs)
     .where(eq(runs.id, runId));
   if (existing && !values.replace) throw new Error(`run ${runId} exists; pass --replace`);
-  await tx.delete(piMessages).where(sql`starts_with(${piMessages.threadId}, ${`${runId}.`})`);
+  await tx.delete(providerCalls).where(eq(providerCalls.runId, runId));
+  await tx.delete(reviewSnapshots).where(eq(reviewSnapshots.runId, runId));
+  await tx.delete(piMessages).where(piMessagesOf(runId));
   await tx.delete(threads).where(eq(threads.runId, runId));
   await tx.delete(events).where(eq(events.runId, runId));
   await tx.delete(runs).where(eq(runs.id, runId));
@@ -129,8 +151,8 @@ await db.transaction(async (tx) => {
   await insertAll(events, dump.events);
   await insertAll(threads, dump.threads);
   await insertAll(piMessages, dump.piMessages);
+  await insertAll(reviewSnapshots, dump.reviewSnapshots ?? []);
+  await insertAll(providerCalls, dump.providerCalls ?? []);
 });
-console.log(
-  `run ${runId}: ${dump.events.length} events, ${dump.threads.length} threads, ${dump.piMessages.length} pi messages loaded`,
-);
+console.log(`run ${runId}: ${describeCounts(countsOf(dump))} loaded`);
 await client.end();
