@@ -10,12 +10,12 @@
  * They never wait for a thread inside the section.
  */
 import type { By } from "@voluma/contracts/events";
+import { transitiveDependents } from "@voluma/contracts/fold";
 import { taskIdSchema } from "@voluma/contracts/ids";
 import { fileRefInputSchema } from "@voluma/contracts/output";
 import { replyInputSchema } from "@voluma/contracts/task-tools";
 import { type PlanTask, workflowPlanSchema } from "@voluma/contracts/workflow";
 import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
-import { isSatisfied, transitiveDependents } from "@voluma/workflow";
 import { planTask } from "@voluma/workflow/plan";
 import { z } from "zod";
 import type { UserSender } from "../adapters/pi/start-thread";
@@ -128,7 +128,7 @@ export function mainTools(deps: MainDeps) {
       if (!task) throw new Refusal(`${taskId} is not a task of this run's plan.`);
       const t = runtime.taskOf(taskId);
       if (t?.skipped) throw new Refusal(`${taskId} was skipped: ${t.skipped.reason}`);
-      const waiting = task.dependsOn.filter((id) => !isSatisfied(runtime.taskOf(id)));
+      const waiting = task.dependsOn.filter((id) => !runtime.taskOf(id)?.satisfied);
       if (waiting.length > 0) {
         throw new Refusal(
           `${taskId} builds on ${waiting.join(", ")}, which has no usable result yet (not done, or rejected by its check until you send feedback or accept it).`,
