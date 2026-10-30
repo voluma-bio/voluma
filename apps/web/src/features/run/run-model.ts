@@ -37,7 +37,13 @@ export type ThreadStatus =
 export type Thread = {
   id: string;
   kind: "supervisor" | "main" | "worker" | "check" | "chat";
+  /** The thread that started it, from its `thread.started`; null on the run's root. */
+  parentId: string | null;
   taskId?: string;
+  /** A check's: the attempt it checks. */
+  attemptId?: string;
+  /** The attempts it opened, in order (`attempt.opened` ids): a redo resumes the same thread. */
+  attempts: string[];
   model?: string;
   /** Its latest start: a resumed thread's clock counts from its resume. */
   startedAt: string;
@@ -102,7 +108,10 @@ function threadsOf(events: RunEvent[]): { threads: Thread[]; lastAt: Map<string,
           threads.set(e.threadId, {
             id: e.threadId,
             kind: e.payload.kind,
+            parentId: e.payload.parentThreadId,
             taskId: e.payload.task,
+            attemptId: e.payload.attemptId,
+            attempts: [],
             model: e.payload.model,
             startedAt: e.createdAt,
             status: "running",
@@ -133,6 +142,9 @@ function threadsOf(events: RunEvent[]): { threads: Thread[]; lastAt: Map<string,
           if (e.payload.isError && !e.payload.infrastructure) t.toolErrors++;
           running.get(e.threadId)?.delete(e.payload.toolCallId);
         }
+        break;
+      case "attempt.opened":
+        t?.attempts.push(e.id);
         break;
       case "checkpoint":
         if (t) t.result = { text: e.payload.text, verdict: e.payload.verdict };
@@ -182,6 +194,25 @@ export function withLiveCalls(threads: Thread[], live: Live): Thread[] {
       ? { ...t, liveTool: "Writing a tool call…" }
       : t,
   );
+}
+
+export type AgentNode = { thread: Thread; children: AgentNode[] };
+
+/**
+ * The run's agents as the log places them: each under the thread that started it
+ * (`parentThreadId`), in start order. The supervisor runs no model, so its children are the roots.
+ * Nothing here knows the kinds, so a new kind or a nested helper appears with no change.
+ */
+export function agentTree(threads: Thread[]): AgentNode[] {
+  const nodes = new Map(
+    threads.filter((t) => t.kind !== "supervisor").map((t) => [t.id, { thread: t, children: [] }]),
+  );
+  const roots: AgentNode[] = [];
+  for (const node of nodes.values()) {
+    const parent = node.thread.parentId ? nodes.get(node.thread.parentId) : undefined;
+    (parent ? parent.children : roots).push(node);
+  }
+  return roots;
 }
 
 /** "Segmentation: the AI's work", "Segmentation: second AI check", "Lead AI". */
@@ -391,8 +422,6 @@ export type RunView = {
   /** `progress` of the latest revision: tasks done of all, and the open check items. */
   progress: { done: number; total: number; toCheck: number };
   spend: RunSpend;
-  /** The lead AI's own thread has started (runs before the main agent had none). */
-  hasLead: boolean;
 };
 
 /** The fold's title for a To check flag set by a `task` event; the task's name says as much. */
@@ -410,7 +439,6 @@ export function runView(
   const running = new Set(state.status === "running" ? openThreads(events) : []);
   const threads = halt ? halted(logged.threads, logged.lastAt, halt) : logged.threads;
   const spent = spend(events, providerCalls);
-  const hasLead = threads.some((t) => t.kind === "main");
   // No plan until the run's first `revision.started`.
   const latest = reviewState(events, { live: true }).revisions.at(-1);
   if (!latest)
@@ -419,7 +447,6 @@ export function runView(
       tasks: [],
       progress: { done: 0, total: 0, toCheck: 0 },
       spend: spent,
-      hasLead,
     };
 
   const byId = new Map(latest.tasks.map((t) => [t.id, t]));
@@ -550,5 +577,5 @@ export function runView(
       spend: taskSpend.get(p.id),
     };
   });
-  return { threads, tasks, progress: progress(latest), spend: spent, hasLead };
+  return { threads, tasks, progress: progress(latest), spend: spent };
 }

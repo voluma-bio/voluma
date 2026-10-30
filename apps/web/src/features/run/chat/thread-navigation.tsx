@@ -1,6 +1,6 @@
 /**
- * The one way to open a thread: agent card names, the running strip and the attention strip all
- * call the same `openThread`, so there is one router and several doors onto it. Ported from
+ * The one way to open a thread: agent card names in the lead AI's stream and the Agents tree call
+ * the same `openThread`, so there is one router and several doors onto it. Ported from
  * Meridian Flow's `ChatThreadNavigation` (apps/app/src/features/chat). Rows expand, names navigate.
  */
 import { createContext, type ReactNode, useContext } from "react";
