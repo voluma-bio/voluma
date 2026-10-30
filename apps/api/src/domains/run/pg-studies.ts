@@ -132,6 +132,7 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
             .orderBy(asc(studyScans.position));
           const found = await results(tx, and(readableRuns(reader), eq(runs.studyId, studyId)), {
             skipUnreadable: true,
+            progress: true,
           });
           const { newestCompleted } = newestOf(found);
           const headline = workflowById(row.workflowId)?.headline ?? [];
