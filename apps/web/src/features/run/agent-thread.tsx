@@ -84,6 +84,8 @@ export function AgentThread({
           // Any move up lets go, however small (a trackpad's first events stay near the bottom);
           // only coming back down to the bottom sticks again.
           const el = e.currentTarget;
+          // Layout already accounted for this position; its queued event must not re-enable follow.
+          if (el.scrollTop === lastTop.current) return;
           if (lastTop.current !== null && el.scrollTop < lastTop.current) stuck.current = false;
           else if (el.scrollHeight - el.scrollTop - el.clientHeight < STICK) stuck.current = true;
           lastTop.current = el.scrollTop;
