@@ -29,10 +29,7 @@ function followTarget(threads: Thread[], previous: string | undefined): Thread |
     .filter((t) => !busyParents.has(t.id))
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
   return (
-    leaf ??
-    threads.find((t) => t.kind === "main") ??
-    kept ??
-    threads.find((t) => t.kind !== "supervisor")
+    leaf ?? threads.find((t) => t.kind === "main") ?? threads.find((t) => t.kind !== "supervisor")
   );
 }
 
