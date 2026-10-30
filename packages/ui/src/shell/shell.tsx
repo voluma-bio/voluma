@@ -370,14 +370,14 @@ export function AppShell({
                     title={r.shortcut ? `${r.label} (${r.shortcut.toUpperCase()})` : r.label}
                     onClick={(e) => toggle(r, e.shiftKey)}
                     className={cx(
-                      "relative mx-1 flex cursor-pointer flex-col items-center gap-0.5 rounded-md px-0.5 py-1.5 text-[10.5px] leading-tight",
+                      "relative mx-1 flex cursor-pointer flex-col items-center gap-0.5 rounded-md px-0.5 py-1.5 text-[10px] leading-tight tracking-tight",
                       active
                         ? "bg-select-tint text-select-text"
                         : "text-muted-foreground hover:bg-accent hover:text-foreground",
                     )}
                   >
                     <span className="[&>svg]:size-4">{r.icon.current}</span>
-                    <span className="max-w-full truncate">{r.label}</span>
+                    <span className="max-w-full text-center text-balance">{r.label}</span>
                     {r.count != null && r.count > 0 && (
                       <span className="absolute top-0.5 right-1 rounded-full bg-check-solid px-1 font-mono text-[10px] text-check-solid-fg leading-[14px]">
                         {r.count}

@@ -187,7 +187,7 @@ function needsYou(v: StudyView): React.ReactNode[] {
   if (parts.length === 0 && study.toCheck === 0) return [];
   const cell =
     study.toCheck > 0 ? (
-      <Count tone="check">{study.toCheck} to check</Count>
+      <StatusMark status="check" label={`${study.toCheck} to check`} />
     ) : failures.length > 0 ? (
       <StatusMark status="stopped" />
     ) : (
@@ -291,7 +291,7 @@ function StudyTable({ views }: { views: StudyView[] }) {
             header: "Finished",
             align: "end",
             cell: (v) => (
-              <span className="font-mono text-sm whitespace-nowrap">
+              <span className="text-sm whitespace-nowrap tabular-nums">
                 {v.study.scansCompleted} of {v.study.scanCount}
               </span>
             ),
@@ -305,11 +305,7 @@ function StudyTable({ views }: { views: StudyView[] }) {
                 newest: v.study.newestRuns,
                 toCheck: v.study.toCheck,
               });
-              return chip.status === "check" ? (
-                <Count tone="check">{chip.label}</Count>
-              ) : (
-                <StatusMark {...chip} />
-              );
+              return <StatusMark {...chip} />;
             },
           },
         ]}

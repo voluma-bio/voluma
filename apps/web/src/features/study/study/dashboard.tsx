@@ -248,7 +248,7 @@ function NeedsYou({
         cell: (
           <span className="flex items-center gap-2">
             {far.has(scan.scan.inputId) && <span className="text-xs text-check">far</span>}
-            <Count tone="check">{scan.toCheck.length} to check</Count>
+            <StatusMark status="check" label={`${scan.toCheck.length} to check`} />
           </span>
         ),
       });
@@ -270,7 +270,7 @@ function NeedsYou({
   return (
     <Box
       title="Needs you"
-      count={rows.length > 0 && <Count tone="check">{plural(rows.length, "scan")}</Count>}
+      count={rows.length > 0 && <Count tone="check">{rows.length}</Count>}
       tools={
         <Button asChild variant="link">
           <Link to={`${base}/check`}>To check</Link>

@@ -81,13 +81,4 @@ export {
   type StripPoint,
 } from "./strip-plot";
 export { Table, type TableColumn, type TableProps } from "./table";
-export {
-  type TabItem,
-  TabList,
-  type TabListProps,
-  TabPanel,
-  type TabPanelProps,
-  Tabs,
-  type TabsProps,
-} from "./tabs";
 export { Tooltip, type TooltipProps } from "./tooltip";

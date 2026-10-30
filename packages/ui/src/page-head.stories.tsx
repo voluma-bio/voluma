@@ -39,7 +39,7 @@ export const Study: Story = {};
 export const WithCount: Story = {
   args: {
     title: "To check",
-    count: <Count tone="check">18</Count>,
+    count: <Count tone="check">{18}</Count>,
     subtitle: "18 items across 7 scans",
     actions: <Button variant="primary">Review OA7-2</Button>,
   },

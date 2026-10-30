@@ -16,6 +16,7 @@ import {
   Row,
   RowLink,
   SegmentedControl,
+  StatusMark,
 } from "@voluma/ui";
 import { Box as Cube } from "lucide-react";
 import { Link, useSearchParams } from "react-router";
@@ -91,9 +92,7 @@ export function ToCheckPage() {
                   title={kind.title}
                   subtitle={`${kind.taskTitle}, ${plural(new Set(kind.items.map((i) => i.scan.scan.inputId)).size, "scan")}`}
                   cells={[
-                    <Count key="n" tone="check">
-                      {kind.items.length}
-                    </Count>,
+                    <StatusMark key="n" status="check" label={`${kind.items.length} to check`} />,
                   ]}
                 >
                   {kind.items.map(({ scan, item }) => (
@@ -123,9 +122,7 @@ function ScanRow({ scan }: { scan: StudyScanDetail }) {
     <span key="group" className="text-sm text-muted-foreground">
       {scan.scan.group}
     </span>,
-    <Count key="n" tone="check">
-      {scan.toCheck.length} to check
-    </Count>,
+    <StatusMark key="n" status="check" label={`${scan.toCheck.length} to check`} />,
     href && (
       <Button key="3d" asChild size="sm">
         <Link to={href}>

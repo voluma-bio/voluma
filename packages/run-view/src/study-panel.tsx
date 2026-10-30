@@ -6,7 +6,6 @@
  */
 import type { StudyDetail, StudyScanDetail } from "@voluma/contracts/study";
 import {
-  Count,
   cx,
   type LinkTo,
   List,
@@ -28,10 +27,16 @@ export function scanStatus({ runs: [run], toCheck }: StudyScanDetail): ScanStatu
   if (!run) return { label: "Not started", status: "waiting", open: 0 };
   const { label, status } = runStatus(run);
   const tasks = run.state.status === "running" ? run.tasks : null;
+  const open = status === "check" ? toCheck.length : 0;
   return {
-    label: tasks ? `Task ${Math.min(tasks.done + 1, tasks.total)} of ${tasks.total}` : label,
+    label:
+      open > 0
+        ? `${open} to check`
+        : tasks
+          ? `Task ${Math.min(tasks.done + 1, tasks.total)} of ${tasks.total}`
+          : label,
     status,
-    open: status === "check" ? toCheck.length : 0,
+    open,
   };
 }
 
@@ -129,14 +134,17 @@ function PanelRow({
       {knee && <span className="truncate font-normal text-muted-foreground">{knee} knee</span>}
     </span>
   );
-  const cell =
-    open > 0 ? (
-      <Count tone="check">{open}</Count>
-    ) : (
-      <span className={cx("text-xs", status === "running" ? "text-info" : "text-muted-foreground")}>
-        {label}
-      </span>
-    );
+  // The row's glyph already marks the state, so the cell is the word alone, inked like a StatusMark's.
+  const cell = (
+    <span
+      className={cx(
+        "text-xs",
+        open > 0 ? "text-check" : status === "running" ? "text-info" : "text-muted-foreground",
+      )}
+    >
+      {label}
+    </span>
+  );
   return to ? (
     <RowLink to={to} title={title} cells={[cell]} selected={selected} />
   ) : (
