@@ -91,8 +91,9 @@ def existing(path):
 
 
 def parser(doc, **kwargs):
-    """The parser of a resource: `doc` is its module docstring, printed whole by `--help`."""
-    return _Parser(description=doc, formatter_class=HelpFormatter, **kwargs)
+    """The parser of a resource: `doc` is its module docstring, printed whole by `--help`. Options are never abbreviated,
+    so a flag's missing value cannot swallow an abbreviated flag (`--out --h`) as that value."""
+    return _Parser(description=doc, formatter_class=HelpFormatter, allow_abbrev=False, **kwargs)
 
 
 def sha256_file(path):
@@ -281,7 +282,7 @@ def _value(s):
 
 
 if __name__ == '__main__':
-    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
+    ap = parser(__doc__)
     ap.add_argument('--array', required=True)
     ap.add_argument('--like', required=True, help='hu.json or another sidecar: the grid this array is on')
     ap.add_argument('--input', action='append', default=[])

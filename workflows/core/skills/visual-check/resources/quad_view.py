@@ -705,7 +705,7 @@ def numbers(txt, n, what):
 
 def parse_args(argv):
     """Parse and check every option, so a bad one is refused in one sentence before any work: ranges, syntax, files."""
-    ap = sl.parser(__doc__, allow_abbrev=False)
+    ap = sl.parser(__doc__)
     ap.add_argument('--out', required=True, help='the image to write (.jpg); the view.json goes beside it')
     ap.add_argument('--from', type=sl.existing, dest='from_', help='an earlier .view.json: take its state and apply the changes below')
     ap.add_argument('--hu', type=sl.existing, help='the scan, hu.npy (first call; later calls take it from --from)')
