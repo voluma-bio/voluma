@@ -46,6 +46,13 @@ export function readerOf(user: UserPrincipal): Reader {
   return { labId: user.labId, ownerId: user.scope === "self" ? user.userId : null };
 }
 
+/** Who starts a run or sends a message: a guest is a visitor principal. */
+export type Caller = { userId: string; guest: boolean };
+
+export function callerOf(user: UserPrincipal): Caller {
+  return { userId: user.userId, guest: user.account === "visitor" };
+}
+
 /**
  * Every lab's records: what the debug token (`VOLUMA_DEBUG_TOKEN`) reads on a run `GET`, so an
  * agent can follow and debug any run. Writes never take it; they take a `Reader`.

@@ -11,7 +11,7 @@ import type { RunEvent } from "@voluma/contracts/events";
 import type { PersonMessage } from "@voluma/contracts/messages";
 import type { reviewState } from "@voluma/contracts/review-state";
 import type { Input, Run } from "@voluma/contracts/run";
-import type { Reader } from "../domain";
+import type { Caller, Reader } from "../domain";
 
 /** Review reads inputs through the Run lane's scoped read adapter. */
 export type ReviewInputs = { listInputs(reader: Reader): Promise<Input[]> };
@@ -72,14 +72,14 @@ export type RunMessages = {
   /** Judges the message without storing anything, so a refused one leaves no snapshot behind. */
   check(
     reader: Reader,
-    userId: string,
+    caller: Caller,
     runId: string,
     msg: { id: string; payload: PersonMessage },
   ): Promise<MessageResult>;
   /** Judges again under the queue lock and stores it, reopening a finished run. */
   send(
     reader: Reader,
-    userId: string,
+    caller: Caller,
     runId: string,
     msg: { id: string; payload: PersonMessage },
   ): Promise<MessageResult>;

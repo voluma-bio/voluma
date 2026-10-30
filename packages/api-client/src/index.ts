@@ -58,6 +58,8 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     url: string,
+    /** The `error` text of a JSON error body, when the server sent one. */
+    readonly serverMessage?: string,
   ) {
     super(`${url}: ${status}`);
     this.name = "ApiError";
@@ -90,16 +92,27 @@ async function request(
   });
 }
 
-function checkResponse(res: Response): Response {
+function checkResponse(res: Response, serverMessage?: string): Response {
   if (res.status === 401) {
     for (const listener of signedOutListeners) listener();
   }
-  if (!res.ok) throw new ApiError(res.status, res.url);
+  if (!res.ok) throw new ApiError(res.status, res.url, serverMessage);
   return res;
 }
 
+/** The `error` text of a failed response's JSON body; none when the body is something else. */
+async function errorMessage(res: Response): Promise<string | undefined> {
+  try {
+    const body: unknown = await res.json();
+    const error = (body as { error?: unknown }).error;
+    return typeof error === "string" ? error : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function json(res: Response): Promise<unknown> {
-  return checkResponse(res).json();
+  return checkResponse(res, res.ok ? undefined : await errorMessage(res)).json();
 }
 
 /** Resolves a readable input's scan archive; the server chooses storage, never the caller. */
