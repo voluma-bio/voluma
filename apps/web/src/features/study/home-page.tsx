@@ -6,13 +6,27 @@
  * every 5 s while its last answer shows a live run.
  */
 import { useQuery } from "@tanstack/react-query";
-import { listStudies } from "@voluma/api-client";
+import { studiesQuery } from "@voluma/api-client/query";
 import type { StudyRunSummary, StudySummary } from "@voluma/contracts/study";
-import { Button, Count, Progress, type Status, StatusMark } from "@voluma/ui";
-import { runHref, studyStatus } from "@voluma/ui/run";
+import { plural, runHref, shortDate, studyStatus } from "@voluma/run-view";
+import {
+  Box,
+  Button,
+  Count,
+  EmptyState,
+  ErrorState,
+  type LinkRenderProps,
+  List,
+  LoadingState,
+  Progress,
+  Row,
+  RowLink,
+  type Status,
+  StatusMark,
+  Table,
+} from "@voluma/ui";
 import { workflowById } from "@voluma/workflow/bundled";
 import { Link } from "react-router";
-import { Delayed, LoadError } from "./parts";
 
 const LIVE = 5000;
 
@@ -49,15 +63,12 @@ function relativeDay(iso: string): string {
   if (days <= 0) return "Today";
   if (days === 1) return "Yesterday";
   if (days < 7) return `${days} days ago`;
-  return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  return shortDate(iso);
 }
-
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 export function HomePage() {
   const studies = useQuery({
-    queryKey: ["studies"],
-    queryFn: listStudies,
+    ...studiesQuery(),
     refetchInterval: (q) => (q.state.data?.some((s) => s.newestRuns.some(isLive)) ? LIVE : false),
   });
 
@@ -73,27 +84,28 @@ export function HomePage() {
   let body: React.ReactNode;
   // A failed refetch keeps what is on screen; only a first load that fails shows the error.
   if (studies.isError && !studies.data) {
-    body = <LoadError what="your studies" retry={() => void studies.refetch()} />;
+    body = (
+      <ErrorState title="Couldn't load your studies" onRetry={() => void studies.refetch()}>
+        Check your connection, then try again.
+      </ErrorState>
+    );
   } else if (!studies.data) {
-    body = <Delayed>Loading your studies…</Delayed>;
+    body = <LoadingState label="Loading your studies" />;
   } else if (studies.data.length === 0) {
     body = (
-      <section className="grid justify-items-start gap-1 rounded-xl border border-border bg-card px-5 py-6">
-        <h2 className="font-semibold">No studies yet</h2>
-        <p className="text-muted-foreground">
-          Drop one scan or a whole study's scans, with your sample sheet if you have one.
-        </p>
-      </section>
+      <EmptyState title="No studies yet" className="rounded-lg border border-border bg-card">
+        Drop one scan or a whole study's scans, with your sample sheet if you have one.
+      </EmptyState>
     );
   } else {
     body = <Dashboard views={studies.data.map(view)} />;
   }
 
   return (
-    <main className="mx-auto grid w-full max-w-[1040px] content-start gap-8 px-6 pt-7 pb-16 max-[760px]:px-4">
+    <div className="mx-auto grid w-full max-w-[1040px] content-start gap-8 px-6 pt-7 pb-16 max-[760px]:px-4">
       {header}
       {body}
-    </main>
+    </div>
   );
 }
 
@@ -103,56 +115,61 @@ function Dashboard({ views }: { views: StudyView[] }) {
   return (
     <>
       <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] items-start gap-6 max-[860px]:grid-cols-1">
-        <section aria-labelledby="needs-you" className="grid gap-3">
-          <h2 id="needs-you" className="flex items-center gap-2 text-lg font-semibold">
-            Needs you
-            {needs.length > 0 && <Count tone="check">{needs.length}</Count>}
-          </h2>
+        <Box
+          title="Needs you"
+          count={needs.length > 0 && <Count tone="check">{needs.length}</Count>}
+          className={BOXED}
+        >
           {needs.length > 0 ? (
-            <ul className="overflow-hidden rounded-xl border border-border bg-card">{needs}</ul>
+            <List columns="auto" label="Needs you">
+              {needs}
+            </List>
           ) : (
-            <p className="text-muted-foreground">Nothing needs you.</p>
+            <EmptyState title="Nothing needs you">
+              Runs that fail or wait for your check show here.
+            </EmptyState>
           )}
-        </section>
-        <section aria-labelledby="running" className="grid gap-3">
-          <h2 id="running" className="text-lg font-semibold">
-            Running
-          </h2>
+        </Box>
+        <Box title="Running" className={BOXED}>
           {running.length > 0 ? (
-            <ul className="overflow-hidden rounded-xl border border-border bg-card">
+            <List columns="10rem" label="Running">
               {running.map((v) => (
                 <RunningRow key={v.study.id} view={v} />
               ))}
-            </ul>
+            </List>
           ) : (
-            <p className="text-muted-foreground">Nothing running.</p>
+            <EmptyState title="Nothing running" />
           )}
-        </section>
+        </Box>
       </div>
       <StudyTable views={views} />
     </>
   );
 }
 
+/** Home's boxes stand alone on the page, so each draws its own frame. */
+const BOXED = "overflow-hidden rounded-lg border border-border";
+
+/** A study's row as a link through the router. */
+const linkTo = (href: string) => (props: LinkRenderProps) => <Link to={href} {...props} />;
+
 /** A study's one "Needs you" row, or none. Example studies are read-only, so they ask nothing. */
 function needsYou(v: StudyView): React.ReactNode[] {
   const { study, one } = v;
   if (study.example) return [];
   const row = (tone: "check" | "destructive", detail: string, action: string, to: string) => (
-    <li
+    <Row
       key={study.id}
-      className={`flex items-center gap-4 border-b border-l-3 border-b-line-subtle px-4 py-2.5 last:border-b-0 max-[520px]:flex-wrap ${
-        tone === "check" ? "border-l-check" : "border-l-destructive"
-      }`}
-    >
-      <div className="min-w-0 flex-1">
-        <p className="truncate font-medium">{one ? one.inputName : study.name}</p>
-        <p className="line-clamp-2 text-ui text-muted-foreground">{detail}</p>
-      </div>
-      <Button asChild size="sm">
-        <Link to={to}>{action}</Link>
-      </Button>
-    </li>
+      title={one ? one.inputName : study.name}
+      subtitle={
+        <span className={tone === "check" ? "text-check" : "text-destructive"}>{detail}</span>
+      }
+      cells={[
+        <Button key="action" asChild size="sm">
+          <Link to={to}>{action}</Link>
+        </Button>,
+      ]}
+    />
   );
   if (one) {
     if (one.state.status === "ended" && one.state.outcome === "failed")
@@ -221,22 +238,15 @@ function RunningRow({ view: v }: { view: StudyView }) {
       .join(", ");
   }
   return (
-    <li className="border-b border-line-subtle last:border-b-0">
-      <Link
-        to={v.href}
-        className="grid grid-cols-[minmax(0,1fr)_10rem] items-center gap-3 px-4 py-3 hover:bg-background"
-      >
-        <span className="min-w-0">
-          <span className="block truncate font-medium">{one ? one.inputName : study.name}</span>
-          <span className="block truncate text-ui text-muted-foreground">{detail}</span>
-        </span>
-        <DoneBar {...progress} />
-      </Link>
-    </li>
+    <RowLink
+      to={linkTo(v.href)}
+      title={one ? one.inputName : study.name}
+      subtitle={detail}
+      cells={[<DoneBar key="bar" {...progress} />]}
+    />
   );
 }
 
-/** `3/9`; nothing before a run's plan exists. */
 /** Scans (or a live run's tasks) done, out of all of them. */
 function DoneBar({ done, total }: { done: number; total: number }) {
   const states: Status[] = Array.from({ length: total }, (_, i) => (i < done ? "done" : "waiting"));
@@ -245,63 +255,71 @@ function DoneBar({ done, total }: { done: number; total: number }) {
   );
 }
 
-const COLUMNS =
-  "grid grid-cols-[minmax(0,1.6fr)_minmax(7rem,1fr)_minmax(6.5rem,auto)_minmax(0,1fr)_6.5rem] items-center gap-4 max-[760px]:grid-cols-[minmax(0,1fr)_auto]";
-
 function StudyTable({ views }: { views: StudyView[] }) {
   return (
-    <section aria-labelledby="studies" className="grid gap-3">
-      <h2 id="studies" className="text-lg font-semibold">
-        Studies
-      </h2>
-      <div className="overflow-hidden rounded-xl border border-border bg-card">
-        <div
-          aria-hidden
-          className={`${COLUMNS} border-b border-border px-4 py-2.5 text-meta font-medium text-fg-subtle max-[760px]:hidden`}
-        >
-          <span>Study</span>
-          <span>Progress</span>
-          <span>Status</span>
-          <span>Workflow</span>
-          <span className="text-right">Last activity</span>
-        </div>
-        <ul>
-          {views.map((v) => {
-            const status = studyStatus({
-              scans: v.study.scanCount,
-              newest: v.study.newestRuns,
-              toCheck: v.study.toCheck,
-            });
-            return (
-              <li key={v.study.id} className="border-b border-line-subtle last:border-b-0">
-                <Link to={v.href} className={`${COLUMNS} px-4 py-3 hover:bg-background`}>
-                  <span className="min-w-0">
-                    <span className="block truncate font-medium">
-                      {v.one ? v.one.inputName : v.study.name}
-                    </span>
-                    <span className="block truncate text-ui text-muted-foreground">
-                      {v.study.scanCount === 1 ? "One scan" : plural(v.study.scanCount, "scan")}
-                      {v.study.example && ", an example"}
-                    </span>
-                  </span>
-                  <span className="flex items-center gap-2.5 max-[760px]:hidden">
-                    <DoneBar {...v.progress} />
-                  </span>
-                  <span>
-                    <StatusMark {...status} />
-                  </span>
-                  <span className="truncate text-ui text-muted-foreground max-[760px]:hidden">
-                    {workflowById(v.study.workflowId)?.name ?? v.study.workflowId}
-                  </span>
-                  <span className="text-right text-ui text-muted-foreground max-[760px]:hidden">
-                    {relativeDay(v.study.lastActivityAt)}
-                  </span>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      </div>
-    </section>
+    <Box title="Studies" className={BOXED}>
+      <Table
+        label="Studies"
+        rows={views}
+        rowKey={(v) => v.study.id}
+        rowLink={(v) => linkTo(v.href)}
+        className="rounded-none border-0"
+        columns={[
+          {
+            key: "study",
+            header: "Study",
+            cell: (v) => (
+              <>
+                <span className="block truncate">{v.one ? v.one.inputName : v.study.name}</span>
+                <span className="block truncate text-sm font-normal text-fg-subtle">
+                  {v.study.scanCount === 1 ? "One scan" : plural(v.study.scanCount, "scan")}
+                  {v.study.example && ", an example"}
+                </span>
+              </>
+            ),
+          },
+          {
+            key: "progress",
+            header: "Progress",
+            cell: (v) => (
+              <span className="flex min-w-28 items-center gap-2.5">
+                <DoneBar {...v.progress} />
+              </span>
+            ),
+          },
+          {
+            key: "status",
+            header: "Status",
+            cell: (v) => {
+              const chip = studyStatus({
+                scans: v.study.scanCount,
+                newest: v.study.newestRuns,
+                toCheck: v.study.toCheck,
+              });
+              return <StatusMark {...chip} />;
+            },
+          },
+          {
+            key: "workflow",
+            header: "Workflow",
+            cell: (v) => (
+              <span className="text-sm text-muted-foreground">
+                {workflowById(v.study.workflowId)?.name ?? v.study.workflowId}
+              </span>
+            ),
+          },
+          {
+            key: "activity",
+            header: "Last activity",
+            align: "end",
+            cell: (v) => (
+              <span className="text-sm whitespace-nowrap text-muted-foreground">
+                {relativeDay(v.study.lastActivityAt)}
+              </span>
+            ),
+          },
+        ]}
+      />
+    </Box>
   );
 }

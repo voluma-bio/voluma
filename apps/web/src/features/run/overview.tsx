@@ -1,20 +1,18 @@
 /**
  * The run's Overview, and the parts the task view shares with it: what the AI is working on now,
  * the To check items as cards (the QC image, what's wrong, "Looks right", "Open in 3D"), and the
- * values grouped by task. Data: `TaskView`s from `runView`; accepting goes through `acceptCheck`.
+ * values grouped by task. Data: `TaskView`s from `runView`; accepting goes through `useAcceptCheck`.
  */
-import { useMutation } from "@tanstack/react-query";
-import { ApiError, acceptCheck, reviewFileUrl } from "@voluma/api-client";
+
+import { reviewFileUrl } from "@voluma/api-client";
+import { useAcceptCheck } from "@voluma/api-client/query";
 import type { Asset } from "@voluma/contracts/review";
 import type { Run } from "@voluma/contracts/run";
-import { Button, Count, cx, Lightbox } from "@voluma/ui";
+import { ClampedMarkdown, Elapsed, type NeedItem, TaskMark, type TaskView } from "@voluma/run-view";
+import { Button, Count, cx, EmptyState, Lightbox } from "@voluma/ui";
 import { ChevronRight, ImageOff } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Link } from "react-router";
-import { Elapsed } from "./agents";
-import { ClampedMarkdown } from "./chat/markdown";
-import type { NeedItem, TaskView } from "./run-model";
-import { TaskMark } from "./task-flow";
 
 /** "Looks right" on a completed run: accepts one check of the latest result. */
 export type Accepting = {
@@ -35,48 +33,27 @@ const without = (set: ReadonlySet<string>, id: string) => {
   return next;
 };
 
-export function useAccepting(
-  run: Run,
-  onChange: (update: (run: Run) => Run) => void,
-  refetch: () => void,
-): Accepting {
+export function useAccepting(run: Run, onChange: (update: (run: Run) => Run) => void): Accepting {
   const [done, setDone] = useState<ReadonlySet<string>>(new Set());
   const [pending, setPending] = useState<ReadonlySet<string>>(new Set());
   const [error, setError] = useState<Accepting["error"]>();
-  const mutation = useMutation({
-    mutationFn: (item: NeedItem) => {
-      if (!run.review) throw new Error("no completed result");
-      return acceptCheck(run.id, item.id, {
-        baseRevisionId: run.review.revisionId,
-        taskId: item.taskId,
-      });
+  const mutation = useAcceptCheck(run.id, run.review?.revisionId, {
+    onMutate: ({ checkId }) => {
+      setPending((p) => new Set(p).add(checkId));
+      setError((e) => (e?.id === checkId ? undefined : e));
     },
-    onMutate: (item) => {
-      setPending((p) => new Set(p).add(item.id));
-      setError((e) => (e?.id === item.id ? undefined : e));
-    },
-    onSuccess: (res, item) => {
-      setDone((d) => new Set(d).add(item.id));
+    onSuccess: (res, { checkId }) => {
+      setDone((d) => new Set(d).add(checkId));
       onChange((r) => ({ ...r, review: res.review }));
     },
-    onError: (e, item) => {
-      const status = e instanceof ApiError ? e.status : undefined;
-      if (status === 409) refetch();
-      setError({
-        id: item.id,
-        text:
-          status === 403
-            ? "This example is read-only."
-            : status === 409
-              ? "The result changed since this page loaded. Reload to see it."
-              : "Couldn't save that. Try again.",
-      });
+    onSettled: (_res, e, { checkId }) => {
+      setPending((p) => without(p, checkId));
+      if (e) setError({ id: checkId, text: e.message });
     },
-    onSettled: (_res, _e, item) => setPending((p) => without(p, item.id)),
   });
   return {
     enabled: run.review !== null && !run.example,
-    accept: (item) => mutation.mutate(item),
+    accept: (item) => mutation.mutate({ checkId: item.id, taskId: item.taskId }),
     done,
     pending,
     error,
@@ -158,13 +135,19 @@ export function Overview({
 
       <Section title="Needs your eye" count={toCheck}>
         {open.length + failed.length === 0 ? (
-          <p className="text-ui text-muted-foreground">
-            {looked.length > 0
-              ? "You've looked at everything."
-              : ended
-                ? "Nothing to check."
-                : "Nothing yet."}
-          </p>
+          <EmptyState
+            title={
+              looked.length > 0
+                ? "You've looked at everything"
+                : ended
+                  ? "Nothing to check"
+                  : "Nothing yet"
+            }
+          >
+            {looked.length === 0 && !ended
+              ? "Items appear as the AI finishes each task."
+              : undefined}
+          </EmptyState>
         ) : (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,24rem),1fr))] gap-2.5">
             {ended && !accepting.enabled && open.length > 0 && (

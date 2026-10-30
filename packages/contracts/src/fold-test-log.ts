@@ -1,12 +1,13 @@
 /**
- * Shared by the fold tests: a log builder, and the check that every folded
- * revision is a valid `ReviewRun` once the parts the API adds are filled in.
+ * Shared by the fold tests: a log builder, and the check that every folded revision is a valid
+ * `ReviewRun` once the parts the API adds are filled in. Valid means the schema's shape plus
+ * `reviewIntegrityIssues`: the fold guarantees these, so nothing checks them at runtime.
  */
 import { expect } from "vitest";
 import type { RunEvent } from "./events";
 import { checkResult, type Folded, type FoldedRevision, fold } from "./fold";
 import type { Output } from "./output";
-import { reviewRunSchema } from "./review";
+import { imageDtype, labelDtype, type ReviewRun, reviewRunSchema } from "./review";
 import type { WorkflowPlan } from "./workflow";
 
 export type Payload<T extends RunEvent["type"]> = Extract<RunEvent, { type: T }>["payload"];
@@ -179,6 +180,110 @@ export function expectParses(f: Folded) {
     })),
   };
   expect(reviewRunSchema.safeParse(run).error).toBeUndefined();
+  expect(reviewIntegrityIssues(run)).toEqual([]);
+}
+
+/** Duplicate ids and references to ids that don't exist, across a `ReviewRun`; empty when it holds together. */
+export function reviewIntegrityIssues(run: ReviewRun): string[] {
+  const issues: string[] = [];
+  const bad = (message: string) => issues.push(message);
+  const idsOf = (xs: { id: string }[], block: string) => {
+    const seen = new Set<string>();
+    for (const x of xs) {
+      if (seen.has(x.id)) bad(`${block}: duplicate id "${x.id}"`);
+      seen.add(x.id);
+    }
+    return seen;
+  };
+  // Each id in `ids` (optional ones may be undefined) must be in `known`.
+  const needAll = (
+    known: Set<string>,
+    ids: (string | undefined)[],
+    where: string,
+    what: string,
+  ) => {
+    for (const id of ids)
+      if (id !== undefined && !known.has(id)) bad(`${where}: unknown ${what} "${id}"`);
+  };
+
+  const revisionIds = idsOf(run.revisions, "revisions");
+  for (const rev of run.revisions) {
+    const volumes = idsOf(rev.volumes, "volumes");
+    const structures = idsOf(rev.structures, "structures");
+    const surfaces = idsOf(rev.surfaces, "surfaces");
+    const annotations = idsOf(rev.annotations, "annotations");
+    const tasks = idsOf(rev.tasks, "tasks");
+    const measurements = idsOf(
+      rev.tasks.flatMap((t) => t.measurements),
+      "measurements",
+    );
+    idsOf(
+      rev.tasks.flatMap((t) => t.scores),
+      "scores",
+    );
+    const kindOf = new Map(rev.volumes.map((v) => [v.id, v.kind]));
+
+    for (const v of rev.volumes) {
+      if (v.data?.format !== "npy") continue;
+      const ok = v.kind === "image" ? imageDtype : labelDtype;
+      if (!ok.safeParse(v.data.dtype).success)
+        bad(`volume ${v.id}: ${v.data.dtype} is not allowed for a ${v.kind} volume`);
+    }
+    // Every block on a grid names that volume.
+    for (const [block, xs] of [
+      ["structure", rev.structures],
+      ["surface", rev.surfaces],
+      ["annotation", rev.annotations],
+    ] as const) {
+      for (const x of xs) needAll(volumes, [x.volumeId ?? undefined], `${block} ${x.id}`, "volume");
+    }
+    for (const x of rev.structures) {
+      if (
+        x.voxels &&
+        "label" in x.voxels &&
+        x.volumeId !== null &&
+        kindOf.get(x.volumeId) === "image"
+      )
+        bad(`structure ${x.id}: volume "${x.volumeId}" is not a labels volume`);
+    }
+    // What a measurement can be shown with.
+    const shown = new Set([...volumes, ...structures, ...surfaces, ...annotations]);
+    for (const t of rev.tasks) {
+      idsOf(t.evidence, "evidence");
+      needAll(tasks, t.dependsOn, `task ${t.id}`, "task");
+      const own = new Set(t.evidence.map((e) => e.id));
+      for (const sc of t.scores) {
+        needAll(shown, [...sc.on, ...sc.context], `score ${sc.id}`, "block");
+        needAll(own, sc.evidenceIds, `score ${sc.id}`, "evidence in this task");
+      }
+      for (const c of t.checks) {
+        const f = c.focus;
+        if (!f) continue;
+        needAll(shown, f.on, `check ${c.id}`, "block");
+        needAll(volumes, [f.volumeId], `check ${c.id}`, "volume");
+        if (
+          f.volumeId !== undefined &&
+          kindOf.has(f.volumeId) &&
+          kindOf.get(f.volumeId) !== "labels"
+        )
+          bad(`check ${c.id}: volume "${f.volumeId}" is not a labels volume`);
+      }
+      for (const m of t.measurements) {
+        needAll(shown, [...m.on, ...m.context], `measurement ${m.id}`, "block");
+        needAll(own, m.evidenceIds, `measurement ${m.id}`, "evidence in this task");
+        needAll(
+          measurements,
+          [m.numeratorId, m.denominatorId],
+          `measurement ${m.id}`,
+          "measurement",
+        );
+      }
+      if (!revisionIds.has(t.resultRevisionId))
+        bad(`task ${t.id}: unknown revision "${t.resultRevisionId}"`);
+    }
+  }
+
+  return issues;
 }
 
 export const W = "worker";

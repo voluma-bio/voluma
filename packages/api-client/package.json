@@ -4,15 +4,20 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./query": "./src/query.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "@tanstack/react-query": "catalog:"
   },
   "dependencies": {
     "@voluma/contracts": "workspace:*"
+  },
+  "peerDependencies": {
+    "@tanstack/react-query": "^5"
   }
 }

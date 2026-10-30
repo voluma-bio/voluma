@@ -4,26 +4,36 @@
  * left to check; Run details (started, took, settled cost); Stop while it is live; Open in 3D.
  * Alerts: the visitor-keys form while the run waits for its starter's keys, and why it failed.
  */
+
 import { useMutation } from "@tanstack/react-query";
 import { ApiError, cancelRun, resendKeys } from "@voluma/api-client";
 import type { Run } from "@voluma/contracts/run";
 import type { RunSpend } from "@voluma/contracts/spend";
 import type { StudyDetail } from "@voluma/contracts/study";
-import { Button, Progress, type Status, StatusMark } from "@voluma/ui";
-import { formatDuration, formatUsd, KeysForm } from "@voluma/ui/run";
+import {
+  formatDuration,
+  formatUsd,
+  KeysForm,
+  plainError,
+  shortDate,
+  useNow,
+} from "@voluma/run-view";
+import {
+  Button,
+  Facts,
+  Popover,
+  PopoverClose,
+  Progress,
+  type Status,
+  StatusMark,
+} from "@voluma/ui";
 import { catalog, workflowName } from "@voluma/workflow/bundled";
 import { ChevronDown } from "lucide-react";
-import { Popover } from "radix-ui";
 import { useState } from "react";
 import { Link } from "react-router";
 import { reviewHref } from "./overview";
-import { plainError } from "./run-model";
-import { useNow } from "./status";
 
 const { taskTitle } = catalog["mouse-oa"];
-
-const day = (iso: string) =>
-  new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 
 /** "OA6-1, right knee", from the study's scan; the scan's file name when the study can't say. */
 function scanTitle(run: Run, study: StudyDetail | undefined) {
@@ -170,7 +180,7 @@ function RunDetails({
   const endedAt = state.status === "ended" ? state.endedAt : undefined;
   const now = useNow(startedAt !== undefined && endedAt === undefined);
   const rows: [string, string][] = [
-    ["Started", startedAt ? day(startedAt) : "Not yet"],
+    ["Started", startedAt ? shortDate(startedAt) : "Not yet"],
     ...(startedAt
       ? ([
           [
@@ -190,37 +200,25 @@ function RunDetails({
     ["Workflow", workflow],
   ];
   return (
-    <Popover.Root>
-      <Popover.Trigger asChild>
+    <Popover
+      label="Run details"
+      className="w-72"
+      trigger={
         <Button variant="ghost" size="sm">
           Run details
-          <ChevronDown aria-hidden />
+          <ChevronDown className="size-3.5" aria-hidden />
         </Button>
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Content
-          align="end"
-          sideOffset={6}
-          className="z-50 w-72 rounded-xl border border-border bg-popover p-4 text-ui text-popover-foreground shadow-md"
-        >
-          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5">
-            {rows.map(([k, v]) => (
-              <div key={k} className="contents">
-                <dt className="text-muted-foreground">{k}</dt>
-                <dd>{v}</dd>
-              </div>
-            ))}
-          </dl>
-          <div className="mt-3 border-t border-border pt-3">
-            <Popover.Close asChild>
-              <Button asChild variant="link">
-                <Link to={agents}>What the AI did</Link>
-              </Button>
-            </Popover.Close>
-          </div>
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
+      }
+    >
+      <Facts items={rows} />
+      <PopoverClose asChild>
+        <div className="mt-3 border-t border-border pt-3">
+          <Button asChild variant="link">
+            <Link to={agents}>What the AI did</Link>
+          </Button>
+        </div>
+      </PopoverClose>
+    </Popover>
   );
 }
 

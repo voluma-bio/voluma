@@ -6,7 +6,7 @@
  */
 import type { StudyDetail, StudyScanDetail } from "@voluma/contracts/study";
 import type { OutputEntry } from "@voluma/contracts/workflow-files";
-import { Button, Count, StatusMark, StripPlot } from "@voluma/ui";
+import { Button, Count, EmptyState, StatusMark, StripPlot } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
@@ -55,9 +55,9 @@ export function Overview({ detail, workflow, onTab, openChecks }: Props) {
           {hasValues && <Legend />}
         </div>
         {!hasValues ? (
-          <p className="rounded-xl border border-dashed border-border px-4 py-6 text-ui text-muted-foreground">
+          <EmptyState title="No values yet" className="rounded-lg border border-border">
             Values appear here as each scan finishes.
-          </p>
+          </EmptyState>
         ) : (
           measures.map((measure) => (
             <MeasureCard
@@ -289,9 +289,9 @@ function NeedsYourEye({
         </ul>
       ) : (
         alerts.length === 0 && (
-          <p className="text-ui text-muted-foreground">
-            {anyDone ? "Nothing to check." : "Nothing yet. Items appear as each scan finishes."}
-          </p>
+          <EmptyState title={anyDone ? "Nothing to check" : "Nothing yet"}>
+            {anyDone ? undefined : "Items appear as each scan finishes."}
+          </EmptyState>
         )
       )}
     </section>

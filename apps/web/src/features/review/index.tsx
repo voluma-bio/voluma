@@ -1,162 +1,99 @@
 /**
- * Review lane: authorized R2 scan intake beside the result workspace. Opening images
- * does not create an analysis run or populate reports. Light Review chrome.
- * Owns its routes; the shell mounts them.
+ * Review lane: a run's results, task by task, beside the task's own analysis grid.
+ * Light Review chrome. Owns its routes; the shell mounts them.
  */
-import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import {
-  ApiError,
-  downloadFile,
-  getInputDownload,
-  getReviewRun,
-  getRun,
-  listInputs,
-  reviewFileUrl,
-} from "@voluma/api-client";
-import { Button } from "@voluma/ui";
-import { type DicomArchive, openDicomZip, ViewerWorkspace } from "@voluma/viewer";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ApiError } from "@voluma/api-client";
+import { reviewRunQuery, runQuery } from "@voluma/api-client/query";
+import { Button, EmptyState, ErrorState, LoadingState } from "@voluma/ui";
+import { ArrowLeft } from "lucide-react";
+import { useEffect, useRef } from "react";
 import { Link, type RouteObject, useParams, useSearchParams } from "react-router";
+import { preparing } from "./report/model";
 import { ReviewWorkspace } from "./report/ReviewWorkspace";
 
 export const reviewRoutes: RouteObject[] = [{ path: "/runs/:runId", element: <ReviewPage /> }];
-const queryClient = new QueryClient();
 
 function ReviewPage() {
-  const { runId } = useParams();
-  // A route change releases the scan instead of showing it under a different run.
-  return (
-    <QueryClientProvider client={queryClient}>
-      <ScanReview key={runId} runId={runId ?? "local"} />
-    </QueryClientProvider>
-  );
+  const { runId = "" } = useParams();
+  // A route change drops the previous run's state instead of showing it under another run.
+  return <RunReview key={runId} runId={runId} />;
 }
 
-function ScanReview({ runId }: { runId: string }) {
+function RunReview({ runId }: { runId: string }) {
+  const queryClient = useQueryClient();
   const [search, setSearch] = useSearchParams();
-  const fileUrl = useCallback((sha256: string) => reviewFileUrl(runId, sha256), [runId]);
   const execution = useQuery({
-    queryKey: ["run", runId],
-    queryFn: () => getRun(runId),
-    enabled: runId !== "local",
+    ...runQuery(runId),
     refetchInterval: (query) => {
       const data = query.state.data;
       return data && data.state.status !== "ended" ? 3000 : false;
     },
   });
   const runStatus = execution.data?.state.status;
+  const endedAt =
+    execution.data?.state.status === "ended" ? Date.parse(execution.data.state.endedAt) : undefined;
   const live = runStatus !== undefined && runStatus !== "ended";
   // The review payload carries no run status, so the run ending is the cue for one last fetch
   // (the polled snapshot is up to 5 s old and has no review summary yet).
   const lastStatus = useRef(runStatus);
   useEffect(() => {
     if (lastStatus.current !== undefined && lastStatus.current !== "ended" && runStatus === "ended")
-      void queryClient.invalidateQueries({ queryKey: ["review-run", runId] });
+      void queryClient.invalidateQueries({ queryKey: reviewRunQuery(runId).queryKey });
     lastStatus.current = runStatus;
   }, [runStatus, runId]);
-  // `/runs/local` is the reference scan alone: no run, so no results.
   const review = useQuery({
-    queryKey: ["review-run", runId],
-    queryFn: () => getReviewRun(runId),
-    enabled: runId !== "local",
+    ...reviewRunQuery(runId),
     // Only a server error may pass on retry; a 404, a 409 or data the contract rejects won't.
     retry: (count, cause) => cause instanceof ApiError && cause.status >= 500 && count < 2,
     // A run with no plan yet gets one once the runner starts it; a live run's results fill in
-    // as tasks report. The effect above makes the final fetch when the run ends.
+    // as tasks report, and its images as they are converted, which may finish after it ends
+    // (for ten minutes after: a run from before conversion existed never gets them).
+    // The effect above makes the final fetch when the run ends.
     refetchInterval: (query) => {
       const cause = query.state.error;
-      return (cause instanceof ApiError && cause.status === 409) || live ? 5000 : false;
+      const data = query.state.data;
+      return (cause instanceof ApiError && cause.status === 409) ||
+        live ||
+        (data && preparing(data) && endedAt !== undefined && Date.now() - endedAt < 10 * 60_000)
+        ? 5000
+        : false;
     },
   });
-  const status = review.error instanceof ApiError ? review.error.status : undefined;
-  // Loaded data stays on screen when a background refetch fails.
-  const notice =
-    review.data && review.isError ? (
-      <>
-        Could not refresh results. Decisions are disabled until results refresh.
-        <Button disabled={review.isFetching} onClick={() => void review.refetch()}>
-          {review.isFetching ? "Retrying…" : "Retry"}
-        </Button>
-      </>
-    ) : review.data && live ? (
-      "This run is still going. Results fill in as tasks report; you can accept checks and mark it reviewed once it completes."
-    ) : runId === "local" || review.data ? undefined : review.isPending ? (
-      "Loading results…"
-    ) : status === 409 ? (
-      "This run has no plan yet. Results appear here once it starts."
-    ) : status === 404 ? (
-      "This run is unavailable or you do not have access to it."
-    ) : (
-      "Could not load this run's results."
+  if (!review.data) {
+    const status = review.error instanceof ApiError ? review.error.status : undefined;
+    return (
+      <div className="mx-auto w-full max-w-2xl px-6 py-8 max-[760px]:px-3">
+        {review.isPending ? (
+          <LoadingState label="Loading the results" rows={4} />
+        ) : status === 409 ? (
+          <EmptyState title="No plan yet">Results appear here once the run starts.</EmptyState>
+        ) : status === 404 ? (
+          <ErrorState title="This run isn't here">
+            It may have been removed, or you can't open it.{" "}
+            <Button asChild variant="link">
+              <Link to="/">Go to Home</Link>
+            </Button>
+          </ErrorState>
+        ) : (
+          <ErrorState title="Couldn't load the results" onRetry={() => void review.refetch()}>
+            Check your connection, then try again.
+          </ErrorState>
+        )}
+      </div>
     );
-  const [archive, setArchive] = useState<DicomArchive>();
-  const [selectedSeries, setSelectedSeries] = useState("");
-  const [progress, setProgress] = useState<string>();
-  const [error, setError] = useState<string>();
-  const controller = useRef<AbortController | null>(null);
-  useEffect(() => () => controller.current?.abort(), []);
-
-  function close() {
-    controller.current?.abort();
-    controller.current = null;
-    setArchive(undefined);
-    setSelectedSeries("");
-    setProgress(undefined);
-    setError(undefined);
   }
-
-  async function open() {
-    close();
-    const request = new AbortController();
-    controller.current = request;
-    setProgress("Looking up scan…");
-    try {
-      const inputId =
-        runId === "local"
-          ? (await listInputs()).find((item) => item.source === "reference")?.id
-          : (await getRun(runId)).input.id;
-      request.signal.throwIfAborted();
-      if (!inputId) throw new Error("No reference scan is available in this workspace.");
-      const descriptor = await getInputDownload(inputId, request.signal);
-      const file = await downloadFile(descriptor, {
-        acceptedMediaTypes: ["application/zip"],
-        // Compressed transfer limit; the importer separately caps expanded DICOM data.
-        maxBytes: 2 * 1024 ** 3,
-        signal: request.signal,
-        onProgress: (received, total) =>
-          setProgress(
-            `Downloading scan ${Math.floor((received / total) * 100)}% (${(received / 1024 ** 2).toFixed(1)} / ${(total / 1024 ** 2).toFixed(1)} MiB)…`,
-          ),
-      });
-      request.signal.throwIfAborted();
-      setProgress("Reading ZIP…");
-      const loaded = await openDicomZip(file, request.signal, (done, total) =>
-        setProgress(`Reading files ${done} / ${total}…`),
-      );
-      if (request.signal.aborted) return;
-      setArchive(loaded);
-      // Never guess which acquisition the researcher intends when there are several.
-      if (loaded.series.length === 1) setSelectedSeries(loaded.series[0]?.id ?? "");
-    } catch (cause) {
-      if (!request.signal.aborted) {
-        setError(
-          cause instanceof ApiError
-            ? cause.status === 503
-              ? "Scan storage is not configured. Contact the workspace administrator."
-              : cause.status === 404
-                ? "This scan is unavailable or you do not have access to it."
-                : "Could not download the scan. Try opening it again."
-            : cause instanceof Error
-              ? cause.message
-              : "Could not open this scan.",
-        );
-      }
-    } finally {
-      if (!request.signal.aborted) setProgress(undefined);
-    }
-  }
-
-  const series = archive?.series.find((item) => item.id === selectedSeries);
+  // Loaded data stays on screen when a background refetch fails.
+  const notice = review.isError ? (
+    <>
+      Couldn't refresh the results. Decisions are off until they refresh.
+      <Button disabled={review.isFetching} onClick={() => void review.refetch()}>
+        {review.isFetching ? "Trying again…" : "Try again"}
+      </Button>
+    </>
+  ) : live ? (
+    "This run is still going. Results fill in as tasks report; you can accept checks and mark it reviewed once it completes."
+  ) : undefined;
   return (
     <ReviewWorkspace
       runId={runId}
@@ -171,71 +108,18 @@ function ScanReview({ runId }: { runId: string }) {
         if (selection.revision) next.set("revision", selection.revision);
         setSearch(next);
       }}
-      backLink={<Link to="/">Home</Link>}
-      viewer={(selected, display, revision, focus, snapshots) => (
-        <ViewerWorkspace
-          series={series}
-          selected={selected}
-          display={display}
-          revision={revision}
-          focus={focus}
-          fileUrl={fileUrl}
-          snapshots={snapshots}
-        >
-          <div className="dicom-intake">
-            <div className="flex flex-wrap items-center gap-3">
-              <Button onClick={() => void open()}>
-                {runId === "local" ? "Open reference scan" : "Open run scan"}
-              </Button>
-              {archive && (
-                <label className="revision-select">
-                  Series
-                  <select
-                    aria-label="DICOM series"
-                    value={selectedSeries}
-                    onChange={(event) => setSelectedSeries(event.target.value)}
-                  >
-                    <option value="" disabled>
-                      Choose a series
-                    </option>
-                    {archive.series.map((item, i) => (
-                      <option key={item.id} value={item.id}>
-                        {i + 1}: {item.modality} · {item.columns} × {item.rows} ·{" "}
-                        {item.slices.length} slices
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              {(archive || progress) && (
-                <Button onClick={close}>{progress ? "Cancel import" : "Close scan"}</Button>
-              )}
-            </div>
-            {progress && (
-              <p className="text-sm mt-2" role="status">
-                {progress}
-              </p>
-            )}
-            {archive && !selectedSeries && (
-              <p className="text-sm mt-2" role="status">
-                Choose a series to view. Series are not combined.
-              </p>
-            )}
-            {!!archive?.ignoredFiles && (
-              <p className="text-xs text-muted-foreground mt-2">
-                Skipped {archive.ignoredFiles} non-image files.
-              </p>
-            )}
-            {error && (
-              <p className="error-message mt-2" role="alert">
-                {error}
-              </p>
-            )}
-          </div>
-        </ViewerWorkspace>
-      )}
+      backLink={
+        <Button asChild variant="link">
+          <Link to="/">
+            <ArrowLeft aria-hidden /> Home
+          </Link>
+        </Button>
+      }
       onRefresh={() =>
-        queryClient.invalidateQueries({ queryKey: ["review-run", runId] }, { throwOnError: true })
+        queryClient.invalidateQueries(
+          { queryKey: reviewRunQuery(runId).queryKey },
+          { throwOnError: true },
+        )
       }
     />
   );
