@@ -179,8 +179,6 @@ export const runs = pgTable(
     stalledClaims: integer().notNull().default(0),
     modelCostUsd: doublePrecision().notNull().default(0),
     sandboxSeconds: doublePrecision().notNull().default(0),
-    /** Retired, never read or written. Drop after servers using the old count are drained. */
-    toCheck: integer(),
   },
   (t) => [
     index("runs_lab_state").on(t.labId, t.state, t.createdAt),
