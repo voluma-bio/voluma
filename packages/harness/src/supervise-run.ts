@@ -48,6 +48,8 @@ export interface SuperviseRunOptions {
   files: Files;
   /** The run's `/outputs` as a whole: backed up when a correction starts, put back when one ends unfinished (`outputs-backup.ts`). */
   outputs: Outputs;
+  /** An earlier claim's sandboxes are confirmed gone; a restore of `/outputs` waits for it (`outputs-backup.ts`). */
+  earlierClaimsEnded: boolean;
   roles: { main: RoleOf; worker: RoleOf; check: RoleOf };
   briefs: Briefs;
   config?: Partial<LoopConfig>;
@@ -81,7 +83,15 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
     ...(reopened && { reopened }),
   });
   // Before any thread or sandbox: nothing may write or read `/outputs` while it is put back.
-  await keepOutputs({ runId, rootThreadId, recorder, outputs: options.outputs, signal });
+  await keepOutputs({
+    runId,
+    rootThreadId,
+    recorder,
+    outputs: options.outputs,
+    mainWorks: options.layout.mainWorks,
+    earlierClaimsEnded: options.earlierClaimsEnded,
+    signal,
+  });
   const pool = threads(
     {
       runId,

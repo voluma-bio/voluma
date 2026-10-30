@@ -217,8 +217,6 @@ export const task = (
 
 export function world(o: WorldOptions) {
   const stored: RunEvent[] = [];
-  /** The Outputs adapter's calls, in order: `backup`, `restore` or `discard`, each with the `<reopenId>`. */
-  const outputCalls: string[] = [];
   const history = new Map<string, string[]>();
   let abort = new AbortController();
   let cut = false;
@@ -375,11 +373,11 @@ export function world(o: WorldOptions) {
         },
         write: async () => {},
       },
+      earlierClaimsEnded: true,
       outputs: {
-        backup: async (_run, reopenId) => void outputCalls.push(`backup ${reopenId}`),
-        restore: async (_run, reopenId) => void outputCalls.push(`restore ${reopenId}`),
-        discard: async (_run, reopenId) => void outputCalls.push(`discard ${reopenId}`),
-        holds: async () => true,
+        backup: async () => {},
+        restore: async () => {},
+        discard: async () => {},
       },
       roles,
       briefs: {
@@ -398,7 +396,6 @@ export function world(o: WorldOptions) {
 
   return {
     stored: stored as readonly RunEvent[],
-    outputCalls: outputCalls as readonly string[],
     /** Whether a claim was cut off by `cutAfter`. */
     get wasCut() {
       return cut;

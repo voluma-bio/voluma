@@ -1,20 +1,17 @@
 /**
  * The R2 Outputs adapter: `/outputs` is the prefix `outputsPrefix(runId)`, its backup
  * `outputsBackupPrefix(runId, reopenId)`. Both copies are server-side `CopyObject` (a run's
- * outputs run to hundreds of MB), listed page by page. `holds` compares a file with its
- * content-addressed evidence copy by size and ETag, so no bytes are read. R2 gives a copy of a
- * multipart-uploaded object the plain content ETag, so the comparison is only meaningful on a
- * file that is itself a copy, as one `restore` has just written.
+ * outputs run to hundreds of MB), listed page by page. `restore` ends by comparing the two
+ * listings (key and ETag per key, no bytes read); both sides are `CopyObject` copies, so their
+ * ETags agree.
  */
 import {
   CopyObjectCommand,
   DeleteObjectsCommand,
-  HeadObjectCommand,
   ListObjectsV2Command,
-  NotFound,
   S3Client,
 } from "@aws-sdk/client-s3";
-import { evidenceKey, outputKey, outputsBackupPrefix, outputsPrefix } from "@voluma/contracts/r2";
+import { outputsBackupPrefix, outputsPrefix } from "@voluma/contracts/r2";
 import type { Outputs } from "@voluma/harness/ports/outputs";
 
 /** How many copies run at once. */
@@ -33,14 +30,14 @@ export function r2Outputs(config: {
     credentials: { accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey },
   });
 
-  async function* keysUnder(prefix: string, signal: AbortSignal) {
+  async function* entriesUnder(prefix: string, signal: AbortSignal) {
     let token: string | undefined;
     do {
       const page = await s3.send(
         new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token }),
         { abortSignal: signal },
       );
-      for (const o of page.Contents ?? []) if (o.Key) yield o.Key;
+      for (const o of page.Contents ?? []) if (o.Key) yield { key: o.Key, etag: o.ETag };
       token = page.NextContinuationToken;
     } while (token);
   }
@@ -59,7 +56,7 @@ export function r2Outputs(config: {
       if (Errors?.length) throw new Error(`deleting under ${prefix} failed: ${Errors[0]?.Message}`);
       batch = [];
     };
-    for await (const key of keysUnder(prefix, signal)) {
+    for await (const { key } of entriesUnder(prefix, signal)) {
       batch.push(key);
       if (batch.length === 1000) await flush();
     }
@@ -70,7 +67,7 @@ export function r2Outputs(config: {
   async function mirror(from: string, to: string, signal: AbortSignal) {
     await clear(to, signal);
     const pending = new Set<Promise<void>>();
-    for await (const key of keysUnder(from, signal)) {
+    for await (const { key } of entriesUnder(from, signal)) {
       const copy: Promise<void> = s3
         .send(
           new CopyObjectCommand({
@@ -89,31 +86,32 @@ export function r2Outputs(config: {
     await Promise.all(pending);
   }
 
-  const head = (Key: string, signal: AbortSignal) =>
-    s3
-      .send(new HeadObjectCommand({ Bucket: bucket, Key }), { abortSignal: signal })
-      .catch((error) => {
-        if (error instanceof NotFound) return undefined;
-        throw error;
-      });
+  /** Throws unless `to` holds exactly the keys of `from`, with the same ETags. */
+  async function expectSame(from: string, to: string, signal: AbortSignal) {
+    const listed = async (prefix: string) => {
+      const found = new Map<string, string | undefined>();
+      for await (const e of entriesUnder(prefix, signal))
+        found.set(e.key.slice(prefix.length), e.etag);
+      return found;
+    };
+    const [want, got] = await Promise.all([listed(from), listed(to)]);
+    const wrong = [...new Set([...want.keys(), ...got.keys()])].filter(
+      (k) => !want.has(k) || !got.has(k) || want.get(k) !== got.get(k),
+    );
+    if (wrong.length > 0)
+      throw new Error(
+        `the restored outputs differ from the backup: ${wrong.slice(0, 5).join(", ")}`,
+      );
+  }
 
   return {
     backup: (runId, reopenId, signal) =>
       mirror(outputsPrefix(runId), outputsBackupPrefix(runId, reopenId), signal),
-    restore: (runId, reopenId, signal) =>
-      mirror(outputsBackupPrefix(runId, reopenId), outputsPrefix(runId), signal),
-    discard: (runId, reopenId, signal) => clear(outputsBackupPrefix(runId, reopenId), signal),
-    async holds(runId, taskId, path, sha256, signal) {
-      const [file, evidence] = await Promise.all([
-        head(outputKey(runId, taskId, path), signal),
-        head(evidenceKey(runId, sha256), signal),
-      ]);
-      return (
-        !!file &&
-        !!evidence &&
-        file.ContentLength === evidence.ContentLength &&
-        file.ETag === evidence.ETag
-      );
+    async restore(runId, reopenId, signal) {
+      const backup = outputsBackupPrefix(runId, reopenId);
+      await mirror(backup, outputsPrefix(runId), signal);
+      await expectSame(backup, outputsPrefix(runId), signal);
     },
+    discard: (runId, reopenId, signal) => clear(outputsBackupPrefix(runId, reopenId), signal),
   };
 }

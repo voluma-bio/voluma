@@ -42,7 +42,7 @@ export const outputsPrefix = (runId: string) => `${runPrefix(runId)}outputs/`;
 /**
  * A copy of the run's outputs taken when the first claim of a correction with a go starts
  * (`outputs.backed-up`, keyed to that `run.reopened`'s id), so a correction that ends unfinished
- * can put them back (`outputs.restored`); deleted once it finished (`outputs.discarded`). Never read as outputs; the sandbox mounts none of it.
+ * can put them back (`outputs.restored`); deleted at the next reopen's first claim once it finished (`outputs.discarded`). Never read as outputs; the sandbox mounts none of it.
  */
 export const outputsBackupPrefix = (runId: string, reopenId: string) =>
   `${runPrefix(runId)}corrections/${seg(reopenId)}/`;

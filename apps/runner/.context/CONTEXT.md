@@ -356,14 +356,18 @@ events. A correction whose main agent stops moving fails the claim (the server r
 `correction.ended`) instead of skipping tasks. `/outputs` is one R2 prefix shared by every claim, so
 `superviseRun` first calls `keepOutputs` (`packages/harness/src/outputs-backup.ts`, before any thread or
 sandbox): the first claim of a correction whose span holds a go (only a go can lead to a write: main
-has no `bash` and its work tools wait for a go; a message-only correction gets no backup) copies the whole prefix to
+has no `bash` and its work tools wait for a go; a message-only correction gets no backup, unless
+the main role holds `bash`, which then backs up every span) copies the whole prefix to
 `runs/<id>/corrections/<reopen id>/` (server-side `CopyObject`, `r2-outputs.ts`; a worker writes
 files before it reports anything, so claim start is the earliest point that precedes every
 writer) and records `outputs.backed-up`; the first claim after `correction.ended` clears
-`/outputs`, copies the backup back, checks each file the kept results reported against its
-evidence copy (size and ETag) and records `outputs.restored`. A check that fails throws, so the
-claim fails and the next one repeats the restore. The first claim after a correction finished (a completed
-root end, no `correction.ended`) deletes its backup and records `outputs.discarded`. A claim's spend cap is the claim's `costCapUsd`:
+`/outputs`, copies the backup back, checks that `/outputs` matches it (key and ETag per key, both
+sides `CopyObject` copies) and records `outputs.restored`. A restore needs `terminateOtherClaims`
+to have succeeded: a stale sandbox could write over the restored files, so otherwise the claim
+fails. A failed check throws too, and the next claim repeats the restore. The first claim of the
+next `run.reopened` after a correction finished (no `correction.ended` before it) deletes its
+backup and records `outputs.discarded`. `correctionSpans` (`@voluma/contracts/fold`) is the one
+reader of where a span starts and how it closed (abandoned, finished or open). A claim's spend cap is the claim's `costCapUsd`:
 `RUNNER_MAX_RUN_COST_USD` for a run's first claims, and for a reopened run the spend at the reopen
 plus `RUNNER_MAX_CORRECTION_COST_USD` (else `RUNNER_MAX_RUN_COST_USD`). A thread that ended `cancelled` is never
 resumed. A tool whose `tool.call` event was
