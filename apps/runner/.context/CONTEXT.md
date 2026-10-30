@@ -111,7 +111,7 @@ records `assets.ready` / `assets.failed` on the root thread (id `<runId>:assets:
   failed file.
 - **Signal.** One rule: the worker halts exactly when the stop will not end the run (server stop,
   lost lease, self-stop, shutdown; `reportFor` is not `ended`). An uncaught
-  `error` ends the run, so they drain, as does `finally`'s own `abort`, which the worker outlives.
+  `error` ends the run, so the worker drains, as it does on `finally`'s own `abort`, which the worker outlives.
   `run.ts` remembers which stop halted it (`haltedBy`) and rebuilds the report from that one,
   never from the first stop. A stopped worker records nothing; the next claim finds the files again and the
   converter skips what has a `manifest.json` of its version and mode.

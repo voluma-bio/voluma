@@ -492,6 +492,11 @@ export function pgRunQueue(
           .for("update");
         if (!run) throw new LeaseLost();
         if (run.state !== "running") return { stop: true };
+        // An org dropped from config stops its running runs here (its queued ones fail at claim).
+        if (!limits.has(run.labId)) {
+          await fail(tx, runId, NO_LIMITS);
+          return { stop: true };
+        }
         await tx
           .update(runs)
           .set({

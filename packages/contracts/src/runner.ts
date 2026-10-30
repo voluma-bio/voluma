@@ -73,7 +73,7 @@
  *
  * Usage. The heartbeat carries the usage since the previous acknowledged
  * heartbeat (`usageSchema`): the dollars of model calls and the seconds of
- * sandbox time. The server adds them up per run,. A heartbeat the server did not acknowledge is resent
+ * sandbox time. The server adds them up per run. A heartbeat the server did not acknowledge is resent
  * with its usage added to the next one. Spend is recorded, never limited.
  *
  * Reports. The runner ends the run with `ended`, or gives it up with
