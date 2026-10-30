@@ -1,14 +1,13 @@
 /**
  * The `provider_calls` table: one row per call the provider gateway admits (`apps/gateway`).
- * The row is inserted `open` with its reservation when the call is admitted, and updated once
- * when the call ends. No request or reply body is stored. There is no foreign key to `runs`,
+ * The row is inserted `open` when the call is admitted, and updated once when the call ends. No request or reply body is stored. There is no foreign key to `runs`,
  * as for the run domain's other tables: nothing about a run may fail a row's write.
  *
  * Column names are snake_case from the camelCase keys: the database handle needs
  * `drizzle(client, { casing: "snake_case" })`, as the API's has.
  *
- * `cost_usd` is null while the cost is unknown (`open`, or `cut` with no usage seen); a null
- * cost counts as the reservation, since the provider may still bill.
+ * `cost_usd` is null while the cost is unknown (`open`, or `cut` with no usage seen). A null
+ * cost on a call that has ended is "cost unknown": it counts as no spend and is counted apart.
  */
 import { doublePrecision, index, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
@@ -26,7 +25,8 @@ export const providerCalls = pgTable(
     /** The gateway instance that admitted the call; it marks its own rows `cut` at shutdown. */
     instance: text().notNull(),
     status: text({ enum: ["open", "done", "failed", "cut"] }).notNull(),
-    reservedUsd: doublePrecision().notNull(),
+    /** Unused since reservations were removed; nullable so rows from the old code still insert. Drop it (`apps/api/.context/TODO.md`). */
+    reservedUsd: doublePrecision(),
     costUsd: doublePrecision(),
     /** A Meta file id: set on an upload's row, and a DELETE may name only these. */
     fileId: text(),

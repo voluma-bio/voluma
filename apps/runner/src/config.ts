@@ -178,7 +178,7 @@ export function runnerConfig() {
     /**
      * A run whose spend (all claims, gateway calls included) reaches this is stopped and ends
      * `failed`. Unset: no cap (test runs have none). Sent with every claim when set: the gateway
-     * checks the same cap. A SAM call reserves $3 there, so the cap must leave room for it.
+     * checks the same cap against known spend before each call.
      */
     maxRunCostUsd: optionalPositiveNumber("RUNNER_MAX_RUN_COST_USD"),
     /**
