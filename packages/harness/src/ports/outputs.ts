@@ -8,6 +8,8 @@ export interface Outputs {
   backup(runId: string, reopenId: string, signal: AbortSignal): Promise<void>;
   /** Makes the run's outputs exactly the backup of `reopenId`: clears them, then copies it back. Safe to repeat. */
   restore(runId: string, reopenId: string, signal: AbortSignal): Promise<void>;
+  /** Deletes the backup of `reopenId`. Safe to repeat. */
+  discard(runId: string, reopenId: string, signal: AbortSignal): Promise<void>;
   /** Whether the outputs file `path` of `taskId` holds the bytes with this sha256. */
   holds(
     runId: string,

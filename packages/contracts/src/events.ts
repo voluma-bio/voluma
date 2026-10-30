@@ -519,13 +519,16 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
   );
 
   /**
-   * The runner's copy of `/outputs` taken at the start of the claim that opens a correction
-   * (`run.reopened` `reopenId`), before any thread runs, and the put-back of that copy at the
-   * first claim after the correction ended unfinished (`correction.ended`). Each is written once
-   * per reopen, after the copy is whole, on the root thread. See `outputs-backup.ts` in the harness.
+   * The runner's copy of `/outputs` taken at the start of the first claim of a correction that
+   * holds a researcher's go (`run.reopened` `reopenId`), before any thread runs; the put-back of
+   * that copy at the first claim after the correction ended unfinished (`correction.ended`); and
+   * the deletion of it at the first claim after the correction finished (a completed root end
+   * with no `correction.ended`). Each is written once per reopen, after the work is done, on the
+   * root thread. See `outputs-backup.ts` in the harness.
    */
   const outputsBackedUp = event("outputs.backed-up", z.object({ reopenId: nonEmpty }));
   const outputsRestored = event("outputs.restored", z.object({ reopenId: nonEmpty }));
+  const outputsDiscarded = event("outputs.discarded", z.object({ reopenId: nonEmpty }));
 
   return z.discriminatedUnion("type", [
     claimStarted,
@@ -548,6 +551,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     assetsFailed,
     outputsBackedUp,
     outputsRestored,
+    outputsDiscarded,
   ]);
 };
 

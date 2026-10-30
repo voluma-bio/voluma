@@ -355,13 +355,15 @@ after it, and a message stored mid-claim is never counted as delivered or answer
 events. A correction whose main agent stops moving fails the claim (the server records
 `correction.ended`) instead of skipping tasks. `/outputs` is one R2 prefix shared by every claim, so
 `superviseRun` first calls `keepOutputs` (`packages/harness/src/outputs-backup.ts`, before any thread or
-sandbox): the first claim of a correction copies the whole prefix to
+sandbox): the first claim of a correction whose span holds a go (only a go can lead to a write: main
+has no `bash` and its work tools wait for a go; a message-only correction gets no backup) copies the whole prefix to
 `runs/<id>/corrections/<reopen id>/` (server-side `CopyObject`, `r2-outputs.ts`; a worker writes
 files before it reports anything, so claim start is the earliest point that precedes every
 writer) and records `outputs.backed-up`; the first claim after `correction.ended` clears
 `/outputs`, copies the backup back, checks each file the kept results reported against its
 evidence copy (size and ETag) and records `outputs.restored`. A check that fails throws, so the
-claim fails and the next one repeats the restore. Backups are not deleted (TODO.md). A claim's spend cap is the claim's `costCapUsd`:
+claim fails and the next one repeats the restore. The first claim after a correction finished (a completed
+root end, no `correction.ended`) deletes its backup and records `outputs.discarded`. A claim's spend cap is the claim's `costCapUsd`:
 `RUNNER_MAX_RUN_COST_USD` for a run's first claims, and for a reopened run the spend at the reopen
 plus `RUNNER_MAX_CORRECTION_COST_USD` (else `RUNNER_MAX_RUN_COST_USD`). A thread that ended `cancelled` is never
 resumed. A tool whose `tool.call` event was

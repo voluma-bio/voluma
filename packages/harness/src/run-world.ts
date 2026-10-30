@@ -217,7 +217,7 @@ export const task = (
 
 export function world(o: WorldOptions) {
   const stored: RunEvent[] = [];
-  /** The Outputs adapter's calls, in order: `backup <reopenId>`, `restore <reopenId>`. */
+  /** The Outputs adapter's calls, in order: `backup`, `restore` or `discard`, each with the `<reopenId>`. */
   const outputCalls: string[] = [];
   const history = new Map<string, string[]>();
   let abort = new AbortController();
@@ -378,6 +378,7 @@ export function world(o: WorldOptions) {
       outputs: {
         backup: async (_run, reopenId) => void outputCalls.push(`backup ${reopenId}`),
         restore: async (_run, reopenId) => void outputCalls.push(`restore ${reopenId}`),
+        discard: async (_run, reopenId) => void outputCalls.push(`discard ${reopenId}`),
         holds: async () => true,
       },
       roles,

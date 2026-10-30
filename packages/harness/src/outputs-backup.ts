@@ -3,6 +3,9 @@
  * shared by every claim; the fold forgets a correction that ended unfinished
  * (`abandonedEvents`), but the files that correction wrote stay unless they are put back.
  *
+ * Only a go can lead to a write: the main agent holds no `bash`, and its work tools and so every
+ * worker and check it starts wait for a go (`main-tools.ts`), so a span with no go gets no backup.
+ *
  * At the start of a claim, before any thread or sandbox exists:
  * 1. For each correction that ended (`correction.ended`) with a backup (`outputs.backed-up`) and
  *    no `outputs.restored`: `restore` the backup, check that every file the kept attempts
@@ -10,12 +13,17 @@
  *    event, the next claim repeats it from the start; a file that fails the check throws, so
  *    the claim fails and the next one tries again, and nothing builds on files the log
  *    does not vouch for.
- * 2. If the run is in a correction (a `run.reopened` with no end) with no backup, `backup` and
- *    record `outputs.backed-up`. The copy is taken here, not when an attempt opens, because a
- *    worker writes into `/outputs` before it reports anything.
+ * 2. For each correction a completed root end closed (no `correction.ended`) whose backup is
+ *    neither restored nor discarded: `discard` it and record `outputs.discarded`.
+ * 3. If the run is in a correction (a `run.reopened` with no end) whose span holds a go
+ *    `person.message` and has no backup, `backup` and record `outputs.backed-up`. The copy is
+ *    taken here, not when an attempt opens, because a worker writes into `/outputs` before it
+ *    reports anything. The span starts at the earlier of the reopen and the message it is keyed
+ *    to (a requeue stores its reopen after the unseen messages). A go that arrives during a
+ *    claim requeues the run (`messages.ts`), so no claim acts on a go it did not see here.
  *
  * Files that were never reported (intermediates) come back too, because the backup is of the
- * whole prefix. Backups are never deleted (`apps/runner/.context/TODO.md`).
+ * whole prefix.
  */
 
 import { abandonedEvents, fold } from "@voluma/contracts/fold";
@@ -32,32 +40,53 @@ export async function keepOutputs(o: {
 }): Promise<void> {
   const { runId, rootThreadId, recorder, outputs, signal } = o;
   const events = recorder.events();
+  const done = new Set<string>(); // reopen ids restored or discarded
   const backedUp = new Set<string>();
-  const restored = new Set<string>();
   const ended: string[] = [];
-  let open: string | undefined;
-  for (const e of events) {
-    if (e.type === "run.reopened") open = e.id;
-    else if (e.type === "correction.ended" && open) {
-      ended.push(open);
+  const finished: string[] = [];
+  let open: { id: string; from: number } | undefined;
+  for (const [i, e] of events.entries()) {
+    if (e.type === "run.reopened") {
+      const keyed = events.findIndex((k) => k.id === e.id.replace(/:reopened$/, ""));
+      open = { id: e.id, from: keyed >= 0 ? Math.min(i, keyed) : i };
+    } else if (e.type === "correction.ended" && open) {
+      ended.push(open.id);
+      open = undefined;
+    } else if (
+      e.type === "thread.ended" &&
+      e.threadId === rootThreadId &&
+      e.payload.status === "completed" &&
+      open
+    ) {
+      finished.push(open.id);
       open = undefined;
     } else if (e.type === "outputs.backed-up") backedUp.add(e.payload.reopenId);
-    else if (e.type === "outputs.restored") restored.add(e.payload.reopenId);
+    else if (e.type === "outputs.restored" || e.type === "outputs.discarded")
+      done.add(e.payload.reopenId);
   }
 
   for (const reopenId of ended) {
-    if (!backedUp.has(reopenId) || restored.has(reopenId)) continue;
+    if (!backedUp.has(reopenId) || done.has(reopenId)) continue;
     await outputs.restore(runId, reopenId, signal);
     await verify(o, events);
     await recorder.append(rootThreadId, "outputs.restored", { reopenId }, `${reopenId}:restored`);
   }
-  if (open && !backedUp.has(open)) {
-    await outputs.backup(runId, open, signal);
+  for (const reopenId of finished) {
+    if (!backedUp.has(reopenId) || done.has(reopenId)) continue;
+    await outputs.discard(runId, reopenId, signal);
+    await recorder.append(rootThreadId, "outputs.discarded", { reopenId }, `${reopenId}:discarded`);
+  }
+  if (
+    open &&
+    !backedUp.has(open.id) &&
+    events.slice(open.from).some((e) => e.type === "person.message" && e.payload.go)
+  ) {
+    await outputs.backup(runId, open.id, signal);
     await recorder.append(
       rootThreadId,
       "outputs.backed-up",
-      { reopenId: open },
-      `${open}:backed-up`,
+      { reopenId: open.id },
+      `${open.id}:backed-up`,
     );
   }
 }

@@ -71,11 +71,13 @@
  * checkpoints, outputs, plan changes, revisions) are abandoned (`abandonedEvents`, fold.ts): the
  * fold, review, the run page and the harness's own scans skip them, so a failed redo leaves
  * no half-redone task. The files the correction wrote to `/outputs` are put back too: the first
- * claim of a correction copies the whole outputs prefix to a backup keyed to its reopen
- * (`outputs.backed-up`, before any thread runs), and the first claim after `correction.ended`
- * restores it exactly and checks the files the kept results reported (`outputs.restored`,
+ * claim of a correction whose span holds a go copies the whole outputs prefix to a backup keyed
+ * to its reopen (`outputs.backed-up`, before any thread runs; only a go can lead to a write, so a
+ * message-only correction makes none), and the first claim after `correction.ended` restores it
+ * exactly and checks the files the kept results reported (`outputs.restored`,
  * `outputs-backup.ts` in the harness), so the next correction starts from the pre-go state,
- * files included. Messages, replies, thread events, `run.reopened` and `correction.ended` stay.
+ * files included. The first claim after a correction that finished deletes its backup
+ * (`outputs.discarded`). Messages, replies, thread events, `run.reopened` and `correction.ended` stay.
  *
  * Who may send: only the run's `startedBy` (403 otherwise; it also settles whose go counts).
  * Cookie auth and Origin rules are `run.ts`'s. Only this route's body limit is raised, to

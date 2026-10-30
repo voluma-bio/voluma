@@ -102,6 +102,7 @@ export function r2Outputs(config: {
       mirror(outputsPrefix(runId), outputsBackupPrefix(runId, reopenId), signal),
     restore: (runId, reopenId, signal) =>
       mirror(outputsBackupPrefix(runId, reopenId), outputsPrefix(runId), signal),
+    discard: (runId, reopenId, signal) => clear(outputsBackupPrefix(runId, reopenId), signal),
     async holds(runId, taskId, path, sha256, signal) {
       const [file, evidence] = await Promise.all([
         head(outputKey(runId, taskId, path), signal),
