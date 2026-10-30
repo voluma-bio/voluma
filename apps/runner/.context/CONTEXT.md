@@ -223,6 +223,11 @@ of a stub Meta that replays a saved response. Modal must reach it over HTTPS (it
 worker's allowlist), so host it in a Modal sandbox on an encrypted tunnel. The reference scan's
 input is DICOM: put the `.npy` under the run's `scratch/` prefix first.
 
+To run the real runner against a stub model provider (a fake that returns 503s or canned replies),
+set every `VOLUMA_<PROVIDER>_API_KEY` in that runner's environment to a dummy value, not a real key. A
+model call the stub misses then fails closed with a 401 instead of reaching the provider. A resumed
+thread takes its model from the log, so a base-URL override set for one model can miss it.
+
 # Runner: `view_image` shows the model files the sandbox wrote
 
 `packages/harness/src/tools/view-image.ts` reads up to 4 PNG or JPEG files (1 MiB and 2000 px a side each, type
