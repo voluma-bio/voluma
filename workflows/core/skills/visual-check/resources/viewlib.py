@@ -6,7 +6,8 @@ left side), both in pixels of the slice. A box is [row0, col0, row1, col1] = [y0
 import hashlib
 import json
 import math
-import os
+import shutil
+import tempfile
 from pathlib import Path
 
 import frame as fr
@@ -178,9 +179,10 @@ MIN_VOXELS = 50  # smaller pieces are not drawn in 3D
 class Meshes:
     """Display surfaces in mm (x, y, z), cut from an array downsampled by a step and cached as .vtp files in `cache_dir`.
 
-    A cache file is named by a hash of the array's path and mtime, the step and what was cut, and written to a temporary name
-    and renamed, so a reader never sees half a file. The downsampled array is read once per Meshes, however many labels
-    are cut from it."""
+    A cache file is named by a hash of the array's path and mtime, the step and what was cut. It is built under /tmp and
+    copied into `cache_dir` in one pass: `cache_dir` is usually under $SCRATCH, an R2 mount where VTK's writer crashes and
+    a rename fails. A mesh is read only once its `.done` marker exists, so a copy cut off part way is built again. The
+    downsampled array is read once per Meshes, however many labels are cut from it."""
 
     def __init__(self, cache_dir):
         self.dir = Path(cache_dir)
@@ -200,15 +202,17 @@ class Meshes:
     def cached(self, key, build):
         import pyvista as pv
         f = self.dir / (hashlib.sha1(json.dumps(key, default=str).encode()).hexdigest()[:20] + '.vtp')
-        if f.exists():
+        done = f.with_suffix('.done')  # written after the copy: VTK reads a cut-off .vtp as a smaller mesh without an error
+        if done.exists():
             return pv.read(f)
         mesh = build()
         if mesh.n_points:
             mesh = mesh.compute_normals(split_vertices=False)  # drawing computes them otherwise, on every call
         self.dir.mkdir(parents=True, exist_ok=True)
-        tmp = f.with_name(f'{f.stem}.{os.getpid()}.tmp.vtp')
-        mesh.save(tmp)
-        os.replace(tmp, f)
+        with tempfile.TemporaryDirectory() as tmp:
+            mesh.save(Path(tmp) / f.name)
+            shutil.copyfile(Path(tmp) / f.name, f)
+        done.write_text('')
         return mesh
 
     def surface(self, path, vol, select, kind, spacing, to_scan=lambda p: p, step=None, grid_id=None):
