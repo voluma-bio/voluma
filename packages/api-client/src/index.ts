@@ -7,6 +7,12 @@ import { logoutResponseSchema, type Me, meResponseSchema } from "@voluma/contrac
 import { type DownloadDescriptor, downloadDescriptorSchema } from "@voluma/contracts/download";
 import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
 import {
+  type SendRunMessageRequest,
+  type SendRunMessageResponse,
+  sendRunMessageRequestSchema,
+  sendRunMessageResponseSchema,
+} from "@voluma/contracts/messages";
+import {
   type AcceptCheckRequest,
   acceptCheckRequestSchema,
   type MarkReviewedRequest,
@@ -306,6 +312,25 @@ export async function markReviewed(
       await request(`/review/runs/${encodeURIComponent(runId)}/mark-reviewed`, {
         method: "POST",
         body: markReviewedRequestSchema.parse(body),
+      }),
+    ),
+  );
+}
+
+/**
+ * Sends the main agent a message (and optional marks, a PNG snapshot, or Go) about a finished run;
+ * reopens an ended or `awaiting-person` run. Keep `body.id` across retries. Refusals and limits:
+ * `messages.ts`. The chat comes back on the run's event stream: read it with `conversation`.
+ */
+export async function sendRunMessage(
+  runId: string,
+  body: SendRunMessageRequest,
+): Promise<SendRunMessageResponse> {
+  return sendRunMessageResponseSchema.parse(
+    await json(
+      await request(`/review/runs/${encodeURIComponent(runId)}/messages`, {
+        method: "POST",
+        body: sendRunMessageRequestSchema.parse(body),
       }),
     ),
   );

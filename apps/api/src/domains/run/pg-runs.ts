@@ -83,6 +83,8 @@ function toRun(
         return { status: "running", startedAt: startedAt as string };
       case "awaiting-keys":
         return { status: "awaiting-keys", startedAt };
+      case "awaiting-person":
+        return { status: "awaiting-person", startedAt: startedAt as string };
       case "ended":
         return {
           status: "ended",

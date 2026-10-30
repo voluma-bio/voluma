@@ -158,6 +158,13 @@ export const shapeZyxSchema = z.tuple([
 /** A voxel index `[z, y, x]` of a grid. */
 export const voxelIndexSchema = z.tuple([z.int().min(0), z.int().min(0), z.int().min(0)]);
 
+/** An inclusive box in voxel indices `[z, y, x]`; `min` must not exceed `max` on any axis. */
+export const voxelBoxSchema = z
+  .object({ min: voxelIndexSchema, max: voxelIndexSchema })
+  .refine((b) => b.min.every((lo, i) => lo <= (b.max[i] ?? lo)), {
+    message: "box.min must not exceed box.max on any axis",
+  });
+
 /**
  * What the converter (`workflows/core/convert/review_assets.py`) prints and writes as
  * `manifest.json`; the runner parses it and builds `assets.ready` from it. Paths are relative
@@ -428,16 +435,12 @@ export const focusSchema = z
     on: z.array(z.string()),
     volumeId: z.string().optional(),
     label: z.int().min(1).optional(),
-    box: z.object({ min: voxelIndexSchema, max: voxelIndexSchema }).optional(),
+    box: voxelBoxSchema.optional(),
     point: voxelIndexSchema.optional(),
   })
   .refine((f) => f.label === undefined || f.volumeId !== undefined, {
     path: ["label"],
     message: "label needs volumeId",
-  })
-  .refine((f) => !f.box || f.box.min.every((lo, i) => lo <= (f.box?.max[i] ?? lo)), {
-    path: ["box"],
-    message: "box.min must not exceed box.max on any axis",
   });
 export type Focus = z.infer<typeof focusSchema>;
 

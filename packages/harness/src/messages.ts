@@ -32,6 +32,8 @@ const PLAIN_REASON: Record<ClaimEndReason, string> = {
   shutdown: "the runner restarted",
   "self-stop": "the runner lost contact with the server",
   "lease-expired": "the server lost contact with the runner",
+  "awaiting-person": "the run waited for the researcher",
+  "person-message": "the researcher sent a message",
 };
 
 /** What a cut-off thread is told on resume: the tool it was in, if any, and why, in plain words. */

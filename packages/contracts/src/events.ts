@@ -29,6 +29,10 @@
  * `check.accepted` and `review.completed` are server-authored human decisions:
  * readable in runEventSchema, rejected by the runner's eventInputSchema, and ignored
  * by the scientific fold. Their payloads and command rules live in review.ts.
+ * `person.message` (server-authored, thread `<runId>.person`, id `<runId>.person:<id>`; payload
+ * and route in messages.ts) is the researcher's side of a correction chat, handled the same way.
+ * `reply` is the main agent's side: the runner writes it from the `reply` tool on the main thread.
+ * The fold ignores both; `conversation` (conversation.ts) reads them.
  */
 import { z } from "zod";
 import {
@@ -38,6 +42,7 @@ import {
   taskStatusSchema,
   toolCallIdSchema,
 } from "./ids";
+import { personMessageSchema, replySchema } from "./messages";
 import { evidenceRefSchema, outputReportSchema } from "./output";
 import { sha256Schema } from "./r2";
 import {
@@ -220,7 +225,8 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
 
   /**
    * Every `thread.ended` is deliberate. A runtime abort (shutdown, self-stop, lost lease)
-   * writes none, so `cancelled` always means a stop someone chose: `stop_worker`, the run
+   * writes none, so `cancelled` always means a stop someone chose (and is final; a `completed`
+   * end is idle and resumable, which is how a person message reopens a finished run): `stop_worker`, the run
    * loop's own stops, or a user's cancel of the run (which the server writes, `threads.ts`).
    */
   const threadEnded = event(
@@ -458,6 +464,12 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
   );
 
   /**
+   * The main agent's answer to the researcher, from its `reply` tool (`replyInputSchema`);
+   * id `<thread>:<toolCallId>:reply`. `fold` ignores it.
+   */
+  const reply = event("reply", replySchema);
+
+  /**
    * Review assets (OME-Zarr levels, meshes) for one reported file were converted: the
    * manifest plus the `sourceSha256` of the file. Written by the runner's conversion worker
    * on the run's root thread (`<runId>.supervisor`); id `<runId>:assets:<sha256>`, so a retry
@@ -496,6 +508,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
     planChanged,
     ask,
     answer,
+    reply,
     assetsReady,
     assetsFailed,
   ]);
@@ -523,13 +536,23 @@ export const runEventSchema = z
       type: z.literal("review.completed"),
       payload: reviewCompletedSchema,
     }),
+    z.object({
+      ...envelope,
+      ...stored,
+      type: z.literal("person.message"),
+      payload: personMessageSchema,
+    }),
   ])
   .refine(
     (e) =>
       (e.type !== "check.accepted" && e.type !== "review.completed") ||
       e.threadId === `${e.runId}.reviewer`,
     { path: ["threadId"], message: "human review decisions belong to <runId>.reviewer" },
-  );
+  )
+  .refine((e) => e.type !== "person.message" || e.threadId === `${e.runId}.person`, {
+    path: ["threadId"],
+    message: "person messages belong to <runId>.person",
+  });
 export type RunEvent = z.infer<typeof runEventSchema>;
 export type EventType = RunEvent["type"];
 

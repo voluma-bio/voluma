@@ -160,3 +160,12 @@ export const askInputSchema = z.object({
   question: nonEmpty.describe("What you need to know to decide your verdict."),
 });
 export type AskInput = z.infer<typeof askInputSchema>;
+
+/**
+ * `reply`: the main agent's answer to the researcher who messaged the run (`messages.ts`); writes
+ * a `reply` event. Allowed in every state of a correction; it acts on no task.
+ */
+export const replyInputSchema = z.object({
+  text: nonEmpty.describe("Your answer to the researcher, in plain language."),
+});
+export type ReplyInput = z.infer<typeof replyInputSchema>;
