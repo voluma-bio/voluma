@@ -15,17 +15,14 @@ import {
 } from "./adapters/pi/start-thread";
 
 /** What differs per thread; the run-wide dependencies come from `Threads`' `shared`. */
-type PerRun = "runId" | "recorder" | "history" | "sandbox" | "signal" | "runSignal";
+type PerRun = "recorder" | "history" | "sandbox" | "signal" | "runSignal";
 // Distributes over the kind union; a plain `Omit` would collapse it.
 export type ThreadSpec = StartThreadOptions extends infer O
   ? O extends unknown
     ? Omit<O, PerRun>
     : never
   : never;
-type Shared = Pick<
-  StartThreadOptions,
-  "runId" | "recorder" | "history" | "sandbox" | "providerOutage"
-> & {
+type Shared = Pick<StartThreadOptions, "recorder" | "history" | "sandbox" | "providerOutage"> & {
   /** Called when a thread ends, whatever the outcome; its sandbox is no longer needed. */
   release(threadId: string): void;
 };

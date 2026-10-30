@@ -98,7 +98,6 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
   });
   const pool = threads(
     {
-      runId,
       recorder,
       history: options.history,
       sandbox: options.sandbox,
@@ -135,7 +134,6 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
         files: options.files,
         runtime,
         main: {
-          runId,
           rootThreadId,
           recorder,
           runtime,

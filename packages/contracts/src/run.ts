@@ -125,11 +125,7 @@
  *     kind (none for an org whose members share one account); another answers
  *     409;
  *   - for `voluma` runs only: runs at once (a claim takes a `queued` run only
- *     while the org is under it). Runs per day count both kinds, since Voluma pays
- *     every sandbox. The daily limit answers 429 when work starts and is checked again
- *     when a claim dequeues a `voluma` run (a run refused at dequeue ends `failed` with
- *     an `error`; a `visitor` run was counted at start). It counts a run once, so a
- *     recovered run isn't refused for a limit it already passed;
+ *     while the org is under it);
  *   - for `visitor` runs: at most this many `queued` or `running` in the org
  *     (those hold the visitor's keys in the server's memory, or a runner
  *     slot; an `awaiting-keys` run holds neither and doesn't count). Starting
@@ -266,8 +262,6 @@ export const runSchema = z
      * reference scan.
      */
     example: z.boolean(),
-    /** The example run this one was forked from by a correction on it; null for a fresh run. */
-    forkedFrom: runIdSchema.nullable(),
     createdAt: z.iso.datetime(),
     state: runStateSchema,
     /**

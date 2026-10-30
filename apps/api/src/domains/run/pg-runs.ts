@@ -113,7 +113,6 @@ function toRun(
     input: toInput(input),
     credentials: run.credentials,
     example: run.example,
-    forkedFrom: run.forkedFrom,
     createdAt: run.createdAt.toISOString(),
     state,
     usage: { modelCostUsd: run.modelCostUsd, sandboxSeconds: run.sandboxSeconds },

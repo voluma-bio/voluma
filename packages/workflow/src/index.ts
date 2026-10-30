@@ -1,6 +1,6 @@
 /**
- * Pure functions over a workflow's plan: which tasks are ready to start and
- * which go stale when one changes. No I/O. (Building the plan from a workflow's files is
+ * Pure functions over a workflow's plan: whether a task's result lets its dependents start, and
+ * which tasks go stale when one changes. No I/O. (Building the plan from a workflow's files is
  * `plan.ts`; reading them is `load.ts`.)
  */
 
@@ -10,9 +10,6 @@ export interface GraphTask {
   /** Tasks this one builds on. */
   dependsOn: readonly string[];
 }
-
-/** Statuses that make a task start (or restart): never started, or marked for a redo. */
-const STARTABLE = new Set(["pending", "stale"]);
 
 /** What the graph needs of a task's latest attempt; `FoldedTask` fits it. */
 export interface TaskState {
@@ -36,23 +33,6 @@ export function isSatisfied(task: TaskState | undefined): boolean {
   return (
     task.status === "done" || (task.status === "to-check" && task.missingRequired.length === 0)
   );
-}
-
-/**
- * Tasks to start now, in plan order: `pending` or `stale`, with every dependency
- * satisfied (`isSatisfied`). `stateOf` answers `undefined` for a task with no attempt.
- */
-export function readyTasks(
-  tasks: readonly GraphTask[],
-  stateOf: (id: string) => TaskState | undefined,
-): string[] {
-  return tasks
-    .filter(
-      (t) =>
-        STARTABLE.has(stateOf(t.id)?.status ?? "pending") &&
-        t.dependsOn.every((d) => isSatisfied(stateOf(d))),
-    )
-    .map((t) => t.id);
 }
 
 /** Every task that depends on `id`, directly or through others, in plan order. */

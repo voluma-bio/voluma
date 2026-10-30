@@ -28,7 +28,6 @@ const run: Run = {
   },
   credentials: "voluma",
   example: false,
-  forkedFrom: null,
   tasks: null,
   createdAt: at,
   state: { status: "ended", outcome: "failed", startedAt: at, endedAt: at },
