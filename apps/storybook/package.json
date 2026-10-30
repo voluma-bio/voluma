@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@voluma/design-tokens": "workspace:*",
+    "@voluma/run-view": "workspace:*",
     "react": "catalog:",
     "react-dom": "catalog:"
   },

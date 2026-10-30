@@ -50,7 +50,10 @@ export type ShellPanelProps = {
   children: ReactNode;
 };
 
-type Registration = Omit<ShellPanelProps, "children" | "tools"> & {
+type Registration = Omit<ShellPanelProps, "children" | "tools" | "icon"> & {
+  /** A ref, so a screen that builds a new icon element every render does not re-register; the
+   * strip reads the latest on its next render. */
+  icon: { current: ReactNode };
   order: number;
   /** A strip button that goes somewhere instead of opening a panel (`ShellLink`). */
   link?: { active: boolean; go(): void };
@@ -106,6 +109,14 @@ function loadLayout(): Layout {
   return fallback;
 }
 
+function saveLayout(layout: Layout) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(layout));
+  } catch {
+    // Disabled or full storage must not make the shell unusable.
+  }
+}
+
 type ShellState = {
   register(reg: Registration): void;
   unregister(id: string): void;
@@ -118,6 +129,18 @@ const ShellContext = createContext<ShellState | null>(null);
 const HeadingContext = createContext<HTMLElement | null>(null);
 
 let nextOrder = 0;
+
+/** Registering the same panel again is a no-op, so a screen's re-render does not re-render the shell. */
+function sameRegistration(a: Registration | undefined, b: Registration) {
+  if (!a) return false;
+  const { link: linkA, ...restA } = a;
+  const { link: linkB, ...restB } = b;
+  return (
+    Object.keys(restB).every(
+      (k) => restA[k as keyof typeof restA] === restB[k as keyof typeof restB],
+    ) && linkA?.active === linkB?.active
+  );
+}
 
 export function AppShell({
   logo,
@@ -156,14 +179,18 @@ export function AppShell({
     return () => observer.disconnect();
   }, [hasLeftStrip, hasRightStrip]);
 
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
+  // A drag changes the layout on every pointermove; it is saved once, when the pointer goes up.
+  const dragging = useRef(false);
   // Full view only hides the saved layout; it never changes which panels are open.
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(layout));
-    } catch {
-      // Disabled or full storage must not make the shell unusable.
-    }
+    if (!dragging.current) saveLayout(layout);
   }, [layout]);
+  const onDragging = useCallback((active: boolean) => {
+    dragging.current = active;
+    if (!active) saveLayout(layoutRef.current);
+  }, []);
 
   // Panels that are open but whose screen no longer renders them stay in `layout.open`, so they
   // come back when the screen does; only registered ones show.
@@ -176,7 +203,9 @@ export function AppShell({
   );
 
   const register = useCallback((reg: Registration) => {
-    setRegs((prev) => new Map(prev).set(reg.id, reg));
+    setRegs((prev) =>
+      sameRegistration(prev.get(reg.id), reg) ? prev : new Map(prev).set(reg.id, reg),
+    );
     if (reg.defaultOpen)
       setLayout((l) =>
         l.arranged.includes(reg.side) || l.open[reg.side].includes(reg.id)
@@ -215,6 +244,9 @@ export function AppShell({
 
   const lastOpen = useRef<Layout["open"]>({ left: [], right: [] });
   const foldSide = useCallback((side: ShellSide) => {
+    // A side that never had a panel open has nothing to fold, and arranging it would stop its
+    // `defaultOpen` panels from opening on their own.
+    if (!layoutRef.current.open[side].length && !lastOpen.current[side].length) return;
     setFull(false);
     setLayout((l) => {
       if (l.open[side].length) lastOpen.current[side] = l.open[side];
@@ -241,8 +273,13 @@ export function AppShell({
         return;
       if (event.key === "\\") foldSide("left");
       else if (event.key === "]") foldSide("right");
-      else if (event.key === "Escape" && full) toggleFull();
-      else if (event.key.toLowerCase() === "f") toggleFull();
+      else if (event.key === "Escape") {
+        // Esc belongs to an open menu, popover or dialog first.
+        if (!full || event.defaultPrevented) return;
+        if (target.closest("[role=menu], [role=dialog], [data-radix-popper-content-wrapper]"))
+          return;
+        toggleFull();
+      } else if (event.key.toLowerCase() === "f") toggleFull();
       else {
         const reg = [...regs.values()].find((r) => r.shortcut === event.key.toLowerCase());
         if (!reg) return;
@@ -327,6 +364,7 @@ export function AppShell({
         onResize={(w) => resize(side, w)}
         onSplit={(s) => setLayout((l) => ({ ...l, split: { ...l.split, [side]: s } }))}
         onFold={() => foldSide(side)}
+        onDragging={onDragging}
       >
         {shown[side].map((id) => {
           const reg = regs.get(id);
@@ -385,7 +423,7 @@ export function AppShell({
                         : "text-muted-foreground hover:bg-accent hover:text-foreground",
                     )}
                   >
-                    <span className="[&>svg]:size-4">{r.icon}</span>
+                    <span className="[&>svg]:size-4">{r.icon.current}</span>
                     <span className="max-w-full truncate">{r.label}</span>
                     {r.count != null && r.count > 0 && (
                       <span className="absolute top-0.5 right-1 rounded-full bg-check-solid px-1 font-mono text-[10px] text-check-solid-fg leading-[14px]">
@@ -434,6 +472,7 @@ function Dock({
   onResize,
   onSplit,
   onFold,
+  onDragging,
   children,
 }: {
   side: ShellSide;
@@ -444,6 +483,7 @@ function Dock({
   onResize(width: number): void;
   onSplit(split: number): void;
   onFold(): void;
+  onDragging(active: boolean): void;
   children: ReactNode[];
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -451,6 +491,7 @@ function Dock({
     const el = ref.current;
     if (!el) return;
     event.preventDefault();
+    onDragging(true);
     const rect = el.getBoundingClientRect();
     const move = (e: PointerEvent) => {
       if (kind === "width")
@@ -458,6 +499,7 @@ function Dock({
       else onSplit(Math.min(0.8, Math.max(0.2, (e.clientY - rect.top) / rect.height)));
     };
     const up = () => {
+      onDragging(false);
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
     };
@@ -536,10 +578,12 @@ export function ShellPanel({ children, tools, ...props }: ShellPanelProps) {
   if (!shell) throw new Error("ShellPanel must be rendered inside AppShell");
   const order = useRef(nextOrder++).current;
   const { register, unregister } = shell;
-  const { id, side, group, label, icon, count, shortcut, defaultOpen, minWidth } = props;
+  const { id, side, group, label, count, shortcut, defaultOpen, minWidth } = props;
+  const icon = useRef(props.icon);
+  icon.current = props.icon;
   useEffect(() => {
     register({ id, side, group, label, icon, count, shortcut, defaultOpen, minWidth, order });
-  }, [register, id, side, group, label, icon, count, shortcut, defaultOpen, minWidth, order]);
+  }, [register, id, side, group, label, count, shortcut, defaultOpen, minWidth, order]);
   useEffect(() => () => unregister(id), [unregister, id]);
   const slot = shell.isOpen(id) ? shell.slot(id) : null;
   return slot
@@ -555,7 +599,7 @@ export function ShellPanel({ children, tools, ...props }: ShellPanelProps) {
             <button
               type="button"
               aria-label={`Close ${label}`}
-              onClick={() => shell.toggle({ ...props, order }, false)}
+              onClick={() => shell.toggle({ ...props, icon, order }, false)}
               className="grid size-6 cursor-pointer place-items-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
             >
               <X className="size-3.5" />
@@ -580,7 +624,7 @@ export function ShellLink({
   side = "left",
   group,
   label,
-  icon,
+  icon: iconNode,
   count,
   shortcut,
   active,
@@ -596,6 +640,8 @@ export function ShellLink({
   const { register, unregister } = shell;
   const goRef = useRef(go);
   goRef.current = go;
+  const icon = useRef(iconNode);
+  icon.current = iconNode;
   useEffect(() => {
     register({
       id,
@@ -608,7 +654,7 @@ export function ShellLink({
       order,
       link: { active, go: () => goRef.current() },
     });
-  }, [register, id, side, group, label, icon, count, shortcut, order, active]);
+  }, [register, id, side, group, label, count, shortcut, order, active]);
   useEffect(() => () => unregister(id), [unregister, id]);
   return null;
 }

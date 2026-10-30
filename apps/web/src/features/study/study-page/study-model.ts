@@ -19,8 +19,8 @@
  */
 import type { StudyDetail, StudyScanDetail, ToCheckItem } from "@voluma/contracts/study";
 import type { OutputEntry } from "@voluma/contracts/workflow-files";
-import type { StatusTone } from "@voluma/ui";
-import { runHref, runStatus } from "@voluma/ui/run";
+import { runHref, runStatus } from "@voluma/run-view";
+import type { Status } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 
 /** Where "Open in 3D" lands: a To check item, or a run's task (a scan far from its group). */
@@ -30,20 +30,20 @@ export type CheckStop = ToCheckItem | Pick<ToCheckItem, "runId" | "taskId">;
 export type OpenChecks = (queue: CheckStop[], start: number) => void;
 
 /**
- * A scan's status: its newest run's chip (`@voluma/ui/run`), with "N of M tasks" while it runs;
+ * A scan's status: its newest run's chip (`@voluma/run-view`), with "N of M tasks" while it runs;
  * "Not started" without a run. Its values may come from an older completed run.
  */
 export function scanStatus({ runs }: StudyScanDetail): {
   label: string;
-  tone: StatusTone;
+  status: Status;
   progress?: string;
 } {
   const run = runs[0];
-  if (!run) return { label: "Not started", tone: "neutral" };
-  const { label, tone } = runStatus(run);
+  if (!run) return { label: "Not started", status: "waiting" };
+  const status = runStatus(run);
   return run.tasks
-    ? { label, tone, progress: `${run.tasks.done} of ${run.tasks.total} tasks` }
-    : { label, tone };
+    ? { ...status, progress: `${run.tasks.done} of ${run.tasks.total} tasks` }
+    : status;
 }
 
 /** A run the API or the runner is still moving: the page refetches while one is in view. */
