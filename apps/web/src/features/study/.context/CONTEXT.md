@@ -1,8 +1,8 @@
 # Study feature
 
-Home (`/`, `home-page.tsx`), Run on new scans (`/new`, `new-page.tsx`) and Workflows
-(`/workflows`, `workflows-page.tsx`) under `StudyLayout` (their query client). The study page
-(`/studies/:id`) joins these routes; until it does, a multi-scan study's link 404s. Every run
+Home (`/`, `home-page.tsx`), Run on new scans (`/new`, `new-page.tsx`), Workflows
+(`/workflows`, `workflows-page.tsx`) and the study page (`/studies/:id`, `study-page/`) under
+`StudyLayout` (their query client). Every run
 belongs to a study (`@voluma/contracts/study`); a study of one is a study whose scan count is 1,
 shown as its scan and linked straight to its run.
 
@@ -48,3 +48,8 @@ shown as its scan and linked straight to its run.
   rest ("1 stopped, 1 not started"). A study reads "Reviewed" once every scan's newest run is
   completed and reviewed. The study page uses
   the same mapping; don't add another.
+- **The study page** derives everything from one `StudyDetail` in `study-page/study-model.ts`
+  (pure; its header states the far-from-group rule and the unit rule). Every "Open in 3D" calls
+  `StudyPage`'s `openChecks`, the check panel's one mount point; pass a real panel there rather
+  than adding links. Adding scans to an existing study isn't designed, so the page has no
+  "Add scans". The knee reads from `attributes.knee`, as intake stores it.
