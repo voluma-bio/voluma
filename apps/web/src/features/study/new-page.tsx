@@ -9,18 +9,18 @@
  * A guest can't upload (the API refuses), so a guest picks an earlier scan and gives keys.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiError, createStudy, listInputs, listRuns, signIn } from "@voluma/api-client";
+import { ApiError, createStudy, signIn } from "@voluma/api-client";
+import { inputsQuery, runsQuery, studiesQuery } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
 import type { Input, Run, VisitorKeys } from "@voluma/contracts/run";
 import type { CreateStudyRequest } from "@voluma/contracts/study";
-import { Button } from "@voluma/ui";
-import { formatDuration, formatUsd, loadKeys, RunKeyLine } from "@voluma/ui/run";
+import { formatDuration, formatUsd, loadKeys, RunKeyLine } from "@voluma/run-view";
+import { Button, Disclosure, EmptyState, ErrorState, LoadingState, TextField } from "@voluma/ui";
 import { catalog } from "@voluma/workflow/bundled";
 import { FolderOpen, Upload, X } from "lucide-react";
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router";
 import { intake, type Knee, readSheet, type Sample, type Sheet, sheetRecognised } from "./intake";
-import { Delayed, LoadError } from "./parts";
 import { type Dropped, fromDataTransfer, fromFileList, groupDropped } from "./scan-files";
 import { formatBytes, type Progress, type UploadState, useSent, useUploads } from "./uploads";
 import { measuredBy, measurementsOf, WorkflowPanel } from "./workflow-tasks";
@@ -94,8 +94,8 @@ export function NewPage() {
   const canUpload = me.kind === "member";
   const guest = me.kind === "visitor";
 
-  const inputs = useQuery({ queryKey: ["inputs"], queryFn: listInputs });
-  const runs = useQuery({ queryKey: ["runs"], queryFn: listRuns });
+  const inputs = useQuery(inputsQuery());
+  const runs = useQuery(runsQuery());
   const uploads = useUploads();
   const [rows, setRows] = useState<Row[]>([]);
   const [sheet, setSheet] = useState<SheetState>({ kind: "none" });
@@ -218,8 +218,8 @@ export function NewPage() {
       return createStudy(request);
     },
     onSuccess: (detail) => {
-      void queryClient.invalidateQueries({ queryKey: ["studies"] });
-      void queryClient.invalidateQueries({ queryKey: ["runs"] });
+      void queryClient.invalidateQueries({ queryKey: studiesQuery().queryKey });
+      void queryClient.invalidateQueries({ queryKey: runsQuery().queryKey });
       const run = detail.scans[0]?.runs[0];
       navigate(
         detail.scans.length === 1 && run ? `/runs/${run.id}/live` : `/studies/${detail.study.id}`,
@@ -251,9 +251,9 @@ export function NewPage() {
         ) : (
           <p className="rounded-lg bg-muted px-4 py-3 text-ui">
             Uploading scans needs a lab account.{" "}
-            <button type="button" className="text-primary-text underline" onClick={() => signIn()}>
+            <Button variant="link" onClick={() => signIn()}>
               Sign in
-            </button>{" "}
+            </Button>{" "}
             or use a scan already here.
           </p>
         )}
@@ -316,13 +316,9 @@ export function NewPage() {
                   <span className="block text-ui text-muted-foreground">{measuredBy(w)}</span>
                 </span>
               </label>
-              <button
-                type="button"
-                className="text-ui text-primary-text hover:underline"
-                onClick={() => setPanel(w.id)}
-              >
+              <Button variant="link" className="text-ui" onClick={() => setPanel(w.id)}>
                 See tasks
-              </button>
+              </Button>
             </div>
           ))}
         </div>
@@ -330,16 +326,14 @@ export function NewPage() {
 
       {several && (
         <Step n={3} title="Study">
-          <label className="grid max-w-md gap-1">
-            <span className="text-ui text-muted-foreground">Name</span>
-            <input
-              value={studyName}
-              maxLength={200}
-              onChange={(e) => setStudyName(e.target.value)}
-              placeholder="DMM knee study, Oct 2026"
-              className="h-9 rounded-lg border border-input bg-card px-3 outline-none focus-visible:border-ring"
-            />
-          </label>
+          <TextField
+            label="Name"
+            className="max-w-md"
+            value={studyName}
+            maxLength={200}
+            onChange={(e) => setStudyName(e.target.value)}
+            placeholder="DMM knee study, Oct 2026"
+          />
           {table.length > 2 && (
             <fieldset className="grid gap-2">
               <legend className="sr-only">What runs now</legend>
@@ -553,7 +547,7 @@ function SheetLine({
   onRemove: () => void;
 }) {
   if (sheet.kind === "none") return null;
-  if (sheet.kind === "reading") return <Delayed>Reading {sheet.name}…</Delayed>;
+  if (sheet.kind === "reading") return <LoadingState rows={1} label={`Reading ${sheet.name}`} />;
   if (sheet.kind === "error")
     return (
       <p role="alert" className="text-ui text-destructive">
@@ -567,9 +561,9 @@ function SheetLine({
         <span className="text-destructive">
           : no columns recognised. Its first row needs headers such as Mouse, Knee and Group.
         </span>{" "}
-        <button type="button" className="text-primary-text hover:underline" onClick={onRemove}>
+        <Button variant="link" onClick={onRemove}>
           Remove
-        </button>
+        </Button>
       </p>
     );
   return (
@@ -578,9 +572,9 @@ function SheetLine({
       <span className="text-muted-foreground">
         {total > 0 && `, groups for ${matched} of ${total} ${total === 1 ? "scan" : "scans"}`}
       </span>{" "}
-      <button type="button" className="text-primary-text hover:underline" onClick={onRemove}>
+      <Button variant="link" onClick={onRemove}>
         Remove
-      </button>
+      </Button>
     </p>
   );
 }
@@ -746,9 +740,9 @@ function UploadLine({
       return (
         <p className="text-meta text-destructive">
           {upload.paths.length === 1 ? "1 file" : `${upload.paths.length} files`} didn't upload.{" "}
-          <button type="button" className="underline" onClick={onRetry}>
+          <Button variant="link" onClick={onRetry}>
             Retry
-          </button>
+          </Button>
         </p>
       );
     case "error":
@@ -756,9 +750,9 @@ function UploadLine({
         <p className="max-w-80 text-meta text-destructive">
           {upload.message}{" "}
           {upload.retry && (
-            <button type="button" className="underline" onClick={onRetry}>
+            <Button variant="link" onClick={onRetry}>
               Retry
-            </button>
+            </Button>
           )}
         </p>
       );
@@ -807,14 +801,18 @@ function Earlier({
 }) {
   const list = inputs.data?.filter((i) => !hidden.has(i.id));
   return (
-    <details open={open} className="group">
-      <summary className="cursor-pointer py-1 text-muted-foreground hover:text-foreground">
-        Or use a scan you uploaded before{list && ` (${list.length})`}
-      </summary>
-      <div className="mt-2">
-        {inputs.isPending && <Delayed>Loading your scans…</Delayed>}
-        {inputs.isError && <LoadError what="your scans" retry={() => void inputs.refetch()} />}
-        {list?.length === 0 && <p className="text-ui text-muted-foreground">No earlier scans.</p>}
+    // Opens again whenever uploading becomes impossible (`open`), as the page's way in.
+    <Disclosure
+      key={String(open)}
+      defaultOpen={open}
+      label={`Or use a scan you uploaded before${list ? ` (${list.length})` : ""}`}
+    >
+      <div>
+        {inputs.isPending && <LoadingState rows={2} density="compact" label="Loading your scans" />}
+        {inputs.isError && (
+          <ErrorState title="Couldn't load your scans" onRetry={() => void inputs.refetch()} />
+        )}
+        {list?.length === 0 && <EmptyState title="No earlier scans" />}
         <ul className="grid">
           {list?.map((input) => (
             <li key={input.id} className="border-t border-line-subtle first:border-t-0">
@@ -834,6 +832,6 @@ function Earlier({
           ))}
         </ul>
       </div>
-    </details>
+    </Disclosure>
   );
 }

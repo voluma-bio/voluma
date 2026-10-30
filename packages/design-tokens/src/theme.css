@@ -50,25 +50,23 @@
   --color-check-tint: var(--check-tint);
   --color-check-line: var(--check-line);
   --color-info: var(--info);
+  --color-info-solid: var(--info-solid);
   --color-info-tint: var(--info-tint);
+  --color-done: var(--done);
+  --color-done-solid: var(--done-solid);
+  --color-done-tint: var(--done-tint);
   --color-destructive: var(--destructive);
+  --color-destructive-solid: var(--destructive-solid);
+  --color-destructive-solid-fg: var(--destructive-solid-fg);
   --color-destructive-tint: var(--destructive-tint);
+  --color-idle: var(--idle);
+  --color-select: var(--select);
+  --color-select-text: var(--select-text);
+  --color-select-dim: var(--select-dim);
+  --color-select-tint: var(--select-tint);
   --color-inverse: var(--inverse);
   --color-inverse-fg: var(--inverse-fg);
   --color-scrim: var(--scrim);
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
-  --color-sidebar: var(--sidebar);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-ring: var(--sidebar-ring);
 
   --color-viewer-well: var(--viewer-well);
   --color-viewer-chip: var(--viewer-chip);
@@ -77,13 +75,45 @@
   --color-axis-y: var(--axis-y);
   --color-axis-z: var(--axis-z);
   --color-check-outline: var(--check-outline);
+  --color-mark-mine: var(--mark-mine);
+  --color-mark-ai: var(--mark-ai);
+  --color-ruler: var(--ruler);
+  --color-bone: var(--bone);
 
   --font-sans: var(--sans);
   --font-mono: var(--mono);
 
-  /* Dense UI sizes from the mockups, between Tailwind's xs (12px) and sm (14px) */
-  --text-meta: 12.5px; /* labels, metadata, badges */
+  /* Type scale: one size per role, 14px body */
+  --text-xs: 12px;
+  --text-xs--line-height: 16px;
+  --text-sm: 13px;
+  --text-sm--line-height: 18px;
+  --text-base: 14px;
+  --text-base--line-height: 20px;
+  --text-lg: 16px;
+  --text-lg--line-height: 22px;
+  --text-xl: 20px;
+  --text-xl--line-height: 26px;
+  --text-2xl: 24px;
+  --text-2xl--line-height: 30px;
+  /* Kept until today's screens move to the scale above (removed in the last phase) */
+  --text-meta: 12.5px;
   --text-meta--line-height: 1.4;
-  --text-ui: 13.5px; /* body text in dense panels */
+  --text-ui: 13.5px;
   --text-ui--line-height: 1.5;
+
+  /* Small radii, one family */
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+
+  --shadow-pop: var(--elevation-pop);
+
+  /* Fades in after 600 ms, so a fast load never flashes its placeholder */
+  --animate-appear: appear 200ms ease-out 600ms both;
+  @keyframes appear {
+    from {
+      opacity: 0;
+    }
+  }
 }

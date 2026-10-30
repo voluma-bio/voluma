@@ -1,18 +1,28 @@
 /**
  * The sign-in gate: a layout route that asks the API who is signed in, then
- * renders the feature routes under the top bar, or the sign-in screen.
+ * renders the feature routes inside the app shell, or the sign-in screen. It also
+ * owns the one query client every feature shares, so a change in one screen (an
+ * item checked in the review) refreshes the others (the study's counts).
  * Features read the signed-in user with `useOutletContext<Me>()`; they never
  * call `getMe` themselves. With no session, the gate asks the server for a guest
  * (`POST /api/auth/guest`); a server with guests off refuses, and the sign-in screen
  * shows. A 401 from any later call (`onSignedOut`) runs the same load again.
  */
+
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ApiError, getMe, onSignedOut, startGuest } from "@voluma/api-client";
 import type { Me } from "@voluma/contracts/auth";
-import { Button } from "@voluma/ui";
+import { AppShell, Button, LoadingState, ShellLink } from "@voluma/ui";
+import { House, Workflow } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { Outlet } from "react-router";
+import { Link, Outlet, useLocation, useMatches, useNavigate } from "react-router";
+import { AccountMenu, BrandLockup } from "./account";
 import { GateScreen, SignInScreen } from "./sign-in-screen";
-import { TopBar } from "./top-bar";
+
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+/** Static facts a route declares in its `handle`: the shell's theme on that screen. */
+export type RouteHandle = { theme?: "light" | "dark" };
 
 type Session =
   | { state: "loading" }
@@ -57,28 +67,60 @@ export function SignedIn() {
     case "loading":
       return (
         <main aria-busy="true" className="grid min-h-dvh place-content-center">
-          {/* Shown only when loading is slow, so a fast load doesn't flash it. */}
-          <p className="animate-[appear_200ms_ease-out_600ms_both] text-ui text-muted-foreground">
-            Loading…
-          </p>
+          <LoadingState rows={2} className="w-72" />
         </main>
       );
     case "signed-out":
-      return <SignInScreen onSignedIn={(me) => setSession({ state: "signed-in", me })} />;
+      return <SignInScreen />;
     case "unreachable":
       return <UnreachableScreen cause={session.cause} retry={load} />;
     case "signed-in":
       return (
-        // Pages fill the space under the bar and scroll inside it, so the bar stays put. `relative`
-        // keeps absolutely placed content (sr-only legends) inside the scroller, not the page.
-        <div className="flex h-dvh flex-col">
-          <TopBar me={session.me} />
-          <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
-            <Outlet context={session.me} />
-          </div>
-        </div>
+        <QueryClientProvider client={queryClient}>
+          <Shell me={session.me} />
+        </QueryClientProvider>
       );
   }
+}
+
+function Shell({ me }: { me: Me }) {
+  const matches = useMatches();
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const theme =
+    matches
+      .map((m) => (m.handle as RouteHandle | undefined)?.theme)
+      .filter(Boolean)
+      .at(-1) ?? "light";
+  return (
+    <AppShell
+      theme={theme}
+      logo={
+        <Link to="/" className="rounded-md">
+          <BrandLockup className="gap-2 [&_svg]:size-5" />
+        </Link>
+      }
+      account={<AccountMenu me={me} />}
+    >
+      <ShellLink
+        id="home"
+        group="app"
+        label="Home"
+        icon={<House />}
+        active={pathname === "/"}
+        go={() => navigate("/")}
+      />
+      <ShellLink
+        id="workflows"
+        group="app"
+        label="Workflows"
+        icon={<Workflow />}
+        active={pathname === "/workflows"}
+        go={() => navigate("/workflows")}
+      />
+      <Outlet context={me} />
+    </AppShell>
+  );
 }
 
 // Stays up while a retry runs, so a retry that fails again doesn't flicker.

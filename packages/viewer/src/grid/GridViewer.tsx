@@ -4,6 +4,7 @@
  * moves when the user moves it, a new `focus` arrives or a saved view is restored; loading data
  * never moves it or the camera. Each pane can be captured as a screenshot with its view.
  */
+import { cx, IconButton } from "@voluma/ui";
 import { Camera, Maximize2, Minimize2 } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
@@ -24,6 +25,13 @@ export type PaneId = (typeof panes)[number]["id"];
 
 /** One pane's view with the crosshair and contrast: what a screenshot saves and restores. */
 export type ViewerState = { pane: PaneId; point: Zyx; contrast: Contrast; view: PaneView };
+
+/** Each slice plane keeps its axis colour (DESIGN.md): axial z, sagittal y, coronal x. */
+const AXIS_INK: Record<string, string> = {
+  axial: "text-axis-z",
+  sagittal: "text-axis-y",
+  coronal: "text-axis-x",
+};
 
 export function GridViewer({
   scene,
@@ -95,16 +103,27 @@ export function GridViewer({
     return () => abort.abort();
   }, [scene.image.base]);
 
+  // A drag handle shows a hairline on hover or focus; hidden while a pane is maximized.
+  const handle = cx(
+    "relative shrink-0 after:absolute after:bg-transparent after:content-[''] hover:after:bg-primary focus-visible:after:bg-primary",
+    maximized && "invisible",
+  );
   const slot = (pane: (typeof panes)[number], showSeparator: boolean) => {
     const isMax = maximized === pane.id;
     return (
       <>
         {showSeparator && (
-          <Separator className="resize-handle" aria-label={`Resize ${pane.label}`} />
+          <Separator
+            className={cx(handle, "w-2 after:inset-y-0 after:left-1/2 after:w-px")}
+            aria-label={`Resize ${pane.label}`}
+          />
         )}
         <Panel id={pane.id} minSize="20%" defaultSize="50%">
           <section
-            className={`view-slot ${isMax ? "maximized" : ""}`}
+            className={cx(
+              "flex h-full flex-col overflow-hidden rounded-md border border-border bg-muted [&[hidden]]:hidden",
+              isMax && "absolute inset-0 z-10",
+            )}
             aria-label={pane.label}
             hidden={maximized !== null && !isMax}
             onDoubleClick={(event) => {
@@ -112,18 +131,18 @@ export function GridViewer({
                 setMaximized(isMax ? null : pane.id);
             }}
           >
-            <header>
-              <h3>
-                {pane.axis !== null && <span className={`axis ${pane.id}`}>{pane.letter}</span>}
+            <header className="flex items-center justify-between gap-1 border-b border-border px-3 py-1">
+              <h3 className="flex items-center gap-2 text-xs font-medium">
+                {pane.axis !== null && (
+                  <span className={cx("font-mono", AXIS_INK[pane.id])}>{pane.letter}</span>
+                )}
                 {pane.label}
               </h3>
               <div className="flex">
                 {onCapture && (
-                  <button
-                    type="button"
-                    className="icon-button"
-                    aria-label={`Save screenshot of ${pane.label}`}
-                    title="Save screenshot"
+                  <IconButton
+                    size="sm"
+                    label={`Save screenshot of ${pane.label}`}
                     disabled={
                       !contrast ||
                       contrast.low >= contrast.high ||
@@ -139,17 +158,16 @@ export function GridViewer({
                         );
                     }}
                   >
-                    <Camera size={15} />
-                  </button>
+                    <Camera />
+                  </IconButton>
                 )}
-                <button
-                  type="button"
-                  className="icon-button"
-                  aria-label={`${isMax ? "Restore" : "Maximize"} ${pane.label}`}
+                <IconButton
+                  size="sm"
+                  label={`${isMax ? "Restore" : "Maximize"} ${pane.label}`}
                   onClick={() => setMaximized(isMax ? null : pane.id)}
                 >
-                  {isMax ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-                </button>
+                  {isMax ? <Minimize2 /> : <Maximize2 />}
+                </IconButton>
               </div>
             </header>
             {pane.axis === null ? (
@@ -183,12 +201,12 @@ export function GridViewer({
 
   return (
     <section
-      className={`viewer-workspace ${maximized ? "is-maximized" : ""}`}
+      className="flex h-full min-h-0 flex-col bg-background p-4"
       aria-label="Imaging workspace"
     >
-      <div className="viewer-heading">
+      <div className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-2 text-sm">
         <h2 className="font-medium">{title}</h2>
-        <div className="grid-toolbar">
+        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
           <output className="font-mono" aria-label="Crosshair voxel (z, y, x)">
             z {point[0]} · y {point[1]} · x {point[2]}
           </output>
@@ -215,11 +233,17 @@ export function GridViewer({
         </p>
       ))}
       {contrastError && (
-        <p className="error-message" role="alert">
+        <p className="rounded-md bg-destructive-tint p-3 text-sm text-destructive" role="alert">
           Couldn't load the image: {contrastError}
         </p>
       )}
-      <div className="viewer-grid">
+      <div
+        className={cx(
+          "relative min-h-0 flex-1 [&_[data-group]]:h-full",
+          // Panels clip their content inline; a maximized pane has to spill over its siblings.
+          maximized && "[&_[data-panel]]:overflow-visible!",
+        )}
+      >
         <Group orientation="vertical" id="grid-rows">
           <Panel id="grid-top" defaultSize="50%" minSize="20%">
             <Group orientation="horizontal" id="grid-top-panes">
@@ -227,7 +251,10 @@ export function GridViewer({
               {slot(panes[1], true)}
             </Group>
           </Panel>
-          <Separator className="resize-handle horizontal" aria-label="Resize viewer rows" />
+          <Separator
+            className={cx(handle, "h-2 w-full after:inset-x-0 after:top-1/2 after:h-px")}
+            aria-label="Resize viewer rows"
+          />
           <Panel id="grid-bottom" minSize="20%">
             <Group orientation="horizontal" id="grid-bottom-panes">
               {slot(panes[2], false)}
@@ -262,9 +289,10 @@ function NumberField({
     setDraft(null);
   };
   return (
-    <label>
+    <label className="flex items-center gap-1">
       {label}
       <input
+        className="h-7 w-20 rounded-md border border-border bg-card px-1 font-mono text-foreground"
         type="text"
         inputMode="decimal"
         value={draft ?? shown}
