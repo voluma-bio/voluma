@@ -130,7 +130,8 @@ function threadsOf(events: RunEvent[]): { threads: Thread[]; lastAt: Map<string,
         if (t) {
           t.status = e.payload.status;
           t.error = e.payload.error;
-          t.endedAt = e.createdAt;
+          // A later cancel can invalidate finished work without adding working time.
+          t.endedAt ??= e.createdAt;
           running.delete(e.threadId);
         }
         break;
@@ -290,7 +291,7 @@ export type NeedItem = {
   image?: Asset;
   accepted: boolean;
   /**
-   * A check item "Looks right" can accept; "K to check" counts these (`progress`). A task left
+   * A check item "Looks right" can accept; "K items to check" counts these (`progress`). A task left
    * To check with no item (its check sent it back, or a required value is missing) still gets
    * a card, with nothing to accept.
    */
