@@ -75,6 +75,12 @@ const STATE_WORD: Partial<Record<TaskState, string>> = {
 export const taskStateWord = (state: TaskState) =>
   STATE_WORD[state] ?? STATUS_WORD[TASK_STATUS[state]];
 
+/**
+ * A box's least width: the longest workflow names ("Proximal tibial metaphysis", "Subchondral
+ * bone plate") fit on two lines, breaking only between words.
+ */
+const BOX = "9.5rem";
+
 export function TaskGraph(props: TaskGraphProps) {
   const right = props.size !== "report";
   const boxes = new Map<string, ReactNode>(
@@ -103,54 +109,59 @@ export function TaskGraph(props: TaskGraphProps) {
   const { layers, edges, lanes } = layout<GraphTask>(props.tasks);
   const { ref, paths } = useEdges(edges, right);
   return (
-    <div
-      ref={ref}
-      className={cx(
-        "relative grid",
-        right
-          ? "auto-cols-[minmax(0,1fr)] grid-flow-col gap-x-6"
-          : "gap-y-4 [&>[data-layer]]:grid [&>[data-layer]]:grid-cols-[repeat(var(--lanes),minmax(0,1fr))] [&>[data-layer]]:items-start [&>[data-layer]]:gap-x-2",
-        props.className,
-      )}
-      style={{ "--lanes": lanes } as CSSProperties}
-    >
-      <svg aria-hidden className="pointer-events-none absolute inset-0 size-full overflow-visible">
-        {paths.map((p) => (
-          <path
-            key={p.key}
-            d={p.d}
-            className={cx(
-              "fill-none",
-              props.selected && (p.from === props.selected || p.to === props.selected)
-                ? "stroke-select stroke-[1.5]"
-                : "stroke-line-strong stroke-[1.25]",
-            )}
-          />
-        ))}
-      </svg>
-      {layers.map((layer) => (
-        <div
-          key={layer[0]?.id}
-          data-layer
-          className={right ? "grid content-center gap-y-2.5" : undefined}
+    // Boxes keep their least width; a narrower parent scrolls sideways.
+    <div className={cx("overflow-x-auto", props.className)}>
+      <div
+        ref={ref}
+        className={cx(
+          "relative grid",
+          right
+            ? "auto-cols-[minmax(var(--box),1fr)] grid-flow-col gap-x-6"
+            : "gap-y-4 [&>[data-layer]]:grid [&>[data-layer]]:grid-cols-[repeat(var(--lanes),minmax(var(--box),1fr))] [&>[data-layer]]:items-start [&>[data-layer]]:gap-x-2",
+        )}
+        style={{ "--lanes": lanes, "--box": BOX } as CSSProperties}
+      >
+        <svg
+          aria-hidden
+          className="pointer-events-none absolute inset-0 size-full overflow-visible"
         >
-          {layer.map((task) => (
-            <div
-              key={task.id}
-              data-node={task.id}
+          {paths.map((p) => (
+            <path
+              key={p.key}
+              d={p.d}
               className={cx(
-                // A lone task in a top-down layer sits centred at one lane's width.
-                !right &&
-                  layer.length === 1 &&
-                  lanes > 1 &&
-                  "col-span-full w-[calc((100%-0.5rem)/2)] justify-self-center",
+                "fill-none",
+                props.selected && (p.from === props.selected || p.to === props.selected)
+                  ? "stroke-select stroke-[1.5]"
+                  : "stroke-line-strong stroke-[1.25]",
               )}
-            >
-              {boxes.get(task.id)}
-            </div>
+            />
           ))}
-        </div>
-      ))}
+        </svg>
+        {layers.map((layer) => (
+          <div
+            key={layer[0]?.id}
+            data-layer
+            className={right ? "grid content-center gap-y-2.5" : undefined}
+          >
+            {layer.map((task) => (
+              <div
+                key={task.id}
+                data-node={task.id}
+                className={cx(
+                  // A lone task in a top-down layer sits centred at one lane's width.
+                  !right &&
+                    layer.length === 1 &&
+                    lanes > 1 &&
+                    "col-span-full w-[calc((100%-0.5rem)/2)] justify-self-center",
+                )}
+              >
+                {boxes.get(task.id)}
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -306,7 +317,7 @@ function Box({
             aria-pressed={pressed === undefined ? undefined : pressed}
             onClick={onSelect}
             className={cx(
-              "min-w-0 flex-1 cursor-pointer text-left text-sm leading-snug font-medium break-words [text-wrap:balance]",
+              "min-w-0 flex-1 cursor-pointer text-left text-sm leading-snug font-medium hyphens-none [text-wrap:balance]",
               "after:absolute after:inset-0 after:rounded-lg focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-offset-1 focus-visible:after:outline-ring",
               dim && "text-muted-foreground",
             )}
@@ -316,7 +327,7 @@ function Box({
         ) : (
           <span
             className={cx(
-              "min-w-0 flex-1 text-sm leading-snug font-medium break-words [text-wrap:balance]",
+              "min-w-0 flex-1 text-sm leading-snug font-medium hyphens-none [text-wrap:balance]",
               dim && "text-muted-foreground",
             )}
           >
