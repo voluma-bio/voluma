@@ -30,7 +30,14 @@ export type TextFieldProps = FieldOwnProps & InputHTMLAttributes<HTMLInputElemen
 export function TextField({ label, hideLabel, error, className, id, ...props }: TextFieldProps) {
   const own = useId();
   return (
-    <Frame id={id ?? own} label={label} hideLabel={hideLabel} error={error} className={className}>
+    <Frame
+      id={id ?? own}
+      label={label}
+      hideLabel={hideLabel}
+      error={error}
+      className={className}
+      describedBy={props["aria-describedby"]}
+    >
       {(a11y) => <input type="text" {...props} {...a11y} className={cx(boxClass, "h-8")} />}
     </Frame>
   );
@@ -48,7 +55,14 @@ export function TextAreaField({
 }: TextAreaFieldProps) {
   const own = useId();
   return (
-    <Frame id={id ?? own} label={label} hideLabel={hideLabel} error={error} className={className}>
+    <Frame
+      id={id ?? own}
+      label={label}
+      hideLabel={hideLabel}
+      error={error}
+      className={className}
+      describedBy={props["aria-describedby"]}
+    >
       {(a11y) => (
         <textarea {...props} {...a11y} className={cx(boxClass, "min-h-18 resize-y py-2")} />
       )}
@@ -62,15 +76,13 @@ function Frame({
   hideLabel,
   error,
   className,
+  describedBy,
   children,
 }: FieldOwnProps & {
   id: string;
   className?: string;
-  children: (a11y: {
-    id: string;
-    "aria-invalid": true | undefined;
-    "aria-describedby": string | undefined;
-  }) => ReactNode;
+  describedBy?: string;
+  children: (a11y: { id: string; "aria-invalid"?: true; "aria-describedby"?: string }) => ReactNode;
 }) {
   const errorId = `${id}-error`;
   return (
@@ -80,8 +92,12 @@ function Frame({
       </label>
       {children({
         id,
-        "aria-invalid": error ? true : undefined,
-        "aria-describedby": error ? errorId : undefined,
+        ...(error
+          ? {
+              "aria-invalid": true as const,
+              "aria-describedby": [describedBy, errorId].filter(Boolean).join(" "),
+            }
+          : {}),
       })}
       {error && (
         <p id={errorId} className="m-0 text-sm text-destructive">
