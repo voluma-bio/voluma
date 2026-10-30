@@ -6,7 +6,8 @@
  * Features read the signed-in user with `useOutletContext<Me>()`; they never
  * call `getMe` themselves. With no session, the gate asks the server for a guest
  * (`POST /api/auth/guest`); a server with guests off refuses, and the sign-in screen
- * shows. A 401 from any later call (`onSignedOut`) runs the same load again.
+ * shows. A 401 drops the authenticated tree; returning to the tab rechecks identity,
+ * since another tab can replace the cookie without a 401.
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -14,7 +15,7 @@ import { ApiError, getMe, onSignedOut, startGuest } from "@voluma/api-client";
 import type { Me } from "@voluma/contracts/auth";
 import { AppShell, Button, ShellLink } from "@voluma/ui";
 import { House, Workflow } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, Outlet, useLocation, useMatches, useNavigate } from "react-router";
 import { AccountMenu, BrandLockup } from "./account";
 import { GateScreen, SignInScreen } from "./sign-in-screen";
@@ -31,37 +32,53 @@ type Session =
 
 export function SignedIn() {
   const [session, setSession] = useState<Session>({ state: "loading" });
+  const request = useRef(0);
 
-  const load = useCallback(
-    () =>
-      getMe()
-        .then((me) => me ?? startGuest())
-        .then(
-          (me) => setSession(me ? { state: "signed-in", me } : { state: "signed-out" }),
-          (error: unknown) => {
-            // TypeError: no network. SyntaxError: something other than the API
-            // (a captive portal, a proxy) answered with a non-JSON page.
-            if (error instanceof TypeError || error instanceof SyntaxError)
-              setSession({ state: "unreachable", cause: "offline" });
-            else if (error instanceof ApiError && error.status >= 500)
-              setSession({ state: "unreachable", cause: "down" });
-            // A schema mismatch or an unexpected status is a bug: hand it to
-            // the router's error screen rather than stalling on "Loading…".
-            else
-              setSession(() => {
-                throw error;
-              });
-          },
-        ),
-    [],
-  );
+  const load = useCallback(async () => {
+    const current = ++request.current;
+    try {
+      let me = await getMe();
+      if (current !== request.current) return;
+      me ??= await startGuest();
+      if (current !== request.current) return;
+      setSession(me ? { state: "signed-in", me } : { state: "signed-out" });
+    } catch (error) {
+      if (current !== request.current) return;
+      // TypeError: no network. SyntaxError: a captive portal or proxy answered with non-JSON.
+      if (error instanceof TypeError || error instanceof SyntaxError)
+        setSession({ state: "unreachable", cause: "offline" });
+      else if (error instanceof ApiError && error.status >= 500)
+        setSession({ state: "unreachable", cause: "down" });
+      // Schema mismatches and unexpected statuses belong on the router's error screen.
+      else
+        setSession(() => {
+          throw error;
+        });
+    }
+  }, []);
 
   useEffect(() => {
-    load();
-    return onSignedOut(() => {
+    const onFocus = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        ++request.current;
+      } else onFocus();
+    };
+    void load();
+    const unsubscribe = onSignedOut(() => {
       setSession({ state: "loading" });
       void load();
     });
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      ++request.current;
+      unsubscribe();
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [load]);
 
   switch (session.state) {
