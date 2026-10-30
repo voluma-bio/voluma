@@ -2,8 +2,11 @@
 
 - **Neon free-tier limits, after 2026-11-04.** Check CU-hours and storage in Neon's console
   (limits: 100 CU-hours a month, 1 GB; staging was 183 MB on 2026-10-30, about 10 MB per run).
-  Then either lengthen `SWEEP_MS` in `apps/gateway/src/main.ts` so the compute can scale to
-  zero, or move to Launch. Also watch the size against 1 GB as runs accumulate.
+  To allow scale to zero with the runner suspended, remove the per-probe SQL from the gateway's
+  `/health` (`apps/gateway/src/gateway.ts`) while preserving its migration-readiness gate, and
+  lengthen `SWEEP_MS` in `apps/gateway/src/main.ts` past five minutes. Verify an idle interval
+  with no browser polling or other database traffic; changing the sweep alone is insufficient
+  ([deploy.md](deploy.md)). Alternatively, move to Launch. Also watch storage against 1 GB.
 - **Postgres migration drill.** Before the lab relies on the database: `pg_dump` from
   Neon (direct URL, see [deploy.md](deploy.md)), restore into a fresh local Postgres, run the app against the copy. Proves the "portable Postgres" rule.
 - **Scheduled `pg_dump` to R2**, so backups don't depend on the host.
