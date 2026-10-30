@@ -1,5 +1,6 @@
 /** Persistent viewport slots. Maximizing changes layout, never the identity of a view. */
 import type { Focus, Revision, Structure } from "@voluma/contracts/review";
+import { Button, IconButton } from "@voluma/ui";
 import { Box, Layers, Maximize2, Minimize2 } from "lucide-react";
 import { lazy, type ReactNode, Suspense, useEffect, useMemo, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
@@ -146,9 +147,9 @@ export function ViewerWorkspace({
       {loaded.error && (
         <p className="error-message" role="alert">
           {loaded.error}{" "}
-          <button type="button" className="text-button" onClick={loaded.retry}>
+          <Button variant="link" onClick={loaded.retry}>
             Retry labels
-          </button>
+          </Button>
         </p>
       )}
       {badFocus && (
@@ -242,14 +243,13 @@ function ViewSlot({
               {view.axis && <span className={`axis ${view.id}`}>{view.axis}</span>}
               {view.label}
             </h3>
-            <button
-              type="button"
-              className="icon-button"
-              aria-label={`${isMax ? "Restore" : "Maximize"} ${view.label}`}
+            <IconButton
+              label={`${isMax ? "Restore" : "Maximize"} ${view.label}`}
+              size="sm"
               onClick={() => onMaximize(isMax ? null : view.id)}
             >
-              {isMax ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-            </button>
+              {isMax ? <Minimize2 /> : <Maximize2 />}
+            </IconButton>
           </header>
           {(view.id === "acquired" || view.id === "surface") && series ? (
             <Suspense

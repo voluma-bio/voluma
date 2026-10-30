@@ -8,11 +8,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { listStudies } from "@voluma/api-client";
 import type { StudyRunSummary, StudySummary } from "@voluma/contracts/study";
-import { StatusBadge } from "@voluma/ui";
+import { Button, Count, Progress, type Status, StatusMark } from "@voluma/ui";
 import { runHref, studyStatus } from "@voluma/ui/run";
 import { workflowById } from "@voluma/workflow/bundled";
 import { Link } from "react-router";
-import { ButtonLink, Delayed, LoadError, ProgressBar } from "./parts";
+import { Delayed, LoadError } from "./parts";
 
 const LIVE = 5000;
 
@@ -21,7 +21,7 @@ interface StudyView {
   /** A study of one's run, once it has one. */
   one: StudyRunSummary | undefined;
   /** A live study of one: its run's tasks done; else its scans with a completed run. */
-  progress: { done: number; total: number; label: string };
+  progress: { done: number; total: number };
   href: string;
 }
 
@@ -32,8 +32,8 @@ function view(study: StudySummary): StudyView {
     one,
     progress:
       one && isLive(one)
-        ? { done: one.tasks?.done ?? 0, total: one.tasks?.total ?? 0, label: "Tasks done" }
-        : { done: study.scansCompleted, total: study.scanCount, label: "Scans done" },
+        ? { done: one.tasks?.done ?? 0, total: one.tasks?.total ?? 0 }
+        : { done: study.scansCompleted, total: study.scanCount },
     href: one ? runHref(one) : `/studies/${study.id}`,
   };
 }
@@ -64,9 +64,9 @@ export function HomePage() {
   const header = (
     <div className="flex flex-wrap items-center gap-3">
       <h1 className="flex-1 text-2xl font-semibold">Home</h1>
-      <ButtonLink to="/new" variant="primary">
-        Run on new scans
-      </ButtonLink>
+      <Button asChild variant="primary">
+        <Link to="/new">Run on new scans</Link>
+      </Button>
     </div>
   );
 
@@ -106,11 +106,7 @@ function Dashboard({ views }: { views: StudyView[] }) {
         <section aria-labelledby="needs-you" className="grid gap-3">
           <h2 id="needs-you" className="flex items-center gap-2 text-lg font-semibold">
             Needs you
-            {needs.length > 0 && (
-              <span className="rounded-full bg-check-tint px-2 text-meta font-semibold text-check tabular-nums">
-                {needs.length}
-              </span>
-            )}
+            {needs.length > 0 && <Count tone="check">{needs.length}</Count>}
           </h2>
           {needs.length > 0 ? (
             <ul className="overflow-hidden rounded-xl border border-border bg-card">{needs}</ul>
@@ -153,9 +149,9 @@ function needsYou(v: StudyView): React.ReactNode[] {
         <p className="truncate font-medium">{one ? one.inputName : study.name}</p>
         <p className="line-clamp-2 text-ui text-muted-foreground">{detail}</p>
       </div>
-      <ButtonLink to={to} size="sm">
-        {action}
-      </ButtonLink>
+      <Button asChild size="sm">
+        <Link to={to}>{action}</Link>
+      </Button>
     </li>
   );
   if (one) {
@@ -228,25 +224,24 @@ function RunningRow({ view: v }: { view: StudyView }) {
     <li className="border-b border-line-subtle last:border-b-0">
       <Link
         to={v.href}
-        className="grid grid-cols-[minmax(0,1fr)_7rem_2.75rem] items-center gap-3 px-4 py-3 hover:bg-background"
+        className="grid grid-cols-[minmax(0,1fr)_10rem] items-center gap-3 px-4 py-3 hover:bg-background"
       >
         <span className="min-w-0">
           <span className="block truncate font-medium">{one ? one.inputName : study.name}</span>
           <span className="block truncate text-ui text-muted-foreground">{detail}</span>
         </span>
-        <ProgressBar {...progress} />
-        <Fraction {...progress} />
+        <DoneBar {...progress} />
       </Link>
     </li>
   );
 }
 
 /** `3/9`; nothing before a run's plan exists. */
-function Fraction({ done, total }: { done: number; total: number }) {
+/** Scans (or a live run's tasks) done, out of all of them. */
+function DoneBar({ done, total }: { done: number; total: number }) {
+  const states: Status[] = Array.from({ length: total }, (_, i) => (i < done ? "done" : "waiting"));
   return (
-    <span className="min-w-8 text-right text-ui text-muted-foreground tabular-nums">
-      {total > 0 && `${done}/${total}`}
-    </span>
+    <Progress look="bar" states={states} label={total > 0 ? `${done} of ${total}` : undefined} />
   );
 }
 
@@ -272,7 +267,7 @@ function StudyTable({ views }: { views: StudyView[] }) {
         </div>
         <ul>
           {views.map((v) => {
-            const chip = studyStatus({
+            const status = studyStatus({
               scans: v.study.scanCount,
               newest: v.study.newestRuns,
               toCheck: v.study.toCheck,
@@ -290,11 +285,10 @@ function StudyTable({ views }: { views: StudyView[] }) {
                     </span>
                   </span>
                   <span className="flex items-center gap-2.5 max-[760px]:hidden">
-                    <ProgressBar {...v.progress} />
-                    <Fraction {...v.progress} />
+                    <DoneBar {...v.progress} />
                   </span>
                   <span>
-                    <StatusBadge tone={chip.tone}>{chip.label}</StatusBadge>
+                    <StatusMark {...status} />
                   </span>
                   <span className="truncate text-ui text-muted-foreground max-[760px]:hidden">
                     {workflowById(v.study.workflowId)?.name ?? v.study.workflowId}

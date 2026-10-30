@@ -2,7 +2,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { acceptCheck, reviewFileUrl } from "@voluma/api-client";
 import type { Focus } from "@voluma/contracts/review";
-import { StatusBadge } from "@voluma/ui";
+import { Button, Chip, StatusMark } from "@voluma/ui";
 import {
   ArrowUpRight,
   Check,
@@ -71,11 +71,15 @@ function Evidence({ runId, asset }: { runId: string; asset: Asset }) {
           </Dialog.Description>
           {!failed && <img className="lightbox-image" src={url} alt={asset.name} />}
           <div className="mt-6 flex justify-end gap-2">
-            <a className="button" href={url} download={fileName(asset)}>
-              <Download size={15} />
-              Download
-            </a>
-            <Dialog.Close className="button">Close evidence</Dialog.Close>
+            <Button asChild>
+              <a href={url} download={fileName(asset)}>
+                <Download />
+                Download
+              </a>
+            </Button>
+            <Dialog.Close asChild>
+              <Button>Close evidence</Button>
+            </Dialog.Close>
           </div>
         </Dialog.Content>
       </Dialog.Portal>
@@ -126,7 +130,7 @@ export function TaskReport({
         <span>Task report</span>
         {task.status !== "pending" && <span className="ml-auto">Result {resultLabel}</span>}
         <span className={task.status === "pending" ? "ml-auto" : undefined}>
-          <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+          <StatusMark {...status} />
         </span>
       </div>
       <h1 className="text-2xl font-semibold mt-3">{task.title}</h1>
@@ -161,7 +165,7 @@ export function TaskReport({
         <div className="section-heading">
           <h2>Measurements</h2>
           {[...task.measurements, ...task.scores].some((m) => m.confidence === "provisional") && (
-            <span className="badge warning">Provisional</span>
+            <Chip>Provisional</Chip>
           )}
         </div>
         <p className="text-xs text-muted-foreground mb-3">
@@ -239,9 +243,9 @@ export function TaskReport({
       <section>
         <div className="section-heading">
           <h2>To check</h2>
-          <button type="button" className="text-button" onClick={() => onFocus()}>
+          <Button variant="link" onClick={() => onFocus()}>
             Clear viewer focus
-          </button>
+          </Button>
           <span className="text-sm text-muted-foreground">
             {task.checks.filter((c) => c.status === "open").length} open
           </span>
@@ -280,35 +284,30 @@ export function TaskReport({
             )}
             <div className="flex flex-wrap items-center gap-2 mt-4">
               {check.focus && (
-                <button
-                  type="button"
-                  className="button compact"
-                  onClick={() => onFocus({ ...check.focus! })}
-                >
+                <Button size="sm" onClick={() => onFocus({ ...check.focus! })}>
                   Show in viewer
-                </button>
+                </Button>
               )}
               {check.status === "accepted" ? (
                 <span className="font-medium text-primary-text">
                   Accepted · values remain provisional
                 </span>
               ) : (
-                <button
-                  type="button"
-                  className="button compact"
+                <Button
+                  size="sm"
                   disabled={readOnly || accept.isPending}
                   onClick={() => accept.mutate(check.id)}
                 >
-                  <Check size={14} />
+                  <Check />
                   {accept.isPending && accept.variables === check.id
                     ? "Accepting…"
                     : "Accept check"}
-                </button>
+                </Button>
               )}
-              <button type="button" className="button compact" disabled>
+              <Button size="sm" disabled>
                 Request correction
-                <ArrowUpRight size={14} />
-              </button>
+                <ArrowUpRight />
+              </Button>
             </div>
           </div>
         ))}
@@ -421,13 +420,13 @@ export function TaskReport({
             disabled
           />
           <div className="flex justify-between items-center mt-3 gap-2">
-            <button type="button" className="text-button text-sm" disabled>
+            <Button variant="link" className="text-sm" disabled>
               Why provisional?
-            </button>
-            <button type="submit" className="button primary compact" disabled>
+            </Button>
+            <Button type="submit" variant="primary" size="sm" disabled>
               Ask question
-              <Send size={14} />
-            </button>
+              <Send />
+            </Button>
           </div>
         </form>
       </section>

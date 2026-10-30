@@ -9,7 +9,7 @@ import { ApiError, startRun } from "@voluma/api-client";
 import type { Me } from "@voluma/contracts/auth";
 import type { VisitorKeys } from "@voluma/contracts/run";
 import type { StudyDetail, StudyScanDetail } from "@voluma/contracts/study";
-import { Button, StatusBadge, Table, type TableColumn } from "@voluma/ui";
+import { Button, StatusMark, Table, type TableColumn } from "@voluma/ui";
 import { loadKeys, RunKeyLine } from "@voluma/ui/run";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import { useState } from "react";
@@ -151,18 +151,18 @@ function ScanStatusCell({
     mutationFn: () => startRun({ studyId: detail.study.id, inputId: scan.scan.inputId, keys }),
     onSuccess: () => client.invalidateQueries({ queryKey: ["study"] }),
   });
-  const { label, tone, progress } = scanStatus(scan);
+  const { label, status, progress } = scanStatus(scan);
   if (scan.runs.length > 0)
     return (
       <span className="flex items-center gap-2">
-        <StatusBadge tone={tone}>{label}</StatusBadge>
+        <StatusMark status={status} label={label} />
         {progress && <span className="text-meta text-fg-subtle tabular-nums">{progress}</span>}
       </span>
     );
   return (
     <span className="grid gap-1">
       <span className="flex items-center gap-2">
-        <StatusBadge tone={tone}>{label}</StatusBadge>
+        <StatusMark status={status} label={label} />
         <Button
           size="sm"
           className="-my-1 h-7 px-2.5"

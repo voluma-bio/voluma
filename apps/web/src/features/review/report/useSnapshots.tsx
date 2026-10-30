@@ -2,6 +2,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createReviewSnapshot, listReviewSnapshots, reviewFileUrl } from "@voluma/api-client";
 import type { ReviewSnapshot } from "@voluma/contracts/snapshot";
+import { Button } from "@voluma/ui";
 import type { SnapshotControls } from "@voluma/viewer";
 
 export function useSnapshots(
@@ -40,9 +41,9 @@ export function useSnapshots(
         {query.isError && (
           <p role="alert" className="mt-2">
             Could not load snapshots.{" "}
-            <button type="button" className="text-button" onClick={() => void query.refetch()}>
+            <Button variant="link" onClick={() => void query.refetch()}>
               Retry
-            </button>
+            </Button>
           </p>
         )}
         {!!items.length && (
@@ -70,16 +71,16 @@ export function useSnapshots(
                     </span>
                   </span>
                 </button>
-                <a
-                  className="text-button"
-                  href={reviewFileUrl(runId, snapshot.png.sha256)}
-                  download={`${snapshot.id}.png`}
-                >
-                  PNG
-                </a>
-                <button
-                  type="button"
-                  className="text-button"
+                <Button asChild variant="link">
+                  <a
+                    href={reviewFileUrl(runId, snapshot.png.sha256)}
+                    download={`${snapshot.id}.png`}
+                  >
+                    PNG
+                  </a>
+                </Button>
+                <Button
+                  variant="link"
                   onClick={() => {
                     const url = URL.createObjectURL(
                       new Blob([JSON.stringify(snapshot, null, 2)], { type: "application/json" }),
@@ -92,7 +93,7 @@ export function useSnapshots(
                   }}
                 >
                   View state
-                </button>
+                </Button>
               </div>
             ))}
           </div>

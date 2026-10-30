@@ -131,7 +131,7 @@ is no runs list: Home (`features/study`) replaces it.
   (`resendKeys`) only to the user who started it.
 - A completed run links to `/runs/:runId`, the review lane's route; the live page is `/runs/:id/live` so it never shadows it. Active runs open live; stopped and failed runs open live too (it shows the error).
 
-- **A run's status chip** (`RunBadge`, `runStatus`) and the formatters (`formatUsd`,
+- **A run's status** (`runStatus`, a word and a `StatusMark` state) and the formatters (`formatUsd`,
   `formatDuration`) are `@voluma/ui/run`, shared with Home; `status.tsx` keeps the clock.
 - **Cost and time** come only from `spend(events, providerCalls)` (`@voluma/contracts/spend`), run
   in `runView` on durable events, never per live frame. Run details shows the run's settled total;

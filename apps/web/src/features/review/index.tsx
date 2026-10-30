@@ -13,6 +13,7 @@ import {
   listInputs,
   reviewFileUrl,
 } from "@voluma/api-client";
+import { Button } from "@voluma/ui";
 import { type DicomArchive, openDicomZip, ViewerWorkspace } from "@voluma/viewer";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, type RouteObject, useParams, useSearchParams } from "react-router";
@@ -73,14 +74,9 @@ function ScanReview({ runId }: { runId: string }) {
     review.data && review.isError ? (
       <>
         Could not refresh results. Decisions are disabled until results refresh.
-        <button
-          type="button"
-          className="button"
-          disabled={review.isFetching}
-          onClick={() => void review.refetch()}
-        >
+        <Button disabled={review.isFetching} onClick={() => void review.refetch()}>
           {review.isFetching ? "Retrying…" : "Retry"}
-        </button>
+        </Button>
       </>
     ) : review.data && live ? (
       "This run is still going. Results fill in as tasks report; you can accept checks and mark it reviewed once it completes."
@@ -188,9 +184,9 @@ function ScanReview({ runId }: { runId: string }) {
         >
           <div className="dicom-intake">
             <div className="flex flex-wrap items-center gap-3">
-              <button type="button" className="button" onClick={() => void open()}>
+              <Button onClick={() => void open()}>
                 {runId === "local" ? "Open reference scan" : "Open run scan"}
-              </button>
+              </Button>
               {archive && (
                 <label className="revision-select">
                   Series
@@ -212,9 +208,7 @@ function ScanReview({ runId }: { runId: string }) {
                 </label>
               )}
               {(archive || progress) && (
-                <button type="button" className="button" onClick={close}>
-                  {progress ? "Cancel import" : "Close scan"}
-                </button>
+                <Button onClick={close}>{progress ? "Cancel import" : "Close scan"}</Button>
               )}
             </div>
             {progress && (

@@ -12,6 +12,9 @@ body {
   font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
 }
-[data-theme] {
-  color: var(--foreground);
+/* In the base layer, as in the app, so a utility on a themed element still wins. */
+@layer base {
+  [data-theme] {
+    color: var(--foreground);
+  }
 }

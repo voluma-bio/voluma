@@ -9,7 +9,7 @@ import { ApiError, cancelRun, resendKeys } from "@voluma/api-client";
 import type { Run } from "@voluma/contracts/run";
 import type { RunSpend } from "@voluma/contracts/spend";
 import type { StudyDetail } from "@voluma/contracts/study";
-import { Button, buttonClass } from "@voluma/ui";
+import { Button, Progress } from "@voluma/ui";
 import { formatDuration, formatUsd, KeysForm } from "@voluma/ui/run";
 import { catalog, workflowName } from "@voluma/workflow/bundled";
 import { ChevronDown } from "lucide-react";
@@ -98,9 +98,9 @@ export function RunHeader({
   return (
     <header className="grid grid-cols-[minmax(0,auto)_minmax(0,1fr)_auto] items-center gap-7 border-b border-border bg-card px-6 py-3 max-[1100px]:grid-cols-1 max-[1100px]:gap-3 max-[1100px]:px-4">
       <div className="min-w-0">
-        <Link to={crumb.to} className="text-meta font-medium text-primary-text hover:underline">
-          {crumb.label}
-        </Link>
+        <Button asChild variant="link" className="text-meta">
+          <Link to={crumb.to}>{crumb.label}</Link>
+        </Button>
         <h1 className="mt-0.5 truncate text-lg font-semibold">{title}</h1>
         <p className="flex flex-wrap gap-x-4 text-ui text-muted-foreground">
           {group && <span>{group}</span>}
@@ -125,19 +125,10 @@ export function RunHeader({
             </span>
           )}
         </p>
-        <div
-          role="progressbar"
-          aria-label="Tasks done"
-          aria-valuemin={0}
-          aria-valuemax={total}
-          aria-valuenow={done}
-          className="h-2 overflow-hidden rounded-full bg-muted"
-        >
-          <div
-            className="h-full rounded-full bg-primary transition-[width] duration-500 motion-reduce:transition-none"
-            style={{ width: total ? `${(done / total) * 100}%` : 0 }}
-          />
-        </div>
+        <Progress
+          look="bar"
+          states={Array.from({ length: total }, (_, i) => (i < done ? "done" : "waiting"))}
+        />
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -150,12 +141,9 @@ export function RunHeader({
         />
         {live && <StopRun run={run} onChange={onChange} />}
         {(state.status !== "queued" || run.tasks) && (
-          <Link
-            to={reviewHref(run.id, openTask)}
-            className={buttonClass({ variant: "primary", size: "sm" })}
-          >
-            Open in 3D
-          </Link>
+          <Button asChild variant="primary" size="sm">
+            <Link to={reviewHref(run.id, openTask)}>Open in 3D</Link>
+          </Button>
         )}
       </div>
     </header>
@@ -201,9 +189,11 @@ function RunDetails({
   ];
   return (
     <Popover.Root>
-      <Popover.Trigger className={buttonClass({ variant: "ghost", size: "sm" })}>
-        Run details
-        <ChevronDown className="size-3.5" aria-hidden />
+      <Popover.Trigger asChild>
+        <Button variant="ghost" size="sm">
+          Run details
+          <ChevronDown aria-hidden />
+        </Button>
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Content
@@ -219,14 +209,13 @@ function RunDetails({
               </div>
             ))}
           </dl>
-          <Popover.Close asChild>
-            <Link
-              to={agents}
-              className="mt-3 block border-t border-border pt-3 font-medium text-primary-text hover:underline"
-            >
-              What the AI did
-            </Link>
-          </Popover.Close>
+          <div className="mt-3 border-t border-border pt-3">
+            <Popover.Close asChild>
+              <Button asChild variant="link">
+                <Link to={agents}>What the AI did</Link>
+              </Button>
+            </Popover.Close>
+          </div>
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>

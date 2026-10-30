@@ -11,6 +11,7 @@ import { ApiError, getRun, getStudy, subscribe } from "@voluma/api-client";
 import type { Me } from "@voluma/contracts/auth";
 import type { RunEvent } from "@voluma/contracts/events";
 import type { Run } from "@voluma/contracts/run";
+import { Button } from "@voluma/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from "react-router";
 import { AgentsView } from "./agents-view";
@@ -152,9 +153,9 @@ function RunOf({ id }: { id: string }) {
         {run.error instanceof ApiError && run.error.status === 404
           ? "This run doesn't exist, or you can't open it."
           : "Couldn't load this run."}{" "}
-        <Link to="/" className="text-primary-text hover:underline">
-          Go to Home
-        </Link>
+        <Button asChild variant="link">
+          <Link to="/">Go to Home</Link>
+        </Button>
       </Message>
     );
   }

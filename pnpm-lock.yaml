@@ -454,6 +454,12 @@ importers:
       '@voluma/contracts':
         specifier: workspace:*
         version: link:../contracts
+      lucide-react:
+        specifier: 'catalog:'
+        version: 1.62.0(@types/react@19.3.0)(react@19.3.1)
+      radix-ui:
+        specifier: 1.8.1
+        version: 1.8.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
     devDependencies:
       '@storybook/react-vite':
         specifier: ^10.6.5
@@ -479,6 +485,9 @@ importers:
       '@voluma/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@voluma/ui':
+        specifier: workspace:*
+        version: link:../ui
       '@zip.js/zip.js':
         specifier: 2.24.0
         version: 2.24.0

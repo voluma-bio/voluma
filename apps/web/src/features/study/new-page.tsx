@@ -251,9 +251,9 @@ export function NewPage() {
         ) : (
           <p className="rounded-lg bg-muted px-4 py-3 text-ui">
             Uploading scans needs a lab account.{" "}
-            <button type="button" className="text-primary-text underline" onClick={() => signIn()}>
+            <Button variant="link" onClick={() => signIn()}>
               Sign in
-            </button>{" "}
+            </Button>{" "}
             or use a scan already here.
           </p>
         )}
@@ -316,13 +316,9 @@ export function NewPage() {
                   <span className="block text-ui text-muted-foreground">{measuredBy(w)}</span>
                 </span>
               </label>
-              <button
-                type="button"
-                className="text-ui text-primary-text hover:underline"
-                onClick={() => setPanel(w.id)}
-              >
+              <Button variant="link" className="text-ui" onClick={() => setPanel(w.id)}>
                 See tasks
-              </button>
+              </Button>
             </div>
           ))}
         </div>
@@ -567,9 +563,9 @@ function SheetLine({
         <span className="text-destructive">
           : no columns recognised. Its first row needs headers such as Mouse, Knee and Group.
         </span>{" "}
-        <button type="button" className="text-primary-text hover:underline" onClick={onRemove}>
+        <Button variant="link" onClick={onRemove}>
           Remove
-        </button>
+        </Button>
       </p>
     );
   return (
@@ -578,9 +574,9 @@ function SheetLine({
       <span className="text-muted-foreground">
         {total > 0 && `, groups for ${matched} of ${total} ${total === 1 ? "scan" : "scans"}`}
       </span>{" "}
-      <button type="button" className="text-primary-text hover:underline" onClick={onRemove}>
+      <Button variant="link" onClick={onRemove}>
         Remove
-      </button>
+      </Button>
     </p>
   );
 }
@@ -746,9 +742,9 @@ function UploadLine({
       return (
         <p className="text-meta text-destructive">
           {upload.paths.length === 1 ? "1 file" : `${upload.paths.length} files`} didn't upload.{" "}
-          <button type="button" className="underline" onClick={onRetry}>
+          <Button variant="link" onClick={onRetry}>
             Retry
-          </button>
+          </Button>
         </p>
       );
     case "error":
@@ -756,9 +752,9 @@ function UploadLine({
         <p className="max-w-80 text-meta text-destructive">
           {upload.message}{" "}
           {upload.retry && (
-            <button type="button" className="underline" onClick={onRetry}>
+            <Button variant="link" onClick={onRetry}>
               Retry
-            </button>
+            </Button>
           )}
         </p>
       );

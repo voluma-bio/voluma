@@ -4,7 +4,7 @@ import { useMutation } from "@tanstack/react-query";
 import { markReviewed } from "@voluma/api-client";
 import type { Focus, Revision, Structure } from "@voluma/contracts/review";
 import type { ReviewSnapshot } from "@voluma/contracts/snapshot";
-import { StatusBadge } from "@voluma/ui";
+import { Button, StatusMark } from "@voluma/ui";
 import type { SnapshotControls, StructureDisplay } from "@voluma/viewer";
 import { ArrowLeft, Download, History, Layers, ListChecks } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
@@ -120,13 +120,16 @@ export function ReviewWorkspace({
               {run?.sample ?? (runId === "local" ? "Scan viewer" : runId)}
             </h1>
             {run?.review && (
-              <StatusBadge tone={run.review.remainingToCheck ? "check" : "primary"}>
-                {run.review.reviewedAt
-                  ? "Reviewed"
-                  : run.review.remainingToCheck
-                    ? `${run.review.remainingToCheck} to check`
-                    : "Checked"}
-              </StatusBadge>
+              <StatusMark
+                status={run.review.remainingToCheck ? "check" : "done"}
+                label={
+                  run.review.reviewedAt
+                    ? "Reviewed"
+                    : run.review.remainingToCheck
+                      ? `${run.review.remainingToCheck} to check`
+                      : "Checked"
+                }
+              />
             )}
           </div>
           {run && (
@@ -143,14 +146,13 @@ export function ReviewWorkspace({
         </div>
         <div className="run-actions">
           {run?.review && !run.review.reviewedAt && (
-            <button
-              type="button"
-              className="button primary"
+            <Button
+              variant="primary"
               disabled={readOnly || run.review.remainingToCheck !== 0 || complete.isPending}
               onClick={() => complete.mutate()}
             >
               {complete.isPending ? "Marking reviewed…" : "Mark reviewed"}
-            </button>
+            </Button>
           )}
           {run && revision && (
             <>
@@ -169,19 +171,14 @@ export function ReviewWorkspace({
                   ))}
                 </select>
               </label>
-              <button type="button" className="button" onClick={() => downloadCsv(run, revision)}>
-                <Download size={15} />
+              <Button onClick={() => downloadCsv(run, revision)}>
+                <Download />
                 Export CSV
-              </button>
-              <button
-                type="button"
-                className="button"
-                disabled={report.isPending}
-                onClick={() => report.mutate({ run, revision })}
-              >
-                <Download size={15} />
+              </Button>
+              <Button disabled={report.isPending} onClick={() => report.mutate({ run, revision })}>
+                <Download />
                 {report.isPending ? "Exporting report…" : "Export review report"}
-              </button>
+              </Button>
             </>
           )}
         </div>
@@ -239,9 +236,7 @@ export function ReviewWorkspace({
                       <span>
                         {item.title}
                         <span className="task-meta">
-                          <StatusBadge tone={taskStatus(item).tone}>
-                            {taskStatus(item).label}
-                          </StatusBadge>
+                          <StatusMark {...taskStatus(item)} />
                           {item.status !== "pending" && (
                             <>
                               {" "}

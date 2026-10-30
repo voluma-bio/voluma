@@ -19,7 +19,7 @@
  */
 import type { StudyDetail, StudyScanDetail, ToCheckItem } from "@voluma/contracts/study";
 import type { OutputEntry } from "@voluma/contracts/workflow-files";
-import type { StatusTone } from "@voluma/ui";
+import type { Status } from "@voluma/ui";
 import { runHref, runStatus } from "@voluma/ui/run";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 
@@ -35,15 +35,15 @@ export type OpenChecks = (queue: CheckStop[], start: number) => void;
  */
 export function scanStatus({ runs }: StudyScanDetail): {
   label: string;
-  tone: StatusTone;
+  status: Status;
   progress?: string;
 } {
   const run = runs[0];
-  if (!run) return { label: "Not started", tone: "neutral" };
-  const { label, tone } = runStatus(run);
+  if (!run) return { label: "Not started", status: "waiting" };
+  const status = runStatus(run);
   return run.tasks
-    ? { label, tone, progress: `${run.tasks.done} of ${run.tasks.total} tasks` }
-    : { label, tone };
+    ? { ...status, progress: `${run.tasks.done} of ${run.tasks.total} tasks` }
+    : status;
 }
 
 /** A run the API or the runner is still moving: the page refetches while one is in view. */

@@ -4,7 +4,7 @@
  * the reader opens them; a running thread ends in a live line naming what it is doing.
  */
 import type { RunEvent } from "@voluma/contracts/events";
-import { StatusBadge } from "@voluma/ui";
+import { StatusMark } from "@voluma/ui";
 import {
   Brain,
   Cog,
@@ -203,11 +203,12 @@ function Checkpoint({ event }: { event: Extract<RunEvent, { type: "checkpoint" }
         {(verdict || toCheck) && (
           <div className="mb-1 flex flex-wrap items-center gap-2">
             {verdict && (
-              <StatusBadge tone={verdict === "passed" ? "primary" : "check"}>
-                {verdict === "passed" ? "Check passed" : "Needs review"}
-              </StatusBadge>
+              <StatusMark
+                status={verdict === "passed" ? "done" : "check"}
+                label={verdict === "passed" ? "Check passed" : "Needs review"}
+              />
             )}
-            {toCheck && <StatusBadge tone="check">To check: {toCheck.title}</StatusBadge>}
+            {toCheck && <StatusMark status="check" label={`To check: ${toCheck.title}`} />}
           </div>
         )}
         <Markdown text={text} className="text-ui" />

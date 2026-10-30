@@ -86,13 +86,9 @@ export function StudyPage({ openChecks }: { openChecks?: OpenChecks }) {
             minute: "2-digit",
           })}
           .
-          <button
-            type="button"
-            onClick={() => void study.refetch()}
-            className="cursor-pointer text-primary-text hover:underline"
-          >
+          <Button variant="link" onClick={() => void study.refetch()}>
             Try again
-          </button>
+          </Button>
         </p>
       )}
       <div

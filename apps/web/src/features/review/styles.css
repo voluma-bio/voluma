@@ -1,39 +1,6 @@
 /* Review-specific layout; shared colors and typography come from design-tokens. */
 
 @layer components {
-  .button {
-    @apply inline-flex items-center justify-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm font-medium text-foreground transition-colors;
-  }
-  .button:hover {
-    @apply bg-accent;
-  }
-  .button:disabled {
-    @apply opacity-50;
-  }
-  .button.primary {
-    @apply bg-primary border-primary text-primary-foreground;
-  }
-  .button.primary:hover {
-    @apply bg-primary-strong;
-  }
-  .button.compact {
-    @apply px-2.5 py-1.5 text-xs;
-  }
-  .icon-button {
-    @apply flex shrink-0 items-center justify-center rounded p-1.5 text-muted-foreground;
-  }
-  .icon-button:hover {
-    @apply bg-accent text-foreground;
-  }
-  .text-button {
-    @apply inline-flex items-center gap-1 font-medium text-primary-text;
-  }
-  .text-button:hover {
-    @apply underline;
-  }
-  .text-button:disabled {
-    @apply opacity-40;
-  }
   .text-input {
     @apply w-full rounded-md border border-border bg-card p-3 text-sm text-foreground;
   }
@@ -42,12 +9,6 @@
   }
   .text-input:disabled {
     @apply bg-muted;
-  }
-  .badge {
-    @apply inline-flex items-center whitespace-nowrap rounded px-2 py-1 text-xs font-medium text-primary-text bg-muted;
-  }
-  .badge.warning {
-    @apply bg-check-tint text-check;
   }
   /* Fills the space under the shell's top bar. */
   .review-shell {
@@ -115,12 +76,6 @@
   }
   .task-meta {
     @apply mt-1 block text-xs text-muted-foreground;
-  }
-  .check-dot {
-    @apply ml-auto mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-check-solid;
-  }
-  .sidebar-note {
-    @apply mx-5 mt-10 border-t border-border pt-4 text-xs leading-relaxed text-muted-foreground;
   }
   .review-panels {
     @apply min-w-0 flex-1;
@@ -325,18 +280,6 @@
   .zoom-controls {
     @apply flex flex-col gap-1;
   }
-  .image-controls .icon-button {
-    @apply h-8 w-8 border border-border bg-card text-foreground;
-  }
-  .image-controls .icon-button:hover:not(:disabled) {
-    @apply bg-accent;
-  }
-  .image-controls .icon-button:disabled {
-    @apply opacity-40;
-  }
-  .image-controls .text-button {
-    @apply h-8;
-  }
   .volume-canvas {
     touch-action: none;
     cursor: grab;
@@ -444,10 +387,8 @@
     overflow: visible;
   }
   .sidebar-label,
-  .sidebar-note,
   .task-number,
-  .task-meta,
-  .check-dot {
+  .task-meta {
     display: none;
   }
   .sidebar-scroll nav {

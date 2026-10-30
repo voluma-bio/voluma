@@ -1,7 +1,8 @@
 /** Acquired-slice viewport. Cornerstone owns pixel decoding, modality/VOI transforms and pixel aspect ratio. */
 import { Enums, getShouldUseCPURendering, RenderingEngine, type Types } from "@cornerstonejs/core";
 import type { Focus, Structure } from "@voluma/contracts/review";
-import { Camera } from "lucide-react";
+import { Button, IconButton } from "@voluma/ui";
+import { Camera, ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { DicomSeries } from "./dicom";
 import { acquireDicomSession, type DicomSession, initializeDicom } from "./dicomSession";
@@ -357,15 +358,14 @@ export default function DicomStack({
         </div>
       </div>
       <div className="slice-controls">
-        <button
-          type="button"
-          className="icon-button"
-          aria-label="Previous slice"
+        <IconButton
+          variant="secondary"
+          label="Previous slice"
           disabled={!ready || index === 0}
           onClick={() => controls.current?.seek(index - 1)}
         >
-          ←
-        </button>
+          <ChevronLeft />
+        </IconButton>
         <input
           type="range"
           aria-label="Slice"
@@ -378,15 +378,14 @@ export default function DicomStack({
         <output aria-live="polite">
           {index + 1} / {series.slices.length}
         </output>
-        <button
-          type="button"
-          className="icon-button"
-          aria-label="Next slice"
+        <IconButton
+          variant="secondary"
+          label="Next slice"
           disabled={!ready || index === series.slices.length - 1}
           onClick={() => controls.current?.seek(index + 1)}
         >
-          →
-        </button>
+          <ChevronRight />
+        </IconButton>
       </div>
       <fieldset className="image-controls" disabled={!ready || !!status}>
         <legend className="sr-only">Image display</legend>
@@ -423,9 +422,7 @@ export default function DicomStack({
             }
           }}
         />
-        <button
-          type="button"
-          className="text-button"
+        <Button
           onClick={() => {
             const view = controls.current?.viewport;
             if (!view) return;
@@ -441,21 +438,19 @@ export default function DicomStack({
           }}
         >
           Reset view
-        </button>
+        </Button>
         {snapshots && (
-          <button
-            type="button"
-            className="button"
+          <Button
             disabled={saving || restoring || labelsPending}
             onClick={() => void saveSnapshot()}
           >
-            <Camera size={15} />
+            <Camera />
             {saving
               ? "Saving…"
               : pendingCapture.current?.scopeKey === snapshots.scopeKey
                 ? "Retry save"
                 : "Screenshot"}
-          </button>
+          </Button>
         )}
       </fieldset>
       {snapshotError && (

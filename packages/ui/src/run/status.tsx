@@ -7,9 +7,8 @@
  * reviewed, which is never inferred. Also where a run's row links, and how its cost and time read.
  * The run page's header says "N items to check" instead, because it sits beside a count of tasks.
  */
-import type { Run } from "@voluma/contracts/run";
 import type { StudyRunSummary } from "@voluma/contracts/study";
-import { StatusBadge, type StatusTone } from "../status-badge";
+import type { Status } from "../status-mark";
 
 /** US dollars: cents, or a tenth of a cent under a dollar so a short run doesn't read $0.00. */
 export function formatUsd(usd: number): string {
@@ -30,32 +29,29 @@ export const runHref = ({ runId, state }: Pick<StudyRunSummary, "runId" | "state
     ? `/runs/${runId}`
     : `/runs/${runId}/live`;
 
-export type RunStatus = { label: string; tone: StatusTone };
+export type RunStatus = { label: string; status: Status };
 
 /** A run's status; a study's newest-run summary carries the same `state` and `review` fields. */
 export function runStatus({ state, review }: Pick<StudyRunSummary, "state" | "review">): RunStatus {
   switch (state.status) {
     case "queued":
-      return { label: state.waitingForProvider ? "AI unavailable" : "Waiting", tone: "neutral" };
+      return state.waitingForProvider
+        ? { label: "AI unavailable", status: "paused" }
+        : { label: "Waiting", status: "waiting" };
     case "running":
-      return { label: "Running", tone: "info" };
+      return { label: "Running", status: "running" };
     case "awaiting-keys":
-      return { label: "Needs your keys", tone: "check" };
+      return { label: "Needs your keys", status: "check" };
     case "ended":
       if (state.outcome === "completed")
         return review?.reviewedAt
-          ? { label: "Reviewed", tone: "primary" }
+          ? { label: "Reviewed", status: "done" }
           : review?.remainingToCheck
-            ? { label: `${review.remainingToCheck} to check`, tone: "check" }
-            : { label: "Checked", tone: "primary" };
-      if (state.outcome === "failed") return { label: "Failed", tone: "destructive" };
-      return { label: "Stopped", tone: "neutral" };
+            ? { label: `${review.remainingToCheck} to check`, status: "check" }
+            : { label: "Checked", status: "done" };
+      if (state.outcome === "failed") return { label: "Failed", status: "stopped" };
+      return { label: "Stopped", status: "stopped" };
   }
-}
-
-export function RunBadge({ run }: { run: Run }) {
-  const { label, tone } = runStatus(run);
-  return <StatusBadge tone={tone}>{label}</StatusBadge>;
 }
 
 /**
@@ -74,11 +70,12 @@ export function studyStatus({
   newest: Pick<StudyRunSummary, "state" | "review">[];
   toCheck: number;
 }): RunStatus {
-  if (scans === 1 && newest[0]) {
-    const own = runStatus(newest[0]);
-    return toCheck > 0 && own.tone !== "destructive"
-      ? { label: `${toCheck} to check`, tone: "check" }
-      : own;
+  const only = newest[0];
+  if (scans === 1 && only) {
+    const failed = only.state.status === "ended" && only.state.outcome === "failed";
+    return toCheck > 0 && !failed
+      ? { label: `${toCheck} to check`, status: "check" }
+      : runStatus(only);
   }
   // A live run by its status, an ended one by its outcome.
   const count = (
@@ -87,30 +84,30 @@ export function studyStatus({
     newest.filter(({ state }) => (state.status === "ended" ? state.outcome : state.status) === kind)
       .length;
   const failed = count("failed");
-  if (failed > 0) return { label: `${failed} failed`, tone: "destructive" };
-  if (toCheck > 0) return { label: `${toCheck} to check`, tone: "check" };
-  if (count("running") > 0) return { label: "Running", tone: "info" };
-  if (count("awaiting-keys") > 0) return { label: "Needs your keys", tone: "check" };
+  if (failed > 0) return { label: `${failed} failed`, status: "stopped" };
+  if (toCheck > 0) return { label: `${toCheck} to check`, status: "check" };
+  if (count("running") > 0) return { label: "Running", status: "running" };
+  if (count("awaiting-keys") > 0) return { label: "Needs your keys", status: "check" };
   // Nothing running or needing keys: every live run is queued, and held ones wait for the AI.
   const queued = newest.filter(({ state }) => state.status === "queued");
   if (queued.length > 0)
-    return {
-      label: queued.every(({ state }) => state.status === "queued" && state.waitingForProvider)
-        ? "AI unavailable"
-        : "Waiting",
-      tone: "neutral",
-    };
+    return queued.every(({ state }) => state.status === "queued" && state.waitingForProvider)
+      ? { label: "AI unavailable", status: "paused" }
+      : { label: "Waiting", status: "waiting" };
   // What is left: completed, stopped, or never run.
   const stopped = count("cancelled");
   const notStarted = scans - newest.length;
-  if (notStarted === scans) return { label: "Not started", tone: "neutral" };
+  if (notStarted === scans) return { label: "Not started", status: "waiting" };
   if (stopped + notStarted === 0)
     return newest.every((r) => r.review?.reviewedAt)
-      ? { label: "Reviewed", tone: "primary" }
-      : { label: "Checked", tone: "primary" };
+      ? { label: "Reviewed", status: "done" }
+      : { label: "Checked", status: "done" };
   const parts = [
     stopped > 0 && `${stopped} stopped`,
     notStarted > 0 && `${notStarted} not started`,
   ];
-  return { label: parts.filter(Boolean).join(", "), tone: "neutral" };
+  return {
+    label: parts.filter(Boolean).join(", "),
+    status: stopped > 0 ? "stopped" : "waiting",
+  };
 }

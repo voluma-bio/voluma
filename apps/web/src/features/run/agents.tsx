@@ -7,7 +7,7 @@
  */
 
 import { cacheHitShare, type Spend } from "@voluma/contracts/spend";
-import { StatusBadge } from "@voluma/ui";
+import { StatusMark } from "@voluma/ui";
 import { formatDuration, formatUsd } from "@voluma/ui/run";
 import { Bot, ChevronDown, ShieldCheck } from "lucide-react";
 import { useDisclosure } from "./chat/disclosure-store";
@@ -122,8 +122,8 @@ export function AgentName({ thread, className = "" }: { thread: Thread; classNam
 }
 
 const VERDICT = {
-  passed: { label: "Check passed", tone: "primary" },
-  "needs-review": { label: "Needs review", tone: "check" },
+  passed: { label: "Check passed", status: "done" },
+  "needs-review": { label: "Needs review", status: "check" },
 } as const;
 
 function ResultLine({ thread }: { thread: Thread }) {
@@ -138,7 +138,7 @@ function ResultLine({ thread }: { thread: Thread }) {
   const verdict = thread.result.verdict && VERDICT[thread.result.verdict];
   return (
     <p className="flex min-w-0 items-center gap-2 text-meta text-muted-foreground">
-      {verdict && <StatusBadge tone={verdict.tone}>{verdict.label}</StatusBadge>}
+      {verdict && <StatusMark status={verdict.status} label={verdict.label} />}
       <span className="min-w-0 truncate">{thread.result.text}</span>
     </p>
   );

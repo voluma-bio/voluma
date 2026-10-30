@@ -9,6 +9,7 @@ import {
   volumeLoader,
 } from "@cornerstonejs/core";
 import type { Focus } from "@voluma/contracts/review";
+import { Button } from "@voluma/ui";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DicomSeries } from "./dicom";
 import {
@@ -443,9 +444,7 @@ function VolumeView({
             }
           }}
         />
-        <button
-          className="text-button"
-          type="button"
+        <Button
           onClick={() => {
             controls.current?.reset();
             setThreshold(20);
@@ -453,7 +452,7 @@ function VolumeView({
           }}
         >
           Reset 3D
-        </button>
+        </Button>
       </fieldset>
     </>
   );

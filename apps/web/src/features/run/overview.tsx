@@ -7,7 +7,7 @@ import { useMutation } from "@tanstack/react-query";
 import { ApiError, acceptCheck, reviewFileUrl } from "@voluma/api-client";
 import type { Asset } from "@voluma/contracts/review";
 import type { Run } from "@voluma/contracts/run";
-import { Button, buttonClass, cx, Lightbox } from "@voluma/ui";
+import { Button, Count, cx, Lightbox } from "@voluma/ui";
 import { ChevronRight, ImageOff } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Link } from "react-router";
@@ -240,11 +240,7 @@ export function Section({
     <section className="mb-8">
       <h2 className="mb-3 flex items-center gap-2 text-base font-semibold [text-wrap:balance]">
         {title}
-        {count ? (
-          <span className="rounded-full border border-check-line bg-check-tint px-2 text-ui font-medium text-check-strong">
-            {count}
-          </span>
-        ) : null}
+        {count ? <Count tone="check">{count}</Count> : null}
       </h2>
       {children}
     </section>
@@ -348,9 +344,9 @@ export function NeedCard({
               {accepting.pending.has(item.id) ? "Saving…" : "Looks right"}
             </Button>
           )}
-          <Link to={reviewHref(runId, item.taskId)} className={buttonClass({ size: "sm" })}>
-            Open in 3D
-          </Link>
+          <Button asChild size="sm">
+            <Link to={reviewHref(runId, item.taskId)}>Open in 3D</Link>
+          </Button>
         </div>
         {error && (
           <p role="alert" className="mt-2 text-meta text-destructive">
@@ -369,10 +365,12 @@ export function NeedCard({
 export function WhatItFound({ text, className }: { text: string; className?: string }) {
   return (
     <details className={cx("group text-ui", className)}>
-      <summary className="inline-flex cursor-pointer items-center gap-1 font-medium text-primary-text hover:underline [&::-webkit-details-marker]:hidden">
-        <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" aria-hidden />
-        What it found
-      </summary>
+      <Button asChild variant="link">
+        <summary className="[&::-webkit-details-marker]:hidden">
+          <ChevronRight className="transition-transform group-open:rotate-90" aria-hidden />
+          What it found
+        </summary>
+      </Button>
       <ClampedMarkdown text={text} className="mt-1.5 text-muted-foreground" />
     </details>
   );

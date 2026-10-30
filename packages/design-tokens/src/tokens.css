@@ -16,7 +16,7 @@
  *   primary     the one main action on a view (ink-filled)
  *   select      selection, focus and crosshairs (ice); never a status
  *   check       To check (amber)
- *   info        Running (violet), and corrected
+ *   info        Running and Checking (violet)
  *   done        Done (green)
  *   destructive Stopped / failed (red)
  *   idle        Waiting / paused (grey)

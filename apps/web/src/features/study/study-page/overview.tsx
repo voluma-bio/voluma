@@ -6,7 +6,7 @@
  */
 import type { StudyDetail, StudyScanDetail } from "@voluma/contracts/study";
 import type { OutputEntry } from "@voluma/contracts/workflow-files";
-import { StatusBadge, StripPlot } from "@voluma/ui";
+import { Button, Count, StatusMark, StripPlot } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
@@ -69,13 +69,13 @@ export function Overview({ detail, workflow, onTab, openChecks }: Props) {
           ))
         )}
         {hasValues && (
-          <button
-            type="button"
+          <Button
+            variant="link"
             onClick={() => onTab("scans")}
-            className="justify-self-start text-ui text-primary-text hover:underline"
+            className="justify-self-start text-ui"
           >
             All values in a table
-          </button>
+          </Button>
         )}
       </section>
       <aside className="grid min-w-0 gap-6 max-[1100px]:order-1">
@@ -213,13 +213,9 @@ function NeedsYourEye({
         <Alert
           key={`far-${output.id}-${scan.scan.inputId}`}
           action={
-            <button
-              type="button"
-              className={smallButton}
-              onClick={() => openChecks([{ runId, taskId: output.task }], 0)}
-            >
+            <Button size="sm" onClick={() => openChecks([{ runId, taskId: output.task }], 0)}>
               Open in 3D
-            </button>
+            </Button>
           }
         >
           <b className="font-semibold">{scan.scan.subject} is far from its group.</b> {output.name}{" "}
@@ -239,9 +235,9 @@ function NeedsYourEye({
         <Alert
           key={`keys-${scan.scan.inputId}`}
           action={
-            <Link to={path} className={smallButton}>
-              Open the run
-            </Link>
+            <Button asChild size="sm">
+              <Link to={path}>Open the run</Link>
+            </Button>
           }
         >
           <b className="font-semibold">{scan.scan.subject} needs your keys</b> to carry on.
@@ -254,9 +250,9 @@ function NeedsYourEye({
           key={`failed-${scan.scan.inputId}`}
           quiet
           action={
-            <Link to={path} className={smallButton}>
-              Open the run
-            </Link>
+            <Button asChild size="sm">
+              <Link to={path}>Open the run</Link>
+            </Button>
           }
         >
           <b className="font-semibold">{what}</b>
@@ -286,9 +282,7 @@ function NeedsYourEye({
                   <span className="block truncate">{kind.taskTitle}</span>
                   <span className="block truncate text-meta text-fg-subtle">{kind.title}</span>
                 </span>
-                <span className="rounded-full border border-check-line bg-check-tint px-2 font-mono text-meta text-check tabular-nums">
-                  {kind.items.length}
-                </span>
+                <Count tone="check">{kind.items.length}</Count>
               </button>
             </li>
           ))}
@@ -303,9 +297,6 @@ function NeedsYourEye({
     </section>
   );
 }
-
-const smallButton =
-  "inline-flex h-8 shrink-0 items-center rounded-lg border border-border bg-card px-3 text-ui font-medium whitespace-nowrap hover:bg-accent";
 
 /** Amber for what the researcher must look at; `quiet` (a card) for a run that failed. */
 function Alert({
@@ -355,7 +346,7 @@ function ScanTiles({ detail }: { detail: StudyDetail }) {
 }
 
 function ScanTile({ scan }: { scan: StudyScanDetail }) {
-  const { label, tone, progress } = scanStatus(scan);
+  const { label, status, progress } = scanStatus(scan);
   const knee = kneeOf(scan);
   const body = (
     <>
@@ -364,7 +355,7 @@ function ScanTile({ scan }: { scan: StudyScanDetail }) {
         {knee && <span className="text-meta text-fg-subtle">{knee}</span>}
       </span>
       <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <StatusBadge tone={tone}>{label}</StatusBadge>
+        <StatusMark status={status} label={label} />
         {progress && <span className="text-meta text-fg-subtle tabular-nums">{progress}</span>}
       </span>
     </>

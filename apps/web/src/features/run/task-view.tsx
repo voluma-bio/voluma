@@ -3,7 +3,7 @@
  * items, its QC image and values, and "How the AI did it": the task's own threads as transcripts,
  * built only when the reader opens it. Tool names may show there and nowhere else on the page.
  */
-import { buttonClass, cx } from "@voluma/ui";
+import { Button, cx } from "@voluma/ui";
 import { ArrowLeft, Check, ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
@@ -44,13 +44,12 @@ export function TaskView({
   const imageShown = task.needs.some((n) => n.image?.id === task.image?.id);
   return (
     <>
-      <Link
-        to={search()}
-        className="inline-flex items-center gap-1 text-ui font-medium text-primary-text hover:underline"
-      >
-        <ArrowLeft className="size-3.5" aria-hidden />
-        Overview
-      </Link>
+      <Button asChild variant="link" className="text-ui">
+        <Link to={search()}>
+          <ArrowLeft aria-hidden />
+          Overview
+        </Link>
+      </Button>
       <h2 className="mt-2 mb-1.5 text-xl font-semibold [text-wrap:balance]">
         {task.number}. {task.title}
       </h2>
@@ -62,9 +61,9 @@ export function TaskView({
 
       {ended && (
         <div className="mb-6 flex flex-wrap gap-2">
-          <Link to={reviewHref(runId, task.id)} className={buttonClass({ size: "sm" })}>
-            Open in 3D
-          </Link>
+          <Button asChild size="sm">
+            <Link to={reviewHref(runId, task.id)}>Open in 3D</Link>
+          </Button>
         </div>
       )}
 
