@@ -179,11 +179,15 @@ export function runnerConfig() {
     required(`VOLUMA_${provider.toUpperCase()}_API_KEY`);
   const api = apiEndpoint();
   const metaApiKey = optional("VOLUMA_META_API_KEY");
-  // A local runner (no API of its own, no gateway URL set) takes `pnpm dev`'s gateway, URL and
-  // secret together, once its tunnel is up.
-  const local = optional("VOLUMA_API_URL") || optional("VOLUMA_GATEWAY_URL") ? undefined : devEnv();
-  const gatewayUrl = local?.gatewayUrl ?? optional("VOLUMA_GATEWAY_URL");
-  const gatewaySecret = local?.gatewayUrl ? local.gatewaySecret : optional("GATEWAY_TOKEN_SECRET");
+  // The dev API's gateway comes only from its launcher: inherited settings must not bypass
+  // `pnpm dev --sam`, or replace the tunnel and its per-launch secret with an older pair.
+  const dev = devEnv();
+  const local = dev && new URL(api.baseUrl).href === new URL(dev.apiUrl).href ? dev : undefined;
+  const gatewayUrl = local ? local.gatewayUrl : optional("VOLUMA_GATEWAY_URL");
+  // The launcher writes a secret before the tunnel is ready, and keeps it if the tunnel fails.
+  const gatewaySecret = local
+    ? gatewayUrl && local.gatewaySecret
+    : optional("GATEWAY_TOKEN_SECRET");
   if (!gatewayUrl !== !gatewaySecret)
     throw new Error("set VOLUMA_GATEWAY_URL and GATEWAY_TOKEN_SECRET together, or neither");
   const gateway =
