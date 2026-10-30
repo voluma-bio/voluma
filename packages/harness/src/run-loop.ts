@@ -142,6 +142,15 @@ const MAIN_GRACE_MS = 15_000;
 const rule = (r: Extract<By, { kind: "rule" }>["rule"]): By => ({ kind: "rule", rule: r });
 const RUNTIME: UserSender = { kind: "runtime" };
 
+/**
+ * A run's error when a thread fails on a fatal provider error. The web names the task from the
+ * `<taskId>: its worker|check` prefix (`run-header.tsx`, `study-model.ts`).
+ */
+const fatalText = (r: ThreadRecord, error: string) =>
+  r.role === "main"
+    ? `the main agent failed on a model provider error: ${error}`
+    : `${r.taskId}: its ${r.role} failed on a model provider error: ${error}`;
+
 /** What a step found: something done, nothing to do until the log changes, or the run is over. */
 type Step = "acted" | "idle" | "done";
 
@@ -431,20 +440,12 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     ).length;
 
   /** The result of a check: the task takes `checkResult`, or `to-check` when there was no verdict. */
-  async function writeResult(
-    d: ThreadLog,
-    t: FoldedTask,
-    c: ThreadRecord,
-    ruleName: "check-result" | "fix-limit",
-    reason?: string,
-  ) {
+  async function writeResult(d: ThreadLog, t: FoldedTask, c: ThreadRecord, reason?: string) {
     if (!t.attemptId) throw new Error(`${t.id} has no attempt to give a result`);
     const status = checkResult(t);
     const limit =
-      ruleName === "check-result" &&
-      t.checker?.verdict === "needs-review" &&
-      fixLimitReached(d, t.id, config.maxFixRounds, 1);
-    const used = limit ? "fix-limit" : ruleName;
+      t.checker?.verdict === "needs-review" && fixLimitReached(d, t.id, config.maxFixRounds, 1);
+    const used = limit ? "fix-limit" : "check-result";
     await runtime.setStatus(
       c.id,
       `${c.id}:result`,
@@ -467,10 +468,11 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       const verdict = t.checker?.verdict;
       const waiting = openAsk(c) !== undefined;
       if (state === "stopped" && !verdict) {
-        await writeResult(d, t, c, "check-result", CHECK_STOPPED);
+        await writeResult(d, t, c, CHECK_STOPPED);
         return true;
       }
-      if (state === "running" || waiting || (state === "cut-off" && !verdict)) continue;
+      // A cut-off check without a verdict never gets here: `resumeCutOff` resumes it first.
+      if (state === "running" || waiting) continue;
       // Idle, or stopped/cut off with a verdict: the check is over.
       const last = c.asks.at(-1);
       if (
@@ -486,13 +488,12 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
         return true;
       }
       if (verdict) {
-        await writeResult(d, t, c, "check-result");
+        await writeResult(d, t, c);
         return true;
       }
       const error = c.end?.error ?? "";
       if (c.end?.status === "failed" && providerError(error)) {
-        if (o.providerFatal?.(error))
-          throw new Error(`${t.id}: its check failed on a model provider error: ${error}`);
+        if (o.providerFatal?.(error)) throw new Error(fatalText(c, error));
         if (checkFailures(d, t.id) <= config.maxProviderRedos) {
           await startCheck(d, t.id);
           return true;
@@ -502,7 +503,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
         await resume(c, verdictNudge(t.id), RUNTIME);
         return true;
       }
-      await writeResult(d, t, c, "check-result");
+      await writeResult(d, t, c);
       return true;
     }
     return false;
@@ -518,11 +519,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
         providerError(error) &&
         o.providerFatal?.(error)
       ) {
-        throw new Error(
-          r.role === "main"
-            ? `the main agent failed on a model provider error: ${error}`
-            : `${r.taskId}: its ${r.role} failed on a model provider error: ${error}`,
-        );
+        throw new Error(fatalText(r, error));
       }
     }
   }
@@ -573,8 +570,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     if (!m || stateOf(m) !== "idle") return false;
     if (m.end?.status === "failed" && providerError(m.end.error ?? "")) {
       const error = m.end.error ?? "";
-      if (o.providerFatal?.(error))
-        throw new Error(`the main agent failed on a model provider error: ${error}`);
+      if (o.providerFatal?.(error)) throw new Error(fatalText(m, error));
       // Provider-failed main threads in a row, counting only those that ended after the run's
       // latest task-state event: a main thread that ended any other way, or a task that moved
       // since, starts the count again.

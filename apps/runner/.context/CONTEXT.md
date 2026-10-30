@@ -271,7 +271,8 @@ agent. A fatal error (a refused key, out of money) fails the run at once, with t
 
 **Loop limits** are `config.loop`: `RUNNER_MAX_FIX_ROUNDS` (default 2 `needs-review` rounds per
 task before it is left to check). The harness defaults the rest (`LoopConfig`). No limit is
-on time: a checker, like every agent, ends with its verdict or on the stall check.
+on time: a checker ends with its verdict or when it is stopped (a stale mark, feedback, the run's
+end).
 
 Cost is Pi's per-reply price, summed per claim; the log prints it
 when a claim reports (`model cost this claim`), and the API stores it as `runs.model_cost_usd`.

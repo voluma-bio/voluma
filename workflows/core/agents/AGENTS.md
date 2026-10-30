@@ -59,7 +59,8 @@ The roles are told none of these; code keeps them (why each holds:
 - every effect is an event appended before it is visible, so a resumed run replays it;
 - a checker on every submitted task, by an agent that did not do it; a task is done only on a passed
   verdict;
-- a check has no time limit; a check that ends without a verdict makes the task to-check;
+- a check has no time limit, and an ask limit; a check that ends without a verdict makes the task
+  to-check;
 - fix rounds are bounded: after N `needs-review` verdicts on one task (default 2, runner config), it
   is to-check;
 - feedback to a task stops the agents of every task that depends on it, and marks stale those that
