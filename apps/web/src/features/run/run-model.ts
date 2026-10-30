@@ -215,15 +215,35 @@ export function agentTree(threads: Thread[]): AgentNode[] {
   return roots;
 }
 
-/** "Segmentation: the AI's work", "Segmentation: second AI check", "Lead AI". */
-export const threadName = (t: Pick<Thread, "kind" | "taskId">) =>
-  t.kind === "worker" && t.taskId
-    ? `${taskTitle(t.taskId)}: the AI's work`
-    : t.kind === "check" && t.taskId
-      ? `${taskTitle(t.taskId)}: second AI check`
-      : t.kind === "chat"
-        ? "Chat"
-        : "Lead AI";
+/**
+ * An agent's name where its task is already shown: "The AI's work, 2 tries", "Second AI check of
+ * try 1", "Lead AI". A check's try is its `attemptId`'s place among its worker's attempts.
+ */
+export function agentLabel(t: Thread, threads: Thread[]): string {
+  switch (t.kind) {
+    case "main":
+      return "Lead AI";
+    case "worker":
+      return t.attempts.length > 1 ? `The AI's work, ${t.attempts.length} tries` : "The AI's work";
+    case "check": {
+      const attemptId = t.attemptId;
+      const tries = attemptId
+        ? threads.find((w) => w.attempts.includes(attemptId))?.attempts
+        : undefined;
+      return tries && tries.length > 1 && attemptId
+        ? `Second AI check of try ${tries.indexOf(attemptId) + 1}`
+        : "Second AI check";
+    }
+    case "chat":
+      return "Chat";
+    default:
+      return "Agent";
+  }
+}
+
+/** An agent's name anywhere: "Segmentation: Second AI check of try 2", "Lead AI". */
+export const agentTitle = (t: Thread, threads: Thread[]) =>
+  t.taskId ? `${taskTitle(t.taskId)}: ${agentLabel(t, threads)}` : agentLabel(t, threads);
 
 export type TaskState =
   /** Not started, and a task it builds on has no usable result yet. */

@@ -60,9 +60,16 @@ is no runs list: Home (`features/study`) replaces it.
 - **QC images** are the run's evidence files through `reviewFileUrl`, 80 to 360 KB each with no
   smaller rendition: `loading="lazy"`, full size only in the lightbox, and "Image not available"
   when the file is missing (a copied run has no R2 files).
-- **"How the AI did it"** shows the task's threads (each worker attempt, then the check) with the
-  transcript components; it is open by default only while the task works, and its rows are built
-  only once it opens.
+- **One agent's thread is `<AgentThread threadId>`** (`agent-thread.tsx`), wherever it shows: the
+  Agents view and "How the AI did it" today. The caller names the thread and gives it a box; the
+  container reads the run's log from `RunLogProvider` (events, live frames, halt, threads; one per
+  run page), builds its rows, and owns its header (name, status, clock, cost), its live line and
+  its own scroll, which sticks to the newest line while the reader is at the bottom. Hosts add
+  header controls through `actions`. Shape from Meridian Flow's `ChatView`. Don't render a thread
+  any other way; a new place for one is a new `<AgentThread>`.
+- **"How the AI did it"** shows the task's agents (the AI's work, its tries in one thread, then a
+  check per try), each an `AgentThread` in a box of at most 36rem; open by default only while the
+  task works, and built only once it opens.
 - **The log is not complete when the runner stops.** Stop ends the run in the API at once, and a
   lost runner writes nothing more (its lease expires and the run goes back to queued or awaiting
   keys), so threads can have a `thread.started` and no `thread.ended`. `haltOf(Run.state, closed)`
