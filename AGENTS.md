@@ -19,6 +19,7 @@ reasons behind the setup: [.context/CONTEXT.md](.context/CONTEXT.md).
 | `pnpm check` | Lint, typecheck and tests across the workspace. CI runs the same |
 | `pnpm db:up` | Start the local Postgres container (once per machine; needs Docker) |
 | `pnpm dev` | API and web app on free ports, with this worktree's own database; prints both URLs |
+| `pnpm worktrees:clean` | Read-only inventory of registered worktrees; automatic cleanup and `--yes` are disabled |
 | `pnpm format` | Biome format and safe fixes |
 | `pnpm check:pr-body <body.md>` | Check a PR body draft against the template |
 | `pnpm --filter @voluma/runner start` | The runner service: claims queued runs from the API and runs them (`RUNNER_MODEL=openai/<id>` in `.env`; `pnpm dev` running locally, start a run in the browser); see [CONTEXT.md](.context/CONTEXT.md) |
@@ -120,6 +121,10 @@ cd ../voluma.worktrees/<name> && pnpm i
 - Screenshots for a PR go in `.github/pr-assets/<branch>/`, linked at a commit.
 - When the PR merges, clean up: stop your dev servers, then
   `git worktree remove ../voluma.worktrees/<name>` and `git branch -d <branch>`.
+  First preserve local work, including ignored files such as `.data/` and `.env`,
+  and confirm the checkout is no longer in use. `pnpm worktrees:clean` only lists
+  registered worktrees; it does not establish that any resource is disposable.
+  Automatic cleanup is disabled pending the [preservation policy](tools/.context/TODO.md).
 
 ## Shared memory
 

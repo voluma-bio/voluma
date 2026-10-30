@@ -180,7 +180,7 @@ What that means here:
 
 - **Size is the tighter limit.** Staging held 256 MB on 2026-10-30 (`pi_messages` 234 MB). One
   full mouse-oa run (9 tasks) added about 95 MB, nearly all model history: about 7 more full runs
-  reach 1 GB (#255 tracks storing less). Check it (`select pg_size_pretty(pg_database_size(current_database()))`) now and then; [TODO.md](TODO.md) tracks it.
+  reach 1 GB for rows written before images moved to R2 (#255; later runs store image references). Check it (`select pg_size_pretty(pg_database_size(current_database()))`) now and then; [TODO.md](TODO.md) tracks it.
 - **Compute hours.** The runner polls `claim` every 2 s, so with it
   running the compute never reaches its 5 idle minutes. At 0.25 CU that is about 6 CU-hours a
   day, about 180 a month against the 100 allowed; the 5 days to Nov 4 cost about 30. With the
@@ -206,6 +206,17 @@ runner first (`r -X POST "$B/services/<ID>/suspend"` for each, so nothing writes
 tables are replaced), run `pg_restore --clean --if-exists --no-owner --no-acl -d "$NEON_DIRECT_URL" dump`, then resume the API and gateway
 (`.../resume`; the runner stays suspended until a run). Compare row counts with the source
 (`runs`, `run_events`, `provider_calls`) before trusting it. Never print the URL.
+
+**Archiving a run** frees space on the 1 GB database without losing the run. `archive:run --id <runId> --remote`
+(with `DATABASE_URL` set to the direct URL) refuses an example or a run that has not ended, writes the run's rows
+(`run.json`: run, input, study, events, threads, pi messages, review snapshots, provider calls) to
+`~/.local/share/voluma-backups/runs/<runId>/` (0600; refuses under 1 GB free), and does it all in one repeatable-read
+transaction: lock the run, read its rows, check them as `import:run` does, write and fsync the file, then delete, rolling back
+unless each table's deleted count equals the file's. Inputs stay (shared); the study goes with its
+scans only when no other run is in it. The run's R2 files are not copied or touched, so `import:run --from <that directory>`
+restores the run whole, with its study and scans when the study id is free and the scans' inputs exist (else a study of one,
+and it says so). The archive is one copy on one disk: copy the directory off this machine before archiving many runs.
+A `pg_dump` of the tables is still the backup for anything else.
 
 ## Rotating secrets
 
