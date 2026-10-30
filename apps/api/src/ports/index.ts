@@ -72,14 +72,14 @@ export type RunMessages = {
   /** Judges the message without storing anything, so a refused one leaves no snapshot behind. */
   check(
     reader: Reader,
-    userId: string,
+    caller: { userId: string; guest: boolean },
     runId: string,
     msg: { id: string; payload: PersonMessage },
   ): Promise<MessageResult>;
   /** Judges again under the queue lock and stores it, reopening a finished run. */
   send(
     reader: Reader,
-    userId: string,
+    caller: { userId: string; guest: boolean },
     runId: string,
     msg: { id: string; payload: PersonMessage },
   ): Promise<MessageResult>;

@@ -447,23 +447,23 @@ export function pgRunQueue(
     /** Whether `reader` may send this message now, without storing anything (`decideMessage`). */
     checkMessage: (
       reader: Reader,
-      userId: string,
+      caller: { userId: string; guest: boolean },
       runId: string,
       msg: { id: string; payload: PersonMessage },
     ) =>
       db.transaction((tx) =>
-        decideMessage(tx, messageContext(reader), reader, userId, runId, msg, false),
+        decideMessage(tx, messageContext(reader), reader, caller, runId, msg, false),
       ),
 
     /** Stores the message, reopening the run if it had ended; one transaction under the queue lock. */
     async sendMessage(
       reader: Reader,
-      userId: string,
+      caller: { userId: string; guest: boolean },
       runId: string,
       msg: { id: string; payload: PersonMessage },
     ) {
       const result = await locked((tx) =>
-        decideMessage(tx, messageContext(reader), reader, userId, runId, msg, true),
+        decideMessage(tx, messageContext(reader), reader, caller, runId, msg, true),
       );
       if ("ok" in result && !result.ok.duplicate) notifier.notify(runId);
       return result;

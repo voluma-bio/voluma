@@ -12,6 +12,7 @@ import { type Context, Hono } from "hono";
 import { type AppEnv, parseJson, readerOf, requireReader, requireUser } from "../../domain";
 import type { RunDeps } from ".";
 import { refusalMessage } from "./admission";
+import { GUEST_KEYS_MESSAGE } from "./corrections";
 import type { QueueRefusal } from "./pg-queue";
 
 /** The answer to a write the queue refused. */
@@ -24,13 +25,7 @@ export function refusal(c: Context, refused: QueueRefusal, detail?: string[]) {
     case "conflict":
       return c.json({ error: "The run is not waiting for keys." }, 409);
     case "guest-keys":
-      return c.json(
-        {
-          error:
-            "Guests run on their own keys. Add your keys to start a run, or sign in with an account to use Voluma's.",
-        },
-        403,
-      );
+      return c.json({ error: GUEST_KEYS_MESSAGE }, 403);
     case "no-input":
       return c.json({ error: "unknown input" }, 404);
     case "no-study":

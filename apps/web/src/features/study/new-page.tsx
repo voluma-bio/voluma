@@ -14,7 +14,7 @@ import type { Me } from "@voluma/contracts/auth";
 import type { Input, Run, VisitorKeys } from "@voluma/contracts/run";
 import type { CreateStudyRequest } from "@voluma/contracts/study";
 import { Button } from "@voluma/ui";
-import { forgetKeys, formatDuration, formatUsd, KeysForm, loadKeys } from "@voluma/ui/run";
+import { formatDuration, formatUsd, loadKeys, RunKeyLine } from "@voluma/ui/run";
 import { catalog } from "@voluma/workflow/bundled";
 import { FolderOpen, Upload, X } from "lucide-react";
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
@@ -47,6 +47,7 @@ type SheetState =
 
 function startError(error: unknown): string {
   if (error instanceof ApiError) {
+    if (error.status === 403 && error.serverMessage) return error.serverMessage;
     if (error.status === 404) return "A scan or the workflow is no longer available.";
     if (error.status === 409)
       return "You already have a run going. Wait for it to finish or stop it, then start again.";
@@ -91,7 +92,7 @@ export function NewPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const canUpload = me.kind === "member";
-  const needsKeys = me.kind === "visitor";
+  const guest = me.kind === "visitor";
 
   const inputs = useQuery({ queryKey: ["inputs"], queryFn: listInputs });
   const runs = useQuery({ queryKey: ["runs"], queryFn: listRuns });
@@ -195,8 +196,8 @@ export function NewPage() {
             ? "Name the study first."
             : !workflow
               ? "Choose a workflow first."
-              : needsKeys && !keys
-                ? "Save your keys first."
+              : guest && !keys
+                ? "Add your Meta key first."
                 : undefined;
 
   const start = useMutation({
@@ -212,7 +213,7 @@ export function NewPage() {
           ...(sample.knee && { attributes: { knee: sample.knee } }),
         })),
         start: table.filter((r) => startIds.includes(r.id)).map((r) => (r.input as Input).id),
-        keys: needsKeys ? keys : undefined,
+        keys,
       };
       return createStudy(request);
     },
@@ -366,40 +367,6 @@ export function NewPage() {
         </Step>
       )}
 
-      {needsKeys && (
-        <Step title="Your keys">
-          <p className="mb-2 text-ui text-muted-foreground">
-            Guests run on their own keys. Sign in with an account to use Voluma's.
-          </p>
-          {keys ? (
-            <p className="text-ui text-muted-foreground">
-              Saved in this browser.{" "}
-              <button
-                type="button"
-                className="text-primary-text hover:underline"
-                onClick={() => setKeys(undefined)}
-              >
-                Change
-              </button>{" "}
-              <button
-                type="button"
-                className="text-primary-text hover:underline"
-                onClick={() => {
-                  forgetKeys(me.userId);
-                  setKeys(undefined);
-                }}
-              >
-                Forget keys
-              </button>
-            </p>
-          ) : (
-            <div className="max-w-sm">
-              <KeysForm userId={me.userId} submitLabel="Save keys" onSubmit={setKeys} />
-            </div>
-          )}
-        </Step>
-      )}
-
       {estimate && table.length > 0 && (
         <p className="px-1 text-ui text-muted-foreground">
           The lab's last run of this workflow took {formatDuration(estimate.seconds)} and cost{" "}
@@ -436,6 +403,12 @@ export function NewPage() {
           </p>
         )}
       </div>
+
+      {table.length > 0 && (
+        <div className="px-1">
+          <RunKeyLine userId={me.userId} guest={guest} keys={keys} onChange={setKeys} />
+        </div>
+      )}
 
       {WORKFLOWS.map((w) => (
         <WorkflowPanel

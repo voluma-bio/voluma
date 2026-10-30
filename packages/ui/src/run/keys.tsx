@@ -76,3 +76,62 @@ export function KeysForm({
     </form>
   );
 }
+
+/**
+ * Next to a Start button: whose key the run uses, from the key stored in this browser. With
+ * a key it can be removed; without one a member can add one, and a guest must (the form).
+ */
+export function RunKeyLine({
+  userId,
+  guest,
+  keys,
+  onChange,
+}: {
+  userId: string;
+  guest: boolean;
+  keys: VisitorKeys | undefined;
+  onChange: (keys: VisitorKeys | undefined) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const link = "text-primary-text hover:underline";
+  return (
+    <div className="grid max-w-sm gap-2 text-ui text-muted-foreground">
+      {keys ? (
+        <p>
+          Runs on your Meta key.{" "}
+          <button
+            type="button"
+            className={link}
+            onClick={() => {
+              forgetKeys(userId);
+              onChange(undefined);
+            }}
+          >
+            Remove it
+          </button>
+        </p>
+      ) : guest ? (
+        <>
+          <p>Guests run on their own Meta key. Sign in with an account to use Voluma's.</p>
+          <KeysForm userId={userId} submitLabel="Save key" onSubmit={onChange} />
+        </>
+      ) : adding ? (
+        <KeysForm
+          userId={userId}
+          submitLabel="Save key"
+          onSubmit={(k) => {
+            setAdding(false);
+            onChange(k);
+          }}
+        />
+      ) : (
+        <p>
+          Runs on Voluma's keys.{" "}
+          <button type="button" className={link} onClick={() => setAdding(true)}>
+            Use your own Meta key
+          </button>
+        </p>
+      )}
+    </div>
+  );
+}

@@ -108,8 +108,10 @@ is no runs list: Home (`features/study`) replaces it.
   animation frame. The task list comes from
  the `revision.started` plan; a task not started yet is Ready when every task it builds on has a usable result (`isSatisfied` from `@voluma/workflow`, the supervisor's own rule: done, or To check with every required output), else "Waiting on" those tasks.
   Queue position and run state are not events, so `getRun` is polled every 3 s until the run ends.
-- **Visitor keys** (`@voluma/ui/run`, shared with `features/study`): a guest's Meta key, the only
-  way a guest runs (the API refuses a guest start without it, 403). They live in localStorage under
+- **Visitor keys** (`@voluma/ui/run`, shared with `features/study`): a Meta key, the only
+  way a guest runs (the API refuses a guest start without it, 403); a member may keep one too. A key
+  in this browser is sent with every start, and `RunKeyLine` next to each Start says whose key the
+  run uses and lets the user remove it. They live in localStorage under
   `voluma.visitor-keys.<userId>`; a run in `awaiting-keys` shows the form on its page
   (`resendKeys`) only to the user who started it.
 - A completed run links to `/runs/:runId`, the review lane's route; the live page is `/runs/:id/live` so it never shadows it. Active runs open live; stopped and failed runs open live too (it shows the error).
