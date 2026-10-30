@@ -108,4 +108,12 @@
   --radius-lg: 4px;
 
   --shadow-pop: var(--elevation-pop);
+
+  /* Fades in after 600 ms, so a fast load never flashes its placeholder */
+  --animate-appear: appear 200ms ease-out 600ms both;
+  @keyframes appear {
+    from {
+      opacity: 0;
+    }
+  }
 }

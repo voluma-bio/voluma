@@ -22,6 +22,7 @@
   "dependencies": {
     "@voluma/contracts": "workspace:*",
     "lucide-react": "catalog:",
-    "radix-ui": "1.8.1"
+    "radix-ui": "catalog:",
+    "tailwind-merge": "catalog:"
   }
 }

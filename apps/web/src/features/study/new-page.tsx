@@ -13,14 +13,13 @@ import { ApiError, createStudy, listInputs, listRuns, signIn } from "@voluma/api
 import type { Me } from "@voluma/contracts/auth";
 import type { Input, Run, VisitorKeys } from "@voluma/contracts/run";
 import type { CreateStudyRequest } from "@voluma/contracts/study";
-import { Button } from "@voluma/ui";
+import { Button, Disclosure, EmptyState, ErrorState, LoadingState, TextField } from "@voluma/ui";
 import { formatDuration, formatUsd, loadKeys, RunKeyLine } from "@voluma/ui/run";
 import { catalog } from "@voluma/workflow/bundled";
 import { FolderOpen, Upload, X } from "lucide-react";
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router";
 import { intake, type Knee, readSheet, type Sample, type Sheet, sheetRecognised } from "./intake";
-import { Delayed, LoadError } from "./parts";
 import { type Dropped, fromDataTransfer, fromFileList, groupDropped } from "./scan-files";
 import { formatBytes, type Progress, type UploadState, useSent, useUploads } from "./uploads";
 import { measuredBy, measurementsOf, WorkflowPanel } from "./workflow-tasks";
@@ -326,16 +325,14 @@ export function NewPage() {
 
       {several && (
         <Step n={3} title="Study">
-          <label className="grid max-w-md gap-1">
-            <span className="text-ui text-muted-foreground">Name</span>
-            <input
-              value={studyName}
-              maxLength={200}
-              onChange={(e) => setStudyName(e.target.value)}
-              placeholder="DMM knee study, Oct 2026"
-              className="h-9 rounded-lg border border-input bg-card px-3 outline-none focus-visible:border-ring"
-            />
-          </label>
+          <TextField
+            label="Name"
+            className="max-w-md"
+            value={studyName}
+            maxLength={200}
+            onChange={(e) => setStudyName(e.target.value)}
+            placeholder="DMM knee study, Oct 2026"
+          />
           {table.length > 2 && (
             <fieldset className="grid gap-2">
               <legend className="sr-only">What runs now</legend>
@@ -549,7 +546,7 @@ function SheetLine({
   onRemove: () => void;
 }) {
   if (sheet.kind === "none") return null;
-  if (sheet.kind === "reading") return <Delayed>Reading {sheet.name}…</Delayed>;
+  if (sheet.kind === "reading") return <LoadingState rows={1} label={`Reading ${sheet.name}`} />;
   if (sheet.kind === "error")
     return (
       <p role="alert" className="text-ui text-destructive">
@@ -803,14 +800,18 @@ function Earlier({
 }) {
   const list = inputs.data?.filter((i) => !hidden.has(i.id));
   return (
-    <details open={open} className="group">
-      <summary className="cursor-pointer py-1 text-muted-foreground hover:text-foreground">
-        Or use a scan you uploaded before{list && ` (${list.length})`}
-      </summary>
-      <div className="mt-2">
-        {inputs.isPending && <Delayed>Loading your scans…</Delayed>}
-        {inputs.isError && <LoadError what="your scans" retry={() => void inputs.refetch()} />}
-        {list?.length === 0 && <p className="text-ui text-muted-foreground">No earlier scans.</p>}
+    // Opens again whenever uploading becomes impossible (`open`), as the page's way in.
+    <Disclosure
+      key={String(open)}
+      defaultOpen={open}
+      label={`Or use a scan you uploaded before${list ? ` (${list.length})` : ""}`}
+    >
+      <div>
+        {inputs.isPending && <LoadingState rows={2} density="compact" label="Loading your scans" />}
+        {inputs.isError && (
+          <ErrorState title="Couldn't load your scans" onRetry={() => void inputs.refetch()} />
+        )}
+        {list?.length === 0 && <EmptyState title="No earlier scans" />}
         <ul className="grid">
           {list?.map((input) => (
             <li key={input.id} className="border-t border-line-subtle first:border-t-0">
@@ -830,6 +831,6 @@ function Earlier({
           ))}
         </ul>
       </div>
-    </details>
+    </Disclosure>
   );
 }

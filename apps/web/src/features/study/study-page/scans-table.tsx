@@ -13,7 +13,7 @@ import { Button, StatusMark, Table, type TableColumn } from "@voluma/ui";
 import { loadKeys, RunKeyLine } from "@voluma/ui/run";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import { useState } from "react";
-import { useNavigate, useOutletContext } from "react-router";
+import { Link, useOutletContext } from "react-router";
 import {
   digitsFor,
   farFromGroup,
@@ -36,7 +36,6 @@ export function ScansTable({
   detail: StudyDetail;
   workflow: BundledWorkflow;
 }) {
-  const navigate = useNavigate();
   const me = useOutletContext<Me>();
   const [keys, setKeys] = useState<VisitorKeys | undefined>(() => loadKeys(me.userId));
   const grouped = detail.scans.some((s) => s.scan.group !== null);
@@ -125,11 +124,11 @@ export function ScansTable({
               }
             : undefined
         }
-        onRowClick={(s) => {
+        rowLink={(s) => {
           const path = scanHref(s);
-          if (path) navigate(path);
+          return path ? (props) => <Link to={path} {...props} /> : undefined;
         }}
-        className="[&_td]:align-middle [&_td]:whitespace-nowrap [&_th]:align-bottom [&_th]:whitespace-nowrap"
+        className="[&_td]:whitespace-nowrap [&_th]:whitespace-nowrap"
       />
     </div>
   );

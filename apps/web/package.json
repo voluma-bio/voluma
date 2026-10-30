@@ -20,7 +20,7 @@
     "@zip.js/zip.js": "2.24.0",
     "fflate": "^0.8.3",
     "lucide-react": "catalog:",
-    "radix-ui": "1.8.1",
+    "radix-ui": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
     "react-markdown": "catalog:",

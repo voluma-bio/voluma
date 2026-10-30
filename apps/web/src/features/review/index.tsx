@@ -4,7 +4,7 @@
  */
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { ApiError, getReviewRun, getRun } from "@voluma/api-client";
-import { Button } from "@voluma/ui";
+import { Button, EmptyState, ErrorState, LoadingState } from "@voluma/ui";
 import { useEffect, useRef } from "react";
 import { Link, type RouteObject, useParams, useSearchParams } from "react-router";
 import { preparing } from "./report/model";
@@ -64,27 +64,40 @@ function RunReview({ runId }: { runId: string }) {
         : false;
     },
   });
-  const status = review.error instanceof ApiError ? review.error.status : undefined;
-  // Loaded data stays on screen when a background refetch fails.
-  const notice =
-    review.data && review.isError ? (
-      <>
-        Could not refresh results. Decisions are disabled until results refresh.
-        <Button disabled={review.isFetching} onClick={() => void review.refetch()}>
-          {review.isFetching ? "Retrying…" : "Retry"}
-        </Button>
-      </>
-    ) : review.data && live ? (
-      "This run is still going. Results fill in as tasks report; you can accept checks and mark it reviewed once it completes."
-    ) : review.data ? undefined : review.isPending ? (
-      "Loading results…"
-    ) : status === 409 ? (
-      "This run has no plan yet. Results appear here once it starts."
-    ) : status === 404 ? (
-      "This run is unavailable or you do not have access to it."
-    ) : (
-      "Could not load this run's results."
+  if (!review.data) {
+    const status = review.error instanceof ApiError ? review.error.status : undefined;
+    return (
+      <div className="mx-auto w-full max-w-2xl px-6 py-8 max-[760px]:px-3">
+        {review.isPending ? (
+          <LoadingState label="Loading the results" rows={4} />
+        ) : status === 409 ? (
+          <EmptyState title="No plan yet">Results appear here once the run starts.</EmptyState>
+        ) : status === 404 ? (
+          <ErrorState title="This run isn't here">
+            It may have been removed, or you can't open it.{" "}
+            <Link to="/" className="text-primary-text hover:underline">
+              Go to Home
+            </Link>
+          </ErrorState>
+        ) : (
+          <ErrorState title="Couldn't load the results" onRetry={() => void review.refetch()}>
+            Check your connection, then try again.
+          </ErrorState>
+        )}
+      </div>
     );
+  }
+  // Loaded data stays on screen when a background refetch fails.
+  const notice = review.isError ? (
+    <>
+      Couldn't refresh the results. Decisions are off until they refresh.
+      <Button disabled={review.isFetching} onClick={() => void review.refetch()}>
+        {review.isFetching ? "Trying again…" : "Try again"}
+      </Button>
+    </>
+  ) : live ? (
+    "This run is still going. Results fill in as tasks report; you can accept checks and mark it reviewed once it completes."
+  ) : undefined;
   return (
     <ReviewWorkspace
       runId={runId}

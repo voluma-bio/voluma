@@ -9,11 +9,18 @@ import { ApiError, cancelRun, resendKeys } from "@voluma/api-client";
 import type { Run } from "@voluma/contracts/run";
 import type { RunSpend } from "@voluma/contracts/spend";
 import type { StudyDetail } from "@voluma/contracts/study";
-import { Button, Progress, type Status, StatusMark } from "@voluma/ui";
+import {
+  Button,
+  Facts,
+  Popover,
+  PopoverClose,
+  Progress,
+  type Status,
+  StatusMark,
+} from "@voluma/ui";
 import { formatDuration, formatUsd, KeysForm } from "@voluma/ui/run";
 import { catalog, workflowName } from "@voluma/workflow/bundled";
 import { ChevronDown } from "lucide-react";
-import { Popover } from "radix-ui";
 import { useState } from "react";
 import { Link } from "react-router";
 import { reviewHref } from "./overview";
@@ -190,37 +197,25 @@ function RunDetails({
     ["Workflow", workflow],
   ];
   return (
-    <Popover.Root>
-      <Popover.Trigger asChild>
+    <Popover
+      label="Run details"
+      className="w-72"
+      trigger={
         <Button variant="ghost" size="sm">
           Run details
-          <ChevronDown aria-hidden />
+          <ChevronDown className="size-3.5" aria-hidden />
         </Button>
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Content
-          align="end"
-          sideOffset={6}
-          className="z-50 w-72 rounded-xl border border-border bg-popover p-4 text-ui text-popover-foreground shadow-md"
-        >
-          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5">
-            {rows.map(([k, v]) => (
-              <div key={k} className="contents">
-                <dt className="text-muted-foreground">{k}</dt>
-                <dd>{v}</dd>
-              </div>
-            ))}
-          </dl>
-          <div className="mt-3 border-t border-border pt-3">
-            <Popover.Close asChild>
-              <Button asChild variant="link">
-                <Link to={agents}>What the AI did</Link>
-              </Button>
-            </Popover.Close>
-          </div>
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
+      }
+    >
+      <Facts items={rows} />
+      <PopoverClose asChild>
+        <div className="mt-3 border-t border-border pt-3">
+          <Button asChild variant="link">
+            <Link to={agents}>What the AI did</Link>
+          </Button>
+        </div>
+      </PopoverClose>
+    </Popover>
   );
 }
 

@@ -4,7 +4,7 @@ import { useMutation } from "@tanstack/react-query";
 import { markReviewed } from "@voluma/api-client";
 import type { Focus, Revision } from "@voluma/contracts/review";
 import type { GridViewState, ReviewSnapshot } from "@voluma/contracts/snapshot";
-import { Button, StatusMark } from "@voluma/ui";
+import { Button, EmptyState, ErrorState, StatusMark, TextField } from "@voluma/ui";
 import type { StructureDisplay } from "@voluma/viewer/grid";
 import { ArrowLeft, Download, History, Layers, ListChecks } from "lucide-react";
 import { lazy, type ReactNode, Suspense, useEffect, useState } from "react";
@@ -29,13 +29,13 @@ export function ReviewWorkspace({
   onRefresh,
 }: {
   runId: string;
-  run?: ReviewRun;
+  run: ReviewRun;
   canReview?: boolean;
   taskId?: string;
   revisionId?: string;
   navigate(selection: { task?: string; revision?: string }): void;
   backLink: ReactNode;
-  /** Loading/unavailable state, or an actionable refresh failure above retained results. */
+  /** A line above the results: a failed refresh with its retry, or that the run is still going. */
   notice?: ReactNode;
   onRefresh(): Promise<void>;
 }) {
@@ -51,8 +51,8 @@ export function ReviewWorkspace({
     taskId: string;
     focus: Focus;
   }>();
-  const latest = run?.revisions.at(-1);
-  const revision = revisionId ? run?.revisions.find((item) => item.id === revisionId) : latest;
+  const latest = run.revisions.at(-1);
+  const revision = revisionId ? run.revisions.find((item) => item.id === revisionId) : latest;
   const task = taskId ? revision?.tasks.find((item) => item.id === taskId) : revision?.tasks[0];
   // A reopened screenshot, kept while its revision and task are open.
   const [restoredSnapshot, setRestoredSnapshot] = useState<
@@ -94,7 +94,7 @@ export function ReviewWorkspace({
       navigate({ revision: snapshot.revisionId, task: snapshot.taskId });
     },
   );
-  const readOnly = !canReview || !run?.review || revision !== latest;
+  const readOnly = !canReview || !run.review || revision !== latest;
   const complete = useMutation({
     mutationFn: () => markReviewed(runId, { baseRevisionId: latest?.id ?? "" }),
     onSuccess: onRefresh,
@@ -109,8 +109,8 @@ export function ReviewWorkspace({
             {backLink}
           </div>
           <div className="run-title">
-            <h1 className="text-xl font-semibold">{run?.sample ?? runId}</h1>
-            {run?.review && (
+            <h1 className="text-xl font-semibold">{run.sample ?? runId}</h1>
+            {run.review && (
               <StatusMark
                 status={run.review.remainingToCheck ? "check" : "done"}
                 label={
@@ -123,20 +123,18 @@ export function ReviewWorkspace({
               />
             )}
           </div>
-          {run && (
-            <p className="text-sm text-muted-foreground">
-              {run.workflows
-                .map((w) =>
-                  [w.path?.split("/").at(-1) ?? w.repo, w.commit?.slice(0, 7)]
-                    .filter(Boolean)
-                    .join(" · "),
-                )
-                .join(", ")}
-            </p>
-          )}
+          <p className="text-sm text-muted-foreground">
+            {run.workflows
+              .map((w) =>
+                [w.path?.split("/").at(-1) ?? w.repo, w.commit?.slice(0, 7)]
+                  .filter(Boolean)
+                  .join(" · "),
+              )
+              .join(", ")}
+          </p>
         </div>
         <div className="run-actions">
-          {run?.review && !run.review.reviewedAt && (
+          {run.review && !run.review.reviewedAt && (
             <Button
               variant="primary"
               disabled={readOnly || run.review.remainingToCheck !== 0 || complete.isPending}
@@ -145,7 +143,7 @@ export function ReviewWorkspace({
               {complete.isPending ? "Marking reviewed…" : "Mark reviewed"}
             </Button>
           )}
-          {run && revision && (
+          {revision && (
             <>
               <label className="revision-select">
                 <History size={15} />
@@ -174,20 +172,18 @@ export function ReviewWorkspace({
           )}
         </div>
       </div>
-      {run && notice && (
+      {notice && (
         <div className="revision-notice" role="alert">
           {notice}
         </div>
       )}
-      {complete.error && !run?.review?.reviewedAt && (
-        <p className="error-message" role="alert">
-          {complete.error.message}
-        </p>
+      {complete.error && !run.review?.reviewedAt && (
+        <ErrorState title="Couldn't mark the review done">{complete.error.message}</ErrorState>
       )}
       {report.error && (
-        <p className="error-message" role="alert">
-          Could not export the review report. Check your connection and try again.
-        </p>
+        <ErrorState title="Couldn't export the review report">
+          Check your connection and try again.
+        </ErrorState>
       )}
       {revision && revision !== latest && (
         <div className="revision-notice">Earlier results are read-only.</div>
@@ -242,19 +238,16 @@ export function ReviewWorkspace({
                 </nav>
                 {!revision?.tasks.length && (
                   <p className="px-5 text-sm text-muted-foreground" role="status">
-                    {notice ?? "Tasks appear when an analysis result is connected."}
+                    Tasks appear when an analysis result is connected.
                   </p>
                 )}
               </>
             ) : (
               <div className="structures-list">
-                <label className="sr-only" htmlFor="structure-filter">
-                  Find a structure
-                </label>
-                <input
-                  id="structure-filter"
-                  className="text-input"
-                  placeholder="Find a structure…"
+                <TextField
+                  label="Find a structure"
+                  hideLabel
+                  placeholder="Find a structure"
                   value={filter}
                   onChange={(event) => setFilter(event.target.value)}
                 />
@@ -334,7 +327,7 @@ export function ReviewWorkspace({
           <Group orientation="horizontal" id="review-split">
             <Panel id="report" defaultSize="42%" minSize="28%">
               <div className="report-scroll" key={`${revision?.id}-${task?.id}`}>
-                {task && revision && run ? (
+                {task && revision ? (
                   <TaskReport
                     task={task}
                     blockName={(id) =>
@@ -359,43 +352,15 @@ export function ReviewWorkspace({
                     onRefresh={onRefresh}
                   />
                 ) : (
-                  <article className="task-report">
-                    <p className="text-xs text-muted-foreground">Task report</p>
-                    <h2 className="text-xl font-semibold mt-3">
-                      {run ? "Result not available" : "No analysis results yet"}
-                    </h2>
-                    <p className="text-muted-foreground mt-4 leading-relaxed">
-                      {run
-                        ? "This task or revision does not exist."
-                        : notice
-                          ? notice
-                          : "Measurements, checks, evidence and images appear only after an analysis has produced them."}
-                    </p>
-                    <section>
-                      <h3 className="font-medium">Measurements</h3>
-                      <p className="text-sm text-muted-foreground mt-2">
-                        No measurements supplied.
-                      </p>
-                    </section>
-                    <section>
-                      <h3 className="font-medium">To check</h3>
-                      <p className="text-sm text-muted-foreground mt-2">
-                        No review decisions are available.
-                      </p>
-                    </section>
-                    <section>
-                      <h3 className="font-medium">Evidence</h3>
-                      <p className="text-sm text-muted-foreground mt-2">
-                        No analysis evidence is attached.
-                      </p>
-                    </section>
-                  </article>
+                  <EmptyState title="Result not available">
+                    This task or revision doesn't exist.
+                  </EmptyState>
                 )}
               </div>
             </Panel>
             <Separator className="main-handle" aria-label="Resize report and viewers" />
             <Panel id="imaging" minSize="28%">
-              {run && revision && task ? (
+              {revision && task ? (
                 <Suspense>
                   <TaskViewer
                     runId={run.id}

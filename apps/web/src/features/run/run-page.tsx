@@ -11,7 +11,7 @@ import { ApiError, getRun, getStudy, subscribe } from "@voluma/api-client";
 import type { Me } from "@voluma/contracts/auth";
 import type { RunEvent } from "@voluma/contracts/events";
 import type { Run } from "@voluma/contracts/run";
-import { Button } from "@voluma/ui";
+import { Button, EmptyState, ErrorState, LoadingState } from "@voluma/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from "react-router";
 import { AgentsView } from "./agents-view";
@@ -146,17 +146,28 @@ function RunOf({ id }: { id: string }) {
   );
   const refetch = useCallback(() => void run.refetch(), [run.refetch]);
 
-  if (run.isPending) return <Message>Loading run…</Message>;
-  if (!run.data) {
+  if (run.isPending)
     return (
-      <Message>
-        {run.error instanceof ApiError && run.error.status === 404
-          ? "This run doesn't exist, or you can't open it."
-          : "Couldn't load this run."}{" "}
-        <Button asChild variant="link">
-          <Link to="/">Go to Home</Link>
-        </Button>
-      </Message>
+      <div className={PAGE_STATE}>
+        <LoadingState label="Loading the run" rows={4} />
+      </div>
+    );
+  if (!run.data) {
+    const missing = run.error instanceof ApiError && run.error.status === 404;
+    return (
+      <div className={PAGE_STATE}>
+        <ErrorState
+          title={missing ? "This run isn't here" : "Couldn't load the run"}
+          onRetry={missing ? undefined : refetch}
+        >
+          {missing
+            ? "It may have been removed, or you can't open it. "
+            : "Check your connection, then try again. "}
+          <Button asChild variant="link">
+            <Link to="/">Go to Home</Link>
+          </Button>
+        </ErrorState>
+      </div>
     );
   }
   return (
@@ -232,11 +243,13 @@ function RunScreen({
   let content: React.ReactNode;
   if (taskId && !task)
     content = (
-      <Message>
-        {tasks.length === 0
-          ? "The tasks appear when the run starts."
-          : "This task isn't in the run's plan."}
-      </Message>
+      <div className={PAGE_STATE}>
+        {tasks.length === 0 ? (
+          <EmptyState title="No tasks yet">The tasks appear when the run starts.</EmptyState>
+        ) : (
+          <ErrorState title="This task isn't in the run's plan" />
+        )}
+      </div>
     );
   else if (task)
     content = (
@@ -253,9 +266,9 @@ function RunScreen({
     content = <AgentsView agentId={agentId} select={openThread} ended={ended} />;
   } else if (tasks.length === 0)
     content = (
-      <p className="text-ui text-muted-foreground">
-        {ended ? "This run ended before it made a plan." : "The tasks appear when the run starts."}
-      </p>
+      <EmptyState title={ended ? "This run ended before it made a plan" : "No tasks yet"}>
+        {ended ? undefined : "The tasks appear when the run starts."}
+      </EmptyState>
     );
   else
     content = (
@@ -313,6 +326,5 @@ function RunScreen({
   );
 }
 
-function Message({ children }: { children: React.ReactNode }) {
-  return <p className="px-10 py-8 text-ui text-muted-foreground">{children}</p>;
-}
+/** Where loading, empty and error states sit while there is no run or task to show. */
+const PAGE_STATE = "px-10 py-8";

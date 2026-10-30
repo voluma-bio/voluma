@@ -2,10 +2,11 @@
  * Tooltip: a control's name and, when it has one, the key that does the same. Built on Radix, so
  * it opens on hover and on keyboard focus, closes on Escape, and renders in a portal clear of any
  * clipping panel. The child must be one element that takes a ref (a button). The portal sits
- * outside the trigger's `data-theme` subtree, so the tooltip copies the trigger's theme.
+ * outside the trigger's `data-theme` subtree, so the tooltip copies the trigger's theme (`useThemedPortal`).
  */
 import { Tooltip as Radix } from "radix-ui";
-import { type ReactElement, useRef, useState } from "react";
+import type { ReactElement } from "react";
+import { useThemedPortal } from "./portal";
 
 export type TooltipProps = {
   /** The control's name, e.g. "Full view". */
@@ -17,24 +18,16 @@ export type TooltipProps = {
 };
 
 export function Tooltip({ label, shortcut, side = "top", children }: TooltipProps) {
-  const trigger = useRef<HTMLButtonElement>(null);
-  const [theme, setTheme] = useState<string>();
+  const portal = useThemedPortal();
   return (
     <Radix.Provider delayDuration={400} skipDelayDuration={300}>
-      <Radix.Root
-        onOpenChange={(open) => {
-          if (open)
-            setTheme(
-              trigger.current?.closest("[data-theme]")?.getAttribute("data-theme") ?? undefined,
-            );
-        }}
-      >
-        <Radix.Trigger ref={trigger} asChild>
+      <Radix.Root onOpenChange={portal.onOpenChange}>
+        <Radix.Trigger ref={portal.ref} asChild>
           {children}
         </Radix.Trigger>
         <Radix.Portal>
           <Radix.Content
-            data-theme={theme}
+            data-theme={portal.theme}
             side={side}
             sideOffset={6}
             collisionPadding={8}
