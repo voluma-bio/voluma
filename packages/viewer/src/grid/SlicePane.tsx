@@ -35,15 +35,12 @@ export function SlicePane({
   point,
   onPoint,
   contrast,
-  onPicture,
 }: {
   axis: Axis;
   scene: GridScene;
   point: Zyx;
   onPoint(point: Zyx): void;
   contrast: Contrast | null;
-  /** The picture drawn for `axis`, or null once none of the requested slice could be. */
-  onPicture(axis: Axis, picture: Picture | null): void;
 }) {
   const [ra, ca] = planeAxes(axis);
   const sr = scene.spacingZyx[ra];
@@ -195,7 +192,6 @@ export function SlicePane({
     const show = (picture: Picture | null, k: number) => {
       if (!picture || abort.signal.aborted) return;
       draw(picture);
-      onPicture(axis, picture);
       setShown({ level: k, index });
       setError(undefined);
       current = true;
@@ -236,14 +232,13 @@ export function SlicePane({
     t.render();
   }
 
-  // Never leave another slice's picture labelled as the requested one, here or in 3D.
+  // Never leave another slice's picture labelled as the requested one.
   function clear() {
     const t = three.current;
     if (t) {
       t.image.visible = false;
       t.render();
     }
-    onPicture(axis, null);
     setShown(null);
   }
 

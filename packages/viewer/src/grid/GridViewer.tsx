@@ -4,14 +4,13 @@
  * moves when the user moves it or a new `focus` arrives; loading data never moves it or the camera.
  */
 import { Maximize2, Minimize2 } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { autoContrast, type Contrast } from "./compose";
 import { Grid3D } from "./Grid3D";
-import type { Picture } from "./picture";
 import { readLevel } from "./planes";
 import { SlicePane } from "./SlicePane";
-import type { Axis, GridScene, Zyx } from "./scene";
+import type { GridScene, Zyx } from "./scene";
 
 const panes = [
   { id: "3d", label: "3D", axis: null },
@@ -48,12 +47,6 @@ export function GridViewer({
   }, [focus]);
   const [contrast, setContrast] = useState<Contrast | null>(null);
   const [contrastError, setContrastError] = useState<string>();
-  const [pictures, setPictures] = useState<Partial<Record<Axis, Picture>>>({});
-  const onPicture = useCallback(
-    (axis: Axis, picture: Picture | null) =>
-      setPictures((all) => ({ ...all, [axis]: picture ?? undefined })),
-    [],
-  );
 
   // The contrast spans the coarsest level's values, so the first picture already uses it.
   useEffect(() => {
@@ -99,7 +92,7 @@ export function GridViewer({
               </button>
             </header>
             {pane.axis === null ? (
-              <Grid3D scene={scene} pictures={pictures} onPoint={setPoint} />
+              <Grid3D scene={scene} contrast={contrast} onPoint={setPoint} />
             ) : (
               <SlicePane
                 axis={pane.axis}
@@ -107,7 +100,6 @@ export function GridViewer({
                 point={point}
                 onPoint={setPoint}
                 contrast={contrast}
-                onPicture={onPicture}
               />
             )}
           </section>

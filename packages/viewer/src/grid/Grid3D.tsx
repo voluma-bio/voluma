@@ -1,47 +1,58 @@
 /**
- * The grid viewer's 3D pane: the scene's meshes and the three slice pictures at the crosshair,
- * in the grid's own mm (voxel × spacing; the grid's rotation into the scan is not applied).
- * Drag rotates, right drag pans, the wheel zooms; a click on a mesh moves the crosshair there.
- * New pictures or meshes never move the camera.
+ * The grid viewer's 3D pane: the image as a volume rendering with the scene's meshes in it, in
+ * the grid's own mm (voxel × spacing; the grid's rotation into the scan is not applied). Drag
+ * rotates, right drag pans, the wheel zooms; a click on a mesh moves the crosshair there. Loading
+ * the volume or meshes never moves the camera.
+ *
+ * Each frame renders the meshes into a target with depth, copies it to the canvas, then
+ * ray-marches the volume over it, stopping each ray at the meshes' depth (`volume.ts`).
  */
 import { useEffect, useRef, useState } from "react";
 import {
   AmbientLight,
   BufferAttribute,
   BufferGeometry,
+  DepthTexture,
   DirectionalLight,
   DoubleSide,
   Group,
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
+  OrthographicCamera,
   PerspectiveCamera,
+  PlaneGeometry,
   Raycaster,
   Scene,
   Vector2,
   Vector3,
   WebGLRenderer,
+  WebGLRenderTarget,
 } from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { corners, type Picture, quad, texture } from "./picture";
-import type { Axis, GridMesh, GridScene, Zyx } from "./scene";
+import type { Contrast } from "./compose";
+import { readLevel } from "./planes";
+import type { GridMesh, GridScene, Zyx } from "./scene";
+import { volumeBytes, volumeLevel, volumeMesh } from "./volume";
 
 export function Grid3D({
   scene,
-  pictures,
+  contrast,
   onPoint,
 }: {
   scene: GridScene;
-  pictures: Partial<Record<Axis, Picture>>;
+  contrast: Contrast | null;
   onPoint(point: Zyx): void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const three = useRef<{
-    planes: Mesh<BufferGeometry, MeshBasicMaterial>[];
     meshes: Group;
+    volumes: Scene;
+    depth: DepthTexture;
     render(): void;
   } | null>(null);
   const [status, setStatus] = useState<string>();
+  const [volumeStatus, setVolumeStatus] = useState<string>();
   const latest = useRef(onPoint);
   latest.current = onPoint;
   const [sz, sy, sx] = scene.spacingZyx;
@@ -71,15 +82,19 @@ export function Grid3D({
     s.add(camera, new AmbientLight(0xffffff, 0.9));
     const meshes = new Group();
     s.add(meshes);
-    const planes = ([0, 1, 2] as const).map(() => {
-      const plane = new Mesh(
-        new BufferGeometry(),
-        new MeshBasicMaterial({ side: DoubleSide, transparent: true, opacity: 0.9 }),
-      );
-      plane.visible = false;
-      s.add(plane);
-      return plane;
-    });
+    // The meshes' colour and depth; the volume pass reads the depth.
+    const depth = new DepthTexture(1, 1);
+    const target = new WebGLRenderTarget(1, 1, { depthTexture: depth, samples: 4 });
+    const copy = new Scene();
+    copy.add(
+      new Mesh(
+        new PlaneGeometry(2, 2),
+        new MeshBasicMaterial({ map: target.texture, depthTest: false, depthWrite: false }),
+      ),
+    );
+    const flat = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    const volumes = new Scene();
+    const size2 = new Vector2();
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.target.copy(center);
     controls.enableDamping = false;
@@ -88,16 +103,35 @@ export function Grid3D({
     const render = () => {
       frame ||= requestAnimationFrame(() => {
         frame = 0;
+        renderer.setRenderTarget(target);
         renderer.render(s, camera);
+        renderer.setRenderTarget(null);
+        renderer.render(copy, flat);
+        renderer.getDrawingBufferSize(size2);
+        for (const child of volumes.children) {
+          const v = child as ReturnType<typeof volumeMesh>;
+          v.updateMatrixWorld();
+          const u = v.material.uniforms;
+          u.cameraLocal!.value.copy(v.worldToLocal(camera.position.clone()));
+          u.localToView!.value.multiplyMatrices(camera.matrixWorldInverse, v.matrixWorld);
+          u.resolution!.value.copy(size2);
+          u.near!.value = camera.near;
+          u.far!.value = camera.far;
+        }
+        renderer.autoClear = false;
+        renderer.render(volumes, camera);
+        renderer.autoClear = true;
       });
     };
     controls.addEventListener("change", render);
     controls.update();
-    three.current = { planes, meshes, render };
+    three.current = { meshes, volumes, depth, render };
     const observer = new ResizeObserver(() => {
       const { width, height } = element.getBoundingClientRect();
       if (!width || !height) return;
       renderer.setSize(width, height);
+      renderer.getDrawingBufferSize(size2);
+      target.setSize(size2.x, size2.y);
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
       render();
@@ -142,13 +176,15 @@ export function Grid3D({
       cancelAnimationFrame(frame);
       observer.disconnect();
       controls.dispose();
-      s.traverse((object) => {
-        if (object instanceof Mesh) {
-          object.geometry.dispose();
-          object.material.map?.dispose();
-          object.material.dispose();
-        }
-      });
+      for (const root of [s, copy, volumes])
+        root.traverse((object) => {
+          if (object instanceof Mesh) {
+            object.geometry.dispose();
+            object.material.uniforms?.volume?.value.dispose();
+            object.material.dispose();
+          }
+        });
+      target.dispose();
       renderer.forceContextLoss();
       renderer.dispose();
       renderer.domElement.remove();
@@ -215,34 +251,58 @@ export function Grid3D({
     return () => abort.abort();
   }, [meshIds]);
 
+  // The volume: the coarsest level at once, then the finest that fits (`volumeLevel`); the raw
+  // values are kept so a contrast change only rebuilds the bytes.
+  const [levels, setLevels] = useState<{ k: number; values: ArrayLike<number> }[]>([]);
+  useEffect(() => {
+    const abort = new AbortController();
+    const { base, levels: all } = scene.image;
+    const coarsest = all.length - 1;
+    const target = volumeLevel(all);
+    setVolumeStatus("Loading the volume…");
+    (async () => {
+      for (const k of target === coarsest ? [coarsest] : [coarsest, target]) {
+        const { data } = await readLevel(base, all[k]!.path, abort.signal);
+        setLevels((had) => [...had.filter((l) => l.k !== k), { k, values: data }]);
+      }
+      setVolumeStatus(undefined);
+    })().catch((cause) => {
+      if (!abort.signal.aborted)
+        setVolumeStatus(`Couldn't load the volume: ${(cause as Error).message}`);
+    });
+    return () => abort.abort();
+  }, [scene.image]);
+  const shown = levels.reduce<(typeof levels)[number] | undefined>(
+    (best, l) => (!best || l.k < best.k ? l : best),
+    undefined,
+  );
   useEffect(() => {
     const t = three.current;
-    if (!t) return;
-    for (const axis of [0, 1, 2] as const) {
-      const picture = pictures[axis];
-      const plane = t.planes[axis]!;
-      // Only the plane whose picture changed uploads a texture; a cleared picture hides it.
-      if (plane.userData.picture === picture) continue;
-      plane.userData.picture = picture;
-      if (!picture) {
-        plane.visible = false;
-        continue;
-      }
-      plane.geometry.dispose();
-      plane.geometry = quad(corners(picture).map((p) => toWorld(p).toArray()));
-      plane.material.map?.dispose();
-      plane.material.map = texture(picture, false);
-      plane.material.needsUpdate = true;
-      plane.visible = true;
-    }
+    if (!t || !shown || !contrast) return;
+    const volume = volumeMesh(
+      volumeBytes(shown.values, contrast),
+      scene.image.levels[shown.k]!,
+      scene.spacingZyx,
+      getComputedStyle(document.documentElement).getPropertyValue("--bone").trim(),
+      t.depth,
+    );
+    t.volumes.add(volume);
     t.render();
-  }, [pictures]);
+    return () => {
+      t.volumes.remove(volume);
+      volume.geometry.dispose();
+      volume.material.uniforms.volume!.value.dispose();
+      volume.material.dispose();
+      t.render();
+    };
+  }, [shown, contrast]);
 
+  const chip = volumeStatus ?? status;
   return (
     <div ref={host} className="grid-pane">
-      {status && (
+      {chip && (
         <span className="grid-chip top-right" role="status">
-          {status}
+          {chip}
         </span>
       )}
     </div>

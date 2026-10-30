@@ -45,8 +45,8 @@ drawn in the grid's own mm (voxel × spacing), not rotated into the scan.
 
 ```diagram
 GridViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane ──► zarr.worker (zarrita, chunk cache)
-    │                                     │ compose (window, overlays) → RGBA picture
-    └─► Grid3D ◄── pictures ──────────────┘   meshes fetched once each
+    │                                       compose (window, overlays) → RGBA picture
+    └─► Grid3D ── readLevel (whole level) ──► volume rendering; meshes fetched once each
 ```
 
 - **Panes.** Axial holds array axis 0, coronal axis 2, sagittal axis 1 (DESIGN.md's axis colours).
@@ -63,6 +63,10 @@ GridViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
   drag) on a mesh moves the crosshair to the voxel under it. Loading never moves the crosshair or
   camera; a new `focus` voxel (a check's) moves the crosshair.
 - **Window.** From the coarsest level, 1st to 99.9th percentile; editable.
+- **3D.** The image as a volume rendering, no slice planes: the coarsest level at once, then the
+  finest level of at most 16 M voxels (`volume.ts`), as an 8-bit 3D texture between the window
+  limits, ray-marched with gradient lighting in `--bone`. The meshes render first into a target
+  with depth and each ray stops at it, so a structure inside the bone shows where it is.
 
 Correctness evidence: `compose.test.ts` pins where a cropped, downsampled overlay lands; worker
 planes matched `labels.npy` of OA6-1RK exactly on all three axes ([#188](https://github.com/voluma-bio/voluma/pull/188)).
