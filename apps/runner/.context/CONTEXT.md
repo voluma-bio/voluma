@@ -312,12 +312,14 @@ A role's model is its file's `model` alias. `config.models` maps each alias to a
 set, forces every alias to one model. Each configured alias's provider key is required at start. A
 visitor run uses `RUNNER_VISITOR_MODEL` for every role except `main` on a visitor-safe model.
 
-`RUNNER_THINKING` (one of Pi's levels) is every thread's thinking level on a `voluma` run: `run.ts`
-passes it as the role's `thinkingLevel`, which `start-thread.ts` sets as the Pi agent's
-`initialState.thinkingLevel`, so Pi sends it as `reasoning` and records it on each History
-message. `main.ts` refuses to start when an alias's or the fallback's model lacks the level,
-because Pi clamps an unsupported level silently. Unset is `"off"`, which sends no level: for
-DeepSeek that means `thinking: disabled`. Visitor runs always use `"off"`.
+A role's thinking level is its role file's `thinking` key, else `RUNNER_THINKING` (one of Pi's
+levels), else none (`"off"`). `run.ts` passes it as the role's `thinkingLevel`, which `start-thread.ts` sets
+as the Pi agent's `initialState.thinkingLevel`, so Pi sends it as `reasoning` and records it on each
+History message. Pi clamps an unsupported level silently, so two checks refuse one: `main.ts` at boot
+checks `RUNNER_THINKING` against every alias and the fallback; `run.ts` at run start checks each
+role's set level against its model and the fallback (the role files load per run); both use `thinking.ts`, and a level nobody set is not checked. `"off"` sends
+no level: for DeepSeek that means `thinking: disabled`. Visitor runs always use `"off"`. The level is
+not in the log, so a resumed thread takes it from the snapshotted role file and the current config.
 
 # Runner: a claim that ends is a cut-off, not a stop
 

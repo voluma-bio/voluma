@@ -8,9 +8,10 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseEnv } from "node:util";
-import type { ThinkingLevel } from "@earendil-works/pi-ai";
+import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { modelRefSchema } from "@voluma/contracts/ids";
 import { parseTokenSecrets } from "@voluma/provider-calls/token";
+import { THINKING_LEVELS } from "@voluma/workflow/definition";
 import { PROVIDERS } from "./providers.ts";
 
 const file = process.env.VOLUMA_ENV_FILE ?? resolve(import.meta.dirname, "../../../.env");
@@ -114,17 +115,8 @@ function visitorModel(): ModelRef {
   return ref;
 }
 
-const THINKING_LEVELS: readonly ThinkingLevel[] = [
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-];
-
 /** `RUNNER_THINKING`, one of Pi's thinking levels; unset: Pi sends none. */
-function thinkingLevel(): ThinkingLevel | undefined {
+function thinkingLevel(): ModelThinkingLevel | undefined {
   const raw = optional("RUNNER_THINKING");
   if (raw === undefined) return undefined;
   const level = THINKING_LEVELS.find((l) => l === raw);
