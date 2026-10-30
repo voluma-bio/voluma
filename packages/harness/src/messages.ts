@@ -56,7 +56,6 @@ export function cutOffText(after: ClaimEndReason | undefined, tool: string | und
 
 /** Why a check ended the way it did, as the task's reason reads. */
 export const CHECK_STOPPED = "The check was stopped before it gave a verdict.";
-export const CHECK_TIMED_OUT = "The check ran past its time limit.";
 
 export function checkReason(t: FoldedTask, status: "done" | "to-check"): string {
   if (status === "done") return "The second agent checked this task and agrees.";

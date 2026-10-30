@@ -96,7 +96,7 @@ export const bySchema = z.discriminatedUnion("kind", [
       "stale",
       "check-start",
       "check-result",
-      // A check hit its time or ask limit; a task reached its fix-round limit.
+      // A task reached its fix-round limit (`fix-limit`). `check-limit` is written by no code now: stored runs from when checks were time-limited carry it.
       "check-limit",
       "fix-limit",
       // The main agent stopped with work unfinished and code ended it.

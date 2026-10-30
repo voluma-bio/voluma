@@ -122,8 +122,7 @@ check threads, and review chat threads.
   thread's state: running, idle, stopped, cut off; asks and answers; fix rounds; the delivery
   cursor and notices) and which threads run in this process. It does the first applicable of:
   resume a cut-off thread, start the check of an `under-review` task, write a finished check's
-  result (`check-result`, or `fix-limit`), enforce the check deadline (`check-limit`), deliver to
-  the main agent, and the liveness end. Resume is the same code as a first run. The run ends when
+  result (`check-result`, or `fix-limit`), deliver to the main agent, and the liveness end. Resume is the same code as a first run. The run ends when
   the root has a completed `thread.ended` (`finish_run`, or liveness); then every thread without
   an end is stopped. Stops are appended first (`thread.ended {cancelled}` inside the section,
   then abort without waiting), so the holder check refuses the stopped thread's next write at once.

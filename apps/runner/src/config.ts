@@ -180,10 +180,9 @@ export function runnerConfig() {
     api,
     /** Runs at once. */
     concurrency: positiveInt("RUNNER_CONCURRENCY", 2),
-    /** The run loop's limits (`LoopConfig`); the harness defaults are 2 fix rounds and 20 minutes. */
+    /** The run loop's limits (`LoopConfig`); the harness default is 2 fix rounds. */
     loop: {
       maxFixRounds: positiveInt("RUNNER_MAX_FIX_ROUNDS", 2),
-      checkTimeoutMs: positiveInt("RUNNER_CHECK_TIMEOUT_MINUTES", 20) * 60_000,
     },
     /**
      * The model behind each alias a role file may name (`model:` in `workflows/core/agents/`),
