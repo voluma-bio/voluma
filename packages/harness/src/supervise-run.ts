@@ -114,8 +114,10 @@ function grantsOf(def: WorkflowDefinition, gateway: boolean): Record<AgentRole, 
   return { main: grant("main"), worker: grant("worker"), check: grant("check") };
 }
 
-/** The run's root thread. Ids are minted here and in `run-loop.ts` and read nowhere else. */
-export const rootThreadIdOf = (runId: string) => `${runId}.supervisor`;
+const ROOT_NAME = "supervisor";
+
+/** The run's root thread. Ids are minted here and in `run-loop.ts`; the sites that still parse one are those #312 deferred (ingest `inRun`, ops `run-dump.ts`, `seed-example.ts`, `backfill.ts`). */
+export const rootThreadIdOf = (runId: string) => `${runId}.${ROOT_NAME}`;
 
 export function superviseRun(options: SuperviseRunOptions): Supervised {
   const { runId, recorder, definition, signal } = options;
@@ -176,6 +178,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
     const resumed = recorder.events().length > 0;
     // Not a derived id: each invocation of the root is a thread start of its own.
     recorder.emit(rootThreadId, "thread.started", {
+      name: ROOT_NAME,
       parentThreadId: null,
       kind: "supervisor",
       workflows: options.workflows.map((pin) => ({ ...pin, commit: definition.commit })),

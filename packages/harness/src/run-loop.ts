@@ -76,7 +76,7 @@ import type { Agents } from "./tools/main-tools";
 import type { Tool } from "./tools/tool";
 
 /** Where a thread sits in the run: stored on its `thread.started` by `begin`, not part of how a thread runs. */
-type Lineage = { parentThreadId: string; attemptId?: string };
+type Lineage = { name: string; parentThreadId: string; attemptId?: string };
 
 /** What the host decides about a thread's model; the loop adds the prompts, identity and tools. */
 export interface ModelSetup {
@@ -215,6 +215,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     const setup = o.model(r.role, d.threads.get(r.id)?.model);
     const common = {
       threadId: r.id,
+      name: r.name,
       systemPrompt: systemPrompt(o.definition, thread),
       model: setup.model,
       thinkingLevel: setup.thinkingLevel,
@@ -265,11 +266,12 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
    * its end is stored. Call inside `section`: a stop cannot come between the append and the start.
    */
   async function begin(spec: ThreadSpec & Lineage, startedEventId: string, spawnedBy?: string) {
-    const { parentThreadId, attemptId, ...start } = spec;
+    const { name, parentThreadId, attemptId, ...start } = spec;
     await recorder.append(
       spec.threadId,
       "thread.started",
       {
+        name,
         parentThreadId,
         kind: spec.kind,
         ...(spec.taskId && { task: spec.taskId }),

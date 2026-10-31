@@ -33,6 +33,8 @@ export type ItemToCheckProps = {
   /** Looks right; absent, the button is off and `readOnly` says why beside it. */
   onAccept?: () => void;
   accepting?: boolean;
+  /** Puts focus on Looks right when the card appears: the panel moved here after a decision. */
+  focusAccept?: boolean;
   /** Why no decision can be made here (an example run, a run still going). */
   readOnly?: string;
   /** Something's wrong: tell the AI what should change. */
@@ -54,6 +56,7 @@ export function ItemToCheck({
   state,
   onAccept,
   accepting = false,
+  focusAccept = false,
   readOnly,
   onWrong,
   actions,
@@ -83,7 +86,13 @@ export function ItemToCheck({
         ) : (
           <>
             {state === "open" && (
-              <Button variant="primary" disabled={!onAccept || accepting} onClick={onAccept}>
+              <Button
+                variant="primary"
+                disabled={!onAccept || accepting}
+                onClick={onAccept}
+                // biome-ignore lint/a11y/noAutofocus: only after the reader's own Looks right moved them here.
+                autoFocus={focusAccept}
+              >
                 <Check aria-hidden />
                 {accepting ? "Saving…" : "Looks right"}
               </Button>

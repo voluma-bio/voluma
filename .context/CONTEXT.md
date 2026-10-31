@@ -111,8 +111,10 @@ and check threads.
   `@voluma/contracts/task-tools`. Its only view of the run is `fold(recorder.events())` (folded
   once per change of the log), inside one per-run critical section (`section`). A thread's
   kind and task come from its tool context, not the log. It writes through `recorder.append`,
-  which makes one attempt, so the runtime never decides from an event the store lacks; a
-  store failure fails the tool call, and the run loop fails the run. Hashing and copying
+  which waits for the store's acknowledgement (retried like `emit`, safe because the store ignores an
+  event id it holds), so the runtime never decides from an event the store lacks; a store
+  that refuses the event fails the tool call, and the run loop fails the run. A store still
+  unavailable after the retries releases the run instead (the runner's "self-stop"). Hashing and copying
   evidence happen outside the section. A worker writes only to its own task, and an attempt
   opens only when every task it builds on is satisfied (`openAttempt` is the one way).
   `tools/task-tools.ts` wraps it as `checkpoint`, `report_output`, `submit_task` and `ask`. `output-checks.ts` holds the

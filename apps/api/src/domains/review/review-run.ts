@@ -19,7 +19,6 @@ export function reviewRun({
     return {
       id: t.id,
       title: t.title,
-      ask: t.ask,
       dependsOn,
       status: t.status,
       resultRevisionId: t.resultRevisionId,

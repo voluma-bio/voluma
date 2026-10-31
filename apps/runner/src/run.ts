@@ -33,7 +33,6 @@ import { resolve } from "node:path";
 import type { Api, Model, Models } from "@earendil-works/pi-ai";
 import { inputPrefix, referencePrefix, workflowSnapshotPrefix } from "@voluma/contracts/r2";
 import type { Claim, ReportRequest } from "@voluma/contracts/runner";
-import { threadName } from "@voluma/contracts/threads";
 import { runClient } from "@voluma/harness/adapters/http/run-client";
 import { type LiveBatcher, liveBatcher } from "@voluma/harness/live";
 import { usageOf } from "@voluma/harness/model-usage";
@@ -271,27 +270,31 @@ async function claimBody(
         throw e;
       }
     };
+    // A thread's name for a log line, from its `thread.started` (recorded before any other event of the thread).
+    const names = new Map<string, string>();
+    const nameOf = (id: string) => names.get(id) ?? id;
     const stored = await client.storedEvents();
     live = liveBatcher((frames) => client.live(frames));
     const recorded = recorder(
       {
         async append(event) {
           await client.append(event);
-          log(eventLine(event, redact, (id) => threadName(runId, id)));
+          log(eventLine(event, redact, nameOf));
         },
       },
       runId,
-      () => stop("lease-lost"),
+      (reason) => stop(reason === "lease-lost" ? "lease-lost" : "self-stop"),
       undefined,
       stored,
       live,
+      halt.signal,
     );
     // The in-flight tool calls (`telemetry.ts`) follow the events as they are emitted, not as
     // the queue delivers them: a stall must name the call that caused it.
     const track = (threadId: string, type: string, payload: unknown) => {
+      if (type === "thread.started") names.set(threadId, (payload as { name: string }).name);
       const { toolCallId, name } = payload as { toolCallId: string; name?: string };
-      if (type === "tool.call")
-        scope.inFlight.set(toolCallId, `${threadName(runId, threadId)} ${name}`);
+      if (type === "tool.call") scope.inFlight.set(toolCallId, `${nameOf(threadId)} ${name}`);
       else if (type === "tool.result") scope.inFlight.delete(toolCallId);
     };
     events = {
