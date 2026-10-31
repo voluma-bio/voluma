@@ -303,7 +303,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       taskId: r.taskId,
       parentThreadId: root,
       ...(folded.attemptId && { attemptId: folded.attemptId }),
-      prompt: checkPrompt(task, folded, o.notes),
+      prompt: checkPrompt(task, folded, view, o.selectedOutputs, o.definition.files, o.notes),
     } satisfies ThreadSpec & Lineage;
   }
 
