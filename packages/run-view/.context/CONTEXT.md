@@ -120,7 +120,9 @@ screens are the scan review (`apps/web/src/features/scan`) and the study pages
   A run's cost is `runCost` (model calls plus gateway calls), the one sum Run details, study spend
   and `/new` use. How long a run worked is `runWork` (`run-model.ts`): its first claim to its end
   plus each correction's reopen to its end, never first start to last end, which would count the
-  idle time before a researcher's reopen.
+  idle time before a researcher's reopen. A run queued again (after a reopen or a lost runner) has
+  no `startedAt` in its state, so the first claim comes from its first `claim.started`. Run details
+  counts redos (`revision.started` of a correction), not reopens: most messages get only a reply.
 - **Cost and time** of a thread or a task come only from `spend(events, providerCalls)`
   (`@voluma/contracts/spend`), run in `runView` on durable events, never per live frame: each
   thread's info shows its own (`Thread.spend`), each task's info its task's (`TaskView.spend`).
