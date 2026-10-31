@@ -436,7 +436,7 @@ function rowsOf(
               : p.sender.kind === "person"
                 ? "Message from a person"
                 : briefed
-                  ? "Update from the run"
+                  ? "Update from Voluma"
                   : "Task brief";
           if (p.sender.kind === "runtime") briefed = true;
           b.row({ kind: "brief", id: e.id, label, text: p.text });
