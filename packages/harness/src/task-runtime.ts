@@ -174,6 +174,8 @@ export function taskRuntime(options: TaskRuntimeOptions) {
   const taskOf = (id: string): FoldedTask | undefined => view().tasks.find((t) => t.id === id);
   /** The plan now, with every `plan.changed` applied. */
   const planNow = () => view().plan.tasks;
+  /** The task's plain title, for text the researcher reads; the id when the plan has none. */
+  const taskName = (id: string) => planNow().find((t) => t.id === id)?.title ?? id;
 
   /**
    * Whether the attempt of `taskId` cites this scratch file (the path after `/scratch/`): a
@@ -416,7 +418,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
           dep,
           t.attemptId,
           "stale",
-          `${taskId} was corrected, so this result may no longer hold.`,
+          `${taskName(taskId)} was corrected, so this result may no longer hold.`,
           { kind: "rule", rule: "stale" },
         );
       }
@@ -507,6 +509,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     view,
     threadNames,
     taskOf,
+    taskName,
     cites,
     section,
     setStatus,
