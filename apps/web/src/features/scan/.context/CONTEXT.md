@@ -39,6 +39,17 @@ Without `item` or `task`, the task in view is the first open item's, else the pl
   (no plan yet) and while assets are still being converted, until ten minutes after the end. A task with no review data yet
   shows "No views for <task> yet"; the viewer never falls back to another task.
 
+## Each grid keeps its viewer
+
+A task is shown on its own grid (`taskGrid`); mouse-oa has two, the Scan and the aligned tibia
+grid. `TaskViewer` keeps one `GridViewer` per grid shown, at most two (`MAX_KEPT`: each holds four
+WebGL contexts, and Chrome allows 16 per page), and hides the others (`hidden`). Going back to a
+grid is instant: camera, crosshair, window, meshes and slices are as they were, and a picked item
+still moves the crosshair to its place. A hidden viewer keeps the scene it last showed, draws
+nothing, and reports readiness for its own grid; only the shown one has the tools, the snapshot
+`ref` and `onMark`. A redo that replaces an image drops its viewer. Leaving the page, or picking
+a task with no results yet ("No views for … yet"), still unmounts them all.
+
 ## The stream reconnects without losing what it has
 
 Every connection appends to the same events and resumes with `subscribe(..., after = last seq)`.
