@@ -30,12 +30,7 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import type { Api, Model, Models } from "@earendil-works/pi-ai";
-import {
-  inputPrefix,
-  referencePrefix,
-  scratchKey,
-  workflowSnapshotPrefix,
-} from "@voluma/contracts/r2";
+import { inputPrefix, referencePrefix, workflowSnapshotPrefix } from "@voluma/contracts/r2";
 import type { Claim, ReportRequest } from "@voluma/contracts/runner";
 import { runClient } from "@voluma/harness/adapters/http/run-client";
 import { type RunLayout, runLayout, type ThreadLayout } from "@voluma/harness/layout";
