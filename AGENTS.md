@@ -79,7 +79,7 @@ Either way the PR body names what breaks and which callers moved.
 A change that could stop a stored event from parsing (a new required field or
 a narrowed shape anywhere in a payload, recorded plans included) converts the
 stored events in an SQL migration in `apps/api/drizzle`, applied on deploy, and
-ships in two steps. Step 1: the field optional (or the shape still wide), an
+ships in two steps, expand then contract, so a live run survives the deploy overlap. Step 1: the field optional (or the shape still wide), an
 idempotent migration, and the code reading the old shape in one function marked
 for deletion. Step 2, after step 1 is live: a PR that re-runs the migration, makes
 the field required and deletes the fallback. Note step 2 in the package's
