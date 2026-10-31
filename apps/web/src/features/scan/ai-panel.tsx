@@ -36,18 +36,15 @@ function closedBecause(run: Run, me: Me): string | undefined {
   return undefined;
 }
 
-/** The API's refusal in plain words (a 403 or 409 carries the server's own); the text stays in the box. */
+/** The API's refusal in its own words when it gave some; the text stays in the box. */
 function refusal(error: Error): string {
-  const status = error instanceof ApiError ? error.status : undefined;
-  if (status === 409)
-    return (
-      (error as ApiError).serverMessage ??
-      "The AI is still answering, or the run can't be reopened. Try again once it finishes."
-    );
-  if (status === 403)
-    return (error as ApiError).serverMessage ?? "You can't write to this run's AI.";
-  if (status === 429) return "Too many runs are going right now. Try again shortly.";
-  return "Couldn't send. Check your connection and try again.";
+  if (!(error instanceof ApiError)) return "Couldn't send. Check your connection and try again.";
+  if (error.serverMessage) return error.serverMessage;
+  if (error.status === 409)
+    return "The AI is still answering, or the run can't be reopened. Try again once it finishes.";
+  if (error.status === 403) return "You can't write to this run's AI.";
+  if (error.status === 429) return "Too many runs are going right now. Try again shortly.";
+  return "Couldn't send. Try again.";
 }
 
 /** PNG bytes as plain base64, as the message takes them. */
@@ -103,8 +100,12 @@ export function useMessage({
     fingerprint: string;
     note: string;
     marks: string[];
+    /** The reply whose offer this accepts. */
+    offer?: string;
     prepared: Promise<{ body: SendRunMessageRequest; unseen: boolean }>;
   }>(undefined);
+  // The offer accepted: its button stays gone while the reopened run catches up.
+  const [accepted, setAccepted] = useState<string>();
   const inFlight = useRef(false);
   // A message without the picture it meant to carry says so once sent.
   const [unseen, setUnseen] = useState(false);
@@ -112,12 +113,13 @@ export function useMessage({
     mutationFn: async (attempt: NonNullable<typeof tried.current>) => {
       const { body, unseen } = await attempt.prepared;
       await sendRunMessage(run.id, body);
-      return { note: attempt.note, marks: attempt.marks, unseen };
+      return { note: attempt.note, marks: attempt.marks, offer: attempt.offer, unseen };
     },
     onSuccess: (sent) => {
       // Words typed while it was sending stay.
       if (sent.note) setText((now) => (now.trim() === sent.note ? "" : now));
       setUnseen(sent.unseen);
+      if (sent.offer) setAccepted(sent.offer);
       tried.current = undefined;
       onSent(sent.marks);
     },
@@ -126,23 +128,25 @@ export function useMessage({
     },
   });
   const closed = closedBecause(run, me);
-  /** Sends the words, or with `redo` accepts the AI's offer to redo that task (a `go`, nothing else). */
-  const submit = (redo?: string) => {
-    const go = redo !== undefined;
+  /** Sends the words, or with `offer` accepts the AI's offer to redo a task (a `go`, nothing else). */
+  const submit = (offer?: { replyId: string; taskId: string }) => {
+    const go = offer !== undefined;
     if (closed !== undefined || inFlight.current || (!go && !text.trim())) return;
     inFlight.current = true;
     const note = go ? "" : text.trim();
     const carried = !go && subject ? marks : [];
     const fields = go
-      ? { taskId: redo, go: true as const }
+      ? { taskId: offer.taskId, go: true as const }
       : {
           text: note,
           ...(subject && { taskId: subject.id }),
           ...(subject && itemId && { itemId }),
           ...(carried.length > 0 && { marks: carried.map((m) => m.mark) }),
         };
+    // A go is told apart by the offer it accepts: a later offer for the same task is a new message.
     const fingerprint = JSON.stringify({
       ...fields,
+      offer: offer?.replyId,
       marks: carried,
       viewKey: !go && snapshot ? viewKey : undefined,
     });
@@ -165,6 +169,7 @@ export function useMessage({
         fingerprint,
         note,
         marks: carried.map((m) => m.id),
+        offer: offer?.replyId,
         prepared: picture.then(async (png) => ({
           body: {
             ...body,
@@ -181,7 +186,7 @@ export function useMessage({
     }
     send.mutate(tried.current);
   };
-  return { subject, text, setText, send, unseen, submit, closed };
+  return { subject, text, setText, send, unseen, submit, closed, accepted };
 }
 
 export function AiPanel({
@@ -191,7 +196,7 @@ export function AiPanel({
   about,
   marks,
   views,
-  message: { subject, text, setText, send, unseen, submit, closed },
+  message: { subject, text, setText, send, unseen, submit, closed, accepted },
 }: {
   run: Run;
   scan: string;
@@ -271,18 +276,27 @@ export function AiPanel({
                 <li key={m.id} className="grid gap-1">
                   <span className="text-xs text-muted-foreground">The AI</span>
                   <Markdown text={m.text} className="text-sm" />
-                  {m.offer && m === items.at(-1) && closed === undefined && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      className="justify-self-start"
-                      disabled={send.isPending}
-                      onClick={() => submit(m.offer?.taskId)}
-                    >
-                      <RotateCcw aria-hidden />
-                      Yes, redo {tasks.find((t) => t.id === m.offer?.taskId)?.title ?? "it"}
-                    </Button>
-                  )}
+                  {m.offer &&
+                    m === items.at(-1) &&
+                    closed === undefined &&
+                    m.id !== accepted &&
+                    (() => {
+                      const offered = tasks.find((t) => t.id === m.offer?.taskId);
+                      return (
+                        offered && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="justify-self-start"
+                            disabled={send.isPending}
+                            onClick={() => submit({ replyId: m.id, taskId: offered.id })}
+                          >
+                            <RotateCcw aria-hidden />
+                            Yes, redo {offered.title}
+                          </Button>
+                        )
+                      );
+                    })()}
                 </li>
               ),
             )}

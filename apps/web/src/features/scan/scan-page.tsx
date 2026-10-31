@@ -377,7 +377,9 @@ function ScanReview({
     marks: sendable,
     snapshot,
     viewKey: subjectShown?.key,
-    itemId: item?.taskId === (about?.taskId ?? taskId) ? item?.id : undefined,
+    // Only an item you picked, and one the fold lists: a card for a task with no item has no id
+    // the server knows.
+    itemId: named?.acceptable ? named.id : undefined,
     onSent: (sent) => {
       setAbout(undefined);
       marking.drop(sent);
