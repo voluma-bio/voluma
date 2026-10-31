@@ -31,15 +31,15 @@ export function TaskList({ workflow }: { workflow: BundledWorkflow }) {
         const measures = measurementsOf(workflow).filter((o) => o.task === task.id);
         return (
           <li key={task.id} className="grid grid-cols-[1.75rem_minmax(0,1fr)] gap-x-2">
-            <span className="pt-px font-mono text-meta text-fg-subtle tabular-nums">{i + 1}</span>
+            <span className="pt-px font-mono text-xs text-fg-subtle tabular-nums">{i + 1}</span>
             <div>
               <p className="font-medium">{workflow.taskTitle(task.id)}</p>
-              {task.summary && <p className="text-ui text-muted-foreground">{task.summary}</p>}
+              {task.summary && <p className="text-sm text-muted-foreground">{task.summary}</p>}
               {measures.length > 0 && (
                 // Names hold commas ("TV, tibial IIOC"), so each is its own chip.
                 <ul aria-label="Measures" className="mt-1.5 flex flex-wrap gap-1">
                   {measures.map((o) => (
-                    <li key={o.id} className="rounded-md bg-muted px-1.5 py-px text-meta">
+                    <li key={o.id} className="rounded-md bg-muted px-1.5 py-px text-xs">
                       {o.name}
                     </li>
                   ))}
@@ -84,7 +84,7 @@ export function WorkflowPanel({
       <header className="flex items-start gap-3 border-b border-border px-5 py-4">
         <div className="min-w-0 flex-1">
           <h2 className="text-lg font-semibold">{workflow.name}</h2>
-          <p className="text-ui text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             {workflow.tasks.length} tasks, {measurementsOf(workflow).length} measurements
           </p>
         </div>
@@ -102,7 +102,7 @@ export function WorkflowPanel({
       </div>
       <footer className="border-t border-border px-5 py-3">
         {/* A new tab: leaving Run on new scans would drop the uploads under way. */}
-        <Button asChild variant="link" className="text-ui">
+        <Button asChild variant="link" className="text-sm">
           <Link to="/workflows" target="_blank" rel="noreferrer">
             Open in Workflows
             <ExternalLink aria-label="opens in a new tab" />

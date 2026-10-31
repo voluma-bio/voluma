@@ -17,13 +17,13 @@ import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { S3Client } from "@aws-sdk/client-s3";
 import { eventInputSchema } from "@voluma/contracts/events";
 import { taskIdSchema } from "@voluma/contracts/ids";
 import { outputReportSchema } from "@voluma/contracts/output";
 import { evidenceKey, reviewAssetKey, sha256Schema } from "@voluma/contracts/r2";
 import { focusSchema, reviewAssetsManifestSchema } from "@voluma/contracts/review";
 import { workflowPlanSchema } from "@voluma/contracts/workflow";
+import type { ObjectStore } from "@voluma/object-store";
 import { z } from "zod";
 import type { events } from "../domains/run/schema";
 import { filesUnder, pool, put } from "./r2-dir";
@@ -62,8 +62,7 @@ async function sha256Of(path: string): Promise<string> {
  * what each asset directory's manifest says. Evidence is content-addressed, so a stored one is kept; assets are overwritten unless the stored bytes match.
  */
 export async function uploadBackfill(
-  r2: S3Client,
-  bucket: string,
+  store: ObjectStore,
   exampleId: string,
   dir: string,
 ): Promise<AssetsReady[]> {
@@ -72,7 +71,7 @@ export async function uploadBackfill(
     const sha = sha256Schema.parse(name.split(".")[0]);
     const path = join(dir, "files", name);
     if ((await sha256Of(path)) !== sha) throw new Error(`${path} is not the file its name says`);
-    await put(r2, bucket, evidenceKey(exampleId, sha), path, { immutable: true });
+    await put(store, evidenceKey(exampleId, sha), path, { immutable: true });
   });
 
   const ready: AssetsReady[] = [];
@@ -85,11 +84,10 @@ export async function uploadBackfill(
     // "Converted" means manifest.json exists, so it goes last.
     const paths = (await filesUnder(root)).filter((p) => p !== "manifest.json");
     await pool(paths, 16, (p) =>
-      put(r2, bucket, reviewAssetKey(exampleId, sourceSha256, p), join(root, p)),
+      put(store, reviewAssetKey(exampleId, sourceSha256, p), join(root, p)),
     );
     await put(
-      r2,
-      bucket,
+      store,
       reviewAssetKey(exampleId, sourceSha256, "manifest.json"),
       join(root, "manifest.json"),
     );
