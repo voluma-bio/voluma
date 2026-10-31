@@ -70,14 +70,19 @@ there reaches every caller at once. Two shapes work:
 
 Either way the PR body names what breaks and which callers moved.
 
-Before merging a change that could stop a stored event from parsing (a new
-required field or a narrowed shape anywhere in a payload, recorded plans
-included), parse every staging run's events with the new `runEventSchema`:
-fetch each run's log from `GET /api/run/runs/:id/stream` with
-`VOLUMA_DEBUG_TOKEN` while it still parses (agents can't reach staging's
-database), and have a conversion ready for any that fail. The app gets no
-reader for an old shape; stored runs are converted by a one-off script kept
-out of the app. A query for the fields you think changed is not enough: it
+A change that could stop a stored event from parsing (a new required field or
+a narrowed shape anywhere in a payload, recorded plans included) converts the
+stored events in an SQL migration in `apps/api/drizzle`, applied on deploy, and
+ships in two steps. Step 1: the field optional (or the shape still wide), an
+idempotent migration, and the code reading the old shape in one function marked
+for deletion. Step 2, after step 1 is live: a PR that re-runs the migration, makes
+the field required and deletes the fallback. Note step 2 in the package's
+`.context/TODO.md`. `payload` is `json` because some payloads hold `\u0000`:
+read or cast payload fields only inside `CASE WHEN type = '<type>' THEN … END`,
+since Postgres may evaluate the json condition before the `type` filter. Before step 2, parse every staging run's
+events with the new `runEventSchema`: fetch each run's log from
+`GET /api/run/runs/:id/stream` with `VOLUMA_DEBUG_TOKEN` (agents can't reach
+staging's database). A query for the fields you think changed is not enough: it
 missed the recorded plans that took the runs list down after #177.
 
 ## Working in parallel

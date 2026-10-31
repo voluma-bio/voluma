@@ -44,11 +44,7 @@ export const events = pgTable(
     payload: json().notNull(),
     createdAt: timestamptz().notNull(),
   },
-  (t) => [
-    primaryKey({ columns: [t.runId, t.id] }),
-    unique("events_run_seq").on(t.runId, t.seq),
-    index("events_thread").on(t.runId, t.threadId, t.seq),
-  ],
+  (t) => [primaryKey({ columns: [t.runId, t.id] }), unique("events_run_seq").on(t.runId, t.seq)],
 );
 
 export const piMessages = pgTable(

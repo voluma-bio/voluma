@@ -1,5 +1,5 @@
 {
-  "id": "4d1f8421-778c-45a1-b842-f81903b37313",
+  "id": "ebcf6121-d8ee-48cc-a726-e917bd54adb3",
   "prevId": "35af82d4-ebb4-4762-a1ee-b437f4c1be17",
   "version": "7",
   "dialect": "postgresql",
@@ -117,30 +117,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
-        },
-        "events_run_id_id": {
-          "name": "events_run_id_id",
-          "columns": [
-            {
-              "expression": "run_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -148,8 +127,8 @@
       "uniqueConstraints": {
         "events_run_seq": {
           "name": "events_run_seq",
-          "nullsNotDistinct": false,
-          "columns": ["run_id", "seq"]
+          "columns": ["run_id", "seq"],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -223,12 +202,6 @@
       "name": "pi_messages",
       "schema": "",
       "columns": {
-        "run_id": {
-          "name": "run_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "thread_id": {
           "name": "thread_id",
           "type": "text",
@@ -248,35 +221,7 @@
           "notNull": true
         }
       },
-      "indexes": {
-        "pi_messages_run_thread_idx": {
-          "name": "pi_messages_run_thread_idx",
-          "columns": [
-            {
-              "expression": "run_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "thread_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "idx",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
+      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {
         "pi_messages_thread_id_idx_pk": {
@@ -500,9 +445,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "runs_started_by": {
           "name": "runs_started_by",
@@ -515,9 +460,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "runs_study": {
           "name": "runs_study",
@@ -530,9 +475,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -615,9 +560,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -746,9 +691,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -878,9 +823,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "provider_calls_open": {
           "name": "provider_calls_open",
@@ -899,9 +844,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -914,10 +859,10 @@
   },
   "enums": {},
   "schemas": {},
+  "views": {},
   "sequences": {},
   "roles": {},
   "policies": {},
-  "views": {},
   "_meta": {
     "columns": {},
     "schemas": {},

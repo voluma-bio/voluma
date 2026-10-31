@@ -2,8 +2,8 @@
  * Live frames (`@voluma/contracts/stream`): the model's output as it is written, sent to the
  * API as it happens and never stored. Two parts:
  * - `LiveBatcher` coalesces frames and posts them in batches, one request at a time and at
- *   most every FLUSH_MS. It never blocks the model: a frame is dropped when the
- *   unacknowledged text is over MAX_BUFFER_CHARS (the API is slow or down), and a failed post is
+ *   most every FLUSH_MS. It never blocks the model: empty frames and frames that would exceed
+ *   MAX_BUFFER_CHARS unacknowledged text or MAX_BATCH buffered frames are dropped. A failed post is
  *   dropped, not retried. A dropped frame leaves a gap in `offset`, which the browser's
  *   append guard turns into "stop showing this partial"; the durable event still lands.
  * - `ReplyFrames` turns one assistant reply's pi-ai events into frames, owning the
@@ -81,8 +81,13 @@ export function liveBatcher(post: PostLive): LiveBatcher {
   return {
     push(frame) {
       counts.frames++;
-      // Never wait for the API: past the cap, drop.
-      if (chars >= MAX_BUFFER_CHARS) {
+      // Bound the next frame too: one large chunk must not bypass the text cap,
+      // and empty/tiny frames from distinct streams must not grow metadata unboundedly.
+      if (
+        frame.text.length === 0 ||
+        chars + frame.text.length > MAX_BUFFER_CHARS ||
+        buffer.length >= MAX_BATCH
+      ) {
         counts.dropped++;
         return;
       }
