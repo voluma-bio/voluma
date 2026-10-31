@@ -1,5 +1,5 @@
 /**
- * The run page's data, derived with no React from the run's events and state: the threads
+ * A run's data, derived with no React from the run's events and state: the threads
  * (main agent, workers, checks) with what each is doing now, and per plan task where it stands,
  * what the AI did, the second AI check's verdict, its To check items (open or accepted), its QC
  * image and its values. Built on `reviewState` (the shared fold plus accepted checks), so it
@@ -217,21 +217,24 @@ export function agentTree(threads: Thread[]): AgentNode[] {
 /**
  * An agent's name where its task is already shown: "The AI's work, 2 tries", "Second AI check of
  * try 1", "Lead AI". A check's try is its `attemptId`'s place among its worker's attempts.
+ * `short`, for a narrow place beside its outcome: "The AI's work", "Second check", "Check 2".
  */
-export function agentLabel(t: Thread, threads: Thread[]): string {
+export function agentLabel(t: Thread, threads: Thread[], { short = false } = {}): string {
   switch (t.kind) {
     case "main":
       return "Lead AI";
     case "worker":
-      return t.attempts.length > 1 ? `The AI's work, ${t.attempts.length} tries` : "The AI's work";
+      return t.attempts.length > 1 && !short
+        ? `The AI's work, ${t.attempts.length} tries`
+        : "The AI's work";
     case "check": {
       const attemptId = t.attemptId;
       const tries = attemptId
         ? threads.find((w) => w.attempts.includes(attemptId))?.attempts
         : undefined;
-      return tries && tries.length > 1 && attemptId
-        ? `Second AI check of try ${tries.indexOf(attemptId) + 1}`
-        : "Second AI check";
+      const n = tries && attemptId ? tries.indexOf(attemptId) + 1 : 0;
+      if (!tries || tries.length < 2) return short ? "Second check" : "Second AI check";
+      return short ? `Check ${n}` : `Second AI check of try ${n}`;
     }
     case "chat":
       return "Chat";
@@ -459,7 +462,7 @@ type RunView = {
 /** The fold's title for a To check flag set by a `task` event; the task's name says as much. */
 const GENERIC_CHECK = "Marked to check";
 
-/** Everything the run page shows about the run, from its durable events and state. */
+/** Everything a run's screen shows about the run, from its durable events and state. */
 export function runView(
   events: RunEvent[],
   state: RunState,
