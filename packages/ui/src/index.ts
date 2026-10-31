@@ -56,6 +56,7 @@ export {
   ShellPanel,
   type ShellPanelProps,
   type ShellSide,
+  useOpenPanel,
 } from "./shell/shell";
 export {
   EmptyState,

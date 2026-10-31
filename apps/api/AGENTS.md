@@ -157,10 +157,6 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   snapshot, including reseeded examples with reused sequence numbers. Cache misses load only those
   events; hits load no event payloads. A single-run read of a run of any state throws on events that don't parse; lists
   leave out a completed run that doesn't and keep another with empty results. The event log remains the only durable human-decision state.
-- `inputs.ts` owns `/inputs/:inputId/download` and `/inputs/:inputId/file`, guarded by
-  `requireUser` only under `/inputs/:inputId/*`. Both allow only the
-  caller's org's reference scan (`referenceInputId(user.labId)`) before using `ReferenceArchive`. Reject HEAD before opening R2; keep
-  the descriptor's ETag pin and stream the file without buffering.
 - `runs.ts` also serves `GET /runs/:runId/files/:sha256`: one of the run's content-addressed
   files (`evidenceKey`) through `RunFiles` (`r2-run-files.ts`), after `RunRecords.readable`.
   No descriptor or ETag pin: the key is the content hash, so the bytes never change (`immutable`,

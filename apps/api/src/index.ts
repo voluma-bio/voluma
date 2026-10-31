@@ -32,7 +32,6 @@ import { pgSnapshots } from "./adapters/pg-snapshots";
 import { createAuth } from "./auth";
 import { createReview } from "./domains/review";
 import { directoryRunFiles } from "./domains/review/directory-run-files";
-import { r2ReferenceArchive } from "./domains/review/r2-reference-archive";
 import { r2RunFiles } from "./domains/review/r2-run-files";
 import { createRun } from "./domains/run";
 import type { Limits } from "./domains/run/admission";
@@ -169,7 +168,6 @@ const r2 =
         secretAccessKey: r2Env.secretAccessKey,
       }
     : null;
-const referenceArchive = r2 && r2ReferenceArchive(r2);
 const runFiles = process.env.RUN_FILES_DIRECTORY
   ? directoryRunFiles(resolve(process.env.RUN_FILES_DIRECTORY))
   : r2 && r2RunFiles(r2);
@@ -227,7 +225,6 @@ app.route(
     snapshots: pgSnapshots(db),
     messages: { check: queue.checkMessage, send: queue.sendMessage },
     files: runFiles,
-    referenceArchive,
   }),
 );
 
