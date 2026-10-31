@@ -85,12 +85,12 @@ and check threads.
   because an R2 mount cannot append: the adapter writes locally and copies in one go.
 - **Many threads, one run.** `startThread` returns `{send, done}` at once: `send` puts a
   message in the thread's inbox and answers false once it ended. Every notice to a thread
-  (a message from a person or another thread, compaction's wrap-up and overflow notes) waits
+  (a message from a person or another thread, compaction's context and overflow notices) waits
   in that inbox. All pending notices, in arrival order and each labelled with its sender, are
   appended to the last tool result of the batch that finishes next, so History holds what the
   model saw; none is ever steered in as its own user message mid-turn. A turn that ends with
   no tool call while the inbox holds notices continues with them as one user message; a
-  thread started with an input starts with them the same way; the wrap-up note, which only
+  thread started with an input starts with them the same way; the context notice, which only
   matters mid-turn, is dropped in both. Each notice is still its own `message` event under
   its own sender.
   `threads.ts` is the run's registry of what is running in this process (start or resume a

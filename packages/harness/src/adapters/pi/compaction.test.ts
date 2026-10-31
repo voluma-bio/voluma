@@ -221,10 +221,10 @@ describe("compactor", () => {
       contextWindow: 1_000_000,
       maxTokens: 131_072,
     });
-    expect(c.wrapUp(thread_(300_000))).toBeUndefined();
+    expect(c.contextNotice(thread_(300_000))).toBeUndefined();
     const warnAt = thread_(310_000);
-    expect(c.wrapUp(warnAt)).toContain("nearly full");
-    expect(c.wrapUp(warnAt)).toBeUndefined(); // once per context-full event
+    expect(c.contextNotice(warnAt)).toContain("nearly full");
+    expect(c.contextNotice(warnAt)).toBeUndefined(); // once per context-full event
     await c.prepare(warnAt);
     expect(requests).toHaveLength(0);
     const messages = thread_(340_000);
@@ -321,7 +321,7 @@ describe("compactor", () => {
     const { c, requests } = setup([reply("SUM")], model);
     const due = [...thread(), image(450)];
     expect(imageLoad(due).bytes).toBe(450);
-    expect(c.wrapUp(due)).toContain("nearly full"); // 45% of the limit: due, not tight
+    expect(c.contextNotice(due)).toContain("nearly full"); // 45% of the limit: due, not tight
     const tight = [...thread(), image(800)];
     await c.prepare(tight); // 80%: another turn might not fit
     expect(requests).toHaveLength(1);
@@ -329,6 +329,6 @@ describe("compactor", () => {
 
   it("skips the notice when another turn would not fit", () => {
     const { c } = setup([]);
-    expect(c.wrapUp(thread_(180_000))).toBeUndefined();
+    expect(c.contextNotice(thread_(180_000))).toBeUndefined();
   });
 });

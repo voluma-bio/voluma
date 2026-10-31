@@ -48,6 +48,13 @@ export function statusOf(message: string): number | undefined {
 const ANTHROPIC_INPUT_PLUS_OUTPUT = /input length and `?max_tokens`? exceed context limit/i;
 
 /**
+ * Meta's 400 past its image count ("request contains 51 images, exceeding the maximum of 50 allowed
+ * per request", per https://dev.meta.ai/docs/image-understanding); Pi's patterns miss it. As an
+ * overflow it belongs to the thread, which compacts and retries, instead of failing the run.
+ */
+const IMAGES_PER_REQUEST = /images?, exceeding the maximum of \d+ allowed per request/i;
+
+/**
  * Whether a failed reply's error text is a context overflow. Pi's catch-all overflow patterns also
  * match 5xx bodies ("too many tokens in the batch"), so only a 400, a 413 or no status counts.
  */
@@ -57,6 +64,7 @@ export function isContextOverflowError(message: string | undefined): boolean {
   return (
     (status === undefined || status === 400 || status === 413) &&
     (ANTHROPIC_INPUT_PLUS_OUTPUT.test(m) ||
+      IMAGES_PER_REQUEST.test(m) ||
       isContextOverflow({ stopReason: "error", errorMessage: m } as AssistantMessage))
   );
 }

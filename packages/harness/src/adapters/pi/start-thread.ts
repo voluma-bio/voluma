@@ -14,7 +14,7 @@
  * labelled with its sender, is appended to the last tool result of the batch that finishes
  * next, so History holds exactly what the model saw. A turn that ends with no tool call
  * while the inbox holds notices continues with them as one user message in the same format
- * (the wrap-up notice, which only matters mid-turn, is dropped there); a thread started with
+ * (the context notice, which only matters mid-turn, is dropped there); a thread started with
  * an `input` (or messages sent before its loop begins) starts with them the same way.
  * Each notice still gets its own user `message` event with its own sender. Once the thread
  * has ended, `send` answers false, and the way to wake it is another `startThread` with the
@@ -225,7 +225,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       m.role === "toolResult" && (m.details as { terminate?: boolean } | undefined)?.terminate;
     if (messages.slice(replyAt + 1).every(terminates)) return [];
     if (!historyError && !cutOff()) {
-      const notice = compacting.wrapUp(messages);
+      const notice = compacting.contextNotice(messages);
       if (notice) inbox.push({ text: notice, sender: NOTICE });
     }
     if (inbox.length === 0) return [];
