@@ -338,6 +338,7 @@ export function world(o: WorldOptions) {
       workflows: [
         { repo: "voluma-bio/voluma", path: "workflows/mouse-oa", commit: "a".repeat(40) },
       ],
+      sandboxImage: "test/image@sha256:" + "0".repeat(64),
       layout: runLayout(RUN, "inputs/", []),
       recorder: rec,
       history: {
@@ -369,7 +370,6 @@ export function world(o: WorldOptions) {
         write: async () => {},
         list: async () => [],
       },
-      earlierClaimsEnded: async () => {},
       outputs: {
         backup: async () => {},
         restore: async () => {},

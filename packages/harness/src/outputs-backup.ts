@@ -13,10 +13,9 @@
  * At the start of a claim, before any thread or sandbox exists:
  * 1. For each abandoned span (`correction.ended`) with a backup (`outputs.backed-up`) and no
  *    `outputs.restored`: `restore` the backup (the port checks `/outputs` matches it), then
- *    record `outputs.restored`. Cut off before the event, the next claim repeats it. Before a
- *    restore, `earlierClaimsEnded` waits until no earlier claim's sandbox is live (one could
- *    write over the restored files) and throws if some still are, which fails the claim. Only
- *    a pending restore waits.
+ *    record `outputs.restored`. Cut off before the event, the next claim repeats it. No earlier
+ *    claim's sandbox is live by now: the claim waited for them to terminate before it began
+ *    (`endOtherClaims`), so none can write over the restored files.
  * 2. For each finished span (the next `run.reopened` came with no end) whose backup is neither
  *    restored nor discarded: `discard` it and record `outputs.discarded`. So is an abandoned
  *    span with no `outputs.backed-up`: a cancel can land between the copy and the event, leaving
@@ -41,15 +40,12 @@ export async function keepOutputs(o: {
   outputs: Outputs;
   /** The main role holds `bash`, so it can write `/outputs` with no go. */
   mainWorks: boolean;
-  /** Resolves once no earlier claim's sandbox is live; throws if some are (`awaitOtherClaimsGone`). */
-  earlierClaimsEnded(signal: AbortSignal): Promise<void>;
   signal: AbortSignal;
 }): Promise<void> {
   const { runId, rootThreadId, recorder, outputs, signal } = o;
 
   for (const { reopenId, closed, backup, go } of corrections(recorder.events()).spans) {
     if (closed === "abandoned" && backup === "backed-up") {
-      await o.earlierClaimsEnded(signal);
       await outputs.restore(runId, reopenId, signal);
       await recorder.append(rootThreadId, "outputs.restored", { reopenId }, `${reopenId}:restored`);
     } else if (
