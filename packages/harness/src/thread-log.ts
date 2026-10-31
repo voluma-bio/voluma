@@ -98,6 +98,8 @@ export type Notice = {
   at: number;
   /** The thread it is about. */
   threadId: string;
+  /** That thread's name, which is how the main agent knows it. */
+  threadName: string;
   taskId?: string;
 } & (
   | { kind: "submitted" }
@@ -138,7 +140,11 @@ export type Notice = {
     }
 );
 
-type NoticeBody = Notice extends infer N ? (N extends unknown ? Omit<N, "at"> : never) : never;
+type NoticeBody = Notice extends infer N
+  ? N extends unknown
+    ? Omit<N, "at" | "threadName">
+    : never
+  : never;
 
 /** A call of the main agent that a rebuilt result reads back (`calls`). */
 export type MainCall =
@@ -154,6 +160,17 @@ function mainCall(name: string, input: unknown): MainCall | undefined {
     return { name, threadId: i.threadId, text: i.text };
   }
   return undefined;
+}
+
+/**
+ * The thread a model's input names: its name (`segmentation.worker`), which is all a model is
+ * shown, or an exact stored id (a thread started before names were what models see).
+ */
+export function threadByRef(
+  threads: ReadonlyMap<string, ThreadRecord>,
+  ref: string,
+): ThreadRecord | undefined {
+  return threads.get(ref) ?? [...threads.values()].find((r) => r.name === ref);
 }
 
 export interface ThreadLog {
@@ -282,7 +299,12 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
     string,
     { verdict: "passed" | "needs-review"; summary?: string; text: string }
   >(); // by attempt
-  const notice = (n: NoticeBody, at: number) => value.notices.push({ ...n, at } as Notice);
+  const notice = (n: NoticeBody, at: number) =>
+    value.notices.push({
+      ...n,
+      at,
+      threadName: value.threads.get(n.threadId)?.name ?? "",
+    } as Notice);
   // The task-state events of a failed or cancelled correction never happened, as `fold` has it.
   const { spans, open } = corrections(events);
   const abandoned = abandonedEvents(events, spans);
@@ -424,7 +446,12 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         record?.openCalls.set(toolCallId, name);
         const call = mainCall(name, input);
         if (call) {
-          value.calls.set(callKey(e.threadId, toolCallId), call);
+          value.calls.set(callKey(e.threadId, toolCallId), {
+            ...call,
+            ...(call.name === "message" && {
+              threadId: threadByRef(value.threads, call.threadId)?.id ?? call.threadId,
+            }),
+          });
           if (call.name === "message") {
             feedbackOpens.set(effectId("message", e.threadId, toolCallId), {
               text: call.text,

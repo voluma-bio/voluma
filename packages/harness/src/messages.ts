@@ -119,7 +119,7 @@ export const stuckSummary = (left: readonly TaskRow[]) =>
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}…` : text);
 
 export function noticeLine(n: Notice): string {
-  const who = n.taskId ? `${n.threadId} (${n.taskId})` : n.threadId;
+  const who = n.taskId ? `${n.threadName} (${n.taskId})` : n.threadName;
   switch (n.kind) {
     case "submitted":
       return `- ${who} submitted ${n.taskId}; its check is starting.`;
@@ -279,7 +279,7 @@ export function agentsList(
         : state;
     const last = r.lastSummary;
     return [
-      `- ${r.id} (${r.role}, ${r.taskId}): ${label}${last ? `. Last checkpoint: ${last}` : ""}`,
+      `- ${r.name} (${r.role}, ${r.taskId}): ${label}${last ? `. Last checkpoint: ${last}` : ""}`,
     ];
   });
   return lines.length > 0 ? lines.join("\n") : "(none)";
@@ -363,7 +363,10 @@ export function interruptedResult(
       : "`message` completed before the run was cut off: the worker has it.";
   }
   if (written) {
-    const what = tool === "start_worker" ? ` Worker ${written.threadId} was started.` : "";
+    const what =
+      tool === "start_worker"
+        ? ` Worker ${d.threads.get(written.threadId)?.name ?? ""} was started.`
+        : "";
     return `\`${tool}\` completed before the run was cut off.${what}`;
   }
   const call = d.calls.get(callKey(threadId, toolCallId));
