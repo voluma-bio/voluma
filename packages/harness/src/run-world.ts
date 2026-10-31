@@ -343,7 +343,7 @@ export function world(o: WorldOptions) {
   }
 
   async function claim(reopened = false): Promise<Folded> {
-    const rec = recorder(store as never, RUN, () => {}, 10, [...stored]);
+    const rec = recorder(store as never, RUN, () => {}, [...stored]);
     const supervised = superviseRun({
       runId: RUN,
       definition,
