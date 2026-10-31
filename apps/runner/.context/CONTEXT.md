@@ -129,7 +129,7 @@ records `assets.ready` / `assets.failed` on the root thread (id `<runId>:assets:
   no network. Only the trusted conversion sandbox mounts the input cache; agents do not.
   The snapshot keeps repo paths and includes
   `core/convert/`, so the command is `python /workflow/workflows/core/convert/review_assets.py` (not `-I`, which drops the `PYTHONPATH`
-  the converter imports `sidecar` through; the sandbox gets `RunLayout.pythonPath` alone).
+  the converter imports `sidecar` through; the sandbox gets `RunLayout.pythonPath` and the pinned image identity).
   A cloud-bucket mount cannot rename, which zarr's local store does for every file: the converter
   builds in a fixed `/tmp` path it clears at the start, and copies, `manifest.json` last. A
   non-zero exit from a sandbox that is gone counts as a sandbox failure (the one retry), not a
