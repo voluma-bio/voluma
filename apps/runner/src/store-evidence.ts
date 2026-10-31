@@ -21,10 +21,27 @@ import type { ObjectStore } from "@voluma/object-store";
 export function storeEvidence(store: ObjectStore): Evidence {
   /** Source key to the ETag and sha256 last seen for it. */
   const hashed = new Map<string, { etag: string; sha256: string }>();
-  async function hashObject(key: string, signal?: AbortSignal): Promise<string> {
-    const { body } = await store.get(key, { signal });
+  async function hashObject(
+    key: string,
+    etag: string | undefined,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const { body, size } = await store.get(key, { ifMatch: etag, signal });
+    const tooLarge = () =>
+      new EvidenceRefused(
+        `Evidence ${key} exceeds the ${MAX_UNMOUNTED_BYTES / 2 ** 20} MiB host read limit. Keep it as an output of the task that wrote it, or cite a smaller file.`,
+      );
+    if (size > MAX_UNMOUNTED_BYTES) {
+      await body.cancel();
+      throw tooLarge();
+    }
     const hash = createHash("sha256");
-    for await (const chunk of body) hash.update(chunk);
+    let read = 0;
+    for await (const chunk of body) {
+      read += chunk.length;
+      if (read > MAX_UNMOUNTED_BYTES) throw tooLarge();
+      hash.update(chunk);
+    }
     return hash.digest("hex");
   }
   return {
@@ -45,7 +62,7 @@ export function storeEvidence(store: ObjectStore): Evidence {
             `Evidence ${file.path} is ${Math.round(head.size / 2 ** 20)} MiB and your sandbox does not mount it, so it cannot be read here (limit ${MAX_UNMOUNTED_BYTES / 2 ** 20} MiB). Keep it as an output of the task that wrote it, or cite a smaller file.`,
           );
         }
-        sha256 = hash ? await hash() : await hashObject(key, signal);
+        sha256 = hash ? await hash() : await hashObject(key, etag, signal);
         if (etag) hashed.set(key, { etag, sha256 });
       }
       const target = evidenceKey(runId, sha256);
