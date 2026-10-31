@@ -35,11 +35,12 @@
  *                                     later call: `Origin: <app URL>` and
  *                                     `content-type: application/json`
  *
- * Rules for every request under `/api` that doesn't carry the runner's bearer token:
- *   - A non-GET/HEAD request must send `content-type: application/json`, or
- *     the server answers 415.
- *   - `Origin` must equal the app's origin, or the server answers 403 (its
- *     message tells a person to reload). Browsers send it on same-origin fetches.
+ * For non-GET/HEAD requests under `/api`, unless authenticated by the runner's
+ * or debug bearer token:
+ *   - `Origin` must equal the app's origin and `Sec-Fetch-Site`, when present,
+ *     must be `same-origin`, or the server answers 403 (its message tells a
+ *     person to reload). Browsers send these on same-origin fetches.
+ *   - `content-type` must be `application/json`, or the server answers 415.
  * `me` also answers 403 to a bearer (non-cookie) principal.
  */
 import { z } from "zod";

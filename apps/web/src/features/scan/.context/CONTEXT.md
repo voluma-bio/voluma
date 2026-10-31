@@ -56,8 +56,9 @@ stopped.
 - **The AI** writes through `sendRunMessage`; who may write and when is the API's rule, and the
   box says why it is off. Something's wrong makes the message about the item's task and opens
   The AI beside what is open; that subject holds until the task in view changes or the message is
-  sent. A 409 shows the server's text. A retry keeps the message id, so the server stores it
-  once; editing after a failure makes a new message.
+  sent. A 403 or 409 shows the server's text. Signing in does not let a guest reopen their old
+  run: the account has a different identity and lab, and only the starter may send. A retry keeps
+  the message id, so the server stores it once; editing after a failure makes a new message.
 - **Your marks** are page state (`useMarking`, `scan-page.tsx`), lost on reload. The tool strip on
   the viewer's bar (`TOOLS` in `marks-panel.tsx`: Navigate, Point, Box, Line, Lasso; Esc, P, B,
   L, O) picks what a click or drag makes (`@voluma/viewer/grid`'s `tool`). Esc first drops a mark

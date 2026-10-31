@@ -16,7 +16,7 @@ import type { Run } from "@voluma/contracts/run";
 import { Markdown, type TaskView, useEvents } from "@voluma/run-view";
 import { Button, Chip, EmptyState, StatusMark, TextAreaField } from "@voluma/ui";
 import { RotateCcw, Send } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { describe, type YourMark } from "./marks-panel";
 
 /** Why this person can't write to the run's AI now, or nothing when they can. */
@@ -25,8 +25,7 @@ function closedBecause(run: Run, me: Me): string | undefined {
   if (run.startedBy !== me.userId)
     return "Only the person who started this run can write to its AI.";
   if (run.credentials === "visitor") return "A run on your own keys can't be reopened.";
-  // Left: a run on Voluma's keys, which a guest can't reopen.
-  if (me.kind === "visitor") return "Sign in with an account to write to this run's AI.";
+  if (me.kind === "visitor") return "Guests can't reopen runs on Voluma's keys.";
   if (run.state.status !== "ended") return "The AI is working. You can write once it finishes.";
   if (run.state.outcome !== "completed")
     return "This run didn't finish, so its AI can't be reopened.";
@@ -143,6 +142,7 @@ export function AiPanel({
     },
   });
   const closed = closedBecause(run, me);
+  const closedId = useId();
   const answering =
     run.state.status !== "ended" && items.length > 0 && items.at(-1)?.from === "person";
 
@@ -230,12 +230,17 @@ export function AiPanel({
           maxLength={10_000}
           value={text}
           disabled={closed !== undefined || send.isPending}
+          aria-describedby={closed ? closedId : undefined}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && text.trim()) send.mutate(false);
           }}
         />
-        {closed && <p className="text-xs text-muted-foreground">{closed}</p>}
+        {closed && (
+          <p id={closedId} className="text-xs text-muted-foreground">
+            {closed}
+          </p>
+        )}
         <div className="flex flex-wrap items-center gap-2">
           <span className="flex-1" />
           {subject && (
@@ -243,6 +248,7 @@ export function AiPanel({
               type="button"
               size="sm"
               disabled={closed !== undefined || send.isPending}
+              aria-describedby={closed ? closedId : undefined}
               onClick={() => send.mutate(true)}
             >
               <RotateCcw aria-hidden />
@@ -254,6 +260,7 @@ export function AiPanel({
             variant="primary"
             size="sm"
             disabled={closed !== undefined || send.isPending || !text.trim()}
+            aria-describedby={closed ? closedId : undefined}
           >
             <Send aria-hidden />
             {send.isPending ? "Sending…" : "Send"}
