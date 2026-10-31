@@ -80,7 +80,7 @@ async function listFiles(): Promise<UploadFile[]> {
 async function put(url: string, path: string): Promise<boolean> {
   for (let attempt = 1; attempt <= 4; attempt++) {
     try {
-      const res = await fetch(url, {
+      const res = await fetch(new URL(url, origin), {
         method: "PUT",
         body: await openAsBlob(diskPaths.get(path) as string),
       });

@@ -1,6 +1,7 @@
 /**
  * Interfaces both API domains depend on: what one domain reads from the other (index.ts
- * wires it; a domain never imports the other), and shared adapters such as blob storage.
+ * wires it; a domain never imports the other). Blob storage is `ObjectStore` from
+ * `@voluma/object-store`, built by index.ts.
  * The run domain's event-log and history ports are derived from its Postgres adapters
  * (`pg-event-log.ts`, `pg-history.ts`); the Sandbox port lives in packages/harness, since the
  * runner, not the API, creates sandboxes. A refusal is an `HTTPException` thrown where it is
@@ -80,36 +81,4 @@ export type RunMessages = {
     runId: string,
     msg: { id: string; payload: PersonMessage },
   ): Promise<MessageSent>;
-};
-
-/** A run's content-addressed files (`evidenceKey`), its converted review assets (`reviewAssetKey`) and the snapshots researchers attach to messages. */
-export type RunFiles = {
-  /** Publish complete content-addressed bytes; rejects with 502 when storage fails. */
-  put(runId: string, sha256: string, bytes: Uint8Array, signal: AbortSignal): Promise<void>;
-  /**
-   * A short-lived URL for one converted asset of the run (`reviewAssetKey(runId, sha256,
-   * path)`), with the seconds it stays valid for. The same file asked for again soon gets the
-   * same URL (signed at a window's start), so the browser's cache can serve the repeat. The
-   * object is immutable; storage tells the browser to cache it for a day. Does not check that
-   * the object exists.
-   */
-  assetUrl(
-    runId: string,
-    sha256: string,
-    path: string,
-  ): Promise<{ url: string; validSeconds: number }>;
-  /** Stores a researcher's view snapshot (`messageSnapshotKey`); the caller has checked it is a PNG. */
-  putSnapshot(runId: string, messageId: string, png: Uint8Array): Promise<void>;
-  /** A message's view snapshot (`messageSnapshotKey`); rejects like `open`. */
-  openSnapshot(
-    runId: string,
-    messageId: string,
-    signal: AbortSignal,
-  ): Promise<{ body: ReadableStream<Uint8Array>; byteLength: number }>;
-  /** Rejects with a 404 `HTTPException` when there is no such file, a 502 when storage fails. */
-  open(
-    runId: string,
-    sha256: string,
-    signal: AbortSignal,
-  ): Promise<{ body: ReadableStream<Uint8Array>; byteLength: number }>;
 };

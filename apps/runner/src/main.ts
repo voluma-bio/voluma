@@ -11,6 +11,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { createModels } from "@earendil-works/pi-ai";
 import { CLAIM_POLL_SECONDS } from "@voluma/contracts/runner";
 import { claimRun } from "@voluma/harness/adapters/http/hand-off";
+import { r2Store } from "@voluma/object-store/r2";
 import { runnerConfig } from "./config.ts";
 import { PROVIDERS } from "./providers.ts";
 import { redactor } from "./redact.ts";
@@ -46,6 +47,7 @@ const ctx: RunnerContext = {
   models,
   aliases,
   visitorModel: resolve(config.visitorModel),
+  objects: r2Store(config.r2),
   log,
 };
 

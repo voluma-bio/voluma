@@ -1,8 +1,9 @@
 /** Human review overlays scientific results; it never changes the scientific fold. */
 import type { RunEvent } from "./events";
-import { fold } from "./fold";
-import type { TaskStatus } from "./ids";
+import { corrections, type FoldedTask, fold } from "./fold";
+import type { TaskState, TaskStatus } from "./ids";
 import type { ReviewSummary } from "./review";
+import type { RunState } from "./run";
 
 /**
  * `live`: include a correction still in progress (the run page's progress). Without it review
@@ -67,4 +68,88 @@ export function progress(revision: {
       0,
     ),
   };
+}
+
+/**
+ * An open correction's revision, which task states read while it runs: `reviewState(events)`
+ * holds it back, so values and checks stay on the last completed result. Undefined when no
+ * correction is open: both folds' latest revision is then the same.
+ */
+export function openCorrectionRevision(events: readonly RunEvent[]) {
+  return corrections(events).open
+    ? reviewState(events, { live: true }).revisions.at(-1)
+    : undefined;
+}
+
+/** What `taskStates` reads of a folded task. */
+export type StateFacts = Pick<FoldedTask, "id" | "status" | "skipped" | "satisfied" | "threads">;
+
+/** What `taskStates` reads of the run's state (`RunState`): its status, and an ended run's outcome. */
+export type RunStateFacts =
+  | { status: "queued" | "running" | "awaiting-keys" }
+  | Pick<Extract<RunState, { status: "ended" }>, "status" | "outcome">;
+
+/**
+ * Where the run stands, as far as its tasks' states need it: `stopped` once it has ended,
+ * `paused` while it waits for a runner or keys, none while it runs.
+ */
+type RunHalt = "stopped" | "paused" | undefined;
+
+/**
+ * Every plan task's state, the one rule the scan review and the study both show. It reads fold
+ * fields only (status, skipped, satisfied, the attempt's threads), never a sentence, and the run's
+ * `state`. `open`: the threads started and not ended (`openThreads`); they run only while the run
+ * does. `failed`: the threads whose latest end failed (`failedThreads`); they count only when the
+ * run failed, since a fatal provider error fails the run with no task event, so the task whose AI
+ * failed is the one it failed on. Read the revision a correction in progress is writing, not the
+ * one `reviewState` holds (`openCorrectionRevision`).
+ */
+export function taskStates(
+  revision: {
+    tasks: readonly StateFacts[];
+    plan: { tasks: readonly { id: string; dependsOn: readonly string[] }[] };
+  },
+  {
+    state,
+    open,
+    failed,
+  }: {
+    state: RunStateFacts;
+    open: Iterable<string>;
+    failed: ReadonlySet<string>;
+  },
+): Map<string, TaskState> {
+  const run: RunNow = {
+    running: new Set(state.status === "running" ? open : []),
+    failed: state.status === "ended" && state.outcome === "failed" ? failed : new Set(),
+    halt: state.status === "ended" ? "stopped" : state.status === "running" ? undefined : "paused",
+  };
+  const byId = new Map(revision.tasks.map((t) => [t.id, t]));
+  return new Map(
+    revision.plan.tasks.map((p) => {
+      const t = byId.get(p.id);
+      const blocked = p.dependsOn.some((d) => !byId.get(d)?.satisfied);
+      return [p.id, stateOf(t, blocked, run)];
+    }),
+  );
+}
+
+type RunNow = { running: ReadonlySet<string>; failed: ReadonlySet<string>; halt: RunHalt };
+
+function stateOf(
+  t: StateFacts | undefined,
+  blocked: boolean,
+  { running, failed, halt }: RunNow,
+): TaskState {
+  const status = t?.status;
+  if (t?.skipped) return "skipped";
+  if (status === "done" || status === "to-check" || status === "failed") return status;
+  const { worker, check } = t?.threads ?? {};
+  if ((worker && failed.has(worker)) || (check && failed.has(check))) return "failed";
+  const started = status === "in-progress" || status === "under-review";
+  if (halt && started) return halt;
+  if (worker && running.has(worker)) return "running";
+  if (status === "under-review" && check && running.has(check)) return "checking";
+  if (started) return "held";
+  return blocked ? "waiting" : "ready";
 }

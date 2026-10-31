@@ -1,18 +1,21 @@
 /**
- * One item waiting for a person's decision: which task it belongs to, what the AI says about it,
+ * One item waiting for a person's decision: where it is (its task, or its scan), what the AI says about it,
  * what the second AI check found, the value it affects, and the two decisions (Looks right,
  * Something's wrong). The decision lives here only: other places (the AI panel, the report) refer
- * to the item, never draw it again. Data comes in as props; the scan review's To check panel shows
- * it today.
+ * to the item, never draw it again. Data comes in as props; the scan review's To check panel and
+ * the study's To check page show it.
  */
 import { Button, cx, StatusGlyph, StatusMark } from "@voluma/ui";
 import { Check } from "lucide-react";
 import type { ReactNode } from "react";
 
 export type ItemToCheckProps = {
-  /** The task it belongs to, named above the title. */
-  task: string;
-  /** What to look at; none when the task's name says it. */
+  /**
+   * Where it is, named above the title: its task, or its scan in a list of one check across
+   * scans. Whichever the list around it doesn't already say.
+   */
+  context: string;
+  /** What to look at; none when `context` says it. */
   title?: string;
   /** What the AI says about it. */
   text: string;
@@ -34,13 +37,15 @@ export type ItemToCheckProps = {
   readOnly?: string;
   /** Something's wrong: tell the AI what should change. */
   onWrong?: () => void;
+  /** The page's own way in after the decisions, such as the study's "Review in 3D". */
+  actions?: ReactNode;
   /** What went wrong with the last decision. */
   error?: string;
   className?: string;
 };
 
 export function ItemToCheck({
-  task,
+  context,
   title,
   text,
   found,
@@ -51,12 +56,13 @@ export function ItemToCheck({
   accepting = false,
   readOnly,
   onWrong,
+  actions,
   error,
   className,
 }: ItemToCheckProps) {
   return (
     <article
-      aria-label={title ?? task}
+      aria-label={title ?? context}
       className={cx(
         "grid gap-2 rounded-lg bg-card p-3.5 inset-ring inset-ring-line-strong",
         className,
@@ -64,7 +70,7 @@ export function ItemToCheck({
     >
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <StatusGlyph status={state === "accepted" ? "done" : "check"} className="size-3" />
-        {task}
+        {context}
       </p>
       {title && <h3 className="text-base leading-snug font-semibold">{title}</h3>}
       {text && <p className="text-sm leading-relaxed">{text}</p>}
@@ -86,6 +92,7 @@ export function ItemToCheck({
             {readOnly && <span className="text-xs text-muted-foreground">{readOnly}</span>}
           </>
         )}
+        {actions}
       </div>
       {error && (
         <p role="alert" className="text-sm text-destructive">
