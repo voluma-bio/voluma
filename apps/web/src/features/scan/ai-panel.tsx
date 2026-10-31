@@ -98,7 +98,6 @@ export function useMessage({
   // The API deduplicates by id alone. A retry must keep the entire request, including its PNG.
   const tried = useRef<{
     fingerprint: string;
-    note: string;
     marks: string[];
     prepared: Promise<{ body: SendRunMessageRequest; unseen: boolean }>;
   }>(undefined);
@@ -109,11 +108,10 @@ export function useMessage({
     mutationFn: async (attempt: NonNullable<typeof tried.current>) => {
       const { body, unseen } = await attempt.prepared;
       await sendRunMessage(run.id, body);
-      return { note: attempt.note, marks: attempt.marks, unseen };
+      return { marks: attempt.marks, unseen };
     },
     onSuccess: (sent) => {
-      // Words typed while it was sending stay.
-      if (sent.note) setText((now) => (now.trim() === sent.note ? "" : now));
+      setText("");
       setUnseen(sent.unseen);
       tried.current = undefined;
       onSent(sent.marks);
@@ -149,29 +147,23 @@ export function useMessage({
         ((MESSAGE_BODY_BYTES - new Blob([JSON.stringify(body)]).size - 64) * 3) / 4,
       );
       // Invoke capture before mutate: a mutation can pause offline while the user changes tasks.
-      const picture =
+      // A capture that fails sends the message without its picture, and says so.
+      const picture: Promise<string | null | undefined> =
         go || !snapshot
           ? Promise.resolve(undefined)
           : room > 0
             ? snapshot(Math.min(MAX_MESSAGE_SNAPSHOT_BYTES, room))
+                .then((png) => png && base64(png))
+                .catch(() => null)
             : Promise.resolve(null);
-      const attempt = {
+      tried.current = {
         fingerprint,
-        note,
         marks: carried.map((m) => m.id),
-        prepared: picture.then(async (png) => ({
-          body: {
-            ...body,
-            ...(png && { snapshot: { mimeType: "image/png" as const, data: await base64(png) } }),
-          },
-          unseen: png === null,
+        prepared: picture.then((data) => ({
+          body: { ...body, ...(data && { snapshot: { mimeType: "image/png" as const, data } }) },
+          unseen: data === null,
         })),
       };
-      // Preparation failures made no request: allow the next click to capture again.
-      void attempt.prepared.catch(() => {
-        if (tried.current === attempt) tried.current = undefined;
-      });
-      tried.current = attempt;
     }
     send.mutate(tried.current);
   };
@@ -225,7 +217,7 @@ export function AiPanel({
           <Chip>no marks of yours</Chip>
         ) : (
           marks.map((m) => (
-            <Chip key={m.id} className="text-mark-mine">
+            <Chip key={m.id} className="text-mark-mine-text">
               your {m.tag}
             </Chip>
           ))
@@ -333,7 +325,7 @@ export function AiPanel({
         </div>
         {send.isSuccess && unseen && (
           <p className="text-xs text-muted-foreground">
-            Sent without a picture of the views: they were not ready or the picture was too large.
+            Sent without a picture of the views: it couldn't be made, or was too large.
           </p>
         )}
         {send.isError && (

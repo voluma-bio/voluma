@@ -16,12 +16,9 @@ import type { Me } from "@voluma/contracts/auth";
 import { AppShell, Button, LoadingState, ShellLink } from "@voluma/ui";
 import { House, Workflow } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, Outlet, useLocation, useMatches, useNavigate } from "react-router";
+import { Link, Outlet, useLocation, useNavigate } from "react-router";
 import { AccountMenu, BrandLockup } from "./account";
 import { GateScreen, SignInScreen } from "./sign-in-screen";
-
-/** Static facts a route declares in its `handle`: the shell's theme on that screen. */
-export type RouteHandle = { theme?: "light" | "dark" };
 
 type Session =
   | { state: "loading" }
@@ -117,18 +114,12 @@ function Shell({ me }: { me: Me }) {
     () => new QueryClient({ defaultOptions: { queries: { retry: false } } }),
   );
   useEffect(() => () => queryClient.clear(), [queryClient]);
-  const matches = useMatches();
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  const theme =
-    matches
-      .map((m) => (m.handle as RouteHandle | undefined)?.theme)
-      .filter(Boolean)
-      .at(-1) ?? "light";
   return (
     <QueryClientProvider client={queryClient}>
       <AppShell
-        theme={theme}
+        theme="light"
         logo={
           <Link to="/" className="rounded-md">
             <BrandLockup className="gap-2 [&_svg]:size-5" />

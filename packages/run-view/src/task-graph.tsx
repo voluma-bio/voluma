@@ -488,9 +488,16 @@ function StudyBox({
 /** Open check items: the ones "Looks right" can still accept, or a card with nothing to accept. */
 const openItems = (task: ScanGraphTask) => task.needs.filter((n) => !n.accepted).length;
 
+/**
+ * The state a box shows: a done task can still carry open items (To check lists them), and
+ * then it reads To check like any other task that needs you.
+ */
+const shownState = (task: ScanGraphTask, open: number): TaskState =>
+  task.state === "done" && open > 0 ? "to-check" : task.state;
+
 /** A box's one line at scan size: what needs you, what is going on, or its key value. */
 function scanLine(task: ScanGraphTask, open: number): { text: ReactNode; tone?: string } {
-  switch (task.state) {
+  switch (shownState(task, open)) {
     case "to-check":
       return open > 0
         ? { text: `${open} to check`, tone: "font-medium text-check" }
@@ -539,7 +546,8 @@ function ScanBox({
 }) {
   const open = openItems(task);
   // A To check task whose items are all accepted reads as done.
-  const status = task.state === "to-check" && open === 0 ? "done" : TASK_STATUS[task.state];
+  const state = shownState(task, open);
+  const status = state === "to-check" && open === 0 ? "done" : TASK_STATUS[state];
   const line = scanLine(task, open);
   const idle = task.state === "waiting" || task.state === "ready" || task.state === "skipped";
   const threads = task.threads ?? [];

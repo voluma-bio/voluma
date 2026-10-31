@@ -6,7 +6,7 @@
  * hover ring; moving those redraws only this canvas, never the pane's picture. Also the
  * measures a mark carries (a line's mm, an outline's mm²).
  */
-import { type RefObject, useEffect, useRef } from "react";
+import { type RefObject, useEffect, useRef, useState } from "react";
 import { sliceSegment } from "./geometry";
 import {
   type Axis,
@@ -24,7 +24,12 @@ type Project = (p: Zyx) => readonly [number, number] | null;
 /** How a pane shows marks now: its projection and what of a mark it shows. */
 export type MarkView = { project: Project; shapeOf: (mark: GridMark) => Shape | null };
 
-/** A pane's mark canvas: the pane draws it with each frame, the layer alone for its own changes. */
+/**
+ * A pane's mark canvas and the marking gesture in progress. The pane draws the canvas with each
+ * frame, the layer alone for its own changes. One gesture at a time: `start` claims a pointer,
+ * `cancel` ends it however it ends (release, Esc, a lost or cancelled pointer, another tool,
+ * unmount) and runs the pane's own reset.
+ */
 export type MarkLayer = {
   canvas: HTMLCanvasElement;
   /** The mark being drawn, and where a point would land. */
@@ -34,39 +39,43 @@ export type MarkLayer = {
   draw(transient?: boolean): void;
   /** Draws at the next frame, the picture untouched. */
   redraw(): void;
+  /** The pane's picture and then the marks, drawn now for a snapshot (`PaneHandle.layers`). */
+  layers(picture: HTMLCanvasElement, paint: () => void): HTMLCanvasElement[];
+  /**
+   * A gesture begins with this pointer, captured on the pane unless `capture` is false (a 3D
+   * click leaves the pointer to the orbit controls).
+   */
+  start(event: PointerEvent, capture?: boolean): void;
+  /** Whether `event` is the gesture's pointer. */
+  owns(event: PointerEvent): boolean;
+  /** Ends the gesture: no draft, no ring, the pointer released, then the pane's own reset. */
+  cancel(): void;
+  /** The pane's reset of its own gesture state, run by every `cancel`; returns its removal. */
+  onCancel(reset: () => void): () => void;
 };
 
 type Ink = Record<"you" | "ai" | "well" | "chip" | "chipFg", string>;
 
 /**
  * The mark layer over `host`, sized with it. `view` is read at each draw (null before the pane
- * has a view). A tool put away mid-gesture leaves no draft, and a tool that doesn't place points
- * leaves no ring.
+ * has a view). A new tool cancels the gesture, and Esc cancels one made with a tool.
  */
 export function useMarkLayer(
   host: RefObject<HTMLElement | null>,
   view: () => MarkView | null,
   tool: MarkTool | null,
   marks: readonly ShownMark[],
-): RefObject<MarkLayer | null> {
-  const layer = useRef<MarkLayer | null>(null);
-  const latest = useRef({ view, marks });
-  latest.current = { view, marks };
-  useEffect(() => {
-    const element = host.current!;
+): MarkLayer {
+  const latest = useRef({ view, marks, tool });
+  latest.current = { view, marks, tool };
+  const [layer] = useState(() => {
     const canvas = document.createElement("canvas");
     // Above the pane's picture, below its chips.
     canvas.className = "pointer-events-none absolute inset-0 z-1";
-    element.append(canvas);
-    // The tokens, once: the theme is fixed for the viewer's life.
-    const ink: Ink = {
-      you: tokenColor("--mark-mine"),
-      ai: tokenColor("--mark-ai"),
-      well: tokenColor("--viewer-well"),
-      chip: tokenColor("--viewer-chip"),
-      chipFg: tokenColor("--viewer-chip-fg"),
-    };
+    let ink: Ink | undefined;
     let frame = 0;
+    let gesture: { pointerId: number; captured: boolean } | null = null;
+    let reset = () => {};
     const own: MarkLayer = {
       canvas,
       draft: null,
@@ -75,6 +84,14 @@ export function useMarkLayer(
         cancelAnimationFrame(frame);
         frame = 0;
         const v = latest.current.view();
+        // The tokens, once: the theme is fixed for the viewer's life.
+        ink ??= {
+          you: tokenColor("--mark-mine"),
+          ai: tokenColor("--mark-ai"),
+          well: tokenColor("--viewer-well"),
+          chip: tokenColor("--viewer-chip"),
+          chipFg: tokenColor("--viewer-chip-fg"),
+        };
         if (v)
           drawMarks(
             canvas,
@@ -88,35 +105,88 @@ export function useMarkLayer(
       redraw() {
         frame ||= requestAnimationFrame(() => own.draw());
       },
+      layers(picture, paint) {
+        paint();
+        own.draw(false);
+        own.redraw();
+        return [picture, canvas];
+      },
+      start(event, capture = true) {
+        gesture = { pointerId: event.pointerId, captured: capture };
+        if (capture) host.current?.setPointerCapture(event.pointerId);
+      },
+      owns: (event) => gesture?.pointerId === event.pointerId,
+      cancel() {
+        const ended = gesture;
+        gesture = null;
+        const element = host.current;
+        if (ended?.captured && element?.hasPointerCapture(ended.pointerId))
+          element.releasePointerCapture(ended.pointerId);
+        own.draft = null;
+        own.hover = null;
+        own.redraw();
+        reset();
+      },
+      onCancel(next) {
+        reset = next;
+        return () => {
+          if (reset === next) reset = () => {};
+        };
+      },
     };
+    return Object.assign(own, {
+      stop() {
+        cancelAnimationFrame(frame);
+        frame = 0;
+      },
+      active: () => gesture !== null,
+    });
+  });
+  useEffect(() => {
+    const element = host.current!;
+    element.append(layer.canvas);
     const observer = new ResizeObserver(() => {
       const { width, height } = element.getBoundingClientRect();
       if (!width || !height) return;
-      canvas.width = Math.round(width * globalThis.devicePixelRatio);
-      canvas.height = Math.round(height * globalThis.devicePixelRatio);
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
-      own.draw();
+      layer.canvas.width = Math.round(width * globalThis.devicePixelRatio);
+      layer.canvas.height = Math.round(height * globalThis.devicePixelRatio);
+      layer.canvas.style.width = `${width}px`;
+      layer.canvas.style.height = `${height}px`;
+      layer.draw();
     });
     observer.observe(element);
-    layer.current = own;
-    return () => {
-      cancelAnimationFrame(frame);
-      observer.disconnect();
-      canvas.remove();
-      layer.current = null;
+    // Only the pane's own capture: the orbit controls capture on the canvas inside it.
+    const lost = (event: PointerEvent) => {
+      if (event.target === element && layer.owns(event)) layer.cancel();
     };
-  }, [host]);
+    const cancelled = (event: PointerEvent) => {
+      if (layer.owns(event)) layer.cancel();
+    };
+    // On the window, ahead of the page: one Esc drops the mark being drawn and does nothing else.
+    const key = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || !layer.active() || !latest.current.tool) return;
+      event.preventDefault();
+      event.stopPropagation();
+      layer.cancel();
+    };
+    element.addEventListener("lostpointercapture", lost);
+    element.addEventListener("pointercancel", cancelled);
+    globalThis.addEventListener("keydown", key, { capture: true });
+    return () => {
+      layer.cancel();
+      layer.stop();
+      element.removeEventListener("lostpointercapture", lost);
+      element.removeEventListener("pointercancel", cancelled);
+      globalThis.removeEventListener("keydown", key, { capture: true });
+      observer.disconnect();
+      layer.canvas.remove();
+    };
+  }, [host, layer]);
   useEffect(() => {
-    layer.current?.redraw();
-  }, [marks]);
-  useEffect(() => {
-    const own = layer.current;
-    if (!own) return;
-    own.hover = null;
-    own.draft = null;
-    own.redraw();
-  }, [tool]);
+    layer.redraw();
+  }, [marks, layer]);
+  // A tool put away or swapped mid-gesture leaves nothing behind.
+  useEffect(() => layer.cancel(), [tool, layer]);
   return layer;
 }
 
@@ -261,6 +331,8 @@ function drawMarks(
     if (!shape) continue;
     const color = ink[m.by];
     const width = m.selected ? 3 : 2;
+    // The selected mark's edge is light, not dark, so it stands out from the rest.
+    const edge = m.selected ? ink.chipFg : ink.well;
     const dash = m.by === "ai" ? [5, 4] : [];
     for (const line of shape.lines) {
       const points = line.points.map(project);
@@ -276,8 +348,8 @@ function drawMarks(
       // A dark edge keeps the line readable over bright bone.
       path();
       ctx.setLineDash([]);
-      ctx.strokeStyle = ink.well;
-      ctx.lineWidth = width + 2;
+      ctx.strokeStyle = edge;
+      ctx.lineWidth = width + (m.selected ? 4 : 2);
       ctx.stroke();
       ctx.setLineDash(dash);
       ctx.strokeStyle = color;
@@ -289,11 +361,11 @@ function drawMarks(
       const p = project(dot);
       if (!p) continue;
       ctx.beginPath();
-      ctx.arc(p[0], p[1], m.selected ? 5 : 4, 0, 2 * Math.PI);
+      ctx.arc(p[0], p[1], m.selected ? 6 : 4, 0, 2 * Math.PI);
       ctx.fillStyle = color;
       ctx.fill();
-      ctx.strokeStyle = ink.well;
-      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = edge;
+      ctx.lineWidth = m.selected ? 2 : 1.5;
       ctx.stroke();
     }
     const anchor = project(shape.measure?.at ?? shape.lines[0]?.points[0] ?? shape.dots[0]!);
@@ -304,6 +376,11 @@ function drawMarks(
       const w = ctx.measureText(m.tag).width + 8;
       ctx.fillStyle = color;
       ctx.fillRect(x, y - 8, w, 16);
+      if (m.selected) {
+        ctx.strokeStyle = edge;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x - 1, y - 9, w + 2, 18);
+      }
       ctx.fillStyle = ink.well;
       ctx.fillText(m.tag, x + 4, y);
       x += w + 2;

@@ -84,6 +84,13 @@
 
   --idle: oklch(0.62 0.012 255);
 
+  /* Viewer colours as text in the chrome (mark tags, axis letters): the solids' hues, dark
+     enough for 4.5:1 on every light surface. The solids stay for the images. */
+  --mark-mine-text: oklch(0.5 0.2 338);
+  --axis-x-text: oklch(0.5 0.16 27);
+  --axis-y-text: oklch(0.5 0.12 150);
+  --axis-z-text: oklch(0.5 0.13 250);
+
   --inverse: oklch(0.205 0.013 255); /* tooltips and toasts */
   --inverse-fg: oklch(0.985 0.003 255);
   --scrim: oklch(0.12 0.01 255 / 0.82);
@@ -148,6 +155,11 @@
 
   --idle: oklch(0.56 0.012 255);
 
+  --mark-mine-text: var(--mark-mine);
+  --axis-x-text: var(--axis-x);
+  --axis-y-text: var(--axis-y);
+  --axis-z-text: var(--axis-z);
+
   --inverse: oklch(0.94 0.006 255);
   --inverse-fg: oklch(0.145 0.014 255);
   --scrim: oklch(0 0 0 / 0.82);
@@ -175,7 +187,7 @@
   --viewer-chip-fg: oklch(0.94 0.006 255);
   --scale-bar: oklch(0.86 0.008 255);
 
-  /* Slice planes: badges, frames, 3D planes */
+  /* Slice planes: frames, crosshairs, 3D planes. Text in the chrome uses `--axis-*-text`. */
   --axis-x: #ef6a5e; /* coronal plane (constant x) */
   --axis-y: #5ccf7a; /* sagittal plane (constant y) */
   --axis-z: #5aa6f2; /* axial plane (constant z) */
@@ -191,7 +203,7 @@
   --ruler-edit-fg: oklch(0.145 0.014 255);
   --landmark-warn: #ff9f6e;
 
-  /* Marks on the scan: yours and the AI's */
+  /* Marks on the scan: yours and the AI's. A tag in the chrome uses `--mark-mine-text`. */
   --mark-mine: #ff4fd8;
   --mark-ai: oklch(0.98 0 0);
 

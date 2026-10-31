@@ -16,7 +16,16 @@ import { autoContrast, type Contrast } from "./compose";
 import { Grid3D } from "./Grid3D";
 import { readLevel } from "./planes";
 import { SlicePane } from "./SlicePane";
-import type { GridMark, GridScene, MarkTool, PaneHandle, PaneView, ShownMark, Zyx } from "./scene";
+import type {
+  GridMark,
+  GridScene,
+  MarkTool,
+  PaneHandle,
+  PaneStatus,
+  PaneView,
+  ShownMark,
+  Zyx,
+} from "./scene";
 import { tokenColor } from "./token-color";
 
 const panes = [
@@ -34,8 +43,9 @@ export type ViewerState = { pane: PaneId; point: Zyx; contrast: Contrast; view: 
 export type GridViewerHandle = {
   /**
    * The shown panes as one PNG, laid out as on screen with their names, at most `maxBytes`: it
-   * freezes the picture before encoding smaller copies, and gives null if a shown pane is not
-   * ready or no copy fits. Callers capture their marks and grid identity before awaiting it.
+   * freezes the picture before encoding smaller copies, and gives null while a shown pane is
+   * loading (`onReady`) or when no copy fits. A failed pane is drawn as it is, its name marked
+   * incomplete. Callers capture their marks and grid identity before awaiting it.
    */
   snapshot(maxBytes: number): Promise<Blob | null>;
 };
@@ -46,9 +56,9 @@ const NO_MARKS: readonly ShownMark[] = [];
 
 /** Each slice plane keeps its axis colour (DESIGN.md): axial z, sagittal y, coronal x. */
 const AXIS_INK: Record<string, string> = {
-  axial: "text-axis-z",
-  sagittal: "text-axis-y",
-  coronal: "text-axis-x",
+  axial: "text-axis-z-text",
+  sagittal: "text-axis-y-text",
+  coronal: "text-axis-x-text",
 };
 
 export function GridViewer({
@@ -64,6 +74,7 @@ export function GridViewer({
   tool = null,
   marks = NO_MARKS,
   onMark,
+  onReady,
   ref,
 }: {
   /**
@@ -90,6 +101,8 @@ export function GridViewer({
   tool?: MarkTool | null;
   marks?: readonly ShownMark[];
   onMark?(mark: GridMark): void;
+  /** Whether a snapshot would picture the shown panes now: none of them loading. */
+  onReady?(ready: boolean): void;
   ref?: Ref<GridViewerHandle>;
 }) {
   const [maximized, setMaximized] = useState<string | null>(null);
@@ -104,8 +117,18 @@ export function GridViewer({
   }, [focus]);
   const [contrast, setContrast] = useState<Contrast | null>(restore?.contrast ?? null);
   const [contrastError, setContrastError] = useState<string>();
-  // Panes short of their full picture: a screenshot would keep that state for good.
-  const [loading, setLoading] = useState<Record<string, boolean>>({});
+  // A loading pane holds pictures back: a screenshot would keep that state for good.
+  const [status, setStatus] = useState<Record<string, PaneStatus>>({});
+  const settled = (id: PaneId) =>
+    !!contrast &&
+    contrast.low < contrast.high &&
+    status[id] !== undefined &&
+    status[id] !== "loading";
+  const shownPanes = panes.filter((p) => !maximized || maximized === p.id);
+  const ready = shownPanes.every((p) => settled(p.id));
+  const latestReady = useRef(onReady);
+  latestReady.current = onReady;
+  useEffect(() => latestReady.current?.(ready), [ready]);
   const handles = useRef(
     Object.fromEntries(panes.map((p) => [p.id, { current: null as PaneHandle | null }])),
   ).current;
@@ -116,7 +139,7 @@ export function GridViewer({
   useImperativeHandle(ref, () => ({
     async snapshot(maxBytes) {
       const host = grid.current?.getBoundingClientRect();
-      if (!host?.width || !host.height || !contrast || contrast.low >= contrast.high) return null;
+      if (!host?.width || !host.height || !ready) return null;
       const scale = Math.min(globalThis.devicePixelRatio, SNAPSHOT_WIDTHS[0]! / host.width);
       // Freeze every pane before the first await: later encodes must not reread live viewer state.
       const frozen = sheet(host, scale);
@@ -146,8 +169,7 @@ export function GridViewer({
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.font = `${Math.round(12 * scale)}px ui-sans-serif, system-ui, sans-serif`;
     ctx.textBaseline = "top";
-    for (const pane of panes) {
-      if (maximized && maximized !== pane.id) continue;
+    for (const pane of shownPanes) {
       // Each pane draws and is copied in the same task: a WebGL buffer doesn't outlive it.
       const layers = handles[pane.id]!.current?.layers() ?? [];
       const rect = layers[0]?.getBoundingClientRect();
@@ -156,8 +178,9 @@ export function GridViewer({
       const y = (rect.top - host.top) * scale;
       for (const layer of layers)
         ctx.drawImage(layer, x, y, rect.width * scale, rect.height * scale);
-      // The pane's name, so the picture says which view is which.
-      const name = pane.axis === null ? pane.label : `${pane.label} ${point[pane.axis] + 1}`;
+      // The pane's name, so the picture says which view is which, and whether it is all there.
+      const place = pane.axis === null ? pane.label : `${pane.label} ${point[pane.axis] + 1}`;
+      const name = status[pane.id] === "failed" ? `${place} (incomplete)` : place;
       ctx.fillStyle = tokenColor("--viewer-chip");
       ctx.fillRect(x, y, ctx.measureText(name).width + 8 * scale, 18 * scale);
       ctx.fillStyle = tokenColor("--viewer-chip-fg");
@@ -226,12 +249,7 @@ export function GridViewer({
                   <IconButton
                     size="sm"
                     label={`Save screenshot of ${pane.label}`}
-                    disabled={
-                      !contrast ||
-                      contrast.low >= contrast.high ||
-                      loading[pane.id] !== false ||
-                      saving
-                    }
+                    disabled={!settled(pane.id) || saving}
                     onClick={() => {
                       const shot = handles[pane.id]!.current?.capture();
                       if (shot && contrast)
@@ -259,8 +277,8 @@ export function GridViewer({
                 contrast={contrast}
                 onPoint={setPoint}
                 handle={handles[pane.id]!}
-                onLoading={(b) =>
-                  setLoading((l) => (l[pane.id] === b ? l : { ...l, [pane.id]: b }))
+                onStatus={(next) =>
+                  setStatus((had) => (had[pane.id] === next ? had : { ...had, [pane.id]: next }))
                 }
                 tool={tool}
                 marks={marks}
@@ -274,8 +292,8 @@ export function GridViewer({
                 onPoint={setPoint}
                 contrast={contrast}
                 handle={handles[pane.id]!}
-                onLoading={(b) =>
-                  setLoading((l) => (l[pane.id] === b ? l : { ...l, [pane.id]: b }))
+                onStatus={(next) =>
+                  setStatus((had) => (had[pane.id] === next ? had : { ...had, [pane.id]: next }))
                 }
                 tool={tool}
                 marks={marks}
@@ -296,8 +314,10 @@ export function GridViewer({
       <div className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-2 text-sm">
         <h2 className="font-medium">{title}</h2>
         <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-          <output className="font-mono" aria-label="Crosshair voxel (z, y, x)">
-            z {point[0]} · y {point[1]} · x {point[2]}
+          <output className="flex gap-2 font-mono" aria-label="Crosshair voxel (z, y, x)">
+            <span>z {point[0]}</span>
+            <span>y {point[1]}</span>
+            <span>x {point[2]}</span>
           </output>
           {contrast && (
             <>

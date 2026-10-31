@@ -145,7 +145,7 @@ export function AppShell({
   logo: ReactNode;
   /** The right end of the header line. */
   account: ReactNode;
-  /** The whole frame's theme: light on study pages, dark in the 3D review. */
+  /** The whole frame's theme: the app is light throughout; Storybook shows both. */
   theme: "light" | "dark";
   children: ReactNode;
 }) {

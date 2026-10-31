@@ -23,7 +23,7 @@ import {
   type Zyx,
 } from "@voluma/viewer/grid";
 import { type Ref, useEffect, useMemo, useRef, useState } from "react";
-import { FULL, gridMark, type ShownGrid, TOOLS, type YourMark } from "./marks-panel";
+import { FULL, gridKeyOf, gridMark, type ShownGrid, TOOLS, type YourMark } from "./marks-panel";
 
 export function TaskViewer({
   runId,
@@ -106,14 +106,12 @@ export function TaskViewer({
   // The crosshair goes to whichever came last: the item's place or a picked mark.
   const imageId = grid.state === "ready" ? grid.imageId : undefined;
   const image = revision.volumes.find((v) => v.id === imageId);
-  // Block ids survive a redo. Coordinates belong to the image bytes and their frame, not its id alone.
-  const gridKey =
-    image?.data?.format === "npy"
-      ? JSON.stringify([image.id, image.gridId, image.data.sha256, image.shapeZyx, image.affine])
-      : undefined;
+  const gridKey = image && gridKeyOf(image);
+  // The new grid's viewer reports false as it mounts.
+  const [ready, setReady] = useState(false);
   useEffect(
-    () => onShown(gridKey ? { key: gridKey, taskId: task.id } : undefined),
-    [gridKey, task.id, onShown],
+    () => onShown(gridKey ? { key: gridKey, taskId: task.id, ready } : undefined),
+    [gridKey, task.id, ready, onShown],
   );
   useEffect(() => () => onShown(undefined), [onShown]);
   const [aim, setAim] = useState({ gridKey, target });
@@ -157,6 +155,7 @@ export function TaskViewer({
       tool={tool}
       marks={shown}
       onMark={(mark) => onMark(mark, grid.imageId, gridKey!)}
+      onReady={setReady}
       ref={viewer}
     >
       <SegmentedControl

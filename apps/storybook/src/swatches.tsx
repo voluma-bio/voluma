@@ -17,6 +17,7 @@ const roles: [string, string][] = [
   ["destructive-solid", "Stopped, failed"],
   ["idle", "Waiting, paused"],
   ["mark-mine", "Your marks on the scan"],
+  ["mark-mine-text", "Your mark tags in text"],
   ["mark-ai", "The AI's marks on the scan"],
 ];
 

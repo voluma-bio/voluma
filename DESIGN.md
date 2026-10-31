@@ -43,7 +43,9 @@ where it is used.
 - **Bone renders ivory by default** (`--bone`); structure label colours
   (`--label-*`) appear only with the Labels toggle.
 - Slice planes keep their axis colours everywhere: coronal `--axis-x`,
-  sagittal `--axis-y`, axial `--axis-z`.
+  sagittal `--axis-y`, axial `--axis-z`. Text in the chrome (an axis letter,
+  a mark's tag) takes the matching ink, `--axis-*-text` or `--mark-mine-text`:
+  the solids are made for the dark image wells and fail 4.5:1 on light surfaces.
 - Rulers are `--ruler`; a ruler being corrected is `--ruler-edit`; a landmark
   more than 0.03 mm off the surface is `--landmark-warn`.
 - Panels dock and resize by dragging; nothing floats. The 3D and slice views

@@ -1,10 +1,12 @@
 /**
  * Marks: your marks on the scan, held by the page until a message to the AI carries them. Each
- * has a short tag (P1, B1, L1, O1) drawn beside it in the views and belongs to the grid it was
- * made on; a row selects it (the views move to it, opening its task when it is on another grid)
- * or deletes it. The tools that make them, and their keys, are `TOOLS`, picked above the views.
+ * has a short tag (P1, B1, L1, O1) drawn beside it in the views and belongs to the image it was
+ * made on (`gridKeyOf`); a redo that replaces that image drops it. A row selects it (the views
+ * move to it, opening its task when it is on another grid) or deletes it. The tools that make
+ * them, and their keys, are `TOOLS`, picked above the views.
  */
 import { MAX_MARKS, type Mark } from "@voluma/contracts/messages";
+import type { Volume } from "@voluma/contracts/review";
 import { EmptyState, IconButton, List, Row } from "@voluma/ui";
 import type { GridMark, MarkTool, Zyx } from "@voluma/viewer/grid";
 import { Trash2 } from "lucide-react";
@@ -12,8 +14,21 @@ import { Trash2 } from "lucide-react";
 /** A mark of yours: `mark` is what the message sends; `taskId` the task it was made in view of. */
 export type YourMark = { id: string; tag: string; taskId: string; gridKey: string; mark: Mark };
 
-/** The task and immutable image/grid identity actually mounted in the viewer. */
-export type ShownGrid = { taskId: string; key: string };
+/**
+ * The task and immutable image/grid identity actually mounted in the viewer, and whether a
+ * picture of the views would go now (no pane loading).
+ */
+export type ShownGrid = { taskId: string; key: string; ready: boolean };
+
+/**
+ * An image's identity for marks: a redo keeps block ids, so coordinates belong to the bytes and
+ * their frame, not the id alone. Undefined for an image the viewer can't show.
+ */
+export function gridKeyOf(image: Volume): string | undefined {
+  return image.data?.format === "npy"
+    ? JSON.stringify([image.id, image.gridId, image.data.sha256, image.shapeZyx, image.affine])
+    : undefined;
+}
 
 /** The marking tools in the order shown, each with the key that picks it. */
 export const TOOLS: { value: MarkTool | "navigate"; label: string; shortcut: string }[] = [
@@ -94,7 +109,7 @@ export function MarksPanel({
   onDelete,
 }: {
   marks: readonly YourMark[];
-  /** Marks on another grid name their task; replaced images never inherit old coordinates. */
+  /** Marks on another grid say where they are. */
   shown: ShownGrid | undefined;
   taskTitle: (taskId: string) => string;
   selected: string | undefined;
@@ -109,9 +124,10 @@ export function MarksPanel({
     );
   return (
     <div className="grid gap-2 p-3">
-      <List label="Your marks" density="compact" columns="auto 28px" boxed>
+      <List label="Your marks" columns="auto 28px" boxed>
         {marks.map((m) => {
-          const { title, measure } = describe(m.mark);
+          const shape = gridMark(m.mark);
+          const measure = describe(m.mark).measure;
           const elsewhere = m.gridKey !== shown?.key;
           return (
             <Row
@@ -119,17 +135,14 @@ export function MarksPanel({
               selected={m.id === selected}
               onSelect={() => onSelect(m.id)}
               title={
-                <span className="flex min-w-0 items-center gap-2">
-                  <span className="font-mono text-xs font-medium text-mark-mine">{m.tag}</span>
-                  <span className="truncate">{title}</span>
-                  {elsewhere && (
-                    <span className="min-w-0 shrink-[4] truncate text-xs text-muted-foreground">
-                      {m.taskId === shown?.taskId
-                        ? "on an earlier grid"
-                        : `on ${taskTitle(m.taskId)}`}
-                    </span>
-                  )}
+                <span className="flex items-baseline gap-2">
+                  <span className="font-mono text-xs font-medium text-mark-mine-text">{m.tag}</span>
+                  {shape ? wordOf(kindOf(shape)) : "Mark"}
                 </span>
+              }
+              subtitle={
+                elsewhere &&
+                (m.taskId === shown?.taskId ? "On another grid" : `On ${taskTitle(m.taskId)}`)
               }
               cells={[
                 <span key="measure" className="font-mono text-xs text-muted-foreground">

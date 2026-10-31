@@ -71,11 +71,11 @@
   --color-viewer-well: var(--viewer-well);
   --color-viewer-chip: var(--viewer-chip);
   --color-viewer-chip-fg: var(--viewer-chip-fg);
-  --color-axis-x: var(--axis-x);
-  --color-axis-y: var(--axis-y);
-  --color-axis-z: var(--axis-z);
+  --color-axis-x-text: var(--axis-x-text);
+  --color-axis-y-text: var(--axis-y-text);
+  --color-axis-z-text: var(--axis-z-text);
   --color-check-outline: var(--check-outline);
-  --color-mark-mine: var(--mark-mine);
+  --color-mark-mine-text: var(--mark-mine-text);
   --color-mark-ai: var(--mark-ai);
   --color-ruler: var(--ruler);
   --color-bone: var(--bone);

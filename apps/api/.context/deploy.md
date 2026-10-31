@@ -163,9 +163,9 @@ it locally only against `pnpm dev`.
 An agent checks staging as a signed-in user with `POST /api/auth/password` (`WORKOS_TEST_EMAIL`,
 `WORKOS_TEST_PASSWORD`) sending `Origin: <APP_URL>` and `Content-Type: application/json`: the
 CSRF check answers any request that changes state without a bearer token, sign-in included,
-`403 forbidden origin` without the first and `415` without the second. Keep every `Set-Cookie`
-(`src/ops/upload-scan.ts` shows how). Reading runs needs no sign-in: `Authorization: Bearer
-$VOLUMA_DEBUG_TOKEN` reads every lab's runs.
+a `403` ("This request didn't come from the Voluma app") without the first and a `415` without
+the second. Keep every `Set-Cookie` (`src/ops/upload-scan.ts` shows how). Reading runs needs no
+sign-in: `Authorization: Bearer $VOLUMA_DEBUG_TOKEN` reads every lab's runs.
 
 ## The database (Neon)
 

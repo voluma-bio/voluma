@@ -123,14 +123,20 @@ export type PaneView =
   | { zoom: number; center: [number, number] }
   | { camera: { position: Vec3; target: Vec3; up: Vec3 } };
 
+/**
+ * Whether a pane shows its full picture: loading (a picture or layer still coming, or one out of
+ * date), ready, or failed (something couldn't load; the rest is drawn as it is).
+ */
+export type PaneStatus = "loading" | "ready" | "failed";
+
 /** What a pane does for screenshots: its pixels as drawn now, and showing a saved view. */
 export type PaneHandle = {
   capture(): { pngBase64: string; width: number; height: number; view: PaneView };
   show(view: PaneView): void;
   /**
    * Draws the pane now and returns its canvases, bottom first (the picture, then the marks), to be
-   * copied in the same task: WebGL clears its buffer once the browser composites it. Empty while
-   * loading, refining or failed. The marks exclude the unfinished gesture and hover cursor.
+   * copied in the same task: WebGL clears its buffer once the browser composites it. The marks
+   * exclude the unfinished gesture and hover cursor.
    */
   layers(): HTMLCanvasElement[];
 };

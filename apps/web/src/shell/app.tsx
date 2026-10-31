@@ -1,5 +1,5 @@
 /**
- * Router shell. Each feature owns its routes and its theme; the shell only
+ * Router shell. Each feature owns its routes; the shell only
  * collects them, so a lane never edits this file to add a screen. Every
  * feature route sits behind the sign-in gate. Shared components are
  * shown in Storybook (apps/storybook), not in the app.
