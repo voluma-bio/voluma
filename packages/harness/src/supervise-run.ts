@@ -17,7 +17,7 @@
 import type { RunEvent } from "@voluma/contracts/events";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
-import type { WorkflowDefinition } from "@voluma/workflow/definition";
+import { OLDER_VERSION_MESSAGE, type WorkflowDefinition } from "@voluma/workflow/definition";
 import { withImageRefs } from "./adapters/pi/image-refs";
 import { errorText } from "./error-text";
 import { type RunLayoutOptions, runLayout, type SandboxLayout } from "./layout";
@@ -149,9 +149,7 @@ export function pinnedImageOf(runId: string, log: readonly RunEvent[]): string |
     (e) => e.type === "thread.started" && e.threadId === root && e.payload.sandboxImage,
   );
   if (image?.type !== "thread.started" || !image.payload.sandboxImage) {
-    throw new Error(
-      "This run was made by an older version of Voluma and can't be resumed; start a new run.",
-    );
+    throw new Error(OLDER_VERSION_MESSAGE);
   }
   return image.payload.sandboxImage;
 }

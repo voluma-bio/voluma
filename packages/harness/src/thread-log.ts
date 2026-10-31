@@ -263,11 +263,11 @@ export function threadState(
 
 /**
  * A started thread's name. Rows an old runner wrote during the deploy that added `name` lack it;
- * their name is the id without the run id. Delete with step 2 (`name` required), see
+ * their name is the id after its first `.` (run ids hold none). Delete with step 2 (`name` required), see
  * `packages/contracts/.context/TODO.md`.
  */
 function threadNameOf(e: Extract<RunEvent, { type: "thread.started" }>): string {
-  return e.payload.name ?? e.threadId.slice(e.runId.length + 1);
+  return e.payload.name ?? e.threadId.slice(e.threadId.indexOf(".") + 1);
 }
 
 /**

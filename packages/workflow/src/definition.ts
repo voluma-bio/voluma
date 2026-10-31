@@ -82,3 +82,7 @@ export class WorkflowParseError extends Error {
     this.name = "WorkflowParseError";
   }
 }
+
+/** Why a run made by an earlier version is refused: by the snapshot loader and the runner's claim. */
+export const OLDER_VERSION_MESSAGE =
+  "This run was made by an older version of Voluma and can't be resumed; start a new run.";

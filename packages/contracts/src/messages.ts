@@ -9,7 +9,7 @@
  * `run.reopened`, then `person.message`, resets `lastClaimEnd` and `stalledClaims` (so
  * `previousClaim` never reports a reason from before the reopen), and moves the run to
  * `queued` through admission. The main agent is resumed with the message (a new
- * `main.<n>` thread when its stored history cannot resume: a run from before corrections, a
+ * `main.<n>` thread when its stored history cannot resume: a
  * changed system prompt or tool list, or a recorded model the runner no longer allows; it never
  * fails the run for that), answers with `reply` (a `reply` event) and calls `finish_run`. On a
  * go it does the new attempt first, then `finish_run`. There is no waiting state.
