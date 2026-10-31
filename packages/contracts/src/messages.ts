@@ -89,7 +89,7 @@
  * from the function the send uses, so a client never copies the rules.
  *
  * Refusals. 400: invalid body; 404: unknown or unreadable run, or a `taskId` the run has no
- * plan for; 403: not the run's `startedBy`, a read-only example run, or a `visitor` run (its keys
+ * plan for; 403: a read-only example run, not the run's `startedBy`, or a `visitor` run (its keys
  * are not kept, so a reopened run could not be resumed), or a guest on a run made with Voluma's keys; 409: the run has not ended (a run still answering a message is told to wait for the reply or cancel), or did not
  * end `completed` (a failed or cancelled run's threads were ended or cut: it is rerun, not
  * reopened), has no plan yet, or `taskId` names a skipped task (a skipped task cannot be

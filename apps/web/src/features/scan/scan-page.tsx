@@ -184,7 +184,7 @@ function useAccepting(run: RunRead, revision: Revision | undefined) {
   const [error, setError] = useState<{ id: string; text: string }>();
   const mutation = useAcceptCheck(run.id, revision?.id, {
     onMutate: ({ checkId }) => setError((e) => (e?.id === checkId ? undefined : e)),
-    // `useAcceptCheck` already words the failure (read-only, changed since, couldn't save).
+    // `useAcceptCheck` already words the failure (the server's refusal, or couldn't save).
     onSettled: (_res, e, { checkId }) => {
       if (e) setError({ id: checkId, text: e.message });
     },

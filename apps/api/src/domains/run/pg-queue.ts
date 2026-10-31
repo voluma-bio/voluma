@@ -469,8 +469,11 @@ export function pgRunQueue(
       caller: { userId: string; guest: boolean },
       run: Run,
     ): Promise<string | null> {
-      const refusal = await db.transaction((tx) =>
-        messageRefusal(tx, messageContext(reader).pinsOf, caller, messageTargetOf(run)),
+      const refusal = await messageRefusal(
+        db,
+        messageContext(reader).pinsOf,
+        caller,
+        messageTargetOf(run),
       );
       return refusal?.message ?? null;
     },

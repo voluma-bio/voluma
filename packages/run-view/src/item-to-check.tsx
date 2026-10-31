@@ -105,13 +105,8 @@ export function ItemToCheck({
                 Something's wrong
               </Button>
             )}
-            {[...new Set([readOnly, wrongReason])].map(
-              (why) =>
-                why && (
-                  <span key={why} className="text-xs text-muted-foreground">
-                    {why}
-                  </span>
-                ),
+            {(readOnly ?? wrongReason) && (
+              <span className="text-xs text-muted-foreground">{readOnly ?? wrongReason}</span>
             )}
           </>
         )}

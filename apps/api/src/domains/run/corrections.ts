@@ -20,7 +20,7 @@ import type { MessageSent } from "../../ports";
 import { admit, type Limits, refusalMessage, usage } from "./admission";
 import { noLease } from "./lease";
 import { eventLock, insertEvent } from "./pg-event-log";
-import { loadRun, readableRuns, type Tx, toRunEvent } from "./pg-runs";
+import { loadRun, type Queryable, readableRuns, type Tx, toRunEvent } from "./pg-runs";
 import { events, runs, studies } from "./schema";
 
 const personThread = (runId: string) => `${runId}.person`;
@@ -79,7 +79,7 @@ async function reopen(tx: Tx, runId: string, messageEventId: string, by: string)
  * `correction.ended` after it. A correction that finished leaves its span open while the run is
  * `ended`, so a caller asks this only of a queued or running run.
  */
-export async function openCorrection(tx: Tx, runId: string): Promise<string | null> {
+export async function openCorrection(tx: Queryable, runId: string): Promise<string | null> {
   const rows = await tx
     .select()
     .from(events)
@@ -137,7 +137,7 @@ export function messageTargetOf(run: Run): MessageTarget {
  * reports its message (`runReadSchema.cannotMessage`), so they cannot differ.
  */
 export async function messageRefusal(
-  tx: Tx,
+  tx: Queryable,
   pinsOf: (workflowId: string) => WorkflowPin[] | undefined,
   caller: { userId: string; guest: boolean },
   run: MessageTarget,
