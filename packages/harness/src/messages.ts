@@ -58,20 +58,20 @@ export function cutOffText(after: ClaimEndReason | undefined, tool: string | und
 }
 
 /** Why a check ended the way it did, as the task's reason reads. */
-export const CHECK_STOPPED = "The check was stopped before it gave a verdict.";
+export const CHECK_STOPPED = "The second AI check was stopped before it gave a verdict.";
 
 export function checkReason(t: FoldedTask, status: "done" | "to-check"): string {
-  if (status === "done") return "The second agent checked this task and agrees.";
-  if (t.checker?.verdict === undefined) return "The check ended without a verdict.";
+  if (status === "done") return "The second AI check looked at this task and agrees.";
+  if (t.checker?.verdict === undefined) return "The second AI check ended without a verdict.";
   if (t.checker.verdict === "needs-review")
-    return "The second agent found problems with this task.";
+    return "The second AI check found problems with this task.";
   return t.missingRequired.length > 0
-    ? `Required outputs are missing: ${t.missingRequired.join(", ")}.`
-    : "The check passed, but items are still open for a person.";
+    ? "Some required results were not reported."
+    : "The second AI check passed it, but items are still open for a person.";
 }
 
 export const fixLimitReason = (rounds: number) =>
-  `The second agent still found problems after ${rounds} rounds of fixes; this task is left for a person.`;
+  `The second AI check still found problems after ${rounds} rounds of fixes; this task is left for a person.`;
 
 /** The main agent's answer, as the check thread that asked reads it. */
 export function answerText(
@@ -85,11 +85,13 @@ export function answerText(
 export const verdictNudge = (taskId: string) =>
   `You stopped before giving a verdict. Write a checkpoint on ${taskId} with verdict "passed" if you agree or "needs-review" if you do not or cannot tell, and one plain line of why.`;
 
-const REBUILT = "its record cannot be resumed (the run's prompts, tools or model changed)";
-export const unresumableReason = (role: "worker" | "check", taskId: string) =>
-  role === "check"
-    ? `${REBUILT}; a new check takes over`
-    : `${REBUILT}; start a new worker on ${taskId} if it is not done`;
+/** Why a thread was stopped as unresumable: `why` is the refusal (`ThreadStale`), in plain words. */
+export const unresumableReason = (role: "worker" | "check", taskId: string, why: string) => {
+  const rebuilt = `its record cannot be resumed: ${why}`;
+  return role === "check"
+    ? `${rebuilt}; a new check takes over`
+    : `${rebuilt}; start a new worker on ${taskId} if it is not done`;
+};
 
 /** The delivery message: the notices, the live agents and the tasks whose row changed. */
 export const deliveryText = (
@@ -110,12 +112,11 @@ export const livenessNudge = (asking: boolean, state: string) =>
   `Nothing is running and the run is not finished: ${asking ? "answer the checker (nothing else can move until you do), then " : ""}start the next workers, or finish the run.\n\n${state}`;
 
 /** What the researcher reads when the main agent stopped moving and code ended the run. */
-export const STUCK_PLAN_REASON =
-  "The main agent stopped before every task was done, so the run ended.";
+export const STUCK_PLAN_REASON = "The AI stopped before every task was done, so the run ended.";
 export const STUCK_SKIP_REASON = "The run stopped before this task was done";
-export const stuckSummary = (left: readonly TaskRow[]) =>
+export const stuckSummary = (left: readonly string[]) =>
   left.length
-    ? `The run stopped before every task was done: ${left.map((t) => t.id).join(", ")} ${left.length === 1 ? "was" : "were"} skipped.`
+    ? `The run stopped before every task was done: ${left.join(", ")} ${left.length === 1 ? "was" : "were"} skipped.`
     : "The run stopped with every task finished.";
 
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}…` : text);

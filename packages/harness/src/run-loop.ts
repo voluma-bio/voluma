@@ -138,14 +138,11 @@ const MAIN_GRACE_MS = 15_000;
 const rule = (r: Extract<By, { kind: "rule" }>["rule"]): By => ({ kind: "rule", rule: r });
 const RUNTIME: UserSender = { kind: "runtime" };
 
-/**
- * A run's error when a thread fails on a provider error. The web names the task from the
- * `<taskId>: its worker|check` prefix (`run-header.tsx`, `study-model.ts`).
- */
-const fatalText = (r: ThreadRecord, error: string) =>
+/** A run's error when a thread fails on a provider error; the researcher reads it after "The run failed: ". */
+const fatalText = (r: ThreadRecord, error: string, taskName: (id: string) => string) =>
   r.role === "main"
-    ? `the main agent failed on a model provider error: ${error}`
-    : `${r.taskId}: its ${r.role} failed on a model provider error: ${error}`;
+    ? `the AI stopped on an error from its provider: ${error}`
+    : `${taskName(r.taskId)}: the AI stopped on an error from its provider: ${error}`;
 
 /** What a step found: something done, nothing to do until the log changes, or the run is over. */
 type Step = "acted" | "idle" | "done";
@@ -183,6 +180,9 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
   const derive = () => threadLog(recorder.events());
   const stateOf = (r: ThreadRecord | undefined): ThreadState | undefined =>
     threadState(r, threads.running(r?.id ?? ""));
+
+  /** The task's plain title for the researcher; the id when the plan has none. */
+  const taskName = (id: string) => runtime.taskName(id);
 
   const planTask = (view: Folded, taskId: string): PlanTask => {
     const found = view.plan.tasks.find((t) => t.id === taskId);
@@ -385,7 +385,11 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
           return true;
         }
       } else {
-        await runtime.stop(r.id, `${r.id}:unresumable`, unresumableReason(r.role, r.taskId));
+        await runtime.stop(
+          r.id,
+          `${r.id}:unresumable`,
+          unresumableReason(r.role, r.taskId, threads.stale(r.id) ?? ""),
+        );
         if (r.role === "check" && runtime.taskOf(r.taskId)?.threads.check === r.id) {
           await startCheck(derive(), r.taskId);
         }
@@ -510,7 +514,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
         await resume(r, "The model provider failed during your last reply; continue.", RUNTIME);
         return true;
       }
-      throw new Error(fatalText(r, error as string));
+      throw new Error(fatalText(r, error as string, taskName));
     }
     return false;
   }
@@ -562,7 +566,8 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     // fresh one takes over, once. If that one fails too, so does the run.
     if (m?.end?.status === "failed" && stateOf(m) === "idle") {
       const mains = [...d.threads.values()].filter((r) => r.role === "main");
-      if (mains.at(-2)?.end?.status === "failed") throw new Error(fatalText(m, m.end.error ?? ""));
+      if (mains.at(-2)?.end?.status === "failed")
+        throw new Error(fatalText(m, m.end.error ?? "", taskName));
       await startMain(d);
       return true;
     }
@@ -608,7 +613,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     await recorder.append(
       root,
       "thread.ended",
-      { status: "completed", summary: stuckSummary(left) },
+      { status: "completed", summary: stuckSummary(left.map((t) => taskName(t.id))) },
       `${root}:liveness:end`,
     );
   }
