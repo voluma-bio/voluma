@@ -39,8 +39,8 @@ import {
 } from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import type { Contrast } from "./compose";
-import { loadMesh } from "./geometry";
-import { drawMarks, lengthMm, overlayCanvas, sizeOverlay, wholeShape } from "./marks";
+import { loadMesh, makePickable } from "./geometry";
+import { lengthMm, useMarkLayer, wholeShape } from "./marks";
 import { CHIP, PANE } from "./pane-style";
 import { readLevel } from "./planes";
 import {
@@ -93,15 +93,35 @@ export function Grid3D({
   latest.current = onPoint;
   const marking = useRef({ tool, marks, onMark });
   marking.current = { tool, marks, onMark };
-  // The line being drawn and where a point would land, drawn with the marks.
-  const draft = useRef<GridMark | null>(null);
-  const hover = useRef<Zyx | null>(null);
+  // The camera as last drawn: the mark layer projects with it between frames.
+  const eye = useRef<PerspectiveCamera | null>(null);
   // The volume as drawn, for finding where a ray meets it.
   const drawn = useRef<{ values: ArrayLike<number>; level: AssetLevel; contrast: Contrast } | null>(
     null,
   );
   const [sz, sy, sx] = scene.spacingZyx;
   const toWorld = (p: Zyx) => new Vector3(p[2] * sx, p[1] * sy, p[0] * sz);
+  const layer = useMarkLayer(
+    host,
+    () => {
+      const camera = eye.current;
+      const canvas = host.current;
+      if (!camera || !canvas) return null;
+      const width = canvas.clientWidth;
+      const height = canvas.clientHeight;
+      const projected = new Vector3();
+      return {
+        project: (p) => {
+          projected.copy(toWorld(p)).project(camera);
+          if (projected.z < -1 || projected.z > 1) return null;
+          return [((projected.x + 1) / 2) * width, ((1 - projected.y) / 2) * height];
+        },
+        shapeOf: wholeShape,
+      };
+    },
+    tool,
+    marks,
+  );
 
   useEffect(() => {
     const element = host.current!;
@@ -110,9 +130,9 @@ export function Grid3D({
     renderer.setClearColor(tokenColor("--viewer-well"));
     renderer.domElement.className = "absolute inset-0";
     element.append(renderer.domElement);
-    const overlay = overlayCanvas(element);
     const s = new Scene();
     const camera = new PerspectiveCamera(30, 1, 0.01, 1000);
+    eye.current = camera;
     // Array z runs down the screen, as in the slice panes.
     camera.up.set(0, 0, -1);
     const size = toWorld(scene.shapeZyx);
@@ -168,20 +188,7 @@ export function Grid3D({
       renderer.clearDepth();
       renderer.render(annotations, camera);
       renderer.autoClear = true;
-      const { width, height } = element.getBoundingClientRect();
-      const projected = new Vector3();
-      drawMarks(
-        overlay,
-        (p) => {
-          projected.copy(toWorld(p)).project(camera);
-          if (projected.z < -1 || projected.z > 1) return null;
-          return [((projected.x + 1) / 2) * width, ((1 - projected.y) / 2) * height];
-        },
-        wholeShape,
-        marking.current.marks,
-        draft.current,
-        hover.current,
-      );
+      layer.current?.draw();
     };
     const render = () => {
       frame ||= requestAnimationFrame(draw);
@@ -203,7 +210,7 @@ export function Grid3D({
       }),
       layers() {
         draw();
-        return [renderer.domElement, overlay];
+        return layer.current ? [renderer.domElement, layer.current.canvas] : [renderer.domElement];
       },
       show(saved) {
         if (!("camera" in saved)) return;
@@ -218,7 +225,6 @@ export function Grid3D({
       const { width, height } = element.getBoundingClientRect();
       if (!width || !height) return;
       renderer.setSize(width, height);
-      sizeOverlay(overlay, width, height);
       renderer.getDrawingBufferSize(size2);
       target.setSize(size2.x, size2.y);
       camera.aspect = width / height;
@@ -299,13 +305,14 @@ export function Grid3D({
     // so the orbit controls on the canvas below never see the press.
     let line: { from: Zyx } | null = null;
     const lineDown = (event: PointerEvent) => {
-      if (marking.current.tool !== "line" || event.button !== 0 || event.shiftKey) return;
+      const own = layer.current;
+      if (!own || marking.current.tool !== "line" || event.button !== 0 || event.shiftKey) return;
       const from = surfaceAt(event);
       if (!from) return;
       event.stopPropagation();
       element.setPointerCapture(event.pointerId);
       line = { from };
-      hover.current = null;
+      own.hover = null;
     };
     // Hover and a line's free end follow the pointer, one surface search per frame.
     let pending: PointerEvent | null = null;
@@ -318,40 +325,58 @@ export function Grid3D({
         searching = 0;
         const at = pending && surfaceAt(pending);
         pending = null;
+        const own = layer.current;
+        if (!own) return;
         if (line) {
           if (at)
-            draft.current = {
+            own.draft = {
               line: {
                 aZyx: [...line.from],
                 bZyx: [...at],
                 lengthMm: lengthMm(line.from, at, scene.spacingZyx),
               },
             };
-        } else hover.current = at;
-        render();
+        } else own.hover = at;
+        own.redraw();
       });
+    };
+    // Ends a line: a release keeps it, a cancelled pointer or Esc drops it.
+    const endLine = (keep: boolean) => {
+      const own = layer.current;
+      const made = own?.draft;
+      line = null;
+      if (own) {
+        own.draft = null;
+        own.redraw();
+      }
+      if (keep && made && "line" in made && made.line.lengthMm > 0) marking.current.onMark(made);
     };
     const lineUp = (event: PointerEvent) => {
       if (!line) return;
       event.stopPropagation();
-      const made = draft.current;
-      line = null;
-      draft.current = null;
-      render();
-      if (made && "line" in made && made.line.lengthMm > 0) marking.current.onMark(made);
+      endLine(event.type === "pointerup");
+    };
+    const key = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || !line) return;
+      event.preventDefault();
+      endLine(false);
     };
     const leave = () => {
       pending = null;
-      if (!hover.current) return;
-      hover.current = null;
-      render();
+      const own = layer.current;
+      if (!own?.hover) return;
+      own.hover = null;
+      own.redraw();
     };
     element.addEventListener("pointerdown", lineDown, { capture: true });
     element.addEventListener("pointermove", lineMove);
     element.addEventListener("pointerup", lineUp, { capture: true });
     element.addEventListener("pointercancel", lineUp, { capture: true });
     element.addEventListener("pointerleave", leave);
+    // The pane takes no focus, so a line in progress listens on the window, ahead of the page.
+    globalThis.addEventListener("keydown", key, { capture: true });
     return () => {
+      globalThis.removeEventListener("keydown", key, { capture: true });
       cancelAnimationFrame(searching);
       element.removeEventListener("pointerdown", lineDown, { capture: true });
       element.removeEventListener("pointermove", lineMove);
@@ -373,17 +398,11 @@ export function Grid3D({
       renderer.forceContextLoss();
       renderer.dispose();
       renderer.domElement.remove();
-      overlay.remove();
+      eye.current = null;
       three.current = null;
       handle.current = null;
     };
   }, []);
-
-  useEffect(() => {
-    // A tool put away mid-gesture leaves no ring behind.
-    if (tool !== "point" && tool !== "line") hover.current = null;
-    three.current?.render();
-  }, [marks, tool]);
 
   useEffect(() => {
     const t = three.current;
@@ -415,7 +434,8 @@ export function Grid3D({
         objects.push(line);
       }
     }
-    t.annotations.add(...objects);
+    // add() with nothing logs an error.
+    if (objects.length) t.annotations.add(...objects);
     t.render();
     return () => {
       for (const object of objects) {
@@ -467,6 +487,7 @@ export function Grid3D({
             side: DoubleSide,
           });
           const mesh = new Mesh(geometry, material);
+          makePickable(mesh);
           mesh.name = m.id;
           // Vertices are voxel (x, y, z), in crop voxels for a cropped mask.
           mesh.scale.set(sx, sy, sz);
@@ -596,8 +617,16 @@ function volumeHit(
     tFar = Math.min(tFar, Math.max(t0, t1));
   }
   if (tFar <= tNear) return null;
-  // Half a level voxel per step; the shader's opacity is per step of about one voxel.
+  // Half a level voxel per step. The shader's opacity is for a step of one texel diagonal in the
+  // unit box's space, so a step's opacity takes the same power the shader gives it there.
   const step = 0.5 * Math.min(kx * sx, ky * sy, kz * sz);
+  const d = ray.direction;
+  const exponent =
+    Math.hypot(
+      (d.x * step) / (nx * kx * sx),
+      (d.y * step) / (ny * ky * sy),
+      (d.z * step) / (nz * kz * sz),
+    ) / Math.hypot(1 / nx, 1 / ny, 1 / nz);
   const span = contrast.high - contrast.low || 1;
   const p = new Vector3();
   let alpha = 0;
@@ -611,7 +640,7 @@ function volumeHit(
     const e = Math.max(0, Math.min(1, (v - 0.22) / (0.6 - 0.22)));
     const a = e * e * (3 - 2 * e);
     if (a <= 0) continue;
-    alpha += (1 - alpha) * (1 - (1 - a * 0.6) ** 0.5);
+    alpha += (1 - alpha) * (1 - (1 - a * 0.6) ** exponent);
     if (alpha >= 0.5) return p.clone();
   }
   return null;
