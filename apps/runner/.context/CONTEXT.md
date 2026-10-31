@@ -430,8 +430,8 @@ The worker's, checker's and (when its file grants `bash`) main's system prompts 
 script, from its docstring's first line; the loader reads it from the snapshot). Their optional tools are the file's `tools`
 (`run.ts` `grant`); `segment_sam` is also dropped when the run has no Meta key, and always for the checker (it calls out to Meta; `keepFailed` writes the run-wide scratch). `loadWorkflow`
 snapshots the role files with the workflow and reads them from the snapshot, so a resumed thread
-composes byte-identical text and an edited file reaches only new threads (a thread whose prompt
-changed is still `ThreadStale`). The main agent without `bash` gets its file's body, then the skill list and the tool index (no sandbox text). A snapshot that has `checker.md` and no `check.md` (cut before the rename) is refused at load: "This run was made by an older version of Voluma and can't be resumed; start a new run." The snapshot is all-or-nothing: `.snapshot-done` is written last and later claims skip copying; with no marker (a first attempt cut off by a deploy) `loadWorkflow` empties the prefix before copying, so files the checkout has since deleted or renamed never sit beside the new ones.
+composes byte-identical text and an edited file reaches only new threads (a resumed thread keeps the system prompt and tool
+definitions it started with, run by the current tools; it is `ThreadStale` only if the input schema of one of its tools changed; a changed description (the tool's or a field's) resumes, a changed default does not, and a tool removed since answers a call with an error). The main agent without `bash` gets its file's body, then the skill list and the tool index (no sandbox text). A snapshot that has `checker.md` and no `check.md` (cut before the rename) is refused at load: "This run was made by an older version of Voluma and can't be resumed; start a new run." The snapshot is all-or-nothing: `.snapshot-done` is written last and later claims skip copying; with no marker (a first attempt cut off by a deploy) `loadWorkflow` empties the prefix before copying, so files the checkout has since deleted or renamed never sit beside the new ones.
 Format: `workflows/core/agents/AGENTS.md`.
 
 A role's model is its file's `model` alias. `config.models` maps each alias to a provider model:
@@ -478,8 +478,7 @@ A cut-off resume counts as no delivery and no redo.
 A researcher's message reopens a finished run (`run.reopened`, `packages/contracts/src/messages.ts`)
 and the next claim resumes the main agent with it, as a notice: nothing is cut off, so there is no
 cut-off text. That claim's `claim.started` carries `reopened: true` instead of `after`. A thread
-whose stored history cannot be resumed (a run made before `reply` existed, a changed prompt or tool
-list) or whose recorded model this runner no longer allows is refused as stale and started again
+whose stored history cannot be resumed (the input schema of one of its tools changed) or whose recorded model this runner no longer allows is refused as stale and started again
 (`main.<n>`); `threadModel` hands such a thread the role's model rather than failing the run. A claim answers one message: the API refuses a message to a run that is
 queued or running, so no message arrives mid-claim. A correction whose main agent stops moving fails the claim (the server records
 `correction.ended`) instead of skipping tasks. `/outputs` is one R2 prefix shared by every claim, so
