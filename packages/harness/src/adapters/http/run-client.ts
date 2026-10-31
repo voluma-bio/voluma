@@ -33,6 +33,7 @@ import {
   type Usage,
 } from "@voluma/contracts/runner";
 import type { LiveFrame } from "@voluma/contracts/stream";
+import { errorText } from "../../error-text";
 import { type EventLog, EventLogUnavailable } from "../../ports/event-log";
 import { type History, HistoryConflict } from "../../ports/history";
 import { LeaseLost } from "../../ports/lease-lost";
@@ -96,9 +97,7 @@ export function runClient(
         const refused =
           error instanceof LeaseLost || (error instanceof HttpError && error.status < 500);
         if (refused) throw error;
-        throw new EventLogUnavailable(error instanceof Error ? error.message : String(error), {
-          cause: error,
-        });
+        throw new EventLogUnavailable(errorText(error), { cause: error });
       }
     },
     /** Every stored event of the run, oldest first: what a resumed run starts its recorder with. */

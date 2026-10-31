@@ -9,6 +9,7 @@
     "./ports/files": "./src/ports/files.ts",
     "./ports/outputs": "./src/ports/outputs.ts",
     "./ports/lease-lost": "./src/ports/lease-lost.ts",
+    "./error-text": "./src/error-text.ts",
     "./layout": "./src/layout.ts",
     "./recorder": "./src/recorder.ts",
     "./live": "./src/live.ts",
