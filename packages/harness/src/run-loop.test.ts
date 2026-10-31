@@ -14,6 +14,7 @@ import {
   hang,
   measurement,
   openAskIds,
+  type Reply,
   RUN,
   type Script,
   sleep,
@@ -1315,30 +1316,59 @@ describe("run loop", () => {
         return chain(["t1"])(t);
       };
     };
-    const retryOverloaded = (e: string) => (/overloaded/.test(e) ? "retry" : undefined);
+    const transient = (e: string) => (/overloaded/.test(e) ? "transient" : undefined);
 
-    it("resumes a thread that failed on a retryable error once; the run goes on", async () => {
+    it("fails the run when the main agent fails on a transient error", async () => {
       const w = world({
         plan: [task("t1")],
         main: throwing(1, "overloaded"),
         check: checker(),
-        providerError: retryOverloaded,
-      });
-      const folded = await w.run();
-      expect(folded.tasks.map((t) => `${t.id}:${t.status}`)).toEqual(["t1:done"]);
-      expect(ended(w.stored, "main")[0]).toBe("failed");
-    });
-
-    it("fails the run when the resumed thread fails on a retryable error again", async () => {
-      const w = world({
-        plan: [task("t1")],
-        main: throwing(2, "overloaded"),
-        check: checker(),
-        providerError: retryOverloaded,
+        providerError: transient,
       });
       await expect(w.run()).rejects.toThrow(
         "the AI stopped on an error from its provider: overloaded",
       );
+    });
+
+    it("leaves a worker that failed on a transient error to main, which replaces it", async () => {
+      const main: Script = (t) => {
+        const did = (name: string) => t.calls.some((c) => c.name === name);
+        if (t.fresh && told(t, /t1.worker \(t1\) failed: overloaded/) && !did("stop_worker"))
+          return call("stop_worker", { threadId: tid("t1.worker"), reason: "It failed." });
+        if (
+          t.fresh &&
+          did("stop_worker") &&
+          !t.calls.some((c) => c.name === "start_agent" && c.input.brief === "Again.")
+        )
+          return call("start_agent", { role: "worker", task: "t1", brief: "Again." });
+        return chain(["t1"])(t);
+      };
+      const w = world({
+        plan: [task("t1")],
+        main,
+        worker: (t) => {
+          if (t.name === "t1.worker" && t.steps === 0) throw new Error("overloaded");
+          return t.steps === 0
+            ? call("report_output", {
+                taskId: "t1",
+                outputId: "m1",
+                title: "m1",
+                output: measurement(1),
+                evidence: [],
+              })
+            : t.steps === 1
+              ? call("submit_task", { taskId: "t1", summary: "t1 measured." })
+              : "Done.";
+        },
+        check: checker(),
+        providerError: transient,
+      });
+      const folded = await w.run();
+      expect(
+        folded.tasks.map((t) => `${t.id}:${t.status}`),
+        w.text(),
+      ).toEqual(["t1:done"]);
+      expect(ended(w.stored, "t1.worker")[0]).toBe("failed");
     });
 
     it("a main that failed is never resumed: a fresh main takes over once", async () => {
@@ -1362,6 +1392,141 @@ describe("run loop", () => {
         "the AI stopped on an error from its provider: prompt is too long",
       );
       expect(of(again.stored, "thread.started", "main.3")).toHaveLength(0);
+    });
+  });
+
+  describe("a failed reply that had started", () => {
+    // The model's reply starts, then the stream is cut: Pi's retries never see it.
+    const cut: Reply = { stop: "error", error: "terminated" };
+    const failing = (replies: Reply[], then: Script): Script => {
+      let calls = 0;
+      return (t) => replies[calls++] ?? then(t);
+    };
+    const statuses = (w: { stored: readonly RunEvent[] }, thread: string) =>
+      ended(w.stored, thread);
+
+    it("resumes the main agent once, and fails the run on a second cut in a row", async () => {
+      const once = world({
+        plan: [task("t1")],
+        main: failing([cut], chain(["t1"])),
+        check: checker(),
+      });
+      const folded = await once.run();
+      expect(folded.tasks.map((t) => `${t.id}:${t.status}`)).toEqual(["t1:done"]);
+      expect(statuses(once, "main")[0]).toBe("failed");
+      expect(of(once.stored, "thread.started", "main.2")).toHaveLength(0);
+
+      const twice = world({
+        plan: [task("t1")],
+        main: failing([cut, cut], chain(["t1"])),
+        check: checker(),
+      });
+      await expect(twice.run()).rejects.toThrow(
+        "the AI stopped on an error from its provider: terminated",
+      );
+      expect(of(twice.stored, "thread.started", "main.2")).toHaveLength(0);
+    });
+
+    it("a length stop is the main agent's own failure: a fresh main takes over", async () => {
+      const w = world({
+        plan: [task("t1")],
+        main: failing([{ stop: "length" }], chain(["t1"])),
+        check: checker(),
+      });
+      const folded = await w.run();
+      expect(folded.tasks.map((t) => `${t.id}:${t.status}`)).toEqual(["t1:done"]);
+      expect(of(w.stored, "thread.started", "main.2")).not.toHaveLength(0);
+    });
+
+    // A check cut off mid-reply has no verdict; main resumes it or replaces it.
+    const mainFor = (act: Script): Script =>
+      first(
+        (t) => (t.fresh && told(t, /t1.check \(t1\) failed/) ? act(t) : undefined),
+        chain(["t1"]),
+      );
+    const actOnce =
+      (name: string, input: unknown): Script =>
+      (t) =>
+        t.calls.some((c) => c.name === name) ? undefined : call(name, input);
+
+    it("lets main resume a failed check with its transcript", async () => {
+      const ok = checker();
+      const w = world({
+        plan: [task("t1")],
+        main: mainFor(actOnce("message", { threadId: tid("t1.check"), text: "Continue." })),
+        check: failing([cut], ok),
+      });
+      const folded = await w.run();
+      expect(
+        folded.tasks.map((t) => `${t.id}:${t.status}`),
+        w.text(),
+      ).toEqual(["t1:done"]);
+      expect(of(w.stored, "thread.started", "t1.check.2")).toHaveLength(0);
+    });
+
+    it("lets main replace a failed check, within the limit", async () => {
+      const w = world({
+        plan: [task("t1")],
+        main: mainFor(actOnce("stop_worker", { threadId: tid("t1.check"), reason: "It failed." })),
+        check: failing([cut], checker()),
+      });
+      const folded = await w.run();
+      expect(
+        folded.tasks.map((t) => `${t.id}:${t.status}`),
+        w.text(),
+      ).toEqual(["t1:done"]);
+      expect(of(w.stored, "thread.started", "t1.check.2")).not.toHaveLength(0);
+    });
+
+    it("a cut, a completed turn, then another cut does not fail the run", async () => {
+      let n = 0;
+      const base = chain(["t1"]);
+      const w = world({
+        plan: [task("t1")],
+        // Cuts on the 1st and 3rd model calls; the 2nd one (start_agent) completes between them.
+        main: (t) => (++n === 1 || n === 3 ? cut : base(t)),
+        check: checker(),
+      });
+      const folded = await w.run();
+      expect(
+        folded.tasks.map((t) => `${t.id}:${t.status}`),
+        w.text(),
+      ).toEqual(["t1:done"]);
+      expect(statuses(w, "main").filter((s) => s === "failed")).toHaveLength(2);
+    });
+
+    it("resumes a failed check even when main was cut on the turn that read the notice", async () => {
+      const act = actOnce("message", { threadId: tid("t1.check"), text: "Continue." });
+      const base = mainFor(act);
+      let cutOnce = false;
+      const w = world({
+        plan: [task("t1")],
+        main: (t) => {
+          if (t.fresh && told(t, /t1.check \(t1\) failed/) && !cutOnce) {
+            cutOnce = true;
+            return cut;
+          }
+          return base(t);
+        },
+        check: failing([cut], checker()),
+      });
+      const folded = await w.run();
+      expect(
+        folded.tasks.map((t) => `${t.id}:${t.status}`),
+        w.text(),
+      ).toEqual(["t1:done"]);
+      expect(of(w.stored, "thread.started", "t1.check.2")).toHaveLength(0);
+    });
+
+    it("leaves the task to check when main does nothing about a failed check", async () => {
+      const w = world({
+        plan: [task("t1")],
+        main: chain(["t1"]),
+        check: failing([cut], checker()),
+      });
+      const folded = await w.run();
+      expect(taskEvents(w.stored, "t1").at(-1), w.text()).toBe("to-check:check-result");
+      expect(folded.tasks.map((t) => t.status)).toEqual(["to-check"]);
     });
   });
 });

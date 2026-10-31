@@ -19,9 +19,9 @@ adapter, fixed only demonstrated failures, then repeated the measurements.
 Base: `origin/main` at `283a4950`, including the merged [#316] object-store
 refactor. No second storage interface, compactor or history format was added.
 
-The opt-in [probe](../src/responsiveness-probe.ts) starts a separate local HTTP
+The opt-in probe ([`responsiveness-probe.ts`](https://github.com/voluma-bio/voluma/blob/3e63664fcf514af3048302aaa72a6d6411c77ff8/apps/runner/src/responsiveness-probe.ts) and its stub server [`responsiveness-server.mjs`](https://github.com/voluma-bio/voluma/blob/3e63664fcf514af3048302aaa72a6d6411c77ff8/apps/runner/src/responsiveness-server.mjs), deleted from the tree after commit `3e63664f`; read them there) starts a separate local HTTP
 process: peer CPU and memory do not count as the runner's. It uses the real
-HTTP client, Pi provider SDK, retry wrapper, lease (15 s heartbeat, 120 s
+HTTP client, Pi provider SDK, the retry wrapper of that commit (since removed), lease (15 s heartbeat, 120 s
 self-stop), thread resume, image-history wrapper, filesystem object store,
 workflow loader and bash output collector. A 10 ms timer records maximum
 **lateness**, excluding its intended interval. Wall time includes IO; it is
@@ -59,7 +59,7 @@ are not evidence for these results.
 Pi reparses growing tool JSON on every delta. An async iterator can drain
 already buffered events through microtasks without letting heartbeat timers
 run. Yielding in the consumer alone does not interrupt the provider's producer.
-`model-retry.ts` now awaits any caller hook, then `setImmediate()`, through Pi's
+`streamFor` in `run.ts` awaits any caller hook, then `setImmediate()`, through Pi's
 awaited `onProviderStreamEvent` hook. The configured Meta/OpenAI Responses,
 OpenAI Completions and Anthropic adapters await this hook before normalization.
 No messages are trimmed or rewritten. Parsing cost remains; timer starvation
@@ -175,7 +175,7 @@ can be sent. This adds no production behavior.
 
 ## Reproduce without paid calls
 
-From the repository root (temporary files are removed by the probe):
+The probe is no longer in the tree: check out commit `3e63664f`, then run from the repository root (temporary files are removed by the probe):
 
 ```sh
 pnpm --filter @voluma/runner exec tsx src/responsiveness-probe.ts

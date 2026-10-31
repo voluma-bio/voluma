@@ -117,6 +117,8 @@ export interface ThreadOutcome {
   error?: string;
   /** The thread was refused because it cannot be resumed as stored (see `ThreadStale`). */
   stale?: true;
+  /** A `failed` outcome whose model reply had started when the provider's error came (`thread.ended`). */
+  interrupted?: true;
   /** The text of the thread's last reply in this invocation; empty if it made none. */
   reply: string;
 }
@@ -254,6 +256,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
   const inbox: Notice[] = [];
   let ended = false;
   let reply = "";
+  let lastInterrupted = false;
 
   async function run(): Promise<ThreadOutcome> {
     let started = false;
@@ -338,12 +341,18 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       // The id the reply's live frames carry, picked when it starts and used by its `message`.
       let replyId: string | undefined;
       let frames: ReturnType<typeof replyFrames> | undefined;
+      // Pi emits a reply's `message_start` as a live partial only once the provider's response
+      // headers are in and its own retries are over; a call that failed before them gets
+      // `message_start` with the final error message. `lastInterrupted`: the latest reply failed
+      // after its start.
+      let replyStarted = false;
       agent.subscribe(async (event) => {
         switch (event.type) {
           case "message_start":
             if (event.message.role === "assistant") {
               replyId = crypto.randomUUID();
               frames = replyFrames(threadId, replyId, recorder.live);
+              replyStarted = event.message.stopReason !== "error";
             }
             break;
           case "message_update":
@@ -360,6 +369,10 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
             const ok = await persist(message);
             if (message.role === "assistant") {
               reply = textOf(message);
+              lastInterrupted =
+                message.stopReason === "error" &&
+                (replyStarted || compacting.interrupted(message.errorMessage));
+              replyStarted = false;
             }
             if (!ok) break;
             if (message.role === "toolResult") {
@@ -432,8 +445,9 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
         while (!historyError && !signal?.aborted) {
           if (overflowRetryable(agent.state.messages)) {
             const recovered = await compacting.recover(agent.state.messages, signal).catch((e) => {
-              // The summary's own provider failure ends the thread as that failure, which the run retries.
-              throw new ThreadFailure(e instanceof Error ? e.message : String(e));
+              // The summary's own provider failure ends the thread as that failure; the run loop treats it by the thread's place (`run-loop.ts`).
+              const text = e instanceof Error ? e.message : String(e);
+              throw new ThreadFailure(text, compacting.interrupted(text));
             });
             if (!recovered) break;
             inbox.push({ text: OVERFLOW_NOTE, sender: NOTICE });
@@ -448,12 +462,13 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
         ? historyFailure(historyError)
         : signal?.aborted && !prompted
           ? { status: "cancelled" }
-          : outcomeOf(agent.state.messages, signal?.aborted === true);
+          : outcomeOf(agent.state.messages, signal?.aborted === true, lastInterrupted);
     } catch (error) {
       outcome = {
         status: "failed",
         error: error instanceof ThreadFailure ? error.message : String(error),
         ...(error instanceof ThreadStale && { stale: true }),
+        ...(error instanceof ThreadFailure && error.interrupted && { interrupted: true }),
       };
       if (!(error instanceof ThreadFailure)) unexpected = error;
     } finally {
@@ -509,7 +524,15 @@ function overflowRetryable(messages: AgentMessage[]): boolean {
 }
 
 /** A failure of the thread itself, as opposed to a bug: reported as the outcome, not thrown. */
-class ThreadFailure extends Error {}
+class ThreadFailure extends Error {
+  constructor(
+    message: string,
+    /** The provider's error came after its reply started (`ThreadOutcome.interrupted`). */
+    readonly interrupted = false,
+  ) {
+    super(message);
+  }
+}
 
 /**
  * The stored thread cannot be resumed as it is (a tool it called is gone, or its model changed): `ran` is false and `stale` true. The caller starts the work again on a new thread.
@@ -728,6 +751,7 @@ function isFinished(messages: AgentMessage[]): boolean {
 function outcomeOf(
   messages: AgentMessage[],
   aborted: boolean,
+  interrupted: boolean,
 ): Omit<ThreadOutcome, "ran" | "reply"> {
   const last = messages.at(-1);
   if (isFinished(messages)) return { status: "completed" };
@@ -743,12 +767,23 @@ function outcomeOf(
       return { status: "failed", error: "the model hit its output limit (stop reason length)" };
     case "error":
       // Claude's `refusal` is an ordinary end of the thread, not a crash.
+      if (last.rawStopReason === "refusal") {
+        return {
+          status: "failed",
+          error: `refusal: ${last.errorMessage ?? "the model declined to continue"}`,
+        };
+      }
       return {
         status: "failed",
-        error:
-          last.rawStopReason === "refusal"
-            ? `refusal: ${last.errorMessage ?? "the model declined to continue"}`
-            : (last.errorMessage ?? "the model request failed"),
+        error: last.errorMessage ?? "the model request failed",
+        // An overflow in the stream is the thread's own, a fresh thread cures it.
+        // A stop the model's side reported (content_filter, sensitive) is the model's own: a
+        // dropped stream leaves the raw stop reason unset.
+        ...(interrupted &&
+          !isContextOverflowError(last.errorMessage) &&
+          (last.rawStopReason === undefined || last.rawStopReason === "failed") && {
+            interrupted: true,
+          }),
       };
     default:
       return { status: "failed", error: `unexpected stop reason ${last.stopReason}` };

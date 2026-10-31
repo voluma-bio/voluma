@@ -32,3 +32,16 @@ API routes and `@voluma/api-client` calls they need are still in place, waiting 
   `getReviewRun` (`revisions`).
 - **Whether `NeedItem` ids stay stable across a redo's new revision**, which `useAccepting`'s
   local `done` set relies on. Not checked.
+
+## Usability, found walking a corrected run end to end (31 Oct)
+
+None of these stops a review; each makes it slower.
+- **The chat doesn't scroll to its end when opened.** At 1280x800 the AI's latest card (a finished
+  redo, or an offer's buttons) can sit under the message box until a send shortens it.
+- **To check opens on nothing when the task in view has no items.** The panel reads "Nothing to
+  check in <task>" above the list; picking the first open item would save a click.
+- **The Report graph pushes the selected task's values below the fold** on a run with several
+  second-check tries per task (one row per try). The values are what the researcher came for.
+- **A lost send response can drop an answer to the AI's offer.** If the stored answer reaches the
+  stream before the send's `onSuccess`, the stale-answer check in `ai-panel.tsx` clears the answer
+  mode and a retry sends a plain message (refused 409). Reasoned from the code, not reproduced.
