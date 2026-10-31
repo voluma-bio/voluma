@@ -205,24 +205,29 @@ export function RunAlert({ run, userId, stale }: { run: Run; userId: string; sta
   return null;
 }
 
-/** Sends of the stored key the page makes by itself in one wait, and the most it waits between two. */
-const AUTO_SENDS = 30;
+/**
+ * Failed sends the page retries by itself when the server or network is down, and the most it waits
+ * between two. A 429 (too many runs going) is retried every MAX_WAIT_MS with no cap: it clears only
+ * when other runs end, which can take longer than any cap would allow.
+ */
+const OUTAGE_SENDS = 30;
 const MAX_WAIT_MS = 60_000;
 
-/** A refusal that can clear without the user: too many runs going, the server or the network down. */
-const clears = (error: unknown) =>
-  !(error instanceof ApiError) || error.status === 429 || error.status >= 500;
+const full = (error: unknown) => error instanceof ApiError && error.status === 429;
+const down = (error: unknown) => !(error instanceof ApiError) || error.status >= 500;
 
 /**
  * The starter's own run waiting for keys. Mounted once per wait, it sends the key stored in this
- * browser by itself, and again after a refusal that clears (waits doubling from 5 s to a minute),
- * until it has tried AUTO_SENDS times or the user sends from the form, which shows after the first
- * failure. A 409 means the run already left the wait (another tab sent the key): not an error.
+ * browser by itself, and again after a refusal that clears: a 429 every minute for as long as the
+ * wait lasts, a 5xx or network error after a wait doubling from 5 s to a minute, OUTAGE_SENDS times.
+ * A send from the form, which shows after the first failure, stops it. A 409 means the run already
+ * left the wait (another tab sent the key): not an error.
  */
 function AwaitingKeys({ run, userId }: { run: Run; userId: string }) {
   const client = useQueryClient();
   const [stored] = useState(() => loadKeys(userId));
   const [sends, setSends] = useState(0);
+  const [outages, setOutages] = useState(0);
   const [manual, setManual] = useState(false);
   const [failure, setFailure] = useState<unknown>();
   const resend = useMutation({
@@ -232,23 +237,34 @@ function AwaitingKeys({ run, userId }: { run: Run; userId: string }) {
       if (error instanceof ApiError && error.status === 409) {
         setFailure(undefined);
         void client.invalidateQueries({ queryKey: runQuery(run.id).queryKey });
-      } else setFailure(error);
+        return;
+      }
+      if (down(error)) setOutages((n) => n + 1);
+      setFailure(error);
     },
   });
   const { mutate } = resend;
   const retrying =
-    failure !== undefined && !!stored && !manual && sends < AUTO_SENDS && clears(failure);
+    failure !== undefined &&
+    !!stored &&
+    !manual &&
+    (full(failure) || (down(failure) && outages < OUTAGE_SENDS));
   const due = sends === 0 ? !!stored : retrying && resend.isError;
+  const wait =
+    sends === 0
+      ? 0
+      : full(failure)
+        ? MAX_WAIT_MS
+        : Math.min(5000 * 2 ** (outages - 1), MAX_WAIT_MS);
   // A timer even for the first send: StrictMode's second effect run clears the first timer.
   useEffect(() => {
     if (!due || !stored) return;
-    const wait = sends === 0 ? 0 : Math.min(5000 * 2 ** (sends - 1), MAX_WAIT_MS);
     const timer = setTimeout(() => {
       setSends((n) => n + 1);
       mutate(stored);
     }, wait);
     return () => clearTimeout(timer);
-  }, [due, sends, stored, mutate]);
+  }, [due, sends, wait, stored, mutate]);
 
   if (stored && !manual && failure === undefined)
     return (
@@ -282,13 +298,12 @@ function AwaitingKeys({ run, userId }: { run: Run; userId: string }) {
 }
 
 function failureMessage(error: unknown, retrying: boolean) {
-  const full = error instanceof ApiError && error.status === 429;
   if (retrying)
-    return full
+    return full(error)
       ? "Too many runs are going right now. Your saved key will be sent again shortly."
       : "Couldn't send your saved key. Trying again shortly.";
-  return full
-    ? "Too many runs are waiting right now. Try again shortly."
+  return full(error)
+    ? "Too many runs are going right now. Try again shortly."
     : "Couldn't send the keys. Try again.";
 }
 
