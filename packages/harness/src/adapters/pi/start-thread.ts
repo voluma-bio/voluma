@@ -136,7 +136,12 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     model: options.model,
     thinkingLevel: options.thinkingLevel,
     streamFn: options.streamFn,
-    store: (row) => persistRow(row),
+    store: async (row) => {
+      const ok = await persistRow(row);
+      // A pending wrap-up warns of a summary that now exists.
+      inbox.splice(0, inbox.length, ...inbox.filter((n) => !n.lapses));
+      return ok;
+    },
     // The summary was a model call: its usage is spend (`spend.ts` counts assistant `message`s).
     onSummary: (reply, summary) => {
       const used = usageOf(reply);
@@ -159,18 +164,6 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       messages: [],
     },
     streamFn: options.streamFn,
-    // Delivers the inbox with the last tool result of a batch (see the file header).
-    afterToolCall: async ({ assistantMessage, toolCall, result }) => {
-      const calls = assistantMessage.content.filter((b) => b.type === "toolCall");
-      // A terminating result ends the turn: its inbox goes in the user message that follows.
-      if (inbox.length === 0 || toolCall.id !== calls.at(-1)?.id || result.terminate) return;
-      const notices = inbox.splice(0);
-      deliveredWith.set(toolCall.id, notices);
-      return {
-        content: [...result.content, { type: "text", text: `\n\n${blockOf(notices)}` }],
-        details: { ...(result.details as object), inbox: true },
-      };
-    },
     // The one place a request's messages differ from the thread's: after a compaction.
     transformContext: async (messages, signal) => compacting.prepare(messages, signal),
     sessionId: threadId,
@@ -196,18 +189,40 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       return false;
     }
   };
-  const emitToolResult = (result: ToolResultMessage) => {
-    const details = result.details as
-      | { truncated?: boolean; infrastructure?: true; inbox?: true }
-      | undefined;
+  const emitToolResult = (result: ToolResultMessage, content = result.content) => {
+    const details = result.details as { truncated?: boolean; infrastructure?: true } | undefined;
     emit("tool.result", {
       toolCallId: result.toolCallId,
       isError: result.isError,
-      // The inbox block is the last part; its notices are their own events.
-      output: textOf(details?.inbox ? { content: result.content.slice(0, -1) } : result),
+      output: textOf({ content }),
       truncated: details?.truncated === true,
       ...(details?.infrastructure && { infrastructure: true as const }),
     });
+  };
+
+  /**
+   * At the last result of a tool batch, when Pi has pushed every result of it: what the thread
+   * is told next. Returns the notices delivered with this result, which sit on it as a text part.
+   */
+  const closeBatch = (last: ToolResultMessage): Notice[] => {
+    const messages = agent.state.messages;
+    const replyAt = messages.map((m) => m.role).lastIndexOf("assistant");
+    const reply = messages[replyAt];
+    if (reply?.role !== "assistant") return [];
+    const calls = reply.content.filter((b) => b.type === "toolCall");
+    if (calls.at(-1)?.id !== last.toolCallId) return [];
+    if (!historyError && !cutOff()) {
+      const notice = compacting.wrapUp(messages);
+      if (notice) inbox.push({ text: notice, sender: NOTICE, lapses: true });
+    }
+    // A batch whose every result terminates ends the turn: its inbox goes in the user message that follows.
+    const terminates = (m: AgentMessage) =>
+      m.role === "toolResult" && (m.details as { terminate?: boolean } | undefined)?.terminate;
+    const results = messages.slice(replyAt + 1);
+    if (inbox.length === 0 || [...results.filter((m) => m !== last), last].every(terminates)) {
+      return [];
+    }
+    return inbox.splice(0);
   };
 
   /** Whether the log already holds an end after this thread's latest start. */
@@ -233,8 +248,6 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
   // Everything waiting for the thread. The last check of it before the loop ends, and
   // `ended = true`, have no await between them, so a message `send` accepted is always delivered.
   const inbox: Notice[] = [];
-  // The notices appended to a tool result, until its `message_end` records them.
-  const deliveredWith = new Map<string, Notice[]>();
   let ended = false;
   let reply = "";
 
@@ -337,17 +350,22 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
             break;
           case "message_end": {
             const { message } = event;
+            // Pi passes this same object into the next request, so the block reaches the model as stored.
+            const raw = message.role === "toolResult" ? message.content : [];
+            const delivered = message.role === "toolResult" ? closeBatch(message) : [];
+            if (delivered.length > 0 && message.role === "toolResult") {
+              message.content = [...raw, { type: "text", text: `\n\n${blockOf(delivered)}` }];
+            }
             const ok = await persist(message);
             if (message.role === "assistant") {
               reply = textOf(message);
             }
             if (!ok) break;
             if (message.role === "toolResult") {
-              emitToolResult(message);
-              for (const { text, sender } of deliveredWith.get(message.toolCallId) ?? []) {
+              emitToolResult(message, raw);
+              for (const { text, sender } of delivered) {
                 emit("message", { role: "user", text, sender });
               }
-              deliveredWith.delete(message.toolCallId);
             } else if (message.role === "assistant") {
               // Every reply gets a `message`, even an empty or failed one: it ends the
               // reply's live partial (`stream.ts`).
@@ -372,13 +390,6 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
                 if (text) emit("message", { role: "user", text, sender });
               }
             }
-            break;
-          }
-          case "turn_end": {
-            // Tools ran, so another turn follows: the thread can still use the notice.
-            if (historyError || cutOff() || event.toolResults.length === 0) break;
-            const notice = compacting.wrapUp(agent.state.messages);
-            if (notice) inbox.push({ text: notice, sender: NOTICE, lapses: true });
             break;
           }
           case "tool_execution_start":
