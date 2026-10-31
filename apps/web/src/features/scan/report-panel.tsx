@@ -8,7 +8,7 @@ import type { ReviewTask } from "@voluma/contracts/review";
 import {
   formatDuration,
   type NeedItem,
-  TASK_STATUS,
+  shownStatus,
   TaskGraph,
   type TaskView,
   taskStateWord,
@@ -119,7 +119,7 @@ function TaskDetail({
             <StatusMark status="check" label={`${open} to check`} />
           ) : (
             <StatusMark
-              status={task.state === "to-check" ? "done" : TASK_STATUS[task.state]}
+              status={shownStatus(task.state, open)}
               label={task.state === "to-check" ? "Done" : taskStateWord(task.state)}
             />
           )}

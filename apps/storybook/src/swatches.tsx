@@ -27,7 +27,7 @@ export function Swatches() {
       {(["light", "dark"] as const).map((t) => (
         <div key={t} data-theme={t} className="bg-card p-4">
           <div className="mb-3 font-medium">
-            {t === "light" ? "Light: home and study pages" : "Dark: the 3D review"}
+            {t === "light" ? "Light: every screen" : "Dark: kept ready in the tokens"}
           </div>
           {roles.map(([name, use]) => (
             <div key={name} className="flex items-center gap-3 py-1">

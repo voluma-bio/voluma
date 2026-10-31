@@ -126,8 +126,7 @@ export function MarksPanel({
     <div className="grid gap-2 p-3">
       <List label="Your marks" columns="auto 28px" boxed>
         {marks.map((m) => {
-          const shape = gridMark(m.mark);
-          const measure = describe(m.mark).measure;
+          const { title, measure } = describe(m.mark);
           const elsewhere = m.gridKey !== shown?.key;
           return (
             <Row
@@ -135,9 +134,9 @@ export function MarksPanel({
               selected={m.id === selected}
               onSelect={() => onSelect(m.id)}
               title={
-                <span className="flex items-baseline gap-2">
+                <span className="flex min-w-0 items-baseline gap-2">
                   <span className="font-mono text-xs font-medium text-mark-mine-text">{m.tag}</span>
-                  {shape ? wordOf(kindOf(shape)) : "Mark"}
+                  <span className="min-w-0 truncate">{title}</span>
                 </span>
               }
               subtitle={

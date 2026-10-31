@@ -124,10 +124,11 @@ export type PaneView =
   | { camera: { position: Vec3; target: Vec3; up: Vec3 } };
 
 /**
- * Whether a pane shows its full picture: loading (a picture or layer still coming, or one out of
- * date), ready, or failed (something couldn't load; the rest is drawn as it is).
+ * Whether a pane shows its full picture: loading (no picture yet, or a layer still coming),
+ * refining (a picture, out of date for a moment: another slice, level or display), ready, or
+ * failed (something couldn't load; the rest is drawn as it is).
  */
-export type PaneStatus = "loading" | "ready" | "failed";
+export type PaneStatus = "loading" | "refining" | "ready" | "failed";
 
 /** What a pane does for screenshots: its pixels as drawn now, and showing a saved view. */
 export type PaneHandle = {

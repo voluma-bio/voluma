@@ -107,8 +107,9 @@ export function TaskViewer({
   const imageId = grid.state === "ready" ? grid.imageId : undefined;
   const image = revision.volumes.find((v) => v.id === imageId);
   const gridKey = image && gridKeyOf(image);
-  // The new grid's viewer reports false as it mounts.
-  const [ready, setReady] = useState(false);
+  // Readiness belongs to the grid that reported it: a new grid is never ready for a render.
+  const [reported, setReported] = useState<{ gridKey: string; ready: boolean }>();
+  const ready = !!reported && reported.gridKey === gridKey && reported.ready;
   useEffect(
     () => onShown(gridKey ? { key: gridKey, taskId: task.id, ready } : undefined),
     [gridKey, task.id, ready, onShown],
@@ -155,7 +156,7 @@ export function TaskViewer({
       tool={tool}
       marks={shown}
       onMark={(mark) => onMark(mark, grid.imageId, gridKey!)}
-      onReady={setReady}
+      onReady={(r) => setReported({ gridKey: gridKey!, ready: r })}
       ref={viewer}
     >
       <SegmentedControl

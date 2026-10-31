@@ -1,5 +1,5 @@
-// Every story renders in both themes side by side, the way the app uses them: light on study
-// pages, dark in the 3D review. The toolbar can narrow it to one.
+// Every story renders in both themes side by side: the app is light throughout, and dark is kept
+// ready in the tokens. The toolbar can narrow it to one.
 import "../src/styles.css";
 import type { Decorator, Preview } from "@storybook/react-vite";
 

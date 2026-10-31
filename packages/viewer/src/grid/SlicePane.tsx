@@ -673,7 +673,6 @@ export function SlicePane({
     element.addEventListener("keydown", key);
     element.addEventListener("contextmenu", menu);
     return () => {
-      layer.cancel();
       stopReset();
       element.removeEventListener("pointerdown", down);
       element.removeEventListener("pointermove", move);
@@ -692,11 +691,13 @@ export function SlicePane({
   const stale =
     refining || (shown && (shown.contrast !== contrast || shown.overlays !== scene.overlays));
   const status: PaneStatus =
-    ((!shown || stale) && !error) || (traces.size !== traceMeshes.length && !traceError)
+    (!shown && !error) || (traces.size !== traceMeshes.length && !traceError)
       ? "loading"
-      : error || traceError
-        ? "failed"
-        : "ready";
+      : stale && !error
+        ? "refining"
+        : error || traceError
+          ? "failed"
+          : "ready";
   useEffect(() => latest.current.onStatus(status), [status]);
   const scale = shown ? scene.image.levels[shown.level]!.scaleZyx[axis] : null;
   return (

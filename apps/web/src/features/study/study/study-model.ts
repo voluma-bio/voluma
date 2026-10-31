@@ -33,7 +33,7 @@ import {
   runHref,
   type ScanGraphTask,
   type StudyGraphTask,
-  TASK_STATUS,
+  shownStatus,
   type TaskState,
 } from "@voluma/run-view";
 import type { Status } from "@voluma/ui";
@@ -171,18 +171,13 @@ function openOn(scan: StudyScanDetail, taskId: string): ToCheckItem[] {
 }
 
 /**
- * A cell of the scan-by-task grid: one task of one scan, and its open checks. A task in To check
- * with every item handled reads done; on a live run the study read has no items yet (they belong
- * to the completed result), so it reads To check as the scan review does.
+ * A cell of the scan-by-task grid: one task of one scan, and its open checks, read by the one
+ * status rule (`shownStatus`). On a live run the study read has no items yet (they belong to the
+ * completed result).
  */
 export function cellOf(scan: StudyScanDetail, taskId: string): { status: Status; open: number } {
-  const state = taskState(scan, taskId);
   const open = openOn(scan, taskId).length;
-  if (state === "to-check") {
-    const live = isLive(scan.runs[0]);
-    return { status: open > 0 || live ? "check" : "done", open };
-  }
-  return { status: TASK_STATUS[state], open };
+  return { status: shownStatus(taskState(scan, taskId), open, isLive(scan.runs[0])), open };
 }
 
 /** The workflow at study size: each task with its state on every scan, in study order. */

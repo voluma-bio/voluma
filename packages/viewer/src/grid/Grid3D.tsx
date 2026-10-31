@@ -395,7 +395,6 @@ export function Grid3D({
     element.addEventListener("pointerup", lineUp, { capture: true });
     element.addEventListener("pointerleave", leave);
     return () => {
-      layer.cancel();
       stopReset();
       element.removeEventListener("pointerdown", lineDown, { capture: true });
       element.removeEventListener("pointermove", lineMove);
@@ -582,12 +581,15 @@ export function Grid3D({
         (meshLoad.left > 0
           ? `Loading ${meshLoad.left} mesh${meshLoad.left > 1 ? "es" : ""}…`
           : undefined)));
+  // The coarsest volume is the first picture; the finer one and new meshes refine it.
   const status: PaneStatus =
-    volumeLoad.loading || meshLoad.left > 0
+    !shown && !volumeLoad.error
       ? "loading"
-      : volumeLoad.error || meshLoad.error
-        ? "failed"
-        : "ready";
+      : volumeLoad.loading || meshLoad.left > 0
+        ? "refining"
+        : volumeLoad.error || meshLoad.error
+          ? "failed"
+          : "ready";
   const latestStatus = useRef(onStatus);
   latestStatus.current = onStatus;
   useEffect(() => latestStatus.current(status), [status]);

@@ -88,7 +88,7 @@
      enough for 4.5:1 on every light surface. The solids stay for the images. */
   --mark-mine-text: oklch(0.5 0.2 338);
   --axis-x-text: oklch(0.5 0.16 27);
-  --axis-y-text: oklch(0.5 0.12 150);
+  --axis-y-text: oklch(0.47 0.12 150);
   --axis-z-text: oklch(0.5 0.13 250);
 
   --inverse: oklch(0.205 0.013 255); /* tooltips and toasts */
