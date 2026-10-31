@@ -541,7 +541,9 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       if (checkAwaitsMain(d, c)) {
         const m = d.main ? d.threads.get(d.main) : undefined;
         const told = !d.undelivered.some((n) => n.threadId === c.id);
-        if (!told || (m && stateOf(m) !== "idle") || anyRunning(d)) continue;
+        // A failed main is `mainFailed`'s first: it may resume the check itself.
+        if (!told || (m && (stateOf(m) !== "idle" || m.end?.status === "failed")) || anyRunning(d))
+          continue;
         await writeResult(
           d,
           t,
@@ -602,7 +604,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
    * A failed main agent, idle. The rules for the failure's kind:
    * - a transient provider error (Pi's retries ran out before any reply) fails the run;
    * - an interrupted reply resumes the same main, history as it was, unless its previous end was
-   *   an interrupted failure too (no completed turn between): then the run fails;
+   *   an interrupted failure too and it has made no reply since its latest start: then the run fails;
    * - anything else (a context overflow, a length stop, a refusal) keeps the history that failed,
    *   so a fresh main takes over, once; if that one fails too, so does the run.
    */
@@ -613,7 +615,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     const kind = failureOf(m);
     if (kind === "transient" && threads.started(m.id)) fail();
     if (kind === "interrupted") {
-      if (m.endBefore?.status === "failed" && m.endBefore.interrupted) fail();
+      if (!m.replied && m.endBefore?.status === "failed" && m.endBefore.interrupted) fail();
       await resume(m, PROVIDER_FAILED_RESUME, RUNTIME);
       return;
     }
@@ -632,7 +634,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       ? reviewing(fold(events), opening, true)
       : "";
     return {
-      text: `${deliveryText(d.undelivered, agentsList(d, stateOf), changed)}${intro}`,
+      text: `${deliveryText(d, d.undelivered, agentsList(d, stateOf), changed)}${intro}`,
       covers: events.at(-1)?.id,
     };
   }

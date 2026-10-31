@@ -777,7 +777,13 @@ function outcomeOf(
         status: "failed",
         error: last.errorMessage ?? "the model request failed",
         // An overflow in the stream is the thread's own, a fresh thread cures it.
-        ...(interrupted && !isContextOverflowError(last.errorMessage) && { interrupted: true }),
+        // A stop the model's side reported (content_filter, sensitive) is the model's own: a
+        // dropped stream leaves the raw stop reason unset.
+        ...(interrupted &&
+          !isContextOverflowError(last.errorMessage) &&
+          (last.rawStopReason === undefined || last.rawStopReason === "failed") && {
+            interrupted: true,
+          }),
       };
     default:
       return { status: "failed", error: `unexpected stop reason ${last.stopReason}` };

@@ -127,7 +127,9 @@ export function mainTools(deps: MainDeps) {
     if (r?.place === "check") {
       if (checkAwaitsMain(d, r) && agents.state(d, r.id) === "idle") return r;
       throw new Refusal(
-        `${ref} is a checker: answer its question with \`answer\`. Only a check that failed can be messaged or stopped.`,
+        r.end?.status === "failed"
+          ? `${ref} failed, but its task no longer waits on this check (its verdict is in, or the task moved on): there is nothing to resume or replace.`
+          : `${ref} is a checker: answer its question with \`answer\`. Only a check that failed can be messaged or stopped.`,
       );
     }
     throw new Refusal(`${ref} is not a worker of this run.`);

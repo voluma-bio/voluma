@@ -389,7 +389,7 @@ text's class (the unit test there pins the texts) and reads `interrupted` from t
   - *transient* (the set Pi retries, before the headers): fails the run.
   - *interrupted*: the same thread is resumed with its history as it was plus one runtime message ("The model
     provider failed during your last reply; continue."), unless the end before it on that thread was an interrupted
-    failure too, with no completed turn between: then the run fails. It is read from the log, so a restart or a
+    failure too and the thread has made no reply (a message or tool call) since its latest start: then the run fails. It is read from the log, so a restart or a
     correction days later does not change it.
   - anything else (a context overflow, a length stop, a refusal): a fresh `main.<n>` with the restart brief, once.
 - A worker or check that ended `failed` is a failed thread like any other: main gets the inbox notice and decides,

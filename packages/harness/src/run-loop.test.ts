@@ -1478,6 +1478,46 @@ describe("run loop", () => {
       expect(of(w.stored, "thread.started", "t1.check.2")).not.toHaveLength(0);
     });
 
+    it("a cut, a completed turn, then another cut does not fail the run", async () => {
+      let n = 0;
+      const base = chain(["t1"]);
+      const w = world({
+        plan: [task("t1")],
+        // Cuts on the 1st and 3rd model calls; the 2nd one (start_agent) completes between them.
+        main: (t) => (++n === 1 || n === 3 ? cut : base(t)),
+        check: checker(),
+      });
+      const folded = await w.run();
+      expect(
+        folded.tasks.map((t) => `${t.id}:${t.status}`),
+        w.text(),
+      ).toEqual(["t1:done"]);
+      expect(statuses(w, "main").filter((s) => s === "failed")).toHaveLength(2);
+    });
+
+    it("resumes a failed check even when main was cut on the turn that read the notice", async () => {
+      const act = actOnce("message", { threadId: tid("t1.check"), text: "Continue." });
+      const base = mainFor(act);
+      let cutOnce = false;
+      const w = world({
+        plan: [task("t1")],
+        main: (t) => {
+          if (t.fresh && told(t, /t1.check \(t1\) failed/) && !cutOnce) {
+            cutOnce = true;
+            return cut;
+          }
+          return base(t);
+        },
+        check: failing([cut], checker()),
+      });
+      const folded = await w.run();
+      expect(
+        folded.tasks.map((t) => `${t.id}:${t.status}`),
+        w.text(),
+      ).toEqual(["t1:done"]);
+      expect(of(w.stored, "thread.started", "t1.check.2")).toHaveLength(0);
+    });
+
     it("leaves the task to check when main does nothing about a failed check", async () => {
       const w = world({
         plan: [task("t1")],
