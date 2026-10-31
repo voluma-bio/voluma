@@ -441,8 +441,11 @@ check), the role files' levels are ignored and `RUNNER_THINKING` alone applies (
 as the Pi agent's `initialState.thinkingLevel`, so Pi sends it as `reasoning` and records it on each
 History message. Pi clamps an unsupported level silently, so two checks refuse one: `main.ts` at boot
 checks `RUNNER_THINKING` against every alias; `run.ts` at run start checks each
-role's set level against its model (the role files load per run); both use `thinking.ts`, and a level nobody set is not checked. `"off"` sends
-no level: for DeepSeek that means `thinking: disabled`. Visitor runs always use `"off"`. The level is
+role's set level against its model (the role files load per run); both use `thinking.ts` and check
+only non-off levels. Unset and `"off"` both mean no requested effort through Pi Agent, not a
+guarantee that the provider disables reasoning: Muse omits `reasoning` and uses its default;
+DeepSeek sends `thinking: disabled`. A role's explicit `thinking: off` overrides global `high`
+without asking Muse for an unsupported effort. Visitor runs always use `"off"`. The level is
 not in the log, so a resumed thread takes it from the snapshotted role file and the current config.
 
 # Runner: a claim that ends is a cut-off, not a stop
@@ -498,6 +501,13 @@ The API bounds restarts with one limit (`apps/api/.context/deploy.md`); the runn
 restart counter of its own.
 
 # Runner: telemetry, and what an uncaught error does
+
+The [responsiveness audit](responsiveness-audit.md) records measured history,
+snapshot, evidence, live-output and provider-response bounds, with a free local
+replay command. Provider normalization must yield through Pi's awaited stream
+hook (`model-retry.ts`): buffered tool arguments otherwise starve heartbeat timers
+even though every iterator step is async. These measurements do not bound unlimited
+stored history; context compaction does not by itself bound the resume response.
 
 `telemetry.ts` starts after startup (a failure before it still kills the process). Every line starts
 with `telemetry`; on Render search the service's logs for these:

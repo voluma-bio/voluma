@@ -23,7 +23,7 @@
     "@biomejs/biome": "^2.5.1",
     "cloudflared": "^0.7.3",
     "lefthook": "^2.1.9",
-    "nx": "^23.0.1",
+    "nx": "^24.0.3",
     "postgres": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
