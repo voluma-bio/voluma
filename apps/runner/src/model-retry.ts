@@ -4,7 +4,9 @@
  * exponential backoff until BUDGET_MS has passed since the first attempt (Pi's own tries inside an
  * attempt count against it, but an attempt in flight is not cut short). Any other error, a 4xx
  * included, and the last error of a spent budget end the call at once; the run then fails with it.
+ * Yields between provider events so parsing a buffered reply cannot starve lease timers.
  */
+import { setImmediate } from "node:timers/promises";
 import {
   type Api,
   type AssistantMessage,
@@ -42,7 +44,15 @@ export function retryTransient(
         let started: AssistantMessageEvent | undefined;
         let content = false;
         let failed: AssistantMessage | undefined;
-        for await (const event of stream(model, context, options)) {
+        for await (const event of stream(model, context, {
+          ...options,
+          // All registered providers await this before normalizing each event. An
+          // async iterator alone can drain buffered deltas entirely through microtasks.
+          onProviderStreamEvent: async (event, model) => {
+            await options?.onProviderStreamEvent?.(event, model);
+            await setImmediate();
+          },
+        })) {
           if (event.type === "start") started = event;
           else if (event.type === "error" && !content) failed = event.error;
           else {

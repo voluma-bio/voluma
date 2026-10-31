@@ -112,7 +112,7 @@ if __name__ == '__main__':
     sp = sidecar.grid(str(sidecar.sidecar_path(a.labels)))['spacing_zyx_mm']
     if (a.within is None) != (a.seeds is None):
         sidecar.fail('--within and --seeds go together')
-    box = crop_box(np.asarray(labels) == a.within if a.within else np.asarray(labels) > 0)
+    box = crop_box(np.asarray(labels) == a.within if a.within is not None else np.asarray(labels) > 0)
     h = hu[box]
     out = np.zeros(hu.shape, np.uint8)
     info = {}

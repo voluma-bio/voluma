@@ -28,7 +28,6 @@ from scipy import ndimage as ndi
 
 NAMES = ('a', 'b', 'c', 'd')
 DFL_ID, DFW_ID, RATIO_ID = 'distal-femoral-length-dfl', 'distal-femoral-width-dfw', 'width-length-ratio'
-SNAP_BOX = 40  # voxels either side of a landmark searched for the nearest femur voxel
 MAX_OFF_BONE_MM = 0.05  # a landmark further than this from femur bone fails the check
 MIN_LENGTH_OVER_WIDTH = 0.4  # DFL / DFW below this fails. One scan (n=1): OA6-1RK reference 0.71, the end-on pick that was wrong 0.27
 
@@ -41,10 +40,11 @@ def unit(v):
 
 
 def off_bone_mm(point, femur, vox):
-    """Distance in mm from a point to the nearest femur voxel within SNAP_BOX, or None if none is that close."""
+    """Distance in mm to femur bone in a box covering MAX_OFF_BONE_MM, or None if the box has no bone."""
     c = np.round(point).astype(int)
-    lo = np.maximum(c - SNAP_BOX, 0)
-    box = femur[tuple(slice(lo_, c_ + SNAP_BOX + 1) for lo_, c_ in zip(lo, c, strict=True))]
+    radius = int(np.ceil(MAX_OFF_BONE_MM / vox))
+    lo = np.maximum(c - radius, 0)
+    box = femur[tuple(slice(lo_, c_ + radius + 1) for lo_, c_ in zip(lo, c, strict=True))]
     if not box.any():
         return None
     dt = ndi.distance_transform_edt(~box)
