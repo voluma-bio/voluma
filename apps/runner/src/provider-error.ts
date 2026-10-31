@@ -3,48 +3,13 @@
  * The call retry (`model-retry.ts`) retries the second set; a provider's error that survives it
  * (every 4xx) fails the run (`run-loop.ts`), and the retry set once more when it arrives mid-reply,
  * after content went out, which `model-retry.ts` cannot redo.
- * The error text is all that reaches us, in these shapes:
- * - Meta, OpenAI, Mistral via Pi: `<provider> API error (<status>): <body>`.
- * - Anthropic (SDK message): `<status> {"type":"error","error":{"type":"<type>",...}}`. An error
- *   sent mid-stream (an overloaded server) is that JSON alone, in any key order, so its
- *   documented `error.type` stands in for a status.
- * - An account out of money has its own message (`OUT_OF_MONEY`).
- * - A connection failure or client timeout: no status.
+ * The error text is all that reaches us (shapes and status: `@voluma/harness/context-overflow`),
+ * and an account out of money has its own message (`OUT_OF_MONEY`).
  */
-import { type AssistantMessage, isContextOverflow } from "@earendil-works/pi-ai";
+import { isContextOverflowError, statusOf } from "@voluma/harness/context-overflow";
 
 const CONNECTION =
   /^Connection error\.?$|^Request timed out\.?$|^Anthropic stream ended before message_stop/;
-
-/** Anthropic's documented error types, as the HTTP status each is sent with. */
-const ANTHROPIC_TYPE_STATUS: Record<string, number> = {
-  authentication_error: 401,
-  billing_error: 402,
-  permission_error: 403,
-  not_found_error: 404,
-  rate_limit_error: 429,
-  api_error: 500,
-  timeout_error: 504,
-  overloaded_error: 529,
-};
-
-/**
- * The status in the text. Pi may prefix `Server requested Ns retry delay (max: 60s). ` to the SDK
- * message; the status follows, then a JSON body, an HTML page or `status code (no body)`.
- */
-function statusOf(message: string): number | undefined {
-  const status =
-    /API error \((\d{3})\)/.exec(message) ??
-    /^(?:Server requested [^.]*\. )?(\d{3}) (?:\{|<|status code)/.exec(message);
-  if (status) return Number(status[1]);
-  if (!message.startsWith("{")) return undefined;
-  try {
-    const type = (JSON.parse(message) as { error?: { type?: unknown } }).error?.type;
-    return typeof type === "string" ? ANTHROPIC_TYPE_STATUS[type] : undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 /**
  * An account out of money: Anthropic's spend cap and empty balance are `400 invalid_request_error`
@@ -61,13 +26,8 @@ const OUT_OF_MONEY =
  */
 export function providerFailure(message: string | undefined): "retry" | "fatal" | undefined {
   const m = message ?? "";
-  // Pi's catch-all overflow patterns also match 5xx bodies ("too many tokens in the batch").
+  if (isContextOverflowError(m)) return;
   const status = statusOf(m);
-  if (
-    (status === undefined || status === 400 || status === 413) &&
-    isContextOverflow({ stopReason: "error", errorMessage: m } as AssistantMessage)
-  )
-    return;
   if (isTransientProviderError(m)) return "retry";
   return CONNECTION.test(m) || OUT_OF_MONEY.test(m) || (status ?? 0) >= 400 ? "fatal" : undefined;
 }

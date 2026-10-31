@@ -1,6 +1,16 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { describe, expect, it } from "vitest";
-import { compactedView, cutPoint, foldHistory, inputTokens } from "./compaction";
+import {
+  compactedView,
+  compactionRow,
+  compactionTrigger,
+  compactor,
+  cutPoint,
+  foldHistory,
+  imageLoad,
+  inputTokens,
+  parseMarker,
+} from "./compaction";
 
 const text = (n: number) => "x".repeat(n * 4); // n tokens
 const user = (n: number): AgentMessage => ({ role: "user", content: text(n), timestamp: 0 });
@@ -72,27 +82,29 @@ describe("cutPoint", () => {
 });
 
 describe("history with a compaction", () => {
-  const compaction = { summary: "did things", keptFrom: 4, at: 8 };
+  const compaction = { summary: "did things", keptFrom: 4 };
+  const rows = (...items: unknown[]) => items.map((m) => JSON.stringify(m));
+  const marker = (c: { summary: string; keptFrom: number }) => ({ role: "compaction", ...c });
 
-  it("folds markers out and keeps every message", () => {
+  it("folds markers out, keeps every message and derives where the marker sat", () => {
     const messages = thread().slice(0, 8);
-    const rows = [...messages, { role: "compaction", ...compaction, timestamp: 1 }, user(3)];
-    const folded = foldHistory(rows);
+    const folded = foldHistory(rows(...messages, marker(compaction), user(3)));
     expect(folded.messages).toEqual([...messages, user(3)]);
-    expect(folded.compaction).toEqual(compaction);
+    expect(folded.compaction).toEqual({ ...compaction, at: 8 });
   });
 
   it("the latest marker wins, and a history without one loads as before", () => {
-    const later = { summary: "more", keptFrom: 6, at: 9 };
-    const rows = [
-      system,
-      user(1),
-      { role: "compaction", ...compaction },
-      user(2),
-      { role: "compaction", ...later },
-    ];
-    expect(foldHistory(rows).compaction).toEqual(later);
-    expect(foldHistory([system, user(1)])).toEqual({ messages: [system, user(1)] });
+    const later = { summary: "more", keptFrom: 6 };
+    const folded = foldHistory(rows(system, user(1), marker(compaction), user(2), marker(later)));
+    expect(folded.compaction).toEqual({ ...later, at: 3 });
+    expect(foldHistory(rows(system, user(1)))).toEqual({ messages: [system, user(1)] });
+  });
+
+  it("a message that mentions a marker is not one", () => {
+    const quoting = user(1);
+    (quoting as { content: string }).content = '{"role":"compaction","summary":"x","keptFrom":1}';
+    expect(parseMarker(JSON.stringify(quoting))).toBeUndefined();
+    expect(parseMarker(compactionRow({ ...compaction, at: 9 }))).toEqual(compaction);
   });
 
   it("a request is the system message, the summary and the kept messages", () => {
@@ -113,5 +125,150 @@ describe("history with a compaction", () => {
     const messages = [system, user(1), stale, result("z", 1)];
     expect(inputTokens(messages)).toBeGreaterThan(300_000);
     expect(inputTokens(messages, { summary: "S", keptFrom: 2, at: 4 })).toBeLessThan(100);
+  });
+});
+
+describe("trigger", () => {
+  const model = (contextWindow: number, maxTokens = 32_000) =>
+    ({ contextWindow, maxTokens }) as never;
+  it("stays positive on a small window and is capped on a large one", () => {
+    expect(compactionTrigger(model(32_000))).toBeGreaterThan(0);
+    expect(compactionTrigger(model(64_000))).toBeGreaterThan(0);
+    expect(compactionTrigger(model(1_000_000))).toBe(400_000);
+    expect(compactionTrigger(model(200_000))).toBeCloseTo(0.9 * (200_000 - 32_000));
+  });
+});
+
+// The compactor with a scripted model: each call returns the next reply and records its request.
+describe("compactor", () => {
+  const image = (bytes: number): AgentMessage =>
+    ({
+      role: "toolResult",
+      toolCallId: "i",
+      toolName: "view_image",
+      content: [{ type: "image", mimeType: "image/png", data: "A".repeat(bytes) }],
+    }) as never;
+  const reply = (text: string, stopReason = "stop", extra: object = {}) => ({
+    stopReason,
+    content: [{ type: "text", text }],
+    usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+    ...extra,
+  });
+  type Reply = ReturnType<typeof reply>;
+
+  function setup(replies: Reply[], model: object = { contextWindow: 200_000, maxTokens: 32_000 }) {
+    const requests: { messages: AgentMessage[]; maxTokens: number }[] = [];
+    const stored: string[] = [];
+    const summaries: string[] = [];
+    const c = compactor({
+      threadId: "t",
+      model: model as never,
+      streamFn: (async (
+        _m: unknown,
+        ctx: { messages: AgentMessage[] },
+        o: { maxTokens: number },
+      ) => {
+        requests.push({ messages: ctx.messages, maxTokens: o.maxTokens });
+        const next = replies.shift();
+        return { result: async () => next };
+      }) as never,
+      store: async (row) => {
+        stored.push(row);
+        return true;
+      },
+      onSummary: (_r, summary) => summaries.push(summary),
+    });
+    return { c, requests, stored, summaries };
+  }
+  // The last reply reports `input` tokens.
+  const thread_ = (input: number) => {
+    const messages = thread();
+    (messages[messages.length - 2] as { usage?: unknown }).usage = {
+      input,
+      output: 10,
+      cacheRead: 0,
+      cacheWrite: 0,
+    };
+    return messages;
+  };
+
+  it("warm: three wrap-up turns, then the same messages plus the instruction, one marker, one recorded reply", async () => {
+    const { c, requests, stored, summaries } = setup([reply("SUM")], {
+      contextWindow: 1_000_000,
+      maxTokens: 32_000,
+    });
+    const messages = thread_(500_000);
+    expect(c.wrapUp(messages)).toContain("nearly full");
+    for (let i = 0; i < 3; i++) await c.prepare(messages);
+    expect(requests).toHaveLength(0);
+    const view = await c.prepare(messages);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.messages.slice(0, messages.length)).toEqual(messages);
+    expect(stored).toHaveLength(1);
+    expect(summaries).toEqual(["SUM"]);
+    expect(view.length).toBeLessThan(messages.length);
+  });
+
+  it("cold when the warm request would not fit: no kept tail, no images", async () => {
+    // 195k input in a 200k window: the warm request plus a 16k summary does not fit
+    const { c, requests } = setup([reply("SUM")]);
+    const messages = thread_(195_000);
+    messages.splice(4, 0, image(10));
+    await c.prepare(messages);
+    const sent = requests[0]?.messages ?? [];
+    expect(sent.length).toBeLessThan(messages.length);
+    expect(JSON.stringify(sent)).not.toContain("AAAAAAAAAA");
+    expect(sent[0]).toBe(messages[0]);
+  });
+
+  it("recover summarizes cold without the tail and stores the marker", async () => {
+    const { c, requests, stored } = setup([reply("SUM")]);
+    const messages = thread_(150_000);
+    expect(await c.recover(messages)).toBe(true);
+    expect(requests[0]?.messages.length).toBeLessThan(messages.length);
+    expect(JSON.parse(stored[0] as string)).toMatchObject({ role: "compaction", summary: "SUM" });
+  });
+
+  it("recover stores nothing and answers false when the summary fails", async () => {
+    const { c, stored } = setup([reply("", "error", { errorMessage: "prompt is too long" })]);
+    expect(await c.recover(thread_(150_000))).toBe(false);
+    expect(stored).toHaveLength(0);
+  });
+
+  it("accepts a summary that also called a tool, and retries once on length", async () => {
+    const a = setup([reply("SUM", "toolUse")]);
+    expect(await a.c.recover(thread_(150_000))).toBe(true);
+    const b = setup([reply("cut", "length"), reply("FULL")]);
+    expect(await b.c.recover(thread_(150_000))).toBe(true);
+    expect(b.requests.map((r) => r.maxTokens)).toEqual([16_000, 32_000]);
+    expect(b.summaries).toEqual(["FULL"]);
+  });
+
+  it("the provider's error text reaches the caller unchanged", async () => {
+    const { c } = setup([reply("", "error", { errorMessage: "529 overloaded" })], {
+      contextWindow: 1_000_000,
+      maxTokens: 32_000,
+    });
+    await expect(c.prepare(thread_(900_000))).rejects.toThrow(/^529 overloaded$/);
+  });
+
+  it("images near the request limit make a thread due, and compact at once when tight", async () => {
+    const model = {
+      contextWindow: 1_000_000,
+      maxTokens: 32_000,
+      inputLimits: { maxRequestBytes: 1_000 },
+    };
+    const { c, requests } = setup([reply("SUM")], model);
+    const due = [...thread(), image(450)];
+    expect(imageLoad(due).bytes).toBe(450);
+    expect(c.wrapUp(due)).toContain("nearly full"); // 45% of the limit: due, not tight
+    const tight = [...thread(), image(800)];
+    await c.prepare(tight); // 80%: another turn might not fit
+    expect(requests).toHaveLength(1);
+  });
+
+  it("skips the notice when another turn would not fit", () => {
+    const { c } = setup([]);
+    expect(c.wrapUp(thread_(180_000))).toBeUndefined();
   });
 });

@@ -3,85 +3,117 @@
  * history between requests (the provider's prompt cache needs the sent prefix byte-identical).
  *
  * Once per context-full event the thread goes through three steps. Before a request, when the
- * estimated input passes the trigger, a notice is steered in ("finish the step; the history will
- * be summarized") and the thread gets `WRAP_UP_TURNS` more turns. Then, before the next request,
- * its own model summarizes the thread on a warm branch (the same messages, system message and
- * tools as the thread's requests, with only the summary instruction appended, so the provider's
- * cache serves the prefix). From then on requests carry `[system, summary, recent turns]`.
- * When even one more turn would not fit the window, or the provider refused a request as too
- * large, the notice is skipped and the thread compacts at once.
+ * estimated input passes the trigger (or the carried images near the model's request-size or
+ * image-count limit), a notice is steered in ("finish the step; the history will be summarized")
+ * and the thread gets `WRAP_UP_TURNS` more turns. Then, before the next request, its own model
+ * summarizes the thread on a warm branch (the same messages, system message and tools as the
+ * thread's requests, with only the summary instruction appended, so the provider's cache serves
+ * the prefix). From then on requests carry `[system, summary, recent turns]`.
+ * When another turn would not fit, the notice is skipped and the thread compacts at once. When
+ * the warm request itself would not fit, or the provider refused a request as too large
+ * (`recover`), the summary is cold: `[system, previous summary, the messages to summarize]`
+ * without the kept tail, with images left out, which is always smaller than the request that
+ * failed.
  *
  * History stays append-only and keeps every message. A compaction is one more row, a marker
- * `{role: "compaction", summary, keptFrom, at}` stored where it happened: `keptFrom` indexes the
+ * `{role: "compaction", summary, keptFrom}` stored where it happened: `keptFrom` indexes the
  * thread's messages (the rows that are not markers) and the latest marker wins. `foldHistory`
  * rebuilds the messages and that marker, so a resumed thread sends what the model saw before it
  * stopped; rows written before compaction existed hold no marker and load as before.
  *
  * Model after meridian-flow's runtime compaction (trigger from the usable window less an output
- * reserve, wrap-up before the summary, warm-branch summary, forced compaction on overflow) and
- * Pi's coding agent (`@earendil-works/pi-coding-agent`, `core/compaction`: the chars/4 estimate
- * and the cut-point rule — walk back until the recent turns are worth `KEEP_SHARE`, start at a
- * user or assistant message, never at a tool result). Left out: Pi's split-turn summary and
- * file-operation lists, meridian-flow's rolling (cold) summary and important-file re-reads.
+ * reserve, wrap-up before the summary, warm-branch summary, rolling cold summary for a request
+ * known to be too large) and Pi's coding agent (`@earendil-works/pi-coding-agent`,
+ * `core/compaction`: the chars/4 estimate and the cut-point rule — walk back until the recent
+ * turns are worth `KEEP_SHARE`, start at a user or assistant message, never at a tool result).
+ * Left out: Pi's split-turn summary and file-operation lists, meridian-flow's important-file
+ * re-reads.
  */
 import type { AgentMessage, StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { type Api, type Model, normalizeContext } from "@earendil-works/pi-ai";
+import {
+  type Api,
+  type AssistantMessage,
+  type Model,
+  normalizeContext,
+} from "@earendil-works/pi-ai";
 
-/** Room the next reply may need; the request's input plus this must fit the window. */
-const OUTPUT_RESERVE = 64_000;
+/** The most room the next reply may need; the request's input plus it must fit the window. */
+const MAX_OUTPUT_RESERVE = 64_000;
 /** Jimmy's cap (2026-10-30): "300k or 400k". */
 const TRIGGER_CAP = 400_000;
 const TRIGGER_SHARE = 0.9;
+const MIN_TRIGGER = 1_000;
 /** The trigger when the model's window is unknown. */
 const UNKNOWN_WINDOW_TRIGGER = 350_000;
 /** Turns a thread gets after the notice before its history is summarized. */
 const WRAP_UP_TURNS = 3;
-/** The recent turns kept verbatim, as a share of the trigger. */
+/** The recent turns kept verbatim, as a share of the trigger and of the request-size limit. */
 const KEEP_SHARE = 0.2;
 const SUMMARY_MAX_TOKENS = 16_000;
+/** For a model that declares no limits (pi-ai's data has them for Claude: 32 MiB, 100 or 600 images). */
+const FALLBACK_REQUEST_BYTES = 32 * 1024 * 1024;
+const FALLBACK_IMAGES_PER_REQUEST = 100;
+/**
+ * Shares of the request-size and image-count limits. Past DUE the thread is told to wrap up (a
+ * `view_image` call adds up to 4 MiB, so three wrap-up turns stay inside the limit); past TIGHT
+ * another turn might not fit, so it compacts at once; past COLD even the warm summary request
+ * might not fit, so it summarizes without the tail.
+ */
+const IMAGE_DUE = 0.4;
+const IMAGE_TIGHT = 0.7;
+const IMAGE_COLD = 0.9;
+
+/** Room kept for the next reply: the model's output limit, at most a quarter of the window. */
+function outputReserve(model: Model<Api>): number {
+  const room = model.contextWindow > 0 ? model.contextWindow / 4 : MAX_OUTPUT_RESERVE;
+  return Math.min(MAX_OUTPUT_RESERVE, room, model.maxTokens > 0 ? model.maxTokens : Infinity);
+}
 
 /** The input size (tokens) at which a thread is told to wrap up; `cap` lets a test or trial lower it. */
 export function compactionTrigger(model: Model<Api>, cap = TRIGGER_CAP): number {
   if (!(model.contextWindow > 0)) return Math.min(cap, UNKNOWN_WINDOW_TRIGGER);
-  return Math.min(cap, (model.contextWindow - OUTPUT_RESERVE) * TRIGGER_SHARE);
+  const usable = (model.contextWindow - outputReserve(model)) * TRIGGER_SHARE;
+  return Math.max(MIN_TRIGGER, Math.min(cap, usable));
 }
 
 export interface Compaction {
   summary: string;
   /** Index into the thread's messages of the first one kept verbatim. */
   keptFrom: number;
-  /** How many messages the thread had then; replies before it report a context that no longer exists. */
+  /** How many messages the thread had then; replies before it report a context that no longer exists. Not stored: the marker's place among the rows gives it. */
   at: number;
 }
 
-const isMarker = (row: unknown): row is Compaction & { role: "compaction" } =>
-  (row as { role?: string } | null)?.role === "compaction";
-
-/** Whether a stored row is a compaction marker, cheaply, before parsing it. */
-export const isCompactionRow = (text: string): boolean => text.startsWith('{"role":"compaction"');
+/** A stored compaction marker, or undefined for any other row. The one place a row is told to be a marker. */
+export function parseMarker(text: string): Omit<Compaction, "at"> | undefined {
+  // A message's own JSON escapes its quotes, so this substring only occurs in a marker.
+  if (!text.includes('"role":"compaction"')) return undefined;
+  const row = JSON.parse(text) as { role?: string; summary: string; keptFrom: number };
+  return row.role === "compaction" ? { summary: row.summary, keptFrom: row.keptFrom } : undefined;
+}
 
 /** The row a compaction is stored as. */
 export const compactionRow = (c: Compaction): string =>
-  JSON.stringify({ role: "compaction", ...c, timestamp: Date.now() });
+  JSON.stringify({
+    role: "compaction",
+    summary: c.summary,
+    keptFrom: c.keptFrom,
+    timestamp: Date.now(),
+  });
 
-/** The thread's messages (every one, markers left out) and its latest compaction, from the parsed rows. */
-export function foldHistory(rows: unknown[]): {
+/** The thread's messages (every one, markers left out) and its latest compaction, from the stored rows. */
+export function foldHistory(rows: string[]): {
   messages: AgentMessage[];
   compaction?: Compaction;
 } {
   const messages: AgentMessage[] = [];
   let compaction: Compaction | undefined;
-  for (const row of rows) {
-    if (isMarker(row)) compaction = { summary: row.summary, keptFrom: row.keptFrom, at: row.at };
-    else messages.push(row as AgentMessage);
+  for (const text of rows) {
+    const marker = parseMarker(text);
+    if (marker) compaction = { ...marker, at: messages.length };
+    else messages.push(JSON.parse(text) as AgentMessage);
   }
   return { messages, ...(compaction && { compaction }) };
-}
-
-/** The first message of the thread's messages that a request carries verbatim, given its stored rows. */
-export function keptFromOf(rows: string[]): number {
-  const marker = rows.filter(isCompactionRow).at(-1);
-  return marker ? (JSON.parse(marker) as Compaction).keptFrom : 0;
 }
 
 const summaryMessage = (summary: string): AgentMessage => ({
@@ -98,6 +130,26 @@ export function compactedView(messages: AgentMessage[], compaction?: Compaction)
     summaryMessage(compaction.summary),
     ...messages.slice(compaction.keptFrom),
   ];
+}
+
+type Block = { type: string; [key: string]: unknown };
+const blocksOf = (message: AgentMessage): Block[] => {
+  const { content } = message as { content?: unknown };
+  return Array.isArray(content) ? (content as Block[]) : [];
+};
+
+/** How many images the messages carry and how many bytes they are in a request (base64 characters). */
+export function imageLoad(messages: AgentMessage[]): { count: number; bytes: number } {
+  let count = 0;
+  let bytes = 0;
+  for (const m of messages) {
+    for (const b of blocksOf(m)) {
+      if (b.type !== "image") continue;
+      count++;
+      bytes += String(b.data ?? "").length;
+    }
+  }
+  return { count, bytes };
 }
 
 /** Pi's chars/4 estimate; an image counts as 4800 characters. */
@@ -135,15 +187,16 @@ export function inputTokens(messages: AgentMessage[], compaction?: Compaction): 
 }
 
 /**
- * Where the kept messages start: walking back from the end until `keepTokens` of recent turns are
- * held, the nearest user or assistant message at or after that point. A tool result is never a
- * start, so a call stays with its results (they follow the assistant message). Undefined when that
- * leaves nothing after `from` to summarize.
+ * Where the kept messages start: walking back from the end until `keepTokens` of recent turns, or
+ * `keepImageBytes` of their images, are held, the nearest user or assistant message at or after
+ * that point. A tool result is never a start, so a call stays with its results (they follow the
+ * assistant message). Undefined when that leaves nothing after `from` to summarize.
  */
 export function cutPoint(
   messages: AgentMessage[],
   from: number,
   keepTokens: number,
+  keepImageBytes = Number.POSITIVE_INFINITY,
 ): number | undefined {
   const lower = Math.max(from, 1);
   const starts: number[] = [];
@@ -152,10 +205,13 @@ export function cutPoint(
     if (role === "user" || role === "assistant") starts.push(i);
   }
   let held = 0;
+  let heldImages = 0;
   let at = starts.at(-1);
   for (let i = messages.length - 1; i >= lower; i--) {
-    held += estimateTokens(messages[i] as AgentMessage);
-    if (held >= keepTokens) {
+    const m = messages[i] as AgentMessage;
+    held += estimateTokens(m);
+    heldImages += imageLoad([m]).bytes;
+    if (held >= keepTokens || heldImages >= keepImageBytes) {
       at = starts.find((s) => s >= i) ?? at;
       break;
     }
@@ -195,12 +251,15 @@ The most recent messages are kept as they are after your summary, so spend it on
 export interface Compactor {
   /** The messages a request carries; summarizes the thread first when it is due. */
   prepare(messages: AgentMessage[], signal?: AbortSignal): Promise<AgentMessage[]>;
-  /** After a turn that called tools: the notice to steer in once the trigger is crossed, else undefined. */
+  /** After a turn that called tools: the notice to steer in once compaction is due and another turn fits, else undefined. */
   wrapUp(messages: AgentMessage[]): string | undefined;
   /** Sets the thread's latest compaction, from its stored history. */
   restore(compaction: Compaction | undefined): void;
-  /** The provider refused a request as too large: compact before the next one. */
-  overflowed(): void;
+  /**
+   * The provider refused a request as too large: summarize cold now. False when it did not (nothing
+   * to summarize, the summary failed, or nothing can be stored): the refusal stands.
+   */
+  recover(messages: AgentMessage[], signal?: AbortSignal): Promise<boolean>;
 }
 
 export function compactor(args: {
@@ -211,73 +270,135 @@ export function compactor(args: {
   streamFn: StreamFn;
   /** Stores the marker row; false when the thread can no longer store anything. */
   store(row: string): Promise<boolean>;
+  /** The summary's reply, once stored: the caller records it as the model call it was (its usage is spend). */
+  onSummary(reply: AssistantMessage, summary: string): void;
   /** Overrides the trigger cap (a test or a local trial). */
   cap?: number;
 }): Compactor {
   const { threadId, model, streamFn, thinkingLevel } = args;
   const trigger = compactionTrigger(model, args.cap);
+  const reserve = outputReserve(model);
+  const window = model.contextWindow > 0 ? model.contextWindow : Number.POSITIVE_INFINITY;
+  const maxBytes = model.inputLimits?.maxRequestBytes ?? FALLBACK_REQUEST_BYTES;
+  const maxImages = model.inputLimits?.images?.maxPerRequest ?? FALLBACK_IMAGES_PER_REQUEST;
   let compaction: Compaction | undefined;
   let turnsLeft: number | undefined;
-  let forced = false;
 
-  async function compact(messages: AgentMessage[], tokensBefore: number, signal?: AbortSignal) {
-    const from = compaction?.keptFrom ?? 1;
-    const cut = cutPoint(messages, from, trigger * KEEP_SHARE);
-    if (cut === undefined) return;
+  /** How full the next request is: tokens, and the images' bytes and count against the model's limits. */
+  function load(messages: AgentMessage[]) {
+    const tokens = inputTokens(messages, compaction);
+    const images = imageLoad(compactedView(messages, compaction));
+    const imageShare = Math.max(images.bytes / maxBytes, images.count / maxImages);
+    return {
+      tokens,
+      due: tokens > trigger || imageShare > IMAGE_DUE,
+      /** Another turn might not fit. */
+      tight: tokens + reserve > window || imageShare > IMAGE_TIGHT,
+      /** The warm summary request might not fit. */
+      cold: tokens + SUMMARY_MAX_TOKENS > window || imageShare > IMAGE_COLD,
+    };
+  }
+
+  /** One summary call; the error text of a failed one is the provider's, unchanged. */
+  async function summarize(
+    request: AgentMessage[],
+    maxTokens: number,
+    reasoning: boolean,
+    signal?: AbortSignal,
+  ) {
     const stream = await streamFn(
       model,
       normalizeContext({
         messages: [
-          ...compactedView(messages, compaction),
+          ...request,
           { role: "user", content: SUMMARY_INSTRUCTION, timestamp: Date.now() },
         ] as never,
       }),
       {
         signal,
         sessionId: threadId,
-        maxTokens: SUMMARY_MAX_TOKENS,
-        ...(thinkingLevel && thinkingLevel !== "off" && { reasoning: thinkingLevel }),
+        maxTokens,
+        ...(reasoning && thinkingLevel && thinkingLevel !== "off" && { reasoning: thinkingLevel }),
       },
     );
-    const reply = await stream.result();
-    const summary = reply.content
+    return stream.result();
+  }
+
+  const textOf = (reply: AssistantMessage) =>
+    reply.content
       .flatMap((b) => (b.type === "text" ? [b.text] : []))
       .join("")
       .trim();
-    if (reply.stopReason !== "stop" || !summary) {
+
+  async function compact(
+    messages: AgentMessage[],
+    tokensBefore: number,
+    cold: boolean,
+    signal?: AbortSignal,
+  ) {
+    const from = compaction?.keptFrom ?? 1;
+    const cut = cutPoint(messages, from, trigger * KEEP_SHARE, maxBytes * KEEP_SHARE);
+    if (cut === undefined) return false;
+    // Cold: only what is summarized (and the summary before it), the images left out.
+    const request = cold
+      ? [
+          messages[0] as AgentMessage,
+          ...(compaction ? [summaryMessage(compaction.summary)] : []),
+          ...messages.slice(from, cut).map(withoutImages),
+        ]
+      : compactedView(messages, compaction);
+    let reply = await summarize(request, SUMMARY_MAX_TOKENS, true, signal);
+    // Reasoning counts inside the output limit on some providers and can use all of it: once more,
+    // with twice the room and no reasoning.
+    if (reply.stopReason === "length") {
+      const room = Math.min(
+        SUMMARY_MAX_TOKENS * 2,
+        model.maxTokens > 0 ? model.maxTokens : Infinity,
+      );
+      reply = await summarize(request, room, false, signal);
+    }
+    // A reply that also called a tool still wrote its summary; the calls are ignored.
+    const summary =
+      reply.stopReason === "stop" || reply.stopReason === "toolUse" ? textOf(reply) : "";
+    if (!summary) {
+      console.error(
+        `compaction: thread ${threadId}: the summary failed (stop reason ${reply.stopReason}, ` +
+          `${cold ? "cold" : "warm"} request of ~${tokensBefore} tokens)`,
+      );
+      // The provider's own text, so the run's error classifier sees what it sent.
       throw new Error(
-        `summarizing thread ${threadId} failed (${reply.stopReason}): ${reply.errorMessage ?? "no summary text"}`,
+        reply.errorMessage ??
+          (reply.stopReason === "length"
+            ? "the summary hit the model's output limit twice (stop reason length)"
+            : `the model wrote no summary (stop reason ${reply.stopReason})`),
       );
     }
     const next: Compaction = { summary, keptFrom: cut, at: messages.length };
-    if (!(await args.store(compactionRow(next)))) return;
+    if (!(await args.store(compactionRow(next)))) return false;
     compaction = next;
     turnsLeft = undefined;
-    forced = false;
+    args.onSummary(reply, summary);
     console.info(
-      `compaction: thread ${threadId}: ${tokensBefore} → ~${inputTokens(messages, next)} input tokens, ` +
+      `compaction: thread ${threadId} (${cold ? "cold" : "warm"}): ${tokensBefore} → ~${inputTokens(messages, next)} input tokens, ` +
         `${cut - from} messages summarized, ${messages.length - cut} kept`,
     );
+    return true;
   }
 
   return {
     async prepare(messages, signal) {
-      const tokens = inputTokens(messages, compaction);
-      const wrappingUp = turnsLeft !== undefined && turnsLeft > 0;
-      const mustFit =
-        forced || (model.contextWindow > 0 && tokens + OUTPUT_RESERVE > model.contextWindow);
-      if (tokens > trigger || forced) {
-        if (!mustFit && wrappingUp) {
-          turnsLeft = (turnsLeft as number) - 1;
-        } else {
-          await compact(messages, tokens, signal);
-        }
+      const now = load(messages);
+      if (now.due) {
+        if (turnsLeft !== undefined && turnsLeft > 0 && !now.tight) turnsLeft--;
+        else await compact(messages, now.tokens, now.cold, signal);
       }
       return compactedView(messages, compaction);
     },
 
     wrapUp(messages) {
-      if (turnsLeft !== undefined || inputTokens(messages, compaction) <= trigger) return;
+      if (turnsLeft !== undefined) return;
+      const now = load(messages);
+      if (!now.due || now.tight) return;
       turnsLeft = WRAP_UP_TURNS;
       return WRAP_UP_NOTICE;
     },
@@ -286,8 +407,23 @@ export function compactor(args: {
       compaction = c;
     },
 
-    overflowed() {
-      forced = true;
+    async recover(messages, signal) {
+      try {
+        return await compact(messages, inputTokens(messages, compaction), true, signal);
+      } catch (error) {
+        console.error(
+          `compaction: thread ${threadId}: recovering from an overflow failed: ${error}`,
+        );
+        return false;
+      }
     },
   };
+}
+
+function withoutImages(message: AgentMessage): AgentMessage {
+  if (!blocksOf(message).some((b) => b.type === "image")) return message;
+  const content = blocksOf(message).map((b) =>
+    b.type === "image" ? { type: "text", text: "[image]" } : b,
+  );
+  return { ...message, content } as unknown as AgentMessage;
 }

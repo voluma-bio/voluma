@@ -71,7 +71,7 @@ describe("withImageRefs", () => {
 
   it("fetches only the images since the latest compaction", async () => {
     const w = world();
-    const marker = JSON.stringify({ role: "compaction", summary: "s", keptFrom: 2, at: 4 });
+    const marker = JSON.stringify({ role: "compaction", summary: "s", keptFrom: 2 });
     for (const [i, row] of [result(1, "AAAA"), result(1, "BBBB"), result(1, "CCCC")].entries()) {
       await w.wrapped.appendMessage("r1.t1.worker", i, row);
     }

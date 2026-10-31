@@ -15,7 +15,7 @@ import { historyImageKey } from "@voluma/contracts/r2";
 import { FileNotFound, type Files } from "../../ports/files";
 import type { History } from "../../ports/history";
 import { parseThreadId } from "../../thread-id";
-import { isCompactionRow, keptFromOf } from "./compaction";
+import { parseMarker } from "./compaction";
 
 type Block = { type: string; [key: string]: unknown };
 type Row = { content?: unknown; [key: string]: unknown };
@@ -57,17 +57,18 @@ export function withImageRefs(history: History, files: Files, runId: string): Hi
     async load(threadId) {
       const rows = (await history.load(threadId)).map((text) => ({
         text,
+        marker: parseMarker(text),
         row:
           text.includes('"imageRef"') || text.includes('"image"')
             ? (JSON.parse(text) as Row)
             : undefined,
       }));
       // `keptFrom` indexes the messages, the rows that are not compaction markers.
-      const keptFrom = keptFromOf(rows.map((r) => r.text));
+      const keptFrom = rows.filter((r) => r.marker).at(-1)?.marker?.keptFrom ?? 0;
       let at = 0;
       return Promise.all(
         rows.map(async (r) => {
-          const index = isCompactionRow(r.text) ? -1 : at++;
+          const index = r.marker ? -1 : at++;
           const blocks = r.row && blocksOf(r.row);
           if (!r.row || !blocks || !has(r.row, "imageRef")) return r.text;
           const content =

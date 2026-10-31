@@ -1305,13 +1305,11 @@ describe("run loop", () => {
 
       const again = world({
         plan: [task("t1")],
-        // A refused request is retried once in the thread (after a compaction, whose own call is
-        // the second throw), so a main fails after two throws and the fresh one after two more.
-        main: throwing(4, "prompt is too long"),
+        main: throwing(2, "prompt is too long"),
         check: checker(),
       });
       await expect(again.run()).rejects.toThrow(
-        /the main agent failed on a model provider error: .*prompt is too long/,
+        "the main agent failed on a model provider error: prompt is too long",
       );
       expect(of(again.stored, "thread.started", "main.3")).toHaveLength(0);
     });

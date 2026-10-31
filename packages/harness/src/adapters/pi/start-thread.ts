@@ -19,15 +19,10 @@ import {
   type StreamFn,
   type ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
-import {
-  type Api,
-  isContextOverflow,
-  type Model,
-  type ToolResultMessage,
-  Type,
-} from "@earendil-works/pi-ai";
+import { type Api, type Model, type ToolResultMessage, Type } from "@earendil-works/pi-ai";
 import type { EventType } from "@voluma/contracts/events";
 import { z } from "zod";
+import { isContextOverflowError } from "../../context-overflow";
 import { replyFrames } from "../../live";
 import { usageOf } from "../../model-usage";
 import type { History } from "../../ports/history";
@@ -125,6 +120,11 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     thinkingLevel: options.thinkingLevel,
     streamFn: options.streamFn,
     store: (row) => persistRow(row),
+    // The summary was a model call: its usage is spend (`spend.ts` counts assistant `message`s).
+    onSummary: (reply, summary) => {
+      const used = usageOf(reply);
+      emit("message", { role: "assistant", text: summary, ...(used && { usage: used }) });
+    },
   });
 
   const agent: Agent = new Agent({
@@ -209,7 +209,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     try {
       const rows = await history.load(threadId);
       nextIdx = rows.length;
-      const { messages: stored, compaction } = foldHistory(rows.map((row) => JSON.parse(row)));
+      const { messages: stored, compaction } = foldHistory(rows);
       compacting.restore(compaction);
       // Every check that can refuse the thread runs before the thread's own events: a refused
       // resume has its `thread.started` already (the run loop stores it first) and gets no more
@@ -353,10 +353,11 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
         if (message !== undefined) await agent.prompt(message);
         else await agent.continue();
         // A message steered in as the loop was ending is still queued. A request the provider
-        // refused as too large is retried once, after a compaction.
+        // refused as too large is retried once, after a compaction; the note that starts the retry
+        // is stored only once the summary was.
         while (!historyError && !signal?.aborted) {
           if (overflowRetryable(agent.state.messages)) {
-            compacting.overflowed();
+            if (!(await compacting.recover(agent.state.messages, signal))) break;
             agent.steer(userMessage(OVERFLOW_NOTE, { kind: "runtime" }));
           } else if (!agent.hasQueuedMessages()) break;
           await agent.continue();
@@ -413,7 +414,8 @@ const OVERFLOW_NOTE =
 function overflowRetryable(messages: AgentMessage[]): boolean {
   const replies = messages.filter((m) => m.role === "assistant");
   const [last, before] = [replies.at(-1), replies.at(-2)];
-  const refused = (m: AgentMessage | undefined) => m?.role === "assistant" && isContextOverflow(m);
+  const refused = (m: AgentMessage | undefined) =>
+    m?.role === "assistant" && m.stopReason === "error" && isContextOverflowError(m.errorMessage);
   return messages.at(-1) === last && refused(last) && !refused(before);
 }
 
