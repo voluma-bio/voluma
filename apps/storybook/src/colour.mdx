@@ -6,8 +6,9 @@ import { Swatches } from "./swatches";
 # Colour
 
 Components name what a colour means, never the colour: `bg-card`, `text-check`, `border-select`.
-Raw values live only in `packages/design-tokens/src/tokens.css`. The whole app is light; only the
-viewer's image wells are dark. Dark stays ready in the tokens, with the same names.
+Raw values live only in `packages/design-tokens/src/tokens.css`. The user picks Light or Dark in
+settings and the whole app follows; the viewer's image wells are dark in both. Nothing else changes
+between the two.
 
 Each status has three forms: a **solid** for marks and filled cells (`bg-check-solid`), an **ink**
 for text on a panel (`text-check`) and a **tint** for a quiet fill behind it (`bg-check-tint`).

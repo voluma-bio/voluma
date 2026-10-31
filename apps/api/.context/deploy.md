@@ -84,6 +84,19 @@ Merge to `main`: Render builds, runs the migration, starts the new instance alon
 one, moves traffic once `/health` answers, then sends the old one SIGTERM (SIGKILL after the
 30 s shutdown delay). A deploy that fails its health check leaves the old one serving.
 
+**An open browser tab keeps the old web app** (`apps/web/src/shell/deploys.ts`). When a chunk it
+loads is gone, it reloads at once. When an API response fails the schema it was built with
+(`ContractError`, `@voluma/api-client`), it fetches `/` and compares the entry bundle there with
+the one it runs, looking again for about 30 s while traffic moves to the new instance. A
+different bundle means a deploy: the tab reloads once no pointer is held (a mark being drawn
+finishes first) and no work holds it (`holdLeave`: scan uploads, a start waiting on them, a study
+being created), or goes Home if the failed call was a write, so they see what it made. While a
+hold waits, a write's mismatch fails instead of hanging, so held work ends; a missing chunk waits
+for holds too. The AI box keeps its
+draft in sessionStorage, so typed text survives. The same bundle means the app's own bug, and
+the error shows. A tab
+reloads toward a given bundle at most once, so a failing deploy can't loop.
+
 **The migration runs while the previous code still serves**, and stays applied if the new
 instance then fails its health check. So every migration must work with the code that is
 deployed now: expand first, contract in a later PR. The rule is in

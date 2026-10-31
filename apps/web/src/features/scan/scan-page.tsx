@@ -83,8 +83,14 @@ function Scan({ runId }: { runId: string }) {
   const run = useQuery({
     ...runQuery(runId),
     // Queue place and state changes aren't events; the stream is the source for the rest. Also in
-    // a background tab: a run waiting for keys gets them from this page (`RunAlert`).
-    refetchInterval: (q) => (q.state.data?.state.status === "ended" ? false : 3000),
+    // a background tab: a run waiting for keys gets them from this page (`RunAlert`). A failed read
+    // (the API restarting for a deploy) keeps polling even for an ended run, so the "can't reach
+    // the server" notice clears by itself; a refusal (4xx: gone, not yours) doesn't.
+    refetchInterval: (q) =>
+      (q.state.error instanceof ApiError && q.state.error.status < 500) ||
+      (q.state.status !== "error" && q.state.data?.state.status === "ended")
+        ? false
+        : 3000,
     refetchIntervalInBackground: true,
   });
   // Laid out as the study page's own loading and not-found states.

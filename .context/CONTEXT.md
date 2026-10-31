@@ -10,7 +10,8 @@ apps/web        React + Vite. shell/ mounts routes and the `AppShell` frame (one
 apps/api        Node server on Postgres (Drizzle), each domain a Hono app. src/index.ts is the
                 composition root: the only code that reads env; it builds the adapters and
                 mounts domains/run at /api/run/ (runs, the queue, the event log) and domains/review at
-                /api/review/ (review data, corrections) with app.route. A
+                /api/review/ (review data, corrections), and domains/user at /api/user/
+                (personal settings) with app.route. A
                 domain's tables and Postgres adapters live in the domain; adapters/ is for
                 shared ports
                 Sign-in: see Authentication
@@ -141,7 +142,7 @@ and check threads.
   A `message` that opens an attempt for feedback is followed by the worker's copy of the text; if a
   cut falls between, the loop resumes the idle holder with the text stored in the `message` call.
 - **The main agent** (name `main[.n]`, kind `main`) is the one model thread that coordinates:
-  it starts workers (`start_worker`, or `start_agent {role, task, brief}` for any role its file lists), steers them or sends feedback on a rejected task
+  it starts workers (`start_agent`), steers them or sends feedback on a rejected task
   (`message`), answers a checker (`answer`), accepts a rejected task, changes the plan
   (`change_plan`, recorded as `plan.changed` before it applies) and ends the run
   (`finish_run`). Its tools are `tools/main-tools.ts`; each writes under an id derived from the
@@ -270,6 +271,28 @@ refused at its next refresh. `returnTo` is sanitized, limited to printable ASCII
 characters, and dropped if it doesn't fit, which keeps a PKCE verifier cookie near 1.2 KB;
 `/login` evicts stale verifier cookies.
 
+## User settings
+
+`GET /api/user/settings` and `POST /api/user/settings` read and update only the
+session user's preferences, including guests. `domains/user` owns the
+`user_settings` table, keyed by `userId` alone: a preference follows a member
+across organizations and is never shared with lab mates. Guest preferences belong
+to that guest cookie's identity; signing in does not transfer them to a member.
+No profile data, credentials or arbitrary settings keys are stored here.
+
+The contract is `@voluma/contracts/settings`: explicit typed fields, defaults
+without a database write on GET, and strict nonempty partial updates. A save
+atomically upserts just the supplied fields. The client exports
+`getUserSettings`, `updateUserSettings`, `userSettingsQuery(userId)` and
+`useUpdateUserSettings(userId)`; the id scopes the query cache, never the API
+request. The shell's identity-keyed QueryClient keeps accounts separate.
+Account → Settings (`features/settings`, `/settings`) offers an Appearance section
+with Light / Dark preview tiles, using small captures of the real Home UI. It shows loading, save and failure states; only a
+successful save changes the selected theme. The shell reads the same query and
+applies it to the document and frame on every route, defaulting to light while
+loading or when settings cannot be loaded. Settings failures never block the app.
+Tab focus refreshes the preference through the query's normal refetch behaviour.
+
 ## Deployment
 
 Staging runs on Render (region Virginia), defined in `render.yaml`: the API
@@ -300,8 +323,8 @@ Import boundaries are written rules in `AGENTS.md`; Biome uses its recommended r
 `[data-theme="light"]`, and again under `[data-theme="dark"]`. `theme.css`
 maps them into Tailwind with `@theme inline`, so a utility reads the token
 where it is used and `data-theme` on any element themes its subtree. That is
-how Storybook shows both themes side by side. The app uses light chrome on home, study
-and scan review; the 3D and slice image wells stay dark. Tailwind's default palette is removed.
+how Storybook shows both themes side by side. The app follows the user's Light / Dark
+setting (light by default); the 3D and slice image wells stay dark. Tailwind's default palette is removed.
 
 The token names are shadcn/ui's (`background`, `card`, `muted`, `accent`,
 `primary`, `destructive`, `border`, `ring`, `chart-*`, `sidebar-*`), with
@@ -318,7 +341,7 @@ the CSS stays the one source.
 
 ## Scan review
 
-One scan's run, live and for review, is `apps/web/src/features/scan` at `/scans/:runId` (light chrome, dark image wells),
+One scan's run, live and for review, is `apps/web/src/features/scan` at `/scans/:runId` (the user's theme, dark image wells),
 with the selection in the URL (`task`, `item`, `agent`); the old `/runs/:id/live` and
 `/runs/:runId` redirect there. It reads the run's stream for tasks, agents, items and the
 conversation, and the review payload (`getReviewRun`) for what the viewer draws, values and

@@ -8,9 +8,9 @@ where it is used.
 
 ## Two themes, one token set
 
-- **Light** for home, study and scan review, including navigation, reports, controls and pane
-  headings. Only the 3D and slice image wells stay dark so anatomy remains bright against them.
-  The dark theme remains available for shared components in Storybook.
+- **Light by default**, with a personal Light / Dark choice in Account → Settings → Appearance.
+  The choice applies to home, study and scan review, including navigation, reports, controls and
+  pane headings. The 3D and slice image wells stay dark in both themes for anatomy contrast.
 - Components use semantic token utilities (`bg-card`, `text-muted-foreground`,
   `border-border`), never raw colours. The names are shadcn/ui's, with our palette as the values;
   `accent` is shadcn's hover fill and `primary` the ink-filled main action. A colour a screen needs goes into

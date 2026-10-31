@@ -1,6 +1,6 @@
 # Scan review
 
-One screen, `/scans/:runId` (light shell, dark image wells): one scan's run, live while it goes and for review once
+One screen, `/scans/:runId` (the user's theme, dark image wells): one scan's run, live while it goes and for review once
 it ends. The grid viewer fills the main area; Study, To check, Report and Agents dock on the left, View,
 Marks and The AI on the right (`ShellPanel`s, shortcuts s, t, r, a, v, m, i). Study replaces the left panel
 without navigating; To check keeps its URL selection and panel scroll position when reopened.
@@ -71,7 +71,8 @@ stopped.
   picture. The submission guard is synchronous, including keyboard/form submissions.
   `ScanReview` owns `useMessage`: draft, prepared retry and pending/error state survive panel
   replacement, closing and Full view. `AiPanel` only renders them; the keyed run page resets them
-  when leaving the run. Keep capture, retry identity and the submission guard in that page lifetime.
+  when leaving the run, except the draft, which is kept per run in sessionStorage so a reload
+  (by hand, or onto a new deploy) keeps it, and cleared by a successful send. Keep capture, retry identity and the submission guard in that page lifetime.
   There is no Redo button: the AI talks a problem through and offers a redo (`reply.offer`);
   "Yes, redo <task>" under its latest reply sends a `go` for that task and nothing else, and stays
   gone once accepted. A message carries the To check item you picked (`itemId`) when the fold lists

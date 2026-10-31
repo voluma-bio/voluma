@@ -1,7 +1,7 @@
 /**
  * Study feature: Home (`/`), Run on new scans (`/new`), Workflows (`/workflows`) and a study's
  * pages (`/studies/:id`: Dashboard, To check, Scans, Results, Details, and the workflow
- * expanded). Light theme. Owns its routes; the shell mounts them.
+ * expanded). Owns its routes; the shell mounts them and applies the user's theme.
  */
 import type { RouteObject } from "react-router";
 import { HomePage } from "./home-page";
