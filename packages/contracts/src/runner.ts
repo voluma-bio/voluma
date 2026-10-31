@@ -108,7 +108,7 @@ export const HEARTBEAT_SECONDS = 15;
  * How long the runner rides out an API it cannot reach before it stops the run, counted from the
  * send of the last acknowledged heartbeat. It also bounds the retries of event and history writes, counted from their first failure.
  */
-export const SELF_STOP_SECONDS = 45;
+export const SELF_STOP_SECONDS = 120;
 /** How often an idle runner asks for a run. */
 export const CLAIM_POLL_SECONDS = 2;
 
