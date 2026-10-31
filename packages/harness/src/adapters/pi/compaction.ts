@@ -4,9 +4,9 @@
  *
  * Each model has a budget: the smaller of `BUDGET_CAP` and its context window. Once per
  * context-full event the thread goes through two steps. When a turn's tools finish with the
- * estimated input past `budget - OUTPUT_RESERVE - WRAP_UP_ROOM` (or the carried images near the
+ * estimated input past `budget - 1.5 x the output reserve` (or the carried images near the
  * model's request-size or image-count limit), a notice goes in the thread's inbox ("finish the
- * step; the history will be summarized"). Before the first request past `budget - OUTPUT_RESERVE`,
+ * step; the history will be summarized"). Before the first request past `budget - the output reserve`,
  * however many turns that took, the thread's own model summarizes it on a warm branch (the same
  * messages, system message and tools as the thread's requests, with only the summary instruction
  * appended, so the provider's cache serves the prefix). From then on requests carry
@@ -47,10 +47,10 @@ import { isTransientProviderError } from "../../context-overflow";
 const BUDGET_CAP = 400_000;
 /** The budget when the model's window is unknown. */
 const UNKNOWN_WINDOW_BUDGET = 350_000;
-/** Room the next reply may need: a thread compacts once its input passes budget less this. */
-const OUTPUT_RESERVE = 64_000;
-/** Room for the thread to wrap up in: it is warned this far below the compact point. */
-const WRAP_UP_ROOM = 32_000;
+/** Most room the next reply may need: a thread compacts once its input passes budget less the reserve (the model's `maxTokens` if smaller). */
+const MAX_OUTPUT_RESERVE = 64_000;
+/** The wrap-up room, as a share of the reserve: a thread is warned this far below the compact point. */
+const WRAP_UP_SHARE = 0.5;
 const MIN_THRESHOLD = 1_000;
 /** The recent turns kept verbatim, as a share of the compact threshold and of the request-size and image-count limits. */
 const KEEP_SHARE = 0.2;
@@ -68,19 +68,20 @@ const IMAGE_DUE = 0.7;
 const IMAGE_COLD = 0.9;
 
 /**
- * The input sizes (tokens) at which a thread is told to wrap up and at which it compacts. `cap`
- * lets a test or trial lower the budget.
+ * The input sizes (tokens) at which a thread is told to wrap up and at which it compacts, and the
+ * output reserve they leave. `cap` lets a test or trial lower the budget.
  */
 export function compactionThresholds(
   model: Model<Api>,
   cap = BUDGET_CAP,
-): { warn: number; compact: number } {
+): { warn: number; compact: number; reserve: number } {
   const budget = Math.min(
     cap,
     model.contextWindow > 0 ? model.contextWindow : UNKNOWN_WINDOW_BUDGET,
   );
-  const compact = Math.max(MIN_THRESHOLD, budget - OUTPUT_RESERVE);
-  return { warn: Math.max(MIN_THRESHOLD / 2, compact - WRAP_UP_ROOM), compact };
+  const reserve = Math.min(MAX_OUTPUT_RESERVE, model.maxTokens > 0 ? model.maxTokens : Infinity);
+  const compact = Math.max(MIN_THRESHOLD, budget - reserve);
+  return { warn: Math.max(MIN_THRESHOLD / 2, compact - reserve * WRAP_UP_SHARE), compact, reserve };
 }
 
 export interface Compaction {
@@ -299,7 +300,7 @@ export function compactor(args: {
   cap?: number;
 }): Compactor {
   const { threadId, model, streamFn, thinkingLevel } = args;
-  const { warn, compact: compactAt } = compactionThresholds(model, args.cap);
+  const { warn, compact: compactAt, reserve } = compactionThresholds(model, args.cap);
   const window = model.contextWindow > 0 ? model.contextWindow : Number.POSITIVE_INFINITY;
   const maxBytes = model.inputLimits?.maxRequestBytes ?? FALLBACK_REQUEST_BYTES;
   const maxImages = model.inputLimits?.images?.maxPerRequest ?? FALLBACK_IMAGES_PER_REQUEST;
@@ -324,7 +325,7 @@ export function compactor(args: {
       warn: tokens > warn || imageShare > IMAGE_WARN,
       due: tokens > compactAt || imageShare > IMAGE_DUE,
       /** Another turn might not fit the window. */
-      tight: tokens + OUTPUT_RESERVE > window || imageShare > IMAGE_DUE,
+      tight: tokens + reserve > window || imageShare > IMAGE_DUE,
       /** The warm summary request might not fit. */
       cold: tokens + SUMMARY_MAX_TOKENS > window || imageShare > IMAGE_COLD,
     };

@@ -309,10 +309,10 @@ there is no automatic conversion to inline rows.
 cache prefix stays intact. Before each request the thread's input is estimated (last reply's input, cache and output
 tokens plus the chars/4 of what came after) and so are its images: bytes and count against the model's
 `inputLimits` (`maxRequestBytes`, `images.maxPerRequest`; 32 MiB and 100 when a model declares none). Budget:
-min(400k, `contextWindow`), 350k when the window is unknown. Warn: when a tool batch ends with input over budget - 96k
-(64k output reserve + 32k wrap-up room; 304k on a 1M window, 104k on 200k), or images over 40% of a limit, a runtime
+min(400k, `contextWindow`), 350k when the window is unknown. Warn: when a tool batch ends with input over budget - 1.5 x reserve
+(reserve = min(64k, model `maxTokens`); wrap-up room = reserve / 2; 304k on Meta, 104k on a 200k Claude, 352k on a 32k-output model), or images over 40% of a limit, a runtime
 user message tells the thread (once per compaction) to finish the step and write down what it needs. Compact: before
-the first request with input over budget - 64k (336k, 136k), or images over 70% of a limit, however many turns that
+the first request with input over budget - reserve (336k, 136k, 368k), or images over 70% of a limit, however many turns that
 took; its own model summarizes it on a warm branch (same messages, system message and tools, summary instruction
 appended). A thread already past it when the runner restarts compacts on its next request. Cold summary (`[system, previous summary,
 messages to summarize]`, no kept tail, images left out): when the warm request plus the 16k summary would not fit

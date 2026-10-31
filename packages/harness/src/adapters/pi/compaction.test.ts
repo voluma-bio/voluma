@@ -129,11 +129,23 @@ describe("history with a compaction", () => {
 });
 
 describe("thresholds", () => {
-  const model = (contextWindow: number) => ({ contextWindow, maxTokens: 32_000 }) as never;
-  it("budget is the smaller of 400k and the window; compact 64k below it, warn 32k below that", () => {
-    expect(compactionThresholds(model(1_000_000))).toEqual({ warn: 304_000, compact: 336_000 });
-    expect(compactionThresholds(model(200_000))).toEqual({ warn: 104_000, compact: 136_000 });
-    expect(compactionThresholds(model(32_000)).compact).toBeGreaterThan(0);
+  const model = (contextWindow: number, maxTokens = 131_072) =>
+    ({ contextWindow, maxTokens }) as never;
+  it("budget is min(400k, window); compact one output reserve below it, warn half a reserve below that", () => {
+    expect(compactionThresholds(model(1_000_000))).toMatchObject({
+      warn: 304_000,
+      compact: 336_000,
+    });
+    expect(compactionThresholds(model(200_000, 64_000))).toMatchObject({
+      warn: 104_000,
+      compact: 136_000,
+    });
+    // a 32k-output model reserves only 32k
+    expect(compactionThresholds(model(1_000_000, 32_000))).toMatchObject({
+      warn: 352_000,
+      compact: 368_000,
+    });
+    expect(compactionThresholds(model(32_000, 8_000)).compact).toBeGreaterThan(0);
   });
 });
 
@@ -204,7 +216,7 @@ describe("compactor", () => {
   it("warm: notice once, then at the first request past the compact point the same messages plus the instruction, one marker, one recorded reply", async () => {
     const { c, requests, stored, summaries } = setup([reply("SUM")], {
       contextWindow: 1_000_000,
-      maxTokens: 32_000,
+      maxTokens: 131_072,
     });
     expect(c.wrapUp(thread_(300_000))).toBeUndefined();
     const warnAt = thread_(310_000);
