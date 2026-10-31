@@ -73,10 +73,19 @@ stopped.
   replacement, closing and Full view. `AiPanel` only renders them; the keyed run page resets them
   when leaving the run, except the draft, which is kept per run in sessionStorage so a reload
   (by hand, or onto a new deploy) keeps it, and cleared by a successful send. Keep capture, retry identity and the submission guard in that page lifetime.
-  There is no Redo button: the AI talks a problem through and offers a redo (`reply.offer`);
-  "Yes, redo <task>" under its latest reply sends a `go` for that task and nothing else, and stays
-  gone once accepted. A message carries the To check item you picked (`itemId`) when the fold lists
-  it. A refusal shows the server's own words when it gave some.
+  There is no Redo button: the AI talks a problem through and offers a redo (`reply.offer`).
+  "Yes, redo <task>" and "No, keep it" under its latest offer never send on their own: they make
+  the box an answer to that offer, where the person can add detail (Keep starts as "No, keep it.").
+  Send sends a `go` on the task with the words, or a message on the task. An answer carries no
+  picture and no marks. The buttons stay gone once answered, and the answer drops when anything
+  follows the offer. A message carries the To check item you picked (`itemId`) when the fold lists
+  it, and the task in view as `taskId`: the AI is told the person was reviewing it, and the chat
+  labels it "on <task>", never "about". A refusal shows the server's own words when it gave some.
+- **How a correction ended** is the AI's last item in the chat (`conversation`'s `outcome`): the
+  root's closing summary after a redo (with a link to the redone task when another is in view), or
+  the failure or stop and its reason, with the note that the task's earlier results stand. The
+  running mark ("The AI is answering", "Redoing <task>") shows only while the run has not ended
+  and the latest message has no outcome after it.
 - **Your marks** are page state (`useMarking`, `scan-page.tsx`), lost on reload. The tool strip on
   the viewer's bar (`TOOLS` in `marks-panel.tsx`: Navigate, Point, Box, Line, Lasso; Esc, P, B,
   L, O) picks what a click or drag makes (`@voluma/viewer/grid`'s `tool`). Esc first drops a mark

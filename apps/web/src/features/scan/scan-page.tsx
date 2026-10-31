@@ -560,6 +560,8 @@ function ScanReview({
             run={run}
             scan={title}
             tasks={tasks}
+            inView={task?.id}
+            onTask={(id) => select({ task: id, item: null })}
             about={about}
             marks={sendable}
             views={snapshot !== undefined}
