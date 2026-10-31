@@ -1,8 +1,14 @@
 # Scan review
 
 One screen, `/scans/:runId` (light shell, dark image wells): one scan's run, live while it goes and for review once
-it ends. The grid viewer fills the main area; To check, Report and Agents dock on the left, View
-and The AI on the right (`ShellPanel`s, shortcuts t, r, a, v, i). `/runs/:id/live` and
+it ends. The grid viewer fills the main area; Study, To check, Report and Agents dock on the left, View
+and The AI on the right (`ShellPanel`s, shortcuts s, t, r, a, v, i). Study replaces the left panel
+without navigating; To check keeps its URL selection and panel scroll position when reopened.
+Each visit to a scan opens To check and The AI, including after Home or a reload. Panel choices
+last only for that visit; the shell saves widths and stacked splits, not open panels.
+Study highlights the current scan and links to the study overview only when it has multiple scans:
+a study of one redirects to its scan, so neither this panel nor the breadcrumb links there.
+`/runs/:id/live` and
 `/runs/:runId` redirect here with their search kept. Links to a run use `runHref`
 (`@voluma/run-view`).
 
