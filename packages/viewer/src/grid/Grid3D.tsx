@@ -581,11 +581,11 @@ export function Grid3D({
         (meshLoad.left > 0
           ? `Loading ${meshLoad.left} mesh${meshLoad.left > 1 ? "es" : ""}…`
           : undefined)));
-  // The coarsest volume is the first picture; the finer one and new meshes refine it.
+  // A missing surface is missing content; the finer volume only sharpens the coarsest one.
   const status: PaneStatus =
-    !shown && !volumeLoad.error
+    (!shown && !volumeLoad.error) || meshLoad.left > 0
       ? "loading"
-      : volumeLoad.loading || meshLoad.left > 0
+      : volumeLoad.loading
         ? "refining"
         : volumeLoad.error || meshLoad.error
           ? "failed"

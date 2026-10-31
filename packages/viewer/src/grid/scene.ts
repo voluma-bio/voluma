@@ -124,8 +124,9 @@ export type PaneView =
   | { camera: { position: Vec3; target: Vec3; up: Vec3 } };
 
 /**
- * Whether a pane shows its full picture: loading (no picture yet, or a layer still coming),
- * refining (a picture, out of date for a moment: another slice, level or display), ready, or
+ * Whether a pane shows its full picture: loading (no picture yet, or a layer or surface still
+ * coming), refining (a picture, out of date for a moment: a slice's stand-in from another index or
+ * level, or the 3D pane's coarser volume), ready, or
  * failed (something couldn't load; the rest is drawn as it is).
  */
 export type PaneStatus = "loading" | "refining" | "ready" | "failed";

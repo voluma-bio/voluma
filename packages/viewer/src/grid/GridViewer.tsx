@@ -42,11 +42,13 @@ export type ViewerState = { pane: PaneId; point: Zyx; contrast: Contrast; view: 
 
 export type GridViewerHandle = {
   /**
-   * The shown panes as one PNG, laid out as on screen with their names, at most `maxBytes`: it
-   * waits for a refining slice, freezes the picture before encoding smaller copies, and gives
-   * null while a shown pane has no picture (`onReady`), after a slice that never settles, or when
-   * no copy fits. A failed pane is drawn as it is, its name marked
-   * incomplete. Callers capture their marks and grid identity before awaiting it.
+   * The shown panes as one PNG, laid out as on screen with their names, at most `maxBytes`. While
+   * a pane refines it waits (at most `SETTLE_MS`), then reads the panes as they are after the
+   * wait, not at the call: a slice moved meanwhile shows its new index in its name. A 3D pane
+   * still sharpening is taken as it is. It gives null while a shown pane has no picture
+   * (`onReady`), when a slice still shows a stand-in after the wait, or when no copy fits. A
+   * failed pane is drawn as it is, its name marked incomplete. Callers capture their marks and
+   * grid identity before awaiting it.
    */
   snapshot(maxBytes: number): Promise<Blob | null>;
 };
@@ -134,12 +136,16 @@ export function GridViewer({
   const shownPanes = panes.filter((p) => !maximized || maximized === p.id);
   const ready = shownPanes.every((p) => pictured(p.id));
   const steady = shownPanes.every((p) => settled(p.id));
+  // A refining slice shows a stand-in (another index or level); a refining 3D pane only a coarser volume.
+  const standIn = shownPanes.some((p) => p.axis !== null && status[p.id] === "refining");
   const latestReady = useRef(onReady);
   latestReady.current = onReady;
   useEffect(() => latestReady.current?.(ready), [ready]);
-  // A snapshot taken while a slice refines waits for it, then reads the panes as they are then.
+  // A snapshot taken while a pane refines waits for it, then reads the panes as they are then.
   const now = useRef<{
+    ready: boolean;
     steady: boolean;
+    standIn: boolean;
     sheet(host: DOMRect, scale: number): HTMLCanvasElement | null;
   }>(null);
   const waiting = useRef<(() => void)[]>([]);
@@ -163,7 +169,7 @@ export function GridViewer({
         });
       const host = grid.current?.getBoundingClientRect();
       const latest = now.current;
-      if (!host?.width || !host.height || !latest?.steady) return null;
+      if (!host?.width || !host.height || !latest?.ready || latest.standIn) return null;
       const scale = Math.min(globalThis.devicePixelRatio, SNAPSHOT_WIDTHS[0]! / host.width);
       // Freeze every pane before encoding: later encodes must not reread live viewer state.
       const frozen = latest.sheet(host, scale);
@@ -212,7 +218,7 @@ export function GridViewer({
     }
     return canvas;
   };
-  now.current = { steady, sheet };
+  now.current = { ready, steady, standIn, sheet };
   // After the focus effect, so a restored crosshair wins when both arrive together.
   useEffect(() => {
     if (!restore) return;
