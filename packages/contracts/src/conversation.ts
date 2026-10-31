@@ -7,7 +7,6 @@
 import type { RunEvent } from "./events";
 import { corrections } from "./fold";
 import type { Mark } from "./messages";
-import { threadPlace } from "./thread-place";
 
 export type ConversationItem =
   | {
@@ -43,7 +42,10 @@ export type ConversationItem =
       status: "completed" | "failed" | "cancelled";
       /** The root's closing summary when completed; the reason, when one was recorded, when not. */
       text?: string;
-      /** The task the correction's go asked to redo. */
+      /**
+       * The task the correction's go asked to redo; when completed, only if an attempt of it
+       * opened (a go can end with the AI finding nothing to redo).
+       */
       redo?: string;
     };
 
@@ -78,14 +80,11 @@ export function conversation(events: readonly RunEvent[]): ConversationItem[] {
       });
     }
   }
-  const rootId = events.find(
-    (e) => e.type === "thread.started" && threadPlace(e.payload) === "root",
-  )?.threadId;
   for (const span of corrections(events).spans) {
-    const redo = span.go?.taskId;
     const end = span.closed === "abandoned" ? events[span.to] : undefined;
     if (end?.type === "correction.ended") {
       const { status, error } = end.payload;
+      const redo = span.go?.taskId;
       items.push({
         from: "outcome",
         id: end.id,
@@ -95,16 +94,10 @@ export function conversation(events: readonly RunEvent[]): ConversationItem[] {
         ...(error && { text: error }),
         ...(redo && { redo }),
       });
-    } else if (span.claimEnded && (redo || !span.replied)) {
-      // The root's completed end that finished the claim (`claimEnded`) carries its summary.
-      const root = events
-        .slice(span.reopened, span.to)
-        .reverse()
-        .find(
-          (e) =>
-            e.type === "thread.ended" && e.threadId === rootId && e.payload.status === "completed",
-        );
-      if (root?.type !== "thread.ended") continue;
+    } else if (span.claimEndedAt !== undefined && (span.go || !span.replied)) {
+      // The root's completed end that finished the claim carries its summary.
+      const root = events[span.claimEndedAt];
+      if (root?.type !== "thread.ended") throw new Error("claimEndedAt is not a thread.ended");
       items.push({
         from: "outcome",
         id: root.id,
@@ -112,9 +105,24 @@ export function conversation(events: readonly RunEvent[]): ConversationItem[] {
         at: root.createdAt,
         status: "completed",
         ...(root.payload.summary && { text: root.payload.summary }),
-        ...(redo && { redo }),
+        ...(span.go?.redone && { redo: span.go.taskId }),
       });
     }
   }
   return items.sort((a, b) => a.seq - b.seq);
+}
+
+/**
+ * The AI's offer still waiting on an answer: its latest reply, when that has an offer and no
+ * message of the person's follows it. A correction's outcome after it leaves it open.
+ */
+export function openOffer(
+  items: readonly ConversationItem[],
+): Extract<ConversationItem, { from: "agent" }> | undefined {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const m = items[i];
+    if (m?.from === "outcome") continue;
+    return m?.from === "agent" && m.offer ? m : undefined;
+  }
+  return undefined;
 }

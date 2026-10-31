@@ -5,7 +5,7 @@
  * threads and payloads, trimmed to the ones `conversation` and `corrections` read.
  */
 import { describe, expect, it } from "vitest";
-import { conversation } from "./conversation";
+import { conversation, openOffer } from "./conversation";
 import { log, RUN } from "./fold-test-log";
 
 const person = `${RUN}.person`;
@@ -33,8 +33,8 @@ function write(l: ReturnType<typeof log>, id: string, payload: object) {
   l.add("person.message", `${person}:${id}`, person, payload as never);
 }
 
-/** The second message: the offer, then the go and its redo, as run 8b7ecfea logged them. */
-function offerAndRedo(l: ReturnType<typeof log>) {
+/** The second message: the offer, then the go, as run 8b7ecfea logged them (before the redo). */
+function offerAndGo(l: ReturnType<typeof log>) {
   write(l, "m3", {
     text: "The dense bone at the plateau rim (my mark P1) should be excluded from the trabecular core (ROI-2).",
     marks: [{ volumeId: "iioc/tibia-grid", point: [188, 155, 167] }],
@@ -59,6 +59,14 @@ function offerAndRedo(l: ReturnType<typeof log>) {
   });
 }
 
+/** `offerAndGo`, then the redo's attempt of the task. */
+function offerAndRedo(l: ReturnType<typeof log>) {
+  offerAndGo(l);
+  l.add("attempt.opened", `${RUN}.trabecular-roi.worker:open`, `${RUN}.trabecular-roi.worker`, {
+    taskId: "trabecular-roi",
+  });
+}
+
 const view = (l: ReturnType<typeof log>) =>
   conversation(l.events).map((m) =>
     m.from === "outcome" ? [m.from, m.status, m.redo, m.text] : [m.from, m.id],
@@ -79,7 +87,7 @@ describe("conversation", () => {
       summary: "Run remains finished with all outputs reported; no tasks redone per request.",
     });
     offerAndRedo(l);
-    expect(view(l).at(-1)).toEqual(["agent", `${main}:call_5:reply`]);
+    expect(view(l).at(-1)?.[0]).not.toBe("outcome");
     l.add("thread.ended", `${main}:call_6:finish_run`, root, {
       status: "completed",
       summary:
@@ -144,5 +152,38 @@ describe("conversation", () => {
       undefined,
       "Run remains finished; acknowledged follow-up with no further work.",
     ]);
+  });
+
+  it("a go that led to no redo ends as Done, naming no redone task", () => {
+    const l = finishedRun();
+    offerAndGo(l);
+    l.add("thread.ended", `${main}:call_6:finish_run`, root, {
+      status: "completed",
+      summary: "The rim is already outside ROI-2; nothing to redo.",
+    });
+    expect(view(l).at(-1)).toEqual([
+      "outcome",
+      "completed",
+      undefined,
+      "The rim is already outside ROI-2; nothing to redo.",
+    ]);
+  });
+
+  it("an offer made during a go stays open past the correction's outcome", () => {
+    const l = finishedRun();
+    offerAndRedo(l);
+    l.add("reply", `${main}:call_7:reply`, main, {
+      text: "The cortical shell now overlaps the new core. Shall I redo it too?",
+      offer: { taskId: "cortical-roi" },
+    });
+    l.add("thread.ended", `${main}:call_8:finish_run`, root, {
+      status: "completed",
+      summary: "Redid the trabecular core; offered a cortical redo.",
+    });
+    const items = conversation(l.events);
+    expect(items.at(-1)?.from).toBe("outcome");
+    expect(openOffer(items)?.id).toBe(`${main}:call_7:reply`);
+    write(l, "m5", { taskId: "cortical-roi", text: "No, keep it." });
+    expect(openOffer(conversation(l.events))).toBeUndefined();
   });
 });

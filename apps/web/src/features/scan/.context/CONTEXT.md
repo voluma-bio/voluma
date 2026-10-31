@@ -90,15 +90,18 @@ stopped.
   when leaving the run, except the draft, which is kept per run in sessionStorage so a reload
   (by hand, or onto a new deploy) keeps it, and cleared by a successful send. Keep capture, retry identity and the submission guard in that page lifetime.
   There is no Redo button: the AI talks a problem through and offers a redo (`reply.offer`).
-  "Yes, redo <task>" and "No, keep it" under its latest offer never send on their own: they make
-  the box an answer to that offer, where the person can add detail (Keep starts as "No, keep it.").
-  Send sends a `go` on the task with the words, or a message on the task. An answer carries no
-  picture and no marks. The buttons stay gone once answered, and the answer drops when anything
-  follows the offer. A message carries the To check item you picked (`itemId`) when the fold lists
+  "Yes, redo <task>" and "No, keep it" under the open offer (`openOffer`: the AI's latest reply,
+  with no message of the person's after it; an outcome after it leaves it open) never send on
+  their own: they make the box an answer to that offer, where the person can add detail. Send
+  sends a `go` on the task with the words, or a message on the task (the words, else
+  "No, keep it."). The answer is page state, never written into the box, so the saved draft holds
+  only the person's words. An answer carries no picture and no marks. The buttons stay gone once
+  answered, and the answer drops once the offer is no longer open. A message carries the To check item you picked (`itemId`) when the fold lists
   it, and the task in view as `taskId`: the AI is told the person was reviewing it, and the chat
   labels it "on <task>", never "about". A refusal shows the server's own words when it gave some.
 - **How a correction ended** is the AI's last item in the chat (`conversation`'s `outcome`): the
-  root's closing summary after a redo (with a link to the redone task when another is in view), or
+  root's closing summary ("Redid <task>" with a link to it when another is in view, only when an
+  attempt of the task opened after the go; else "Done"), or
   the failure or stop and its reason, with the note that the task's earlier results stand. The
   running mark ("The AI is answering", "Redoing <task>") shows only while the run has not ended
   and the latest message has no outcome after it.

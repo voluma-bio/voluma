@@ -14,7 +14,7 @@
  */
 import { useMutation } from "@tanstack/react-query";
 import { ApiError, sendRunMessage } from "@voluma/api-client";
-import { type ConversationItem, conversation } from "@voluma/contracts/conversation";
+import { type ConversationItem, conversation, openOffer } from "@voluma/contracts/conversation";
 import {
   MAX_MESSAGE_SNAPSHOT_BYTES,
   MESSAGE_BODY_BYTES,
@@ -123,14 +123,6 @@ export function useMessage({
   /** The AI's offer you are answering: `go` redoes its task, else you keep the task as it is. */
   const [answer, setAnswer] = useState<{ replyId: string; taskId: string; go: boolean }>();
   const subject = tasks.find((t) => t.id === (answer?.taskId ?? about?.taskId ?? task?.id));
-  const answerOffer = (a: NonNullable<typeof answer>) => {
-    setAnswer(a);
-    if (!a.go && !text.trim()) setText(KEEP_IT);
-  };
-  const leaveAnswer = () => {
-    setAnswer(undefined);
-    if (text === KEEP_IT) setText("");
-  };
   // The API deduplicates by id alone. A retry must keep the entire request, including its PNG.
   const tried = useRef<{
     fingerprint: string;
@@ -167,16 +159,18 @@ export function useMessage({
   const closed = run.cannotMessage ?? undefined;
   /**
    * Sends the words. An answer to an offer carries only the words and the offer's task (with `go`
-   * when it redoes it; the words are then optional), no picture and no marks.
+   * when it redoes it), no picture and no marks; its words are optional.
    */
   const submit = () => {
     const go = answer?.go === true;
-    if (closed !== undefined || inFlight.current || (!go && !text.trim())) return;
+    if (closed !== undefined || inFlight.current || (!answer && !text.trim())) return;
     inFlight.current = true;
     const note = text.trim();
     const carried = !answer && subject ? marks : [];
     const fields = answer
-      ? { taskId: answer.taskId, ...(go && { go: true as const }), ...(note && { text: note }) }
+      ? go
+        ? { taskId: answer.taskId, go: true as const, ...(note && { text: note }) }
+        : { taskId: answer.taskId, text: note || KEEP_IT }
       : {
           text: note,
           ...(subject && { taskId: subject.id }),
@@ -231,12 +225,11 @@ export function useMessage({
     closed,
     accepted,
     answer,
-    answerOffer,
-    leaveAnswer,
+    setAnswer,
   };
 }
 
-/** What "No, keep it" puts in the box. */
+/** What a "No, keep it" answer says when you add nothing. */
 const KEEP_IT = "No, keep it.";
 
 export function AiPanel({
@@ -248,19 +241,7 @@ export function AiPanel({
   about,
   marks,
   views,
-  message: {
-    subject,
-    text,
-    setText,
-    send,
-    unseen,
-    submit,
-    closed,
-    accepted,
-    answer,
-    answerOffer,
-    leaveAnswer,
-  },
+  message: { subject, text, setText, send, unseen, submit, closed, accepted, answer, setAnswer },
 }: {
   run: RunRead;
   scan: string;
@@ -283,11 +264,11 @@ export function AiPanel({
   useEffect(() => {
     if (about || answer) form.current?.querySelector("textarea")?.focus();
   }, [about, answer]);
-  // An answer is to the latest offer: once anything follows it, there is nothing left to answer.
-  const latest = items.at(-1)?.id;
+  // An answer is to the open offer: once a reply or message follows it, there is nothing to answer.
+  const offer = openOffer(items);
   useEffect(() => {
-    if (answer && latest !== answer.replyId) leaveAnswer();
-  }, [answer, latest, leaveAnswer]);
+    if (answer && offer?.id !== answer.replyId) setAnswer(undefined);
+  }, [answer, offer, setAnswer]);
   const closedId = useId();
   const titleOf = (id: string) => tasks.find((t) => t.id === id)?.title ?? id;
   // The AI works on a message until its correction's outcome; a run that ended has stopped.
@@ -359,8 +340,7 @@ export function AiPanel({
                 <li key={m.id} className="grid gap-1">
                   <span className="text-xs text-muted-foreground">The AI</span>
                   <Markdown text={m.text} className="text-sm" />
-                  {m.offer &&
-                    m === items.at(-1) &&
+                  {m === offer &&
                     closed === undefined &&
                     m.id !== accepted &&
                     answer?.replyId !== m.id &&
@@ -368,7 +348,7 @@ export function AiPanel({
                       const offered = tasks.find((t) => t.id === m.offer?.taskId);
                       if (!offered) return null;
                       const pick = (go: boolean) =>
-                        answerOffer({ replyId: m.id, taskId: offered.id, go });
+                        setAnswer({ replyId: m.id, taskId: offered.id, go });
                       return (
                         <span className="flex flex-wrap gap-2">
                           <Button
@@ -428,7 +408,7 @@ export function AiPanel({
               label="Cancel your answer"
               size="sm"
               disabled={send.isPending}
-              onClick={leaveAnswer}
+              onClick={() => setAnswer(undefined)}
             >
               <X aria-hidden />
             </IconButton>
@@ -438,8 +418,10 @@ export function AiPanel({
           label="Message to the AI"
           hideLabel
           placeholder={
-            answer?.go
-              ? "Anything the AI should know for the redo? Optional."
+            answer
+              ? answer.go
+                ? "Anything the AI should know for the redo? Optional."
+                : "Anything the AI should know? Optional."
               : "What's wrong and why? What does the AI need to do to get it right?"
           }
           rows={3}
@@ -466,7 +448,7 @@ export function AiPanel({
             type="submit"
             variant="primary"
             size="sm"
-            disabled={closed !== undefined || send.isPending || (!answer?.go && !text.trim())}
+            disabled={closed !== undefined || send.isPending || (!answer && !text.trim())}
             aria-describedby={closed ? closedId : undefined}
           >
             <Send aria-hidden />
@@ -531,7 +513,7 @@ function Outcome({
             ? `Redo of ${title} ${stopped ? "stopped" : "failed"}`
             : stopped
               ? "Answer stopped"
-              : "Couldn't answer"
+              : "Stopped with an error"
         }
       />
       {title && <p className="text-sm">The earlier results of {title} stand.</p>}
