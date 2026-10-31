@@ -7,8 +7,8 @@
  * before the server's expiry whatever the network delay, and needs no shared clock. One timer
  * schedules the next heartbeat after each one finishes: HEARTBEAT_SECONDS after an answer,
  * HEARTBEAT_RETRY_SECONDS after a failure, so the lease is renewed soon after the API answers
- * again. A cut-off that starts just after a heartbeat therefore survives about 43 s, and one that
- * starts just before the next about 28 s.
+ * again. A cut-off that starts just after a heartbeat therefore survives about 118 s, and one that
+ * starts just before the next about 103 s.
  *
  * Not every missed window is lost contact. If the runner's own event loop was blocked for most of
  * it while this was the only live run, the run starved its heartbeats: that stop is

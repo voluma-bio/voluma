@@ -167,7 +167,7 @@ and check threads.
   `runClient`, which also stops the run on a lost lease and redacts what it sends. `lease.ts` heartbeats every 15 s with the
   usage since the last acknowledged one (model dollars from Pi's per-reply cost, sandbox
   seconds from the session's ready/stopped states) and stops the run on `stop`, on a
-  `LeaseLost` from events, history or heartbeat, or 45 s after the last acknowledged
+  `LeaseLost` from events, history or heartbeat, or 120 s after the last acknowledged
   heartbeat was sent. One timer schedules the next heartbeat: 15 s after an answer, 2 s after a failure (each attempt cut at
   5 s), so the lease is renewed soon after the API answers again. SIGTERM stops every run, each reports `released`, and the process
   exits. A `voluma` run uses our model key; a `visitor` run uses the claim's Meta key, in that run's scope
