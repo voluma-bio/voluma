@@ -304,6 +304,8 @@ export type Correction = {
   replied: boolean;
   /** The claim finished: the root thread ended after the reopen and the span was not abandoned. */
   claimEnded: boolean;
+  /** Index of the root's latest completed `thread.ended` that `claimEnded` counts. */
+  claimEndedAt: number | undefined;
 };
 
 /** The id of the `revision.started` the loop writes when the main agent is told of a go. */
@@ -339,6 +341,7 @@ export function corrections(events: readonly RunEvent[]): {
           backup: "none",
           replied: false,
           claimEnded: false,
+          claimEndedAt: undefined,
         };
         spans.push(next);
         byReopen.set(e.id, next);
@@ -359,8 +362,10 @@ export function corrections(events: readonly RunEvent[]): {
         if (threadPlace(e.payload) === "root") root = e.threadId;
         break;
       case "thread.ended":
-        if (span?.closed === "open" && e.threadId === root && e.payload.status === "completed")
+        if (span?.closed === "open" && e.threadId === root && e.payload.status === "completed") {
           span.claimEnded = true;
+          span.claimEndedAt = i;
+        }
         break;
       case "revision.started":
         if (span?.go && span.message !== undefined && e.id === goMarkerId(span.message)) {

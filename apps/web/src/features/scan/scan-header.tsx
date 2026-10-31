@@ -1,27 +1,43 @@
 /**
  * What the header line says in the scan review: the study and the scan, its group, where the run
- * stands, and Run details (how long it took, its workflow, Stop while it goes). Below the header,
+ * stands, and Run details: what the researcher may ask (how long it took, its workflow, its cost,
+ * Stop while it goes), then what someone fixing a run needs (times, ids, commits, keys, failures,
+ * gateway requests). Below the header,
  * over the views: the run's own problems (it waits for its starter's keys, it failed) and a lost
  * connection.
  */
 import { type QueryClient, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, cancelRun, resendKeys } from "@voluma/api-client";
 import { runQuery } from "@voluma/api-client/query";
-import type { Run, VisitorKeys } from "@voluma/contracts/run";
+import type { Run, RunRead, VisitorKeys } from "@voluma/contracts/run";
 import type { StudyDetail } from "@voluma/contracts/study";
+import { failedThreads } from "@voluma/contracts/threads";
 import {
   formatDuration,
+  formatUsd,
   KeysForm,
   loadKeys,
+  runCost,
   runStatus,
+  runWork,
   scanLabel,
   stoppedText,
+  useEvents,
   useNow,
 } from "@voluma/run-view";
-import { Button, Facts, Popover, ShellHeading, type Status, StatusMark } from "@voluma/ui";
+import {
+  Button,
+  type FactSection,
+  FactSections,
+  IconButton,
+  Popover,
+  ShellHeading,
+  type Status,
+  StatusMark,
+} from "@voluma/ui";
 import { catalog, workflowName } from "@voluma/workflow/bundled";
-import { ChevronDown } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Check, ChevronDown, Copy } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 
 /** "OA6-1, right knee", from the study's scan; the scan's file name when the study can't say. */
@@ -39,26 +55,14 @@ const workflowLabel = (run: Run, study: StudyDetail | undefined) => {
     : workflowName(run.workflows[0]?.path);
 };
 
-/** How long it ran: to its end, or ticking while it goes. */
-function useTook(run: Run) {
-  const { state } = run;
-  const startedAt = state.status === "queued" ? undefined : state.startedAt;
-  const endedAt = state.status === "ended" ? state.endedAt : undefined;
-  const now = useNow(startedAt !== undefined && endedAt === undefined);
-  return startedAt
-    ? formatDuration(((endedAt ? Date.parse(endedAt) : now) - Date.parse(startedAt)) / 1000)
-    : undefined;
-}
-
 /**
- * Where the run stands in a few words: "Finished in 52 min", "Running, 4 of 9 tasks done",
- * "Waiting, place 2 in line" (also a run that lost its runner and waits for another); otherwise
- * the word every list uses (`runStatus`).
+ * Where the run stands in a few words: "Finished", "Running, 4 of 9 tasks done", "Waiting, place
+ * 2 in line" (also a run that lost its runner and waits for another); otherwise the word every
+ * list uses (`runStatus`). How long it took is in Run details.
  */
 function where(
   run: Run,
   progress: { done: number; total: number },
-  took: string | undefined,
 ): { status?: Status; text: string } {
   const { state } = run;
   if (state.status === "queued")
@@ -71,8 +75,7 @@ function where(
           ? `Running, ${progress.done} of ${progress.total} tasks done`
           : "Running",
     };
-  if (state.status === "ended" && state.outcome === "completed")
-    return { text: took ? `Finished in ${took}` : "Finished" };
+  if (state.status === "ended" && state.outcome === "completed") return { text: "Finished" };
   const { label, status } = runStatus(run);
   return { status, text: label };
 }
@@ -87,8 +90,7 @@ export function ScanHeading({
   progress: { done: number; total: number };
 }) {
   const { title, group } = scanTitle(run, study);
-  const took = useTook(run);
-  const now = where(run, progress, took);
+  const now = where(run, progress);
   return (
     <ShellHeading>
       <nav aria-label="Where you are" className="flex min-w-0 items-center gap-2 text-sm">
@@ -119,18 +121,17 @@ export function ScanHeading({
       ) : (
         <span className="shrink-0 text-sm text-muted-foreground">{now.text}</span>
       )}
-      <RunDetails run={run} took={took} workflow={workflowLabel(run, study)} />
+      <RunDetails run={run} workflow={workflowLabel(run, study)} />
     </ShellHeading>
   );
 }
 
-function RunDetails({ run, took, workflow }: { run: Run; took?: string; workflow: string }) {
+function RunDetails({ run, workflow }: { run: Run; workflow: string }) {
   const live = run.state.status !== "ended";
   return (
     <Popover
       label="Run details"
       align="start"
-      className="w-72"
       trigger={
         <Button variant="ghost" size="sm" className="shrink-0">
           Run details
@@ -138,14 +139,100 @@ function RunDetails({ run, took, workflow }: { run: Run; took?: string; workflow
         </Button>
       }
     >
-      <Facts
-        items={[
-          [live ? "Running for" : "Took", took ?? "Not started"],
-          ["Workflow", workflow],
-        ]}
-      />
+      <RunFacts run={run} workflow={workflow} />
       {live && <StopRun run={run} />}
     </Popover>
+  );
+}
+
+const clock = (iso: string) =>
+  new Date(iso).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZoneName: "short",
+  });
+
+/** Mounted only while Run details is open, so its clock and the log scan run only then. */
+function RunFacts({ run, workflow }: { run: Run; workflow: string }) {
+  const { state, providerCalls } = run;
+  const live = state.status !== "ended";
+  const events = useEvents();
+  const work = runWork(events, state, useNow(live));
+  const failed = useMemo(() => failedThreads(events).size, [events]);
+  // Each claim records the commit its runner's checkout was at; a resume after a deploy adds one.
+  const commits = useMemo(() => {
+    const seen = new Set<string>();
+    for (const e of events)
+      if (e.type === "thread.started")
+        for (const pin of e.payload.workflows ?? []) seen.add(pin.commit);
+    return [...seen];
+  }, [events]);
+  const cost = formatUsd(runCost(run));
+  const unknown = providerCalls.unknownCostCalls;
+  const researcher: FactSection["items"] = [
+    // Live, the sum includes earlier work: a correction adds to the run's total.
+    [live ? "Worked so far" : "Took", work ? formatDuration(work.seconds) : "Not started"],
+    ...(work?.redos ? [["Redos", String(work.redos)] as [string, string]] : []),
+    ["Workflow", workflow],
+    // A request of unknown cost adds nothing to the sum, so the sum is a floor.
+    [live ? "Spent so far" : "Cost", unknown > 0 ? `At least ${cost}` : cost],
+  ];
+  const support: FactSection["items"] = [
+    ["Started", work ? clock(work.startedAt) : "Not started"],
+    ...(state.status === "ended" ? [["Ended", clock(state.endedAt)] as [string, string]] : []),
+    ...(work?.reopens
+      ? [["Messages after it finished", String(work.reopens)] as [string, string]]
+      : []),
+    ["Sandbox time", formatDuration(run.usage.sandboxSeconds)],
+    ["Run id", <CopyId key="id" id={run.id} />],
+    [
+      commits.length > 1 ? "Workflow commits" : "Workflow commit",
+      commits.length > 0 ? (
+        <span className="font-mono text-xs" title={commits.join("\n")}>
+          {commits.map((c) => c.slice(0, 7)).join(", ")}
+        </span>
+      ) : (
+        "Not recorded yet"
+      ),
+    ],
+    ["Keys", run.credentials === "visitor" ? "The starter's own" : "Voluma's"],
+    ["Failed agents", failed > 0 ? String(failed) : "None"],
+    [
+      "Gateway requests",
+      `${providerCalls.calls.toLocaleString()}${unknown > 0 ? `, ${unknown.toLocaleString()} of unknown cost` : ""}`,
+    ],
+  ];
+  return (
+    <FactSections
+      sections={[{ items: researcher }, { title: "For troubleshooting", items: support }]}
+    />
+  );
+}
+
+/** The run's id, in full, with a button that copies it. */
+function CopyId({ id }: { id: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <span className="flex min-w-0 items-center gap-1">
+      <span className="min-w-0 truncate font-mono text-xs" title={id}>
+        {id}
+      </span>
+      <IconButton
+        size="sm"
+        label={copied ? "Copied" : "Copy run id"}
+        onClick={() =>
+          void navigator.clipboard.writeText(id).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          })
+        }
+      >
+        {copied ? <Check /> : <Copy />}
+      </IconButton>
+    </span>
   );
 }
 
@@ -314,7 +401,7 @@ function failureMessage(error: unknown, retrying: boolean) {
 }
 
 /** Shows a run the API returned; first cancels a poll in flight, whose older read would land after it. */
-async function showRun(client: QueryClient, next: Run) {
+async function showRun(client: QueryClient, next: RunRead) {
   const { queryKey } = runQuery(next.id);
   await client.cancelQueries({ queryKey });
   client.setQueryData(queryKey, next);

@@ -14,8 +14,7 @@
 import { cx, type LinkTo, Progress, STATUS_WORD, type Status, StatusGlyph } from "@voluma/ui";
 import { type CSSProperties, type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { THREAD_STATUS } from "./agents";
-import { agentLabel, type TaskState, type TaskView, type Thread, workedSeconds } from "./run-model";
-import { formatDuration } from "./run-status";
+import { agentLabel, type TaskState, type TaskView, type Thread } from "./run-model";
 
 /** One task as the graph places it. */
 export type GraphTask = { id: string; title: string; dependsOn: string[] };
@@ -23,12 +22,13 @@ export type GraphTask = { id: string; title: string; dependsOn: string[] };
 /** A task at study size: its state on each scan of the study, in the study's scan order. */
 export type StudyGraphTask = GraphTask & { scans: Status[] };
 
-/** What a box at scan size needs of a task; the report size also lists its `threads`. */
-export type ScanGraphTask = Pick<
-  TaskView,
-  "id" | "title" | "dependsOn" | "state" | "needs" | "results"
-> &
-  Partial<Pick<TaskView, "threads">>;
+/**
+ * What a box at scan size needs of a task; the report size also lists its `threads`. `open`: its
+ * items still open for a person, as the scan review counts them (`openItems`, review-state.ts).
+ */
+export type ScanGraphTask = Pick<TaskView, "id" | "title" | "dependsOn" | "state" | "results"> & {
+  open: number;
+} & Partial<Pick<TaskView, "threads">>;
 
 export type TaskGraphProps =
   | {
@@ -66,6 +66,17 @@ export const TASK_STATUS: Record<TaskState, Status> = {
   paused: "paused",
   skipped: "waiting",
 };
+
+/**
+ * The one rule for the status a task shows, from its state and its open items (`openItems`,
+ * review-state.ts). Open items read To check while the task is done or in To check: a done task
+ * can still carry them. A To check task with every item handled reads done.
+ */
+export function shownStatus(state: TaskState, open: number): Status {
+  if (open > 0 && (state === "done" || state === "to-check")) return "check";
+  if (state === "to-check") return "done";
+  return TASK_STATUS[state];
+}
 
 /** Where a state is more exact than its mark's word. */
 const STATE_WORD: Partial<Record<TaskState, string>> = {
@@ -497,16 +508,11 @@ function StudyBox({
   );
 }
 
-/** Open check items: the ones "Looks right" can still accept, or a card with nothing to accept. */
-const openItems = (task: ScanGraphTask) => task.needs.filter((n) => !n.accepted).length;
-
 /** A box's one line at scan size: what needs you, what is going on, or its key value. */
 function scanLine(task: ScanGraphTask, open: number): { text: ReactNode; tone?: string } {
+  if (shownStatus(task.state, open) === "check" && open > 0)
+    return { text: `${open} to check`, tone: "font-medium text-check" };
   switch (task.state) {
-    case "to-check":
-      return open > 0
-        ? { text: `${open} to check`, tone: "font-medium text-check" }
-        : keyValue(task);
     case "running":
       return { text: "Running", tone: "text-info" };
     case "checking":
@@ -515,6 +521,7 @@ function scanLine(task: ScanGraphTask, open: number): { text: ReactNode; tone?: 
     case "stopped":
       return { text: taskStateWord(task.state), tone: "text-destructive" };
     case "done":
+    case "to-check":
       return keyValue(task);
     default:
       return { text: taskStateWord(task.state) };
@@ -549,9 +556,8 @@ function ScanBox({
   onSelect?: (taskId: string) => void;
   onAgent?: (threadId: string) => void;
 }) {
-  const open = openItems(task);
-  // A To check task whose items are all accepted reads as done.
-  const status = task.state === "to-check" && open === 0 ? "done" : TASK_STATUS[task.state];
+  const { open } = task;
+  const status = shownStatus(task.state, open);
   const line = scanLine(task, open);
   const idle = task.state === "waiting" || task.state === "ready" || task.state === "skipped";
   const threads = task.threads ?? [];
@@ -578,11 +584,6 @@ function ScanBox({
         )}
       >
         {line.text}
-        {size === "report" &&
-          attempts > 1 &&
-          (task.state === "done" || task.state === "to-check") && (
-            <span className="font-normal text-muted-foreground">, attempt {attempts}</span>
-          )}
       </p>
       {grow && <AgentRows threads={threads} onAgent={onAgent} />}
     </Box>
@@ -624,14 +625,5 @@ function AgentOutcome({ thread }: { thread: Thread }) {
   if (verdict === "passed") return <span className="text-muted-foreground">Agreed</span>;
   if (thread.status === "failed") return <span className="text-destructive">Failed</span>;
   if (thread.status === "running") return <span className="text-info">Running</span>;
-  // A thread still open with no stop has no duration to show yet: its state says where it is.
-  if (thread.openSince && !thread.stoppedAt)
-    return (
-      <span className="text-muted-foreground">{STATUS_WORD[THREAD_STATUS[thread.status]]}</span>
-    );
-  return (
-    <span className="text-muted-foreground tabular-nums whitespace-nowrap">
-      {formatDuration(workedSeconds(thread, Date.now()))}
-    </span>
-  );
+  return <span className="text-muted-foreground">{STATUS_WORD[THREAD_STATUS[thread.status]]}</span>;
 }

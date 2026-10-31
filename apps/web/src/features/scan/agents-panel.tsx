@@ -8,7 +8,6 @@ import {
   AgentThread,
   agentLabel,
   agentTree,
-  Elapsed,
   type TaskView,
   THREAD_STATUS,
   type Thread,
@@ -87,13 +86,9 @@ export function AgentsPanel({
         </EmptyState>
       </div>
     );
-  const count = agents.length;
   return (
     <div className="flex h-full flex-col">
-      <div className="max-h-[45%] shrink-0 overflow-y-auto border-b border-border">
-        <p className="px-4 pt-3 pb-1 text-sm text-muted-foreground">
-          {count} {count === 1 ? "agent" : "agents"}
-        </p>
+      <div className="max-h-[45%] shrink-0 overflow-y-auto border-b border-border pt-2">
         <List label="Agents" density="compact" columns="auto">
           {tree.map((g) =>
             g.taskId ? (
@@ -105,11 +100,6 @@ export function AgentsPanel({
                     {taskTitle(g.taskId)}
                   </Titled>
                 }
-                cells={[
-                  <span key="n" className="text-xs text-muted-foreground">
-                    {g.threads.length} {g.threads.length === 1 ? "agent" : "agents"}
-                  </span>,
-                ]}
               >
                 <List columns="auto">
                   {g.threads.map((t) => (
@@ -183,9 +173,7 @@ function AgentRow({
           <span key="v" className="text-xs text-muted-foreground">
             Agreed
           </span>
-        ) : (
-          <Elapsed key="v" thread={thread} />
-        ),
+        ) : null,
       ]}
       onSelect={() => pick(thread.id)}
     />

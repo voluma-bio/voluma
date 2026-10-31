@@ -2,7 +2,7 @@
 
 One screen, `/scans/:runId` (the user's theme, dark image wells): one scan's run, live while it goes and for review once
 it ends. The grid viewer fills the main area; Study, To check, Report and Agents dock on the left, View,
-Marks and The AI on the right (`ShellPanel`s, shortcuts s, t, r, a, v, m, i). Study replaces the left panel
+Marks and The AI on the right (`ShellPanel`s, shortcuts s, t, r, a, v, m, i; Marks only while you have a mark). Study replaces the left panel
 without navigating; To check keeps its URL selection and panel scroll position when reopened.
 Each visit to a scan opens To check and The AI, including after Home or a reload. Panel choices
 last only for that visit; the shell saves widths and stacked splits, not open panels.
@@ -39,6 +39,22 @@ Without `item` or `task`, the task in view is the first open item's, else the pl
   (no plan yet) and while assets are still being converted, until ten minutes after the end. A task with no review data yet
   shows "No views for <task> yet"; the viewer never falls back to another task.
 
+## Each grid keeps its viewer
+
+A task is shown on its own grid (`taskGrid`); mouse-oa has two, the Scan and the aligned tibia
+grid. `TaskViewer` keeps one `GridViewer` per grid shown, at most two mounted at any commit
+(`MAX_KEPT`: each holds four WebGL contexts, and Chrome allows 16 per page), and hides the others
+(`hidden`). One function, `keep`, decides what is kept, both for what mounts in a render and for
+the `kept` state: viewers whose image is still in the revision, least recently shown first, the
+shown one last; the oldest goes past the cap. Each kept entry carries its viewer's readiness, so
+an evicted or retired viewer takes its readiness with it. Going back to a grid is instant: camera,
+crosshair, window, meshes and slices are as they were, and a picked item still moves the crosshair
+to its place. Showing a grid moves its viewer to the end of the DOM; a moved canvas keeps its
+WebGL context. A hidden viewer keeps the scene it last showed, draws nothing, and reports
+readiness for its own grid; only the shown one has the tools, the snapshot `ref` and `onMark`. A
+redo that replaces an image drops its viewer and frees its place. Leaving the page, or picking a
+task with no results yet ("No views for … yet"), still unmounts them all.
+
 ## The stream reconnects without losing what it has
 
 Every connection appends to the same events and resumes with `subscribe(..., after = last seq)`.
@@ -73,10 +89,22 @@ stopped.
   replacement, closing and Full view. `AiPanel` only renders them; the keyed run page resets them
   when leaving the run, except the draft, which is kept per run in sessionStorage so a reload
   (by hand, or onto a new deploy) keeps it, and cleared by a successful send. Keep capture, retry identity and the submission guard in that page lifetime.
-  There is no Redo button: the AI talks a problem through and offers a redo (`reply.offer`);
-  "Yes, redo <task>" under its latest reply sends a `go` for that task and nothing else, and stays
-  gone once accepted. A message carries the To check item you picked (`itemId`) when the fold lists
-  it. A refusal shows the server's own words when it gave some.
+  There is no Redo button: the AI talks a problem through and offers a redo (`reply.offer`).
+  "Yes, redo <task>" and "No, keep it" under the open offer (`openOffer`: the AI's latest reply,
+  with no message of the person's after it; an outcome after it leaves it open) never send on
+  their own: they make the box an answer to that offer, where the person can add detail. Send
+  sends a `go` on the task with the words, or a message on the task (the words, else
+  "No, keep it."). The answer is page state, never written into the box, so the saved draft holds
+  only the person's words. An answer carries no picture and no marks. The buttons stay gone once
+  answered, and the answer drops once the offer is no longer open. A message carries the To check item you picked (`itemId`) when the fold lists
+  it, and the task in view as `taskId`: the AI is told the person was reviewing it, and the chat
+  labels it "on <task>", never "about". A refusal shows the server's own words when it gave some.
+- **How a correction ended** is the AI's last item in the chat (`conversation`'s `outcome`): the
+  root's closing summary ("Redid <task>" with a link to it when another is in view, only when an
+  attempt of the task opened after the go; else "Done"), or
+  the failure or stop and its reason, with the note that the task's earlier results stand. The
+  running mark ("The AI is answering", "Redoing <task>") shows only while the run has not ended
+  and the latest message has no outcome after it.
 - **Your marks** are page state (`useMarking`, `scan-page.tsx`), lost on reload. The tool strip on
   the viewer's bar (`TOOLS` in `marks-panel.tsx`: Navigate, Point, Box, Line, Lasso; Esc, P, B,
   L, O) picks what a click or drag makes (`@voluma/viewer/grid`'s `tool`). Esc first drops a mark

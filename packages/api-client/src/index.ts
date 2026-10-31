@@ -34,6 +34,8 @@ import {
   listRunsResponseSchema,
   type ResendKeysRequest,
   type Run,
+  type RunRead,
+  runReadSchema,
   runSchema,
   type StartRunRequest,
   type VisitorKeys,
@@ -241,8 +243,8 @@ export async function getStudy(id: string): Promise<StudyDetail> {
   return read(studyDetailSchema, await request(`/run/studies/${encodeURIComponent(id)}`));
 }
 
-export async function getRun(id: string): Promise<Run> {
-  return read(runSchema, await request(`/run/runs/${encodeURIComponent(id)}`));
+export async function getRun(id: string): Promise<RunRead> {
+  return read(runReadSchema, await request(`/run/runs/${encodeURIComponent(id)}`));
 }
 
 /** The caller's org's runs (only the caller's own under scope `self`), newest first. */
@@ -250,18 +252,18 @@ export async function listRuns(): Promise<Run[]> {
   return (await read(listRunsResponseSchema, await request("/run/runs"))).runs;
 }
 
-export async function cancelRun(id: string): Promise<Run> {
+export async function cancelRun(id: string): Promise<RunRead> {
   return read(
-    runSchema,
+    runReadSchema,
     await request(`/run/runs/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
   );
 }
 
 /** Resends a visitor run's keys after the runner lost them (state `awaiting-keys`). */
-export async function resendKeys(id: string, keys: VisitorKeys): Promise<Run> {
+export async function resendKeys(id: string, keys: VisitorKeys): Promise<RunRead> {
   const body: ResendKeysRequest = { keys };
   return read(
-    runSchema,
+    runReadSchema,
     await request(`/run/runs/${encodeURIComponent(id)}/keys`, { method: "POST", body }),
   );
 }

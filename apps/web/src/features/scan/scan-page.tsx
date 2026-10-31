@@ -14,17 +14,14 @@ import { reviewRunQuery, runQuery, studyQuery, useAcceptCheck } from "@voluma/ap
 import type { Me } from "@voluma/contracts/auth";
 import { MAX_MARKS } from "@voluma/contracts/messages";
 import type { ReviewRun, Revision } from "@voluma/contracts/review";
-import type { Run } from "@voluma/contracts/run";
+import type { RunRead } from "@voluma/contracts/run";
 import {
   DisclosureProvider,
   haltOf,
   isLive,
   type NeedItem,
-  plural,
   RunStoreProvider,
-  runHref,
   runView,
-  StudyPanel,
   ThreadNavigationProvider,
   useClosed,
   useEvents,
@@ -38,17 +35,7 @@ import type {
   StructureDisplay,
   Zyx,
 } from "@voluma/viewer/grid";
-import { workflowById } from "@voluma/workflow/bundled";
-import {
-  ArrowUpRight,
-  CircleAlert,
-  Layers,
-  ListChecks,
-  MessagesSquare,
-  Network,
-  PanelLeft,
-  Users,
-} from "lucide-react";
+import { CircleAlert, Layers, ListChecks, MessagesSquare, Network, Users } from "lucide-react";
 import {
   lazy,
   Suspense,
@@ -63,6 +50,7 @@ import { Link, useOutletContext, useParams, useSearchParams } from "react-router
 import { AgentsPanel } from "./agents-panel";
 import { AiPanel, useMessage } from "./ai-panel";
 import {
+  gridKeyOf,
   gridMark,
   MarksPanel,
   middleOf,
@@ -73,6 +61,7 @@ import {
 } from "./marks-panel";
 import { ReportPanel } from "./report-panel";
 import { RunAlert, ScanHeading, scanTitle } from "./scan-header";
+import { StudyDock } from "./study-dock";
 import { ToCheckPanel } from "./to-check-panel";
 import { useRunStream } from "./use-run-stream";
 import { ViewPanel } from "./view-panel";
@@ -139,7 +128,7 @@ function Scan({ runId }: { runId: string }) {
  * the run has no plan (409) and while its images are still being converted (until ten minutes
  * after it ends): neither shows on the stream.
  */
-function useReviewRun(runId: string, run: Run, changed: string) {
+function useReviewRun(runId: string, run: RunRead, changed: string) {
   const client = useQueryClient();
   const status = run.state.status;
   const endedAt = run.state.status === "ended" ? Date.parse(run.state.endedAt) : undefined;
@@ -190,43 +179,27 @@ function preparing(run: ReviewRun): boolean {
   return files.some((sha256) => !run.assets[sha256]);
 }
 
-/** "Looks right" on a completed run's latest result; an example takes no decisions. */
-function useAccepting(run: Run, revision: Revision | undefined) {
+/** "Looks right" on a completed run's latest result, when the server says this caller may. */
+function useAccepting(run: RunRead, revision: Revision | undefined) {
   const [error, setError] = useState<{ id: string; text: string }>();
   const mutation = useAcceptCheck(run.id, revision?.id, {
     onMutate: ({ checkId }) => setError((e) => (e?.id === checkId ? undefined : e)),
-    // `useAcceptCheck` already words the failure (read-only, changed since, couldn't save).
+    // `useAcceptCheck` already words the failure (the server's refusal, or couldn't save).
     onSettled: (_res, e, { checkId }) => {
       if (e) setError({ id: checkId, text: e.message });
     },
   });
-  const readOnly = run.example
-    ? "Example runs can't be changed."
-    : run.state.status !== "ended"
-      ? "You can decide once the run finishes."
-      : run.review === null
-        ? "This run didn't finish, so there is nothing to accept."
-        : !revision
-          ? "Wait for the results to load."
-          : undefined;
+  // The server says when no decision can be taken; the page's own wait is for the results to load.
+  const readOnly = run.cannotAccept ?? (revision ? undefined : "Wait for the results to load.");
   return {
     readOnly,
     accept: readOnly
       ? undefined
-      : (item: NeedItem, onAccepted?: () => void) => {
-          const task = revision?.tasks.find((t) => t.id === item.taskId);
-          if (
-            task?.resultRevisionId !== item.resultRevisionId ||
-            !task.checks.some((c) => c.id === item.id)
-          ) {
-            setError({ id: item.id, text: "This changed since you opened it. Look again." });
-            return;
-          }
+      : (item: NeedItem, onAccepted?: () => void) =>
           mutation.mutate(
             { checkId: item.id, taskId: item.taskId, resultRevisionId: item.resultRevisionId },
             { onSuccess: onAccepted },
-          );
-        },
+          ),
     pending: mutation.isPending ? mutation.variables?.checkId : undefined,
     error,
   };
@@ -238,13 +211,15 @@ function ScanReview({
   stale,
   refetchRun,
 }: {
-  run: Run;
+  run: RunRead;
   /** The last poll failed: what is shown may be out of date. */
   stale: boolean;
   refetchRun: () => void;
 }) {
   const me = useOutletContext<Me>();
   const openPanel = useOpenPanel();
+  // Under 1440 px, two panels leave the views too narrow: The AI waits for i or Something's wrong.
+  const [wide] = useState(() => globalThis.innerWidth >= 1440);
   const study = useQuery({
     ...studyQuery(run.studyId),
     refetchInterval: (query) =>
@@ -344,6 +319,16 @@ function ScanReview({
   const focus = useMemo(() => check?.focus && { ...check.focus }, [focusKey, picked]);
   const [display, setDisplay] = useState<StructureDisplay>({});
   const marking = useMarking();
+  // A redo that replaces an image leaves no marks on the old one: their voxels mean nothing now.
+  const grids = useMemo(
+    () =>
+      latest && new Set(latest.volumes.flatMap((v) => (v.kind === "image" && gridKeyOf(v)) || [])),
+    [latest],
+  );
+  const { keep } = marking;
+  useEffect(() => {
+    if (grids) keep(grids);
+  }, [grids, keep]);
 
   const pickItem = (next: NeedItem) => {
     select({ item: next.id, task: next.taskId });
@@ -373,10 +358,9 @@ function ScanReview({
     () => (subjectShown ? marking.marks.filter((m) => m.gridKey === subjectShown.key) : []),
     [marking.marks, subjectShown],
   );
-  const snapshot = subjectShown ? marking.snapshot : undefined;
+  const snapshot = subjectShown?.ready ? marking.snapshot : undefined;
   const message = useMessage({
     run,
-    me,
     tasks,
     task,
     about,
@@ -459,63 +443,7 @@ function ScanReview({
     <DisclosureProvider>
       <ThreadNavigationProvider onOpenThread={openAgent}>
         <ScanHeading run={run} study={study.data} progress={view.progress} />
-        <ShellPanel
-          id="scan-study"
-          side="left"
-          group="study"
-          label="Study"
-          icon={<PanelLeft />}
-          shortcut="s"
-        >
-          {study.data ? (
-            <>
-              {study.isError && (
-                <p role="status" className="px-4 py-2 text-sm text-muted-foreground">
-                  Couldn't refresh the study; what you see may be out of date.
-                  <Button variant="link" onClick={() => void study.refetch()}>
-                    Try again
-                  </Button>
-                </p>
-              )}
-              {study.data.scans.length > 1 && (
-                <div className="border-b border-border px-4 py-2">
-                  <Button asChild variant="link">
-                    <Link to={`/studies/${study.data.study.id}`}>
-                      Study overview <ArrowUpRight className="size-3.5" />
-                    </Link>
-                  </Button>
-                </div>
-              )}
-              <StudyPanel
-                detail={study.data}
-                about={`${plural(study.data.scans.length, "scan")}, ${workflowById(study.data.study.workflowId)?.name ?? study.data.study.workflowId}`}
-                current={run.input.id}
-                scanLink={({ runs: [latestRun] }) =>
-                  latestRun
-                    ? (props) => (
-                        <Link
-                          to={
-                            latestRun.id === run.id
-                              ? { search: params.toString() }
-                              : runHref({ runId: latestRun.id })
-                          }
-                          {...props}
-                        />
-                      )
-                    : undefined
-                }
-              />
-            </>
-          ) : study.isPending ? (
-            <LoadingState label="Loading the study" rows={3} className="p-4" />
-          ) : (
-            <div className="p-4">
-              <ErrorState title="Couldn't load the study" onRetry={() => void study.refetch()}>
-                Check your connection, then try again.
-              </ErrorState>
-            </div>
-          )}
-        </ShellPanel>
+        <StudyDock run={run} study={study} />
         <ShellPanel
           id="scan-to-check"
           side="left"
@@ -537,6 +465,7 @@ function ScanReview({
             onPick={pickItem}
             accepting={accepting}
             onWrong={(n) => tellAi(n.taskId)}
+            wrongReason={run.cannotMessage ?? undefined}
             live={run.state.status !== "ended"}
           />
         </ShellPanel>
@@ -581,40 +510,45 @@ function ScanReview({
         <ShellPanel id="scan-view" side="right" label="View" icon={<Layers />} shortcut="v">
           <ViewPanel revision={latest} task={reviewTask} display={display} onDisplay={setDisplay} />
         </ShellPanel>
-        <ShellPanel
-          id="scan-marks"
-          side="right"
-          label="Marks"
-          icon={<ListChecks />}
-          count={marking.marks.length || undefined}
-          shortcut="m"
-        >
-          <MarksPanel
-            marks={marking.marks}
-            shown={marking.shown}
-            taskTitle={(id) => tasks.find((t) => t.id === id)?.title ?? id}
-            selected={marking.selected}
-            onSelect={(id) => {
-              const mark = marking.select(id);
-              // A mark on another grid opens the task it was made on; the views go to it there.
-              if (mark && mark.gridKey !== marking.shown?.key)
-                select({ task: mark.taskId, item: null });
-            }}
-            onDelete={marking.remove}
-          />
-        </ShellPanel>
+        {/* Marks has a place only once there is a mark: an empty list would take the views' width. */}
+        {marking.marks.length > 0 && (
+          <ShellPanel
+            id="scan-marks"
+            side="right"
+            label="Marks"
+            icon={<ListChecks />}
+            count={marking.marks.length}
+            shortcut="m"
+          >
+            <MarksPanel
+              marks={marking.marks}
+              shown={marking.shown}
+              taskTitle={(id) => tasks.find((t) => t.id === id)?.title ?? id}
+              selected={marking.selected}
+              onSelect={(id) => {
+                const mark = marking.select(id);
+                // A mark on another grid opens the task it was made on; the views go to it there.
+                if (mark && mark.gridKey !== marking.shown?.key)
+                  select({ task: mark.taskId, item: null });
+              }}
+              onDelete={marking.remove}
+            />
+          </ShellPanel>
+        )}
         <ShellPanel
           id="scan-ai"
           side="right"
           label="The AI"
           icon={<MessagesSquare />}
           shortcut="i"
-          defaultOpen
+          defaultOpen={wide}
         >
           <AiPanel
             run={run}
             scan={title}
             tasks={tasks}
+            inView={task?.id}
+            onTask={(id) => select({ task: id, item: null })}
             about={about}
             marks={sendable}
             views={snapshot !== undefined}
@@ -712,6 +646,12 @@ function useMarking() {
       [marks],
     ),
     remove: useCallback((id: string) => setMarks((had) => had.filter((m) => m.id !== id)), []),
+    /** Keeps only the marks on these grids. */
+    keep: useCallback((grids: ReadonlySet<string>) => {
+      setMarks((had) =>
+        had.every((m) => grids.has(m.gridKey)) ? had : had.filter((m) => grids.has(m.gridKey)),
+      );
+    }, []),
     /** Drops the marks a message carried. */
     drop: useCallback((ids: string[]) => {
       if (ids.length) setMarks((had) => had.filter((m) => !ids.includes(m.id)));

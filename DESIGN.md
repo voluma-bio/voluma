@@ -39,11 +39,17 @@ where it is used.
 
 - **One selection drives the report, the 3D view and the slices.** Selecting
   a task, value or structure anywhere moves all of them.
+- **Up front is what the researcher reviews.** Statuses, verdicts, values, To check, the AI's
+  words, QC images and the viewer's controls show. How long something took, tries, counts, cost,
+  tokens and ids sit behind an info button (`InfoButton`) or Run details, with the numbers someone
+  fixing a run needs after the researcher's.
 - **Labels show only for the selection.** Everything else stays unlabelled.
 - **Bone renders ivory by default** (`--bone`); structure label colours
   (`--label-*`) appear only with the Labels toggle.
 - Slice planes keep their axis colours everywhere: coronal `--axis-x`,
-  sagittal `--axis-y`, axial `--axis-z`.
+  sagittal `--axis-y`, axial `--axis-z`. Text in the chrome (an axis letter,
+  a mark's tag) takes the matching ink, `--axis-*-text` or `--mark-mine-text`:
+  the solids are made for the dark image wells and fail 4.5:1 on light surfaces.
 - Rulers are `--ruler`; a ruler being corrected is `--ruler-edit`; a landmark
   more than 0.03 mm off the surface is `--landmark-warn`.
 - Panels dock and resize by dragging; nothing floats. The 3D and slice views

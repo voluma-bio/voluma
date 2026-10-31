@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import type { Status } from "@voluma/ui";
-import type { NeedItem, ResultRow, TaskState, Thread } from "./run-model";
+import type { ResultRow, TaskState, Thread } from "./run-model";
 import { type ScanGraphTask, type StudyGraphTask, TaskGraph } from "./task-graph";
 
 /**
@@ -69,18 +69,6 @@ function thread(
   };
 }
 
-function need(taskId: string, title: string): NeedItem {
-  return {
-    id: `${taskId}/1`,
-    taskId,
-    resultRevisionId: "story-revision",
-    title,
-    text: "",
-    accepted: false,
-    acceptable: true,
-  };
-}
-
 function scanTasks(
   states: Record<string, TaskState>,
   extra: Record<string, Partial<ScanGraphTask>> = {},
@@ -92,18 +80,18 @@ function scanTasks(
       v && (state === "done" || state === "to-check")
         ? [{ id: `${id}/value`, title, value: v[0], unit: v[1] }]
         : [];
-    return { id, title, dependsOn, state, needs: [], results, ...extra[id] };
+    return { id, title, dependsOn, state, open: 0, results, ...extra[id] };
   });
 }
 
 const finished = scanTasks(Object.fromEntries(PLAN.map(([id]) => [id, "done" as TaskState])), {
   segmentation: {
     state: "to-check",
-    needs: [need("segmentation", "Meniscus label touches the tibia")],
+    open: 1,
   },
   cortical: {
     state: "to-check",
-    needs: [need("cortical", "Cortex thin at the medial edge")],
+    open: 1,
     threads: [
       thread("w", "worker", "cortical", "completed", [10, 16], { attempts: ["a1", "a2"] }),
       thread("c1", "check", "cortical", "completed", [16, 18], {

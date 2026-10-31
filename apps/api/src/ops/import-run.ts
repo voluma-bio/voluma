@@ -21,7 +21,7 @@ import type { PgTable } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { reviewSnapshots } from "../domains/review/schema";
-import { eventLock } from "../domains/run/pg-event-log";
+import { lockRun } from "../domains/run/pg-event-log";
 import { QUEUE_LOCK } from "../domains/run/pg-queue";
 import { events, inputs, piMessages, runs, studies, studyScans } from "../domains/run/schema";
 import { databaseUrl } from "./operator";
@@ -109,12 +109,7 @@ function sameSharedRow(name: string, actual: unknown, expected: unknown) {
 }
 await db.transaction(async (tx) => {
   await tx.execute(sql`SELECT pg_advisory_xact_lock(${QUEUE_LOCK})`);
-  await eventLock(tx, runId);
-  const [existing] = await tx
-    .select({ studyId: runs.studyId })
-    .from(runs)
-    .where(eq(runs.id, runId))
-    .for("update");
+  const existing = await lockRun(tx, runId);
   if (existing && !values.replace) throw new Error(`run ${runId} exists; pass --replace`);
   await tx.delete(providerCalls).where(eq(providerCalls.runId, runId));
   await tx.delete(reviewSnapshots).where(eq(reviewSnapshots.runId, runId));
