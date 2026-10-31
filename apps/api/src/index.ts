@@ -13,7 +13,7 @@
  * GUEST_ORGANIZATION_ID with GUEST_SCOPE (self|lab, default self) to let anyone in as a guest (the repo .env).
  * Run limits, per organization (LAB, JUDGES, DEMO) and number: RUN_LIMITS_<ORG>_PER_CALLER, _CONCURRENT,
  * _VISITOR_ACTIVE; unset is no limit. Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
- * R2_SECRET_ACCESS_KEY, R2_BUCKET: Review's reference download and scan uploads (the API
+ * R2_SECRET_ACCESS_KEY, R2_BUCKET: Review's run files and scan uploads (the API
  * presigns PUTs; files never pass through it); OBJECT_STORE_DIRECTORY replaces R2 with a local folder. UPLOAD_MAX_FILES, UPLOAD_MAX_BYTES per scan and UPLOAD_MAX_OPEN uploads in progress per member (defaults below). Fails at startup if the database is unreachable or not migrated.
  */
 import { existsSync } from "node:fs";
@@ -149,9 +149,9 @@ const queue = pgRunQueue(
 );
 const eventLog = pgEventLog(db, notifier);
 
-const runRecords = pgRunRecords(db, notifier);
+const runRecords = pgRunRecords(db, notifier, results);
 
-/** R2, optional as a group (and replaced by `OBJECT_STORE_DIRECTORY`): without either the reference download, run files and scan uploads are 503s. */
+/** R2, optional as a group (and replaced by `OBJECT_STORE_DIRECTORY`): without either run files and scan uploads are 503s. */
 const r2Env = {
   accountId: process.env.R2_ACCOUNT_ID,
   bucket: process.env.R2_BUCKET,

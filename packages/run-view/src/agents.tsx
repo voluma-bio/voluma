@@ -88,7 +88,7 @@ const MARK: Record<Thread["status"], string> = {
   cancelled: "bg-muted text-muted-foreground",
 };
 
-export function AgentMark({ thread }: { thread: Thread }) {
+function AgentMark({ thread }: { thread: Thread }) {
   const Icon = thread.kind === "check" ? ShieldCheck : Bot;
   return (
     <span

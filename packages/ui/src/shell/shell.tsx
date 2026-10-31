@@ -123,6 +123,7 @@ type ShellState = {
   slot(id: string): HTMLElement | null;
   isOpen(id: string): boolean;
   toggle(reg: Registration, stack: boolean): void;
+  open(id: string): void;
 };
 
 const ShellContext = createContext<ShellState | null>(null);
@@ -291,6 +292,26 @@ export function AppShell({
     return () => window.removeEventListener("keydown", onKey);
   }, [foldSide, toggleFull, toggle, regs, full]);
 
+  // A screen opens one of its panels: it joins what is open on its side, as Shift-click stacks
+  // it. From Full view it brings the saved layout back with the panel added. Stable, so a
+  // screen's callbacks built on it don't change when panels do.
+  const regsRef = useRef(regs);
+  regsRef.current = regs;
+  const open = useCallback((id: string) => {
+    const reg = regsRef.current.get(id);
+    if (!reg || reg.link) return;
+    setFull(false);
+    setLayout((l) =>
+      l.open[reg.side].includes(id)
+        ? l
+        : {
+            ...l,
+            open: { ...l.open, [reg.side]: [...l.open[reg.side], id].slice(-2) },
+            arranged: [...new Set([...l.arranged, reg.side])],
+          },
+    );
+  }, []);
+
   const state = useMemo<ShellState>(
     () => ({
       register,
@@ -298,8 +319,9 @@ export function AppShell({
       slot: (id) => slots[id] ?? null,
       isOpen: (id) => shown.left.includes(id) || shown.right.includes(id),
       toggle,
+      open,
     }),
-    [register, unregister, slots, shown, toggle],
+    [register, unregister, slots, shown, toggle, open],
   );
 
   // One stable ref callback per panel: a new callback each render would detach and reattach the
@@ -610,6 +632,13 @@ export function ShellPanel({ children, tools, ...props }: ShellPanelProps) {
         slot,
       )
     : null;
+}
+
+/** Opens a panel of this screen by id, beside what is open on its side. */
+export function useOpenPanel(): (id: string) => void {
+  const shell = useContext(ShellContext);
+  if (!shell) throw new Error("useOpenPanel must be used inside AppShell");
+  return shell.open;
 }
 
 /** What the header line says about this screen: where you are, and its one-line facts. */

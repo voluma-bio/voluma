@@ -97,9 +97,6 @@ export const referenceInputId = (labId: string) => `reference-${labId}`;
 /** Reference data for the OA6-1RK sample: the raw scan and the reference run. */
 export const referencePrefix = (part: "scan" | "run") => `reference/OA6-1RK/${part}/`;
 
-/** The existing ZIP is beside scan/, not inside the sandbox's DICOM mount. */
-export const referenceScanArchiveKey = () => "reference/OA6-1RK/scan.zip";
-
 /**
  * A stored pointer to a file in R2: an `evidenceKey`, or a key under the
  * reference run (whose files are already immutable). Review data stores full

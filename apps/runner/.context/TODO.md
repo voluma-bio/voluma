@@ -1,6 +1,7 @@
 # Runner TODO
 
 - **Measure the live `/inputs` staging rate after #198.** Run a before/after A/B on the staging OA6-1RK prefix with the staging runner environment, recording `cp` stderr and elapsed time. The parent-directory race is reproduced and fixed locally; a real-Modal count would confirm it was the only cause. Do not lower `-P 32` without that measurement.
+- **Staged `/inputs` is a writable local copy.** For tasks with `copyInputs`, `modal-sandbox.ts` mounts the source read-only under `/staged/inputs` but copies it to ordinary local files at `/inputs`. Commands run as root; the copy is not remounted read-only. The read-only instruction in the prompt is not enforcement, and an edit disappears on sandbox restart. Preserve the original input files; enforcing a read-only staged copy needs support in the sandbox image or mount options.
 
 From the round-2 review of #40 (`voluma-bio/docs` `work/mvp-contracts-and-data/research/review-pr40-round2.md`):
 
