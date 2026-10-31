@@ -68,6 +68,7 @@ function resultOf({ run, results }: RunResult) {
         toCheck.push({
           runId: run.id,
           taskId: task.id,
+          resultRevisionId: task.resultRevisionId,
           checkId: check.id,
           title: check.title,
           detail: check.detail,

@@ -30,6 +30,11 @@ change it safely.
   means the cost is unknown (the provider may have billed it). A reply that was cut short is never
   priced from the usage seen so far. Spend is the sum of known costs; unknown-cost calls are
   counted apart (`providerCalls.unknownCostCalls`) and shown as "cost unknown", never as $0.
+- **Counts are gateway requests, not SAM operations.** `providerCalls.calls` counts every
+  non-open row, including failures and cuts. Upload, response, delete and retry requests each
+  have their own row: two successful SAM operations normally mean six gateway requests.
+  Keep the wire names; label these counts "gateway requests" for people. Model-call counts
+  in event-derived spend are separate and stay labeled model calls.
 - **Only Meta is enabled** (`ProviderDef.enabled`); Anthropic and OpenAI have definitions but
   every route is a 403 until the gate in [TODO.md](TODO.md) is met.
 - **The body is the caller's.** `body.ts` reads `model` as a top-level key only,
