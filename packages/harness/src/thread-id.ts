@@ -2,7 +2,7 @@
  * Thread ids. A new thread's id is a UUIDv5 of its run and name, minted once when the thread
  * first starts; every later reader takes the id from the thread's `thread.started` record and
  * never rebuilds or parses it. Runs recorded before this keep their stored ids
- * (`<runId>.<name>`).
+ * (`<runId>.<name>`): they stay readable but cannot be resumed (`pinnedImageOf`).
  */
 import { createHash } from "node:crypto";
 

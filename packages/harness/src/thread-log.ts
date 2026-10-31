@@ -161,30 +161,26 @@ type NoticeBody = Notice extends infer N
 
 /** A call of the main agent that a rebuilt result reads back (`calls`). */
 export type MainCall =
-  | { name: "start_worker" | "start_agent"; brief: string }
+  | { name: "start_agent"; brief: string }
   | { name: "message"; threadId: string; text: string };
 
 /** The stored input of a main-agent call; undefined for other tools or an input of another shape. */
 function mainCall(name: string, input: unknown): MainCall | undefined {
   if (typeof input !== "object" || input === null) return undefined;
   const i = input as Record<string, unknown>;
-  if ((name === "start_worker" || name === "start_agent") && typeof i.brief === "string")
-    return { name, brief: i.brief };
+  if (name === "start_agent" && typeof i.brief === "string") return { name, brief: i.brief };
   if (name === "message" && typeof i.threadId === "string" && typeof i.text === "string") {
     return { name, threadId: i.threadId, text: i.text };
   }
   return undefined;
 }
 
-/**
- * The thread a model's input names: its name (`segmentation.worker`), which is all a model is
- * shown, or an exact stored id (a thread started before names were what models see).
- */
+/** The thread a model's input names: its name (`segmentation.worker`), which is all a model is shown. */
 export function threadByRef(
   threads: ReadonlyMap<string, ThreadRecord>,
   ref: string,
 ): ThreadRecord | undefined {
-  return threads.get(ref) ?? [...threads.values()].find((r) => r.name === ref);
+  return [...threads.values()].find((r) => r.name === ref);
 }
 
 /**
@@ -251,7 +247,7 @@ function briefOf(started: PayloadOf<"thread.started">, calls: ThreadLog["calls"]
     started.spawnedBy && started.parentThreadId
       ? calls.get(callKey(started.parentThreadId, started.spawnedBy))
       : undefined;
-  return call?.name === "start_worker" || call?.name === "start_agent" ? call.brief : "";
+  return call?.name === "start_agent" ? call.brief : "";
 }
 
 /** The state of a thread; undefined for an id the log has not seen start. */
@@ -267,11 +263,11 @@ export function threadState(
 
 /**
  * A started thread's name. Rows an old runner wrote during the deploy that added `name` lack it;
- * their name is the id without the run id. Delete with step 2 (`name` required), see
+ * their name is the id after its first `.` (run ids hold none). Delete with step 2 (`name` required), see
  * `packages/contracts/.context/TODO.md`.
  */
 function threadNameOf(e: Extract<RunEvent, { type: "thread.started" }>): string {
-  return e.payload.name ?? e.threadId.slice(e.runId.length + 1);
+  return e.payload.name ?? e.threadId.slice(e.threadId.indexOf(".") + 1);
 }
 
 /**
@@ -386,8 +382,9 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         break;
       case "person.message": {
         const { text, marks, snapshotKey, go, taskId } = e.payload;
-        // A message with no span (sent while the run was live, before corrections) counts as open.
-        const closed = spans.find((s) => s.message === e.id)?.closed ?? "open";
+        // Every message is the one of a span (`run.reopened` is written with it).
+        const closed = spans.find((s) => s.message === e.id)?.closed;
+        if (!closed) break;
         if (closed !== "abandoned") unanswered = true;
         notice(
           {
