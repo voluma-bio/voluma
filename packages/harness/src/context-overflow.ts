@@ -42,6 +42,12 @@ export function statusOf(message: string): number | undefined {
 }
 
 /**
+ * Anthropic's 400 when input plus the requested `max_tokens` passes the window ("input length and
+ * `max_tokens` exceed context limit: 188240 + 21333 > 200000, ..."); Pi's patterns miss it.
+ */
+const ANTHROPIC_INPUT_PLUS_OUTPUT = /input length and `?max_tokens`? exceed context limit/i;
+
+/**
  * Whether a failed reply's error text is a context overflow. Pi's catch-all overflow patterns also
  * match 5xx bodies ("too many tokens in the batch"), so only a 400, a 413 or no status counts.
  */
@@ -50,7 +56,8 @@ export function isContextOverflowError(message: string | undefined): boolean {
   const status = statusOf(m);
   return (
     (status === undefined || status === 400 || status === 413) &&
-    isContextOverflow({ stopReason: "error", errorMessage: m } as AssistantMessage)
+    (ANTHROPIC_INPUT_PLUS_OUTPUT.test(m) ||
+      isContextOverflow({ stopReason: "error", errorMessage: m } as AssistantMessage))
   );
 }
 

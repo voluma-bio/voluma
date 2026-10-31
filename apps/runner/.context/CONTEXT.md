@@ -324,27 +324,28 @@ and rolling back to a runner that cannot decode `imageRef` need an operator poli
 there is no automatic conversion to inline rows.
 
 **Context compaction.** `adapters/pi/compaction.ts`; nothing rewrites history between requests, so the provider's
-cache prefix stays intact. Before each request the thread's input is estimated (last reply's input, cache and output
-tokens plus the chars/4 of what came after) and so are its images: bytes and count against the model's
-`inputLimits` (`maxRequestBytes`, `images.maxPerRequest`; 32 MiB and 100 when a model declares none). Trigger:
-input over min(400k, 0.9 x (`contextWindow` - reserve)), reserve = min(64k, model `maxTokens`, window/4); 350k when
-the window is unknown; or images over 40% of a limit. Past it, a runtime user message tells the thread to finish the
-step and write down what it needs, it gets 3 more turns, then its own model summarizes it on a warm branch (same
-messages, system message and tools, summary instruction appended). Skipped notice, compaction at once: another turn
-would not fit (input + reserve > window, or images over 70% of a limit). Cold summary (`[system, previous summary,
-messages to summarize]`, no kept tail, images left out): when the warm request plus the 16k summary would not fit
-(or images over 90%), and always when the provider refused a request as too large (`recover`, called from
+cache prefix stays intact. Token decisions use only what the last request used (the last reply's reported input, cache read and cache write
+tokens): nothing blocks or splits a request on an estimate, so a request may go past the budget. Only a thread with no
+reply since its last compaction (resumed after a crash) is judged by a chars/4 estimate of its view. Images are measured
+before each request: bytes and count against the model's
+`inputLimits` (`maxRequestBytes`, `images.maxPerRequest`; 32 MiB and 100 when a model declares none). Budget:
+min(400k, `contextWindow`), 350k when the window is unknown. Warn: when a tool batch ends with input over budget - 1.5 x reserve
+(reserve = min(64k, model `maxTokens`, budget/3); wrap-up room = reserve / 2; 304k on Meta, 104k on a 200k Claude, 352k on a 32k-output model), or images over 40% of a limit, a runtime
+user message tells the thread (once per compaction) to finish the step and write down what it needs. Compact: when a reply reported input over budget - reserve, the next request is the compaction request
+(336k, 136k, 368k), or images over 70% of a limit; its own model summarizes it on a warm branch (same messages, system message and tools, summary instruction
+appended). A thread already past it when the runner restarts compacts on its next request. Cold summary (`[system, previous summary,
+messages to summarize]`, no kept tail, images left out): when images are over 90% of a limit, and always when the provider refused a request as too large (`recover`, called from
 `start-thread.ts`; then one retry in the same thread, started by a note stored only after the summary was; a failed
 recovery leaves the refusal as the thread's failure (unless the summary's own error is transient: then it ends the thread as that error and the run retries it), and a second refusal ends it as before). A summary that stops on
 length is retried once with twice the room (the thread's reasoning setting stays, so the cache holds; both calls' usage is recorded); one that also called a tool is accepted by its text.
-A compaction that would leave the thread due again (the last turn alone is over a limit) waits until a request is tight or cold. A failed summary fails the thread with the provider's own error text (so `provider-error.ts` classifies it), the
-context in a log line. The summary reply is recorded as an assistant `message` event with its usage, so spend counts
+A compaction that would leave the thread due again (the last turn alone is over a limit) waits until images are near a limit. A summary that fails for any reason other than an overflow fails the thread with the provider's own error text (so `provider-error.ts` classifies it); an overflow of the warm summary request recovers through the cold summary. The
+context goes to a log line. The summary reply is recorded as an assistant `message` event with its usage, so spend counts
 it, a failed summary's usage too (an event with `compaction: true` and no text). The event carries `compaction: true`: the run page shows it as a collapsed "History summarized" row (the notices read "Context notice") and leaves it out of a thread's `said` and `reply`. The wrap-up and overflow notices go through the thread's inbox with sender `{kind: "runtime", notice: true}`, which `thread-log` does not count as a nudge. One overflow test (`context-overflow.ts`: a 400, a 413 or no
-status, and Pi's patterns) serves both this and the runner's classifier.
+status, Pi's patterns and Anthropic's "input length and `max_tokens` exceed context limit") serves both this and the runner's classifier.
 The result is a marker row `{role: "compaction", summary, keptFrom}` appended to `pi_messages`; every earlier row
 stays. `keptFrom` indexes the thread's messages (rows that are not markers); `foldHistory` rebuilds them and the
 latest marker (and derives where it sat), and a request carries `[system, summary message, messages from keptFrom]`
-(the last ~20% of each limit `load` checks: the trigger in tokens, the byte limit and the image-count limit, so a compaction always leaves the thread not due; starting at a user or assistant message, so a
+(the last ~20% of each limit `load` checks: the compact threshold in tokens, the byte limit and the image-count limit, so a compaction always leaves the thread not due; starting at a user or assistant message, so a
 call keeps its results). The system prompt is untouched (resume compares it). Each compaction logs `compaction:
 thread …` with tokens before and after. Images stay in history until a compaction; the loader fetches only those from
 `keptFrom`.
