@@ -36,8 +36,11 @@ export function SignedIn() {
   const [session, setSession] = useState<Session>({ state: "loading" });
   const request = useRef(0);
   const pendingGuest = useRef<Promise<Me | null> | null>(null);
+  // One retry at a time after an unreachable API, started only once the last attempt answered.
+  const retry = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const load = useCallback(async () => {
+    clearTimeout(retry.current);
     const current = ++request.current;
     try {
       // A superseded guest response still writes its cookie. Wait even if it fails,
@@ -63,8 +66,11 @@ export function SignedIn() {
           : error instanceof ApiError && error.status >= 500
             ? "down"
             : undefined;
-      if (cause)
+      if (cause) {
         setSession((now) => (now.state === "signed-in" ? now : { state: "unreachable", cause }));
+        // Until the API answers: then a kept session also picks up an identity another tab changed.
+        retry.current = setTimeout(() => void load(), 5000);
+      }
       // Schema mismatches and unexpected statuses belong on the router's error screen.
       else
         setSession(() => {
@@ -91,6 +97,7 @@ export function SignedIn() {
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
       ++request.current;
+      clearTimeout(retry.current);
       unsubscribe();
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibility);
@@ -173,10 +180,6 @@ function UnreachableScreen({
   retry: () => Promise<void>;
 }) {
   const [trying, setTrying] = useState(false);
-  useEffect(() => {
-    const timer = setInterval(() => void retry(), 5000);
-    return () => clearInterval(timer);
-  }, [retry]);
   return (
     <GateScreen
       title={cause === "offline" ? "Voluma can't be reached" : "Voluma isn't responding"}
