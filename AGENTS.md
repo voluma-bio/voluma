@@ -45,9 +45,9 @@ areas of the app, never a person's patch.
 
 What the structure still requires:
 
-- `features/run` and `features/review` never import each other, and neither
-  do `domains/run` and `domains/review` in the API. They share code only
-  through `packages/` (and `apps/api/src/ports` on the server).
+- Web features (`features/study`, `features/scan`) never import each other,
+  and neither do `domains/run` and `domains/review` in the API. They share
+  code only through `packages/` (and `apps/api/src/ports` on the server).
 - Web features reach the API only through `@voluma/api-client`.
 - Each web feature serves its routes and theme; the shell only mounts them.
 - Each API domain serves every path under its prefix (`/run/`, `/review/`).

@@ -1,21 +1,20 @@
 /**
  * Router shell. Each feature owns its routes and its theme; the shell only
- * collects them, so the run and review lanes never edit this file to add a
- * screen. Every feature route sits behind the sign-in gate. Shared components are
+ * collects them, so a lane never edits this file to add a screen. Every
+ * feature route sits behind the sign-in gate. Shared components are
  * shown in Storybook (apps/storybook), not in the app.
  */
 import { Button } from "@voluma/ui";
 import { createBrowserRouter, Link } from "react-router";
 import { RouterProvider } from "react-router/dom";
-import { reviewRoutes } from "../features/review";
-import { runRoutes } from "../features/run";
+import { scanRoutes } from "../features/scan";
 import { studyRoutes } from "../features/study";
 import { SignedIn } from "./signed-in";
 
 const router = createBrowserRouter([
   {
     element: <SignedIn />,
-    children: [...studyRoutes, ...runRoutes, ...reviewRoutes, { path: "*", element: <NotFound /> }],
+    children: [...studyRoutes, ...scanRoutes, { path: "*", element: <NotFound /> }],
   },
 ]);
 

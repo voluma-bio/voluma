@@ -6,10 +6,11 @@
  * (`@source "<path to>/packages/run-view/src";`).
  */
 export { AgentThread } from "./agent-thread";
-export { AgentMark, Elapsed, THREAD_STATUS } from "./agents";
+export { Elapsed, THREAD_STATUS } from "./agents";
 export { DisclosureProvider } from "./chat/disclosure-store";
-export { ClampedMarkdown } from "./chat/markdown";
+export { Markdown } from "./chat/markdown";
 export { ThreadNavigationProvider } from "./chat/thread-navigation";
+export { ItemToCheck, type ItemToCheckProps } from "./item-to-check";
 export { KeysForm, loadKeys, RunKeyLine } from "./keys";
 export {
   type AgentNode,
@@ -29,6 +30,7 @@ export {
   type RunStatus,
   runHref,
   runStatus,
+  scanLabel,
   shortDate,
   studyStatus,
 } from "./run-status";
@@ -39,6 +41,14 @@ export {
   useRunStore,
   useThreads,
 } from "./run-store";
-export { TaskFlow, type TaskLinkProps, TaskMark } from "./task-flow";
+export {
+  type GraphTask,
+  type ScanGraphTask,
+  type StudyGraphTask,
+  TASK_STATUS,
+  TaskGraph,
+  type TaskGraphProps,
+  taskStateWord,
+} from "./task-graph";
 export { applyFrame, type Live, noLive, type Settled, settle } from "./transcript";
 export { useNow } from "./use-now";
