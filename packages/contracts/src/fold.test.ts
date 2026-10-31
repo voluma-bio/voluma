@@ -77,6 +77,7 @@ describe("fold", () => {
       ],
     });
     l.add("thread.started", "w2:started", "w2", {
+      name: "w2",
       parentThreadId: "root",
       kind: "worker",
       task: "c",

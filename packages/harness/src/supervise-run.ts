@@ -69,6 +69,7 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
   const resumed = recorder.events().length > 0;
   // Not a derived id: each invocation of the root is a thread start of its own.
   recorder.emit(rootThreadId, "thread.started", {
+    name: "supervisor",
     parentThreadId: null,
     kind: "supervisor",
     workflows: options.workflows,

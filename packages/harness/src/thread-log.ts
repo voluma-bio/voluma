@@ -22,7 +22,6 @@ import {
 import type { Mark } from "@voluma/contracts/messages";
 import type { EvidenceRef } from "@voluma/contracts/output";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
-import { threadName } from "@voluma/contracts/threads";
 import type { UserSender } from "./adapters/pi/start-thread";
 import type { PayloadOf } from "./recorder";
 import { callKey, effectId } from "./tools/effects";
@@ -360,7 +359,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         if (record && !record.end && !record.inputPending) resumedCutOff.add(e.threadId);
         const fields: ThreadFields = {
           id: e.threadId,
-          name: threadName(e.runId, e.threadId),
+          name: e.payload.name,
           end: undefined,
           nudges: record?.nudges ?? 0,
           brief: record?.brief ?? briefOf(e.payload, value.calls),

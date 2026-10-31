@@ -61,8 +61,8 @@ named by the thread's `name`, its id without the run id). `RunLayout.forThread(r
   locally and cites `v1.jpg` is refused unless the worker cited `v1.jpg`, in which case the
   citation resolves to the worker's file.
 - Readers take a thread's `name`, `role` and `taskId` from its `ThreadRecord`, never from its id.
-  `threadName` (`packages/contracts/src/threads.ts`) is the one parser of an id; ids are minted only
-  in `run-loop.ts` (`nextThread`) and `supervise-run.ts` (`rootThreadIdOf`). The runner knows a
+  The name is minted with the id (`nextThread` in `run-loop.ts`; `supervisor` in `supervise-run.ts`)
+  and recorded as `thread.started.name`, repeated by every resume; no code parses an id. The runner knows a
   thread's layout, and so its name, by id from `run.ts`'s `laidOut` map (filled by the run loop).
 
 Spend and the usage meter sum sandbox seconds over all sandboxes.
