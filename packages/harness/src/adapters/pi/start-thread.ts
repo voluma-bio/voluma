@@ -72,7 +72,7 @@ export type StartThreadOptions = ThreadIdentity & {
   streamFn: StreamFn;
   /**
    * A new thread stores both. A resumed thread keeps the stored prompt and tool definitions;
-   * it is refused only if it called a tool that is gone or a call no longer fits the tool.
+   * it is refused only if the input schema of a tool it was given changed.
    */
   systemPrompt: string;
   tools: Tool[];
@@ -230,14 +230,8 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       // Every check that can refuse the thread runs before the thread's own events: a refused
       // resume has its `thread.started` already (the run loop stores it first) and gets no more
       // from here; the run loop then stops it.
-      if (stored.length > 0) {
-        if (stored[0]?.role !== "system") {
-          throw new ThreadStale("the stored history does not start with a system message");
-        }
-        refuseUnrunnableCalls(stored, options.tools);
-        // The model keeps the tool definitions it started with (the system message in `stored`
-        // declares them; Pi would otherwise append the difference to the current tools).
-        agent.state.tools = storedTools(getCurrentTools(stored), agentTools);
+      if (stored.length > 0 && stored[0]?.role !== "system") {
+        throw new ThreadStale("the stored history does not start with a system message");
       }
       // The model is part of a thread's identity, like its prompt: History is the record of it
       // (an assistant message names the model that wrote it), not `thread.started`, which may
@@ -251,6 +245,11 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
           `the thread was written by ${wrote.provider}/${wrote.model}, not ${options.model.provider}/${options.model.id}; ` +
             "a resumed thread keeps its model",
         );
+      }
+      if (stored.length > 0) {
+        // The model keeps the tool definitions it started with (the system message in `stored`
+        // declares them; Pi would otherwise append the difference to the current tools).
+        agent.state.tools = storedTools(getCurrentTools(stored), agentTools);
       }
       const repairs = interruptedToolResults(stored, options.interrupted);
       const hasUser = stored.some((m) => m.role === "user");
@@ -449,7 +448,7 @@ function overflowRetryable(messages: AgentMessage[]): boolean {
 class ThreadFailure extends Error {}
 
 /**
- * The stored thread cannot be resumed as it is (it called a tool a deploy removed or reshaped,
+ * The stored thread cannot be resumed as it is (a deploy changed the input of one of its tools,
  * or its model changed): `ran` is false and `stale` true. The caller starts the work again on a new thread.
  */
 class ThreadStale extends ThreadFailure {}
@@ -529,12 +528,18 @@ function strictObjects<T>(schema: T): T {
 
 /**
  * The tools a resumed thread offers: the definitions it started with, run by the current tool
- * of the same name. A tool since removed answers a call with an error, so one the thread never
- * called costs nothing; a tool added since is not offered.
+ * of the same name. A tool whose input schema changed since is refused as stale: Pi checks a
+ * call against the stored schema and `execute` then parses it with the current one, so a call
+ * could pass one and fail the other for the rest of the thread. A description change resumes.
+ * A tool since removed answers a call with an error; a tool added since is not offered.
+ * (A changed `prepare` cannot be seen: the stored definitions do not carry it.)
  */
 function storedTools(declared: ToolDeclaration[], current: AgentTool[]): AgentTool[] {
   return declared.map((d) => {
     const now = current.find((t) => t.name === d.name);
+    if (now && JSON.stringify(now.parameters) !== JSON.stringify(d.parameters)) {
+      throw new ThreadStale(`the input of ${d.name} changed since the thread started`);
+    }
     return {
       label: d.name,
       execute: async () => ({
@@ -548,28 +553,6 @@ function storedTools(declared: ToolDeclaration[], current: AgentTool[]): AgentTo
       parameters: d.parameters,
     };
   });
-}
-
-/** Refuses a thread that called a tool that is gone, or whose stored arguments the tool no longer accepts. */
-function refuseUnrunnableCalls(stored: AgentMessage[], tools: Tool[]): void {
-  for (const m of stored) {
-    // Pi drops errored and aborted replies from requests, so their calls never run again.
-    if (m.role !== "assistant" || m.stopReason === "error" || m.stopReason === "aborted") continue;
-    for (const call of m.content) {
-      if (call.type !== "toolCall") continue;
-      const tool = tools.find((t) => t.name === call.name);
-      if (!tool) {
-        throw new ThreadStale(`the thread called ${call.name}, which no longer exists`);
-      }
-      const args = tool.prepare ? tool.prepare(call.arguments) : call.arguments;
-      const parsed = tool.input.safeParse(args);
-      if (!parsed.success) {
-        throw new ThreadStale(
-          `the thread's call of ${call.name} no longer fits its input: ${parsed.error.message}`,
-        );
-      }
-    }
-  }
 }
 
 /**
