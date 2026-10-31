@@ -178,7 +178,18 @@ export async function decideMessage(
       message: "This run used an older version of its workflow, so rerun it.",
     });
   }
-  const { taskId } = msg.payload;
+  const { taskId, itemId } = msg.payload;
+  if (itemId !== undefined) {
+    // By primary key, then read in code: `payload` is `json` (see the guard in AGENTS.md).
+    const [item] = await tx
+      .select({ type: events.type, payload: events.payload })
+      .from(events)
+      .where(and(eq(events.runId, runId), eq(events.id, itemId)));
+    const p = item?.type === "checkpoint" ? (item.payload as Record<string, unknown>) : undefined;
+    if (!p || p.taskId !== taskId || !p.toCheck) {
+      throw new HTTPException(400, { message: `${itemId} is not a To check item of ${taskId}.` });
+    }
+  }
   const view = fold(
     (
       await tx

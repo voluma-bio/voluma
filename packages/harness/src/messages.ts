@@ -345,6 +345,26 @@ export function finishedRunText(view: Folded): string {
   return `The run had already finished before the researcher wrote to you. Its tasks are done (see the table below) and their results are the current ones; nothing is being redone unless the researcher said go. Their message is quoted below under "Still open, or not yet told to you": read it and answer it with \`reply\`, from these results when it asks about them. The files are in /outputs/<task id>/ (\`read_file\` opens the text ones; \`.npy\` volumes are binary and it cannot); the values reported:\n${lines.length ? lines.join("\n") : "(none)"}`;
 }
 
+/**
+ * What the researcher was reviewing when they wrote, told to a main agent that starts inside a
+ * correction: the task and open item by name, the attached picture and marks, and the rule that
+ * a redo needs their go. Undefined when the message names no task.
+ */
+export function reviewingText(o: {
+  task: string;
+  item?: { title: string; text: string };
+  attachments: boolean;
+}): string {
+  return [
+    `The researcher was reviewing the task "${o.task}" when they wrote.`,
+    o.item ? `The To check item they had open: "${o.item.title}": ${o.item.text}` : "",
+    o.attachments ? "Their view picture and marks are attached to their message below." : "",
+    `Look at the task's evidence, then discuss their feedback with them through \`reply\`. When redoing the task would help, offer it with \`reply\`'s \`offer\` (taskId: the task you name here) and wait: start no work until their go arrives.`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 /** The full state block: `main.<n>`'s first message and a liveness nudge carry it. */
 export function stateBlock(
   d: ThreadLog,

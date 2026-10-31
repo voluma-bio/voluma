@@ -507,14 +507,25 @@ export function mainTools(deps: MainDeps) {
   const reply: Tool<typeof replyInputSchema> = {
     name: "reply",
     description:
-      "Answer the researcher who wrote to the run, in plain words. It starts no work: after a go you act with your other tools. You may call it more than once.",
+      "Answer the researcher who wrote to the run, in plain words. It starts no work: after a go you act with your other tools. You may call it more than once. With `offer` you propose redoing one task and wait for their go.",
     input: replyInputSchema,
     sequential: true,
-    execute: inSection(async ({ text }, ctx) => {
+    execute: inSection(async ({ text, offer }, ctx) => {
+      if (offer) {
+        const t = runtime.taskOf(offer.taskId);
+        if (!t) throw new Refusal(`${offer.taskId} is not a task of the plan.`);
+        if (t.skipped) throw new Refusal(`${offer.taskId} was skipped, so it cannot be redone.`);
+        if (t.status !== "done" && t.status !== "to-check") {
+          throw new Refusal(`${offer.taskId} is ${t.status}: it can be redone once it is done.`);
+        }
+        if (agents.fixLimitReached(log(), offer.taskId)) {
+          throw new Refusal(`${offer.taskId} has used its fix rounds; it stays as it is.`);
+        }
+      }
       await recorder.append(
         ctx.threadId,
         "reply",
-        { text },
+        { text, ...(offer && { offer }) },
         effectId("reply", ctx.threadId, ctx.toolCallId),
       );
       return { message: "Sent to the researcher." };

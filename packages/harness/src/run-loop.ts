@@ -48,6 +48,7 @@ import {
   fixLimitReason,
   interruptedResult,
   livenessNudge,
+  reviewingText,
   STUCK_IN_CORRECTION,
   STUCK_PLAN_REASON,
   STUCK_SKIP_REASON,
@@ -187,6 +188,22 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     return found;
   };
 
+  /** What the open correction's message says the researcher was reviewing; empty when it names no task. */
+  function reviewing(messageId: string | undefined): string {
+    const events = recorder.events();
+    const m = events.find((e) => e.id === messageId);
+    if (m?.type !== "person.message" || !m.payload.taskId) return "";
+    const { taskId, itemId, marks, snapshotKey } = m.payload;
+    const item = events.find((e) => e.id === itemId);
+    const toCheck = item?.type === "checkpoint" ? item.payload.toCheck : undefined;
+    return `\n\n${reviewingText({
+      task: taskName(taskId),
+      ...(toCheck &&
+        item?.type === "checkpoint" && { item: { title: toCheck.title, text: item.payload.text } }),
+      attachments: !!snapshotKey || (marks ?? []).length > 0,
+    })}`;
+  }
+
   function mainFirstMessage(view: Folded, n: number, d: ThreadLog) {
     // A main that starts when the open correction's message is still unread (a fresh `main.<n>`,
     // or the first main of a run made before corrections) was never told the run had finished.
@@ -200,7 +217,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       mainRestartPrompt(view, state, o.selectedOutputs, o.definition.files, o.notes);
     if (!inCorrection) return { prompt: restart(), ...covers };
     const brief = n === 1 ? `${first()}\n\n${state}` : restart();
-    return { prompt: `${finishedRunText(view)}\n\n${brief}`, ...covers };
+    return { prompt: `${finishedRunText(view)}${reviewing(message)}\n\n${brief}`, ...covers };
   }
 
   /** The start options for a thread; `prompt` is its first message, which a resumed thread uses only if it never stored one. */
