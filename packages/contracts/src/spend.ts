@@ -100,16 +100,20 @@ export type CacheState = { prompt: number; active: boolean };
  * miss when the thread already had cache activity (an earlier call read or wrote cache), there
  * is an earlier call, and this call's `cacheRead` is below half the earlier call's full prompt
  * (`input + cacheRead + cacheWrite`): the cache the earlier call left was lost. The first call
- * is never a miss. Ported from meridian-flow's `isCacheReset`.
+ * is never a miss. A call that reports no prompt tokens at all (an aborted or failed reply)
+ * is unreported, not a miss, and leaves the state as it was. Ported from meridian-flow's
+ * `isCacheReset`.
  */
 export function cacheStep(
   prev: CacheState | undefined,
   u: ModelUsage,
 ): { miss: boolean; next: CacheState } {
+  const prompt = u.input + u.cacheRead + u.cacheWrite;
+  if (prompt === 0) return { miss: false, next: prev ?? { prompt: 0, active: false } };
   return {
     miss: !!prev?.active && u.cacheRead < prev.prompt * 0.5,
     next: {
-      prompt: u.input + u.cacheRead + u.cacheWrite,
+      prompt,
       active: !!prev?.active || u.cacheRead > 0 || u.cacheWrite > 0,
     },
   };
