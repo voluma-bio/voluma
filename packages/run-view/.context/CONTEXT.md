@@ -52,8 +52,8 @@ screens are the scan review (`apps/web/src/features/scan`) and the study pages
   keys), so threads can have a `thread.started` and no `thread.ended`. `haltOf(Run.state, closed)`
   says why the runner isn't running the threads, and is the one input `runView` and `threadRows`
   take: once ended, a thread, tool call or task still open shows as Stopped (Failed if the run
-  failed, at the run's end); while queued or awaiting keys it shows as Paused, its clock
-  frozen at its last event, until the runner's `thread.started` resumes it. The end applies only once the
+  failed, at the run's end); while queued (waiting in line for a runner) it shows as Waiting,
+  and while awaiting keys as Paused, its clock frozen at its last event, until the runner's `thread.started` resumes it. The end applies only once the
   stream has closed (`useRunStream`'s `closed`), when the log is whole: the server ends an ended
   run's stream with `event: end`, so that is right after the backlog, with no reconnect. A
   reload therefore never shows a finished thread as Stopped while its backlog loads; during the

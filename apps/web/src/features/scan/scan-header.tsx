@@ -14,6 +14,7 @@ import {
   KeysForm,
   loadKeys,
   plainError,
+  runStatus,
   scanLabel,
   useNow,
 } from "@voluma/run-view";
@@ -51,7 +52,8 @@ function useTook(run: Run) {
 
 /**
  * Where the run stands in a few words: "Finished in 52 min", "Running, 4 of 9 tasks done",
- * "Waiting, place 2 in line". A queued run with a plan has started (it lost its runner): paused.
+ * "Waiting, place 2 in line" (also a run that lost its runner and waits for another); otherwise
+ * the word every list uses (`runStatus`).
  */
 function where(
   run: Run,
@@ -59,20 +61,20 @@ function where(
   took: string | undefined,
 ): { status?: Status; text: string } {
   const { state } = run;
-  const tasks = progress.total > 0 ? `${progress.done} of ${progress.total} tasks done` : "";
-  switch (state.status) {
-    case "queued":
-      return progress.total > 0
-        ? { status: "paused", text: `Paused, ${tasks}` }
-        : { status: "waiting", text: `Waiting, place ${state.position} in line` };
-    case "running":
-      return { status: "running", text: tasks ? `Running, ${tasks}` : "Running" };
-    case "awaiting-keys":
-      return { status: "check", text: "Needs your keys" };
-    case "ended":
-      if (state.outcome === "completed") return { text: took ? `Finished in ${took}` : "Finished" };
-      return { status: "stopped", text: state.outcome === "failed" ? "Failed" : "Stopped" };
-  }
+  if (state.status === "queued")
+    return { status: "waiting", text: `Waiting, place ${state.position} in line` };
+  if (state.status === "running")
+    return {
+      status: "running",
+      text:
+        progress.total > 0
+          ? `Running, ${progress.done} of ${progress.total} tasks done`
+          : "Running",
+    };
+  if (state.status === "ended" && state.outcome === "completed")
+    return { text: took ? `Finished in ${took}` : "Finished" };
+  const { label, status } = runStatus(run);
+  return { status, text: label };
 }
 
 export function ScanHeading({
