@@ -39,11 +39,11 @@ we add our own pieces only when a real run needs them. The agent runs
 outside the sandbox, so credentials never enter it. A run is a tree of
 threads: a supervisor (the root, code), the main agent, workers (one per task),
 and check threads.
-- **Event log.** Ours, kept separately from Pi's history: the `threads` and
-  `events` tables in Postgres, behind the run domain's API. Each event is saved
+- **Event log.** Ours, kept separately from Pi's history: the `events`
+  table in Postgres, behind the run domain's API, keyed `(run_id, id)`. Each event is saved
   before it is published, and `seq` (per run) is the stream cursor. Both the
   UI and the review read this log. Pi's own messages go in `pi_messages`,
-  one row per message, so a thread can resume.
+  one row per message, keyed `(run_id, thread_id, idx)`, so a thread can resume.
 - **Sandboxes.** One Modal sandbox per sandbox, CPU or GPU, created by the Node
   runner through the `Sandbox` port (`packages/harness/src/ports/sandbox.ts`); the
   adapter is `apps/runner/src/modal-sandbox.ts`, the only file that imports `modal`
@@ -79,25 +79,34 @@ and check threads.
   in `packages/harness/src/tools`; it caps what the model sees (head and tail) and
   writes the full text to `toolOutputKey` with `Sandbox.writeFile`, which exists
   because an R2 mount cannot append: the adapter writes locally and copies in one go.
-- **Many threads, one run.** `startThread` returns `{send, done}` at once: `send` steers a
-  message into the thread (Pi's steering queue; one sent before the loop starts is queued
-  for it) and answers false once it ended.
+- **Many threads, one run.** `startThread` returns `{send, done}` at once: `send` puts a
+  message in the thread's inbox and answers false once it ended. Every notice to a thread
+  (a message from a person or another thread, compaction's wrap-up and overflow notes) waits
+  in that inbox. All pending notices, in arrival order and each labelled with its sender, are
+  appended to the last tool result of the batch that finishes next, so History holds what the
+  model saw; none is ever steered in as its own user message mid-turn. A turn that ends with
+  no tool call while the inbox holds notices continues with them as one user message; a
+  thread started with an input starts with them the same way; the wrap-up note, which only
+  matters mid-turn, is dropped in both. Each notice is still its own `message` event under
+  its own sender.
   `threads.ts` is the run's registry of what is running in this process (start or resume a
-  thread, `send`, `abort`, wait for one to go idle) and holds no run state. Thread ids are
-  unique across runs (History is keyed by the thread id alone) and are built by
-  `packages/harness/src/thread-id.ts`: the root is `<runId>.supervisor`, the main agent `<runId>.main`,
-  the others `<runId>.<taskId>.<role>` (plus `.<n>` for the n-th), where n is how many the log
-  has started for that thread, so a restart never reuses a thread. `thread.started` carries the task id
+  thread, `send`, `abort`, wait for one to go idle) and holds no run state. A thread's id is opaque, unique within its run
+  only (every row and query is keyed by run): a new thread gets `uuid5(runId, name)`
+  (`packages/harness/src/thread-id.ts`), minted once when it first starts. Its `name` (`supervisor`,
+  `main`, `<taskId>.<role>`, plus `.<n>` for the n-th) is on `thread.started`, where n is how many the
+  log has started for that role, so a restart never reuses a thread. Everything after the mint reads
+  the id from the record; runs recorded before keep their `<runId>.<name>` ids, and a run's root is
+  looked up in its log (`rootThreadOf`), never rebuilt. `thread.started` carries the task id
   for a worker or check thread.
 - **Pi's batch rules shape the tools.** Pi runs the tool calls of one reply as a batch: in
   parallel, unless any tool in it is `sequential`, which makes the whole batch sequential. A
   batch ends the turn only when every result in it sets `terminate`; one call that doesn't and
-  the agent carries on. A steered message lands only after the whole batch has finished, never
+  the agent carries on. An inbox delivery lands with the last result of a batch, never
   between its calls. So a tool that must end the turn (`submit_task`, `ask`) refuses to share a
   reply (`ToolContext.batchSize`): it answers with an error result and no effect, the other calls
   run as usual, and the model calls it again alone; `wait` ends the main agent's turn instead of blocking until
   something happens, because a blocking `wait` would hold every sequential call batched behind it
-  and no steered delivery could reach it; and a stored history whose last batch all set
+  and no inbox delivery could reach it; and a stored history whose last batch all set
   `terminate` is a finished turn, not one to continue (`isFinished` in `start-thread.ts`). Pi
   does not settle a tool call that ignores its abort signal (`ToolContext.signal`), and the thread
   cannot stop until every call settles, so a tool passes the signal on to whatever it waits for.
@@ -111,8 +120,10 @@ and check threads.
   `@voluma/contracts/task-tools`. Its only view of the run is `fold(recorder.events())` (folded
   once per change of the log), inside one per-run critical section (`section`). A thread's
   kind and task come from its tool context, not the log. It writes through `recorder.append`,
-  which makes one attempt, so the runtime never decides from an event the store lacks; a
-  store failure fails the tool call, and the run loop fails the run. Hashing and copying
+  which waits for the store's acknowledgement (retried like `emit`, safe because the store ignores an
+  event id it holds), so the runtime never decides from an event the store lacks; a store
+  that refuses the event fails the tool call, and the run loop fails the run. A store still
+  unavailable after the retries releases the run instead (the runner's "self-stop"). Hashing and copying
   evidence happen outside the section. A worker writes only to its own task, and an attempt
   opens only when every task it builds on is satisfied (`openAttempt` is the one way).
   `tools/task-tools.ts` wraps it as `checkpoint`, `report_output`, `submit_task` and `ask`. `output-checks.ts` holds the
@@ -129,7 +140,7 @@ and check threads.
   A stale mark stops every worker and check of the dependent the same way, whatever its status.
   A `message` that opens an attempt for feedback is followed by the worker's copy of the text; if a
   cut falls between, the loop resumes the idle holder with the text stored in the `message` call.
-- **The main agent** (`<runId>.main[.n]`, kind `main`) is the one model thread that coordinates:
+- **The main agent** (name `main[.n]`, kind `main`) is the one model thread that coordinates:
   it starts workers (`start_worker`), steers them or sends feedback on a rejected task
   (`message`), answers a checker (`answer`), accepts a rejected task, changes the plan
   (`change_plan`, recorded as `plan.changed` before it applies) and ends the run
@@ -146,7 +157,7 @@ and check threads.
   A thread that throws or is refused before it starts (`ran` false), a fatal provider error (a retryable one resumes its thread once first), or an
   error in a step fails the run: threads aborted, the root ends `failed`. The loop never imports
   Pi; `superviseRun` (`packages/harness/src/supervise-run.ts`) wires it, and a host gives only
-  adapters, each role's model/prompt/tool names (`RoleOf`) and the first messages (`Briefs`).
+  what holds keys and machines (the stored record, a model per thread, `createSandbox`, the gateway's token). The harness writes each role's tools, system prompt and first message from the workflow definition (`prompts.ts`) and each sandbox's spec from its layout.
   The harness builds exactly the tools a role's file names (`tools/registry.ts`).
 - **The runner service** (`apps/runner`, `pnpm --filter @voluma/runner start`). It polls
   `claim` while it has a free slot (`RUNNER_CONCURRENCY`); `run.ts` runs each claim the same
@@ -288,8 +299,8 @@ Import boundaries are written rules in `AGENTS.md`; Biome uses its recommended r
 `[data-theme="light"]`, and again under `[data-theme="dark"]`. `theme.css`
 maps them into Tailwind with `@theme inline`, so a utility reads the token
 where it is used and `data-theme` on any element themes its subtree. That is
-how Storybook shows both themes side by side. The app is light on home and study
-pages and dark in the 3D review. Tailwind's default palette is removed.
+how Storybook shows both themes side by side. The app uses light chrome on home, study
+and scan review; the 3D and slice image wells stay dark. Tailwind's default palette is removed.
 
 The token names are shadcn/ui's (`background`, `card`, `muted`, `accent`,
 `primary`, `destructive`, `border`, `ring`, `chart-*`, `sidebar-*`), with
@@ -306,7 +317,7 @@ the CSS stays the one source.
 
 ## Scan review
 
-One scan's run, live and for review, is `apps/web/src/features/scan` at `/scans/:runId` (dark),
+One scan's run, live and for review, is `apps/web/src/features/scan` at `/scans/:runId` (light chrome, dark image wells),
 with the selection in the URL (`task`, `item`, `agent`); the old `/runs/:id/live` and
 `/runs/:runId` redirect there. It reads the run's stream for tasks, agents, items and the
 conversation, and the review payload (`getReviewRun`) for what the viewer draws, values and

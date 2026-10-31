@@ -1,17 +1,17 @@
 /**
- * The scan review (`/scans/:runId`): one scan's run, live or finished, in the dark shell. The main
+ * The scan review (`/scans/:runId`): one scan's run, live or finished, in the light shell. The main
  * area is the task in view on its grid; the left side holds To check, Report and Agents, the right
  * side View and The AI. One selection drives them all, kept in the URL: `task` (the task in view),
  * `item` (the To check item open) and `agent` (the agent whose steps show; none follows the one
  * working now). Everything is derived from the run's stream (`runView`), the run (`getRun`,
  * polled while it goes, for what isn't an event) and its review data (`getReviewRun`, for the
- * views, values and files).
+ * views, values, files and human decisions).
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@voluma/api-client";
 import { reviewRunQuery, runQuery, studyQuery, useAcceptCheck } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
-import type { ReviewRun } from "@voluma/contracts/review";
+import type { ReviewRun, Revision } from "@voluma/contracts/review";
 import type { Run } from "@voluma/contracts/run";
 import {
   DisclosureProvider,
@@ -25,6 +25,7 @@ import {
   useRunStore,
 } from "@voluma/run-view";
 import {
+  Button,
   EmptyState,
   ErrorState,
   LoadingState,
@@ -69,27 +70,33 @@ export function ScanPage() {
 function Scan({ runId }: { runId: string }) {
   const run = useQuery({
     ...runQuery(runId),
-    // Queue place and state changes aren't events; the stream is the source for the rest.
+    // Queue place and state changes aren't events; the stream is the source for the rest. Also in
+    // a background tab: a run waiting for keys gets them from this page (`RunAlert`).
     refetchInterval: (q) => (q.state.data?.state.status === "ended" ? false : 3000),
+    refetchIntervalInBackground: true,
   });
+  // Laid out as the study page's own loading and not-found states.
+  const page = "mx-auto w-full max-w-2xl px-6 py-8";
   if (run.isPending)
     return (
-      <div className="p-8">
+      <div className={page}>
         <LoadingState label="Loading the scan" rows={4} />
       </div>
     );
   if (!run.data) {
     const missing = run.error instanceof ApiError && run.error.status === 404;
     return (
-      <div className="p-8">
+      <div className={page}>
         <ErrorState
-          title={missing ? "This scan's run isn't here" : "Couldn't load the scan"}
+          title={missing ? "This scan isn't here" : "Couldn't load the scan"}
           onRetry={missing ? undefined : () => void run.refetch()}
         >
-          {missing ? "It may have been removed, or you can't open it. " : "Check your connection. "}
-          <Link to="/" className="text-primary-text hover:underline">
-            Go to Home
-          </Link>
+          {missing
+            ? "It may have been removed, or it belongs to another lab."
+            : "Check your connection, then try again."}{" "}
+          <Button asChild variant="link">
+            <Link to="/">Go to Home</Link>
+          </Button>
         </ErrorState>
       </div>
     );
@@ -124,6 +131,9 @@ function useReviewRun(runId: string, run: Run, changed: string) {
   }, [status, changed, runId, client]);
   return useQuery({
     ...reviewRunQuery(runId),
+    // Execution SSE ends before later human decisions. Reconcile on return, even when ended.
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: "always",
     // Only a server error may pass on retry; a 404, a 409 or data the contract rejects won't.
     retry: (count, cause) => cause instanceof ApiError && cause.status >= 500 && count < 2,
     refetchInterval: (query) => {
@@ -152,19 +162,10 @@ function preparing(run: ReviewRun): boolean {
 }
 
 /** "Looks right" on a completed run's latest result; an example takes no decisions. */
-function useAccepting(run: Run) {
-  const queryClient = useQueryClient();
-  // Accepted here: an ended run's stream is closed, so the decision never comes back on it.
-  const [done, setDone] = useState<ReadonlySet<string>>(new Set());
+function useAccepting(run: Run, revision: Revision | undefined) {
   const [error, setError] = useState<{ id: string; text: string }>();
-  const mutation = useAcceptCheck(run.id, run.review?.revisionId, {
+  const mutation = useAcceptCheck(run.id, revision?.id, {
     onMutate: ({ checkId }) => setError((e) => (e?.id === checkId ? undefined : e)),
-    onSuccess: (res, { checkId }) => {
-      setDone((d) => new Set(d).add(checkId));
-      queryClient.setQueryData<Run>(runQuery(run.id).queryKey, (r) =>
-        r ? { ...r, review: res.review } : r,
-      );
-    },
     // `useAcceptCheck` already words the failure (read-only, changed since, couldn't save).
     onSettled: (_res, e, { checkId }) => {
       if (e) setError({ id: checkId, text: e.message });
@@ -176,14 +177,28 @@ function useAccepting(run: Run) {
       ? "You can decide once the run finishes."
       : run.review === null
         ? "This run didn't finish, so there is nothing to accept."
-        : undefined;
+        : !revision
+          ? "Wait for the results to load."
+          : undefined;
   return {
     readOnly,
     accept: readOnly
       ? undefined
-      : (item: NeedItem) => mutation.mutate({ checkId: item.id, taskId: item.taskId }),
+      : (item: NeedItem, onAccepted?: () => void) => {
+          const task = revision?.tasks.find((t) => t.id === item.taskId);
+          if (
+            task?.resultRevisionId !== item.resultRevisionId ||
+            !task.checks.some((c) => c.id === item.id)
+          ) {
+            setError({ id: item.id, text: "This changed since you opened it. Look again." });
+            return;
+          }
+          mutation.mutate(
+            { checkId: item.id, taskId: item.taskId, resultRevisionId: item.resultRevisionId },
+            { onSuccess: onAccepted },
+          );
+        },
     pending: mutation.isPending ? mutation.variables?.checkId : undefined,
-    done,
     error,
   };
 }
@@ -211,6 +226,7 @@ function ScanReview({
   const [reopened, setReopened] = useState(0);
   useRunStream(run.id, {
     reopened,
+    revisionId: run.review?.revisionId,
     going: run.state.status !== "ended",
     onClosed: refetchRun,
   });
@@ -241,7 +257,8 @@ function ScanReview({
     [view.tasks],
   );
   const review = useReviewRun(run.id, run, changed);
-  const accepting = useAccepting(run);
+  const latest = review.data?.revisions.at(-1);
+  const accepting = useAccepting(run, latest);
 
   const [params, setParams] = useSearchParams();
   const select = useCallback(
@@ -262,10 +279,15 @@ function ScanReview({
   const { tasks } = view;
   const items = useMemo(
     () =>
-      tasks.flatMap((t) =>
-        t.needs.map((n) => (accepting.done.has(n.id) ? { ...n, accepted: true } : n)),
-      ),
-    [tasks, accepting.done],
+      tasks.flatMap((t) => {
+        const result = latest?.tasks.find((r) => r.id === t.id);
+        return t.needs.map((n) => {
+          if (result?.resultRevisionId !== n.resultRevisionId) return n;
+          const check = result.checks.find((c) => c.id === n.id);
+          return check ? { ...n, accepted: check.status === "accepted" } : n;
+        });
+      }),
+    [tasks, latest],
   );
   // `item` (a check id) names its own task; without it the task in view comes from `task`, else
   // the first open item's. The open item is always one of the task in view: its first open one
@@ -283,7 +305,6 @@ function ScanReview({
   }, [wrongTask, named, select]);
   const agentId = params.get("agent") ?? undefined;
 
-  const latest = review.data?.revisions.at(-1);
   const reviewTask = latest?.tasks.find((t) => t.id === taskId);
   // The open item moves the crosshair, once per pick: a new object each time it is picked.
   const [picked, setPicked] = useState(0);
@@ -462,7 +483,7 @@ function ScanReview({
             about={about}
             onSent={() => {
               setAbout(undefined);
-              setReopened((g) => g + 1);
+              setReopened((n) => n + 1);
               refetchRun();
             }}
           />

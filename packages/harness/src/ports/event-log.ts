@@ -6,6 +6,13 @@
  */
 import type { EventInput } from "@voluma/contracts/events";
 
+/**
+ * The store could not be reached or answered 5xx: the event may or may not be stored, and a
+ * retry is safe. Any other error is the store refusing the event, which a retry will not fix.
+ */
+export class EventLogUnavailable extends Error {}
+
 export interface EventLog {
+  /** Throws `LeaseLost`, `EventLogUnavailable`, or another error when the store refuses the event. */
   append(event: EventInput): Promise<void>;
 }

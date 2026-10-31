@@ -10,7 +10,7 @@ From the round-2 review of #40 (`voluma-bio/docs` `work/mvp-contracts-and-data/r
 
 From the skillset move (`workflows/` in this repo):
 
-- **The sandbox image does not follow the pinned commit.** The image is one digest in config (`SANDBOX_IMAGE`), so an old pin runs on the newest image. To tie them: tag the image with the hash of `workflows/core/requirements.txt`, have the runner resolve that tag from the requirements at the run's pinned commit, and record the image in the run's first event. Needs the workflow-packages lane's pin and the `/workflow` mount to read that file.
+- **The image a run begins on is this runner's, not the pinned commit's.** A run records its image on the root `thread.started` (`sandboxImage`) at its first claim and keeps it on every resume, so a deploy no longer moves a running run. A run that starts on a new runner whose workflow commit is older still gets the newest image. To tie them: tag the image with the hash of `workflows/core/requirements.txt` and resolve that tag from the requirements at the pinned commit.
 
 
 - **An ended run can leave review assets "preparing" when it fails before the conversion worker

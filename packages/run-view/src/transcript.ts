@@ -18,6 +18,7 @@
  */
 
 import type { ModelUsage, RunEvent } from "@voluma/contracts/events";
+import { type CacheState, cacheStep } from "@voluma/contracts/spend";
 import type { LiveFrame } from "@voluma/contracts/stream";
 import { threadRole } from "@voluma/contracts/thread-role";
 import { catalog } from "@voluma/workflow/bundled";
@@ -43,12 +44,13 @@ export const noLive: Live = { replies: new Map(), calls: new Map(), outputs: new
 
 /**
  * Why the runner is not running the run's threads, from `Run.state`: the log holds no end for
- * the threads it cut off (a user's cancel leaves none; the server ends them). `paused` while the
- * run waits for a runner again (its lease expired) or for its starter's keys.
+ * the threads it cut off (a user's cancel leaves none; the server ends them). `waiting` while the
+ * run waits in line for a runner again (its lease expired), `paused` while it waits for its
+ * starter's keys.
  */
 export type Halt =
   | { kind: "ended"; at: string; outcome: "completed" | "failed" | "cancelled" }
-  | { kind: "paused" };
+  | { kind: "waiting" | "paused" };
 
 /** `bash.ts`'s `TAIL_CHARS`: what the durable result keeps of the output's end. */
 const OUTPUT_TAIL_CHARS = 8_000;
@@ -293,7 +295,14 @@ export type Step =
   | { kind: "note"; id: string; text: string; failed?: boolean };
 
 export type Row =
-  | { kind: "prose"; id: string; text: string; streaming: boolean; usage?: ModelUsage }
+  | {
+      kind: "prose";
+      id: string;
+      text: string;
+      streaming: boolean;
+      usage?: ModelUsage;
+      cacheMiss?: boolean;
+    }
   | { kind: "process"; id: string; steps: Step[]; digest: string }
   /** What the thread was told: its system prompt, its brief, a message from another thread. */
   | { kind: "brief"; id: string; label: string; text: string }
@@ -381,6 +390,8 @@ function rowsOf(
   let briefed = false;
   const seen = new Set<string>();
   let root: string | undefined;
+  // Each shown thread's calls step its cache state, a compaction summary resets it (see `spend`).
+  const cache = new Map<string, CacheState>();
   for (const e of events) {
     if (orchestration) {
       if (e.type === "thread.started" && threadRole(e.payload) === "root") root = e.threadId;
@@ -422,10 +433,28 @@ function rowsOf(
       case "message": {
         const p = e.payload;
         if (p.role === "assistant") {
+          let cacheMiss = false;
+          if (p.compaction) cache.delete(e.threadId);
+          else if (p.usage) {
+            const step = cacheStep(cache.get(e.threadId), p.usage);
+            cache.set(e.threadId, step.next);
+            cacheMiss = step.miss;
+          }
           if (p.reasoning)
             b.step({ kind: "reasoning", id: `${e.id}:reasoning`, text: p.reasoning });
-          if (p.text)
-            b.row({ kind: "prose", id: e.id, text: p.text, streaming: false, usage: p.usage });
+          // A summary that failed has no text; its message only carries the spend.
+          if (p.compaction) {
+            if (p.text)
+              b.row({ kind: "brief", id: e.id, label: "History summarized", text: p.text });
+          } else if (p.text)
+            b.row({
+              kind: "prose",
+              id: e.id,
+              text: p.text,
+              streaming: false,
+              usage: p.usage,
+              cacheMiss,
+            });
         } else if (p.role === "system") {
           b.row({ kind: "brief", id: e.id, label: "System prompt", text: p.text });
         } else {
@@ -435,10 +464,12 @@ function rowsOf(
               ? "Message from another thread"
               : p.sender.kind === "person"
                 ? "Message from a person"
-                : briefed
-                  ? "Update from Voluma"
-                  : "Task brief";
-          if (p.sender.kind === "runtime") briefed = true;
+                : p.sender.notice
+                  ? "Context notice"
+                  : briefed
+                    ? "Update from Voluma"
+                    : "Task brief";
+          if (p.sender.kind === "runtime" && !p.sender.notice) briefed = true;
           b.row({ kind: "brief", id: e.id, label, text: p.text });
         }
         break;

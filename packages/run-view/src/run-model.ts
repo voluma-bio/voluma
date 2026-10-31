@@ -23,9 +23,10 @@ const { outputName, taskTitle, tasks: workflowTasks } = catalog["mouse-oa"];
 const purpose = new Map(workflowTasks.map((t) => [t.id, t.summary]));
 
 /**
- * `paused`: open while the run waits for a runner or keys; it resumes with a `thread.started`.
+ * `waiting`: open while the run waits in line for a runner; `paused`: while it waits for its
+ * starter's keys. Either resumes with a `thread.started`.
  */
-export type ThreadStatus = "running" | "paused" | "completed" | "failed" | "cancelled";
+export type ThreadStatus = "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled";
 
 export type Thread = {
   id: string;
@@ -60,7 +61,10 @@ export type Thread = {
   /** The tool call running now, by title; else the last one it made. */
   liveTool?: string;
   lastTool?: string;
-  /** The thread's last checkpoint, and its verdict for a checker. */
+  /**
+   * The thread's last checkpoint in the researcher's words (its `summary`; its `text` when it has
+   * none), and its verdict for a checker.
+   */
   result?: { text: string; verdict?: "passed" | "needs-review" };
   /** Its last prose, the report a finished card expands to. */
   said?: string;
@@ -68,7 +72,7 @@ export type Thread = {
 
 /**
  * When the runner is not running the run's threads (see `Halt`). A queued run with no threads
- * open is paused too, which changes nothing. An ended run halts only once its stream has
+ * open is waiting too, which changes nothing. An ended run halts only once its stream has
  * `closed`: until then its log may still be loading, and a thread open in the part loaded so
  * far may have ended in the rest.
  */
@@ -77,7 +81,7 @@ export function haltOf(state: RunState, closed: boolean): Halt | undefined {
     case "running":
       return undefined;
     case "queued":
-      return { kind: "paused" };
+      return { kind: "waiting" };
     case "awaiting-keys":
       return { kind: "paused" };
     case "ended":
@@ -146,10 +150,11 @@ function threadsOf(
         t?.attempts.push(e.id);
         break;
       case "checkpoint":
-        if (t) t.result = { text: e.payload.text, verdict: e.payload.verdict };
+        if (t) t.result = { text: e.payload.summary ?? e.payload.text, verdict: e.payload.verdict };
         break;
       case "message":
-        if (t && e.payload.role === "assistant" && e.payload.text) t.said = e.payload.text;
+        if (t && e.payload.role === "assistant" && !e.payload.compaction && e.payload.text)
+          t.said = e.payload.text;
         break;
     }
   }
@@ -169,7 +174,7 @@ function threadsOf(
 /**
  * A thread still open when the runner is not running the run (`halt`): a lost runner writes no
  * end. A cancel ends every thread in the API, so only a failed run leaves them here. It is stopped
- * (failed, if the run failed) at the run's end, or paused at its last event while the run waits to resume.
+ * (failed, if the run failed) at the run's end, or waiting (paused, for keys) at its last event while the run waits to resume.
  */
 function halted(threads: Thread[], lastAt: Map<string, string>, halt: Halt): Thread[] {
   return threads.map((t) =>
@@ -230,7 +235,7 @@ export function agentTree(threads: Thread[]): AgentNode[] {
 /**
  * An agent's name where its task is already shown: "The AI's work, 2 tries", "Second AI check of
  * try 1", "Lead AI". A check's try is its `attemptId`'s place among its worker's attempts.
- * `short`, for a narrow place beside its outcome: "The AI's work", "Second check", "Check 2".
+ * `short`, for a narrow place beside its outcome: "The AI's work", "Second check", "Second check 2".
  */
 export function agentLabel(t: Thread, threads: Thread[], { short = false } = {}): string {
   switch (t.kind) {
@@ -247,7 +252,8 @@ export function agentLabel(t: Thread, threads: Thread[], { short = false } = {})
         : undefined;
       const n = tries && attemptId ? tries.indexOf(attemptId) + 1 : 0;
       if (!tries || tries.length < 2) return short ? "Second check" : "Second AI check";
-      return short ? `Check ${n}` : `Second AI check of try ${n}`;
+      // A no-break space keeps the number with its word when a narrow box wraps the name.
+      return short ? `Second check\u00a0${n}` : `Second AI check of try ${n}`;
     }
     default:
       return "Agent";
@@ -266,6 +272,8 @@ export type NeedItem = {
   /** The check's id (`acceptCheck`). */
   id: string;
   taskId: string;
+  /** The task result this item describes; decisions must not substitute a fresher result. */
+  resultRevisionId: string;
   /** None for the fold's generic "Marked to check": the task's name says as much. */
   title?: string;
   /** What is wrong, in the checkpoint's researcher sentence when it has one. */
@@ -324,8 +332,6 @@ export type TaskView = {
   valued: boolean;
   /** Its latest result came from a correction. */
   corrected: boolean;
-  /** While waiting: the tasks it builds on that have no usable result yet. */
-  waitingOn: string[];
   spend?: Spend;
 };
 
@@ -406,7 +412,14 @@ function resultRows(t: FoldedTask, state: TaskState): ResultRow[] {
 
 /** The card for a task left To check with no check item: why it is there, in plain words. */
 function unexplained(t: FoldedTask, check: TaskView["check"], image: Asset | undefined): NeedItem {
-  const base = { id: `${t.id}/to-check`, taskId: t.id, image, accepted: false, acceptable: false };
+  const base = {
+    id: `${t.id}/to-check`,
+    taskId: t.id,
+    resultRevisionId: t.resultRevisionId,
+    image,
+    accepted: false,
+    acceptable: false,
+  };
   if (t.rejected || check?.verdict === "needs-review")
     return {
       ...base,
@@ -457,7 +470,9 @@ export function runView(
     };
 
   const byId = new Map(latest.tasks.map((t) => [t.id, t]));
-  const titleOf = (id: string) => byId.get(id)?.title ?? taskTitle(id);
+  // The fold names an untitled task by its id; a plan recorded before titles has none.
+  const planned = new Map(latest.plan.tasks.map((p) => [p.id, p.title]));
+  const titleOf = (id: string) => planned.get(id) ?? taskTitle(id);
   // A dependent of a skipped task reads as the skipped task's own reason, under its title.
   const skipText = (t: FoldedTask) => {
     if (!t.skipped) return undefined;
@@ -529,6 +544,7 @@ export function runView(
     const items: NeedItem[] = t.checks.map((c) => ({
       id: c.id,
       taskId: p.id,
+      resultRevisionId: t.resultRevisionId,
       title: c.title === GENERIC_CHECK ? undefined : c.title,
       text: summaries.get(c.id) ?? skipText(t) ?? c.detail,
       image: imageOf(t.milestones.find((m) => m.id === c.id)?.evidenceIds ?? []) ?? image,
@@ -562,7 +578,6 @@ export function runView(
       results: resultRows(t, state),
       valued: p.outputs.some((o) => o.kind === "measurement" || o.kind === "score"),
       corrected: corrections.has(t.resultRevisionId),
-      waitingOn: state === "waiting" ? p.dependsOn.filter((d) => !byId.get(d)?.satisfied) : [],
       spend: taskSpend.get(p.id),
     };
   });

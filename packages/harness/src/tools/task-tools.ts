@@ -111,7 +111,7 @@ export function taskTools(runtime: TaskRuntime) {
   const checkpoint: Tool<typeof checkpointInputSchema> = {
     name: "checkpoint",
     description:
-      'Record a milestone under a task, in plain language, with the files it rests on. Arguments: {taskId, text, summary, evidence: [path or {root, path}], verdict?, toCheck?: {title, focus?}}; there is no top-level title, and `text` is the milestone and `summary` one or two plain sentences for the researcher. Set toCheck when you are unsure of something a person should look at: `title` says what to look at in a few words, and `text` explains. A check thread sets verdict ("passed" or "needs-review") and puts the values it re-derived in `text`: it does not report outputs.',
+      'Record a milestone under a task, in plain language, with the files it rests on. Arguments: {taskId, text, summary, evidence: [path or {root, path}], verdict?, toCheck?: {title, focus?}}; there is no top-level title, and `text` is the milestone and `summary` one or two plain sentences for the researcher. Set toCheck when you are unsure of something a person should look at: `title` says what to look at in a few words, about the scan and not about who did or checked the work, and `text` explains. A check thread sets verdict ("passed" or "needs-review") and puts the values it re-derived in `text`: it does not report outputs.',
     input: checkpointInputSchema,
     prepare: (args) => prepareCheckpoint(args, runtime.threadNames()),
     sequential: true,

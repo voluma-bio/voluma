@@ -7,11 +7,15 @@
  *   sums over threads.
  * - Cost and tokens: the `usage` on each assistant `message`, for the thread that wrote the
  *   event; an event from a thread with no `thread.started` before it counts only in `total`.
- * - Provider calls (the gateway's, `Run.providerCalls`) are passed in separately and added
+ * - Gateway requests (`Run.providerCalls`) are passed in separately and added
  *   to `costUsd` and `toolCostUsd`: `total` takes their `costUsd`, and each `bySandbox`
  *   entry's cost also goes to the thread that wrote the `sandbox` event with that `name`. They
- *   are not model calls, so `calls` stays the model calls that reported usage. Calls whose
- *   cost is unknown (`unknownCostCalls`) add no dollars and are counted apart.
+ *   are not model calls, so `calls` stays the model calls that reported usage. Requests whose
+ *   cost is unknown (`unknownCostCalls`) add no dollars and are counted apart as gateway
+ *   requests, not SAM operations.
+ * - Cache misses (`cacheMisses`) are judged per thread by `cacheStep`. A compaction summary is a
+ *   call but is not judged, and the thread's next call starts a new baseline: it re-reads only the
+ *   system prompt of a far shorter history, which is not a lost cache.
  * - A worker or check thread belongs to the task its `thread.started` names, so a task's
  *   spend covers all its attempts: worker, check and any redo. A thread with no task (the root, the main
  *   agent) belongs to `main`.
@@ -31,7 +35,7 @@
  * The runner's end-of-run log line sums the same model costs over the run's threads, so
  * without provider calls `total.costUsd` matches it for a run that didn't lose events.
  */
-import type { RunEvent } from "./events";
+import type { ModelUsage, RunEvent } from "./events";
 import type { ProviderCalls } from "./run";
 import { threadRole } from "./thread-role";
 
@@ -40,7 +44,7 @@ export type Spend = {
   costUsd: number;
   /** The paid tool calls' part of `costUsd`. */
   toolCostUsd: number;
-  /** Paid tool calls cut off before their usage arrived: their cost is unknown, and not in `costUsd`. */
+  /** Gateway requests with unknown cost, not included in `costUsd`; not SAM operations. */
   unknownCostCalls: number;
   /** Model calls that reported usage. */
   calls: number;
@@ -49,6 +53,8 @@ export type Spend = {
   output: number;
   cacheRead: number;
   cacheWrite: number;
+  /** Calls that lost the thread's prompt cache (`cacheStep`). */
+  cacheMisses: number;
   wallSeconds: number;
   sandboxSeconds: number;
 };
@@ -80,6 +86,7 @@ const empty = (): Spend => ({
   output: 0,
   cacheRead: 0,
   cacheWrite: 0,
+  cacheMisses: 0,
   wallSeconds: 0,
   sandboxSeconds: 0,
 });
@@ -87,6 +94,33 @@ const empty = (): Spend => ({
 /** The share of prompt tokens read from cache, `cacheRead / (input + cacheRead)`; null with no calls. */
 export const cacheHitShare = (s: Spend): number | null =>
   s.input + s.cacheRead > 0 ? s.cacheRead / (s.input + s.cacheRead) : null;
+
+/** What `cacheStep` carries from one call of a thread to the next. */
+export type CacheState = { prompt: number; active: boolean };
+
+/**
+ * One model call against its thread's cache, calls fed in order (start from `undefined`). It is a
+ * miss when the thread already had cache activity (an earlier call read or wrote cache), there
+ * is an earlier call, and this call's `cacheRead` is below half the earlier call's full prompt
+ * (`input + cacheRead + cacheWrite`): the cache the earlier call left was lost. The first call
+ * is never a miss. A call that reports no prompt tokens at all (an aborted or failed reply)
+ * is unreported, not a miss, and leaves the state as it was. Ported from meridian-flow's
+ * `isCacheReset`.
+ */
+export function cacheStep(
+  prev: CacheState | undefined,
+  u: ModelUsage,
+): { miss: boolean; next: CacheState } {
+  const prompt = u.input + u.cacheRead + u.cacheWrite;
+  if (prompt === 0) return { miss: false, next: prev ?? { prompt: 0, active: false } };
+  return {
+    miss: !!prev?.active && u.cacheRead < prev.prompt * 0.5,
+    next: {
+      prompt,
+      active: !!prev?.active || u.cacheRead > 0 || u.cacheWrite > 0,
+    },
+  };
+}
 
 const sum = (spends: Iterable<Spend>): Spend => {
   const out = empty();
@@ -98,6 +132,7 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
   const total = empty();
   // threadId → its own spend and where it counts besides `total` (a task, `main`, or neither).
   const threads = new Map<string, Spend>();
+  const cache = new Map<string, CacheState>();
   const owner = new Map<string, { task: string } | "main">();
   const ended = new Map<string, number>();
   const open = new Map<string, { since: number; last: number }>();
@@ -155,9 +190,18 @@ export function spend(events: readonly RunEvent[], providerCalls?: ProviderCalls
         close(e.threadId, at);
         break;
       case "message": {
-        const used = e.payload.role === "assistant" ? e.payload.usage : undefined;
+        const m = e.payload;
+        const used = m.role === "assistant" ? m.usage : undefined;
         if (!used) break;
+        let miss = false;
+        if (m.role === "assistant" && m.compaction) cache.delete(e.threadId);
+        else {
+          const step = cacheStep(cache.get(e.threadId), used);
+          cache.set(e.threadId, step.next);
+          miss = step.miss;
+        }
         add(e.threadId, (s) => {
+          s.cacheMisses += miss ? 1 : 0;
           s.costUsd += used.costUsd;
           s.calls++;
           s.input += used.input;

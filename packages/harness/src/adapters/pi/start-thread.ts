@@ -4,12 +4,20 @@
  * written synchronously), and Pi's events go to the run's recorder (the stream
  * record, queued in the background). A thread with stored
  * history resumes from it unchanged, system message included, so the prompt cache
- * stays valid; steering and follow-ups are new messages, never edits.
+ * stays valid: the model keeps seeing the prompt and tool definitions the thread started
+ * with, and calls run on the current tools. Notices are new text, never edits.
  *
- * `startThread` returns at once with a handle. While the thread runs, `send` steers a
- * message into it (Pi's steering queue: delivered after the current tool calls); one sent
- * before the loop starts is queued for it. Once the thread has ended, `send` answers false, and the way to wake it is another `startThread` with the same
- * thread id and an `input`, which resumes from History (`threads.ts` does this). Several
+ * `startThread` returns at once with a handle. While the thread runs, `send` puts a message
+ * in the thread's inbox, and so does the thread's own runtime (compaction's notices). Nothing
+ * is steered in as a user message mid-turn: the whole inbox, in arrival order, each notice
+ * labelled with its sender, is appended to the last tool result of the batch that finishes
+ * next, so History holds exactly what the model saw. A turn that ends with no tool call
+ * while the inbox holds notices continues with them as one user message in the same format
+ * (the wrap-up notice, which only matters mid-turn, is dropped there); a thread started with
+ * an `input` (or messages sent before its loop begins) starts with them the same way.
+ * Each notice still gets its own user `message` event with its own sender. Once the thread
+ * has ended, `send` answers false, and the way to wake it is another `startThread` with the
+ * same thread id and an `input`, which resumes from History (`threads.ts` does this). Several
  * threads share one process; each gets its own sandbox through `sandbox`.
  */
 import {
@@ -19,16 +27,24 @@ import {
   type StreamFn,
   type ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
-import { type Api, type Model, type ToolResultMessage, Type } from "@earendil-works/pi-ai";
+import {
+  type Api,
+  getCurrentTools,
+  type Model,
+  type Tool as ToolDeclaration,
+  type ToolResultMessage,
+  Type,
+} from "@earendil-works/pi-ai";
 import type { EventType } from "@voluma/contracts/events";
 import { z } from "zod";
+import { isContextOverflowError } from "../../context-overflow";
 import { replyFrames } from "../../live";
 import { usageOf } from "../../model-usage";
 import type { History } from "../../ports/history";
 import type { Sandbox } from "../../ports/sandbox";
 import type { PayloadOf, Recorder } from "../../recorder";
 import { SandboxUnavailableError, type Tool, type ToolResult } from "../../tools/tool";
-import { elideOldImages } from "./elide-images";
+import { type Compactor, compactor, foldHistory } from "./compaction";
 
 export type UserSender = Extract<PayloadOf<"message">, { role: "user" }>["sender"];
 
@@ -61,7 +77,10 @@ export type StartThreadOptions = ThreadIdentity & {
   thinkingLevel?: ThinkingLevel;
   /** `models.streamSimple.bind(models)` from pi-ai. */
   streamFn: StreamFn;
-  /** Fixed for the thread's life: a resumed thread whose stored prompt or tools differ fails. */
+  /**
+   * A new thread stores both. A resumed thread keeps the stored prompt and tool definitions;
+   * it is refused only if the input schema of a tool it was given changed.
+   */
   systemPrompt: string;
   tools: Tool[];
   recorder: Recorder;
@@ -79,7 +98,7 @@ export type StartThreadOptions = ThreadIdentity & {
 };
 
 export interface ThreadHandle {
-  /** Steers a user message into the running thread. False once the thread has ended or never ran. */
+  /** Puts a message in the running thread's inbox. False once the thread has ended. */
   send(text: string, sender: UserSender): boolean;
   done: Promise<ThreadOutcome>;
 }
@@ -111,16 +130,42 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     return 1;
   };
 
+  // `compacting` is built before the agent but needs `persistRow`, declared below with the history cursor.
+  const compacting: Compactor = compactor({
+    threadId,
+    model: options.model,
+    thinkingLevel: options.thinkingLevel,
+    streamFn: options.streamFn,
+    store: async (row) => {
+      const ok = await persistRow(row);
+      // A pending wrap-up warns of a summary that now exists.
+      inbox.splice(0, inbox.length, ...inbox.filter((n) => !n.lapses));
+      return ok;
+    },
+    // The summary was a model call: its usage is spend (`spend.ts` counts assistant `message`s).
+    onSummary: (reply, summary) => {
+      const used = usageOf(reply);
+      emit("message", {
+        role: "assistant",
+        text: summary,
+        compaction: true,
+        ...(used && { usage: used }),
+      });
+    },
+  });
+
+  const agentTools = options.tools.map((tool) => toAgentTool(tool, options, batchSize));
   const agent: Agent = new Agent({
     initialState: {
       systemPrompt: options.systemPrompt,
       model: options.model,
       thinkingLevel: options.thinkingLevel,
-      tools: options.tools.map((tool) => toAgentTool(tool, options, batchSize)),
+      tools: agentTools,
       messages: [],
     },
     streamFn: options.streamFn,
-    transformContext: async (messages) => elideOldImages(messages),
+    // The one place a request's messages differ from the thread's: after a compaction.
+    transformContext: async (messages, signal) => compacting.prepare(messages, signal),
     sessionId: threadId,
   });
   // Pi made the system message the current prompt and tools call for.
@@ -131,10 +176,11 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
   // emitted (the stream record follows the history), and the agent stops.
   let nextIdx = 0;
   let historyError: unknown;
-  const persist = async (message: AgentMessage): Promise<boolean> => {
+  const persist = (message: AgentMessage) => persistRow(JSON.stringify(message));
+  const persistRow = async (row: string): Promise<boolean> => {
     if (historyError || cutOff()) return false;
     try {
-      await history.appendMessage(threadId, nextIdx, JSON.stringify(message));
+      await history.appendMessage(threadId, nextIdx, row);
       nextIdx++;
       return true;
     } catch (error) {
@@ -143,15 +189,39 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       return false;
     }
   };
-  const emitToolResult = (result: ToolResultMessage) => {
+  const emitToolResult = (result: ToolResultMessage, content = result.content) => {
     const details = result.details as { truncated?: boolean; infrastructure?: true } | undefined;
     emit("tool.result", {
       toolCallId: result.toolCallId,
       isError: result.isError,
-      output: textOf(result),
+      output: textOf({ content }),
       truncated: details?.truncated === true,
       ...(details?.infrastructure && { infrastructure: true as const }),
     });
+  };
+
+  /**
+   * At the last result of a tool batch, when Pi has pushed every result of it: what the thread
+   * is told next. Returns the notices delivered with this result, which sit on it as a text part.
+   */
+  const closeBatch = (last: ToolResultMessage): Notice[] => {
+    const messages = agent.state.messages;
+    const replyAt = messages.map((m) => m.role).lastIndexOf("assistant");
+    const reply = messages[replyAt];
+    if (reply?.role !== "assistant") return [];
+    const calls = reply.content.filter((b) => b.type === "toolCall");
+    if (calls.at(-1)?.id !== last.toolCallId) return [];
+    // A batch whose every result terminates ends the turn: its inbox goes in the user message that
+    // follows, and there is no next request to warn.
+    const terminates = (m: AgentMessage) =>
+      m.role === "toolResult" && (m.details as { terminate?: boolean } | undefined)?.terminate;
+    if (messages.slice(replyAt + 1).every(terminates)) return [];
+    if (!historyError && !cutOff()) {
+      const notice = compacting.wrapUp(messages);
+      if (notice) inbox.push({ text: notice, sender: NOTICE, lapses: true });
+    }
+    if (inbox.length === 0) return [];
+    return inbox.splice(0);
   };
 
   /** Whether the log already holds an end after this thread's latest start. */
@@ -166,20 +236,18 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     return false;
   };
 
-  // The sender of each user message we prompt with, kept with the message itself.
-  const senders = new WeakMap<AgentMessage, UserSender>();
-  const userMessage = (text: string, sender: UserSender): AgentMessage => {
+  // The notices of each user message we prompt with (a brief has one), kept with the message
+  // itself so each is recorded under its own sender.
+  const noticesOf = new WeakMap<AgentMessage, Notice[]>();
+  const userMessage = (notices: Notice[], text = blockOf(notices)): AgentMessage => {
     const message: AgentMessage = { role: "user", content: text, timestamp: Date.now() };
-    senders.set(message, sender);
+    noticesOf.set(message, notices);
     return message;
   };
-  // True from the moment the agent loop is about to start until its last check for queued
-  // messages, with no await between that check and clearing it, so a message accepted here
-  // is always run.
-  let accepting = false;
+  // Everything waiting for the thread. The last check of it before the loop ends, and
+  // `ended = true`, have no await between them, so a message `send` accepted is always delivered.
+  const inbox: Notice[] = [];
   let ended = false;
-  // Messages sent before the loop starts; they join the first turn (or are steered in).
-  const early: { text: string; sender: UserSender }[] = [];
   let reply = "";
 
   async function run(): Promise<ThreadOutcome> {
@@ -189,16 +257,15 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     const abort = () => agent.abort();
     signal?.addEventListener("abort", abort);
     try {
-      const stored = (await history.load(threadId)).map((row) => JSON.parse(row) as AgentMessage);
-      nextIdx = stored.length;
+      const rows = await history.load(threadId);
+      nextIdx = rows.length;
+      const { messages: stored, compaction } = foldHistory(rows);
+      compacting.restore(compaction);
       // Every check that can refuse the thread runs before the thread's own events: a refused
       // resume has its `thread.started` already (the run loop stores it first) and gets no more
       // from here; the run loop then stops it.
-      if (stored.length > 0 && !sameSystem(stored[0], system)) {
-        throw new ThreadStale(
-          "the stored system message differs from the current system prompt or tools; " +
-            "a resumed thread keeps the prompt it started with (prompt-cache rule 1)",
-        );
+      if (stored.length > 0 && stored[0]?.role !== "system") {
+        throw new ThreadStale("its stored history does not start with a system message");
       }
       // The model is part of a thread's identity, like its prompt: History is the record of it
       // (an assistant message names the model that wrote it), not `thread.started`, which may
@@ -209,9 +276,13 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
         (wrote.provider !== options.model.provider || wrote.model !== options.model.id)
       ) {
         throw new ThreadStale(
-          `the thread was written by ${wrote.provider}/${wrote.model}, not ${options.model.provider}/${options.model.id}; ` +
-            "a resumed thread keeps its model",
+          `it was written by the model ${wrote.provider}/${wrote.model} and this run uses ${options.model.provider}/${options.model.id}; a thread keeps its model`,
         );
+      }
+      if (stored.length > 0) {
+        // The model keeps the tool definitions it started with (the system message in `stored`
+        // declares them; Pi would otherwise append the difference to the current tools).
+        agent.state.tools = storedTools(getCurrentTools(stored), agentTools);
       }
       const repairs = interruptedToolResults(stored, options.interrupted);
       const hasUser = stored.some((m) => m.role === "user");
@@ -222,18 +293,21 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       // sandbox restart note reaches the model through the sandbox's command output
       // (`sandbox-session.ts`), not as a message here.
       const prompts: AgentMessage[] = [];
-      const addPrompt = (text: string | undefined, sender: UserSender) => {
-        if (text) prompts.push(userMessage(text, sender));
-      };
       if (hasUser) {
-        if (options.input) addPrompt(options.input.text, options.input.sender);
-      } else {
-        addPrompt(options.prompt, {
-          kind: "runtime",
-          ...(options.promptCovers && { covers: options.promptCovers }),
-        });
+        if (options.input?.text) inbox.unshift(options.input);
+      } else if (options.prompt) {
+        const brief = {
+          text: options.prompt,
+          sender: {
+            kind: "runtime",
+            ...(options.promptCovers && { covers: options.promptCovers }),
+          } satisfies UserSender,
+        };
+        prompts.push(userMessage([brief], brief.text));
       }
-      for (const { text, sender } of early.splice(0)) addPrompt(text, sender);
+      // Nothing is running, so a wrap-up notice has nothing to act on.
+      const waiting = inbox.splice(0).filter((n) => !n.lapses);
+      if (waiting.length > 0) prompts.push(userMessage(waiting));
       const message = prompts.length > 0 ? prompts : undefined;
       if (message === undefined && finished) {
         return { status: "completed", ran: false, reply };
@@ -275,13 +349,23 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
             break;
           case "message_end": {
             const { message } = event;
+            // Pi passes this same object into the next request, so the block reaches the model as stored.
+            const raw = message.role === "toolResult" ? message.content : [];
+            const delivered = message.role === "toolResult" ? closeBatch(message) : [];
+            if (delivered.length > 0 && message.role === "toolResult") {
+              message.content = [...raw, { type: "text", text: `\n\n${blockOf(delivered)}` }];
+            }
             const ok = await persist(message);
             if (message.role === "assistant") {
               reply = textOf(message);
             }
             if (!ok) break;
-            if (message.role === "toolResult") emitToolResult(message);
-            else if (message.role === "assistant") {
+            if (message.role === "toolResult") {
+              emitToolResult(message, raw);
+              for (const { text, sender } of delivered) {
+                emit("message", { role: "user", text, sender });
+              }
+            } else if (message.role === "assistant") {
               // Every reply gets a `message`, even an empty or failed one: it ends the
               // reply's live partial (`stream.ts`).
               const used = usageOf(message);
@@ -299,10 +383,11 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
               );
               replyId = frames = undefined;
             } else if (message.role === "user") {
-              const sender = senders.get(message);
-              if (!sender) throw new Error("a user message reached message_end without a sender");
-              const text = textOf(message);
-              if (text) emit("message", { role: "user", text, sender });
+              const notices = noticesOf.get(message);
+              if (!notices) throw new Error("a user message reached message_end without a sender");
+              for (const { text, sender } of notices) {
+                if (text) emit("message", { role: "user", text, sender });
+              }
             }
             break;
           }
@@ -321,16 +406,25 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       let prompted = false;
       if (!historyError && !signal?.aborted) {
         prompted = true;
-        accepting = true;
-        for (const { text, sender } of early.splice(0)) agent.steer(userMessage(text, sender));
         if (message !== undefined) await agent.prompt(message);
         else await agent.continue();
-        // A message steered in as the loop was ending is still queued.
-        while (!historyError && !signal?.aborted && agent.hasQueuedMessages()) {
-          await agent.continue();
+        // A message that arrived as the loop was ending is still in the inbox. A request the provider
+        // refused as too large is retried once, after a compaction; the note that starts the retry
+        // is stored only once the summary was.
+        while (!historyError && !signal?.aborted) {
+          if (overflowRetryable(agent.state.messages)) {
+            const recovered = await compacting.recover(agent.state.messages, signal).catch((e) => {
+              // The summary's own provider failure ends the thread as that failure, which the run retries.
+              throw new ThreadFailure(e instanceof Error ? e.message : String(e));
+            });
+            if (!recovered) break;
+            inbox.push({ text: OVERFLOW_NOTE, sender: NOTICE });
+          }
+          inbox.splice(0, inbox.length, ...inbox.filter((n) => !n.lapses));
+          if (inbox.length === 0) break;
+          await agent.prompt(userMessage(inbox.splice(0)));
         }
       }
-      accepting = false;
       // Stopped before its first prompt, it did nothing this invocation: its turn from before
       // must not read as this invocation completing.
       outcome = historyError
@@ -346,7 +440,6 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
       };
       if (!(error instanceof ThreadFailure)) unexpected = error;
     } finally {
-      accepting = false;
       ended = true;
       signal?.removeEventListener("abort", abort);
     }
@@ -363,23 +456,48 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
   return {
     send(text, sender) {
       if (ended) return false;
-      if (!accepting) {
-        early.push({ text, sender });
-        return true;
-      }
-      agent.steer(userMessage(text, sender));
+      inbox.push({ text, sender });
       return true;
     },
     done: run(),
   };
 }
 
+/** One entry of a thread's inbox. A `lapses` notice only matters while the thread is running a turn. */
+interface Notice {
+  text: string;
+  sender: UserSender;
+  lapses?: true;
+}
+
+const senderLabel = (s: UserSender) =>
+  s.kind === "thread" ? "the main agent" : s.kind === "person" ? "the researcher" : "Voluma";
+
+/** The text the model reads for a set of notices, in arrival order. */
+const blockOf = (notices: Notice[]) =>
+  `New messages for you:\n\n${notices.map((n) => `From ${senderLabel(n.sender)}:\n${n.text}`).join("\n\n")}`;
+
+/** The sender of compaction notices: the runtime, but not a nudge. */
+const NOTICE: UserSender = { kind: "runtime", notice: true };
+
+const OVERFLOW_NOTE =
+  "The last request was too large for the model, so your history was summarized. Continue the task.";
+
+/** Whether the thread ended on a too-large request whose predecessor, if it was one, was not also refused. */
+function overflowRetryable(messages: AgentMessage[]): boolean {
+  const replies = messages.filter((m) => m.role === "assistant");
+  const [last, before] = [replies.at(-1), replies.at(-2)];
+  const refused = (m: AgentMessage | undefined) =>
+    m?.role === "assistant" && m.stopReason === "error" && isContextOverflowError(m.errorMessage);
+  return messages.at(-1) === last && refused(last) && !refused(before);
+}
+
 /** A failure of the thread itself, as opposed to a bug: reported as the outcome, not thrown. */
 class ThreadFailure extends Error {}
 
 /**
- * The stored thread cannot be resumed as it is (its prompt, tools or model changed, e.g. by a
- * deploy): `ran` is false and `stale` true. The caller starts the work again on a new thread.
+ * The stored thread cannot be resumed as it is (a deploy changed the input of one of its tools,
+ * or its model changed): `ran` is false and `stale` true. The caller starts the work again on a new thread.
  */
 class ThreadStale extends ThreadFailure {}
 
@@ -456,11 +574,55 @@ function strictObjects<T>(schema: T): T {
   ) as T;
 }
 
-/** The stored system message must be the one the current prompt and tools would make. */
-function sameSystem(stored: AgentMessage | undefined, current: AgentMessage | undefined): boolean {
-  const key = (m: AgentMessage | undefined) =>
-    m?.role === "system" ? JSON.stringify([m.content, m.toolsAdded]) : undefined;
-  return key(stored) !== undefined && key(stored) === key(current);
+/**
+ * A schema without its `description` keywords, for comparing what a call may contain. Keys
+ * of a map of named schemas (`properties`, `$defs`) are names, so only their values are walked.
+ */
+function withoutDescriptions(schema: unknown, named = false): unknown {
+  if (Array.isArray(schema)) return schema.map((s) => withoutDescriptions(s));
+  if (typeof schema !== "object" || schema === null) return schema;
+  return Object.fromEntries(
+    Object.entries(schema)
+      .filter(([key]) => named || key !== "description")
+      .map(([key, value]) => [
+        key,
+        withoutDescriptions(value, !named && ["properties", "$defs", "definitions"].includes(key)),
+      ]),
+  );
+}
+
+/**
+ * The tools a resumed thread offers: the definitions it started with, run by the current tool
+ * of the same name. A tool whose input schema changed since is refused as stale: Pi checks a
+ * call against the stored schema and `execute` then parses it with the current one, so a call
+ * could pass one and fail the other for the rest of the thread. A description change resumes,
+ * the tool's or a field's (`.describe()`); a changed default or any other keyword is refused.
+ * A tool since removed answers a call with an error; a tool added since is not offered.
+ * (A changed `prepare` cannot be seen: the stored definitions do not carry it.)
+ */
+function storedTools(declared: ToolDeclaration[], current: AgentTool[]): AgentTool[] {
+  return declared.map((d) => {
+    const now = current.find((t) => t.name === d.name);
+    if (
+      now &&
+      JSON.stringify(withoutDescriptions(now.parameters)) !==
+        JSON.stringify(withoutDescriptions(d.parameters))
+    ) {
+      throw new ThreadStale(`the input of its tool ${d.name} changed since it started`);
+    }
+    return {
+      label: d.name,
+      execute: async () => ({
+        content: [{ type: "text" as const, text: `The tool ${d.name} is no longer available.` }],
+        details: {},
+        isError: true,
+      }),
+      ...now,
+      name: d.name,
+      description: d.description,
+      parameters: d.parameters,
+    };
+  });
 }
 
 /**

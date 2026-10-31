@@ -174,6 +174,8 @@ export function taskRuntime(options: TaskRuntimeOptions) {
   const taskOf = (id: string): FoldedTask | undefined => view().tasks.find((t) => t.id === id);
   /** The plan now, with every `plan.changed` applied. */
   const planNow = () => view().plan.tasks;
+  /** The task's plain title, for text the researcher reads; the id when the plan has none. */
+  const taskName = (id: string) => planNow().find((t) => t.id === id)?.title ?? id;
 
   /**
    * Whether the attempt of `taskId` cites this scratch file (the path after `/scratch/`): a
@@ -345,14 +347,14 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     if (c.kind === "main") {
       if (workers.length > 0) {
         throw new Refusal(
-          `${taskId} has a worker (${workers[0]?.id}); it is not yours to write to.`,
+          `${taskId} has a worker (${workers[0]?.name}); it is not yours to write to.`,
         );
       }
     } else {
       // Its own `thread.started` may not be stored yet: a thread not in the log is the newest.
       const latest = workers.at(-1);
       if (latest && latest.id !== c.threadId && d.threads.has(c.threadId)) {
-        throw new Refusal(`${taskId} is held by a newer worker (${latest.id}); stop here.`);
+        throw new Refusal(`${taskId} is held by a newer worker (${latest.name}); stop here.`);
       }
     }
     const waiting = known(taskId).dependsOn.filter((d) => !taskOf(d)?.satisfied);
@@ -416,7 +418,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
           dep,
           t.attemptId,
           "stale",
-          `${taskId} was corrected, so this result may no longer hold.`,
+          `${taskName(taskId)} was corrected, so this result may no longer hold.`,
           { kind: "rule", rule: "stale" },
         );
       }
@@ -507,6 +509,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
     view,
     threadNames,
     taskOf,
+    taskName,
     cites,
     section,
     setStatus,

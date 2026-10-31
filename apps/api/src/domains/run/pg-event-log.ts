@@ -5,10 +5,10 @@
  *    statement's snapshot is taken when it starts, so a lock taken inside the insert's
  *    own statement would not see the previous holder's row and `seq` would collide;
  * 2. check the lease token against the run row (`LeaseLost` rolls the append back);
- * 3. insert with `seq = MAX(seq) + 1`; a repeated event `id` inserts nothing, and is
- *    `EventIdTaken` if the stored event belongs to another run;
- * 4. apply the `threads` projection, only if the event was new, and move the run's
- *    `last_progress_seq` if the event is run-state progress (`claim-progress.ts`).
+ * 3. insert with `seq = MAX(seq) + 1`; a repeated event `id` (ids are unique per run) inserts
+ *    nothing;
+ * 4. if the event was new, move the run's `last_progress_seq` when it is run-state progress
+ *    (`claim-progress.ts`).
  *
  * So `seq` is gapless and in commit order per run: a reader that has seen `seq` n has seen
  * every event below it. The stream (stream.ts) relies on that: the notifier fires after a
@@ -25,20 +25,13 @@ import { isProgress } from "./claim-progress";
 import { assertLease } from "./lease";
 import type { Notifier } from "./notifier";
 import { readableRuns, type Tx, toRunEvent } from "./pg-runs";
-import { events, runs, threads } from "./schema";
-
-/** An event id already stored under another run. */
-export class EventIdTaken extends Error {
-  constructor() {
-    super("event id belongs to another run");
-  }
-}
+import { events, runs } from "./schema";
 
 /** First key of the advisory lock pair; the second is the run. Distinguishes our locks from others'. */
 export const EVENT_SEQ_LOCK = 0x76_6f_6c_75;
 
 /**
- * The run's event lock. Lock order, everywhere: the queue lock, then this, then row locks
+ * The run's event lock. Lock order, everywhere: the queue lock (where taken), then this, then row locks
  * (`corrections.ts`).
  */
 export const eventLock = (tx: Tx, runId: string) =>
@@ -53,7 +46,7 @@ export async function insertEvent(tx: Tx, event: Omit<RunEvent, "seq">) {
       createdAt: new Date(event.createdAt),
       seq: sql`(SELECT COALESCE(MAX(${events.seq}), 0) + 1 FROM ${events} WHERE ${events.runId} = ${event.runId})`,
     })
-    .onConflictDoNothing({ target: events.id })
+    .onConflictDoNothing({ target: [events.runId, events.id] })
     .returning({ id: events.id, seq: events.seq });
 }
 
@@ -68,10 +61,8 @@ export async function cancelOpenThreads(tx: Tx, runId: string) {
   const log = (
     await tx.select().from(events).where(eq(events.runId, runId)).orderBy(asc(events.seq))
   ).map(toRunEvent);
-  const createdAt = new Date();
-  for (const ended of cancelEnds(runId, log, createdAt)) {
+  for (const ended of cancelEnds(runId, log, new Date())) {
     await insertEvent(tx, ended);
-    await projectThread(tx, ended, createdAt);
   }
 }
 
@@ -137,22 +128,13 @@ export function pgEventLog(db: PostgresJsDatabase, notifier: Notifier) {
     checkLease: (runId: string, leaseToken: string) =>
       db.transaction((tx) => assertLease(tx, runId, leaseToken)),
 
-    /** Throws `LeaseLost`, or `EventIdTaken` for an id stored under another run. */
+    /** Throws `LeaseLost`. */
     async append(event: EventInput, leaseToken: string) {
       await db.transaction(async (tx) => {
         await eventLock(tx, event.runId);
         await assertLease(tx, event.runId, leaseToken);
-        const createdAt = new Date(event.createdAt);
         const inserted = await insertEvent(tx, event);
-        if (inserted.length === 0) {
-          const [stored] = await tx
-            .select({ runId: events.runId })
-            .from(events)
-            .where(eq(events.id, event.id));
-          if (stored?.runId !== event.runId) throw new EventIdTaken();
-          return;
-        }
-        await projectThread(tx, event, createdAt);
+        if (inserted.length === 0) return;
         const [row] = inserted;
         if (row && isProgress(event)) {
           await tx.update(runs).set({ lastProgressSeq: row.seq }).where(eq(runs.id, event.runId));
@@ -161,36 +143,6 @@ export function pgEventLog(db: PostgresJsDatabase, notifier: Notifier) {
       notifier.notify(event.runId);
     },
   };
-}
-
-async function projectThread(tx: Tx, event: EventInput, createdAt: Date) {
-  switch (event.type) {
-    case "thread.started":
-      // A resumed thread starts again: same row, running again.
-      await tx
-        .insert(threads)
-        .values({
-          id: event.threadId,
-          runId: event.runId,
-          parentThreadId: event.payload.parentThreadId,
-          kind: event.payload.kind,
-          task: event.payload.task ?? null,
-          status: "running",
-          createdAt,
-        })
-        .onConflictDoUpdate({
-          target: threads.id,
-          set: { status: "running", endedAt: null },
-          setWhere: eq(threads.runId, event.runId),
-        });
-      return;
-    case "thread.ended":
-      await tx
-        .update(threads)
-        .set({ status: event.payload.status, endedAt: createdAt })
-        .where(and(eq(threads.id, event.threadId), eq(threads.runId, event.runId)));
-      return;
-  }
 }
 
 export type LeasedEventLog = ReturnType<typeof pgEventLog>;

@@ -26,9 +26,9 @@ import postgres from "postgres";
 import { reviewSnapshots } from "../domains/review/schema";
 import { eventLock } from "../domains/run/pg-event-log";
 import { QUEUE_LOCK } from "../domains/run/pg-queue";
-import { events, piMessages, runs, studies, studyScans, threads } from "../domains/run/schema";
+import { events, piMessages, runs, studies, studyScans } from "../domains/run/schema";
 import { databaseUrl } from "./operator";
-import { assertRestorable, countsOf, describeCounts, piMessagesOf, readDump } from "./run-dump";
+import { assertRestorable, countsOf, describeCounts, readDump } from "./run-dump";
 
 const MIN_FREE_BYTES = 1024 ** 3;
 
@@ -49,7 +49,7 @@ if (dump.run.state !== "ended") {
 }
 // A shutdown/stale sweep marks calls cut before their handler's final settlement can land.
 if (dump.providerCalls.some((call) => call.status === "open" || call.durationMs === null)) {
-  throw new Error(`run ${runId} has unsettled provider calls; nothing deleted`);
+  throw new Error(`run ${runId} has unsettled gateway requests; nothing deleted`);
 }
 if (
   !dump.input ||
@@ -125,8 +125,7 @@ const deleted = await db.transaction(async (tx) => {
       .delete(reviewSnapshots)
       .where(eq(reviewSnapshots.runId, runId))
       .returning(),
-    piMessages: await tx.delete(piMessages).where(piMessagesOf(runId)).returning(),
-    threads: await tx.delete(threads).where(eq(threads.runId, runId)).returning(),
+    piMessages: await tx.delete(piMessages).where(eq(piMessages.runId, runId)).returning(),
     events: await tx.delete(events).where(eq(events.runId, runId)).returning(),
   };
   for (const name of Object.keys(rows) as (keyof typeof rows)[]) {

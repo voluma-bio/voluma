@@ -31,6 +31,12 @@ Merging to `main` deploys to Render staging each service whose build filter (`re
 (which serves the web app), the runner and the gateway, together and in no fixed order; see
 [apps/api/.context/deploy.md](apps/api/.context/deploy.md).
 
+Merges never wait for runs. A live run carries on through any number of these deploys: no
+failure, no lost agent context, no human click. A change that would break a live run during the
+deploy overlap (a column dropped while the old code still reads it, a narrowed stored event or
+runner-facing response) ships in two PRs, expand first; anything that still breaks a live run is a
+bug, not a reason to hold merges.
+
 Pre-commit runs Biome on staged files. Nothing runs on push. Use pnpm, never npm.
 
 ## Boundaries
@@ -70,14 +76,19 @@ there reaches every caller at once. Two shapes work:
 
 Either way the PR body names what breaks and which callers moved.
 
-Before merging a change that could stop a stored event from parsing (a new
-required field or a narrowed shape anywhere in a payload, recorded plans
-included), parse every staging run's events with the new `runEventSchema`:
-fetch each run's log from `GET /api/run/runs/:id/stream` with
-`VOLUMA_DEBUG_TOKEN` while it still parses (agents can't reach staging's
-database), and have a conversion ready for any that fail. The app gets no
-reader for an old shape; stored runs are converted by a one-off script kept
-out of the app. A query for the fields you think changed is not enough: it
+A change that could stop a stored event from parsing (a new required field or
+a narrowed shape anywhere in a payload, recorded plans included) converts the
+stored events in an SQL migration in `apps/api/drizzle`, applied on deploy, and
+ships in two steps, expand then contract, so a live run survives the deploy overlap. Step 1: the field optional (or the shape still wide), an
+idempotent migration, and the code reading the old shape in one function marked
+for deletion. Step 2, after step 1 is live: a PR that re-runs the migration, makes
+the field required and deletes the fallback. Note step 2 in the package's
+`.context/TODO.md`. `payload` is `json` because some payloads hold `\u0000`:
+read or cast payload fields only inside `CASE WHEN type = '<type>' THEN … END`,
+since Postgres may evaluate the json condition before the `type` filter. Before step 2, parse every staging run's
+events with the new `runEventSchema`: fetch each run's log from
+`GET /api/run/runs/:id/stream` with `VOLUMA_DEBUG_TOKEN` (agents can't reach
+staging's database). A query for the fields you think changed is not enough: it
 missed the recorded plans that took the runs list down after #177.
 
 ## Working in parallel
@@ -95,6 +106,14 @@ cd ../voluma.worktrees/<name> && pnpm i
   The exception is R2: every worktree and staging use one bucket, so a script
   that writes R2 writes only keys staging never reads (`dev/…`, a local
   example's `example-local-<runId>`); see `apps/api/AGENTS.md`.
+- The machine is shared, so stop a process only by the PID you recorded
+  when you started it. Never stop one by name or pattern: `pkill -f` and
+  `pgrep -f` match anywhere in a command line, which hits other agents' dev
+  servers and any agent session launched with a prompt that contains the
+  pattern; `killall` hits every process with that name. Start a long-running
+  process as `setsid <cmd> > <log> 2>&1 & echo $! > <pidfile>`, and stop it
+  and its children with `kill -- -$(cat <pidfile>)`. If you lost the PID,
+  leave the process running and say so in your report.
 - Small PRs to `main`. Keep your branch current with
   `git merge origin/main`. Never rebase, force-push or commit to someone
   else's branch.

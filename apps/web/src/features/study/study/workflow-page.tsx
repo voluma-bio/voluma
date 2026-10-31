@@ -3,13 +3,13 @@
  * TaskGraph at study size with room to read, and the selected task (`?task=`) on every scan
  * below it, each scan with its state there and a way into its review.
  */
-import { itemHref, plural, scanLabel, TaskGraph } from "@voluma/run-view";
+import { itemHref, plural, scanLabel, TaskGraph, taskStateWord } from "@voluma/run-view";
 import { Button, IconButton, List, PageHead, RowLink, STATUS_WORD, StatusMark } from "@voluma/ui";
 import { Box as Cube, X } from "lucide-react";
 import { Link, useSearchParams } from "react-router";
 import { linkTo } from "../link";
 import { useStudy } from "./study-layout";
-import { cellOf, checkTitles, scanHref, stoppedLine, studyGraph } from "./study-model";
+import { cellOf, checkTitles, scanHref, stoppedLine, studyGraph, taskState } from "./study-model";
 
 export function WorkflowPage() {
   const { detail, workflow } = useStudy();
@@ -82,7 +82,13 @@ export function WorkflowPage() {
                     <StatusMark
                       key="s"
                       status={status}
-                      label={status === "check" ? `${open} to check` : undefined}
+                      label={
+                        status === "check"
+                          ? `${open} to check`
+                          : status === "stopped"
+                            ? taskStateWord(taskState(scan, selected.id))
+                            : undefined
+                      }
                     />,
                     <Button key="3d" asChild size="sm">
                       <Link to={to}>

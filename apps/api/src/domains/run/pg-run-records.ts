@@ -29,7 +29,7 @@ export function pgRunRecords(
     },
     async decide(reader, runId, decision) {
       // A run that has not ended has no review to decide on: judge it without the event lock,
-      // which a heartbeat holds the queue lock to wait for.
+      // which a heartbeat or report holds while it ends a run.
       const [state] = await db
         .select({ state: runs.state })
         .from(runs)
@@ -38,6 +38,7 @@ export function pgRunRecords(
       if (state.state !== "ended") {
         const record = await db.transaction(
           async (tx) => (await results(tx, eq(runs.id, runId)))[0],
+          { isolationLevel: "repeatable read" },
         );
         if (!record) return null;
         if (!decision(record)) return record;

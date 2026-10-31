@@ -1,13 +1,14 @@
 /**
  * To check: this scan's items, one open at a time. The open item's card (`ItemToCheck`) holds the
- * decision; Next names the next open item; the list below is every item of the scan in task
- * order. Picking an item sets up the views on its task and place.
+ * decision; Next names the next open item; the list below is the scan's open items in task
+ * order. "Looks right" moves on to the next open item of the same task, else of the scan, and the
+ * handled item leaves the list. Picking an item sets up the views on its task and place.
  */
 import { reviewFileUrl } from "@voluma/api-client";
 import { ItemToCheck, type NeedItem, type TaskView } from "@voluma/run-view";
 import { Disclosure, EmptyState, IconButton, Lightbox, List, Row, StatusGlyph } from "@voluma/ui";
 import { ChevronLeft, ChevronRight, ImageOff } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { Accepting } from "./scan-page";
 
 export function ToCheckPanel({
@@ -24,7 +25,7 @@ export function ToCheckPanel({
 }: {
   runId: string;
   scan: string;
-  /** Every item of the scan in task order, with what was accepted here. */
+  /** Every item of the scan in task order, reconciled with authoritative human decisions. */
   items: NeedItem[];
   tasks: TaskView[];
   /** The open item: one of the task in view's, none when that task has none. */
@@ -37,6 +38,12 @@ export function ToCheckPanel({
   live: boolean;
 }) {
   const titleOf = (taskId: string) => tasks.find((t) => t.id === taskId)?.title ?? taskId;
+  // The item in view when a save lands: the move after Looks right happens only if it is still
+  // the one accepted, so a pick made while saving wins.
+  const shown = useRef(current?.id);
+  shown.current = current?.id;
+  // The item the panel moved to after Looks right, whose Looks right takes focus.
+  const [arrived, setArrived] = useState<string>();
   if (items.length === 0)
     return (
       <div className="p-4">
@@ -49,12 +56,16 @@ export function ToCheckPanel({
     );
   const open = items.filter((n) => !n.accepted);
   const handled = items.length - open.length;
-  // Task order, kept as items are handled, so nothing moves under the reader.
-  const queue = items;
+  // The open items in task order; the item in view stays in its place once handled, so a
+  // handled item picked from Report still reads as one of them.
+  const queue = items.filter((n) => !n.accepted || n === current);
   const at = current ? queue.indexOf(current) : -1;
-  const next = [...queue.slice(at + 1), ...queue.slice(0, Math.max(at, 0))].find(
+  const after = [...queue.slice(at + 1), ...queue.slice(0, Math.max(at, 0))].filter(
     (n) => !n.accepted && n !== current,
   );
+  const next = after[0];
+  // Where "Looks right" moves: the same task's next open item, else the scan's.
+  const then = after.find((n) => n.taskId === current?.taskId) ?? next;
   const task = current && tasks.find((t) => t.id === current.taskId);
   return (
     <div className="grid gap-3 p-3">
@@ -106,12 +117,21 @@ export function ToCheckPanel({
           onAccept={
             accepting.accept &&
             (() => {
-              // Keep this item open, to show it was decided, until the reader moves on.
+              // Hold this item in view until it is saved; then move on, when anything is left.
               onPick(current);
-              accepting.accept?.(current);
+              accepting.accept?.(
+                current,
+                then &&
+                  (() => {
+                    if (shown.current !== current.id) return;
+                    setArrived(then.id);
+                    onPick(then);
+                  }),
+              );
             })
           }
           accepting={accepting.pending === current.id}
+          focusAccept={current.id === arrived}
           readOnly={accepting.readOnly}
           onWrong={() => onWrong(current)}
           error={accepting.error?.id === current.id ? accepting.error.text : undefined}
@@ -132,12 +152,17 @@ export function ToCheckPanel({
           <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
         </button>
       )}
-      <section aria-label={`This scan's ${items.length} items`}>
-        <h3 className="flex items-baseline gap-2 px-1 pt-1 pb-1.5 text-sm font-semibold">
-          This scan's {items.length} {items.length === 1 ? "item" : "items"}
-          <span className="ml-auto text-xs font-normal text-muted-foreground">
-            {handled} handled
-          </span>
+      <section aria-labelledby="scan-open-items">
+        <h3
+          id="scan-open-items"
+          className="flex items-baseline gap-2 px-1 pt-1 pb-1.5 text-sm font-semibold"
+        >
+          {open.length > 0 ? `${open.length} left to check` : "Nothing left to check"}
+          {handled > 0 && (
+            <span className="ml-auto text-xs font-normal text-muted-foreground">
+              {handled} handled
+            </span>
+          )}
         </h3>
         <List boxed density="compact" columns="minmax(0,7.5rem)">
           {queue.map((n) => (
