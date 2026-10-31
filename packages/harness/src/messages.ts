@@ -77,13 +77,37 @@ export const PROVIDER_FAILED_RESUME = "The model provider failed during your las
 export const fixLimitReason = (rounds: number) =>
   `The second AI check still found problems after ${rounds} rounds of fixes; this task is left for a person.`;
 
-/** The main agent's answer, as the check thread that asked reads it. */
+/** The main agent's answer, as the thread that asked reads it. */
 export function answerText(
   answer: { text: string; files: { root: string; path: string }[] },
   taskId: string,
 ) {
   const files = answer.files.map((f) => `${f.root}:${f.path}`).join(", ");
   return `The main agent answers: ${answer.text}${files ? `\nFiles for you: ${files} (root "scratch" is /scratch/<path>, "outputs" is /outputs/${taskId}/<path>).` : ""}`;
+}
+
+/** What a running worker is told when the main agent changes the plan: the changes by task, not the plan again. */
+export function planChangedText(
+  change: {
+    reason: string;
+    doneWhen?: { taskId: string }[];
+    instructions?: { taskId: string }[];
+    skip?: { taskId: string }[];
+  },
+  added: readonly { id: string }[],
+  adHoc: readonly { id: string }[],
+): string {
+  const parts = [
+    [...added, ...adHoc].length > 0 && `added ${[...added, ...adHoc].map((t) => t.id).join(", ")}`,
+    change.skip && `skipped ${change.skip.map((t) => t.taskId).join(", ")}`,
+    (change.doneWhen || change.instructions) &&
+      `done-when or instructions changed on ${[
+        ...new Set(
+          [...(change.doneWhen ?? []), ...(change.instructions ?? [])].map((t) => t.taskId),
+        ),
+      ].join(", ")}`,
+  ].filter(Boolean);
+  return `The main agent changed the plan (${parts.join("; ")}): ${change.reason}`;
 }
 
 export const verdictNudge = (taskId: string) =>
@@ -113,7 +137,7 @@ export const deliveryText = (
 
 /** What the main agent is told when nothing is running and the run is not finished. */
 export const livenessNudge = (asking: boolean, state: string) =>
-  `Nothing is running and the run is not finished: ${asking ? "answer the checker (nothing else can move until you do), then " : ""}start the next workers, or finish the run.\n\n${state}`;
+  `Nothing is running and the run is not finished: ${asking ? "answer the open question (nothing else can move until you do), then " : ""}start the next workers, or finish the run.\n\n${state}`;
 
 /** What the researcher reads when the main agent stopped moving and code ended the run. */
 export const STUCK_PLAN_REASON = "The AI stopped before every task was done, so the run ended.";
@@ -158,7 +182,7 @@ export function noticeLine(n: Notice): string {
     case "failed":
       return `- ${who} failed: ${clip(n.error, REPLY_MAX)}${n.place === "check" ? ` Its check has no verdict yet: \`message\` it to resume it where it stopped, or \`stop_worker\` it for a fresh check. If you do neither, ${n.taskId} is left to check for the researcher.` : ""}`;
     case "ask":
-      return `- ${who} asks (askId ${askRef(n.threadName, n.threadId, n.eventId)}): "${n.question}" Reply with \`answer\`.`;
+      return `- ${who} asks (askId ${askRef(n.threadName, n.threadId, n.eventId)}): "${n.question}" Reply with \`answer\`.${n.place === "worker" ? " It carries on meanwhile." : ""}`;
     case "stale":
       return `- ${n.taskId} is stale: ${n.reason}`;
     case "stopped":
@@ -301,7 +325,9 @@ export function agentsList(
     const state = stateOf(r);
     if (r.place === "check" && state !== "running" && !openAsk(r)) return [];
     const label = openAsk(r)
-      ? "waiting for your answer"
+      ? r.place === "worker"
+        ? `${state}, asked you a question`
+        : "waiting for your answer"
       : state === "idle"
         ? r.submitted
           ? "idle, submitted its task"
@@ -324,7 +350,7 @@ function carriedNotices(d: ThreadLog, view: Folded): Notice[] {
   const rejected = new Set(view.tasks.flatMap((t) => (t.rejected ? [t.id] : [])));
   const openAsks = new Set(
     [...d.threads.values()].flatMap((r) => {
-      const ask = r.place === "check" ? openAsk(r) : undefined;
+      const ask = openAsk(r);
       return ask ? [ask.id] : [];
     }),
   );

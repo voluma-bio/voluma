@@ -285,7 +285,14 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
         kind: "worker" as const,
         taskId: r.taskId,
         parentThreadId: d.main ?? root,
-        prompt: workerPrompt(task, record?.brief ?? "", o.notes),
+        prompt: workerPrompt(
+          task,
+          record?.brief ?? "",
+          view,
+          o.selectedOutputs,
+          o.definition.files,
+          o.notes,
+        ),
       } satisfies ThreadSpec & Lineage;
     }
     const folded = runtime.taskOf(r.taskId);
@@ -382,7 +389,18 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       const spec = specFor(thread);
       const task = planTask(runtime.view(), taskId);
       await begin(
-        { ...spec, parentThreadId: main, prompt: workerPrompt(task, brief, o.notes) },
+        {
+          ...spec,
+          parentThreadId: main,
+          prompt: workerPrompt(
+            task,
+            brief,
+            runtime.view(),
+            o.selectedOutputs,
+            o.definition.files,
+            o.notes,
+          ),
+        },
         startedEventId,
         spawnedBy,
       );
@@ -663,7 +681,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     if (anyRunning(d)) return false;
     const covers = recorder.events().at(-1)?.id;
     if (d.emptyDeliveries < config.stuckLimit) {
-      const asking = [...d.threads.values()].some((r) => r.place === "check" && openAsk(r));
+      const asking = [...d.threads.values()].some((r) => openAsk(r));
       await resume(m, livenessNudge(asking, stateBlock(d, view, stateOf)), {
         kind: "runtime",
         ...(covers && { covers }),

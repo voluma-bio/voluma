@@ -138,10 +138,13 @@ export function taskTools(runtime: TaskRuntime) {
   const ask: Tool<typeof askInputSchema> = {
     name: "ask",
     description:
-      "Ask the main agent a question you need answered to decide your verdict (at most 3 per check). Call it alone: it ends your turn, and the answer resumes you.",
+      "Ask the main agent a question. A check asks what it needs answered to decide its verdict (at most 3): call it alone, it ends your turn, and the answer resumes you. A worker asks when its brief or an earlier task looks wrong, or a choice depends on what a later task needs: it does not end your turn, one question is open at a time, and the answer reaches you with a later tool result.",
     input: askInputSchema,
     sequential: true,
-    execute: async (input, ctx) => finish(await result(() => runtime.ask(caller(ctx), input))),
+    execute: async (input, ctx) => {
+      const sent = await result(() => runtime.ask(caller(ctx), input));
+      return ctx.kind === "check" ? finish(sent) : sent;
+    },
   };
   return { checkpoint, report_output, submit_task, ask };
 }

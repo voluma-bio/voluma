@@ -5,8 +5,8 @@
  * prompt is fixed for its life (a resumed thread that differs fails), so it takes only the
  * role's rules and the skill list, both fixed by the run's snapshot. What varies goes in the
  * first message, which gives each role what its role file says it gets: main the plan, the
- * deliverable and the researcher's notes; a worker its task, the main agent's brief and the
- * notes; a checker the task as planned, what the worker reported and the evidence it cited,
+ * deliverable and the researcher's notes; a worker its task, the plan, the deliverable, the main
+ * agent's brief and the notes; a checker the task as planned, what the worker reported and the evidence it cited,
  * never the worker's account.
  */
 import type { Folded, FoldedTask } from "@voluma/contracts/fold";
@@ -83,11 +83,22 @@ function notesBlock(notes: string | undefined): string {
     : "";
 }
 
-export function workerPrompt(task: PlanTask, brief: string, notes: string | undefined): string {
+/**
+ * A worker's first message: its task in full, the whole plan with its own task marked and the
+ * deliverable (so it knows who uses its outputs), then the main agent's brief and the notes.
+ */
+export function workerPrompt(
+  task: PlanTask,
+  brief: string,
+  view: Folded,
+  selected: readonly string[] | undefined,
+  workflow: WorkflowFiles,
+  notes: string | undefined,
+): string {
   const needs = task.dependsOn.length
     ? `It builds on ${task.dependsOn.join(", ")}; their files are in /outputs/<task id>/.`
     : "It builds on no other task.";
-  return `Your task is "${task.id}". ${needs}\n${taskBrief(task)}\n${outputList(task)}\n\nFrom the main agent:\n${brief}${notesBlock(notes)}`;
+  return `Your task is "${task.id}". ${needs}\n${taskBrief(task)}\n${outputList(task)}\n\n${planBlock(view, workflow, task.id)}\n\n${deliverableBlock(selected, workflow)}\n\nFrom the main agent:\n${brief}${notesBlock(notes)}`;
 }
 
 const list = (items: string[]) => (items.length ? items.join("\n") : "(none)");
@@ -136,10 +147,15 @@ Evidence files the worker cited (open them with view_image):
 ${list(cited)}${notesBlock(notes)}`;
 }
 
-/** The plan as the main agent reads it: each task with what it builds on, what it does and the outputs it reports. */
-function planBlock(view: Folded, workflow: WorkflowFiles): string {
+/**
+ * The plan as the main agent or a worker reads it: each task with what it builds on, what it does
+ * and the outputs it reports. For a worker, `own` is its task, which its message already gives in full.
+ */
+function planBlock(view: Folded, workflow: WorkflowFiles, own?: string): string {
   const names = new Map(workflow.outputs.map((o) => [o.id, o.name]));
   const tasks = view.plan.tasks.map((t) => {
+    if (t.id === own)
+      return `### ${t.id}${t.title ? ` — ${t.title}` : ""} (your task, in full above)`;
     const outputs = t.outputs.map(
       (o) =>
         `  - ${o.id}${names.has(o.id) ? ` (${names.get(o.id)})` : ""}: ${o.kind}${o.required ? ", required" : ""}`,
@@ -150,7 +166,7 @@ ${taskBrief(t)}
 Reports:
 ${outputs.length ? outputs.join("\n") : "  (no outputs)"}`;
   });
-  return `## The plan\n\n${tasks.join("\n\n")}`;
+  return `## The plan\n\n${own ? "Every task of the run, so you know what builds on yours and who uses your outputs. The main agent can change it; you are told when it does.\n\n" : ""}${tasks.join("\n\n")}`;
 }
 
 /** The outputs the researcher selected: what the run is for. */

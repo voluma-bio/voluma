@@ -20,9 +20,11 @@ import { planTask } from "@voluma/workflow/plan";
 import { z } from "zod";
 import type { UserSender } from "../adapters/pi/start-thread";
 import {
+  answerText,
   feedbackText,
   GO_REFUSAL,
   goNotActedOn,
+  planChangedText,
   UNANSWERED,
   UNDELIVERED,
   unfinished,
@@ -337,7 +339,7 @@ export function mainTools(deps: MainDeps) {
   > = {
     name: "answer",
     description:
-      'Answer a checker\'s question (its askId is in the message that told you). `files` are files you want the checker to open: {root: "outputs", path: <inside /outputs/<task id>/>} or {root: "scratch", path: <inside your $SCRATCH>}. The checker is resumed with your answer.',
+      'Answer a checker\'s or worker\'s question (its askId is in the message that told you). `files` are files you want a checker to open: {root: "outputs", path: <inside /outputs/<task id>/>} or {root: "scratch", path: <inside your $SCRATCH>}; a worker\'s question takes none, so put what it needs in `text`. A checker is resumed with your answer; a worker, which carries on meanwhile, gets it with its next tool result.',
     input: z.object({
       askId: nonEmpty,
       text: nonEmpty,
@@ -352,16 +354,22 @@ export function mainTools(deps: MainDeps) {
           const named = (x: ThreadRecord, a: { id: string }) =>
             a.id === input.askId || askRef(x.name, x.id, a.id) === input.askId;
           const r = [...d.threads.values()].find(
-            (x) => x.place === "check" && x.asks.some((a) => named(x, a)),
+            (x) => x.place !== "main" && x.asks.some((a) => named(x, a)),
           );
-          if (r?.place !== "check") throw new Refusal(`No checker asked ${input.askId}.`);
+          if (r?.place !== "check" && r?.place !== "worker") {
+            throw new Refusal(`No worker or checker asked ${input.askId}.`);
+          }
           const ask = r.asks.find((a) => named(r, a));
-          if (!ask) throw new Refusal(`No checker asked ${input.askId}.`);
+          if (!ask) throw new Refusal(`No worker or checker asked ${input.askId}.`);
           if (ask.answer) {
             throw new Refusal(`${input.askId} is already answered.`);
           }
           const t = runtime.taskOf(r.taskId);
-          if (
+          if (r.place === "worker") {
+            if (agents.state(d, r.id) === "stopped") {
+              throw new Refusal(`${r.name}, which asked ${input.askId}, was stopped.`);
+            }
+          } else if (
             agents.state(d, r.id) === "stopped" ||
             t?.status !== "under-review" ||
             t.threads.check !== r.id
@@ -371,6 +379,9 @@ export function mainTools(deps: MainDeps) {
           return { r, ask };
         };
         const target = asker(log()).r;
+        if (target.place === "worker" && input.files?.length) {
+          throw new Refusal("A worker's question takes no files: put what it needs in the text.");
+        }
         const caller = {
           threadId: ctx.threadId,
           toolCallId: ctx.toolCallId,
@@ -396,10 +407,30 @@ export function mainTools(deps: MainDeps) {
             },
             effectId("answer", ctx.threadId, ctx.toolCallId),
           );
-          return { message: `Answer recorded; ${r.name} resumes with it.` };
+          return { r, ask };
         });
+        const { r, ask } = done;
+        // A check is resumed by the loop; a worker is working, so the answer joins its inbox, or
+        // resumes it if its turn just ended.
+        if (r.place === "worker") {
+          const text = answerText({ text: input.text, files: [] }, r.taskId);
+          const sender: UserSender = { kind: "thread", threadId: ctx.threadId };
+          if (!agents.steer(r.id, text, sender)) {
+            await agents.settled(r.id);
+            await recorder.flush();
+            await runtime.section(async () => {
+              main(ctx);
+              if (agents.state(log(), r.id) === "idle") await agents.resume(r.id, text, sender);
+            });
+          }
+        }
         agents.changed();
-        return done;
+        return {
+          message:
+            r.place === "worker"
+              ? `Answer recorded; ${r.name} gets it with its next tool result.`
+              : `Answer recorded; ${r.name} resumes with it.`,
+        };
       }),
   };
 
@@ -545,6 +576,13 @@ export function mainTools(deps: MainDeps) {
               await runtime.stop(r.id, `${eventId}:skip:${r.id}`);
           }
         }
+      }
+      // Running workers still read the plan they started with: tell each what changed, in one line.
+      const changes = planChangedText(input, added, adHoc);
+      for (const r of d.threads.values()) {
+        if (r.place !== "worker" || skipped.has(r.taskId) || agents.state(d, r.id) !== "running")
+          continue;
+        agents.steer(r.id, changes, { kind: "thread", threadId: ctx.threadId });
       }
       return {
         message: `The plan changed.${skipped.size > 0 ? ` Skipped: ${[...skipped].join(", ")}.` : ""}`,

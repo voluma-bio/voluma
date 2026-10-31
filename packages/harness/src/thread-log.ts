@@ -36,7 +36,7 @@ const VERDICT_TEXT_MAX = 1500;
 
 export type Role = "worker" | "check";
 
-/** A check thread's question to the main agent, and the answer once it has one. */
+/** A worker's or check thread's question to the main agent, and the answer once it has one. */
 export interface AskRecord {
   /** The `ask` event's id. */
   id: string;
@@ -80,7 +80,7 @@ interface ThreadFields {
   model: string | undefined;
   /** Tool calls the log shows without a result, by tool call id; after a cut-off, what it was cut off in. */
   openCalls: Map<string, string>;
-  /** The questions a check thread asked, in order. */
+  /** The questions a worker or check thread asked, in order. */
   asks: AskRecord[];
   /** The text of its latest reply in the latest invocation. */
   reply: string;
@@ -119,7 +119,8 @@ export type Notice = {
       summary?: string;
       text?: string;
     }
-  | { kind: "ask"; question: string }
+  /** A check thread waits for the answer; a worker carries on. */
+  | { kind: "ask"; question: string; place: "worker" | "check" }
   | { kind: "stale"; reason: string }
   /** The loop stopped a thread the main agent did not ask to stop; `reason` says why. */
   | { kind: "stopped"; reason: string }
@@ -266,7 +267,7 @@ function threadNameOf(e: Extract<RunEvent, { type: "thread.started" }>): string 
   return e.payload.name ?? e.threadId.slice(e.runId.length + 1);
 }
 
-/** The question a check thread waits on: its latest ask, when unanswered. */
+/** The question a worker or check thread has open: its latest ask, when unanswered. */
 export const openAsk = (r: ThreadRecord): AskRecord | undefined => {
   const last = r.asks.at(-1);
   return last && !last.answer ? last : undefined;
@@ -573,6 +574,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
             taskId: record?.taskId,
             kind: "ask",
             question: e.payload.question,
+            place: record?.place === "worker" ? "worker" : "check",
           },
           at,
         );

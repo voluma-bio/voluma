@@ -573,19 +573,34 @@ export function taskRuntime(options: TaskRuntimeOptions) {
         return done(`${taskId} is submitted for checking. Your turn ends here.`, id);
       }),
 
-    /** A check thread's question to the main agent; it ends its turn and the answer resumes it. */
+    /**
+     * A question to the main agent. A check thread's ends its turn and the answer resumes it; a
+     * worker's does not: it carries on, one question open at a time, and the answer reaches it as a
+     * message.
+     */
     ask: (c: Caller, input: AskInput) =>
       section(async () => {
-        if (c.kind !== "check" || !c.taskId) throw new Refusal("Only a check thread asks.");
+        if ((c.kind !== "check" && c.kind !== "worker") || !c.taskId) {
+          throw new Refusal("Only a worker or a check thread asks.");
+        }
         if (c.batchSize > 1) throw new Refusal("Call ask alone, not with other tools.");
-        writeTarget(c, c.taskId, { verdict: false, what: "asks" });
-        const asked = log().threads.get(c.threadId)?.asks.length ?? 0;
-        if (asked >= MAX_ASKS) {
-          throw new Refusal(`You have asked ${MAX_ASKS} questions; give your verdict now.`);
+        const asks = log().threads.get(c.threadId)?.asks ?? [];
+        if (c.kind === "check") {
+          writeTarget(c, c.taskId, { verdict: false, what: "asks" });
+          if (asks.length >= MAX_ASKS) {
+            throw new Refusal(`You have asked ${MAX_ASKS} questions; give your verdict now.`);
+          }
+        } else if (asks.at(-1) && !asks.at(-1)?.answer) {
+          throw new Refusal("Your last question is not answered yet; carry on until it is.");
         }
         const id = effectId("ask", c.threadId, c.toolCallId);
         await recorder.append(c.threadId, "ask", { question: input.question }, id);
-        return done("Question sent. Your turn ends here; the answer resumes you.", id);
+        return done(
+          c.kind === "check"
+            ? "Question sent. Your turn ends here; the answer resumes you."
+            : "Question sent to the main agent. Carry on with what does not depend on the answer; the answer reaches you with a later tool result.",
+          id,
+        );
       }),
 
     checkpoint: (c: Caller, input: CheckpointInput) => {
