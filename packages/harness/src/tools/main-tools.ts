@@ -393,7 +393,7 @@ export function mainTools(deps: MainDeps) {
         const files = await Promise.all(
           (input.files ?? []).map((f) => runtime.keep(caller, target.taskId, f)),
         );
-        const done = await runtime.section(async () => {
+        const r = await runtime.section(async () => {
           main(ctx);
           const { r, ask } = asker(log());
           await recorder.append(
@@ -407,9 +407,8 @@ export function mainTools(deps: MainDeps) {
             },
             effectId("answer", ctx.threadId, ctx.toolCallId),
           );
-          return { r, ask };
+          return r;
         });
-        const { r, ask } = done;
         // A check is resumed by the loop; a worker is working, so the answer joins its inbox, or
         // resumes it if its turn just ended.
         if (r.place === "worker") {
