@@ -119,6 +119,28 @@ export function metaClient(options: { url: string; token: string; log(line: stri
     }
   }
 
+  /**
+   * A gateway redeploy cuts the calls its old instance still holds, and the new instance takes
+   * the next one: an infrastructure failure is retried once. A retried SAM request is a second
+   * paid request (the cut one stays a `cut` row of unknown cost).
+   */
+  async function again<T>(run: () => Promise<T>): Promise<T> {
+    try {
+      return await run();
+    } catch (error) {
+      if (!(error instanceof Failure && error.infrastructure)) throw error;
+      log(`${error.message}; trying once more`);
+      return run().catch((second) => {
+        if (second instanceof Failure && second.infrastructure)
+          throw new Failure(
+            `${second.message}. Tried twice, so the gateway may be redeploying or down: call segment_sam again after a minute, or carry on without it.`,
+            true,
+          );
+        throw second;
+      });
+    }
+  }
+
   /** Throws the right failure for a reply that is not a success. */
   async function expectOk(res: Response, what: string): Promise<void> {
     if (res.ok) return;
@@ -131,18 +153,19 @@ export function metaClient(options: { url: string; token: string; log(line: stri
 
   return {
     /** Uploads the video and returns its file id. */
-    async upload(path: string): Promise<string> {
-      const res = await send(async () => {
-        const form = new FormData();
-        form.set("purpose", "user_data");
-        form.set("file", await openAsBlob(path, { type: "video/mp4" }), "stack.mp4");
-        return fetch(`${base}/files`, { method: "POST", headers: auth, body: form, dispatcher });
-      }, "Meta upload");
-      await expectOk(res, "Meta upload");
-      const id = ((await res.json()) as { id?: string }).id;
-      if (!id) throw new Failure("Meta's upload reply had no file id");
-      return id;
-    },
+    upload: (path: string): Promise<string> =>
+      again(async () => {
+        const res = await send(async () => {
+          const form = new FormData();
+          form.set("purpose", "user_data");
+          form.set("file", await openAsBlob(path, { type: "video/mp4" }), "stack.mp4");
+          return fetch(`${base}/files`, { method: "POST", headers: auth, body: form, dispatcher });
+        }, "Meta upload");
+        await expectOk(res, "Meta upload");
+        const id = ((await res.json()) as { id?: string }).id;
+        if (!id) throw new Failure("Meta's upload reply had no file id");
+        return id;
+      }),
 
     /** The user's scan must not stay in Meta's file store: a failed delete is loud, not fatal. */
     async remove(id: string, timeoutMs = 60_000): Promise<void> {
@@ -204,38 +227,43 @@ export function metaClient(options: { url: string; token: string; log(line: stri
           "Meta request",
         );
       const started = Date.now();
-      let res = await request();
-      // Meta answers `404 model_not_found` for some prompts (a small box), not only for an outage,
-      // and bills nothing for it. Once more on the uploaded file costs nothing if it fails again.
-      if (res.status === 404) {
-        log(`Meta answered 404 to a SAM request: ${await failure(res)}; trying once more`);
-        res = await request();
-      }
-      if (res.status === 404) {
-        throw new Failure(
-          `Meta answered 404 twice to this request: ${await failure(res)}. It bills nothing for a failed ` +
-            `call. Either this input is the cause (seen once: a small box prompt failed on every call ` +
-            `while the other objects succeeded) or Meta is down. Asked for: ${asked}. To tell which: ` +
-            `try once more with the smallest or least certain object left out or given a larger box ` +
-            `(a call that succeeds costs about $0.07-0.10). If that also gets a 404, stop calling ` +
-            `segment_sam and report the outage.`,
-        );
-      }
-      await expectOk(res, "Meta request");
-      if (!res.body) throw new Failure("Meta request: the reply had no body", true);
-      const file = createWriteStream(out);
-      const watch = streamWatch(started);
-      try {
-        for await (const chunk of res.body) {
-          watch.add(chunk);
-          if (!file.write(chunk)) await once(file, "drain");
+      /** One request and its whole reply written to `out`. */
+      const attempt = async () => {
+        let res = await request();
+        // Meta answers `404 model_not_found` for some prompts (a small box), not only for an outage,
+        // and bills nothing for it. Once more on the uploaded file costs nothing if it fails again.
+        if (res.status === 404) {
+          log(`Meta answered 404 to a SAM request: ${await failure(res)}; trying once more`);
+          res = await request();
         }
-      } catch (error) {
-        file.destroy();
-        throw new Failure(`Meta request: the reply was cut off (${String(error)})`, true);
-      }
-      file.end();
-      await once(file, "finish");
+        if (res.status === 404) {
+          throw new Failure(
+            `Meta answered 404 twice to this request: ${await failure(res)}. It bills nothing for a failed ` +
+              `call. Either this input is the cause (seen once: a small box prompt failed on every call ` +
+              `while the other objects succeeded) or Meta is down. Asked for: ${asked}. To tell which: ` +
+              `try once more with the smallest or least certain object left out or given a larger box ` +
+              `(a call that succeeds costs about $0.07-0.10). If that also gets a 404, stop calling ` +
+              `segment_sam and report the outage.`,
+          );
+        }
+        await expectOk(res, "Meta request");
+        if (!res.body) throw new Failure("Meta request: the reply had no body", true);
+        const file = createWriteStream(out);
+        const watch = streamWatch(started);
+        try {
+          for await (const chunk of res.body) {
+            watch.add(chunk);
+            if (!file.write(chunk)) await once(file, "drain");
+          }
+        } catch (error) {
+          file.destroy();
+          throw new Failure(`Meta request: the reply was cut off (${String(error)})`, true);
+        }
+        file.end();
+        await once(file, "finish");
+        return { res, watch };
+      };
+      const { res, watch } = await again(attempt);
       const end = Date.now();
       // Wait ends at the first `data:` line: the gateway's keepalive comments are not arrivals.
       const waitMs = watch.stats.firstEventMs ?? end - started;
