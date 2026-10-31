@@ -118,7 +118,7 @@ export type Notice = {
   /** A worker's turn ended without submitting; `reply` is what it said last. */
   | { kind: "worker-idle"; reply: string }
   | { kind: "failed"; error: string; place: "worker" | "check" }
-  /** `rule` says how the check ended (`check-result`, `fix-limit`; `check-limit` only in runs from when checks were time-limited). */
+  /** `rule` says how the check ended (`check-result`, `fix-limit`). */
   | {
       kind: "check-result";
       rule: string;
@@ -259,15 +259,6 @@ export function threadState(
   if (running) return "running";
   if (!r.end) return "cut-off";
   return r.end.status === "cancelled" ? "stopped" : "idle";
-}
-
-/**
- * A started thread's name. Rows an old runner wrote during the deploy that added `name` lack it;
- * their name is the id after its first `.` (run ids hold none). Delete with step 2 (`name` required), see
- * `packages/contracts/.context/TODO.md`.
- */
-function threadNameOf(e: Extract<RunEvent, { type: "thread.started" }>): string {
-  return e.payload.name ?? e.threadId.slice(e.threadId.indexOf(".") + 1);
 }
 
 /**
@@ -433,7 +424,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         const fields: ThreadFields = {
           id: e.threadId,
           role: kind,
-          name: threadNameOf(e),
+          name: e.payload.name,
           end: undefined,
           nudges: record?.nudges ?? 0,
           brief: record?.brief ?? briefOf(e.payload, value.calls),
@@ -571,16 +562,9 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
           if (record.place !== "main") notice({ ...base, kind: "submitted" }, at);
         } else if (by.kind === "rule" && by.rule === "stale") {
           notice({ ...base, kind: "stale", reason }, at);
-        } else if (
-          by.kind === "rule" &&
-          (by.rule === "check-result" || by.rule === "check-limit" || by.rule === "fix-limit")
-        ) {
+        } else if (by.kind === "rule" && (by.rule === "check-result" || by.rule === "fix-limit")) {
           const result = verdicts.get(attemptId);
-          if (
-            status === "to-check" &&
-            result?.verdict === "needs-review" &&
-            by.rule !== "check-limit"
-          ) {
+          if (status === "to-check" && result?.verdict === "needs-review") {
             value.fixRounds.set(taskId, (value.fixRounds.get(taskId) ?? 0) + 1);
           }
           notice(

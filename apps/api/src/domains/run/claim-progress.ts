@@ -12,7 +12,7 @@
  */
 import type { ReleaseReason } from "@voluma/contracts/runner";
 
-/** Why a claim ends now; `provider-outage` is read only (`claimEndReasonSchema`). */
+/** Why a claim ends now. */
 export type ClaimEnd = ReleaseReason | "lease-expired";
 
 const COUNTED: ReadonlySet<ClaimEnd> = new Set(["lease-expired", "loop-stalled", "refused"]);

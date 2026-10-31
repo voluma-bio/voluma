@@ -90,8 +90,7 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   the runner's `released`; `lease-expired` when the claim's sweep finds the lease gone). `recover` in `pg-queue.ts` stores it
   for the next claim's `previousClaim` and applies the no-progress limit (`claim-progress.ts`:
   the counting rule and the progress events; `lease-expired`, `loop-stalled` and `refused` count).
-  There is no other restart counter. `provider-outage` is read only (events and `last_claim_end`
-  written before provider errors failed the run).
+  There is no other restart counter.
 - **A researcher's message reopens a finished run** (`messages.ts` in contracts is the rulebook;
   `queue.checkMessage`/`sendMessage` in `pg-queue.ts` call `corrections.ts`, which holds the
   rules; Review's `POST /runs/:id/messages` calls them through the `RunMessages` port after it

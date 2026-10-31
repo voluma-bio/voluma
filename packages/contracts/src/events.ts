@@ -96,8 +96,7 @@ export const bySchema = z.discriminatedUnion("kind", [
       "stale",
       "check-start",
       "check-result",
-      // A task reached its fix-round limit (`fix-limit`). `check-limit` is written by no code now: stored runs from when checks were time-limited carry it.
-      "check-limit",
+      // A task reached its fix-round limit.
       "fix-limit",
       // The main agent stopped with work unfinished and code ended it.
       "liveness",
@@ -166,7 +165,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
          * `segmentation.check.2`. It is the thread's folder under `/scratch` and its sandbox's
          * name, and the same on every start of the thread.
          */
-        name: nonEmpty.optional(),
+        name: nonEmpty,
         /** Null on a run's root thread. */
         parentThreadId: z.string().nullable(),
         kind: threadKindSchema,
