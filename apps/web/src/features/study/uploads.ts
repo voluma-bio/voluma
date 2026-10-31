@@ -5,7 +5,8 @@
  * (`UPLOAD_MAX_OPEN`, 3); a scan's files PUT straight to storage, 4 at once, 3 tries each,
  * then complete. A scan with files that didn't upload waits for Retry, which sends only
  * those; one whose complete failed retries the complete. Removing a scan aborts and cancels
- * its upload. Leaving the page aborts them all; a reload asks first.
+ * its upload. Leaving the page aborts them all; a reload asks first, and a deploy's reload waits
+ * for them (`holdLeave`).
  *
  * Bytes sent live outside React state (`Progress`), read per scan with `useSent`: progress
  * arrives every frame, and page state changing at frame rate re-renders the whole page.
@@ -27,6 +28,7 @@ import {
   MAX_UPLOAD_FILE_BYTES,
 } from "@voluma/contracts/run";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { holdLeave } from "../../shell/deploys";
 import type { ScanFile } from "./scan-files";
 
 /** Files PUT at once; enough to fill a lab uplink without starving the page. */
@@ -305,7 +307,12 @@ export function useUploads() {
     if (!busy) return;
     const warn = (e: BeforeUnloadEvent) => e.preventDefault();
     window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
+    // A deploy's reload waits too, until the last scan is uploaded, fails or is removed.
+    const release = holdLeave();
+    return () => {
+      window.removeEventListener("beforeunload", warn);
+      release();
+    };
   }, [busy]);
 
   return { states, progress, add, retry, remove };

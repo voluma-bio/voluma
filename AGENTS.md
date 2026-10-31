@@ -56,7 +56,7 @@ What the structure still requires:
   and neither do `domains/run` and `domains/review` in the API. They share
   code only through `packages/` (and `apps/api/src/ports` on the server).
 - Web features reach the API only through `@voluma/api-client`.
-- Each web feature serves its routes; the shell only mounts them.
+- Each web feature serves its routes; the shell mounts them and applies the user's theme.
 - Each API domain serves every path under its prefix (`/run/`, `/review/`).
   A domain is built by a factory taking its own dependency type, written in
   ports. Only `apps/api/src/index.ts` reads `env` and builds adapters. One
@@ -76,6 +76,13 @@ there reaches every caller at once. Two shapes work:
   together, so there is no red base and nothing left half-migrated.
 
 Either way the PR body names what breaks and which callers moved.
+
+A response only the browser reads changes in one step, no expand/contract: when
+a response fails its schema, an open tab checks whether `/` names a newer entry
+bundle and, once no pointer is held and no work holds it (`holdLeave`), reloads
+into it (a failed write goes Home instead); with no newer bundle the error shows
+(`apps/web/src/shell/deploys.ts`). Runner-facing responses and stored events keep
+the two-step rule below.
 
 A change that could stop a stored event from parsing (a new required field or
 a narrowed shape anywhere in a payload, recorded plans included) converts the

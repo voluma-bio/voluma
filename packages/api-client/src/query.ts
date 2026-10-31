@@ -12,15 +12,18 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import type { AcceptCheckRequest, ReviewDecisionResponse } from "@voluma/contracts/review";
+import type { UpdateUserSettingsRequest } from "@voluma/contracts/settings";
 import {
   ApiError,
   acceptCheck,
   getReviewRun,
   getRun,
   getStudy,
+  getUserSettings,
   listInputs,
   listRuns,
   listStudies,
+  updateUserSettings,
 } from "./index";
 
 export const runQuery = (id: string) =>
@@ -32,6 +35,23 @@ export const studyQuery = (id: string) =>
   queryOptions({ queryKey: ["study", id], queryFn: () => getStudy(id) });
 export const runsQuery = () => queryOptions({ queryKey: ["runs"], queryFn: listRuns });
 export const inputsQuery = () => queryOptions({ queryKey: ["inputs"], queryFn: listInputs });
+
+/** Identity scopes the cache only; the server always takes the user from the session. */
+export const userSettingsQuery = (userId: string) =>
+  queryOptions({ queryKey: ["user-settings", userId], queryFn: getUserSettings });
+
+export function useUpdateUserSettings(userId: string) {
+  const client = useQueryClient();
+  const { queryKey } = userSettingsQuery(userId);
+  return useMutation({
+    mutationFn: (patch: UpdateUserSettingsRequest) => updateUserSettings(patch),
+    onSuccess: async (settings) => {
+      await client.cancelQueries({ queryKey });
+      client.setQueryData(queryKey, settings);
+      await client.invalidateQueries({ queryKey });
+    },
+  });
+}
 
 /** Every study read, whichever study: `study` keys are `["study", id]`. */
 export const allStudiesKey = ["study"] as const;
