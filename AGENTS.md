@@ -109,7 +109,7 @@ cd ../voluma.worktrees/<name> && pnpm i
   example's `example-local-<runId>`); see `apps/api/AGENTS.md`.
 - The machine is shared. To stop `pnpm dev`, the runner (`start`, `try-run`) and their
   children, run `pnpm dev:stop`: it stops only the process groups this worktree
-  recorded in `.dev/pids/` and lists anything else still running here. Stop any other
+  recorded in `.dev/pids/` (SIGTERM, SIGKILL after 55 s so a runner can release its runs; never `kill -9` the group yourself) and lists anything else still running here. Stop any other
   process only by the PID you recorded when you started it. Never stop one by name or
   pattern: `pkill -f` and `pgrep -f` match anywhere in a command line, which hits other
   agents' dev servers and any agent session launched with a prompt that contains the

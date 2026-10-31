@@ -7,7 +7,10 @@
  */
 import { spawn } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { constants } from "node:os";
 import { resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+import { identity } from "./dev-proc.mjs";
 
 const [label, command, ...args] = process.argv.slice(2);
 if (!label || !command) {
@@ -20,21 +23,37 @@ mkdirSync(pidsDir, { recursive: true });
 
 const child = spawn(command, args, { stdio: "inherit", detached: true });
 const entry = resolve(pidsDir, `${label}.${child.pid}`);
-writeFileSync(entry, `${JSON.stringify({ pgid: child.pid, wrapper: process.pid })}\n`);
+writeFileSync(entry, `${JSON.stringify({ pgid: child.pid, identity: identity(child.pid) })}\n`);
 
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
-  process.on(signal, () => {
-    try {
-      process.kill(-child.pid, signal);
-    } catch {}
-  });
+  process.on(signal, () => signalGroup(signal));
 }
 child.on("error", (error) => {
   rmSync(entry, { force: true });
   console.error(error.message);
   process.exit(2);
 });
-child.on("exit", (code, signal) => {
+child.on("exit", async (code, signal) => {
+  // The leader can exit before its children (dev.mjs gives them 500 ms): keep the entry, and
+  // end what is left, until the group is empty.
+  for (let waited = 0; groupAlive(); waited += 100) {
+    if (waited === 0) signalGroup("SIGTERM");
+    if (waited === 5000) signalGroup("SIGKILL");
+    await delay(100);
+  }
   rmSync(entry, { force: true });
-  process.exit(code ?? 128 + (signal === "SIGINT" ? 2 : 15));
+  process.exit(code ?? 128 + constants.signals[signal]);
 });
+function groupAlive() {
+  try {
+    process.kill(-child.pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function signalGroup(signal) {
+  try {
+    process.kill(-child.pid, signal);
+  } catch {}
+}

@@ -5,50 +5,36 @@
  * is signalled only if its leader is alive with its cwd inside this worktree, so a recycled PID
  * is never hit. Processes in this worktree that were not recorded are listed, not stopped.
  */
-import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { resolve, sep } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { command, cwds as cwdMap, identity, parentOf } from "./dev-proc.mjs";
 
 const root = realpathSync(resolve(import.meta.dirname, ".."));
 const pidsDir = resolve(root, ".dev/pids");
-const GRACE_MS = 5000;
+// A runner releases its runs on SIGTERM within 50 s (apps/runner/src/main.ts); SIGKILL earlier would lose the release.
+const GRACE_MS = 55_000;
 
 if (process.argv.length > 2) {
   console.error("dev:stop takes no arguments: it stops this worktree's recorded processes.");
   process.exit(1);
 }
 
-const alive = (pid) => {
+const groupAlive = (pgid) => {
   try {
-    process.kill(pid, 0);
+    process.kill(-pgid, 0);
     return true;
   } catch (error) {
     return error.code === "EPERM";
   }
 };
-const groupAlive = (pgid) => alive(-pgid);
 const signalGroup = (pgid, signal) => {
   try {
     process.kill(-pgid, signal);
   } catch {}
 };
 
-function cwdOf(pid) {
-  try {
-    if (process.platform === "linux") return readlinkSync(`/proc/${pid}/cwd`);
-    const out = execFileSync("lsof", ["-p", String(pid), "-a", "-d", "cwd", "-Fn"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    return out
-      .split("\n")
-      .find((line) => line.startsWith("n"))
-      ?.slice(1);
-  } catch {
-    return undefined;
-  }
-}
+const cwds = cwdMap();
 const inWorktree = (cwd) => cwd !== undefined && (cwd === root || cwd.startsWith(root + sep));
 
 const stale = [];
@@ -63,7 +49,8 @@ for (const file of recorded) {
     rmSync(path, { force: true });
     continue;
   }
-  if (alive(entry.pgid) && inWorktree(cwdOf(entry.pgid))) targets.push({ file, path, ...entry });
+  if (identity(entry.pgid) === entry.identity && inWorktree(cwds.get(entry.pgid)))
+    targets.push({ file, path, ...entry });
   else {
     rmSync(path, { force: true });
     stale.push(file);
@@ -83,37 +70,16 @@ for (const file of stale) console.log(`skipped ${file}: not running here (entry 
 if (targets.length + stale.length === 0) console.log("no recorded dev processes");
 
 // Anything else in this worktree: not ours to stop. Skip this command and its ancestors.
-const ppidOf = (pid) =>
-  Number(execFileSync("ps", ["-o", "ppid=", "-p", String(pid)], { encoding: "utf8" }).trim());
 const ancestors = new Set();
-for (let pid = process.pid; pid > 1 && !ancestors.has(pid); ) {
+for (let pid = process.pid; pid > 1 && !ancestors.has(pid); pid = parentOf(pid)) {
   ancestors.add(pid);
-  try {
-    pid = ppidOf(pid);
-  } catch {
-    break;
-  }
 }
-const pids =
-  process.platform === "linux"
-    ? readdirSync("/proc").filter((n) => /^\d+$/.test(n))
-    : execFileSync("ps", ["-axo", "pid="], { encoding: "utf8" }).trim().split(/\s+/);
-const command = (pid) => {
-  try {
-    return execFileSync("ps", ["-o", "args=", "-p", String(pid)], { encoding: "utf8" }).trim();
-  } catch {
-    return undefined; // exited since the scan
-  }
-};
-const others = pids
-  .map(Number)
-  .filter((pid) => !ancestors.has(pid) && inWorktree(cwdOf(pid)))
-  .flatMap((pid) => {
+const others = [...cwdMap()]
+  .filter(([pid, cwd]) => !ancestors.has(pid) && inWorktree(cwd))
+  .flatMap(([pid]) => {
     const args = command(pid);
-    return args ? [`  ${pid}  ${args}`] : [];
+    return args ? [`  ${pid}  ${args}`] : []; // none: exited since the scan
   });
 if (others.length > 0) {
-  console.log(
-    `\nstill running in this worktree, not recorded (stop by PID if they are yours):\n${others.join("\n")}`,
-  );
+  console.log(`\nstill running in this worktree, not recorded:\n${others.join("\n")}`);
 }
