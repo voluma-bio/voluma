@@ -41,10 +41,11 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   (`EVERY_LAB`) and writes nothing. A subtree for signed-in members is
   `new Hono<UserEnv>().use(requireUser)`, whose handlers read the narrowed
   `c.var.user` (`userId`, `email`, `name`, `labId`, `scope`) and never check `kind`. Any
-  other kind gets 403. **Reads go through the reader:** a domain passes `readerOf(c.var.user)`
+  other kind gets 403. **Research-data reads go through the reader:** a domain passes `readerOf(c.var.user)`
   (`src/domain.ts`: `{ labId, ownerId }`, `ownerId` null for a lab member and the user's id for
   a `self` user) into its store port's read methods, and the adapter applies it once
-  (`labId = ? AND (ownerId IS NULL OR created_by = ownerId)`). Handlers never branch on
+  (`labId = ? AND (ownerId IS NULL OR created_by = ownerId)`). Personal settings instead use
+  the authenticated `c.var.user.userId` directly, independent of lab or research-data scope. Handlers never branch on
   `scope`, which is server-internal; no domain reads an organization id. A domain never reads cookies, tokens or `Origin`; the CSRF and Origin checks
   are the root's.
 - Each domain's factory returns a Hono app, mounted by `index.ts` with `app.route`. Use
