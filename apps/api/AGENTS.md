@@ -96,13 +96,10 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   `queue.checkMessage`/`sendMessage` in `pg-queue.ts` call `corrections.ts`, which holds the
   rules; Review's `POST /runs/:id/messages` calls them through the `RunMessages` port after it
   checks and stores the snapshot PNG). `decideMessage` judges in the contract's order, under the
-  queue lock for `sendMessage`. **Lock order, everywhere: the queue lock (where taken), then the run's event lock
-  (`eventLock`), then row locks.** `heartbeat` and `report` skip the queue lock. A claim's sweep re-reads
-  each run's row after taking it, so a heartbeat that extended the lease first wins. `cancel` takes the
-  event and row locks before judging the run's state. A runner's append takes the event lock before it shares the run
-  row, so a transaction holding the row and then asking for the event lock deadlocks with it:
-  `recover`, `heartbeat`, `report`, `cancel` and `decideMessage` take the event lock first, through the one
-  `eventLock` in `pg-event-log.ts`; `decide` (review decisions) checks the run has ended before
+  queue lock for `sendMessage`. **Lock order: the queue lock (where taken), then `lockRun`
+  (`pg-event-log.ts`: event lock, then the run row; the only way to lock a run row).** `heartbeat` and `report` skip the queue lock. A claim's sweep re-reads
+  each run's row after taking it, so a heartbeat that extended the lease first wins. `cancel` locks
+  the run before judging its state. `decide` (review decisions) checks the run has ended before
   taking it, so an accept on a running run never holds it while loading the log). `decideMessage` refuses a message
   to a queued or running run (409: one message, one claim) and reopens an ended `completed` one: it
   writes `run.reopened`, clears `lastClaimEnd`, `stalledClaims` and the lease. A run is in a

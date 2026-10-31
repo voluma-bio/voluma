@@ -18,7 +18,7 @@
  */
 import type { EventInput, RunEvent } from "@voluma/contracts/events";
 import { cancelEnds } from "@voluma/contracts/threads";
-import { and, asc, eq, gt, sql } from "drizzle-orm";
+import { and, asc, eq, gt, type SQL, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { ReadScope } from "../../domain";
 import { isProgress } from "./claim-progress";
@@ -30,12 +30,26 @@ import { events, runs } from "./schema";
 /** First key of the advisory lock pair; the second is the run. Distinguishes our locks from others'. */
 export const EVENT_SEQ_LOCK = 0x76_6f_6c_75;
 
-/**
- * The run's event lock. Lock order, everywhere: the queue lock (where taken), then this, then row locks
- * (`corrections.ts`).
- */
+/** The event lock alone, for a write that appends events without locking the row. */
 export const eventLock = (tx: Tx, runId: string) =>
   tx.execute(sql`SELECT pg_advisory_xact_lock(${EVENT_SEQ_LOCK}, hashtext(${runId}))`);
+
+/**
+ * The only way to lock a run row: the run's event lock, then the row `FOR UPDATE`; returns the
+ * row, or undefined when none matches `where` (the run, plus any extra condition). Lock order,
+ * everywhere: the queue lock (`QUEUE_LOCK`, where a write needs it), then this. A runner's
+ * append takes the event lock before it shares the run row (`assertLease`), so a transaction
+ * that holds the row and then asks for the event lock can deadlock with it.
+ */
+export async function lockRun(tx: Tx, runId: string, where?: SQL) {
+  await eventLock(tx, runId);
+  const [run] = await tx
+    .select()
+    .from(runs)
+    .where(and(eq(runs.id, runId), where))
+    .for("update");
+  return run;
+}
 
 /** Caller holds the event lock and has authorized the write under the run-row lock. */
 export async function insertEvent(tx: Tx, event: Omit<RunEvent, "seq">) {
