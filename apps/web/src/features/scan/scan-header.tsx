@@ -235,7 +235,6 @@ function ModelId({ id }: { id: string }) {
   return (
     <span className="-indent-[1ch] pl-[1ch]">
       {parts.map((part, i) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: an id's parts never reorder
         <Fragment key={i}>
           <span className="whitespace-nowrap">{i < parts.length - 1 ? `${part}/` : part}</span>
           {i < parts.length - 1 && <wbr />}
