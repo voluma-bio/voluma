@@ -506,7 +506,10 @@ export function createAuth(config: AuthConfig) {
     if (c.get("principal")?.kind === "service" || !mutates) return next();
     const site = headers.get("sec-fetch-site");
     if (headers.get("origin") !== appOrigin || (site !== null && site !== "same-origin")) {
-      return c.json({ error: "forbidden origin" }, 403);
+      return c.json(
+        { error: "This request didn't come from the Voluma app. Reload the page and try again." },
+        403,
+      );
     }
     if (!/^application\/json\s*(;|$)/i.test(headers.get("content-type") ?? "")) {
       return c.json({ error: "content-type must be application/json" }, 415);

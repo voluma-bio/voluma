@@ -126,13 +126,30 @@ records `assets.ready` / `assets.failed` on the root thread (id `<runId>:assets:
   dies or cannot be created fails the file (the sandbox session replaces an ended sandbox on the next call, and runs a command the provider refused once more). `sourceSha256`
   is the queue item's; a converter that prints another one has failed.
 - **Mounts.** `/evidence` (the run's evidence prefix) and `/workflow` read-only, `/review`
-  (`reviewAssetPrefix`) read-write, no network. The snapshot keeps repo paths and includes
+  (`reviewAssetPrefix`) and `/input-review` (`inputReviewPrefix(run.input.id)`) read-write,
+  no network. Only the trusted conversion sandbox mounts the input cache; agents do not.
+  The snapshot keeps repo paths and includes
   `core/convert/`, so the command is `python /workflow/workflows/core/convert/review_assets.py` (not `-I`, which drops the `PYTHONPATH`
-  the converter imports `sidecar` through; the sandbox gets `RunLayout.convert`'s `PYTHONPATH` alone).
+  the converter imports `sidecar` through; `RunLayout.convert` supplies `PYTHONPATH` and the cache path,
+  and `superviseRun` adds `VOLUMA_REVIEW_RUNTIME` from the same run-pinned image as the sandbox spec).
   A cloud-bucket mount cannot rename, which zarr's local store does for every file: the converter
   builds in a fixed `/tmp` path it clears at the start, and copies, `manifest.json` last. A
   non-zero exit from a sandbox that is gone counts as a sandbox failure (the one retry), not a
   failed file.
+- **Reuse across runs.** The converter takes `VOLUMA_REVIEW_CACHE` (or `--cache`) and caches
+  completed assets under a hash of its source code and `VOLUMA_REVIEW_RUNTIME` (the pinned
+  sandbox image), conversion mode and `.npy` hash. A cache hit
+  copies the assets into the run's own review prefix and emits its own `assets.ready`, so
+  viewer URLs and run authorization do not change. The cache holds only voxel-space assets:
+  affine, calibration and grid identity remain each run's reported outputs. Changes to bytes,
+  mode, converter code or runtime cannot reuse the old entry. Each publisher writes a unique
+  generation, `manifest.json` last, then writes a small `ready` record selecting it. Readers
+  select one immutable generation; another publisher never overwrites its files. Completed
+  and abandoned generations are not deleted during conversion.
+  Concurrent runs in one runner wait for the same input/file/mode's conversion; independent
+  runners may duplicate a cold conversion into separate generations. This is first-report
+  reuse, not eager upload-time preparation: DICOM intake still runs per run. Runs pinned to
+  converters without cache support keep their original conversion behavior.
 - **Signal.** One rule: the worker halts exactly when the stop will not end the run (server stop,
   lost lease, self-stop, shutdown; `reportFor` is not `ended`). An uncaught
   `error` ends the run, so the worker drains, as it does on `finally`'s own `abort`, which the worker outlives.
@@ -162,8 +179,9 @@ who ends it:
 2. **A signal.** SIGINT and SIGTERM stop every run (the running command is killed), each
    reports `released` with reason `shutdown` first, so the run is recovered within the platform's grace period,
    then closes its sandbox (no `stopped` event is stored); the service waits up to 50 s (Render's grace is 60 s), and the release retries for what is left of it after a 15 s cap on the flush of events (the final usage is always sent), so a deploy that overlaps an API outage is still recorded as `shutdown`. A second signal
-   exits 130 at once and leaves the sandboxes (use `sandboxes:clean`). Signal the process
-   group (Ctrl-C does); `kill <pid of pnpm>` alone leaves the runner running.
+   exits 130 at once and leaves the sandboxes (use `sandboxes:clean`). Locally, `start` and
+   `try-run` run in their own process group (`tools/dev-run.mjs`, recorded in `.dev/pids/`):
+   Ctrl-C reaches it, and `pnpm dev:stop` stops it with the worktree's dev servers: SIGTERM, so active runs release, and SIGKILL only after 55 s.
    The recorder stops a run the same way (`self-stop`) when the API stays unreachable for its retries (network or 5xx, about 20 s): the run is released and resumed, not failed. A 4xx refusal still fails it.
 3. **A resume.** Right after a claim succeeds, before any sandbox, `run.ts` calls `endOtherClaims` (`modal-sandbox.ts`): it lists the live sandboxes tagged with the run but not this claim, terminates each and polls until Modal has reported every one terminated (a sandbox Modal no longer knows counts as gone) and a fresh listing shows none. The claim holds the lease, so a crashed or lost runner's sandbox, still writing the shared `/outputs` and scratch mounts, must be gone before this claim starts a sandbox or restores `/outputs`. There is no deadline: a guess shorter than Modal's own would start a writer beside a live one. Transient Modal errors are retried with backoff and logged, a permanent one (a revoked token) fails the claim; the wait ends on confirmation or on the claim's stop (shutdown, lost lease), and a sandbox Modal never reports still ends at its lifetime limit. While it waits the claim heartbeats and logs "still waiting" every 30 s. Measured locally, a terminate takes about 30 s to confirm. A creation is aborted with the run's signal, so a released run's creation cannot start a sandbox beside the runner that reclaimed it. A process frozen past its lease (a sleeping laptop) can still act late.
 4. **Modal ends it.** After 300 s with no command running (`VOLUMA_SANDBOX_IDLE_SECONDS` in

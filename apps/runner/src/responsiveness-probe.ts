@@ -341,6 +341,7 @@ try {
 
       const layout = runLayout({
         runId: "probe",
+        inputId: "probe",
         inputPrefix: "inputs/",
         skills: [],
         grants: { main: [], worker: [], check: [] },

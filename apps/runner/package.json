@@ -6,9 +6,9 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "start": "tsx src/main.ts",
+    "start": "node ../../tools/dev-run.mjs runner tsx src/main.ts",
     "sandboxes:clean": "tsx src/sandboxes-clean.ts",
-    "try-run": "tsx src/try-run.ts",
+    "try-run": "node ../../tools/dev-run.mjs try-run tsx src/try-run.ts",
     "dev-sandbox": "tsx src/dev-sandbox.ts"
   },
   "dependencies": {

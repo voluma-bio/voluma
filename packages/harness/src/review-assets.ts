@@ -21,6 +21,7 @@
  */
 
 import { ASSET_ERROR_MAX, type RunEvent } from "@voluma/contracts/events";
+import { inputReviewPrefix } from "@voluma/contracts/r2";
 import { type ReviewAssetsManifest, reviewAssetsManifestSchema } from "@voluma/contracts/review";
 import { EVIDENCE, REVIEW, WORKFLOW } from "./layout";
 import { type Sandbox, SandboxEndedError } from "./ports/sandbox";
@@ -31,6 +32,8 @@ const CONVERT_TIMEOUT_SECONDS = 1200;
 const POLL_MS = 1000;
 /** How long `drain` waits for a halted loop (a sandbox call that ignores abort) before it moves on. */
 const HALT_GRACE_MS = 5000;
+/** Coalesce cold misses from concurrent runs in this runner; only completion is shared. */
+const converting = new Map<string, Promise<void>>();
 
 interface Job {
   sha256: string;
@@ -82,6 +85,7 @@ export interface ReviewAssetsWorker {
 
 export interface ReviewAssetsOptions {
   runId: string;
+  inputId: string;
   /** The run's root thread, which the `assets.*` events are written on. */
   rootThreadId: string;
   recorder: Recorder;
@@ -147,8 +151,32 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
     }
   }
 
-  /** One conversion's result, or a throw when the sandbox failed. */
+  /** Waits for another run of this input to populate the cache before opening our sandbox. */
   async function convert(
+    job: Job,
+  ): Promise<{ manifest: ReviewAssetsManifest } | { error: string }> {
+    const key = `${inputReviewPrefix(options.inputId)}${job.sha256}/${job.flags}`;
+    while (converting.has(key)) {
+      await Promise.race([converting.get(key), sleep(POLL_MS)]);
+      signal.throwIfAborted();
+    }
+    let release!: () => void;
+    converting.set(
+      key,
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    );
+    try {
+      return await convertInSandbox(job);
+    } finally {
+      converting.delete(key);
+      release();
+    }
+  }
+
+  /** One conversion's result, or a throw when the sandbox failed. */
+  async function convertInSandbox(
     job: Job,
   ): Promise<{ manifest: ReviewAssetsManifest } | { error: string }> {
     const box = await options.sandbox();
@@ -212,7 +240,9 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
       if (!finished.has(job.sha256)) return job;
   };
 
-  const loop = (async () => {
+  // A resume can already have queued outputs. Return the worker before asking for its
+  // sandbox: the session's creation callback reads this worker's combined signal.
+  const loop = Promise.resolve().then(async () => {
     while (!signal.aborted) {
       scan();
       const job = nextJob();
@@ -227,7 +257,7 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
         running = undefined;
       }
     }
-  })();
+  });
   loop.catch((e) => log(`review assets: worker stopped: ${e}`));
 
   return {
