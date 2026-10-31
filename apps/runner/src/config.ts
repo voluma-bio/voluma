@@ -159,7 +159,7 @@ export function modalToken(): { tokenId: string; tokenSecret: string } | undefin
 }
 
 /**
- * The public sandbox image every run uses, pinned by digest (built from
+ * The public sandbox image new runs start on (a run keeps its first claim's), pinned by digest (built from
  * sandbox/Dockerfile by the "Sandbox image" workflow, which prints the new digest).
  */
 const SANDBOX_IMAGE =

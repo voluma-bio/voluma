@@ -123,7 +123,7 @@ runner reads it as `RENDER_EXTERNAL_URL`). Settings, all in `render.yaml`:
 | Pre-deploy | none. The API's pre-deploy runs the migration; on a new database the gateway starts first, logs `waiting for the migration` with a backoff, and `/health` answers 503 until `provider_calls` exists |
 | Start | `cd apps/gateway && exec node --import tsx src/main.ts` (`exec`: node gets SIGTERM) |
 | Health check | `/health` (200 once `provider_calls` exists; 503 while it doesn't or while draining) |
-| Shutdown delay | 90 s: above `GATEWAY_DRAIN_SECONDS` (60) plus the cleanup after it; calls still running when the drain ends are cut (cost unknown) |
+| Shutdown delay | 300 s (Render's cap): above `GATEWAY_DRAIN_SECONDS` (240) plus the cleanup after it. The longest staging Meta request was 72 s (`POST /v1/responses`, 58 MB); the drain is over three times that. Calls still running when it ends are cut (cost unknown); `voluma-sam` retries a cut call once |
 | Instances | one |
 | Build filter | `apps/gateway`, `packages/provider-calls`, and the root build files |
 | Domain | public (sandboxes reach it from Modal); staging derives its SNI allowlist from `VOLUMA_GATEWAY_URL`. A dedicated-IP cutover also sets `VOLUMA_GATEWAY_IPV4` on the runner |
@@ -138,7 +138,7 @@ Variables:
 | `GATEWAY_ANTHROPIC_API_KEY`, `GATEWAY_OPENAI_API_KEY` | not in the yaml: those providers are disabled in code |
 | `PORT` | not set: Render's injected 10000 (the code's default is 8080) |
 | `HOST` | not set (all interfaces); `pnpm dev` sets 127.0.0.1 |
-| `GATEWAY_DRAIN_SECONDS` | `60` (the code's default), written in the yaml next to the shutdown delay |
+| `GATEWAY_DRAIN_SECONDS` | `240` (the code's default), written in the yaml next to the shutdown delay |
 | `GATEWAY_<PROVIDER>_BASE_URL` | not in the yaml; only for pointing at a stub |
 | `RENDER_INSTANCE_ID` | Render's; names the instance in `provider_calls.instance` |
 

@@ -38,7 +38,7 @@ export class EventIdTaken extends Error {
 export const EVENT_SEQ_LOCK = 0x76_6f_6c_75;
 
 /**
- * The run's event lock. Lock order, everywhere: the queue lock, then this, then row locks
+ * The run's event lock. Lock order, everywhere: the queue lock (where taken), then this, then row locks
  * (`corrections.ts`).
  */
 export const eventLock = (tx: Tx, runId: string) =>

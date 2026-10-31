@@ -61,4 +61,4 @@ After the run ends the researcher may write to you from the 3D view; each messag
 
 `finish_run` when every task is done, left to the researcher as To check, or skipped. Its summary is for the researcher: what the
 run measured, what to look at first, what it could not do and why. Findings first; no paths or
-internal ids.
+internal ids. Everything the researcher reads (this summary, a `reply`, a plan-change or skip reason) says "the AI" for the one that did the work, "a second AI check" for the check and the task's plain title for a task, never worker, checker, agent, thread or task id.

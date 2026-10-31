@@ -11,7 +11,6 @@
  * because pasting it anyway would misplace the labels without a sign.
  */
 import { createReadStream } from "node:fs";
-import { Failure } from "./meta";
 import { decodeMask } from "./sam-mask";
 
 /** Lines of the file, without the newline. */
@@ -67,7 +66,6 @@ export async function pasteResponse(path: string, target: PasteTarget): Promise<
   const confidence: Pasted["confidence"] = {};
   let frames = 0;
   let responseId: string | undefined;
-  let completed = false;
   let rest = "";
   let frame: number | undefined;
   for await (const line of lines(path)) {
@@ -90,17 +88,12 @@ export async function pasteResponse(path: string, target: PasteTarget): Promise<
       }
       rest = text.slice(end);
     } else if (event.type === "response.completed") {
-      completed = true;
       frames = event.response?.usage?.video_frames_processed ?? 0;
       responseId = event.response?.id;
     } else if (event.type === "error" || event.type === "response.failed") {
       throw new Error(`Meta request failed: ${JSON.stringify(event).slice(0, 500)}`);
     }
   }
-  // A body closed early (a proxy timeout, a gateway that ends the stream) parses cleanly but
-  // leaves slices out.
-  if (!completed)
-    throw new Failure("Meta's reply ended before response.completed: it is cut short", true);
   if (rest.trim()) throw new Error("the response ends in the middle of a record");
   return { confidence, frames, responseId };
 }

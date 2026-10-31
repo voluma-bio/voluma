@@ -81,7 +81,7 @@ and `voluma-sam` (the bundle of `packages/voluma-sam`, which the workflow builds
 build context `sam`). The "Sandbox image" workflow
 (`.github/workflows/sandbox-image.yml`) builds it for linux/amd64 on a change to the Dockerfile,
 `packages/voluma-sam` or by hand, pushes `ghcr.io/voluma-bio/voluma-sandbox:<commit>` and prints the digest. Put
-that digest in `SANDBOX_IMAGE` (`src/config.ts`). Every run of the workflow gives a new digest, even for the same contents (image timestamps), and it also runs when the workflow file or `requirements.txt` changes, so bump `SANDBOX_IMAGE` only when the contents changed. The package
+that digest in `SANDBOX_IMAGE` (`src/config.ts`). Every run of the workflow gives a new digest, even for the same contents (image timestamps), and it also runs when the workflow file or `requirements.txt` changes, so bump `SANDBOX_IMAGE` only when the contents changed. A run keeps the image of its first claim (`sandboxImage` on its first `thread.started`): a bump reaches runs that start after the deploy, not the ones in flight. If a run's recorded digest becomes unpullable (package deleted or made private), no runner bump reaches that run: start a new run instead. The package
 must be **public**, or Modal cannot pull it: GitHub, the org's Packages,
 `voluma-sandbox`, Package settings, Danger Zone, Change visibility.
 
