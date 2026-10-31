@@ -38,7 +38,12 @@ import { type LiveBatcher, liveBatcher } from "@voluma/harness/live";
 import { usageOf } from "@voluma/harness/model-usage";
 import type { CreateSandbox } from "@voluma/harness/ports/sandbox";
 import { type Recorder, recorder } from "@voluma/harness/recorder";
-import { type ModelSetup, type Supervised, superviseRun } from "@voluma/harness/supervise-run";
+import {
+  type ModelSetup,
+  rootThreadIdOf,
+  type Supervised,
+  superviseRun,
+} from "@voluma/harness/supervise-run";
 import { TOOL_NAMES } from "@voluma/harness/tools";
 import type { ObjectStore } from "@voluma/object-store";
 import { loadWorkflow } from "@voluma/workflow/load";
@@ -46,12 +51,7 @@ import { computePlan } from "@voluma/workflow/plan";
 import { type Config, isVisitorSafe, providerKey } from "./config.ts";
 import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
-import {
-  awaitOtherClaimsGone,
-  claimSandboxes,
-  terminateClaim,
-  terminateOtherClaims,
-} from "./modal-sandbox.ts";
+import { claimSandboxes, endOtherClaims, terminateClaim } from "./modal-sandbox.ts";
 import { retryTransient } from "./model-retry.ts";
 import { providerFailure } from "./provider-error.ts";
 import { r2Outputs } from "./r2-outputs.ts";
@@ -192,20 +192,11 @@ async function claimBody(
     });
     log(`claimed (${visitor ? "visitor" : "voluma"} keys)`);
 
-    // What an earlier claim of this run left running must not keep writing or spending.
-    // Cleanup only: it never decides the run's outcome, and idle timeouts back it up. A restore
-    // of /outputs waits until they are gone (`awaitOtherClaimsGone`).
-    for (let attempt = 1; attempt <= 2 && !abort.signal.aborted; attempt++) {
-      try {
-        const orphans = await terminateOtherClaims(config.modal, runId, claimId, abort.signal);
-        if (orphans > 0)
-          log(`ended ${orphans} sandbox${orphans === 1 ? "" : "es"} of an earlier claim`);
-        break;
-      } catch (e) {
-        log(`ending an earlier claim's sandboxes failed (attempt ${attempt}): ${e}`);
-        if (attempt < 2) await new Promise((r) => setTimeout(r, 2000));
-      }
-    }
+    // What an earlier claim of this run left running must not keep writing or spending, so this
+    // claim starts no sandbox (and restores nothing) until Modal reports each one terminated.
+    const orphans = await endOtherClaims(config.modal, runId, claimId, abort.signal, log);
+    if (orphans > 0)
+      log(`ended ${orphans} sandbox${orphans === 1 ? "" : "es"} of an earlier claim`);
 
     // Before any sandbox: an unreadable workflow or a bad selection fails the run here, with its
     // message. The run's pin names the workflow directory; its files are snapshotted from this
@@ -274,6 +265,17 @@ async function claimBody(
     const names = new Map<string, string>();
     const nameOf = (id: string) => names.get(id) ?? id;
     const stored = await client.storedEvents();
+    // The image the run began on: a deploy that changes `SANDBOX_IMAGE` must not move a resumed
+    // run to different dependencies. A run recorded before the field existed takes this runner's.
+    const pinnedImage = stored
+      .flatMap((e) =>
+        e.type === "thread.started" && e.threadId === rootThreadIdOf(runId)
+          ? [e.payload.sandboxImage]
+          : [],
+      )
+      .find((image) => image !== undefined);
+    const sandboxImage = pinnedImage ?? config.sandbox.image;
+    log(`sandbox image: ${sandboxImage} (${pinnedImage ? "the run's own" : "this runner's"})`);
     live = liveBatcher((frames) => client.live(frames));
     const recorded = recorder(
       {
@@ -363,14 +365,14 @@ async function claimBody(
       evidence: storeEvidence(objects),
       files: storeFiles(objects),
       outputs: r2Outputs(config.r2),
-      earlierClaimsEnded: (signal) => awaitOtherClaimsGone(config.modal, runId, claimId, signal),
       model: (role, recorded) => ({
         model: threadModel(primary[role], recorded),
         thinkingLevel: thinking[role],
         streamFn: streamFor(role),
       }),
       createSandbox,
-      sandbox: config.sandbox,
+      // The image is recorded on the root's first event, so `sandboxImage` is the run's own.
+      sandbox: { ...config.sandbox, image: sandboxImage },
       // The token follows the tool grant: `superviseRun` asks for it only for a sandbox whose role holds `segment_sam`.
       gateway: config.gateway
         ? (sandbox) =>

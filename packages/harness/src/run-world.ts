@@ -375,7 +375,6 @@ export function world(o: WorldOptions) {
         write: async () => {},
         list: async () => [],
       },
-      earlierClaimsEnded: async () => {},
       outputs: {
         backup: async () => {},
         restore: async () => {},

@@ -25,7 +25,7 @@
  *   ms; the SDK exposes no creation time, and `sandboxes:clean` reports age from it). Modal limits
  *   a name to 64 characters, so the Modal name is `<spec.name>.<8 hex>` without the run id (the
  *   `run` tag carries it) and `validate` rejects a longer one. Sandboxes a dead process left behind
- *   are ended by the next claim (`terminateOtherClaims`), and one's own after a slow close by
+ *   are ended by the next claim (`endOtherClaims`), and one's own after a slow close by
  *   claim (`terminateClaim`), never by run. Creation is aborted once the run's lease is
  *   released or lost (a process frozen past its lease can still act late).
  */
@@ -171,51 +171,94 @@ async function* otherClaims(
   }
 }
 
-/**
- * Asks Modal to terminate every live sandbox of the run that another claim started, without
- * waiting for it to stop; returns how many. Called right after a claim succeeds: the claim holds
- * the lease, so what an earlier claim left running (a crashed or lost runner) must not keep
- * writing the run's mounts or spending.
- */
-export async function terminateOtherClaims(
-  modal: ModalSandboxConfig["modal"],
-  runId: string,
-  claim: string,
-  signal?: AbortSignal,
-): Promise<number> {
-  let ended = 0;
-  for await (const sandbox of otherClaims(modal, runId, claim, signal)) {
-    await sandbox.terminate();
-    ended++;
-  }
-  return ended;
+// gRPC codes (CANCELLED, UNKNOWN, DEADLINE_EXCEEDED, RESOURCE_EXHAUSTED, INTERNAL, UNAVAILABLE) and
+// socket errors that a later try can clear. Anything else (UNAUTHENTICATED, PERMISSION_DENIED,
+// INVALID_ARGUMENT, ...) is permanent and must fail the claim with its message. NOT_FOUND on a
+// sandbox is not a failure: it is already gone, which is what the caller wants.
+const TRANSIENT_GRPC = new Set([1, 2, 4, 8, 13, 14]);
+const TRANSIENT_SOCKET = new Set(["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EPIPE", "EAI_AGAIN"]);
+
+function isTransient(e: unknown): boolean {
+  const code = (e as { code?: unknown } | null)?.code;
+  if (typeof code === "number") return TRANSIENT_GRPC.has(code);
+  return typeof code === "string" && TRANSIENT_SOCKET.has(code);
 }
 
+const GRPC_NOT_FOUND = 5;
+
+function isGone(e: unknown): boolean {
+  return (e as { code?: unknown } | null)?.code === GRPC_NOT_FOUND;
+}
+
+/** Modal's exit code for a sandbox, or a non-null stand-in when Modal no longer knows it. */
+async function pollOrGone(sandbox: ModalSandbox): Promise<number | null> {
+  try {
+    return await sandbox.poll();
+  } catch (e) {
+    if (isGone(e)) return 0;
+    throw e;
+  }
+}
+
+const RETRY_MS = { first: 2000, max: 30_000 };
+const POLL_MS = 1000;
+const PROGRESS_LOG_MS = 30_000;
+
 /**
- * Resolves once no sandbox of the run from another claim is live (a terminated one drops out of
- * the listing); throws if some remain after `timeoutMs`. Needed before `/outputs` is put back:
- * a sandbox still running could write over the restored files.
+ * Ends every live sandbox of the run that another claim started, and returns only once Modal has
+ * reported each one terminated (`poll` returns an exit code) and a fresh listing shows none left.
+ * Called right after a claim succeeds and before it starts any sandbox: the claim holds the lease,
+ * and an earlier claim's sandbox (a crashed or lost runner's) that is still alive could write over
+ * this claim's `/outputs` or scratch on the shared mounts.
+ *
+ * There is no deadline: a guess shorter than Modal's own would start a writer beside a live one.
+ * Transient Modal errors are retried with backoff and logged; a permanent one (a revoked token)
+ * throws, so the claim fails with its message. The wait ends when termination is confirmed or
+ * `signal` aborts (a stop, shutdown or lost lease), and a sandbox Modal never reports still ends
+ * at its lifetime limit. While waiting the claim heartbeats and starts nothing.
  */
-export async function awaitOtherClaimsGone(
+export async function endOtherClaims(
   modal: ModalSandboxConfig["modal"],
   runId: string,
   claim: string,
-  signal?: AbortSignal,
-  timeoutMs = 60_000,
-) {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    let live = false;
-    for await (const _ of otherClaims(modal, runId, claim, signal)) {
-      live = true;
-      break;
+  signal: AbortSignal,
+  log: (line: string) => void,
+): Promise<number> {
+  const started = Date.now();
+  const ended = new Set<string>();
+  let nextLog = started;
+  for (let delay = RETRY_MS.first; ; ) {
+    try {
+      const live: ModalSandbox[] = [];
+      for await (const sandbox of otherClaims(modal, runId, claim, signal)) live.push(sandbox);
+      if (live.length === 0) return ended.size;
+      for (const sandbox of live) {
+        if (ended.has(sandbox.sandboxId)) continue;
+        await sandbox.terminate().catch((e) => {
+          if (!isGone(e)) throw e;
+        });
+        ended.add(sandbox.sandboxId);
+      }
+      // Our own loop, not `terminate({wait: true})`: the SDK's wait cannot be stopped by a signal.
+      for (let pending = live; pending.length > 0; ) {
+        if (Date.now() >= nextLog) {
+          log(
+            `waiting for ${pending.length} sandbox${pending.length === 1 ? "" : "es"} of an earlier claim to terminate (${Math.round((Date.now() - started) / 1000)} s)`,
+          );
+          nextLog = Date.now() + PROGRESS_LOG_MS;
+        }
+        await setTimeout(POLL_MS, undefined, { signal });
+        const codes = await Promise.all(pending.map(pollOrGone));
+        pending = pending.filter((_, i) => codes[i] === null);
+      }
+      delay = RETRY_MS.first;
+    } catch (e) {
+      signal.throwIfAborted();
+      if (!isTransient(e)) throw e;
+      log(`ending an earlier claim's sandboxes failed, retrying in ${delay / 1000} s: ${e}`);
+      await setTimeout(delay, undefined, { signal });
+      delay = Math.min(delay * 2, RETRY_MS.max);
     }
-    if (!live) return;
-    if (Date.now() >= deadline)
-      throw new Error(
-        "an earlier claim's sandboxes are still running, so /outputs cannot be put back",
-      );
-    await setTimeout(2000, undefined, { signal });
   }
 }
 

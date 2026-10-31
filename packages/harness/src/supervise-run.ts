@@ -57,8 +57,6 @@ export interface SuperviseRunOptions {
   files: Files;
   /** The run's `/outputs` as a whole: backed up when a correction starts, put back when one ends unfinished (`outputs-backup.ts`). */
   outputs: Outputs;
-  /** Resolves once no earlier claim's sandbox is live, throws if some are; awaited before a restore of `/outputs` (`outputs-backup.ts`). */
-  earlierClaimsEnded(signal: AbortSignal): Promise<void>;
   /**
    * The model, thinking level and call function of a thread of `role`. `recorded` is the model
    * (`provider/id`) a resumed thread started on, which it must keep.
@@ -182,6 +180,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       parentThreadId: null,
       kind: "supervisor",
       workflows: options.workflows.map((pin) => ({ ...pin, commit: definition.commit })),
+      sandboxImage: options.sandbox.image,
     });
     // A reopen clears the claim-end reason (`messages.ts`); a claim cut off before it wrote its
     // `claim.started` has one again, and says that instead.
@@ -198,7 +197,6 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       recorder,
       outputs: options.outputs,
       mainWorks: layout.mainWorks,
-      earlierClaimsEnded: options.earlierClaimsEnded,
       signal,
     });
     const pool = threads(

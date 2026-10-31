@@ -165,7 +165,7 @@ who ends it:
    exits 130 at once and leaves the sandboxes (use `sandboxes:clean`). Signal the process
    group (Ctrl-C does); `kill <pid of pnpm>` alone leaves the runner running.
    The recorder stops a run the same way (`self-stop`) when the API stays unreachable for its retries (network or 5xx, about 20 s): the run is released and resumed, not failed. A 4xx refusal still fails it.
-3. **A resume.** Right after a claim succeeds, `run.ts` terminates every live sandbox tagged with the run but not this claim (`terminateOtherClaims`: one list call, then each sandbox's tags; no wait). The claim holds the lease, so nothing an earlier claim started keeps writing or spending. The sweep is cleanup and never decides the run's outcome: an error is logged and retried once, and the idle timeout backs it up. A creation is aborted with the run's signal, so a released run's creation cannot start a sandbox beside the runner that reclaimed it. A process frozen past its lease (a sleeping laptop) can still act late.
+3. **A resume.** Right after a claim succeeds, before any sandbox, `run.ts` calls `endOtherClaims` (`modal-sandbox.ts`): it lists the live sandboxes tagged with the run but not this claim, terminates each and polls until Modal has reported every one terminated (a sandbox Modal no longer knows counts as gone) and a fresh listing shows none. The claim holds the lease, so a crashed or lost runner's sandbox, still writing the shared `/outputs` and scratch mounts, must be gone before this claim starts a sandbox or restores `/outputs`. There is no deadline: a guess shorter than Modal's own would start a writer beside a live one. Transient Modal errors are retried with backoff and logged, a permanent one (a revoked token) fails the claim; the wait ends on confirmation or on the claim's stop (shutdown, lost lease), and a sandbox Modal never reports still ends at its lifetime limit. While it waits the claim heartbeats and logs "still waiting" every 30 s. Measured locally, a terminate takes about 30 s to confirm. A creation is aborted with the run's signal, so a released run's creation cannot start a sandbox beside the runner that reclaimed it. A process frozen past its lease (a sleeping laptop) can still act late.
 4. **Modal ends it.** After 300 s with no command running (`VOLUMA_SANDBOX_IDLE_SECONDS` in
    `.env`, at least 30) or at a hard lifetime of 14400 s (`VOLUMA_SANDBOX_LIFETIME_SECONDS`).
    Before each call the session asks Modal whether a sandbox it handed out earlier still
@@ -431,8 +431,8 @@ The worker's, checker's and (when its file grants `bash`) main's system prompts 
 script, from its docstring's first line; the loader reads it from the snapshot). Their optional tools are the file's `tools`
 (`supervise-run.ts` `grantsOf`); `segment_sam` is also dropped when the runner configures no gateway, and always for the checker (it calls out to Meta; `keepFailed` writes the run-wide scratch). `loadWorkflow`
 snapshots the role files with the workflow and reads them from the snapshot, so a resumed thread
-composes byte-identical text and an edited file reaches only new threads (a thread whose prompt
-changed is still `ThreadStale`). The main agent without `bash` gets its file's body, then the skill list and the tool index (no sandbox text). A snapshot that has `checker.md` and no `check.md` (cut before the rename) is refused at load: "This run was made by an older version of Voluma and can't be resumed; start a new run." The snapshot is all-or-nothing: `.snapshot-done` is written last and later claims skip copying; with no marker (a first attempt cut off by a deploy) `loadWorkflow` empties the prefix before copying, so files the checkout has since deleted or renamed never sit beside the new ones.
+composes byte-identical text and an edited file reaches only new threads (a resumed thread keeps the system prompt and tool
+definitions it started with, run by the current tools; it is `ThreadStale` only if the input schema of one of its tools changed; a changed description (the tool's or a field's) resumes, a changed default does not, and a tool removed since answers a call with an error). The main agent without `bash` gets its file's body, then the skill list and the tool index (no sandbox text). A snapshot that has `checker.md` and no `check.md` (cut before the rename) is refused at load: "This run was made by an older version of Voluma and can't be resumed; start a new run." The snapshot is all-or-nothing: `.snapshot-done` is written last and later claims skip copying; with no marker (a first attempt cut off by a deploy) `loadWorkflow` empties the prefix before copying, so files the checkout has since deleted or renamed never sit beside the new ones.
 Format: `workflows/core/agents/AGENTS.md`.
 
 A role's model is its file's `model` alias. `config.models` maps each alias to a provider model:
@@ -479,8 +479,7 @@ A cut-off resume counts as no delivery and no redo.
 A researcher's message reopens a finished run (`run.reopened`, `packages/contracts/src/messages.ts`)
 and the next claim resumes the main agent with it, as a notice: nothing is cut off, so there is no
 cut-off text. That claim's `claim.started` carries `reopened: true` instead of `after`. A thread
-whose stored history cannot be resumed (a run made before `reply` existed, a changed prompt or tool
-list) or whose recorded model this runner no longer allows is refused as stale and started again
+whose stored history cannot be resumed (the input schema of one of its tools changed) or whose recorded model this runner no longer allows is refused as stale and started again
 (`main.<n>`); `threadModel` hands such a thread the role's model rather than failing the run. A claim answers one message: the API refuses a message to a run that is
 queued or running, so no message arrives mid-claim. A correction whose main agent stops moving fails the claim (the server records
 `correction.ended`) instead of skipping tasks. `/outputs` is one R2 prefix shared by every claim, so
@@ -492,10 +491,7 @@ the main role holds `bash`, which then backs up every span) copies the whole pre
 files before it reports anything, so claim start is the earliest point that precedes every
 writer) and records `outputs.backed-up`; the first claim after `correction.ended` clears
 `/outputs`, copies the backup back, checks that `/outputs` matches it (key and ETag per key, both
-sides `CopyObject` copies) and records `outputs.restored`. Before a restore the claim
-calls `awaitOtherClaimsGone`, which re-lists the run's sandboxes of other claims until none is
-live (up to 60 s): a stale sandbox could write over the restored files, so if some remain the
-claim fails. Only a pending restore waits; `terminateOtherClaims` at claim start does not. A failed check throws too, and the next claim repeats the restore. The first claim of the
+sides `CopyObject` copies) and records `outputs.restored`. No earlier claim's sandbox is live by then (`endOtherClaims` waited for them at claim start), so none can write over the restored files. A failed check throws too, and the next claim repeats the restore. The first claim of the
 next `run.reopened` after a correction finished (no `correction.ended` before it) deletes its
 backup and records `outputs.discarded`. `corrections` (`@voluma/contracts/fold`) is the one
 reader of a correction's state (its message and go, how it closed, its backup). A thread that ended `cancelled` is never
