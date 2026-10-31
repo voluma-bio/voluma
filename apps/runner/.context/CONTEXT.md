@@ -160,7 +160,7 @@ who ends it:
    released run's old runner must not kill the sandbox of the runner that reclaimed it).
 2. **A signal.** SIGINT and SIGTERM stop every run (the running command is killed), each
    reports `released` with reason `shutdown` first, so the run is recovered within the platform's grace period,
-   then closes its sandbox (no `stopped` event is stored); the service waits up to 30 s. A second signal
+   then closes its sandbox (no `stopped` event is stored); the service waits up to 50 s (Render's grace is 60 s), and the release retries for what is left of it after a 15 s cap on the final flush, so a deploy that overlaps an API outage is still recorded as `shutdown`. A second signal
    exits 130 at once and leaves the sandboxes (use `sandboxes:clean`). Signal the process
    group (Ctrl-C does); `kill <pid of pnpm>` alone leaves the runner running.
 3. **A resume.** Right after a claim succeeds, `run.ts` terminates every live sandbox tagged with the run but not this claim (`terminateOtherClaims`: one list call, then each sandbox's tags; no wait). The claim holds the lease, so nothing an earlier claim started keeps writing or spending. The sweep is cleanup and never decides the run's outcome: an error is logged and retried once, and the idle timeout backs it up. A creation is aborted with the run's signal, so a released run's creation cannot start a sandbox beside the runner that reclaimed it. A process frozen past its lease (a sleeping laptop) can still act late.
@@ -463,7 +463,7 @@ never resumed: a stale dependent's thread stopped (`task-runtime.ts` `staleDepen
 failing run aborting its threads (`abortAll`). A stop stores that `cancelled` end first
 (`task-runtime.ts` `stop`, inside `section`) and then aborts without waiting; the thread's own
 later end is dropped (`start-thread.ts`). So a stopped thread's next write is refused at once,
-and "open" always means "cut off". A self-stop reports `released` with reason `self-stop`; a signal, `shutdown`.
+and "open" always means "cut off". A self-stop reports `released` with reason `self-stop`; a signal, `shutdown`. Neither counts toward the API's no-progress limit (the process was alive); only `lease-expired`, a runner that said nothing, does.
 
 The next claim learns why from `claim.previousClaim` (the API records `lease-expired` itself)
 and writes `claim.started {resumed, after}` right after the root's `thread.started`. The

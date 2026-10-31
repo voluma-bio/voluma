@@ -94,7 +94,7 @@ async function recover(tx: Tx, where: SQL, reason: ClaimEnd) {
         tx,
         run.id,
         "failed",
-        stalledError(reason, await inFlightTool(tx, run.id, run.claimStartSeq)),
+        stalledError(await inFlightTool(tx, run.id, run.claimStartSeq)),
         base,
       );
     } else {

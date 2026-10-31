@@ -1,6 +1,8 @@
 /**
- * The no-progress limit: a run whose claims keep ending in infrastructure trouble without
- * changing run state ends `failed` instead of looping. Progress is a change to run state
+ * The no-progress limit: a run whose runner keeps vanishing (the server expires its lease: a
+ * crash, an OOM) without changing run state ends `failed` instead of looping. A release the
+ * runner reports (`shutdown`, `self-stop`) is never counted: the process was alive and chose to
+ * stop, whether for a deploy or because it could not reach the API. Progress is a change to run state
  * (a task, checkpoint, output, attempt, revision or plan change); model turns and tool calls are not, since a loop that kills the runner every
  * time still makes them. The run row keeps `last_progress_seq` (set on append) and the
  * current claim's `claim_start_seq`; `endClaim` judges a claim when it ends.
@@ -33,23 +35,14 @@ export const isProgress = (event: { type: string; payload: unknown }) =>
 /** Consecutive claims that end without progress before the run fails. */
 export const STALLED_CLAIMS_LIMIT = 3;
 
-/** A deploy (`shutdown`) is nobody's fault: never counted. */
-const COUNTED_REASONS: ReadonlySet<ClaimEnd> = new Set(["self-stop", "lease-expired"]);
-
 export function endClaim(
   run: { lastProgressSeq: number; claimStartSeq: number; stalledClaims: number },
   reason: ClaimEnd,
 ): { stalledClaims: number; exhausted: boolean } {
   const progressed = run.lastProgressSeq > run.claimStartSeq;
-  const stalledClaims = progressed ? 0 : run.stalledClaims + (COUNTED_REASONS.has(reason) ? 1 : 0);
+  const stalledClaims = progressed ? 0 : run.stalledClaims + (reason === "lease-expired" ? 1 : 0);
   return { stalledClaims, exhausted: stalledClaims >= STALLED_CLAIMS_LIMIT };
 }
 
-const WHY: Record<ClaimEnd, string> = {
-  shutdown: "the runner restarted",
-  "self-stop": "the runner lost contact with the server",
-  "lease-expired": "the server lost contact with the runner",
-};
-
-export const stalledError = (reason: ClaimEnd, tool: string | undefined) =>
-  `Stopped: ${WHY[reason]} ${STALLED_CLAIMS_LIMIT} times in a row without progress${tool ? ` (last call: \`${tool}\`)` : ""}.`;
+export const stalledError = (tool: string | undefined) =>
+  `Stopped: the server lost contact with the runner ${STALLED_CLAIMS_LIMIT} times in a row without progress${tool ? ` (last call: \`${tool}\`)` : ""}.`;
