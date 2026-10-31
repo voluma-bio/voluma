@@ -13,6 +13,7 @@ import {
   type TaskView,
   taskStateWord,
   useNow,
+  workedSeconds,
 } from "@voluma/run-view";
 import { EmptyState, List, Readout, Row, StatusGlyph, StatusMark, Table } from "@voluma/ui";
 import { Download, FileText } from "lucide-react";
@@ -80,10 +81,7 @@ export function ReportPanel({
 /** Working time of a task's agents, together. */
 function took(task: TaskView, now: number): string | undefined {
   if (task.threads.length === 0) return undefined;
-  const seconds = task.threads.reduce((sum, t) => {
-    const end = t.endedAt ? Date.parse(t.endedAt) : now;
-    return sum + t.workedBefore + Math.max(0, end - Date.parse(t.startedAt)) / 1000;
-  }, 0);
+  const seconds = task.threads.reduce((sum, t) => sum + workedSeconds(t, now), 0);
   return formatDuration(seconds);
 }
 
