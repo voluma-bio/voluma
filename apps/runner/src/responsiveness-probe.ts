@@ -54,6 +54,7 @@ const client = runClient(
       leaseFailures++;
     },
     runStopped: new AbortController().signal,
+    onUnreachable() {},
   },
 );
 const lease = holdLease({

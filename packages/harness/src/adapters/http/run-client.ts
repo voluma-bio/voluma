@@ -2,19 +2,21 @@
  * The runner's one client for a claimed run: the run domain's ingest routes under
  * `/api/run/ingest/runs/:id`, with the bearer token and the claim's lease token on every call
  * (there is no tokenless write: `@voluma/contracts/runner`). It is the EventLog and History
- * ports, the resume read, heartbeat and report, and it owns the two policies every call
+ * ports, the resume read, heartbeat and report, and it owns the policies every call
  * shares:
  * - `onLeaseLost` runs once per failing call, as soon as any call finds the lease gone, before
  *   the error goes on (a 409 whose body is `leaseLostSchema`; never retried);
  * - `redact` is applied to every body before it is sent: to a history message first (it is
  *   JSON text inside the JSON body, so escaped twice), then to the serialized body.
  *
- * Event appends make one attempt: the recorder owns their retry policy. A network or 5xx failure
- * is the port's `EventLogUnavailable`; a lease loss or a 4xx passes through. History is the
- * durable record and a failed write ends the thread, so its calls retry until the run stops
- * (`policy.runStopped`, which the heartbeat's self-stop aborts); they are idempotent on the server (an idx repeated with the same
- * content is a no-op), so network and 5xx failures retry. A 409 on a history append is the
- * port's `HistoryConflict`. `storedEvents` is the resume read, paged (`@voluma/contracts/events`).
+ * Event and history writes share one retry rule (`writes`): a network or 5xx failure is retried
+ * until SELF_STOP_SECONDS after its first failure, or until the run stops (`policy.runStopped`).
+ * If the time runs out, `policy.onUnreachable(firstFailureAt)` runs before the error goes on, so
+ * the run is already stopping (released, not failed) when the caller sees it. A failed event
+ * append is the port's `EventLogUnavailable`; a lease loss or a 4xx passes through. History
+ * writes are idempotent on the server (an idx repeated with the same content is a no-op), and a
+ * 409 on one is the port's `HistoryConflict`. `storedEvents` is the resume read, paged
+ * (`@voluma/contracts/events`).
  * `live` posts a batch of live frames (`live.ts`): one attempt, and the caller drops a failure.
  * `heartbeat` makes one attempt, cut at HEARTBEAT_ATTEMPT_MS: the caller keeps the usage and resends it if this throws.
  * `report` ends or releases the run, with the last event seq it read; a 409 means the server ended the run first or the lease
@@ -27,6 +29,7 @@ import {
   type HeartbeatResponse,
   heartbeatResponseSchema,
   type ReportRequest,
+  SELF_STOP_SECONDS,
   type Usage,
 } from "@voluma/contracts/runner";
 import type { LiveFrame } from "@voluma/contracts/stream";
@@ -52,10 +55,21 @@ export interface RunClient extends EventLog, History {
 export function runClient(
   endpoint: Endpoint,
   claim: { runId: string; leaseToken: string },
-  policy: { redact(text: string): string; onLeaseLost(): void; runStopped: AbortSignal },
+  policy: {
+    redact(text: string): string;
+    onLeaseLost(): void;
+    runStopped: AbortSignal;
+    /** A write could not be stored for SELF_STOP_SECONDS; `firstFailureAt` is when it first failed. */
+    onUnreachable(firstFailureAt: number): void;
+  },
 ): RunClient {
   const { leaseToken } = claim;
   const { redact } = policy;
+  const writes = {
+    forMs: SELF_STOP_SECONDS * 1000,
+    until: policy.runStopped,
+    onGiveUp: policy.onUnreachable,
+  };
   const runPath = `/api/run/ingest/runs/${encodeURIComponent(claim.runId)}`;
   const historyPath = (threadId: string) =>
     `${runPath}/threads/${encodeURIComponent(threadId)}/messages`;
@@ -77,7 +91,7 @@ export function runClient(
   return {
     async append(event: EventInput) {
       try {
-        await post(`${runPath}/events`, event);
+        await post(`${runPath}/events`, event, writes);
       } catch (error) {
         const refused =
           error instanceof LeaseLost || (error instanceof HttpError && error.status < 500);
@@ -106,10 +120,7 @@ export function runClient(
     async appendMessage(threadId, idx, message) {
       try {
         const row = { idx, message: redact(message) } satisfies HistoryRow;
-        await post(historyPath(threadId), row, {
-          forMs: Number.POSITIVE_INFINITY,
-          until: policy.runStopped,
-        });
+        await post(historyPath(threadId), row, writes);
       } catch (error) {
         if (error instanceof HttpError && error.status === 409) {
           throw new HistoryConflict(error.message);

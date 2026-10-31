@@ -71,6 +71,7 @@ if (run.id !== values.run) {
       redact,
       onLeaseLost: () => {},
       runStopped: AbortSignal.abort(),
+      onUnreachable: () => {},
     },
   )
     .report({ kind: "released", reason: "shutdown" })
@@ -84,7 +85,12 @@ const abort = new AbortController();
 const client = runClient(
   config.api,
   { runId: run.id, leaseToken },
-  { redact, onLeaseLost: () => abort.abort(), runStopped: abort.signal },
+  {
+    redact,
+    onLeaseLost: () => abort.abort(),
+    runStopped: abort.signal,
+    onUnreachable: () => abort.abort(),
+  },
 );
 const meter = usageMeter();
 const beats = { count: 0, maxRoundTripMs: 0 };

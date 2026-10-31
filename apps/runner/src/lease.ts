@@ -4,9 +4,11 @@
  * the run stops that the runner learns here: the server ended it (`stop`), the lease is gone
  * (`LeaseLost`), or no heartbeat has been acknowledged for SELF_STOP_SECONDS,
  * counted from when the last acknowledged one was sent (the claim, before the first). That is
- * before the server's expiry whatever the network delay, and needs no shared clock. A heartbeat
- * that fails is retried after HEARTBEAT_RETRY_SECONDS, so the lease is renewed as soon as the API
- * answers again; the cadence stays HEARTBEAT_SECONDS otherwise.
+ * before the server's expiry whatever the network delay, and needs no shared clock. One timer
+ * schedules the next heartbeat after each one finishes: HEARTBEAT_SECONDS after an answer,
+ * HEARTBEAT_RETRY_SECONDS after a failure, so the lease is renewed soon after the API answers
+ * again. A cut-off that starts just after a heartbeat therefore survives about 43 s, and one that
+ * starts just before the next about 28 s.
  *
  * Not every missed window is lost contact. If the runner's own event loop was blocked for most of
  * it while this was the only live run, the run starved its heartbeats: that stop is
@@ -41,8 +43,9 @@ export function holdLease(options: {
 }) {
   const { client, meter, onStop, onRoundTrip, log } = options;
   let inFlight: Promise<void> | undefined;
-  let retry: ReturnType<typeof setTimeout> | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   let halted = false;
+  let acknowledgedAt = 0;
   // The window counts from the send of the last acknowledged heartbeat (the claim, before the first).
   const arm = (sentAt: number, stalledAtSend: number) =>
     setTimeout(
@@ -52,15 +55,16 @@ export function holdLease(options: {
     );
   let deadline = arm(Date.now(), soloStalledMs());
 
-  async function beat(): Promise<void> {
+  /** Resolves true when the heartbeat failed in a way a retry can fix. */
+  async function beat(): Promise<boolean> {
     const sentAt = Date.now();
     const stalledAtSend = soloStalledMs();
     const usage = meter.take();
     try {
       const { stop } = await client.heartbeat(usage);
       onRoundTrip(Date.now() - sentAt);
+      acknowledgedAt = Date.now();
       clearTimeout(deadline);
-      clearTimeout(retry);
       deadline = arm(sentAt, stalledAtSend);
       if (stop) onStop("stop");
     } catch (error) {
@@ -73,24 +77,31 @@ export function holdLease(options: {
         onStop("refused");
       } else if (!(error instanceof LeaseLost)) {
         log(`heartbeat failed, will retry: ${error instanceof Error ? error.message : error}`);
-        if (!halted) retry = setTimeout(tick, HEARTBEAT_RETRY_SECONDS * 1000);
+        return true;
       }
     }
+    return false;
   }
 
-  function tick() {
-    inFlight ??= beat().finally(() => {
-      inFlight = undefined;
-    });
+  function schedule(seconds: number) {
+    if (!halted) timer = setTimeout(tick, seconds * 1000);
   }
-  const timer = setInterval(tick, HEARTBEAT_SECONDS * 1000);
+  function tick() {
+    inFlight = beat()
+      .then((failed) => schedule(failed ? HEARTBEAT_RETRY_SECONDS : HEARTBEAT_SECONDS))
+      .finally(() => {
+        inFlight = undefined;
+      });
+  }
+  schedule(HEARTBEAT_SECONDS);
 
   return {
+    /** When the last heartbeat was acknowledged (0: none yet). */
+    acknowledgedAt: () => acknowledgedAt,
     /** Stops the timers at once, so a run being closed can't also stop with a late `self-stop`. */
     halt() {
       halted = true;
-      clearInterval(timer);
-      clearTimeout(retry);
+      clearTimeout(timer);
       clearTimeout(deadline);
     },
     /** Sends the usage since the last acknowledged heartbeat, after the one in flight. */
