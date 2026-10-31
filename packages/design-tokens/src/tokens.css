@@ -6,7 +6,7 @@
  * has no name for keeps ours (`select*`, `check-*`, `info-*`, `done*`,
  * `idle`, `mark-*`, the viewer and axis tokens).
  *
- * Two themes share one set of names. The app uses light chrome, including scan review;
+ * Two themes share one set of names. The user's preference themes all app chrome;
  * the viewer's image wells stay dark in both themes. A theme applies to the subtree
  * under `data-theme`, so Storybook shows both side by side.
  *

@@ -3,7 +3,7 @@
  * the caller's settings (defaults before the first save); POST updates only the
  * supplied fields and returns the saved settings. Both require a user session,
  * including guests. Identity comes from the session, never the request body.
- * Theme is stored here but is not applied by the web app yet.
+ * The web shell applies the saved theme across all pages.
  */
 import { z } from "zod";
 
