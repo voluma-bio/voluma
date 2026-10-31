@@ -1,6 +1,6 @@
 /**
  * The browser's input routes (`@voluma/contracts/run`): list the scans a run can start
- * on, and upload one (Uploads): create (an `uploading` input and a presigned PUT URL per
+ * on, and upload one: create (an `uploading` input and a presigned PUT URL per
  * file), then complete once storage holds every declared file at its declared size, or
  * cancel.
  * Uploading is for members only: a guest can list and start on inputs but not store
@@ -9,6 +9,7 @@
 import { randomUUID } from "node:crypto";
 import { inputKey, inputPrefix, uploadKey, uploadPrefix } from "@voluma/contracts/r2";
 import { type CreateUploadResponse, createUploadRequestSchema } from "@voluma/contracts/run";
+import { deletePrefix, type ObjectStore } from "@voluma/object-store";
 import { Hono } from "hono";
 import { parseJson, readerOf, requireUser, type UserEnv } from "../../domain";
 import type { RunDeps } from ".";
@@ -24,7 +25,23 @@ export interface UploadLimits {
   maxOpen: number;
 }
 
-export function inputsRoutes({ reads, uploadStore, objects, uploadLimits }: RunDeps) {
+/** Every object under `prefix`: key relative to the prefix → bytes. */
+async function sizesUnder(store: ObjectStore, prefix: string): Promise<Map<string, number>> {
+  const { objects } = await store.list(prefix);
+  return new Map(objects.map((o) => [o.key.slice(prefix.length), o.size]));
+}
+
+/** Copies each `[from, to]` inside the store (R2 copies up to 5 GB), then deletes every `from`. */
+async function moveObjects(store: ObjectStore, pairs: [from: string, to: string][]): Promise<void> {
+  const queue = [...pairs];
+  const copyNext = async (): Promise<void> => {
+    for (let pair = queue.shift(); pair; pair = queue.shift()) await store.copy(pair[0], pair[1]);
+  };
+  await Promise.all(Array.from({ length: 16 }, copyNext));
+  await store.delete(pairs.map(([from]) => from));
+}
+
+export function inputsRoutes({ reads, uploadStore, store, uploadLimits }: RunDeps) {
   const app = new Hono<UserEnv>();
   app.use("/inputs", requireUser);
   app.use("/inputs/*", requireUser);
@@ -36,7 +53,7 @@ export function inputsRoutes({ reads, uploadStore, objects, uploadLimits }: RunD
     if (user.account !== "member") {
       return c.json({ error: "Sign in with a lab account to upload a scan." }, 403);
     }
-    if (!objects) return c.json({ error: "Scan upload is not set up on this server." }, 503);
+    if (!store) return c.json({ error: "Scan upload is not set up on this server." }, 503);
     const { name, files } = await parseJson(c, createUploadRequestSchema);
     const bytes = files.reduce((sum, f) => sum + f.size, 0);
     if (files.length > uploadLimits.maxFiles || bytes > uploadLimits.maxBytes) {
@@ -60,7 +77,10 @@ export function inputsRoutes({ reads, uploadStore, objects, uploadLimits }: RunD
     const uploads = await Promise.all(
       files.map(async (f) => ({
         path: f.path,
-        url: await objects.presignPut(uploadKey(id, f.path), f.size, URL_TTL_SECONDS),
+        url: await store.presignPut(uploadKey(id, f.path), {
+          size: f.size,
+          expiresIn: URL_TTL_SECONDS,
+        }),
       })),
     );
     return c.json({ inputId: id, uploads, expiresAt } satisfies CreateUploadResponse);
@@ -74,10 +94,10 @@ export function inputsRoutes({ reads, uploadStore, objects, uploadLimits }: RunD
     const upload = await uploadStore.findOwn(readerOf(user), user.userId, id);
     if (!upload) return c.json({ error: "not found" }, 404);
     if (upload.status === "ready") return c.json(upload.input);
-    if (!objects) return c.json({ error: "Scan upload is not set up on this server." }, 503);
+    if (!store) return c.json({ error: "Scan upload is not set up on this server." }, 503);
     const [staged, moved] = await Promise.all([
-      objects.sizes(uploadPrefix(id)),
-      objects.sizes(inputPrefix(id)),
+      sizesUnder(store, uploadPrefix(id)),
+      sizesUnder(store, inputPrefix(id)),
     ]);
     const missing = upload.files
       .filter((f) => staged.get(f.path) !== f.size && moved.get(f.path) !== f.size)
@@ -91,7 +111,8 @@ export function inputsRoutes({ reads, uploadStore, objects, uploadLimits }: RunD
         409,
       );
     }
-    await objects.move(
+    await moveObjects(
+      store,
       upload.files
         .filter((f) => staged.get(f.path) === f.size)
         .map((f): [string, string] => [uploadKey(id, f.path), inputKey(id, f.path)]),
@@ -107,14 +128,14 @@ export function inputsRoutes({ reads, uploadStore, objects, uploadLimits }: RunD
     const upload = await uploadStore.findOwn(readerOf(user), user.userId, id);
     if (!upload) return c.json({ error: "not found" }, 404);
     if (upload.status === "ready") return c.json({ error: "The scan is already uploaded." }, 409);
-    if (!objects) return c.json({ error: "Scan upload is not set up on this server." }, 503);
+    if (!store) return c.json({ error: "Scan upload is not set up on this server." }, 503);
     // The row first, and only while uploading: a complete that already marked it ready
     // keeps its files, and one still moving them then finds no row and answers 404.
     if (!(await uploadStore.remove(id))) {
       return c.json({ error: "The scan is already uploaded." }, 409);
     }
-    await objects.deletePrefix(uploadPrefix(id));
-    await objects.deletePrefix(inputPrefix(id));
+    await deletePrefix(store, uploadPrefix(id));
+    await deletePrefix(store, inputPrefix(id));
     return c.body(null, 204);
   });
 

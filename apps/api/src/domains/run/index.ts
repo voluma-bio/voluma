@@ -10,6 +10,7 @@
  * returns a Hono app and does not know its mount. The Postgres adapters and tables are in
  * this directory.
  */
+import type { ObjectStore } from "@voluma/object-store";
 import { Hono } from "hono";
 import type { AppEnv } from "../../domain";
 import { ingestRoutes } from "./ingest";
@@ -21,7 +22,6 @@ import type { RunQueue } from "./pg-queue";
 import type { RunReads } from "./pg-runs";
 import type { StudyReads } from "./pg-studies";
 import type { PgUploads } from "./pg-uploads";
-import type { Uploads } from "./r2-uploads";
 import { runsRoutes } from "./runs";
 import { streamRoutes } from "./stream";
 import { studiesRoutes } from "./studies";
@@ -34,9 +34,9 @@ export interface RunDeps {
   history: LeasedHistory;
   /** Wakes open streams when a run's events or state change. */
   notifier: Notifier;
-  /** Upload rows, and the object store their files go to (presigned, never through the API); null when R2 is not configured. */
+  /** Upload rows, and the object store their files go to (presigned, never through the API); null when neither R2 nor a storage directory is configured. */
   uploadStore: PgUploads;
-  objects: Uploads | null;
+  store: ObjectStore | null;
   uploadLimits: UploadLimits;
   /** Aborts when the API starts draining; open streams end so the drain isn't held. */
   shutdown: AbortSignal;
