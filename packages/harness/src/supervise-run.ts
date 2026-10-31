@@ -7,12 +7,14 @@
  * the same session. Resume and a first run are the same call; the recorder is built on the stored
  * events by the host.
  *
- * `superviseRun` returns at once with the loop's result and the two things the host orders at the
- * end of a run, which depend on why it ends (the lease, the report): `drain` the conversion queue,
- * `close` the sandboxes.
+ * The host passes one signal: a cut-off, "this will not end the run" (shutdown, a lost lease, the
+ * server's stop). `superviseRun` returns at once; `result` settles with how the claim ended. On a
+ * normal end (completed, or failed) the harness first drains the conversion queue, so every
+ * output has an `assets.*` event whatever step failed, even the host's `prepare`. A cut-off, also
+ * one that lands during the drain, records nothing permanent: the next claim resumes. `close`
+ * destroys the sandboxes, which the host orders after the lease and the report.
  */
 import type { RunEvent } from "@voluma/contracts/events";
-import type { Folded } from "@voluma/contracts/fold";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import type { WorkflowDefinition } from "@voluma/workflow/definition";
@@ -37,12 +39,31 @@ import { buildTools } from "./tools/registry";
 
 export type { LoopConfig, ModelSetup, PlanTask };
 
-export interface SuperviseRunOptions {
-  runId: string;
+/** How long threads get to end after a cut-off or `fail` before the result settles anyway. */
+const WIND_DOWN_MS = 5_000;
+
+/** What `prepare` returns: the workflow and what depends on its roles. */
+export interface Prepared {
   /** The role files, skills and task files of the run's workflow snapshot. */
   definition: WorkflowDefinition;
   /** The plan computed from the user's selection; the run starts with it (the main agent may change it). */
   plan: readonly PlanTask[];
+  /**
+   * The model, thinking level and call function of a thread of `role`. `recorded` is the model
+   * (`provider/id`) a resumed thread started on, which it must keep.
+   */
+  model(role: string, recorded: string | undefined): ModelSetup;
+}
+
+export interface SuperviseRunOptions {
+  runId: string;
+  /**
+   * The host's setup that can fail: loading the workflow, checking its roles' models, ending an
+   * earlier claim's sandboxes. It runs inside the supervisor, so a failure here ends the run like
+   * any other failure, with the conversion queue drained. No sandbox is created before it resolves.
+   * `signal` aborts when the run is cut off or failed.
+   */
+  prepare(signal: AbortSignal): Promise<Prepared>;
   /** The outputs the user selected (every output when absent) and their notes; the first messages carry both. */
   selectedOutputs: readonly string[] | undefined;
   notes: string | undefined;
@@ -61,11 +82,6 @@ export interface SuperviseRunOptions {
   files: Files;
   /** The run's `/outputs` as a whole: backed up when a correction starts, put back when one ends unfinished (`outputs-backup.ts`). */
   outputs: Outputs;
-  /**
-   * The model, thinking level and call function of a thread of `role`. `recorded` is the model
-   * (`provider/id`) a resumed thread started on, which it must keep.
-   */
-  model(role: string, recorded: string | undefined): ModelSetup;
   /** Makes a sandbox; the host meters it and picks the provider. `signal` stops a creation. */
   createSandbox: CreateSandbox;
   /** Size and lifetime of every sandbox. */
@@ -79,25 +95,24 @@ export interface SuperviseRunOptions {
   config?: Partial<LoopConfig>;
   /** Whether a failed thread's error text says the model provider failed. */
   providerError?(error: string): "retry" | "fatal" | undefined;
+  /** How long a normal end waits for the review assets still being converted. */
+  drainMs: number;
   log(line: string): void;
-  /** Ends the run: its threads stop where they are. */
+  /** The cut-off: this will not end the run. Threads and the conversion stop where they are. */
   signal: AbortSignal;
-  /**
-   * Ends the review-asset conversion and its sandbox creation. A stop that will not end the run
-   * fires it; `signal`, which the host also fires when the run ends normally, must not, since
-   * the conversion outlives it until `drain`.
-   */
-  conversionSignal: AbortSignal;
 }
 
+/** How a claim ended. A run that ended is final; a cut-off one is resumed by the next claim. */
+export type Outcome = { kind: "ended"; error?: string } | { kind: "cut-off" };
+
 export interface Supervised {
-  /** The loop's result: the run's fold, or the error that failed it. */
-  result: Promise<Folded>;
+  /** Settles once threads have ended (or `WIND_DOWN_MS` after a cut-off) and, on a normal end, the conversion queue has drained. */
+  result: Promise<Outcome>;
   /**
-   * For a run that has ended: waits until every output has an `assets.*` event, up to
-   * `timeoutMs`, and records `assets.failed` for the rest (`ReviewAssetsWorker.drain`).
+   * Fails the run with this error, as a step error would: its threads stop and the run ends
+   * `failed`. Returns false once `result` has settled, when it changes nothing.
    */
-  drain(timeoutMs: number): Promise<void>;
+  fail(error: unknown): boolean;
   /** Stops the conversion and destroys every sandbox. */
   close(): Promise<void>;
 }
@@ -125,65 +140,76 @@ export const rootThreadOf = (runId: string, log: readonly RunEvent[]) =>
   threadLog(log).root.id ?? threadIdOf(runId, ROOT_NAME);
 
 export function superviseRun(options: SuperviseRunOptions): Supervised {
-  const { runId, recorder, definition, signal } = options;
+  const { runId, recorder, signal: cutOff } = options;
   const rootThreadId = rootThreadOf(runId, recorder.events());
-  const main = definition.agents.main;
-  const copyInputs = new Set(definition.files.tasks.filter((t) => t.copyInputs).map((t) => t.id));
-  const layout = runLayout({
-    runId,
-    inputId: options.inputId,
-    inputPrefix: options.inputPrefix,
-    skills: definition.skills,
-    roles: rolesOf(definition, options.gateway !== undefined),
-    // From the workflow's task, so a task the main agent adds from it keeps the flag.
-    copiesInputs: (id) => copyInputs.has(id),
-  });
-  const recordOf = (threadId: string) => {
-    const record = threadLog(recorder.events()).threads.get(threadId);
-    if (!record) throw new Error(`${threadId} has no thread.started`);
-    return record;
-  };
-
-  // The sandboxes of the run: one per thread, and the review-asset converter's. A thread's
-  // `thread.started` is stored before its first sandbox call, so its layout is found by id.
   const CONVERT = `${runId}.convert`;
-  const sandboxLayout = (id: string): SandboxLayout =>
-    id === CONVERT ? layout.convert : layout.forThread(recordOf(id));
-  const settings = { runId, ...options.sandbox };
-  // Halt lives here so convert-sandbox create can abort on it without reading the worker.
-  const conversionHalt = new AbortController();
-  const conversionAbort = AbortSignal.any([options.conversionSignal, conversionHalt.signal]);
-  const session: SandboxSession = sandboxSession(
-    (id) => {
-      const sandbox = sandboxLayout(id);
-      const gateway = sandbox.gateway ? options.gateway?.(sandbox.name) : undefined;
-      const spec = specOf(sandbox, settings, gateway);
-      // Cache identity must follow the run's pinned image, including after a deploy.
-      if (id === CONVERT) spec.env = { ...spec.env, VOLUMA_REVIEW_RUNTIME: spec.image };
-      // The conversion outlives `signal` (see `conversionSignal`); conversionAbort also carries halt.
-      return options.createSandbox(spec, id === CONVERT ? conversionAbort : signal);
-    },
-    // The convert sandbox writes no event: a failure there shows as the file's `assets.failed`,
-    // not as a failed sandbox on the main agent's page.
-    (id, state, detail) => {
-      if (id !== CONVERT)
-        recorder.emit(id, "sandbox", { name: sandboxLayout(id).name, state, detail });
-    },
-    // The convert sandbox's commands run with `note: false`, so its note is never read.
-    (id) => (id === CONVERT ? "" : layout.forThread(recordOf(id)).restartNote),
-  );
+  // Ends the run's own threads: after `fail`, and once the loop has settled.
+  const ending = new AbortController();
+  const loopSignal = AbortSignal.any([cutOff, ending.signal]);
+  let failure: string | undefined;
+  let settled = false;
+
+  // Everything that needs the workflow. The conversion worker waits on it, so a `prepare` that
+  // fails fails the pending conversions, which the drain then settles like any others.
+  const world = options.prepare(loopSignal).then((prepared) => {
+    const { definition } = prepared;
+    const copyInputs = new Set(definition.files.tasks.filter((t) => t.copyInputs).map((t) => t.id));
+    const layout = runLayout({
+      runId,
+      inputId: options.inputId,
+      inputPrefix: options.inputPrefix,
+      skills: definition.skills,
+      roles: rolesOf(definition, options.gateway !== undefined),
+      // From the workflow's task, so a task the main agent adds from it keeps the flag.
+      copiesInputs: (id) => copyInputs.has(id),
+    });
+    const recordOf = (threadId: string) => {
+      const record = threadLog(recorder.events()).threads.get(threadId);
+      if (!record) throw new Error(`${threadId} has no thread.started`);
+      return record;
+    };
+    // The sandboxes of the run: one per thread, and the review-asset converter's. A thread's
+    // `thread.started` is stored before its first sandbox call, so its layout is found by id.
+    const sandboxLayout = (id: string): SandboxLayout =>
+      id === CONVERT ? layout.convert : layout.forThread(recordOf(id));
+    const settings = { runId, ...options.sandbox };
+    const session: SandboxSession = sandboxSession(
+      (id) => {
+        const sandbox = sandboxLayout(id);
+        const gateway = sandbox.gateway ? options.gateway?.(sandbox.name) : undefined;
+        const spec = specOf(sandbox, settings, gateway);
+        // Cache identity must follow the run's pinned image, including after a deploy.
+        if (id === CONVERT) spec.env = { ...spec.env, VOLUMA_REVIEW_RUNTIME: spec.image };
+        // The conversion outlives the loop: it stops on the cut-off or its own halt, not with `ending`.
+        return options.createSandbox(spec, id === CONVERT ? conversion.signal : loopSignal);
+      },
+      // The convert sandbox writes no event: a failure there shows as the file's `assets.failed`,
+      // not as a failed sandbox on the main agent's page.
+      (id, state, detail) => {
+        if (id !== CONVERT)
+          recorder.emit(id, "sandbox", { name: sandboxLayout(id).name, state, detail });
+      },
+      // The convert sandbox's commands run with `note: false`, so its note is never read.
+      (id) => (id === CONVERT ? "" : layout.forThread(recordOf(id)).restartNote),
+    );
+    return { prepared, layout, recordOf, session };
+  });
+  world.catch(() => {}); // the loop and the conversion read its failure
+
   const conversion = reviewAssetsWorker({
     runId,
     inputId: options.inputId,
     rootThreadId,
     recorder,
-    sandbox: () => session.get(CONVERT, { note: false }),
-    signal: options.conversionSignal,
-    halt: conversionHalt,
+    sandbox: async () => (await world).session.get(CONVERT, { note: false }),
+    signal: cutOff,
     log: options.log,
   });
 
-  const result = (async (): Promise<Folded> => {
+  const loop = async (): Promise<void> => {
+    const { prepared, layout, recordOf, session } = await world;
+    const { definition } = prepared;
+    const main = definition.agents.main;
     // Not a derived id: each invocation of the root is a thread start of its own.
     recorder.emit(rootThreadId, "thread.started", {
       name: ROOT_NAME,
@@ -209,7 +235,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       recorder,
       outputs: options.outputs,
       mainWorks: main.tools.includes("bash") && main.outputs === "write",
-      signal,
+      signal: loopSignal,
     });
     const pool = threads(
       {
@@ -221,7 +247,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
             .release(id)
             .catch((e) => options.log(`releasing ${recordOf(id).name} failed: ${e}`)),
       },
-      signal,
+      loopSignal,
     );
     const runtime = taskRuntime({
       recorder,
@@ -230,12 +256,12 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       layoutOf: layout.forThread,
       sandbox: (id, o) => session.get(id, o),
       rootThreadId,
-      plan: options.plan,
+      plan: prepared.plan,
       abortThread: (id) => {
         if (pool.started(id)) pool.abort(id);
       },
     });
-    return runLoop({
+    await runLoop({
       runId,
       rootThreadId,
       recorder,
@@ -245,7 +271,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       definition,
       selectedOutputs: options.selectedOutputs,
       notes: options.notes,
-      model: options.model,
+      model: prepared.model,
       config: options.config,
       tools: (thread, agents) =>
         buildTools(thread.tools, {
@@ -262,15 +288,63 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
           },
         }),
       providerError: options.providerError,
-      signal,
+      signal: loopSignal,
     });
+  };
+
+  const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+  const result = (async (): Promise<Outcome> => {
+    // A thread stuck in a slow call (creating a sandbox takes a minute) must not hold the end of
+    // the run: WIND_DOWN_MS after the loop's signal fires, the result settles anyway.
+    let timer: NodeJS.Timeout | undefined;
+    const windDown = new Promise<void>((resolve) => {
+      const arm = () => {
+        timer = setTimeout(resolve, WIND_DOWN_MS);
+      };
+      if (loopSignal.aborted) arm();
+      else loopSignal.addEventListener("abort", arm, { once: true });
+    });
+    let error: unknown;
+    try {
+      await Promise.race([loop(), windDown]);
+    } catch (e) {
+      error = e;
+    } finally {
+      ending.abort();
+      clearTimeout(timer);
+    }
+    try {
+      if (cutOff.aborted) return { kind: "cut-off" };
+      if (!(await conversion.drain(options.drainMs))) return { kind: "cut-off" };
+      // An error nobody caught (`fail`) is what ended the run, whatever the stopped loop threw.
+      const reason = failure ?? (error === undefined ? undefined : messageOf(error));
+      return reason === undefined ? { kind: "ended" } : { kind: "ended", error: reason };
+    } catch (e) {
+      // A store that gave up during the drain stops the run (the host's cut-off) before this.
+      if (cutOff.aborted) return { kind: "cut-off" };
+      return { kind: "ended", error: messageOf(e) };
+    } finally {
+      settled = true;
+    }
   })();
 
   return {
     result,
-    drain: (timeoutMs) => conversion.drain(timeoutMs),
+    fail(error) {
+      if (settled) return false;
+      failure ??= messageOf(error);
+      ending.abort();
+      return true;
+    },
     close: async () => {
-      await Promise.all([conversion.close(), session.close()]);
+      await Promise.all([
+        conversion.close(),
+        world.then(
+          ({ session }) => session.close(),
+          () => {},
+        ),
+      ]);
     },
   };
 }

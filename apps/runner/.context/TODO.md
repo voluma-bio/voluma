@@ -14,15 +14,6 @@ From the skillset move (`workflows/` in this repo):
 - **The image a run begins on is this runner's, not the pinned commit's.** A run records its image on the root `thread.started` (`sandboxImage`) at its first claim and keeps it on every resume, so a deploy no longer moves a running run. A run that starts on a new runner whose workflow commit is older still gets the newest image. To tie them: tag the image with the hash of `workflows/core/requirements.txt` and resolve that tag from the requirements at the pinned commit.
 
 
-- **An ended run can leave review assets "preparing" when it fails before the conversion worker
-  starts** (e.g. `loadWorkflow` throws on a resume whose log already holds outputs). Create the
-  recorder and worker right after `storedEvents()`, or record `assets.failed` for pending outputs in
-  `finally` when the report is `ended` and the worker is undefined. (review p528 of #184)
-- **A stop between `drain`'s last abort check and its final flush** releases the run with its
-  leftovers already `assets.failed`, so the next claim won't retry them. Have `drain` return whether
-  it closed the queue and rebuild the report only when it didn't. (p528)
-- An output appended after the drain's final scan (a thread stuck past the 5 s wind-down) gets no
-  `assets.*` event. Narrow. (p529)
 - **Thinking level isn't in the events.** Pi records each reply's level in History (`thinkingLevel` on the assistant message), and the runner's boot line prints `RUNNER_THINKING`, but a run's events don't say which level a thread used. Per-role levels have landed (role files' `thinking`); record the level with the model on `thread.started` (a contract change) so a resume keeps it.
 
 - **A correction's output backup (`runs/<id>/corrections/<reopen id>/`) is deleted only by the next claim after it, and a restored one stays.** A go's first claim copies the whole `/outputs` (`outputs-backup.ts`); the first claim of the next reopen after the correction finished deletes it, but a backup that was restored (the correction failed) is kept, and a run never reopened again keeps its last one. Delete restored backups too. Objects over 5 GB would need a multipart copy (`r2-outputs.ts` uses one `CopyObject`).

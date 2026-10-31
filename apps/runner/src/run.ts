@@ -13,16 +13,20 @@
  * logged through it.
  *
  * Beside the supervisor runs the harness's conversion worker (`review-assets.ts`): it turns
- * the files tasks report into review assets in a `convert` sandbox as they appear. It stops when a stop will
- * not end the run (`conversionSignal`), not on the internal abort at the end of the run, which it must outlive.
+ * the files tasks report into review assets in a `convert` sandbox as they appear.
  *
- * End of the run, in order. A normal end (an uncaught error included) waits for
- * the conversion queue to drain (bounded by `DRAIN_MS`, the lease heartbeating meanwhile; every
- * output left without an `assets.*` event is recorded as failed; a stop during the wait ends it
- * and the run is released instead), then closes the sandboxes, then reports. A stop
- * (shutdown, self-stop) reports `released` with its reason first, so the run is recovered within
- * the platform's grace period, then closes the sandboxes; it does not drain, the next claim
- * resumes the queue. A stop by the server or a lost lease reports nothing.
+ * The host gives `superviseRun` one signal, the cut-off: a stop that will not end the run
+ * (shutdown, self-stop, refused, loop-stalled, lease lost, the server's stop). The supervisor
+ * ends its own threads and, on a normal end, drains the conversion queue (bounded by `DRAIN_MS`,
+ * the lease heartbeating meanwhile; every output left without an `assets.*` event is recorded
+ * as failed, whatever step failed, `prepare` included). Its `result` says which happened: the run
+ * ended, or it was cut off, a cut-off during the drain included, which records nothing.
+ *
+ * End of the run, in order. An ended run (an uncaught error included, via `Supervised.fail`)
+ * closes the sandboxes, then reports `ended`. A cut-off reports `released` with its reason
+ * first (shutdown, self-stop, ...), so the run is recovered within the platform's grace
+ * period, then closes the sandboxes; the next claim resumes the queue. A stop by the server
+ * or a lost lease reports nothing.
  * None of these stops writes a `thread.ended`: the threads are cut off, and the next claim
  * (which learns why from `claim.previousClaim`) resumes them (`run-loop.ts`). The exception
  * is a user's cancel, which the runner learns as `stop`: the API has already ended every
@@ -42,6 +46,8 @@ import type { CreateSandbox } from "@voluma/harness/ports/sandbox";
 import { type Recorder, recorder } from "@voluma/harness/recorder";
 import {
   type ModelSetup,
+  type Outcome,
+  type Prepared,
   rootThreadOf,
   type Supervised,
   superviseRun,
@@ -75,8 +81,6 @@ const REPO_ROOT = resolve(import.meta.dirname, "../../..");
  * report waits only on the platform's grace period.
  */
 const CLOSE_BUDGET_MS = { ended: 60_000, stopped: 15_000 };
-/** How long threads get to end after a stop before the run is reported anyway. */
-const WIND_DOWN_MS = 5_000;
 /**
  * How long a shutdown release waits for its events and final usage to reach an API that may be
  * down before it reports. The report's retries then get what is left of the shutdown budget (`main.ts`): a
@@ -104,10 +108,9 @@ export interface RunnerContext {
 export const inputPrefixOf = (run: Claim["run"]) =>
   run.input.source === "reference" ? referencePrefix("scan") : inputPrefix(run.input.id);
 
-/** "error": an error nobody caught reached the process handler while this run was working (`telemetry.ts`). */
-type Stopped = StopReason | "shutdown" | "error";
+type Stopped = StopReason | "shutdown";
 
-/** Which report a stop reason, a clean end or a failure becomes; undefined: say nothing more. */
+/** Which report a cut-off reason, a clean end or a failure becomes; undefined: say nothing more. */
 export function reportFor(
   stopped: Stopped | undefined,
   error?: string,
@@ -149,27 +152,21 @@ async function claimBody(
   const log = (line: string) => ctx.log(`[${runId}] ${redact(line)}`);
   scope.log = log;
 
-  const abort = new AbortController();
-  // The conversion worker's own signal: it ends when a stop will not end the run, not with the
-  // abort `finally` does to close it. `haltedBy` is the stop that did.
-  const halt = new AbortController();
-  let haltedBy: Stopped | undefined;
-  // An object, so TypeScript does not narrow what the callbacks set.
-  const why: { stopped?: Stopped } = {};
-  // The first reason decides the report; every reason is logged, since a later one (an
-  // error) is what a self-stop would otherwise hide.
-  const reasons = new Set<Stopped>();
+  // The cut-off: the one signal the supervisor takes. Only a stop that will not end the run fires it.
+  const cutOff = new AbortController();
+  let stopped: Stopped | undefined;
+  // Every reason is logged once, since a later one (an error) is what a self-stop would hide;
+  // the first cut-off decides the report.
+  const reasons = new Set<string>();
+  const note = (reason: string) => {
+    if (reasons.has(reason)) return;
+    reasons.add(reason);
+    log(`stop: ${reason}${reasons.size === 1 ? "" : ` (first was ${[...reasons][0]})`}`);
+  };
   const stop = (reason: Stopped) => {
-    why.stopped ??= reason;
-    if (reportFor(reason)?.kind !== "ended") {
-      haltedBy ??= reason;
-      halt.abort();
-    }
-    if (!reasons.has(reason)) {
-      reasons.add(reason);
-      log(`stop: ${reason}${reason === why.stopped ? "" : ` (first was ${why.stopped})`}`);
-    }
-    abort.abort();
+    stopped ??= reason;
+    note(reason);
+    cutOff.abort();
   };
   // The shutdown signal outlives this run: the listener is removed in `finally`.
   const onShutdown = () => stop("shutdown");
@@ -183,7 +180,7 @@ async function claimBody(
     {
       redact,
       onLeaseLost: () => stop("lease-lost"),
-      runStopped: halt.signal,
+      runStopped: cutOff.signal,
       // Heartbeats answered during the failure window prove the API is up: the run is refused
       // those writes, not cut off from it, so the stop counts as a strike and a route that fails
       // for good ends the run instead of looping.
@@ -195,15 +192,17 @@ async function claimBody(
   let events: Recorder | undefined;
   let live: LiveBatcher | undefined;
   let supervised: Supervised | undefined;
+  let outcome: Outcome | undefined;
   let error: string | undefined;
-  // An error nobody caught (`telemetry.ts`) is kept apart from `error`, so a later throw does
-  // not replace it. Once `finally` fixes the report it can change nothing.
+  // An error nobody caught (`telemetry.ts`). Before the supervisor exists it fails the claim at
+  // the next step; after, `Supervised.fail` ends the run with it.
   let uncaught: string | undefined;
-  let reportFixed = false;
   scope.fail = (e) => {
-    if (reportFixed) return false;
-    uncaught ??= redact(e instanceof Error ? e.message : String(e));
-    stop("error");
+    const message = redact(e instanceof Error ? e.message : String(e));
+    if (supervised) {
+      if (!supervised.fail(message)) return false;
+    } else uncaught ??= message;
+    note("error");
     return true;
   };
   try {
@@ -216,61 +215,6 @@ async function claimBody(
     });
     log(`claimed (${visitor ? "visitor" : "voluma"} keys)`);
 
-    // What an earlier claim of this run left running must not keep writing or spending, so this
-    // claim starts no sandbox (and restores nothing) until Modal reports each one terminated.
-    const orphans = await endOtherClaims(config.modal, runId, claimId, abort.signal, log);
-    if (orphans > 0)
-      log(`ended ${orphans} sandbox${orphans === 1 ? "" : "es"} of an earlier claim`);
-
-    // Before any sandbox: an unreadable workflow or a bad selection fails the run here, with its
-    // message. The run's pin names the workflow directory; its files are snapshotted from this
-    // runner's checkout once (at `config.commit`), so a resume reads what the run began with.
-    const workflowDir = run.workflows[0]?.path;
-    if (!workflowDir) throw new Error(NO_WORKFLOW_DIR);
-    const definition = await loadWorkflow(workflowDir, {
-      store: objects,
-      prefix: workflowSnapshotPrefix(runId),
-      root: REPO_ROOT,
-      commit: config.commit,
-      knownTools: TOOL_NAMES,
-    });
-    // A role's model is its file's alias. A visitor's key and scan go to Standard-mode Meta
-    // models only: the main thread keeps its configured model when that is one, else the
-    // visitor model.
-    const roleModel = ({ name, model: alias }: AgentDefinition) => {
-      const model = ctx.aliases[alias];
-      if (!model) {
-        log(
-          `the ${name} role's model "${alias}" is unset: set RUNNER_MODEL_${alias.toUpperCase()}`,
-        );
-        throw new Error(roleModelUnset(alias));
-      }
-      return !visitor || (name === "main" && isVisitorSafe(model)) ? model : ctx.visitorModel;
-    };
-    // A role's file may set its thinking level; else the runner's; else none is sent ("off").
-    const roleThinking = ({ name, thinking }: AgentDefinition, model: Model<Api>) => {
-      if (visitor) return "off";
-      const level = config.modelForced ? config.thinking : (thinking ?? config.thinking);
-      assertThinking(level, [model], `the ${name} role's`);
-      return level ?? "off";
-    };
-    const roles = Object.values(definition.agents);
-    const setups = new Map(
-      roles.map((r) => {
-        const model = roleModel(r);
-        return [r.name, { model, thinkingLevel: roleThinking(r, model) }] as const;
-      }),
-    );
-    const setupOf = (name: string) => {
-      const setup = setups.get(name);
-      if (!setup) throw new Error(`${name} is not a role of this run`);
-      return setup;
-    };
-    log(`models: ${roles.map((r) => `${r.name} ${setupOf(r.name).model.id}`).join(", ")}`);
-    log(`thinking: ${roles.map((r) => `${r.name} ${setupOf(r.name).thinkingLevel}`).join(", ")}`);
-    // The tasks that produce the selected outputs and what they need. The main thread may adapt
-    // them to the run's notes when the run starts (`superviseRun`).
-    const computed = computePlan(definition.files, run.selectedOutputs);
     // Metered from the start of creation (the sweep included) to destroy: a conservative upper bound.
     const modal = claimSandboxes(config, config.modal, claimId);
     const createSandbox: CreateSandbox = async (spec, signal) => {
@@ -334,21 +278,6 @@ async function claimBody(
         return recorded.append(threadId, type, payload, id);
       },
     };
-    // A thread keeps the model it started on (the log records it).
-    const threadModel = (fallback: Model<Api>, recorded: string | undefined) => {
-      if (recorded) {
-        // Only a model this run may use: a visitor's scan goes to Standard-mode Meta only. Any other
-        // thread (a run made on another model, reopened for a correction) gets the role's model:
-        // its stored history was written by another, so it is refused as unresumable and the run
-        // loop starts the work again (`run-loop.ts`), instead of the run failing.
-        const [provider = "", ...id] = recorded.split("/");
-        const allowed = visitor
-          ? isVisitorSafe({ provider, id: id.join("/") })
-          : [...setups.values()].some(({ model: m }) => `${m.provider}/${m.id}` === recorded);
-        return (allowed && models.getModel(provider, id.join("/"))) || fallback;
-      }
-      return fallback;
-    };
     const callModel = (role: string) =>
       retryTransient(
         (m, context, options) =>
@@ -380,10 +309,88 @@ async function claimBody(
         );
         return stream;
       };
+    const prepare = async (signal: AbortSignal): Promise<Prepared> => {
+      // What an earlier claim of this run left running must not keep writing or spending, so this
+      // claim starts no sandbox (and restores nothing) until Modal reports each one terminated.
+      const orphans = await endOtherClaims(config.modal, runId, claimId, signal, log);
+      if (orphans > 0)
+        log(`ended ${orphans} sandbox${orphans === 1 ? "" : "es"} of an earlier claim`);
+
+      // Before any sandbox: an unreadable workflow or a bad selection fails the run here, with its
+      // message. The run's pin names the workflow directory; its files are snapshotted from this
+      // runner's checkout once (at `config.commit`), so a resume reads what the run began with.
+      const workflowDir = run.workflows[0]?.path;
+      if (!workflowDir) throw new Error(NO_WORKFLOW_DIR);
+      const definition = await loadWorkflow(workflowDir, {
+        store: objects,
+        prefix: workflowSnapshotPrefix(runId),
+        root: REPO_ROOT,
+        commit: config.commit,
+        knownTools: TOOL_NAMES,
+      });
+      // A role's model is its file's alias. A visitor's key and scan go to Standard-mode Meta
+      // models only: the main thread keeps its configured model when that is one, else the
+      // visitor model.
+      const roleModel = ({ name, model: alias }: AgentDefinition) => {
+        const model = ctx.aliases[alias];
+        if (!model) {
+          log(
+            `the ${name} role's model "${alias}" is unset: set RUNNER_MODEL_${alias.toUpperCase()}`,
+          );
+          throw new Error(roleModelUnset(alias));
+        }
+        return !visitor || (name === "main" && isVisitorSafe(model)) ? model : ctx.visitorModel;
+      };
+      // A role's file may set its thinking level; else the runner's; else none is sent ("off").
+      const roleThinking = ({ name, thinking }: AgentDefinition, model: Model<Api>) => {
+        if (visitor) return "off";
+        const level = config.modelForced ? config.thinking : (thinking ?? config.thinking);
+        assertThinking(level, [model], `the ${name} role's`);
+        return level ?? "off";
+      };
+      const roles = Object.values(definition.agents);
+      const setups = new Map(
+        roles.map((r) => {
+          const model = roleModel(r);
+          return [r.name, { model, thinkingLevel: roleThinking(r, model) }] as const;
+        }),
+      );
+      const setupOf = (name: string) => {
+        const setup = setups.get(name);
+        if (!setup) throw new Error(`${name} is not a role of this run`);
+        return setup;
+      };
+      log(`models: ${roles.map((r) => `${r.name} ${setupOf(r.name).model.id}`).join(", ")}`);
+      log(`thinking: ${roles.map((r) => `${r.name} ${setupOf(r.name).thinkingLevel}`).join(", ")}`);
+      // A thread keeps the model it started on (the log records it).
+      const threadModel = (fallback: Model<Api>, recorded: string | undefined) => {
+        if (recorded) {
+          // Only a model this run may use: a visitor's scan goes to Standard-mode Meta only. Any other
+          // thread (a run made on another model, reopened for a correction) gets the role's model:
+          // its stored history was written by another, so it is refused as unresumable and the run
+          // loop starts the work again (`run-loop.ts`), instead of the run failing.
+          const [provider = "", ...id] = recorded.split("/");
+          const allowed = visitor
+            ? isVisitorSafe({ provider, id: id.join("/") })
+            : [...setups.values()].some(({ model: m }) => `${m.provider}/${m.id}` === recorded);
+          return (allowed && models.getModel(provider, id.join("/"))) || fallback;
+        }
+        return fallback;
+      };
+      return {
+        definition,
+        plan: computePlan(definition.files, run.selectedOutputs).tasks,
+        model: (role, recorded) => ({
+          model: threadModel(setupOf(role).model, recorded),
+          thinkingLevel: setupOf(role).thinkingLevel,
+          streamFn: streamFor(role),
+        }),
+      };
+    };
+    if (uncaught !== undefined) throw new Error(uncaught);
     supervised = superviseRun({
       runId,
-      definition,
-      plan: computed.tasks,
+      prepare,
       selectedOutputs: run.selectedOutputs,
       notes: run.notes,
       inputId: run.input.id,
@@ -396,11 +403,6 @@ async function claimBody(
       evidence: storeEvidence(objects),
       files: storeFiles(objects),
       outputs: r2Outputs(config.r2),
-      model: (role, recorded) => ({
-        model: threadModel(setupOf(role).model, recorded),
-        thinkingLevel: setupOf(role).thinkingLevel,
-        streamFn: streamFor(role),
-      }),
       createSandbox,
       // The image is recorded on the root's first event, so `sandboxImage` is the run's own.
       sandbox: { ...config.sandbox, image: sandboxImage },
@@ -416,39 +418,23 @@ async function claimBody(
         : undefined,
       config: config.loop,
       log,
-      signal: abort.signal,
-      conversionSignal: halt.signal,
+      drainMs: DRAIN_MS,
+      signal: cutOff.signal,
     });
-    const { result } = supervised;
-    result.catch(() => {}); // an error after the race below is moot: the run is stopping
-    // A stop does not wait for a thread stuck in a slow call (creating a sandbox takes a
-    // minute): after a grace period the run is reported and the sandbox closed regardless.
-    const windDown = new Promise<void>((resolve) => {
-      const arm = () => setTimeout(resolve, WIND_DOWN_MS);
-      if (abort.signal.aborted) arm();
-      else abort.signal.addEventListener("abort", arm, { once: true });
-    });
-    await Promise.race([result, windDown]);
+    outcome = await supervised.result;
+    if (outcome.kind === "ended" && outcome.error !== undefined)
+      log(`failed: ${redact(outcome.error)}`);
   } catch (e) {
     error = redact(e instanceof Error ? e.message : String(e));
     log(`failed: ${error}`);
   } finally {
-    // Frozen here: a stop that lands while the run is being closed does not change its report,
-    // except during the drain below, where the queue is unfinished.
-    const stopped = why.stopped;
-    reportFixed = true;
-    let report = reportFor(stopped, uncaught ?? error);
-    abort.abort();
-    if (report?.kind === "ended") {
-      // Every output gets an `assets.*` event, or the run is released to be resumed.
-      await supervised?.drain(DRAIN_MS);
-      // A stop during the drain ends it at once: the run is released (nothing, for a server stop
-      // or a lost lease), so the next claim resumes the queue.
-      if (haltedBy) report = reportFor(haltedBy);
-      if (report?.kind === "ended") {
-        await closeSandboxes(CLOSE_BUDGET_MS.ended);
-      }
-    }
+    // The harness decided how the claim ended, drained included; a stop landing now changes nothing.
+    // Without an outcome the claim failed before the supervisor ran (or was stopped then).
+    const report =
+      outcome?.kind === "ended"
+        ? reportFor(undefined, outcome.error === undefined ? undefined : redact(outcome.error))
+        : reportFor(stopped, uncaught ?? error);
+    if (report?.kind === "ended") await closeSandboxes(CLOSE_BUDGET_MS.ended);
     shutdown.removeEventListener("abort", onShutdown);
     lease?.halt();
     const wrapUp = (async () => {

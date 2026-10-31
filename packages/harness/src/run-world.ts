@@ -16,7 +16,7 @@ import {
   fauxToolCall,
 } from "@earendil-works/pi-ai";
 import type { RunEvent } from "@voluma/contracts/events";
-import { corrections, type Folded } from "@voluma/contracts/fold";
+import { corrections, type Folded, fold } from "@voluma/contracts/fold";
 import { cancelEnds } from "@voluma/contracts/threads";
 import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
 import type { AgentDefinition, WorkflowDefinition } from "@voluma/workflow/definition";
@@ -369,8 +369,16 @@ export function world(o: WorldOptions) {
     const rec = recorder(store as never, RUN, () => {}, [...stored]);
     const supervised = superviseRun({
       runId: RUN,
-      definition,
-      plan: o.plan,
+      prepare: async () => ({
+        definition,
+        plan: o.plan,
+        model: (role) => ({
+          model: modelOf[role as keyof typeof modelOf].getModel(),
+          thinkingLevel: "off" as const,
+          streamFn: models.streamSimple.bind(models) as never,
+        }),
+      }),
+      drainMs: 5_000,
       selectedOutputs: undefined,
       notes: undefined,
       inputId: "input1",
@@ -407,11 +415,6 @@ export function world(o: WorldOptions) {
         restore: async () => {},
         discard: async () => {},
       },
-      model: (role) => ({
-        model: modelOf[role as keyof typeof modelOf].getModel(),
-        thinkingLevel: "off" as const,
-        streamFn: models.streamSimple.bind(models) as never,
-      }),
       createSandbox: async () => {
         throw new Error("these runs call no sandbox");
       },
@@ -422,10 +425,11 @@ export function world(o: WorldOptions) {
       // A reopen clears the claim-end reason (`messages.ts`).
       ...(stored.length > 0 && !reopened && { previousClaim: "shutdown" as const }),
       signal: abort.signal,
-      conversionSignal: abort.signal,
     });
     try {
-      return await supervised.result;
+      const outcome = await supervised.result;
+      if (outcome.kind === "ended" && outcome.error !== undefined) throw new Error(outcome.error);
+      return fold(stored);
     } finally {
       await supervised.close();
     }
