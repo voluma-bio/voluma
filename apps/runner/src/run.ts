@@ -280,11 +280,10 @@ async function claimBody(
     const stored = await client.storedEvents();
     // The image the run began on: a deploy that changes `SANDBOX_IMAGE` must not move a resumed
     // run to different dependencies. A run recorded before the field existed takes this runner's.
+    const root = rootThreadOf(runId, stored);
     const pinnedImage = stored
       .flatMap((e) =>
-        e.type === "thread.started" && e.threadId === rootThreadOf(runId, stored)
-          ? [e.payload.sandboxImage]
-          : [],
+        e.type === "thread.started" && e.threadId === root ? [e.payload.sandboxImage] : [],
       )
       .find((image) => image !== undefined);
     const sandboxImage = pinnedImage ?? config.sandbox.image;

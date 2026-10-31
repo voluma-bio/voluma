@@ -10,6 +10,7 @@ import type { Folded, FoldedTask } from "@voluma/contracts/fold";
 import type { Mark } from "@voluma/contracts/messages";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import {
+  askRef,
   type Notice,
   openAsk,
   type ThreadLog,
@@ -130,7 +131,7 @@ export function noticeLine(n: Notice): string {
     case "failed":
       return `- ${who} failed: ${clip(n.error, REPLY_MAX)}`;
     case "ask":
-      return `- ${who} asks (askId ${n.eventId}): "${n.question}" Reply with \`answer\`.`;
+      return `- ${who} asks (askId ${askRef(n.threadName, n.threadId, n.eventId)}): "${n.question}" Reply with \`answer\`.`;
     case "stale":
       return `- ${n.taskId} is stale: ${n.reason}`;
     case "stopped":

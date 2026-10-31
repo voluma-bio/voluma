@@ -151,8 +151,10 @@ expand-then-contract rule. Otherwise fix forward. A rollback through the API lea
 merge would deploy over it: the `PATCH` above turns it off (not yet run here). Turn it back on
 (`{"autoDeploy":"yes"}`, or the dashboard's Settings, Build & Deploy) once the fix is merged.
 
-Gate: merge #333 (the run-keyed contract migration, 0017) only after #332's commit is live on
-staging (check the API's deployed commit); the API before #332 can't run on the 0017 schema.
+Gate: merge #333 (the run-keyed contract migration, 0017) only after the API with the run-keyed
+conflict target (27c000a9 or later: `insertEvent` conflicts on `(run_id, id)`) is live on staging
+(check the API's deployed commit); an older API's `ON CONFLICT (id)` fails once 0017 drops that
+key. Roll forward only past 0017: seeded copies reuse event ids, so `events(id)` can't be unique again.
 
 The runner service (`pnpm --filter @voluma/runner start`) claims whatever is queued, so
 pointing a local one at staging (`VOLUMA_API_URL`) takes a visitor's run and their keys. Run

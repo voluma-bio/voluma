@@ -102,7 +102,7 @@ describe("run loop", () => {
     const feedback: Script = (t) => {
       const m = /The check of (t\d) found problems/.exec(t.lastUser);
       return t.fresh && m
-        ? call("message", { threadId: tid(`${m[1]}.worker`), text: "Redo the placement." })
+        ? call("message", { threadId: `${m[1]}.worker`, text: "Redo the placement." })
         : undefined;
     };
     const w = world({
@@ -461,7 +461,7 @@ describe("run loop", () => {
       const feedback: Script = (t) => {
         const m = /The check of (t\d) found problems/.exec(t.lastUser);
         return t.fresh && m
-          ? call("message", { threadId: tid(`${m[1]}.worker`), text: "Redo the placement." })
+          ? call("message", { threadId: `${m[1]}.worker`, text: "Redo the placement." })
           : undefined;
       };
       const w = world({
@@ -535,7 +535,7 @@ describe("run loop", () => {
       const feedback: Script = (t) => {
         const m = /The check of (t\d) found problems/.exec(t.lastUser);
         return t.fresh && m
-          ? call("message", { threadId: tid(`${m[1]}.worker`), text: "Redo the placement." })
+          ? call("message", { threadId: `${m[1]}.worker`, text: "Redo the placement." })
           : undefined;
       };
       const w = world({

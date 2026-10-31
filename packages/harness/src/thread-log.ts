@@ -173,6 +173,13 @@ export function threadByRef(
   return threads.get(ref) ?? [...threads.values()].find((r) => r.name === ref);
 }
 
+/**
+ * An ask as a model sees it: `<checker name>:<tool call id>`, not the stored event id, which
+ * starts with the checker's uuid.
+ */
+export const askRef = (name: string, threadId: string, askId: string) =>
+  `${name}:${askId.slice(threadId.length + 1).replace(/:ask$/, "")}`;
+
 export interface ThreadLog {
   /** `fold` of the same events. */
   view: Folded;

@@ -31,8 +31,10 @@ import {
 import type { Recorder } from "../recorder";
 import { Refusal, type TaskRuntime } from "../task-runtime";
 import {
+  askRef,
   startedFor,
   type ThreadLog,
+  type ThreadRecord,
   type ThreadState,
   threadByRef,
   threadLog,
@@ -306,11 +308,16 @@ export function mainTools(deps: MainDeps) {
       result(async () => {
         main(ctx);
         const asker = (d: ThreadLog) => {
+          // The exact stored id (asks open in earlier runs), else the form models are shown.
+          const named = (x: ThreadRecord, a: { id: string }) =>
+            a.id === input.askId || askRef(x.name, x.id, a.id) === input.askId;
           const r = [...d.threads.values()].find(
-            (x) => x.role === "check" && x.asks.some((a) => a.id === input.askId),
+            (x) => x.role === "check" && x.asks.some((a) => named(x, a)),
           );
           if (r?.role !== "check") throw new Refusal(`No checker asked ${input.askId}.`);
-          if (r.asks.find((a) => a.id === input.askId)?.answer) {
+          const ask = r.asks.find((a) => named(r, a));
+          if (!ask) throw new Refusal(`No checker asked ${input.askId}.`);
+          if (ask.answer) {
             throw new Refusal(`${input.askId} is already answered.`);
           }
           const t = runtime.taskOf(r.taskId);
@@ -321,9 +328,9 @@ export function mainTools(deps: MainDeps) {
           ) {
             throw new Refusal(`The check that asked ${input.askId} is over.`);
           }
-          return r;
+          return { r, ask };
         };
-        const target = asker(log());
+        const target = asker(log()).r;
         const caller = {
           threadId: ctx.threadId,
           toolCallId: ctx.toolCallId,
@@ -337,19 +344,19 @@ export function mainTools(deps: MainDeps) {
         );
         const done = await runtime.section(async () => {
           main(ctx);
-          const r = asker(log());
+          const { r, ask } = asker(log());
           await recorder.append(
             ctx.threadId,
             "answer",
             {
               checkThreadId: r.id,
-              askId: input.askId,
+              askId: ask.id,
               text: input.text,
               ...(files.length > 0 && { files }),
             },
             effectId("answer", ctx.threadId, ctx.toolCallId),
           );
-          return { message: `Answer recorded; ${r.id} resumes with it.` };
+          return { message: `Answer recorded; ${r.name} resumes with it.` };
         });
         agents.changed();
         return done;
@@ -540,7 +547,7 @@ export function mainTools(deps: MainDeps) {
             ...(d.undelivered.some((n) => n.kind === "person") ? [UNDELIVERED] : []),
             ...(d.unanswered ? [UNANSWERED] : []),
             ...(d.go && !d.go.redone ? [goNotActedOn(d.go.taskId)] : []),
-            ...running.map((r) => `${r.id} (${r.role}, ${r.taskId}) is still running.`),
+            ...running.map((r) => `${r.name} (${r.role}, ${r.taskId}) is still running.`),
             ...unfinished(view).map((t) =>
               t.status === "pending"
                 ? `${t.id} has not run: start a worker on it, or skip it with a reason.`
