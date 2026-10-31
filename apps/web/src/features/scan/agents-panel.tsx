@@ -30,7 +30,8 @@ function followTarget(agents: Thread[], previous: string | undefined): Thread | 
   const busyParents = new Set(working.map((t) => t.parentId));
   const leaf = working
     .filter((t) => !busyParents.has(t.id))
-    .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
+    // A running thread's open span is its current start.
+    .sort((a, b) => (b.openSince ?? "").localeCompare(a.openSince ?? ""))[0];
   return leaf ?? agents[0];
 }
 

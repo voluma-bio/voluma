@@ -5,7 +5,13 @@ importing each other: the run model (`run-model.ts`: `runView`, `agentTree`, `ha
 transcript fold (`transcript.ts`), the run store (`run-store.tsx`), `AgentThread`, the task graph
 (`task-graph.tsx`: `TaskGraph` at study, summary and report size), `ItemToCheck`, `chat/`, the
 clock (`use-now.ts`), and the status, formatting and visitor-key helpers. It has no router. Its
-screen today is the scan review (`apps/web/src/features/scan`).
+screens are the scan review (`apps/web/src/features/scan`) and the study pages
+(`apps/web/src/features/study`).
+
+- **Parts take data and callbacks; screens own the calls.** `ItemToCheck` makes no request: each
+  screen runs its own accept. Where a part leads to another page it takes a `LinkTo` (`@voluma/ui`),
+  the app's router link, and renders a link: `TaskGraph`'s `taskLink`. A box that picks a task on
+  the same page is a toggle (`onSelect`).
 
 - **Task titles** are the plan's (`TaskView.title`, from the run's first `revision.started`); a
   task without one shows its id. `catalog["mouse-oa"]` (`@voluma/workflow/bundled`) is only for
@@ -100,7 +106,7 @@ screen today is the scan review (`apps/web/src/features/scan`).
   `voluma.visitor-keys.<userId>`; a run in `awaiting-keys` shows the form on its page
   (`resendKeys`) only to the user who started it.
 - **A run's status** (`runStatus`, a word and a `StatusMark` state) and the formatters (`formatUsd`,
-  `formatDuration`, `plural`, `shortDate`) are `@voluma/run-view`, shared with Home; `use-now.ts` is the clock.
+  `formatDuration`, `plural`) are `@voluma/run-view`, shared with Home; `use-now.ts` is the clock.
 - **Cost and time** come only from `spend(events, providerCalls)` (`@voluma/contracts/spend`), run
   in `runView` on durable events, never per live frame. Run details shows the run's settled total;
   each card in the lead AI's stream and each thread in "How the AI did it" shows that thread's own
