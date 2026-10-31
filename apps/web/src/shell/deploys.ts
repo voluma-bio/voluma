@@ -5,7 +5,8 @@
  * so that reloads at once. A contract mismatch reloads only once `/` names a different entry
  * bundle than the one running, rechecking for about 30 s while the deploy switches over; if it
  * never does, the mismatch is this app's own bug and its error shows. Either way a tab reloads at
- * most once toward a given bundle, so a bundle that keeps failing can't loop.
+ * most once toward a given bundle, so a bundle that keeps failing can't loop. The reload waits for
+ * a held pointer and for work that holds it (`holdLeave`).
  */
 import { type ContractError, onContractError } from "@voluma/api-client";
 
