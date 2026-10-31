@@ -35,11 +35,13 @@ export const eventLock = (tx: Tx, runId: string) =>
   tx.execute(sql`SELECT pg_advisory_xact_lock(${EVENT_SEQ_LOCK}, hashtext(${runId}))`);
 
 /**
- * The only way to lock a run row: the run's event lock, then the row `FOR UPDATE`; returns the
+ * The only way the API locks a run row `FOR UPDATE`: the run's event lock, then the row; returns the
  * row, or undefined when none matches `where` (the run, plus any extra condition). Lock order,
  * everywhere: the queue lock (`QUEUE_LOCK`, where a write needs it), then this. A runner's
  * append takes the event lock before it shares the run row (`assertLease`), so a transaction
- * that holds the row and then asks for the event lock can deadlock with it.
+ * that holds the row and then asks for the event lock can deadlock with it. Exceptions: the
+ * gateway's `admitCall` (`packages/provider-calls/src/calls.ts`) locks the row alone and never
+ * takes the event lock after it; `FOR SHARE` reads (`assertLease`, `pg-snapshots.ts`) are separate.
  */
 export async function lockRun(tx: Tx, runId: string, where?: SQL) {
   await eventLock(tx, runId);

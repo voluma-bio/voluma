@@ -150,11 +150,7 @@ async function inFlightTool(tx: Tx, runId: string, sinceSeq: number): Promise<st
  * False when the token is not that of a counted sweep (or the sweep failed the run).
  */
 async function takeBackStrike(tx: Tx, runId: string, leaseToken: string, reason: ReleaseReason) {
-  const [run] = await tx
-    .select({ state: runs.state })
-    .from(runs)
-    .where(and(eq(runs.id, runId), eq(runs.struckLeaseToken, leaseToken)))
-    .for("update");
+  const run = await lockRun(tx, runId, eq(runs.struckLeaseToken, leaseToken));
   // A counted reason keeps its strike; an ended run (the sweep failed it) stays ended.
   if (!run || run.state === "ended" || isCounted(reason)) return false;
   await tx

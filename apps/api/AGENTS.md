@@ -97,7 +97,7 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   rules; Review's `POST /runs/:id/messages` calls them through the `RunMessages` port after it
   checks and stores the snapshot PNG). `decideMessage` judges in the contract's order, under the
   queue lock for `sendMessage`. **Lock order: the queue lock (where taken), then `lockRun`
-  (`pg-event-log.ts`: event lock, then the run row; the only way to lock a run row).** `heartbeat` and `report` skip the queue lock. A claim's sweep re-reads
+  (`pg-event-log.ts`: event lock, then the run row; the only way the API takes a run row `FOR UPDATE`).** Exceptions: the gateway's `admitCall` (`packages/provider-calls/src/calls.ts`) locks the row alone and never takes the event lock after it; `FOR SHARE` reads (`assertLease`, `pg-snapshots.ts`) are separate. `heartbeat` and `report` skip the queue lock. A claim's sweep re-reads
   each run's row after taking it, so a heartbeat that extended the lease first wins. `cancel` locks
   the run before judging its state. `decide` (review decisions) checks the run has ended before
   taking it, so an accept on a running run never holds it while loading the log). `decideMessage` refuses a message
@@ -144,7 +144,7 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   id, and `reviewIntegrityIssues` (`fold-test-log.ts`) checks that in the fold tests.
 - It reads runs and writes human decisions only through `RunRecords` (`src/ports`), wired
   to Run's `pg-run-records.ts`. Reads use one repeatable-read snapshot. Decisions hold
-  the existing event-sequence lock **before** the run-row lock, then validate and append
+  the event lock **before** the run-row lock (both through `lockRun`), then validate and append
   atomically; preserve that order to avoid deadlocking runner appends. Review owns policy;
   Run owns authorization filters, sequence allocation and persistence. No domain imports
   the other. `review-state` overlays acceptance on `fold` without changing scientific state.
