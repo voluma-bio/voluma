@@ -162,9 +162,9 @@ export function checker(
   };
 }
 
-/** The ids of the asks main was told about (`askId <id>)`) and has not answered. */
+/** The ids of the asks main was told about (in a user message or a tool result) (`askId <id>)`) and has not answered. */
 export function openAskIds(t: Turn): string[] {
-  const asked = t.users.flatMap((u) =>
+  const asked = [...t.users, ...t.results].flatMap((u) =>
     [...u.matchAll(/askId (\S+)\)/g)].map((m) => m[1] as string),
   );
   const answered = t.calls.filter((c) => c.name === "answer").map((c) => c.input.askId);
