@@ -49,7 +49,7 @@ export function ResultsTable({
       key: "measure",
       header: "Measurement",
       cell: ({ output }) => (
-        <span className="grid w-52 whitespace-normal">
+        <span className="grid w-44 whitespace-normal">
           <span className="leading-snug">{output.name}</span>
           {!byTask && (
             <span className="truncate text-sm font-normal text-fg-subtle">
@@ -97,10 +97,10 @@ export function ResultsTable({
       header: "Scans",
       align: "end",
       cell: ({ output }) => (
-        <span className="text-sm whitespace-nowrap text-muted-foreground">
-          {groups.map((g, i) => (
+        // One line per group, beside the plot's own line for it.
+        <span className="grid text-sm whitespace-nowrap text-muted-foreground">
+          {groups.map((g) => (
             <span key={g}>
-              {i > 0 && ", "}
               <span className="font-mono">
                 {inGroup(g).filter((s) => scanValue(s, output) !== null).length}
               </span>
@@ -153,7 +153,7 @@ function Plot({
   const byId = new Map(detail.scans.map((s) => [s.scan.inputId, s]));
   return (
     <StripPlot
-      className="w-72"
+      className="w-64"
       label={output.name}
       unit={unit}
       digits={digits}

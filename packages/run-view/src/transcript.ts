@@ -20,8 +20,9 @@
 import type { ModelUsage, RunEvent } from "@voluma/contracts/events";
 import { type CacheState, cacheStep } from "@voluma/contracts/spend";
 import type { LiveFrame } from "@voluma/contracts/stream";
-import { threadRole } from "@voluma/contracts/thread-role";
+import { threadPlace } from "@voluma/contracts/thread-place";
 import { catalog } from "@voluma/workflow/bundled";
+import { stoppedText } from "./run-error";
 import { plural } from "./run-status";
 
 const { taskTitle } = catalog["mouse-oa"];
@@ -234,6 +235,8 @@ export function toolTitle(name: string, input: unknown): string {
     }
     case "start_worker":
       return `Started a worker on ${taskTitle(s("taskId") ?? "a task")}`;
+    case "start_agent":
+      return `Started a worker on ${taskTitle(s("task") ?? "a task")}`;
     case "stop_worker":
       return `Stopped ${s("threadId") ?? "a worker"}`;
     case "accept":
@@ -388,16 +391,17 @@ function rowsOf(
     for (const step of tools.values()) if (step.status === "running") step.status = "stopped";
   };
   let briefed = false;
+  let systemSeen = false;
   const seen = new Set<string>();
   let root: string | undefined;
   // Each shown thread's calls step its cache state, a compaction summary resets it (see `spend`).
   const cache = new Map<string, CacheState>();
   for (const e of events) {
     if (orchestration) {
-      if (e.type === "thread.started" && threadRole(e.payload) === "root") root = e.threadId;
+      if (e.type === "thread.started" && threadPlace(e.payload) === "root") root = e.threadId;
       if (
         e.type === "thread.started" &&
-        ["worker", "check"].includes(threadRole(e.payload)) &&
+        ["worker", "check"].includes(threadPlace(e.payload)) &&
         !seen.has(e.threadId)
       ) {
         seen.add(e.threadId);
@@ -425,7 +429,7 @@ function rowsOf(
         e.threadId === root &&
         e.payload.status === "failed"
       ) {
-        b.row({ kind: "failure", id: e.id, text: e.payload.error ?? "The run failed." });
+        b.row({ kind: "failure", id: e.id, text: stoppedText(e.payload.error) });
       }
     }
     if (!ids.has(e.threadId)) continue;
@@ -456,7 +460,13 @@ function rowsOf(
               cacheMiss,
             });
         } else if (p.role === "system") {
-          b.row({ kind: "brief", id: e.id, label: "System prompt", text: p.text });
+          b.row({
+            kind: "brief",
+            id: e.id,
+            label: systemSeen ? "Tools changed" : "System prompt",
+            text: p.text,
+          });
+          systemSeen = true;
         } else {
           // The runtime's first message is the thread's brief; later ones nudge it on.
           const label =
@@ -561,7 +571,7 @@ export const threadRows = (
 export function mainRows(events: RunEvent[], live: Live = noLive, halt?: Halt): Row[] {
   const mains = new Set(
     events.flatMap((e) =>
-      e.type === "thread.started" && threadRole(e.payload) === "main" ? [e.threadId] : [],
+      e.type === "thread.started" && threadPlace(e.payload) === "main" ? [e.threadId] : [],
     ),
   );
   return rowsOf(events, mains, live, halt, true);

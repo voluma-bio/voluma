@@ -90,7 +90,7 @@ import type {
   Volume,
 } from "./review";
 import { toWorld } from "./ruler";
-import { threadRole } from "./thread-role";
+import { threadPlace } from "./thread-place";
 import type { DeclaredOutput, PlanTask, WorkflowPlan } from "./workflow";
 
 type OutputEvent = Extract<RunEvent, { type: "output" }>;
@@ -247,6 +247,23 @@ export type Folded = {
   assets: Record<string, ReviewAssets>;
 };
 
+/**
+ * Why a person's go cannot redo `taskId` now, or null. The one rule behind the API's refusal of a
+ * go and the main agent's refusal of an offer, so an offer is never made that a go would refuse.
+ * A go resets the task's fix rounds and redoes a task in any status, so only the plan and a skip
+ * limit it.
+ */
+export function redoRefusal(
+  view: Pick<Folded, "plan" | "tasks">,
+  taskId: string,
+): { status: 404 | 409; message: string } | null {
+  if (!view.plan.tasks.some((t) => t.id === taskId))
+    return { status: 404, message: `${taskId} is not a task of this run.` };
+  if (view.tasks.find((t) => t.id === taskId)?.skipped)
+    return { status: 409, message: `${taskId} was skipped, so it cannot be corrected.` };
+  return null;
+}
+
 /** The event types that carry a task's state: all that an abandoned correction leaves out. */
 const TASK_STATE = new Set<RunEvent["type"]>([
   "attempt.opened",
@@ -339,7 +356,7 @@ export function corrections(events: readonly RunEvent[]): {
         if (span) span.replied = true;
         break;
       case "thread.started":
-        if (threadRole(e.payload) === "root") root = e.threadId;
+        if (threadPlace(e.payload) === "root") root = e.threadId;
         break;
       case "thread.ended":
         if (span?.closed === "open" && e.threadId === root && e.payload.status === "completed")
@@ -837,7 +854,7 @@ export function fold(events: readonly RunEvent[], holdOpenCorrection = false): F
     switch (e.type) {
       case "thread.started": {
         if (!roles.has(e.threadId)) {
-          const role = threadRole(e.payload);
+          const role = threadPlace(e.payload);
           roles.add(e.threadId);
           if (role === "check") checkThreads.add(e.threadId);
           else if (role === "worker" && e.payload.task) workerOf.set(e.payload.task, e.threadId);

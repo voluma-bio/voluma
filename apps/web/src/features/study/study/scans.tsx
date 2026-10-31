@@ -107,7 +107,7 @@ export function ScansPage() {
       key: "scan",
       header: "Scan",
       cell: (s) => (
-        <span className="grid w-44">
+        <span className="grid w-40">
           <span className="truncate">{scanLabel(s.scan)}</span>
           {density === "comfortable" && (
             <span className="truncate text-sm font-normal text-fg-subtle">{line(s)}</span>

@@ -74,11 +74,6 @@ export interface ReviewAssetsWorker {
    * it returns at once, recording nothing.
    */
   drain(timeoutMs: number): Promise<void>;
-  /**
-   * Ends with the host's `signal` or when the worker is halted (`drain`, `close`). The sandbox
-   * session's creation takes it, so a creation in flight stops with the worker.
-   */
-  readonly signal: AbortSignal;
   /** Stops the worker, ending a conversion in flight; the session closes the sandbox. */
   close(): Promise<void>;
 }
@@ -92,13 +87,15 @@ export interface ReviewAssetsOptions {
   /** The convert sandbox (`SandboxSession.get`), created on first use and replaced when it has ended. */
   sandbox(): Promise<Sandbox>;
   signal: AbortSignal;
+  /** Drain and close abort this; convert-sandbox create uses the same controller. */
+  halt: AbortController;
   log(line: string): void;
 }
 
 export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWorker {
   const { runId, recorder, log } = options;
   const root = options.rootThreadId;
-  const halt = new AbortController();
+  const halt = options.halt;
   const signal = AbortSignal.any([options.signal, halt.signal]);
 
   let scanned = 0;
@@ -240,9 +237,7 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
       if (!finished.has(job.sha256)) return job;
   };
 
-  // A resume can already have queued outputs. Return the worker before asking for its
-  // sandbox: the session's creation callback reads this worker's combined signal.
-  const loop = Promise.resolve().then(async () => {
+  const loop = (async () => {
     while (!signal.aborted) {
       scan();
       const job = nextJob();
@@ -257,11 +252,10 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
         running = undefined;
       }
     }
-  });
+  })();
   loop.catch((e) => log(`review assets: worker stopped: ${e}`));
 
   return {
-    signal,
     async drain(timeoutMs) {
       const deadline = Date.now() + timeoutMs;
       while (!signal.aborted && Date.now() < deadline) {
