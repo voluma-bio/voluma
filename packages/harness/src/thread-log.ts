@@ -36,7 +36,7 @@ const VERDICT_TEXT_MAX = 1500;
 
 export type Role = "worker" | "check";
 
-/** A check thread's question to the main agent, and the answer once it has one. */
+/** A worker's or check thread's question to the main agent, and the answer once it has one. */
 export interface AskRecord {
   /** The `ask` event's id. */
   id: string;
@@ -87,7 +87,7 @@ interface ThreadFields {
   model: string | undefined;
   /** Tool calls the log shows without a result, by tool call id; after a cut-off, what it was cut off in. */
   openCalls: Map<string, string>;
-  /** The questions a check thread asked, in order. */
+  /** The questions a worker or check thread asked, in order. */
   asks: AskRecord[];
   /** The text of its latest reply in the latest invocation. */
   reply: string;
@@ -126,7 +126,8 @@ export type Notice = {
       summary?: string;
       text?: string;
     }
-  | { kind: "ask"; question: string }
+  /** A check thread waits for the answer; a worker carries on. */
+  | { kind: "ask"; question: string; place: "worker" | "check" }
   | { kind: "stale"; reason: string }
   /** The loop stopped a thread the main agent did not ask to stop; `reason` says why. */
   | { kind: "stopped"; reason: string }
@@ -273,10 +274,33 @@ function threadNameOf(e: Extract<RunEvent, { type: "thread.started" }>): string 
   return e.payload.name ?? e.threadId.slice(e.runId.length + 1);
 }
 
-/** The question a check thread waits on: its latest ask, when unanswered. */
-export const openAsk = (r: ThreadRecord): AskRecord | undefined => {
+/**
+ * The thread is still the one in charge of its work. A worker is, whatever its task's status
+ * (main may have resumed it on a finished task), unless a newer worker holds the task, it handed
+ * the task over in this invocation, or the task is under review, stale or skipped. A check is
+ * while its task is under review by it with no verdict.
+ */
+export function inCharge(d: ThreadLog, r: ThreadRecord): boolean {
+  if (r.place === "main") return d.main === r.id;
+  const t = d.view.tasks.find((x) => x.id === r.taskId);
+  if (r.place === "check")
+    return t?.status === "under-review" && t.threads.check === r.id && !t.checker;
+  const latest = startedFor(d, r.taskId, "worker")
+    .filter((w) => w.end?.status !== "cancelled")
+    .at(-1);
+  return (
+    latest?.id === r.id &&
+    !r.submitted &&
+    !t?.skipped &&
+    t?.status !== "under-review" &&
+    t?.status !== "stale"
+  );
+}
+
+/** The question a worker or check thread has open: its latest ask, when unanswered and, for a worker, while it is in charge. */
+export const openAsk = (d: ThreadLog, r: ThreadRecord): AskRecord | undefined => {
   const last = r.asks.at(-1);
-  return last && !last.answer ? last : undefined;
+  return last && !last.answer && (r.place !== "worker" || inCharge(d, r)) ? last : undefined;
 };
 
 // The log only grows, so its length says whether the derivation is current.
@@ -587,6 +611,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
             taskId: record?.taskId,
             kind: "ask",
             question: e.payload.question,
+            place: record?.place === "worker" ? "worker" : "check",
           },
           at,
         );

@@ -254,7 +254,7 @@ export function toolTitle(name: string, input: unknown): string {
     case "message":
       return `Messaged ${s("threadId") ?? "another thread"}`;
     case "answer":
-      return "Answered the checker";
+      return "Answered a question";
     case "ask":
       return "Asked the main agent";
     case "segment_sam":

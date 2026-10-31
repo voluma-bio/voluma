@@ -67,6 +67,7 @@ import { threadIdOf } from "./thread-id";
 import {
   checkAwaitsMain,
   fixLimitReached,
+  inCharge,
   openAsk,
   type Role,
   startedFor,
@@ -288,7 +289,14 @@ export async function runLoop(o: RunLoopOptions): Promise<void> {
         kind: "worker" as const,
         taskId: r.taskId,
         parentThreadId: d.main ?? root,
-        prompt: workerPrompt(task, record?.brief ?? "", o.notes),
+        prompt: workerPrompt(
+          task,
+          record?.brief ?? "",
+          view,
+          o.selectedOutputs,
+          o.definition.files,
+          o.notes,
+        ),
       } satisfies ThreadSpec & Lineage;
     }
     const folded = runtime.taskOf(r.taskId);
@@ -299,7 +307,7 @@ export async function runLoop(o: RunLoopOptions): Promise<void> {
       taskId: r.taskId,
       parentThreadId: root,
       ...(folded.attemptId && { attemptId: folded.attemptId }),
-      prompt: checkPrompt(task, folded, o.notes),
+      prompt: checkPrompt(task, folded, view, o.selectedOutputs, o.definition.files, o.notes),
     } satisfies ThreadSpec & Lineage;
   }
 
@@ -336,8 +344,22 @@ export async function runLoop(o: RunLoopOptions): Promise<void> {
   /** Resumes a thread that is not running, from its History, with a message. Never a stopped one. */
   async function resume(r: ThreadRecord, text: string, sender: UserSender) {
     if (stateOf(r) === "stopped") throw new Error(`${r.id} was stopped and is never resumed`);
+    // An answer the worker has not heard goes with whatever resumes it (idle, cut off, failed),
+    // and counts as heard only if a thread sent it.
+    const d = derive();
+    const ask = r.place === "worker" && inCharge(d, r) ? unheardAnswer(r) : undefined;
+    if (r.place === "worker" && ask?.answer) {
+      text = [answerText(ask.answer, r.taskId), text].filter(Boolean).join("\n\n");
+      if (sender.kind !== "thread") sender = { kind: "thread", threadId: d.main ?? root };
+    }
     await begin({ ...specFor(r), input: { text, sender } }, `${r.id}:started:${r.starts + 1}`);
   }
+
+  /** The worker's latest ask when main answered it after the last message the worker got from a thread. */
+  const unheardAnswer = (r: ThreadRecord) => {
+    const last = r.asks.at(-1);
+    return last?.answer && (r.answeredAt ?? -1) > (r.heardAt ?? -1) ? last : undefined;
+  };
 
   /**
    * The next thread of a task (`<task>.<role>[.<n>]`) or of the main agent (`main[.<n>]`), after
@@ -385,7 +407,18 @@ export async function runLoop(o: RunLoopOptions): Promise<void> {
       const spec = specFor(thread);
       const task = planTask(runtime.view(), taskId);
       await begin(
-        { ...spec, parentThreadId: main, prompt: workerPrompt(task, brief, o.notes) },
+        {
+          ...spec,
+          parentThreadId: main,
+          prompt: workerPrompt(
+            task,
+            brief,
+            runtime.view(),
+            o.selectedOutputs,
+            o.definition.files,
+            o.notes,
+          ),
+        },
         startedEventId,
         spawnedBy,
       );
@@ -412,28 +445,6 @@ export async function runLoop(o: RunLoopOptions): Promise<void> {
   /** Whether the main agent is still in charge of nothing but waiting: no worker or checker runs. */
   const anyRunning = (d: ThreadLog) =>
     [...d.threads.values()].some((r) => r.place !== "main" && threads.running(r.id));
-
-  /**
-   * The thread a crash cut off is still the one in charge of its work. A worker is, whatever its
-   * task's status (main may have resumed it on a finished task), unless a newer worker holds the
-   * task, it handed the task over in this invocation, or the task is under review, stale or skipped.
-   */
-  function inCharge(d: ThreadLog, r: ThreadRecord): boolean {
-    if (r.place === "main") return d.main === r.id;
-    const t = runtime.taskOf(r.taskId);
-    if (r.place === "check")
-      return t?.status === "under-review" && t.threads.check === r.id && !t.checker;
-    const latest = startedFor(d, r.taskId, "worker")
-      .filter((w) => w.end?.status !== "cancelled")
-      .at(-1);
-    return (
-      latest?.id === r.id &&
-      !r.submitted &&
-      !t?.skipped &&
-      t?.status !== "under-review" &&
-      t?.status !== "stale"
-    );
-  }
 
   /** Threads this process was refused as unresumable: the main agent starts over, a check is made again, a worker is stopped. */
   async function unresumable(d: ThreadLog): Promise<boolean> {
@@ -487,6 +498,17 @@ export async function runLoop(o: RunLoopOptions): Promise<void> {
     return false;
   }
 
+  /** An idle worker in charge of its task that main answered while it was not running: resume it with the answer. */
+  async function answerIdleWorkers(d: ThreadLog): Promise<boolean> {
+    for (const r of d.threads.values()) {
+      if (r.place !== "worker" || stateOf(r) !== "idle" || !inCharge(d, r) || !unheardAnswer(r))
+        continue;
+      await resume(r, "", RUNTIME);
+      return true;
+    }
+    return false;
+  }
+
   /** A task `under-review` whose attempt has no check thread: start one. */
   async function startChecks(d: ThreadLog, view: Folded): Promise<boolean> {
     for (const t of view.tasks) {
@@ -527,7 +549,7 @@ export async function runLoop(o: RunLoopOptions): Promise<void> {
       if (c?.place !== "check") continue;
       const state = stateOf(c);
       const verdict = t.checker?.verdict;
-      const waiting = openAsk(c) !== undefined;
+      const waiting = openAsk(d, c) !== undefined;
       // A check stopped with no verdict that no fresh check replaced: `stop_worker` past the
       // replacement limit, or a stop the loop itself made.
       if (state === "stopped" && !verdict) {
@@ -684,7 +706,7 @@ export async function runLoop(o: RunLoopOptions): Promise<void> {
     if (anyRunning(d)) return false;
     const covers = recorder.events().at(-1)?.id;
     if (d.emptyDeliveries < config.stuckLimit) {
-      const asking = [...d.threads.values()].some((r) => r.place === "check" && openAsk(r));
+      const asking = [...d.threads.values()].some((r) => openAsk(d, r));
       await resume(m, livenessNudge(asking, stateBlock(d, view, stateOf)), {
         kind: "runtime",
         ...(covers && { covers }),
@@ -736,6 +758,7 @@ export async function runLoop(o: RunLoopOptions): Promise<void> {
     if (await unresumable(d)) return "acted";
     if (await markGo(d)) return "acted";
     if (await resumeFeedback(d)) return "acted";
+    if (await answerIdleWorkers(d)) return "acted";
     if (await resumeCutOff(d)) return "acted";
     if (await startChecks(d, view)) return "acted";
     if (await checks(d, view)) return "acted";

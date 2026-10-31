@@ -20,9 +20,11 @@ import { planTask } from "@voluma/workflow/plan";
 import { z } from "zod";
 import type { UserSender } from "../adapters/pi/start-thread";
 import {
+  answerText,
   feedbackText,
   GO_REFUSAL,
   goNotActedOn,
+  planChangedText,
   UNANSWERED,
   UNDELIVERED,
   unfinished,
@@ -32,6 +34,7 @@ import { Refusal, type TaskRuntime } from "../task-runtime";
 import {
   askRef,
   checkAwaitsMain,
+  inCharge,
   startedFor,
   type ThreadLog,
   type ThreadRecord,
@@ -339,7 +342,7 @@ export function mainTools(deps: MainDeps) {
   > = {
     name: "answer",
     description:
-      'Answer a checker\'s question (its askId is in the message that told you). `files` are files you want the checker to open: {root: "outputs", path: <inside /outputs/<task id>/>} or {root: "scratch", path: <inside your $SCRATCH>}. The checker is resumed with your answer.',
+      'Answer a checker\'s or worker\'s question (its askId is in the message that told you). `files` are files you want a checker to open: {root: "outputs", path: <inside /outputs/<task id>/>} or {root: "scratch", path: <inside your $SCRATCH>}; a worker\'s question takes none, so put what it needs in `text`. A checker is resumed with your answer; a worker, which carries on meanwhile, gets it with its next tool result.',
     input: z.object({
       askId: nonEmpty,
       text: nonEmpty,
@@ -354,16 +357,24 @@ export function mainTools(deps: MainDeps) {
           const named = (x: ThreadRecord, a: { id: string }) =>
             a.id === input.askId || askRef(x.name, x.id, a.id) === input.askId;
           const r = [...d.threads.values()].find(
-            (x) => x.place === "check" && x.asks.some((a) => named(x, a)),
+            (x) => x.place !== "main" && x.asks.some((a) => named(x, a)),
           );
-          if (r?.place !== "check") throw new Refusal(`No checker asked ${input.askId}.`);
+          if (r?.place !== "check" && r?.place !== "worker") {
+            throw new Refusal(`No worker or checker asked ${input.askId}.`);
+          }
           const ask = r.asks.find((a) => named(r, a));
-          if (!ask) throw new Refusal(`No checker asked ${input.askId}.`);
+          if (!ask) throw new Refusal(`No worker or checker asked ${input.askId}.`);
           if (ask.answer) {
             throw new Refusal(`${input.askId} is already answered.`);
           }
           const t = runtime.taskOf(r.taskId);
-          if (
+          if (r.place === "worker") {
+            if (!inCharge(d, r)) {
+              throw new Refusal(
+                `${r.name}, which asked ${input.askId}, is no longer in charge of ${r.taskId} (submitted, stopped or replaced). Its question is closed: send what it needs with \`message\` or \`change_plan\`.`,
+              );
+            }
+          } else if (
             agents.state(d, r.id) === "stopped" ||
             t?.status !== "under-review" ||
             t.threads.check !== r.id
@@ -373,6 +384,9 @@ export function mainTools(deps: MainDeps) {
           return { r, ask };
         };
         const target = asker(log()).r;
+        if (target.place === "worker" && input.files?.length) {
+          throw new Refusal("A worker's question takes no files: put what it needs in the text.");
+        }
         const caller = {
           threadId: ctx.threadId,
           toolCallId: ctx.toolCallId,
@@ -384,7 +398,7 @@ export function mainTools(deps: MainDeps) {
         const files = await Promise.all(
           (input.files ?? []).map((f) => runtime.keep(caller, target.taskId, f)),
         );
-        const done = await runtime.section(async () => {
+        const r = await runtime.section(async () => {
           main(ctx);
           const { r, ask } = asker(log());
           await recorder.append(
@@ -398,10 +412,22 @@ export function mainTools(deps: MainDeps) {
             },
             effectId("answer", ctx.threadId, ctx.toolCallId),
           );
-          return { message: `Answer recorded; ${r.name} resumes with it.` };
+          return r;
         });
+        // The loop delivers the answer to whatever resumes a thread; a running worker gets it now.
+        if (r.place === "worker") {
+          agents.steer(r.id, answerText({ text: input.text, files: [] }, r.taskId), {
+            kind: "thread",
+            threadId: ctx.threadId,
+          });
+        }
         agents.changed();
-        return done;
+        return {
+          message:
+            r.place === "worker"
+              ? `Answer recorded; ${r.name} gets it with its next tool result.`
+              : `Answer recorded; ${r.name} resumes with it.`,
+        };
       }),
   };
 
@@ -547,6 +573,15 @@ export function mainTools(deps: MainDeps) {
               await runtime.stop(r.id, `${eventId}:skip:${r.id}`);
           }
         }
+      }
+      // A running worker still reads the plan it started with: tell it what changed for its task.
+      // One not running, or cut off before it reads this, is not told.
+      for (const r of d.threads.values()) {
+        if (r.place !== "worker" || skipped.has(r.taskId) || !inCharge(d, r)) continue;
+        agents.steer(r.id, planChangedText(input, added, adHoc, r.taskId), {
+          kind: "thread",
+          threadId: ctx.threadId,
+        });
       }
       return {
         message: `The plan changed.${skipped.size > 0 ? ` Skipped: ${[...skipped].join(", ")}.` : ""}`,

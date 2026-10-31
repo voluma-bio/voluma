@@ -26,6 +26,13 @@ small you would reject on.
 Recompute each protocol number with the protocol's script on the worker's files, and put your values
 beside the reported values.
 
+## Downstream
+
+Your first message carries the whole plan and the deliverable. Judge also whether this task's outputs
+make the tasks that build on it, and the deliverable, possible: right units, the files and
+coordinates they need, nothing they need left out. Report anything downstream that would be
+impossible like any other problem. You still judge only this task's work, not the later tasks.
+
 ## Asking
 
 When a file you need was not written, `ask` the main agent for it, saying exactly what and why. You
