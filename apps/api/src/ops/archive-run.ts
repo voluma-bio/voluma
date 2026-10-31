@@ -24,7 +24,7 @@ import { eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { reviewSnapshots } from "../domains/review/schema";
-import { eventLock } from "../domains/run/pg-event-log";
+import { lockRun } from "../domains/run/pg-event-log";
 import { QUEUE_LOCK } from "../domains/run/pg-queue";
 import { events, piMessages, runs, studies, studyScans } from "../domains/run/schema";
 import { databaseUrl } from "./operator";
@@ -116,8 +116,7 @@ function matches(name: string, actual: unknown[], archived: unknown[]) {
 const deleted = await db.transaction(async (tx) => {
   // Same order as lifecycle writes. The queue lock also excludes new sibling runs.
   await tx.execute(sql`SELECT pg_advisory_xact_lock(${QUEUE_LOCK})`);
-  await eventLock(tx, runId);
-  const [locked] = await tx.select().from(runs).where(eq(runs.id, runId)).for("update");
+  const locked = await lockRun(tx, runId);
   matches("run", locked ? [locked] : [], [copy.run]);
   const rows = {
     providerCalls: await tx.delete(providerCalls).where(eq(providerCalls.runId, runId)).returning(),
