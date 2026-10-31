@@ -31,6 +31,7 @@ import type { Recorder } from "../recorder";
 import { Refusal, type TaskRuntime } from "../task-runtime";
 import {
   askRef,
+  checkAwaitsMain,
   startedFor,
   type ThreadLog,
   type ThreadRecord,
@@ -65,6 +66,8 @@ export interface Agents {
   steer(threadId: string, text: string, sender: UserSender): boolean;
   /** Resolves once the thread is not running here. Never call it inside `section`. */
   settled(threadId: string): Promise<void>;
+  /** Starts a fresh check of an under-review task; false once the task has had its limit of checks. Call inside `section`. */
+  replaceCheck(taskId: string): Promise<boolean>;
   /** Resumes a thread that is not running, with a message; its start is stored first. Call inside `section`. */
   resume(threadId: string, text: string, sender: UserSender): Promise<void>;
   /** The run changed: the loop takes its next step. */
@@ -114,16 +117,22 @@ export function mainTools(deps: MainDeps) {
       });
   }
 
+  /**
+   * The thread `message` and `stop_worker` act on: a worker, or the check of an under-review task
+   * that failed (idle after an error, no verdict). A live check is `answer`'s.
+   */
   const workerOf = (d: ThreadLog, ref: string) => {
     const r = threadByRef(d.threads, ref);
-    if (r?.place !== "worker") {
+    if (r?.place === "worker") return r;
+    if (r?.place === "check") {
+      if (checkAwaitsMain(d, r) && agents.state(d, r.id) === "idle") return r;
       throw new Refusal(
-        r?.place === "check"
-          ? `${ref} is a checker: answer its question with \`answer\`.`
-          : `${ref} is not a worker of this run.`,
+        r.end?.status === "failed"
+          ? `${ref} failed, but its task no longer waits on this check (its verdict is in, or the task moved on): there is nothing to resume or replace.`
+          : `${ref} is a checker: answer its question with \`answer\`. Only a check that failed can be messaged or stopped.`,
       );
     }
-    return r;
+    throw new Refusal(`${ref} is not a worker of this run.`);
   };
 
   /** Starts `role` on a task: the checks both start tools share. `tool` names the effect, so a replay finds it. */
@@ -201,7 +210,7 @@ export function mainTools(deps: MainDeps) {
   const message: Tool<z.ZodObject<{ threadId: z.ZodString; text: z.ZodString }>> = {
     name: "message",
     description:
-      "Send a message to a worker. A running worker gets it in its current turn; an idle one is resumed with it. On a task whose check rejected it, the message is your feedback: it opens a new attempt for the same worker, which fixes the task, reports its outputs again and submits. Refused for a checker (use `answer`), a stopped worker, or a task that used its fix rounds.",
+      "Send a message to a worker. A running worker gets it in its current turn; an idle one is resumed with it. On a task whose check rejected it, the message is your feedback: it opens a new attempt for the same worker, which fixes the task, reports its outputs again and submits. A checker that failed (the notice says so) is resumed the same way, with its transcript and sandbox, and gives its verdict. Refused for a checker that is running or asked a question (use `answer`), a stopped worker, or a task that used its fix rounds.",
     input: z.object({
       threadId: nonEmpty.describe("The worker's name, as the agents list shows it."),
       text: nonEmpty,
@@ -216,9 +225,13 @@ export function mainTools(deps: MainDeps) {
         const w = workerOf(before, ref);
         const threadId = w.id;
         if (agents.state(before, threadId) === "stopped") {
-          throw new Refusal(`${w.name} was stopped; start a new worker for ${w.taskId}.`);
+          throw new Refusal(
+            w.place === "check"
+              ? `${w.name} was stopped.`
+              : `${w.name} was stopped; start a new worker for ${w.taskId}.`,
+          );
         }
-        if (agents.fixLimitReached(before, w.taskId)) {
+        if (w.place === "worker" && agents.fixLimitReached(before, w.taskId)) {
           throw new Refusal(`${w.taskId} has used its fix rounds; it stays as it is.`);
         }
         if (agents.state(before, threadId) === "running" && agents.steer(threadId, text, sender)) {
@@ -278,7 +291,7 @@ export function mainTools(deps: MainDeps) {
   const stop_worker: Tool<z.ZodObject<{ threadId: z.ZodString; reason: z.ZodString }>> = {
     name: "stop_worker",
     description:
-      "Stop a worker for good: it is never resumed. If it was working on its task, the task goes back to pending with your reason; its attempt is kept. Start a new worker on the task to redo it.",
+      "Stop a worker for good: it is never resumed. If it was working on its task, the task goes back to pending with your reason; its attempt is kept. Start a new worker on the task to redo it. On a checker that failed, the task is checked again by a fresh checker that starts at once.",
     input: z.object({
       threadId: nonEmpty.describe("The worker's name, as the agents list shows it."),
       reason: nonEmpty.describe(
@@ -305,6 +318,13 @@ export function mainTools(deps: MainDeps) {
           reason,
           AGENT,
         );
+      }
+      if (w.place === "check") {
+        return {
+          message: (await agents.replaceCheck(w.taskId))
+            ? `${w.name} stopped; a fresh check of ${w.taskId} starts.`
+            : `${w.name} stopped; ${w.taskId} has had its checks and is left to check for the researcher.`,
+        };
       }
       return { message: `${w.name} stopped.${working ? ` ${w.taskId} is pending again.` : ""}` };
     }, true),

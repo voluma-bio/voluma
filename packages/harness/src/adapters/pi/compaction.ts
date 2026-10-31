@@ -302,6 +302,11 @@ export interface Compactor {
    * to summarize, the summary failed, or nothing can be stored): the refusal stands.
    */
   recover(messages: AgentMessage[], signal?: AbortSignal): Promise<boolean>;
+  /**
+   * Whether `errorText` is the error of a summary call that failed after its reply started
+   * (Pi's response headers were in), which the provider's retries did not cover.
+   */
+  interrupted(errorText: string | undefined): boolean;
 }
 
 export function compactor(args: {
@@ -351,8 +356,12 @@ export function compactor(args: {
     };
   }
 
+  const interruptedTexts = new Set<string>();
+
   /** One summary call; the error text of a failed one is the provider's, unchanged. */
   async function summarize(request: AgentMessage[], maxTokens: number, signal?: AbortSignal) {
+    // Pi calls this for each event of the response body, so only after the headers arrived.
+    let started = false;
     const stream = await streamFn(
       model,
       normalizeContext({
@@ -364,11 +373,18 @@ export function compactor(args: {
       {
         signal,
         sessionId: threadId,
+        onProviderStreamEvent: () => {
+          started = true;
+        },
         maxTokens,
         ...(thinkingLevel && thinkingLevel !== "off" && { reasoning: thinkingLevel }),
       },
     );
-    return stream.result();
+    const reply = await stream.result();
+    if (started && reply.stopReason === "error" && reply.errorMessage) {
+      interruptedTexts.add(reply.errorMessage);
+    }
+    return reply;
   }
 
   const textOf = (reply: AssistantMessage) =>
@@ -458,11 +474,13 @@ export function compactor(args: {
       compaction = c;
     },
 
+    interrupted: (errorText) => errorText !== undefined && interruptedTexts.has(errorText),
+
     async recover(messages, signal) {
       try {
         return await compact(messages, inputTokens(messages, compaction), true, true, signal);
       } catch (error) {
-        // A transient failure of the summary is the provider's, not the thread's: the run retries it.
+        // A transient failure of the summary is the provider's, not the thread's: the thread fails with it as it is.
         if (isTransientProviderError(errorText(error))) throw error;
         console.error(
           `compaction: thread ${threadId}: recovering from an overflow failed: ${error}`,

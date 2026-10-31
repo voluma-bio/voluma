@@ -11,6 +11,7 @@ import type { Mark } from "@voluma/contracts/messages";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import {
   askRef,
+  checkAwaitsMain,
   type Notice,
   openAsk,
   type ThreadLog,
@@ -67,6 +68,13 @@ export function checkReason(t: FoldedTask, status: "done" | "to-check"): string 
     : "The second AI check passed it, but items are still open for a person.";
 }
 
+/** Why a task is left to check when its check failed and the main agent did not act on it. */
+export const checkFailed = (error: string, provider: boolean) =>
+  `The second AI check could not finish: ${provider ? "its AI provider failed " : ""}(${clip(error, REPLY_MAX)}).`;
+
+/** What the main agent is told when the provider failed after its reply started; its history is as it was. */
+export const PROVIDER_FAILED_RESUME = "The model provider failed during your last reply; continue.";
+
 export const fixLimitReason = (rounds: number) =>
   `The second AI check still found problems after ${rounds} rounds of fixes; this task is left for a person.`;
 
@@ -92,12 +100,13 @@ export const unresumableReason = (place: "worker" | "check", taskId: string, why
 
 /** The delivery message: the notices, the live agents and the tasks whose row changed. */
 export const deliveryText = (
+  d: ThreadLog,
   notices: readonly Notice[],
   agents: string,
   changed: readonly TaskRow[],
 ) =>
   [
-    notices.map(noticeLine).join("\n"),
+    notices.map((n) => noticeLine(n, d)).join("\n"),
     `Agents:\n${agents}`,
     changed.length > 0 ? `Tasks that changed:\n${taskTable(changed)}` : "",
   ]
@@ -139,9 +148,15 @@ export const NO_WORKFLOW_DIR = "no workflow was named to start";
 export const roleModelUnset = (alias: string) =>
   `the "${alias}" AI this workflow needs is not set up; whoever runs Voluma sets it up`;
 
+/** Read when main reads the notice: the task may have moved on since the check failed. */
+const awaitsMain = (d: ThreadLog, threadId: string) => {
+  const r = d.threads.get(threadId);
+  return r !== undefined && checkAwaitsMain(d, r);
+};
+
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}…` : text);
 
-export function noticeLine(n: Notice): string {
+export function noticeLine(n: Notice, d: ThreadLog): string {
   const who = n.taskId ? `${n.threadName} (${n.taskId})` : n.threadName;
   switch (n.kind) {
     case "submitted":
@@ -149,7 +164,7 @@ export function noticeLine(n: Notice): string {
     case "worker-idle":
       return `- ${who} stopped without submitting${n.reply ? `. Its last words: "${clip(n.reply, REPLY_MAX)}"` : "."}`;
     case "failed":
-      return `- ${who} failed: ${clip(n.error, REPLY_MAX)}`;
+      return `- ${who} failed: ${clip(n.error, REPLY_MAX)}${n.place === "check" && awaitsMain(d, n.threadId) ? ` Its check has no verdict yet: \`message\` it to resume it where it stopped, or \`stop_worker\` it for a fresh check. If you do neither, ${n.taskId} is left to check for the researcher.` : ""}`;
     case "ask":
       return `- ${who} asks (askId ${askRef(n.threadName, n.threadId, n.eventId)}): "${n.question}" Reply with \`answer\`.`;
     case "stale":
@@ -379,7 +394,7 @@ export function stateBlock(
   const carried = carriedNotices(d, view);
   return [
     carried.length > 0
-      ? `Still open, or not yet told to you:\n${carried.map(noticeLine).join("\n")}`
+      ? `Still open, or not yet told to you:\n${carried.map((n) => noticeLine(n, d)).join("\n")}`
       : "",
     `Agents:\n${agentsList(d, stateOf)}`,
     `Tasks:\n${taskTable(taskRows(view))}`,

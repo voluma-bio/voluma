@@ -1,28 +1,27 @@
 /**
- * Which model-call errors are the provider's, and which of them a later call can succeed after.
- * The call retry (`model-retry.ts`) retries the second set; a provider's error that survives it
- * (every 4xx) fails the run (`run-loop.ts`), and the retry set once more when it arrives mid-reply,
- * after content went out, which `model-retry.ts` cannot redo.
- * The error text is all that reaches us (shapes and status: `@voluma/harness/context-overflow`),
- * and an account out of money has its own message (`OUT_OF_MONEY`).
+ * Which model-call errors are the provider's and cannot be cured by a fresh thread, read from the
+ * error text (shapes and status: `@voluma/harness/context-overflow`). Pi's own retries
+ * (`model-fetch.ts`) are the only ones, and they cover only the request up to its response
+ * headers. What the run loop (`run-loop.ts`) does with the result:
+ * - `"fatal"`: no later call can succeed (a 4xx, an empty account). Fails the run on any thread.
+ * - `"transient"`: Pi retried it and gave up, before any reply. Fails the run on the main agent.
+ * - `undefined`: not the provider's, or an error whose text says nothing. Whether the reply had
+ *   started is the thread's own record (`thread.ended`'s `interrupted`), which the loop reads
+ *   and which overrides `"transient"`: that is the case the main agent is resumed once.
+ * On a worker or check any failure leaves a failed thread and main decides.
  */
 import {
-  CONNECTION,
   isContextOverflowError,
   isTransientProviderError,
   OUT_OF_MONEY,
   statusOf,
 } from "@voluma/harness/context-overflow";
+import type { ProviderError } from "@voluma/harness/supervise-run";
 
-/**
- * What a failed thread's error means for the run: `undefined` when it is not the provider's (a
- * context overflow is the thread's own, a fresh thread cures it), `"retry"` when a later call can
- * succeed after it (`isTransientProviderError`), `"fatal"` for any other provider error: a 4xx or an empty account.
- */
-export function providerFailure(message: string | undefined): "retry" | "fatal" | undefined {
+/** `undefined` for a context overflow (the thread's own, a fresh thread cures it) and for any text that is neither. */
+export function providerFailure(message: string | undefined): ProviderError | undefined {
   const m = message ?? "";
   if (isContextOverflowError(m)) return;
-  const status = statusOf(m);
-  if (isTransientProviderError(m)) return "retry";
-  return CONNECTION.test(m) || OUT_OF_MONEY.test(m) || (status ?? 0) >= 400 ? "fatal" : undefined;
+  if (isTransientProviderError(m)) return "transient";
+  return OUT_OF_MONEY.test(m) || (statusOf(m) ?? 0) >= 400 ? "fatal" : undefined;
 }

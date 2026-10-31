@@ -66,8 +66,8 @@
  * and clears `lastClaimEnd`, so `previousClaim` never reports a reason from before it.
  *
  * A model provider's error does not release the run: a 4xx fails it at once and a 5xx or network
- * error after a short retry fails it (`apps/runner/src/model-retry.ts`), with the provider's message
- * in the run's `error`.
+ * error that outlasts Pi's retries fails it when the main agent hit it (a worker's or check's
+ * failure goes to main as a failed thread), with the provider's message in the run's `error`.
  *
  * There is no tokenless call: the runner service is the only claimer.
  *

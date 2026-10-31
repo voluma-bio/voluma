@@ -26,7 +26,7 @@ import type { Outputs } from "./ports/outputs";
 import type { CreateSandbox } from "./ports/sandbox";
 import type { Recorder } from "./recorder";
 import { reviewAssetsWorker } from "./review-assets";
-import { type LoopConfig, type ModelSetup, runLoop } from "./run-loop";
+import { type LoopConfig, type ModelSetup, type ProviderError, runLoop } from "./run-loop";
 import { type SandboxSession, sandboxSession } from "./sandbox-session";
 import { type Gateway, type SandboxSettings, specOf } from "./sandbox-specs";
 import { type PlanTask, taskRuntime } from "./task-runtime";
@@ -35,7 +35,7 @@ import { threadLog } from "./thread-log";
 import { threads } from "./threads";
 import { buildTools } from "./tools/registry";
 
-export type { LoopConfig, ModelSetup, PlanTask };
+export type { LoopConfig, ModelSetup, PlanTask, ProviderError };
 
 export interface SuperviseRunOptions {
   runId: string;
@@ -77,8 +77,8 @@ export interface SuperviseRunOptions {
    */
   gateway?(sandbox: string): Gateway | undefined;
   config?: Partial<LoopConfig>;
-  /** Whether a failed thread's error text says the model provider failed. */
-  providerError?(error: string): "retry" | "fatal" | undefined;
+  /** Whether a failed thread's error says the model provider failed (`RunLoopOptions.providerError`). */
+  providerError?(error: string): ProviderError | undefined;
   log(line: string): void;
   /** Ends the run: its threads stop where they are. */
   signal: AbortSignal;
