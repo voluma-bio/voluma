@@ -1,9 +1,9 @@
 /**
  * Postgres adapter for the run queue: every state change of a run, and the key vault
  * (key-vault.ts) that goes with it. Each transition (start, resume, cancel, claim,
- * heartbeat, report) runs in one transaction under the queue lock, judged by the
- * database's `now()`; no API process's clock or memory decides a lease. The vault is only
- * touched under that lock, so holding or dropping a run's keys can't interleave with
+ * heartbeat, report) runs in one transaction, judged by the database's `now()`; no API
+ * process's clock or memory decides a lease. Which transitions take the queue lock, and why
+ * heartbeat and report don't: `apps/api/AGENTS.md`. The vault is only touched under that lock, so holding or dropping a run's keys can't interleave with
  * the claim that hands them out: keys are held before the transaction that makes a run
  * queued commits, and dropped by whatever ends or moves it. The lease token stays on an
  * ended run so the old holder's next heartbeat is told to `stop`; a recovery clears it,
