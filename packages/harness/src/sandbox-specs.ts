@@ -5,7 +5,7 @@
  *
  * | role    | read-only mounts       | writable mounts            | network                     |
  * |---------|------------------------|----------------------------|-----------------------------|
- * | worker  | as the caller says     | as the caller says         | the gateway host, if any    |
+ * | worker  | as the caller says     | as the caller says         | the gateway host or IPv4   |
  * | checker | `readOnly`             | `scratch` (its own prefix) | none                        |
  * | convert | `evidence`             | `review`                   | none                        |
  *
@@ -46,18 +46,29 @@ const withAccess = (mounts: SandboxMount[], access: SandboxMount["access"]): San
   mounts.map((m) => ({ ...m, access }));
 
 /**
- * A worker. With a `gateway` it reaches that host only (over HTTPS) and finds its URL and
- * token in `VOLUMA_GATEWAY_URL` and `VOLUMA_GATEWAY_TOKEN`; without one it has no network.
+ * A worker. A gateway's dedicated IPv4 replaces its SNI allowlist; without an IPv4, shared
+ * edges can still route by Host (#236). The URL and token go in the environment. No gateway:
+ * no network.
  */
 export function workerSandboxSpec(
-  options: Common & { mounts: SandboxMount[]; gateway?: { url: string; token: string } },
+  options: Common & {
+    mounts: SandboxMount[];
+    gateway?: { url: string; token: string; ipv4?: string };
+  },
 ): SandboxSpec {
   const { gateway } = options;
+  // Keep HTTPS/443 required even when the network restriction is an IP rather than SNI.
+  const host = gateway && gatewayHost(gateway.url);
   return {
     ...base(options),
     role: "worker",
     mounts: options.mounts,
-    network: gateway ? { kind: "hosts", hosts: [gatewayHost(gateway.url)] } : { kind: "none" },
+    network:
+      gateway && host
+        ? gateway.ipv4 !== undefined
+          ? { kind: "ipv4", address: gateway.ipv4 }
+          : { kind: "hosts", hosts: [host] }
+        : { kind: "none" },
     env: gateway
       ? { ...options.env, VOLUMA_GATEWAY_URL: gateway.url, VOLUMA_GATEWAY_TOKEN: gateway.token }
       : options.env,
