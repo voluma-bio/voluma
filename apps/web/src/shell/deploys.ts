@@ -20,26 +20,30 @@ export function followDeploys(running: string) {
     window.location.reload();
   });
 
-  const pointer = trackPointer();
-  let leaving: Promise<boolean> | undefined;
+  trackPointer();
+  let found = false;
   let checking: Promise<boolean> | undefined;
   // A write's mismatch sends the tab Home rather than reloading the form that made it.
   let home = false;
+  // True: the failed call never settles, as the tab leaves now or after a pointer release. Under
+  // a hold the leave may be long off, so the call fails instead: held work that made it can end
+  // (and release its hold) rather than hang forever.
+  const leavingSoon = () => holds === 0;
   onContractError((error: ContractError) => {
     home ||= error.write;
-    if (leaving) return leaving;
+    if (found) return Promise.resolve(leavingSoon());
     checking ??= deployed(running).then((entry) => {
       checking = undefined;
       if (!entry || !claim(`voluma:deploy-reload:${entry}`)) {
         home = false;
         return false;
       }
-      leaving = Promise.resolve(true);
-      pointer.whenIdle(() => {
+      found = true;
+      whenIdle(() => {
         if (home) window.location.assign("/");
         else window.location.reload();
       });
-      return true;
+      return leavingSoon();
     });
     return checking;
   });
@@ -76,33 +80,58 @@ function claim(key: string): boolean {
   }
 }
 
+let holds = 0;
+let pointerDown = false;
+/** The leave waiting for the page to go idle: set once a deploy is found. */
+let pending: (() => void) | undefined;
+
 /**
- * Whether the person is mid-gesture: a pointer held down (drawing a mark, dragging). `whenIdle`
- * runs `leave` now if not, or when the tab is hidden; else once the pointer is released. Typed
- * text needs no wait: The AI box keeps its draft across a reload (`ai-panel.tsx`).
+ * Keeps the tab from leaving for a deploy while work that a reload would lose is under way (a
+ * scan uploading). Returns the release; the tab leaves once the last hold is released. Release on
+ * every way the work ends, unmount included, or the tab stays on the old app.
  */
+export function holdLeave(): () => void {
+  holds += 1;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    holds -= 1;
+    recheck();
+  };
+}
+
+/**
+ * Busy: a hold is taken, or a pointer is held down in a visible tab (drawing a mark, dragging).
+ * Typed text needs no wait: The AI box keeps its draft across a reload (`ai-panel.tsx`).
+ */
+const busy = () => holds > 0 || (pointerDown && document.visibilityState !== "hidden");
+
+// After the event, so a release's click has run.
+const recheck = () =>
+  setTimeout(() => {
+    if (!pending || busy()) return;
+    const leave = pending;
+    pending = undefined;
+    leave();
+  });
+
 function trackPointer() {
-  let pointerDown = false;
   window.addEventListener("pointerdown", () => (pointerDown = true), true);
   for (const type of ["pointerup", "pointercancel"])
-    window.addEventListener(type, () => (pointerDown = false), true);
+    window.addEventListener(
+      type,
+      () => {
+        pointerDown = false;
+        recheck();
+      },
+      true,
+    );
+  document.addEventListener("visibilitychange", recheck);
+}
 
-  const busy = () => pointerDown && document.visibilityState !== "hidden";
-
-  return {
-    whenIdle(leave: () => void) {
-      if (!busy()) return leave();
-      const events = ["visibilitychange", "pointerup", "pointercancel"] as const;
-      // After the event, so a release's click has run.
-      let left = false;
-      const check = () =>
-        setTimeout(() => {
-          if (left || busy()) return;
-          left = true;
-          for (const type of events) document.removeEventListener(type, check, true);
-          leave();
-        });
-      for (const type of events) document.addEventListener(type, check, true);
-    },
-  };
+/** Runs `leave` now if nothing is busy, else once it isn't. */
+function whenIdle(leave: () => void) {
+  if (!busy()) return leave();
+  pending = leave;
 }
