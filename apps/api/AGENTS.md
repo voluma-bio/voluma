@@ -71,8 +71,9 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   write (start, create, cancel, resume) goes through `attempt`: a refusal rolls it back and reaches the
   client (`onError` answers `{error}`), and `attempt` drops the visitor keys it held. `runs` has no workflow
   column: `pgRunQueue` gets `workflowOf` and resolves the pins and outputs from the study. The seeded example has
-  its own study (`study-<exampleId>`, `example`), read-only like its run; `import:run` gives
-  an imported run a study of one the same way.
+  its own study (`study-<exampleId>`, `example`), read-only like its run; `import:run` restores
+  a dump's original study, scans and inputs, refusing conflicting shared rows. Only legacy dumps
+  without study metadata get a study of one.
 - **Every transition holds one lock** (`QUEUE_LOCK`, a transaction advisory lock), so
   limit counts can't race. The lease is judged by the database's `now()`. An ingest write
   checks the run's lease token inside its own transaction (`assertLease`, `FOR SHARE`); a
@@ -147,14 +148,15 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   `ReviewRun.review`; no persisted count is maintained. Unfinished/failed/cancelled runs
   have null summaries. Review mutations return/refetch snapshots; execution SSE closes
   at run end and does not continuously deliver human review changes.
-- Run list/get and study reads memoize at most 2048 derived results (`{summary, tasks, values, toCheck}`, all from one `reviewState(log)`; least recently read out first), keyed by each run's latest
-  event ID (ordered by sequence) in the same repeatable-read snapshot, including reseeded
-  examples with reused sequence numbers. Cache misses load only fold/review
-  events; hits load no event payloads. The event log remains the only durable human-decision state.
-- `inputs.ts` owns `/inputs/:inputId/download` and `/inputs/:inputId/file`, guarded by
-  `requireUser` only under `/inputs/:inputId/*`. Both allow only the
-  caller's org's reference scan (`referenceInputId(user.labId)`) before using `ReferenceArchive`. Reject HEAD before opening R2; keep
-  the descriptor's ETag pin and stream the file without buffering.
+- One loader, `resultsLoader()` (`pg-runs.ts`), serves the run and study reads and Review's `RunRecords.load`
+  and `decide`. It memoizes derived results (`{results, summary, tasks, values, toCheck}`, all
+  from one `reviewState(log)`) up to 250,000 folded events in total (about 20 MB; least recently read out
+  first). An unreadable run's verdict is cached too, so lists don't re-parse it. Keyed by each run's latest event ID
+  (ordered by sequence) among `FOLD_EVENT_TYPES` (`packages/contracts/src/fold.ts`, next to the
+  switch it describes; add a type there when the fold starts to read it) in the same repeatable-read
+  snapshot, including reseeded examples with reused sequence numbers. Cache misses load only those
+  events; hits load no event payloads. A single-run read of a run of any state throws on events that don't parse; lists
+  leave out a completed run that doesn't and keep another with empty results. The event log remains the only durable human-decision state.
 - `runs.ts` also serves `GET /runs/:runId/files/:sha256`: one of the run's content-addressed
   files (`evidenceKey`) through `RunFiles` (`r2-run-files.ts`), after `RunRecords.readable`.
   No descriptor or ETag pin: the key is the content hash, so the bytes never change (`immutable`,
@@ -167,6 +169,9 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   metadata is inserted. Retries keep the same UUID/pixels and return the original actor/time;
   conflicting captures return 409. Run's internal `generation` changes on example replacement:
   every snapshot query and insert uses it, so late saves cannot attach to the replacement.
+  `adapters/pg-snapshots.ts` implements the shared `ReviewSnapshots` port: insertion holds a
+  share lock on the matching run generation until commit. Archive/replacement holds the run's
+  update lock, so a save either commits before the archive checks it or is refused afterwards.
 - A screenshot is one grid-viewer pane (`slice` or `3d`) on a `gridId`. The API checks the
   grid has an image volume in the pinned revision, the crosshair lies on it, and every
   structure and focus reference belongs to the revision; it refuses new `acquired` (DICOM

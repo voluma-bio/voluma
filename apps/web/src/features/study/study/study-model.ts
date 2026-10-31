@@ -28,7 +28,6 @@ import {
   groupNames,
   groupOf,
   itemHref,
-  kneeOf,
   type NeedItem,
   runHref,
   type ScanGraphTask,
@@ -153,12 +152,6 @@ export function checkKinds(detail: StudyDetail, workflow: BundledWorkflow): Chec
   const rank = (k: CheckKind) => order.get(k.taskId) ?? workflow.tasks.length;
   return [...kinds.values()].sort((a, b) => rank(a) - rank(b) || a.title.localeCompare(b.title));
 }
-
-/** "OA7-2, left knee": the scan's subject and its knee. */
-export const scanName = (scan: StudyScanDetail) => {
-  const knee = kneeOf(scan);
-  return knee ? `${scan.scan.subject}, ${knee.toLowerCase()} knee` : scan.scan.subject;
-};
 
 /** Where a scan links: its newest run's review (the scan review shows a live run too). */
 export const scanHref = ({ runs: [run] }: StudyScanDetail) =>

@@ -1,56 +1,67 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Button } from "@voluma/ui";
-import { Box as Cube } from "lucide-react";
+import { Button, Readout } from "@voluma/ui";
+import { Box } from "lucide-react";
 import { ItemToCheck } from "./item-to-check";
 
 /**
- * **What:** one open check on one scan's result: what the AI flagged, where, why, and the
- * decision ("Looks right"). **Why:** a decision lives in one place, and accepting reads and fails
- * the same wherever it is offered. **Where:** the study's To check page (under a scan or an issue)
- * and the scan review's To check panel.
+ * **What:** one item waiting for your decision: its task, what the AI says, what the second AI
+ * check found, the value it affects, and Looks right / Something's wrong. **Why:** the decision
+ * lives in one place; the AI panel and the report refer to the item instead of drawing it again.
+ * **Where:** the scan review's To check panel and the study's To check page.
  *
- * Sample data (stories only). There is no API here, so "Looks right" fails and shows its error.
+ * Sample data (stories only).
  */
-const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
-
 const meta = {
   title: "Run view/ItemToCheck",
   component: ItemToCheck,
+  decorators: [(Story) => <div className="w-[368px]">{Story()}</div>],
   args: {
-    runId: "sample-run",
-    revisionId: "sample-revision",
-    taskId: "segmentation",
-    checkId: "medial-osteophyte",
-    title: "Medial osteophyte boundary",
     context: "Segmentation",
-    detail:
-      "The osteophyte merges with the medial femoral condyle; the label edge is the AI's best call.",
-    children: (
-      <Button size="sm">
-        <Cube aria-hidden />
-        Review in 3D
-      </Button>
+    title: "Medial osteophyte boundary",
+    text: "The osteophyte merges with the medial femoral condyle; the label edge is the AI's best call.",
+    found: "A second AI check agreed with the values and left this call to you.",
+    value: (
+      <Readout
+        values={[{ label: "Medial meniscus/osteophyte volume", value: "0.500", unit: "mm³" }]}
+      />
     ),
+    state: "open",
+    onAccept: () => {},
+    onWrong: () => {},
   },
-  decorators: [
-    (Story) => (
-      <QueryClientProvider client={client}>
-        <div className="max-w-xl px-4">{Story()}</div>
-      </QueryClientProvider>
-    ),
-  ],
 } satisfies Meta<typeof ItemToCheck>;
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** Under its scan: named by the check, with its task. */
-export const UnderAScan: Story = {};
-/** Under its issue (one check across scans): named by the scan. */
-export const UnderAnIssue: Story = { args: { title: "OA7-2, left knee", context: undefined } };
-/** With the value it affects. */
-export const WithValue: Story = {
-  args: { values: [{ label: "Medial osteophyte volume", value: "0.500", unit: "mm³" }] },
+export const Open: Story = {};
+export const Saving: Story = { args: { accepting: true } };
+export const Accepted: Story = { args: { state: "accepted" } };
+/** An example run takes no decisions: the reason sits beside the off button. */
+export const ReadOnly: Story = {
+  args: { onAccept: undefined, readOnly: "Example runs can't be changed" },
 };
-/** An example study is read-only: the decision says why it is off. */
-export const ReadOnly: Story = { args: { readOnly: true } };
+/** A task left To check with nothing to accept: only Something's wrong. */
+export const NothingToAccept: Story = {
+  args: {
+    context: "Tibial cortical thickness",
+    title: "Sent back by the second AI",
+    text: "The cortex is thinner than the scan supports at the medial edge.",
+    found: undefined,
+    value: undefined,
+    state: "info",
+  },
+};
+/** On the study's To check page, by issue: the scan above the title, and a way into the scan review. */
+export const OnTheStudyPage: Story = {
+  args: {
+    context: "OA7-2, right knee",
+    onWrong: undefined,
+    actions: (
+      <Button variant="ghost">
+        <Box aria-hidden />
+        Review OA7-2 in 3D
+      </Button>
+    ),
+  },
+};
+export const Failed: Story = { args: { error: "This changed since you opened it. Look again." } };

@@ -5,10 +5,11 @@
  * - `summary`: left to right and small; one scan's tasks, each with its state and one line.
  * - `report`: top down, fitted to the scan review's Report panel; the selected, working or redone
  *   task also lists its agents.
+ * A box either opens somewhere (`taskLink`, a link) or picks a task in place (`onSelect`, a toggle).
  * Boxes are ordinary layout and may grow; the edges are measured from where the boxes are after
  * layout, so the drawing never needs to know a box's size.
  */
-import { cx, Progress, STATUS_WORD, type Status, StatusGlyph } from "@voluma/ui";
+import { cx, type LinkTo, Progress, STATUS_WORD, type Status, StatusGlyph } from "@voluma/ui";
 import { type CSSProperties, type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { THREAD_STATUS } from "./agents";
 import { agentLabel, type TaskState, type TaskView, type Thread, workedSeconds } from "./run-model";
@@ -33,7 +34,10 @@ export type TaskGraphProps =
       tasks: StudyGraphTask[];
       /** The task the page is filtered to; its edges light up. */
       selected?: string;
+      /** Picks a task on this page: the box is a toggle, pressed when `selected`. */
       onSelect?: (taskId: string) => void;
+      /** Where a box opens, when it leads to another page: the box is a link. */
+      taskLink?: (taskId: string) => LinkTo;
       className?: string;
     }
   | {
@@ -73,6 +77,12 @@ const STATE_WORD: Partial<Record<TaskState, string>> = {
 export const taskStateWord = (state: TaskState) =>
   STATE_WORD[state] ?? STATUS_WORD[TASK_STATUS[state]];
 
+/**
+ * A box's least width: the longest workflow names ("Proximal tibial metaphysis", "Subchondral
+ * bone plate") fit on two lines, breaking only between words.
+ */
+const BOX = "9.5rem";
+
 export function TaskGraph(props: TaskGraphProps) {
   const right = props.size !== "report";
   const boxes = new Map<string, ReactNode>(
@@ -84,6 +94,7 @@ export function TaskGraph(props: TaskGraphProps) {
             task={t}
             pressed={props.selected === t.id}
             onSelect={props.onSelect}
+            link={props.taskLink?.(t.id)}
           />,
         ])
       : props.tasks.map((t) => [
@@ -101,54 +112,59 @@ export function TaskGraph(props: TaskGraphProps) {
   const { layers, edges, lanes } = layout<GraphTask>(props.tasks);
   const { ref, paths } = useEdges(edges, right);
   return (
-    <div
-      ref={ref}
-      className={cx(
-        "relative grid",
-        right
-          ? "auto-cols-[minmax(0,1fr)] grid-flow-col gap-x-6"
-          : "gap-y-4 [&>[data-layer]]:grid [&>[data-layer]]:grid-cols-[repeat(var(--lanes),minmax(0,1fr))] [&>[data-layer]]:items-start [&>[data-layer]]:gap-x-2",
-        props.className,
-      )}
-      style={{ "--lanes": lanes } as CSSProperties}
-    >
-      <svg aria-hidden className="pointer-events-none absolute inset-0 size-full overflow-visible">
-        {paths.map((p) => (
-          <path
-            key={p.key}
-            d={p.d}
-            className={cx(
-              "fill-none",
-              props.selected && (p.from === props.selected || p.to === props.selected)
-                ? "stroke-select stroke-[1.5]"
-                : "stroke-line-strong stroke-[1.25]",
-            )}
-          />
-        ))}
-      </svg>
-      {layers.map((layer) => (
-        <div
-          key={layer[0]?.id}
-          data-layer
-          className={right ? "grid content-center gap-y-2.5" : undefined}
+    // Boxes keep their least width; a narrower parent scrolls sideways.
+    <div className={cx("overflow-x-auto", props.className)}>
+      <div
+        ref={ref}
+        className={cx(
+          "relative grid",
+          right
+            ? "auto-cols-[minmax(var(--box),1fr)] grid-flow-col gap-x-6"
+            : "gap-y-4 [&>[data-layer]]:grid [&>[data-layer]]:grid-cols-[repeat(var(--lanes),minmax(var(--box),1fr))] [&>[data-layer]]:items-start [&>[data-layer]]:gap-x-2",
+        )}
+        style={{ "--lanes": lanes, "--box": BOX } as CSSProperties}
+      >
+        <svg
+          aria-hidden
+          className="pointer-events-none absolute inset-0 size-full overflow-visible"
         >
-          {layer.map((task) => (
-            <div
-              key={task.id}
-              data-node={task.id}
+          {paths.map((p) => (
+            <path
+              key={p.key}
+              d={p.d}
               className={cx(
-                // A lone task in a top-down layer sits centred at one lane's width.
-                !right &&
-                  layer.length === 1 &&
-                  lanes > 1 &&
-                  "col-span-full w-[calc((100%-0.5rem)/2)] justify-self-center",
+                "fill-none",
+                props.selected && (p.from === props.selected || p.to === props.selected)
+                  ? "stroke-select stroke-[1.5]"
+                  : "stroke-line-strong stroke-[1.25]",
               )}
-            >
-              {boxes.get(task.id)}
-            </div>
+            />
           ))}
-        </div>
-      ))}
+        </svg>
+        {layers.map((layer) => (
+          <div
+            key={layer[0]?.id}
+            data-layer
+            className={right ? "grid content-center gap-y-2.5" : undefined}
+          >
+            {layer.map((task) => (
+              <div
+                key={task.id}
+                data-node={task.id}
+                className={cx(
+                  // A lone task in a top-down layer sits centred at one lane's width.
+                  !right &&
+                    layer.length === 1 &&
+                    lanes > 1 &&
+                    "col-span-full w-[calc((100%-0.5rem)/2)] justify-self-center",
+                )}
+              >
+                {boxes.get(task.id)}
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -265,6 +281,7 @@ function Box({
   dim,
   compact,
   onSelect,
+  link,
   lead,
   children,
 }: {
@@ -276,6 +293,7 @@ function Box({
   dim?: boolean;
   compact?: boolean;
   onSelect?: () => void;
+  link?: LinkTo;
   lead?: ReactNode;
   children?: ReactNode;
 }) {
@@ -291,11 +309,17 @@ function Box({
             : "inset-ring inset-ring-line-strong",
         pressed && "bg-select-tint",
         onSelect && "has-[[data-box-control]:hover]:bg-accent",
+        // A link's stretched target covers the box, so hovering the box is hovering the link.
+        link && "hover:bg-accent",
       )}
     >
       <div className="flex min-w-0 items-start gap-1.5">
         {lead && <span className="mt-0.5 flex">{lead}</span>}
-        {onSelect ? (
+        {link ? (
+          <BoxLink to={link} label={label} dim={dim}>
+            {title}
+          </BoxLink>
+        ) : onSelect ? (
           <button
             type="button"
             data-box-control
@@ -303,18 +327,14 @@ function Box({
             aria-current={selected || undefined}
             aria-pressed={pressed === undefined ? undefined : pressed}
             onClick={onSelect}
-            className={cx(
-              "min-w-0 flex-1 cursor-pointer text-left text-sm leading-snug font-medium hyphens-auto [text-wrap:balance]",
-              "after:absolute after:inset-0 after:rounded-lg focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-offset-1 focus-visible:after:outline-ring",
-              dim && "text-muted-foreground",
-            )}
+            className={cx(CONTROL, dim && "text-muted-foreground")}
           >
             {title}
           </button>
         ) : (
           <span
             className={cx(
-              "min-w-0 flex-1 text-sm leading-snug font-medium hyphens-auto [text-wrap:balance]",
+              "min-w-0 flex-1 text-sm leading-snug font-medium hyphens-none [text-wrap:balance]",
               dim && "text-muted-foreground",
             )}
           >
@@ -324,6 +344,41 @@ function Box({
       </div>
       {children}
     </div>
+  );
+}
+
+/** A box's title as its control: the whole box is the target, through a stretched `after`. */
+const CONTROL = cx(
+  "min-w-0 flex-1 cursor-pointer text-left text-sm leading-snug font-medium hyphens-none [text-wrap:balance]",
+  "after:absolute after:inset-0 after:rounded-lg focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-offset-1 focus-visible:after:outline-ring",
+);
+
+/** A box's title as a link: a plain URL, or the app's router link given the box's look. */
+function BoxLink({
+  to,
+  label,
+  dim,
+  children,
+}: {
+  to: LinkTo;
+  label: string;
+  dim?: boolean;
+  children: ReactNode;
+}) {
+  const className = cx(CONTROL, dim && "text-muted-foreground");
+  // A router link passes on only its props, so the accessible name is text, not `aria-label`.
+  const body = (
+    <>
+      <span className="sr-only">{label}</span>
+      <span aria-hidden>{children}</span>
+    </>
+  );
+  return typeof to === "string" ? (
+    <a href={to} className={className}>
+      {body}
+    </a>
+  ) : (
+    to({ className, children: body, "data-row-control": "" })
   );
 }
 
@@ -341,10 +396,12 @@ function StudyBox({
   task,
   pressed,
   onSelect,
+  link,
 }: {
   task: StudyGraphTask;
   pressed: boolean;
   onSelect?: (taskId: string) => void;
+  link?: LinkTo;
 }) {
   const counts = COUNT_ORDER.map((c) => ({
     ...c,
@@ -357,6 +414,7 @@ function StudyBox({
       label={`${task.title}: ${summary || "no scans"}`}
       pressed={onSelect ? pressed : undefined}
       onSelect={onSelect && (() => onSelect(task.id))}
+      link={link}
     >
       <Progress states={task.scans} className="my-0.5" />
       <p className="flex flex-wrap gap-x-2.5 text-xs leading-4 text-muted-foreground">
@@ -478,10 +536,11 @@ function AgentRows({
             type="button"
             disabled={!onAgent}
             onClick={() => onAgent?.(t.id)}
-            className="grid h-[22px] w-full cursor-pointer grid-cols-[12px_minmax(0,1fr)_auto] items-center gap-1.5 rounded-sm px-1 text-left text-xs hover:bg-accent disabled:cursor-default disabled:hover:bg-transparent"
+            className="grid min-h-[22px] w-full cursor-pointer grid-cols-[12px_minmax(0,1fr)_auto] items-start gap-x-1.5 rounded-sm px-1 py-[3px] text-left text-xs leading-4 hover:bg-accent disabled:cursor-default disabled:hover:bg-transparent"
           >
-            <StatusGlyph status={THREAD_STATUS[t.status]} className="size-3" />
-            <span className="truncate">{agentLabel(t, threads, { short: true })}</span>
+            <StatusGlyph status={THREAD_STATUS[t.status]} className="mt-0.5 size-3" />
+            {/* A narrow box wraps the name between words rather than cutting it. */}
+            <span className="hyphens-none">{agentLabel(t, threads, { short: true })}</span>
             <AgentOutcome thread={t} />
           </button>
         </li>
@@ -502,7 +561,7 @@ function AgentOutcome({ thread }: { thread: Thread }) {
       <span className="text-muted-foreground">{STATUS_WORD[THREAD_STATUS[thread.status]]}</span>
     );
   return (
-    <span className="text-muted-foreground tabular-nums">
+    <span className="text-muted-foreground tabular-nums whitespace-nowrap">
       {formatDuration(workedSeconds(thread, Date.now()))}
     </span>
   );

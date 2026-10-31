@@ -5,12 +5,12 @@
  * headline measurements by group.
  */
 import type { StudyDetail, StudyScanDetail } from "@voluma/contracts/study";
-import { formatUsd, plural, scanStatus, TaskGraph } from "@voluma/run-view";
+import { formatUsd, plural, scanLabel, scanStatus, TaskGraph } from "@voluma/run-view";
 import { Box, Button, Count, EmptyState, List, PageHead, RowLink, StatusMark } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 import { Box as Cube, Maximize2 } from "lucide-react";
 import type { ReactNode } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link } from "react-router";
 import { linkTo } from "../link";
 import { measurementsOf } from "../workflow-tasks";
 import { ResultsTable } from "./results-table";
@@ -22,7 +22,6 @@ import {
   farFromGroup,
   reviewHref,
   scanHref,
-  scanName,
   stoppedLine,
   studyGraph,
   studySpend,
@@ -31,7 +30,6 @@ import {
 
 export function Dashboard() {
   const { detail, workflow } = useStudy();
-  const navigate = useNavigate();
   const base = `/studies/${detail.study.id}`;
   const [next] = byMostToCheck(detail.scans);
   const nextHref = next && reviewHref(next);
@@ -68,7 +66,7 @@ export function Dashboard() {
           <TaskGraph
             size="study"
             tasks={studyGraph(detail, workflow)}
-            onSelect={(task) => navigate(`${base}/workflow?task=${encodeURIComponent(task)}`)}
+            taskLink={(task) => linkTo(`${base}/workflow?${new URLSearchParams({ task })}`)}
             className="min-w-[44rem]"
           />
         </div>
@@ -275,7 +273,7 @@ function NeedsYou({
         <List columns="auto" label="Needs you">
           {rows.map(({ scan, subtitle, cell }) => {
             const href = scanHref(scan);
-            const props = { title: scanName(scan), subtitle, cells: [cell] };
+            const props = { title: scanLabel(scan.scan), subtitle, cells: [cell] };
             return href ? <RowLink key={scan.scan.inputId} to={linkTo(href)} {...props} /> : null;
           })}
         </List>
@@ -318,7 +316,7 @@ function RunningNow({ detail, workflow }: { detail: StudyDetail; workflow: Bundl
                 <RowLink
                   key={scan.scan.inputId}
                   to={linkTo(href)}
-                  title={scanName(scan)}
+                  title={scanLabel(scan.scan)}
                   subtitle={list(working(scan)) || "Between tasks"}
                   cells={[<StatusMark key="s" status="running" label={label} />]}
                 />

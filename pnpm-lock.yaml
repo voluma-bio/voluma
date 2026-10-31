@@ -233,9 +233,6 @@ importers:
 
   apps/storybook:
     dependencies:
-      '@tanstack/react-query':
-        specifier: 'catalog:'
-        version: 5.105.0(@types/react@19.3.0)(react@19.3.1)
       '@voluma/design-tokens':
         specifier: workspace:*
         version: link:../../packages/design-tokens
@@ -303,27 +300,18 @@ importers:
       '@voluma/workflow':
         specifier: workspace:*
         version: link:../../packages/workflow
-      '@zip.js/zip.js':
-        specifier: 2.24.0
-        version: 2.24.0
       fflate:
         specifier: ^0.8.3
         version: 0.8.3
       lucide-react:
         specifier: 'catalog:'
         version: 1.62.0(@types/react@19.3.0)(react@19.3.1)
-      radix-ui:
-        specifier: 'catalog:'
-        version: 1.8.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       react:
         specifier: 'catalog:'
         version: 19.3.1
       react-dom:
         specifier: 'catalog:'
         version: 19.3.1(react@19.3.1)
-      react-resizable-panels:
-        specifier: 'catalog:'
-        version: 4.15.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       react-router:
         specifier: ^8.5.0
         version: 8.5.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -446,9 +434,6 @@ importers:
 
   packages/run-view:
     dependencies:
-      '@voluma/api-client':
-        specifier: workspace:*
-        version: link:../api-client
       '@voluma/contracts':
         specifier: workspace:*
         version: link:../contracts
@@ -477,9 +462,6 @@ importers:
       '@storybook/react-vite':
         specifier: ^10.6.5
         version: 10.6.5(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(storybook@10.6.5(@types/react@19.3.0)(react@19.3.1))(typescript@6.0.3)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.0))
-      '@tanstack/react-query':
-        specifier: 'catalog:'
-        version: 5.105.0(@types/react@19.3.0)(react@19.3.1)
       '@types/react':
         specifier: 'catalog:'
         version: 19.3.0
@@ -3141,10 +3123,6 @@ packages:
 
   '@zarrita/storage@0.2.0':
     resolution: {integrity: sha512-855ZXqtnds7spnT8vNvD+MXa3QExP1m2GqShe8yt7uZXHnQLgJHgkpVwFjE1B0KDDRO0ki09hmk6OboTaIfPsQ==}
-
-  '@zip.js/zip.js@2.24.0':
-    resolution: {integrity: sha512-WlaVKzdqBK+RF3bdiXZWbdCnvGB6PdO4IHC1mn/2Yfl3bASgqUNegnU3+PNg61iecwoPfUi5BgLUPqBukXpyWw==}
-    engines: {bun: '>=0.7.0', deno: '>=1.0.0', node: '>=18.0.0'}
 
   '@zkochan/js-yaml@0.0.7':
     resolution: {integrity: sha512-nrUSn7hzt7J6JWgWGz78ZYI8wj+gdIJdk0Ynjpp8l+trkn58Uqsf6RYrYkEK+3X18EX+TNdtJI0WxAtc+L84SQ==}
@@ -7335,8 +7313,6 @@ snapshots:
     dependencies:
       reference-spec-reader: 0.2.0
       unzipit: 2.0.0
-
-  '@zip.js/zip.js@2.24.0': {}
 
   '@zkochan/js-yaml@0.0.7':
     dependencies:

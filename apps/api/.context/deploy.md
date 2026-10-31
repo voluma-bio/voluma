@@ -49,7 +49,7 @@ Variables on `voluma-api` (names in `render.yaml`; values never go in the repo):
 | `WORKOS_LAB_ORGANIZATION_ID` | the Yao Lab organization's id (`org_...`); its members get scope `lab` |
 | `WORKOS_JUDGES_ORGANIZATION_ID` | the Judges organization's id; its members get scope `self`. Unset means no Judges sign-in |
 | `GUEST_ORGANIZATION_ID`, `GUEST_SCOPE` | set on `voluma-api`: guest sign-in is on (below). Optional: let anyone in as a guest of this organization (`self` or `lab`, default `self`). Never the Yao Lab, whose data is for signed-in members only (startup throws if the guest organization is one members sign in to). Unset means the sign-in wall |
-| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (and `R2_BUCKET=voluma-staging` from the group) | Optional as a group: enables Review's reference scan download, a run's files (`/api/review/runs/:runId/files/:sha256`, reads under `runs/<id>/evidence/`) and scan uploads. Use an Object Read & Write token scoped to `voluma-staging` (uploads presign PUTs to `uploads/` and move them to `inputs/`); only the server receives it. Missing or partial configuration leaves the API running and returns 503 for a reference scan download, a run file or an upload. Object `reference/OA6-1RK/scan.zip` must be a plain ZIP with no `Content-Encoding` metadata. The descriptor's version pins the GET with `If-Match`; the API streams without buffering or redirecting to R2. The bucket's CORS has two rules, both for any origin: `scan-upload-put` allows `PUT` (the browser PUTs scan files straight to R2; the presigned URL is the credential) and `review-asset-get` allows `GET` and `HEAD` (review assets) |
+| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (and `R2_BUCKET=voluma-staging` from the group) | Optional as a group: enables a run's files (`/api/review/runs/:runId/files/:sha256`, reads under `runs/<id>/evidence/`) and scan uploads. Use an Object Read & Write token scoped to `voluma-staging` (uploads presign PUTs to `uploads/` and move them to `inputs/`); only the server receives it. Missing or partial configuration leaves the API running and returns 503 for a run file or an upload. The bucket's CORS has two rules, both for any origin: `scan-upload-put` allows `PUT` (the browser PUTs scan files straight to R2; the presigned URL is the credential) and `review-asset-get` allows `GET` and `HEAD` (review assets) |
 | `UPLOAD_MAX_FILES`, `UPLOAD_MAX_BYTES`, `UPLOAD_MAX_OPEN` | not in `render.yaml`; optional: files and bytes per scan upload (default 5000 and 20 GB), and uncompleted uploads per member (default 3) |
 | `RUN_LIMITS_<ORG>_<LIMIT>` | what an organization may run, `<ORG>` one of `LAB`, `JUDGES`, `DEMO` (the guest organization) and `<LIMIT>` one of `PER_CALLER`, `CONCURRENT`, `VISITOR_ACTIVE` (visitor runs queued or running, per org: a start or `/keys` past it is a 429; `awaiting-keys` runs don't count). Unset is no limit, so they are literals in `render.yaml`: Yao Lab `CONCURRENT=4`; Judges `CONCURRENT=2`; Demo `PER_CALLER=1`, `CONCURRENT=1`, `VISITOR_ACTIVE=4`. There is no daily limit (2026-10-30, Jimmy): guests run on their own Meta key, so their only cost to Voluma is Modal sandbox time, which the runner's two slots (`RUNNER_CONCURRENCY=2`) and the Modal workspace's spend limit bound; Demo's `CONCURRENT=1` keeps guests from holding both slots. A removed key stays on the service until deleted there (a Blueprint sync doesn't delete it). Read at start: a change is a restart, not a deploy of code |
 
@@ -208,15 +208,33 @@ tables are replaced), run `pg_restore --clean --if-exists --no-owner --no-acl -d
 (`runs`, `run_events`, `provider_calls`) before trusting it. Never print the URL.
 
 **Archiving a run** frees space on the 1 GB database without losing the run. `archive:run --id <runId> --remote`
-(with `DATABASE_URL` set to the direct URL) refuses an example or a run that has not ended, writes the run's rows
-(`run.json`: run, input, study, events, threads, pi messages, review snapshots, provider calls) to
-`~/.local/share/voluma-backups/runs/<runId>/` (0600; refuses under 1 GB free), and does it all in one repeatable-read
-transaction: lock the run, read its rows, check them as `import:run` does, write and fsync the file, then delete, rolling back
-unless each table's deleted count equals the file's. Inputs stay (shared); the study goes with its
-scans only when no other run is in it. The run's R2 files are not copied or touched, so `import:run --from <that directory>`
-restores the run whole, with its study and scans when the study id is free and the scans' inputs exist (else a study of one,
-and it says so). The archive is one copy on one disk: copy the directory off this machine before archiving many runs.
-A `pg_dump` of the tables is still the backup for anything else.
+(with `DATABASE_URL` set to the direct URL) refuses an example, an unfinished run, unsettled provider calls,
+or missing inputs/study metadata and unsupported workflows that prevent restoration. It reads one database snapshot
+(`run.json`: run, study, study scans and their inputs, events, threads, pi messages, review snapshots, provider calls),
+writes `~/.local/share/voluma-backups/runs/<runId>/` (0600; refuses under 1 GB free), syncs the file and directory entries
+to disk, and reads it back. Only then does it delete, holding the queue, event and run-row locks. Every deleted row,
+including the run and any deleted study/scans, must match the archive, not merely its count; any difference rolls back.
+Inputs stay (shared); the study and its scans go only when no other run is in it. A failed write, sync or validation
+never deletes rows; an existing `run.json` is never overwritten. A failure may leave an incomplete file: retain it for
+inspection and use a new output directory when retrying.
+
+`import:run --from <that directory>` restores the original study identity and scan metadata, adding missing shared rows
+and refusing conflicts rather than overwriting them. Legacy dumps without study metadata get a study of one, or keep
+the replaced run's study only if its lab, workflow, example status and scan agree; input conflicts are refused too.
+Every import creates a fresh local run generation and moves the dump's current screenshots to it. Older screenshot
+generations stay historical. A save that validated before the import is refused instead of entering the restored run.
+
+**Provider accounting must be final before archiving.** Only `settleCall` fills `duration_ms`, atomically with cost
+and usage, and it never updates an already-settled row. Archive refuses `open` calls and any call with null duration,
+including `cut` rows from shutdown or stale-call sweeping: those may still receive late settlement. A genuinely settled
+`cut` with unknown cost is archivable; its cost stays null. A crashed call that never settles blocks archiving indefinitely.
+Keep that run in the database (export is still available); do not fill a fake duration to bypass the guard. A separate
+operator reconciliation policy is needed for abandoned calls ([TODO.md](TODO.md)). Use this archive only after gateways
+have rolled onto the settle-once implementation.
+
+The run's R2 files are neither copied nor touched: this is a database archive, not an independent backup of evidence.
+Keep those R2 objects and the local archive; choose a persistent disk, not an ephemeral orb or `/tmp`, for an operational
+archive. Filesystem sync does not protect against losing that disk. A `pg_dump` remains the backup for the whole database.
 
 ## Rotating secrets
 
@@ -238,7 +256,7 @@ ended that exposure for what was only there.
 | Modal token | `.env` or `~/.modal.toml` | `modal token new`, revoke the old in the Modal dashboard |
 
 The runner service holds the model key (`VOLUMA_META_API_KEY`), the Modal token and the R2 keys in
-its own variables (names in [../../runner/.context/deploy.md](../../runner/.context/deploy.md)); rotate them there as well as in `.env`. The API has its own R2 key (reference download, run files and scan uploads) in its variables; rotate that separately. The API holds no model keys.
+its own variables (names in [../../runner/.context/deploy.md](../../runner/.context/deploy.md)); rotate them there as well as in `.env`. The API has its own R2 key (run files and scan uploads) in its variables; rotate that separately. The API holds no model keys.
 
 ## Least privilege
 

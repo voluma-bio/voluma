@@ -6,29 +6,31 @@
  * runner, not the API, creates sandboxes. A refusal is an `HTTPException` thrown where it is
  * decided; a port method returns its success shape only.
  * A domain's own adapters live in the domain; adapters shared by domains go in
- * adapters/ (none yet). Only index.ts constructs adapters.
+ * adapters/. Only index.ts constructs adapters.
  */
 import type { RunEvent } from "@voluma/contracts/events";
 import type { PersonMessage } from "@voluma/contracts/messages";
 import type { reviewState } from "@voluma/contracts/review-state";
 import type { Run } from "@voluma/contracts/run";
+import type { ReviewSnapshot } from "@voluma/contracts/snapshot";
 import type { Caller, Reader } from "../domain";
 
-/** The published reference archive; a version pins the bytes described by the lookup. */
-export type ReferenceArchive = {
-  head(signal: AbortSignal): Promise<{ byteLength: number; version: string }>;
-  open(
-    version: string,
-    signal: AbortSignal,
-  ): Promise<{ body: ReadableStream<Uint8Array>; byteLength: number }>;
+/** Immutable screenshots; writes require the same run lifetime to still exist. */
+export type ReviewSnapshots = {
+  find(runId: string, generation: string, id: string): Promise<ReviewSnapshot | null>;
+  list(runId: string, generation: string): Promise<ReviewSnapshot[]>;
+  insert(
+    snapshot: ReviewSnapshot,
+    generation: string,
+  ): Promise<{ snapshot: ReviewSnapshot; created: boolean }>;
 };
 
 export type RunRecord = {
   /** Opaque run lifetime; changes when an example is replaced under the same id. */
   generation: string;
   run: Run;
-  events: RunEvent[];
-  results: ReturnType<typeof reviewState>;
+  /** Shared with the loader's cache: read only. */
+  results: Readonly<ReturnType<typeof reviewState>>;
 };
 /** Only authenticated human decisions can cross the review write port. */
 export type ReviewDecision =
@@ -37,7 +39,7 @@ export type ReviewDecision =
 
 /** Run-owned coherent reads and serialized human writes; Review owns decision policy. */
 export type RunRecords = {
-  /** The run and every stored event, in `seq` order; null when `reader` can't read the run. */
+  /** The run and its folded results; null when `reader` can't read the run. */
   load(reader: Reader, runId: string): Promise<RunRecord | null>;
   /** Validate against the locked current record; append one decision or return it unchanged. */
   decide(

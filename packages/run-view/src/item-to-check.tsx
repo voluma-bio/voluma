@@ -1,80 +1,102 @@
 /**
- * Something waiting for a person's decision: one open check on one scan's result. It says what
- * the AI flagged (the title), where (the scan or the task, `context`), and why (`detail`), and
- * offers the decision: "Looks right" accepts the check against the result's revision through
- * `useAcceptCheck`, so its error reads the same everywhere. The page adds its own ways in
- * (`children`: "Review in 3D", "Something's wrong").
- *
- * `revisionId` is the completed result the check belongs to; without one, or `readOnly` (an
- * example study answers 403), the decision is disabled with its reason beside it.
+ * One item waiting for a person's decision: where it is (its task, or its scan), what the AI says about it,
+ * what the second AI check found, the value it affects, and the two decisions (Looks right,
+ * Something's wrong). The decision lives here only: other places (the AI panel, the report) refer
+ * to the item, never draw it again. Data comes in as props; the scan review's To check panel and
+ * the study's To check page show it.
  */
-import { useAcceptCheck } from "@voluma/api-client/query";
-import { Button, cx, Readout, type ReadoutValue, StatusGlyph } from "@voluma/ui";
+import { Button, cx, StatusGlyph, StatusMark } from "@voluma/ui";
+import { Check } from "lucide-react";
 import type { ReactNode } from "react";
 
 export type ItemToCheckProps = {
-  runId: string;
-  revisionId: string | undefined;
-  taskId: string;
-  checkId: string;
-  /** What names it in its list: the check's title, or the scan when the list is one check's. */
-  title: string;
-  /** More of where it is: the task, or the scan, whichever the list and title don't say. */
-  context?: ReactNode;
-  /** Why the check was raised, in the AI's sentence. */
-  detail?: string;
-  /** The values it affects. */
-  values?: ReadoutValue[];
-  readOnly?: boolean;
-  /** The page's other actions, after "Looks right". */
-  children?: ReactNode;
+  /**
+   * Where it is, named above the title: its task, or its scan in a list of one check across
+   * scans. Whichever the list around it doesn't already say.
+   */
+  context: string;
+  /** What to look at; none when `context` says it. */
+  title?: string;
+  /** What the AI says about it. */
+  text: string;
+  /** The second AI check's sentence about it, quieter. */
+  found?: ReactNode;
+  /** The value it affects: a `Readout`. */
+  value?: ReactNode;
+  /** A QC image or other evidence, under the text. */
+  evidence?: ReactNode;
+  /**
+   * `open` takes a decision; `accepted` was decided Looks right; `info` is a task left To check
+   * with nothing to accept (its check sent it back, a value is missing): only Something's wrong.
+   */
+  state: "open" | "accepted" | "info";
+  /** Looks right; absent, the button is off and `readOnly` says why beside it. */
+  onAccept?: () => void;
+  accepting?: boolean;
+  /** Why no decision can be made here (an example run, a run still going). */
+  readOnly?: string;
+  /** Something's wrong: tell the AI what should change. */
+  onWrong?: () => void;
+  /** The page's own way in after the decisions, such as the study's "Review in 3D". */
+  actions?: ReactNode;
+  /** What went wrong with the last decision. */
+  error?: string;
   className?: string;
 };
 
 export function ItemToCheck({
-  runId,
-  revisionId,
-  taskId,
-  checkId,
-  title,
   context,
-  detail,
-  values,
-  readOnly = false,
-  children,
+  title,
+  text,
+  found,
+  value,
+  evidence,
+  state,
+  onAccept,
+  accepting = false,
+  readOnly,
+  onWrong,
+  actions,
+  error,
   className,
 }: ItemToCheckProps) {
-  const accept = useAcceptCheck(runId, revisionId);
-  const accepted = accept.isSuccess;
   return (
-    <article aria-label={title} className={cx("grid gap-1.5 py-2.5", className)}>
-      <header className="flex min-w-0 items-baseline gap-2">
-        <StatusGlyph status={accepted ? "done" : "check"} className="translate-y-0.5" />
-        <h3 className="m-0 min-w-0 text-base font-medium">{title}</h3>
-        {context && <span className="truncate text-sm text-muted-foreground">{context}</span>}
-      </header>
-      {detail && <p className="m-0 pl-5.5 text-sm text-pretty text-muted-foreground">{detail}</p>}
-      {values && values.length > 0 && <Readout values={values} className="ml-5.5" />}
-      <div className="flex flex-wrap items-center gap-2 pt-0.5 pl-5.5">
-        <Button
-          size="sm"
-          disabled={readOnly || !revisionId || accept.isPending || accepted}
-          reason={
-            readOnly
-              ? "An example study can't be changed."
-              : !revisionId
-                ? "Decide on this one in the scan review."
-                : undefined
-          }
-          onClick={() => accept.mutate({ checkId, taskId })}
-        >
-          {accept.isPending ? "Saving…" : accepted ? "Accepted" : "Looks right"}
-        </Button>
-        {children}
+    <article
+      aria-label={title ?? context}
+      className={cx(
+        "grid gap-2 rounded-lg bg-card p-3.5 inset-ring inset-ring-line-strong",
+        className,
+      )}
+    >
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <StatusGlyph status={state === "accepted" ? "done" : "check"} className="size-3" />
+        {context}
+      </p>
+      {title && <h3 className="text-base leading-snug font-semibold">{title}</h3>}
+      {text && <p className="text-sm leading-relaxed">{text}</p>}
+      {found && <div className="text-sm leading-relaxed text-muted-foreground">{found}</div>}
+      {value}
+      {evidence}
+      <div className="mt-1 flex flex-wrap items-center gap-2">
+        {state === "accepted" ? (
+          <StatusMark status="done" label="Looked right" />
+        ) : (
+          <>
+            {state === "open" && (
+              <Button variant="primary" disabled={!onAccept || accepting} onClick={onAccept}>
+                <Check aria-hidden />
+                {accepting ? "Saving…" : "Looks right"}
+              </Button>
+            )}
+            {onWrong && <Button onClick={onWrong}>Something's wrong</Button>}
+            {readOnly && <span className="text-xs text-muted-foreground">{readOnly}</span>}
+          </>
+        )}
+        {actions}
       </div>
-      {accept.isError && (
-        <p role="alert" className="m-0 pl-5.5 text-sm text-destructive">
-          {accept.error.message}
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
         </p>
       )}
     </article>

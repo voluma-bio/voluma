@@ -9,7 +9,6 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@tanstack/react-query": "catalog:",
     "@voluma/design-tokens": "workspace:*",
     "@voluma/run-view": "workspace:*",
     "react": "catalog:",

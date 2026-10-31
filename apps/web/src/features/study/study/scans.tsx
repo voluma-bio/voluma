@@ -9,7 +9,15 @@ import { ApiError, startRun } from "@voluma/api-client";
 import { allStudiesKey } from "@voluma/api-client/query";
 import type { VisitorKeys } from "@voluma/contracts/run";
 import type { StudyDetail, StudyScanDetail } from "@voluma/contracts/study";
-import { groupNames, groupOf, loadKeys, RunKeyLine, scanStatus, TaskGraph } from "@voluma/run-view";
+import {
+  groupNames,
+  groupOf,
+  loadKeys,
+  RunKeyLine,
+  scanLabel,
+  scanStatus,
+  TaskGraph,
+} from "@voluma/run-view";
 import {
   Button,
   Count,
@@ -33,7 +41,6 @@ import {
   rangeText,
   scanGraph,
   scanHref,
-  scanName,
   scanValue,
   stoppedLine,
   unitOf,
@@ -101,7 +108,7 @@ export function ScansPage() {
       header: "Scan",
       cell: (s) => (
         <span className="grid w-44">
-          <span className="truncate">{scanName(s)}</span>
+          <span className="truncate">{scanLabel(s.scan)}</span>
           {density === "comfortable" && (
             <span className="truncate text-sm font-normal text-fg-subtle">{line(s)}</span>
           )}

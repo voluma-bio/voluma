@@ -28,11 +28,10 @@ import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
 import postgres from "postgres";
+import { pgSnapshots } from "./adapters/pg-snapshots";
 import { createAuth } from "./auth";
 import { createReview } from "./domains/review";
 import { directoryRunFiles } from "./domains/review/directory-run-files";
-import { pgSnapshots } from "./domains/review/pg-snapshots";
-import { r2ReferenceArchive } from "./domains/review/r2-reference-archive";
 import { r2RunFiles } from "./domains/review/r2-run-files";
 import { createRun } from "./domains/run";
 import type { Limits } from "./domains/run/admission";
@@ -151,7 +150,7 @@ const queue = pgRunQueue(
 );
 const eventLog = pgEventLog(db, notifier);
 
-const runRecords = pgRunRecords(db, notifier);
+const runRecords = pgRunRecords(db, notifier, results);
 
 /** R2, optional as a group: without it the reference download, run files and scan uploads are 503s. */
 const r2Env = {
@@ -169,7 +168,6 @@ const r2 =
         secretAccessKey: r2Env.secretAccessKey,
       }
     : null;
-const referenceArchive = r2 && r2ReferenceArchive(r2);
 const runFiles = process.env.RUN_FILES_DIRECTORY
   ? directoryRunFiles(resolve(process.env.RUN_FILES_DIRECTORY))
   : r2 && r2RunFiles(r2);
@@ -227,7 +225,6 @@ app.route(
     snapshots: pgSnapshots(db),
     messages: { check: queue.checkMessage, send: queue.sendMessage },
     files: runFiles,
-    referenceArchive,
   }),
 );
 

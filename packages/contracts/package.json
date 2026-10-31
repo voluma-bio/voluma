@@ -7,7 +7,6 @@
     ".": "./src/index.ts",
     "./ids": "./src/ids.ts",
     "./r2": "./src/r2.ts",
-    "./download": "./src/download.ts",
     "./events": "./src/events.ts",
     "./stream": "./src/stream.ts",
     "./task-tools": "./src/task-tools.ts",

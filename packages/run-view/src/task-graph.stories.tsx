@@ -202,8 +202,14 @@ const study: StudyGraphTask[] = PLAN.map(([id, title, dependsOn]) => ({
   scans: spread(STUDY[id] ?? {}),
 }));
 
-/** The study dashboard: each box is one task across the study's 20 scans. */
+/** The study dashboard: each box is one task across the study's 20 scans, and opens it. */
 export const Study: Story = {
+  args: { size: "study", tasks: study, taskLink: (id) => `#workflow?task=${id}` },
+  decorators: [(Story) => <div className="w-[720px]">{Story()}</div>],
+};
+
+/** The Workflow page: a box picks the task in place, and its edges light up. */
+export const StudyPicked: Story = {
   args: { size: "study", tasks: study, selected: "iioc", onSelect: () => {} },
   decorators: [(Story) => <div className="w-[720px]">{Story()}</div>],
 };

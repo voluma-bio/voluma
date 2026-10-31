@@ -5,8 +5,10 @@
  * check on each scan. Each item is an `ItemToCheck` ("Looks right"); "Review in 3D" opens the
  * scan's review.
  */
+
+import { useAcceptCheck } from "@voluma/api-client/query";
 import type { StudyScanDetail, ToCheckItem } from "@voluma/contracts/study";
-import { ItemToCheck, itemHref, plural, TaskGraph } from "@voluma/run-view";
+import { ItemToCheck, itemHref, plural, scanLabel, TaskGraph } from "@voluma/run-view";
 import {
   Button,
   Count,
@@ -22,16 +24,12 @@ import { Box as Cube } from "lucide-react";
 import { Link, useSearchParams } from "react-router";
 import { linkTo } from "../link";
 import { useStudy } from "./study-layout";
-import {
-  byMostToCheck,
-  checkKinds,
-  checkTitles,
-  reviewHref,
-  scanGraph,
-  scanName,
-} from "./study-model";
+import { byMostToCheck, checkKinds, checkTitles, reviewHref, scanGraph } from "./study-model";
 
 type By = "scan" | "issue";
+
+/** An opened row's items: cards in a column, as wide as the scan review's own. */
+const ITEMS = "grid max-w-2xl gap-2 pb-3";
 
 export function ToCheckPage() {
   const { detail, workflow } = useStudy();
@@ -100,14 +98,16 @@ export function ToCheckPage() {
                     <StatusMark key="n" status="check" label={`${kind.items.length} to check`} />,
                   ]}
                 >
-                  {kind.items.map(({ scan, item }) => (
-                    <Item
-                      key={`${item.runId}/${item.checkId}`}
-                      scan={scan}
-                      item={item}
-                      title={scanName(scan)}
-                    />
-                  ))}
+                  <div className={ITEMS}>
+                    {kind.items.map(({ scan, item }) => (
+                      <Item
+                        key={`${item.runId}/${item.checkId}`}
+                        scan={scan}
+                        item={item}
+                        context={scanLabel(scan.scan)}
+                      />
+                    ))}
+                  </div>
                 </Row>
               ))}
             </List>
@@ -142,62 +142,75 @@ function ScanRow({ scan }: { scan: StudyScanDetail }) {
       <div className="overflow-x-auto py-2">
         <TaskGraph size="summary" tasks={scanGraph(scan, workflow)} className="min-w-[40rem]" />
       </div>
-      {scan.toCheck.map((item) => (
-        <Item
-          key={item.checkId}
-          scan={scan}
-          item={item}
-          title={item.title}
-          context={workflow.taskTitle(item.taskId)}
-        />
-      ))}
+      <div className={ITEMS}>
+        {scan.toCheck.map((item) => (
+          <Item
+            key={item.checkId}
+            scan={scan}
+            item={item}
+            context={workflow.taskTitle(item.taskId)}
+            title={item.title}
+          />
+        ))}
+      </div>
     </>
   );
   return href ? (
-    <RowLink to={linkTo(href)} title={scanName(scan)} subtitle={titles} cells={cells}>
+    <RowLink to={linkTo(href)} title={scanLabel(scan.scan)} subtitle={titles} cells={cells}>
       {body}
     </RowLink>
   ) : (
-    <Row title={scanName(scan)} subtitle={titles} cells={cells}>
+    <Row title={scanLabel(scan.scan)} subtitle={titles} cells={cells}>
       {body}
     </Row>
   );
 }
 
-/** An item under its scan (titled by the check) or under its issue (titled by the scan). */
+/**
+ * One open check, under its scan (titled by the check, its task above) or under its issue (its
+ * scan above, the issue's row says the check). "Looks right" accepts it against the revision the
+ * study read's items belong to, the scan's latest completed result; a result that changed since
+ * answers 409, and the refetch shows the new one.
+ */
 function Item({
   scan,
   item,
-  title,
   context,
+  title,
 }: {
   scan: StudyScanDetail;
   item: ToCheckItem;
-  title: string;
-  context?: string;
+  context: string;
+  title?: string;
 }) {
   const { detail } = useStudy();
-  // The study read's items belong to the scan's latest completed result, whose revision the
-  // accept names; a result that changed since answers 409 and the refetch shows the new one.
   const revision = scan.runs.find((r) => r.id === item.runId)?.review?.revisionId;
+  const accept = useAcceptCheck(item.runId, revision);
+  const readOnly = detail.study.example
+    ? "Example studies can't be changed."
+    : !revision
+      ? "Decide on this one in the scan review."
+      : undefined;
   return (
     <ItemToCheck
-      runId={item.runId}
-      revisionId={revision}
-      taskId={item.taskId}
-      checkId={item.checkId}
-      title={title}
       context={context}
-      detail={item.detail}
-      readOnly={detail.study.example}
-      className="border-t border-border first:border-t-0"
-    >
-      <Button asChild size="sm" variant="ghost">
-        <Link to={itemHref(item)}>
-          <Cube aria-hidden />
-          Review {scan.scan.subject} in 3D
-        </Link>
-      </Button>
-    </ItemToCheck>
+      title={title}
+      text={item.detail}
+      state={accept.isSuccess ? "accepted" : "open"}
+      onAccept={
+        readOnly ? undefined : () => accept.mutate({ checkId: item.checkId, taskId: item.taskId })
+      }
+      accepting={accept.isPending}
+      readOnly={readOnly}
+      error={accept.error?.message}
+      actions={
+        <Button asChild variant="ghost">
+          <Link to={itemHref(item)}>
+            <Cube aria-hidden />
+            Review {scan.scan.subject} in 3D
+          </Link>
+        </Button>
+      }
+    />
   );
 }
