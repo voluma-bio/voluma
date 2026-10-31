@@ -72,7 +72,7 @@ Muse uses its default; DeepSeek runs with thinking off. A role's explicit `think
 global `high`. With `RUNNER_MODEL` set (every role forced onto one model), the role files' levels
 are ignored and `RUNNER_THINKING` alone applies.
 
-There is no fallback model: a provider error fails the run: at once for a 4xx, after retries (a minute per call, one resume of the thread) for a 5xx or a network error (see `CONTEXT.md`). Visitor runs use `RUNNER_VISITOR_MODEL` (default `meta/muse-spark-1.3`) with the visitor's key for every role except main, which keeps its role file's model when that is a Standard-mode Meta model (with no `RUNNER_MODEL`, wonder), so a visitor's key without wonder access fails the run at its first call.
+There is no fallback model. Pi is the only retry layer: it retries a 5xx, a 409, a network error or a 60 s wait for headers, up to 10 times. A worker or check whose call still fails ends `failed`, and main decides what to do. Main's own failure fails the run, except a reply cut off after its headers, which gets one resume of main (see `CONTEXT.md`). Visitor runs use `RUNNER_VISITOR_MODEL` (default `meta/muse-spark-1.3`) with the visitor's key for every role except main, which keeps its role file's model when that is a Standard-mode Meta model (with no `RUNNER_MODEL`, wonder), so a visitor's key without wonder access fails the run at its first call.
 
 ## The sandbox image
 
