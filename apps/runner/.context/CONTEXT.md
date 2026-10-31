@@ -348,8 +348,8 @@ other error, a 4xx included (Meta's `404 model_not_found` too), or the spent bud
 at once. The failed reply is stored and the thread ends `failed` with the provider's message. The
 run loop (`packages/harness/src/run-loop.ts`) sees a thread this process ran that failed on a
 provider error (`providerFailure` in `provider-error.ts`: any 4xx or 5xx status, a connection
-failure, an empty account) and fails the run with it in `state.error`: "the main agent failed on a
-model provider error: <message>", or "<taskId>: its worker failed on a model provider error:
+failure, an empty account) and fails the run with it in `state.error`: "the AI stopped on an error
+from its provider: <message>", or "<task title>: the AI stopped on an error from its provider:
 <message>". A retryable error (the set above) on a thread that already streamed content, or that
 outlasted the 60 s, resumes that thread once ("The model provider failed during your last reply;
 continue.") before the run fails; the resumed call has its own 60 s. A context overflow (400/413

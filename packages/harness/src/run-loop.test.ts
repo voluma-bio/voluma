@@ -1255,7 +1255,7 @@ describe("run loop", () => {
         providerError: (e) => (/provider down/.test(e) ? "fatal" : undefined),
       });
       await expect(w.run()).rejects.toThrow(
-        "the main agent failed on a model provider error: provider down",
+        "the AI stopped on an error from its provider: provider down",
       );
       expect(of(w.stored, "thread.started", "main")).toHaveLength(1);
     });
@@ -1289,7 +1289,7 @@ describe("run loop", () => {
         providerError: retryOverloaded,
       });
       await expect(w.run()).rejects.toThrow(
-        "the main agent failed on a model provider error: overloaded",
+        "the AI stopped on an error from its provider: overloaded",
       );
     });
 
@@ -1311,7 +1311,7 @@ describe("run loop", () => {
         check: checker(),
       });
       await expect(again.run()).rejects.toThrow(
-        "the main agent failed on a model provider error: prompt is too long",
+        "the AI stopped on an error from its provider: prompt is too long",
       );
       expect(of(again.stored, "thread.started", "main.3")).toHaveLength(0);
     });

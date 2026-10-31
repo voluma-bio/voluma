@@ -36,6 +36,7 @@ import { inputPrefix, referencePrefix, workflowSnapshotPrefix } from "@voluma/co
 import type { Claim, ReportRequest } from "@voluma/contracts/runner";
 import { runClient } from "@voluma/harness/adapters/http/run-client";
 import { type LiveBatcher, liveBatcher } from "@voluma/harness/live";
+import { NO_WORKFLOW_DIR, roleModelUnset } from "@voluma/harness/messages";
 import { usageOf } from "@voluma/harness/model-usage";
 import type { CreateSandbox } from "@voluma/harness/ports/sandbox";
 import { type Recorder, recorder } from "@voluma/harness/recorder";
@@ -215,7 +216,7 @@ async function claimBody(
     // message. The run's pin names the workflow directory; its files are snapshotted from this
     // runner's checkout once (at `config.commit`), so a resume reads what the run began with.
     const workflowDir = run.workflows[0]?.path;
-    if (!workflowDir) throw new Error("the run pins no workflow directory");
+    if (!workflowDir) throw new Error(NO_WORKFLOW_DIR);
     const definition = await loadWorkflow(workflowDir, {
       store: objects,
       prefix: workflowSnapshotPrefix(runId),
@@ -229,10 +230,7 @@ async function claimBody(
     const roleModel = (role: ModelRole) => {
       const alias = definition.agents[role].model;
       const model = ctx.aliases[alias];
-      if (!model)
-        throw new Error(
-          `the ${role} role names model "${alias}", which RUNNER_MODEL_${alias.toUpperCase()} does not set`,
-        );
+      if (!model) throw new Error(roleModelUnset(role, alias));
       return !visitor || (role === "main" && isVisitorSafe(model)) ? model : ctx.visitorModel;
     };
     // A role's file may set its thinking level; else the runner's; else none is sent ("off").
