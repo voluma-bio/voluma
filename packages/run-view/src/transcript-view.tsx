@@ -107,7 +107,7 @@ function RowView({ row, threads }: { row: Row; threads?: Map<string, Thread> }) 
       return (
         <p
           role="alert"
-          className="rounded-xl bg-destructive-tint px-3 py-2 text-ui text-destructive"
+          className="rounded-xl bg-destructive-tint px-3 py-2 text-ui whitespace-pre-wrap text-destructive"
         >
           {plainError(row.text)}
         </p>

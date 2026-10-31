@@ -71,7 +71,7 @@ export function AgentThread({
         </div>
         {answer && (
           <p
-            className={`text-meta text-muted-foreground ${!running && thread.error ? "break-words" : "truncate"}`}
+            className={`text-meta text-muted-foreground ${!running && thread.error ? "break-words whitespace-pre-wrap" : "truncate"}`}
           >
             {!running && thread.error ? plainError(thread.error) : answer}
           </p>
