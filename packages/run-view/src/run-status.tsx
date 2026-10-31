@@ -73,11 +73,12 @@ export function runStatus({ state, review }: Pick<StudyRunSummary, "state" | "re
     case "awaiting-keys":
       return { label: "Needs your keys", status: "paused" };
     case "ended":
+      // To check means needs you: a card nobody can accept outranks Reviewed too.
       if (state.outcome === "completed")
-        return review?.reviewedAt
-          ? { label: "Reviewed", status: "done" }
-          : review?.remainingToCheck
-            ? { label: `${review.remainingToCheck} to check`, status: "check" }
+        return review?.needsYou
+          ? { label: `${review.needsYou} to check`, status: "check" }
+          : review?.reviewedAt
+            ? { label: "Reviewed", status: "done" }
             : { label: "Checked", status: "done" };
       if (state.outcome === "failed") return { label: "Failed", status: "stopped" };
       return { label: "Stopped", status: "stopped" };
@@ -86,25 +87,25 @@ export function runStatus({ state, review }: Pick<StudyRunSummary, "state" | "re
 
 /**
  * A study's status from each scan's newest run (`newest`, one per scan that has run) and its
- * open checks (`StudySummary.toCheck`): what most needs the researcher, else how far it got.
- * "Not started" counts only scans with no run. A study of one reads as its run, except that
- * open checks outrank a rerun that hasn't failed: `toCheck` is the newest *completed* run's,
- * which stay acceptable while a rerun is live.
+ * items that need the researcher (`StudySummary.needsYou`): what most needs them, else how far it
+ * got. "Not started" counts only scans with no run. A study of one reads as its run, except that
+ * its items outrank a rerun that hasn't failed: while a rerun is live, `needsYou` counts the
+ * newest completed run's acceptable checks (`scanNeedsYou`).
  */
 export function studyStatus({
   scans,
   newest,
-  toCheck,
+  needsYou,
 }: {
   scans: number;
   newest: Pick<StudyRunSummary, "state" | "review">[];
-  toCheck: number;
+  needsYou: number;
 }): RunStatus {
   const only = newest[0];
   if (scans === 1 && only) {
     const failed = only.state.status === "ended" && only.state.outcome === "failed";
-    return toCheck > 0 && !failed
-      ? { label: `${toCheck} to check`, status: "check" }
+    return needsYou > 0 && !failed
+      ? { label: `${needsYou} to check`, status: "check" }
       : runStatus(only);
   }
   // A live run by its status, an ended one by its outcome.
@@ -115,7 +116,7 @@ export function studyStatus({
       .length;
   const failed = count("failed");
   if (failed > 0) return { label: `${failed} failed`, status: "stopped" };
-  if (toCheck > 0) return { label: `${toCheck} to check`, status: "check" };
+  if (needsYou > 0) return { label: `${needsYou} to check`, status: "check" };
   if (count("running") > 0) return { label: "Running", status: "running" };
   if (count("awaiting-keys") > 0) return { label: "Needs your keys", status: "paused" };
   if (count("queued") > 0) return { label: "Waiting", status: "waiting" };

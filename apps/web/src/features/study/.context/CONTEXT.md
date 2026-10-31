@@ -7,11 +7,11 @@ shown as its scan and linked straight to its scan review (`/scans/:runId`, `runH
 
 - **Home's data** is `listStudies` alone: each study carries each scan's newest run in brief
   (`newestRuns`: run id, state, a live run's tasks done, a completed run's `review`) and its
-  `scansCompleted` and `toCheck`. It refetches every 5 s while any newest run is live. `toCheck`
-  is each scan's newest *completed* run's open checks, which stay acceptable while that scan
-  reruns, so they still ask for the researcher (a study of one too). "Across M scans" shows
-  only when the newest runs hold every open check; under a rerun M is unknowable from
-  `newestRuns`, so the row says just "N to check."
+  `scansCompleted` and `needsYou`. It refetches every 5 s while any newest run is live.
+  `needsYou` sums each scan's `scanNeedsYou`: its newest run's items when that run completed,
+  else its newest completed run's acceptable checks, which still ask for the researcher while
+  the scan reruns (a study of one too). "Across M scans" shows only when the newest runs hold
+  every item; under a rerun M is unknowable from `newestRuns`, so the row says just "N to check."
   Needs you has one row per study; example studies are read-only and ask nothing. Running
   lists only scans whose run is running, then "N waiting to start" for queued ones; a run
   waiting for keys is in Needs you.
@@ -59,11 +59,16 @@ shown as its scan and linked straight to its scan review (`/scans/:runId`, `runH
   It takes the run's state and threads and derives the rest itself. During a correction both read
   the correction's own revision (`openCorrectionRevision` on the server), while the study's values
   and open checks stay on the last completed result. Don't re-derive a task's state here; a
-  workflow task missing from it is outside the run's plan. Each task's open items come with it
-  (`openItems`, counted as the scan review counts them, from the same run), and `shownStatus`
-  turns state and count into the status every page shows. `toCheck` lists only the newest
-  completed result's acceptable checks, so the per-scan "N to check" can be lower than the cells'
-  sum (a live or stopped run's items, a task the second AI sent back).
+  workflow task missing from it is outside the run's plan. Each task's items that need a person
+  come with it (`needsYou`, counted as the scan review counts them, from the same run), and
+  `shownStatus` turns state and count into the status every page shows.
+- **To check means needs you.** Two counts, named apart in contracts: `needsYou` (what needs a
+  person: open checks plus the card of a To check task with no check, such as one the second AI
+  sent back) is what every "N to check" reads: Home, the scan's status, Needs you, the To check
+  page and the nav count (all `scanNeedsYou` / `needsYouOf`), and the cells. `acceptable` is
+  only what "Looks right" can accept: the cards on the To check page, item titles, and the Mark
+  reviewed gate. A card nobody can accept is listed by its task and why (`cardsOf`) and opens the
+  scan review on it. A live or stopped rerun's items show on its tasks, not in the counts.
 - **Links into the scan review**: a scan opens at `runHref`; a To check item opens at
   `itemHref` (`?task=&item=`), so the review shows exactly that item. `reviewHref` picks a
   scan's first open item. Adding scans to an existing study isn't designed, so there is no

@@ -18,7 +18,6 @@
     "./snapshot": "./src/snapshot.ts",
     "./workflow": "./src/workflow.ts",
     "./fold": "./src/fold.ts",
-    "./fold-test-log": "./src/fold-test-log.ts",
     "./threads": "./src/threads.ts",
     "./thread-place": "./src/thread-place.ts",
     "./spend": "./src/spend.ts",

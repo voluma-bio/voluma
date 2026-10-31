@@ -17,6 +17,8 @@ export {
   type AgentNode,
   agentLabel,
   agentTree,
+  CARD_TITLE,
+  cardId,
   haltOf,
   type NeedItem,
   runView,
@@ -49,6 +51,7 @@ export {
   groupOf,
   isLive,
   kneeOf,
+  needsYouOf,
   StudyPanel,
   scanStatus,
 } from "./study-panel";

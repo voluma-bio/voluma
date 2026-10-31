@@ -2,7 +2,7 @@
 import type { RunEvent } from "./events";
 import { corrections, type FoldedTask, fold } from "./fold";
 import type { TaskState, TaskStatus } from "./ids";
-import type { ReviewSummary } from "./review";
+import type { ReviewSummary, Unacceptable } from "./review";
 import type { RunState } from "./run";
 
 /**
@@ -44,7 +44,8 @@ export function reviewState(events: readonly RunEvent[], { live = false } = {}) 
   const summary: ReviewSummary | null = latest
     ? {
         revisionId: latest.id,
-        remainingToCheck: progress(latest).toCheck,
+        acceptable: progress(latest).acceptable,
+        needsYou: latest.tasks.reduce((n, task) => n + openItems(task), 0),
         reviewedAt: completed?.createdAt ?? null,
       }
     : null;
@@ -53,17 +54,18 @@ export function reviewState(events: readonly RunEvent[], { live = false } = {}) 
 
 /**
  * How far a revision got, as Home, the study and the run page all count it: tasks done of the
- * plan's (To check counts, a skipped task among them: its work is over), and the open check
- * items, the ones a person can accept.
+ * plan's (To check counts, a skipped task among them: its work is over), and the open checks a
+ * person can accept (`acceptable`: what "Looks right" and Mark reviewed read, not what a screen
+ * calls To check; that is `openItems`).
  */
 export function progress(revision: {
   tasks: readonly { status: TaskStatus; checks: readonly { status: string }[] }[];
   plan: { tasks: readonly unknown[] };
-}): { done: number; total: number; toCheck: number } {
+}): { done: number; total: number; acceptable: number } {
   return {
     done: revision.tasks.filter((t) => t.status === "done" || t.status === "to-check").length,
     total: revision.plan.tasks.length,
-    toCheck: revision.tasks.reduce(
+    acceptable: revision.tasks.reduce(
       (n, task) => n + task.checks.filter((check) => check.status === "open").length,
       0,
     ),
@@ -81,42 +83,89 @@ export function openCorrectionRevision(events: readonly RunEvent[]) {
     : undefined;
 }
 
+/** What `cardWithoutCheck` and `openItems` read of a folded task. */
+type ItemFacts = Pick<FoldedTask, "status" | "checks" | "rejected" | "checker" | "missingRequired">;
+
 /**
- * A task's items still open for a person, as the scan review counts them: its checks not yet
- * accepted, or one for a To check task with none, which the review explains (sent back by the
- * second AI, values missing, or the AI's own reason) and nobody can accept. A done task can still
- * carry open checks.
+ * A To check task with no check gets one card nobody can accept, saying why: the second AI sent
+ * it back, values are missing, or the AI marked it. Null for any other task. The scan review
+ * draws the card; the study read counts it.
  */
-export function openItems(task: {
-  status: TaskStatus;
-  checks: readonly { status: string }[];
-}): number {
-  if (task.status === "to-check" && task.checks.length === 0) return 1;
+export function cardWithoutCheck(task: ItemFacts): Unacceptable | null {
+  if (task.status !== "to-check" || task.checks.length > 0) return null;
+  if (task.rejected || task.checker?.verdict === "needs-review") return "sent-back";
+  if (task.missingRequired.length > 0) return "values-missing";
+  return "marked";
+}
+
+/**
+ * A task's items that need a person, as the scan review counts them: its checks not yet
+ * accepted, or its card without a check (`cardWithoutCheck`). A done task can still carry open
+ * checks. What every screen calls To check; `progress().acceptable` is only the accept flow's.
+ */
+export function openItems(task: ItemFacts): number {
+  if (cardWithoutCheck(task)) return 1;
   return task.checks.filter((check) => check.status !== "accepted").length;
 }
 
 /**
- * A run's tasks as the scan review shows them, for the study read: each plan task's state
- * (`taskStates`), and its open items (`openItems`) where it has any. Read the revision a
- * correction in progress is writing (`openCorrectionRevision`), else the latest.
+ * A scan's newest run as the scan review shows its tasks, for the study read: each plan task's
+ * state (`taskStates`), its items that need a person where it has any (`openItems`), and why a
+ * card without a check is there. `revision` is the one the review reads (`latestRevision`); no
+ * run, or no plan yet, reads as no tasks.
  */
 export function shownTasks(
-  revision: {
-    tasks: readonly (StateFacts & { checks: readonly { status: string }[] })[];
-    plan: { tasks: readonly { id: string; dependsOn: readonly string[] }[] };
-  },
-  run: Parameters<typeof taskStates>[1],
-): { taskState: Record<string, TaskState>; openItems: Record<string, number> } {
+  newest:
+    | (Parameters<typeof taskStates>[1] & {
+        revision:
+          | {
+              tasks: readonly (StateFacts & ItemFacts)[];
+              plan: { tasks: readonly { id: string; dependsOn: readonly string[] }[] };
+            }
+          | undefined;
+      })
+    | undefined,
+): {
+  taskState: Record<string, TaskState>;
+  needsYou: Record<string, number>;
+  unacceptable: Record<string, Unacceptable>;
+} {
+  const revision = newest?.revision;
+  if (!revision) return { taskState: {}, needsYou: {}, unacceptable: {} };
+  const { tasks } = revision;
   return {
-    taskState: Object.fromEntries(taskStates(revision, run)),
-    openItems: Object.fromEntries(
-      revision.tasks.flatMap((t) => {
+    taskState: Object.fromEntries(taskStates(revision, newest)),
+    needsYou: Object.fromEntries(
+      tasks.flatMap((t) => {
         const n = openItems(t);
         return n > 0 ? [[t.id, n]] : [];
       }),
     ),
+    unacceptable: Object.fromEntries(
+      tasks.flatMap((t) => {
+        const why = cardWithoutCheck(t);
+        return why ? [[t.id, why]] : [];
+      }),
+    ),
   };
 }
+
+/**
+ * The revision the scan review reads: a correction in progress's own, else the latest. The
+ * study read takes its task states and items from the same one.
+ */
+export const latestRevision = <R>(fold: {
+  results: { revisions: readonly R[] };
+  correcting: R | undefined;
+}): R | undefined => fold.correcting ?? fold.results.revisions.at(-1);
+
+/**
+ * What needs a person on a scan, the count Home, the study pages and the queues call To check:
+ * its newest run's items (`ReviewSummary.needsYou`) when that run completed, else the acceptable
+ * checks of its newest completed result (a live or stopped rerun's items show on its tasks only).
+ */
+export const scanNeedsYou = (newest: Pick<ReviewSummary, "needsYou"> | null, acceptable: number) =>
+  newest ? newest.needsYou : acceptable;
 
 /** What `taskStates` reads of a folded task. */
 export type StateFacts = Pick<FoldedTask, "id" | "status" | "skipped" | "satisfied" | "threads">;

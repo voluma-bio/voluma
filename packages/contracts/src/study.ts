@@ -25,16 +25,19 @@
  * `GET /runs` would show the caller, so a `self` caller sees only the runs they started in
  * an example study.
  *
- * `values` and `toCheck` come from each scan's **newest completed run** only (`resultRunId`):
+ * Two counts, never swapped: `needsYou` is what needs a person, what every screen calls To check;
+ * `acceptable` is only what "Looks right" can accept.
+ *
+ * `values` and `acceptable` come from each scan's **newest completed run** only (`resultRunId`):
  * accepting a check needs the latest completed result, so a live run's items would answer 409.
  * `values` is keyed by output id (the `outputs.json` id, not the fold's `taskId/outputId`)
  * and holds every measurement the run reported. `taskState` comes from the scan's **newest
  * run**, whatever its state, so the study shows where a live or stopped run is: the state the
  * scan review shows (`taskStates`, review-state.ts), keyed by the run's plan tasks; a workflow
- * task missing from it is outside the run's plan. `openItems` comes from the same run: what the
- * scan review counts To check, so both screens agree on a task's status (`shownStatus`). It
- * counts items `toCheck` doesn't list: a live or stopped run's, and a To check task's with no
- * check (sent back by the second AI).
+ * task missing from it is outside the run's plan. `needsYou` and `unacceptable` come from the
+ * same run and revision: what the scan review counts To check, so both screens agree on a task's
+ * status (`shownStatus`). They count items `acceptable` doesn't list: a live or stopped run's,
+ * and the card of a To check task with no check (sent back by the second AI).
  *
  * The list is what Home renders: per study its counts and each scan's newest run in brief
  * (`studyRunSummarySchema`), so Home reads no run list.
@@ -48,7 +51,7 @@ import {
   taskIdSchema,
   taskStateSchema,
 } from "./ids";
-import { measurementSchema } from "./review";
+import { measurementSchema, unacceptableSchema } from "./review";
 import {
   inputSchema,
   runSchema,
@@ -99,7 +102,8 @@ export const studyRunSummarySchema = z.object({
   /** As `runSchema.review`: the open checks and review time of a completed run; null otherwise. */
   review: z
     .object({
-      remainingToCheck: z.number().int().nonnegative(),
+      acceptable: z.number().int().nonnegative(),
+      needsYou: z.number().int().nonnegative(),
       reviewedAt: z.iso.datetime().nullable(),
     })
     .nullable(),
@@ -112,8 +116,8 @@ export const studySummarySchema = studySchema.extend({
   scanCount: z.number().int().nonnegative(),
   /** Scans with a completed run, whether or not it is the newest. */
   scansCompleted: z.number().int().nonnegative(),
-  /** Open checks of each scan's newest completed run, summed. */
-  toCheck: z.number().int().nonnegative(),
+  /** What needs a person on each scan (`scanNeedsYou`), summed. */
+  needsYou: z.number().int().nonnegative(),
   /** The latest of the study's creation and its runs' creation, start and end. */
   lastActivityAt: z.iso.datetime(),
   /** Each scan's newest run, newest first; a scan with no run is absent. */
@@ -148,11 +152,12 @@ export const studyScanDetailSchema = z.object({
   input: inputSchema,
   /** Newest first; empty: "not started". */
   runs: z.array(runSchema),
-  /** The newest completed run, which `values` and `toCheck` read; null when none has completed. */
+  /** The newest completed run, which `values` and `acceptable` read; null when none has completed. */
   resultRunId: runIdSchema.nullable(),
   /** Output id → value, for every measurement that run reported. */
   values: z.record(segmentSchema, studyValueSchema),
-  toCheck: z.array(toCheckItemSchema),
+  /** That run's open checks a person can accept ("Looks right"); not what a screen counts To check. */
+  acceptable: z.array(toCheckItemSchema),
   /**
    * Task id → its state in the newest run (`taskStates`): the run's latest revision read with
    * the run's state now. Empty before the run has a plan, or with no run. A task outside the
@@ -160,11 +165,14 @@ export const studyScanDetailSchema = z.object({
    */
   taskState: z.record(taskIdSchema, taskStateSchema),
   /**
-   * Task id → its items open for a person in the newest run, as the scan review counts them
-   * (`openItems`): checks not accepted, or one for a To check task with none. Read from the same
-   * revision as `taskState`, whatever the run's state. A task with none is absent.
+   * Task id → its items that need a person in the newest run, as the scan review counts them
+   * (`openItems`): checks not accepted, or the card of a To check task with none. What a screen
+   * counts To check. Read from the same revision as `taskState`, whatever the run's state. A task
+   * with none is absent.
    */
-  openItems: z.record(taskIdSchema, z.number().int().positive()),
+  needsYou: z.record(taskIdSchema, z.number().int().positive()),
+  /** Task id → why its card without a check is there (`cardWithoutCheck`); nobody can accept it. */
+  unacceptable: z.record(taskIdSchema, unacceptableSchema),
 });
 export type StudyScanDetail = z.infer<typeof studyScanDetailSchema>;
 
