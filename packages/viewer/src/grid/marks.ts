@@ -2,14 +2,112 @@
  * Marks over a pane: a 2D canvas above the pane's WebGL canvas, drawn in screen pixels so a dot,
  * a dash and a label keep their size at any zoom. Each pane projects source voxels (z, y, x) to
  * its own CSS pixels; a slice draws only the part of a mark that lies on its slice, 3D draws
- * all of it over the anatomy. Also the measures a mark carries (a line's mm, an outline's mm²).
+ * all of it over the anatomy. `useMarkLayer` owns a pane's canvas, the mark being drawn and the
+ * hover ring; moving those redraws only this canvas, never the pane's picture. Also the
+ * measures a mark carries (a line's mm, an outline's mm²).
  */
+import { type RefObject, useEffect, useRef } from "react";
 import { sliceSegment } from "./geometry";
-import { type Axis, type GridMark, planeAxes, type ShownMark, type Zyx } from "./scene";
+import {
+  type Axis,
+  type GridMark,
+  type MarkTool,
+  planeAxes,
+  type ShownMark,
+  type Zyx,
+} from "./scene";
 import { tokenColor } from "./token-color";
 
 /** A source position to the pane's CSS pixels, or null where the pane can't show it. */
-export type Project = (p: Zyx) => readonly [number, number] | null;
+type Project = (p: Zyx) => readonly [number, number] | null;
+
+/** How a pane shows marks now: its projection and what of a mark it shows. */
+export type MarkView = { project: Project; shapeOf: (mark: GridMark) => Shape | null };
+
+/** A pane's mark canvas: the pane draws it with each frame, the layer alone for its own changes. */
+export type MarkLayer = {
+  canvas: HTMLCanvasElement;
+  /** The mark being drawn, and where a point would land. */
+  draft: GridMark | null;
+  hover: Zyx | null;
+  /** Draws now: the pane calls it after drawing its picture, so both show the same view. */
+  draw(): void;
+  /** Draws at the next frame, the picture untouched. */
+  redraw(): void;
+};
+
+type Ink = Record<"you" | "ai" | "well" | "chip" | "chipFg", string>;
+
+/**
+ * The mark layer over `host`, sized with it. `view` is read at each draw (null before the pane
+ * has a view). A tool put away mid-gesture leaves no draft, and a tool that doesn't place points
+ * leaves no ring.
+ */
+export function useMarkLayer(
+  host: RefObject<HTMLElement | null>,
+  view: () => MarkView | null,
+  tool: MarkTool | null,
+  marks: readonly ShownMark[],
+): RefObject<MarkLayer | null> {
+  const layer = useRef<MarkLayer | null>(null);
+  const latest = useRef({ view, marks });
+  latest.current = { view, marks };
+  useEffect(() => {
+    const element = host.current!;
+    const canvas = document.createElement("canvas");
+    // Above the pane's picture, below its chips.
+    canvas.className = "pointer-events-none absolute inset-0 z-1";
+    element.append(canvas);
+    // The tokens, once: the theme is fixed for the viewer's life.
+    const ink: Ink = {
+      you: tokenColor("--mark-mine"),
+      ai: tokenColor("--mark-ai"),
+      well: tokenColor("--viewer-well"),
+      chip: tokenColor("--viewer-chip"),
+      chipFg: tokenColor("--viewer-chip-fg"),
+    };
+    let frame = 0;
+    const own: MarkLayer = {
+      canvas,
+      draft: null,
+      hover: null,
+      draw() {
+        cancelAnimationFrame(frame);
+        frame = 0;
+        const v = latest.current.view();
+        if (v) drawMarks(canvas, ink, v, latest.current.marks, own.draft, own.hover);
+      },
+      redraw() {
+        frame ||= requestAnimationFrame(own.draw);
+      },
+    };
+    const observer = new ResizeObserver(() => {
+      const { width, height } = element.getBoundingClientRect();
+      if (!width || !height) return;
+      canvas.width = Math.round(width * globalThis.devicePixelRatio);
+      canvas.height = Math.round(height * globalThis.devicePixelRatio);
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      own.draw();
+    });
+    observer.observe(element);
+    layer.current = own;
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      canvas.remove();
+      layer.current = null;
+    };
+  }, [host]);
+  useEffect(() => {
+    const own = layer.current;
+    if (!own) return;
+    if (tool !== "point" && tool !== "line") own.hover = null;
+    if (!tool) own.draft = null;
+    own.redraw();
+  }, [marks, tool]);
+  return layer;
+}
 
 /** What one mark draws, in source voxels: polylines, dots and a measure. */
 type Shape = {
@@ -17,21 +115,6 @@ type Shape = {
   dots: Zyx[];
   measure?: { at: Zyx; text: string };
 };
-
-export function overlayCanvas(host: HTMLElement): HTMLCanvasElement {
-  const canvas = document.createElement("canvas");
-  canvas.className = "pointer-events-none absolute inset-0";
-  host.append(canvas);
-  return canvas;
-}
-
-export function sizeOverlay(canvas: HTMLCanvasElement, width: number, height: number) {
-  const dpr = globalThis.devicePixelRatio;
-  canvas.width = Math.round(width * dpr);
-  canvas.height = Math.round(height * dpr);
-  canvas.style.width = `${width}px`;
-  canvas.style.height = `${height}px`;
-}
 
 /** mm between two positions on a grid with this spacing (z, y, x). */
 export function lengthMm(a: Zyx, b: Zyx, spacingZyx: Zyx): number {
@@ -141,29 +224,23 @@ export function wholeShape(mark: GridMark): Shape {
 
 /**
  * Clears `canvas` and draws the marks, a mark being drawn (`draft`) and the ring where a point
- * would land (`hover`). `shapeOf` says what of a mark this pane shows.
+ * would land (`hover`).
  */
-export function drawMarks(
+function drawMarks(
   canvas: HTMLCanvasElement,
-  project: Project,
-  shapeOf: (mark: GridMark) => Shape | null,
+  ink: Ink,
+  { project, shapeOf }: MarkView,
   marks: readonly ShownMark[],
   draft: GridMark | null,
   hover: Zyx | null,
 ) {
   const ctx = canvas.getContext("2d")!;
-  const dpr = globalThis.devicePixelRatio;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   if (!marks.length && !draft && !hover) return;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const ink = {
-    you: tokenColor("--mark-mine"),
-    ai: tokenColor("--mark-ai"),
-    well: tokenColor("--viewer-well"),
-    chip: tokenColor("--viewer-chip"),
-    chipFg: tokenColor("--viewer-chip-fg"),
-  };
+  // The scale the canvas was sized with, so a pixel-ratio change before the next resize can't skew it.
+  const scale = canvas.width / (canvas.clientWidth || 1);
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
   ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
   ctx.textBaseline = "middle";
   const shown: ShownMark[] = [...marks];

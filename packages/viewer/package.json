@@ -23,6 +23,7 @@
     "react": "catalog:",
     "react-resizable-panels": "catalog:",
     "three": "catalog:",
+    "three-mesh-bvh": "catalog:",
     "zarrita": "0.7.5"
   }
 }

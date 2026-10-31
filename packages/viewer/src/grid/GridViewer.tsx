@@ -39,8 +39,8 @@ export type GridViewerHandle = {
   snapshot(maxBytes: number): Promise<Blob | null>;
 };
 
-/** Widths, CSS px, a snapshot tries in turn; the last at 1x whatever the screen. */
-const SNAPSHOT_WIDTHS = [1600, 1200, 800, 560];
+/** Picture widths, in pixels, a snapshot tries in turn until one fits. */
+const SNAPSHOT_WIDTHS = [1600, 1200, 800, 560, 400];
 const NO_MARKS: readonly ShownMark[] = [];
 
 /** Each slice plane keeps its axis colour (DESIGN.md): axial z, sagittal y, coronal x. */
@@ -114,18 +114,22 @@ export function GridViewer({
   const grid = useRef<HTMLDivElement>(null);
   useImperativeHandle(ref, () => ({
     async snapshot(maxBytes) {
-      for (const [i, width] of SNAPSHOT_WIDTHS.entries()) {
-        const dpr = i < SNAPSHOT_WIDTHS.length - 1 ? globalThis.devicePixelRatio : 1;
-        const blob = await sheet(width, dpr);
+      let tried = 0;
+      for (const width of SNAPSHOT_WIDTHS) {
+        const host = grid.current?.getBoundingClientRect();
+        if (!host?.width) return null;
+        // Never sharper than the screen: a grid narrower than a width gives the same picture.
+        const scale = Math.min(globalThis.devicePixelRatio, width / host.width);
+        if (scale === tried) continue;
+        tried = scale;
+        const blob = await sheet(host, scale);
         if (blob && blob.size <= maxBytes) return blob;
       }
       return null;
     },
   }));
-  /** The shown panes as one PNG at most `width` CSS px wide, times `dpr`. */
-  const sheet = (width: number, dpr: number) => {
-    const host = grid.current!.getBoundingClientRect();
-    const scale = Math.min(1, width / host.width) * dpr;
+  /** The shown panes as one PNG, `scale` picture pixels to a CSS pixel of the grid. */
+  const sheet = (host: DOMRect, scale: number) => {
     const canvas = document.createElement("canvas");
     canvas.width = Math.round(host.width * scale);
     canvas.height = Math.round(host.height * scale);

@@ -72,19 +72,20 @@ GridViewer ── crosshair (z, y, x) ──► SlicePane ×3 ── readPlane �
   `onMark` gets a `GridMark`: the contract's `Mark` (`messages.ts`) without `volumeId`, which the
   caller adds from `TaskGrid.imageId`. The caller holds the marks and passes them back as
   `ShownMark`s. Point: a click; on a slice the voxel under the pointer, in 3D the nearer of the
-  first shown mesh and the volume where it turns half opaque by `volume.ts`'s opacity (a CPU march
-  of the shown level); on empty space nothing. A ring shows where it would land; the crosshair
+  first shown mesh (a see-through shell included) and the volume where it turns half opaque by
+  `volume.ts`'s opacity (a CPU march of the shown level); on empty space nothing. 3D meshes carry
+  a bounds tree (`three-mesh-bvh`) so the hover search is cheap enough to run every frame. A ring shows where it would land; the crosshair
   moves to the new point. Box: a drag on a slice; across the held axis it takes the smaller
   dragged side in mm, centred on the slice. Line: a drag on a slice (sub-voxel ends on that
   slice), or in 3D from one surface point to another (a drag that starts off the surface still
   rotates). Lasso: freehand on a slice, closed, at most 500 points. Lengths and areas are mm from
   the grid's spacing. Esc drops a mark being drawn. Marks draw on a 2D canvas over each pane in
-  screen pixels (`marks.ts`): yours in `--mark-mine`, the AI's dashed in `--mark-ai`, with a tag
+  screen pixels (`marks.ts`, `useMarkLayer`; the draft and ring redraw only that canvas): yours in `--mark-mine`, the AI's dashed in `--mark-ai`, with a tag
   and the measure; a slice shows what lies on it (a crossing line as a dot), 3D shows all of it.
 - **Snapshot.** `ref` → `snapshot(maxBytes)`: each pane draws and is copied in the same task
   (WebGL keeps no buffer), picture then marks, composed as laid out on screen with each pane's
-  name, at 1600, 1200, 800 CSS px wide at the screen's pixel ratio, then 560 at 1x, until a PNG
-  fits; null if none does.
+  name, at 1600, 1200, 800, 560, then 400 pixels wide (never above the screen's pixel ratio,
+  skipping a width that gives the same picture) until a PNG fits; null if none does.
 - **Window.** From the coarsest level, 1st to 99.9th percentile; editable.
 - **3D.** The image as a volume rendering, no slice planes: the coarsest level at once, then the
   finest level of at most 16 M voxels (`volume.ts`), as an 8-bit 3D texture between the window
