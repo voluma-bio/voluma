@@ -11,5 +11,5 @@ import { devWritePrefix, r2FromEnv, uploadDir } from "./r2-dir";
 const { values } = parseArgs({ options: { from: { type: "string" }, to: { type: "string" } } });
 if (!values.from || !values.to) throw new Error("usage: r2:put --from <dir> --to r2:dev/<prefix>");
 const prefix = devWritePrefix(values.to);
-const { r2, bucket } = r2FromEnv();
-console.log(`${await uploadDir(r2, bucket, values.from, prefix)} files -> r2:${prefix}`);
+const { store, bucket } = r2FromEnv();
+console.log(`${await uploadDir(store, bucket, values.from, prefix)} files -> r2:${prefix}`);

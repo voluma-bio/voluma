@@ -16,11 +16,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1158.0",
-    "@aws-sdk/s3-request-presigner": "^3.1158.0",
     "@hono/node-server": "^2.1.5",
     "@voluma/contracts": "workspace:*",
     "@voluma/harness": "workspace:*",
+    "@voluma/object-store": "workspace:*",
     "@voluma/provider-calls": "workspace:*",
     "@voluma/workflow": "workspace:*",
     "@workos-inc/node": "10.14.0",

@@ -5,14 +5,10 @@
  * listings (key and ETag per key, no bytes read); both sides are `CopyObject` copies, so their
  * ETags agree.
  */
-import {
-  CopyObjectCommand,
-  DeleteObjectsCommand,
-  ListObjectsV2Command,
-  S3Client,
-} from "@aws-sdk/client-s3";
+import { CopyObjectCommand, DeleteObjectsCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { outputsBackupPrefix, outputsPrefix } from "@voluma/contracts/r2";
 import type { Outputs } from "@voluma/harness/ports/outputs";
+import { r2Client } from "@voluma/object-store/r2";
 
 const COPY_CONCURRENCY = 16;
 
@@ -23,11 +19,7 @@ export function r2Outputs(config: {
   secretAccessKey: string;
 }): Outputs {
   const { bucket } = config;
-  const s3 = new S3Client({
-    region: "auto",
-    endpoint: `https://${config.accountId}.r2.cloudflarestorage.com`,
-    credentials: { accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey },
-  });
+  const s3 = r2Client(config);
 
   async function* entriesUnder(prefix: string, signal: AbortSignal) {
     let token: string | undefined;

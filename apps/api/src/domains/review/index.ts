@@ -3,15 +3,11 @@
  * and a run's files, and a researcher's messages to it (`runs.ts`), and authorized scan downloads (`inputs.ts`).
  * The composition root supplies ports; Review never imports the Run domain.
  */
+
+import type { ObjectStore } from "@voluma/object-store";
 import { Hono } from "hono";
 import type { AppEnv } from "../../domain";
-import type {
-  ReferenceArchive,
-  ReviewSnapshots,
-  RunFiles,
-  RunMessages,
-  RunRecords,
-} from "../../ports";
+import type { ReviewSnapshots, RunMessages, RunRecords } from "../../ports";
 import { inputRoutes } from "./inputs";
 import { runRoutes } from "./runs";
 import { snapshotRoutes } from "./snapshots";
@@ -21,9 +17,8 @@ export type ReviewDeps = {
   snapshots: ReviewSnapshots;
   /** A researcher's message to a run: the Run domain stores it and reopens the run. */
   messages: RunMessages;
-  /** Null without R2: run files are 503s. */
-  files: RunFiles | null;
-  referenceArchive: ReferenceArchive | null;
+  /** Null without R2 or a storage directory: run files and the reference archive are 503s. */
+  store: ObjectStore | null;
 };
 
 export function createReview(deps: ReviewDeps) {

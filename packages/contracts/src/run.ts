@@ -363,8 +363,8 @@ export type CreateUploadRequest = z.infer<typeof createUploadRequestSchema>;
 
 export const createUploadResponseSchema = z.object({
   inputId: inputIdSchema,
-  /** One per requested file, in request order. */
-  uploads: z.array(z.object({ path: uploadPathSchema, url: z.url() })),
+  /** One per requested file, in request order. `url` is absolute, or a path on the API's own origin when storage is a local directory. */
+  uploads: z.array(z.object({ path: uploadPathSchema, url: z.string().min(1) })),
   /** When the URLs stop working; see Uploads. */
   expiresAt: z.iso.datetime(),
 });

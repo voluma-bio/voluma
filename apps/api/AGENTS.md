@@ -154,17 +154,17 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   events; hits load no event payloads. The event log remains the only durable human-decision state.
 - `inputs.ts` owns `/inputs/:inputId/download` and `/inputs/:inputId/file`, guarded by
   `requireUser` only under `/inputs/:inputId/*`. Both allow only the
-  caller's org's reference scan (`referenceInputId(user.labId)`) before using `ReferenceArchive`. Reject HEAD before opening R2; keep
+  caller's org's reference scan (`referenceInputId(user.labId)`) before reading `referenceScanArchiveKey()` from the store. Reject HEAD before opening R2; keep
   the descriptor's ETag pin and stream the file without buffering.
 - `runs.ts` also serves `GET /runs/:runId/files/:sha256`: one of the run's content-addressed
-  files (`evidenceKey`) through `RunFiles` (`r2-run-files.ts`), after `RunRecords.readable`.
+  files (`evidenceKey`) from the store (`files.ts` maps a missing object to 404 and a failed read to 502), after `RunRecords.readable`.
   No descriptor or ETag pin: the key is the content hash, so the bytes never change (`immutable`,
   a day). The leading bytes pick the type: JPEG and PNG inline, anything else an attachment,
   always `nosniff`, since the stored content type is whatever the sandbox mount wrote. HEAD is
   a 405 before storage is opened.
 - `snapshots.ts` owns immutable screenshots, separate from scientific results and human
   decision events. Authorized readers may save them, including on examples and historical
-  revisions. Review owns metadata; `RunFiles.put` publishes validated static PNGs before
+  revisions. Review owns metadata; `saveEvidence` (`files.ts`) publishes validated static PNGs before
   metadata is inserted. Retries keep the same UUID/pixels and return the original actor/time;
   conflicting captures return 409. Run's internal `generation` changes on example replacement:
   every snapshot query and insert uses it, so late saves cannot attach to the replacement.
@@ -174,16 +174,20 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
 - A screenshot is one grid-viewer pane (`slice` or `3d`) on a `gridId`. The API checks the
   grid has an image volume in the pinned revision, the crosshair lies on it, and every
   structure and focus reference belongs to the revision; it refuses new `acquired` (DICOM
-  viewer) saves, which stay listed. `RUN_FILES_DIRECTORY` selects local run-file
-  storage at the composition root; it never redirects the read-only reference archive.
+  viewer) saves, which stay listed. The domains get one `ObjectStore` (`@voluma/object-store`; the R2
+  adapter, or with `OBJECT_STORE_DIRECTORY` a local folder with the same keys) and build their keys with
+  `@voluma/contracts/r2`. The folder's signed URLs (asset GETs, scan upload PUTs) point at
+  `/api/storage/*`, which `index.ts` mounts ahead of the auth guards; they carry their own HMAC and
+  stop working when the API restarts. Only `index.ts` and `src/ops` build R2 clients, through
+  `r2Store`.
 - `runs.ts` serves `GET /runs/:runId/assets/:sha256/*`: a converted review asset
   (`reviewAssetKey`, written by the runner's conversion worker) as a 302 to a presigned R2 GET
-  (`RunFiles.assetUrl`: signed at the start of a 4-minute window and valid 5 minutes, so repeat
+  (`assetUrl` in `files.ts`: signed at the start of a 4-minute window and valid 5 minutes, so repeat
   requests get the same URL; `ResponseCacheControl` makes R2's own response `immutable`, capped
   at a day like the files route). The 302 is `private` with a `max-age` 30 s below the URL's
   remaining validity, so the browser's cache serves the repeats (a viewer asks per chunk). Assets live under the
   run's own prefix, so the read check on the run is the whole scope check, and the route reads
   no event log (a viewer sends one request per chunk). The tail goes through `relativePathSchema`;
   the route does not check the object exists, so a missing chunk is R2's 404 on the redirect.
-- `r2-reference-archive.ts` serves only the published reference scan. Deferred work:
+- Deferred work:
   [.context/TODO.md](src/domains/review/.context/TODO.md).

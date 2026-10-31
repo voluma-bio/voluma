@@ -154,6 +154,7 @@ services:
         - apps/runner/**
         - packages/harness/**
         - packages/workflow/**
+        - packages/object-store/**
         - packages/contracts/**
         - packages/provider-calls/**
         - packages/voluma-sam/**

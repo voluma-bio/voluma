@@ -9,15 +9,11 @@ import { createWriteStream } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import {
-  GetObjectCommand,
-  HeadObjectCommand,
-  ListObjectsV2Command,
-  PutObjectCommand,
-  S3Client,
-} from "@aws-sdk/client-s3";
 import { relativePathSchema } from "@voluma/contracts/r2";
+import type { ObjectStore } from "@voluma/object-store";
+import { r2Store } from "@voluma/object-store/r2";
 
 export const required = (name: string) => {
   const value = process.env[name];
@@ -25,20 +21,19 @@ export const required = (name: string) => {
   return value;
 };
 
-export function r2FromEnv(): { r2: S3Client; bucket: string } {
+export function r2FromEnv(): { store: ObjectStore; bucket: string } {
+  const bucket = required("R2_BUCKET");
   return {
-    bucket: required("R2_BUCKET"),
-    r2: new S3Client({
-      region: "auto",
-      maxAttempts: 8,
-      // A stalled connection would otherwise hang a script for good; the SDK retries after a timeout.
-      requestHandler: { connectionTimeout: 15_000, requestTimeout: 120_000 },
-      endpoint: `https://${required("R2_ACCOUNT_ID")}.r2.cloudflarestorage.com`,
-      credentials: {
+    bucket,
+    store: r2Store(
+      {
+        accountId: required("R2_ACCOUNT_ID"),
+        bucket,
         accessKeyId: required("R2_ACCESS_KEY_ID"),
         secretAccessKey: required("R2_SECRET_ACCESS_KEY"),
       },
-    }),
+      { retries: { maxAttempts: 8, connectionTimeoutMs: 15_000, requestTimeoutMs: 120_000 } },
+    ),
   };
 }
 
@@ -56,27 +51,20 @@ export function r2Prefix(spec: string): string | null {
  * R2 reports for a single-part upload), so a changed file never leaves stale bytes.
  */
 export async function put(
-  r2: S3Client,
-  bucket: string,
+  store: ObjectStore,
   key: string,
   path: string,
   { immutable = false } = {},
 ): Promise<void> {
   // A buffer, not a stream: the SDK can retry it when the connection drops.
   const body = await readFile(path);
-  try {
-    const head = await r2.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
-    if (
-      immutable ||
-      head.ETag?.replaceAll('"', "") === createHash("md5").update(body).digest("hex")
-    )
-      return;
-  } catch (error) {
-    if ((error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode !== 404) {
-      throw error;
-    }
-  }
-  await r2.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body }));
+  const head = await store.head(key);
+  if (
+    head &&
+    (immutable || head.etag?.replaceAll('"', "") === createHash("md5").update(body).digest("hex"))
+  )
+    return;
+  await store.put(key, body);
 }
 
 /** Runs `work` over `items`, `limit` at a time. */
@@ -101,7 +89,7 @@ export async function filesUnder(dir: string, prefix = ""): Promise<string[]> {
 }
 
 export async function uploadDir(
-  r2: S3Client,
+  store: ObjectStore,
   bucket: string,
   dir: string,
   prefix: string,
@@ -113,36 +101,29 @@ export async function uploadDir(
   await pool(
     paths.filter((p) => !isManifest(p)),
     16,
-    (p) => put(r2, bucket, `${prefix}${p}`, join(dir, p)),
+    (p) => put(store, `${prefix}${p}`, join(dir, p)),
   );
-  await pool(paths.filter(isManifest), 4, (p) => put(r2, bucket, `${prefix}${p}`, join(dir, p)));
+  await pool(paths.filter(isManifest), 4, (p) => put(store, `${prefix}${p}`, join(dir, p)));
   return paths.length;
 }
 
 async function downloadDir(
-  r2: S3Client,
+  store: ObjectStore,
   bucket: string,
   prefix: string,
   dir: string,
 ): Promise<void> {
-  const keys: string[] = [];
-  for (let token: string | undefined; ; ) {
-    const page = await r2.send(
-      new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token }),
-    );
-    for (const object of page.Contents ?? [])
-      keys.push((object.Key as string).slice(prefix.length));
-    token = page.NextContinuationToken;
-    if (!token) break;
-  }
+  const keys = (await store.list(prefix)).objects.map((o) => o.key.slice(prefix.length));
   if (keys.length === 0) throw new Error(`nothing under r2:${prefix} in bucket ${bucket}`);
   await pool(keys, 16, async (rel) => {
     relativePathSchema.parse(rel); // the bucket is outside input: no key may leave the folder
-    const body = (await r2.send(new GetObjectCommand({ Bucket: bucket, Key: `${prefix}${rel}` })))
-      .Body;
+    const { body } = await store.get(`${prefix}${rel}`);
     const path = join(dir, rel);
     await mkdir(dirname(path), { recursive: true });
-    await pipeline(body as NodeJS.ReadableStream, createWriteStream(path));
+    await pipeline(
+      Readable.fromWeb(body as import("node:stream/web").ReadableStream),
+      createWriteStream(path),
+    );
   });
 }
 
@@ -150,10 +131,10 @@ async function downloadDir(
 export async function withLocalDir<T>(spec: string, use: (dir: string) => Promise<T>): Promise<T> {
   const prefix = r2Prefix(spec);
   if (!prefix) return use(spec);
-  const { r2, bucket } = r2FromEnv();
+  const { store, bucket } = r2FromEnv();
   const dir = await mkdtemp(join(tmpdir(), "voluma-r2-"));
   try {
-    await downloadDir(r2, bucket, prefix, dir);
+    await downloadDir(store, bucket, prefix, dir);
     return await use(dir);
   } finally {
     await rm(dir, { recursive: true, force: true });

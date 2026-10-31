@@ -14,7 +14,7 @@
  * Run limits, per organization (LAB, JUDGES, DEMO) and number: RUN_LIMITS_<ORG>_PER_CALLER, _CONCURRENT,
  * _VISITOR_ACTIVE; unset is no limit. Optionally, as a group, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
  * R2_SECRET_ACCESS_KEY, R2_BUCKET: Review's reference download and scan uploads (the API
- * presigns PUTs; files never pass through it). UPLOAD_MAX_FILES, UPLOAD_MAX_BYTES per scan and UPLOAD_MAX_OPEN uploads in progress per member (defaults below). Fails at startup if the database is unreachable or not migrated.
+ * presigns PUTs; files never pass through it); OBJECT_STORE_DIRECTORY replaces R2 with a local folder. UPLOAD_MAX_FILES, UPLOAD_MAX_BYTES per scan and UPLOAD_MAX_OPEN uploads in progress per member (defaults below). Fails at startup if the database is unreachable or not migrated.
  */
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -22,6 +22,8 @@ import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { MESSAGE_BODY_BYTES } from "@voluma/contracts/messages";
 import { REVIEW_SNAPSHOT_BODY_BYTES } from "@voluma/contracts/snapshot";
+import { directoryStore } from "@voluma/object-store/directory";
+import { r2Store } from "@voluma/object-store/r2";
 import { workflowById } from "@voluma/workflow/bundled";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { type Context, Hono } from "hono";
@@ -31,9 +33,6 @@ import postgres from "postgres";
 import { pgSnapshots } from "./adapters/pg-snapshots";
 import { createAuth } from "./auth";
 import { createReview } from "./domains/review";
-import { directoryRunFiles } from "./domains/review/directory-run-files";
-import { r2ReferenceArchive } from "./domains/review/r2-reference-archive";
-import { r2RunFiles } from "./domains/review/r2-run-files";
 import { createRun } from "./domains/run";
 import type { Limits } from "./domains/run/admission";
 import { KeyVault } from "./domains/run/key-vault";
@@ -45,7 +44,6 @@ import { pgRunRecords } from "./domains/run/pg-run-records";
 import { pgRunReads, resultsLoader } from "./domains/run/pg-runs";
 import { pgStudyReads } from "./domains/run/pg-studies";
 import { pgUploads } from "./domains/run/pg-uploads";
-import { r2Uploads } from "./domains/run/r2-uploads";
 
 const required = (name: string) => {
   const value = process.env[name];
@@ -153,7 +151,7 @@ const eventLog = pgEventLog(db, notifier);
 
 const runRecords = pgRunRecords(db, notifier);
 
-/** R2, optional as a group: without it the reference download, run files and scan uploads are 503s. */
+/** R2, optional as a group (and replaced by `OBJECT_STORE_DIRECTORY`): without either the reference download, run files and scan uploads are 503s. */
 const r2Env = {
   accountId: process.env.R2_ACCOUNT_ID,
   bucket: process.env.R2_BUCKET,
@@ -169,13 +167,18 @@ const r2 =
         secretAccessKey: r2Env.secretAccessKey,
       }
     : null;
-const referenceArchive = r2 && r2ReferenceArchive(r2);
-const runFiles = process.env.RUN_FILES_DIRECTORY
-  ? directoryRunFiles(resolve(process.env.RUN_FILES_DIRECTORY))
-  : r2 && r2RunFiles(r2);
+/** Where the signed URLs of a storage directory point (`serve` below). */
+const DIRECTORY_STORE_MOUNT = "/api/storage";
+const storageDirectory = process.env.OBJECT_STORE_DIRECTORY
+  ? directoryStore(resolve(process.env.OBJECT_STORE_DIRECTORY), DIRECTORY_STORE_MOUNT)
+  : null;
+const store = storageDirectory ?? (r2 && r2Store(r2, { checksum: "when-required" }));
 
 const app = new Hono();
 app.get("/health", (c) => c.text("ok"));
+// A storage directory's signed URLs carry their own authorization, and uploads pass the body limit.
+if (storageDirectory)
+  app.all(`${DIRECTORY_STORE_MOUNT}/*`, (c) => storageDirectory.serve(c.req.raw));
 // A body over the limit is a 413 before anything reads it. Browsers get 256 KB (the key
 // vault and the event log keep what they send), except a message with its snapshot (3 MB) and an upload's file list (up to
 // 10,000 paths of 300 ASCII characters: 4 MB). The runner is trusted, and a model's
@@ -210,7 +213,7 @@ app.route(
     notifier,
     history: pgHistory(db),
     uploadStore: pgUploads(db),
-    objects: r2 && r2Uploads(r2),
+    store,
     // A prepared scan is a few hundred files and a few hundred MB; a raw one, a few thousand.
     uploadLimits: {
       maxFiles: countFromEnv("UPLOAD_MAX_FILES", 5000),
@@ -226,8 +229,7 @@ app.route(
     runs: runRecords,
     snapshots: pgSnapshots(db),
     messages: { check: queue.checkMessage, send: queue.sendMessage },
-    files: runFiles,
-    referenceArchive,
+    store,
   }),
 );
 
