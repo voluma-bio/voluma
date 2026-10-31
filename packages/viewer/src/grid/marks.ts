@@ -30,8 +30,8 @@ export type MarkLayer = {
   /** The mark being drawn, and where a point would land. */
   draft: GridMark | null;
   hover: Zyx | null;
-  /** Draws now: the pane calls it after drawing its picture, so both show the same view. */
-  draw(): void;
+  /** Draws now; snapshots omit the unfinished gesture and hover cursor. */
+  draw(transient?: boolean): void;
   /** Draws at the next frame, the picture untouched. */
   redraw(): void;
 };
@@ -71,14 +71,22 @@ export function useMarkLayer(
       canvas,
       draft: null,
       hover: null,
-      draw() {
+      draw(transient = true) {
         cancelAnimationFrame(frame);
         frame = 0;
         const v = latest.current.view();
-        if (v) drawMarks(canvas, ink, v, latest.current.marks, own.draft, own.hover);
+        if (v)
+          drawMarks(
+            canvas,
+            ink,
+            v,
+            latest.current.marks,
+            transient ? own.draft : null,
+            transient ? own.hover : null,
+          );
       },
       redraw() {
-        frame ||= requestAnimationFrame(own.draw);
+        frame ||= requestAnimationFrame(() => own.draw());
       },
     };
     const observer = new ResizeObserver(() => {
@@ -100,12 +108,15 @@ export function useMarkLayer(
     };
   }, [host]);
   useEffect(() => {
+    layer.current?.redraw();
+  }, [marks]);
+  useEffect(() => {
     const own = layer.current;
     if (!own) return;
-    if (tool !== "point" && tool !== "line") own.hover = null;
-    if (!tool) own.draft = null;
+    own.hover = null;
+    own.draft = null;
     own.redraw();
-  }, [marks, tool]);
+  }, [tool]);
   return layer;
 }
 

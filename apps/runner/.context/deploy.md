@@ -55,7 +55,7 @@ Variables (names only; values never go in the repo):
 
 | Variable | Source |
 |---|---|
-| `VOLUMA_API_URL` | `https://voluma-api.onrender.com`, the public URL. Not the private `hostport`: when an API deploy ends, the old instance exits and requests over the private hostname failed for 30+ s, long enough for the runner to self-stop each run it held, and self-stops count toward the 3-claim no-progress limit (a rehearsal run failed this way on 2026-10-31). The public route switches to the new instance before the old one exits |
+| `VOLUMA_API_URL` | `fromService` `voluma-api`, `property: hostport` (`host:port` on the private network, no scheme; `apiEndpoint()` in `config.ts` adds `http://`). Not the public URL: Render's web application firewall sits in front of `voluma-api.onrender.com` and answered a runner history write with a 403 "Blocked" page, which failed that agent's thread (2026-10-31). The cost of the private network: when an API deploy ends, requests fail for 30+ s while the hostname moves to the new instance. Runs held then self-stop and resume, and self-stops never count toward the no-progress limit |
 | `VOLUMA_API_TOKEN` | `fromService` `voluma-api`'s variable: rotating it on the API reaches the runner at the next Blueprint sync |
 | `VOLUMA_META_API_KEY`, `RUNNER_CONCURRENCY` | the model key; 2 slots. Until Jimmy says the infrastructure is ready, staging is a test stack: `RUNNER_MODEL=meta/muse-spark-1.3-contributor` and `RUNNER_THINKING=medium` force every role onto cheap Spark contributor (Jimmy's choice, 30 Oct), both literals in `render.yaml`. Contributor mode lets Meta train on what it is sent, so put only cleared scans (OA6-1RK, OA7) on staging while it is set. For real runs, delete both from the yaml: each role then takes its role file's alias (`wonder` = `meta/muse-wonder-1.0`, Standard mode) and thinking level. Contributor is never right outside that test default |
 | `GATEWAY_TOKEN_SECRET` | `fromService` `voluma-gateway`: its secret |
@@ -81,7 +81,7 @@ and `voluma-sam` (the bundle of `packages/voluma-sam`, which the workflow builds
 build context `sam`). The "Sandbox image" workflow
 (`.github/workflows/sandbox-image.yml`) builds it for linux/amd64 on a change to the Dockerfile,
 `packages/voluma-sam` or by hand, pushes `ghcr.io/voluma-bio/voluma-sandbox:<commit>` and prints the digest. Put
-that digest in `SANDBOX_IMAGE` (`src/config.ts`). Every run of the workflow gives a new digest, even for the same contents (image timestamps), and it also runs when the workflow file or `requirements.txt` changes, so bump `SANDBOX_IMAGE` only when the contents changed. The package
+that digest in `SANDBOX_IMAGE` (`src/config.ts`). Every run of the workflow gives a new digest, even for the same contents (image timestamps), and it also runs when the workflow file or `requirements.txt` changes, so bump `SANDBOX_IMAGE` only when the contents changed. A run keeps the image of its first claim (`sandboxImage` on its first `thread.started`): a bump reaches runs that start after the deploy, not the ones in flight. If a run's recorded digest becomes unpullable (package deleted or made private), no runner bump reaches that run: start a new run instead. The package
 must be **public**, or Modal cannot pull it: GitHub, the org's Packages,
 `voluma-sandbox`, Package settings, Danger Zone, Change visibility.
 

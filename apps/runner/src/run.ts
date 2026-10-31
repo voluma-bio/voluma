@@ -1,7 +1,8 @@
 /**
  * One claimed run, start to report: the same path for a fresh run and a recovered one. It
- * reads the run's stored events over HTTP, builds the recorder on them and the sandbox
- * session (one sandbox per thread), and hands the harness its adapters (`superviseRun`). Alongside, it holds the lease
+ * reads the run's stored events over HTTP, builds the recorder on them, and hands the harness
+ * what holds keys and machines (`superviseRun`: the models, Modal sandboxes, the gateway's token).
+ * The harness writes the prompts, the tool grants and each sandbox's spec. Alongside, it holds the lease
  * (`lease.ts`) and stops at once on any of: the server ending the run, a lost lease, a
  * self-stop, or the service shutting down. Then it reports.
  *
@@ -11,9 +12,9 @@
  * clipped. The function never rejects: every failure after `redact` exists is caught and
  * logged through it.
  *
- * Beside the supervisor runs the conversion worker (`@voluma/harness/review-assets`): it turns
+ * Beside the supervisor runs the harness's conversion worker (`review-assets.ts`): it turns
  * the files tasks report into review assets in a `convert` sandbox as they appear. It stops when a stop will
- * not end the run, not on the internal abort at the end of the run, which it must outlive.
+ * not end the run (`conversionSignal`), not on the internal abort at the end of the run, which it must outlive.
  *
  * End of the run, in order. A normal end (an uncaught error included) waits for
  * the conversion queue to drain (bounded by `DRAIN_MS`, the lease heartbeating meanwhile; every
@@ -29,53 +30,31 @@
  */
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import type { Api, Model, Models } from "@earendil-works/pi-ai";
 import { inputPrefix, referencePrefix, workflowSnapshotPrefix } from "@voluma/contracts/r2";
 import type { Claim, ReportRequest } from "@voluma/contracts/runner";
 import { runClient } from "@voluma/harness/adapters/http/run-client";
-import { type RunLayout, runLayout, type ThreadLayout } from "@voluma/harness/layout";
 import { type LiveBatcher, liveBatcher } from "@voluma/harness/live";
+import { NO_WORKFLOW_DIR, roleModelUnset } from "@voluma/harness/messages";
 import { usageOf } from "@voluma/harness/model-usage";
+import type { CreateSandbox } from "@voluma/harness/ports/sandbox";
 import { type Recorder, recorder } from "@voluma/harness/recorder";
 import {
-  convertMounts,
-  type ReviewAssetsWorker,
-  reviewAssetsWorker,
-} from "@voluma/harness/review-assets";
-import { type SandboxSession, sandboxSession } from "@voluma/harness/sandbox-session";
-import {
-  checkSandboxSpec,
-  convertSandboxSpec,
-  workerSandboxSpec,
-} from "@voluma/harness/sandbox-specs";
-import {
-  type RoleOf,
-  type RoleSetup,
-  rootThreadIdOf,
+  type ModelSetup,
+  rootThreadOf,
+  type Supervised,
   superviseRun,
 } from "@voluma/harness/supervise-run";
 import { TOOL_NAMES } from "@voluma/harness/tools";
 import type { ObjectStore } from "@voluma/object-store";
-import type { Skill } from "@voluma/workflow/definition";
 import { loadWorkflow } from "@voluma/workflow/load";
 import { computePlan } from "@voluma/workflow/plan";
 import { type Config, isVisitorSafe, providerKey } from "./config.ts";
 import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
-import {
-  awaitOtherClaimsGone,
-  claimSandboxes,
-  terminateClaim,
-  terminateOtherClaims,
-} from "./modal-sandbox.ts";
+import { claimSandboxes, endOtherClaims, terminateClaim } from "./modal-sandbox.ts";
 import { retryTransient } from "./model-retry.ts";
-import {
-  checkPrompt,
-  mainPrompt,
-  mainRestartPrompt,
-  systemPrompt,
-  workerPrompt,
-} from "./prompts.ts";
 import { providerFailure } from "./provider-error.ts";
 import { r2Outputs } from "./r2-outputs.ts";
 import { type Redact, redactor } from "./redact.ts";
@@ -97,6 +76,13 @@ const REPO_ROOT = resolve(import.meta.dirname, "../../..");
 const CLOSE_BUDGET_MS = { ended: 60_000, stopped: 15_000 };
 /** How long threads get to end after a stop before the run is reported anyway. */
 const WIND_DOWN_MS = 5_000;
+/**
+ * How long a shutdown release waits for its events and final usage to reach an API that may be
+ * down before it reports. The report's retries then get what is left of the shutdown budget (`main.ts`): a
+ * release that never reaches the server is recorded as `lease-expired`, unless a later claim
+ * has not yet swept the lease (`takeBackStrike`, `pg-queue.ts`).
+ */
+const RELEASE_FLUSH_MS = 15_000;
 /** How long an ended run waits for the review assets still being converted before it reports. */
 const DRAIN_MS = 10 * 60_000;
 /** Pi's own retries of a model call (429 honours retry-after, 5xx, dropped connections). */
@@ -113,20 +99,9 @@ export interface RunnerContext {
   log(line: string): void;
 }
 
-/** Where a run's files are: its scan (a reference scan or an upload), outputs and scratch. */
-export const layoutOf = (
-  run: Claim["run"],
-  skills: readonly Skill[],
-  mainWorks: boolean,
-  copiesInputs: (taskId: string) => boolean,
-) =>
-  runLayout(
-    run.id,
-    run.input.source === "reference" ? referencePrefix("scan") : inputPrefix(run.input.id),
-    skills,
-    mainWorks,
-    copiesInputs,
-  );
+/** The R2 prefix of the run's scan: a reference scan or an upload. */
+export const inputPrefixOf = (run: Claim["run"]) =>
+  run.input.source === "reference" ? referencePrefix("scan") : inputPrefix(run.input.id);
 
 /** "error": an error nobody caught reached the process handler while this run was working (`telemetry.ts`). */
 type Stopped = StopReason | "shutdown" | "error";
@@ -137,7 +112,12 @@ export function reportFor(
   error?: string,
 ): ReportRequest["report"] | undefined {
   if (stopped === "stop" || stopped === "lease-lost") return undefined;
-  if (stopped === "self-stop" || stopped === "shutdown")
+  if (
+    stopped === "self-stop" ||
+    stopped === "loop-stalled" ||
+    stopped === "refused" ||
+    stopped === "shutdown"
+  )
     return { kind: "released", reason: stopped };
   return error === undefined
     ? { kind: "ended", outcome: "completed" }
@@ -204,8 +184,7 @@ async function claimBody(
   let lease: ReturnType<typeof holdLease> | undefined;
   let events: Recorder | undefined;
   let live: LiveBatcher | undefined;
-  let session: SandboxSession | undefined;
-  let convert: ReviewAssetsWorker | undefined;
+  let supervised: Supervised | undefined;
   let error: string | undefined;
   // An error nobody caught (`telemetry.ts`) is kept apart from `error`, so a later throw does
   // not replace it. Once `finally` fixes the report it can change nothing.
@@ -227,26 +206,17 @@ async function claimBody(
     });
     log(`claimed (${visitor ? "visitor" : "voluma"} keys)`);
 
-    // What an earlier claim of this run left running must not keep writing or spending.
-    // Cleanup only: it never decides the run's outcome, and idle timeouts back it up. A restore
-    // of /outputs waits until they are gone (`awaitOtherClaimsGone`).
-    for (let attempt = 1; attempt <= 2 && !abort.signal.aborted; attempt++) {
-      try {
-        const orphans = await terminateOtherClaims(config.modal, runId, claimId, abort.signal);
-        if (orphans > 0)
-          log(`ended ${orphans} sandbox${orphans === 1 ? "" : "es"} of an earlier claim`);
-        break;
-      } catch (e) {
-        log(`ending an earlier claim's sandboxes failed (attempt ${attempt}): ${e}`);
-        if (attempt < 2) await new Promise((r) => setTimeout(r, 2000));
-      }
-    }
+    // What an earlier claim of this run left running must not keep writing or spending, so this
+    // claim starts no sandbox (and restores nothing) until Modal reports each one terminated.
+    const orphans = await endOtherClaims(config.modal, runId, claimId, abort.signal, log);
+    if (orphans > 0)
+      log(`ended ${orphans} sandbox${orphans === 1 ? "" : "es"} of an earlier claim`);
 
     // Before any sandbox: an unreadable workflow or a bad selection fails the run here, with its
     // message. The run's pin names the workflow directory; its files are snapshotted from this
     // runner's checkout once (at `config.commit`), so a resume reads what the run began with.
     const workflowDir = run.workflows[0]?.path;
-    if (!workflowDir) throw new Error("the run pins no workflow directory");
+    if (!workflowDir) throw new Error(NO_WORKFLOW_DIR);
     const definition = await loadWorkflow(workflowDir, {
       store: objects,
       prefix: workflowSnapshotPrefix(runId),
@@ -260,10 +230,7 @@ async function claimBody(
     const roleModel = (role: ModelRole) => {
       const alias = definition.agents[role].model;
       const model = ctx.aliases[alias];
-      if (!model)
-        throw new Error(
-          `the ${role} role names model "${alias}", which RUNNER_MODEL_${alias.toUpperCase()} does not set`,
-        );
+      if (!model) throw new Error(roleModelUnset(role, alias));
       return !visitor || (role === "main" && isVisitorSafe(model)) ? model : ctx.visitorModel;
     };
     // A role's file may set its thinking level; else the runner's; else none is sent ("off").
@@ -288,40 +255,37 @@ async function claimBody(
     // The tasks that produce the selected outputs and what they need. The main thread may adapt
     // them to the run's notes when the run starts (`superviseRun`).
     const computed = computePlan(definition.files, run.selectedOutputs);
-    // Each role gets the tools its file lists. `segment_sam` also needs the gateway, and a
-    // sandbox to run in: workers have one, main only when its role holds `bash`; the checker
-    // never holds it (it does not redo the task).
-    const grant = (role: ModelRole) => {
-      const { tools } = definition.agents[role];
-      const sandboxed = role === "worker" || (role === "main" && tools.includes("bash"));
-      return tools.filter((t) => t !== "segment_sam" || (config.gateway && sandboxed));
+    // Metered from the start of creation (the sweep included) to destroy: a conservative upper bound.
+    const modal = claimSandboxes(config, config.modal, claimId);
+    const createSandbox: CreateSandbox = async (spec, signal) => {
+      meter.sandboxUp();
+      try {
+        const sandbox = await modal(spec, signal);
+        return {
+          exec: (request, s) => sandbox.exec(request, s),
+          writeFile: (path, bytes, s) => sandbox.writeFile(path, bytes, s),
+          exitCode: () => sandbox.exitCode(),
+          destroy: () => sandbox.destroy().finally(() => meter.sandboxDown()),
+        };
+      } catch (e) {
+        meter.sandboxDown();
+        throw e;
+      }
     };
-
-    // From the workflow's task, so a task the main agent adds from it keeps the flag.
-    const copyInputs = new Set(definition.files.tasks.filter((t) => t.copyInputs).map((t) => t.id));
-    const plain = layoutOf(run, definition.skills, grant("main").includes("bash"), (id) =>
-      copyInputs.has(id),
-    );
-    // The run loop lays a thread out before it uses its sandbox or writes its first line; the
-    // sandbox and the log, which know a thread only by id, look its layout up here.
-    const laidOut = new Map<string, ThreadLayout>();
-    const layout: RunLayout = {
-      ...plain,
-      forThread(thread, cited) {
-        const laid = plain.forThread(thread, cited);
-        laidOut.set(thread.id, laid);
-        return laid;
-      },
-    };
-    const laid = (threadId: string) => {
-      const found = laidOut.get(threadId);
-      if (!found) throw new Error(`${threadId} was never laid out`);
-      return found;
-    };
-    // A thread's name for a line: the root thread is never laid out.
-    const nameOf = (threadId: string) => laidOut.get(threadId)?.name ?? threadId;
-    const createSandbox = claimSandboxes(config, config.modal, claimId);
+    // A thread's name for a log line, from its `thread.started` (recorded before any other event of the thread).
+    const names = new Map<string, string>();
+    const nameOf = (id: string) => names.get(id) ?? id;
     const stored = await client.storedEvents();
+    // The image the run began on: a deploy that changes `SANDBOX_IMAGE` must not move a resumed
+    // run to different dependencies. A run recorded before the field existed takes this runner's.
+    const root = rootThreadOf(runId, stored);
+    const pinnedImage = stored
+      .flatMap((e) =>
+        e.type === "thread.started" && e.threadId === root ? [e.payload.sandboxImage] : [],
+      )
+      .find((image) => image !== undefined);
+    const sandboxImage = pinnedImage ?? config.sandbox.image;
+    log(`sandbox image: ${sandboxImage} (${pinnedImage ? "the run's own" : "this runner's"})`);
     live = liveBatcher((frames) => client.live(frames));
     const recorded = recorder(
       {
@@ -340,6 +304,7 @@ async function claimBody(
     // The in-flight tool calls (`telemetry.ts`) follow the events as they are emitted, not as
     // the queue delivers them: a stall must name the call that caused it.
     const track = (threadId: string, type: string, payload: unknown) => {
+      if (type === "thread.started") names.set(threadId, (payload as { name: string }).name);
       const { toolCallId, name } = payload as { toolCallId: string; name?: string };
       if (type === "tool.call") scope.inFlight.set(toolCallId, `${nameOf(threadId)} ${name}`);
       else if (type === "tool.result") scope.inFlight.delete(toolCallId);
@@ -355,53 +320,6 @@ async function claimBody(
         return recorded.append(threadId, type, payload, id);
       },
     };
-    session = sandboxSession(
-      (threadId) => {
-        const thread = laid(threadId);
-        const common = {
-          runId,
-          name: thread.name,
-          image: config.sandbox.image,
-          lifetimeSeconds: config.sandbox.lifetimeSeconds,
-          idleSeconds: config.sandbox.idleSeconds,
-          env: thread.env,
-          workdir: thread.dir,
-        };
-        return createSandbox(
-          thread.role === "worker" ||
-            thread.mounts.some((m) => m.path === "/outputs" && m.access === "read-write")
-            ? workerSandboxSpec({
-                ...common,
-                mounts: thread.mounts,
-                // The network and the token follow the tool grant: a sandbox whose role cannot
-                // call `segment_sam` gets neither, since `voluma-sam` is on every sandbox's PATH.
-                gateway: grant(thread.role).includes("segment_sam")
-                  ? sandboxGateway(
-                      config,
-                      { runId, leaseToken, visitorMetaKey: keys?.metaApiKey },
-                      thread.name,
-                      redact,
-                    )
-                  : undefined,
-              })
-            : checkSandboxSpec({
-                ...common,
-                readOnly: thread.mounts.filter((m) => m !== thread.scratch),
-                scratch: thread.scratch,
-              }),
-          abort.signal,
-        );
-      },
-      (id, state, detail) => {
-        // Metered from the start of creation, the sweep included: a conservative upper bound.
-        if (state === "starting") meter.sandboxUp();
-        else if (state === "stopped" || state === "failed") meter.sandboxDown();
-        events?.emit(id, "sandbox", { name: laid(id).name, state, detail });
-      },
-      (threadId) => laid(threadId).restartNote,
-    );
-    const opened = session;
-
     // A thread keeps the model it started on (the log records it).
     const threadModel = (primary: Model<Api>, recorded: string | undefined) => {
       if (recorded) {
@@ -424,6 +342,11 @@ async function claimBody(
             ...options,
             apiKey: keyFor(m.provider),
             maxRetries: MODEL_RETRIES,
+            // Meta's default prompt cache is in-memory and evicted under pressure or after
+            // inactivity. Runs have long tool calls and many independent threads, so ask the
+            // Responses API to keep Meta prefixes for up to 24 hours. Anthropic long retention
+            // costs more per cache write, so leave its existing setting unchanged.
+            ...(m.provider === "meta" && { cacheRetention: "long" }),
           }),
         (attempt, delayMs, error) => {
           log(
@@ -432,94 +355,58 @@ async function claimBody(
         },
       );
     const streamFor =
-      (role: ModelRole): RoleSetup["streamFn"] =>
+      (role: ModelRole): ModelSetup["streamFn"] =>
       (m, context, options) => {
         const stream = callModel(role)(m, context, options);
+        // `sessionId` is the thread's id, for a turn and for a compaction summary.
+        const threadId = options?.sessionId as string;
         stream.result().then(
-          (reply) => meter.addModelCall(role, usageOf(reply)),
+          (reply) => meter.addModelCall(role, threadId, usageOf(reply)),
           () => {},
         );
         return stream;
       };
-    const role =
-      (primary: Model<Api>, modelRole: ModelRole): RoleOf =>
-      (thread, recorded) => ({
-        model: threadModel(primary, recorded),
-        thinkingLevel: thinking[modelRole],
-        streamFn: streamFor(modelRole),
-        systemPrompt: systemPrompt(definition, thread),
-        tools: grant(modelRole),
-      });
-    const files = storeFiles(objects);
-    const supervised = superviseRun({
+    const primary = { main: mainModel, worker: workerModel, check: checkModel };
+    supervised = superviseRun({
       runId,
+      definition,
       plan: computed.tasks,
+      selectedOutputs: run.selectedOutputs,
+      notes: run.notes,
+      inputPrefix: inputPrefixOf(run),
       previousClaim: claim.previousClaim?.reason,
       providerError: providerFailure,
-      workflow: definition.files,
-      // The commit the files came from: the snapshot's, which a resume keeps.
-      workflows: run.workflows.map((pin) => ({ ...pin, commit: definition.commit })),
-      layout,
+      workflows: run.workflows,
       recorder: events,
       history: client,
-      sandbox: (id, options) => opened.get(id, options),
-      releaseSandbox: (id) =>
-        opened.release(id).catch((e) => log(`releasing ${nameOf(id)} failed: ${e}`)),
       evidence: storeEvidence(objects),
-      files,
+      files: storeFiles(objects),
       outputs: r2Outputs(config.r2),
-      earlierClaimsEnded: (signal) => awaitOtherClaimsGone(config.modal, runId, claimId, signal),
-      roles: {
-        main: role(mainModel, "main"),
-        worker: role(workerModel, "worker"),
-        check: role(checkModel, "check"),
-      },
-      briefs: {
-        main: (view) => mainPrompt(view, run.selectedOutputs, definition.files, run.notes),
-        mainRestart: (view, state) =>
-          mainRestartPrompt(view, state, run.selectedOutputs, definition.files, run.notes),
-        worker: (task, brief) => workerPrompt(task, brief, run.notes),
-        check: (task, state) => checkPrompt(task, state, run.notes),
-      },
+      model: (role, recorded) => ({
+        model: threadModel(primary[role], recorded),
+        thinkingLevel: thinking[role],
+        streamFn: streamFor(role),
+      }),
+      createSandbox,
+      // The image is recorded on the root's first event, so `sandboxImage` is the run's own.
+      sandbox: { ...config.sandbox, image: sandboxImage },
+      // The token follows the tool grant: `superviseRun` asks for it only for a sandbox whose role holds `segment_sam`.
+      gateway: config.gateway
+        ? (sandbox) =>
+            sandboxGateway(
+              config,
+              { runId, leaseToken, visitorMetaKey: keys?.metaApiKey },
+              sandbox,
+              redact,
+            )
+        : undefined,
       config: config.loop,
-      signal: abort.signal,
-    });
-    convert = reviewAssetsWorker({
-      runId,
-      rootThreadId: rootThreadIdOf(runId),
-      recorder: events,
-      signal: halt.signal,
       log,
-      async createSandbox(signal) {
-        // Metered like the run's sandboxes: from the start of creation to destroy.
-        meter.sandboxUp();
-        try {
-          const sandbox = await createSandbox(
-            convertSandboxSpec({
-              runId,
-              name: "convert",
-              image: config.sandbox.image,
-              lifetimeSeconds: config.sandbox.lifetimeSeconds,
-              idleSeconds: config.sandbox.idleSeconds,
-              // The converter imports `sidecar` through the run's PYTHONPATH.
-              env: { PYTHONPATH: layout.pythonPath },
-              ...convertMounts(runId),
-            }),
-            signal,
-          );
-          return {
-            exec: (request, s) => sandbox.exec(request, s),
-            writeFile: (path, bytes, s) => sandbox.writeFile(path, bytes, s),
-            exitCode: () => sandbox.exitCode(),
-            destroy: () => sandbox.destroy().finally(() => meter.sandboxDown()),
-          };
-        } catch (e) {
-          meter.sandboxDown();
-          throw e;
-        }
-      },
+      signal: abort.signal,
+      conversionSignal: halt.signal,
     });
-    supervised.catch(() => {}); // an error after the race below is moot: the run is stopping
+    const { result } = supervised;
+    result.catch(() => {}); // an error after the race below is moot: the run is stopping
     // A stop does not wait for a thread stuck in a slow call (creating a sandbox takes a
     // minute): after a grace period the run is reported and the sandbox closed regardless.
     const windDown = new Promise<void>((resolve) => {
@@ -527,7 +414,7 @@ async function claimBody(
       if (abort.signal.aborted) arm();
       else abort.signal.addEventListener("abort", arm, { once: true });
     });
-    await Promise.race([supervised, windDown]);
+    await Promise.race([result, windDown]);
   } catch (e) {
     error = redact(e instanceof Error ? e.message : String(e));
     log(`failed: ${error}`);
@@ -540,21 +427,24 @@ async function claimBody(
     abort.abort();
     if (report?.kind === "ended") {
       // Every output gets an `assets.*` event, or the run is released to be resumed.
-      await convert?.drain(DRAIN_MS);
+      await supervised?.drain(DRAIN_MS);
       // A stop during the drain ends it at once: the run is released (nothing, for a server stop
       // or a lost lease), so the next claim resumes the queue.
       if (haltedBy) report = reportFor(haltedBy);
       if (report?.kind === "ended") {
-        await Promise.all([
-          closeSandbox(CLOSE_BUDGET_MS.ended, session?.close.bind(session)),
-          closeSandbox(CLOSE_BUDGET_MS.ended, convert?.close.bind(convert)),
-        ]);
+        await closeSandboxes(CLOSE_BUDGET_MS.ended);
       }
     }
     shutdown.removeEventListener("abort", onShutdown);
-    await live?.flush();
-    await events?.flush();
-    await lease?.end(report !== undefined);
+    lease?.halt();
+    const wrapUp = (async () => {
+      await live?.flush();
+      await events?.flush();
+      if (report) await lease?.sendFinalUsage();
+    })();
+    await (report?.kind === "released" && report.reason === "shutdown"
+      ? Promise.race([wrapUp, delay(RELEASE_FLUSH_MS)])
+      : wrapUp);
     if (report) {
       const stored = await client.report(report).catch((e) => {
         log(`report failed: ${e instanceof Error ? e.message : e}`);
@@ -578,16 +468,13 @@ async function claimBody(
       log(`stopped (${[...reasons].join(", ")}); nothing more to report`);
     }
     if (report?.kind !== "ended") {
-      await Promise.all([
-        closeSandbox(CLOSE_BUDGET_MS.stopped, session?.close.bind(session)),
-        closeSandbox(CLOSE_BUDGET_MS.stopped, convert?.close.bind(convert)),
-      ]);
+      await closeSandboxes(CLOSE_BUDGET_MS.stopped);
     }
   }
 
-  async function closeSandbox(budgetMs: number, close: (() => Promise<void>) | undefined) {
-    if (!close) return;
-    const closed = close().then(
+  async function closeSandboxes(budgetMs: number) {
+    if (!supervised) return;
+    const closed = supervised.close().then(
       () => true,
       () => false,
     );

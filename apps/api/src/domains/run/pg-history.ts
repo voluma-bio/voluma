@@ -19,7 +19,7 @@ export function pgHistory(db: PostgresJsDatabase) {
         const rows = await tx
           .select({ message: piMessages.message })
           .from(piMessages)
-          .where(eq(piMessages.threadId, threadId))
+          .where(and(eq(piMessages.runId, runId), eq(piMessages.threadId, threadId)))
           .orderBy(asc(piMessages.idx));
         return rows.map((row) => row.message);
       }),
@@ -33,17 +33,23 @@ export function pgHistory(db: PostgresJsDatabase) {
       db.transaction(async (tx) => {
         await assertLease(tx, runId, leaseToken);
         const inserted = await tx.execute(sql`
-          INSERT INTO pi_messages (thread_id, idx, message)
-          SELECT ${threadId}, ${idx}::integer, ${message}
+          INSERT INTO pi_messages (run_id, thread_id, idx, message)
+          SELECT ${runId}, ${threadId}, ${idx}::integer, ${message}
           WHERE ${idx}::integer = 0
-             OR EXISTS (SELECT 1 FROM pi_messages WHERE thread_id = ${threadId} AND idx = ${idx}::integer - 1)
-          ON CONFLICT (thread_id, idx) DO NOTHING
+             OR EXISTS (SELECT 1 FROM pi_messages WHERE run_id = ${runId} AND thread_id = ${threadId} AND idx = ${idx}::integer - 1)
+          ON CONFLICT (run_id, thread_id, idx) DO NOTHING
           RETURNING idx`);
         if (inserted.length > 0) return;
         const [existing] = await tx
           .select({ message: piMessages.message })
           .from(piMessages)
-          .where(and(eq(piMessages.threadId, threadId), eq(piMessages.idx, idx)));
+          .where(
+            and(
+              eq(piMessages.runId, runId),
+              eq(piMessages.threadId, threadId),
+              eq(piMessages.idx, idx),
+            ),
+          );
         if (existing?.message !== message) {
           throw new HistoryConflict(`thread ${threadId}: idx ${idx} is not the next free row`);
         }

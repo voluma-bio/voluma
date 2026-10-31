@@ -1,8 +1,14 @@
 # Scan review
 
-One screen, `/scans/:runId` (dark theme): one scan's run, live while it goes and for review once
-it ends. The grid viewer fills the main area; To check, Report and Agents dock on the left, View,
-Marks and The AI on the right (`ShellPanel`s, shortcuts t, r, a, v, m, i). `/runs/:id/live` and
+One screen, `/scans/:runId` (light shell, dark image wells): one scan's run, live while it goes and for review once
+it ends. The grid viewer fills the main area; Study, To check, Report and Agents dock on the left, View,
+Marks and The AI on the right (`ShellPanel`s, shortcuts s, t, r, a, v, m, i). Study replaces the left panel
+without navigating; To check keeps its URL selection and panel scroll position when reopened.
+Each visit to a scan opens To check and The AI, including after Home or a reload. Panel choices
+last only for that visit; the shell saves widths and stacked splits, not open panels.
+Study highlights the current scan and links to the study overview only when it has multiple scans:
+a study of one redirects to its scan, so neither this panel nor the breadcrumb links there.
+`/runs/:id/live` and
 `/runs/:runId` redirect here with their search kept. Links to a run use `runHref`
 (`@voluma/run-view`).
 
@@ -58,13 +64,22 @@ stopped.
   The AI beside what is open; that subject holds until the task in view changes or the message is
   sent. A 403 or 409 shows the server's text. Signing in does not let a guest reopen their old
   run: the account has a different identity and lab, and only the starter may send. A retry keeps
-  the message id, so the server stores it once; editing after a failure makes a new message.
+  the message id, so the server stores it once, and keeps the exact request including its picture.
+  Submission freezes the task, text, marks and capture before a mutation can pause offline.
+  Changing the task, Redo intent, marks, text or image/grid makes a new message; moving the camera
+  alone does not replace a retry's picture. The submission guard is synchronous, including
+  keyboard/form submissions.
 - **Your marks** are page state (`useMarking`, `scan-page.tsx`), lost on reload. The tool strip on
   the viewer's bar (`TOOLS` in `marks-panel.tsx`: Navigate, Point, Box, Line, Lasso; Esc, P, B,
   L, O) picks what a click or drag makes (`@voluma/viewer/grid`'s `tool`). Esc first drops a mark
   being drawn, then puts the tool away, then (the shell's) leaves Full view: one thing per press.
   A new mark names the grid's image volume (`TaskGrid.imageId`) and gets a tag (P1, B1, L1, O1);
-  the viewer draws the marks on that image. Marks lists them; a row moves the views to the mark,
+  its local identity also pins the image hash, grid id, shape and affine. A redo that replaces
+  the image cannot inherit its old marks just because it reuses a block id. The viewer draws
+  and sends only marks matching that identity; other marks stay listed for inspection/deletion.
+  The focus handed to a newly mounted viewer is keyed the same way: it starts at that grid's
+  target or centre, never the previous grid's voxel while an effect catches up.
+  Marks lists them; a row moves the views to the mark,
   opening its task first when it is on another grid ("on <task>"). At `MAX_MARKS` the tools are
   held off with the reason. A message to the AI carries the marks on the views shown when those
   are its subject's, and a PNG of them (`GridViewer`'s `snapshot`, in the room the rest of the

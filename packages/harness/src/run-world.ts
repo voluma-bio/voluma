@@ -19,7 +19,7 @@ import type { RunEvent } from "@voluma/contracts/events";
 import { corrections, type Folded } from "@voluma/contracts/fold";
 import { cancelEnds } from "@voluma/contracts/threads";
 import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
-import { runLayout } from "./layout";
+import type { AgentDefinition, WorkflowDefinition } from "@voluma/workflow/definition";
 import { EvidenceNotFound } from "./ports/evidence";
 import { recorder } from "./recorder";
 import { type LoopConfig, type PlanTask, superviseRun } from "./supervise-run";
@@ -36,6 +36,8 @@ export const call = (name: string, input: unknown = {}): Call => ({ name, input 
 /** One model request: the thread asking and what its history holds. */
 export interface Turn {
   thread: string;
+  /** The thread's name from its `thread.started` (`t1.worker`, `main.2`). */
+  name: string | undefined;
   /** The thread's role and, for a worker or checker, its task. */
   role: "main" | "worker" | "check";
   task: string | undefined;
@@ -74,7 +76,7 @@ const textOf = (content: unknown): string =>
 
 function turnOf(
   messages: any[],
-  who: Pick<Turn, "thread" | "role" | "task">,
+  who: Pick<Turn, "thread" | "name" | "role" | "task">,
   signal: AbortSignal | undefined,
 ): Turn {
   const lastUserIdx = messages.map((m) => m.role).lastIndexOf("user");
@@ -160,9 +162,9 @@ export function checker(
   };
 }
 
-/** The ids of the asks main was told about (`askId <id>)`) and has not answered. */
+/** The ids of the asks main was told about (in a user message or a tool result) (`askId <id>)`) and has not answered. */
 export function openAskIds(t: Turn): string[] {
-  const asked = t.users.flatMap((u) =>
+  const asked = [...t.users, ...t.results].flatMap((u) =>
     [...u.matchAll(/askId (\S+)\)/g)].map((m) => m[1] as string),
   );
   const answered = t.calls.filter((c) => c.name === "answer").map((c) => c.input.askId);
@@ -236,7 +238,8 @@ export function world(o: WorldOptions) {
       const thread = options?.sessionId as string;
       const started = stored.find((e) => e.type === "thread.started" && e.threadId === thread);
       const task = started?.type === "thread.started" ? started.payload.task : undefined;
-      const turn = turnOf(ctx.messages as any[], { thread, role, task }, options?.signal);
+      const name = started?.type === "thread.started" ? started.payload.name : undefined;
+      const turn = turnOf(ctx.messages as any[], { thread, name, role, task }, options?.signal);
       const reply = await script(turn);
       if (reply === undefined)
         throw new Error(`no scripted reply for ${turn.thread} (${turn.steps} steps)`);
@@ -249,29 +252,39 @@ export function world(o: WorldOptions) {
   workerP.setResponses(Array(400).fill(factory(o.worker ?? worker, "worker")));
   checkP.setResponses(Array(400).fill(factory(o.check ?? checker(), "check")));
 
-  const role = (p: typeof mainP, tools: string[]) => () => ({
-    model: p.getModel(),
-    thinkingLevel: "off" as const,
-    streamFn: models.streamSimple.bind(models) as never,
-    systemPrompt: "faux",
+  const agent = (name: string, tools: string[]): AgentDefinition => ({
+    name,
+    description: "",
+    model: "faux",
     tools,
+    subagents: [],
+    skills: [],
+    body: `The ${name} of a scripted run.`,
   });
-  const roles = {
-    main: role(mainP, [
-      "start_worker",
-      "message",
-      "wait",
-      "stop_worker",
-      "answer",
-      "accept",
-      "change_plan",
-      "reply",
-      "finish_run",
-      ...(o.mainTools ?? []),
-    ]),
-    worker: role(workerP, ["report_output", "submit_task", ...(o.workerTools ?? [])]),
-    check: role(checkP, ["checkpoint", "ask"]),
+  const definition: WorkflowDefinition = {
+    dir: "workflows/mouse-oa",
+    commit: "a".repeat(40),
+    files: { tasks: [], outputs: [] } as unknown as WorkflowFiles,
+    skills: [],
+    toolIndex: [],
+    agents: {
+      main: agent("main", [
+        "start_worker",
+        "message",
+        "wait",
+        "stop_worker",
+        "answer",
+        "accept",
+        "change_plan",
+        "reply",
+        "finish_run",
+        ...(o.mainTools ?? []),
+      ]),
+      worker: agent("worker", ["report_output", "submit_task", ...(o.workerTools ?? [])]),
+      check: agent("check", ["checkpoint", "ask"]),
+    },
   };
+  const modelOf = { main: mainP, worker: workerP, check: checkP };
 
   const store = {
     append: async (e: { id: string } & Record<string, unknown>) => {
@@ -331,14 +344,14 @@ export function world(o: WorldOptions) {
 
   async function claim(reopened = false): Promise<Folded> {
     const rec = recorder(store as never, RUN, () => {}, 10, [...stored]);
-    return superviseRun({
+    const supervised = superviseRun({
       runId: RUN,
+      definition,
       plan: o.plan,
-      workflow: { tasks: [], outputs: [] } as unknown as WorkflowFiles,
-      workflows: [
-        { repo: "voluma-bio/voluma", path: "workflows/mouse-oa", commit: "a".repeat(40) },
-      ],
-      layout: runLayout(RUN, "inputs/", []),
+      selectedOutputs: undefined,
+      notes: undefined,
+      inputPrefix: "inputs/",
+      workflows: [{ repo: "voluma-bio/voluma", path: "workflows/mouse-oa" }],
       recorder: rec,
       history: {
         load: async (t) => {
@@ -351,10 +364,6 @@ export function world(o: WorldOptions) {
           if (rows[idx] === undefined) rows.push(m);
         },
       },
-      sandbox: async () => {
-        throw new Error("these runs call no sandbox");
-      },
-      releaseSandbox: () => {},
       evidence: {
         keep: async (_run, taskId, f) => {
           if (o.evidenceExists?.(f.root, taskId, f.path) === false)
@@ -369,25 +378,33 @@ export function world(o: WorldOptions) {
         write: async () => {},
         list: async () => [],
       },
-      earlierClaimsEnded: async () => {},
       outputs: {
         backup: async () => {},
         restore: async () => {},
         discard: async () => {},
       },
-      roles,
-      briefs: {
-        main: () => "Run the plan.",
-        mainRestart: (_v, state) => `Restarted.\n${state}`,
-        worker: (t, brief) => `Your task is "${t.id}".\n${brief}`,
-        check: (t) => `Check task "${t.id}".`,
+      model: (role) => ({
+        model: modelOf[role].getModel(),
+        thinkingLevel: "off" as const,
+        streamFn: models.streamSimple.bind(models) as never,
+      }),
+      createSandbox: async () => {
+        throw new Error("these runs call no sandbox");
       },
+      sandbox: { image: "faux", lifetimeSeconds: 60, idleSeconds: 60 },
       config: o.config,
       providerError: o.providerError,
+      log: () => {},
       // A reopen clears the claim-end reason (`messages.ts`).
       ...(stored.length > 0 && !reopened && { previousClaim: "shutdown" as const }),
       signal: abort.signal,
+      conversionSignal: abort.signal,
     });
+    try {
+      return await supervised.result;
+    } finally {
+      await supervised.close();
+    }
   }
 
   return {
@@ -419,15 +436,14 @@ export function world(o: WorldOptions) {
     },
     /** The log as one line per event, for a failure message. */
     text(): string {
-      return stored.map((e) => line(e)).join("\n");
+      return stored.map((e) => line(e, stored)).join("\n");
     },
   };
 }
 
-const short = (id: string) => id.replace(`${RUN}.`, "");
-
-function line(e: RunEvent): string {
-  const who = short(e.threadId);
+function line(e: RunEvent, stored: readonly RunEvent[]): string {
+  const started = stored.find((s) => s.type === "thread.started" && s.threadId === e.threadId);
+  const who = started?.type === "thread.started" ? started.payload.name : e.threadId;
   switch (e.type) {
     case "task":
       return `${who} task ${e.payload.taskId} ${e.payload.status} (${e.payload.by.kind === "rule" ? e.payload.by.rule : e.payload.by.kind})`;

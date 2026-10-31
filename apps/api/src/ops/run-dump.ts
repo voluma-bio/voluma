@@ -8,22 +8,10 @@
 import { runEventSchema } from "@voluma/contracts/events";
 import { providerCalls } from "@voluma/provider-calls";
 import { catalog, workflowById } from "@voluma/workflow/bundled";
-import { asc, eq, inArray, sql } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { reviewSnapshots } from "../domains/review/schema";
-import {
-  events,
-  inputs,
-  piMessages,
-  runs,
-  studies,
-  studyScans,
-  threads,
-} from "../domains/run/schema";
-
-/** Pi messages belong to a run through their thread id (`<runId>.<thread>`). */
-export const piMessagesOf = (runId: string) =>
-  sql`starts_with(${piMessages.threadId}, ${`${runId}.`})`;
+import { events, inputs, piMessages, runs, studies, studyScans } from "../domains/run/schema";
 
 export async function readDump(db: PostgresJsDatabase, runId: string) {
   return db.transaction((tx) => readRows(tx, runId), { isolationLevel: "repeatable read" });
@@ -45,11 +33,10 @@ async function readRows(db: PostgresJsDatabase, runId: string) {
       .from(inputs)
       .where(inArray(inputs.id, [...new Set([run.inputId, ...scans.map((s) => s.inputId)])])),
     events: await db.select().from(events).where(eq(events.runId, runId)).orderBy(asc(events.seq)),
-    threads: await db.select().from(threads).where(eq(threads.runId, runId)),
     piMessages: await db
       .select()
       .from(piMessages)
-      .where(piMessagesOf(runId))
+      .where(eq(piMessages.runId, runId))
       .orderBy(asc(piMessages.threadId), asc(piMessages.idx)),
     reviewSnapshots: await db
       .select()
@@ -62,20 +49,18 @@ async function readRows(db: PostgresJsDatabase, runId: string) {
 /** Row counts of the tables a run owns, for the one-line report and the archive's check. */
 export const countsOf = (dump: {
   events: unknown[];
-  threads: unknown[];
   piMessages: unknown[];
   reviewSnapshots?: unknown[];
   providerCalls?: unknown[];
 }) => ({
   events: dump.events.length,
-  threads: dump.threads.length,
   piMessages: dump.piMessages.length,
   reviewSnapshots: dump.reviewSnapshots?.length ?? 0,
   providerCalls: dump.providerCalls?.length ?? 0,
 });
 
 export const describeCounts = (c: ReturnType<typeof countsOf>) =>
-  `${c.events} events, ${c.threads} threads, ${c.piMessages} pi messages, ${c.reviewSnapshots} snapshots, ${c.providerCalls} gateway requests`;
+  `${c.events} events, ${c.piMessages} pi messages, ${c.reviewSnapshots} snapshots, ${c.providerCalls} provider calls`;
 
 /**
  * Everything `import:run` needs to hold of a dump, so `archive:run` can refuse to delete a run
@@ -87,8 +72,8 @@ export function assertRestorable(dump: {
   run: { id: string; workflowId?: string; workflows: unknown };
   study?: { workflowId: string } | null;
   events: { id: string; seq: number; runId: string }[];
-  threads: { runId: string }[];
-  piMessages: { threadId: string }[];
+  // Dumps made before run-keyed rows have no `runId` here.
+  piMessages: { runId?: string }[];
   // Dumps from before these were exported have neither.
   reviewSnapshots?: { runId: string }[];
   providerCalls?: { runId: string }[];
@@ -107,8 +92,9 @@ export function assertRestorable(dump: {
 
   const strays = [
     ...dump.events.filter((e) => e.runId !== runId).map((e) => `event ${e.id}`),
-    ...dump.threads.filter((t) => t.runId !== runId).map((t) => `thread of ${t.runId}`),
-    ...dump.piMessages.filter((m) => !m.threadId.startsWith(`${runId}.`)).map((m) => m.threadId),
+    ...dump.piMessages
+      .filter((m) => m.runId !== undefined && m.runId !== runId)
+      .map((m) => `pi message of ${m.runId}`),
     ...(dump.reviewSnapshots ?? [])
       .filter((s) => s.runId !== runId)
       .map((s) => `snapshot of ${s.runId}`),

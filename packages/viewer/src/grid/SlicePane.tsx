@@ -101,12 +101,18 @@ export function SlicePane({
   // A saved view shown before the pane had a size: applied when it gets one.
   const pending = useRef<{ zoom: number; center: [number, number] } | null>(null);
   const [level, setLevel] = useState(scene.image.levels.length - 1);
-  const [shown, setShown] = useState<{ level: number; index: number } | null>(null);
+  const [shown, setShown] = useState<{
+    level: number;
+    index: number;
+    contrast: Contrast;
+    overlays: GridScene["overlays"];
+  } | null>(null);
   const [error, setError] = useState<string>();
   const [traceError, setTraceError] = useState<string>();
   const [traces, setTraces] = useState<Map<string, BufferGeometry>>(new Map());
   const latest = useRef({ point, onPoint, onLoading, tool, marks, onMark });
   latest.current = { point, onPoint, onLoading, tool, marks, onMark };
+  const ready = useRef(false);
 
   // Pane mm: columns run right, rows run down.
   const toPane = (p: Zyx): [number, number] => [p[ca] * sc, -p[ra] * sr];
@@ -188,7 +194,10 @@ export function SlicePane({
         };
       },
       layers() {
+        if (!ready.current) return [];
         paint();
+        layer.current?.draw(false);
+        layer.current?.redraw();
         return layer.current ? [renderer.domElement, layer.current.canvas] : [renderer.domElement];
       },
       show(saved: PaneView) {
@@ -396,7 +405,7 @@ export function SlicePane({
     const show = (picture: Picture | null, k: number) => {
       if (!picture || abort.signal.aborted) return;
       draw(picture);
-      setShown({ level: k, index });
+      setShown({ level: k, index, contrast, overlays: scene.overlays });
       setError(undefined);
       current = true;
     };
@@ -500,6 +509,7 @@ export function SlicePane({
       return p as unknown as Zyx;
     };
     let drag: {
+      pointerId: number;
       mode: "cross" | "pan" | MarkTool;
       x: number;
       y: number;
@@ -512,10 +522,13 @@ export function SlicePane({
     // What is being drawn lives on the mark layer, which redraws alone.
     const marking = () => layer.current;
     const down = (event: PointerEvent) => {
+      if (drag || !view.current) return;
+      element.focus({ preventScroll: true });
       element.setPointerCapture(event.pointerId);
       const pan = event.button === 1 || event.button === 2 || event.shiftKey;
       const from = toPosition(event);
       drag = {
+        pointerId: event.pointerId,
         mode: pan ? "pan" : (latest.current.tool ?? "cross"),
         x: event.clientX,
         y: event.clientY,
@@ -536,6 +549,7 @@ export function SlicePane({
         }
         return;
       }
+      if (event.pointerId !== drag.pointerId) return;
       if (drag.mode === "cross") latest.current.onPoint(toVoxel(event));
       else if (drag.mode !== "pan") {
         if (!drag.moved && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < CLICK_PX)
@@ -584,17 +598,26 @@ export function SlicePane({
       }
     };
     const up = (event: PointerEvent) => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      if (event.type === "pointerup") move(event);
       const made = drag && event.type === "pointerup" ? finish(drag) : null;
-      drag = null;
-      const own = marking();
-      if (own?.draft) {
-        own.draft = null;
-        own.redraw();
-      }
+      cancel();
       if (!made) return;
       latest.current.onMark(made);
       // A point moves the crosshair to it, so every pane shows it.
       if ("point" in made) latest.current.onPoint(made.point);
+    };
+    const cancel = () => {
+      const pointerId = drag?.pointerId;
+      drag = null;
+      if (pointerId !== undefined && element.hasPointerCapture(pointerId))
+        element.releasePointerCapture(pointerId);
+      const own = marking();
+      if (own) {
+        own.draft = null;
+        own.hover = null;
+        own.redraw();
+      }
     };
     // The mark a finished gesture makes, if any: a click marks only with Point.
     const finish = (d: NonNullable<typeof drag>): GridMark | null => {
@@ -658,14 +681,13 @@ export function SlicePane({
       latest.current.onPoint(p as unknown as Zyx);
     };
     const key = (event: KeyboardEvent) => {
-      const own = marking();
-      if (event.key === "Escape" && own?.draft) {
+      if (event.key === "Escape" && drag && drag.mode !== "cross" && drag.mode !== "pan") {
         event.preventDefault();
-        drag = null;
-        own.draft = null;
-        own.redraw();
+        event.stopPropagation();
+        cancel();
         return;
       }
+      if (event.target !== element) return;
       const by = { ArrowUp: -1, ArrowDown: 1, PageUp: -10, PageDown: 10 }[event.key];
       if (by === undefined) return;
       event.preventDefault();
@@ -676,26 +698,35 @@ export function SlicePane({
     element.addEventListener("pointermove", move);
     element.addEventListener("pointerup", up);
     element.addEventListener("pointercancel", up);
+    element.addEventListener("lostpointercapture", cancel);
     element.addEventListener("pointerleave", leave);
     element.addEventListener("wheel", wheel, { passive: false });
-    element.addEventListener("keydown", key);
+    globalThis.addEventListener("keydown", key, { capture: true });
     element.addEventListener("contextmenu", menu);
     return () => {
+      cancel();
       element.removeEventListener("pointerdown", down);
       element.removeEventListener("pointermove", move);
       element.removeEventListener("pointerup", up);
       element.removeEventListener("pointercancel", up);
+      element.removeEventListener("lostpointercapture", cancel);
       element.removeEventListener("pointerleave", leave);
       element.removeEventListener("wheel", wheel);
-      element.removeEventListener("keydown", key);
+      globalThis.removeEventListener("keydown", key, { capture: true });
       element.removeEventListener("contextmenu", menu);
     };
-  }, []);
+  }, [tool]);
 
   const total = scene.shapeZyx[axis];
-  const refining = shown && (shown.level !== level || shown.index !== index);
+  const refining =
+    shown &&
+    (shown.level !== level ||
+      shown.index !== index ||
+      shown.contrast !== contrast ||
+      shown.overlays !== scene.overlays);
   const loading =
     !shown || !!refining || !!error || !!traceError || traces.size !== traceMeshes.length;
+  ready.current = !loading;
   useEffect(() => latest.current.onLoading(loading), [loading]);
   const scale = shown ? scene.image.levels[shown.level]!.scaleZyx[axis] : null;
   return (

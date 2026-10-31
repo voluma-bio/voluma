@@ -10,7 +10,10 @@ import type { GridMark, MarkTool, Zyx } from "@voluma/viewer/grid";
 import { Trash2 } from "lucide-react";
 
 /** A mark of yours: `mark` is what the message sends; `taskId` the task it was made in view of. */
-export type YourMark = { id: string; tag: string; taskId: string; mark: Mark };
+export type YourMark = { id: string; tag: string; taskId: string; gridKey: string; mark: Mark };
+
+/** The task and immutable image/grid identity actually mounted in the viewer. */
+export type ShownGrid = { taskId: string; key: string };
 
 /** The marking tools in the order shown, each with the key that picks it. */
 export const TOOLS: { value: MarkTool | "navigate"; label: string; shortcut: string }[] = [
@@ -84,15 +87,15 @@ export function middleOf(mark: GridMark): Zyx {
 
 export function MarksPanel({
   marks,
-  imageId,
+  shown,
   taskTitle,
   selected,
   onSelect,
   onDelete,
 }: {
   marks: readonly YourMark[];
-  /** The image of the grid in view: marks on another grid name their task. */
-  imageId: string | undefined;
+  /** Marks on another grid name their task; replaced images never inherit old coordinates. */
+  shown: ShownGrid | undefined;
   taskTitle: (taskId: string) => string;
   selected: string | undefined;
   onSelect: (id: string) => void;
@@ -109,7 +112,7 @@ export function MarksPanel({
       <List label="Your marks" density="compact" columns="auto 28px" boxed>
         {marks.map((m) => {
           const { title, measure } = describe(m.mark);
-          const elsewhere = m.mark.volumeId !== imageId;
+          const elsewhere = m.gridKey !== shown?.key;
           return (
             <Row
               key={m.id}
@@ -121,7 +124,9 @@ export function MarksPanel({
                   <span className="truncate">{title}</span>
                   {elsewhere && (
                     <span className="min-w-0 shrink-[4] truncate text-xs text-muted-foreground">
-                      on {taskTitle(m.taskId)}
+                      {m.taskId === shown?.taskId
+                        ? "on an earlier grid"
+                        : `on ${taskTitle(m.taskId)}`}
                     </span>
                   )}
                 </span>

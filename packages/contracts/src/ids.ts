@@ -15,20 +15,18 @@ export const segmentSchema = z
   });
 
 /**
- * Run and task ids also hold no '.', so a thread id built as
- * `<runId>.<taskId>.<role>` reads back one way: with a '.' allowed,
- * run `a.b` + task `c` and run `a` + task `b.c` would build the same id. Thread ids
- * are global keys (events, history rows) and URL segments (`/ingest/runs/:runId/threads/:threadId/messages`),
- * and '.' is URL-safe. A root thread's id is `<runId>.<role>`.
+ * Run and task ids also hold no '.': a run's thread names are `<taskId>.<role>` and the
+ * sandbox name is `<runId>.<name>`, which read back one way only if neither id holds a '.'.
+ * Runs recorded before opaque thread ids have thread ids `<runId>.<name>`.
  */
 const dotFreeSegmentSchema = segmentSchema.refine((s) => !s.includes("."), {
-  message: "must not contain '.' (thread ids are '<runId>.<taskId>.<role>')",
+  message: "must not contain '.' (thread names are '<taskId>.<role>')",
 });
 
 export const runIdSchema = dotFreeSegmentSchema;
 export const inputIdSchema = segmentSchema;
 export const studyIdSchema = segmentSchema;
-/** `main` and `supervisor` are thread roles in ids (`<runId>.main`, `<runId>.supervisor`), so no task takes them. */
+/** `main` and `supervisor` are thread names (`main`, `supervisor`), so no task takes them. */
 export const taskIdSchema = dotFreeSegmentSchema.refine((s) => s !== "main" && s !== "supervisor", {
   message: "'main' and 'supervisor' are reserved",
 });

@@ -55,7 +55,7 @@ import {
   type Zyx,
 } from "./scene";
 import { tokenColor } from "./token-color";
-import { volumeBytes, volumeLevel, volumeMesh } from "./volume";
+import { volumeBytes, volumeLevel, volumeMesh, volumeSteps } from "./volume";
 
 export function Grid3D({
   scene,
@@ -93,12 +93,12 @@ export function Grid3D({
   latest.current = onPoint;
   const marking = useRef({ tool, marks, onMark });
   marking.current = { tool, marks, onMark };
+  const cancelGesture = useRef<() => void>(() => {});
+  const ready = useRef(false);
   // The camera as last drawn: the mark layer projects with it between frames.
   const eye = useRef<PerspectiveCamera | null>(null);
   // The volume as drawn, for finding where a ray meets it.
-  const drawn = useRef<{ values: ArrayLike<number>; level: AssetLevel; contrast: Contrast } | null>(
-    null,
-  );
+  const drawn = useRef<{ bytes: Uint8Array; level: AssetLevel } | null>(null);
   const [sz, sy, sx] = scene.spacingZyx;
   const toWorld = (p: Zyx) => new Vector3(p[2] * sx, p[1] * sy, p[0] * sz);
   const layer = useMarkLayer(
@@ -209,7 +209,10 @@ export function Grid3D({
         },
       }),
       layers() {
+        if (!ready.current) return [];
         draw();
+        layer.current?.draw(false);
+        layer.current?.redraw();
         return layer.current ? [renderer.domElement, layer.current.canvas] : [renderer.domElement];
       },
       show(saved) {
@@ -235,7 +238,7 @@ export function Grid3D({
 
     // A left click (not a drag) on a mesh moves the crosshair to the voxel under it: the first
     // opaque mesh, so a structure inside a see-through bone shell wins over the shell.
-    let downAt: [number, number] | null = null;
+    let downAt: { x: number; y: number; pointerId: number } | null = null;
     const rayAt = (event: { clientX: number; clientY: number }) => {
       const rect = element.getBoundingClientRect();
       const ray = new Raycaster();
@@ -271,11 +274,20 @@ export function Grid3D({
       ];
     };
     const down = (event: PointerEvent) => {
-      downAt = event.button === 0 ? [event.clientX, event.clientY] : null;
+      downAt =
+        event.button === 0 && !event.shiftKey && !event.ctrlKey && !event.metaKey
+          ? { x: event.clientX, y: event.clientY, pointerId: event.pointerId }
+          : null;
     };
     const up = (event: PointerEvent) => {
-      if (!downAt || Math.hypot(event.clientX - downAt[0], event.clientY - downAt[1]) > 3) return;
+      const start = downAt;
       downAt = null;
+      if (
+        !start ||
+        event.pointerId !== start.pointerId ||
+        Math.hypot(event.clientX - start.x, event.clientY - start.y) > 3
+      )
+        return;
       const tool = marking.current.tool;
       if (tool === "point") {
         const at = surfaceAt(event);
@@ -306,15 +318,25 @@ export function Grid3D({
 
     // Line: a drag that starts on the surface draws instead of rotating. Captured on the pane,
     // so the orbit controls on the canvas below never see the press.
-    let line: { from: Zyx } | null = null;
+    let line: { from: Zyx; pointerId: number } | null = null;
     const lineDown = (event: PointerEvent) => {
       const own = layer.current;
-      if (!own || marking.current.tool !== "line" || event.button !== 0 || event.shiftKey) return;
+      if (
+        line ||
+        !own ||
+        marking.current.tool !== "line" ||
+        event.button !== 0 ||
+        event.shiftKey ||
+        event.ctrlKey ||
+        event.metaKey
+      )
+        return;
       const from = surfaceAt(event);
       if (!from) return;
       event.stopPropagation();
+      downAt = null;
       element.setPointerCapture(event.pointerId);
-      line = { from };
+      line = { from, pointerId: event.pointerId };
       own.hover = null;
     };
     // Hover and a line's free end follow the pointer, one surface search per frame.
@@ -322,6 +344,9 @@ export function Grid3D({
     let searching = 0;
     const lineMove = (event: PointerEvent) => {
       const tool = marking.current.tool;
+      if (downAt && Math.hypot(event.clientX - downAt.x, event.clientY - downAt.y) > 3)
+        downAt = null;
+      if (line && event.pointerId !== line.pointerId) return;
       if (!line && (event.buttons || (tool !== "point" && tool !== "line"))) return;
       pending = event;
       searching ||= requestAnimationFrame(() => {
@@ -331,38 +356,56 @@ export function Grid3D({
         const own = layer.current;
         if (!own) return;
         if (line) {
-          if (at)
-            own.draft = {
-              line: {
-                aZyx: [...line.from],
-                bZyx: [...at],
-                lengthMm: lengthMm(line.from, at, scene.spacingZyx),
-              },
-            };
+          own.draft = at
+            ? {
+                line: {
+                  aZyx: [...line.from],
+                  bZyx: [...at],
+                  lengthMm: lengthMm(line.from, at, scene.spacingZyx),
+                },
+              }
+            : null;
         } else own.hover = at;
         own.redraw();
       });
     };
     // Ends a line: a release keeps it, a cancelled pointer or Esc drops it.
-    const endLine = (keep: boolean) => {
-      const own = layer.current;
-      const made = own?.draft;
+    const cancel = () => {
+      cancelAnimationFrame(searching);
+      searching = 0;
+      pending = null;
+      downAt = null;
+      const pointerId = line?.pointerId;
       line = null;
+      if (pointerId !== undefined && element.hasPointerCapture(pointerId))
+        element.releasePointerCapture(pointerId);
+      const own = layer.current;
       if (own) {
         own.draft = null;
+        own.hover = null;
         own.redraw();
       }
-      if (keep && made && "line" in made && made.line.lengthMm > 0) marking.current.onMark(made);
     };
+    cancelGesture.current = cancel;
     const lineUp = (event: PointerEvent) => {
-      if (!line) return;
+      if (!line || event.pointerId !== line.pointerId) return;
       event.stopPropagation();
-      endLine(event.type === "pointerup");
+      // Resolve the release itself, not the last animation frame or last valid surface hit.
+      const from = line.from;
+      const at = event.type === "pointerup" ? surfaceAt(event) : null;
+      cancel();
+      if (at) {
+        const length = lengthMm(from, at, scene.spacingZyx);
+        if (length > 0)
+          marking.current.onMark({ line: { aZyx: [...from], bZyx: [...at], lengthMm: length } });
+      }
     };
     const key = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || !line) return;
+      if (event.key !== "Escape" || (!line && !(downAt && marking.current.tool === "point")))
+        return;
       event.preventDefault();
-      endLine(false);
+      event.stopPropagation();
+      cancel();
     };
     const leave = () => {
       pending = null;
@@ -375,16 +418,22 @@ export function Grid3D({
     element.addEventListener("pointermove", lineMove);
     element.addEventListener("pointerup", lineUp, { capture: true });
     element.addEventListener("pointercancel", lineUp, { capture: true });
+    element.addEventListener("pointercancel", cancel);
+    element.addEventListener("lostpointercapture", cancel);
     element.addEventListener("pointerleave", leave);
     // The pane takes no focus, so a line in progress listens on the window, ahead of the page.
     globalThis.addEventListener("keydown", key, { capture: true });
     return () => {
+      cancel();
+      cancelGesture.current = () => {};
       globalThis.removeEventListener("keydown", key, { capture: true });
       cancelAnimationFrame(searching);
       element.removeEventListener("pointerdown", lineDown, { capture: true });
       element.removeEventListener("pointermove", lineMove);
       element.removeEventListener("pointerup", lineUp, { capture: true });
       element.removeEventListener("pointercancel", lineUp, { capture: true });
+      element.removeEventListener("pointercancel", cancel);
+      element.removeEventListener("lostpointercapture", cancel);
       element.removeEventListener("pointerleave", leave);
       cancelAnimationFrame(frame);
       observer.disconnect();
@@ -406,6 +455,8 @@ export function Grid3D({
       handle.current = null;
     };
   }, []);
+
+  useEffect(() => cancelGesture.current(), [tool]);
 
   useEffect(() => {
     const t = three.current;
@@ -539,15 +590,16 @@ export function Grid3D({
   useEffect(() => {
     const t = three.current;
     if (!t || !shown || !contrast) return;
+    const bytes = volumeBytes(shown.values, contrast);
     const volume = volumeMesh(
-      volumeBytes(shown.values, contrast),
+      bytes,
       scene.image.levels[shown.k]!,
       scene.spacingZyx,
       tokenColor("--bone"),
       t.depth,
     );
     t.volumes.add(volume);
-    drawn.current = { values: shown.values, level: scene.image.levels[shown.k]!, contrast };
+    drawn.current = { bytes, level: scene.image.levels[shown.k]! };
     t.render();
     return () => {
       drawn.current = null;
@@ -563,6 +615,7 @@ export function Grid3D({
   const latestLoading = useRef(onLoading);
   latestLoading.current = onLoading;
   const loading = !!chip || !shown;
+  ready.current = !loading && !!contrast;
   useEffect(() => latestLoading.current(loading), [loading]);
   return (
     <div ref={host} className={PANE}>
@@ -589,16 +642,16 @@ function paint(mesh: Mesh, m: GridMesh) {
 
 /**
  * Where `ray` (grid mm) first meets the volume as `volume.ts` draws it: half opaque, with the
- * shader's opacity per value and per step, sampling the shown level's nearest voxel. Null if it
- * stays clear before `before` (an opaque mesh's distance).
+ * shader's byte texture, linear filtering and step count. Null if it stays clear before the
+ * first shown mesh (`before`); point marking deliberately includes translucent shells.
  */
 function volumeHit(
   ray: Ray,
-  volume: { values: ArrayLike<number>; level: AssetLevel; contrast: Contrast },
+  volume: { bytes: Uint8Array; level: AssetLevel },
   spacingZyx: Zyx,
   before: number,
 ): Vector3 | null {
-  const { values, level, contrast } = volume;
+  const { bytes, level } = volume;
   const [nz, ny, nx] = level.shapeZyx;
   const [kz, ky, kx] = level.scaleZyx;
   const [sz, sy, sx] = spacingZyx;
@@ -620,9 +673,9 @@ function volumeHit(
     tFar = Math.min(tFar, Math.max(t0, t1));
   }
   if (tFar <= tNear) return null;
-  // Half a level voxel per step. The shader's opacity is for a step of one texel diagonal in the
-  // unit box's space, so a step's opacity takes the same power the shader gives it there.
-  const step = 0.5 * Math.min(kx * sx, ky * sy, kz * sz);
+  // Same midpoint samples and unit-box opacity exponent as the shader, including anisotropy.
+  const steps = volumeSteps(level.shapeZyx);
+  const step = (tFar - tNear) / steps;
   const d = ray.direction;
   const exponent =
     Math.hypot(
@@ -630,16 +683,35 @@ function volumeHit(
       (d.y * step) / (ny * ky * sy),
       (d.z * step) / (nz * kz * sz),
     ) / Math.hypot(1 / nx, 1 / ny, 1 / nz);
-  const span = contrast.high - contrast.low || 1;
+  const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+  const sample = (x: number, y: number, z: number) => bytes[(z * ny + y) * nx + x]! / 255;
   const p = new Vector3();
   let alpha = 0;
-  for (let t = tNear + step / 2; t < tFar; t += step) {
-    ray.at(t, p);
-    const ix = Math.floor((p.x / sx + 0.5) / kx);
-    const iy = Math.floor((p.y / sy + 0.5) / ky);
-    const iz = Math.floor((p.z / sz + 0.5) / kz);
-    if (ix < 0 || iy < 0 || iz < 0 || ix >= nx || iy >= ny || iz >= nz) continue;
-    const v = Math.max(0, Math.min(1, (values[(iz * ny + iy) * nx + ix]! - contrast.low) / span));
+  for (let i = 0; i < steps; i++) {
+    ray.at(tNear + (i + 0.5) * step, p);
+    // Texture coordinates address texel centres; edges clamp just like Data3DTexture.
+    const x = Math.max(0, Math.min(nx - 1, (p.x / sx + 0.5) / kx - 0.5));
+    const y = Math.max(0, Math.min(ny - 1, (p.y / sy + 0.5) / ky - 0.5));
+    const z = Math.max(0, Math.min(nz - 1, (p.z / sz + 0.5) / kz - 0.5));
+    const x0 = Math.floor(x),
+      x1 = Math.min(x0 + 1, nx - 1);
+    const y0 = Math.floor(y),
+      y1 = Math.min(y0 + 1, ny - 1);
+    const z0 = Math.floor(z),
+      z1 = Math.min(z0 + 1, nz - 1);
+    const v = lerp(
+      lerp(
+        lerp(sample(x0, y0, z0), sample(x1, y0, z0), x - x0),
+        lerp(sample(x0, y1, z0), sample(x1, y1, z0), x - x0),
+        y - y0,
+      ),
+      lerp(
+        lerp(sample(x0, y0, z1), sample(x1, y0, z1), x - x0),
+        lerp(sample(x0, y1, z1), sample(x1, y1, z1), x - x0),
+        y - y0,
+      ),
+      z - z0,
+    );
     const e = Math.max(0, Math.min(1, (v - 0.22) / (0.6 - 0.22)));
     const a = e * e * (3 - 2 * e);
     if (a <= 0) continue;

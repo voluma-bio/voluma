@@ -1,9 +1,9 @@
 /**
  * Postgres adapter for the run queue: every state change of a run, and the key vault
  * (key-vault.ts) that goes with it. Each transition (start, resume, cancel, claim,
- * heartbeat, report) runs in one transaction under the queue lock, judged by the
- * database's `now()`; no API process's clock or memory decides a lease. The vault is only
- * touched under that lock, so holding or dropping a run's keys can't interleave with
+ * heartbeat, report) runs in one transaction, judged by the database's `now()`; no API
+ * process's clock or memory decides a lease. Which transitions take the queue lock, and why
+ * heartbeat and report don't: `apps/api/AGENTS.md`. The vault is only touched under that lock, so holding or dropping a run's keys can't interleave with
  * the claim that hands them out: keys are held before the transaction that makes a run
  * queued commits, and dropped by whatever ends or moves it. The lease token stays on an
  * ended run so the old holder's next heartbeat is told to `stop`; a recovery clears it,
@@ -24,7 +24,7 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { HTTPException } from "hono/http-exception";
 import type { Caller, Reader } from "../../domain";
 import { admit, type Limits, type Refusal, refusalMessage, type Usage, usage } from "./admission";
-import { type ClaimEnd, endClaim, stalledError } from "./claim-progress";
+import { type ClaimEnd, endClaim, isCounted, stalledError } from "./claim-progress";
 import { decideMessage, endCorrection, GUEST_KEYS_MESSAGE, openCorrection } from "./corrections";
 import type { KeyVault } from "./key-vault";
 import { LeaseLost, noLease } from "./lease";
@@ -40,7 +40,13 @@ import {
 } from "./pg-runs";
 import { events, inputs, runs, studies, studyScans } from "./schema";
 
-/** Serializes every transaction that changes a run, so the limit counts can't race a claim. */
+/**
+ * Serializes the transactions that admit or start work: claim, start, resume, cancel, message,
+ * import/archive. A heartbeat and a report take only the run's own locks (`eventLock`, then the
+ * row), so a slow claim never delays an acknowledgement. They can skip this lock because they
+ * only take a run off `running`, which lowers the counts a claim reads (`usage`); the one write
+ * that raises them, `queued` → `running`, is the claim's, under this lock.
+ */
 export const QUEUE_LOCK = 0x76_6f_6c_71;
 
 /** How long a visitor run waits for its keys. */
@@ -81,12 +87,19 @@ async function recover(tx: Tx, where: SQL, reason: ClaimEnd) {
     .where(and(eq(runs.state, "running"), where));
   for (const { id } of ids) {
     await eventLock(tx, id); // before the row lock (`corrections.ts`)
-    const [run] = await tx.select().from(runs).where(eq(runs.id, id)).for("update");
+    // The lock wait may have let a heartbeat extend the lease or a report end the claim: judge
+    // the row again as it is now.
+    const [run] = await tx
+      .select()
+      .from(runs)
+      .where(and(eq(runs.id, id), eq(runs.state, "running"), where))
+      .for("update");
     if (!run) continue;
-    const { stalledClaims, exhausted } = endClaim(run, reason);
+    const { stalledClaims, exhausted, counted } = endClaim(run, reason);
     const base = {
       lastClaimEnd: reason,
       stalledClaims,
+      struckLeaseToken: reason === "lease-expired" && counted ? run.leaseToken : null,
       ...noLease,
     };
     if (exhausted) {
@@ -94,7 +107,7 @@ async function recover(tx: Tx, where: SQL, reason: ClaimEnd) {
         tx,
         run.id,
         "failed",
-        stalledError(reason, await inFlightTool(tx, run.id, run.claimStartSeq)),
+        stalledError(await inFlightTool(tx, run.id, run.claimStartSeq)),
         base,
       );
     } else {
@@ -126,6 +139,30 @@ async function inFlightTool(tx: Tx, runId: string, sinceSeq: number): Promise<st
     .orderBy(desc(events.seq))
     .limit(1);
   return row?.name;
+}
+
+/**
+ * A `released` report from a lease the API already swept and counted: the runner was alive and
+ * only the outage kept the report back. Records the reported end and takes the strike back.
+ * False when the token is not that of a counted sweep (or the sweep failed the run).
+ */
+async function takeBackStrike(tx: Tx, runId: string, leaseToken: string, reason: ReleaseReason) {
+  const [run] = await tx
+    .select({ state: runs.state })
+    .from(runs)
+    .where(and(eq(runs.id, runId), eq(runs.struckLeaseToken, leaseToken)))
+    .for("update");
+  // A counted reason keeps its strike; an ended run (the sweep failed it) stays ended.
+  if (!run || run.state === "ended" || isCounted(reason)) return false;
+  await tx
+    .update(runs)
+    .set({
+      lastClaimEnd: reason,
+      stalledClaims: sql`greatest(${runs.stalledClaims} - 1, 0)`,
+      struckLeaseToken: null,
+    })
+    .where(eq(runs.id, runId));
+  return true;
 }
 
 async function sweep(tx: Tx) {
@@ -394,7 +431,15 @@ export function pgRunQueue(
         if (!run) throw new HTTPException(404, { message: "not found" });
         if (run.example) throw new HTTPException(403, { message: "Examples are read-only." });
         vault.drop(runId);
-        if (run.state.status === "ended") return { run };
+        // A report may end the run under its own locks: take them (event lock, then row) and
+        // judge the state they leave.
+        await eventLock(tx, runId);
+        const [locked] = await tx
+          .select({ state: runs.state })
+          .from(runs)
+          .where(eq(runs.id, runId))
+          .for("update");
+        if (locked?.state === "ended") return { run: await loadRun(tx, runId) };
         await endUnfinished(tx, runId, "cancelled");
         return { run: await loadRun(tx, runId) };
       });
@@ -526,9 +571,13 @@ export function pgRunQueue(
 
     /**
      * Extends the lease and adds the usage; `stop` once the run has ended. Throws `LeaseLost`.
+     * Under the run's event lock and row lock only, not the queue lock. Against a claim's lease
+     * sweep, whichever takes the row first wins: a heartbeat first extends the lease and the
+     * sweep, re-reading the row, skips it; a sweep first clears the token and the heartbeat
+     * finds no row.
      */
     heartbeat: (runId: string, leaseToken: string, used: RunnerUsage) =>
-      locked(async (tx) => {
+      db.transaction(async (tx) => {
         await eventLock(tx, runId); // a failing heartbeat ends the run's threads (`corrections.ts`)
         const [run] = await tx
           .select()
@@ -555,17 +604,26 @@ export function pgRunQueue(
 
     /**
      * Throws `LeaseLost` or `RunEnded`. A failed claim of a reopened run ends it `completed`
-     * (`endUnfinished`).
+     * (`endUnfinished`). Like `heartbeat`, under the run's own locks only: a cancel takes the
+     * same two, so whichever takes the row first ends the run and the other sees it ended (`RunEnded`, or
+     * the cancel returns the run as it ended).
      */
     async report(runId: string, leaseToken: string, report: RunnerReport) {
-      await locked(async (tx) => {
+      await db.transaction(async (tx) => {
         await eventLock(tx, runId); // before the row lock: `endUnfinished` appends events
         const [run] = await tx
           .select({ state: runs.state })
           .from(runs)
           .where(and(eq(runs.id, runId), eq(runs.leaseToken, leaseToken)))
           .for("update");
-        if (!run) throw new LeaseLost();
+        if (!run) {
+          if (
+            report.kind === "released" &&
+            (await takeBackStrike(tx, runId, leaseToken, report.reason))
+          )
+            return;
+          throw new LeaseLost();
+        }
         if (run.state !== "running") throw new RunEnded();
         if (report.kind === "released") {
           await recover(tx, sql`id = ${runId}`, report.reason);

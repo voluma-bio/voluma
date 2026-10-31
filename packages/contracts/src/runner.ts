@@ -56,11 +56,13 @@
  * claim carries no plan: the runner snapshots the run's workflow directory and builds the plan
  * itself (`packages/workflow`), and a resumed run keeps the plan its first `revision.started`
  * recorded (`task-tools.ts`). One limit stops a run that keeps costing its runner: the API
- * counts consecutive claims that end `self-stop` or `lease-expired` without run-state
+ * counts consecutive claims that end `loop-stalled`, `refused` or `lease-expired` without run-state
  * progress (a `task`, `checkpoint`, `output`, `attempt.opened`, `assets.ready` or correcting
  * `revision.started` or `plan.changed` event), and the run ends
  * `failed` at 3, naming the call that was in flight; except a claim of a reopened run, which ends it `completed` and writes `correction.ended` instead (the correction rule in `messages.ts`). Progress resets the count. `shutdown`
- * never counts, so deploys don't fail a long run. A reopen (`messages.ts`) resets the count to 0
+ * and `self-stop` (the runner was alive and no call reached the API) never count, so deploys and API
+ * outages don't fail a long run. A `released` report from the lease of a claim the API already swept
+ * as `lease-expired` takes that strike back (`struckLeaseToken`). A reopen (`messages.ts`) resets the count to 0
  * and clears `lastClaimEnd`, so `previousClaim` never reports a reason from before it.
  *
  * A model provider's error does not release the run: a 4xx fails it at once and a 5xx or network
@@ -82,7 +84,7 @@
  * with its usage added to the next one. Spend is recorded, never limited.
  *
  * Reports. The runner ends the run with `ended`, or gives it up with
- * `released` (a shutdown or a self-stop: its `reason`). Either one ends the
+ * `released` (a shutdown, a self-stop or a loop stall: its `reason`). Either one ends the
  * lease, and a `released` run is recovered as above, at once. The runner's
  * `ended` never says `cancelled`, which is the server's to record. The first
  * end wins: a report on a run that has ended, or that this lease no longer
@@ -114,8 +116,13 @@ export const leaseLostSchema = z.object({ code: z.literal("lease-lost") });
  */
 export const runnerIdSchema = z.string().min(1);
 
-/** Why the runner gave up a lease. */
-export const releaseReasonSchema = z.enum(["shutdown", "self-stop"]);
+/**
+ * Why the runner gave up a lease. `loop-stalled` is a self-stop whose window the runner's own
+ * event loop spent mostly blocked while it held only this run: the run kept the runner from
+ * heartbeating. `refused` is a heartbeat the API answered with a 4xx that a retry cannot fix.
+ * Both count toward the no-progress limit like an expired lease.
+ */
+export const releaseReasonSchema = z.enum(["shutdown", "self-stop", "loop-stalled", "refused"]);
 export type ReleaseReason = z.infer<typeof releaseReasonSchema>;
 
 /**
@@ -180,7 +187,7 @@ export const reportRequestSchema = z.object({
       /** Why a `failed` run failed, redacted of key values; absent otherwise. */
       error: z.string().optional(),
     }),
-    /** The runner stops the run and gives up its lease: a shutdown or a self-stop. */
+    /** The runner stops the run and gives up its lease: a shutdown, a self-stop or a loop stall. */
     z.object({
       kind: z.literal("released"),
       reason: releaseReasonSchema,

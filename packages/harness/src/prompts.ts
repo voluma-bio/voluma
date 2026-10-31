@@ -11,9 +11,9 @@
  */
 import type { Folded, FoldedTask } from "@voluma/contracts/fold";
 import type { WorkflowFiles } from "@voluma/contracts/workflow-files";
-import type { ThreadLayout } from "@voluma/harness/layout";
-import type { PlanTask } from "@voluma/harness/supervise-run";
 import type { AgentDefinition, WorkflowDefinition } from "@voluma/workflow/definition";
+import type { ThreadLayout } from "./layout";
+import type { PlanTask } from "./task-runtime";
 
 function common(role: "worker" | "check", thread: ThreadLayout): string {
   const dir = thread.dir;

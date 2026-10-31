@@ -1,6 +1,6 @@
 /**
- * Run domain tables (Drizzle). `threads` is a projection of the thread.* events,
- * written in the same transaction as the event.
+ * Run domain tables (Drizzle). `events` and `pi_messages` are keyed by run: ids are
+ * unique within a run only, so a copy of a run keeps every id verbatim under a new `run_id`.
  *
  * Neither table uses `jsonb`. `pi_messages.message` is `text`: history is read back
  * byte for byte (the retry compare and the model's prompt cache depend on it), and
@@ -13,10 +13,6 @@
  * usage: the claim, the sweep and every ingest write judge them in one transaction by the
  * database's `now()` (pg-queue.ts). `inputs` and `runs` have no foreign keys to the
  * event tables: events are written under the run lock and must never fail on a projection.
- *
- * `threads.parent_thread_id` has no foreign key: `threads` is derived from the event
- * log, which is the record, so a projection must never fail the append (a missing
- * parent row would roll the event back).
  */
 
 import { referenceInputId } from "@voluma/contracts/r2";
@@ -36,47 +32,30 @@ import {
 
 const timestamptz = () => timestamp({ withTimezone: true });
 
-export const threads = pgTable(
-  "threads",
-  {
-    id: text().primaryKey(),
-    runId: text().notNull(),
-    parentThreadId: text(),
-    kind: text().notNull(),
-    task: text(),
-    status: text().notNull(),
-    createdAt: timestamptz().notNull(),
-    endedAt: timestamptz(),
-  },
-  (t) => [index("threads_run").on(t.runId)],
-);
-
 /** `id` comes from the client so a retried POST is a no-op; `seq` is the stream cursor. */
 export const events = pgTable(
   "events",
   {
-    id: text().primaryKey(),
     runId: text().notNull(),
+    id: text().notNull(),
     threadId: text().notNull(),
     seq: integer().notNull(),
     type: text().notNull(),
     payload: json().notNull(),
     createdAt: timestamptz().notNull(),
   },
-  (t) => [
-    unique("events_run_seq").on(t.runId, t.seq),
-    index("events_thread").on(t.threadId, t.seq),
-  ],
+  (t) => [primaryKey({ columns: [t.runId, t.id] }), unique("events_run_seq").on(t.runId, t.seq)],
 );
 
 export const piMessages = pgTable(
   "pi_messages",
   {
+    runId: text().notNull(),
     threadId: text().notNull(),
     idx: integer().notNull(),
     message: text().notNull(),
   },
-  (t) => [primaryKey({ columns: [t.threadId, t.idx] })],
+  (t) => [primaryKey({ columns: [t.runId, t.threadId, t.idx] })],
 );
 
 /**
@@ -176,8 +155,20 @@ export const runs = pgTable(
     leaseExpiresAt: timestamptz(),
     /** Why the last claim ended (`claimEndReasonSchema`); the next claim carries it. Null before the first end. */
     lastClaimEnd: text({
-      enum: ["shutdown", "self-stop", "lease-expired", "provider-outage"],
+      enum: [
+        "shutdown",
+        "self-stop",
+        "loop-stalled",
+        "refused",
+        "lease-expired",
+        "provider-outage",
+      ],
     }),
+    /**
+     * The lease token of the last claim the API swept as `lease-expired` and counted as a strike,
+     * kept so a `released` report from that runner, still alive behind an outage, takes it back.
+     */
+    struckLeaseToken: text(),
     /** Seq of the latest progress event (`claim-progress.ts`), and the log's last seq when the current claim began. */
     lastProgressSeq: integer().notNull().default(0),
     claimStartSeq: integer().notNull().default(0),

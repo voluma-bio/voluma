@@ -34,7 +34,8 @@ export type ViewerState = { pane: PaneId; point: Zyx; contrast: Contrast; view: 
 export type GridViewerHandle = {
   /**
    * The shown panes as one PNG, laid out as on screen with their names, at most `maxBytes`: it
-   * tries smaller pictures until one fits, and gives null if none does.
+   * freezes the picture before encoding smaller copies, and gives null if a shown pane is not
+   * ready or no copy fits. Callers capture their marks and grid identity before awaiting it.
    */
   snapshot(maxBytes: number): Promise<Blob | null>;
 };
@@ -114,15 +115,22 @@ export function GridViewer({
   const grid = useRef<HTMLDivElement>(null);
   useImperativeHandle(ref, () => ({
     async snapshot(maxBytes) {
+      const host = grid.current?.getBoundingClientRect();
+      if (!host?.width || !host.height || !contrast || contrast.low >= contrast.high) return null;
+      const scale = Math.min(globalThis.devicePixelRatio, SNAPSHOT_WIDTHS[0]! / host.width);
+      // Freeze every pane before the first await: later encodes must not reread live viewer state.
+      const frozen = sheet(host, scale);
+      if (!frozen) return null;
       let tried = 0;
       for (const width of SNAPSHOT_WIDTHS) {
-        const host = grid.current?.getBoundingClientRect();
-        if (!host?.width) return null;
-        // Never sharper than the screen: a grid narrower than a width gives the same picture.
-        const scale = Math.min(globalThis.devicePixelRatio, width / host.width);
-        if (scale === tried) continue;
-        tried = scale;
-        const blob = await sheet(host, scale);
+        const size = Math.min(frozen.width, width);
+        if (size === tried) continue;
+        tried = size;
+        const canvas = document.createElement("canvas");
+        canvas.width = size;
+        canvas.height = Math.round((size / frozen.width) * frozen.height);
+        canvas.getContext("2d")!.drawImage(frozen, 0, 0, canvas.width, canvas.height);
+        const blob = await new Promise<Blob | null>((done) => canvas.toBlob(done, "image/png"));
         if (blob && blob.size <= maxBytes) return blob;
       }
       return null;
@@ -139,10 +147,11 @@ export function GridViewer({
     ctx.font = `${Math.round(12 * scale)}px ui-sans-serif, system-ui, sans-serif`;
     ctx.textBaseline = "top";
     for (const pane of panes) {
+      if (maximized && maximized !== pane.id) continue;
       // Each pane draws and is copied in the same task: a WebGL buffer doesn't outlive it.
       const layers = handles[pane.id]!.current?.layers() ?? [];
       const rect = layers[0]?.getBoundingClientRect();
-      if (!rect?.width || !rect.height) continue;
+      if (!rect?.width || !rect.height) return null;
       const x = (rect.left - host.left) * scale;
       const y = (rect.top - host.top) * scale;
       for (const layer of layers)
@@ -154,7 +163,7 @@ export function GridViewer({
       ctx.fillStyle = tokenColor("--viewer-chip-fg");
       ctx.fillText(name, x + 4 * scale, y + 3 * scale);
     }
-    return new Promise<Blob | null>((done) => canvas.toBlob(done, "image/png"));
+    return canvas;
   };
   // After the focus effect, so a restored crosshair wins when both arrive together.
   useEffect(() => {
