@@ -350,6 +350,7 @@ export function world(o: WorldOptions) {
       plan: o.plan,
       selectedOutputs: undefined,
       notes: undefined,
+      inputId: "input1",
       inputPrefix: "inputs/",
       workflows: [{ repo: "voluma-bio/voluma", path: "workflows/mouse-oa" }],
       recorder: rec,
