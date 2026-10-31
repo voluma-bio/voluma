@@ -4,7 +4,32 @@
  * position is a source voxel (z, y, x) of the grid; the viewer never resamples between grids.
  */
 
+import type { Mark } from "@voluma/contracts/messages";
+
 export type Zyx = readonly [number, number, number];
+
+/**
+ * A mark on the grid in source voxels (z, y, x): a voxel, an inclusive box, a line or a closed
+ * outline on one slice, exactly as `Mark` (`@voluma/contracts/messages`) without its `volumeId`.
+ */
+export type GridMark =
+  | Required<Pick<Mark, "point">>
+  | Required<Pick<Mark, "box">>
+  | Required<Pick<Mark, "line">>
+  | Required<Pick<Mark, "outline">>;
+
+/** What a marking gesture makes; none is the viewer's own navigation. */
+export type MarkTool = "point" | "box" | "line" | "outline";
+
+/** A mark as drawn: the person's own in `--mark-mine`, the AI's dashed in `--mark-ai`. */
+export type ShownMark = {
+  id: string;
+  mark: GridMark;
+  by: "you" | "ai";
+  /** A short name drawn beside it ("P1"). */
+  tag?: string;
+  selected?: boolean;
+};
 
 /** One OME-Zarr level: `scaleZyx` source voxels per level voxel (2^k on every axis). */
 export type AssetLevel = { path: string; shapeZyx: Zyx; scaleZyx: Zyx };
@@ -102,6 +127,12 @@ export type PaneView =
 export type PaneHandle = {
   capture(): { pngBase64: string; width: number; height: number; view: PaneView };
   show(view: PaneView): void;
+  /**
+   * Draws the pane now and returns its canvases, bottom first (the picture, then the marks), to be
+   * copied in the same task: WebGL clears its buffer once the browser composites it. Empty while
+   * loading, refining or failed. The marks exclude the unfinished gesture and hover cursor.
+   */
+  layers(): HTMLCanvasElement[];
 };
 
 /** Draws the pane now and reads its canvas, before the browser clears the drawing buffer. */

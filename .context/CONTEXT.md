@@ -79,9 +79,16 @@ and check threads.
   in `packages/harness/src/tools`; it caps what the model sees (head and tail) and
   writes the full text to `toolOutputKey` with `Sandbox.writeFile`, which exists
   because an R2 mount cannot append: the adapter writes locally and copies in one go.
-- **Many threads, one run.** `startThread` returns `{send, done}` at once: `send` steers a
-  message into the thread (Pi's steering queue; one sent before the loop starts is queued
-  for it) and answers false once it ended.
+- **Many threads, one run.** `startThread` returns `{send, done}` at once: `send` puts a
+  message in the thread's inbox and answers false once it ended. Every notice to a thread
+  (a message from a person or another thread, compaction's wrap-up and overflow notes) waits
+  in that inbox. All pending notices, in arrival order and each labelled with its sender, are
+  appended to the last tool result of the batch that finishes next, so History holds what the
+  model saw; none is ever steered in as its own user message mid-turn. A turn that ends with
+  no tool call while the inbox holds notices continues with them as one user message; a
+  thread started with an input starts with them the same way; the wrap-up note, which only
+  matters mid-turn, is dropped in both. Each notice is still its own `message` event under
+  its own sender.
   `threads.ts` is the run's registry of what is running in this process (start or resume a
   thread, `send`, `abort`, wait for one to go idle) and holds no run state. A thread's id is opaque, unique within its run
   only (every row and query is keyed by run): a new thread gets `uuid5(runId, name)`
@@ -94,12 +101,12 @@ and check threads.
 - **Pi's batch rules shape the tools.** Pi runs the tool calls of one reply as a batch: in
   parallel, unless any tool in it is `sequential`, which makes the whole batch sequential. A
   batch ends the turn only when every result in it sets `terminate`; one call that doesn't and
-  the agent carries on. A steered message lands only after the whole batch has finished, never
+  the agent carries on. An inbox delivery lands with the last result of a batch, never
   between its calls. So a tool that must end the turn (`submit_task`, `ask`) refuses to share a
   reply (`ToolContext.batchSize`): it answers with an error result and no effect, the other calls
   run as usual, and the model calls it again alone; `wait` ends the main agent's turn instead of blocking until
   something happens, because a blocking `wait` would hold every sequential call batched behind it
-  and no steered delivery could reach it; and a stored history whose last batch all set
+  and no inbox delivery could reach it; and a stored history whose last batch all set
   `terminate` is a finished turn, not one to continue (`isFinished` in `start-thread.ts`). Pi
   does not settle a tool call that ignores its abort signal (`ToolContext.signal`), and the thread
   cannot stop until every call settles, so a tool passes the signal on to whatever it waits for.
