@@ -21,7 +21,6 @@ import { z } from "zod";
 import type { UserSender } from "../adapters/pi/start-thread";
 import {
   feedbackText,
-  fromMain,
   GO_REFUSAL,
   goNotActedOn,
   UNANSWERED,
@@ -179,10 +178,7 @@ export function mainTools(deps: MainDeps) {
         if (agents.fixLimitReached(before, w.taskId)) {
           throw new Refusal(`${w.taskId} has used its fix rounds; it stays as it is.`);
         }
-        if (
-          agents.state(before, threadId) === "running" &&
-          agents.steer(threadId, fromMain(text), sender)
-        ) {
+        if (agents.state(before, threadId) === "running" && agents.steer(threadId, text, sender)) {
           return { message: `Delivered to ${threadId}, which is running.` };
         }
         // A thread that just ended is not running a moment later; its end is stored by then.
@@ -210,11 +206,7 @@ export function mainTools(deps: MainDeps) {
               effectId("message", ctx.threadId, ctx.toolCallId),
             );
           }
-          await agents.resume(
-            threadId,
-            feedback ? feedbackText(w.taskId, text) : fromMain(text),
-            sender,
-          );
+          await agents.resume(threadId, feedback ? feedbackText(w.taskId, text) : text, sender);
           return {
             message: feedback
               ? `Feedback sent: ${threadId} resumed on a new attempt of ${w.taskId}.`

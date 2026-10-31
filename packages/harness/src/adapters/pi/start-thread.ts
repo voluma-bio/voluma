@@ -462,7 +462,7 @@ interface Notice {
 }
 
 const senderLabel = (s: UserSender) =>
-  s.kind === "thread" ? `thread ${s.threadId}` : s.kind === "person" ? "the researcher" : "Voluma";
+  s.kind === "thread" ? "the main agent" : s.kind === "person" ? "the researcher" : "Voluma";
 
 /** The text the model reads for a set of notices, in arrival order. */
 const blockOf = (notices: Notice[]) =>

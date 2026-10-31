@@ -21,13 +21,9 @@ import { callKey, effectId, isEffectTool } from "./tools/effects";
 /** The reply a worker left when its turn ended without a submit, as the notice quotes it. */
 export const REPLY_MAX = 500;
 
-export const fromMain = (text: string) => `From the main agent:\n${text}`;
-
 /** What a worker is told when feedback opens a new attempt of its task. */
 export const feedbackText = (taskId: string, text: string) =>
-  fromMain(
-    `${text}\n\nThis opens a new attempt of ${taskId}: fix it, report its outputs again, then submit_task.`,
-  );
+  `${text}\n\nThis opens a new attempt of ${taskId}: fix it, report its outputs again, then submit_task.`;
 
 const PLAIN_REASON: Record<ClaimEndReason, string> = {
   shutdown: "the runner restarted",
