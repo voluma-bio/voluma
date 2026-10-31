@@ -53,7 +53,7 @@ export async function insertEvent(tx: Tx, event: Omit<RunEvent, "seq">) {
       createdAt: new Date(event.createdAt),
       seq: sql`(SELECT COALESCE(MAX(${events.seq}), 0) + 1 FROM ${events} WHERE ${events.runId} = ${event.runId})`,
     })
-    .onConflictDoNothing({ target: events.id })
+    .onConflictDoNothing({ target: [events.runId, events.id] })
     .returning({ id: events.id, seq: events.seq });
 }
 

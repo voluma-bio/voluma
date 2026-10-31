@@ -106,6 +106,14 @@ cd ../voluma.worktrees/<name> && pnpm i
   The exception is R2: every worktree and staging use one bucket, so a script
   that writes R2 writes only keys staging never reads (`dev/…`, a local
   example's `example-local-<runId>`); see `apps/api/AGENTS.md`.
+- The machine is shared, so stop a process only by the PID you recorded
+  when you started it. Never stop one by name or pattern: `pkill -f` and
+  `pgrep -f` match anywhere in a command line, which hits other agents' dev
+  servers and any agent session launched with a prompt that contains the
+  pattern; `killall` hits every process with that name. Start a long-running
+  process as `setsid <cmd> > <log> 2>&1 & echo $! > <pidfile>`, and stop it
+  and its children with `kill -- -$(cat <pidfile>)`. If you lost the PID,
+  leave the process running and say so in your report.
 - Small PRs to `main`. Keep your branch current with
   `git merge origin/main`. Never rebase, force-push or commit to someone
   else's branch.
