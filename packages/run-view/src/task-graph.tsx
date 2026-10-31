@@ -149,8 +149,8 @@ export function TaskGraph(props: TaskGraphProps) {
   const { ref, paths } = useEdges(edges, right);
   const { ref: outer, fit: lanes } = useFit(all, !right);
   return (
-    // Boxes keep their least width; a parent narrower than one box (or a left-to-right graph's
-    // layers) scrolls sideways.
+    // Boxes keep their least width; a parent narrower than one box, or than a left-to-right
+    // graph's layers (a study workflow of 7 or more layers beside the Study panel), scrolls here.
     <div ref={outer} className={cx("overflow-x-auto", props.className)}>
       <div
         ref={ref}

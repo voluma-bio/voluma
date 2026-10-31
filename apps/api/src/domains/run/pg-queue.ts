@@ -23,7 +23,15 @@ import { and, asc, desc, eq, gt, inArray, notInArray, type SQL, sql } from "driz
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { HTTPException } from "hono/http-exception";
 import type { Caller, Reader } from "../../domain";
-import { admit, type Limits, type Refusal, refusalMessage, type Usage, usage } from "./admission";
+import {
+  admit,
+  type Limits,
+  type Refusal,
+  refusalError,
+  refusalMessage,
+  type Usage,
+  usage,
+} from "./admission";
 import { type ClaimEnd, endClaim, isCounted, stalledError } from "./claim-progress";
 import { decideMessage, endCorrection, GUEST_KEYS_MESSAGE, openCorrection } from "./corrections";
 import type { KeyVault } from "./key-vault";
@@ -204,7 +212,8 @@ async function endUnfinished(
     .where(eq(runs.id, runId));
 }
 
-const NO_LIMITS = "This organization can no longer run work.";
+/** A run's error when its org is gone from config: a clause read after "The run stopped: ". */
+const NO_LIMITS = "this organization can no longer run work";
 
 /** What the runs of one start call share: the credentials kind comes from `keys`. */
 type Starts = {
@@ -541,7 +550,7 @@ export function pgRunQueue(
             const refused = admit("claim", orgLimits, used, { credentials: "voluma" });
             if (refused === "concurrent") continue;
             if (refused) {
-              await fail(tx, run.id, refusalMessage[refused]);
+              await fail(tx, run.id, refusalError[refused]);
               continue;
             }
           }

@@ -134,9 +134,10 @@ export const fatalText = (
 export const STUCK_IN_CORRECTION = "the AI stopped before the correction was done";
 
 /** Setup failures that end a run before it starts; the researcher reads them as the run's error. */
-export const NO_WORKFLOW_DIR = "it names no workflow to start";
-export const roleModelUnset = (role: string, alias: string) =>
-  `the ${role} role needs the model "${alias}", which RUNNER_MODEL_${alias.toUpperCase()} does not set`;
+export const NO_WORKFLOW_DIR = "no workflow was named to start";
+/** What the researcher reads; the runner logs which variable is unset. */
+export const roleModelUnset = (alias: string) =>
+  `the "${alias}" AI this workflow needs is not set up; whoever runs Voluma sets it up`;
 
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}…` : text);
 

@@ -12,13 +12,13 @@ export { Markdown } from "./chat/markdown";
 export { ThreadNavigationProvider } from "./chat/thread-navigation";
 export { ItemToCheck, type ItemToCheckProps } from "./item-to-check";
 export { KeysForm, loadKeys, RunKeyLine } from "./keys";
+export { plainError, stoppedText } from "./run-error";
 export {
   type AgentNode,
   agentLabel,
   agentTree,
   haltOf,
   type NeedItem,
-  plainError,
   runView,
   type TaskState,
   type TaskView,

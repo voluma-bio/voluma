@@ -11,7 +11,8 @@
  * A table wider than its box scrolls sideways with its first column (and the chevron before it)
  * held in place: a shadow marks the held column once the rest scrolls under it, and a fade marks
  * the side with more to see. A held cell is positioned, which would shrink the row's stretched
- * control to that cell, so the rest of the row is a mouse-only copy of it in the last cell.
+ * control to that cell, so the rest of the row is a mouse-only copy of it in the last cell, and
+ * one layer in the held cell draws the row's selection outline and focus ring over its width.
  */
 import { ArrowRight } from "lucide-react";
 import { type ReactNode, useId, useLayoutEffect, useRef, useState } from "react";
@@ -25,7 +26,6 @@ import {
   moveRowFocus,
   raiseControls,
   rowBodyClass,
-  stretchedClass,
 } from "./row";
 
 export type TableColumn<Row> = {
@@ -99,7 +99,7 @@ export function Table<Row>({
     <div
       className={cx("relative overflow-hidden rounded-lg border border-border bg-card", className)}
     >
-      <div ref={ref} className="overflow-x-auto">
+      <div ref={ref} className="@container overflow-x-auto">
         <table aria-label={label} onKeyDown={moveRowFocus} className="w-full border-collapse">
           <thead>
             <tr className="h-[30px] border-b border-border text-xs font-medium text-fg-subtle">
@@ -155,7 +155,7 @@ export function Table<Row>({
                   const first = (content: ReactNode) => {
                     if (to !== undefined) {
                       const props: LinkRenderProps = {
-                        className: cx("block", stretchedClass),
+                        className: cx("block", heldStretch),
                         children: content,
                         "data-row-control": "",
                       };
@@ -169,7 +169,7 @@ export function Table<Row>({
                           aria-expanded={isOpen}
                           aria-controls={isOpen ? detailId : undefined}
                           onClick={() => toggle(key)}
-                          className={cx("block cursor-pointer text-left", stretchedClass)}
+                          className={cx("block cursor-pointer text-left", heldStretch)}
                         >
                           {content}
                         </button>
@@ -190,8 +190,7 @@ export function Table<Row>({
                         "group/row relative border-t border-border first:border-t-0",
                         compact ? "h-(--row-compact-h)" : "h-(--row-h)",
                         control && "hover:bg-accent",
-                        selected &&
-                          "bg-select-tint inset-ring inset-ring-select-dim hover:bg-select-tint",
+                        selected && "bg-select-tint hover:bg-select-tint",
                       )}
                     >
                       {lead && (
@@ -199,7 +198,7 @@ export function Table<Row>({
                           className={cx(
                             leadCell,
                             "align-middle",
-                            control && "group-hover/row:bg-accent",
+                            control && !selected && "group-hover/row:bg-accent",
                             selected && "bg-linear-to-r from-select-tint to-select-tint",
                           )}
                         >
@@ -227,7 +226,7 @@ export function Table<Row>({
                               cx(
                                 "font-medium",
                                 firstHeld,
-                                control && "group-hover/row:bg-accent",
+                                control && !selected && "group-hover/row:bg-accent",
                                 selected && "bg-linear-to-r from-select-tint to-select-tint",
                               ),
                           )}
@@ -235,6 +234,9 @@ export function Table<Row>({
                           <div className={raiseControls}>
                             {i === 0 ? first(column.cell(row)) : column.cell(row)}
                           </div>
+                          {i === 0 && (control || selected) && (
+                            <RowRing selected={selected} lead={lead} />
+                          )}
                           {!trail && i === columns.length - 1 && copy}
                         </td>
                       ))}
@@ -279,15 +281,32 @@ export function Table<Row>({
   );
 }
 
-const copyClass = cx(
-  "after:absolute after:inset-0 after:content-['']",
-  "group-has-[[data-row-control]:focus-visible]/row:after:outline-2 group-has-[[data-row-control]:focus-visible]/row:after:-outline-offset-2 group-has-[[data-row-control]:focus-visible]/row:after:outline-ring",
-);
+/** The row's own control covers its held cell; the row's ring is `RowRing`'s. */
+const heldStretch = "after:absolute after:inset-0 after:content-[''] focus-visible:outline-none";
+
+const copyClass = "after:absolute after:inset-0 after:content-['']";
 
 /**
- * The row's control again, for the mouse, stretched over the row under its held cells; it draws
- * the row's focus ring while the real control has focus.
+ * The selected row's ice outline and the focus ring while the row's control has focus, drawn over
+ * the row's visible width, held cells included, and never in the way of a click. It sits in the
+ * held first cell, so its left edge stays put while the rest scrolls, and spans the scroller
+ * (`100cqw`) from the row's left edge.
  */
+function RowRing({ selected, lead }: { selected: boolean; lead: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={cx(
+        "pointer-events-none absolute inset-y-0 z-[3] w-[100cqw]",
+        lead ? "-left-7" : "left-0",
+        selected && "inset-ring inset-ring-select-dim",
+        "group-has-[[data-row-control]:focus-visible]/row:outline-2 group-has-[[data-row-control]:focus-visible]/row:-outline-offset-2 group-has-[[data-row-control]:focus-visible]/row:outline-ring",
+      )}
+    />
+  );
+}
+
+/** The row's control again, for the mouse, stretched over the row under its held cells. */
 function RowCopy({ to, onToggle }: { to: LinkTo | undefined; onToggle?: () => void }) {
   if (to === undefined)
     return <span aria-hidden className={cx("cursor-pointer", copyClass)} onClick={onToggle} />;

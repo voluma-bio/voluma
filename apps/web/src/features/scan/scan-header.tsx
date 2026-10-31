@@ -13,9 +13,9 @@ import {
   formatDuration,
   KeysForm,
   loadKeys,
-  plainError,
   runStatus,
   scanLabel,
+  stoppedText,
   useNow,
 } from "@voluma/run-view";
 import { Button, Facts, Popover, ShellHeading, type Status, StatusMark } from "@voluma/ui";
@@ -199,7 +199,7 @@ export function RunAlert({ run, userId, stale }: { run: Run; userId: string; sta
   if (state.status === "ended" && state.outcome === "failed")
     return (
       <p role="alert" className={`${bar} bg-destructive-tint text-destructive`}>
-        {failureText(state.error)}
+        {stoppedText(state.error)}
       </p>
     );
   if (stale)
@@ -318,11 +318,4 @@ async function showRun(client: QueryClient, next: Run) {
   const { queryKey } = runQuery(next.id);
   await client.cancelQueries({ queryKey });
   client.setQueryData(queryKey, next);
-}
-
-/** Why the run failed: the run's error (a clause) without the provider's raw response. */
-function failureText(error: string | undefined): string {
-  if (!error) return "The run failed.";
-  const words = plainError(error);
-  return `The run stopped: ${words}${/[.!?]$/.test(words) ? "" : "."}`;
 }

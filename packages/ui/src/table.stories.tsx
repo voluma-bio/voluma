@@ -26,7 +26,11 @@ const scans: Scan[] = [
 ];
 
 const columns: TableColumn<Scan>[] = [
-  { key: "scan", header: "Scan", cell: (s) => <span className="font-mono">{s.id}</span> },
+  {
+    key: "scan",
+    header: "Scan",
+    cell: (s) => <span className="font-mono whitespace-nowrap">{s.id}</span>,
+  },
   { key: "knee", header: "Knee", cell: (s) => `${s.group}, ${s.knee} knee` },
   {
     key: "status",
