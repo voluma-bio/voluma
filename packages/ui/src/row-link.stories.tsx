@@ -60,3 +60,12 @@ export const RouterLink: Story = {
     to: (props) => <a href="#from-router" data-router="" {...props} />,
   },
 };
+
+/** A subtitle that is a sentence to read whole wraps instead of being cut: Home's "Needs you". */
+export const WrappedSubtitle: Story = {
+  args: {
+    subtitle:
+      "18 to check across 8 scans. 2 scans failed: OA7-15, OA7-20. 1 scan paused until you add your API key.",
+    wrapSubtitle: true,
+  },
+};

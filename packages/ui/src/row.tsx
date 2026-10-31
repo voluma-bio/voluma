@@ -30,7 +30,10 @@ export type LinkTo = string | ((props: LinkRenderProps) => ReactNode);
 export type LinkRenderProps = {
   className: string;
   children: ReactNode;
-  "data-row-control": "";
+  /** Marks the row's one control, for arrow keys; absent on a mouse-only copy. */
+  "data-row-control"?: "";
+  tabIndex?: number;
+  "aria-hidden"?: boolean;
 };
 
 const ListContext = createContext<{ density: Density; nested: boolean } | null>(null);
@@ -110,8 +113,10 @@ export function useOpen({ open, defaultOpen = false, onOpenChange }: OpenProps) 
 
 type RowBaseProps = OpenProps & {
   title: ReactNode;
-  /** One line under the title; hidden in compact lists. */
+  /** One line under the title, cut to fit; hidden in compact lists. */
   subtitle?: ReactNode;
+  /** The subtitle is a sentence to read whole: it wraps onto more lines instead of being cut. */
+  wrapSubtitle?: boolean;
   /** The row's status (a StatusMark), in the first cell after the title. */
   status?: ReactNode;
   /** Cells after the status, laid out by the list's `columns`. */
@@ -253,6 +258,7 @@ export function ChevronToggle({
 function RowFrame({
   title,
   subtitle,
+  wrapSubtitle,
   status,
   cells = [],
   selected,
@@ -296,7 +302,11 @@ function RowFrame({
         <div className="min-w-0">
           {title}
           {subtitle && !compact && (
-            <div className="truncate text-sm text-fg-subtle">{subtitle}</div>
+            <div
+              className={cx("text-sm text-fg-subtle", wrapSubtitle ? "text-pretty" : "truncate")}
+            >
+              {subtitle}
+            </div>
           )}
         </div>
         {status !== undefined && <div className={cellClass}>{status}</div>}

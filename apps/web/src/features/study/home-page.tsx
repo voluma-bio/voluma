@@ -202,6 +202,7 @@ function needsYou(v: StudyView): React.ReactNode[] {
       to={linkTo(v.href)}
       title={one ? one.inputName : study.name}
       subtitle={parts.join(" ") || undefined}
+      wrapSubtitle
       cells={[cell]}
     />,
   ];

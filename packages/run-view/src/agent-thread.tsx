@@ -7,7 +7,8 @@
  */
 import { type ReactNode, useLayoutEffect, useMemo, useRef } from "react";
 import { Elapsed, ThreadSpendInfo, threadWord } from "./agents";
-import { agentLabel, agentTitle, isMain, plainError } from "./run-model";
+import { plainError } from "./run-error";
+import { agentLabel, agentTitle, isMain } from "./run-model";
 import { useThread, useThreadRows, useThreads } from "./run-store";
 import { TranscriptView } from "./transcript-view";
 

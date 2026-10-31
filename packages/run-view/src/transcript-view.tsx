@@ -23,7 +23,8 @@ import { ActivityRow } from "./chat/activity-row";
 import { InfoButton, usageRows } from "./chat/info-button";
 import { Markdown, StreamingText } from "./chat/markdown";
 import { ProcessDisclosure } from "./chat/process-disclosure";
-import { plainError, type Thread } from "./run-model";
+import { plainError } from "./run-error";
+import type { Thread } from "./run-model";
 import type { Row, Step, ToolStep } from "./transcript";
 
 export function TranscriptView({
@@ -123,6 +124,7 @@ const TOOL_ICON: Record<string, LucideIcon> = {
   bash: Terminal,
   view_image: Image,
   start_worker: ListChecks,
+  start_agent: ListChecks,
   submit_task: ListChecks,
   checkpoint: Flag,
   report_output: PackageCheck,

@@ -346,10 +346,11 @@ try {
         inputId: "probe",
         inputPrefix: "inputs/",
         skills: [],
-        grants: { main: [], worker: [], check: [] },
+        roles: { worker: { scratch: "all", outputs: "write", subagents: [], tools: [] } },
       }).forThread({
         id: "probe.intake.worker",
         name: "intake.worker",
+        place: "worker",
         role: "worker",
         taskId: "intake",
       });

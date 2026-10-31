@@ -62,14 +62,12 @@ export function Dashboard() {
             </Link>
           </Button>
         </header>
-        <div className="overflow-x-auto px-4 pt-2 pb-4">
-          <TaskGraph
-            size="study"
-            tasks={studyGraph(detail, workflow)}
-            taskLink={(task) => linkTo(`${base}/workflow?${new URLSearchParams({ task })}`)}
-            className="min-w-[44rem]"
-          />
-        </div>
+        <TaskGraph
+          size="study"
+          tasks={studyGraph(detail, workflow)}
+          taskLink={(task) => linkTo(`${base}/workflow?${new URLSearchParams({ task })}`)}
+          className="px-4 pt-2 pb-4"
+        />
       </section>
       <ScanMatrix detail={detail} workflow={workflow} />
       <div className="grid grid-cols-2 gap-px border-b border-border bg-border max-[1100px]:grid-cols-1">
