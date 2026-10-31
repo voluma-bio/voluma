@@ -49,13 +49,15 @@ export type TaskStatus = z.infer<typeof taskStatusSchema>;
 /**
  * Where a task stands as every screen shows it (`taskStates`, review-state.ts): its status,
  * read with the run's state, its threads and the tasks it builds on.
- * - `waiting`: not started, and a task it builds on has no usable result yet.
+ * - `waiting`: not started, and a task it builds on has no usable result yet; or started while
+ *   the run waits in line for a runner (it lost its runner and is queued again).
  * - `ready`: not started, and every task it builds on has one (`satisfied`).
  * - `running`: an AI is working on it now. `checking`: a second AI is checking it now.
  * - `held`: started, and no AI is working on it or checking it: the lead AI decides what's next.
  * - `skipped`: skipped by the plan, or builds on a skipped task.
  * - `failed`: failed, or its AI failed on the error that failed the run.
- * - `stopped`, `paused`: started when the run ended, or while it waits for a runner or keys.
+ * - `stopped`: started when the run ended. `paused`: started while the run waits for its
+ *   starter's keys.
  */
 export const taskStateSchema = z.enum([
   "waiting",

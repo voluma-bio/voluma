@@ -223,12 +223,16 @@ export function scanGraph(scan: StudyScanDetail, workflow: BundledWorkflow): Sca
   }));
 }
 
-/** Where a stopped scan stopped: "Stopped during Segmentation", from the task its run stopped or failed in. */
+/**
+ * Where a scan's run stopped or failed, in the word its status uses: "Failed during Segmentation",
+ * from the task it stopped or failed in; "Stopped before it finished" when no task says.
+ */
 export function stoppedLine(scan: StudyScanDetail, workflow: BundledWorkflow): string | null {
   const run = scan.runs[0];
   if (run?.state.status !== "ended" || run.state.outcome === "completed") return null;
+  const word = run.state.outcome === "failed" ? "Failed" : "Stopped";
   const id = Object.entries(scan.taskState).find(([, s]) => s === "stopped" || s === "failed")?.[0];
-  return id ? `Stopped during ${workflow.taskTitle(id)}` : null;
+  return id ? `${word} during ${workflow.taskTitle(id)}` : `${word} before it finished`;
 }
 
 /** What waits on a scan, by check title: "Patella partly outside the field, Medial osteophyte boundary". */

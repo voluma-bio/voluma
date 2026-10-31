@@ -285,7 +285,7 @@ export type Run = z.infer<typeof runSchema>;
 /** Real keys are well under 512 characters; the cap bounds what the server holds in memory. */
 const keyField = z.string().min(1).max(512);
 /**
- * A visitor's own credentials: a Meta Model API key. Their sandboxes run on Voluma's Modal
+ * A visitor's own credentials: a Meta API key. Their sandboxes run on Voluma's Modal
  * account. Sent only in requests, never returned; see the header.
  */
 export const visitorKeysSchema = z.object({ metaApiKey: keyField });

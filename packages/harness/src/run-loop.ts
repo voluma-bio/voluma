@@ -74,7 +74,7 @@ import type { Agents } from "./tools/main-tools";
 import type { Tool } from "./tools/tool";
 
 /** Where a thread sits in the run: stored on its `thread.started` by `begin`, not part of how a thread runs. */
-type Lineage = { parentThreadId: string; attemptId?: string };
+type Lineage = { name: string; parentThreadId: string; attemptId?: string };
 
 /** What a host decides about a role's threads; the loop adds identity and the tools. */
 export interface RoleSetup {
@@ -219,6 +219,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     const role = o.roles[r.role](thread, d.threads.get(r.id)?.model);
     const common = {
       threadId: r.id,
+      name: r.name,
       systemPrompt: role.systemPrompt,
       model: role.model,
       thinkingLevel: role.thinkingLevel,
@@ -269,11 +270,12 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
    * its end is stored. Call inside `section`: a stop cannot come between the append and the start.
    */
   async function begin(spec: ThreadSpec & Lineage, startedEventId: string, spawnedBy?: string) {
-    const { parentThreadId, attemptId, ...start } = spec;
+    const { name, parentThreadId, attemptId, ...start } = spec;
     await recorder.append(
       spec.threadId,
       "thread.started",
       {
+        name,
         parentThreadId,
         kind: spec.kind,
         ...(spec.taskId && { task: spec.taskId }),

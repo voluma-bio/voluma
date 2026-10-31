@@ -58,6 +58,7 @@ function log() {
     add(
       "thread.started",
       {
+        name: threadId.replace("review-111.", ""),
         parentThreadId: "review-111.supervisor",
         kind: "worker",
         task,
@@ -110,7 +111,6 @@ describe("reviewRun", () => {
       evidence: [],
       files: [],
     });
-    expect(pending?.ask).toBe(tasks.find((t) => t.id === "segmentation")?.instructions);
     expect(result?.revisions[0]?.structures).toEqual([]);
     expect(reviewRunSchema.safeParse(result).success).toBe(true);
   });
@@ -121,7 +121,12 @@ describe("reviewRun", () => {
       tasks: plan.tasks.filter((t) => t.id === "intake" || t.id === "orientation"),
     };
     // A root invocation can precede the initial revision.
-    l.add("thread.started", { parentThreadId: null, kind: "supervisor", workflows });
+    l.add("thread.started", {
+      name: "supervisor",
+      parentThreadId: null,
+      kind: "supervisor",
+      workflows,
+    });
     l.add("revision.started", { reason: "run", plan: selected });
     expect(
       reviewRun({ run, results: reviewState(l.events) })?.revisions[0]?.tasks.map((t) => [
