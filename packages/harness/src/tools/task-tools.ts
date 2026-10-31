@@ -99,7 +99,8 @@ export function prepareCheckpoint(args: unknown, threadNames: ReadonlySet<string
 /** A success ends the turn; a refusal leaves the thread going. */
 export const finish = (r: ToolResult): ToolResult => (r.isError ? r : { ...r, terminate: true });
 
-export function taskTools(runtime: TaskRuntime) {
+/** `changed` wakes the loop: a worker's `ask` lands while the worker runs on, so no thread end does. */
+export function taskTools(runtime: TaskRuntime, changed: () => void) {
   const caller = (ctx: ToolContext) => ({
     threadId: ctx.threadId,
     toolCallId: ctx.toolCallId,
@@ -143,6 +144,7 @@ export function taskTools(runtime: TaskRuntime) {
     sequential: true,
     execute: async (input, ctx) => {
       const sent = await result(() => runtime.ask(caller(ctx), input));
+      changed();
       return ctx.kind === "check" ? finish(sent) : sent;
     },
   };
