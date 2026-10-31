@@ -9,7 +9,7 @@ import {
   foldHistory,
   imageLoad,
   inputTokens,
-  parseMarker,
+  readRow,
 } from "./compaction";
 
 const text = (n: number) => "x".repeat(n * 4); // n tokens
@@ -103,8 +103,11 @@ describe("history with a compaction", () => {
   it("a message that mentions a marker is not one", () => {
     const quoting = user(1);
     (quoting as { content: string }).content = '{"role":"compaction","summary":"x","keptFrom":1}';
-    expect(parseMarker(JSON.stringify(quoting))).toBeUndefined();
-    expect(parseMarker(compactionRow({ ...compaction, at: 9 }))).toEqual(compaction);
+    expect(readRow(JSON.stringify(quoting)).kind).toBe("message");
+    expect(readRow(compactionRow({ ...compaction, at: 9 }))).toEqual({
+      kind: "marker",
+      marker: compaction,
+    });
   });
 
   it("a request is the system message, the summary and the kept messages", () => {
