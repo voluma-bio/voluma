@@ -861,7 +861,7 @@ describe("run loop", () => {
                 taskId: "t1",
                 text: "Re-derived.",
                 summary: "Looks passed.",
-                evidence: [{ root: "outputs", path: "t1/nope.json" }],
+                evidence: [{ root: "outputs", path: "t1/frame.json" }],
                 verdict: "passed",
               })
             : t.steps === 1
@@ -878,7 +878,7 @@ describe("run loop", () => {
       await w.run();
       const refusal = seen.find((r) => r.includes("No file at"));
       expect(refusal, w.text()).toContain(
-        'No file at /outputs/t1/nope.json. Cite an output file by its path inside /outputs/t1/, e.g. {root: "outputs", path: "frame.json"}.',
+        'No file at /outputs/t1/t1/frame.json. Cite an output file by its path inside /outputs/t1/, e.g. {root: "outputs", path: "frame.json"}.',
       );
       expect(refusal).not.toMatch(/key does not exist/i);
     });
@@ -1305,7 +1305,9 @@ describe("run loop", () => {
 
       const again = world({
         plan: [task("t1")],
-        main: throwing(2, "prompt is too long"),
+        // A refused request is recovered once in the thread (its cold summary is the second call,
+        // which the fake refuses too), so a main fails after two throws and the fresh one after two more.
+        main: throwing(4, "prompt is too long"),
         check: checker(),
       });
       await expect(again.run()).rejects.toThrow(

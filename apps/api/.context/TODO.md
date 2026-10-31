@@ -1,5 +1,11 @@
 # TODO
 
+- **Reconcile abandoned provider calls before archiving their runs.** Archive now refuses
+  calls without a completed settlement (`duration_ms IS NULL`), including swept `cut` rows.
+  Late settlement is preserved; genuinely settled unknown-cost calls remain archivable.
+  A crashed handler that never settles leaves its run retained indefinitely. Decide how an
+  operator proves no settlement can arrive and records unknown accounting before permitting
+  removal; don't fabricate duration/cost or add an age-based override. Export remains available.
 - **Neon free-tier limits, after 2026-11-04.** Check CU-hours and storage in Neon's console
   (limits: 100 CU-hours a month, 1 GB; staging was 256 MB on 2026-10-30, about 95 MB per full
   run, #255). Storage will likely run out first.

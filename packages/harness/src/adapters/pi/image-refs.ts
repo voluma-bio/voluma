@@ -17,6 +17,10 @@ import type { History } from "../../ports/history";
 import { parseThreadId } from "../../thread-id";
 import { parseMarker } from "./compaction";
 
+// view_image returns at most 1 MiB per image. Its stored object is on writable scratch,
+// so check the stream before buffering it: a sandbox can replace it with a larger file.
+const MAX_IMAGE_BYTES = 1024 * 1024;
+
 type Block = { type: string; [key: string]: unknown };
 type Row = { content?: unknown; [key: string]: unknown };
 
@@ -41,8 +45,13 @@ export function withImageRefs(history: History, files: Files, runId: string): Hi
       mimeType: string;
     };
     const chunks: Uint8Array[] = [];
+    let size = 0;
     try {
-      for await (const chunk of files.read(key, signal)) chunks.push(chunk);
+      for await (const chunk of files.read(key, signal)) {
+        size += chunk.length;
+        if (size > MAX_IMAGE_BYTES) return note("its file exceeds the image size limit");
+        chunks.push(chunk);
+      }
     } catch (error) {
       if (error instanceof FileNotFound) return note("its file was deleted");
       throw error;

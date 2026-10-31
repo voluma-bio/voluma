@@ -56,15 +56,17 @@ if __name__ == '__main__':
     ap.add_argument('--frame', type=sl.existing, help='frame.json from orient_joint.py: orients the views by the bones')
     ap.add_argument('--header', type=sl.existing, help='hu.json for the spacing (default: the labels sidecar)')
     ap.add_argument('--names', help='label names, 1=femur,2=tibia or an anatomy.json')
-    ap.add_argument('--step', type=int, help='downsampling step in voxels (default: the mesh target shared with quad_view)')
+    ap.add_argument('--step', type=int, help='downsampling step in voxels (default: the longest axis / 300, rounded, at least 1)')
     a = ap.parse_args()
     labels = np.load(a.labels, mmap_mode='r')
     sp = sl.grid(a.header or str(sl.sidecar_path(a.labels)))['spacing_zyx_mm']
+    # The fragment-check sheet keeps finer sampling than the quad pane: MIN_VOXELS is counted after downsampling.
+    step = a.step or max(1, round(max(labels.shape) / 300))
     cache = vl.Meshes(Path(a.out).parent / '.mesh-cache')
-    present = cache.label_ids(a.labels, labels, a.step)
+    present = cache.label_ids(a.labels, labels, step)
     if not present:
         sl.fail('the labels volume is empty: nothing to render')
-    ms = {lv: cache.surface(a.labels, labels, lambda x, lv=lv: x == lv, f'label{lv}', sp, step=a.step) for lv in present}
+    ms = {lv: cache.surface(a.labels, labels, lambda x, lv=lv: x == lv, f'label{lv}', sp, step=step) for lv in present}
     ms = {lv: m for lv, m in ms.items() if m.n_points}
     frame = fr.load(a.frame) if a.frame else None
     look, up = view_vectors(frame)
@@ -78,4 +80,4 @@ if __name__ == '__main__':
         ax.text(8, 24, f'{k * 60} deg', color='w', fontsize=9)
     vl.draw_legend(fig, sorted(ms), names, loc='lower left')
     sl.save_image(fig, a.out)
-    sl.emit(image=a.out, labels_drawn=sorted(ms), step=cache.step_for(labels, a.step), triangles=int(sum(m.n_faces for m in ms.values())))
+    sl.emit(image=a.out, labels_drawn=sorted(ms), step=step, triangles=int(sum(m.n_faces for m in ms.values())))

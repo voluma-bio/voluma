@@ -34,6 +34,7 @@ export const providerCalls = pgTable(
     outputTokens: integer(),
     startedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     ttfbMs: integer(),
+    /** Set only by final settlement, never by a cut sweep; null blocks run archiving. */
     durationMs: integer(),
   },
   (t) => [
