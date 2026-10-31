@@ -47,6 +47,20 @@ function refusal(error: Error): string {
   return "Couldn't send. Try again.";
 }
 
+/**
+ * A go the server turned down (409: the plan no longer lets that task be redone), in the task's own
+ * name; the server's text names it by id.
+ */
+function redoRefused(
+  error: Error,
+  tasks: TaskView[],
+  redo: string | undefined,
+): string | undefined {
+  if (redo === undefined || !(error instanceof ApiError) || error.status !== 409) return undefined;
+  const title = tasks.find((t) => t.id === redo)?.title ?? "That task";
+  return `${title} can't be redone now. Ask the AI what changed.`;
+}
+
 /** PNG bytes as plain base64, as the message takes them. */
 async function base64(blob: Blob): Promise<string> {
   const bytes = new Uint8Array(await blob.arrayBuffer());
@@ -102,6 +116,8 @@ export function useMessage({
     marks: string[];
     /** The reply whose offer this accepts. */
     offer?: string;
+    /** The task a go asks to redo. */
+    redo?: string;
     prepared: Promise<{ body: SendRunMessageRequest; unseen: boolean }>;
   }>(undefined);
   // The offer accepted: its button stays gone while the reopened run catches up.
@@ -170,6 +186,7 @@ export function useMessage({
         note,
         marks: carried.map((m) => m.id),
         offer: offer?.replyId,
+        redo: offer?.taskId,
         prepared: picture.then(async (png) => ({
           body: {
             ...body,
@@ -358,7 +375,7 @@ export function AiPanel({
         )}
         {send.isError && (
           <p role="alert" className="text-sm text-destructive">
-            {refusal(send.error)}
+            {redoRefused(send.error, tasks, send.variables?.redo) ?? refusal(send.error)}
           </p>
         )}
       </form>
