@@ -28,13 +28,23 @@
  * `values` and `toCheck` come from each scan's **newest completed run** only (`resultRunId`):
  * accepting a check needs the latest completed result, so a live run's items would answer 409.
  * `values` is keyed by output id (the `outputs.json` id, not the fold's `taskId/outputId`)
- * and holds the study workflow's `headline` outputs that the run reported.
+ * and holds every measurement the run reported. `taskState` comes from the scan's **newest
+ * run**, whatever its state, so the study shows where a live or stopped run is: the state the
+ * scan review shows (`taskStates`, review-state.ts), keyed by the run's plan tasks; a workflow
+ * task missing from it is outside the run's plan.
  *
  * The list is what Home renders: per study its counts and each scan's newest run in brief
  * (`studyRunSummarySchema`), so Home reads no run list.
  */
 import { z } from "zod";
-import { inputIdSchema, runIdSchema, segmentSchema, studyIdSchema, taskIdSchema } from "./ids";
+import {
+  inputIdSchema,
+  runIdSchema,
+  segmentSchema,
+  studyIdSchema,
+  taskIdSchema,
+  taskStateSchema,
+} from "./ids";
 import { measurementSchema } from "./review";
 import {
   inputSchema,
@@ -135,9 +145,15 @@ export const studyScanDetailSchema = z.object({
   runs: z.array(runSchema),
   /** The newest completed run, which `values` and `toCheck` read; null when none has completed. */
   resultRunId: runIdSchema.nullable(),
-  /** Output id → value, for the workflow's headline outputs that run reported. */
+  /** Output id → value, for every measurement that run reported. */
   values: z.record(segmentSchema, studyValueSchema),
   toCheck: z.array(toCheckItemSchema),
+  /**
+   * Task id → its state in the newest run (`taskStates`): the run's latest revision read with
+   * the run's state now. Empty before the run has a plan, or with no run. A task outside the
+   * run's plan (not selected) is absent.
+   */
+  taskState: z.record(taskIdSchema, taskStateSchema),
 });
 export type StudyScanDetail = z.infer<typeof studyScanDetailSchema>;
 

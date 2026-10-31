@@ -1,6 +1,6 @@
 /**
  * Home (`/`): what needs the researcher (one action per row), what is running, and every
- * study. A study of one shows as its scan and links straight to its run.
+ * study with one mark per scan. A study of one shows as its scan and links straight to it.
  *
  * Data: `listStudies` alone; each study carries each scan's newest run in brief. It refetches
  * every 5 s while its last answer shows a live run.
@@ -8,25 +8,31 @@
 import { useQuery } from "@tanstack/react-query";
 import { studiesQuery } from "@voluma/api-client/query";
 import type { StudyRunSummary, StudySummary } from "@voluma/contracts/study";
-import { plural, runHref, shortDate, studyStatus } from "@voluma/run-view";
+import { isLive, liveStatus, plural, runHref, runStatus, studyStatus } from "@voluma/run-view";
 import {
   Box,
+  Breadcrumb,
   Button,
   Count,
+  type Density,
   EmptyState,
   ErrorState,
-  type LinkRenderProps,
   List,
   LoadingState,
+  PageHead,
   Progress,
-  Row,
   RowLink,
+  SegmentedControl,
+  ShellHeading,
   type Status,
   StatusMark,
   Table,
 } from "@voluma/ui";
 import { workflowById } from "@voluma/workflow/bundled";
+import { Plus } from "lucide-react";
+import { useState } from "react";
 import { Link } from "react-router";
+import { linkTo } from "./link";
 
 const LIVE = 5000;
 
@@ -34,8 +40,6 @@ interface StudyView {
   study: StudySummary;
   /** A study of one's run, once it has one. */
   one: StudyRunSummary | undefined;
-  /** A live study of one: its run's tasks done; else its scans with a completed run. */
-  progress: { done: number; total: number };
   href: string;
 }
 
@@ -44,27 +48,12 @@ function view(study: StudySummary): StudyView {
   return {
     study,
     one,
-    progress:
-      one && isLive(one)
-        ? { done: one.tasks?.done ?? 0, total: one.tasks?.total ?? 0 }
-        : { done: study.scansCompleted, total: study.scanCount },
     href: one ? runHref(one) : `/studies/${study.id}`,
   };
 }
 
-const isLive = ({ state }: StudyRunSummary) => state.status !== "ended";
 const failed = ({ state }: StudyRunSummary) =>
   state.status === "ended" && state.outcome === "failed";
-
-/** "Today", "Yesterday", "3 days ago", then the day ("12 Oct"). */
-function relativeDay(iso: string): string {
-  const day = (d: Date) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
-  const days = Math.round((day(new Date()) - day(new Date(iso))) / 86_400_000);
-  if (days <= 0) return "Today";
-  if (days === 1) return "Yesterday";
-  if (days < 7) return `${days} days ago`;
-  return shortDate(iso);
-}
 
 export function HomePage() {
   const studies = useQuery({
@@ -72,29 +61,24 @@ export function HomePage() {
     refetchInterval: (q) => (q.state.data?.some((s) => s.newestRuns.some(isLive)) ? LIVE : false),
   });
 
-  const header = (
-    <div className="flex flex-wrap items-center gap-3">
-      <h1 className="flex-1 text-2xl font-semibold">Home</h1>
-      <Button asChild variant="primary">
-        <Link to="/new">Run on new scans</Link>
-      </Button>
-    </div>
-  );
-
   let body: React.ReactNode;
   // A failed refetch keeps what is on screen; only a first load that fails shows the error.
   if (studies.isError && !studies.data) {
     body = (
-      <ErrorState title="Couldn't load your studies" onRetry={() => void studies.refetch()}>
+      <ErrorState
+        className="m-6"
+        title="Couldn't load your studies"
+        onRetry={() => void studies.refetch()}
+      >
         Check your connection, then try again.
       </ErrorState>
     );
   } else if (!studies.data) {
-    body = <LoadingState label="Loading your studies" />;
+    body = <LoadingState label="Loading your studies" className="py-2" />;
   } else if (studies.data.length === 0) {
     body = (
-      <EmptyState title="No studies yet" className="rounded-lg border border-border bg-card">
-        Drop one scan or a whole study's scans, with your sample sheet if you have one.
+      <EmptyState title="No studies yet">
+        Run on new scans: one scan, or a whole study's with your sample sheet.
       </EmptyState>
     );
   } else {
@@ -102,8 +86,21 @@ export function HomePage() {
   }
 
   return (
-    <div className="mx-auto grid w-full max-w-[1040px] content-start gap-8 px-6 pt-7 pb-16 max-[760px]:px-4">
-      {header}
+    <div className="shrink-0">
+      <ShellHeading>
+        <Breadcrumb current="Home" />
+      </ShellHeading>
+      <PageHead
+        title="Home"
+        actions={
+          <Button asChild variant="primary">
+            <Link to="/new">
+              <Plus aria-hidden />
+              Run on new scans
+            </Link>
+          </Button>
+        }
+      />
       {body}
     </div>
   );
@@ -111,14 +108,15 @@ export function HomePage() {
 
 function Dashboard({ views }: { views: StudyView[] }) {
   const needs = views.flatMap(needsYou);
-  const running = views.filter((v) => v.study.newestRuns.some(isLive));
+  const running = views.flatMap((v) =>
+    v.study.newestRuns.filter(isLive).map((run) => ({ run, study: v.one ? null : v.study })),
+  );
   return (
     <>
-      <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] items-start gap-6 max-[860px]:grid-cols-1">
+      <div className="grid grid-cols-2 gap-px border-b border-border bg-border max-[860px]:grid-cols-1">
         <Box
           title="Needs you"
           count={needs.length > 0 && <Count tone="check">{needs.length}</Count>}
-          className={BOXED}
         >
           {needs.length > 0 ? (
             <List columns="auto" label="Needs you">
@@ -130,11 +128,14 @@ function Dashboard({ views }: { views: StudyView[] }) {
             </EmptyState>
           )}
         </Box>
-        <Box title="Running" className={BOXED}>
+        <Box
+          title="Running"
+          count={running.length > 0 && <Count tone="running">{running.length}</Count>}
+        >
           {running.length > 0 ? (
-            <List columns="10rem" label="Running">
-              {running.map((v) => (
-                <RunningRow key={v.study.id} view={v} />
+            <List columns="auto" label="Running">
+              {running.map(({ run, study }) => (
+                <RunningRow key={run.runId} run={run} study={study} />
               ))}
             </List>
           ) : (
@@ -147,42 +148,19 @@ function Dashboard({ views }: { views: StudyView[] }) {
   );
 }
 
-/** Home's boxes stand alone on the page, so each draws its own frame. */
-const BOXED = "overflow-hidden rounded-lg border border-border";
-
-/** A study's row as a link through the router. */
-const linkTo = (href: string) => (props: LinkRenderProps) => <Link to={href} {...props} />;
-
-/** A study's one "Needs you" row, or none. Example studies are read-only, so they ask nothing. */
+/**
+ * A study's one "Needs you" row, or none: what waits for the researcher in a sentence, the
+ * number to check (or what stopped) beside it, and the row opens the study (a study of one, its
+ * scan). Example studies are read-only, so they ask nothing.
+ */
 function needsYou(v: StudyView): React.ReactNode[] {
   const { study, one } = v;
   if (study.example) return [];
-  const row = (tone: "check" | "destructive", detail: string, action: string, to: string) => (
-    <Row
-      key={study.id}
-      title={one ? one.inputName : study.name}
-      subtitle={
-        <span className={tone === "check" ? "text-check" : "text-destructive"}>{detail}</span>
-      }
-      cells={[
-        <Button key="action" asChild size="sm">
-          <Link to={to}>{action}</Link>
-        </Button>,
-      ]}
-    />
-  );
-  if (one) {
-    if (one.state.status === "ended" && one.state.outcome === "failed")
-      return [
-        row("destructive", one.state.error ?? "The run failed.", "See what happened", v.href),
-      ];
-    if (one.state.status === "awaiting-keys")
-      return [row("check", "Waiting for your keys to carry on.", "Add your keys", v.href)];
-    if (study.toCheck > 0) return [row("check", `${study.toCheck} to check`, "Check", v.href)];
-    return [];
-  }
+  const runs = one ? [one] : study.newestRuns;
+  const failures = runs.filter(failed);
+  const keys = runs.filter((r) => r.state.status === "awaiting-keys");
   const parts: string[] = [];
-  if (study.toCheck > 0) {
+  if (study.toCheck > 0 && !one) {
     // `toCheck` sums each scan's newest completed run, which `newestRuns` lacks for a scan
     // rerunning; the scan count is exact only when the newest runs hold every open check.
     const open = study.newestRuns.filter((r) => (r.review?.remainingToCheck ?? 0) > 0);
@@ -193,71 +171,81 @@ function needsYou(v: StudyView): React.ReactNode[] {
         : `${study.toCheck} to check.`,
     );
   }
-  const failures = study.newestRuns.filter(failed);
   if (failures.length > 0)
     parts.push(
-      `${plural(failures.length, "run")} failed: ${failures.map((r) => r.inputName).join(", ")}.`,
+      one
+        ? "The run stopped before it finished."
+        : `${plural(failures.length, "scan")} stopped: ${failures.map((r) => r.inputName).join(", ")}.`,
     );
-  const keys = study.newestRuns.filter((r) => r.state.status === "awaiting-keys").length;
-  if (keys > 0) parts.push(`${plural(keys, "run")} waiting for your keys.`);
-  if (parts.length === 0) return [];
+  if (keys.length > 0)
+    parts.push(
+      one
+        ? "Paused until you add your API key."
+        : `${plural(keys.length, "scan")} paused until you add your API key.`,
+    );
+  if (parts.length === 0 && study.toCheck === 0) return [];
+  const cell =
+    study.toCheck > 0 ? (
+      <StatusMark status="check" label={`${study.toCheck} to check`} />
+    ) : failures.length > 0 ? (
+      <StatusMark status="stopped" />
+    ) : (
+      <StatusMark status="paused" label="Needs your keys" />
+    );
   return [
-    row(failures.length > 0 ? "destructive" : "check", parts.join(" "), "Open the study", v.href),
+    <RowLink
+      key={study.id}
+      to={linkTo(v.href)}
+      title={one ? one.inputName : study.name}
+      subtitle={parts.join(" ") || undefined}
+      cells={[cell]}
+    />,
   ];
 }
 
-function RunningRow({ view: v }: { view: StudyView }) {
-  const { study, one, progress } = v;
-  let detail: string;
-  if (one) {
-    detail =
-      one.state.status === "queued"
-        ? one.state.position === 1
-          ? "Starts next"
-          : `Waiting, place ${one.state.position} in line`
-        : one.state.status === "awaiting-keys"
-          ? "Waiting for your keys"
-          : "Running";
-  } else {
-    const live = study.newestRuns.filter(isLive);
-    const running = live.filter((r) => r.state.status === "running").length;
-    const waiting = live.length - running;
-    detail = [
-      running > 0 && `${running} running`,
-      waiting > 0 && `${waiting} waiting`,
-      study.scanCount > study.newestRuns.length &&
-        `${study.scanCount - study.newestRuns.length} not started`,
-    ]
-      .filter(Boolean)
-      .join(", ");
-  }
+/** A live run: its scan, its study (unless it is a study of one), and where it stands. */
+function RunningRow({ run, study }: { run: StudyRunSummary; study: StudySummary | null }) {
   return (
     <RowLink
-      to={linkTo(v.href)}
-      title={one ? one.inputName : study.name}
-      subtitle={detail}
-      cells={[<DoneBar key="bar" {...progress} />]}
+      to={linkTo(runHref(run))}
+      title={run.inputName}
+      subtitle={study?.name}
+      cells={[<StatusMark key="s" {...liveStatus(run)} />]}
     />
   );
 }
 
-/** Scans (or a live run's tasks) done, out of all of them. */
-function DoneBar({ done, total }: { done: number; total: number }) {
-  const states: Status[] = Array.from({ length: total }, (_, i) => (i < done ? "done" : "waiting"));
-  return (
-    <Progress look="bar" states={states} label={total > 0 ? `${done} of ${total}` : undefined} />
-  );
+/** One mark per scan of the study: its newest run's state; a scan with no run waits. */
+function scanMarks(study: StudySummary): Status[] {
+  const ran = study.newestRuns.map((r) => runStatus(r).status);
+  return [...ran, ...Array<Status>(Math.max(0, study.scanCount - ran.length)).fill("waiting")];
 }
 
 function StudyTable({ views }: { views: StudyView[] }) {
+  const [density, setDensity] = useState<Density>("comfortable");
   return (
-    <Box title="Studies" className={BOXED}>
+    <Box
+      title="Your studies"
+      count={<Count>{views.length}</Count>}
+      tools={
+        <SegmentedControl<Density>
+          label="Rows"
+          value={density}
+          onValueChange={setDensity}
+          options={[
+            { value: "comfortable", label: "Comfortable" },
+            { value: "compact", label: "Compact" },
+          ]}
+        />
+      }
+    >
       <Table
-        label="Studies"
+        label="Your studies"
+        density={density}
         rows={views}
         rowKey={(v) => v.study.id}
         rowLink={(v) => linkTo(v.href)}
-        className="rounded-none border-0"
+        className="rounded-none border-x-0 border-b-0"
         columns={[
           {
             key: "study",
@@ -265,25 +253,34 @@ function StudyTable({ views }: { views: StudyView[] }) {
             cell: (v) => (
               <>
                 <span className="block truncate">{v.one ? v.one.inputName : v.study.name}</span>
-                <span className="block truncate text-sm font-normal text-fg-subtle">
-                  {v.study.scanCount === 1 ? "One scan" : plural(v.study.scanCount, "scan")}
-                  {v.study.example && ", an example"}
-                </span>
+                {density === "comfortable" && (
+                  <span className="block truncate text-sm font-normal text-fg-subtle">
+                    {v.study.scanCount === 1 ? "One scan" : plural(v.study.scanCount, "scan")}.{" "}
+                    {workflowById(v.study.workflowId)?.name ?? v.study.workflowId}
+                    {v.study.example && ". An example"}
+                  </span>
+                )}
               </>
             ),
           },
           {
-            key: "progress",
-            header: "Progress",
+            key: "scans",
+            header: "Scans, one mark each",
+            cell: (v) => <Progress states={scanMarks(v.study)} className="max-w-60" />,
+          },
+          {
+            key: "finished",
+            header: "Finished",
+            align: "end",
             cell: (v) => (
-              <span className="flex min-w-28 items-center gap-2.5">
-                <DoneBar {...v.progress} />
+              <span className="text-sm whitespace-nowrap tabular-nums">
+                {v.study.scansCompleted} of {v.study.scanCount}
               </span>
             ),
           },
           {
             key: "status",
-            header: "Status",
+            header: "Needs you",
             cell: (v) => {
               const chip = studyStatus({
                 scans: v.study.scanCount,
@@ -292,25 +289,6 @@ function StudyTable({ views }: { views: StudyView[] }) {
               });
               return <StatusMark {...chip} />;
             },
-          },
-          {
-            key: "workflow",
-            header: "Workflow",
-            cell: (v) => (
-              <span className="text-sm text-muted-foreground">
-                {workflowById(v.study.workflowId)?.name ?? v.study.workflowId}
-              </span>
-            ),
-          },
-          {
-            key: "activity",
-            header: "Last activity",
-            align: "end",
-            cell: (v) => (
-              <span className="text-sm whitespace-nowrap text-muted-foreground">
-                {relativeDay(v.study.lastActivityAt)}
-              </span>
-            ),
           },
         ]}
       />

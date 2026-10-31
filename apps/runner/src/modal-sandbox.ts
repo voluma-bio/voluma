@@ -18,9 +18,9 @@
  *   writable: commands run as root, and a sandbox cannot remount or `chattr` a path or run as
  *   another user and still write the mounts; the bucket is mounted at a private path under
  *   /staged for the copy.
- * - Network follows the spec: none (`blockNetwork`), or HTTPS to the listed hosts only
- *   (`outboundDomainAllowlist`; probed on 0.11.1: plain HTTP, other hosts and IPs are refused,
- *   but DNS lookups of any name still resolve).
+ * - Network follows the spec: none (`blockNetwork`), TLS SNI allowlist
+ *   (`outboundDomainAllowlist`, vulnerable to shared-edge Host routing), or one dedicated
+ *   IPv4 (`outboundCidrAllowlist`, /32, any protocol). Allowlists still permit DNS (#236).
  * - Each sandbox gets a fresh name and the tags `{run, name, claim, startedAt}` (`startedAt` is epoch
  *   ms; the SDK exposes no creation time, and `sandboxes:clean` reports age from it). Modal limits
  *   a name to 64 characters, so the Modal name is `<spec.name>.<8 hex>` without the run id (the
@@ -31,6 +31,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { isIPv4 } from "node:net";
 import { setTimeout } from "node:timers/promises";
 import {
   type CreateSandbox,
@@ -277,11 +278,12 @@ export function createModalSandbox(config: ModalSandboxConfig): CreateSandbox {
       cloudBucketMounts,
       timeoutMs: spec.lifetimeSeconds * 1000,
       idleTimeoutMs: spec.idleSeconds === undefined ? undefined : spec.idleSeconds * 1000,
-      // Mounts are set up outside the sandbox, so they work with either policy (probed:
-      // writes too). Modal then refuses everything but HTTPS to the listed hosts.
+      // Do not combine allowlists: Modal treats them as a union, reopening domain fronting.
       ...(spec.network.kind === "none"
         ? { blockNetwork: true }
-        : { outboundDomainAllowlist: spec.network.hosts }),
+        : spec.network.kind === "ipv4"
+          ? { outboundCidrAllowlist: [`${spec.network.address}/32`] }
+          : { outboundDomainAllowlist: spec.network.hosts }),
     });
     const sandbox = new ModalSandboxAdapter(modal, spec);
     try {
@@ -575,12 +577,15 @@ function validate(spec: SandboxSpec): void {
       throw new Error(`${name} must be a positive integer`);
     }
   }
-  // The role fixes the network: only a worker may reach out, and only to hosts.
-  if (spec.network.kind === "hosts") {
+  // The role fixes the network: only a worker may reach out.
+  if (spec.network.kind !== "none") {
     if (spec.role !== "worker")
       throw new Error(`a ${spec.role} sandbox cannot have network access`);
-    if (spec.network.hosts.length === 0) {
+    if (spec.network.kind === "hosts" && spec.network.hosts.length === 0) {
       throw new Error("a sandbox with a host allowlist needs at least one host");
+    }
+    if (spec.network.kind === "ipv4" && !isIPv4(spec.network.address)) {
+      throw new Error("a sandbox IPv4 allowlist needs one IPv4 address (no CIDR)");
     }
   }
   // The Modal name is `<name>.<8 hex>`, and Modal refuses one over 64 characters.
