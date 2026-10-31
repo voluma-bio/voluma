@@ -11,6 +11,7 @@
  * end of a run, which depend on why it ends (the lease, the report): `drain` the conversion queue,
  * `close` the sandboxes.
  */
+import type { RunEvent } from "@voluma/contracts/events";
 import type { Folded } from "@voluma/contracts/fold";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
@@ -29,6 +30,7 @@ import { type AgentRole, type LoopConfig, type ModelSetup, runLoop } from "./run
 import { type SandboxSession, sandboxSession } from "./sandbox-session";
 import { type Gateway, type SandboxSettings, specOf } from "./sandbox-specs";
 import { type PlanTask, taskRuntime } from "./task-runtime";
+import { threadIdOf } from "./thread-id";
 import { threadLog } from "./thread-log";
 import { threads } from "./threads";
 import { buildTools } from "./tools/registry";
@@ -114,12 +116,13 @@ function grantsOf(def: WorkflowDefinition, gateway: boolean): Record<AgentRole, 
 
 const ROOT_NAME = "supervisor";
 
-/** The run's root thread. Ids are minted here and in `run-loop.ts`; the sites that still parse one are those #312 deferred (ingest `inRun`, ops `run-dump.ts`, `seed-example.ts`, `backfill.ts`). */
-export const rootThreadIdOf = (runId: string) => `${runId}.${ROOT_NAME}`;
+/** The run's root thread: the one its log already holds (an older run's id is not minted), else the id a new run mints. */
+export const rootThreadOf = (runId: string, log: readonly RunEvent[]) =>
+  threadLog(log).root.id ?? threadIdOf(runId, ROOT_NAME);
 
 export function superviseRun(options: SuperviseRunOptions): Supervised {
   const { runId, recorder, definition, signal } = options;
-  const rootThreadId = rootThreadIdOf(runId);
+  const rootThreadId = rootThreadOf(runId, recorder.events());
   const grants = grantsOf(definition, options.gateway !== undefined);
   const copyInputs = new Set(definition.files.tasks.filter((t) => t.copyInputs).map((t) => t.id));
   const layout = runLayout({

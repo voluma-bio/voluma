@@ -3,8 +3,8 @@
  *   pnpm --filter @voluma/api seed:example --from <runId> [--id <exampleRunId>] [--backfill <dir|r2:prefix>] [--remote]
  * Reads DATABASE_URL (else this worktree's `pnpm dev` database), GUEST_ORGANIZATION_ID (the Demo organization) and the R2 settings (the repo .env, or the host's variables).
  *
- * The example gets the source's events and history under its own run id (thread
- * ids are `<runId>.…`, so they are renamed), `startedBy: "voluma-examples"`, `example: true`,
+ * The example gets the source's events and history under its own run id (event ids, thread ids
+ * and payloads are copied verbatim: rows are keyed by run), `startedBy: "voluma-examples"`, `example: true`,
  * and the Demo org's reference-scan input. It belongs to its own study of one scan
  * (`study-<exampleId>`, `example: true`), replaced with it. The source's evidence, review assets, message snapshots (`scratch/person/`) and `outputs/` objects in R2 are copied
  * under the example's own prefix (`evidenceKey` builds a key from the run being read, so an
@@ -23,7 +23,7 @@ import {
   scratchPrefix,
 } from "@voluma/contracts/r2";
 import { deletePrefix } from "@voluma/object-store";
-import { asc, eq, type SQL, sql } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import {
@@ -118,30 +118,13 @@ if (existing && !(existing.example && existing.startedBy === EXAMPLES_OPERATOR))
   throw new Error(`run ${exampleId} exists and is not an example; pick another --id`);
 }
 
-// Ids of events that payloads point at (`attemptId`, `askId`, …) are prefixed along with the events.
+// A copy keeps every event id, thread id and payload verbatim; only `run_id` changes.
 const sourceEvents = await db
   .select()
   .from(events)
   .where(eq(events.runId, source))
   .orderBy(asc(events.seq));
-const eventIds = new Set(sourceEvents.map((e) => e.id.replaceAll(`${source}.`, `${exampleId}.`)));
-const renameIds = (value: unknown): unknown => {
-  if (typeof value === "string") return eventIds.has(value) ? `${exampleId}:${value}` : value;
-  if (Array.isArray(value)) return value.map(renameIds);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, renameIds(v)]));
-  }
-  return value;
-};
-const renamed = sourceEvents.map(({ seq: _seq, ...event }) => ({
-  ...event,
-  id: `${exampleId}:${event.id.replaceAll(`${source}.`, `${exampleId}.`)}`,
-  runId: exampleId,
-  threadId: `${exampleId}${event.threadId.slice(source.length)}`,
-  payload: renameIds(
-    JSON.parse(JSON.stringify(event.payload).replaceAll(`"${source}.`, `"${exampleId}.`)),
-  ) as typeof event.payload,
-}));
+const renamed = sourceEvents.map(({ seq: _seq, ...event }) => ({ ...event, runId: exampleId }));
 
 const copied = await copyPrefix(evidencePrefix);
 const copiedReview = await copyPrefix(reviewAssetPrefix, { replace: true });
@@ -207,10 +190,9 @@ await db.transaction(async (tx) => {
   for (let i = 0; i < numbered.length; i += 500) {
     await tx.insert(events).values(numbered.slice(i, i + 500));
   }
-  const rename = (text: SQL) => sql`${exampleId} || substr(${text}, ${source.length + 1})`;
   await tx.execute(sql`
     INSERT INTO pi_messages (run_id, thread_id, idx, message)
-    SELECT ${exampleId}, ${rename(sql`thread_id`)}, idx, message
+    SELECT ${exampleId}, thread_id, idx, message
     FROM pi_messages WHERE run_id = ${source}`);
 });
 

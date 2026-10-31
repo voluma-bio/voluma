@@ -36,6 +36,8 @@ export const call = (name: string, input: unknown = {}): Call => ({ name, input 
 /** One model request: the thread asking and what its history holds. */
 export interface Turn {
   thread: string;
+  /** The thread's name from its `thread.started` (`t1.worker`, `main.2`). */
+  name: string | undefined;
   /** The thread's role and, for a worker or checker, its task. */
   role: "main" | "worker" | "check";
   task: string | undefined;
@@ -74,7 +76,7 @@ const textOf = (content: unknown): string =>
 
 function turnOf(
   messages: any[],
-  who: Pick<Turn, "thread" | "role" | "task">,
+  who: Pick<Turn, "thread" | "name" | "role" | "task">,
   signal: AbortSignal | undefined,
 ): Turn {
   const lastUserIdx = messages.map((m) => m.role).lastIndexOf("user");
@@ -236,7 +238,8 @@ export function world(o: WorldOptions) {
       const thread = options?.sessionId as string;
       const started = stored.find((e) => e.type === "thread.started" && e.threadId === thread);
       const task = started?.type === "thread.started" ? started.payload.task : undefined;
-      const turn = turnOf(ctx.messages as any[], { thread, role, task }, options?.signal);
+      const name = started?.type === "thread.started" ? started.payload.name : undefined;
+      const turn = turnOf(ctx.messages as any[], { thread, name, role, task }, options?.signal);
       const reply = await script(turn);
       if (reply === undefined)
         throw new Error(`no scripted reply for ${turn.thread} (${turn.steps} steps)`);
@@ -450,15 +453,14 @@ export function world(o: WorldOptions) {
     },
     /** The log as one line per event, for a failure message. */
     text(): string {
-      return stored.map((e) => line(e)).join("\n");
+      return stored.map((e) => line(e, stored)).join("\n");
     },
   };
 }
 
-const short = (id: string) => id.replace(`${RUN}.`, "");
-
-function line(e: RunEvent): string {
-  const who = short(e.threadId);
+function line(e: RunEvent, stored: readonly RunEvent[]): string {
+  const started = stored.find((s) => s.type === "thread.started" && s.threadId === e.threadId);
+  const who = started?.type === "thread.started" ? started.payload.name : e.threadId;
   switch (e.type) {
     case "task":
       return `${who} task ${e.payload.taskId} ${e.payload.status} (${e.payload.by.kind === "rule" ? e.payload.by.rule : e.payload.by.kind})`;

@@ -10,6 +10,7 @@ import type { Folded, FoldedTask } from "@voluma/contracts/fold";
 import type { Mark } from "@voluma/contracts/messages";
 import type { ClaimEndReason } from "@voluma/contracts/runner";
 import {
+  askRef,
   type Notice,
   openAsk,
   type ThreadLog,
@@ -141,7 +142,7 @@ export const roleModelUnset = (role: string, alias: string) =>
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}…` : text);
 
 export function noticeLine(n: Notice): string {
-  const who = n.taskId ? `${n.threadId} (${n.taskId})` : n.threadId;
+  const who = n.taskId ? `${n.threadName} (${n.taskId})` : n.threadName;
   switch (n.kind) {
     case "submitted":
       return `- ${who} submitted ${n.taskId}; its check is starting.`;
@@ -150,7 +151,7 @@ export function noticeLine(n: Notice): string {
     case "failed":
       return `- ${who} failed: ${clip(n.error, REPLY_MAX)}`;
     case "ask":
-      return `- ${who} asks (askId ${n.eventId}): "${n.question}" Reply with \`answer\`.`;
+      return `- ${who} asks (askId ${askRef(n.threadName, n.threadId, n.eventId)}): "${n.question}" Reply with \`answer\`.`;
     case "stale":
       return `- ${n.taskId} is stale: ${n.reason}`;
     case "stopped":
@@ -301,7 +302,7 @@ export function agentsList(
         : state;
     const last = r.lastSummary;
     return [
-      `- ${r.id} (${r.role}, ${r.taskId}): ${label}${last ? `. Last checkpoint: ${last}` : ""}`,
+      `- ${r.name} (${r.role}, ${r.taskId}): ${label}${last ? `. Last checkpoint: ${last}` : ""}`,
     ];
   });
   return lines.length > 0 ? lines.join("\n") : "(none)";
@@ -387,7 +388,7 @@ export function interruptedResult(
   if (written) {
     const what =
       tool === "start_worker" || tool === "start_agent"
-        ? ` Worker ${written.threadId} was started.`
+        ? ` Worker ${d.threads.get(written.threadId)?.name ?? ""} was started.`
         : "";
     return `\`${tool}\` completed before the run was cut off.${what}`;
   }

@@ -30,7 +30,15 @@ import {
 } from "../messages";
 import type { Recorder } from "../recorder";
 import { Refusal, type TaskRuntime } from "../task-runtime";
-import { startedFor, type ThreadLog, type ThreadState, threadLog } from "../thread-log";
+import {
+  askRef,
+  startedFor,
+  type ThreadLog,
+  type ThreadRecord,
+  type ThreadState,
+  threadByRef,
+  threadLog,
+} from "../thread-log";
 import { effectId } from "./effects";
 import { finish, result } from "./task-tools";
 import type { Tool, ToolContext } from "./tool";
@@ -107,13 +115,13 @@ export function mainTools(deps: MainDeps) {
       });
   }
 
-  const workerOf = (d: ThreadLog, threadId: string) => {
-    const r = d.threads.get(threadId);
+  const workerOf = (d: ThreadLog, ref: string) => {
+    const r = threadByRef(d.threads, ref);
     if (r?.role !== "worker") {
       throw new Refusal(
         r?.role === "check"
-          ? `${threadId} is a checker: answer its question with \`answer\`.`
-          : `${threadId} is not a worker of this run.`,
+          ? `${ref} is a checker: answer its question with \`answer\`.`
+          : `${ref} is not a worker of this run.`,
       );
     }
     return r;
@@ -144,7 +152,7 @@ export function mainTools(deps: MainDeps) {
     });
     if (live) {
       throw new Refusal(
-        `${taskId} has a worker, ${live.id} (${agents.state(d, live.id)}): use \`message\` to steer or resume it, or \`stop_worker\` first${d.threads.get(live.id)?.end?.status === "failed" ? ` (a worker that failed keeps its history; for a fresh one, \`stop_worker\` then \`${tool}\`)` : ""}.`,
+        `${taskId} has a worker, ${live.name} (${agents.state(d, live.id)}): use \`message\` to steer or resume it, or \`stop_worker\` first${d.threads.get(live.id)?.end?.status === "failed" ? ` (a worker that failed keeps its history; for a fresh one, \`stop_worker\` then \`${tool}\`)` : ""}.`,
       );
     }
     if (t?.status === "under-review") throw new Refusal(`${taskId} is under review.`);
@@ -159,7 +167,8 @@ export function mainTools(deps: MainDeps) {
       spawnedBy: ctx.toolCallId,
       startedEventId: effectId(tool, ctx.threadId, ctx.toolCallId),
     });
-    return { message: `Worker ${threadId} started on ${taskId}.`, threadId };
+    const name = log().threads.get(threadId)?.name ?? "";
+    return { message: `Worker ${name} started on ${taskId}.` };
   }
 
   const TASK_START =
@@ -194,17 +203,21 @@ export function mainTools(deps: MainDeps) {
     name: "message",
     description:
       "Send a message to a worker. A running worker gets it in its current turn; an idle one is resumed with it. On a task whose check rejected it, the message is your feedback: it opens a new attempt for the same worker, which fixes the task, reports its outputs again and submits. Refused for a checker (use `answer`), a stopped worker, or a task that used its fix rounds.",
-    input: z.object({ threadId: nonEmpty, text: nonEmpty }),
+    input: z.object({
+      threadId: nonEmpty.describe("The worker's name, as the agents list shows it."),
+      text: nonEmpty,
+    }),
     sequential: true,
     execute: (input, ctx) =>
       result(async () => {
         main(ctx, true);
-        const { threadId, text } = input;
+        const { threadId: ref, text } = input;
         const sender: UserSender = { kind: "thread", threadId: ctx.threadId };
         const before = log();
-        const w = workerOf(before, threadId);
+        const w = workerOf(before, ref);
+        const threadId = w.id;
         if (agents.state(before, threadId) === "stopped") {
-          throw new Refusal(`${threadId} was stopped; start a new worker for ${w.taskId}.`);
+          throw new Refusal(`${w.name} was stopped; start a new worker for ${w.taskId}.`);
         }
         if (agents.fixLimitReached(before, w.taskId)) {
           throw new Refusal(`${w.taskId} has used its fix rounds; it stays as it is.`);
@@ -213,7 +226,7 @@ export function mainTools(deps: MainDeps) {
           agents.state(before, threadId) === "running" &&
           agents.steer(threadId, fromMain(text), sender)
         ) {
-          return { message: `Delivered to ${threadId}, which is running.` };
+          return { message: `Delivered to ${w.name}, which is running.` };
         }
         // A thread that just ended is not running a moment later; its end is stored by then.
         await agents.settled(threadId);
@@ -221,11 +234,10 @@ export function mainTools(deps: MainDeps) {
         const done = await runtime.section(async () => {
           main(ctx, true);
           const d = log();
-          workerOf(d, threadId);
-          if (agents.state(d, threadId) === "stopped")
-            throw new Refusal(`${threadId} was stopped.`);
+          workerOf(d, ref);
+          if (agents.state(d, threadId) === "stopped") throw new Refusal(`${w.name} was stopped.`);
           if (agents.state(d, threadId) === "running") {
-            throw new Refusal(`${threadId} is running again; send the message once more.`);
+            throw new Refusal(`${w.name} is running again; send the message once more.`);
           }
           const t = runtime.taskOf(w.taskId);
           // A task its check rejected, or one the researcher said go on that is finished (done, or left
@@ -247,8 +259,8 @@ export function mainTools(deps: MainDeps) {
           );
           return {
             message: feedback
-              ? `Feedback sent: ${threadId} resumed on a new attempt of ${w.taskId}.`
-              : `${threadId} resumed with your message.`,
+              ? `Feedback sent: ${w.name} resumed on a new attempt of ${w.taskId}.`
+              : `${w.name} resumed with your message.`,
           };
         });
         agents.changed();
@@ -276,17 +288,18 @@ export function mainTools(deps: MainDeps) {
     description:
       "Stop a worker for good: it is never resumed. If it was working on its task, the task goes back to pending with your reason; its attempt is kept. Start a new worker on the task to redo it.",
     input: z.object({
-      threadId: nonEmpty,
+      threadId: nonEmpty.describe("The worker's name, as the agents list shows it."),
       reason: nonEmpty.describe(
         "One plain line for the researcher, with no mention of workers, checkers, agents, threads or task ids.",
       ),
     }),
     sequential: true,
-    execute: inSection(async ({ threadId, reason }, ctx) => {
+    execute: inSection(async ({ threadId: ref, reason }, ctx) => {
       const d = log();
-      const w = workerOf(d, threadId);
+      const w = workerOf(d, ref);
+      const threadId = w.id;
       if (agents.state(d, threadId) === "stopped")
-        throw new Refusal(`${threadId} is already stopped.`);
+        throw new Refusal(`${w.name} is already stopped.`);
       const t = runtime.taskOf(w.taskId);
       const working = t?.status === "in-progress" && d.holders.get(w.taskId) === threadId;
       await runtime.stop(threadId, effectId("stop_worker", ctx.threadId, ctx.toolCallId));
@@ -301,7 +314,7 @@ export function mainTools(deps: MainDeps) {
           AGENT,
         );
       }
-      return { message: `${threadId} stopped.${working ? ` ${w.taskId} is pending again.` : ""}` };
+      return { message: `${w.name} stopped.${working ? ` ${w.taskId} is pending again.` : ""}` };
     }, true),
   };
 
@@ -325,11 +338,16 @@ export function mainTools(deps: MainDeps) {
       result(async () => {
         main(ctx);
         const asker = (d: ThreadLog) => {
+          // The exact stored id (asks open in earlier runs), else the form models are shown.
+          const named = (x: ThreadRecord, a: { id: string }) =>
+            a.id === input.askId || askRef(x.name, x.id, a.id) === input.askId;
           const r = [...d.threads.values()].find(
-            (x) => x.role === "check" && x.asks.some((a) => a.id === input.askId),
+            (x) => x.role === "check" && x.asks.some((a) => named(x, a)),
           );
           if (r?.role !== "check") throw new Refusal(`No checker asked ${input.askId}.`);
-          if (r.asks.find((a) => a.id === input.askId)?.answer) {
+          const ask = r.asks.find((a) => named(r, a));
+          if (!ask) throw new Refusal(`No checker asked ${input.askId}.`);
+          if (ask.answer) {
             throw new Refusal(`${input.askId} is already answered.`);
           }
           const t = runtime.taskOf(r.taskId);
@@ -340,9 +358,9 @@ export function mainTools(deps: MainDeps) {
           ) {
             throw new Refusal(`The check that asked ${input.askId} is over.`);
           }
-          return r;
+          return { r, ask };
         };
-        const target = asker(log());
+        const target = asker(log()).r;
         const caller = {
           threadId: ctx.threadId,
           toolCallId: ctx.toolCallId,
@@ -356,19 +374,19 @@ export function mainTools(deps: MainDeps) {
         );
         const done = await runtime.section(async () => {
           main(ctx);
-          const r = asker(log());
+          const { r, ask } = asker(log());
           await recorder.append(
             ctx.threadId,
             "answer",
             {
               checkThreadId: r.id,
-              askId: input.askId,
+              askId: ask.id,
               text: input.text,
               ...(files.length > 0 && { files }),
             },
             effectId("answer", ctx.threadId, ctx.toolCallId),
           );
-          return { message: `Answer recorded; ${r.id} resumes with it.` };
+          return { message: `Answer recorded; ${r.name} resumes with it.` };
         });
         agents.changed();
         return done;
@@ -559,7 +577,7 @@ export function mainTools(deps: MainDeps) {
             ...(d.undelivered.some((n) => n.kind === "person") ? [UNDELIVERED] : []),
             ...(d.unanswered ? [UNANSWERED] : []),
             ...(d.go && !d.go.redone ? [goNotActedOn(d.go.taskId)] : []),
-            ...running.map((r) => `${r.id} (${r.role}, ${r.taskId}) is still running.`),
+            ...running.map((r) => `${r.name} (${r.role}, ${r.taskId}) is still running.`),
             ...unfinished(view).map((t) =>
               t.status === "pending"
                 ? `${t.id} has not run: start a worker on it, or skip it with a reason.`
