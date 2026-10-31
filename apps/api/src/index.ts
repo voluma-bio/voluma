@@ -151,7 +151,7 @@ const queue = pgRunQueue(
 );
 const eventLog = pgEventLog(db, notifier);
 
-const runRecords = pgRunRecords(db, notifier);
+const runRecords = pgRunRecords(db, notifier, results);
 
 /** R2, optional as a group: without it the reference download, run files and scan uploads are 503s. */
 const r2Env = {
