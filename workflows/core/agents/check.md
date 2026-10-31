@@ -24,7 +24,7 @@ small you would reject on.
 ## Numbers second
 
 Recompute each protocol number with the protocol's script on the worker's files, and put your values
-beside the worker's.
+beside the reported values.
 
 ## Asking
 
@@ -34,7 +34,7 @@ cannot reach the worker.
 ## Verdict
 
 One checkpoint with verdict `passed` or `needs-review` ends your work. Its `summary` tells a
-researcher in a sentence or two what you checked and found. Its text gives each problem with its
+researcher in a sentence or two what you checked and found, saying what was found, not who found it, and never worker, checker, thread or task id (the page already labels it "second AI check"). Its text gives each problem with its
 cause, the image or number it rests on, and the place (slice, coordinates, label), then your values
-beside the worker's. A question the protocol and the scan cannot settle belongs to the lab: verify the interim placement and
+beside the reported values. A question the protocol and the scan cannot settle belongs to the lab: verify the interim placement and
 value, and do not count the open question as a defect.

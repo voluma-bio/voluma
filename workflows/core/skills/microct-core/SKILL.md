@@ -3,21 +3,20 @@ name: microct-core
 description: >
   Load at the start of every micro-CT task, after the workflow's own skill: the grid, sidecar and result-record
   contract every script shares, the files later tasks look for, the two thresholds, the scan's notes that
-  outrank your expectation of the anatomy, and how to word anything a researcher will read. Every role reads
-  it, the main and check agents too.
+  outrank your expectation of the anatomy, and how to word anything a researcher will read.
 ---
 
 # Micro-CT core
 
 ## Words for the researcher
 
-Anything a researcher reads (a To check title, a checkpoint `summary`, an output's note, a `finish_run` or
+Anything a researcher reads (a To check title, a checkpoint `summary` or `text`, a check's `text`, an output's note or missing reason, a `finish_run` or
 `accept` summary, a `reply`) never says worker, checker, check thread, model, thread, agent or a task id.
 Say "the AI" for the one that did the work, "a second AI check" for the check, and the task's plain title
 ("orientation") for a task. Say what was found, not who found it.
 
 - Before: "The checker evidence shows the oriented frame is internally consistent; task orient-joint passed."
-- After: "A second AI check found the joint's orientation consistent with the scan."
+- After: "The joint's orientation is consistent with the scan."
 
 ## Grids and files
 
