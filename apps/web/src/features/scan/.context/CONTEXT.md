@@ -1,6 +1,6 @@
 # Scan review
 
-One screen, `/scans/:runId` (light shell, dark image wells): one scan's run, live while it goes and for review once
+One screen, `/scans/:runId` (the user's theme, dark image wells): one scan's run, live while it goes and for review once
 it ends. The grid viewer fills the main area; Study, To check, Report and Agents dock on the left, View,
 Marks and The AI on the right (`ShellPanel`s, shortcuts s, t, r, a, v, m, i). Study replaces the left panel
 without navigating; To check keeps its URL selection and panel scroll position when reopened.

@@ -12,18 +12,17 @@
  * screen, and that screen retries by itself.
  */
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { ApiError, getMe, onSignedOut, startGuest } from "@voluma/api-client";
+import { userSettingsQuery } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
+import { DEFAULT_USER_SETTINGS } from "@voluma/contracts/settings";
 import { AppShell, Button, LoadingState, ShellLink } from "@voluma/ui";
 import { House, Workflow } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, Outlet, useLocation, useMatches, useNavigate } from "react-router";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Link, Outlet, useLocation, useNavigate } from "react-router";
 import { AccountMenu, BrandLockup } from "./account";
 import { GateScreen, SignInScreen } from "./sign-in-screen";
-
-/** Static facts a route declares in its `handle`: the shell's theme on that screen. */
-export type RouteHandle = { theme?: "light" | "dark" };
 
 type Session =
   | { state: "loading" }
@@ -131,14 +130,16 @@ function Shell({ me }: { me: Me }) {
     () => new QueryClient({ defaultOptions: { queries: { retry: false } } }),
   );
   useEffect(() => () => queryClient.clear(), [queryClient]);
-  const matches = useMatches();
+  const settings = useQuery(userSettingsQuery(me.userId), queryClient);
+  const theme = settings.data?.theme ?? DEFAULT_USER_SETTINGS.theme;
+  useLayoutEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    return () => {
+      delete document.documentElement.dataset.theme;
+    };
+  }, [theme]);
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  const theme =
-    matches
-      .map((m) => (m.handle as RouteHandle | undefined)?.theme)
-      .filter(Boolean)
-      .at(-1) ?? "light";
   return (
     <QueryClientProvider client={queryClient}>
       <AppShell

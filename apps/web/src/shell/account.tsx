@@ -4,6 +4,7 @@ import type { Me } from "@voluma/contracts/auth";
 import { Button, Menu, MenuHeader, MenuItem, MenuSeparator } from "@voluma/ui";
 import { ChevronDown } from "lucide-react";
 import { useState } from "react";
+import { useNavigate } from "react-router";
 
 // The mark beside the wordmark, as in the mockups' top bar. The mark alone
 // reads as a face at large sizes, so it never appears without the wordmark.
@@ -28,6 +29,7 @@ export function BrandLockup({ className }: { className: string }) {
 export function AccountMenu({ me }: { me: Me }) {
   const who = me.name ?? (me.kind === "member" ? me.email : "Guest");
   const [signOutState, setSignOutState] = useState<"idle" | "pending" | "failed">("idle");
+  const navigate = useNavigate();
   return (
     <Menu
       onOpenChange={(open) => {
@@ -47,6 +49,7 @@ export function AccountMenu({ me }: { me: Me }) {
         )}
       </MenuHeader>
       <MenuSeparator />
+      <MenuItem onSelect={() => navigate("/settings")}>Settings</MenuItem>
       {me.kind === "visitor" ? (
         <MenuItem onSelect={() => signIn(location.pathname + location.search)}>Sign in</MenuItem>
       ) : (

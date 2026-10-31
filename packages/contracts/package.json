@@ -11,6 +11,7 @@
     "./stream": "./src/stream.ts",
     "./task-tools": "./src/task-tools.ts",
     "./auth": "./src/auth.ts",
+    "./settings": "./src/settings.ts",
     "./history": "./src/history.ts",
     "./review": "./src/review.ts",
     "./ruler": "./src/ruler.ts",
