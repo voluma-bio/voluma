@@ -173,8 +173,8 @@ export function mainTools(deps: MainDeps) {
   const TASK_START =
     "`brief` is your message to it: what matters for this task beyond the task text, what earlier tasks settled, where their files are. Refused when a task it builds on has no usable result, when the task already has a live worker, is under review, or has used its fix rounds.";
 
-  // Registered for threads that began with it in their tool list (a run from before `start_agent`
-  // resumes its main agent with the tools it stored); no role file offers it to a new thread.
+  // Registered for threads that began with it in their tool list: a main agent resumes with the
+  // tools it stored, so it stays while any live thread holds it.
   const start_worker: Tool<z.ZodObject<{ taskId: typeof taskIdSchema; brief: z.ZodString }>> = {
     name: "start_worker",
     description: `Start a worker on a task of the plan. ${TASK_START}`,
