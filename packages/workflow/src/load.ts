@@ -3,7 +3,7 @@
  * directory (`workflows/<name>/`) from the runner's checkout into the run's R2 prefix when the
  * run starts (`workflowSnapshotPrefix`), and reads the snapshot, never the checkout, so a
  * resume after a redeploy that changed the files sees what the run began with. IO goes through
- * `WorkflowStore`, so this package holds no S3 client.
+ * an `ObjectStore`, so this package holds no S3 client.
  *
  * Both directories hold skills, `skills/<name>/SKILL.md` with optional `references/` and
  * `resources/`. `core/` also holds the role files, `agents/<role>.md`, the same for every
@@ -14,6 +14,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { workflowFilesSchema } from "@voluma/contracts/workflow-files";
+import { getText, type ObjectStore } from "@voluma/object-store";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import {
@@ -26,17 +27,8 @@ import {
 } from "./definition";
 import { docstringSummary } from "./docstring";
 
-/** The run's snapshot bucket, as the loader needs it. Keys are R2 keys. */
-export interface WorkflowStore {
-  has(key: string): Promise<boolean>;
-  put(key: string, body: Uint8Array): Promise<void>;
-  /** Every key under `prefix`. */
-  list(prefix: string): Promise<string[]>;
-  get(key: string): Promise<string>;
-}
-
 export interface LoadOptions {
-  store: WorkflowStore;
+  store: ObjectStore;
   /** The run's snapshot prefix (`workflowSnapshotPrefix(runId)`). */
   prefix: string;
   /** The checkout the workflows are read from: the repo root. */
@@ -153,7 +145,7 @@ async function* walk(root: string, rel: string): AsyncGenerator<string> {
 }
 
 async function snapshot(dir: string, { store, prefix, root, commit }: LoadOptions) {
-  if (await store.has(`${prefix}${DONE}`)) return;
+  if (await store.head(`${prefix}${DONE}`)) return;
   const put = async (path: string) =>
     store.put(`${prefix}${path}`, await readFile(join(root, path)));
   for (const d of [CORE, dir]) {
@@ -181,7 +173,7 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
   await snapshot(dir, options);
   const { store, prefix } = options;
   const texts = new Map<string, string>();
-  for (const key of await store.list(prefix)) {
+  for (const { key } of (await store.list(prefix)).objects) {
     const path = key.slice(prefix.length);
     if (
       /(^|\/)SKILL\.md$|(^|\/)(outputs|tasks)\.json$|^workflows\/core\/agents\/[^/]+\.md$/.test(
@@ -189,7 +181,7 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
       ) ||
       scriptOf(path)
     )
-      texts.set(path, await store.get(key));
+      texts.set(path, await getText(store, key));
   }
 
   // A snapshot cut before `checker.md` became `check.md` (R2 snapshots are write-once): refused
@@ -303,7 +295,7 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
   }
   return {
     dir,
-    commit: await store.get(`${prefix}${DONE}`),
+    commit: await getText(store, `${prefix}${DONE}`),
     files: files.data,
     skills,
     toolIndex,
