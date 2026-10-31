@@ -21,6 +21,7 @@ describe("taskStates during a correction", () => {
     l.add("run.reopened", "p:1:reopened", `${RUN}.person`, { by: "u" });
     l.revision("sup:1:revision", SUP, { reason: "correction", taskId: "a" });
     l.add("thread.started", "w:restarted", W, {
+      name: "a.worker",
       parentThreadId: "root",
       workflows: [{ repo: "o/w", commit: "a".repeat(40) }],
       kind: "worker",
