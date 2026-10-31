@@ -91,7 +91,8 @@ the one it runs, looking again for about 30 s while traffic moves to the new ins
 different bundle means a deploy: the tab reloads once no pointer is held (a mark being drawn
 finishes first) and no work holds it (`holdLeave`: scan uploads, a start waiting on them, a study
 being created), or goes Home if the failed call was a write, so they see what it made. While a
-hold waits, a mismatching call fails instead of hanging, so held work ends. The AI box keeps its
+hold waits, a write's mismatch fails instead of hanging, so held work ends; a missing chunk waits
+for holds too. The AI box keeps its
 draft in sessionStorage, so typed text survives. The same bundle means the app's own bug, and
 the error shows. A tab
 reloads toward a given bundle at most once, so a failing deploy can't loop.

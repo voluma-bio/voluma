@@ -17,6 +17,9 @@ const RECHECK_MS = [0, 5000, 10_000, 15_000];
 export function followDeploys(running: string) {
   window.addEventListener("vite:preloadError", (event) => {
     if (!claim(`voluma:preload-reload:${running}`)) return;
+    // Under a hold the import fails as it would without this handler (the sheet can't be read),
+    // and the reload waits for the held work.
+    if (holds > 0) return whenIdle(() => window.location.reload());
     event.preventDefault();
     window.location.reload();
   });
@@ -26,13 +29,14 @@ export function followDeploys(running: string) {
   let checking: Promise<boolean> | undefined;
   // A write's mismatch sends the tab Home rather than reloading the form that made it.
   let home = false;
-  // True: the failed call never settles, as the tab leaves now or after a pointer release. Under
-  // a hold the leave may be long off, so the call fails instead: held work that made it can end
-  // (and release its hold) rather than hang forever.
-  const leavingSoon = () => holds === 0;
+  // True: the failed call never settles, so nothing renders an error on the way out. Under a hold
+  // the leave may be long off, and held work waits on its writes (create and complete an upload,
+  // create the study): a write fails instead, so that work can end and release its hold. Reads
+  // keep hanging, so no error screen unmounts the held work.
+  const hang = (error: ContractError) => holds === 0 || !error.write;
   onContractError((error: ContractError) => {
     home ||= error.write;
-    if (found) return Promise.resolve(leavingSoon());
+    if (found) return Promise.resolve(hang(error));
     checking ??= deployed(running).then((entry) => {
       checking = undefined;
       if (!entry || !claim(`voluma:deploy-reload:${entry}`)) {
@@ -44,9 +48,9 @@ export function followDeploys(running: string) {
         if (home) window.location.assign("/");
         else window.location.reload();
       });
-      return leavingSoon();
+      return true;
     });
-    return checking;
+    return checking.then((deploy) => deploy && hang(error));
   });
 }
 
@@ -134,5 +138,6 @@ function trackPointer() {
 /** Runs `leave` now if nothing is busy, else once it isn't. */
 function whenIdle(leave: () => void) {
   if (!busy()) return leave();
-  pending = leave;
+  // A leave already waiting (Home after a write) stands.
+  pending ??= leave;
 }
