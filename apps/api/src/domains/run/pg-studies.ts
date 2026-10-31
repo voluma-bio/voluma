@@ -1,11 +1,11 @@
 /**
  * Postgres adapter for the browser's reads of studies (`@voluma/contracts/study`): Home's
  * list, which carries each scan's newest run in brief, and one study with its scans, runs,
- * values, open checks and each scan's task states. Reads apply the caller's `ReadScope` as
+ * values, open checks and each scan's task states and open items. Reads apply the caller's `ReadScope` as
  * `pg-runs.ts` does, and fold through its `ResultsLoader`, so a run is folded once for both; the
  * scans' values, checks and states are read from each fold here. Writes are the queue's.
  */
-import { taskStates } from "@voluma/contracts/review-state";
+import { shownTasks } from "@voluma/contracts/review-state";
 import type { Run } from "@voluma/contracts/run";
 import type {
   Study,
@@ -78,11 +78,11 @@ function resultOf({ run, results }: RunResult) {
   return { values, toCheck };
 }
 
-/** Every task of a run's latest plan in its state, a correction in progress's own; none before a plan. */
-function taskStateOf({ run, results, correcting, open, failed }: RunResult) {
+/** Every task of a run's latest plan in its state, with its open items; a correction in progress's own. */
+function tasksOf({ run, results, correcting, open, failed }: RunResult) {
   const revision = correcting ?? results.revisions.at(-1);
-  if (!revision) return {};
-  return Object.fromEntries(taskStates(revision, { state: run.state, open, failed }));
+  if (!revision) return { taskState: {}, openItems: {} };
+  return shownTasks(revision, { state: run.state, open, failed });
 }
 
 function summarize(study: Study, scanCount: number, results: RunResult[]): StudySummary {
@@ -196,7 +196,7 @@ export function pgStudyReads(db: PostgresJsDatabase, results: ResultsLoader) {
                 runs: runsOf.get(scan.inputId) ?? [],
                 resultRunId: result?.run.id ?? null,
                 ...(result ? resultOf(result) : { values: {}, toCheck: [] }),
-                taskState: newestRun ? taskStateOf(newestRun) : {},
+                ...(newestRun ? tasksOf(newestRun) : { taskState: {}, openItems: {} }),
               };
             }),
           };

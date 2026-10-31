@@ -81,6 +81,43 @@ export function openCorrectionRevision(events: readonly RunEvent[]) {
     : undefined;
 }
 
+/**
+ * A task's items still open for a person, as the scan review counts them: its checks not yet
+ * accepted, or one for a To check task with none, which the review explains (sent back by the
+ * second AI, values missing, or the AI's own reason) and nobody can accept. A done task can still
+ * carry open checks.
+ */
+export function openItems(task: {
+  status: TaskStatus;
+  checks: readonly { status: string }[];
+}): number {
+  if (task.status === "to-check" && task.checks.length === 0) return 1;
+  return task.checks.filter((check) => check.status !== "accepted").length;
+}
+
+/**
+ * A run's tasks as the scan review shows them, for the study read: each plan task's state
+ * (`taskStates`), and its open items (`openItems`) where it has any. Read the revision a
+ * correction in progress is writing (`openCorrectionRevision`), else the latest.
+ */
+export function shownTasks(
+  revision: {
+    tasks: readonly (StateFacts & { checks: readonly { status: string }[] })[];
+    plan: { tasks: readonly { id: string; dependsOn: readonly string[] }[] };
+  },
+  run: Parameters<typeof taskStates>[1],
+): { taskState: Record<string, TaskState>; openItems: Record<string, number> } {
+  return {
+    taskState: Object.fromEntries(taskStates(revision, run)),
+    openItems: Object.fromEntries(
+      revision.tasks.flatMap((t) => {
+        const n = openItems(t);
+        return n > 0 ? [[t.id, n]] : [];
+      }),
+    ),
+  };
+}
+
 /** What `taskStates` reads of a folded task. */
 export type StateFacts = Pick<FoldedTask, "id" | "status" | "skipped" | "satisfied" | "threads">;
 

@@ -18,18 +18,16 @@
  * To check kinds: items group by task and check title, in workflow task order, then title.
  *
  * Task states: a scan's tasks are where its newest run is (`taskState`), the state the scan
- * review shows, derived once on the server. A workflow task outside that run's plan reads
- * Skipped; with no plan yet, Waiting. A task To check with no open item left reads Done, since
- * its checks were accepted.
+ * review shows, derived once on the server with its open items (`openItems`), counted as the scan
+ * review counts them. A workflow task outside that run's plan reads Skipped; with no plan yet,
+ * Waiting. A task To check with no open item left reads Done, since its checks were accepted.
  */
 import type { StudyDetail, StudyScanDetail, ToCheckItem } from "@voluma/contracts/study";
 import type { OutputEntry } from "@voluma/contracts/workflow-files";
 import {
   groupNames,
   groupOf,
-  isLive,
   itemHref,
-  type NeedItem,
   runHref,
   type ScanGraphTask,
   type StudyGraphTask,
@@ -164,20 +162,13 @@ export function taskState(scan: StudyScanDetail, taskId: string): TaskState {
   return states[taskId] ?? (Object.keys(states).length > 0 ? "skipped" : "waiting");
 }
 
-/** Open checks of the scan's result for one task, counted only while that result is its newest run. */
-function openOn(scan: StudyScanDetail, taskId: string): ToCheckItem[] {
-  if (scan.resultRunId === null || scan.runs[0]?.id !== scan.resultRunId) return [];
-  return scan.toCheck.filter((item) => item.taskId === taskId);
-}
-
 /**
- * A cell of the scan-by-task grid: one task of one scan, and its open checks, read by the one
- * status rule (`shownStatus`). On a live run the study read has no items yet (they belong to the
- * completed result).
+ * A cell of the scan-by-task grid: one task of one scan, and its open items in the newest run,
+ * read by the one status rule (`shownStatus`).
  */
 export function cellOf(scan: StudyScanDetail, taskId: string): { status: Status; open: number } {
-  const open = openOn(scan, taskId).length;
-  return { status: shownStatus(taskState(scan, taskId), open, isLive(scan.runs[0])), open };
+  const open = scan.openItems[taskId] ?? 0;
+  return { status: shownStatus(taskState(scan, taskId), open), open };
 }
 
 /** The workflow at study size: each task with its state on every scan, in study order. */
@@ -196,17 +187,7 @@ export function scanGraph(scan: StudyScanDetail, workflow: BundledWorkflow): Sca
     title: workflow.taskTitle(t.id),
     dependsOn: t.dependsOn,
     state: taskState(scan, t.id),
-    needs: openOn(scan, t.id).map(
-      (item): NeedItem => ({
-        id: item.checkId,
-        taskId: item.taskId,
-        resultRevisionId: item.resultRevisionId,
-        title: item.title,
-        text: item.detail,
-        accepted: false,
-        acceptable: true,
-      }),
-    ),
+    open: scan.openItems[t.id] ?? 0,
     results: workflow.outputs
       .filter((o) => o.task === t.id && o.kind === "measurement")
       .flatMap((o) => {

@@ -31,7 +31,10 @@
  * and holds every measurement the run reported. `taskState` comes from the scan's **newest
  * run**, whatever its state, so the study shows where a live or stopped run is: the state the
  * scan review shows (`taskStates`, review-state.ts), keyed by the run's plan tasks; a workflow
- * task missing from it is outside the run's plan.
+ * task missing from it is outside the run's plan. `openItems` comes from the same run: what the
+ * scan review counts To check, so both screens agree on a task's status (`shownStatus`). It
+ * counts items `toCheck` doesn't list: a live or stopped run's, and a To check task's with no
+ * check (sent back by the second AI).
  *
  * The list is what Home renders: per study its counts and each scan's newest run in brief
  * (`studyRunSummarySchema`), so Home reads no run list.
@@ -156,6 +159,12 @@ export const studyScanDetailSchema = z.object({
    * run's plan (not selected) is absent.
    */
   taskState: z.record(taskIdSchema, taskStateSchema),
+  /**
+   * Task id → its items open for a person in the newest run, as the scan review counts them
+   * (`openItems`): checks not accepted, or one for a To check task with none. Read from the same
+   * revision as `taskState`, whatever the run's state. A task with none is absent.
+   */
+  openItems: z.record(taskIdSchema, z.number().int().positive()),
 });
 export type StudyScanDetail = z.infer<typeof studyScanDetailSchema>;
 
