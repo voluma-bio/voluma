@@ -31,10 +31,12 @@ jobs:
           cache: pnpm
       - uses: astral-sh/setup-uv@v7
       # Nx replays a task whose inputs it has seen, so a run pays only for the projects it touches.
-      # Keyed by commit because a cache entry never updates; restore-keys takes the newest one.
+      # The whole `.nx` goes in: the task cache alone left Nx rebuilding graph and hasher state and
+      # replaying nothing. Keyed by commit because a cache entry never updates; restore-keys takes
+      # the newest one.
       - uses: actions/cache@v6
         with:
-          path: .nx/cache
+          path: .nx
           key: nx-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
             nx-${{ runner.os }}-
