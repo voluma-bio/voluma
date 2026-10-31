@@ -28,6 +28,10 @@ import type { AssetLevel, Zyx } from "./scene";
 /** About 16 M voxels: a level the browser fetches and uploads in a few seconds. */
 const MAX_VOXELS = 2 ** 24;
 
+/** The renderer and surface picker take the same samples along the visible part of a ray. */
+export const volumeSteps = ([nz, ny, nx]: Zyx) =>
+  Math.min(768, Math.ceil(Math.hypot(nx, ny, nz) * 1.5));
+
 /** The finest level small enough to hold whole, else the coarsest. */
 export function volumeLevel(levels: readonly AssetLevel[]): number {
   const fits = levels.findIndex((l) => l.shapeZyx[0] * l.shapeZyx[1] * l.shapeZyx[2] <= MAX_VOXELS);
@@ -75,7 +79,7 @@ export function volumeMesh(
       cameraLocal: { value: new Vector3() },
       localToView: { value: new Matrix4() },
       texelSize: { value: new Vector3(1 / nx, 1 / ny, 1 / nz) },
-      steps: { value: Math.min(768, Math.ceil(Math.hypot(nx, ny, nz) * 1.5)) },
+      steps: { value: volumeSteps(level.shapeZyx) },
       tint: { value: new Color(color) },
     },
     vertexShader,

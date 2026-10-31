@@ -145,8 +145,6 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     streamFn: options.streamFn,
     store: async (row) => {
       const ok = await persistRow(row);
-      // A pending wrap-up warns of a summary that now exists.
-      inbox.splice(0, inbox.length, ...inbox.filter((n) => !n.lapses));
       return ok;
     },
     // The summary was a model call: its usage is spend (`spend.ts` counts assistant `message`s).
@@ -225,7 +223,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
     if (messages.slice(replyAt + 1).every(terminates)) return [];
     if (!historyError && !cutOff()) {
       const notice = compacting.wrapUp(messages);
-      if (notice) inbox.push({ text: notice, sender: NOTICE, lapses: true });
+      if (notice) inbox.push({ text: notice, sender: NOTICE });
     }
     if (inbox.length === 0) return [];
     return inbox.splice(0);
@@ -310,8 +308,7 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
         };
         prompts.push(userMessage([brief], brief.text));
       }
-      // Nothing is running, so a wrap-up notice has nothing to act on.
-      const waiting = inbox.splice(0).filter((n) => !n.lapses);
+      const waiting = inbox.splice(0);
       if (waiting.length > 0) prompts.push(userMessage(waiting));
       const message = prompts.length > 0 ? prompts : undefined;
       if (message === undefined && finished) {
@@ -436,7 +433,6 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
             if (!recovered) break;
             inbox.push({ text: OVERFLOW_NOTE, sender: NOTICE });
           }
-          inbox.splice(0, inbox.length, ...inbox.filter((n) => !n.lapses));
           if (inbox.length === 0) break;
           await agent.prompt(userMessage(inbox.splice(0)));
         }
@@ -479,11 +475,10 @@ export function startThread(options: StartThreadOptions): ThreadHandle {
   };
 }
 
-/** One entry of a thread's inbox. A `lapses` notice only matters while the thread is running a turn. */
+/** One entry of a thread's inbox. */
 interface Notice {
   text: string;
   sender: UserSender;
-  lapses?: true;
 }
 
 const senderLabel = (s: UserSender) =>

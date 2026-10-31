@@ -136,6 +136,7 @@ try {
   } as const;
   const thread = runLayout({
     runId: run.id,
+    inputId: run.input.id,
     inputPrefix: inputPrefixOf(run),
     skills: [], // no workflow is loaded here, so no PYTHONPATH
     copiesInputs: () => true,

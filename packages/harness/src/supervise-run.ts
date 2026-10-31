@@ -46,6 +46,8 @@ export interface SuperviseRunOptions {
   /** The outputs the user selected (every output when absent) and their notes; the first messages carry both. */
   selectedOutputs: readonly string[] | undefined;
   notes: string | undefined;
+  /** The input whose completed review conversions this run can reuse. */
+  inputId: string;
   /** The R2 prefix of the run's read-only inputs (the scan). */
   inputPrefix: string;
   /** Why the previous claim ended; absent on the run's first claim. Recorded as `claim.started`. */
@@ -127,6 +129,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
   const copyInputs = new Set(definition.files.tasks.filter((t) => t.copyInputs).map((t) => t.id));
   const layout = runLayout({
     runId,
+    inputId: options.inputId,
     inputPrefix: options.inputPrefix,
     skills: definition.skills,
     grants,
@@ -149,11 +152,11 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
     (id) => {
       const sandbox = sandboxLayout(id);
       const gateway = sandbox.gateway ? options.gateway?.(sandbox.name) : undefined;
+      const spec = specOf(sandbox, settings, gateway);
+      // Cache identity must follow the run's pinned image, including after a deploy.
+      if (id === CONVERT) spec.env = { ...spec.env, VOLUMA_REVIEW_RUNTIME: spec.image };
       // The conversion outlives `signal` (see `conversionSignal`); its own signal also carries the worker's halt.
-      return options.createSandbox(
-        specOf(sandbox, settings, gateway),
-        id === CONVERT ? conversion.signal : signal,
-      );
+      return options.createSandbox(spec, id === CONVERT ? conversion.signal : signal);
     },
     // The convert sandbox writes no event: a failure there shows as the file's `assets.failed`,
     // not as a failed sandbox on the main agent's page.
@@ -166,6 +169,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
   );
   const conversion: ReviewAssetsWorker = reviewAssetsWorker({
     runId,
+    inputId: options.inputId,
     rootThreadId,
     recorder,
     sandbox: () => session.get(CONVERT, { note: false }),

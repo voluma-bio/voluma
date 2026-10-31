@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   compactedView,
   compactionRow,
-  compactionTrigger,
+  compactionThresholds,
   compactor,
   cutPoint,
   foldHistory,
@@ -123,19 +123,29 @@ describe("history with a compaction", () => {
       usage: { input: 300_000, output: 10, cacheRead: 0, cacheWrite: 0 },
     } as never;
     const messages = [system, user(1), stale, result("z", 1)];
-    expect(inputTokens(messages)).toBeGreaterThan(300_000);
+    expect(inputTokens(messages)).toBe(300_000);
     expect(inputTokens(messages, { summary: "S", keptFrom: 2, at: 4 })).toBeLessThan(100);
   });
 });
 
-describe("trigger", () => {
-  const model = (contextWindow: number, maxTokens = 32_000) =>
+describe("thresholds", () => {
+  const model = (contextWindow: number, maxTokens = 131_072) =>
     ({ contextWindow, maxTokens }) as never;
-  it("stays positive on a small window and is capped on a large one", () => {
-    expect(compactionTrigger(model(32_000))).toBeGreaterThan(0);
-    expect(compactionTrigger(model(64_000))).toBeGreaterThan(0);
-    expect(compactionTrigger(model(1_000_000))).toBe(400_000);
-    expect(compactionTrigger(model(200_000))).toBeCloseTo(0.9 * (200_000 - 32_000));
+  it("budget is min(400k, window); compact one output reserve below it, warn half a reserve below that", () => {
+    expect(compactionThresholds(model(1_000_000))).toMatchObject({
+      warn: 304_000,
+      compact: 336_000,
+    });
+    expect(compactionThresholds(model(200_000, 64_000))).toMatchObject({
+      warn: 104_000,
+      compact: 136_000,
+    });
+    // a 32k-output model reserves only 32k
+    expect(compactionThresholds(model(1_000_000, 32_000))).toMatchObject({
+      warn: 352_000,
+      compact: 368_000,
+    });
+    expect(compactionThresholds(model(32_000, 8_000)).compact).toBeGreaterThan(0);
   });
 });
 
@@ -203,15 +213,18 @@ describe("compactor", () => {
     return messages;
   };
 
-  it("warm: three wrap-up turns, then the same messages plus the instruction, one marker, one recorded reply", async () => {
+  it("warm: notice once, then at the first request past the compact point the same messages plus the instruction, one marker, one recorded reply", async () => {
     const { c, requests, stored, summaries } = setup([reply("SUM")], {
       contextWindow: 1_000_000,
-      maxTokens: 32_000,
+      maxTokens: 131_072,
     });
-    const messages = thread_(500_000);
-    expect(c.wrapUp(messages)).toContain("nearly full");
-    for (let i = 0; i < 3; i++) await c.prepare(messages);
+    expect(c.wrapUp(thread_(300_000))).toBeUndefined();
+    const warnAt = thread_(310_000);
+    expect(c.wrapUp(warnAt)).toContain("nearly full");
+    expect(c.wrapUp(warnAt)).toBeUndefined(); // once per context-full event
+    await c.prepare(warnAt);
     expect(requests).toHaveLength(0);
+    const messages = thread_(340_000);
     const view = await c.prepare(messages);
     expect(requests).toHaveLength(1);
     expect(requests[0]?.messages.slice(0, messages.length)).toEqual(messages);
@@ -220,11 +233,14 @@ describe("compactor", () => {
     expect(view.length).toBeLessThan(messages.length);
   });
 
-  it("cold when the warm request would not fit: no kept tail, no images", async () => {
-    // 195k input in a 200k window: the warm request plus a 16k summary does not fit
-    const { c, requests } = setup([reply("SUM")]);
-    const messages = thread_(195_000);
-    messages.splice(4, 0, image(10));
+  it("cold when the images near the request limit: no kept tail, no images", async () => {
+    const { c, requests } = setup([reply("SUM")], {
+      contextWindow: 1_000_000,
+      maxTokens: 32_000,
+      inputLimits: { maxRequestBytes: 1_000 },
+    });
+    const messages = thread_(150_000);
+    messages.splice(4, 0, image(950));
     await c.prepare(messages);
     const sent = requests[0]?.messages ?? [];
     expect(sent.length).toBeLessThan(messages.length);
@@ -283,22 +299,6 @@ describe("compactor", () => {
       await c.prepare(messages);
     }
     expect(requests).toHaveLength(1);
-  });
-
-  it("a last turn that alone is due: summarize when tight, not on every request", async () => {
-    // Each turn is 450k tokens, over the 400k trigger, in a 1M window: two turns still fit.
-    const turn = (i: number): AgentMessage[] => [call(`b${i}`, 10), result(`b${i}`, 450_000)];
-    const { c, requests } = setup(
-      Array.from({ length: 30 }, () => reply("SUM")),
-      { contextWindow: 1_000_000, maxTokens: 32_000 },
-    );
-    const messages = [system, user(10)];
-    for (let i = 0; i < 8; i++) {
-      messages.push(...turn(i));
-      await c.prepare(messages);
-    }
-    // turns 3, 5, 7 (three turns do not fit); without the check, every turn from the second
-    expect(requests).toHaveLength(3);
   });
 
   it("the provider's error text reaches the caller unchanged", async () => {
