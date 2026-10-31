@@ -17,6 +17,8 @@ export class Failure extends Error {
   constructor(
     message: string,
     readonly infrastructure = false,
+    /** The gateway or network cut the request (so a redeploy may be the cause), not a status it answered. */
+    readonly transport = false,
   ) {
     super(message);
   }
@@ -24,6 +26,8 @@ export class Failure extends Error {
 
 /** A quiet SAM call can take many minutes; undici's default of 300 s would cut it. */
 const THIRTY_MINUTES = 30 * 60_000;
+/** The gateway aborts a call at this age (`MAX_CALL_MS` in packages/provider-calls); this package cannot import it. */
+const MAX_CALL_MS = THIRTY_MINUTES;
 const dispatcher = new Agent({ headersTimeout: THIRTY_MINUTES, bodyTimeout: THIRTY_MINUTES });
 /** Waits before each retry of a call the gateway answered 429 (too many in flight). */
 const BACKOFF_MS = [1_000, 2_000, 4_000, 8_000, 16_000];
@@ -107,7 +111,11 @@ export function metaClient(options: { url: string; token: string; log(line: stri
         res = await make();
       } catch (error) {
         const cause = (error as { cause?: { code?: string } }).cause?.code;
-        throw new Failure(`${what}: no answer from the gateway (${cause ?? String(error)})`, true);
+        throw new Failure(
+          `${what}: no answer from the gateway (${cause ?? String(error)})`,
+          true,
+          true,
+        );
       }
       if (res.status !== 429) return res;
       const detail = await failure(res);
@@ -122,19 +130,25 @@ export function metaClient(options: { url: string; token: string; log(line: stri
   /**
    * A gateway redeploy cuts the calls its old instance still holds, and the new instance takes
    * the next one: an infrastructure failure is retried once. A retried SAM request is a second
-   * paid request (the cut one stays a `cut` row of unknown cost).
+   * paid request (the cut one stays a `cut` row of unknown cost). A first try that ran to the
+   * gateway's time limit is not retried: it would hit the limit again.
    */
   async function again<T>(run: () => Promise<T>): Promise<T> {
+    const begun = Date.now();
     try {
       return await run();
     } catch (error) {
       if (!(error instanceof Failure && error.infrastructure)) throw error;
+      if (Date.now() - begun >= MAX_CALL_MS - 60_000) throw error;
       log(`${error.message}; trying once more`);
       return run().catch((second) => {
         if (second instanceof Failure && second.infrastructure)
           throw new Failure(
-            `${second.message}. Tried twice, so the gateway may be redeploying or down: call segment_sam again after a minute, or carry on without it.`,
+            second.transport
+              ? `${second.message}. Tried twice, so the gateway may be redeploying or down: call segment_sam again after a minute, or carry on without it.`
+              : `${second.message}. Tried twice.`,
             true,
+            second.transport,
           );
         throw second;
       });
@@ -226,9 +240,9 @@ export function metaClient(options: { url: string; token: string; log(line: stri
             ),
           "Meta request",
         );
-      const started = Date.now();
       /** One request and its whole reply written to `out`. */
       const attempt = async () => {
+        const started = Date.now();
         let res = await request();
         // Meta answers `404 model_not_found` for some prompts (a small box), not only for an outage,
         // and bills nothing for it. Once more on the uploaded file costs nothing if it fails again.
@@ -257,13 +271,20 @@ export function metaClient(options: { url: string; token: string; log(line: stri
           }
         } catch (error) {
           file.destroy();
-          throw new Failure(`Meta request: the reply was cut off (${String(error)})`, true);
+          throw new Failure(`Meta request: the reply was cut off (${String(error)})`, true, true);
         }
+        // A proxy may close a cut stream cleanly: only response.completed shows it was whole.
+        if (!watch.completed)
+          throw new Failure(
+            "Meta request: the reply ended before response.completed, so it was cut off",
+            true,
+            true,
+          );
         file.end();
         await once(file, "finish");
-        return { res, watch };
+        return { res, watch, started };
       };
-      const { res, watch } = await again(attempt);
+      const { res, watch, started } = await again(attempt);
       const end = Date.now();
       // Wait ends at the first `data:` line: the gateway's keepalive comments are not arrivals.
       const waitMs = watch.stats.firstEventMs ?? end - started;
@@ -278,6 +299,8 @@ export function metaClient(options: { url: string; token: string; log(line: stri
 }
 
 /** Measures the reply chunk by chunk: cost per chunk is its length, however long the stream. */
+const COMPLETED = Buffer.from("response.completed");
+
 function streamWatch(started: number) {
   const LINE = Buffer.from("\ndata: ");
   const stats: StreamStats = {
@@ -288,6 +311,9 @@ function streamWatch(started: number) {
     events: 0,
   };
   let last = started;
+  let completed = false;
+  // The last bytes of the previous chunk, so COMPLETED is found across a chunk edge.
+  let before: Buffer = Buffer.alloc(0);
   // The last 6 bytes (one short of LINE): a match across two chunks starts in them.
   let tail: Buffer = Buffer.from("\n");
   const keepalive = (chunk: Buffer) =>
@@ -297,6 +323,9 @@ function streamWatch(started: number) {
     chunk.at(-2) === 0x0a;
   return {
     stats,
+    get completed() {
+      return completed;
+    },
     add(bytes: Uint8Array) {
       // undici yields plain Uint8Arrays, whose indexOf takes a byte, not a pattern: view as a Buffer, no copy.
       const chunk = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.length);
@@ -320,6 +349,10 @@ function streamWatch(started: number) {
           stats.longestGapAtMs = now - started;
         }
         last = now;
+      }
+      if (!completed) {
+        completed = Buffer.concat([before, chunk]).includes(COMPLETED);
+        before = chunk.subarray(-(COMPLETED.length - 1));
       }
       if (seen) stats.firstEventMs ??= now - started;
       stats.events += seen;
