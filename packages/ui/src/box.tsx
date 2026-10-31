@@ -14,7 +14,8 @@ export type BoxProps = {
   tools?: ReactNode;
   /** A link to the full section, or a line on what comes next. */
   foot?: ReactNode;
-  children: ReactNode;
+  /** None for a box whose head says it all. */
+  children?: ReactNode;
   className?: string;
 };
 

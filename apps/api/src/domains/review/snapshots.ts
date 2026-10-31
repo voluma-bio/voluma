@@ -11,6 +11,7 @@ import { HTTPException } from "hono/http-exception";
 import sharp from "sharp";
 import { parseJson, readerOf, requireUser, type UserEnv } from "../../domain";
 import type { ReviewDeps } from ".";
+import { saveEvidence } from "./files";
 import { reviewRun } from "./review-run";
 
 function sameCapture(a: ReviewSnapshot, b: ReviewSnapshot) {
@@ -22,7 +23,7 @@ function sameCapture(a: ReviewSnapshot, b: ReviewSnapshot) {
   );
 }
 
-export function snapshotRoutes({ runs, files, snapshots }: ReviewDeps) {
+export function snapshotRoutes({ runs, store, snapshots }: ReviewDeps) {
   const app = new Hono<UserEnv>();
   app.use("/runs/:runId/snapshots", requireUser);
   app.get("/runs/:runId/snapshots", async (c) => {
@@ -125,8 +126,8 @@ export function snapshotRoutes({ runs, files, snapshots }: ReviewDeps) {
         });
       return c.json(existing);
     }
-    if (!files) throw new HTTPException(503, { message: "File storage is not configured." });
-    await files.put(runId, snapshot.png.sha256, bytes, c.req.raw.signal);
+    if (!store) throw new HTTPException(503, { message: "File storage is not configured." });
+    await saveEvidence(store, runId, snapshot.png.sha256, bytes, c.req.raw.signal);
     const saved = await snapshots.insert(snapshot, record.generation);
     if ((await runs.readable(readerOf(c.var.user), runId))?.generation !== record.generation)
       throw new HTTPException(409, { message: "This run was replaced. Reload the run." });

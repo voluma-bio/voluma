@@ -14,13 +14,24 @@ import { inputsQuery, runsQuery, studiesQuery } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
 import type { Input, Run, VisitorKeys } from "@voluma/contracts/run";
 import type { CreateStudyRequest } from "@voluma/contracts/study";
-import { formatDuration, formatUsd, loadKeys, RunKeyLine } from "@voluma/run-view";
-import { Button, Disclosure, EmptyState, ErrorState, LoadingState, TextField } from "@voluma/ui";
+import { formatDuration, formatUsd, loadKeys, RunKeyLine, runHref } from "@voluma/run-view";
+import {
+  Breadcrumb,
+  Button,
+  Disclosure,
+  EmptyState,
+  ErrorState,
+  LoadingState,
+  PageHead,
+  ShellHeading,
+  TextField,
+} from "@voluma/ui";
 import { catalog } from "@voluma/workflow/bundled";
 import { FolderOpen, Upload, X } from "lucide-react";
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router";
 import { intake, type Knee, readSheet, type Sample, type Sheet, sheetRecognised } from "./intake";
+import { linkTo } from "./link";
 import { type Dropped, fromDataTransfer, fromFileList, groupDropped } from "./scan-files";
 import { formatBytes, type Progress, type UploadState, useSent, useUploads } from "./uploads";
 import { measuredBy, measurementsOf, WorkflowPanel } from "./workflow-tasks";
@@ -222,7 +233,9 @@ export function NewPage() {
       void queryClient.invalidateQueries({ queryKey: runsQuery().queryKey });
       const run = detail.scans[0]?.runs[0];
       navigate(
-        detail.scans.length === 1 && run ? `/runs/${run.id}/live` : `/studies/${detail.study.id}`,
+        detail.scans.length === 1 && run
+          ? runHref({ runId: run.id })
+          : `/studies/${detail.study.id}`,
       );
     },
   });
@@ -242,174 +255,178 @@ export function NewPage() {
   const startLabel = several ? "Start the study" : "Start run";
 
   return (
-    <div className="mx-auto grid w-full max-w-[860px] content-start gap-4 px-6 pt-7 pb-16 max-[760px]:px-4">
-      <h1 className="mb-1 text-2xl font-semibold">Run on new scans</h1>
-
-      <Step n={1} title="Scans">
-        {canUpload ? (
-          <DropZone compact={table.length > 0} onFiles={(d) => void addDropped(d)} />
-        ) : (
-          <p className="rounded-lg bg-muted px-4 py-3 text-ui">
-            Uploading scans needs a lab account.{" "}
-            <Button variant="link" onClick={() => signIn()}>
-              Sign in
-            </Button>{" "}
-            or use a scan already here.
-          </p>
-        )}
-        {skipped.length > 0 && (
-          <p className="text-ui text-muted-foreground">
-            Not used: {skipped.slice(0, 5).join(", ")}
-            {skipped.length > 5 && ` and ${skipped.length - 5} more`}
-          </p>
-        )}
-        <SheetLine
-          sheet={sheet}
-          matched={read ? rows.filter((r) => parsed.get(r.name)?.group).length : 0}
-          total={table.length}
-          onRemove={() => setSheet({ kind: "none" })}
-        />
-        {table.length > 0 && (
-          <IntakeTable
-            rows={table}
-            several={several}
-            onEdit={(id, edit) =>
-              setRows((prev) =>
-                prev.map((r) => (r.id === id ? { ...r, edits: { ...r.edits, ...edit } } : r)),
+    <div className="shrink-0">
+      <ShellHeading>
+        <Breadcrumb trail={[{ label: "Home", to: linkTo("/") }]} current="Run on new scans" />
+      </ShellHeading>
+      <PageHead title="Run on new scans" />
+      <div className="mx-auto grid w-full max-w-[860px] content-start gap-4 px-6 pt-6 pb-16 max-[760px]:px-4">
+        <Step n={1} title="Scans">
+          {canUpload ? (
+            <DropZone compact={table.length > 0} onFiles={(d) => void addDropped(d)} />
+          ) : (
+            <p className="rounded-lg bg-muted px-4 py-3 text-sm">
+              Uploading scans needs a lab account.{" "}
+              <Button variant="link" onClick={() => signIn()}>
+                Sign in
+              </Button>{" "}
+              or use a scan already here.
+            </p>
+          )}
+          {skipped.length > 0 && (
+            <p className="text-sm text-muted-foreground">
+              Not used: {skipped.slice(0, 5).join(", ")}
+              {skipped.length > 5 && ` and ${skipped.length - 5} more`}
+            </p>
+          )}
+          <SheetLine
+            sheet={sheet}
+            matched={read ? rows.filter((r) => parsed.get(r.name)?.group).length : 0}
+            total={table.length}
+            onRemove={() => setSheet({ kind: "none" })}
+          />
+          {table.length > 0 && (
+            <IntakeTable
+              rows={table}
+              several={several}
+              onEdit={(id, edit) =>
+                setRows((prev) =>
+                  prev.map((r) => (r.id === id ? { ...r, edits: { ...r.edits, ...edit } } : r)),
+                )
+              }
+              onRemove={removeRow}
+              onRetry={uploads.retry}
+              progress={uploads.progress}
+            />
+          )}
+          <Earlier
+            inputs={inputs}
+            open={!canUpload}
+            chosen={new Set(rows.flatMap((r) => (r.input ? [r.input.id] : [])))}
+            hidden={
+              new Set(
+                table.flatMap((r) => (!r.id.startsWith("input-") && r.input ? [r.input.id] : [])),
               )
             }
-            onRemove={removeRow}
-            onRetry={uploads.retry}
-            progress={uploads.progress}
+            onToggle={toggleEarlier}
           />
-        )}
-        <Earlier
-          inputs={inputs}
-          open={!canUpload}
-          chosen={new Set(rows.flatMap((r) => (r.input ? [r.input.id] : [])))}
-          hidden={
-            new Set(
-              table.flatMap((r) => (!r.id.startsWith("input-") && r.input ? [r.input.id] : [])),
-            )
-          }
-          onToggle={toggleEarlier}
-        />
-      </Step>
-
-      <Step n={2} title="Choose a workflow">
-        <div role="radiogroup" aria-label="Workflow" className="grid">
-          {WORKFLOWS.map((w) => (
-            <div key={w.id} className="flex items-center gap-3 py-1">
-              <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3">
-                <input
-                  type="radio"
-                  name="workflow"
-                  className="mt-1 size-4 accent-primary"
-                  checked={workflowId === w.id}
-                  onChange={() => setWorkflowId(w.id)}
-                />
-                <span className="min-w-0">
-                  <span className="block font-medium">{w.name}</span>
-                  <span className="block text-ui text-muted-foreground">
-                    {w.tasks.length} tasks, {measurementsOf(w).length} measurements
-                  </span>
-                  <span className="block text-ui text-muted-foreground">{measuredBy(w)}</span>
-                </span>
-              </label>
-              <Button variant="link" className="text-ui" onClick={() => setPanel(w.id)}>
-                See tasks
-              </Button>
-            </div>
-          ))}
-        </div>
-      </Step>
-
-      {several && (
-        <Step n={3} title="Study">
-          <TextField
-            label="Name"
-            className="max-w-md"
-            value={studyName}
-            maxLength={200}
-            onChange={(e) => setStudyName(e.target.value)}
-            placeholder="DMM knee study, Oct 2026"
-          />
-          {table.length > 2 && (
-            <fieldset className="grid gap-2">
-              <legend className="sr-only">What runs now</legend>
-              <Choice
-                checked={pilot}
-                onChange={() => setPilot(true)}
-                title={`Run ${pilotIds.length} first, then the rest`}
-              >
-                {table
-                  .filter((r) => pilotIds.includes(r.id))
-                  .map((r) => r.name)
-                  .join(" and ")}{" "}
-                run now. Check them; start the other {table.length - pilotIds.length} from the study
-                page, so a change you make to the method reaches them.
-              </Choice>
-              <Choice
-                checked={!pilot}
-                onChange={() => setPilot(false)}
-                title={`Run all ${table.length} now`}
-              >
-                They queue under your lab's limit on runs at once.
-              </Choice>
-            </fieldset>
-          )}
         </Step>
-      )}
 
-      {estimate && table.length > 0 && (
-        <p className="px-1 text-ui text-muted-foreground">
-          The lab's last run of this workflow took {formatDuration(estimate.seconds)} and cost{" "}
-          {formatUsd(estimate.usd)}
-          {startIds.length > 1 &&
-            `; ${startIds.length} runs at that rate cost about ${formatUsd(estimate.usd * startIds.length)}`}
-          .
-        </p>
-      )}
+        <Step n={2} title="Choose a workflow">
+          <div role="radiogroup" aria-label="Workflow" className="grid">
+            {WORKFLOWS.map((w) => (
+              <div key={w.id} className="flex items-center gap-3 py-1">
+                <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3">
+                  <input
+                    type="radio"
+                    name="workflow"
+                    className="mt-1 size-4 accent-primary"
+                    checked={workflowId === w.id}
+                    onChange={() => setWorkflowId(w.id)}
+                  />
+                  <span className="min-w-0">
+                    <span className="block font-medium">{w.name}</span>
+                    <span className="block text-sm text-muted-foreground">
+                      {w.tasks.length} tasks, {measurementsOf(w).length} measurements
+                    </span>
+                    <span className="block text-sm text-muted-foreground">{measuredBy(w)}</span>
+                  </span>
+                </label>
+                <Button variant="link" className="text-sm" onClick={() => setPanel(w.id)}>
+                  See tasks
+                </Button>
+              </div>
+            ))}
+          </div>
+        </Step>
 
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-1">
-        <Button
-          variant="primary"
-          disabled={table.length === 0 || blocker !== undefined || armed || start.isPending}
-          onClick={() => (pending.length > 0 ? setArmed(true) : start.mutate())}
-        >
-          {start.isPending ? "Starting…" : armed ? "Waiting for uploads…" : startLabel}
-        </Button>
-        <span role="status" className="text-ui text-muted-foreground">
-          {table.length === 0
-            ? "Add a scan to start."
-            : (blocker ??
-              (armed
-                ? `Starts when ${pending.length === 1 ? "the last scan finishes" : `${pending.length} scans finish`} uploading. Keep this page open until then.`
-                : pending.length > 0
-                  ? pending.length === 1
-                    ? "A scan is still uploading. Start now and it begins once the upload finishes."
-                    : `${pending.length} scans are still uploading. Start now and they begin once the uploads finish.`
-                  : "You can close this page once it starts; the runs carry on."))}
-        </span>
-        {start.isError && (
-          <p role="alert" className="w-full text-ui text-destructive">
-            {startError(start.error)}
+        {several && (
+          <Step n={3} title="Study">
+            <TextField
+              label="Name"
+              className="max-w-md"
+              value={studyName}
+              maxLength={200}
+              onChange={(e) => setStudyName(e.target.value)}
+              placeholder="DMM knee study, Oct 2026"
+            />
+            {table.length > 2 && (
+              <fieldset className="grid gap-2">
+                <legend className="sr-only">What runs now</legend>
+                <Choice
+                  checked={pilot}
+                  onChange={() => setPilot(true)}
+                  title={`Run ${pilotIds.length} first, then the rest`}
+                >
+                  {table
+                    .filter((r) => pilotIds.includes(r.id))
+                    .map((r) => r.name)
+                    .join(" and ")}{" "}
+                  run now. Check them; start the other {table.length - pilotIds.length} from the
+                  study page, so a change you make to the method reaches them.
+                </Choice>
+                <Choice
+                  checked={!pilot}
+                  onChange={() => setPilot(false)}
+                  title={`Run all ${table.length} now`}
+                >
+                  They queue under your lab's limit on runs at once.
+                </Choice>
+              </fieldset>
+            )}
+          </Step>
+        )}
+
+        {estimate && table.length > 0 && (
+          <p className="px-1 text-sm text-muted-foreground">
+            The lab's last run of this workflow took {formatDuration(estimate.seconds)} and cost{" "}
+            {formatUsd(estimate.usd)}
+            {startIds.length > 1 &&
+              `; ${startIds.length} runs at that rate cost about ${formatUsd(estimate.usd * startIds.length)}`}
+            .
           </p>
         )}
-      </div>
 
-      <div className="px-1">
-        <RunKeyLine userId={me.userId} guest={guest} keys={keys} onChange={setKeys} />
-      </div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-1">
+          <Button
+            variant="primary"
+            disabled={table.length === 0 || blocker !== undefined || armed || start.isPending}
+            onClick={() => (pending.length > 0 ? setArmed(true) : start.mutate())}
+          >
+            {start.isPending ? "Starting…" : armed ? "Waiting for uploads…" : startLabel}
+          </Button>
+          <span role="status" className="text-sm text-muted-foreground">
+            {table.length === 0
+              ? "Add a scan to start."
+              : (blocker ??
+                (armed
+                  ? `Starts when ${pending.length === 1 ? "the last scan finishes" : `${pending.length} scans finish`} uploading. Keep this page open until then.`
+                  : pending.length > 0
+                    ? pending.length === 1
+                      ? "A scan is still uploading. Start now and it begins once the upload finishes."
+                      : `${pending.length} scans are still uploading. Start now and they begin once the uploads finish.`
+                    : "You can close this page once it starts; the runs carry on."))}
+          </span>
+          {start.isError && (
+            <p role="alert" className="w-full text-sm text-destructive">
+              {startError(start.error)}
+            </p>
+          )}
+        </div>
 
-      {WORKFLOWS.map((w) => (
-        <WorkflowPanel
-          key={w.id}
-          workflow={w}
-          open={panel === w.id}
-          onClose={() => setPanel(undefined)}
-        />
-      ))}
+        <div className="px-1">
+          <RunKeyLine userId={me.userId} guest={guest} keys={keys} onChange={setKeys} />
+        </div>
+
+        {WORKFLOWS.map((w) => (
+          <WorkflowPanel
+            key={w.id}
+            workflow={w}
+            open={panel === w.id}
+            onClose={() => setPanel(undefined)}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -423,7 +440,7 @@ function Step({ n, title, children }: { n?: number; title: string; children: Rea
     >
       <h2 id={id} className="flex items-center gap-2.5 font-semibold">
         {n !== undefined && (
-          <span className="grid size-5.5 place-items-center rounded-full bg-primary-tint text-meta text-primary-strong">
+          <span className="grid size-5.5 place-items-center rounded-full bg-primary-tint text-xs text-primary-strong">
             {n}
           </span>
         )}
@@ -458,7 +475,7 @@ function Choice({
       />
       <span>
         <span className="block font-medium">{title}</span>
-        <span className="block text-ui text-muted-foreground">{children}</span>
+        <span className="block text-sm text-muted-foreground">{children}</span>
       </span>
     </label>
   );
@@ -506,7 +523,7 @@ function DropZone({ compact, onFiles }: { compact: boolean; onFiles: (d: Dropped
         </Button>
       </div>
       {unreadable && (
-        <p role="alert" className="text-ui text-destructive">
+        <p role="alert" className="text-sm text-destructive">
           Couldn't read what was dropped. Try Choose a folder instead.
         </p>
       )}
@@ -550,13 +567,13 @@ function SheetLine({
   if (sheet.kind === "reading") return <LoadingState rows={1} label={`Reading ${sheet.name}`} />;
   if (sheet.kind === "error")
     return (
-      <p role="alert" className="text-ui text-destructive">
+      <p role="alert" className="text-sm text-destructive">
         Couldn't read {sheet.name}. Save it as CSV and drop it again.
       </p>
     );
   if (!sheetRecognised(sheet.sheet))
     return (
-      <p role="alert" className="text-ui">
+      <p role="alert" className="text-sm">
         Sample sheet <span className="font-medium">{sheet.sheet.name}</span>
         <span className="text-destructive">
           : no columns recognised. Its first row needs headers such as Mouse, Knee and Group.
@@ -567,7 +584,7 @@ function SheetLine({
       </p>
     );
   return (
-    <p className="text-ui">
+    <p className="text-sm">
       Sample sheet <span className="font-medium">{sheet.sheet.name}</span>
       <span className="text-muted-foreground">
         {total > 0 && `, groups for ${matched} of ${total} ${total === 1 ? "scan" : "scans"}`}
@@ -606,7 +623,7 @@ function IntakeTable({
   return (
     <div className="grid gap-2">
       {several && (
-        <p className="text-ui text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           {rows.length} scans
           {subjects.size > 0 && ` of ${subjects.size} ${subjects.size === 1 ? "mouse" : "mice"}`}
         </p>
@@ -614,7 +631,7 @@ function IntakeTable({
       <div className="rounded-lg border border-border">
         <div
           aria-hidden
-          className={`${cols} border-b border-border px-3 py-2 text-meta font-medium text-fg-subtle max-[640px]:hidden`}
+          className={`${cols} border-b border-border px-3 py-2 text-xs font-medium text-fg-subtle max-[640px]:hidden`}
         >
           <span>File</span>
           <span className="px-2">Mouse</span>
@@ -631,7 +648,7 @@ function IntakeTable({
                   : "border-transparent bg-transparent hover:border-border max-[640px]:border-border"
               }`;
             const label = (text: string) => (
-              <span className="text-meta text-fg-subtle min-[641px]:sr-only">{text}</span>
+              <span className="text-xs text-fg-subtle min-[641px]:sr-only">{text}</span>
             );
             return (
               <li
@@ -639,7 +656,7 @@ function IntakeTable({
                 className={`${cols} items-start border-b border-line-subtle px-3 py-2 last:border-b-0 max-[640px]:gap-y-2`}
               >
                 <div className="min-w-0 py-1.5 max-[640px]:col-span-full max-[640px]:col-start-1 max-[640px]:row-start-1 max-[640px]:pr-9">
-                  <p className="truncate font-mono text-ui" title={r.name}>
+                  <p className="truncate font-mono text-sm" title={r.name}>
                     {r.name}
                   </p>
                   <UploadLine
@@ -726,19 +743,19 @@ function UploadLine({
   const size =
     files &&
     `${files.count === 1 ? "1 file" : `${files.count} files`}, ${formatBytes(files.bytes)}`;
-  if (!upload) return <p className="text-meta text-muted-foreground">Uploaded before</p>;
+  if (!upload) return <p className="text-xs text-muted-foreground">Uploaded before</p>;
   switch (upload.kind) {
     case "waiting":
-      return <p className="text-meta text-muted-foreground">{size}, waiting to upload</p>;
+      return <p className="text-xs text-muted-foreground">{size}, waiting to upload</p>;
     case "uploading":
       return <UploadBar progress={progress} id={id} total={upload.total} />;
     case "finishing":
-      return <p className="text-meta text-muted-foreground">Finishing the upload…</p>;
+      return <p className="text-xs text-muted-foreground">Finishing the upload…</p>;
     case "ready":
-      return <p className="text-meta text-primary-text">{size}, uploaded</p>;
+      return <p className="text-xs text-primary-text">{size}, uploaded</p>;
     case "failed":
       return (
-        <p className="text-meta text-destructive">
+        <p className="text-xs text-destructive">
           {upload.paths.length === 1 ? "1 file" : `${upload.paths.length} files`} didn't upload.{" "}
           <Button variant="link" onClick={onRetry}>
             Retry
@@ -747,7 +764,7 @@ function UploadLine({
       );
     case "error":
       return (
-        <p className="max-w-80 text-meta text-destructive">
+        <p className="max-w-80 text-xs text-destructive">
           {upload.message}{" "}
           {upload.retry && (
             <Button variant="link" onClick={onRetry}>
@@ -778,7 +795,7 @@ function UploadBar({ progress, id, total }: { progress: Progress; id: string; to
           style={{ width: `${percent}%` }}
         />
       </span>
-      <span className="text-meta text-muted-foreground tabular-nums">
+      <span className="text-xs text-muted-foreground tabular-nums">
         Uploading, {formatBytes(sent)} of {formatBytes(total)}
       </span>
     </div>
@@ -825,7 +842,7 @@ function Earlier({
                 />
                 <span className="min-w-0 flex-1 truncate">{input.name}</span>
                 {input.source === "reference" && (
-                  <span className="text-meta text-fg-subtle">Reference scan</span>
+                  <span className="text-xs text-fg-subtle">Reference scan</span>
                 )}
               </label>
             </li>
