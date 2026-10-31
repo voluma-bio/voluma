@@ -1,13 +1,14 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Download } from "lucide-react";
 import { Button } from "./button";
-import { Facts, Popover } from "./popover";
+import { FactSections, Facts, InfoButton, Popover } from "./popover";
 
 /**
  * **What:** facts about a thing, one click away. Escape or a click outside closes it.
  * **Why:** detail without leaving the page, in place of four hand-rolled popovers. **Where:**
  * Run details, a scan's facts, Study details, matrix hover. `Facts` lays out label and value
- * pairs.
+ * pairs, `FactSections` several lists under titles. `InfoButton` is the (i) beside an agent, a
+ * task or a reply: what it took, tried and cost, which a researcher asks for rather than scans.
  */
 const mono = (v: string) => <span className="font-mono text-xs">{v}</span>;
 const runDetails = (
@@ -57,3 +58,33 @@ export const Closed: Story = {};
  * closes the other); narrow the toolbar to one theme to compare.
  */
 export const Open: Story = { args: { open: true } };
+
+/**
+ * The (i) beside a thing, shown open. Its first section is untitled (the button names it), the
+ * model's use sits under the model's name.
+ */
+export const Info: Story = {
+  render: () => (
+    <InfoButton label="Agent details" open>
+      <FactSections
+        sections={[
+          {
+            items: [
+              ["Took", "3 min 4 s"],
+              ["Tries", "2"],
+              ["Tool calls", "18, 1 failed"],
+            ],
+          },
+          {
+            title: "meta/muse-spark-1.3",
+            items: [
+              ["Cost", "$0.412"],
+              ["Command time", "1 min 12 s"],
+              ["Model calls", "23"],
+            ],
+          },
+        ]}
+      />
+    </InfoButton>
+  ),
+};

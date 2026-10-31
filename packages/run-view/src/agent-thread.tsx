@@ -1,12 +1,13 @@
 /**
  * One agent's thread, anywhere: `<AgentThread threadId>` reads its rows from the run
- * store (`run-store.tsx`, one per run), and owns its header, its live
+ * store (`run-store.tsx`, one per run), and owns its header (name, status, info), its live
  * line and its own scroll, which sticks to the newest line while the reader is at the bottom.
  * It fills the box its caller gives it, so moving a thread to another place is one line.
  * Shape from Meridian Flow's `ChatView` (the caller names a thread; the container reads it).
  */
 import { type ReactNode, useLayoutEffect, useMemo, useRef } from "react";
-import { Elapsed, ThreadSpendInfo, threadWord } from "./agents";
+import { threadWord } from "./agents";
+import { ThreadInfo } from "./info";
 import { plainError } from "./run-error";
 import { agentLabel, agentTitle, isMain } from "./run-model";
 import { useThread, useThreadRows, useThreads } from "./run-store";
@@ -66,8 +67,7 @@ export function AgentThread({
           <span className="shrink-0 text-meta text-muted-foreground">
             {threadWord(thread.status)}
           </span>
-          <Elapsed thread={thread} />
-          <ThreadSpendInfo thread={thread} />
+          <ThreadInfo thread={thread} />
           {actions && <div className="ml-auto flex shrink-0 items-center">{actions}</div>}
         </div>
         {answer && (

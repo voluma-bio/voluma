@@ -39,6 +39,10 @@ where it is used.
 
 - **One selection drives the report, the 3D view and the slices.** Selecting
   a task, value or structure anywhere moves all of them.
+- **Up front is what the researcher reviews.** Statuses, verdicts, values, To check, the AI's
+  words, QC images and the viewer's controls show. How long something took, tries, counts, cost,
+  tokens and ids sit behind an info button (`InfoButton`) or Run details, with the numbers someone
+  fixing a run needs after the researcher's.
 - **Labels show only for the selection.** Everything else stays unlabelled.
 - **Bone renders ivory by default** (`--bone`); structure label colours
   (`--label-*`) appear only with the Labels toggle.
