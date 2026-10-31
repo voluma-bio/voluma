@@ -422,6 +422,33 @@ type Attempt = {
   citedScratch: Set<string>;
 };
 
+/**
+ * Every event type `fold` (and `reviewState`'s overlay of `check.accepted` and
+ * `review.completed`) reads: a reader that loads only these gets the same result as one that
+ * loads the whole log. Add a type here when `fold` or `corrections` starts to read it.
+ */
+export const FOLD_EVENT_TYPES = [
+  "run.reopened",
+  "person.message",
+  "reply",
+  "thread.started",
+  "thread.ended",
+  "revision.started",
+  "attempt.opened",
+  "correction.ended",
+  "outputs.backed-up",
+  "outputs.restored",
+  "outputs.discarded",
+  "task",
+  "checkpoint",
+  "output",
+  "plan.changed",
+  "assets.ready",
+  "assets.failed",
+  "check.accepted",
+  "review.completed",
+] as const satisfies readonly RunEvent["type"][];
+
 /** `holdOpenCorrection`: fold as of the last completed revision, skipping a correction still in progress (review). */
 export function fold(events: readonly RunEvent[], holdOpenCorrection = false): Folded {
   // Threads that check an attempt: the starts that name one.
