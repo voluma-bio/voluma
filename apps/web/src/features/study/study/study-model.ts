@@ -18,22 +18,23 @@
  * To check kinds: items group by task and check title, in workflow task order, then title.
  *
  * Task states: a scan's tasks are where its newest run is (`taskState`), the state the scan
- * review shows, derived once on the server. A workflow task outside that run's plan reads
- * Skipped; with no plan yet, Waiting. A task To check with no open item left reads Done, since
- * its checks were accepted.
+ * review shows, derived once on the server with its items that need a person (`needsYou`),
+ * counted as the scan review counts them. A workflow task outside that run's plan reads Skipped; with no plan yet,
+ * Waiting. A task To check with no open item left reads Done, since its checks were accepted.
  */
 import type { StudyDetail, StudyScanDetail, ToCheckItem } from "@voluma/contracts/study";
 import type { OutputEntry } from "@voluma/contracts/workflow-files";
 import {
+  CARD_TITLE,
+  cardId,
   groupNames,
   groupOf,
-  isLive,
   itemHref,
-  type NeedItem,
+  needsYouOf,
   runHref,
   type ScanGraphTask,
   type StudyGraphTask,
-  TASK_STATUS,
+  shownStatus,
   type TaskState,
 } from "@voluma/run-view";
 import type { Status } from "@voluma/ui";
@@ -136,7 +137,7 @@ export type CheckKind = {
 export function checkKinds(detail: StudyDetail, workflow: BundledWorkflow): CheckKind[] {
   const kinds = new Map<string, CheckKind>();
   for (const scan of detail.scans) {
-    for (const item of scan.toCheck) {
+    for (const item of scan.acceptable) {
       const key = `${item.taskId}\n${item.title}`;
       const kind = kinds.get(key) ?? {
         key,
@@ -164,25 +165,13 @@ export function taskState(scan: StudyScanDetail, taskId: string): TaskState {
   return states[taskId] ?? (Object.keys(states).length > 0 ? "skipped" : "waiting");
 }
 
-/** Open checks of the scan's result for one task, counted only while that result is its newest run. */
-function openOn(scan: StudyScanDetail, taskId: string): ToCheckItem[] {
-  if (scan.resultRunId === null || scan.runs[0]?.id !== scan.resultRunId) return [];
-  return scan.toCheck.filter((item) => item.taskId === taskId);
-}
-
 /**
- * A cell of the scan-by-task grid: one task of one scan, and its open checks. A task in To check
- * with every item handled reads done; on a live run the study read has no items yet (they belong
- * to the completed result), so it reads To check as the scan review does.
+ * A cell of the scan-by-task grid: one task of one scan, and its open items in the newest run,
+ * read by the one status rule (`shownStatus`).
  */
 export function cellOf(scan: StudyScanDetail, taskId: string): { status: Status; open: number } {
-  const state = taskState(scan, taskId);
-  const open = openOn(scan, taskId).length;
-  if (state === "to-check") {
-    const live = isLive(scan.runs[0]);
-    return { status: open > 0 || live ? "check" : "done", open };
-  }
-  return { status: TASK_STATUS[state], open };
+  const open = scan.needsYou[taskId] ?? 0;
+  return { status: shownStatus(taskState(scan, taskId), open), open };
 }
 
 /** The workflow at study size: each task with its state on every scan, in study order. */
@@ -201,17 +190,7 @@ export function scanGraph(scan: StudyScanDetail, workflow: BundledWorkflow): Sca
     title: workflow.taskTitle(t.id),
     dependsOn: t.dependsOn,
     state: taskState(scan, t.id),
-    needs: openOn(scan, t.id).map(
-      (item): NeedItem => ({
-        id: item.checkId,
-        taskId: item.taskId,
-        resultRevisionId: item.resultRevisionId,
-        title: item.title,
-        text: item.detail,
-        accepted: false,
-        acceptable: true,
-      }),
-    ),
+    open: scan.needsYou[t.id] ?? 0,
     results: workflow.outputs
       .filter((o) => o.task === t.id && o.kind === "measurement")
       .flatMap((o) => {
@@ -235,18 +214,45 @@ export function stoppedLine(scan: StudyScanDetail, workflow: BundledWorkflow): s
   return id ? `${word} during ${workflow.taskTitle(id)}` : `${word} before it finished`;
 }
 
-/** What waits on a scan, by check title: "Patella partly outside the field, Medial osteophyte boundary". */
-export const checkTitles = (items: readonly ToCheckItem[]) =>
-  [...new Set(items.map((i) => i.title))].join(", ");
+/**
+ * A To check task's card nobody can accept (`unacceptable`), as the study lists it: its task,
+ * why it is there, and the scan review opened on it.
+ */
+export type Card = { taskId: string; title: string; href: string | null };
 
-/** The scans with open checks, most first: the order every queue reads them in. */
+export const cardsOf = (scan: StudyScanDetail, taskId?: string): Card[] =>
+  Object.entries(scan.unacceptable)
+    .filter(([id]) => !taskId || id === taskId)
+    .map(([id, why]) => ({
+      taskId: id,
+      title: CARD_TITLE[why],
+      href: scan.runs[0]
+        ? itemHref({ runId: scan.runs[0].id, taskId: id, checkId: cardId(id) })
+        : null,
+    }));
+
+/**
+ * What waits on a scan (or one of its tasks), in a line: its acceptable checks' titles, then each
+ * card as "<task>: <why>".
+ */
+export const waitsOn = (scan: StudyScanDetail, workflow: BundledWorkflow, taskId?: string) =>
+  [
+    ...new Set([
+      ...scan.acceptable.filter((i) => !taskId || i.taskId === taskId).map((i) => i.title),
+      ...cardsOf(scan, taskId).map((c) =>
+        taskId ? c.title : `${workflow.taskTitle(c.taskId)}: ${c.title}`,
+      ),
+    ]),
+  ].join(", ");
+
+/** The scans with items that need a person (`needsYouOf`), most first: every queue's order. */
 export const byMostToCheck = (scans: readonly StudyScanDetail[]) =>
-  scans.filter((s) => s.toCheck.length > 0).sort((a, b) => b.toCheck.length - a.toCheck.length);
+  scans.filter((s) => needsYouOf(s) > 0).sort((a, b) => needsYouOf(b) - needsYouOf(a));
 
-/** Where "Review" on a scan leads: its first open item, else the scan. */
+/** Where "Review" on a scan leads: its first acceptable item, else its first card, else the scan. */
 export const reviewHref = (scan: StudyScanDetail) => {
-  const [item] = scan.toCheck;
-  return item ? itemHref(item) : scanHref(scan);
+  const [item] = scan.acceptable;
+  return item ? itemHref(item) : (cardsOf(scan)[0]?.href ?? scanHref(scan));
 };
 
 /** A measurement as the grid and the summary graph read it: about three significant figures. */

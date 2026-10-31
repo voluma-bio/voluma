@@ -13,6 +13,7 @@ import {
   groupNames,
   groupOf,
   loadKeys,
+  needsYouOf,
   RunKeyLine,
   scanLabel,
   scanStatus,
@@ -34,7 +35,6 @@ import { linkTo } from "../link";
 import { useStudy } from "./study-layout";
 import {
   cellOf,
-  checkTitles,
   digitsFor,
   farFromGroup,
   otherUnit,
@@ -45,6 +45,7 @@ import {
   stoppedLine,
   unitOf,
   valuesOf,
+  waitsOn,
 } from "./study-model";
 
 export function ScansPage() {
@@ -59,11 +60,13 @@ export function ScansPage() {
 
   /** What a scan's row says under its name: what waits, or where it stopped. */
   const line = (s: StudyScanDetail) => {
-    if (s.toCheck.length > 0) return checkTitles(s.toCheck);
+    // Titles only of what the study read lists: a live or stopped run's checks have none here.
+    const waits = waitsOn(s, workflow);
+    if (waits) return waits;
     const stopped = stoppedLine(s, workflow);
     if (stopped) return stopped;
     if (s.runs.length === 0) return "Not started";
-    return s.resultRunId ? "Nothing to check" : undefined;
+    return s.resultRunId && needsYouOf(s) === 0 ? "Nothing to check" : undefined;
   };
 
   const valueColumns = workflow.headline.map((output): TableColumn<StudyScanDetail> => {

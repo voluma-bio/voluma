@@ -68,14 +68,24 @@ import { workflowPinSchema } from "./workflow";
 export const reviewSummarySchema = z
   .object({
     revisionId: z.string().min(1),
-    remainingToCheck: z.number().int().nonnegative(),
+    /** Open checks a person can accept ("Looks right"); Mark reviewed needs none left. */
+    acceptable: z.number().int().nonnegative(),
+    /**
+     * Items that need a person (`openItems`): the acceptable ones, plus one card per To check
+     * task with no check, which only a correction clears. What a screen calls "N to check".
+     */
+    needsYou: z.number().int().nonnegative(),
     reviewedAt: z.iso.datetime().nullable(),
   })
-  .refine((r) => r.reviewedAt === null || r.remainingToCheck === 0, {
+  .refine((r) => r.reviewedAt === null || r.acceptable === 0, {
     path: ["reviewedAt"],
     message: "reviewed results cannot have open checks",
   });
 export type ReviewSummary = z.infer<typeof reviewSummarySchema>;
+
+/** Why a To check task with no check carries a card nobody can accept (`cardWithoutCheck`). */
+export const unacceptableSchema = z.enum(["sent-back", "values-missing", "marked"]);
+export type Unacceptable = z.infer<typeof unacceptableSchema>;
 
 /**
  * Cookie-authenticated review commands, returning 200 reviewDecisionResponseSchema.

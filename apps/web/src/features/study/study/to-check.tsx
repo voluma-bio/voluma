@@ -1,6 +1,7 @@
 /**
- * The study's To check page: every open check of each scan's latest result, the study's queue of
- * decisions. By scan (most to check first): a scan's row opens to its summary graph and its
+ * The study's To check page: everything that needs a person on each scan (`needsYouOf`), the
+ * study's queue of decisions: the acceptable checks of its latest result, and the cards of To check
+ * tasks with no check, which open the scan review (only a correction clears them). By scan (most to check first): a scan's row opens to its summary graph and its
  * items. By issue: one row per kind of check (task and title, `checkKinds`), opening to that
  * check on each scan. Each item is an `ItemToCheck` ("Looks right"); "Review in 3D" opens the
  * scan's review.
@@ -8,7 +9,7 @@
 
 import { useAcceptCheck } from "@voluma/api-client/query";
 import type { StudyScanDetail, ToCheckItem } from "@voluma/contracts/study";
-import { ItemToCheck, itemHref, plural, scanLabel, TaskGraph } from "@voluma/run-view";
+import { ItemToCheck, itemHref, needsYouOf, plural, scanLabel, TaskGraph } from "@voluma/run-view";
 import {
   Button,
   Count,
@@ -24,7 +25,15 @@ import { Box as Cube } from "lucide-react";
 import { Link, useSearchParams } from "react-router";
 import { linkTo } from "../link";
 import { useStudy } from "./study-layout";
-import { byMostToCheck, checkKinds, checkTitles, reviewHref, scanGraph } from "./study-model";
+import {
+  byMostToCheck,
+  cardsOf,
+  checkKinds,
+  reviewHref,
+  scanGraph,
+  stoppedLine,
+  waitsOn,
+} from "./study-model";
 
 type By = "scan" | "issue";
 
@@ -36,7 +45,7 @@ export function ToCheckPage() {
   const [search, setSearch] = useSearchParams();
   const by: By = search.get("by") === "issue" ? "issue" : "scan";
   const scans = byMostToCheck(detail.scans);
-  const items = scans.reduce((n, s) => n + s.toCheck.length, 0);
+  const items = scans.reduce((n, s) => n + needsYouOf(s), 0);
   const first = scans[0];
   const firstHref = first && reviewHref(first);
   const anyDone = detail.scans.some((s) => s.resultRunId !== null);
@@ -122,12 +131,12 @@ export function ToCheckPage() {
 function ScanRow({ scan }: { scan: StudyScanDetail }) {
   const { workflow } = useStudy();
   const href = reviewHref(scan);
-  const titles = checkTitles(scan.toCheck);
+  const titles = waitsOn(scan, workflow) || stoppedLine(scan, workflow);
   const cells = [
     <span key="group" className="text-sm text-muted-foreground">
       {scan.scan.group}
     </span>,
-    <StatusMark key="n" status="check" label={`${scan.toCheck.length} to check`} />,
+    <StatusMark key="n" status="check" label={`${needsYouOf(scan)} to check`} />,
     href && (
       <Button key="3d" asChild size="sm">
         <Link to={href}>
@@ -143,13 +152,32 @@ function ScanRow({ scan }: { scan: StudyScanDetail }) {
         <TaskGraph size="summary" tasks={scanGraph(scan, workflow)} className="min-w-[40rem]" />
       </div>
       <div className={ITEMS}>
-        {scan.toCheck.map((item) => (
+        {scan.acceptable.map((item) => (
           <Item
             key={item.checkId}
             scan={scan}
             item={item}
             context={workflow.taskTitle(item.taskId)}
             title={item.title}
+          />
+        ))}
+        {cardsOf(scan).map((card) => (
+          <ItemToCheck
+            key={card.taskId}
+            context={workflow.taskTitle(card.taskId)}
+            title={card.title}
+            text=""
+            state="info"
+            actions={
+              card.href && (
+                <Button asChild variant="ghost">
+                  <Link to={card.href}>
+                    <Cube aria-hidden />
+                    Review {scan.scan.subject} in 3D
+                  </Link>
+                </Button>
+              )
+            }
           />
         ))}
       </div>

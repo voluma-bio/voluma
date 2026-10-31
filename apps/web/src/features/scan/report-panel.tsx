@@ -8,7 +8,7 @@ import type { ReviewTask } from "@voluma/contracts/review";
 import {
   formatDuration,
   type NeedItem,
-  TASK_STATUS,
+  shownStatus,
   TaskGraph,
   type TaskView,
   taskStateWord,
@@ -58,7 +58,7 @@ export function ReportPanel({
           size="report"
           tasks={tasks.map((t) => ({
             ...t,
-            needs: t.needs.map((n) => items.find((i) => i.id === n.id) ?? n),
+            open: items.filter((n) => n.taskId === t.id && !n.accepted).length,
           }))}
           selected={task?.id}
           onSelect={onTask}
@@ -102,6 +102,7 @@ function TaskDetail({
   onItem: (item: NeedItem) => void;
 }) {
   const open = items.filter((n) => !n.accepted).length;
+  const status = shownStatus(task.state, open);
   const working = task.state === "running" || task.state === "checking";
   const time = took(task, useNow(working));
   const references =
@@ -115,14 +116,16 @@ function TaskDetail({
       <header className="grid gap-1.5">
         <h3 className="text-base font-semibold">{task.title}</h3>
         <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
-          {open > 0 ? (
-            <StatusMark status="check" label={`${open} to check`} />
-          ) : (
-            <StatusMark
-              status={task.state === "to-check" ? "done" : TASK_STATUS[task.state]}
-              label={task.state === "to-check" ? "Done" : taskStateWord(task.state)}
-            />
-          )}
+          <StatusMark
+            status={status}
+            label={
+              status === "check"
+                ? `${open} to check`
+                : status === "done"
+                  ? "Done"
+                  : taskStateWord(task.state)
+            }
+          />
           {time && <span>{working ? `${time} so far` : `Took ${time}`}</span>}
           {task.check && (
             <span>
