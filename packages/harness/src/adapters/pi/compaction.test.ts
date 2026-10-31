@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   compactedView,
   compactionRow,
-  compactionTrigger,
+  compactionThresholds,
   compactor,
   cutPoint,
   foldHistory,
@@ -128,14 +128,12 @@ describe("history with a compaction", () => {
   });
 });
 
-describe("trigger", () => {
-  const model = (contextWindow: number, maxTokens = 32_000) =>
-    ({ contextWindow, maxTokens }) as never;
-  it("stays positive on a small window and is capped on a large one", () => {
-    expect(compactionTrigger(model(32_000))).toBeGreaterThan(0);
-    expect(compactionTrigger(model(64_000))).toBeGreaterThan(0);
-    expect(compactionTrigger(model(1_000_000))).toBe(400_000);
-    expect(compactionTrigger(model(200_000))).toBeCloseTo(0.9 * (200_000 - 32_000));
+describe("thresholds", () => {
+  const model = (contextWindow: number) => ({ contextWindow, maxTokens: 32_000 }) as never;
+  it("budget is the smaller of 400k and the window; compact 64k below it, warn 32k below that", () => {
+    expect(compactionThresholds(model(1_000_000))).toEqual({ warn: 304_000, compact: 336_000 });
+    expect(compactionThresholds(model(200_000))).toEqual({ warn: 104_000, compact: 136_000 });
+    expect(compactionThresholds(model(32_000)).compact).toBeGreaterThan(0);
   });
 });
 
@@ -203,15 +201,18 @@ describe("compactor", () => {
     return messages;
   };
 
-  it("warm: three wrap-up turns, then the same messages plus the instruction, one marker, one recorded reply", async () => {
+  it("warm: notice once, then at the first request past the compact point the same messages plus the instruction, one marker, one recorded reply", async () => {
     const { c, requests, stored, summaries } = setup([reply("SUM")], {
       contextWindow: 1_000_000,
       maxTokens: 32_000,
     });
-    const messages = thread_(500_000);
-    expect(c.wrapUp(messages)).toContain("nearly full");
-    for (let i = 0; i < 3; i++) await c.prepare(messages);
+    expect(c.wrapUp(thread_(300_000))).toBeUndefined();
+    const warnAt = thread_(310_000);
+    expect(c.wrapUp(warnAt)).toContain("nearly full");
+    expect(c.wrapUp(warnAt)).toBeUndefined(); // once per context-full event
+    await c.prepare(warnAt);
     expect(requests).toHaveLength(0);
+    const messages = thread_(340_000);
     const view = await c.prepare(messages);
     expect(requests).toHaveLength(1);
     expect(requests[0]?.messages.slice(0, messages.length)).toEqual(messages);
@@ -286,7 +287,7 @@ describe("compactor", () => {
   });
 
   it("a last turn that alone is due: summarize when tight, not on every request", async () => {
-    // Each turn is 450k tokens, over the 400k trigger, in a 1M window: two turns still fit.
+    // Each turn is 450k tokens, over the 336k compact point, in a 1M window: two turns still fit.
     const turn = (i: number): AgentMessage[] => [call(`b${i}`, 10), result(`b${i}`, 450_000)];
     const { c, requests } = setup(
       Array.from({ length: 30 }, () => reply("SUM")),

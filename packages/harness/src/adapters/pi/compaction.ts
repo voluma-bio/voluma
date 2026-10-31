@@ -2,14 +2,17 @@
  * Auto-compaction: keeps a thread's requests inside the model's window without rewriting
  * history between requests (the provider's prompt cache needs the sent prefix byte-identical).
  *
- * Once per context-full event the thread goes through three steps. Before a request, when the
- * estimated input passes the trigger (or the carried images near the model's request-size or
- * image-count limit), a notice goes in the thread's inbox ("finish the step; the history will be summarized")
- * and the thread gets `WRAP_UP_TURNS` more turns. Then, before the next request, its own model
- * summarizes the thread on a warm branch (the same messages, system message and tools as the
- * thread's requests, with only the summary instruction appended, so the provider's cache serves
- * the prefix). From then on requests carry `[system, summary, recent turns]`.
- * When another turn would not fit, the notice is skipped and the thread compacts at once. When
+ * Each model has a budget: the smaller of `BUDGET_CAP` and its context window. Once per
+ * context-full event the thread goes through two steps. When a turn's tools finish with the
+ * estimated input past `budget - OUTPUT_RESERVE - WRAP_UP_ROOM` (or the carried images near the
+ * model's request-size or image-count limit), a notice goes in the thread's inbox ("finish the
+ * step; the history will be summarized"). Before the first request past `budget - OUTPUT_RESERVE`,
+ * however many turns that took, the thread's own model summarizes it on a warm branch (the same
+ * messages, system message and tools as the thread's requests, with only the summary instruction
+ * appended, so the provider's cache serves the prefix). From then on requests carry
+ * `[system, summary, recent turns]`. The window above the budget is only slack for a turn that
+ * overshoots. When another turn would not fit the window, a thread already due compacts even if
+ * the summary would leave it due again. When
  * the warm request itself would not fit, or the provider refused a request as too large
  * (`recover`), the summary is cold: `[system, previous summary, the messages to summarize]`
  * without the kept tail, with images left out, which is always smaller than the request that
@@ -40,43 +43,44 @@ import {
 } from "@earendil-works/pi-ai";
 import { isTransientProviderError } from "../../context-overflow";
 
-/** The most room the next reply may need; the request's input plus it must fit the window. */
-const MAX_OUTPUT_RESERVE = 64_000;
-/** Jimmy's cap (2026-10-30): "300k or 400k". */
-const TRIGGER_CAP = 400_000;
-const TRIGGER_SHARE = 0.9;
-const MIN_TRIGGER = 1_000;
-/** The trigger when the model's window is unknown. */
-const UNKNOWN_WINDOW_TRIGGER = 350_000;
-/** Turns a thread gets after the notice before its history is summarized. */
-const WRAP_UP_TURNS = 3;
-/** The recent turns kept verbatim, as a share of the trigger and of the request-size and image-count limits. */
+/** Jimmy's cap (2026-10-30): "300k or 400k". A thread's input stays under this, or under a smaller window. */
+const BUDGET_CAP = 400_000;
+/** The budget when the model's window is unknown. */
+const UNKNOWN_WINDOW_BUDGET = 350_000;
+/** Room the next reply may need: a thread compacts once its input passes budget less this. */
+const OUTPUT_RESERVE = 64_000;
+/** Room for the thread to wrap up in: it is warned this far below the compact point. */
+const WRAP_UP_ROOM = 32_000;
+const MIN_THRESHOLD = 1_000;
+/** The recent turns kept verbatim, as a share of the compact threshold and of the request-size and image-count limits. */
 const KEEP_SHARE = 0.2;
 const SUMMARY_MAX_TOKENS = 16_000;
 /** For a model that declares no limits (pi-ai's data has them for Claude: 32 MiB, 100 or 600 images). */
 const FALLBACK_REQUEST_BYTES = 32 * 1024 * 1024;
 const FALLBACK_IMAGES_PER_REQUEST = 100;
 /**
- * Shares of the request-size and image-count limits. Past DUE the thread is told to wrap up (a
- * `view_image` call adds up to 4 MiB, so three wrap-up turns stay inside the limit); past TIGHT
- * another turn might not fit, so it compacts at once; past COLD even the warm summary request
- * might not fit, so it summarizes without the tail.
+ * Shares of the request-size and image-count limits. Past WARN the thread is told to wrap up (a
+ * `view_image` call adds up to 4 MiB); past DUE it compacts at once; past COLD even the warm
+ * summary request might not fit, so it summarizes without the tail.
  */
-const IMAGE_DUE = 0.4;
-const IMAGE_TIGHT = 0.7;
+const IMAGE_WARN = 0.4;
+const IMAGE_DUE = 0.7;
 const IMAGE_COLD = 0.9;
 
-/** Room kept for the next reply: the model's output limit, at most a quarter of the window. */
-function outputReserve(model: Model<Api>): number {
-  const room = model.contextWindow > 0 ? model.contextWindow / 4 : MAX_OUTPUT_RESERVE;
-  return Math.min(MAX_OUTPUT_RESERVE, room, model.maxTokens > 0 ? model.maxTokens : Infinity);
-}
-
-/** The input size (tokens) at which a thread is told to wrap up; `cap` lets a test or trial lower it. */
-export function compactionTrigger(model: Model<Api>, cap = TRIGGER_CAP): number {
-  if (!(model.contextWindow > 0)) return Math.min(cap, UNKNOWN_WINDOW_TRIGGER);
-  const usable = (model.contextWindow - outputReserve(model)) * TRIGGER_SHARE;
-  return Math.max(MIN_TRIGGER, Math.min(cap, usable));
+/**
+ * The input sizes (tokens) at which a thread is told to wrap up and at which it compacts. `cap`
+ * lets a test or trial lower the budget.
+ */
+export function compactionThresholds(
+  model: Model<Api>,
+  cap = BUDGET_CAP,
+): { warn: number; compact: number } {
+  const budget = Math.min(
+    cap,
+    model.contextWindow > 0 ? model.contextWindow : UNKNOWN_WINDOW_BUDGET,
+  );
+  const compact = Math.max(MIN_THRESHOLD, budget - OUTPUT_RESERVE);
+  return { warn: Math.max(MIN_THRESHOLD / 2, compact - WRAP_UP_ROOM), compact };
 }
 
 export interface Compaction {
@@ -267,7 +271,7 @@ The most recent messages are kept as they are after your summary, so spend it on
 export interface Compactor {
   /** The messages a request carries; summarizes the thread first when it is due. */
   prepare(messages: AgentMessage[], signal?: AbortSignal): Promise<AgentMessage[]>;
-  /** After a turn that called tools: the notice to put in the inbox once compaction is due and another turn fits, else undefined. */
+  /** After a turn that called tools: the notice to put in the inbox once, when the thread nears its compact point, else undefined. */
   wrapUp(messages: AgentMessage[]): string | undefined;
   /** Sets the thread's latest compaction, from its stored history. */
   restore(compaction: Compaction | undefined): void;
@@ -291,24 +295,24 @@ export function compactor(args: {
    * the summary was stored `summary` is its text; a summary that failed is recorded with `""`.
    */
   onSummary(reply: AssistantMessage, summary: string): void;
-  /** Overrides the trigger cap (a test or a local trial). */
+  /** Overrides the budget cap (a test or a local trial). */
   cap?: number;
 }): Compactor {
   const { threadId, model, streamFn, thinkingLevel } = args;
-  const trigger = compactionTrigger(model, args.cap);
-  const reserve = outputReserve(model);
+  const { warn, compact: compactAt } = compactionThresholds(model, args.cap);
   const window = model.contextWindow > 0 ? model.contextWindow : Number.POSITIVE_INFINITY;
   const maxBytes = model.inputLimits?.maxRequestBytes ?? FALLBACK_REQUEST_BYTES;
   const maxImages = model.inputLimits?.images?.maxPerRequest ?? FALLBACK_IMAGES_PER_REQUEST;
   // `load` marks a thread due past these; a compaction keeps KEEP_SHARE of each, so it leaves the
   // thread not due on every axis (a limit added to one must be added to the other).
   const keep: Budget = {
-    tokens: trigger * KEEP_SHARE,
+    tokens: compactAt * KEEP_SHARE,
     bytes: maxBytes * KEEP_SHARE,
     images: maxImages * KEEP_SHARE,
   };
   let compaction: Compaction | undefined;
-  let turnsLeft: number | undefined;
+  /** The wrap-up notice went out since the last compaction. */
+  let warned = false;
 
   /** How full the next request is: tokens, and the images' bytes and count against the model's limits. */
   function load(messages: AgentMessage[], at = compaction) {
@@ -317,9 +321,10 @@ export function compactor(args: {
     const imageShare = Math.max(images.bytes / maxBytes, images.count / maxImages);
     return {
       tokens,
-      due: tokens > trigger || imageShare > IMAGE_DUE,
-      /** Another turn might not fit. */
-      tight: tokens + reserve > window || imageShare > IMAGE_TIGHT,
+      warn: tokens > warn || imageShare > IMAGE_WARN,
+      due: tokens > compactAt || imageShare > IMAGE_DUE,
+      /** Another turn might not fit the window. */
+      tight: tokens + OUTPUT_RESERVE > window || imageShare > IMAGE_DUE,
       /** The warm summary request might not fit. */
       cold: tokens + SUMMARY_MAX_TOKENS > window || imageShare > IMAGE_COLD,
     };
@@ -407,7 +412,7 @@ export function compactor(args: {
     const next: Compaction = { summary, keptFrom: cut, at: messages.length };
     if (!(await args.store(compactionRow(next)))) return false;
     compaction = next;
-    turnsLeft = undefined;
+    warned = false;
     args.onSummary(reply, summary);
     console.info(
       `compaction: thread ${threadId} (${cold ? "cold" : "warm"}): ${tokensBefore} → ~${inputTokens(messages, next)} input tokens, ` +
@@ -419,18 +424,16 @@ export function compactor(args: {
   return {
     async prepare(messages, signal) {
       const now = load(messages);
-      if (now.due) {
-        if (turnsLeft !== undefined && turnsLeft > 0 && !now.tight) turnsLeft--;
-        else await compact(messages, now.tokens, now.cold, now.tight, signal);
-      }
+      if (now.due) await compact(messages, now.tokens, now.cold, now.tight, signal);
       return compactedView(messages, compaction);
     },
 
     wrapUp(messages) {
-      if (turnsLeft !== undefined) return;
+      if (warned) return;
       const now = load(messages);
-      if (!now.due || now.tight) return;
-      turnsLeft = WRAP_UP_TURNS;
+      // Past the compact point the next request summarizes before the thread could act on a notice.
+      if (!now.warn || now.due) return;
+      warned = true;
       return WRAP_UP_NOTICE;
     },
 

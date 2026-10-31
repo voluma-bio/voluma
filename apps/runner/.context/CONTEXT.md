@@ -308,12 +308,13 @@ there is no automatic conversion to inline rows.
 **Context compaction.** `adapters/pi/compaction.ts`; nothing rewrites history between requests, so the provider's
 cache prefix stays intact. Before each request the thread's input is estimated (last reply's input, cache and output
 tokens plus the chars/4 of what came after) and so are its images: bytes and count against the model's
-`inputLimits` (`maxRequestBytes`, `images.maxPerRequest`; 32 MiB and 100 when a model declares none). Trigger:
-input over min(400k, 0.9 x (`contextWindow` - reserve)), reserve = min(64k, model `maxTokens`, window/4); 350k when
-the window is unknown; or images over 40% of a limit. Past it, a runtime user message tells the thread to finish the
-step and write down what it needs, it gets 3 more turns, then its own model summarizes it on a warm branch (same
-messages, system message and tools, summary instruction appended). Skipped notice, compaction at once: another turn
-would not fit (input + reserve > window, or images over 70% of a limit). Cold summary (`[system, previous summary,
+`inputLimits` (`maxRequestBytes`, `images.maxPerRequest`; 32 MiB and 100 when a model declares none). Budget:
+min(400k, `contextWindow`), 350k when the window is unknown. Warn: when a tool batch ends with input over budget - 96k
+(64k output reserve + 32k wrap-up room; 304k on a 1M window, 104k on 200k), or images over 40% of a limit, a runtime
+user message tells the thread (once per compaction) to finish the step and write down what it needs. Compact: before
+the first request with input over budget - 64k (336k, 136k), or images over 70% of a limit, however many turns that
+took; its own model summarizes it on a warm branch (same messages, system message and tools, summary instruction
+appended). A thread already past it when the runner restarts compacts on its next request. Cold summary (`[system, previous summary,
 messages to summarize]`, no kept tail, images left out): when the warm request plus the 16k summary would not fit
 (or images over 90%), and always when the provider refused a request as too large (`recover`, called from
 `start-thread.ts`; then one retry in the same thread, started by a note stored only after the summary was; a failed
@@ -326,7 +327,7 @@ status, and Pi's patterns) serves both this and the runner's classifier.
 The result is a marker row `{role: "compaction", summary, keptFrom}` appended to `pi_messages`; every earlier row
 stays. `keptFrom` indexes the thread's messages (rows that are not markers); `foldHistory` rebuilds them and the
 latest marker (and derives where it sat), and a request carries `[system, summary message, messages from keptFrom]`
-(the last ~20% of each limit `load` checks: the trigger in tokens, the byte limit and the image-count limit, so a compaction always leaves the thread not due; starting at a user or assistant message, so a
+(the last ~20% of each limit `load` checks: the compact threshold in tokens, the byte limit and the image-count limit, so a compaction always leaves the thread not due; starting at a user or assistant message, so a
 call keeps its results). The system prompt is untouched (resume compares it). Each compaction logs `compaction:
 thread …` with tokens before and after. Images stay in history until a compaction; the loader fetches only those from
 `keptFrom`.
