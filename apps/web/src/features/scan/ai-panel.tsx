@@ -11,7 +11,11 @@ import { useMutation } from "@tanstack/react-query";
 import { ApiError, sendRunMessage } from "@voluma/api-client";
 import type { Me } from "@voluma/contracts/auth";
 import { conversation } from "@voluma/contracts/conversation";
-import { MAX_MESSAGE_SNAPSHOT_BYTES, MESSAGE_BODY_BYTES } from "@voluma/contracts/messages";
+import {
+  MAX_MESSAGE_SNAPSHOT_BYTES,
+  MESSAGE_BODY_BYTES,
+  type SendRunMessageRequest,
+} from "@voluma/contracts/messages";
 import type { Run } from "@voluma/contracts/run";
 import { Markdown, type TaskView, useEvents } from "@voluma/run-view";
 import { Button, Chip, EmptyState, StatusMark, TextAreaField } from "@voluma/ui";
@@ -62,6 +66,7 @@ export function AiPanel({
   about,
   marks,
   snapshot,
+  viewKey,
   onSent,
 }: {
   run: Run;
@@ -79,6 +84,8 @@ export function AiPanel({
    * larger, undefined when they aren't shown (also as the function's answer).
    */
   snapshot: ((maxBytes: number) => Promise<Blob | null | undefined>) | undefined;
+  /** Identity of the image/grid being captured, independent of the current camera. */
+  viewKey: string | undefined;
   /** The run reopened: reconnect its stream. `marks`: the ids of the marks the message carried. */
   onSent: (marks: string[]) => void;
 }) {
@@ -90,56 +97,85 @@ export function AiPanel({
   useEffect(() => {
     if (about) form.current?.querySelector("textarea")?.focus();
   }, [about]);
-  // A retry of the same message keeps its id, so the server stores it once. After a failure,
-  // other words or other marks make it a new message: the first may have landed.
-  const id = useRef(crypto.randomUUID());
-  const tried = useRef<string>(undefined);
+  // The API deduplicates by id alone. A retry must keep the entire request, including its PNG.
+  const tried = useRef<{
+    fingerprint: string;
+    note: string;
+    marks: string[];
+    prepared: Promise<{ body: SendRunMessageRequest; unseen: boolean }>;
+  }>(undefined);
+  const inFlight = useRef(false);
   // A message without the picture it meant to carry says so once sent.
   const [unseen, setUnseen] = useState(false);
   const send = useMutation({
-    mutationFn: async (go: boolean) => {
+    mutationFn: async (attempt: NonNullable<typeof tried.current>) => {
+      const { body, unseen } = await attempt.prepared;
+      await sendRunMessage(run.id, body);
+      return { note: attempt.note, marks: attempt.marks, unseen };
+    },
+    onSuccess: (sent) => {
+      if (sent.note) setText("");
+      setUnseen(sent.unseen);
+      tried.current = undefined;
+      onSent(sent.marks);
+    },
+    onSettled: () => {
+      inFlight.current = false;
+    },
+  });
+  const closed = closedBecause(run, me);
+  const submit = (go: boolean) => {
+    if (closed !== undefined || inFlight.current || (!go && !text.trim())) return;
+    if (go && !subject) return;
+    inFlight.current = true;
+    const note = text.trim();
+    const carried = !go && subject ? marks : [];
+    const fields = {
+      ...(note && { text: note }),
+      ...(subject && { taskId: subject.id }),
+      ...(go && { go: true as const }),
+      ...(carried.length > 0 && { marks: carried.map((m) => m.mark) }),
+    };
+    const fingerprint = JSON.stringify({
+      ...fields,
+      marks: carried,
+      viewKey: !go && snapshot ? viewKey : undefined,
+    });
+    if (tried.current?.fingerprint !== fingerprint) {
       // Marks name a block of the task's results, so they go only with a task; a redo takes none.
-      const carried = !go && subject ? marks : [];
-      const note = text.trim();
-      const attempt = `${note}\n${carried.map((m) => m.id).join()}`;
-      if (tried.current !== undefined && attempt !== tried.current)
-        id.current = crypto.randomUUID();
-      tried.current = attempt;
-      const body = {
-        id: id.current,
-        ...(note && { text: note }),
-        ...(subject && { taskId: subject.id }),
-        ...(go && { go: true as const }),
-        ...(carried.length > 0 && { marks: carried.map((m) => m.mark) }),
-      };
+      const body: SendRunMessageRequest = { id: crypto.randomUUID(), ...fields };
       // A redo has nothing to show the AI; a message carries the views as they are, in the room
       // the rest of the body leaves (base64 is 4 bytes per 3, plus the field's own JSON).
       const room = Math.floor(
         ((MESSAGE_BODY_BYTES - new Blob([JSON.stringify(body)]).size - 64) * 3) / 4,
       );
+      // Invoke capture before mutate: a mutation can pause offline while the user changes tasks.
       const picture =
         go || !snapshot
-          ? undefined
+          ? Promise.resolve(undefined)
           : room > 0
-            ? await snapshot(Math.min(MAX_MESSAGE_SNAPSHOT_BYTES, room))
-            : null;
-      setUnseen(picture === null);
-      await sendRunMessage(run.id, {
-        ...body,
-        ...(picture && {
-          snapshot: { mimeType: "image/png" as const, data: await base64(picture) },
-        }),
+            ? snapshot(Math.min(MAX_MESSAGE_SNAPSHOT_BYTES, room))
+            : Promise.resolve(null);
+      const attempt = {
+        fingerprint,
+        note,
+        marks: carried.map((m) => m.id),
+        prepared: picture.then(async (png) => ({
+          body: {
+            ...body,
+            ...(png && { snapshot: { mimeType: "image/png" as const, data: await base64(png) } }),
+          },
+          unseen: png === null,
+        })),
+      };
+      // Preparation failures made no request: allow the next click to capture again.
+      void attempt.prepared.catch(() => {
+        if (tried.current === attempt) tried.current = undefined;
       });
-      return { note, marks: carried.map((m) => m.id) };
-    },
-    onSuccess: (sent) => {
-      if (sent.note) setText("");
-      id.current = crypto.randomUUID();
-      tried.current = undefined;
-      onSent(sent.marks);
-    },
-  });
-  const closed = closedBecause(run, me);
+      tried.current = attempt;
+    }
+    send.mutate(tried.current);
+  };
   const answering =
     run.state.status !== "ended" && items.length > 0 && items.at(-1)?.from === "person";
 
@@ -216,7 +252,7 @@ export function AiPanel({
         className="grid gap-2 border-t border-border p-3"
         onSubmit={(e) => {
           e.preventDefault();
-          if (text.trim()) send.mutate(false);
+          submit(false);
         }}
       >
         <TextAreaField
@@ -229,7 +265,10 @@ export function AiPanel({
           disabled={closed !== undefined || send.isPending}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && text.trim()) send.mutate(false);
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              if (!e.repeat && !e.nativeEvent.isComposing) submit(false);
+            }
           }}
         />
         {closed && <p className="text-xs text-muted-foreground">{closed}</p>}
@@ -240,7 +279,7 @@ export function AiPanel({
               type="button"
               size="sm"
               disabled={closed !== undefined || send.isPending}
-              onClick={() => send.mutate(true)}
+              onClick={() => submit(true)}
             >
               <RotateCcw aria-hidden />
               Redo {subject.title}
@@ -258,7 +297,7 @@ export function AiPanel({
         </div>
         {send.isSuccess && unseen && (
           <p className="text-xs text-muted-foreground">
-            Sent without a picture of the views: it was too large.
+            Sent without a picture of the views: they were not ready or the picture was too large.
           </p>
         )}
         {send.isError && (
