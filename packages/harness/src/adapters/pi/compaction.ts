@@ -50,6 +50,8 @@ const UNKNOWN_WINDOW_BUDGET = 350_000;
 const MAX_OUTPUT_RESERVE = 64_000;
 /** The wrap-up room, as a share of the reserve: a thread is warned this far below the compact point. */
 const WRAP_UP_SHARE = 0.5;
+/** The reserve is at most this share of the budget, so a small window does not compact on every request. */
+const MAX_RESERVE_SHARE = 0.25;
 const MIN_THRESHOLD = 1_000;
 /** The recent turns kept verbatim, as a share of the compact threshold and of the request-size and image-count limits. */
 const KEEP_SHARE = 0.2;
@@ -78,7 +80,11 @@ export function compactionThresholds(
     cap,
     model.contextWindow > 0 ? model.contextWindow : UNKNOWN_WINDOW_BUDGET,
   );
-  const reserve = Math.min(MAX_OUTPUT_RESERVE, model.maxTokens > 0 ? model.maxTokens : Infinity);
+  const reserve = Math.min(
+    MAX_OUTPUT_RESERVE,
+    model.maxTokens > 0 ? model.maxTokens : Infinity,
+    budget * MAX_RESERVE_SHARE,
+  );
   const compact = Math.max(MIN_THRESHOLD, budget - reserve);
   return { warn: Math.max(MIN_THRESHOLD / 2, compact - reserve * WRAP_UP_SHARE), compact, reserve };
 }
@@ -176,18 +182,25 @@ export function estimateTokens(message: AgentMessage): number {
 }
 
 /**
- * How much the last request used: the last reply's reported input and cache tokens. Nothing is
- * added for what came after it, and nothing refuses a request. A thread with no reply since its
- * last compaction (a fresh summary, or a resume after a crash) has none to go by, so its view is
- * estimated.
+ * How much the last request used: the latest successful reply's reported input and cache tokens;
+ * nothing is added for what came after it, and nothing refuses a request. A reply that reports no
+ * usage has nothing to go by, so the last reply that did is used plus an estimate of everything
+ * after it. A thread with no reported reply since its last compaction (a fresh summary, or a
+ * resume after a crash) is estimated by its whole view.
  */
 export function inputTokens(messages: AgentMessage[], compaction?: Compaction): number {
+  let latest = true;
   for (let i = messages.length - 1; i >= (compaction?.at ?? 0); i--) {
     const m = messages[i];
     if (m?.role !== "assistant" || m.stopReason === "error" || m.stopReason === "aborted") continue;
     const u = m.usage;
     const reported = u ? u.input + u.cacheRead + u.cacheWrite : 0;
-    if (reported > 0) return reported;
+    if (reported > 0) {
+      return latest
+        ? reported
+        : reported + messages.slice(i + 1).reduce((n, x) => n + estimateTokens(x), 0);
+    }
+    latest = false;
   }
   return compactedView(messages, compaction).reduce((sum, x) => sum + estimateTokens(x), 0);
 }
@@ -322,7 +335,7 @@ export function compactor(args: {
       warn: tokens > warn || imageShare > IMAGE_WARN,
       due: tokens > compactAt || imageShare > IMAGE_DUE,
       /** Another turn might not fit the provider's image limits (tokens never refuse a request). */
-      tight: imageShare > IMAGE_DUE,
+      urgent: imageShare > IMAGE_DUE,
       /** The warm summary request might not fit the image limits. */
       cold: imageShare > IMAGE_COLD,
     };
@@ -422,7 +435,7 @@ export function compactor(args: {
   return {
     async prepare(messages, signal) {
       const now = load(messages);
-      if (now.due) await compact(messages, now.tokens, now.cold, now.tight, signal);
+      if (now.due) await compact(messages, now.tokens, now.cold, now.urgent, signal);
       return compactedView(messages, compaction);
     },
 
