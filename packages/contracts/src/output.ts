@@ -128,7 +128,12 @@ const outputs = <R extends z.ZodType>(ref: R) => {
     }),
     z.object({
       kind: z.literal("annotation"),
-      note: z.string().optional(),
+      note: z
+        .string()
+        .optional()
+        .describe(
+          "For the researcher, with no mention of workers, checkers, agents, threads or task ids.",
+        ),
       annotation: z.discriminatedUnion("kind", [
         z.object({ gridId: gridIdField, kind: z.literal("point"), zyx: positionZyx }),
         z.object({
@@ -150,7 +155,12 @@ const outputs = <R extends z.ZodType>(ref: R) => {
       file: ref,
       mediaType: assetSchema.shape.mediaType.unwrap(),
     }),
-    z.object({ kind: z.literal("missing"), reason: nonEmpty }),
+    z.object({
+      kind: z.literal("missing"),
+      reason: nonEmpty.describe(
+        "Why it could not be made, for the researcher, with no mention of workers, checkers, agents, threads or task ids.",
+      ),
+    }),
   ]);
 };
 
