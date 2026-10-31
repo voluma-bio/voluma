@@ -59,8 +59,11 @@ shown as its scan and linked straight to its scan review (`/scans/:runId`, `runH
   It takes the run's state and threads and derives the rest itself. During a correction both read
   the correction's own revision (`openCorrectionRevision` on the server), while the study's values
   and open checks stay on the last completed result. Don't re-derive a task's state here; a
-  workflow task missing from it is outside the run's plan. One exception in the matrix: a task in
-  To check on a live run has no items in the study read yet, so it reads To check, not done.
+  workflow task missing from it is outside the run's plan. Each task's open items come with it
+  (`openItems`, counted as the scan review counts them, from the same run), and `shownStatus`
+  turns state and count into the status every page shows. `toCheck` lists only the newest
+  completed result's acceptable checks, so the per-scan "N to check" can be lower than the cells'
+  sum (a live or stopped run's items, a task the second AI sent back).
 - **Links into the scan review**: a scan opens at `runHref`; a To check item opens at
   `itemHref` (`?task=&item=`), so the review shows exactly that item. `reviewHref` picks a
   scan's first open item. Adding scans to an existing study isn't designed, so there is no
