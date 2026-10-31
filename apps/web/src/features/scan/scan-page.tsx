@@ -1,40 +1,54 @@
 /**
  * The scan review (`/scans/:runId`): one scan's run, live or finished, in the light shell. The main
- * area is the task in view on its grid; the left side holds To check, Report and Agents, the right
- * side View and The AI. One selection drives them all, kept in the URL: `task` (the task in view),
+ * area is the task in view on its grid; the left side holds Study, To check, Report and Agents, the
+ * right side View, Marks and The AI. One selection drives them all, kept in the URL: `task` (the task in view),
  * `item` (the To check item open) and `agent` (the agent whose steps show; none follows the one
  * working now). Everything is derived from the run's stream (`runView`), the run (`getRun`,
  * polled while it goes, for what isn't an event) and its review data (`getReviewRun`, for the
- * views, values, files and human decisions).
+ * views, values, files and human decisions). Your marks are page state, until a message to the
+ * AI carries them.
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@voluma/api-client";
 import { reviewRunQuery, runQuery, studyQuery, useAcceptCheck } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
+import { MAX_MARKS } from "@voluma/contracts/messages";
 import type { ReviewRun, Revision } from "@voluma/contracts/review";
 import type { Run } from "@voluma/contracts/run";
 import {
   DisclosureProvider,
   haltOf,
+  isLive,
   type NeedItem,
+  plural,
   RunStoreProvider,
+  runHref,
   runView,
+  StudyPanel,
   ThreadNavigationProvider,
   useClosed,
   useEvents,
   useRunStore,
 } from "@voluma/run-view";
+import { Button, EmptyState, ErrorState, LoadingState, ShellPanel, useOpenPanel } from "@voluma/ui";
+import type {
+  GridMark,
+  GridViewerHandle,
+  MarkTool,
+  StructureDisplay,
+  Zyx,
+} from "@voluma/viewer/grid";
+import { workflowById } from "@voluma/workflow/bundled";
 import {
-  Button,
-  EmptyState,
-  ErrorState,
-  LoadingState,
-  ShellLink,
-  ShellPanel,
-  useOpenPanel,
-} from "@voluma/ui";
-import type { StructureDisplay } from "@voluma/viewer/grid";
-import { CircleAlert, Layers, LayoutDashboard, MessagesSquare, Network, Users } from "lucide-react";
+  ArrowUpRight,
+  CircleAlert,
+  Layers,
+  ListChecks,
+  MessagesSquare,
+  Network,
+  PanelLeft,
+  Users,
+} from "lucide-react";
 import {
   lazy,
   Suspense,
@@ -45,9 +59,18 @@ import {
   useRef,
   useState,
 } from "react";
-import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from "react-router";
+import { Link, useOutletContext, useParams, useSearchParams } from "react-router";
 import { AgentsPanel } from "./agents-panel";
-import { AiPanel } from "./ai-panel";
+import { AiPanel, useMessage } from "./ai-panel";
+import {
+  gridMark,
+  MarksPanel,
+  middleOf,
+  nextTag,
+  type ShownGrid,
+  TOOLS,
+  type YourMark,
+} from "./marks-panel";
 import { ReportPanel } from "./report-panel";
 import { RunAlert, ScanHeading, scanTitle } from "./scan-header";
 import { ToCheckPanel } from "./to-check-panel";
@@ -215,12 +238,11 @@ function ScanReview({
   refetchRun: () => void;
 }) {
   const me = useOutletContext<Me>();
-  const navigate = useNavigate();
   const openPanel = useOpenPanel();
   const study = useQuery({
     ...studyQuery(run.studyId),
-    // Labels only (the study's name, the scan's subject, knee and group): read once.
-    staleTime: Number.POSITIVE_INFINITY,
+    refetchInterval: (query) =>
+      isLive(run) || query.state.data?.scans.some((scan) => isLive(scan.runs[0])) ? 5000 : false,
   });
   const store = useRunStore();
   const [reopened, setReopened] = useState(0);
@@ -315,10 +337,12 @@ function ScanReview({
   const focusKey = check?.focus && JSON.stringify(check.focus);
   const focus = useMemo(() => check?.focus && { ...check.focus }, [focusKey, picked]);
   const [display, setDisplay] = useState<StructureDisplay>({});
+  const marking = useMarking();
 
   const pickItem = (next: NeedItem) => {
     select({ item: next.id, task: next.taskId });
     setPicked((n) => n + 1);
+    marking.jumped();
   };
   const openAgent = useCallback(
     (threadId: string | null) => {
@@ -335,10 +359,34 @@ function ScanReview({
   };
   // It holds until the reader moves to another task or the message is sent.
   useEffect(() => setAbout(undefined), [taskId]);
+  // What a message about its subject carries: the views and your marks on them, when the views
+  // shown are the subject's.
+  const subjectShown =
+    marking.shown?.taskId === (about?.taskId ?? taskId) ? marking.shown : undefined;
+  const sendable = useMemo(
+    () => (subjectShown ? marking.marks.filter((m) => m.gridKey === subjectShown.key) : []),
+    [marking.marks, subjectShown],
+  );
+  const snapshot = subjectShown ? marking.snapshot : undefined;
+  const message = useMessage({
+    run,
+    me,
+    tasks,
+    task,
+    about,
+    marks: sendable,
+    snapshot,
+    viewKey: subjectShown?.key,
+    onSent: (sent) => {
+      setAbout(undefined);
+      marking.drop(sent);
+      setReopened((n) => n + 1);
+      refetchRun();
+    },
+  });
 
   const open = items.filter((n) => !n.accepted).length;
   const { title } = scanTitle(run, study.data);
-  const studyId = study.data?.study.id;
 
   let main: React.ReactNode;
   if (!review.data) {
@@ -385,6 +433,15 @@ function ScanReview({
           assets={review.data.assets}
           display={display}
           focus={focus}
+          tool={marking.tool}
+          onTool={marking.setTool}
+          marks={marking.marks}
+          selected={marking.selected}
+          jump={marking.jump}
+          onJumped={marking.jumped}
+          onMark={(mark, volumeId, gridKey) => marking.add(mark, volumeId, gridKey, reviewTask.id)}
+          onShown={marking.setShown}
+          viewer={marking.viewer}
         />
       </Suspense>
     );
@@ -393,14 +450,63 @@ function ScanReview({
     <DisclosureProvider>
       <ThreadNavigationProvider onOpenThread={openAgent}>
         <ScanHeading run={run} study={study.data} progress={view.progress} />
-        <ShellLink
+        <ShellPanel
           id="scan-study"
+          side="left"
           group="study"
           label="Study"
-          icon={<LayoutDashboard />}
-          active={false}
-          go={() => studyId && navigate(`/studies/${studyId}`)}
-        />
+          icon={<PanelLeft />}
+          shortcut="s"
+        >
+          {study.data ? (
+            <>
+              {study.isError && (
+                <p role="status" className="px-4 py-2 text-sm text-muted-foreground">
+                  Couldn't refresh the study; what you see may be out of date.
+                  <Button variant="link" onClick={() => void study.refetch()}>
+                    Try again
+                  </Button>
+                </p>
+              )}
+              {study.data.scans.length > 1 && (
+                <div className="border-b border-border px-4 py-2">
+                  <Button asChild variant="link">
+                    <Link to={`/studies/${study.data.study.id}`}>
+                      Study overview <ArrowUpRight className="size-3.5" />
+                    </Link>
+                  </Button>
+                </div>
+              )}
+              <StudyPanel
+                detail={study.data}
+                about={`${plural(study.data.scans.length, "scan")}, ${workflowById(study.data.study.workflowId)?.name ?? study.data.study.workflowId}`}
+                current={run.input.id}
+                scanLink={({ runs: [latestRun] }) =>
+                  latestRun
+                    ? (props) => (
+                        <Link
+                          to={
+                            latestRun.id === run.id
+                              ? { search: params.toString() }
+                              : runHref({ runId: latestRun.id })
+                          }
+                          {...props}
+                        />
+                      )
+                    : undefined
+                }
+              />
+            </>
+          ) : study.isPending ? (
+            <LoadingState label="Loading the study" rows={3} className="p-4" />
+          ) : (
+            <div className="p-4">
+              <ErrorState title="Couldn't load the study" onRetry={() => void study.refetch()}>
+                Check your connection, then try again.
+              </ErrorState>
+            </div>
+          )}
+        </ShellPanel>
         <ShellPanel
           id="scan-to-check"
           side="left"
@@ -467,6 +573,28 @@ function ScanReview({
           <ViewPanel revision={latest} task={reviewTask} display={display} onDisplay={setDisplay} />
         </ShellPanel>
         <ShellPanel
+          id="scan-marks"
+          side="right"
+          label="Marks"
+          icon={<ListChecks />}
+          count={marking.marks.length || undefined}
+          shortcut="m"
+        >
+          <MarksPanel
+            marks={marking.marks}
+            shown={marking.shown}
+            taskTitle={(id) => tasks.find((t) => t.id === id)?.title ?? id}
+            selected={marking.selected}
+            onSelect={(id) => {
+              const mark = marking.select(id);
+              // A mark on another grid opens the task it was made on; the views go to it there.
+              if (mark && mark.gridKey !== marking.shown?.key)
+                select({ task: mark.taskId, item: null });
+            }}
+            onDelete={marking.remove}
+          />
+        </ShellPanel>
+        <ShellPanel
           id="scan-ai"
           side="right"
           label="The AI"
@@ -476,16 +604,12 @@ function ScanReview({
         >
           <AiPanel
             run={run}
-            me={me}
             scan={title}
             tasks={tasks}
-            task={task}
             about={about}
-            onSent={() => {
-              setAbout(undefined);
-              setReopened((n) => n + 1);
-              refetchRun();
-            }}
+            marks={sendable}
+            views={snapshot !== undefined}
+            message={message}
           />
         </ShellPanel>
         <div className="flex min-h-0 flex-1 flex-col bg-background">
@@ -495,6 +619,100 @@ function ScanReview({
       </ThreadNavigationProvider>
     </DisclosureProvider>
   );
+}
+
+/**
+ * Your marks and the tool that makes them. A tool's key (`TOOLS`) picks it and Esc puts it away,
+ * as the shell's panel keys do: never while typing, never with a modifier. Listening on the
+ * document puts this after a pane's own Esc (dropping a mark being drawn) and before the shell's
+ * (leaving Full view), so one Esc does one thing.
+ */
+function useMarking() {
+  const [tool, setTool] = useState<MarkTool | null>(null);
+  const [marks, setMarks] = useState<YourMark[]>([]);
+  const [selected, setSelected] = useState<string>();
+  const [jump, setJump] = useState<{ at: Zyx; gridKey: string; taskId: string }>();
+  const [shown, setShown] = useState<ShownGrid>();
+  const viewer = useRef<GridViewerHandle>(null);
+  const full = marks.length >= MAX_MARKS;
+  const latest = useRef({ tool, full });
+  latest.current = { tool, full };
+  // At the cap the tools are held off (`viewer.tsx` says why).
+  useEffect(() => {
+    if (full) setTool(null);
+  }, [full]);
+  useEffect(() => {
+    const keys = new Map(
+      TOOLS.map((t) => [t.shortcut.toLowerCase(), t.value === "navigate" ? null : t.value]),
+    );
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.repeat || event.isComposing) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement;
+      if (
+        target.isContentEditable ||
+        target.closest("input, textarea, select, dialog, [role='dialog'], [role='menu']")
+      )
+        return;
+      const next = keys.get(event.key.toLowerCase());
+      if (next === undefined) return;
+      // Esc with no tool out is the shell's; a tool's key at the cap does nothing.
+      if (next === null ? !latest.current.tool : latest.current.full) return;
+      event.preventDefault();
+      setTool(next);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
+  return {
+    tool,
+    setTool,
+    marks,
+    selected,
+    jump,
+    shown,
+    setShown,
+    viewer,
+    jumped: useCallback(() => setJump(undefined), []),
+    add: useCallback((mark: GridMark, volumeId: string, gridKey: string, taskId: string) => {
+      setMarks((had) =>
+        had.length >= MAX_MARKS
+          ? had
+          : [
+              ...had,
+              {
+                id: crypto.randomUUID(),
+                tag: nextTag(had, mark),
+                taskId,
+                gridKey,
+                mark: { volumeId, ...mark },
+              },
+            ],
+      );
+    }, []),
+    /** Selects a mark and aims the views at it; returns it. */
+    select: useCallback(
+      (id: string) => {
+        setSelected(id);
+        const mark = marks.find((m) => m.id === id);
+        const shape = mark && gridMark(mark.mark);
+        if (mark && shape)
+          setJump({ at: middleOf(shape), gridKey: mark.gridKey, taskId: mark.taskId });
+        return mark;
+      },
+      [marks],
+    ),
+    remove: useCallback((id: string) => setMarks((had) => had.filter((m) => m.id !== id)), []),
+    /** Drops the marks a message carried. */
+    drop: useCallback((ids: string[]) => {
+      if (ids.length) setMarks((had) => had.filter((m) => !ids.includes(m.id)));
+    }, []),
+    snapshot: useCallback(
+      // Undefined until the lazy viewer mounts: nothing to picture yet.
+      (maxBytes: number) => viewer.current?.snapshot(maxBytes) ?? Promise.resolve(undefined),
+      [],
+    ),
+  };
 }
 
 function Centered({ children }: { children: React.ReactNode }) {

@@ -20,6 +20,7 @@
  */
 import {
   evidencePrefix,
+  inputReviewPrefix,
   outputsPrefix,
   relativePathSchema,
   reviewAssetPrefix,
@@ -37,6 +38,7 @@ const SCRATCH = "/scratch";
 export const WORKFLOW = "/workflow";
 export const EVIDENCE = "/evidence";
 export const REVIEW = "/review";
+const INPUT_REVIEW = "/input-review";
 
 export interface ThreadLayout {
   /** `main` has a sandbox only if its role holds `bash` (`runLayout`'s `mainWorks`). */
@@ -87,7 +89,7 @@ export interface RunLayout {
   mainWorks: boolean;
   /**
    * The review-asset converter's sandbox, outside the threads: reads the evidence and the
-   * workflow, writes the review prefix, no network.
+   * workflow, writes the run's review prefix and the input's conversion cache, no network.
    */
   convert: SandboxLayout;
   /**
@@ -100,6 +102,7 @@ export interface RunLayout {
 
 export interface RunLayoutOptions {
   runId: string;
+  inputId: string;
   /** The R2 prefix of the run's read-only inputs. */
   inputPrefix: string;
   /**
@@ -127,6 +130,7 @@ export interface RunLayoutOptions {
 
 export function runLayout({
   runId,
+  inputId,
   inputPrefix,
   skills,
   grants,
@@ -208,8 +212,9 @@ export function runLayout({
       { path: EVIDENCE, prefix: evidencePrefix(runId), access: "read-only" },
       { path: WORKFLOW, prefix: workflowSnapshotPrefix(runId), access: "read-only" },
       { path: REVIEW, prefix: reviewAssetPrefix(runId), access: "read-write" },
+      { path: INPUT_REVIEW, prefix: inputReviewPrefix(inputId), access: "read-write" },
     ],
-    env: { PYTHONPATH: pythonPath },
+    env: { PYTHONPATH: pythonPath, VOLUMA_REVIEW_CACHE: INPUT_REVIEW },
     gateway: false,
   };
 
