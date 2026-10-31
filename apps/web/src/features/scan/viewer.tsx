@@ -109,16 +109,6 @@ export function TaskViewer({
   const imageId = grid.state === "ready" ? grid.imageId : undefined;
   const image = revision.volumes.find((v) => v.id === imageId);
   const gridKey = image && gridKeyOf(image);
-  // Readiness belongs to the grid that reported it; a kept viewer keeps reporting while hidden.
-  const [ready, setReady] = useState<Record<string, boolean>>({});
-  const report = (key: string) => (r: boolean) =>
-    setReady((had) => (had[key] === r ? had : { ...had, [key]: r }));
-  const shownReady = !!gridKey && !!ready[gridKey];
-  useEffect(
-    () => onShown(gridKey ? { key: gridKey, taskId: task.id, ready: shownReady } : undefined),
-    [gridKey, task.id, shownReady, onShown],
-  );
-  useEffect(() => () => onShown(undefined), [onShown]);
   const [aim, setAim] = useState({ gridKey, target });
   useEffect(() => setAim({ gridKey, target }), [gridKey, target]);
   useEffect(() => {
@@ -146,7 +136,7 @@ export function TaskViewer({
   // Each grid shown keeps its viewer, hidden while another grid is shown, so going back is
   // instant with the camera, crosshair, window and loaded data as they were. A hidden viewer
   // keeps the scene it last showed and draws nothing until it is shown again.
-  const live: Kept | undefined =
+  const live: View | undefined =
     grid.state === "ready" && gridKey
       ? {
           key: gridKey,
@@ -155,26 +145,30 @@ export function TaskViewer({
           title: grid.name,
           notes: grid.notes,
           focus: shownFocus,
-          at: 0,
         }
       : undefined;
   const [kept, setKept] = useState<Kept[]>([]);
-  const latestLive = useRef(live);
-  latestLive.current = live;
+  // What mounts is what `kept` becomes once this render commits, so a new grid never mounts a
+  // viewer past the cap and a replaced image's viewer leaves at once.
+  const slots = keep(kept, live, revision);
+  const latest = useRef({ live, revision });
+  latest.current = { live, revision };
   useEffect(() => {
-    const now = latestLive.current && { ...latestLive.current, at: Date.now() };
-    if (!now) return;
+    setKept((had) => keep(had, latest.current.live, latest.current.revision));
+  }, [live?.key, live?.scene, live?.focus, revision]);
+  // A viewer reports readiness while hidden; an evicted one takes its readiness with it.
+  const report = (key: string) => (ready: boolean) =>
     setKept((had) =>
-      had.some((k) => k.key === now.key)
-        ? had.map((k) => (k.key === now.key ? now : k))
-        : [...(had.length < MAX_KEPT ? had : withoutOldest(had)), now],
+      had.some((k) => k.key === key && k.ready !== ready)
+        ? had.map((k) => (k.key === key ? { ...k, ready } : k))
+        : had,
     );
-  }, [live?.key, live?.scene, live?.focus]);
-  // Slots stay in the order their grids were first shown, so no viewer moves in the DOM. A redo
-  // that replaces an image retires its viewer.
-  const images = new Set(revision.volumes.map(gridKeyOf));
-  const slots = kept.filter((k) => images.has(k.key)).map((k) => (k.key === live?.key ? live : k));
-  if (live && !slots.includes(live)) slots.push(live);
+  const shownReady = !!live && !!slots.find((k) => k.key === live.key)?.ready;
+  useEffect(
+    () => onShown(gridKey ? { key: gridKey, taskId: task.id, ready: shownReady } : undefined),
+    [gridKey, task.id, shownReady, onShown],
+  );
+  useEffect(() => () => onShown(undefined), [onShown]);
   // One tree shape whether or not this task's grid is ready, so the kept viewers never remount.
   return (
     <>
@@ -189,7 +183,7 @@ export function TaskViewer({
         </div>
       )}
       {slots.map((k) => {
-        const on = k === live;
+        const on = k.key === live?.key;
         return (
           <div key={k.key} className="h-full" hidden={!on}>
             <GridViewer
@@ -232,17 +226,16 @@ export function TaskViewer({
   );
 }
 
-/** A grid's viewer as last shown: what it keeps while hidden. */
-type Kept = {
+/** What a grid's viewer is given; a hidden one keeps what it was last given. */
+type View = {
   key: string;
   imageId: string;
   scene: GridScene;
   title: string;
   notes: string[];
   focus: { at: Zyx } | undefined;
-  /** When it was last shown, for eviction. */
-  at: number;
 };
+type Kept = View & { ready: boolean };
 
 /**
  * Viewers kept per page: the grid shown and the one before (mouse-oa has two). Each holds four
@@ -251,7 +244,15 @@ type Kept = {
 const MAX_KEPT = 2;
 const NO_MARKS: ShownMark[] = [];
 
-const withoutOldest = (kept: Kept[]) => {
-  const oldest = kept.reduce((a, b) => (b.at < a.at ? b : a));
-  return kept.filter((k) => k !== oldest);
+/**
+ * The viewers to keep, least recently shown first: those whose image is still in the revision (a
+ * redo that replaces an image retires its viewer), with the shown grid last and up to date.
+ * Reordering moves a viewer in the DOM; its canvases keep their WebGL contexts.
+ */
+const keep = (had: Kept[], live: View | undefined, revision: Revision): Kept[] => {
+  const images = new Set(revision.volumes.map(gridKeyOf));
+  const others = had.filter((k) => k.key !== live?.key && images.has(k.key));
+  if (!live) return others.length === had.length ? had : others;
+  const ready = had.find((k) => k.key === live.key)?.ready ?? false;
+  return [...others, { ...live, ready }].slice(-MAX_KEPT);
 };

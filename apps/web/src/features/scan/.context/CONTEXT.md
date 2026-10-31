@@ -42,13 +42,18 @@ Without `item` or `task`, the task in view is the first open item's, else the pl
 ## Each grid keeps its viewer
 
 A task is shown on its own grid (`taskGrid`); mouse-oa has two, the Scan and the aligned tibia
-grid. `TaskViewer` keeps one `GridViewer` per grid shown, at most two (`MAX_KEPT`: each holds four
-WebGL contexts, and Chrome allows 16 per page), and hides the others (`hidden`). Going back to a
-grid is instant: camera, crosshair, window, meshes and slices are as they were, and a picked item
-still moves the crosshair to its place. A hidden viewer keeps the scene it last showed, draws
-nothing, and reports readiness for its own grid; only the shown one has the tools, the snapshot
-`ref` and `onMark`. A redo that replaces an image drops its viewer. Leaving the page, or picking
-a task with no results yet ("No views for … yet"), still unmounts them all.
+grid. `TaskViewer` keeps one `GridViewer` per grid shown, at most two mounted at any commit
+(`MAX_KEPT`: each holds four WebGL contexts, and Chrome allows 16 per page), and hides the others
+(`hidden`). One function, `keep`, decides what is kept, both for what mounts in a render and for
+the `kept` state: viewers whose image is still in the revision, least recently shown first, the
+shown one last; the oldest goes past the cap. Each kept entry carries its viewer's readiness, so
+an evicted or retired viewer takes its readiness with it. Going back to a grid is instant: camera,
+crosshair, window, meshes and slices are as they were, and a picked item still moves the crosshair
+to its place. Showing a grid moves its viewer to the end of the DOM; a moved canvas keeps its
+WebGL context. A hidden viewer keeps the scene it last showed, draws nothing, and reports
+readiness for its own grid; only the shown one has the tools, the snapshot `ref` and `onMark`. A
+redo that replaces an image drops its viewer and frees its place. Leaving the page, or picking a
+task with no results yet ("No views for … yet"), still unmounts them all.
 
 ## The stream reconnects without losing what it has
 
