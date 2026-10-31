@@ -14,7 +14,6 @@
  * outputs are untrusted (`@voluma/contracts/run`), and an example's scan is shown to everyone.
  */
 import { parseArgs } from "node:util";
-import { CopyObjectCommand, DeleteObjectsCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { runIdSchema } from "@voluma/contracts/ids";
 import {
   evidencePrefix,
@@ -23,6 +22,7 @@ import {
   runPrefix,
   scratchPrefix,
 } from "@voluma/contracts/r2";
+import { deletePrefix } from "@voluma/object-store";
 import { asc, eq, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
@@ -70,7 +70,7 @@ const demoLabId = required("GUEST_ORGANIZATION_ID");
 
 const client = postgres(databaseUrl({ writes: true, remote: values.remote }));
 const db = drizzle(client, { casing: "snake_case" });
-const { r2, bucket } = r2FromEnv();
+const { store, bucket } = r2FromEnv();
 console.log(`example ${exampleId} -> bucket ${bucket}, prefix ${runPrefix(exampleId)}`);
 
 // Copies every object under one of the source run's prefixes to the same place under the
@@ -84,45 +84,15 @@ async function copyPrefix(
   prefixOf: (runId: string) => string,
   { replace = false } = {},
 ): Promise<number> {
-  let copied = 0;
   const fromPrefix = prefixOf(source);
   if (replace) {
-    for (let token: string | undefined; ; ) {
-      const page = await r2.send(
-        new ListObjectsV2Command({
-          Bucket: bucket,
-          Prefix: prefixOf(exampleId),
-          ContinuationToken: token,
-        }),
-      );
-      const Objects = (page.Contents ?? []).map((o) => ({ Key: o.Key as string }));
-      if (Objects.length > 0) {
-        await r2.send(
-          new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects, Quiet: true } }),
-        );
-      }
-      token = page.NextContinuationToken;
-      if (!token) break;
-    }
+    await deletePrefix(store, prefixOf(exampleId));
   }
-  for (let token: string | undefined; ; ) {
-    const page = await r2.send(
-      new ListObjectsV2Command({ Bucket: bucket, Prefix: fromPrefix, ContinuationToken: token }),
-    );
-    for (const object of page.Contents ?? []) {
-      const rest = (object.Key as string).slice(fromPrefix.length);
-      await r2.send(
-        new CopyObjectCommand({
-          Bucket: bucket,
-          CopySource: `${bucket}/${object.Key}`,
-          Key: `${prefixOf(exampleId)}${rest}`,
-        }),
-      );
-      copied++;
-    }
-    token = page.NextContinuationToken;
-    if (!token) break;
+  const { objects } = await store.list(fromPrefix);
+  for (const object of objects) {
+    await store.copy(object.key, `${prefixOf(exampleId)}${object.key.slice(fromPrefix.length)}`);
   }
+  const copied = objects.length;
   return copied;
 }
 
@@ -184,7 +154,7 @@ const rows = values.backfill
         exampleId,
         renamed,
         await readBackfill(dir),
-        await uploadBackfill(r2, bucket, exampleId, dir),
+        await uploadBackfill(store, exampleId, dir),
       ),
     )
   : renamed;

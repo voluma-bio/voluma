@@ -38,14 +38,14 @@ named by the thread's `name`, its id without the run id). `RunLayout.forThread(r
   under `$SCRATCH`.
 - The path namespace is the same for every thread: `/scratch/<name>/x.png` is the key
   `scratchKey(runId, "<name>/x.png")`, so a checkpoint's evidence `{root: "scratch", path:
-  "<name>/x.png"}` resolves the same way (`r2Evidence`, the local evidence adapter). Before
+  "<name>/x.png"}` resolves the same way (`storeEvidence`). Before
   `evidence.keep`, `taskRuntime` checks each evidence path with the calling thread's
   `keyOf(..., "read")`, so a thread cites only what it can read.
 - **Evidence is hashed in the sandbox, not the runner.** The runner holds and moves no
   scan-sized data (a run reports a ~943 MB scan and ~224 MB grid). For a path the calling
   thread's sandbox mounts, `taskRuntime` runs `sha256sum` there (`bash`-style, through
   `sandboxSession.get(id, { note: false })`, so the hash exec never consumes the restart note
-  owed to the model; the file goes in on stdin) and passes the hash to `keep` as a callback; `r2Evidence` HEADs the
+  owed to the model; the file goes in on stdin) and passes the hash to `keep` as a callback; `storeEvidence` HEADs the
   source, calls it only on an ETag it has not seen for that key in this claim, then HEADs the
   target and does the server-side `CopyObject`. It never GETs the body, except for a path the
   caller's sandbox does not mount (a checker citing the worker's scratch), which it hashes by
