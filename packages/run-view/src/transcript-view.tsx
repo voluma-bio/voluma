@@ -20,9 +20,9 @@ import {
 import type { ReactNode } from "react";
 import { AgentCard } from "./agents";
 import { ActivityRow } from "./chat/activity-row";
-import { InfoButton, usageRows } from "./chat/info-button";
 import { Markdown, StreamingText } from "./chat/markdown";
 import { ProcessDisclosure } from "./chat/process-disclosure";
+import { ReplyInfo } from "./info";
 import { plainError } from "./run-error";
 import type { Thread } from "./run-model";
 import type { Row, Step, ToolStep } from "./transcript";
@@ -75,11 +75,10 @@ function RowView({ row, threads }: { row: Row; threads?: Map<string, Thread> }) 
         <div className="group relative">
           <StreamingText text={row.text} streaming={row.streaming} />
           {row.usage && (
-            <div className="absolute top-0 -left-8 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 max-[1100px]:hidden">
-              <InfoButton
-                label="Usage"
-                sections={[{ title: "This reply", rows: usageRows(row.usage, row.cacheMiss) }]}
-              />
+            // Wide, in the gutter left of the reply on hover or focus; narrow, there is no gutter,
+            // so it sits under the reply, always shown.
+            <div className="flex justify-end min-[1100px]:absolute min-[1100px]:top-0 min-[1100px]:-left-8 min-[1100px]:opacity-0 min-[1100px]:transition-opacity min-[1100px]:group-hover:opacity-100 min-[1100px]:focus-within:opacity-100">
+              <ReplyInfo usage={row.usage} miss={row.cacheMiss} />
             </div>
           )}
         </div>

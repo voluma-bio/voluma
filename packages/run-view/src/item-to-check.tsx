@@ -70,7 +70,7 @@ export function ItemToCheck({
     <article
       aria-label={title ?? context}
       className={cx(
-        "grid gap-2 rounded-lg bg-card p-3.5 inset-ring inset-ring-line-strong",
+        "grid grid-cols-[minmax(0,1fr)] gap-2 rounded-lg bg-card p-3.5 inset-ring inset-ring-line-strong",
         className,
       )}
     >

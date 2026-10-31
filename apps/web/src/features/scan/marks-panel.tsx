@@ -3,11 +3,12 @@
  * has a short tag (P1, B1, L1, O1) drawn beside it in the views and belongs to the image it was
  * made on (`gridKeyOf`); a redo that replaces that image drops it. A row selects it (the views
  * move to it, opening its task when it is on another grid) or deletes it. The tools that make
- * them, and their keys, are `TOOLS`, picked above the views.
+ * them, and their keys, are `TOOLS`, picked above the views. The page mounts the panel only
+ * while there is a mark.
  */
 import { MAX_MARKS, type Mark } from "@voluma/contracts/messages";
 import type { Volume } from "@voluma/contracts/review";
-import { EmptyState, IconButton, List, Row } from "@voluma/ui";
+import { IconButton, List, Row } from "@voluma/ui";
 import type { GridMark, MarkTool, Zyx } from "@voluma/viewer/grid";
 import { Trash2 } from "lucide-react";
 
@@ -116,12 +117,6 @@ export function MarksPanel({
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
-  if (marks.length === 0)
-    return (
-      <div className="p-4">
-        <EmptyState title="No marks of yours yet" />
-      </div>
-    );
   return (
     <div className="grid gap-2 p-3">
       <List label="Your marks" columns="auto 28px" boxed>

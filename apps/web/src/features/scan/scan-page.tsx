@@ -510,28 +510,31 @@ function ScanReview({
         <ShellPanel id="scan-view" side="right" label="View" icon={<Layers />} shortcut="v">
           <ViewPanel revision={latest} task={reviewTask} display={display} onDisplay={setDisplay} />
         </ShellPanel>
-        <ShellPanel
-          id="scan-marks"
-          side="right"
-          label="Marks"
-          icon={<ListChecks />}
-          count={marking.marks.length || undefined}
-          shortcut="m"
-        >
-          <MarksPanel
-            marks={marking.marks}
-            shown={marking.shown}
-            taskTitle={(id) => tasks.find((t) => t.id === id)?.title ?? id}
-            selected={marking.selected}
-            onSelect={(id) => {
-              const mark = marking.select(id);
-              // A mark on another grid opens the task it was made on; the views go to it there.
-              if (mark && mark.gridKey !== marking.shown?.key)
-                select({ task: mark.taskId, item: null });
-            }}
-            onDelete={marking.remove}
-          />
-        </ShellPanel>
+        {/* Marks has a place only once there is a mark: an empty list would take the views' width. */}
+        {marking.marks.length > 0 && (
+          <ShellPanel
+            id="scan-marks"
+            side="right"
+            label="Marks"
+            icon={<ListChecks />}
+            count={marking.marks.length}
+            shortcut="m"
+          >
+            <MarksPanel
+              marks={marking.marks}
+              shown={marking.shown}
+              taskTitle={(id) => tasks.find((t) => t.id === id)?.title ?? id}
+              selected={marking.selected}
+              onSelect={(id) => {
+                const mark = marking.select(id);
+                // A mark on another grid opens the task it was made on; the views go to it there.
+                if (mark && mark.gridKey !== marking.shown?.key)
+                  select({ task: mark.taskId, item: null });
+              }}
+              onDelete={marking.remove}
+            />
+          </ShellPanel>
+        )}
         <ShellPanel
           id="scan-ai"
           side="right"

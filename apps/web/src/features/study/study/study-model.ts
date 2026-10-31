@@ -31,6 +31,7 @@ import {
   groupOf,
   itemHref,
   needsYouOf,
+  runCost,
   runHref,
   type ScanGraphTask,
   type StudyGraphTask,
@@ -40,17 +41,9 @@ import {
 import type { Status } from "@voluma/ui";
 import type { BundledWorkflow } from "@voluma/workflow/bundled";
 
-/**
- * What every run of the study has spent so far: the runner's own model calls (heartbeats) plus
- * the sandbox's provider calls through the gateway, two separate amounts, as the run page adds them.
- */
+/** What every run of the study has spent so far (`runCost`, as Run details shows each run's). */
 export const studySpend = (detail: StudyDetail) =>
-  detail.scans
-    .flatMap((s) => s.runs)
-    .reduce(
-      (usd, run) => usd + (run.usage?.modelCostUsd ?? 0) + (run.providerCalls?.costUsd ?? 0),
-      0,
-    );
+  detail.scans.flatMap((s) => s.runs).reduce((usd, run) => usd + runCost(run), 0);
 
 /** An output's declared unit; "" for one without. */
 export const unitOf = (output: OutputEntry) =>

@@ -36,7 +36,17 @@ export {
   MenuSeparator,
 } from "./menu";
 export { PageHead, type PageHeadProps } from "./page-head";
-export { Facts, type FactsProps, Popover, PopoverClose, type PopoverProps } from "./popover";
+export {
+  type FactSection,
+  FactSections,
+  Facts,
+  type FactsProps,
+  InfoButton,
+  type InfoButtonProps,
+  Popover,
+  PopoverClose,
+  type PopoverProps,
+} from "./popover";
 export { Progress, type ProgressProps } from "./progress";
 export { Readout, type ReadoutProps, type ReadoutValue } from "./readout";
 export {
