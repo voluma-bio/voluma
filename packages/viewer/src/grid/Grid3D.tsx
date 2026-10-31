@@ -261,10 +261,13 @@ export function Grid3D({
       const inVolume = v && volumeHit(ray.ray, v, scene.spacingZyx, hit?.distance ?? Infinity);
       const at = inVolume ?? hit?.point;
       if (!at) return null;
+      // To 0.01 voxel: finer says nothing and only lengthens the message.
+      const voxel = (n: number, size: number) =>
+        Math.round(Math.max(0, Math.min(size - 1, n)) * 100) / 100;
       return [
-        Math.max(0, Math.min(scene.shapeZyx[0] - 1, at.z / sz)),
-        Math.max(0, Math.min(scene.shapeZyx[1] - 1, at.y / sy)),
-        Math.max(0, Math.min(scene.shapeZyx[2] - 1, at.x / sx)),
+        voxel(at.z / sz, scene.shapeZyx[0]),
+        voxel(at.y / sy, scene.shapeZyx[1]),
+        voxel(at.x / sx, scene.shapeZyx[2]),
       ];
     };
     const down = (event: PointerEvent) => {
