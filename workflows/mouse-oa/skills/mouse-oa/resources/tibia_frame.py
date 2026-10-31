@@ -16,21 +16,18 @@ Writes: <out>/<name>-hu.npy  float32 HU on the aligned grid (linear interpolatio
         <out>/<name>-frame-qc.jpg  six coronal sections of the aligned stack with the mask outlined: check the axes here
         <out>/<name>.json  the result record: `objects` holds the aligned grid as `tibia-grid` (a volume on the frame's affine)
 Prints: one JSON line {out, values, objects, hu, mask, frame, qc, grid_id, shape_wvu, mask_volume_mm3, shaft_z, epiphysis_z}
-Example: python tibia_frame.py --hu hu.npy --hu-json hu.json --labels labels.npy --label 2 --out tibia/ --joint-end low
+Example: python tibia_frame.py --window anatomy.json --hu hu.npy --hu-json hu.json --labels labels.npy --label 2 --out tibia/ --joint-end low
 Exits 2 with one sentence on bad input, before writing anything.
 """
 
 from pathlib import Path
 
 import frame as fr
-import matplotlib
 import numpy as np
 import objects
 import sidecar
+import viewlib as vl
 from envelope import close_and_fill
-
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 
 SUBSAMPLE = 2  # epiphysis points for the PCA are taken every 2nd voxel
 
@@ -89,6 +86,7 @@ def main():
     ap.add_argument('--hu-json', type=sidecar.existing, required=True, help='hu.json that scan-intake wrote: grid id and spacing')
     ap.add_argument('--labels', type=sidecar.existing, required=True, help='labels.npy on the scan grid')
     ap.add_argument('--label', type=int, required=True, help='label id of the bone (tibia = 2)')
+    ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', required=True, help="QC display window in HU, or the workflow's anatomy.json")
     ap.add_argument('--out', required=True, help='output directory (created)')
     ap.add_argument('--name', default='tibia', help='prefix of the output files')
     ap.add_argument(
@@ -171,16 +169,9 @@ def main():
             script='tibia_frame.py',
         )
     fr.save(frame, out / f'{a.name}-frame.json')
-    fig, axs = plt.subplots(2, 3, figsize=(18, 12))
-    for ax, v in zip(axs.ravel(), np.linspace(shape_zyx[1] * 0.2, shape_zyx[1] * 0.8, 6).astype(int)):
-        ax.imshow(aligned[:, v, :], cmap='gray', vmin=-500, vmax=6000)
-        ax.contour(amask[:, v, :], levels=[0.5], colors='cyan', linewidths=0.5)
-        ax.set(title=f'coronal V={v}', xlabel='U index', ylabel='W index (joint at top)')
-        ax.grid(alpha=0.3)
-    fig.tight_layout()
-    qc = out / f'{a.name}-frame-qc.jpg'
-    sidecar.save_image(fig, qc)
-    plt.close(fig)
+    vs = [int(v) for v in np.linspace(shape_zyx[1] * 0.2, shape_zyx[1] * 0.8, 6)]
+    qc = vl.slice_sheet(out / f'{a.name}-frame-qc.jpg', aligned, [(amask, 'cyan')], 1, vs, a.window,
+                        axis_names=('W index (joint at top)', 'V index', 'U index'), titles=[f'coronal V={v}' for v in vs], voxel_mm=sp[0])
     sidecar.emit_values(
         out / f'{a.name}.json',
         {},
@@ -188,7 +179,7 @@ def main():
         hu=str(out / f'{a.name}-hu.npy'),
         mask=str(out / f'{a.name}-mask.npy'),
         frame=str(out / f'{a.name}-frame.json'),
-        qc=str(qc),
+        qc=qc,
         grid_id=frame['grid_id'],
         shape_wvu=list(shape_zyx),
         mask_volume_mm3=round(float(amask.sum()) * sp[0] ** 3, 4),

@@ -43,7 +43,7 @@ if __name__ == '__main__':
     ap.add_argument('--in', type=sl.existing, dest='src', required=True, help='a 3D stack or a 2D image, .npy')
     ap.add_argument('--index', type=int, help='slice along axis 0 of a 3D stack (required for a 3D stack)')
     ap.add_argument('--out', required=True, help='the image to write (.jpg)')
-    ap.add_argument('--window', metavar='lo,hi', help='display window in the volume\'s units, HU (default: from the data)')
+    ap.add_argument('--window', type=vl.window_arg, metavar='lo,hi', help='display window in the volume\'s units, HU (default: from the data)')
     ap.add_argument('--grid', action='store_true', help='draw a 100 px grid with coordinates')
     ap.add_argument('--boxes', nargs='*', metavar='BOX', help='boxes as r0,c0,r1,c1[:name], in pixels, row then column')
     ap.add_argument('--points', nargs='*', metavar='POINT', help='points as r,c[:name], in pixels, row then column')
@@ -57,6 +57,6 @@ if __name__ == '__main__':
         img = np.asarray(v[a.index])
     else:
         img = np.asarray(v)
-    render(img, a.out, vl.parse_window(a.window) if a.window else None, a.grid,
+    render(img, a.out, a.window, a.grid,
            parse_items(a.boxes, 4), parse_items(a.points, 2), title=f'{Path(a.src).name} slice {a.index}')
     sl.emit(image=a.out, shape_rc=list(img.shape), index=a.index, boxes=len(a.boxes or []), points=len(a.points or []))
