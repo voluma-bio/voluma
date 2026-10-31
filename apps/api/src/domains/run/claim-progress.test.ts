@@ -39,7 +39,7 @@ describe("endClaim", () => {
 describe("stalledError", () => {
   it("names the call that was in flight", () => {
     expect(stalledError("segment_sam")).toBe(
-      "Stopped: the server lost contact with the runner 3 times in a row without progress (last call: `segment_sam`).",
+      "the server lost contact with the runner 3 times in a row without progress (last call: `segment_sam`)",
     );
     expect(stalledError(undefined)).not.toContain("last call");
   });

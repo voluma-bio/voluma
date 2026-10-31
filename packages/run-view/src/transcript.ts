@@ -22,6 +22,7 @@ import { type CacheState, cacheStep } from "@voluma/contracts/spend";
 import type { LiveFrame } from "@voluma/contracts/stream";
 import { threadPlace } from "@voluma/contracts/thread-place";
 import { catalog } from "@voluma/workflow/bundled";
+import { stoppedText } from "./run-error";
 import { plural } from "./run-status";
 
 const { taskTitle } = catalog["mouse-oa"];
@@ -428,7 +429,7 @@ function rowsOf(
         e.threadId === root &&
         e.payload.status === "failed"
       ) {
-        b.row({ kind: "failure", id: e.id, text: e.payload.error ?? "The run failed." });
+        b.row({ kind: "failure", id: e.id, text: stoppedText(e.payload.error) });
       }
     }
     if (!ids.has(e.threadId)) continue;
