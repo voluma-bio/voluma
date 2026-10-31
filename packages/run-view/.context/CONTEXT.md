@@ -43,7 +43,7 @@ screens are the scan review (`apps/web/src/features/scan`) and the study pages
 - **One agent's thread is `<AgentThread threadId>`** (`agent-thread.tsx`), wherever it shows: the
   scan review's Agents panel today. The caller names the thread and gives it a box; the
   container reads its rows and thread from the run store (`run-store.tsx`: one per run, fed by
-  the screen's stream; selector hooks, so a thread re-renders only for its own frames), and owns its header (name, status, clock, cost), its live line and
+  the screen's stream; selector hooks, so a thread re-renders only for its own frames), and owns its header (name, status, its info button), its live line and
   its own scroll, which sticks to the newest line while the reader is at the bottom. Hosts add
   header controls through `actions`. Shape from Meridian Flow's `ChatView`. Don't render a thread
   any other way; a new place for one is a new `<AgentThread>`.
@@ -69,8 +69,13 @@ screens are the scan review (`apps/web/src/features/scan`) and the study pages
   of tool calls between two pieces of prose fold into one closed `ProcessDisclosure` whose label is
   a digest ("Ran 12 commands, 1 failed"). Folds never open or close by themselves, and their rows'
   contents are built only when opened. Checkpoints, reported outputs and failures break the fold;
-  the `checkpoint` and `report_output` calls themselves are hidden unless they failed. No timestamps:
-  elapsed time is on agent rows, model usage behind info popovers.
+  the `checkpoint` and `report_output` calls themselves are hidden unless they failed.
+- **Up front is what the researcher reviews; the rest is behind info.** Statuses, verdicts,
+  values, To check, the AI's words and QC images show. Durations, tries, agent and tool-call
+  counts, cost, tokens and ids sit behind an info button (`@voluma/ui`'s `InfoButton`, filled by
+  `info.tsx`: `ThreadInfo`, `TaskInfo`) or Run details, never as text in a row, card or header.
+  Agent names carry no try count ("The AI's work"; checks are numbered only to tell two apart).
+  A new number goes behind info unless the researcher acts on it.
 - **Live frames** (`@voluma/contracts/stream`) are folded in `transcript.ts` (`applyFrame`, offset
   guarded) and dropped by `settle` when their durable event lands: a reply by `messageId` (the
   `message`), a call's arguments by `toolCallId` until its `tool.call`, its
@@ -89,7 +94,7 @@ screens are the scan review (`apps/web/src/features/scan`) and the study pages
   `live` changes per frame; `events` keeps its identity, so the event derivations don't rerun per
   token. A thread's first `runtime` message is labelled its task brief.
 - **Ported from Flow**: `chat/` holds Flow's `ProcessDisclosure`, `ActivityRow`, `StreamingText`
-  caret, `DisclosureStore`, `ChatThreadNavigation` and `TurnInfoButton`,
+  caret, `DisclosureStore` and `ChatThreadNavigation`,
   restyled onto voluma's tokens; each file header names its source. `chat/` stays generic (no run
   model), so it can move to `packages/ui`; the sub-agent cards built on Flow's anatomy are
   `agents.tsx`, at feature level. Markdown
@@ -112,11 +117,16 @@ screens are the scan review (`apps/web/src/features/scan`) and the study pages
   run at its first model call (401). Other users see that the run waits for its starter.
 - **A run's status** (`runStatus`, a word and a `StatusMark` state) and the formatters (`formatUsd`,
   `formatDuration`, `plural`) are `@voluma/run-view`, shared with Home; `use-now.ts` is the clock.
-- **Cost and time** come only from `spend(events, providerCalls)` (`@voluma/contracts/spend`), run
-  in `runView` on durable events, never per live frame. Run details shows the run's settled total;
-  each card in the lead AI's stream and each thread in "How the AI did it" shows that thread's own
-  cost (`Thread.spend`). `providerCalls.calls` and `unknownCostCalls` count gateway requests
+  A run's cost is `runCost` (model calls plus gateway calls), the one sum Run details, study spend
+  and `/new` use. How long a run worked is `runWork` (`run-model.ts`): its first claim to its end
+  plus each correction's reopen to its end, never first start to last end, which would count the
+  idle time before a researcher's reopen.
+- **Cost and time** of a thread or a task come only from `spend(events, providerCalls)`
+  (`@voluma/contracts/spend`), run in `runView` on durable events, never per live frame: each
+  thread's info shows its own (`Thread.spend`), each task's info its task's (`TaskView.spend`).
+  Run details shows the run's total from the run record (`runCost`). `providerCalls.calls` and `unknownCostCalls` count gateway requests
   (upload, response, delete and retries separately), not SAM operations; model-call counts
-  stay model calls. Only `Elapsed` and the header's running-for tick each second.
+  stay model calls. Clocks live inside info popovers, which mount only while open, so nothing on
+  the review ticks each second.
 
 Gaps: "Reviewed" needs review state ([#102](https://github.com/voluma-bio/voluma/issues/102)). Workflow versions are not shown (no versions yet).

@@ -14,7 +14,14 @@ import { inputsQuery, runsQuery, studiesQuery } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
 import type { Input, Run, VisitorKeys } from "@voluma/contracts/run";
 import type { CreateStudyRequest } from "@voluma/contracts/study";
-import { formatDuration, formatUsd, loadKeys, RunKeyLine, runHref } from "@voluma/run-view";
+import {
+  formatDuration,
+  formatUsd,
+  loadKeys,
+  RunKeyLine,
+  runCost,
+  runHref,
+} from "@voluma/run-view";
 import {
   Breadcrumb,
   Button,
@@ -82,7 +89,7 @@ function lastCompleted(runs: Run[] | undefined, path: string) {
     )
       return {
         seconds: (Date.parse(state.endedAt) - Date.parse(state.startedAt)) / 1000,
-        usd: run.usage.modelCostUsd,
+        usd: runCost(run),
       };
   }
 }

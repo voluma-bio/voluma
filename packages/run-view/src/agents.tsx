@@ -1,82 +1,19 @@
 /**
  * Workers and checks as the lead AI's transcript shows them: an inline card where each started,
- * with its clock and cost (`spendRows` behind an info button). Anatomy from Meridian Flow's
+ * its clock and cost behind an info button (`ThreadInfo`). Anatomy from Meridian Flow's
  * `SpawnReportCard` and `SubagentRow` (apps/app/src/features/chat):
- * running, a card shows the live tool line and a ticking clock; finished, its result, and the row
+ * running, a card shows the live tool line; finished, its result, and the row
  * expands to the report (built only on open). Rows expand, names navigate.
  */
 
-import { cacheHitShare, type Spend } from "@voluma/contracts/spend";
 import { STATUS_WORD, type Status, StatusMark } from "@voluma/ui";
 import { Bot, ChevronDown, ShieldCheck } from "lucide-react";
 import { useDisclosure } from "./chat/disclosure-store";
-import { InfoButton, type InfoSection } from "./chat/info-button";
 import { Markdown } from "./chat/markdown";
 import { useOpenThread } from "./chat/thread-navigation";
-import { agentTitle, isCheck, type Thread, workedSeconds } from "./run-model";
-import { formatDuration, formatUsd } from "./run-status";
+import { ThreadInfo } from "./info";
+import { agentTitle, isCheck, type Thread } from "./run-model";
 import { useThreads } from "./run-store";
-import { useNow } from "./use-now";
-
-const count = (n: number) => n.toLocaleString();
-
-/** Cost, command time, then calls and tokens; a thread's wall time is its clock (`Elapsed`). */
-function spendRows(s: Spend): InfoSection["rows"] {
-  const hit = cacheHitShare(s);
-  const rows: InfoSection["rows"] = [["Cost", formatUsd(s.costUsd)]];
-  if (s.unknownCostCalls > 0)
-    rows.push([
-      "Cost unknown",
-      `${count(s.unknownCostCalls)} gateway ${s.unknownCostCalls === 1 ? "request" : "requests"}`,
-    ]);
-  if (s.toolCostUsd > 0) rows.push(["Paid tools", formatUsd(s.toolCostUsd)]);
-  // `bash` calls only: the runs list's sandbox time is the sandbox's uptime, which is longer.
-  rows.push(["Command time", formatDuration(s.sandboxSeconds)]);
-  rows.push(
-    ["Model calls", count(s.calls)],
-    ["Input tokens", count(s.input + s.cacheRead)],
-    ["Output tokens", count(s.output)],
-    ["Cache hit", hit === null ? "none" : `${Math.round(100 * hit)}%`],
-    ["Cache misses", count(s.cacheMisses)],
-    ["Cache writes", count(s.cacheWrite)],
-  );
-  return rows;
-}
-
-export function Elapsed({ thread }: { thread: Thread }) {
-  const now = useNow(thread.status === "running");
-  return (
-    <span className="shrink-0 text-meta text-muted-foreground tabular-nums">
-      {formatDuration(workedSeconds(thread, now))}
-    </span>
-  );
-}
-
-/** A worker's or checker's own cost so far, once a model call reports one. */
-function ThreadCost({ thread }: { thread: Thread }) {
-  if (!thread.spend?.calls) return null;
-  return (
-    <span className="shrink-0 text-meta text-muted-foreground tabular-nums">
-      {formatUsd(thread.spend.costUsd)}
-    </span>
-  );
-}
-
-/** Its cost, command time, tokens and cache share behind an info button; its clock is `Elapsed`. */
-export function ThreadSpendInfo({ thread }: { thread: Thread }) {
-  if (!thread.spend?.calls) return null;
-  return (
-    <InfoButton
-      label="Cost and usage"
-      sections={[
-        {
-          title: thread.model ? `This thread, ${thread.model}` : "This thread",
-          rows: spendRows(thread.spend),
-        },
-      ]}
-    />
-  );
-}
 
 const MARK: Record<Thread["status"], string> = {
   running: "bg-info-tint text-info",
@@ -169,8 +106,9 @@ export function AgentCard({ thread }: { thread: Thread }) {
         <AgentName thread={thread} className="text-ui" />
         <span className="sr-only">{threadWord(thread.status)}</span>
         <span className="ml-auto" />
-        <ThreadCost thread={thread} />
-        <Elapsed thread={thread} />
+        <span className="relative z-10">
+          <ThreadInfo thread={thread} />
+        </span>
         {expandable && (
           <>
             <ChevronDown
@@ -197,13 +135,6 @@ export function AgentCard({ thread }: { thread: Thread }) {
           ) : (
             <p className="text-meta text-muted-foreground">It wrote no report.</p>
           )}
-          <div className="flex items-center gap-2 text-meta text-muted-foreground">
-            <span>
-              {thread.toolCalls} tool {thread.toolCalls === 1 ? "call" : "calls"}
-              {thread.toolErrors > 0 && `, ${thread.toolErrors} failed`}
-            </span>
-            <ThreadSpendInfo thread={thread} />
-          </div>
         </div>
       )}
     </div>

@@ -204,6 +204,48 @@ export function workedSeconds(t: Thread, now: number): number {
   return t.endedSeconds + Math.max(0, end - Date.parse(t.openSince)) / 1000;
 }
 
+/**
+ * The spans a run worked: its first claim to its end, then each correction from its
+ * `run.reopened` to the root thread's next end or its `correction.ended`. The time between an
+ * end and a researcher's reopen is not work. The last span runs to the run's end, or to `now`
+ * while the run goes. `seconds` is their sum; `corrections` how many reopens there were.
+ */
+export function runWork(
+  events: readonly RunEvent[],
+  state: RunState,
+  now: number,
+): { seconds: number; corrections: number } | undefined {
+  if (state.status === "queued" && events.length === 0) return undefined;
+  const first = state.status === "queued" ? undefined : state.startedAt;
+  const roots = new Set<string>();
+  const starts: number[] = first ? [Date.parse(first)] : [];
+  const ends: (number | undefined)[] = [];
+  let corrections = 0;
+  for (const e of events) {
+    if (e.type === "thread.started" && e.payload.parentThreadId === null) roots.add(e.threadId);
+    else if (e.type === "run.reopened") {
+      corrections += 1;
+      starts.push(Date.parse(e.createdAt));
+    } else if (
+      (e.type === "thread.ended" && roots.has(e.threadId)) ||
+      e.type === "correction.ended"
+    )
+      // The latest end inside a span closes it: a resumed root can end more than once.
+      ends[starts.length - 1] = Date.parse(e.createdAt);
+  }
+  if (starts.length === 0) return undefined;
+  const last = state.status === "ended" ? Date.parse(state.endedAt) : now;
+  let seconds = 0;
+  starts.forEach((start, i) => {
+    const end =
+      i === starts.length - 1 && state.status !== "ended"
+        ? last
+        : (ends[i] ?? starts[i + 1] ?? last);
+    seconds += Math.max(0, end - start) / 1000;
+  });
+  return { seconds, corrections };
+}
+
 /** Threads with a tool call still being written and none running say so; others are kept as is. */
 export function withLiveCalls(threads: Thread[], live: Live): Thread[] {
   const writing = new Set([...live.calls.values()].map((c) => c.threadId));
@@ -239,18 +281,17 @@ export function agentTree(threads: Thread[]): AgentNode[] {
 }
 
 /**
- * An agent's name where its task is already shown: "The AI's work, 2 tries", "Second AI check of
- * try 1", "Lead AI". A check's try is its `attemptId`'s place among its worker's attempts.
- * `short`, for a narrow place beside its outcome: "The AI's work", "Second check", "Second check 2".
+ * An agent's name where its task is already shown: "The AI's work", "Second AI check 2", "Lead
+ * AI". A check is numbered by its `attemptId`'s place among its worker's attempts once there are
+ * two; how many tries the worker took is in its info (`ThreadInfo`). `short`, for a narrow place
+ * beside its outcome: "Second check", "Second check 2".
  */
 export function agentLabel(t: Thread, threads: Thread[], { short = false } = {}): string {
   switch (t.kind) {
     case "main":
       return "Lead AI";
     case "worker":
-      return t.attempts.length > 1 && !short
-        ? `The AI's work, ${t.attempts.length} tries`
-        : "The AI's work";
+      return "The AI's work";
     case "check": {
       const attemptId = t.attemptId;
       const tries = attemptId
@@ -259,14 +300,14 @@ export function agentLabel(t: Thread, threads: Thread[], { short = false } = {})
       const n = tries && attemptId ? tries.indexOf(attemptId) + 1 : 0;
       if (!tries || tries.length < 2) return short ? "Second check" : "Second AI check";
       // A no-break space keeps the number with its word when a narrow box wraps the name.
-      return short ? `Second check\u00a0${n}` : `Second AI check of try ${n}`;
+      return short ? `Second check\u00a0${n}` : `Second AI check\u00a0${n}`;
     }
     default:
       return "Agent";
   }
 }
 
-/** An agent's name anywhere: "Segmentation: Second AI check of try 2", "Lead AI". */
+/** An agent's name anywhere: "Segmentation: Second AI check 2", "Lead AI". */
 export const agentTitle = (t: Thread, threads: Thread[]) =>
   t.taskId ? `${taskTitle(t.taskId)}: ${agentLabel(t, threads)}` : agentLabel(t, threads);
 

@@ -1,11 +1,15 @@
 /**
- * Facts about a thing, one click away (Run details, a scan's facts). Radix underneath: the
- * trigger toggles it, Escape and a click outside close it, and focus moves in and back.
- * `Facts` is the label and value list most popovers hold; wrap a link in `PopoverClose` to close
- * the popover as it navigates.
+ * Facts about a thing, one click away (Run details, a scan's facts, an agent's or a task's info).
+ * Radix underneath: the trigger toggles it, Escape and a click outside close it, and focus moves
+ * in and back. `Facts` is the label and value list most popovers hold, `FactSections` several of
+ * them under titles, and `InfoButton` the quiet (i) that opens them beside what they describe.
+ * Wrap a link in `PopoverClose` to close the popover as it navigates. The content mounts only
+ * while open, so a clock inside it ticks only while someone reads it.
  */
+import { Info } from "lucide-react";
 import { Popover as P } from "radix-ui";
 import type { ReactElement, ReactNode } from "react";
+import { IconButton } from "./button";
 import { cx } from "./cx";
 import { floatingClass, useThemedPortal } from "./portal";
 
@@ -71,13 +75,67 @@ export type FactsProps = {
 
 export function Facts({ items, className }: FactsProps) {
   return (
-    <dl className={cx("m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm", className)}>
+    <dl
+      className={cx("m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-sm", className)}
+    >
       {items.map(([label, value]) => (
         <div key={label} className="contents">
-          <dt className="text-fg-subtle">{label}</dt>
-          <dd className="m-0 tabular-nums">{value}</dd>
+          <dt className="whitespace-nowrap text-fg-subtle">{label}</dt>
+          <dd className="m-0 min-w-0 tabular-nums">{value}</dd>
         </div>
       ))}
     </dl>
+  );
+}
+
+export type FactSection = {
+  /** Omitted for the first section, which the popover's trigger already names. */
+  title?: string;
+  items: FactsProps["items"];
+};
+
+/** Fact lists one after another, each under its title, with a rule between them. */
+export function FactSections({ sections }: { sections: FactSection[] }) {
+  return (
+    <div className="grid gap-3">
+      {sections
+        .filter((s) => s.items.length > 0)
+        .map((s, i) => (
+          <section key={s.title ?? i} className={cx(i > 0 && "border-t border-border pt-3")}>
+            {s.title && (
+              <h3 className="mb-1.5 text-xs font-medium text-muted-foreground">{s.title}</h3>
+            )}
+            <Facts items={s.items} />
+          </section>
+        ))}
+    </div>
+  );
+}
+
+export type InfoButtonProps = {
+  /** What it tells, as its accessible name and tooltip: "Agent details". */
+  label: string;
+  children: ReactNode;
+  align?: PopoverProps["align"];
+};
+
+/**
+ * The quiet (i) beside a thing: what it took, cost and counted, which the reader asks for
+ * rather than scans for. Holds `FactSections` or `Facts`.
+ */
+export function InfoButton({ label, children, align = "start" }: InfoButtonProps) {
+  return (
+    <Popover
+      label={label}
+      align={align}
+      className="w-80 p-3"
+      trigger={
+        <IconButton size="sm" label={label} className="text-fg-subtle hover:text-foreground">
+          <Info />
+        </IconButton>
+      }
+    >
+      {children}
+    </Popover>
   );
 }

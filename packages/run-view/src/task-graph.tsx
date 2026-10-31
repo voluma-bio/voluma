@@ -14,8 +14,7 @@
 import { cx, type LinkTo, Progress, STATUS_WORD, type Status, StatusGlyph } from "@voluma/ui";
 import { type CSSProperties, type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { THREAD_STATUS } from "./agents";
-import { agentLabel, type TaskState, type TaskView, type Thread, workedSeconds } from "./run-model";
-import { formatDuration } from "./run-status";
+import { agentLabel, type TaskState, type TaskView, type Thread } from "./run-model";
 
 /** One task as the graph places it. */
 export type GraphTask = { id: string; title: string; dependsOn: string[] };
@@ -585,11 +584,6 @@ function ScanBox({
         )}
       >
         {line.text}
-        {size === "report" &&
-          attempts > 1 &&
-          (task.state === "done" || task.state === "to-check") && (
-            <span className="font-normal text-muted-foreground">, attempt {attempts}</span>
-          )}
       </p>
       {grow && <AgentRows threads={threads} onAgent={onAgent} />}
     </Box>
@@ -631,14 +625,5 @@ function AgentOutcome({ thread }: { thread: Thread }) {
   if (verdict === "passed") return <span className="text-muted-foreground">Agreed</span>;
   if (thread.status === "failed") return <span className="text-destructive">Failed</span>;
   if (thread.status === "running") return <span className="text-info">Running</span>;
-  // A thread still open with no stop has no duration to show yet: its state says where it is.
-  if (thread.openSince && !thread.stoppedAt)
-    return (
-      <span className="text-muted-foreground">{STATUS_WORD[THREAD_STATUS[thread.status]]}</span>
-    );
-  return (
-    <span className="text-muted-foreground tabular-nums whitespace-nowrap">
-      {formatDuration(workedSeconds(thread, Date.now()))}
-    </span>
-  );
+  return <span className="text-muted-foreground">{STATUS_WORD[THREAD_STATUS[thread.status]]}</span>;
 }

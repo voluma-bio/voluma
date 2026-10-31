@@ -212,14 +212,15 @@ export function Evidence({ runId, name, sha256 }: { runId: string; name: string;
         type="button"
         onClick={() => setOpen(true)}
         aria-label={`Open ${file} full size`}
-        className="block cursor-zoom-in overflow-hidden rounded-md bg-muted inset-ring inset-ring-border"
+        className="block min-h-16 min-w-16 w-fit max-w-full cursor-zoom-in overflow-hidden rounded-md inset-ring inset-ring-border"
       >
+        {/* The frame is the image's own size: no empty card around a narrow or short image. */}
         <img
           src={url}
           alt=""
           loading="lazy"
           onError={() => setFailed(true)}
-          className="max-h-40 w-full object-contain"
+          className="block max-h-40 w-auto max-w-full"
         />
       </button>
       <Lightbox open={open} onClose={() => setOpen(false)} caption={file}>

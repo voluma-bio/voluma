@@ -7,6 +7,7 @@
  * reviewed, which is never inferred. Also where a run's row links (the scan review), how a scan
  * is named, and how its cost and time read.
  */
+import type { Run } from "@voluma/contracts/run";
 import type { StudyRunSummary, StudyScan } from "@voluma/contracts/study";
 import type { Status } from "@voluma/ui";
 
@@ -18,6 +19,14 @@ export function formatUsd(usd: number): string {
   if (usd === 0) return "$0";
   return `$${usd.toFixed(usd < 1 ? 3 : 2)}`;
 }
+
+/**
+ * What a run has spent, in US dollars: the runner's own model calls (heartbeats) plus the
+ * sandboxes' provider calls through the gateway, two separate amounts. A request of unknown cost
+ * adds nothing (`providerCalls.unknownCostCalls`), so this is a floor while there are any.
+ */
+export const runCost = (run: Pick<Run, "usage" | "providerCalls">) =>
+  run.usage.modelCostUsd + run.providerCalls.costUsd;
 
 /** Whole seconds as `45 s`, `12 min 5 s` or `2 h 3 min`. */
 export function formatDuration(seconds: number): string {
