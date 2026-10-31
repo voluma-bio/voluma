@@ -22,6 +22,7 @@ export {
   cardId,
   haltOf,
   type NeedItem,
+  runModels,
   runView,
   runWork,
   type TaskState,

@@ -18,11 +18,11 @@ import {
   KeysForm,
   loadKeys,
   runCost,
+  runModels,
   runStatus,
   runWork,
   scanLabel,
   stoppedText,
-  type Thread,
   useEvents,
   useNow,
   useThreads,
@@ -39,7 +39,7 @@ import {
 } from "@voluma/ui";
 import { catalog, workflowName } from "@voluma/workflow/bundled";
 import { Check, ChevronDown, Copy } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 
 /** "OA6-1, right knee", from the study's scan; the scan's file name when the study can't say. */
@@ -134,6 +134,8 @@ function RunDetails({ run, workflow }: { run: Run; workflow: string }) {
     <Popover
       label="Run details"
       align="start"
+      // Wide enough for a usual model id ("deepseek/deepseek-v4-pro") on one line beside its role.
+      className="w-96"
       trigger={
         <Button variant="ghost" size="sm" className="shrink-0">
           Run details
@@ -157,27 +159,6 @@ const clock = (iso: string) =>
     timeZoneName: "short",
   });
 
-const ROLE_MODEL = { main: "Lead AI model", worker: "Task AI model", check: "Second check model" };
-
-/**
- * Which model the run calls: one "Model" line when every agent uses the same, else a line per
- * role listing its models; none before an agent records one.
- */
-function modelItems(threads: Thread[]): FactSection["items"] {
-  const byRole = new Map<keyof typeof ROLE_MODEL, Set<string>>();
-  for (const role of Object.keys(ROLE_MODEL) as (keyof typeof ROLE_MODEL)[]) {
-    const models = new Set<string>();
-    for (const t of threads) if (t.place === role && t.model) models.add(t.model);
-    if (models.size > 0) byRole.set(role, models);
-  }
-  const all = new Set([...byRole.values()].flatMap((m) => [...m]));
-  if (all.size === 1) return [["Model", [...all][0]]];
-  return [...byRole].map(([role, models]) => [
-    models.size > 1 ? `${ROLE_MODEL[role]}s` : ROLE_MODEL[role],
-    [...models].join(", "),
-  ]);
-}
-
 /** Mounted only while Run details is open, so its clock and the log scan run only then. */
 function RunFacts({ run, workflow }: { run: Run; workflow: string }) {
   const { state, providerCalls } = run;
@@ -186,7 +167,7 @@ function RunFacts({ run, workflow }: { run: Run; workflow: string }) {
   const work = runWork(events, state, useNow(live));
   const failed = useMemo(() => failedThreads(events).size, [events]);
   const threads = useThreads();
-  const models = useMemo(() => modelItems(threads), [threads]);
+  const models = useMemo(() => runModels(threads), [threads]);
   // Each claim records the commit its runner's checkout was at; a resume after a deploy adds one.
   const commits = useMemo(() => {
     const seen = new Set<string>();
@@ -202,7 +183,14 @@ function RunFacts({ run, workflow }: { run: Run; workflow: string }) {
     [live ? "Worked so far" : "Took", work ? formatDuration(work.seconds) : "Not started"],
     ...(work?.redos ? [["Redos", String(work.redos)] as [string, string]] : []),
     ["Workflow", workflow],
-    ...models,
+    ...models.map(({ label, models }): [string, ReactNode] => [
+      label,
+      <span key={label} className="flex flex-col font-mono text-xs">
+        {models.map((m) => (
+          <ModelId key={m} id={m} />
+        ))}
+      </span>,
+    ]),
     // A request of unknown cost adds nothing to the sum, so the sum is a floor.
     [live ? "Spent so far" : "Cost", unknown > 0 ? `At least ${cost}` : cost],
   ];
@@ -235,6 +223,25 @@ function RunFacts({ run, workflow }: { run: Run; workflow: string }) {
     <FactSections
       sections={[{ items: researcher }, { title: "For troubleshooting", items: support }]}
     />
+  );
+}
+
+/**
+ * A model id that wraps only after a "/", never at a hyphen inside a name, with a hanging indent
+ * so a wrapped id reads as one item in a list of them.
+ */
+function ModelId({ id }: { id: string }) {
+  const parts = id.split("/");
+  return (
+    <span className="-indent-[1ch] pl-[1ch]">
+      {parts.map((part, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: an id's parts never reorder
+        <Fragment key={i}>
+          <span className="whitespace-nowrap">{i < parts.length - 1 ? `${part}/` : part}</span>
+          {i < parts.length - 1 && <wbr />}
+        </Fragment>
+      ))}
+    </span>
   );
 }
 
