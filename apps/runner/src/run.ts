@@ -488,6 +488,7 @@ async function claimBody(
     });
     convert = reviewAssetsWorker({
       runId,
+      inputId: run.input.id,
       rootThreadId: rootThreadIdOf(runId),
       recorder: events,
       signal: halt.signal,
@@ -505,7 +506,7 @@ async function claimBody(
               idleSeconds: config.sandbox.idleSeconds,
               // The converter imports `sidecar` through the run's PYTHONPATH.
               env: { PYTHONPATH: layout.pythonPath },
-              ...convertMounts(runId),
+              ...convertMounts(runId, run.input.id),
             }),
             signal,
           );

@@ -20,7 +20,12 @@
  */
 
 import { ASSET_ERROR_MAX, type RunEvent } from "@voluma/contracts/events";
-import { evidencePrefix, reviewAssetPrefix, workflowSnapshotPrefix } from "@voluma/contracts/r2";
+import {
+  evidencePrefix,
+  inputReviewPrefix,
+  reviewAssetPrefix,
+  workflowSnapshotPrefix,
+} from "@voluma/contracts/r2";
 import { type ReviewAssetsManifest, reviewAssetsManifestSchema } from "@voluma/contracts/review";
 import { type Sandbox, SandboxEndedError, type SandboxMount } from "./ports/sandbox";
 import type { Recorder } from "./recorder";
@@ -28,14 +33,20 @@ import type { Recorder } from "./recorder";
 const EVIDENCE = "/evidence";
 const WORKFLOW = "/workflow";
 const REVIEW = "/review";
+const INPUT_REVIEW = "/input-review";
 /** One conversion; a 1.25 GB scan is minutes. The drain bounds the end of the run, not this. */
 const CONVERT_TIMEOUT_SECONDS = 1200;
 const POLL_MS = 1000;
 /** How long `drain` waits for a halted loop (a sandbox call that ignores abort) before it moves on. */
 const HALT_GRACE_MS = 5000;
+/** Coalesce cold misses from concurrent runs in this runner; only completion is shared. */
+const converting = new Map<string, Promise<void>>();
 
 /** The mounts of the run's convert sandbox, for `convertSandboxSpec`. */
-export function convertMounts(runId: string): {
+export function convertMounts(
+  runId: string,
+  inputId: string,
+): {
   evidence: SandboxMount[];
   review: SandboxMount[];
 } {
@@ -44,7 +55,10 @@ export function convertMounts(runId: string): {
       { path: EVIDENCE, prefix: evidencePrefix(runId), access: "read-only" },
       { path: WORKFLOW, prefix: workflowSnapshotPrefix(runId), access: "read-only" },
     ],
-    review: [{ path: REVIEW, prefix: reviewAssetPrefix(runId), access: "read-write" }],
+    review: [
+      { path: REVIEW, prefix: reviewAssetPrefix(runId), access: "read-write" },
+      { path: INPUT_REVIEW, prefix: inputReviewPrefix(inputId), access: "read-write" },
+    ],
   };
 }
 
@@ -93,6 +107,7 @@ export interface ReviewAssetsWorker {
 
 export interface ReviewAssetsOptions {
   runId: string;
+  inputId: string;
   /** The run's root thread, which the `assets.*` events are written on. */
   rootThreadId: string;
   recorder: Recorder;
@@ -171,13 +186,38 @@ export function reviewAssetsWorker(options: ReviewAssetsOptions): ReviewAssetsWo
     await old?.destroy().catch((e) => log(`review assets: closing the sandbox failed: ${e}`));
   }
 
-  /** One conversion's result, or a throw when the sandbox failed. */
+  /** Waits for another run of this input to populate the cache before opening our sandbox. */
   async function convert(
     job: Job,
   ): Promise<{ manifest: ReviewAssetsManifest } | { error: string }> {
+    const key = `${inputReviewPrefix(options.inputId)}${job.sha256}/${job.flags}`;
+    while (converting.has(key)) {
+      await Promise.race([converting.get(key), sleep(POLL_MS)]);
+      signal.throwIfAborted();
+    }
+    let release!: () => void;
+    converting.set(
+      key,
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    );
+    try {
+      return await convertInSandbox(job);
+    } finally {
+      converting.delete(key);
+      release();
+    }
+  }
+
+  /** One conversion's result, or a throw when the sandbox failed. */
+  async function convertInSandbox(
+    job: Job,
+  ): Promise<{ manifest: ReviewAssetsManifest } | { error: string }> {
     const box = await liveSandbox();
+    // The cache location is environment, so a run's older snapshotted converter keeps its CLI.
     const command =
-      `python ${WORKFLOW}/workflows/core/convert/review_assets.py --source ${EVIDENCE}/${job.sha256} ` +
+      `VOLUMA_REVIEW_CACHE=${INPUT_REVIEW} python ${WORKFLOW}/workflows/core/convert/review_assets.py --source ${EVIDENCE}/${job.sha256} ` +
       `${job.flags} --out ${REVIEW}`;
     let stdout = "";
     let stderr = "";

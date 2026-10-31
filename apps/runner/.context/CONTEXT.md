@@ -119,13 +119,26 @@ records `assets.ready` / `assets.failed` on the root thread (id `<runId>:assets:
   dies or cannot be created is replaced once, then the file is recorded failed. `sourceSha256`
   is the queue item's; a converter that prints another one has failed.
 - **Mounts.** `/evidence` (the run's evidence prefix) and `/workflow` read-only, `/review`
-  (`reviewAssetPrefix`) read-write, no network. The snapshot keeps repo paths and includes
+  (`reviewAssetPrefix`) and `/input-review` (`inputReviewPrefix(run.input.id)`) read-write,
+  no network. Only the trusted conversion sandbox mounts the input cache; agents do not.
+  The snapshot keeps repo paths and includes
   `core/convert/`, so the command is `python /workflow/workflows/core/convert/review_assets.py` (not `-I`, which drops the `PYTHONPATH`
   the converter imports `sidecar` through; the sandbox gets `RunLayout.pythonPath` alone).
   A cloud-bucket mount cannot rename, which zarr's local store does for every file: the converter
   builds in a fixed `/tmp` path it clears at the start, and copies, `manifest.json` last. A
   non-zero exit from a sandbox that is gone counts as a sandbox failure (the one retry), not a
   failed file.
+- **Reuse across runs.** The converter takes `VOLUMA_REVIEW_CACHE` (or `--cache`) and caches
+  completed assets under its source-code hash, conversion mode and `.npy` hash. A cache hit
+  copies the assets into the run's own review prefix and emits its own `assets.ready`, so
+  viewer URLs and run authorization do not change. The cache holds only voxel-space assets:
+  affine, calibration and grid identity remain each run's reported outputs. Changes to bytes,
+  mode or converter code cannot reuse the old entry. `manifest.json` is copied last. Shared
+  entries are never deleted during conversion, including after an interrupted write.
+  Concurrent runs in one runner wait for the same input/file/mode's conversion; independent
+  runners may duplicate a cold conversion and publish identical bytes. This is first-report
+  reuse, not eager upload-time preparation: DICOM intake still runs per run. Runs pinned to
+  converters without cache support keep their original conversion behavior.
 - **Signal.** One rule: the worker halts exactly when the stop will not end the run (server stop,
   lost lease, self-stop, shutdown; `reportFor` is not `ended`). An uncaught
   `error` ends the run, so the worker drains, as it does on `finally`'s own `abort`, which the worker outlives.
