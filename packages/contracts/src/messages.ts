@@ -164,7 +164,7 @@ const messageBase = {
   text: z.string().max(MAX_TEXT).optional(),
   marks: z.array(markSchema).max(MAX_MARKS).optional(),
   taskId: taskIdSchema.optional(),
-  /** The To check item open in the panel: its `checkpoint` event id (needs `taskId`; the route checks it belongs to that task). */
+  /** A To check item's id, as the run view lists it (needs `taskId`; the route checks it is one of that task's). */
   itemId: z.string().min(1).optional(),
   go: z.literal(true).optional(),
 };

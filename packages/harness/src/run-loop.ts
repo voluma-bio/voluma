@@ -189,16 +189,13 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
   };
 
   /** What the open correction's message says the researcher was reviewing; empty when it names no task. */
-  function reviewing(messageId: string | undefined): string {
+  function reviewing(view: Folded, messageId: string | undefined): string {
     const events = recorder.events();
     const m = events.find((e) => e.id === messageId);
     if (m?.type !== "person.message" || m.payload.go || !m.payload.taskId) return "";
     const { taskId, itemId, marks, snapshotKey } = m.payload;
-    const item = events.find((e) => e.id === itemId);
-    const found =
-      item?.type === "checkpoint" && item.payload.toCheck
-        ? { title: item.payload.toCheck.title, text: item.payload.text }
-        : undefined;
+    const check = view.tasks.find((t) => t.id === taskId)?.checks.find((c) => c.id === itemId);
+    const found = check && { title: check.title, text: check.detail };
     return `\n\n${reviewingText({
       task: taskName(taskId),
       taskId,
@@ -220,7 +217,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
       mainRestartPrompt(view, state, o.selectedOutputs, o.definition.files, o.notes);
     if (!inCorrection) return { prompt: restart(), ...covers };
     const brief = n === 1 ? `${first()}\n\n${state}` : restart();
-    return { prompt: `${finishedRunText(view)}${reviewing(message)}\n\n${brief}`, ...covers };
+    return { prompt: `${finishedRunText(view)}${reviewing(view, message)}\n\n${brief}`, ...covers };
   }
 
   /** The start options for a thread; `prompt` is its first message, which a resumed thread uses only if it never stored one. */
@@ -539,7 +536,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     const changed = changedTasks(fold(events.slice(0, cut)), d.view);
     const opening = corrections(events).open?.message;
     const intro = d.undelivered.some((n) => n.kind === "person" && n.eventId === opening)
-      ? reviewing(opening)
+      ? reviewing(fold(events), opening)
       : "";
     return {
       text: `${deliveryText(d.undelivered, agentsList(d, stateOf), changed)}${intro}`,

@@ -9,7 +9,7 @@
  * event lock can deadlock with it.
  */
 import { runEventSchema } from "@voluma/contracts/events";
-import { corrections, fold } from "@voluma/contracts/fold";
+import { corrections, FOLD_EVENT_TYPES, fold } from "@voluma/contracts/fold";
 import type { PersonMessage } from "@voluma/contracts/messages";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { and, asc, eq, inArray } from "drizzle-orm";
@@ -179,33 +179,12 @@ export async function decideMessage(
     });
   }
   const { taskId, itemId } = msg.payload;
-  if (itemId !== undefined) {
-    // By primary key, then read in code: `payload` is `json` (see the guard in AGENTS.md).
-    const [item] = await tx
-      .select({ type: events.type, payload: events.payload })
-      .from(events)
-      .where(and(eq(events.runId, runId), eq(events.id, itemId)));
-    const p = item?.type === "checkpoint" ? (item.payload as Record<string, unknown>) : undefined;
-    if (!p || p.taskId !== taskId || !p.toCheck) {
-      throw new HTTPException(400, { message: `${itemId} is not a To check item of ${taskId}.` });
-    }
-  }
   const view = fold(
     (
       await tx
         .select()
         .from(events)
-        .where(
-          and(
-            eq(events.runId, runId),
-            inArray(events.type, [
-              "revision.started",
-              "plan.changed",
-              "run.reopened",
-              "correction.ended",
-            ]),
-          ),
-        )
+        .where(and(eq(events.runId, runId), inArray(events.type, [...FOLD_EVENT_TYPES])))
         .orderBy(asc(events.seq))
     ).map(toRunEvent),
   );
@@ -219,6 +198,12 @@ export async function decideMessage(
       throw new HTTPException(409, {
         message: `${taskId} was skipped, so it cannot be corrected.`,
       });
+    }
+    if (
+      itemId !== undefined &&
+      !view.tasks.find((t) => t.id === taskId)?.checks.some((c) => c.id === itemId)
+    ) {
+      throw new HTTPException(400, { message: `${itemId} is not a To check item of ${taskId}.` });
     }
   }
   const refused = admit(
