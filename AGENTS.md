@@ -96,7 +96,7 @@ read or cast payload fields only inside `CASE WHEN type = '<type>' THEN … END`
 since Postgres may evaluate the json condition before the `type` filter. Before step 2, parse every staging run's
 events, and every `run.json` under `r2:dev/runs/`, with the new `runEventSchema`: fetch each run's log from
 `GET /api/run/runs/:id/stream` with `VOLUMA_DEBUG_TOKEN` (agents can't reach
-staging's database). A query for the fields you think changed is not enough: it
+staging's database), leaving out its `event: live` frames, which are not stored events. A query for the fields you think changed is not enough: it
 missed the recorded plans that took the runs list down after #177.
 
 ## Working in parallel
