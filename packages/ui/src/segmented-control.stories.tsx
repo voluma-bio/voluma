@@ -3,7 +3,8 @@ import { useState } from "react";
 import { SegmentedControl } from "./segmented-control";
 
 /**
- * **What:** two or three modes of one view; one is always on. Arrow keys move between them.
+ * **What:** a few modes of one view; one is always on. Arrow keys move between them. A mode's
+ * key, or why it can't be picked now, shows on hover.
  * **Why:** one look for mode switches that were drawn ad hoc. **Where:** the matrix's Status /
  * Values, a list's Comfortable / Compact, the Agents stream filter, the scan review's marking
  * tools (each with its key).
@@ -11,11 +12,14 @@ import { SegmentedControl } from "./segmented-control";
 function Demo({
   initial,
   options,
-  keys = [],
+  shortcuts = [],
+  reason,
 }: {
   initial: string;
   options: string[];
-  keys?: string[];
+  shortcuts?: string[];
+  /** Holds every mode but the first off, with this reason. */
+  reason?: string;
 }) {
   const [value, setValue] = useState(initial);
   return (
@@ -23,7 +27,12 @@ function Demo({
       label="Show"
       value={value}
       onValueChange={setValue}
-      options={options.map((o, i) => ({ value: o, label: o, keys: keys[i] }))}
+      options={options.map((o, i) => ({
+        value: o,
+        label: o,
+        shortcut: shortcuts[i],
+        reason: i > 0 ? reason : undefined,
+      }))}
     />
   );
 }
@@ -40,10 +49,16 @@ export const TwoModes: Story = {};
 export const ThreeModes: Story = {
   args: { initial: "Compact", options: ["Comfortable", "Compact", "Only to check"] },
 };
-export const WithKeys: Story = {
+export const WithShortcuts: Story = {
   args: {
     initial: "Navigate",
     options: ["Navigate", "Point", "Box", "Line", "Lasso"],
-    keys: ["Escape", "P", "B", "L", "O"],
+    shortcuts: ["Escape", "p", "b", "l", "o"],
+  },
+};
+export const HeldOff: Story = {
+  args: {
+    ...WithShortcuts.args,
+    reason: "A message carries up to 20 marks. Delete one to add another.",
   },
 };

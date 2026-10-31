@@ -59,11 +59,15 @@ stopped.
   sent. A 409 shows the server's text. A retry keeps the message id, so the server stores it
   once; editing after a failure makes a new message.
 - **Your marks** are page state (`useMarking`, `scan-page.tsx`), lost on reload. The tool strip on
-  the viewer's bar (Navigate, Point, Box, Line, Lasso; Esc, P, B, L, O) picks what a click or drag
-  makes (`@voluma/viewer/grid`'s `tool`). A new mark names the grid's image volume
-  (`TaskGrid.imageId`) and gets a tag (P1, B1, L1, O1); the viewer draws the marks on that image.
-  Marks lists them; a row moves the views to the mark. A message to the AI carries all of them
-  (up to `MAX_MARKS`) and a PNG of the views as shown (`GridViewer`'s `snapshot`, at most
-  `MAX_MESSAGE_SNAPSHOT_BYTES`); a sent message clears them. The tags reach the AI only through the
-  picture: the contract's marks have no names.
+  the viewer's bar (`TOOLS` in `marks-panel.tsx`: Navigate, Point, Box, Line, Lasso; Esc, P, B,
+  L, O) picks what a click or drag makes (`@voluma/viewer/grid`'s `tool`). Esc first drops a mark
+  being drawn, then puts the tool away, then (the shell's) leaves Full view: one thing per press.
+  A new mark names the grid's image volume (`TaskGrid.imageId`) and gets a tag (P1, B1, L1, O1);
+  the viewer draws the marks on that image. Marks lists them; a row moves the views to the mark,
+  opening its task first when it is on another grid ("on <task>"). At `MAX_MARKS` the tools are
+  held off with the reason. A message to the AI carries the marks on the views shown when those
+  are its subject's, and a PNG of them (`GridViewer`'s `snapshot`, in the room the rest of the
+  body leaves, at most `MAX_MESSAGE_SNAPSHOT_BYTES`); the marks it carried leave the list. Redo
+  carries neither. The tags reach the AI only through the picture: the contract's marks have no
+  names.
 - Thread kinds are shown as labels only; nothing here branches on a kind or a role name.

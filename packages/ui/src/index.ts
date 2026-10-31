@@ -50,7 +50,11 @@ export {
   type RowLinkProps,
   type RowProps,
 } from "./row";
-export { SegmentedControl, type SegmentedControlProps } from "./segmented-control";
+export {
+  SegmentedControl,
+  type SegmentedControlOption,
+  type SegmentedControlProps,
+} from "./segmented-control";
 export {
   AppShell,
   ShellHeading,

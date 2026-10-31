@@ -11,7 +11,7 @@ import { useMutation } from "@tanstack/react-query";
 import { ApiError, sendRunMessage } from "@voluma/api-client";
 import type { Me } from "@voluma/contracts/auth";
 import { conversation } from "@voluma/contracts/conversation";
-import { MAX_MESSAGE_SNAPSHOT_BYTES } from "@voluma/contracts/messages";
+import { MAX_MESSAGE_SNAPSHOT_BYTES, MESSAGE_BODY_BYTES } from "@voluma/contracts/messages";
 import type { Run } from "@voluma/contracts/run";
 import { Markdown, type TaskView, useEvents } from "@voluma/run-view";
 import { Button, Chip, EmptyState, StatusMark, TextAreaField } from "@voluma/ui";
@@ -72,15 +72,15 @@ export function AiPanel({
   task: TaskView | undefined;
   /** Set by Something's wrong: the message is about this task, and the box takes focus. */
   about: { taskId: string; at: number } | undefined;
-  /** Your marks: the next message carries them. */
+  /** Your marks on the subject's views: the next message carries them. */
   marks: readonly YourMark[];
   /**
-   * The views as one PNG of at most this many bytes: null when even the smallest is larger,
-   * undefined when no views are shown (also as the function's answer).
+   * The subject's views as one PNG of at most this many bytes: null when even the smallest is
+   * larger, undefined when they aren't shown (also as the function's answer).
    */
   snapshot: ((maxBytes: number) => Promise<Blob | null | undefined>) | undefined;
-  /** The run reopened: reconnect its stream; the marks went with the message. */
-  onSent: () => void;
+  /** The run reopened: reconnect its stream. `marks`: the ids of the marks the message carried. */
+  onSent: (marks: string[]) => void;
 }) {
   const events = useEvents();
   const items = useMemo(() => conversation(events), [events]);
@@ -90,31 +90,53 @@ export function AiPanel({
   useEffect(() => {
     if (about) form.current?.querySelector("textarea")?.focus();
   }, [about]);
-  // A retry of the same message keeps its id, so the server stores it once.
-  const [id, setId] = useState(() => crypto.randomUUID());
+  // A retry of the same message keeps its id, so the server stores it once. After a failure,
+  // other words or other marks make it a new message: the first may have landed.
+  const id = useRef(crypto.randomUUID());
+  const tried = useRef<string>(undefined);
   // A message without the picture it meant to carry says so once sent.
   const [unseen, setUnseen] = useState(false);
   const send = useMutation({
     mutationFn: async (go: boolean) => {
-      // A redo carries no note, so nothing to show the AI; a message carries the views as they are.
-      const picture = go || !snapshot ? undefined : await snapshot(MAX_MESSAGE_SNAPSHOT_BYTES);
-      setUnseen(picture === null);
-      return sendRunMessage(run.id, {
-        id,
-        ...(text.trim() && { text: text.trim() }),
+      // Marks name a block of the task's results, so they go only with a task; a redo takes none.
+      const carried = !go && subject ? marks : [];
+      const note = text.trim();
+      const attempt = `${note}\n${carried.map((m) => m.id).join()}`;
+      if (tried.current !== undefined && attempt !== tried.current)
+        id.current = crypto.randomUUID();
+      tried.current = attempt;
+      const body = {
+        id: id.current,
+        ...(note && { text: note }),
         ...(subject && { taskId: subject.id }),
         ...(go && { go: true as const }),
-        // Marks name a block of the task's results, so they go only with a task.
-        ...(!go && subject && marks.length > 0 && { marks: marks.map((m) => m.mark) }),
+        ...(carried.length > 0 && { marks: carried.map((m) => m.mark) }),
+      };
+      // A redo has nothing to show the AI; a message carries the views as they are, in the room
+      // the rest of the body leaves (base64 is 4 bytes per 3, plus the field's own JSON).
+      const room = Math.floor(
+        ((MESSAGE_BODY_BYTES - new Blob([JSON.stringify(body)]).size - 64) * 3) / 4,
+      );
+      const picture =
+        go || !snapshot
+          ? undefined
+          : room > 0
+            ? await snapshot(Math.min(MAX_MESSAGE_SNAPSHOT_BYTES, room))
+            : null;
+      setUnseen(picture === null);
+      await sendRunMessage(run.id, {
+        ...body,
         ...(picture && {
           snapshot: { mimeType: "image/png" as const, data: await base64(picture) },
         }),
       });
+      return { note, marks: carried.map((m) => m.id) };
     },
-    onSuccess: () => {
-      setText("");
-      setId(crypto.randomUUID());
-      onSent();
+    onSuccess: (sent) => {
+      if (sent.note) setText("");
+      id.current = crypto.randomUUID();
+      tried.current = undefined;
+      onSent(sent.marks);
     },
   });
   const closed = closedBecause(run, me);
@@ -205,11 +227,7 @@ export function AiPanel({
           maxLength={10_000}
           value={text}
           disabled={closed !== undefined || send.isPending}
-          onChange={(e) => {
-            setText(e.target.value);
-            // Edited after a failed send: a new message, not a retry of the one that may have landed.
-            if (send.isError) setId(crypto.randomUUID());
-          }}
+          onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && text.trim()) send.mutate(false);
           }}

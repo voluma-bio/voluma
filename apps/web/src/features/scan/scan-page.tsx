@@ -64,7 +64,7 @@ import {
 import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from "react-router";
 import { AgentsPanel } from "./agents-panel";
 import { AiPanel } from "./ai-panel";
-import { MarksPanel, middleOf, nextTag, type YourMark } from "./marks-panel";
+import { gridMark, MarksPanel, middleOf, nextTag, TOOLS, type YourMark } from "./marks-panel";
 import { ReportPanel } from "./report-panel";
 import { RunAlert, ScanHeading, scanTitle } from "./scan-header";
 import { ToCheckPanel } from "./to-check-panel";
@@ -330,10 +330,12 @@ function ScanReview({
   const focusKey = check?.focus && JSON.stringify(check.focus);
   const focus = useMemo(() => check?.focus && { ...check.focus }, [focusKey, picked]);
   const [display, setDisplay] = useState<StructureDisplay>({});
+  const marking = useMarking();
 
   const pickItem = (next: NeedItem) => {
     select({ item: next.id, task: next.taskId });
     setPicked((n) => n + 1);
+    marking.jumped();
   };
   const openAgent = useCallback(
     (threadId: string | null) => {
@@ -350,8 +352,13 @@ function ScanReview({
   };
   // It holds until the reader moves to another task or the message is sent.
   useEffect(() => setAbout(undefined), [taskId]);
-
-  const marking = useMarking();
+  // What a message about its subject carries: the views and your marks on them, when the views
+  // shown are the subject's.
+  const subjectShown = !about || about.taskId === taskId ? marking.shown : undefined;
+  const sendable = useMemo(
+    () => (subjectShown ? marking.marks.filter((m) => m.mark.volumeId === subjectShown) : []),
+    [marking.marks, subjectShown],
+  );
 
   const open = items.filter((n) => !n.accepted).length;
   const { title } = scanTitle(run, study.data);
@@ -407,7 +414,9 @@ function ScanReview({
           marks={marking.marks}
           selected={marking.selected}
           jump={marking.jump}
-          onMark={marking.add}
+          onJumped={marking.jumped}
+          onMark={(mark, volumeId) => marking.add(mark, volumeId, reviewTask.id)}
+          onShown={marking.setShown}
           viewer={marking.viewer}
         />
       </Suspense>
@@ -500,8 +509,15 @@ function ScanReview({
         >
           <MarksPanel
             marks={marking.marks}
+            imageId={marking.shown}
+            taskTitle={(id) => tasks.find((t) => t.id === id)?.title ?? id}
             selected={marking.selected}
-            onSelect={marking.select}
+            onSelect={(id) => {
+              const mark = marking.select(id);
+              // A mark on another grid opens the task it was made on; the views go to it there.
+              if (mark && mark.mark.volumeId !== marking.shown)
+                select({ task: mark.taskId, item: null });
+            }}
             onDelete={marking.remove}
           />
         </ShellPanel>
@@ -520,11 +536,11 @@ function ScanReview({
             tasks={tasks}
             task={task}
             about={about}
-            marks={marking.marks}
-            snapshot={latest && reviewTask ? marking.snapshot : undefined}
-            onSent={() => {
+            marks={sendable}
+            snapshot={subjectShown ? marking.snapshot : undefined}
+            onSent={(sent) => {
               setAbout(undefined);
-              marking.clear();
+              marking.drop(sent);
               setReopened((n) => n + 1);
               refetchRun();
             }}
@@ -540,39 +556,48 @@ function ScanReview({
 }
 
 /**
- * Your marks and the tool that makes them. P, B, L and O pick a tool and Esc puts it away, as
- * the shell's panel keys do: never while typing, never with a modifier.
+ * Your marks and the tool that makes them. A tool's key (`TOOLS`) picks it and Esc puts it away,
+ * as the shell's panel keys do: never while typing, never with a modifier. Listening on the
+ * document puts this after a pane's own Esc (dropping a mark being drawn) and before the shell's
+ * (leaving Full view), so one Esc does one thing.
  */
 function useMarking() {
   const [tool, setTool] = useState<MarkTool | null>(null);
   const [marks, setMarks] = useState<YourMark[]>([]);
   const [selected, setSelected] = useState<string>();
   const [jump, setJump] = useState<{ at: Zyx; volumeId: string }>();
+  // The image of the grid whose views are shown.
+  const [shown, setShown] = useState<string>();
   const viewer = useRef<GridViewerHandle>(null);
+  const full = marks.length >= MAX_MARKS;
+  const latest = useRef({ tool, full });
+  latest.current = { tool, full };
+  // At the cap the tools are held off (`viewer.tsx` says why).
   useEffect(() => {
-    const keys: Record<string, MarkTool | null> = {
-      p: "point",
-      b: "box",
-      l: "line",
-      o: "outline",
-      escape: null,
-    };
+    if (full) setTool(null);
+  }, [full]);
+  useEffect(() => {
+    const keys = new Map(
+      TOOLS.map((t) => [t.shortcut.toLowerCase(), t.value === "navigate" ? null : t.value]),
+    );
     const onKey = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.repeat || event.metaKey || event.ctrlKey || event.altKey)
-        return;
+      if (event.defaultPrevented || event.repeat || event.isComposing) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target as HTMLElement;
       if (
         target.isContentEditable ||
         target.closest("input, textarea, select, dialog, [role='dialog'], [role='menu']")
       )
         return;
-      const key = event.key.toLowerCase();
-      if (!(key in keys)) return;
-      setTool(keys[key]!);
-      if (key !== "escape") event.preventDefault();
+      const next = keys.get(event.key.toLowerCase());
+      if (next === undefined) return;
+      // Esc with no tool out is the shell's; a tool's key at the cap does nothing.
+      if (next === null ? !latest.current.tool : latest.current.full) return;
+      event.preventDefault();
+      setTool(next);
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
   }, []);
   return {
     tool,
@@ -580,29 +605,40 @@ function useMarking() {
     marks,
     selected,
     jump,
+    shown,
+    setShown,
     viewer,
-    add: useCallback((mark: GridMark, volumeId: string) => {
+    jumped: useCallback(() => setJump(undefined), []),
+    add: useCallback((mark: GridMark, volumeId: string, taskId: string) => {
       setMarks((had) =>
         had.length >= MAX_MARKS
           ? had
           : [
               ...had,
-              { id: crypto.randomUUID(), tag: nextTag(had, mark), mark: { volumeId, ...mark } },
+              {
+                id: crypto.randomUUID(),
+                tag: nextTag(had, mark),
+                taskId,
+                mark: { volumeId, ...mark },
+              },
             ],
       );
     }, []),
+    /** Selects a mark and aims the views at it; returns it. */
     select: useCallback(
       (id: string) => {
         setSelected(id);
-        const mark = marks.find((m) => m.id === id)?.mark;
-        if (mark) setJump({ at: middleOf(mark), volumeId: mark.volumeId });
+        const mark = marks.find((m) => m.id === id);
+        const shape = mark && gridMark(mark.mark);
+        if (mark && shape) setJump({ at: middleOf(shape), volumeId: mark.mark.volumeId });
+        return mark;
       },
       [marks],
     ),
     remove: useCallback((id: string) => setMarks((had) => had.filter((m) => m.id !== id)), []),
-    clear: useCallback(() => {
-      setMarks([]);
-      setSelected(undefined);
+    /** Drops the marks a message carried. */
+    drop: useCallback((ids: string[]) => {
+      if (ids.length) setMarks((had) => had.filter((m) => !ids.includes(m.id)));
     }, []),
     snapshot: useCallback(
       // Undefined until the lazy viewer mounts: nothing to picture yet.

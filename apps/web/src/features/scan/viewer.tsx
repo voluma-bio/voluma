@@ -3,9 +3,11 @@
  * (3D and three slices through one crosshair), with the blocks the task names drawn on it, from
  * the run's converted assets. Loaded lazily, with three.js. The viewer remounts only for another
  * grid; structure display changes redraw in place. The marking tools sit on the viewer's bar;
- * your marks on this grid's image are drawn, and a new one is named by that image's id.
+ * your marks on this grid's image are drawn, and a new one is named by that image's id. The
+ * page learns which grid is shown (`onShown`), since marks and the picture belong to it.
  */
 import { reviewAssetUrl } from "@voluma/api-client";
+import { MAX_MARKS } from "@voluma/contracts/messages";
 import type { Focus, ReviewAssets, ReviewTask, Revision } from "@voluma/contracts/review";
 import { EmptyState, SegmentedControl } from "@voluma/ui";
 import {
@@ -21,16 +23,7 @@ import {
   type Zyx,
 } from "@voluma/viewer/grid";
 import { type Ref, useEffect, useMemo, useRef, useState } from "react";
-import type { YourMark } from "./marks-panel";
-
-/** The tools, each with the key that picks it (`scan-page.tsx` listens). */
-export const TOOLS: { value: MarkTool | "navigate"; label: string; keys: string }[] = [
-  { value: "navigate", label: "Navigate", keys: "Escape" },
-  { value: "point", label: "Point", keys: "P" },
-  { value: "box", label: "Box", keys: "B" },
-  { value: "line", label: "Line", keys: "L" },
-  { value: "outline", label: "Lasso", keys: "O" },
-];
+import { FULL, gridMark, TOOLS, type YourMark } from "./marks-panel";
 
 export function TaskViewer({
   runId,
@@ -44,7 +37,9 @@ export function TaskViewer({
   marks,
   selected,
   jump,
+  onJumped,
   onMark,
+  onShown,
   viewer,
 }: {
   runId: string;
@@ -58,10 +53,13 @@ export function TaskViewer({
   onTool: (tool: MarkTool | null) => void;
   marks: readonly YourMark[];
   selected: string | undefined;
-  /** A mark picked in Marks: each new object moves the crosshair there once. */
+  /** A mark picked in Marks: it moves the crosshair once its grid is shown, then `onJumped`. */
   jump?: { at: Zyx; volumeId: string };
+  onJumped: () => void;
   /** A new mark, on the image volume `volumeId`. */
   onMark: (mark: GridMark, volumeId: string) => void;
+  /** The image of the grid shown, once its views are; undefined while they aren't. */
+  onShown: (imageId: string | undefined) => void;
   viewer: Ref<GridViewerHandle>;
 }) {
   const [labels, setLabels] = useState(false);
@@ -107,24 +105,25 @@ export function TaskViewer({
   const target = useMemo(() => (at ? { at } : undefined), [focus, atKey]);
   // The crosshair goes to whichever came last: the item's place or a picked mark.
   const imageId = grid.state === "ready" ? grid.imageId : undefined;
+  useEffect(() => onShown(imageId), [imageId, onShown]);
+  useEffect(() => () => onShown(undefined), [onShown]);
   const [aim, setAim] = useState(target);
   useEffect(() => setAim(target), [target]);
   useEffect(() => {
-    if (jump && jump.volumeId === imageId) setAim({ at: jump.at });
-  }, [jump, imageId]);
+    if (!jump || jump.volumeId !== imageId) return;
+    setAim({ at: jump.at });
+    onJumped();
+  }, [jump, imageId, onJumped]);
   const shown = useMemo<ShownMark[]>(
     () =>
-      marks
-        .filter((m) => m.mark.volumeId === imageId)
-        .map(({ id, tag, mark: { volumeId: _, ...mark } }) => ({
-          id,
-          tag,
-          mark: mark as GridMark,
-          by: "you",
-          selected: id === selected,
-        })),
+      marks.flatMap((m) => {
+        const mark = m.mark.volumeId === imageId && gridMark(m.mark);
+        const by = "you" as const;
+        return mark ? [{ id: m.id, tag: m.tag, mark, by, selected: m.id === selected }] : [];
+      }),
     [marks, imageId, selected],
   );
+  const full = marks.length >= MAX_MARKS;
   if (grid.state !== "ready")
     return (
       <div
@@ -150,7 +149,10 @@ export function TaskViewer({
     >
       <SegmentedControl
         label="Marking tool"
-        options={TOOLS}
+        options={TOOLS.map((t) => ({
+          ...t,
+          reason: full && t.value !== "navigate" ? FULL : undefined,
+        }))}
         value={tool ?? "navigate"}
         onValueChange={(v) => onTool(v === "navigate" ? null : v)}
       />
