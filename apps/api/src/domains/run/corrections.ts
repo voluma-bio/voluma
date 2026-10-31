@@ -9,7 +9,7 @@
  * event lock can deadlock with it.
  */
 import { runEventSchema } from "@voluma/contracts/events";
-import { corrections, fold } from "@voluma/contracts/fold";
+import { corrections, FOLD_EVENT_TYPES, fold, redoRefusal } from "@voluma/contracts/fold";
 import type { PersonMessage } from "@voluma/contracts/messages";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { and, asc, eq, inArray } from "drizzle-orm";
@@ -179,46 +179,25 @@ export async function decideMessage(
     });
   }
   const { taskId, itemId } = msg.payload;
-  if (itemId !== undefined) {
-    // By primary key, then read in code: `payload` is `json` (see the guard in AGENTS.md).
-    const [item] = await tx
-      .select({ type: events.type, payload: events.payload })
-      .from(events)
-      .where(and(eq(events.runId, runId), eq(events.id, itemId)));
-    const p = item?.type === "checkpoint" ? (item.payload as Record<string, unknown>) : undefined;
-    if (!p || p.taskId !== taskId || !p.toCheck) {
-      throw new HTTPException(400, { message: `${itemId} is not a To check item of ${taskId}.` });
-    }
-  }
   const view = fold(
     (
       await tx
         .select()
         .from(events)
-        .where(
-          and(
-            eq(events.runId, runId),
-            inArray(events.type, [
-              "revision.started",
-              "plan.changed",
-              "run.reopened",
-              "correction.ended",
-            ]),
-          ),
-        )
+        .where(and(eq(events.runId, runId), inArray(events.type, [...FOLD_EVENT_TYPES])))
         .orderBy(asc(events.seq))
     ).map(toRunEvent),
   );
   if (view.plan.tasks.length === 0)
     throw new HTTPException(409, { message: "The run has no plan yet." });
   if (taskId !== undefined) {
-    if (!view.plan.tasks.some((t) => t.id === taskId)) {
-      throw new HTTPException(404, { message: `${taskId} is not a task of this run.` });
-    }
-    if (view.tasks.find((t) => t.id === taskId)?.skipped) {
-      throw new HTTPException(409, {
-        message: `${taskId} was skipped, so it cannot be corrected.`,
-      });
+    const cannot = redoRefusal(view, taskId);
+    if (cannot) throw new HTTPException(cannot.status, { message: cannot.message });
+    if (
+      itemId !== undefined &&
+      !view.tasks.find((t) => t.id === taskId)?.checks.some((c) => c.id === itemId)
+    ) {
+      throw new HTTPException(400, { message: "That is not one of this task's To check items." });
     }
   }
   const refused = admit(
