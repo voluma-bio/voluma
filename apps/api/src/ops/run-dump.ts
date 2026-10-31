@@ -75,7 +75,7 @@ export const countsOf = (dump: {
 });
 
 export const describeCounts = (c: ReturnType<typeof countsOf>) =>
-  `${c.events} events, ${c.threads} threads, ${c.piMessages} pi messages, ${c.reviewSnapshots} snapshots, ${c.providerCalls} provider calls`;
+  `${c.events} events, ${c.threads} threads, ${c.piMessages} pi messages, ${c.reviewSnapshots} snapshots, ${c.providerCalls} gateway requests`;
 
 /**
  * Everything `import:run` needs to hold of a dump, so `archive:run` can refuse to delete a run

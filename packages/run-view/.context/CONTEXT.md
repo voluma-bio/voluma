@@ -110,6 +110,8 @@ screens are the scan review (`apps/web/src/features/scan`) and the study pages
 - **Cost and time** come only from `spend(events, providerCalls)` (`@voluma/contracts/spend`), run
   in `runView` on durable events, never per live frame. Run details shows the run's settled total;
   each card in the lead AI's stream and each thread in "How the AI did it" shows that thread's own
-  cost (`Thread.spend`). Only `Elapsed` and the header's running-for tick each second.
+  cost (`Thread.spend`). `providerCalls.calls` and `unknownCostCalls` count gateway requests
+  (upload, response, delete and retries separately), not SAM operations; model-call counts
+  stay model calls. Only `Elapsed` and the header's running-for tick each second.
 
 Gaps: "Reviewed" needs review state ([#102](https://github.com/voluma-bio/voluma/issues/102)). Workflow versions are not shown (no versions yet).

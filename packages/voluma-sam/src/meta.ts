@@ -1,8 +1,9 @@
 /**
  * Meta's Model API (`sam-3.1`, Standard mode: content is not used for training), reached
  * through the run's gateway (`$VOLUMA_GATEWAY_URL/meta/v1/...`, the sandbox's token as the
- * bearer): the gateway adds Meta's key and meters the call. One call is an upload of the
- * encoded stack and one streamed request tracking the boxed structures both ways.
+ * bearer): the gateway adds Meta's key and meters each request. One SAM operation normally
+ * makes three gateway requests: upload the encoded stack, stream the response tracking
+ * the boxed structures both ways, then delete the uploaded file. Retries add requests.
  *
  * Failures that are the gateway's or the network's, not the request's, are `Failure`s with
  * `infrastructure` set, which the tool passes on so the agent knows to retry.
