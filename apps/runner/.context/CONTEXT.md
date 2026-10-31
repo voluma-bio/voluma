@@ -163,7 +163,7 @@ who ends it:
    then closes its sandbox (no `stopped` event is stored); the service waits up to 30 s. A second signal
    exits 130 at once and leaves the sandboxes (use `sandboxes:clean`). Signal the process
    group (Ctrl-C does); `kill <pid of pnpm>` alone leaves the runner running.
-3. **A resume.** Right after a claim succeeds, `run.ts` terminates every live sandbox tagged with the run but not this claim (`terminateOtherClaims`: one list call, then each sandbox's tags; no wait). The claim holds the lease, so nothing an earlier claim started keeps writing or spending. The sweep is cleanup and never decides the run's outcome: an error is logged and retried once, and the idle timeout backs it up. A creation is aborted with the run's signal, so a released run's creation cannot start a sandbox beside the runner that reclaimed it. A process frozen past its lease (a sleeping laptop) can still act late.
+3. **A resume.** Right after a claim succeeds, before any sandbox, `run.ts` calls `endOtherClaims` (`modal-sandbox.ts`): it lists the live sandboxes tagged with the run but not this claim, terminates each with `terminate({wait: true})` and returns only when Modal has reported every one terminated and a fresh listing shows none. The claim holds the lease, so a crashed or lost runner's sandbox, still writing the shared `/outputs` and scratch mounts, must be gone before this claim starts a sandbox or restores `/outputs`. There is no deadline: a guess shorter than Modal's own would start a writer beside a live one. Modal API errors are retried with backoff and logged; the wait ends on confirmation or on the claim's stop (shutdown, lost lease), and a sandbox Modal never reports still ends at its lifetime limit. While it waits the claim heartbeats and logs "still waiting" every 30 s. Measured locally, a terminate takes about 30 s to confirm. A creation is aborted with the run's signal, so a released run's creation cannot start a sandbox beside the runner that reclaimed it. A process frozen past its lease (a sleeping laptop) can still act late.
 4. **Modal ends it.** After 300 s with no command running (`VOLUMA_SANDBOX_IDLE_SECONDS` in
    `.env`, at least 30) or at a hard lifetime of 14400 s (`VOLUMA_SANDBOX_LIFETIME_SECONDS`).
    Before each call the session asks Modal whether a sandbox it handed out earlier still
@@ -490,10 +490,7 @@ the main role holds `bash`, which then backs up every span) copies the whole pre
 files before it reports anything, so claim start is the earliest point that precedes every
 writer) and records `outputs.backed-up`; the first claim after `correction.ended` clears
 `/outputs`, copies the backup back, checks that `/outputs` matches it (key and ETag per key, both
-sides `CopyObject` copies) and records `outputs.restored`. Before a restore the claim
-calls `awaitOtherClaimsGone`, which re-lists the run's sandboxes of other claims until none is
-live (up to 60 s): a stale sandbox could write over the restored files, so if some remain the
-claim fails. Only a pending restore waits; `terminateOtherClaims` at claim start does not. A failed check throws too, and the next claim repeats the restore. The first claim of the
+sides `CopyObject` copies) and records `outputs.restored`. No earlier claim's sandbox is live by then (`endOtherClaims` waited for them at claim start), so none can write over the restored files. A failed check throws too, and the next claim repeats the restore. The first claim of the
 next `run.reopened` after a correction finished (no `correction.ended` before it) deletes its
 backup and records `outputs.discarded`. `corrections` (`@voluma/contracts/fold`) is the one
 reader of a correction's state (its message and go, how it closed, its backup). A thread that ended `cancelled` is never

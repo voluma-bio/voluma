@@ -36,6 +36,8 @@ export interface SuperviseRunOptions {
   previousClaim?: ClaimEndReason;
   /** The workflow packages the run starts from, as recorded on the root's first event. */
   workflows: RecordedPin[];
+  /** The sandbox image the run uses, as recorded on the root's first event. */
+  sandboxImage: string;
   layout: RunLayout;
   recorder: Recorder;
   history: History;
@@ -48,8 +50,6 @@ export interface SuperviseRunOptions {
   files: Files;
   /** The run's `/outputs` as a whole: backed up when a correction starts, put back when one ends unfinished (`outputs-backup.ts`). */
   outputs: Outputs;
-  /** Resolves once no earlier claim's sandbox is live, throws if some are; awaited before a restore of `/outputs` (`outputs-backup.ts`). */
-  earlierClaimsEnded(signal: AbortSignal): Promise<void>;
   roles: { main: RoleOf; worker: RoleOf; check: RoleOf };
   briefs: Briefs;
   config?: Partial<LoopConfig>;
@@ -72,6 +72,7 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
     parentThreadId: null,
     kind: "supervisor",
     workflows: options.workflows,
+    sandboxImage: options.sandboxImage,
   });
   // A reopen clears the claim-end reason (`messages.ts`); a claim cut off before it wrote its
   // `claim.started` has one again, and says that instead.
@@ -88,7 +89,6 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
     recorder,
     outputs: options.outputs,
     mainWorks: options.layout.mainWorks,
-    earlierClaimsEnded: options.earlierClaimsEnded,
     signal,
   });
   const pool = threads(
