@@ -8,8 +8,8 @@
  * Limits, because every image enters the thread's history: at most 4 files per call (a sheet
  * of views, not a gallery), 1 MiB each, and 2000 px on a side (the most Claude accepts once a
  * request holds many images). A bigger image is downscaled to fit and re-encoded as JPEG, and
- * the result line says so. Requests carry only the last two calls' images
- * (`adapters/pi/elide-images.ts`).
+ * the result line says so. Images stay in the thread until a compaction summarizes them away
+ * (`adapters/pi/compaction.ts`), which also keeps a request under the model's size limits.
  */
 import { createHash } from "node:crypto";
 import sharp from "sharp";
@@ -73,7 +73,7 @@ export function viewImageTool({
     description:
       "Look at up to 4 image files you wrote (PNG or JPEG; one over 1 MiB or 2000 px a side is downscaled for you): they are returned as images, " +
       "in order, so you can check a render, an overlay or a plot. Only images; other files are refused. " +
-      "Put several views on one sheet when you can. Only the images of your last two calls stay visible; older ones show as their text line, so call again to see one. " +
+      "Put several views on one sheet when you can. Images stay visible until your history is summarized; after that an older one shows as its text line, so call again to see it. " +
       layout.description,
     input: inputSchema,
     async execute({ paths }, ctx) {

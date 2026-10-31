@@ -16,14 +16,20 @@ not shown here"), never resampled onto this one.
   id starts with `<taskId>/`); else the scan's grid, the first image volume's. The grid's image is
   its `image` volume with `.npy` data; spacing is the norms of its affine's columns.
 - **What is drawn.** The named structures on the grid (a named labels volume brings all its
-  structures): a labels volume as one overlay coloured per label (`--label-n` by label value), a
+  structures): a labels volume as one ivory overlay (`--bone`, or `--label-n` with Labels on), a
   cropped mask as an overlay at its `offsetZyx`, each with its meshes; named surfaces as meshes
-  (their trace in the slices is still to come); annotations aren't drawn yet.
+  and their triangle intersections with each slice. Named rulers and points map from world mm
+  through the image's affine into source voxels. Rulers use `--ruler`, with endpoints in 3D and
+  on slices; only the part within half a source voxel of a slice is shown, never a projection
+  from another slice. In 3D annotations draw over the anatomy so a ruler stays readable.
+  Coplanar surface patches show their boundary, not their triangle diagonals; intersections
+  are cached by geometry, mesh offsets and slice coordinate, independently of display settings.
 - **Assets.** From `ReviewRun.assets` by the file's sha256: absent is "Preparing…", `failed` is
   its error. For the image that replaces the viewer; for an overlay it is a note under the heading.
   Review refetches while a file of the latest revision has no entry (about ten minutes at most).
-- **Display.** The Structures panel lists structures and surfaces; its visibility and opacity scale the overlay's blend and the
-  mesh; hidden is opacity 0, so a mesh stays loaded. A new scene on the same grid redraws in place.
+- **Display.** The View panel lists structures, surfaces and annotations; its visibility and opacity
+  scale their drawings in every pane. Hidden is opacity 0, so a mesh stays loaded. The Labels toggle
+  changes bone colours without moving the camera or crosshair. A new scene on the same grid redraws in place.
 - **Focus.** A check's focused blocks are drawn in `--check-outline` at full opacity, whatever the
   panel says; so is its `volumeId` labels volume (a disagreement mask), only its `label` if given,
   drawn even when no structure brings it. The crosshair goes to its `point`, or its `box` centre, only on the scan's grid (they

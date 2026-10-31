@@ -5,16 +5,16 @@
  * mimeType}`, the bytes (the ones the model saw, downscaled if they were) written to the thread's
  * scratch in the run's bucket (`historyImageKey`); a loaded history gets the images back.
  *
- * Rows written before this hold inline image blocks and use the same retention rule. An image whose object
+ * Rows written before this hold inline image blocks and load unchanged. An image whose object
  * is gone or no longer matches its sha256 comes back as a short text note. Only the images
- * the next request would carry are fetched (`KEEP` in `elide-images.ts`): older ones become the
- * note the request would have shown anyway.
+ * the next request would carry are fetched, those in the messages since the latest compaction
+ * (`compaction.ts`); the ones it summarized away become that note.
  */
 import { createHash } from "node:crypto";
 import { historyImageKey } from "@voluma/contracts/r2";
 import { FileNotFound, type Files } from "../../ports/files";
 import type { History } from "../../ports/history";
-import { KEEP, withoutImages } from "./elide-images";
+import { parseMarker } from "./compaction";
 
 // view_image returns at most 1 MiB per image. Its stored object is on writable scratch,
 // so check the stream before buffering it: a sandbox can replace it with a larger file.
@@ -27,6 +27,8 @@ const blocksOf = (row: Row): Block[] | undefined =>
   Array.isArray(row.content) ? (row.content as Block[]) : undefined;
 
 const has = (row: Row, type: string) => blocksOf(row)?.some((b) => b.type === type) === true;
+
+const GONE_NOTE = "[the images are no longer shown; call view_image again to see them]";
 
 /** `nameOf` is a thread's name (`ThreadRecord.name`): the folder its images are written under. */
 export function withImageRefs(
@@ -69,38 +71,24 @@ export function withImageRefs(
     async load(threadId) {
       const rows = (await history.load(threadId)).map((text) => ({
         text,
+        marker: parseMarker(text),
         row:
           text.includes('"imageRef"') || text.includes('"image"')
             ? (JSON.parse(text) as Row)
             : undefined,
       }));
-      const withImages = rows.filter(
-        (r) => r.row?.role === "toolResult" && (has(r.row, "image") || has(r.row, "imageRef")),
-      );
-      const shown = new Set(withImages.slice(-KEEP));
+      // `keptFrom` indexes the messages, the rows that are not compaction markers.
+      const keptFrom = rows.filter((r) => r.marker).at(-1)?.marker?.keptFrom ?? 0;
+      let at = 0;
       return Promise.all(
         rows.map(async (r) => {
+          const index = r.marker ? -1 : at++;
           const blocks = r.row && blocksOf(r.row);
-          if (!r.row || !blocks) return r.text;
-          // Elide both forms before missing references become text; otherwise Pi can promote
-          // an older inline image into the two-result window on the next request.
-          if (
-            r.row.role === "toolResult" &&
-            !shown.has(r) &&
-            blocks.some((b) => b.type === "image" || b.type === "imageRef")
-          ) {
-            return JSON.stringify({
-              ...r.row,
-              content: withoutImages(
-                blocks.filter((b) => b.type !== "imageRef"),
-                "image",
-              ),
-            });
-          }
-          if (!has(r.row, "imageRef")) return r.text;
-          const content = await Promise.all(
-            blocks.map((b) => (b.type === "imageRef" ? fetchImage(b) : b)),
-          );
+          if (!r.row || !blocks || !has(r.row, "imageRef")) return r.text;
+          const content =
+            index >= keptFrom
+              ? await Promise.all(blocks.map((b) => (b.type === "imageRef" ? fetchImage(b) : b)))
+              : [...blocks.filter((b) => b.type !== "imageRef"), { type: "text", text: GONE_NOTE }];
           return JSON.stringify({ ...r.row, content });
         }),
       );

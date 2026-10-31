@@ -1305,7 +1305,9 @@ describe("run loop", () => {
 
       const again = world({
         plan: [task("t1")],
-        main: throwing(2, "prompt is too long"),
+        // A refused request is recovered once in the thread (its cold summary is the second call,
+        // which the fake refuses too), so a main fails after two throws and the fresh one after two more.
+        main: throwing(4, "prompt is too long"),
         check: checker(),
       });
       await expect(again.run()).rejects.toThrow(
