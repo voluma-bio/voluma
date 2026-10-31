@@ -34,7 +34,7 @@
  * Go. `go` requires `taskId`. When the loop's log shows the span's go the main agent has not been
  * told of, it writes `revision.started {reason: "correction", taskId}` (id `<person.message id>:go`)
  * and then tells main; that marker, not the message, opens the gate. Code refuses `message`,
- * `start_worker`, `change_plan` and `stop_worker` until the span holds a marker. A go of a span
+ * `start_agent`, `change_plan` and `stop_worker` until the span holds a marker. A go of a span
  * that ended (`correction.ended`) before main acted is void: later messages tell main so and start
  * no work. The marker also gives review and the correction span a boundary when nothing depends
  * on the task, and resets the task's fix rounds.

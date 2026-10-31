@@ -35,7 +35,6 @@ export const TOOL_NAMES = [
   "segment_sam",
   "read_file",
   "ask",
-  "start_worker",
   "start_agent",
   "message",
   "wait",

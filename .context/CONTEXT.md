@@ -99,8 +99,9 @@ and check threads.
   (`packages/harness/src/thread-id.ts`), minted once when it first starts. Its `name` (`supervisor`,
   `main`, `<taskId>.<role>`, plus `.<n>` for the n-th) is on `thread.started`, where n is how many the
   log has started for that role, so a restart never reuses a thread. Everything after the mint reads
-  the id from the record; runs recorded before keep their `<runId>.<name>` ids, and a run's root is
-  looked up in its log (`rootThreadOf`), never rebuilt. `thread.started` carries the task id
+  the id from the record. A run whose root is not `uuid5(runId, "supervisor")`, or records no
+  `sandboxImage`, was made by an older Voluma: its claim fails with "can't be resumed" (`pinnedImageOf`)
+  rather than mint a second root. `thread.started` carries the task id
   for a worker or check thread.
 - **Pi's batch rules shape the tools.** Pi runs the tool calls of one reply as a batch: in
   parallel, unless any tool in it is `sequential`, which makes the whole batch sequential. A

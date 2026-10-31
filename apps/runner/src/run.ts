@@ -49,7 +49,7 @@ import {
   type ModelSetup,
   type Outcome,
   type Prepared,
-  rootThreadOf,
+  pinnedImageOf,
   type Supervised,
   superviseRun,
 } from "@voluma/harness/supervise-run";
@@ -248,13 +248,8 @@ async function claimBody(
     const nameOf = (id: string) => names.get(id) ?? id;
     const stored = await client.storedEvents();
     // The image the run began on: a deploy that changes `SANDBOX_IMAGE` must not move a resumed
-    // run to different dependencies. A run recorded before the field existed takes this runner's.
-    const root = rootThreadOf(runId, stored);
-    const pinnedImage = stored
-      .flatMap((e) =>
-        e.type === "thread.started" && e.threadId === root ? [e.payload.sandboxImage] : [],
-      )
-      .find((image) => image !== undefined);
+    // run to different dependencies. A run made before this was recorded is refused here.
+    const pinnedImage = pinnedImageOf(runId, stored);
     const sandboxImage = pinnedImage ?? config.sandbox.image;
     log(`sandbox image: ${sandboxImage} (${pinnedImage ? "the run's own" : "this runner's"})`);
     live = liveBatcher((frames) => client.live(frames));

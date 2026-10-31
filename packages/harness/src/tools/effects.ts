@@ -13,7 +13,6 @@ const SUFFIX = {
   report_output: "",
   submit_task: "",
   ask: ":ask",
-  start_worker: ":start_worker",
   start_agent: ":start_agent",
   message: ":message:open",
   stop_worker: ":stop_worker:end",

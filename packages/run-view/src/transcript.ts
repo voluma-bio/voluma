@@ -233,8 +233,6 @@ export function toolTitle(name: string, input: unknown): string {
       const paths = Array.isArray(r.paths) ? r.paths.filter((p) => typeof p === "string") : [];
       return `Viewed ${paths.map((p) => p.split("/").pop()).join(", ") || "an image"}`;
     }
-    case "start_worker":
-      return `Started a worker on ${taskTitle(s("taskId") ?? "a task")}`;
     case "start_agent":
       return `Started a worker on ${taskTitle(s("task") ?? "a task")}`;
     case "stop_worker":

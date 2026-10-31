@@ -46,7 +46,7 @@ export interface AgentDefinition {
   outputs: "read" | "write";
   /** The role that checks a task this role submits; each exists. Unset: its submissions are not checked. */
   checkedBy?: string;
-  /** The roles this role may start; each exists. `start_worker` starts `worker`, so a role holding it lists it. */
+  /** The roles this role may start; each exists. */
   subagents: string[];
   /** The skills named in the role's prompt: names of the workflow's `skills`, its own first. */
   skills: string[];

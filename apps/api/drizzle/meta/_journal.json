@@ -134,6 +134,13 @@
       "when": 1793435861818,
       "tag": "0018_faithful_namora",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1793471734542,
+      "tag": "0019_legacy_event_values",
+      "breakpoints": true
     }
   ]
 }

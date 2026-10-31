@@ -423,7 +423,7 @@ export function interruptedResult(
   }
   if (written) {
     const what =
-      tool === "start_worker" || tool === "start_agent"
+      tool === "start_agent"
         ? ` Worker ${d.threads.get(written.threadId)?.name ?? ""} was started.`
         : "";
     return `\`${tool}\` completed before the run was cut off.${what}`;
