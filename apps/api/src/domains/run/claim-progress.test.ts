@@ -12,13 +12,15 @@ describe("endClaim", () => {
   it("counts an expired lease that made no progress", () => {
     expect(endClaim(run(), "lease-expired").stalledClaims).toBe(1);
     expect(endClaim(run({ stalledClaims: 1 }), "lease-expired").stalledClaims).toBe(2);
+    expect(endClaim(run(), "loop-stalled").stalledClaims).toBe(1);
   });
 
-  it("never counts a release the runner reported, and keeps the count", () => {
+  it("never counts a shutdown or self-stop, and keeps the count", () => {
     for (const reason of ["shutdown", "self-stop"] as const)
       expect(endClaim(run({ stalledClaims: 2 }), reason)).toEqual({
         stalledClaims: 2,
         exhausted: false,
+        counted: false,
       });
   });
 

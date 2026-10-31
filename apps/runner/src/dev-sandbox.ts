@@ -90,6 +90,10 @@ const lease = holdLease({
     log(`the run stopped (${reason})`);
     abort.abort();
   },
+  onFail: (message) => {
+    log(`the run failed (${message})`);
+    abort.abort();
+  },
   log,
 });
 const loop = monitorEventLoopDelay({ resolution: 10 });

@@ -32,6 +32,7 @@ export const feedbackText = (taskId: string, text: string) =>
 const PLAIN_REASON: Record<ClaimEndReason, string> = {
   shutdown: "the runner restarted",
   "self-stop": "the runner lost contact with the server",
+  "loop-stalled": "the runner was too busy to answer the server",
   "lease-expired": "the server lost contact with the runner",
   "provider-outage": "the model provider was unavailable",
 };

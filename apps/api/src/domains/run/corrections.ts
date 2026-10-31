@@ -65,6 +65,7 @@ async function reopen(tx: Tx, runId: string, messageEventId: string, by: string)
       endedAt: null,
       error: null,
       lastClaimEnd: null,
+      struckLeaseToken: null,
       stalledClaims: 0,
       ...noLease,
     })

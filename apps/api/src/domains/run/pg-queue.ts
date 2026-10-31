@@ -83,10 +83,11 @@ async function recover(tx: Tx, where: SQL, reason: ClaimEnd) {
     await eventLock(tx, id); // before the row lock (`corrections.ts`)
     const [run] = await tx.select().from(runs).where(eq(runs.id, id)).for("update");
     if (!run) continue;
-    const { stalledClaims, exhausted } = endClaim(run, reason);
+    const { stalledClaims, exhausted, counted } = endClaim(run, reason);
     const base = {
       lastClaimEnd: reason,
       stalledClaims,
+      struckLeaseToken: reason === "lease-expired" && counted ? run.leaseToken : null,
       ...noLease,
     };
     if (exhausted) {
@@ -126,6 +127,30 @@ async function inFlightTool(tx: Tx, runId: string, sinceSeq: number): Promise<st
     .orderBy(desc(events.seq))
     .limit(1);
   return row?.name;
+}
+
+/**
+ * A `released` report from a lease the API already swept and counted: the runner was alive and
+ * only the outage kept the report back. Records the reported end and takes the strike back.
+ * False when the token is not that of a counted sweep (or the sweep failed the run).
+ */
+async function takeBackStrike(tx: Tx, runId: string, leaseToken: string, reason: ReleaseReason) {
+  const [run] = await tx
+    .select({ state: runs.state })
+    .from(runs)
+    .where(and(eq(runs.id, runId), eq(runs.struckLeaseToken, leaseToken)))
+    .for("update");
+  // A counted reason keeps its strike; an ended run (the sweep failed it) stays ended.
+  if (!run || run.state === "ended" || reason === "loop-stalled") return false;
+  await tx
+    .update(runs)
+    .set({
+      lastClaimEnd: reason,
+      stalledClaims: sql`greatest(${runs.stalledClaims} - 1, 0)`,
+      struckLeaseToken: null,
+    })
+    .where(eq(runs.id, runId));
+  return true;
 }
 
 async function sweep(tx: Tx) {
@@ -565,7 +590,14 @@ export function pgRunQueue(
           .from(runs)
           .where(and(eq(runs.id, runId), eq(runs.leaseToken, leaseToken)))
           .for("update");
-        if (!run) throw new LeaseLost();
+        if (!run) {
+          if (
+            report.kind === "released" &&
+            (await takeBackStrike(tx, runId, leaseToken, report.reason))
+          )
+            return;
+          throw new LeaseLost();
+        }
         if (run.state !== "running") throw new RunEnded();
         if (report.kind === "released") {
           await recover(tx, sql`id = ${runId}`, report.reason);

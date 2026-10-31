@@ -61,6 +61,9 @@ const lease = holdLease({
   onStop() {
     leaseFailures++;
   },
+  onFail() {
+    leaseFailures++;
+  },
   onRoundTrip() {
     heartbeats++;
   },

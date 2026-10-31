@@ -1,8 +1,8 @@
 /**
  * The no-progress limit: a run whose runner keeps vanishing (the server expires its lease: a
- * crash, an OOM) without changing run state ends `failed` instead of looping. A release the
- * runner reports (`shutdown`, `self-stop`) is never counted: the process was alive and chose to
- * stop, whether for a deploy or because it could not reach the API. Progress is a change to run state
+ * crash, an OOM) or a runner that reports its event loop stalled (`loop-stalled`) without
+ * changing run state ends `failed` instead of looping. A `shutdown` or `self-stop` (the process
+ * was alive and no call reached the API) is never counted. Progress is a change to run state
  * (a task, checkpoint, output, attempt, revision or plan change); model turns and tool calls are not, since a loop that kills the runner every
  * time still makes them. The run row keeps `last_progress_seq` (set on append) and the
  * current claim's `claim_start_seq`; `endClaim` judges a claim when it ends.
@@ -11,6 +11,8 @@ import type { ReleaseReason } from "@voluma/contracts/runner";
 
 /** Why a claim ends now; `provider-outage` is read only (`claimEndReasonSchema`). */
 export type ClaimEnd = ReleaseReason | "lease-expired";
+
+const COUNTED: ReadonlySet<ClaimEnd> = new Set(["lease-expired", "loop-stalled"]);
 
 const PROGRESS_EVENT_TYPES: ReadonlySet<string> = new Set([
   "task",
@@ -38,10 +40,14 @@ export const STALLED_CLAIMS_LIMIT = 3;
 export function endClaim(
   run: { lastProgressSeq: number; claimStartSeq: number; stalledClaims: number },
   reason: ClaimEnd,
-): { stalledClaims: number; exhausted: boolean } {
+): { stalledClaims: number; exhausted: boolean; counted: boolean } {
   const progressed = run.lastProgressSeq > run.claimStartSeq;
-  const stalledClaims = progressed ? 0 : run.stalledClaims + (reason === "lease-expired" ? 1 : 0);
-  return { stalledClaims, exhausted: stalledClaims >= STALLED_CLAIMS_LIMIT };
+  const stalledClaims = progressed ? 0 : run.stalledClaims + (COUNTED.has(reason) ? 1 : 0);
+  return {
+    stalledClaims,
+    exhausted: stalledClaims >= STALLED_CLAIMS_LIMIT,
+    counted: stalledClaims > run.stalledClaims,
+  };
 }
 
 export const stalledError = (tool: string | undefined) =>

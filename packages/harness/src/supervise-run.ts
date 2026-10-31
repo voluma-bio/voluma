@@ -64,9 +64,11 @@ export const rootThreadIdOf = (runId: string) => `${runId}.supervisor`;
 export async function superviseRun(options: SuperviseRunOptions): Promise<Folded> {
   const { runId, recorder, signal } = options;
   const rootThreadId = rootThreadIdOf(runId);
-  // A stored log means an earlier claim ran. `previousClaim` says why it ended; a run claimed
-  // before the API recorded reasons has none, and its resume says only "restarted".
-  const resumed = recorder.events().length > 0;
+  // A stored log means an earlier claim ran, and so does `previousClaim`, which says why it
+  // ended: a claim cut off before any event reached the API (an outage right after the claim)
+  // left no log. A run claimed before the API recorded reasons has none, and its resume says
+  // only "restarted".
+  const resumed = recorder.events().length > 0 || options.previousClaim !== undefined;
   // Not a derived id: each invocation of the root is a thread start of its own.
   recorder.emit(rootThreadId, "thread.started", {
     parentThreadId: null,
