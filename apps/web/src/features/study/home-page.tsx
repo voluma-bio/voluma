@@ -1,6 +1,6 @@
 /**
- * Home (`/`): what needs the researcher (one action per row), what is running, and every
- * study with one mark per scan. A study of one shows as its scan and links straight to it.
+ * Home (`/`): what needs the researcher (one action per row), what is running (and how many
+ * wait to start), and every study with one mark per scan. A study of one shows as its scan and links straight to it.
  *
  * Data: `listStudies` alone; each study carries each scan's newest run in brief. It refetches
  * every 5 s while its last answer shows a live run.
@@ -207,7 +207,7 @@ function needsYou(v: StudyView): React.ReactNode[] {
   ];
 }
 
-/** A live run: its scan, its study (unless it is a study of one), and where it stands. */
+/** A running run: its scan, its study (unless it is a study of one), and where it stands. */
 function RunningRow({ run, study }: { run: StudyRunSummary; study: StudySummary | null }) {
   return (
     <RowLink

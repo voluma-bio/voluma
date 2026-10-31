@@ -8,7 +8,7 @@ import { reviewFileUrl } from "@voluma/api-client";
 import { ItemToCheck, type NeedItem, type TaskView } from "@voluma/run-view";
 import { Disclosure, EmptyState, IconButton, Lightbox, List, Row, StatusGlyph } from "@voluma/ui";
 import { ChevronLeft, ChevronRight, ImageOff } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { Accepting } from "./scan-page";
 
 export function ToCheckPanel({
@@ -38,6 +38,12 @@ export function ToCheckPanel({
   live: boolean;
 }) {
   const titleOf = (taskId: string) => tasks.find((t) => t.id === taskId)?.title ?? taskId;
+  // The item in view when a save lands: the move after Looks right happens only if it is still
+  // the one accepted, so a pick made while saving wins.
+  const shown = useRef(current?.id);
+  shown.current = current?.id;
+  // The item the panel moved to after Looks right, whose Looks right takes focus.
+  const [arrived, setArrived] = useState<string>();
   if (items.length === 0)
     return (
       <div className="p-4">
@@ -113,10 +119,19 @@ export function ToCheckPanel({
             (() => {
               // Hold this item in view until it is saved; then move on, when anything is left.
               onPick(current);
-              accepting.accept?.(current, then && (() => onPick(then)));
+              accepting.accept?.(
+                current,
+                then &&
+                  (() => {
+                    if (shown.current !== current.id) return;
+                    setArrived(then.id);
+                    onPick(then);
+                  }),
+              );
             })
           }
           accepting={accepting.pending === current.id}
+          focusAccept={current.id === arrived}
           readOnly={accepting.readOnly}
           onWrong={() => onWrong(current)}
           error={accepting.error?.id === current.id ? accepting.error.text : undefined}

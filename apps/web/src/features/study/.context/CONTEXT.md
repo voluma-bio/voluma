@@ -13,7 +13,8 @@ shown as its scan and linked straight to its scan review (`/scans/:runId`, `runH
   only when the newest runs hold every open check; under a rerun M is unknowable from
   `newestRuns`, so the row says just "N to check."
   Needs you has one row per study; example studies are read-only and ask nothing. Running
-  lists each live scan.
+  lists only scans whose run is running, then "N waiting to start" for queued ones; a run
+  waiting for keys is in Needs you.
 - **Run on new scans** keeps no outputs checklist and no notes: a study runs every output (the
   request sends no `selectedOutputs`). Grouping dropped files into scans is `scan-files.ts` (the
   rule is its header); intake (mouse, knee, group from names and the sample sheet, no AI) is

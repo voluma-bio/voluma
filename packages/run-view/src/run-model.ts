@@ -332,8 +332,6 @@ export type TaskView = {
   valued: boolean;
   /** Its latest result came from a correction. */
   corrected: boolean;
-  /** While waiting: the tasks it builds on that have no usable result yet. */
-  waitingOn: string[];
   spend?: Spend;
 };
 
@@ -580,7 +578,6 @@ export function runView(
       results: resultRows(t, state),
       valued: p.outputs.some((o) => o.kind === "measurement" || o.kind === "score"),
       corrected: corrections.has(t.resultRevisionId),
-      waitingOn: state === "waiting" ? p.dependsOn.filter((d) => !byId.get(d)?.satisfied) : [],
       spend: taskSpend.get(p.id),
     };
   });

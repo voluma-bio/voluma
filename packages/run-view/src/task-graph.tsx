@@ -81,21 +81,22 @@ export const taskStateWord = (state: TaskState) =>
  * A box's least width: the longest workflow names ("Proximal tibial metaphysis", "Subchondral
  * bone plate") fit on two lines, breaking only between words.
  */
-const BOX = "9.5rem";
 const BOX_REM = 9.5;
+const BOX = `${BOX_REM}rem`;
 /** The gap between top-down lanes, `gap-2`. */
 const LANE_GAP_REM = 0.5;
 
 /**
  * How many lanes of `BOX` fit the graph's own width, at most `lanes`: a top-down layer wider than
- * its panel wraps onto more rows instead of running off the edge.
+ * its panel wraps onto more rows instead of running off the edge. Off (`lanes` as is) for a
+ * left-to-right graph, whose layers are columns.
  */
-function useFit(lanes: number) {
+function useFit(lanes: number, on: boolean) {
   const ref = useRef<HTMLDivElement>(null);
   const [fit, setFit] = useState(lanes);
   useLayoutEffect(() => {
     const el = ref.current;
-    if (!el) return;
+    if (!el || !on) return;
     const measure = () => {
       const rem = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
       const n = Math.floor(
@@ -107,8 +108,8 @@ function useFit(lanes: number) {
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [lanes]);
-  return { ref, fit };
+  }, [lanes, on]);
+  return { ref, fit: on ? fit : lanes };
 }
 
 export function TaskGraph(props: TaskGraphProps) {
@@ -139,8 +140,7 @@ export function TaskGraph(props: TaskGraphProps) {
   );
   const { layers, edges, lanes: all } = layout<GraphTask>(props.tasks);
   const { ref, paths } = useEdges(edges, right);
-  const { ref: outer, fit } = useFit(all);
-  const lanes = right ? all : fit;
+  const { ref: outer, fit: lanes } = useFit(all, !right);
   return (
     // Boxes keep their least width; a parent narrower than one box (or a left-to-right graph's
     // layers) scrolls sideways.
@@ -270,8 +270,25 @@ function useEdges(edges: Edge[], right: boolean) {
           x += n.offsetLeft;
           y += n.offsetTop;
         }
-        return { x, y, w: el.offsetWidth, h: el.offsetHeight };
+        // The layer it sits in, for a top-down layer wrapped onto more rows.
+        const layer = el.parentElement as HTMLElement;
+        return {
+          x,
+          y,
+          w: el.offsetWidth,
+          h: el.offsetHeight,
+          top: layer.offsetTop,
+          bottom: layer.offsetTop + layer.offsetHeight,
+        };
       };
+      // A wrapped row's box can't be reached straight down without passing behind the row above
+      // it (or leave straight down past the row below): its edge runs in the gutter beside it, on
+      // its left, or on its right in the first column, and meets its side.
+      const gap =
+        Number.parseFloat(getComputedStyle(document.documentElement).fontSize) * LANE_GAP_REM;
+      const gutter = (b: { x: number; w: number }) =>
+        b.x > gap ? b.x - gap / 2 : b.x + b.w + gap / 2;
+      const side = (b: { x: number; w: number }) => (b.x > gap ? b.x : b.x + b.w);
       setPaths(
         edges.flatMap((e) => {
           const a = box(e.from);
@@ -283,9 +300,18 @@ function useEdges(edges: Edge[], right: boolean) {
             const m = (x1 + x2) / 2;
             d = `M${x1} ${y1} C${m} ${y1} ${m} ${y2} ${x2} ${y2}`;
           } else {
-            const [x1, y1, x2, y2] = [a.x + a.w / 2, a.y + a.h, b.x + b.w / 2, b.y];
+            const fromLast = a.y + a.h >= a.bottom - 1;
+            const toFirst = b.y <= b.top + 1;
+            const [x1, y1] = fromLast ? [a.x + a.w / 2, a.y + a.h] : [gutter(a), a.bottom];
+            const [x2, y2] = toFirst ? [b.x + b.w / 2, b.y] : [gutter(b), b.top];
             const m = (y1 + y2) / 2;
-            d = `M${x1} ${y1} C${x1} ${m} ${x2} ${m} ${x2} ${y2}`;
+            d = [
+              fromLast
+                ? `M${x1} ${y1}`
+                : `M${side(a)} ${a.y + a.h / 2} L${x1} ${a.y + a.h / 2} L${x1} ${y1}`,
+              `C${x1} ${m} ${x2} ${m} ${x2} ${y2}`,
+              toFirst ? "" : `L${x2} ${b.y + b.h / 2} L${side(b)} ${b.y + b.h / 2}`,
+            ].join(" ");
           }
           return [{ ...e, key: `${e.from}>${e.to}`, d }];
         }),
