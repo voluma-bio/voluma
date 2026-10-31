@@ -77,7 +77,7 @@ function RowView({ row, threads }: { row: Row; threads?: Map<string, Thread> }) 
             <div className="absolute top-0 -left-8 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 max-[1100px]:hidden">
               <InfoButton
                 label="Usage"
-                sections={[{ title: "This reply", rows: usageRows(row.usage) }]}
+                sections={[{ title: "This reply", rows: usageRows(row.usage, row.cacheMiss) }]}
               />
             </div>
           )}
