@@ -352,6 +352,7 @@ export function finishedRunText(view: Folded): string {
  */
 export function reviewingText(o: {
   task: string;
+  taskId: string;
   item?: { title: string; text: string };
   attachments: boolean;
 }): string {
@@ -359,7 +360,7 @@ export function reviewingText(o: {
     `The researcher was reviewing the task "${o.task}" when they wrote.`,
     o.item ? `The To check item they had open: "${o.item.title}": ${o.item.text}` : "",
     o.attachments ? "Their view picture and marks are attached to their message below." : "",
-    `Look at the task's evidence, then discuss their feedback with them through \`reply\`. When redoing the task would help, offer it with \`reply\`'s \`offer\` (taskId: the task you name here) and wait: start no work until their go arrives.`,
+    `Look at the task's evidence, then discuss their feedback with them through \`reply\`. When redoing the task would help, offer it with \`reply\`'s \`offer\` (taskId \`${o.taskId}\`) and wait: start no work until their go arrives.`,
   ]
     .filter(Boolean)
     .join("\n");

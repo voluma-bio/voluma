@@ -192,14 +192,17 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
   function reviewing(messageId: string | undefined): string {
     const events = recorder.events();
     const m = events.find((e) => e.id === messageId);
-    if (m?.type !== "person.message" || !m.payload.taskId) return "";
+    if (m?.type !== "person.message" || m.payload.go || !m.payload.taskId) return "";
     const { taskId, itemId, marks, snapshotKey } = m.payload;
     const item = events.find((e) => e.id === itemId);
-    const toCheck = item?.type === "checkpoint" ? item.payload.toCheck : undefined;
+    const found =
+      item?.type === "checkpoint" && item.payload.toCheck
+        ? { title: item.payload.toCheck.title, text: item.payload.text }
+        : undefined;
     return `\n\n${reviewingText({
       task: taskName(taskId),
-      ...(toCheck &&
-        item?.type === "checkpoint" && { item: { title: toCheck.title, text: item.payload.text } }),
+      taskId,
+      ...(found && { item: found }),
       attachments: !!snapshotKey || (marks ?? []).length > 0,
     })}`;
   }
@@ -534,8 +537,12 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     const events = recorder.events();
     const cut = d.cursor ? events.findIndex((e) => e.id === d.cursor) + 1 : 0;
     const changed = changedTasks(fold(events.slice(0, cut)), d.view);
+    const opening = corrections(events).open?.message;
+    const intro = d.undelivered.some((n) => n.kind === "person" && n.eventId === opening)
+      ? reviewing(opening)
+      : "";
     return {
-      text: deliveryText(d.undelivered, agentsList(d, stateOf), changed),
+      text: `${deliveryText(d.undelivered, agentsList(d, stateOf), changed)}${intro}`,
       covers: events.at(-1)?.id,
     };
   }
