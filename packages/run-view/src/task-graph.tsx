@@ -67,6 +67,18 @@ export const TASK_STATUS: Record<TaskState, Status> = {
   skipped: "waiting",
 };
 
+/**
+ * The one rule for the status a task shows, from its state and its open items. Open items read
+ * To check while the task is done or in To check: a done task can still carry them. A To check
+ * task with every item handled reads done, unless its run is `live` (a live run's items aren't
+ * read yet, so it reads To check as the scan review does).
+ */
+export function shownStatus(state: TaskState, open: number, live = false): Status {
+  if (open > 0 && (state === "done" || state === "to-check")) return "check";
+  if (state === "to-check") return live ? "check" : "done";
+  return TASK_STATUS[state];
+}
+
 /** Where a state is more exact than its mark's word. */
 const STATE_WORD: Partial<Record<TaskState, string>> = {
   ready: "Ready to start",
@@ -502,11 +514,9 @@ const openItems = (task: ScanGraphTask) => task.needs.filter((n) => !n.accepted)
 
 /** A box's one line at scan size: what needs you, what is going on, or its key value. */
 function scanLine(task: ScanGraphTask, open: number): { text: ReactNode; tone?: string } {
+  if (shownStatus(task.state, open) === "check" && open > 0)
+    return { text: `${open} to check`, tone: "font-medium text-check" };
   switch (task.state) {
-    case "to-check":
-      return open > 0
-        ? { text: `${open} to check`, tone: "font-medium text-check" }
-        : keyValue(task);
     case "running":
       return { text: "Running", tone: "text-info" };
     case "checking":
@@ -515,6 +525,7 @@ function scanLine(task: ScanGraphTask, open: number): { text: ReactNode; tone?: 
     case "stopped":
       return { text: taskStateWord(task.state), tone: "text-destructive" };
     case "done":
+    case "to-check":
       return keyValue(task);
     default:
       return { text: taskStateWord(task.state) };
@@ -551,7 +562,7 @@ function ScanBox({
 }) {
   const open = openItems(task);
   // A To check task whose items are all accepted reads as done.
-  const status = task.state === "to-check" && open === 0 ? "done" : TASK_STATUS[task.state];
+  const status = shownStatus(task.state, open);
   const line = scanLine(task, open);
   const idle = task.state === "waiting" || task.state === "ready" || task.state === "skipped";
   const threads = task.threads ?? [];

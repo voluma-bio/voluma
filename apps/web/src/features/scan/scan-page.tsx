@@ -20,11 +20,8 @@ import {
   haltOf,
   isLive,
   type NeedItem,
-  plural,
   RunStoreProvider,
-  runHref,
   runView,
-  StudyPanel,
   ThreadNavigationProvider,
   useClosed,
   useEvents,
@@ -38,17 +35,7 @@ import type {
   StructureDisplay,
   Zyx,
 } from "@voluma/viewer/grid";
-import { workflowById } from "@voluma/workflow/bundled";
-import {
-  ArrowUpRight,
-  CircleAlert,
-  Layers,
-  ListChecks,
-  MessagesSquare,
-  Network,
-  PanelLeft,
-  Users,
-} from "lucide-react";
+import { CircleAlert, Layers, ListChecks, MessagesSquare, Network, Users } from "lucide-react";
 import {
   lazy,
   Suspense,
@@ -63,6 +50,7 @@ import { Link, useOutletContext, useParams, useSearchParams } from "react-router
 import { AgentsPanel } from "./agents-panel";
 import { AiPanel, useMessage } from "./ai-panel";
 import {
+  gridKeyOf,
   gridMark,
   MarksPanel,
   middleOf,
@@ -73,6 +61,7 @@ import {
 } from "./marks-panel";
 import { ReportPanel } from "./report-panel";
 import { RunAlert, ScanHeading, scanTitle } from "./scan-header";
+import { StudyDock } from "./study-dock";
 import { ToCheckPanel } from "./to-check-panel";
 import { useRunStream } from "./use-run-stream";
 import { ViewPanel } from "./view-panel";
@@ -229,6 +218,8 @@ function ScanReview({
 }) {
   const me = useOutletContext<Me>();
   const openPanel = useOpenPanel();
+  // Under 1440 px, two panels leave the views too narrow: The AI waits for i or Something's wrong.
+  const [wide] = useState(() => globalThis.innerWidth >= 1440);
   const study = useQuery({
     ...studyQuery(run.studyId),
     refetchInterval: (query) =>
@@ -328,6 +319,16 @@ function ScanReview({
   const focus = useMemo(() => check?.focus && { ...check.focus }, [focusKey, picked]);
   const [display, setDisplay] = useState<StructureDisplay>({});
   const marking = useMarking();
+  // A redo that replaces an image leaves no marks on the old one: their voxels mean nothing now.
+  const grids = useMemo(
+    () =>
+      latest && new Set(latest.volumes.flatMap((v) => (v.kind === "image" && gridKeyOf(v)) || [])),
+    [latest],
+  );
+  const { keep } = marking;
+  useEffect(() => {
+    if (grids) keep(grids);
+  }, [grids, keep]);
 
   const pickItem = (next: NeedItem) => {
     select({ item: next.id, task: next.taskId });
@@ -357,7 +358,7 @@ function ScanReview({
     () => (subjectShown ? marking.marks.filter((m) => m.gridKey === subjectShown.key) : []),
     [marking.marks, subjectShown],
   );
-  const snapshot = subjectShown ? marking.snapshot : undefined;
+  const snapshot = subjectShown?.ready ? marking.snapshot : undefined;
   const message = useMessage({
     run,
     tasks,
@@ -442,63 +443,7 @@ function ScanReview({
     <DisclosureProvider>
       <ThreadNavigationProvider onOpenThread={openAgent}>
         <ScanHeading run={run} study={study.data} progress={view.progress} />
-        <ShellPanel
-          id="scan-study"
-          side="left"
-          group="study"
-          label="Study"
-          icon={<PanelLeft />}
-          shortcut="s"
-        >
-          {study.data ? (
-            <>
-              {study.isError && (
-                <p role="status" className="px-4 py-2 text-sm text-muted-foreground">
-                  Couldn't refresh the study; what you see may be out of date.
-                  <Button variant="link" onClick={() => void study.refetch()}>
-                    Try again
-                  </Button>
-                </p>
-              )}
-              {study.data.scans.length > 1 && (
-                <div className="border-b border-border px-4 py-2">
-                  <Button asChild variant="link">
-                    <Link to={`/studies/${study.data.study.id}`}>
-                      Study overview <ArrowUpRight className="size-3.5" />
-                    </Link>
-                  </Button>
-                </div>
-              )}
-              <StudyPanel
-                detail={study.data}
-                about={`${plural(study.data.scans.length, "scan")}, ${workflowById(study.data.study.workflowId)?.name ?? study.data.study.workflowId}`}
-                current={run.input.id}
-                scanLink={({ runs: [latestRun] }) =>
-                  latestRun
-                    ? (props) => (
-                        <Link
-                          to={
-                            latestRun.id === run.id
-                              ? { search: params.toString() }
-                              : runHref({ runId: latestRun.id })
-                          }
-                          {...props}
-                        />
-                      )
-                    : undefined
-                }
-              />
-            </>
-          ) : study.isPending ? (
-            <LoadingState label="Loading the study" rows={3} className="p-4" />
-          ) : (
-            <div className="p-4">
-              <ErrorState title="Couldn't load the study" onRetry={() => void study.refetch()}>
-                Check your connection, then try again.
-              </ErrorState>
-            </div>
-          )}
-        </ShellPanel>
+        <StudyDock run={run} study={study} />
         <ShellPanel
           id="scan-to-check"
           side="left"
@@ -593,7 +538,7 @@ function ScanReview({
           label="The AI"
           icon={<MessagesSquare />}
           shortcut="i"
-          defaultOpen
+          defaultOpen={wide}
         >
           <AiPanel
             run={run}
@@ -696,6 +641,12 @@ function useMarking() {
       [marks],
     ),
     remove: useCallback((id: string) => setMarks((had) => had.filter((m) => m.id !== id)), []),
+    /** Keeps only the marks on these grids. */
+    keep: useCallback((grids: ReadonlySet<string>) => {
+      setMarks((had) =>
+        had.every((m) => grids.has(m.gridKey)) ? had : had.filter((m) => grids.has(m.gridKey)),
+      );
+    }, []),
     /** Drops the marks a message carried. */
     drop: useCallback((ids: string[]) => {
       if (ids.length) setMarks((had) => had.filter((m) => !ids.includes(m.id)));
