@@ -73,9 +73,9 @@ export const OUT_OF_MONEY =
   /You have reached your specified API usage limits|Your credit balance is too low|insufficient_quota/;
 
 /**
- * The provider errors a later call can succeed after: a timeout, a rate limit, a server or
- * connection error. The runner retries these (`model-retry.ts`), and a summary that fails this way
- * is not the thread's own failure (`adapters/pi/compaction.ts`).
+ * The provider errors a later call can succeed after: a timeout, a conflict, a rate limit, a
+ * server or connection error (the set Pi retries). A summary that fails this way is not the
+ * thread's own failure (`adapters/pi/compaction.ts`).
  */
 export function isTransientProviderError(message: string | undefined): boolean {
   const m = message ?? "";
@@ -83,6 +83,7 @@ export function isTransientProviderError(message: string | undefined): boolean {
   return (
     CONNECTION.test(m) ||
     status === 408 ||
+    status === 409 ||
     (status === 429 && !OUT_OF_MONEY.test(m)) ||
     (status ?? 0) >= 500
   );

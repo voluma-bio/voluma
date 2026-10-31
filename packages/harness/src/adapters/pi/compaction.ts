@@ -462,7 +462,7 @@ export function compactor(args: {
       try {
         return await compact(messages, inputTokens(messages, compaction), true, true, signal);
       } catch (error) {
-        // A transient failure of the summary is the provider's, not the thread's: the run retries it.
+        // A transient failure of the summary is the provider's, not the thread's: the thread fails with it as it is.
         if (isTransientProviderError(errorText(error))) throw error;
         console.error(
           `compaction: thread ${threadId}: recovering from an overflow failed: ${error}`,

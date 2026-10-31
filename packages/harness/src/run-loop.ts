@@ -126,11 +126,13 @@ export interface RunLoopOptions {
   /** Builds the tools a thread's role names; the main agent's tools act through `agents`. */
   tools(thread: ThreadLayout, agents: Agents): Tool[];
   /**
-   * What a failed thread's error text means (the host knows its texts): `"fatal"` fails the run at
-   * once; `"retry"` (an error the host's own call retry could not redo, as one in mid-reply)
-   * resumes the thread once, then fails the run; `undefined` leaves it a failed thread.
+   * What a failed thread's error text means (the host knows its texts): `"fatal"` is a provider
+   * error no later call can fix (auth, model not found, an empty account) and fails the run at
+   * once; `"transient"` is one the model client already retried (a rate limit, a 5xx, a dropped
+   * connection) and fails the run only on the main agent, while any other thread stays a failed
+   * thread for main to act on; `undefined` is not the provider's (a context overflow).
    */
-  providerError?(error: string): "retry" | "fatal" | undefined;
+  providerError?(error: string): "transient" | "fatal" | undefined;
   signal?: AbortSignal;
 }
 
@@ -146,8 +148,6 @@ type Step = "acted" | "idle" | "done";
 export async function runLoop(o: RunLoopOptions): Promise<Folded> {
   const { runId, rootThreadId: root, recorder, runtime, threads, signal } = o;
   const config = { ...LOOP_DEFAULTS, ...o.config };
-  /** A thread resumed after a retryable provider error → its start count then; the resumed start's own failure is fatal. */
-  const retriedAt = new Map<string, number>();
   let failure: unknown;
   /** Threads whose refusal as unresumable the loop has dealt with. */
   const dealtWith = new Set<string>();
@@ -543,21 +543,20 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     return false;
   }
 
-  /** Resumes a thread this process ran that failed on a retryable provider error (once); throws on any other provider error. */
-  async function checkFatal(d: ThreadLog): Promise<boolean> {
+  /**
+   * Fails the run for a provider error on a thread this process ran: any fatal one, and a transient
+   * one on the main agent. A worker or check that failed on a transient one stays a failed thread
+   * and main decides, as for any worker failure. Only threads this process started count: a
+   * failure an earlier claim recorded (a reopened run's) must not fail the new claim.
+   */
+  function checkFatal(d: ThreadLog) {
     for (const r of d.threads.values()) {
       const error = r.end?.status === "failed" ? (r.end.error ?? "") : undefined;
-      const kind =
-        error !== undefined && threads.started(r.id) ? o.providerError?.(error) : undefined;
-      if (!kind) continue;
-      if (kind === "retry" && r.starts > (retriedAt.get(r.id) ?? -1) + 1 && !threads.stale(r.id)) {
-        retriedAt.set(r.id, r.starts);
-        await resume(r, "The model provider failed during your last reply; continue.", RUNTIME);
-        return true;
-      }
-      throw new Error(fatalText(r, error as string, taskName));
+      if (error === undefined || !threads.started(r.id)) continue;
+      const kind = o.providerError?.(error);
+      if (kind === "fatal" || (kind === "transient" && r.place === "main"))
+        throw new Error(fatalText(r, error, taskName));
     }
-    return false;
   }
 
   /** The delivery message and the last event it covers. */
@@ -669,7 +668,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     const d = derive();
     if (d.root.ended) return "done";
     const view = d.view;
-    if (await checkFatal(d)) return "acted";
+    checkFatal(d);
     if (!d.main) {
       await startMain(d);
       return "acted";

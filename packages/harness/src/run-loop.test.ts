@@ -1315,30 +1315,59 @@ describe("run loop", () => {
         return chain(["t1"])(t);
       };
     };
-    const retryOverloaded = (e: string) => (/overloaded/.test(e) ? "retry" : undefined);
+    const transient = (e: string) => (/overloaded/.test(e) ? "transient" : undefined);
 
-    it("resumes a thread that failed on a retryable error once; the run goes on", async () => {
+    it("fails the run when the main agent fails on a transient error", async () => {
       const w = world({
         plan: [task("t1")],
         main: throwing(1, "overloaded"),
         check: checker(),
-        providerError: retryOverloaded,
-      });
-      const folded = await w.run();
-      expect(folded.tasks.map((t) => `${t.id}:${t.status}`)).toEqual(["t1:done"]);
-      expect(ended(w.stored, "main")[0]).toBe("failed");
-    });
-
-    it("fails the run when the resumed thread fails on a retryable error again", async () => {
-      const w = world({
-        plan: [task("t1")],
-        main: throwing(2, "overloaded"),
-        check: checker(),
-        providerError: retryOverloaded,
+        providerError: transient,
       });
       await expect(w.run()).rejects.toThrow(
         "the AI stopped on an error from its provider: overloaded",
       );
+    });
+
+    it("leaves a worker that failed on a transient error to main, which replaces it", async () => {
+      const main: Script = (t) => {
+        const did = (name: string) => t.calls.some((c) => c.name === name);
+        if (t.fresh && told(t, /t1.worker \(t1\) failed: overloaded/) && !did("stop_worker"))
+          return call("stop_worker", { threadId: tid("t1.worker"), reason: "It failed." });
+        if (
+          t.fresh &&
+          did("stop_worker") &&
+          !t.calls.some((c) => c.name === "start_agent" && c.input.brief === "Again.")
+        )
+          return call("start_agent", { role: "worker", task: "t1", brief: "Again." });
+        return chain(["t1"])(t);
+      };
+      const w = world({
+        plan: [task("t1")],
+        main,
+        worker: (t) => {
+          if (t.name === "t1.worker" && t.steps === 0) throw new Error("overloaded");
+          return t.steps === 0
+            ? call("report_output", {
+                taskId: "t1",
+                outputId: "m1",
+                title: "m1",
+                output: measurement(1),
+                evidence: [],
+              })
+            : t.steps === 1
+              ? call("submit_task", { taskId: "t1", summary: "t1 measured." })
+              : "Done.";
+        },
+        check: checker(),
+        providerError: transient,
+      });
+      const folded = await w.run();
+      expect(
+        folded.tasks.map((t) => `${t.id}:${t.status}`),
+        w.text(),
+      ).toEqual(["t1:done"]);
+      expect(ended(w.stored, "t1.worker")[0]).toBe("failed");
     });
 
     it("a main that failed is never resumed: a fresh main takes over once", async () => {

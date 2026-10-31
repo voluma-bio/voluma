@@ -78,7 +78,7 @@ export interface SuperviseRunOptions {
   gateway?(sandbox: string): Gateway | undefined;
   config?: Partial<LoopConfig>;
   /** Whether a failed thread's error text says the model provider failed. */
-  providerError?(error: string): "retry" | "fatal" | undefined;
+  providerError?(error: string): "transient" | "fatal" | undefined;
   log(line: string): void;
   /** Ends the run: its threads stop where they are. */
   signal: AbortSignal;

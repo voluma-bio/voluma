@@ -191,7 +191,7 @@ export interface WorldOptions {
   /** Milliseconds a thread's history takes to load (to hold a resume in its start-up at a chosen moment). */
   delayLoad?: (threadId: string) => number;
   /** Whether a failed thread's error text says the model provider failed. */
-  providerError?: (error: string) => "retry" | "fatal" | undefined;
+  providerError?: (error: string) => "transient" | "fatal" | undefined;
   /** Whether evidence storage holds this file (default: every file); `keep` rejects with `EvidenceNotFound` otherwise. */
   evidenceExists?: (root: "outputs" | "scratch", taskId: string, path: string) => boolean;
   /** Runs for every event the store accepts (for tests that need something to happen at that moment). */
