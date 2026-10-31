@@ -21,3 +21,8 @@
   skill's script raised it. The stream can't say so: a checkpoint's `toCheck` has a title, a
   detail and a focus, and nothing records that a script raised it. It needs a field on `toCheck`
   (a contracts PR), and the skills' scripts' warnings written through it.
+- **Resend a stored key from Home and the study dashboard too.** Only the run page sends the
+  starter's stored Meta key by itself when a run waits for keys (`AwaitingKeys` in
+  `apps/web/src/features/scan/scan-header.tsx`). Home and the dashboard list the waiting run and link
+  to it, so a guest watching a batch still opens each scan. Move the once-per-wait send into a hook
+  here and use it from both features.
