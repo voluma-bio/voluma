@@ -143,7 +143,7 @@ const RUNTIME: UserSender = { kind: "runtime" };
 /** What a step found: something done, nothing to do until the log changes, or the run is over. */
 type Step = "acted" | "idle" | "done";
 
-export async function runLoop(o: RunLoopOptions): Promise<Folded> {
+export async function runLoop(o: RunLoopOptions): Promise<void> {
   const { runId, rootThreadId: root, recorder, runtime, threads, signal } = o;
   const config = { ...LOOP_DEFAULTS, ...o.config };
   /** A thread resumed after a retryable provider error → its start count then; the resumed start's own failure is fatal. */
@@ -744,5 +744,4 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
   if (!signal?.aborted && !derive().root.endedThisClaim) {
     recorder.emit(root, "thread.ended", { status: "completed" });
   }
-  return runtime.view();
 }

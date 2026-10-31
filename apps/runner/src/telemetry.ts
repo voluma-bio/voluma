@@ -75,7 +75,7 @@ export function startTelemetry(log: (line: string) => void) {
     }
     const failed = scope.fail?.(reason) ?? false;
     scope.log(
-      `telemetry ${kind} ${failed ? "in this run, failing it" : "after its report was fixed"}: ${describe(reason)}`,
+      `telemetry ${kind} ${failed ? "in this run, failing it" : "after its run was cut off or ended"}: ${describe(reason)}`,
     );
   };
   process.on("unhandledRejection", onError("unhandledRejection"));

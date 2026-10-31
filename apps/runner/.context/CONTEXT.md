@@ -160,10 +160,11 @@ records `assets.ready` / `assets.failed` on the root thread (id `<runId>:assets:
   `result` (`DRAIN_MS`, 10 minutes, the lease heartbeating meanwhile), before the sandboxes close.
   Then every output still without an `assets.*` event is recorded `assets.failed` ("timed out",
   "the run ended before the file was converted", or, when `prepare` failed, the setup error), so an ended run leaves no file "preparing" whatever step failed.
-  The worker starts at claim but its sandbox waits on `prepare` (workflow load, role-model
-  checks, ending an earlier claim's sandboxes). A failed `prepare` halts the worker with the files
-  pending, and the drain records them behind its cut-off check like any other, so every permanent
-  asset record goes through that one check. `prepare` retries transient store errors a few times. Events go
+  The worker starts once `prepare` (workflow load, role-model checks, ending an earlier claim's
+  sandboxes) has resolved. When `prepare` fails there is no worker: `superviseRun` records the
+  outputs itself with the run's error, through the same check-then-record step as the drain
+  (`failUnfinishedAssets`), so every record made after the run ended goes through one cut-off check.
+  `prepare` retries transient store errors a few times. Events go
   through `emit` (retried) and count as done once stored. This is **permanent for the run**: the next claim
   skips it and review shows the object without assets. A cut-off at any point before the failed
   events are queued (the drain checks and queues them in one synchronous step) makes `result` say

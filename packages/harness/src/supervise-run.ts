@@ -28,7 +28,7 @@ import type { History } from "./ports/history";
 import type { Outputs } from "./ports/outputs";
 import type { CreateSandbox } from "./ports/sandbox";
 import type { Recorder } from "./recorder";
-import { NotPreparedError, reviewAssetsWorker } from "./review-assets";
+import { failUnfinishedAssets, type ReviewAssetsWorker, reviewAssetsWorker } from "./review-assets";
 import { type LoopConfig, type ModelSetup, runLoop } from "./run-loop";
 import { type SandboxSession, sandboxSession } from "./sandbox-session";
 import { type Gateway, type SandboxSettings, specOf } from "./sandbox-specs";
@@ -150,8 +150,9 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
   let failure: string | undefined;
   let settled = false;
 
-  // Everything that needs the workflow. The conversion worker waits on it, so a `prepare` that
-  // fails fails the pending conversions, which the drain then settles like any others.
+  // Everything that needs the workflow, the conversion worker included: it starts once `prepare`
+  // has resolved. When `prepare` fails there is no worker, and the end records the outputs itself.
+  let worker: ReviewAssetsWorker | undefined; // set once `prepare` has resolved
   const world = options.prepare(loopSignal).then((prepared) => {
     const { definition } = prepared;
     const copyInputs = new Set(definition.files.tasks.filter((t) => t.copyInputs).map((t) => t.id));
@@ -193,24 +194,19 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       // The convert sandbox's commands run with `note: false`, so its note is never read.
       (id) => (id === CONVERT ? "" : layout.forThread(recordOf(id)).restartNote),
     );
-    return { prepared, layout, recordOf, session };
+    const conversion = reviewAssetsWorker({
+      runId,
+      inputId: options.inputId,
+      rootThreadId,
+      recorder,
+      sandbox: () => session.get(CONVERT, { note: false }),
+      signal: cutOff,
+      log: options.log,
+    });
+    worker = conversion;
+    return { prepared, layout, recordOf, session, conversion };
   });
-  world.catch(() => {}); // the loop and the conversion read its failure
-
-  const conversion = reviewAssetsWorker({
-    runId,
-    inputId: options.inputId,
-    rootThreadId,
-    recorder,
-    sandbox: async () => {
-      const ready = await world.catch((e) => {
-        throw new NotPreparedError(errorText(e), { cause: e });
-      });
-      return ready.session.get(CONVERT, { note: false });
-    },
-    signal: cutOff,
-    log: options.log,
-  });
+  world.catch(() => {}); // the loop and the end read its failure
 
   const loop = async (): Promise<void> => {
     const { prepared, layout, recordOf, session } = await world;
@@ -320,9 +316,16 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
     }
     try {
       if (cutOff.aborted) return { kind: "cut-off" };
-      if (!(await conversion.drain(options.drainMs))) return { kind: "cut-off" };
       // An error nobody caught (`fail`) is what ended the run, whatever the stopped loop threw.
       const reason = failure ?? (error === undefined ? undefined : errorText(error));
+      const drained = worker
+        ? await worker.drain(options.drainMs)
+        : // `prepare` failed or never resolved: no worker, so the outputs are recorded here
+          await failUnfinishedAssets(
+            { runId, rootThreadId, recorder, signal: cutOff },
+            reason ?? "the run's setup did not finish",
+          );
+      if (!drained) return { kind: "cut-off" };
       return reason === undefined ? { kind: "ended" } : { kind: "ended", error: reason };
     } catch (e) {
       // A store that gave up during the drain stops the run (the host's cut-off) before this.
@@ -342,13 +345,10 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       return true;
     },
     close: async () => {
-      await Promise.all([
-        conversion.close(),
-        world.then(
-          ({ session }) => session.close(),
-          () => {},
-        ),
-      ]);
+      await world.then(
+        ({ session, conversion }) => Promise.all([conversion.close(), session.close()]),
+        () => {},
+      );
     },
   };
 }

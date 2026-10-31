@@ -33,7 +33,6 @@
 import { randomUUID } from "node:crypto";
 import { isIPv4 } from "node:net";
 import { setTimeout } from "node:timers/promises";
-import { errorText } from "@voluma/harness/error-text";
 import {
   type CreateSandbox,
   type ExecChunk,
@@ -45,6 +44,7 @@ import {
 } from "@voluma/harness/ports/sandbox";
 import { ModalClient, type Sandbox as ModalSandbox, NotFoundError } from "modal";
 import type { Config } from "./config.ts";
+import { withTransientRetry } from "./transient.ts";
 
 export interface ModalSandboxConfig {
   /** Modal API credentials; absent: the SDK uses ~/.modal.toml. */
@@ -172,45 +172,6 @@ async function* otherClaims(
   }
 }
 
-// gRPC codes (CANCELLED, UNKNOWN, DEADLINE_EXCEEDED, RESOURCE_EXHAUSTED, INTERNAL, UNAVAILABLE) and
-// socket errors that a later try can clear. Anything else (UNAUTHENTICATED, PERMISSION_DENIED,
-// INVALID_ARGUMENT, ...) is permanent and must fail the claim with its message. NOT_FOUND on a
-// sandbox is not a failure: it is already gone, which is what the caller wants.
-const TRANSIENT_GRPC = new Set([1, 2, 4, 8, 13, 14]);
-const TRANSIENT_SOCKET = new Set(["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EPIPE", "EAI_AGAIN"]);
-
-function isTransient(e: unknown): boolean {
-  const code = (e as { code?: unknown } | null)?.code;
-  if (typeof code === "number") return TRANSIENT_GRPC.has(code);
-  if (typeof code === "string" && TRANSIENT_SOCKET.has(code)) return true;
-  // A connect that failed on every address is an AggregateError; a store client wraps the socket error.
-  const { errors, cause } = (e ?? {}) as { errors?: unknown; cause?: unknown };
-  return (
-    (Array.isArray(errors) && errors.some(isTransient)) ||
-    (cause !== undefined && isTransient(cause))
-  );
-}
-
-const RETRY_ATTEMPTS = 4;
-
-/** Runs `attempt`, retrying a transient failure (`isTransient`) a few times before it throws. */
-export async function withTransientRetry<T>(
-  signal: AbortSignal,
-  log: (line: string) => void,
-  attempt: () => Promise<T>,
-): Promise<T> {
-  for (let n = 1, wait = RETRY_MS.first; ; n++, wait *= 2) {
-    try {
-      return await attempt();
-    } catch (e) {
-      signal.throwIfAborted();
-      if (n === RETRY_ATTEMPTS || !isTransient(e)) throw e;
-      log(`failed (${errorText(e)}), retrying in ${wait / 1000} s`);
-      await setTimeout(wait, undefined, { signal });
-    }
-  }
-}
-
 const GRPC_NOT_FOUND = 5;
 
 function isGone(e: unknown): boolean {
@@ -227,7 +188,6 @@ async function pollOrGone(sandbox: ModalSandbox): Promise<number | null> {
   }
 }
 
-const RETRY_MS = { first: 2000, max: 30_000 };
 const POLL_MS = 1000;
 const PROGRESS_LOG_MS = 30_000;
 
@@ -254,39 +214,38 @@ export async function endOtherClaims(
   const started = Date.now();
   const ended = new Set<string>();
   let nextLog = started;
-  for (let delay = RETRY_MS.first; ; ) {
-    try {
-      const live: ModalSandbox[] = [];
-      for await (const sandbox of otherClaims(modal, runId, claim, signal)) live.push(sandbox);
-      if (live.length === 0) return ended.size;
-      for (const sandbox of live) {
-        if (ended.has(sandbox.sandboxId)) continue;
-        await sandbox.terminate().catch((e) => {
-          if (!isGone(e)) throw e;
-        });
-        ended.add(sandbox.sandboxId);
-      }
-      // Our own loop, not `terminate({wait: true})`: the SDK's wait cannot be stopped by a signal.
-      for (let pending = live; pending.length > 0; ) {
-        if (Date.now() >= nextLog) {
-          log(
-            `waiting for ${pending.length} sandbox${pending.length === 1 ? "" : "es"} of an earlier claim to terminate (${Math.round((Date.now() - started) / 1000)} s)`,
-          );
-          nextLog = Date.now() + PROGRESS_LOG_MS;
+  return withTransientRetry(
+    "ending an earlier claim's sandboxes",
+    signal,
+    log,
+    async () => {
+      for (;;) {
+        const live: ModalSandbox[] = [];
+        for await (const sandbox of otherClaims(modal, runId, claim, signal)) live.push(sandbox);
+        if (live.length === 0) return ended.size;
+        for (const sandbox of live) {
+          if (ended.has(sandbox.sandboxId)) continue;
+          await sandbox.terminate().catch((e) => {
+            if (!isGone(e)) throw e;
+          });
+          ended.add(sandbox.sandboxId);
         }
-        await setTimeout(POLL_MS, undefined, { signal });
-        const codes = await Promise.all(pending.map(pollOrGone));
-        pending = pending.filter((_, i) => codes[i] === null);
+        // Our own loop, not `terminate({wait: true})`: the SDK's wait cannot be stopped by a signal.
+        for (let pending = live; pending.length > 0; ) {
+          if (Date.now() >= nextLog) {
+            log(
+              `waiting for ${pending.length} sandbox${pending.length === 1 ? "" : "es"} of an earlier claim to terminate (${Math.round((Date.now() - started) / 1000)} s)`,
+            );
+            nextLog = Date.now() + PROGRESS_LOG_MS;
+          }
+          await setTimeout(POLL_MS, undefined, { signal });
+          const codes = await Promise.all(pending.map(pollOrGone));
+          pending = pending.filter((_, i) => codes[i] === null);
+        }
       }
-      delay = RETRY_MS.first;
-    } catch (e) {
-      signal.throwIfAborted();
-      if (!isTransient(e)) throw e;
-      log(`ending an earlier claim's sandboxes failed, retrying in ${delay / 1000} s: ${e}`);
-      await setTimeout(delay, undefined, { signal });
-      delay = Math.min(delay * 2, RETRY_MS.max);
-    }
-  }
+    },
+    Infinity,
+  );
 }
 
 /** The sandbox factory of one claim of a run: `run.ts` and `dev-sandbox.ts` build theirs here. */

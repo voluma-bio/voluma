@@ -34,7 +34,6 @@
  */
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import type { Api, Model, Models } from "@earendil-works/pi-ai";
 import { inputPrefix, referencePrefix, workflowSnapshotPrefix } from "@voluma/contracts/r2";
 import type { Claim, ReportRequest } from "@voluma/contracts/runner";
@@ -61,12 +60,7 @@ import { computePlan } from "@voluma/workflow/plan";
 import { type Config, isVisitorSafe, providerKey } from "./config.ts";
 import { holdLease, type StopReason } from "./lease.ts";
 import { eventLine } from "./log.ts";
-import {
-  claimSandboxes,
-  endOtherClaims,
-  terminateClaim,
-  withTransientRetry,
-} from "./modal-sandbox.ts";
+import { claimSandboxes, endOtherClaims, terminateClaim } from "./modal-sandbox.ts";
 import { retryTransient } from "./model-retry.ts";
 import { providerFailure } from "./provider-error.ts";
 import { r2Outputs } from "./r2-outputs.ts";
@@ -76,6 +70,7 @@ import { storeEvidence } from "./store-evidence.ts";
 import { storeFiles } from "./store-files.ts";
 import { heartbeatRoundTrip, inRunScope, type RunScope } from "./telemetry.ts";
 import { assertThinking } from "./thinking.ts";
+import { withTransientRetry } from "./transient.ts";
 import { usageMeter } from "./usage.ts";
 
 /** The repo checkout this runner was deployed from: `workflows/` is read from it. */
@@ -150,6 +145,8 @@ async function claimBody(
     visitor ? (provider === "meta" ? keys.metaApiKey : undefined) : providerKey(provider);
   const redact: Redact = redactor([...config.secrets, ...(visitor ? [keys.metaApiKey] : [])]);
   const log = (line: string) => ctx.log(`[${runId}] ${redact(line)}`);
+  /** The report keeps only `errorText`; the stack shows where an error came from. */
+  const logStack = (e: unknown) => log(e instanceof Error && e.stack ? e.stack : String(e));
   scope.log = log;
 
   // The cut-off: the one signal the supervisor takes. Only a stop that will not end the run fires it.
@@ -322,7 +319,7 @@ async function claimBody(
       // runner's checkout once (at `config.commit`), so a resume reads what the run began with.
       const workflowDir = run.workflows[0]?.path;
       if (!workflowDir) throw new Error(NO_WORKFLOW_DIR);
-      const definition = await withTransientRetry(signal, log, () =>
+      const definition = await withTransientRetry("loading the workflow", signal, log, () =>
         loadWorkflow(workflowDir, {
           store: objects,
           prefix: workflowSnapshotPrefix(runId),
@@ -390,13 +387,11 @@ async function claimBody(
         }),
       };
     };
-    if (uncaught !== undefined) throw new Error(uncaught);
     supervised = superviseRun({
       runId,
       prepare: (signal) =>
         prepare(signal).catch((e) => {
-          // The report keeps only `errorText`; the stack shows where it came from.
-          log(redact(e instanceof Error && e.stack ? e.stack : String(e)));
+          logStack(e);
           throw e;
         }),
       selectedOutputs: run.selectedOutputs,
@@ -429,13 +424,15 @@ async function claimBody(
       drainMs: DRAIN_MS,
       signal: cutOff.signal,
     });
+    // An error nobody caught before the supervisor existed ends the run like one after it.
+    if (uncaught !== undefined) supervised.fail(uncaught);
     outcome = await supervised.result;
     if (outcome.kind === "ended" && outcome.error !== undefined)
       log(`failed: ${redact(outcome.error)}`);
   } catch (e) {
     error = redact(errorText(e));
     log(`failed: ${error}`);
-    log(redact(e instanceof Error && e.stack ? e.stack : String(e)));
+    logStack(e);
   } finally {
     // The harness decided how the claim ended, drained included; a stop landing now changes nothing.
     // Without an outcome the claim failed before the supervisor ran (or was stopped then).
@@ -445,11 +442,7 @@ async function claimBody(
         : stopped
           ? cutOffReport(stopped)
           : endedReport(uncaught ?? error);
-    // A shutdown that lands after the harness ended the run still has the shutdown budget (`main.ts`) to fit in.
-    if (report?.kind === "ended")
-      await closeSandboxes(
-        stopped === "shutdown" ? CLOSE_BUDGET_MS.stopped : CLOSE_BUDGET_MS.ended,
-      );
+    if (report?.kind === "ended") await closeSandboxes(CLOSE_BUDGET_MS.ended);
     shutdown.removeEventListener("abort", onShutdown);
     lease?.halt();
     const wrapUp = (async () => {
@@ -457,9 +450,7 @@ async function claimBody(
       await events?.flush();
       if (report) await lease?.sendFinalUsage();
     })();
-    await (report?.kind === "released" && report.reason === "shutdown"
-      ? Promise.race([wrapUp, delay(RELEASE_FLUSH_MS)])
-      : wrapUp);
+    await untilShutdownPlus(RELEASE_FLUSH_MS, wrapUp);
     if (report) {
       const stored = await client.report(report).catch((e) => {
         log(`report failed: ${e instanceof Error ? e.message : e}`);
@@ -487,6 +478,28 @@ async function claimBody(
     }
   }
 
+  /**
+   * Waits for `work`, but gives up `ms` after the shutdown signal fires (or at once plus `ms`
+   * when it already has): the process exits when the shutdown budget (`main.ts`) is spent, so a
+   * report or a close under shutdown must fit in what is left. Undefined when it gave up.
+   */
+  async function untilShutdownPlus<T>(ms: number, work: Promise<T>): Promise<T | undefined> {
+    const done = new AbortController();
+    const late = new Promise<undefined>((resolve) => {
+      const arm = () => {
+        const timer = setTimeout(resolve, ms, undefined);
+        done.signal.addEventListener("abort", () => clearTimeout(timer), { once: true });
+      };
+      if (shutdown.aborted) arm();
+      else shutdown.addEventListener("abort", arm, { once: true, signal: done.signal });
+    });
+    try {
+      return await Promise.race([work, late]);
+    } finally {
+      done.abort();
+    }
+  }
+
   async function closeSandboxes(budgetMs: number) {
     if (!supervised) return;
     const closed = supervised.close().then(
@@ -494,7 +507,8 @@ async function claimBody(
       () => false,
     );
     const timeout = new Promise<false>((resolve) => setTimeout(resolve, budgetMs, false));
-    if (!(await Promise.race([closed, timeout]))) {
+    // A shutdown during the close switches to the stopped budget.
+    if (!(await untilShutdownPlus(CLOSE_BUDGET_MS.stopped, Promise.race([closed, timeout])))) {
       log("sandbox did not close in time; terminating this claim's sandboxes");
       await terminateClaim(config.modal, runId, claimId).catch((e) =>
         log(`terminate failed: ${e}`),
