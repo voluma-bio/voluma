@@ -148,10 +148,15 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   `ReviewRun.review`; no persisted count is maintained. Unfinished/failed/cancelled runs
   have null summaries. Review mutations return/refetch snapshots; execution SSE closes
   at run end and does not continuously deliver human review changes.
-- Run list/get and study reads memoize at most 2048 derived results (`{summary, tasks, values, toCheck}`, all from one `reviewState(log)`; least recently read out first), keyed by each run's latest
-  event ID (ordered by sequence) in the same repeatable-read snapshot, including reseeded
-  examples with reused sequence numbers. Cache misses load only fold/review
-  events; hits load no event payloads. The event log remains the only durable human-decision state.
+- One loader, `resultsLoader()` (`pg-runs.ts`), serves the run and study reads and Review's `RunRecords.load`
+  and `decide`. It memoizes derived results (`{results, summary, tasks, values, toCheck}`, all
+  from one `reviewState(log)`) up to 250,000 folded events in total (about 20 MB; least recently read out
+  first). An unreadable run's verdict is cached too, so lists don't re-parse it. Keyed by each run's latest event ID
+  (ordered by sequence) among `FOLD_EVENT_TYPES` (`packages/contracts/src/fold.ts`, next to the
+  switch it describes; add a type there when the fold starts to read it) in the same repeatable-read
+  snapshot, including reseeded examples with reused sequence numbers. Cache misses load only those
+  events; hits load no event payloads. A single-run read of a run of any state throws on events that don't parse; lists
+  leave out a completed run that doesn't and keep another with empty results. The event log remains the only durable human-decision state.
 - `runs.ts` also serves `GET /runs/:runId/files/:sha256`: one of the run's content-addressed
   files (`evidenceKey`) through `RunFiles` (`r2-run-files.ts`), after `RunRecords.readable`.
   No descriptor or ETag pin: the key is the content hash, so the bytes never change (`immutable`,

@@ -29,8 +29,8 @@ export type RunRecord = {
   /** Opaque run lifetime; changes when an example is replaced under the same id. */
   generation: string;
   run: Run;
-  events: RunEvent[];
-  results: ReturnType<typeof reviewState>;
+  /** Shared with the loader's cache: read only. */
+  results: Readonly<ReturnType<typeof reviewState>>;
 };
 /** Only authenticated human decisions can cross the review write port. */
 export type ReviewDecision =
@@ -39,7 +39,7 @@ export type ReviewDecision =
 
 /** Run-owned coherent reads and serialized human writes; Review owns decision policy. */
 export type RunRecords = {
-  /** The run and every stored event, in `seq` order; null when `reader` can't read the run. */
+  /** The run and its folded results; null when `reader` can't read the run. */
   load(reader: Reader, runId: string): Promise<RunRecord | null>;
   /** Validate against the locked current record; append one decision or return it unchanged. */
   decide(
