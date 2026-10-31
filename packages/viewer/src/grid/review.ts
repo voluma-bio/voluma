@@ -20,6 +20,8 @@ export type TaskGrid =
       state: "ready";
       /** The grid's id: a new one remounts the viewer. */
       gridId: string;
+      /** The grid's image volume block id: what a mark on this grid names (`Mark.volumeId`). */
+      imageId: string;
       name: string;
       scene: GridScene;
       /** Where the focused check is, when the run says. */
@@ -272,6 +274,7 @@ export function taskGrid({
   return {
     state: "ready",
     gridId,
+    imageId: image.id,
     name: image.name,
     scene: {
       shapeZyx: image.shapeZyx,
