@@ -69,8 +69,10 @@ export function ScanPage() {
 function Scan({ runId }: { runId: string }) {
   const run = useQuery({
     ...runQuery(runId),
-    // Queue place and state changes aren't events; the stream is the source for the rest.
+    // Queue place and state changes aren't events; the stream is the source for the rest. Also in
+    // a background tab: a run waiting for keys gets them from this page (`RunAlert`).
     refetchInterval: (q) => (q.state.data?.state.status === "ended" ? false : 3000),
+    refetchIntervalInBackground: true,
   });
   if (run.isPending)
     return (

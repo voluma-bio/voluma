@@ -105,8 +105,10 @@ screens are the scan review (`apps/web/src/features/scan`) and the study pages
   run uses and lets the user remove it. They live in localStorage under
   `voluma.visitor-keys.<userId>`. A run in `awaiting-keys` is handled on its page
   (`features/scan/scan-header.tsx`) for the user who started it only: with a key stored, the page
-  sends it (`resendKeys`) once per wait by itself; without one, or when that send fails, it shows
-  the form. Other users see that the run waits for its starter.
+  sends it (`resendKeys`) by itself, and again after a 429, 5xx or network failure (backoff, capped),
+  so the run page polls in a background tab too. A 409 means another tab already sent it. The form
+  shows when no key is stored or a send fails. `/keys` doesn't check the key: a revoked one fails the
+  run at its first model call (401). Other users see that the run waits for its starter.
 - **A run's status** (`runStatus`, a word and a `StatusMark` state) and the formatters (`formatUsd`,
   `formatDuration`, `plural`) are `@voluma/run-view`, shared with Home; `use-now.ts` is the clock.
 - **Cost and time** come only from `spend(events, providerCalls)` (`@voluma/contracts/spend`), run

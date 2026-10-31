@@ -4,7 +4,7 @@
  * over the views: the run's own problems (it waits for its starter's keys, it failed) and a lost
  * connection.
  */
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, cancelRun, resendKeys } from "@voluma/api-client";
 import { runQuery } from "@voluma/api-client/query";
 import type { Run, VisitorKeys } from "@voluma/contracts/run";
@@ -20,7 +20,7 @@ import {
 import { Button, Facts, Popover, ShellHeading, type Status, StatusMark } from "@voluma/ui";
 import { catalog, workflowName } from "@voluma/workflow/bundled";
 import { ChevronDown } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router";
 
 /** "OA6-1, right knee", from the study's scan; the scan's file name when the study can't say. */
@@ -149,7 +149,7 @@ function StopRun({ run }: { run: Run }) {
   const [confirming, setConfirming] = useState(false);
   const cancel = useMutation({
     mutationFn: () => cancelRun(run.id),
-    onSuccess: (next) => client.setQueryData(runQuery(run.id).queryKey, next),
+    onSuccess: (next) => showRun(client, next),
   });
   return (
     <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3">
@@ -177,13 +177,14 @@ function StopRun({ run }: { run: Run }) {
   );
 }
 
+const bar = "shrink-0 border-b border-border px-4 py-2 text-sm";
+
 /** The run's own problems, over the views: waiting for its starter's keys, failed, or out of touch. */
 export function RunAlert({ run, userId, stale }: { run: Run; userId: string; stale: boolean }) {
   const { state } = run;
-  const bar = "shrink-0 border-b border-border px-4 py-2 text-sm";
   if (state.status === "awaiting-keys")
     return run.startedBy === userId ? (
-      <AwaitingKeys run={run} userId={userId} bar={bar} />
+      <AwaitingKeys run={run} userId={userId} />
     ) : (
       <p className={`${bar} bg-check-tint text-check-strong`}>
         The run is waiting for the keys of the person who started it.
@@ -204,31 +205,58 @@ export function RunAlert({ run, userId, stale }: { run: Run; userId: string; sta
   return null;
 }
 
+/** Sends of the stored key the page makes by itself in one wait, and the most it waits between two. */
+const AUTO_SENDS = 30;
+const MAX_WAIT_MS = 60_000;
+
+/** A refusal that can clear without the user: too many runs going, the server or the network down. */
+const clears = (error: unknown) =>
+  !(error instanceof ApiError) || error.status === 429 || error.status >= 500;
+
 /**
  * The starter's own run waiting for keys. Mounted once per wait, it sends the key stored in this
- * browser by itself, once; the form shows when there is no stored key or that send fails.
+ * browser by itself, and again after a refusal that clears (waits doubling from 5 s to a minute),
+ * until it has tried AUTO_SENDS times or the user sends from the form, which shows after the first
+ * failure. A 409 means the run already left the wait (another tab sent the key): not an error.
  */
-function AwaitingKeys({ run, userId, bar }: { run: Run; userId: string; bar: string }) {
+function AwaitingKeys({ run, userId }: { run: Run; userId: string }) {
   const client = useQueryClient();
+  const [stored] = useState(() => loadKeys(userId));
+  const [sends, setSends] = useState(0);
+  const [manual, setManual] = useState(false);
+  const [failure, setFailure] = useState<unknown>();
   const resend = useMutation({
     mutationFn: (keys: VisitorKeys) => resendKeys(run.id, keys),
-    onSuccess: (next) => client.setQueryData(runQuery(run.id).queryKey, next),
+    onSuccess: (next) => showRun(client, next),
+    onError: (error) => {
+      if (error instanceof ApiError && error.status === 409) {
+        setFailure(undefined);
+        void client.invalidateQueries({ queryKey: runQuery(run.id).queryKey });
+      } else setFailure(error);
+    },
   });
-  const [stored] = useState(() => loadKeys(userId));
-  // A ref, not state: StrictMode runs the effect twice and the key must go once.
-  const sent = useRef(false);
   const { mutate } = resend;
+  const retrying =
+    failure !== undefined && !!stored && !manual && sends < AUTO_SENDS && clears(failure);
+  const due = sends === 0 ? !!stored : retrying && resend.isError;
+  // A timer even for the first send: StrictMode's second effect run clears the first timer.
   useEffect(() => {
-    if (!stored || sent.current) return;
-    sent.current = true;
-    mutate(stored);
-  }, [stored, mutate]);
-  if (stored && !resend.isError)
+    if (!due || !stored) return;
+    const wait = sends === 0 ? 0 : Math.min(5000 * 2 ** (sends - 1), MAX_WAIT_MS);
+    const timer = setTimeout(() => {
+      setSends((n) => n + 1);
+      mutate(stored);
+    }, wait);
+    return () => clearTimeout(timer);
+  }, [due, sends, stored, mutate]);
+
+  if (stored && !manual && failure === undefined)
     return (
       <p role="status" className={`${bar} bg-muted text-muted-foreground`}>
         The server restarted. Reconnecting with your saved key…
       </p>
     );
+  const busy = manual && resend.isPending;
   return (
     <section className={`${bar} grid gap-2 bg-check-tint text-check-strong`}>
       <p>The run is waiting for your keys: the server restarted and no longer has them.</p>
@@ -236,19 +264,39 @@ function AwaitingKeys({ run, userId, bar }: { run: Run; userId: string; bar: str
         <KeysForm
           userId={userId}
           submitLabel="Continue the run"
-          busy={resend.isPending}
-          onSubmit={(keys) => resend.mutate(keys)}
+          busy={busy}
+          onSubmit={(keys) => {
+            setManual(true);
+            setFailure(undefined);
+            resend.mutate(keys);
+          }}
         />
       </div>
-      {resend.isError && (
+      {failure !== undefined && !busy && (
         <p role="alert" className="text-destructive">
-          {resend.error instanceof ApiError && resend.error.status === 429
-            ? "Too many runs are waiting right now. Try again shortly."
-            : "Couldn't send the keys. Try again."}
+          {failureMessage(failure, retrying)}
         </p>
       )}
     </section>
   );
+}
+
+function failureMessage(error: unknown, retrying: boolean) {
+  const full = error instanceof ApiError && error.status === 429;
+  if (retrying)
+    return full
+      ? "Too many runs are going right now. Your saved key will be sent again shortly."
+      : "Couldn't send your saved key. Trying again shortly.";
+  return full
+    ? "Too many runs are waiting right now. Try again shortly."
+    : "Couldn't send the keys. Try again.";
+}
+
+/** Shows a run the API returned; first cancels a poll in flight, whose older read would land after it. */
+async function showRun(client: QueryClient, next: Run) {
+  const { queryKey } = runQuery(next.id);
+  await client.cancelQueries({ queryKey });
+  client.setQueryData(queryKey, next);
 }
 
 /** Why the run failed: the run's error without the provider's raw response. */
