@@ -1,14 +1,16 @@
 # Runner: sandbox roles
 
-A sandbox is created from a spec with a role (`packages/harness/src/sandbox-specs.ts`), which fixes
-its size (2 CPUs, 8192 MiB), its network and which mounts it holds. Tags on every sandbox:
-`{run, name, claim, startedAt}`; `sandboxes:clean --run` ends all roles.
+A sandbox's spec is made by the harness from its layout (`specOf` in `packages/harness/src/sandbox-specs.ts`
+over a `SandboxLayout` from `layout.ts`): the layout fixes the mounts with their access and whether the
+sandbox reaches the gateway, `specOf` the size (2 CPUs, 8192 MiB) and the network. The runner supplies
+only `createSandbox(spec, signal)` (Modal) and the gateway's URL and token. Tags on every sandbox:
+`{run, name, claim, startedAt}`; `sandboxes:clean --run` ends all of them.
 
-| Role | Mounts | Network | Name |
+| Layout | Mounts | Network | Name |
 |---|---|---|---|
-| `worker` | as the caller says (today the worker `ThreadLayout.mounts`) | gateway IPv4 `/32` when configured, otherwise TLS SNI allowlist; no gateway: none | `<taskId>.worker[.n]` |
-| `check` | `readOnly` mounts read-only, one writable `scratch` prefix | none | `<taskId>.check[.n]` |
-| `convert` | `evidence` read-only, `review` writable | none | the job's |
+| worker thread (main too, when its file grants `bash`) | `/inputs`, `/workflow` read-only; `/outputs` and its scratch writable | gateway IPv4 `/32` when configured, otherwise TLS SNI allowlist, only if the role holds `segment_sam`; else none | `<taskId>.worker[.n]` |
+| check thread | `/inputs`, `/workflow`, `/outputs` read-only, one writable `scratch` prefix | none | `<taskId>.check[.n]` |
+| `RunLayout.convert` | `/evidence`, `/workflow` read-only, `/review` writable | none | `convert` |
 
 `VOLUMA_GATEWAY_IPV4` selects a single-address CIDR policy instead of SNI, never both (Modal
 unions them). It must be an exclusive inbound IPv4, not a resolved shared Render/Cloudflare IP.
@@ -16,9 +18,9 @@ Staging leaves it unset: the Host-header escape is still open. CIDR permits all 
 to that address and still permits DNS; it does not make scans exfiltration-proof. Deployment
 choices, approval gates and probes: [gateway deploy](../../gateway/.context/deploy.md#dedicated-ip-cutover-236-awaiting-approval).
 
-The builder sets the access of each mount, and the Modal adapter refuses a network on a
-non-worker role. The runner makes one sandbox per thread (`sandboxSession.get(threadId)`,
-named by the thread's `name`, its id without the run id). `RunLayout.forThread(record)` (a `ThreadRecord`, or the identity of a thread about to start)
+The runner makes no choice here: the harness's sandbox session makes one sandbox per thread
+(`sandboxSession.get(threadId)`, named by the thread's `name`, its id without the run id) and one for
+the review-asset converter, all through the same session. `RunLayout.forThread(record)` (a `ThreadRecord`, or the identity of a thread about to start)
 (`packages/harness/src/layout.ts`) gives each thread its role, mounts, tool description, restart note,
 `keyOf` and bash-spill path, so a worker and a checker each see their own files:
 
@@ -67,9 +69,9 @@ named by the thread's `name`, its id without the run id). `RunLayout.forThread(r
   locally and cites `v1.jpg` is refused unless the worker cited `v1.jpg`, in which case the
   citation resolves to the worker's file.
 - Readers take a thread's `name`, `role` and `taskId` from its `ThreadRecord`, never from its id.
-  The name is minted with the id (`nextThread` in `run-loop.ts`; `supervisor` in `supervise-run.ts`)
-  and recorded as `thread.started.name`, repeated by every resume; no code parses an id. The runner knows a
-  thread's layout, and so its name, by id from `run.ts`'s `laidOut` map (filled by the run loop).
+  The name is minted with the id (`nextThread` in `run-loop.ts`; `ROOT_NAME` in `supervise-run.ts`)
+  and recorded as `thread.started.name`, repeated by every resume; no code parses an id. The harness
+  finds a thread's layout (and its name) from its `thread.started`.
 
 Spend and the usage meter sum sandbox seconds over all sandboxes.
 
@@ -116,18 +118,17 @@ Spend and the usage meter sum sandbox seconds over all sandboxes.
 `packages/harness/src/review-assets.ts` converts every file a task reports as a volume, a
 structure mask or a surface (`convertJob`) into review assets while the run is live, and
 records `assets.ready` / `assets.failed` on the root thread (id `<runId>:assets:<sha256>`).
-`run.ts` starts it at claim beside `superviseRun`.
+`superviseRun` starts it at claim; `run.ts` orders its `drain` and the close.
 
 - **Queue.** Every `output` event in the recorder's view, from the first (so a resume reads the
   whole log), minus files with an `assets.*` event; new events are polled once a second.
-  One file at a time, in one `convert` sandbox per claim (created at the first file, metered
-  like the others). A failed conversion is recorded and the worker moves on; a sandbox that
-  dies or cannot be created is replaced once, then the file is recorded failed. `sourceSha256`
+  One file at a time, in the run's `convert` sandbox (`RunLayout.convert`, from the sandbox session: created at the first file, replaced when the provider ended it, metered by the runner's `createSandbox` like the others). A failed conversion is recorded and the worker moves on; a sandbox that
+  dies or cannot be created fails the file (the sandbox session replaces an ended sandbox on the next call, and runs a command the provider refused once more). `sourceSha256`
   is the queue item's; a converter that prints another one has failed.
 - **Mounts.** `/evidence` (the run's evidence prefix) and `/workflow` read-only, `/review`
   (`reviewAssetPrefix`) read-write, no network. The snapshot keeps repo paths and includes
   `core/convert/`, so the command is `python /workflow/workflows/core/convert/review_assets.py` (not `-I`, which drops the `PYTHONPATH`
-  the converter imports `sidecar` through; the sandbox gets `RunLayout.pythonPath` alone).
+  the converter imports `sidecar` through; the sandbox gets `RunLayout.convert`'s `PYTHONPATH` alone).
   A cloud-bucket mount cannot rename, which zarr's local store does for every file: the converter
   builds in a fixed `/tmp` path it clears at the start, and copies, `manifest.json` last. A
   non-zero exit from a sandbox that is gone counts as a sandbox failure (the one retry), not a
@@ -160,7 +161,7 @@ who ends it:
    released run's old runner must not kill the sandbox of the runner that reclaimed it).
 2. **A signal.** SIGINT and SIGTERM stop every run (the running command is killed), each
    reports `released` with reason `shutdown` first, so the run is recovered within the platform's grace period,
-   then closes its sandbox (no `stopped` event is stored); the service waits up to 30 s. A second signal
+   then closes its sandbox (no `stopped` event is stored); the service waits up to 50 s (Render's grace is 60 s), and the release retries for what is left of it after a 15 s cap on the flush of events (the final usage is always sent), so a deploy that overlaps an API outage is still recorded as `shutdown`. A second signal
    exits 130 at once and leaves the sandboxes (use `sandboxes:clean`). Signal the process
    group (Ctrl-C does); `kill <pid of pnpm>` alone leaves the runner running.
    The recorder stops a run the same way (`self-stop`) when the API stays unreachable for its retries (network or 5xx, about 20 s): the run is released and resumed, not failed. A 4xx refusal still fails it.
@@ -394,7 +395,7 @@ Both are R2 bucket mounts (`modal-sandbox.ts`), so a file is written whole, once
 (`sed -i`, editors), append, in-place edits and memory-mapped writes
 (`np.lib.format.open_memmap(mode="w+")`) fail there: the model builds a file under `/tmp`
 (local disk, lost on a sandbox restart) and `cp`s it in. The worker and check prompts
-(`prompts.ts`) and the bash tool description (`layout.ts`) say so.
+(`packages/harness/src/prompts.ts`) and the bash tool description (`layout.ts`) say so.
 
 **`/scratch` stays an R2 mount**, though it is only intermediate files. Two things need it to
 outlive a sandbox: a long bash output is stored there for the model to open (`toolOutputPath`),
@@ -426,9 +427,9 @@ lifetime) and once more 23 min into the replacement, before the exit code was lo
 # Runner: role text, tool grants and models come from `workflows/core/agents/`
 
 The worker's, checker's and (when its file grants `bash`) main's system prompts are `workflows/core/agents/<role>.md`'s body, then `COMMON`
-(sandbox text per role, `prompts.ts` `systemPrompt`), then the role's skill list and the tool index (one line per skill
+(sandbox text per role, `packages/harness/src/prompts.ts` `systemPrompt`), then the role's skill list and the tool index (one line per skill
 script, from its docstring's first line; the loader reads it from the snapshot). Their optional tools are the file's `tools`
-(`run.ts` `grant`); `segment_sam` is also dropped when the run has no Meta key, and always for the checker (it calls out to Meta; `keepFailed` writes the run-wide scratch). `loadWorkflow`
+(`supervise-run.ts` `grantsOf`); `segment_sam` is also dropped when the runner configures no gateway, and always for the checker (it calls out to Meta; `keepFailed` writes the run-wide scratch). `loadWorkflow`
 snapshots the role files with the workflow and reads them from the snapshot, so a resumed thread
 composes byte-identical text and an edited file reaches only new threads (a resumed thread keeps the system prompt and tool
 definitions it started with, run by the current tools; it is `ThreadStale` only if the input schema of one of its tools changed; a changed description (the tool's or a field's) resumes, a changed default does not, and a tool removed since answers a call with an error). The main agent without `bash` gets its file's body, then the skill list and the tool index (no sandbox text). A snapshot that has `checker.md` and no `check.md` (cut before the rename) is refused at load: "This run was made by an older version of Voluma and can't be resumed; start a new run." The snapshot is all-or-nothing: `.snapshot-done` is written last and later claims skip copying; with no marker (a first attempt cut off by a deploy) `loadWorkflow` empties the prefix before copying, so files the checkout has since deleted or renamed never sit beside the new ones.
@@ -464,7 +465,7 @@ never resumed: a stale dependent's thread stopped (`task-runtime.ts` `staleDepen
 failing run aborting its threads (`abortAll`). A stop stores that `cancelled` end first
 (`task-runtime.ts` `stop`, inside `section`) and then aborts without waiting; the thread's own
 later end is dropped (`start-thread.ts`). So a stopped thread's next write is refused at once,
-and "open" always means "cut off". A self-stop reports `released` with reason `self-stop`; a signal, `shutdown`.
+and "open" always means "cut off". A self-stop reports `released` with reason `self-stop`; a signal, `shutdown`. Neither counts toward the API's no-progress limit (the process was alive and no call got an answer). A self-stop whose window the event loop spent mostly blocked while this was the only live run (`soloStalledMs`, `telemetry.ts`) reports `loop-stalled`, which counts; with two runs live the block is nobody's to count, so both report `self-stop`. A heartbeat the API refuses with a 4xx reports `refused`, which counts (resending the same body cannot succeed, and the next claim starts a fresh usage meter). `lease-expired`, a runner that said nothing, counts too.
 
 The next claim learns why from `claim.previousClaim` (the API records `lease-expired` itself)
 and writes `claim.started {resumed, after}` right after the root's `thread.started`. The

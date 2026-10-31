@@ -3,7 +3,7 @@
  *   pnpm --filter @voluma/api seed:example --from <runId> [--id <exampleRunId>] [--backfill <dir|r2:prefix>] [--remote]
  * Reads DATABASE_URL (else this worktree's `pnpm dev` database), GUEST_ORGANIZATION_ID (the Demo organization) and the R2 settings (the repo .env, or the host's variables).
  *
- * The example gets the source's events, threads and history under its own run id (thread
+ * The example gets the source's events and history under its own run id (thread
  * ids are `<runId>.…`, so they are renamed), `startedBy: "voluma-examples"`, `example: true`,
  * and the Demo org's reference-scan input. It belongs to its own study of one scan
  * (`study-<exampleId>`, `example: true`), replaced with it. The source's evidence, review assets, message snapshots (`scratch/person/`) and `outputs/` objects in R2 are copied
@@ -35,7 +35,6 @@ import {
   runs,
   studies,
   studyScans,
-  threads,
 } from "../domains/run/schema";
 import { backfillRows, readBackfill, uploadBackfill } from "./backfill";
 import { databaseUrl } from "./operator";
@@ -160,8 +159,7 @@ const rows = values.backfill
   : renamed;
 
 await db.transaction(async (tx) => {
-  await tx.delete(piMessages).where(sql`starts_with(${piMessages.threadId}, ${`${exampleId}.`})`);
-  await tx.delete(threads).where(eq(threads.runId, exampleId));
+  await tx.delete(piMessages).where(eq(piMessages.runId, exampleId));
   await tx.delete(events).where(eq(events.runId, exampleId));
   await tx.delete(runs).where(eq(runs.id, exampleId));
   await tx.delete(studyScans).where(eq(studyScans.studyId, studyId));
@@ -211,15 +209,9 @@ await db.transaction(async (tx) => {
   }
   const rename = (text: SQL) => sql`${exampleId} || substr(${text}, ${source.length + 1})`;
   await tx.execute(sql`
-    INSERT INTO threads (id, run_id, parent_thread_id, kind, task, status, created_at, ended_at)
-    SELECT ${rename(sql`id`)}, ${exampleId},
-      CASE WHEN parent_thread_id IS NULL THEN NULL ELSE ${rename(sql`parent_thread_id`)} END,
-      kind, task, status, created_at, ended_at
-    FROM threads WHERE run_id = ${source}`);
-  await tx.execute(sql`
-    INSERT INTO pi_messages (thread_id, idx, message)
-    SELECT ${rename(sql`thread_id`)}, idx, message
-    FROM pi_messages WHERE starts_with(thread_id, ${`${source}.`})`);
+    INSERT INTO pi_messages (run_id, thread_id, idx, message)
+    SELECT ${exampleId}, ${rename(sql`thread_id`)}, idx, message
+    FROM pi_messages WHERE run_id = ${source}`);
 });
 
 console.log(

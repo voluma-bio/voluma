@@ -86,7 +86,7 @@ change it safely.
   an event stream still gets keepalives after its headers.
 - **Boot and shutdown.** While draining, new calls get 503 with `Connection: close`. At SIGTERM
   the instance drains for `GATEWAY_DRAIN_SECONDS`, aborts what remains (those calls end `cut`),
-  then marks its own leftover `open` rows `cut`. If `provider_calls` is missing at boot (a new database, before the API's migration), the gateway serves `/health` 503 and retries with a backoff; the boot sweep runs once it exists.
+  then marks its own leftover `open` rows `cut`. The drain (240 s) is sized to Render's 300 s shutdown cap and to the longest staging Meta request (72 s); the new instance takes new calls while the old one drains. A call cut anyway is retried once by `voluma-sam` (a second row in `provider_calls`, the cut one stays `cut` with unknown cost). If `provider_calls` is missing at boot (a new database, before the API's migration), the gateway serves `/health` 503 and retries with a backoff; the boot sweep runs once it exists.
 
 ## Known limits
 

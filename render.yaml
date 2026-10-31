@@ -113,7 +113,7 @@ services:
     # `provider_calls` exists).
     startCommand: cd apps/gateway && exec node --import tsx src/main.ts
     healthCheckPath: /health # 200 once `provider_calls` exists; 503 before the migration and while draining
-    maxShutdownDelaySeconds: 90 # above GATEWAY_DRAIN_SECONDS (60) plus the row cleanup after it
+    maxShutdownDelaySeconds: 300 # Render's cap; above GATEWAY_DRAIN_SECONDS (240) plus the row cleanup after it
     buildFilter:
       paths:
         - apps/gateway/**
@@ -128,7 +128,7 @@ services:
       - key: DATABASE_URL # Neon's direct connection string, as on voluma-api
         sync: false
       - key: GATEWAY_DRAIN_SECONDS
-        value: "60"
+        value: "240"
       - key: GATEWAY_TOKEN_SECRET # `<kid>:<base64 of 32 bytes>`; the runner reads this one
         sync: false
       - key: GATEWAY_META_API_KEY
@@ -148,7 +148,7 @@ services:
     autoDeployTrigger: checksPass
     buildCommand: pnpm install --frozen-lockfile
     startCommand: cd apps/runner && exec node --import tsx src/main.ts
-    maxShutdownDelaySeconds: 60 # above the runner's SHUTDOWN_BUDGET_MS (30 s)
+    maxShutdownDelaySeconds: 60 # above the runner's SHUTDOWN_BUDGET_MS (50 s)
     buildFilter:
       paths:
         - apps/runner/**

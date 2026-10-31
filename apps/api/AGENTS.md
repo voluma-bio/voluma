@@ -74,6 +74,12 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   its own study (`study-<exampleId>`, `example`), read-only like its run; `import:run` restores
   a dump's original study, scans and inputs, refusing conflicting shared rows. Only legacy dumps
   without study metadata get a study of one.
+- **Rows are read and written by run.** Every query on `events` and `pi_messages` filters by `run_id`
+  (`events` has a unique index `(run_id, id)`, `pi_messages` `(run_id, thread_id, idx)`), and no
+  code reads a thread id's text; ingest scopes every write by the lease and the path's run. The
+  primary keys are still `events(id)` and `pi_messages(thread_id, idx)`, and `pi_messages.run_id` is
+  still nullable, with a trigger that fills it for the previous API's inserts: the contract step is a
+  later migration ([TODO](.context/TODO.md)).
 - **Browser writes, claim and `import:run`/`archive:run` hold one lock** (`QUEUE_LOCK`, a transaction
   advisory lock), so limit counts can't race. `heartbeat` and `report` skip it: they only end or release
   a running run, which lowers the counts a claim reads, and take just the run's event lock and row. The
@@ -81,13 +87,12 @@ Node server on Postgres. Architecture and the `seq` allocator: [.context/CONTEXT
   rule is stated; other comments point here. The lease is judged by the database's `now()`. An ingest write
   checks the run's lease token inside its own transaction (`assertLease`, `FOR SHARE`); a
   late write can't land after a takeover.
-- **Recovery ends a claim with a reason** (`shutdown`, `self-stop` from the runner's `released`;
-  `lease-expired` when the claim's sweep finds the lease gone). `recover` in `pg-queue.ts` stores it
+- **Recovery ends a claim with a reason** (`shutdown`, `self-stop`, `loop-stalled`, `refused` from
+  the runner's `released`; `lease-expired` when the claim's sweep finds the lease gone). `recover` in `pg-queue.ts` stores it
   for the next claim's `previousClaim` and applies the no-progress limit (`claim-progress.ts`:
-  the counting rule and the progress events). There is no other restart counter. `provider-outage`
-  is read only (events and `last_claim_end` written before provider errors failed the run). The
-  column `runs.claimable_after` is unused and gone from `schema.ts`; drop it in a later migration
-  ([TODO](.context/TODO.md)).
+  the counting rule and the progress events; `lease-expired`, `loop-stalled` and `refused` count).
+  There is no other restart counter. `provider-outage` is read only (events and `last_claim_end`
+  written before provider errors failed the run).
 - **A researcher's message reopens a finished run** (`messages.ts` in contracts is the rulebook;
   `queue.checkMessage`/`sendMessage` in `pg-queue.ts` call `corrections.ts`, which holds the
   rules; Review's `POST /runs/:id/messages` calls them through the `RunMessages` port after it

@@ -31,11 +31,11 @@ export function usageMeter() {
   const cache = new Map<string, CacheState>();
   return {
     /** One model call's usage: its cost goes to the heartbeat, its tokens and cache miss to the per-role totals. */
-    addModelCall(role: ModelRole, threadName: string, used: ModelUsage | undefined) {
+    addModelCall(role: ModelRole, threadId: string, used: ModelUsage | undefined) {
       if (!used) return;
       this.addModelCost(used.costUsd);
-      const { miss, next } = cacheStep(cache.get(threadName), used);
-      cache.set(threadName, next);
+      const { miss, next } = cacheStep(cache.get(threadId), used);
+      cache.set(threadId, next);
       const t = tokens.get(role) ?? { calls: 0, input: 0, cacheRead: 0, misses: 0 };
       t.misses += miss ? 1 : 0;
       t.calls++;

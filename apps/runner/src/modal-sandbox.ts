@@ -620,10 +620,7 @@ function validate(spec: SandboxSpec): void {
       throw new Error(`${name} must be a positive integer`);
     }
   }
-  // The role fixes the network: only a worker may reach out.
   if (spec.network.kind !== "none") {
-    if (spec.role !== "worker")
-      throw new Error(`a ${spec.role} sandbox cannot have network access`);
     if (spec.network.kind === "hosts" && spec.network.hosts.length === 0) {
       throw new Error("a sandbox with a host allowlist needs at least one host");
     }
