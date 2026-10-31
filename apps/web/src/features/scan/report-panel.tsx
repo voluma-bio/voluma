@@ -1,6 +1,6 @@
 /**
- * Report: the scan's task graph (report size), then the task in view: where it stands, what the
- * AI was asked, its items, its values, how they compare with reference readers, its QC images
+ * Report: the scan's task graph (report size), then the task in view: where it stands, what it is
+ * for, its items, its values, how they compare with reference readers, its QC images
  * and its files. Picking a box sets up the views on that task; a box's agent opens its steps.
  */
 import { reviewFileUrl } from "@voluma/api-client";
@@ -132,12 +132,8 @@ function TaskDetail({
             </span>
           )}
         </p>
-        {reviewTask?.ask && (
-          <p className="text-sm leading-relaxed">
-            <span className="text-muted-foreground">Asked: </span>
-            {reviewTask.ask}
-          </p>
-        )}
+        {/* The workflow's sentence for a person, never the AI's instructions (paths, skills). */}
+        {task.purpose && <p className="text-sm leading-relaxed">{task.purpose}</p>}
         {task.dependsOn.length > 0 && (
           <p className="text-sm text-muted-foreground">
             Uses {task.dependsOn.map(titleOf).join(", ")}.
