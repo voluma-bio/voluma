@@ -25,13 +25,15 @@ function closedBecause(run: Run, me: Me): string | undefined {
   if (run.startedBy !== me.userId)
     return "Only the person who started this run can write to its AI.";
   if (run.credentials === "visitor") return "A run on your own keys can't be reopened.";
+  // Left: a run on Voluma's keys, which a guest can't reopen.
+  if (me.kind === "visitor") return "Sign in with an account to write to this run's AI.";
   if (run.state.status !== "ended") return "The AI is working. You can write once it finishes.";
   if (run.state.outcome !== "completed")
     return "This run didn't finish, so its AI can't be reopened.";
   return undefined;
 }
 
-/** The API's refusal in plain words (a 409 carries the server's own); the text stays in the box. */
+/** The API's refusal in plain words (a 403 or 409 carries the server's own); the text stays in the box. */
 function refusal(error: Error): string {
   const status = error instanceof ApiError ? error.status : undefined;
   if (status === 409)
@@ -39,7 +41,8 @@ function refusal(error: Error): string {
       (error as ApiError).serverMessage ??
       "The AI is still answering, or the run can't be reopened. Try again once it finishes."
     );
-  if (status === 403) return "You can read this run but not write to its AI.";
+  if (status === 403)
+    return (error as ApiError).serverMessage ?? "You can't write to this run's AI.";
   if (status === 429) return "Too many runs are going right now. Try again shortly.";
   return "Couldn't send. Check your connection and try again.";
 }
