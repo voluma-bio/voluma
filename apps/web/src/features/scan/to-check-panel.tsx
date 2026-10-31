@@ -20,6 +20,7 @@ export function ToCheckPanel({
   inView,
   onPick,
   accepting,
+  wrongReason,
   onWrong,
   live,
 }: {
@@ -34,6 +35,8 @@ export function ToCheckPanel({
   inView: string | undefined;
   onPick: (item: NeedItem) => void;
   accepting: Accepting;
+  /** Why Something's wrong is off (the run read's `cannotMessage`). */
+  wrongReason: string | undefined;
   onWrong: (item: NeedItem) => void;
   live: boolean;
 }) {
@@ -134,6 +137,7 @@ export function ToCheckPanel({
           focusAccept={current.id === arrived}
           readOnly={accepting.readOnly}
           onWrong={() => onWrong(current)}
+          wrongReason={wrongReason}
           error={accepting.error?.id === current.id ? accepting.error.text : undefined}
         />
       )}

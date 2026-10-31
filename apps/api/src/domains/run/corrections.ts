@@ -11,6 +11,7 @@
 import { runEventSchema } from "@voluma/contracts/events";
 import { corrections, FOLD_EVENT_TYPES, fold, redoRefusal } from "@voluma/contracts/fold";
 import type { PersonMessage } from "@voluma/contracts/messages";
+import type { Run } from "@voluma/contracts/run";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
@@ -106,6 +107,72 @@ export async function endCorrection(
 export const GUEST_KEYS_MESSAGE =
   "Guests run on their own keys. Add your keys to start a run, or sign in with an account to use Voluma's.";
 
+/** What `messageRefusal` judges of a run: a run row's columns, or a `Run` read (`messageTargetOf`). */
+export type MessageTarget = {
+  id: string;
+  startedBy: string;
+  studyId: string;
+  example: boolean;
+  credentials: "voluma" | "visitor";
+  workflows: WorkflowPin[];
+  /** The queue state: `queued`, `running`, `awaiting-keys` or `ended`. */
+  state: string;
+  outcome: string | null;
+};
+
+export function messageTargetOf(run: Run): MessageTarget {
+  const { state } = run;
+  return {
+    ...run,
+    state: state.status,
+    outcome: state.status === "ended" ? state.outcome : null,
+  };
+}
+
+/**
+ * Why this caller can't message this run now, or null: the run-level part of the refusals the
+ * contract lists, in its order. Nothing here is per message (a repeated id, the task to redo, its
+ * item) or transient (the run limit), and the empty plan is checked beside the plan it reads: a
+ * completed run always has one. `decideMessage` throws what this returns and the run read
+ * reports its message (`runReadSchema.cannotMessage`), so they cannot differ.
+ */
+export async function messageRefusal(
+  tx: Tx,
+  pinsOf: (workflowId: string) => WorkflowPin[] | undefined,
+  caller: { userId: string; guest: boolean },
+  run: MessageTarget,
+): Promise<{ status: 403 | 409; message: string } | null> {
+  if (run.example) return { status: 403, message: "Example runs can't be changed." };
+  if (run.startedBy !== caller.userId)
+    return { status: 403, message: "Only the person who started the run can write to it." };
+  if (run.credentials === "visitor")
+    return {
+      status: 403,
+      message: "A run with your own keys keeps no keys, so it cannot be reopened.",
+    };
+  // Only a run on Voluma's keys is left here, and a guest has none of their own to reopen it on.
+  if (caller.guest) return { status: 403, message: GUEST_KEYS_MESSAGE };
+  if (run.state === "queued" || run.state === "running")
+    return {
+      status: 409,
+      message:
+        (await openCorrection(tx, run.id)) !== null
+          ? "The run is still answering your last message. Wait for its reply, or cancel it."
+          : "The run has not finished yet.",
+    };
+  if (run.state !== "ended" || run.outcome !== "completed")
+    return { status: 409, message: "Only a run that completed can be reopened; rerun this one." };
+  const [study] = await tx
+    .select({ workflowId: studies.workflowId })
+    .from(studies)
+    .where(eq(studies.id, run.studyId));
+  const current = study && pinsOf(study.workflowId);
+  const pathsOf = (pins: readonly WorkflowPin[]) => pins.map((p) => p.path ?? "").sort();
+  if (!current || pathsOf(current).join() !== pathsOf(run.workflows).join())
+    return { status: 409, message: "This run used an older version of its workflow, so rerun it." };
+  return null;
+}
+
 /**
  * A researcher's message to a run, judged in the order the contract lists the refusals. `write`
  * false judges only (nothing is stored, no lock is taken): the route calls that first, so a
@@ -131,53 +198,20 @@ export async function decideMessage(
     .where(and(readableRuns(reader), eq(runs.id, runId)));
   const [run] = await (write ? found.for("update") : found);
   if (!run) throw new HTTPException(404, { message: "not found" });
-  if (run.startedBy !== userId) {
-    throw new HTTPException(403, {
-      message: "Only the person who started the run can write to it.",
-    });
-  }
-  if (run.example) throw new HTTPException(403, { message: "Examples are read-only." });
-  if (run.credentials === "visitor") {
-    throw new HTTPException(403, {
-      message: "A run with your own keys keeps no keys, so it cannot be reopened.",
-    });
-  }
-  // Only a run on Voluma's keys is left here, and a guest has none of their own to reopen it on.
-  if (caller.guest) {
-    throw new HTTPException(403, { message: GUEST_KEYS_MESSAGE });
-  }
+  const refusal = await messageRefusal(tx, o.pinsOf, caller, {
+    ...run,
+    workflows: run.workflows as WorkflowPin[],
+  });
   const eventId = personEventId(runId, msg.id);
   const [again] = await tx
     .select({ id: events.id })
     .from(events)
     .where(and(eq(events.runId, runId), eq(events.id, eventId)));
   const stateNow = async () => (await loadRun(tx, runId)).state;
-  if (again) return { eventId, state: await stateNow(), duplicate: true };
-
-  if (run.state === "queued" || run.state === "running") {
-    throw new HTTPException(409, {
-      message:
-        (await openCorrection(tx, runId)) !== null
-          ? "The run is still answering your last message. Wait for its reply, or cancel it."
-          : "The run has not finished yet.",
-    });
-  }
-  if (run.state !== "ended" || run.outcome !== "completed") {
-    throw new HTTPException(409, {
-      message: "Only a run that completed can be reopened; rerun this one.",
-    });
-  }
-  const [study] = await tx
-    .select({ workflowId: studies.workflowId })
-    .from(studies)
-    .where(eq(studies.id, run.studyId));
-  const current = study && o.pinsOf(study.workflowId);
-  const pathsOf = (pins: readonly WorkflowPin[]) => pins.map((p) => p.path ?? "").sort();
-  if (!current || pathsOf(current).join() !== pathsOf(run.workflows as WorkflowPin[]).join()) {
-    throw new HTTPException(409, {
-      message: "This run used an older version of its workflow, so rerun it.",
-    });
-  }
+  // A message already stored is answered even though the run is busy answering it.
+  if (again && refusal?.status !== 403)
+    return { eventId, state: await stateNow(), duplicate: true };
+  if (refusal) throw new HTTPException(refusal.status, { message: refusal.message });
   const { taskId, itemId } = msg.payload;
   const view = fold(
     (

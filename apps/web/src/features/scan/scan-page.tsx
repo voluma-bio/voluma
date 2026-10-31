@@ -14,7 +14,7 @@ import { reviewRunQuery, runQuery, studyQuery, useAcceptCheck } from "@voluma/ap
 import type { Me } from "@voluma/contracts/auth";
 import { MAX_MARKS } from "@voluma/contracts/messages";
 import type { ReviewRun, Revision } from "@voluma/contracts/review";
-import type { Run } from "@voluma/contracts/run";
+import type { RunRead } from "@voluma/contracts/run";
 import {
   DisclosureProvider,
   haltOf,
@@ -139,7 +139,7 @@ function Scan({ runId }: { runId: string }) {
  * the run has no plan (409) and while its images are still being converted (until ten minutes
  * after it ends): neither shows on the stream.
  */
-function useReviewRun(runId: string, run: Run, changed: string) {
+function useReviewRun(runId: string, run: RunRead, changed: string) {
   const client = useQueryClient();
   const status = run.state.status;
   const endedAt = run.state.status === "ended" ? Date.parse(run.state.endedAt) : undefined;
@@ -190,8 +190,8 @@ function preparing(run: ReviewRun): boolean {
   return files.some((sha256) => !run.assets[sha256]);
 }
 
-/** "Looks right" on a completed run's latest result; an example takes no decisions. */
-function useAccepting(run: Run, revision: Revision | undefined) {
+/** "Looks right" on a completed run's latest result, when the server says this caller may. */
+function useAccepting(run: RunRead, revision: Revision | undefined) {
   const [error, setError] = useState<{ id: string; text: string }>();
   const mutation = useAcceptCheck(run.id, revision?.id, {
     onMutate: ({ checkId }) => setError((e) => (e?.id === checkId ? undefined : e)),
@@ -200,33 +200,17 @@ function useAccepting(run: Run, revision: Revision | undefined) {
       if (e) setError({ id: checkId, text: e.message });
     },
   });
-  const readOnly = run.example
-    ? "Example runs can't be changed."
-    : run.state.status !== "ended"
-      ? "You can decide once the run finishes."
-      : run.review === null
-        ? "This run didn't finish, so there is nothing to accept."
-        : !revision
-          ? "Wait for the results to load."
-          : undefined;
+  // The server says when no decision can be taken; the page's own wait is for the results to load.
+  const readOnly = run.cannotAccept ?? (revision ? undefined : "Wait for the results to load.");
   return {
     readOnly,
     accept: readOnly
       ? undefined
-      : (item: NeedItem, onAccepted?: () => void) => {
-          const task = revision?.tasks.find((t) => t.id === item.taskId);
-          if (
-            task?.resultRevisionId !== item.resultRevisionId ||
-            !task.checks.some((c) => c.id === item.id)
-          ) {
-            setError({ id: item.id, text: "This changed since you opened it. Look again." });
-            return;
-          }
+      : (item: NeedItem, onAccepted?: () => void) =>
           mutation.mutate(
             { checkId: item.id, taskId: item.taskId, resultRevisionId: item.resultRevisionId },
             { onSuccess: onAccepted },
-          );
-        },
+          ),
     pending: mutation.isPending ? mutation.variables?.checkId : undefined,
     error,
   };
@@ -238,7 +222,7 @@ function ScanReview({
   stale,
   refetchRun,
 }: {
-  run: Run;
+  run: RunRead;
   /** The last poll failed: what is shown may be out of date. */
   stale: boolean;
   refetchRun: () => void;
@@ -376,7 +360,6 @@ function ScanReview({
   const snapshot = subjectShown ? marking.snapshot : undefined;
   const message = useMessage({
     run,
-    me,
     tasks,
     task,
     about,
@@ -537,6 +520,7 @@ function ScanReview({
             onPick={pickItem}
             accepting={accepting}
             onWrong={(n) => tellAi(n.taskId)}
+            wrongReason={run.cannotMessage ?? undefined}
             live={run.state.status !== "ended"}
           />
         </ShellPanel>
