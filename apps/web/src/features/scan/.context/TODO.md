@@ -20,10 +20,10 @@ API routes and `@voluma/api-client` calls they need are still in place, waiting 
   shows the word for runs marked before. Waiting: `markReviewed(runId, { baseRevisionId })`
   (`POST /api/review/runs/:runId/mark-reviewed`), allowed once nothing is left to check. Never infer it
   from acceptance.
-- **Snapshots.** Saving what the viewer shows (and sending it with a message to the AI). Waiting:
-  `createReviewSnapshot`, `listReviewSnapshots` (`/api/review/runs/:runId/snapshots`), and
-  `runMessageSnapshotUrl` for a message's snapshot. The viewer's capture hook went with the old
-  `TaskViewer`.
+- **Snapshots.** Saving what the viewer shows. A message to the AI carries a picture of the
+  views (`GridViewer`'s `snapshot`), but saved review snapshots and showing a sent message's
+  picture in the chat still wait: `createReviewSnapshot`, `listReviewSnapshots`
+  (`/api/review/runs/:runId/snapshots`) and `runMessageSnapshotUrl`.
 - **Values CSV and report export.** The old review exported the latest revision's values (with
   result revision and evidence ids, formulas escaped). Nothing to wait on in the API: it is built
   from `getReviewRun`.

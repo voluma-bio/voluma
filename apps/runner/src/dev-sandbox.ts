@@ -64,7 +64,16 @@ if (!claim) throw new Error("no queued run: start one in the web app (pnpm dev) 
 const { run, leaseToken } = claim;
 if (run.id !== values.run) {
   // Not ours: hand it back to the queue.
-  await runClient(config.api, { runId: run.id, leaseToken }, { redact, onLeaseLost: () => {} })
+  await runClient(
+    config.api,
+    { runId: run.id, leaseToken },
+    {
+      redact,
+      onLeaseLost: () => {},
+      runStopped: AbortSignal.abort(),
+      onUnreachable: () => {},
+    },
+  )
     .report({ kind: "released", reason: "shutdown" })
     .catch(() => {});
   throw new Error(`claimed run ${run.id}, not ${values.run}; gave it back`);
@@ -76,7 +85,12 @@ const abort = new AbortController();
 const client = runClient(
   config.api,
   { runId: run.id, leaseToken },
-  { redact, onLeaseLost: () => abort.abort() },
+  {
+    redact,
+    onLeaseLost: () => abort.abort(),
+    runStopped: abort.signal,
+    onUnreachable: () => abort.abort(),
+  },
 );
 const meter = usageMeter();
 const beats = { count: 0, maxRoundTripMs: 0 };
@@ -137,6 +151,7 @@ try {
   } as const;
   const thread = runLayout({
     runId: run.id,
+    inputId: run.input.id,
     inputPrefix: inputPrefixOf(run),
     skills: [], // no workflow is loaded here, so no PYTHONPATH
     copiesInputs: () => true,

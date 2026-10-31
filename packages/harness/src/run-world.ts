@@ -366,13 +366,14 @@ export function world(o: WorldOptions) {
   }
 
   async function claim(reopened = false): Promise<Folded> {
-    const rec = recorder(store as never, RUN, () => {}, 10, [...stored]);
+    const rec = recorder(store as never, RUN, () => {}, [...stored]);
     const supervised = superviseRun({
       runId: RUN,
       definition,
       plan: o.plan,
       selectedOutputs: undefined,
       notes: undefined,
+      inputId: "input1",
       inputPrefix: "inputs/",
       workflows: [{ repo: "voluma-bio/voluma", path: "workflows/mouse-oa" }],
       recorder: rec,

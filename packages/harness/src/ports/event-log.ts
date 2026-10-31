@@ -7,8 +7,8 @@
 import type { EventInput } from "@voluma/contracts/events";
 
 /**
- * The store could not be reached or answered 5xx: the event may or may not be stored, and a
- * retry is safe. Any other error is the store refusing the event, which a retry will not fix.
+ * The store could not be reached or answered 5xx, and the adapter's own retries ran out: the event
+ * may or may not be stored, and a retry is safe. Any other error is the store refusing the event, which a retry will not fix.
  */
 export class EventLogUnavailable extends Error {}
 

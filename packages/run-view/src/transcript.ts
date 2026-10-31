@@ -390,6 +390,7 @@ function rowsOf(
     for (const step of tools.values()) if (step.status === "running") step.status = "stopped";
   };
   let briefed = false;
+  let systemSeen = false;
   const seen = new Set<string>();
   let root: string | undefined;
   // Each shown thread's calls step its cache state, a compaction summary resets it (see `spend`).
@@ -458,7 +459,13 @@ function rowsOf(
               cacheMiss,
             });
         } else if (p.role === "system") {
-          b.row({ kind: "brief", id: e.id, label: "System prompt", text: p.text });
+          b.row({
+            kind: "brief",
+            id: e.id,
+            label: systemSeen ? "Tools changed" : "System prompt",
+            text: p.text,
+          });
+          systemSeen = true;
         } else {
           // The runtime's first message is the thread's brief; later ones nudge it on.
           const label =

@@ -32,15 +32,30 @@ function parseJson(text: string): unknown {
   }
 }
 
-/** `retryForMs`: keep retrying network and 5xx failures until this long has passed. */
+const LOG_EVERY_MS = 30_000;
+
+/**
+ * `forMs`: keep retrying network and 5xx failures until this long has passed since the first
+ * failure, or until `until` aborts (the call's owner stopped: the wait ends at once, and no
+ * attempt follows a failed one). If the time runs out, `onGiveUp(firstFailureAt)` runs before the
+ * error is thrown. A retrying call logs its first failure and then one every 30 s.
+ * `attemptTimeoutMs` bounds each attempt.
+ */
 export async function send(
   endpoint: Endpoint,
   path: string,
   init: RequestInit & { leaseToken?: string },
-  retryForMs = 0,
+  retry: {
+    forMs?: number;
+    until?: AbortSignal;
+    attemptTimeoutMs?: number;
+    onGiveUp?(firstFailureAt: number): void;
+  } = {},
 ): Promise<Response> {
   const { leaseToken, ...fetchInit } = init;
-  const deadline = Date.now() + retryForMs;
+  const { forMs = 0, until, attemptTimeoutMs = ATTEMPT_TIMEOUT_MS, onGiveUp } = retry;
+  let firstFailureAt = 0;
+  let loggedAt = 0;
   for (let attempt = 1; ; attempt++) {
     try {
       const response = await fetch(new URL(path, endpoint.baseUrl), {
@@ -50,7 +65,7 @@ export async function send(
           authorization: `Bearer ${endpoint.token}`,
           ...(leaseToken && { [LEASE_TOKEN_HEADER]: leaseToken }),
         },
-        signal: AbortSignal.timeout(ATTEMPT_TIMEOUT_MS),
+        signal: AbortSignal.timeout(attemptTimeoutMs),
       });
       if (response.ok) return response;
       const text = await response.text();
@@ -59,17 +74,29 @@ export async function send(
       }
       throw new HttpError(response.status, `${path}: ${response.status} ${text}`);
     } catch (error) {
-      if (
-        error instanceof LeaseLost ||
-        (error instanceof HttpError && error.status < 500) ||
-        Date.now() >= deadline
-      ) {
+      if (error instanceof LeaseLost || (error instanceof HttpError && error.status < 500)) {
         throw error;
       }
+      firstFailureAt ||= Date.now();
+      if (until?.aborted) throw error;
+      if (Date.now() - firstFailureAt >= forMs) {
+        onGiveUp?.(firstFailureAt);
+        throw error;
+      }
+      if (Date.now() - loggedAt >= LOG_EVERY_MS) {
+        loggedAt = Date.now();
+        console.error(`${path}: will retry: ${error instanceof Error ? error.message : error}`);
+      }
     }
-    await new Promise((resolve) =>
-      setTimeout(resolve, Math.min(200 * 2 ** attempt, MAX_BACKOFF_MS)),
-    );
+    await new Promise<void>((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        until?.removeEventListener("abort", done);
+        resolve();
+      };
+      const timer = setTimeout(done, Math.min(200 * 2 ** attempt, MAX_BACKOFF_MS));
+      until?.addEventListener("abort", done, { once: true });
+    });
   }
 }
 
@@ -77,7 +104,11 @@ export function postJson(
   endpoint: Endpoint,
   path: string,
   body: unknown,
-  options: { leaseToken?: string; retryForMs?: number; redact?(text: string): string } = {},
+  options: {
+    leaseToken?: string;
+    retry?: Parameters<typeof send>[3];
+    redact?(text: string): string;
+  } = {},
 ): Promise<Response> {
   const text = JSON.stringify(body);
   return send(
@@ -89,6 +120,6 @@ export function postJson(
       body: options.redact ? options.redact(text) : text,
       leaseToken: options.leaseToken,
     },
-    options.retryForMs,
+    options.retry,
   );
 }
