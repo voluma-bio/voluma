@@ -310,6 +310,25 @@ export function agentLabel(t: Thread, threads: Thread[], { short = false } = {})
 export const agentTitle = (t: Thread, threads: Thread[]) =>
   t.taskId ? `${taskTitle(t.taskId)}: ${agentLabel(t, threads)}` : agentLabel(t, threads);
 
+/** Each role's name in `runModels`, in `agentLabel`'s words; the root records no model. */
+const MODEL_ROLE = { main: "lead AI", worker: "tasks", check: "second checks" } as const;
+
+/**
+ * Which models a run calls, as label and ids: one "Model" row when every agent uses the same,
+ * else a row per role ("Models (tasks)"); none before an agent records one. Every role lists
+ * its ids in the run's first-seen order, so a model shared by two roles lines up in both.
+ */
+export function runModels(threads: Thread[]): { label: string; models: string[] }[] {
+  const all = [...new Set(threads.flatMap((t) => (t.model ? [t.model] : [])))];
+  if (all.length < 2) return all.map((m) => ({ label: "Model", models: [m] }));
+  return Object.entries(MODEL_ROLE).flatMap(([place, role]) => {
+    const used = new Set(threads.filter((t) => t.place === place).map((t) => t.model));
+    const models = all.filter((m) => used.has(m));
+    if (models.length === 0) return [];
+    return [{ label: `${models.length > 1 ? "Models" : "Model"} (${role})`, models }];
+  });
+}
+
 /** Where a task stands: the one rule the study shares (`taskStates`, contracts). */
 export type { TaskState };
 
