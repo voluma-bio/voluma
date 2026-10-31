@@ -64,7 +64,15 @@ import {
 import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from "react-router";
 import { AgentsPanel } from "./agents-panel";
 import { AiPanel, useMessage } from "./ai-panel";
-import { gridMark, MarksPanel, middleOf, nextTag, TOOLS, type YourMark } from "./marks-panel";
+import {
+  gridMark,
+  MarksPanel,
+  middleOf,
+  nextTag,
+  type ShownGrid,
+  TOOLS,
+  type YourMark,
+} from "./marks-panel";
 import { ReportPanel } from "./report-panel";
 import { RunAlert, ScanHeading, scanTitle } from "./scan-header";
 import { ToCheckPanel } from "./to-check-panel";
@@ -354,19 +362,22 @@ function ScanReview({
   useEffect(() => setAbout(undefined), [taskId]);
   // What a message about its subject carries: the views and your marks on them, when the views
   // shown are the subject's.
-  const subjectShown = !about || about.taskId === taskId ? marking.shown : undefined;
+  const subjectShown =
+    marking.shown?.taskId === (about?.taskId ?? taskId) ? marking.shown : undefined;
   const sendable = useMemo(
-    () => (subjectShown ? marking.marks.filter((m) => m.mark.volumeId === subjectShown) : []),
+    () => (subjectShown ? marking.marks.filter((m) => m.gridKey === subjectShown.key) : []),
     [marking.marks, subjectShown],
   );
   const snapshot = subjectShown ? marking.snapshot : undefined;
   const message = useMessage({
     run,
+    me,
     tasks,
     task,
     about,
     marks: sendable,
     snapshot,
+    viewKey: subjectShown?.key,
     onSent: (sent) => {
       setAbout(undefined);
       marking.drop(sent);
@@ -430,7 +441,7 @@ function ScanReview({
           selected={marking.selected}
           jump={marking.jump}
           onJumped={marking.jumped}
-          onMark={(mark, volumeId) => marking.add(mark, volumeId, reviewTask.id)}
+          onMark={(mark, volumeId, gridKey) => marking.add(mark, volumeId, gridKey, reviewTask.id)}
           onShown={marking.setShown}
           viewer={marking.viewer}
         />
@@ -524,13 +535,13 @@ function ScanReview({
         >
           <MarksPanel
             marks={marking.marks}
-            imageId={marking.shown}
+            shown={marking.shown}
             taskTitle={(id) => tasks.find((t) => t.id === id)?.title ?? id}
             selected={marking.selected}
             onSelect={(id) => {
               const mark = marking.select(id);
               // A mark on another grid opens the task it was made on; the views go to it there.
-              if (mark && mark.mark.volumeId !== marking.shown)
+              if (mark && mark.gridKey !== marking.shown?.key)
                 select({ task: mark.taskId, item: null });
             }}
             onDelete={marking.remove}
@@ -546,7 +557,6 @@ function ScanReview({
         >
           <AiPanel
             run={run}
-            me={me}
             scan={title}
             tasks={tasks}
             about={about}
@@ -574,9 +584,8 @@ function useMarking() {
   const [tool, setTool] = useState<MarkTool | null>(null);
   const [marks, setMarks] = useState<YourMark[]>([]);
   const [selected, setSelected] = useState<string>();
-  const [jump, setJump] = useState<{ at: Zyx; volumeId: string }>();
-  // The image of the grid whose views are shown.
-  const [shown, setShown] = useState<string>();
+  const [jump, setJump] = useState<{ at: Zyx; gridKey: string; taskId: string }>();
+  const [shown, setShown] = useState<ShownGrid>();
   const viewer = useRef<GridViewerHandle>(null);
   const full = marks.length >= MAX_MARKS;
   const latest = useRef({ tool, full });
@@ -618,7 +627,7 @@ function useMarking() {
     setShown,
     viewer,
     jumped: useCallback(() => setJump(undefined), []),
-    add: useCallback((mark: GridMark, volumeId: string, taskId: string) => {
+    add: useCallback((mark: GridMark, volumeId: string, gridKey: string, taskId: string) => {
       setMarks((had) =>
         had.length >= MAX_MARKS
           ? had
@@ -628,6 +637,7 @@ function useMarking() {
                 id: crypto.randomUUID(),
                 tag: nextTag(had, mark),
                 taskId,
+                gridKey,
                 mark: { volumeId, ...mark },
               },
             ],
@@ -639,7 +649,8 @@ function useMarking() {
         setSelected(id);
         const mark = marks.find((m) => m.id === id);
         const shape = mark && gridMark(mark.mark);
-        if (mark && shape) setJump({ at: middleOf(shape), volumeId: mark.mark.volumeId });
+        if (mark && shape)
+          setJump({ at: middleOf(shape), gridKey: mark.gridKey, taskId: mark.taskId });
         return mark;
       },
       [marks],

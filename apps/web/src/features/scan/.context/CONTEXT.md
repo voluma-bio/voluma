@@ -57,13 +57,22 @@ stopped.
   box says why it is off. Something's wrong makes the message about the item's task and opens
   The AI beside what is open; that subject holds until the task in view changes or the message is
   sent. A 409 shows the server's text. A retry keeps the message id, so the server stores it
-  once; editing after a failure makes a new message.
+  once, and keeps the exact request including its picture. Submission freezes the task, text,
+  marks and capture before a mutation can pause offline. Changing the task, Redo intent, marks,
+  text or image/grid makes a new message; moving the camera alone does not replace a retry's
+  picture. The submission guard is synchronous, including keyboard/form submissions.
+  `ScanReview` owns `useMessage`: draft, prepared retry and pending/error state survive panel
+  replacement, closing and Full view. `AiPanel` only renders them; the keyed run page resets them
+  when leaving the run. Keep capture, retry identity and the submission guard in that page lifetime.
 - **Your marks** are page state (`useMarking`, `scan-page.tsx`), lost on reload. The tool strip on
   the viewer's bar (`TOOLS` in `marks-panel.tsx`: Navigate, Point, Box, Line, Lasso; Esc, P, B,
   L, O) picks what a click or drag makes (`@voluma/viewer/grid`'s `tool`). Esc first drops a mark
   being drawn, then puts the tool away, then (the shell's) leaves Full view: one thing per press.
   A new mark names the grid's image volume (`TaskGrid.imageId`) and gets a tag (P1, B1, L1, O1);
-  the viewer draws the marks on that image. Marks lists them; a row moves the views to the mark,
+  its local identity also pins the image hash, grid id, shape and affine. A redo that replaces
+  the image cannot inherit its old marks just because it reuses a block id. The viewer draws
+  and sends only marks matching that identity; other marks stay listed for inspection/deletion.
+  Marks lists them; a row moves the views to the mark,
   opening its task first when it is on another grid ("on <task>"). At `MAX_MARKS` the tools are
   held off with the reason. A message to the AI carries the marks on the views shown when those
   are its subject's, and a PNG of them (`GridViewer`'s `snapshot`, in the room the rest of the
