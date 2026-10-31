@@ -110,8 +110,11 @@ function PanelRow({
   const knee = kneeOf(scan);
   const title = (
     <span className="flex min-w-0 items-center gap-2.5">
-      <span className="w-14 shrink-0 font-mono text-sm">{scan.scan.subject}</span>
+      <span className="truncate font-mono text-sm" title={scan.scan.subject}>
+        {scan.scan.subject}
+      </span>
       {knee && <span className="truncate font-normal text-muted-foreground">{knee} knee</span>}
+      {selected && <span className="shrink-0 text-xs text-select-text">Viewing</span>}
     </span>
   );
   const cell = <StatusMark status={status} label={label} className="text-xs" />;
