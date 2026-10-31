@@ -5,7 +5,7 @@
  * steps slices, Ctrl or ⌘ + wheel zooms at the pointer, Shift, middle or right drag pans.
  */
 import { cx } from "@voluma/ui";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BufferGeometry,
   CircleGeometry,
@@ -220,6 +220,20 @@ export function SlicePane({
     };
   }, [traceKey]);
 
+  // Display changes only repaint the traces; intersect the triangles again only on a new plane
+  // or geometry. Review rebuilds the mesh objects even when only a ruler's opacity changes.
+  const traceLayout = traceMeshes.map((m) => `${m.id}:${m.offsetZyx.join(",")}`).join("\n");
+  const traceSegments = useMemo(
+    () =>
+      new Map(
+        latestTraces.current.map((m) => {
+          const geometry = traces.get(m.id);
+          return [m.id, geometry ? surfaceTrace(geometry, axis, point[axis], m.offsetZyx) : []];
+        }),
+      ),
+    [traces, traceLayout, point[axis]],
+  );
+
   useEffect(() => {
     const t = three.current;
     if (!t) return;
@@ -244,11 +258,7 @@ export function SlicePane({
       object.renderOrder = 2;
       objects.push(object);
     };
-    for (const m of traceMeshes) {
-      const geometry = traces.get(m.id);
-      if (geometry && m.opacity > 0)
-        line(surfaceTrace(geometry, axis, point[axis], m.offsetZyx), m.color, m.opacity);
-    }
+    for (const m of traceMeshes) line(traceSegments.get(m.id) ?? [], m.color, m.opacity);
     for (const a of scene.annotations) {
       if (a.opacity <= 0) continue;
       let dots = [...a.points];
@@ -286,7 +296,7 @@ export function SlicePane({
         object.material.dispose();
       }
     };
-  }, [point[axis], scene.annotations, scene.meshes, traces]);
+  }, [point[axis], scene.annotations, scene.meshes, traceSegments]);
 
   /** The level that gives each device pixel at least one voxel at the current zoom. */
   function pickLevel() {

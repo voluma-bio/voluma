@@ -22,6 +22,8 @@ not shown here"), never resampled onto this one.
   through the image's affine into source voxels. Rulers use `--ruler`, with endpoints in 3D and
   on slices; only the part within half a source voxel of a slice is shown, never a projection
   from another slice. In 3D annotations draw over the anatomy so a ruler stays readable.
+  Coplanar surface patches show their boundary, not their triangle diagonals; intersections
+  are cached by geometry, mesh offsets and slice coordinate, independently of display settings.
 - **Assets.** From `ReviewRun.assets` by the file's sha256: absent is "Preparing…", `failed` is
   its error. For the image that replaces the viewer; for an overlay it is a note under the heading.
   Review refetches while a file of the latest revision has no entry (about ten minutes at most).

@@ -19,11 +19,12 @@ export async function loadMesh(m: GridMesh, signal: AbortSignal) {
   return geometry;
 }
 
-/** Segments in source voxels; half-open edges count an exact vertex only once. */
+/** Segments in source voxels, including boundary edges of coplanar surface patches. */
 export function surfaceTrace(geometry: BufferGeometry, axis: Axis, at: number, offset: Zyx): Zyx[] {
   const positions = geometry.getAttribute("position");
   const indices = geometry.getIndex()!;
   const segments: Zyx[] = [];
+  const onPlane = new Map<string, { a: Zyx; b: Zyx; coplanarFaces: number }>();
   const vertex = (i: number): Zyx => {
     const j = indices.getX(i);
     return [
@@ -34,6 +35,22 @@ export function surfaceTrace(geometry: BufferGeometry, axis: Axis, at: number, o
   };
   for (let i = 0; i < indices.count; i += 3) {
     const triangle = [vertex(i), vertex(i + 1), vertex(i + 2)];
+    const coplanar = triangle.every((p) => p[axis] === at);
+    let hasEdge = false;
+    for (let e = 0; e < 3; e++) {
+      const next = (e + 1) % 3;
+      const a = triangle[e]!;
+      const b = triangle[next]!;
+      if (a[axis] !== at || b[axis] !== at) continue;
+      hasEdge = true;
+      const j = indices.getX(i + e);
+      const k = indices.getX(i + next);
+      const key = `${Math.min(j, k)}/${Math.max(j, k)}`;
+      const edge = onPlane.get(key) ?? { a, b, coplanarFaces: 0 };
+      if (coplanar) edge.coplanarFaces++;
+      onPlane.set(key, edge);
+    }
+    if (hasEdge) continue;
     const hits: Zyx[] = [];
     for (let e = 0; e < 3; e++) {
       const a = triangle[e]!;
@@ -45,6 +62,8 @@ export function surfaceTrace(geometry: BufferGeometry, axis: Axis, at: number, o
     }
     if (hits.length === 2) segments.push(...hits);
   }
+  for (const { a, b, coplanarFaces } of onPlane.values())
+    if (coplanarFaces < 2) segments.push(a, b);
   return segments;
 }
 
