@@ -111,7 +111,8 @@ export const MAX_MESSAGE_SNAPSHOT_BYTES = 2 * 1024 * 1024;
 /** The body limit for the messages route: the base64 snapshot plus the text and marks. */
 export const MESSAGE_BODY_BYTES = 3 * 1024 * 1024;
 
-const MAX_MARKS = 20;
+/** The most marks one message carries. */
+export const MAX_MARKS = 20;
 const MAX_TEXT = 10_000;
 
 /**
