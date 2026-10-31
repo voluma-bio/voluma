@@ -1,5 +1,6 @@
 /** Published mesh geometry and its intersection with a source-voxel slice plane. */
-import { BufferAttribute, BufferGeometry } from "three";
+import { BufferAttribute, BufferGeometry, type Mesh } from "three";
+import { acceleratedRaycast, MeshBVH } from "three-mesh-bvh";
 import type { Axis, GridMesh, Zyx } from "./scene";
 
 export async function loadMesh(m: GridMesh, signal: AbortSignal) {
@@ -17,6 +18,15 @@ export async function loadMesh(m: GridMesh, signal: AbortSignal) {
   geometry.computeVertexNormals();
   geometry.computeBoundingSphere();
   return geometry;
+}
+
+/**
+ * Gives a mesh a bounds tree, so a ray tests a few triangles instead of all of them: hover in 3D
+ * searches the surface every frame. Built once per mesh, where it is pointed at.
+ */
+export function makePickable(mesh: Mesh) {
+  mesh.geometry.boundsTree = new MeshBVH(mesh.geometry);
+  mesh.raycast = acceleratedRaycast;
 }
 
 /** Segments in source voxels, including boundary edges of coplanar surface patches. */
