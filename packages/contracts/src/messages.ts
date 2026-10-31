@@ -5,8 +5,7 @@
  *   POST /api/review/runs/:runId/messages   body `sendRunMessageRequestSchema` → 200 `sendRunMessageResponseSchema`
  *
  * One message, one claim. A run that ended `completed` is reopened by the message for ONE claim:
- * in one transaction, under the queue lock (taken first, then the event lock, then row locks:
- * the order every transaction that changes a run takes, `corrections.ts`), the route appends
+ * in one transaction, under the queue lock (lock order: see `lockRun`, `pg-event-log.ts`), the route appends
  * `run.reopened`, then `person.message`, resets `lastClaimEnd` and `stalledClaims` (so
  * `previousClaim` never reports a reason from before the reopen), and moves the run to
  * `queued` through admission. The main agent is resumed with the message (a new

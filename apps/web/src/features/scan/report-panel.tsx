@@ -58,7 +58,7 @@ export function ReportPanel({
           size="report"
           tasks={tasks.map((t) => ({
             ...t,
-            needs: t.needs.map((n) => items.find((i) => i.id === n.id) ?? n),
+            open: items.filter((n) => n.taskId === t.id && !n.accepted).length,
           }))}
           selected={task?.id}
           onSelect={onTask}

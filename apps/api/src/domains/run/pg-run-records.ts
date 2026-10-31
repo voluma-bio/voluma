@@ -5,7 +5,7 @@ import { and, eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { RunRecords } from "../../ports";
 import type { Notifier } from "./notifier";
-import { eventLock, insertEvent } from "./pg-event-log";
+import { insertEvent, lockRun } from "./pg-event-log";
 import { type ResultsLoader, readableRuns } from "./pg-runs";
 import { runs } from "./schema";
 
@@ -44,14 +44,7 @@ export function pgRunRecords(
         if (!decision(record)) return record;
       }
       const result = await db.transaction(async (tx) => {
-        // Same order as runner append: event lock, then row lock. Lifecycle writes
-        // take the row too; none acquires the event lock while holding it.
-        await eventLock(tx, runId);
-        const [row] = await tx
-          .select({ id: runs.id })
-          .from(runs)
-          .where(and(readableRuns(reader), eq(runs.id, runId)))
-          .for("update");
+        const row = await lockRun(tx, runId, readableRuns(reader));
         if (!row) return null;
         const [record] = await results(tx, eq(runs.id, runId));
         if (!record) throw new Error(`run ${runId} vanished inside its transaction`);

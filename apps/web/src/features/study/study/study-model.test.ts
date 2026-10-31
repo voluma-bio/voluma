@@ -16,7 +16,7 @@ const scan = (inputId: string, value: number, unit: string) =>
     runs: [],
     resultRunId: `run-${inputId}`,
     values: { ct_th: { value, unit, confidence: null } },
-    toCheck: [],
+    acceptable: [],
   }) as unknown as StudyScanDetail;
 
 const detail = {

@@ -108,7 +108,7 @@ export function runRoutes({ runs, store, messages }: ReviewDeps) {
     const { baseRevisionId } = await parseJson(c, markReviewedRequestSchema);
     const record = await runs.decide(readerOf(c.var.user), c.req.param("runId"), (record) => {
       const review = currentReview(record, baseRevisionId);
-      if (review.remainingToCheck !== 0)
+      if (review.acceptable !== 0)
         throw new HTTPException(409, {
           message: "Accept every To check item before marking reviewed.",
         });

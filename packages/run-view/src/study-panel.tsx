@@ -4,20 +4,27 @@
  * click away on every study page and in the scan review, so both render it from here. Also the
  * scan-level facts both read from a `StudyDetail`: a scan's status, knee and group.
  */
+import { scanNeedsYou } from "@voluma/contracts/review-state";
 import type { StudyDetail, StudyRunSummary, StudyScanDetail } from "@voluma/contracts/study";
 import { type LinkTo, List, Progress, Row, RowLink, type Status, StatusMark } from "@voluma/ui";
 import { liveStatus, plural } from "./run-status";
 
 type ScanStatus = { label: string; status: Status; open: number };
 
+/** What needs a person on a scan (`scanNeedsYou`), as Home counts it too. */
+export const needsYouOf = (scan: StudyScanDetail) =>
+  scanNeedsYou(scan.runs[0]?.review ?? null, scan.acceptable.length);
+
 /**
- * A scan's status: its newest run's (`runStatus`), with "Task N of M" while it runs and its open
- * checks; "Not started" without a run. Its values may come from an older completed run.
+ * A scan's status: its newest run's (`runStatus`, which reads To check from the items that need
+ * a person), with "Task N of M" while it runs; "Not started" without a run. Its values may come
+ * from an older completed run.
  */
-export function scanStatus({ runs: [run], toCheck }: StudyScanDetail): ScanStatus {
+export function scanStatus(scan: StudyScanDetail): ScanStatus {
+  const [run] = scan.runs;
   if (!run) return { label: "Not started", status: "waiting", open: 0 };
   const { label, status } = liveStatus(run);
-  const open = status === "check" ? toCheck.length : 0;
+  const open = status === "check" ? needsYouOf(scan) : 0;
   return { label: open > 0 ? `${open} to check` : label, status, open };
 }
 

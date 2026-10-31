@@ -8,8 +8,13 @@
 import type { RunEvent } from "@voluma/contracts/events";
 import { abandonedEvents, type FoldedTask } from "@voluma/contracts/fold";
 import type { TaskState } from "@voluma/contracts/ids";
-import type { Asset } from "@voluma/contracts/review";
-import { progress, reviewState, taskStates } from "@voluma/contracts/review-state";
+import type { Asset, Unacceptable } from "@voluma/contracts/review";
+import {
+  cardWithoutCheck,
+  progress,
+  reviewState,
+  taskStates,
+} from "@voluma/contracts/review-state";
 import type { ProviderCalls, RunState } from "@voluma/contracts/run";
 import { type RunSpend, type Spend, spend } from "@voluma/contracts/spend";
 import { type ThreadPlace, threadPlace } from "@voluma/contracts/thread-place";
@@ -388,30 +393,46 @@ function resultRows(t: FoldedTask, state: TaskState): ResultRow[] {
   return rows;
 }
 
-/** The card for a task left To check with no check item: why it is there, in plain words. */
-function unexplained(t: FoldedTask, check: TaskView["check"], image: Asset | undefined): NeedItem {
+/** The title of a To check task's card without a check (`cardWithoutCheck`): why it is there. */
+export const CARD_TITLE: Record<Unacceptable, string> = {
+  "sent-back": "Sent back by the second AI",
+  "values-missing": "Values missing",
+  marked: "To check",
+};
+
+/** The item id of a task's card without a check, as `itemHref` opens it. */
+export const cardId = (taskId: string) => `${taskId}/to-check`;
+
+/** The card for a task left To check with no check item (`cardWithoutCheck`), in plain words. */
+function unexplained(
+  t: FoldedTask,
+  why: Unacceptable,
+  check: TaskView["check"],
+  image: Asset | undefined,
+): NeedItem {
   const base = {
-    id: `${t.id}/to-check`,
+    id: cardId(t.id),
     taskId: t.id,
     resultRevisionId: t.resultRevisionId,
     image,
     accepted: false,
     acceptable: false,
   };
-  if (t.rejected || check?.verdict === "needs-review")
+  const title = CARD_TITLE[why];
+  if (why === "sent-back")
     return {
       ...base,
-      title: "Sent back by the second AI",
+      title,
       text: check?.summary ?? "The second AI check sent the result back.",
       found: check?.text,
     };
-  if (t.missingRequired.length > 0)
+  if (why === "values-missing")
     return {
       ...base,
-      title: "Values missing",
+      title,
       text: `Not reported: ${t.missingRequired.map(outputName).join(", ")}.`,
     };
-  return { ...base, title: "To check", text: t.reason ?? "" };
+  return { ...base, title, text: t.reason ?? "" };
 }
 
 type RunView = {
@@ -419,8 +440,8 @@ type RunView = {
   threads: Thread[];
   /** One per plan task, in plan order; empty until the run has a plan. */
   tasks: TaskView[];
-  /** `progress` of the latest revision: tasks done of all, and the open check items. */
-  progress: { done: number; total: number; toCheck: number };
+  /** `progress` of the latest revision: tasks done of all, and the checks a person can accept. */
+  progress: { done: number; total: number; acceptable: number };
   spend: RunSpend;
 };
 
@@ -443,7 +464,7 @@ export function runView(
     return {
       threads,
       tasks: [],
-      progress: { done: 0, total: 0, toCheck: 0 },
+      progress: { done: 0, total: 0, acceptable: 0 },
       spend: spent,
     };
 
@@ -529,6 +550,7 @@ export function runView(
       accepted: c.status === "accepted",
       acceptable: true,
     }));
+    const card = cardWithoutCheck(t);
     const reason =
       state === "skipped"
         ? skipText(t)
@@ -551,7 +573,7 @@ export function runView(
       check,
       rejected: t.rejected,
       reason: reason ?? undefined,
-      needs: t.status === "to-check" && items.length === 0 ? [unexplained(t, check, image)] : items,
+      needs: card ? [unexplained(t, card, check, image)] : items,
       image,
       results: resultRows(t, state),
       valued: p.outputs.some((o) => o.kind === "measurement" || o.kind === "score"),
