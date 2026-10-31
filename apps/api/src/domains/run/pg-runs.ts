@@ -6,7 +6,7 @@
 
 import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
 import { FOLD_EVENT_TYPES } from "@voluma/contracts/fold";
-import { progress, reviewState } from "@voluma/contracts/review-state";
+import { openCorrectionRevision, progress, reviewState } from "@voluma/contracts/review-state";
 import { type Input, type Run, runSchema } from "@voluma/contracts/run";
 import { failedThreads, openThreads } from "@voluma/contracts/threads";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
@@ -184,11 +184,13 @@ type Revision = Results["revisions"][number];
 
 /**
  * What the cache keeps of one run: its `reviewState` (the whole `results` for Review; the run's
- * summary and progress, and a study's values, open checks and task states, are read from it),
- * and the threads `taskStates` needs, which only the log knows.
+ * summary and progress, and a study's values and open checks, are read from it), and what
+ * `taskStates` needs that only the log knows.
  */
 export type RunFold = {
   results: Results;
+  /** An open correction's revision, which task states read; none when no correction is open. */
+  correcting: Revision | undefined;
   /** The threads started and not yet ended (`openThreads`). */
   open: readonly string[];
   /** The threads whose latest end failed (`failedThreads`). */
@@ -197,6 +199,7 @@ export type RunFold = {
 
 const foldRun = (log: RunEvent[]): RunFold => ({
   results: reviewState(log),
+  correcting: openCorrectionRevision(log),
   open: openThreads(log),
   failed: failedThreads(log),
 });

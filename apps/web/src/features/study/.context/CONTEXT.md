@@ -54,8 +54,12 @@ shown as its scan and linked straight to its scan review (`/scans/:runId`, `runH
   hands it to each page through `useStudy`. They derive everything from one `StudyDetail` in
   `study/study-model.ts` (pure; its header states the far-from-group rule and the unit rule).
 - **Task states come from the server**: the study read's `taskState` per scan is `taskStates`
-  (`@voluma/contracts/review-state`), the rule the scan review uses, so the two never disagree.
-  Don't re-derive a task's state here; a workflow task missing from it is outside the run's plan.
+  (`@voluma/contracts/review-state`) over the scan's newest run, the rule the scan review uses.
+  It takes the run's state and threads and derives the rest itself. During a correction both read
+  the correction's own revision (`openCorrectionRevision` on the server), while the study's values
+  and open checks stay on the last completed result. Don't re-derive a task's state here; a
+  workflow task missing from it is outside the run's plan. One exception in the matrix: a task in
+  To check on a live run has no items in the study read yet, so it reads To check, not done.
 - **Links into the scan review**: a scan opens at `runHref`; a To check item opens at
   `itemHref` (`?task=&item=`), so the review shows exactly that item. `reviewHref` picks a
   scan's first open item. Adding scans to an existing study isn't designed, so there is no

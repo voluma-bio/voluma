@@ -5,7 +5,7 @@
  * `pg-runs.ts` does, and fold through its `ResultsLoader`, so a run is folded once for both; the
  * scans' values, checks and states are read from each fold here. Writes are the queue's.
  */
-import { type RunHalt, taskStates } from "@voluma/contracts/review-state";
+import { taskStates } from "@voluma/contracts/review-state";
 import type { Run } from "@voluma/contracts/run";
 import type {
   Study,
@@ -77,30 +77,11 @@ function resultOf({ run, results }: RunResult) {
   return { values, toCheck };
 }
 
-/** Where a run stands for its tasks, as the run page reads it from the same state. */
-function haltOf({ state }: Run): RunHalt {
-  switch (state.status) {
-    case "running":
-      return undefined;
-    case "queued":
-    case "awaiting-keys":
-      return "paused";
-    case "ended":
-      return "stopped";
-  }
-}
-
-/** Every task of a run's latest plan in its state; none before a plan. */
-function taskStateOf({ run, results, open, failed }: RunResult): StudyScanDetail["taskState"] {
-  const latest = results.revisions.at(-1);
-  if (!latest) return {};
-  const { state } = run;
-  const states = taskStates(latest, {
-    running: new Set(state.status === "running" ? open : []),
-    failed: state.status === "ended" && state.outcome === "failed" ? failed : new Set(),
-    halt: haltOf(run),
-  });
-  return Object.fromEntries(states);
+/** Every task of a run's latest plan in its state, a correction in progress's own; none before a plan. */
+function taskStateOf({ run, results, correcting, open, failed }: RunResult) {
+  const revision = correcting ?? results.revisions.at(-1);
+  if (!revision) return {};
+  return Object.fromEntries(taskStates(revision, { state: run.state, open, failed }));
 }
 
 function summarize(study: Study, scanCount: number, results: RunResult[]): StudySummary {

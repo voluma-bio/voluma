@@ -35,7 +35,6 @@ export {
   runHref,
   runStatus,
   scanLabel,
-  shortDate,
   studyStatus,
 } from "./run-status";
 export {

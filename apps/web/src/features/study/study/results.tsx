@@ -144,9 +144,10 @@ function EveryValue({
 
 /** One row per scan, one column per measurement (its unit in the head), as a CSV download. */
 function exportCsv(detail: StudyDetail, outputs: OutputEntry[]) {
-  const cell = (v: string) => (/[",\n]/.test(v) ? `"${v.replaceAll('"', '""')}"` : v);
-  // Typed text (subject, group, names) that a spreadsheet would run as a formula opens as text.
-  const text = (v: string) => (/^[=+\-@]/.test(v) ? `'${v}` : v);
+  const cell = (v: string) => (/[",\r\n]/.test(v) ? `"${v.replaceAll('"', '""')}"` : v);
+  // Typed text (subject, group, names) that a spreadsheet would run as a formula opens as text;
+  // a leading tab or carriage return can hide one.
+  const text = (v: string) => (/^[=+\-@\t\r]/.test(v) ? `'${v}` : v);
   const head = [
     "Scan",
     "Group",

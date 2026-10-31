@@ -106,7 +106,7 @@ screens are the scan review (`apps/web/src/features/scan`) and the study pages
   `voluma.visitor-keys.<userId>`; a run in `awaiting-keys` shows the form on its page
   (`resendKeys`) only to the user who started it.
 - **A run's status** (`runStatus`, a word and a `StatusMark` state) and the formatters (`formatUsd`,
-  `formatDuration`, `plural`, `shortDate`) are `@voluma/run-view`, shared with Home; `use-now.ts` is the clock.
+  `formatDuration`, `plural`) are `@voluma/run-view`, shared with Home; `use-now.ts` is the clock.
 - **Cost and time** come only from `spend(events, providerCalls)` (`@voluma/contracts/spend`), run
   in `runView` on durable events, never per live frame. Run details shows the run's settled total;
   each card in the lead AI's stream and each thread in "How the AI did it" shows that thread's own

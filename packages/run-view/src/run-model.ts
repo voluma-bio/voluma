@@ -441,8 +441,6 @@ export function runView(
 ): RunView {
   const spent = spend(events, providerCalls);
   const logged = threadsOf(events, spent);
-  // Open threads run only while the run does: an ended or paused run's open threads were cut off.
-  const running = new Set(state.status === "running" ? openThreads(events) : []);
   const threads = halt ? halted(logged.threads, logged.lastAt, halt) : logged.threads;
   // No plan until the run's first `revision.started`.
   const latest = reviewState(events, { live: true }).revisions.at(-1);
@@ -475,11 +473,12 @@ export function runView(
       writer.set(e.id, e.threadId);
       if (e.payload.summary) summaries.set(e.id, e.payload.summary);
     }
-  const runFailed = halt?.kind === "ended" && halt.outcome === "failed";
   const states = taskStates(latest, {
-    running,
-    failed: runFailed ? failedThreads(events) : new Set(),
-    halt: halt && (halt.kind === "ended" ? "stopped" : halt.kind),
+    // An ended run's log may still be loading until its stream closes (`haltOf`): read it as
+    // it stood while the run ran, not as ended.
+    state: state.status === "ended" && !halt ? { status: "running" } : state,
+    open: openThreads(events),
+    failed: failedThreads(events),
   });
   const taskSpend = new Map(spent.tasks.map((t) => [t.taskId, t.spend]));
   const corrections = new Set(
@@ -494,13 +493,15 @@ export function runView(
     const t = byId.get(p.id);
     // The fold gives every plan task a row, pending ones too.
     if (!t) throw new Error(`fold has no row for plan task ${p.id}`);
+    // `taskStates` gives every plan task a state.
+    const state = states.get(p.id) as TaskState;
     // The logged end, not `halted`'s: a thread cut off by a failed run didn't fail itself.
-    const failedThread = runFailed
-      ? [t.threads.worker, t.threads.check]
-          .map((id) => (id ? loggedById.get(id) : undefined))
-          .find((th) => th?.status === "failed")
-      : undefined;
-    const state = states.get(p.id) ?? "waiting";
+    const failedThread =
+      state === "failed"
+        ? [t.threads.worker, t.threads.check]
+            .map((id) => (id ? loggedById.get(id) : undefined))
+            .find((th) => th?.status === "failed")
+        : undefined;
     const own = threads.filter((th) => th.taskId === p.id);
     const assets = new Map(t.evidence.map((a) => [a.id, a]));
     const imageOf = (ids: string[]) =>

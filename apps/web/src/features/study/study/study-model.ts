@@ -27,6 +27,7 @@ import type { OutputEntry } from "@voluma/contracts/workflow-files";
 import {
   groupNames,
   groupOf,
+  isLive,
   itemHref,
   type NeedItem,
   runHref,
@@ -169,11 +170,18 @@ function openOn(scan: StudyScanDetail, taskId: string): ToCheckItem[] {
   return scan.toCheck.filter((item) => item.taskId === taskId);
 }
 
-/** A cell of the scan-by-task grid: one task of one scan, and its open checks. */
+/**
+ * A cell of the scan-by-task grid: one task of one scan, and its open checks. A task in To check
+ * with every item handled reads done; on a live run the study read has no items yet (they belong
+ * to the completed result), so it reads To check as the scan review does.
+ */
 export function cellOf(scan: StudyScanDetail, taskId: string): { status: Status; open: number } {
   const state = taskState(scan, taskId);
   const open = openOn(scan, taskId).length;
-  if (state === "to-check") return { status: open > 0 ? "check" : "done", open };
+  if (state === "to-check") {
+    const live = isLive(scan.runs[0]);
+    return { status: open > 0 || live ? "check" : "done", open };
+  }
   return { status: TASK_STATUS[state], open };
 }
 
