@@ -3,11 +3,11 @@
  * path with its R2 prefix, per thread: the sandbox spec mounts `mounts` (`specOf`), the tool descriptions say
  * `description`, and host-side tools turn paths into keys with `keyOf`.
  *
- * A worker mounts the run's `/scratch` and `/outputs` read-write and works in `/scratch/<its name>/`. A checker mounts `/outputs`
- * read-only and writes only `/scratch/<its name>/`, the R2 prefix `scratch/<its name>/`; the main
- * agent has the same shape, with `/outputs` writable when its role holds `bash` (it then does
- * tasks itself, `mainWorks`), and a sandbox only then. Host-side (`keyOf`, so `view_image`) they also read
- * the run's `/scratch`, but a checker only the files the attempt under review cites as
+ * A role's frontmatter picks the shape (`AgentDefinition.scratch`, `outputs`). `scratch: all` mounts the run's
+ * `/scratch` read-write and works in `/scratch/<its name>/`. `own` (also for a role without `bash`, which only
+ * host-side tools use) mounts `/outputs` as the role's `outputs` says and writes only
+ * `/scratch/<its name>/`, the R2 prefix `scratch/<its name>/`. Host-side (`keyOf`, so `view_image`) they also read
+ * the run's `/scratch`, but a role that checks another (some role's `checkedBy`) only the files the attempt under review cites as
  * evidence: the worker's scripts, logs and notes stay unread. Its sandbox does
  * not mount the rest. The path namespace is the same for every thread:
  * `/scratch/<name>/x.png` is the key `scratchKey(runId, "<name>/x.png")` whoever wrote it, so
@@ -28,7 +28,7 @@ import {
   toolOutputKey,
   workflowSnapshotPrefix,
 } from "@voluma/contracts/r2";
-import type { Skill } from "@voluma/workflow/definition";
+import type { AgentDefinition, Skill } from "@voluma/workflow/definition";
 import type { SandboxMount } from "./ports/sandbox";
 import type { ThreadIdentity } from "./thread-log";
 
@@ -41,8 +41,12 @@ export const REVIEW = "/review";
 const INPUT_REVIEW = "/input-review";
 
 export interface ThreadLayout {
-  /** `main` has a sandbox only if its role holds `bash` (`runLayout`'s `mainWorks`). */
-  role: "worker" | "check" | "main";
+  /** What the thread is in the run (main, a task's worker, a task's check). */
+  place: "worker" | "check" | "main";
+  /** The role file it runs on: the key of `RunLayoutOptions.roles` and of the definition. */
+  role: string;
+  /** Its role checks another's tasks: it reads only what the attempt cites of the other's scratch. */
+  reviewer: boolean;
   /** The thread's name (`ThreadRecord.name`): the sandbox's name, and the folder of its spill and (non-workers) scratch. */
   name: string;
   /** What the thread's sandbox mounts. */
@@ -55,6 +59,10 @@ export interface ThreadLayout {
   env: Record<string, string>;
   /** `/inputs` is copied to local disk in this thread's sandbox; otherwise it is the read-only mount. */
   copiesInputs: boolean;
+  /** The tools its role holds (the role file's, less what the run cannot grant). */
+  tools: readonly string[];
+  /** The roles its role may start. */
+  subagents: readonly string[];
   /** The sandbox may reach the gateway (and gets its URL and token): the role holds `segment_sam`. */
   gateway: boolean;
   /** The mounts, as bullet lines for the tool description. */
@@ -85,8 +93,6 @@ type RoleParts = Pick<ThreadLayout, "mounts" | "scratch" | "description" | "rest
 };
 
 export interface RunLayout {
-  /** The main agent's role holds `bash` (`runLayout`'s `mainWorks`): its `/outputs` is writable. */
-  mainWorks: boolean;
   /**
    * The review-asset converter's sandbox, outside the threads: reads the evidence and the
    * workflow, writes the run's review prefix and the input's conversion cache, no network.
@@ -111,11 +117,16 @@ export interface RunLayoutOptions {
    */
   skills: readonly Skill[];
   /**
-   * The tools each role holds. The main agent holding `bash` does tasks itself, so its `/outputs`
-   * is writable. The roles holding `segment_sam` reach the gateway (every sandbox has
-   * `voluma-sam` on its PATH, so one whose role cannot call it gets no network).
+   * Each role file's scratch and `/outputs` access, checker, subagents and the tools it holds. The roles
+   * holding `segment_sam` reach the gateway (every sandbox has `voluma-sam` on its PATH, so one
+   * whose role cannot call it gets no network).
    */
-  grants: Record<ThreadLayout["role"], readonly string[]>;
+  roles: Record<
+    string,
+    Pick<AgentDefinition, "scratch" | "outputs" | "checkedBy" | "subagents"> & {
+      tools: readonly string[];
+    }
+  >;
   /**
    * Says a task's threads get `/inputs` copied to local disk, which the workflow declares
    * (`copyInputs`): reading the DICOM straight from a cold mount is slow (measured on Modal:
@@ -133,10 +144,10 @@ export function runLayout({
   inputId,
   inputPrefix,
   skills,
-  grants,
+  roles,
   copiesInputs = () => false,
 }: RunLayoutOptions): RunLayout {
-  const mainWorks = grants.main.includes("bash");
+  const reviewers = new Set(Object.values(roles).map((a) => a.checkedBy));
   const scratch = scratchPrefix(runId);
   const pythonPath = skills.map((s) => `${s.path}/resources`).join(":");
   const inputs = (copy: boolean): SandboxMount => ({
@@ -169,10 +180,10 @@ export function runLayout({
     `(cp /tmp/x.vtp $SCRATCH/). Reading is unrestricted.\n`;
 
   // What differs by role. `hostOnly` entries are readable by host-side tools, not mounted.
-  const worker = (dir: string, copy: boolean): RoleParts => {
+  const full = (dir: string, copy: boolean, outputsAccess: SandboxMount["access"]): RoleParts => {
     const writable: SandboxMount = { path: SCRATCH, prefix: scratch, access: "read-write" };
     return {
-      mounts: [inputs(copy), workflow, writable, outputs("read-write")],
+      mounts: [inputs(copy), workflow, writable, outputs(outputsAccess)],
       scratch: writable,
       hostOnly: [],
       description:
@@ -219,25 +230,30 @@ export function runLayout({
   };
 
   return {
-    mainWorks,
     convert,
-    forThread({ name, role, taskId }, cited = () => false) {
+    forThread({ name, place, role, taskId }, cited = () => false) {
       const copy = taskId !== undefined && copiesInputs(taskId);
       const dir = `${SCRATCH}/${name}`;
+      const facts = roles[role];
+      if (!facts) throw new Error(`${name} runs on ${role}, which is not a role of this run`);
+      const access = facts.outputs === "write" ? "read-write" : "read-only";
+      const reviewer = reviewers.has(role);
       const parts =
-        role === "worker"
-          ? worker(dir, copy)
-          : confined(name, dir, role === "main" && mainWorks ? "read-write" : "read-only", copy);
+        facts.scratch === "all" ? full(dir, copy, access) : confined(name, dir, access, copy);
       const { hostOnly, ...rest } = parts;
       const table = [...parts.mounts, ...hostOnly];
       const resolve = (path: string) =>
         path.startsWith("/") ? path : `${dir}/${path.replace(/^(\.\/)+/, "")}`;
       return {
         ...rest,
+        place,
         role,
+        reviewer,
         name,
         copiesInputs: copy,
-        gateway: grants[role].includes("segment_sam"),
+        tools: facts.tools,
+        subagents: facts.subagents,
+        gateway: facts.tools.includes("segment_sam"),
         dir,
         env: { PYTHONPATH: pythonPath, SCRATCH: dir },
         toolOutputPath: (toolCallId) =>
@@ -256,7 +272,7 @@ export function runLayout({
           const relative = path.slice(mount.path.length + 1);
           if (!relativePathSchema.safeParse(relative).success)
             throw new Error(`${path} is not a valid path`);
-          if (role === "check" && hostOnly.includes(mount)) {
+          if (reviewer && hostOnly.includes(mount)) {
             if (!cited(relative))
               throw new Error(
                 `${path} is in the worker's folder and the worker did not cite it as evidence. A check can open the files the worker cited, and its own folder ${dir}.`,

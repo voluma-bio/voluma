@@ -64,6 +64,9 @@ const agentSchema = z.strictObject({
   model: z.string().min(1),
   thinking: z.enum(THINKING_LEVELS).optional(),
   tools: z.array(z.string().min(1)),
+  scratch: z.enum(["own", "all"]).optional(),
+  outputs: z.enum(["read", "write"]).optional(),
+  checkedBy: z.string().min(1).optional(),
   subagents: z.array(z.string().min(1)).default([]),
   skills: z.array(z.string().min(1)).optional(),
 });
@@ -95,6 +98,13 @@ function parseFile<T extends z.ZodType>(file: string, text: string, schema: T) {
 
 const frontmatter = (file: string, text: string) => parseFile(file, text, frontmatterSchema).data;
 
+/**
+ * What the worker file said before it declared `scratch`, `outputs` and `checkedBy`: a run's
+ * snapshot from then has no such keys and must build the same sandboxes (`main` and `check` match
+ * the defaults). Delete with the last such snapshot.
+ */
+const WORKER_BEFORE_FRONTMATTER = { scratch: "all", outputs: "write", checkedBy: "check" } as const;
+
 /** `skills` still unresolved: `parseAgent` leaves the default to the caller, who knows the skills. */
 type ParsedAgent = Omit<AgentDefinition, "skills"> & { skills?: string[] };
 
@@ -109,12 +119,29 @@ function parseAgent(path: string, text: string, knownTools: readonly string[]): 
     throw new WorkflowParseError(path, `tool "${unknown}" is not a tool of the harness`);
   }
   if (!body) throw new WorkflowParseError(path, "the body is empty");
+  const declared = data.scratch ?? data.outputs ?? data.checkedBy;
+  const given = name === "worker" && !declared ? WORKER_BEFORE_FRONTMATTER : data;
+  const scratch = given.scratch ?? "own";
+  const outputs = given.outputs ?? "read";
+  const hasBash = data.tools.includes("bash");
+  if (
+    !hasBash &&
+    (scratch === "all" || outputs === "write" || data.tools.includes("segment_sam"))
+  ) {
+    throw new WorkflowParseError(
+      path,
+      "scratch: all, outputs: write and segment_sam need a sandbox, which holding bash gives",
+    );
+  }
   return {
     name,
     description: data.description.replace(/\s+/g, " ").trim(),
     model: data.model,
     thinking: data.thinking,
     tools: data.tools,
+    scratch,
+    outputs,
+    checkedBy: given.checkedBy,
     subagents: data.subagents,
     skills: data.skills,
     body,
@@ -281,6 +308,15 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
     const path = `${AGENTS_DIR}/${agent.name}.md`;
     const missing = agent.subagents.find((n) => !found[n]);
     if (missing) throw new WorkflowParseError(path, `subagent "${missing}" is not a role file`);
+    if (agent.checkedBy && !found[agent.checkedBy]) {
+      throw new WorkflowParseError(path, `checkedBy "${agent.checkedBy}" is not a role file`);
+    }
+    if (agent.tools.includes("submit_task") && !agent.checkedBy) {
+      throw new WorkflowParseError(path, "a role with submit_task names its checker (checkedBy)");
+    }
+    if (agent.tools.includes("start_agent") && agent.subagents.length === 0) {
+      throw new WorkflowParseError(path, "a role with start_agent lists the roles it may start");
+    }
     if (agent.tools.includes("start_worker") && !agent.subagents.includes("worker")) {
       throw new WorkflowParseError(
         path,
@@ -292,20 +328,14 @@ export async function loadWorkflow(dir: string, options: LoadOptions): Promise<W
       throw new WorkflowParseError(path, `skill "${unknown}" is not a skill of this workflow`);
     agents[agent.name] = { ...agent, skills: agent.skills ?? skillNames };
   }
-  const { main, worker, check } = agents;
-  for (const [name, role] of Object.entries({ main, worker, check })) {
-    if (!role) throw new WorkflowParseError(`${prefix}${AGENTS_DIR}/${name}.md`, "not found");
-  }
+  const { main } = agents;
+  if (!main) throw new WorkflowParseError(`${AGENTS_DIR}/main.md`, "not found");
   return {
     dir,
     commit: await getText(store, `${prefix}${DONE}`),
     files: files.data,
     skills,
     toolIndex,
-    agents: {
-      main: main as AgentDefinition,
-      worker: worker as AgentDefinition,
-      check: check as AgentDefinition,
-    },
+    agents: { ...agents, main },
   };
 }

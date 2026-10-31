@@ -66,12 +66,16 @@ stopped.
   run: the account has a different identity and lab, and only the starter may send. A retry keeps
   the message id and the exact request including its picture, so the server stores it once.
   Submission freezes the task, text, marks and capture before a mutation can pause offline.
-  Changing the task, Redo intent, marks,
+  Changing the task, the offer a go accepts, marks,
   text or image/grid makes a new message; moving the camera alone does not replace a retry's
   picture. The submission guard is synchronous, including keyboard/form submissions.
   `ScanReview` owns `useMessage`: draft, prepared retry and pending/error state survive panel
   replacement, closing and Full view. `AiPanel` only renders them; the keyed run page resets them
   when leaving the run. Keep capture, retry identity and the submission guard in that page lifetime.
+  There is no Redo button: the AI talks a problem through and offers a redo (`reply.offer`);
+  "Yes, redo <task>" under its latest reply sends a `go` for that task and nothing else, and stays
+  gone once accepted. A message carries the To check item you picked (`itemId`) when the fold lists
+  it. A refusal shows the server's own words when it gave some.
 - **Your marks** are page state (`useMarking`, `scan-page.tsx`), lost on reload. The tool strip on
   the viewer's bar (`TOOLS` in `marks-panel.tsx`: Navigate, Point, Box, Line, Lasso; Esc, P, B,
   L, O) picks what a click or drag makes (`@voluma/viewer/grid`'s `tool`). Esc first drops a mark
@@ -86,7 +90,7 @@ stopped.
   opening its task first when it is on another grid ("on <task>"). At `MAX_MARKS` the tools are
   held off with the reason. A message to the AI carries the marks on the views shown when those
   are its subject's, and a PNG of them (`GridViewer`'s `snapshot`, in the room the rest of the
-  body leaves, at most `MAX_MESSAGE_SNAPSHOT_BYTES`); the marks it carried leave the list. Redo
+  body leaves, at most `MAX_MESSAGE_SNAPSHOT_BYTES`); the marks it carried leave the list. A go
   carries neither. The tags reach the AI only through the picture: the contract's marks have no
   names.
 - Thread kinds are shown as labels only; nothing here branches on a kind or a role name.

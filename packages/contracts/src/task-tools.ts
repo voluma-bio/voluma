@@ -177,5 +177,11 @@ export const replyInputSchema = z.object({
   text: nonEmpty.describe(
     "Your answer to the researcher, in plain language, with no mention of workers, checkers, agents, threads or task ids.",
   ),
+  offer: z
+    .object({ taskId: taskIdSchema })
+    .optional()
+    .describe(
+      "Set it when redoing one task would help with what the researcher raised: you propose that redo and the researcher's panel asks them to accept. Nothing starts until they accept (their go arrives as a message); wait for it. One task per offer. Leave it out to just answer or discuss.",
+    ),
 });
 export type ReplyInput = z.infer<typeof replyInputSchema>;

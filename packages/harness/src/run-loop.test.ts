@@ -28,7 +28,11 @@ const tid = (name: string) => threadIdOf(RUN, name);
 const T1 = [task("t1"), task("t2", ["t1"])];
 
 const started = (t: Turn, taskId: string) =>
-  t.calls.some((c) => c.name === "start_worker" && c.input.taskId === taskId);
+  t.calls.some(
+    (c) =>
+      (c.name === "start_agent" || c.name === "start_worker") &&
+      (c.input.task ?? c.input.taskId) === taskId,
+  );
 const told = (t: Turn, re: RegExp) => t.users.some((u) => re.test(u));
 const passed = (t: Turn, taskId: string) => told(t, new RegExp(`The check of ${taskId} passed`));
 
@@ -40,7 +44,7 @@ const chain =
     for (const [i, id] of tasks.entries()) {
       if (started(t, id)) continue;
       if (i === 0 || passed(t, tasks[i - 1] as string))
-        return call("start_worker", { taskId: id, brief: `Measure ${id}.` });
+        return call("start_agent", { role: "worker", task: id, brief: `Measure ${id}.` });
     }
     if (tasks.every((id) => passed(t, id)) && !t.results.some((r) => /run is finished/.test(r)))
       return call("finish_run", { summary: "Done." });
@@ -217,9 +221,9 @@ describe("run loop", () => {
         return call("message", { threadId: tid("t1.worker"), text: "Redo it." });
       if (t.fresh && did("message") && !did("stop_worker") && t.users.length > 2)
         return call("stop_worker", { threadId: tid("t1.worker"), reason: "Replacing it." });
-      const starts = t.calls.filter((c) => c.name === "start_worker").length;
+      const starts = t.calls.filter((c) => c.name === "start_agent").length;
       if (t.fresh && did("stop_worker") && starts === 1)
-        return call("start_worker", { taskId: "t1", brief: "Measure t1 again." });
+        return call("start_agent", { role: "worker", task: "t1", brief: "Measure t1 again." });
       return chain(["t1"])(t);
     };
     const w = world({
@@ -253,7 +257,11 @@ describe("run loop", () => {
         if (/has a worker/.test(lastResult))
           return call("stop_worker", { threadId: tid("t2.worker"), reason: "Redoing t2." });
         if (/is stopped\.|stopped\./.test(lastResult))
-          return call("start_worker", { taskId: "t2", brief: "Redo t2 on the corrected t1." });
+          return call("start_agent", {
+            role: "worker",
+            task: "t2",
+            brief: "Redo t2 on the corrected t1.",
+          });
         return "Waiting.";
       }
       if (/used its fix rounds/.test(t.lastUser))
@@ -263,7 +271,11 @@ describe("run loop", () => {
       // Redo t2 once t1 passes again after its correction made t2 stale.
       const redone = t.calls.some((c) => c.name === "stop_worker");
       if (told(t, /t2 is stale/) && /The check of t1 passed/.test(t.lastUser) && !redone)
-        return call("start_worker", { taskId: "t2", brief: "Redo t2 on the corrected t1." });
+        return call("start_agent", {
+          role: "worker",
+          task: "t2",
+          brief: "Redo t2 on the corrected t1.",
+        });
       if (redone && passed(t, "t2")) return call("finish_run", { summary: "Done." });
       if (told(t, /t2 is stale/)) return call("wait");
       return chain(["t1", "t2"])(t);
@@ -373,7 +385,7 @@ describe("run loop", () => {
   });
 
   // A stale mark stops every worker and check of the dependent, whatever its status, so
-  // `start_worker` on the stale task needs no `stop_worker`.
+  // `start_agent` on the stale task needs no `stop_worker`.
   it("redo with attempted dependents: a correction marks them stale and stops their worker", async () => {
     const main: Script = (t) => {
       const redo = t.calls.some((c) => c.name === "message");
@@ -406,11 +418,30 @@ describe("run loop", () => {
         e.type === "message" && e.payload.role === "user" ? [e.payload.text] : [],
       );
 
-    it("start_worker: the worker is not started twice and main is told it was", async () => {
+    it("start_worker still starts a worker (runs from before start_agent)", async () => {
+      const w = world({
+        plan: [task("t1")],
+        main: (t) => {
+          if (!t.fresh) return "Waiting.";
+          if (!started(t, "t1"))
+            return call("start_worker", { taskId: "t1", brief: "Measure t1." });
+          if (passed(t, "t1") && !t.results.some((r) => /run is finished/.test(r)))
+            return call("finish_run", { summary: "Done." });
+          return call("wait");
+        },
+      });
+      const folded = await w.run();
+      expect(
+        folded.tasks.map((x) => `${x.id}:${x.status}`),
+        w.text(),
+      ).toEqual(["t1:done"]);
+    });
+
+    it("start_agent: the worker is not started twice and main is told it was", async () => {
       const w = world({
         plan: T1,
         main: chain(["t1", "t2"]),
-        cutAfter: (e) => e.id.endsWith(":start_worker"),
+        cutAfter: (e) => e.id.endsWith(":start_agent"),
       });
       const folded = await w.run();
       expect(w.wasCut).toBe(true);
@@ -424,7 +455,7 @@ describe("run loop", () => {
       expect(of(w.stored, "thread.started", "t1.worker.2")).toHaveLength(0);
       expect(
         resultsOf(w.stored, "main").some((r) =>
-          /start_worker.*completed before the run was cut off/.test(r),
+          /start_agent.*completed before the run was cut off/.test(r),
         ),
       ).toBe(true);
       expect(duplicates(w.stored)).toEqual([]);
@@ -590,8 +621,8 @@ describe("run loop", () => {
       if (!t.fresh) return "Waiting.";
       if (t.calls.length === 0)
         return [
-          call("start_worker", { taskId: "t1", brief: "t1." }),
-          call("start_worker", { taskId: "t2", brief: "t2." }),
+          call("start_agent", { role: "worker", task: "t1", brief: "t1." }),
+          call("start_agent", { role: "worker", task: "t2", brief: "t2." }),
         ];
       if (passed(t, "t1") && passed(t, "t2")) return call("finish_run", { summary: "Done." });
       return call("wait");
@@ -645,13 +676,13 @@ describe("run loop", () => {
     const main: Script = (t) => {
       if (t.calls.length === 0 && t.fresh)
         return [
-          call("start_worker", { taskId: "t1", brief: "t1." }),
+          call("start_agent", { role: "worker", task: "t1", brief: "t1." }),
           call("stop_worker", { threadId: tid("t1.worker"), reason: "Not now." }),
         ];
       if (!t.fresh) {
-        const started2 = t.calls.filter((c) => c.name === "start_worker").length > 1;
+        const started2 = t.calls.filter((c) => c.name === "start_agent").length > 1;
         return t.calls.at(-1)?.name === "stop_worker" && !started2
-          ? call("start_worker", { taskId: "t1", brief: "t1, again." })
+          ? call("start_agent", { role: "worker", task: "t1", brief: "t1, again." })
           : "Waiting.";
       }
       return passed(t, "t1") ? call("finish_run", { summary: "Done." }) : call("wait");
@@ -692,7 +723,7 @@ describe("run loop", () => {
     const main: Script = (t) => {
       if (t.calls.length === 0) return call("finish_run", { summary: "Done early." });
       if (!t.fresh && t.calls.length === 1)
-        return call("start_worker", { taskId: "t1", brief: "t1." });
+        return call("start_agent", { role: "worker", task: "t1", brief: "t1." });
       return chain(["t1", "t2"])(t);
     };
     const w = world({ plan: T1, main });
@@ -748,7 +779,7 @@ describe("run loop", () => {
         return call("submit_task", { taskId: "t1", summary: "t1 measured by main." });
       if (!t.fresh) return "Waiting.";
       if (passed(t, "t1") && !started(t, "t2"))
-        return call("start_worker", { taskId: "t2", brief: "t2." });
+        return call("start_agent", { role: "worker", task: "t2", brief: "t2." });
       if (passed(t, "t1") && passed(t, "t2")) return call("finish_run", { summary: "Done." });
       return call("wait");
     };
@@ -900,7 +931,8 @@ describe("run loop", () => {
       (extra: (t: Turn) => ReturnType<Script>): Script =>
       (t) => {
         if (!t.fresh) return "Waiting.";
-        if (!started(t, "t1")) return call("start_worker", { taskId: "t1", brief: "Measure t1." });
+        if (!started(t, "t1"))
+          return call("start_agent", { role: "worker", task: "t1", brief: "Measure t1." });
         return extra(t) ?? call("wait");
       };
 
@@ -978,11 +1010,12 @@ describe("run loop", () => {
         const refused = t.results.some((r) => /cannot finish yet/.test(r));
         if (!t.fresh)
           return refused && !started2(t)
-            ? call("start_worker", { taskId: "t2", brief: "Redo t2." })
+            ? call("start_agent", { role: "worker", task: "t2", brief: "Redo t2." })
             : "Waiting.";
-        if (!started(t, "t1")) return call("start_worker", { taskId: "t1", brief: "t1." });
+        if (!started(t, "t1"))
+          return call("start_agent", { role: "worker", task: "t1", brief: "t1." });
         if (!started(t, "t2") && passes("t1") === 1)
-          return call("start_worker", { taskId: "t2", brief: "t2." });
+          return call("start_agent", { role: "worker", task: "t2", brief: "t2." });
         if (passes("t2") === 1 && !redo)
           return call("message", { threadId: tid("t1.worker"), text: "Redo t1." });
         if (redo && passes("t1") === 2 && passes("t2") === 1 && !refused)
@@ -991,7 +1024,11 @@ describe("run loop", () => {
         return call("wait");
       };
       const started2 = (t: Turn) =>
-        t.calls.filter((c) => c.name === "start_worker" && c.input.taskId === "t2").length > 1;
+        t.calls.filter(
+          (c) =>
+            (c.name === "start_agent" || c.name === "start_worker") &&
+            (c.input.task ?? c.input.taskId) === "t2",
+        ).length > 1;
       const w = world({ plan: T1, main });
       const folded = await w.run();
       expect(
@@ -1015,7 +1052,7 @@ describe("run loop", () => {
         const names = t.calls.map((c) => c.name);
         if (names.length === 0)
           return [
-            call("start_worker", { taskId: "t1", brief: "t1." }),
+            call("start_agent", { role: "worker", task: "t1", brief: "t1." }),
             call("finish_run", { summary: "Too early." }),
           ];
         if (!names.includes("change_plan"))
@@ -1087,7 +1124,7 @@ describe("run loop", () => {
     it("work tools are refused until a go; finish_run until main has replied", async () => {
       const probes = [
         call("message", { threadId: tid("t1.worker"), text: "Redo it." }),
-        call("start_worker", { taskId: "t1", brief: "Again." }),
+        call("start_agent", { role: "worker", task: "t1", brief: "Again." }),
         call("change_plan", { reason: "Tighten.", doneWhen: [{ taskId: "t1", lines: ["x"] }] }),
         call("stop_worker", { threadId: tid("t1.worker"), reason: "No." }),
         call("finish_run", { summary: "Too soon." }),
@@ -1119,8 +1156,12 @@ describe("run loop", () => {
           return call("message", { threadId: tid("t1.worker"), text: "The left edge is off." });
         if (/Feedback sent/.test(last)) return call("reply", { text: "Redoing t1." });
         // t1's redo made t2 stale and stopped its worker; t2 is redone by a new one.
-        if (t.fresh && /The check of t1 passed/.test(t.lastUser) && count(t, "start_worker") === 2)
-          return call("start_worker", { taskId: "t2", brief: "Redo t2 on the corrected t1." });
+        if (t.fresh && /The check of t1 passed/.test(t.lastUser) && count(t, "start_agent") === 2)
+          return call("start_agent", {
+            role: "worker",
+            task: "t2",
+            brief: "Redo t2 on the corrected t1.",
+          });
         if (t.fresh && /The check of t2 passed/.test(t.lastUser))
           return call("finish_run", { summary: "t1 and t2 redone." });
         return call("wait");

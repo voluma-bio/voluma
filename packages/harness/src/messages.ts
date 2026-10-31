@@ -83,9 +83,9 @@ export const verdictNudge = (taskId: string) =>
   `You stopped before giving a verdict. Write a checkpoint on ${taskId} with verdict "passed" if you agree or "needs-review" if you do not or cannot tell, and one plain line of why.`;
 
 /** Why a thread was stopped as unresumable: `why` is the refusal (`ThreadStale`), in plain words. */
-export const unresumableReason = (role: "worker" | "check", taskId: string, why: string) => {
+export const unresumableReason = (place: "worker" | "check", taskId: string, why: string) => {
   const rebuilt = `its record cannot be resumed: ${why}`;
-  return role === "check"
+  return place === "check"
     ? `${rebuilt}; a new check takes over`
     : `${rebuilt}; start a new worker on ${taskId} if it is not done`;
 };
@@ -121,13 +121,13 @@ export const stuckSummary = (left: readonly string[]) =>
  * the researcher reads after "The run stopped: ".
  */
 export const fatalText = (
-  r: Pick<ThreadRecord, "role" | "taskId">,
+  r: Pick<ThreadRecord, "place" | "taskId">,
   error: string,
   taskName: (id: string) => string,
 ) => {
   const stopped = `stopped on an error from its provider: ${error}`;
-  if (r.role === "main" || !r.taskId) return `the AI ${stopped}`;
-  return `${taskName(r.taskId)}: ${r.role === "check" ? "the second AI check" : "the AI"} ${stopped}`;
+  if (r.place === "main" || !r.taskId) return `the AI ${stopped}`;
+  return `${taskName(r.taskId)}: ${r.place === "check" ? "the second AI check" : "the AI"} ${stopped}`;
 };
 
 /** A correction cannot end as a stuck run; its claim fails with this. */
@@ -233,7 +233,7 @@ function personLine(n: Extract<Notice, { kind: "person" }>): string {
   } else {
     lines.push(
       n.go
-        ? `  They said go on ${n.taskId}: you may now redo it. Send its worker feedback with \`message\` (it opens a new attempt; a worker that was stopped takes \`start_worker\` instead), say in \`reply\` what you are doing, and finish the run once the new attempt is checked and the tasks that build on it are done.`
+        ? `  They said go on ${n.taskId}: you may now redo it. Send its worker feedback with \`message\` (it opens a new attempt; a worker that was stopped needs a new one started instead), say in \`reply\` what you are doing, and finish the run once the new attempt is checked and the tasks that build on it are done.`
         : "  Answer them with `reply`. They have not said go, so start no work.",
     );
   }
@@ -290,9 +290,9 @@ export function agentsList(
   stateOf: (r: ThreadRecord) => ThreadState | undefined,
 ): string {
   const lines = [...d.threads.values()].flatMap((r) => {
-    if (r.role === "main") return [];
+    if (r.place === "main") return [];
     const state = stateOf(r);
-    if (r.role === "check" && state !== "running" && !openAsk(r)) return [];
+    if (r.place === "check" && state !== "running" && !openAsk(r)) return [];
     const label = openAsk(r)
       ? "waiting for your answer"
       : state === "idle"
@@ -302,7 +302,7 @@ export function agentsList(
         : state;
     const last = r.lastSummary;
     return [
-      `- ${r.name} (${r.role}, ${r.taskId}): ${label}${last ? `. Last checkpoint: ${last}` : ""}`,
+      `- ${r.name} (${r.place}, ${r.taskId}): ${label}${last ? `. Last checkpoint: ${last}` : ""}`,
     ];
   });
   return lines.length > 0 ? lines.join("\n") : "(none)";
@@ -317,7 +317,7 @@ function carriedNotices(d: ThreadLog, view: Folded): Notice[] {
   const rejected = new Set(view.tasks.flatMap((t) => (t.rejected ? [t.id] : [])));
   const openAsks = new Set(
     [...d.threads.values()].flatMap((r) => {
-      const ask = r.role === "check" ? openAsk(r) : undefined;
+      const ask = r.place === "check" ? openAsk(r) : undefined;
       return ask ? [ask.id] : [];
     }),
   );
@@ -347,6 +347,27 @@ export function finishedRunText(view: Folded): string {
     ...t.scores.map((c) => `- ${c.id}: level "${c.level}"`),
   ]);
   return `The run had already finished before the researcher wrote to you. Its tasks are done (see the table below) and their results are the current ones; nothing is being redone unless the researcher said go. Their message is quoted below under "Still open, or not yet told to you": read it and answer it with \`reply\`, from these results when it asks about them. The files are in /outputs/<task id>/ (\`read_file\` opens the text ones; \`.npy\` volumes are binary and it cannot); the values reported:\n${lines.length ? lines.join("\n") : "(none)"}`;
+}
+
+/**
+ * What the researcher was reviewing when they wrote, told to a main agent that starts inside a
+ * correction: the task and open item by name, the attached picture and marks, and the rule that
+ * a redo needs their go.
+ */
+export function reviewingText(o: {
+  task: string;
+  taskId: string;
+  item?: { title: string; text: string };
+  attachments: boolean;
+}): string {
+  return [
+    `The researcher was reviewing the task "${o.task}" when they wrote.`,
+    o.item ? `The To check item they had open: "${o.item.title}": ${o.item.text}` : "",
+    o.attachments ? "Their view picture and marks are attached to their message below." : "",
+    `Look at the task's evidence, then discuss their feedback with them through \`reply\`. When redoing the task would help, offer it with \`reply\`'s \`offer\` (taskId \`${o.taskId}\`) and wait: start no work until their go arrives.`,
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 /** The full state block: `main.<n>`'s first message and a liveness nudge carry it. */
@@ -387,7 +408,7 @@ export function interruptedResult(
   }
   if (written) {
     const what =
-      tool === "start_worker"
+      tool === "start_worker" || tool === "start_agent"
         ? ` Worker ${d.threads.get(written.threadId)?.name ?? ""} was started.`
         : "";
     return `\`${tool}\` completed before the run was cut off.${what}`;
