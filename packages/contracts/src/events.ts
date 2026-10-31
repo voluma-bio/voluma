@@ -164,7 +164,7 @@ const eventUnion = <S extends z.ZodRawShape>(extra: S) => {
          * `segmentation.check.2`. It is the thread's folder under `/scratch` and its sandbox's
          * name, and the same on every start of the thread.
          */
-        name: nonEmpty,
+        name: nonEmpty.optional(),
         /** Null on a run's root thread. */
         parentThreadId: z.string().nullable(),
         kind: threadKindSchema,

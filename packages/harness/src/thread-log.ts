@@ -227,6 +227,15 @@ export function threadState(
   return r.end.status === "cancelled" ? "stopped" : "idle";
 }
 
+/**
+ * A started thread's name. Rows an old runner wrote during the deploy that added `name` lack it;
+ * their name is the id without the run id. Delete with step 2 (`name` required), see
+ * `packages/contracts/.context/TODO.md`.
+ */
+function threadNameOf(e: Extract<RunEvent, { type: "thread.started" }>): string {
+  return e.payload.name ?? e.threadId.slice(e.runId.length + 1);
+}
+
 /** The question a check thread waits on: its latest ask, when unanswered. */
 export const openAsk = (r: ThreadRecord): AskRecord | undefined => {
   const last = r.asks.at(-1);
@@ -359,7 +368,7 @@ export function threadLog(events: readonly RunEvent[]): ThreadLog {
         if (record && !record.end && !record.inputPending) resumedCutOff.add(e.threadId);
         const fields: ThreadFields = {
           id: e.threadId,
-          name: e.payload.name,
+          name: threadNameOf(e),
           end: undefined,
           nudges: record?.nudges ?? 0,
           brief: record?.brief ?? briefOf(e.payload, value.calls),
