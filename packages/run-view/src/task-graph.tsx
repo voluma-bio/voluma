@@ -2,6 +2,8 @@
  * The workflow as a graph of real nodes: one box per task, laid out by dependency depth, with an
  * edge for each dependency no longer path already implies. One component in three sizes:
  * - `study`: left to right; each box sums the study's scans, one cell per scan, then counts.
+ *   Its boxes share the graph's width down to `STUDY_BOX`, so a six-layer workflow fits a page
+ *   column beside the Study panel at 1280 px.
  * - `summary`: left to right and small; one scan's tasks, each with its state and one line.
  * - `report`: top down, fitted to the scan review's Report panel: a layer wider than the panel
  *   wraps onto more rows. The selected, working or redone task also lists its agents.
@@ -83,6 +85,11 @@ export const taskStateWord = (state: TaskState) =>
  */
 const BOX_REM = 9.5;
 const BOX = `${BOX_REM}rem`;
+/**
+ * A study box's least width: narrower than `BOX`, so the mouse OA workflow's six layers fit 784 px
+ * (6 x 108 px boxes, 5 x 16 px gaps). A long name takes a third line there.
+ */
+const STUDY_BOX = "6.75rem";
 /** The gap between top-down lanes, `gap-2`. */
 const LANE_GAP_REM = 0.5;
 
@@ -150,10 +157,15 @@ export function TaskGraph(props: TaskGraphProps) {
         className={cx(
           "relative grid",
           right
-            ? "auto-cols-[minmax(var(--box),1fr)] grid-flow-col gap-x-6"
+            ? cx(
+                "auto-cols-[minmax(var(--box),1fr)] grid-flow-col",
+                props.size === "study" ? "gap-x-4" : "gap-x-6",
+              )
             : "gap-y-4 [&>[data-layer]]:grid [&>[data-layer]]:grid-cols-[repeat(var(--lanes),minmax(var(--box),1fr))] [&>[data-layer]]:items-start [&>[data-layer]]:gap-2",
         )}
-        style={{ "--lanes": lanes, "--box": BOX } as CSSProperties}
+        style={
+          { "--lanes": lanes, "--box": props.size === "study" ? STUDY_BOX : BOX } as CSSProperties
+        }
       >
         <svg
           aria-hidden

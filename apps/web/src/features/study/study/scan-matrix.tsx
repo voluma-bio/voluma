@@ -73,7 +73,7 @@ export function ScanMatrix({
       key: task.id,
       align: mode === "values" ? "end" : "start",
       header: (
-        <span className="grid w-16 justify-items-center text-center leading-tight whitespace-normal">
+        <span className="grid max-w-16 min-w-14 justify-items-center text-center leading-tight whitespace-normal">
           {workflow.taskTitle(task.id)}
           {mode === "values" && output && (
             <span title={output.name} className="font-mono text-[10px] text-fg-subtle">
@@ -109,7 +109,9 @@ export function ScanMatrix({
     {
       key: "scan",
       header: "Scan",
-      cell: (s) => <span className="font-mono text-sm font-normal">{s.scan.subject}</span>,
+      cell: (s) => (
+        <span className="font-mono text-sm font-normal whitespace-nowrap">{s.scan.subject}</span>
+      ),
     },
     ...taskColumns,
     {

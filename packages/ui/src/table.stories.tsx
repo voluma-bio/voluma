@@ -89,3 +89,31 @@ export const Empty: Story = {
 
 /** Static rows: no link, no detail, no hover. */
 export const Static: Story = {};
+
+/**
+ * Wider than its box: the rest scrolls sideways under the held first column (and chevron); a
+ * fade marks the side with more, a shadow the held column once scrolled.
+ */
+export const Scrolls: Story = {
+  args: {
+    groupOf: (s) => s.group,
+    rowLink: (s) => `#${s.id}`,
+    rowDetail: () => <p className="m-0 text-sm text-fg-subtle">The scan's tasks open here.</p>,
+    columns: [
+      ...columns,
+      ...["Patella volume", "Medial osteophyte volume", "Tibial cortical thickness"].map(
+        (name): TableColumn<Scan> => ({
+          key: name,
+          header: <span className="inline-block w-28 whitespace-normal">{name}</span>,
+          align: "end",
+          cell: () => <span className="font-mono">0.135</span>,
+        }),
+      ),
+    ],
+  },
+  render: (args) => (
+    <div className="max-w-md">
+      <Table {...args} />
+    </div>
+  ),
+};

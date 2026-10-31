@@ -320,9 +320,9 @@ async function showRun(client: QueryClient, next: Run) {
   client.setQueryData(queryKey, next);
 }
 
-/** Why the run failed: the run's error without the provider's raw response. */
+/** Why the run failed: the run's error (a clause) without the provider's raw response. */
 function failureText(error: string | undefined): string {
   if (!error) return "The run failed.";
   const words = plainError(error);
-  return `The run failed: ${words}${/[.!?]$/.test(words) ? "" : "."}`;
+  return `The run stopped: ${words}${/[.!?]$/.test(words) ? "" : "."}`;
 }

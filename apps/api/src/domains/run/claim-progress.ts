@@ -56,5 +56,6 @@ export function endClaim(
   };
 }
 
+/** The run's error: a clause the researcher reads after "The run stopped: ". */
 export const stalledError = (tool: string | undefined) =>
-  `Stopped: the server lost contact with the runner ${STALLED_CLAIMS_LIMIT} times in a row without progress${tool ? ` (last call: \`${tool}\`)` : ""}.`;
+  `the server lost contact with the runner ${STALLED_CLAIMS_LIMIT} times in a row without progress${tool ? ` (last call: \`${tool}\`)` : ""}`;
