@@ -17,7 +17,7 @@ import {
   type Model,
   type SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
-import { isTransientProviderError } from "./provider-error.ts";
+import { isTransientProviderError } from "@voluma/harness/context-overflow";
 
 const BASE_DELAY_MS = 1000;
 const MAX_DELAY_MS = 30_000;

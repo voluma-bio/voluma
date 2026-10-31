@@ -149,7 +149,8 @@ function threadsOf(
         if (t) t.result = { text: e.payload.text, verdict: e.payload.verdict };
         break;
       case "message":
-        if (t && e.payload.role === "assistant" && e.payload.text) t.said = e.payload.text;
+        if (t && e.payload.role === "assistant" && !e.payload.compaction && e.payload.text)
+          t.said = e.payload.text;
         break;
     }
   }
