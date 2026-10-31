@@ -77,6 +77,11 @@ there reaches every caller at once. Two shapes work:
 
 Either way the PR body names what breaks and which callers moved.
 
+A response only the browser reads changes in one step, no expand/contract: an
+open tab whose response fails its schema reloads once into the deployed code
+(`apps/web/src/main.tsx`). Runner-facing responses and stored events keep the
+two-step rule below.
+
 A change that could stop a stored event from parsing (a new required field or
 a narrowed shape anywhere in a payload, recorded plans included) converts the
 stored events in an SQL migration in `apps/api/drizzle`, applied on deploy, and

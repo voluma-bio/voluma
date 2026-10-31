@@ -71,7 +71,8 @@ export function SignedIn() {
         // Until the API answers: then a kept session also picks up an identity another tab changed.
         retry.current = setTimeout(() => void load(), 5000);
       }
-      // Schema mismatches and unexpected statuses belong on the router's error screen.
+      // A schema mismatch has already reloaded the tab once (main.tsx); a repeat, and
+      // unexpected statuses, belong on the router's error screen.
       else
         setSession(() => {
           throw error;

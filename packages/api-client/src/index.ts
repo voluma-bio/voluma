@@ -1,7 +1,9 @@
 /**
  * Typed client for apps/api over the contracts. Web features call the API only
  * through here. Requests are same-origin; a 401 on any call except `getMe`
- * emits "signed out" so the shell can show the sign-in screen.
+ * emits "signed out" so the shell can show the sign-in screen. A response that
+ * fails its schema throws `ContractError` and emits it, so the app can reload
+ * into the deployed code.
  */
 import { logoutResponseSchema, type Me, meResponseSchema } from "@voluma/contracts/auth";
 import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
@@ -114,18 +116,55 @@ async function json(res: Response): Promise<unknown> {
   return checkResponse(res, res.ok ? undefined : await errorMessage(res)).json();
 }
 
+/**
+ * A response that doesn't match the contract this bundle was built against: the API was most
+ * likely deployed with a changed shape while this tab kept the old code. `url` names the call.
+ */
+export class ContractError extends Error {
+  constructor(
+    readonly url: string,
+    cause: unknown,
+  ) {
+    super(`${url}: the response doesn't match this app's contract`, { cause });
+    this.name = "ContractError";
+  }
+}
+
+const contractErrorListeners = new Set<(error: ContractError) => void>();
+
+/** Listen for every `ContractError`, whichever call threw it. Returns the unsubscribe function. */
+export function onContractError(listener: (error: ContractError) => void): () => void {
+  contractErrorListeners.add(listener);
+  return () => contractErrorListeners.delete(listener);
+}
+
+/** Every response body is parsed here, so a mismatch always throws `ContractError` and tells the listeners. */
+function matches<T>(schema: { parse(data: unknown): T }, data: unknown, url: string): T {
+  try {
+    return schema.parse(data);
+  } catch (cause) {
+    const error = new ContractError(url, cause);
+    for (const listener of contractErrorListeners) listener(error);
+    throw error;
+  }
+}
+
+async function read<T>(schema: { parse(data: unknown): T }, res: Response): Promise<T> {
+  return matches(schema, await json(res), res.url);
+}
+
 /** The signed-in user, or null when signed out. Being signed out on load is not an event. */
 export async function getMe(): Promise<Me | null> {
   const res = await request("/auth/me");
   if (res.status === 401) return null;
-  return meResponseSchema.parse(await json(res));
+  return read(meResponseSchema, res);
 }
 
 /** The caller's guest identity, made on first call; null when the server lets no guests in (404). */
 export async function startGuest(): Promise<Me | null> {
   const res = await request("/auth/guest", { method: "POST" });
   if (res.status === 404) return null;
-  return meResponseSchema.parse(await json(res));
+  return read(meResponseSchema, res);
 }
 
 /** Starts sign-in: navigates to the identity provider, then back to `returnTo`. The server validates `returnTo`. */
@@ -135,64 +174,61 @@ export function signIn(returnTo = location.pathname + location.search): void {
 
 /** Ends the session, then leaves the app for the identity provider's logout page. */
 export async function signOut(): Promise<void> {
-  const { logoutUrl } = logoutResponseSchema.parse(
-    await json(await request("/auth/logout", { method: "POST" })),
+  const { logoutUrl } = await read(
+    logoutResponseSchema,
+    await request("/auth/logout", { method: "POST" }),
   );
   location.href = logoutUrl;
 }
 
 /** Starts a run on a scan of one of the caller's studies (`req.studyId`, `req.inputId`). With `keys` it runs on the caller's own credentials and skips the org's runs-at-once count; either way it waits for the runner to claim it. 409 and 429: the org's limits (see `@voluma/contracts/run`). */
 export async function startRun(req: StartRunRequest): Promise<Run> {
-  return runSchema.parse(await json(await request("/run/runs", { method: "POST", body: req })));
+  return read(runSchema, await request("/run/runs", { method: "POST", body: req }));
 }
 
 /** Creates a study and starts the runs for `req.start` in one call; a refusal (409, 429) leaves no study. See `@voluma/contracts/study`. */
 export async function createStudy(req: CreateStudyRequest): Promise<StudyDetail> {
-  return studyDetailSchema.parse(
-    await json(await request("/run/studies", { method: "POST", body: req })),
-  );
+  return read(studyDetailSchema, await request("/run/studies", { method: "POST", body: req }));
 }
 
 /** The caller's readable studies, newest activity first. */
 export async function listStudies(): Promise<StudySummary[]> {
-  return listStudiesResponseSchema.parse(await json(await request("/run/studies"))).studies;
+  return (await read(listStudiesResponseSchema, await request("/run/studies"))).studies;
 }
 
 /** A study with its scans, their runs, and the workflow's headline values. */
 export async function getStudy(id: string): Promise<StudyDetail> {
-  return studyDetailSchema.parse(
-    await json(await request(`/run/studies/${encodeURIComponent(id)}`)),
-  );
+  return read(studyDetailSchema, await request(`/run/studies/${encodeURIComponent(id)}`));
 }
 
 export async function getRun(id: string): Promise<Run> {
-  return runSchema.parse(await json(await request(`/run/runs/${encodeURIComponent(id)}`)));
+  return read(runSchema, await request(`/run/runs/${encodeURIComponent(id)}`));
 }
 
 /** The caller's org's runs (only the caller's own under scope `self`), newest first. */
 export async function listRuns(): Promise<Run[]> {
-  return listRunsResponseSchema.parse(await json(await request("/run/runs"))).runs;
+  return (await read(listRunsResponseSchema, await request("/run/runs"))).runs;
 }
 
 export async function cancelRun(id: string): Promise<Run> {
-  return runSchema.parse(
-    await json(await request(`/run/runs/${encodeURIComponent(id)}/cancel`, { method: "POST" })),
+  return read(
+    runSchema,
+    await request(`/run/runs/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
   );
 }
 
 /** Resends a visitor run's keys after the runner lost them (state `awaiting-keys`). */
 export async function resendKeys(id: string, keys: VisitorKeys): Promise<Run> {
   const body: ResendKeysRequest = { keys };
-  return runSchema.parse(
-    await json(await request(`/run/runs/${encodeURIComponent(id)}/keys`, { method: "POST", body })),
+  return read(
+    runSchema,
+    await request(`/run/runs/${encodeURIComponent(id)}/keys`, { method: "POST", body }),
   );
 }
 
 /** A run's review data, built from its event log on each call. 404: unreadable or unknown run; 409: the run has no plan. */
 export async function getReviewRun(runId: string): Promise<ReviewRun> {
-  return reviewRunSchema.parse(
-    await json(await request(`/review/runs/${encodeURIComponent(runId)}`)),
-  );
+  return read(reviewRunSchema, await request(`/review/runs/${encodeURIComponent(runId)}`));
 }
 
 /** Accepts one current-result check; never marks the run reviewed. */
@@ -201,12 +237,11 @@ export async function acceptCheck(
   checkId: string,
   body: AcceptCheckRequest,
 ): Promise<ReviewDecisionResponse> {
-  return reviewDecisionResponseSchema.parse(
-    await json(
-      await request(
-        `/review/runs/${encodeURIComponent(runId)}/checks/${encodeURIComponent(checkId)}/accept`,
-        { method: "POST", body: acceptCheckRequestSchema.parse(body) },
-      ),
+  return read(
+    reviewDecisionResponseSchema,
+    await request(
+      `/review/runs/${encodeURIComponent(runId)}/checks/${encodeURIComponent(checkId)}/accept`,
+      { method: "POST", body: acceptCheckRequestSchema.parse(body) },
     ),
   );
 }
@@ -216,13 +251,12 @@ export async function markReviewed(
   runId: string,
   body: MarkReviewedRequest,
 ): Promise<ReviewDecisionResponse> {
-  return reviewDecisionResponseSchema.parse(
-    await json(
-      await request(`/review/runs/${encodeURIComponent(runId)}/mark-reviewed`, {
-        method: "POST",
-        body: markReviewedRequestSchema.parse(body),
-      }),
-    ),
+  return read(
+    reviewDecisionResponseSchema,
+    await request(`/review/runs/${encodeURIComponent(runId)}/mark-reviewed`, {
+      method: "POST",
+      body: markReviewedRequestSchema.parse(body),
+    }),
   );
 }
 
@@ -235,13 +269,12 @@ export async function sendRunMessage(
   runId: string,
   body: SendRunMessageRequest,
 ): Promise<SendRunMessageResponse> {
-  return sendRunMessageResponseSchema.parse(
-    await json(
-      await request(`/review/runs/${encodeURIComponent(runId)}/messages`, {
-        method: "POST",
-        body: sendRunMessageRequestSchema.parse(body),
-      }),
-    ),
+  return read(
+    sendRunMessageResponseSchema,
+    await request(`/review/runs/${encodeURIComponent(runId)}/messages`, {
+      method: "POST",
+      body: sendRunMessageRequestSchema.parse(body),
+    }),
   );
 }
 
@@ -277,13 +310,12 @@ export async function createReviewSnapshot(
   runId: string,
   body: CreateReviewSnapshotRequest,
 ): Promise<ReviewSnapshot> {
-  return reviewSnapshotSchema.parse(
-    await json(
-      await request(`/review/runs/${encodeURIComponent(runId)}/snapshots`, {
-        method: "POST",
-        body: createReviewSnapshotRequestSchema.parse(body),
-      }),
-    ),
+  return read(
+    reviewSnapshotSchema,
+    await request(`/review/runs/${encodeURIComponent(runId)}/snapshots`, {
+      method: "POST",
+      body: createReviewSnapshotRequestSchema.parse(body),
+    }),
   );
 }
 
@@ -292,14 +324,17 @@ export async function listReviewSnapshots(
   runId: string,
   signal?: AbortSignal,
 ): Promise<ReviewSnapshot[]> {
-  return listReviewSnapshotsResponseSchema.parse(
-    await json(await request(`/review/runs/${encodeURIComponent(runId)}/snapshots`, { signal })),
+  return (
+    await read(
+      listReviewSnapshotsResponseSchema,
+      await request(`/review/runs/${encodeURIComponent(runId)}/snapshots`, { signal }),
+    )
   ).snapshots;
 }
 
 /** Inputs the caller may start a run on, newest first. */
 export async function listInputs(): Promise<Input[]> {
-  return listInputsResponseSchema.parse(await json(await request("/run/inputs"))).inputs;
+  return (await read(listInputsResponseSchema, await request("/run/inputs"))).inputs;
 }
 
 /**
@@ -308,8 +343,9 @@ export async function listInputs(): Promise<Input[]> {
  * guest, 413 over the server's limits, 429 when the caller has too many uploads open.
  */
 export async function createUpload(req: CreateUploadRequest): Promise<CreateUploadResponse> {
-  return createUploadResponseSchema.parse(
-    await json(await request("/run/inputs", { method: "POST", body: req })),
+  return read(
+    createUploadResponseSchema,
+    await request("/run/inputs", { method: "POST", body: req }),
   );
 }
 
@@ -333,10 +369,10 @@ export async function completeUpload(inputId: string): Promise<Input> {
     method: "POST",
   });
   if (res.status === 409) {
-    const { missing } = completeUploadConflictSchema.parse(await res.json());
+    const { missing } = matches(completeUploadConflictSchema, await res.json(), res.url);
     throw new UploadIncompleteError(missing, res.url);
   }
-  return inputSchema.parse(await json(res));
+  return read(inputSchema, res);
 }
 
 /** Drops an uncompleted upload and its stored files. 409 once it is completed. */
@@ -382,7 +418,8 @@ export function putUploadFile(
  * Opens a run's event stream (`@voluma/contracts/stream`): `onEvent` gets each durable event
  * in order, once. `EventSource` reconnects by itself and resumes from the last event's `id`.
  * `after` is the highest `seq` the caller already holds, for the first connect only. `onError`
- * is told of a message that fails to parse; a dropped connection is not an error. `onLive` gets
+ * is told of a message that fails to parse (a `ContractError` when it doesn't match the schema)
+ * or a handler that throws; a dropped connection is not an error. `onLive` gets
  * each live frame (token-level text, reasoning, tool arguments, tool output): unstored, no
  * cursor, not replayed on reconnect; see the contract for how to fold them.
  * `onClosed` fires when the stream is over for good, with why: `"ended"` when the server sent
@@ -406,7 +443,7 @@ export function subscribe(
   );
   source.onmessage = (e) => {
     try {
-      handlers.onEvent(runEventSchema.parse(JSON.parse(e.data)));
+      handlers.onEvent(matches(runEventSchema, JSON.parse(e.data), source.url));
     } catch (error) {
       handlers.onError?.(error);
     }
@@ -415,7 +452,7 @@ export function subscribe(
     const onLive = handlers.onLive;
     source.addEventListener(LIVE_EVENT, (e) => {
       try {
-        onLive(liveFrameSchema.parse(JSON.parse((e as MessageEvent<string>).data)));
+        onLive(matches(liveFrameSchema, JSON.parse((e as MessageEvent<string>).data), source.url));
       } catch (error) {
         handlers.onError?.(error);
       }
