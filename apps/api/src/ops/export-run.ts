@@ -29,8 +29,8 @@ await client.end();
 await mkdir(out, { recursive: true });
 await writeFile(join(out, "run.json"), JSON.stringify(dump));
 if (prefix) {
-  const { r2, bucket } = r2FromEnv();
-  await uploadDir(r2, bucket, out, prefix);
+  const { store, bucket } = r2FromEnv();
+  await uploadDir(store, bucket, out, prefix);
   await rm(out, { recursive: true, force: true });
 }
 console.log(`run ${runId}: ${describeCounts(countsOf(dump))} -> ${values.out}`);

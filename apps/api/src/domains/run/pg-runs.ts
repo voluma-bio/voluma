@@ -6,10 +6,9 @@
 
 import { type RunEvent, runEventSchema } from "@voluma/contracts/events";
 import { FOLD_EVENT_TYPES } from "@voluma/contracts/fold";
-import type { ReviewSummary } from "@voluma/contracts/review";
-import { progress, reviewState } from "@voluma/contracts/review-state";
+import { openCorrectionRevision, progress, reviewState } from "@voluma/contracts/review-state";
 import { type Input, type Run, runSchema } from "@voluma/contracts/run";
-import type { StudyValue, ToCheckItem } from "@voluma/contracts/study";
+import { failedThreads, openThreads } from "@voluma/contracts/threads";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import { callsOfRuns, type RunCalls } from "@voluma/provider-calls";
 import { and, asc, desc, eq, inArray, or, type SQL, sql } from "drizzle-orm";
@@ -69,10 +68,7 @@ export const toInput = (row: typeof inputs.$inferSelect): Input => ({
 export const toRunEvent = (row: typeof events.$inferSelect) =>
   runEventSchema.parse({ ...row, createdAt: row.createdAt.toISOString() });
 
-function toRun(
-  { run, input, position, calls }: Row,
-  { summary, tasks }: Pick<Derived, "summary" | "tasks">,
-): Run {
+function toRun({ run, input, position, calls }: Row, { summary, revisions }: Results): Run {
   const iso = (d: Date | null) => d?.toISOString() ?? null;
   const startedAt = iso(run.startedAt);
   const state = ((): Run["state"] => {
@@ -109,7 +105,7 @@ function toRun(
     usage: { modelCostUsd: run.modelCostUsd, sandboxSeconds: run.sandboxSeconds },
     providerCalls: calls,
     review: run.state === "ended" && run.outcome === "completed" ? summary : null,
-    tasks: run.state === "ended" ? null : tasks,
+    tasks: run.state === "ended" ? null : progressOf(revisions.at(-1)),
   });
 }
 
@@ -183,21 +179,32 @@ async function loadLogs(tx: Tx, ids: string[]) {
   return { logs, unreadable };
 }
 
+type Results = ReturnType<typeof reviewState>;
+type Revision = Results["revisions"][number];
+
 /**
- * What one `reviewState(log)` gives the reads: the whole `results` for Review, and from them
- * for a completed run the summary and, for studies, its measurement values and open checks;
- * for a live run its task progress.
+ * What the cache keeps of one run: its `reviewState` (the whole `results` for Review; the run's
+ * summary and progress, and a study's values and open checks, are read from it), and what
+ * `taskStates` needs that only the log knows.
  */
-type Derived = {
-  results: ReturnType<typeof reviewState>;
-  summary: ReviewSummary | null;
-  tasks: Run["tasks"];
-  /** Output id (`outputs.json`) → value, from the latest revision's tasks. */
-  values: Record<string, StudyValue>;
-  toCheck: Omit<ToCheckItem, "runId">[];
+export type RunFold = {
+  results: Results;
+  /** An open correction's revision, which task states read; none when no correction is open. */
+  correcting: Revision | undefined;
+  /** The threads started and not yet ended (`openThreads`). */
+  open: readonly string[];
+  /** The threads whose latest end failed (`failedThreads`). */
+  failed: ReadonlySet<string>;
 };
 
-type Revision = ReturnType<typeof reviewState>["revisions"][number];
+const foldRun = (log: RunEvent[]): RunFold => ({
+  results: reviewState(log),
+  correcting: openCorrectionRevision(log),
+  open: openThreads(log),
+  failed: failedThreads(log),
+});
+
+const NOTHING = foldRun([]);
 
 /** A revision's finished tasks out of its plan's; null before there is a revision. */
 function progressOf(latest: Revision | undefined): Run["tasks"] {
@@ -206,44 +213,17 @@ function progressOf(latest: Revision | undefined): Run["tasks"] {
   return { done, total };
 }
 
-function derive(log: RunEvent[]): Derived {
-  const results = reviewState(log);
-  const { summary, revisions } = results;
-  const latest = revisions.at(-1);
-  const values: Derived["values"] = {};
-  const toCheck: Derived["toCheck"] = [];
-  for (const task of latest?.tasks ?? []) {
-    for (const m of task.measurements) {
-      // The fold names a measurement `taskId/outputId`; the workflow files know the output id.
-      values[m.id.slice(task.id.length + 1)] = {
-        value: m.value,
-        unit: m.unit,
-        confidence: m.confidence,
-      };
-    }
-    for (const check of task.checks) {
-      if (check.status === "open") {
-        toCheck.push({
-          taskId: task.id,
-          checkId: check.id,
-          title: check.title,
-          detail: check.detail,
-        });
-      }
-    }
-  }
-  return { results, summary, tasks: progressOf(latest), values, toCheck };
-}
-
-const NOTHING = derive([]);
-
-/** One run's cache entry: null `derived` is the verdict that its events don't parse. `weight` is its event count, a stand-in for its size. */
-type CacheEntry = { lastEventId: string | null; derived: Derived | null; weight: number };
+/**
+ * One run's cache entry: null `fold` is the verdict that its events don't parse, kept against
+ * the watermark so an unreadable run isn't loaded again on every read. `weight` is its event
+ * count, a stand-in for its size.
+ */
+type CacheEntry = { lastEventId: string | null; fold: RunFold | null; weight: number };
 type SummaryCache = { entries: Map<string, CacheEntry>; weight: number };
 
 /**
  * The most event-weight kept (~76 bytes of results per folded event, so about 20 MB of JSON), least
- * recently read out first; evicted ones are derived again from the event log.
+ * recently read out first; evicted ones are folded again from the event log.
  */
 const CACHE_BUDGET = 250_000;
 
@@ -264,7 +244,7 @@ function remember(cache: SummaryCache, id: string, entry: CacheEntry) {
   }
 }
 
-export type RunResult = { run: Run; generation: string } & Derived;
+export type RunResult = { run: Run; generation: string } & RunFold;
 
 interface LoadOptions {
   cache?: SummaryCache;
@@ -276,15 +256,31 @@ interface LoadOptions {
    * don't parse is kept, with `tasks: null`: it still runs.
    */
   skipUnreadable?: boolean;
+  /**
+   * Which failed or cancelled runs to fold. A stopped run's row says all a list shows of it
+   * (`review` and `tasks` are null), so the lists take `none`; the study read takes `newest`, a
+   * scan's newest run, to show where it stopped; one run's read (default) takes `all`. A run
+   * left out reads as having no events.
+   */
+  stopped?: "all" | "newest" | "none";
 }
 
 async function loadResults(
   tx: Tx,
   where: SQL | undefined,
-  { cache = newCache(), skipUnreadable = false }: LoadOptions = {},
+  { cache = newCache(), skipUnreadable = false, stopped = "all" }: LoadOptions = {},
 ): Promise<RunResult[]> {
   const rows = await loadRows(tx, where);
-  const ids = rows.map(({ run }) => run.id);
+  // Rows are newest first, so a scan's first row is its newest run.
+  const seen = new Set<string>();
+  const ids = rows
+    .filter(({ run }) => {
+      const newest = !seen.has(run.inputId);
+      seen.add(run.inputId);
+      const halted = run.state === "ended" && run.outcome !== "completed";
+      return !halted || stopped === "all" || (stopped === "newest" && newest);
+    })
+    .map(({ run }) => run.id);
   const watermarks = ids.length
     ? await tx
         .selectDistinctOn([events.runId], { runId: events.runId, id: events.id })
@@ -297,7 +293,7 @@ async function loadResults(
   const cached = new Map(ids.map((id) => [id, cache.entries.get(id)]));
   const missing = ids.filter((id) => cached.get(id)?.lastEventId !== (versions.get(id) ?? null));
   const { logs, unreadable } = await loadLogs(tx, missing);
-  const derivedOf = new Map<string, Derived>();
+  const foldOf = new Map<string, RunFold>();
   const failed: string[] = [];
   for (const id of ids) {
     const lastEventId = versions.get(id) ?? null;
@@ -308,11 +304,11 @@ async function loadResults(
       const log = logs.get(id) ?? [];
       entry = {
         lastEventId,
-        derived: unreadable.has(id) ? null : derive(log),
+        fold: unreadable.has(id) ? null : foldRun(log),
         weight: log.length + 1,
       };
     }
-    if (entry.derived) derivedOf.set(id, entry.derived);
+    if (entry.fold) foldOf.set(id, entry.fold);
     else failed.push(id);
     remember(cache, id, entry);
   }
@@ -326,15 +322,15 @@ async function loadResults(
         !skipUnreadable ||
         run.state !== "ended" ||
         run.outcome !== "completed" ||
-        derivedOf.get(run.id)?.summary,
+        foldOf.get(run.id)?.results.summary,
     )
     .map((row) => {
-      const derived = derivedOf.get(row.run.id) ?? NOTHING;
-      return { run: toRun(row, derived), generation: row.run.generation, ...derived };
+      const fold = foldOf.get(row.run.id) ?? NOTHING;
+      return { run: toRun(row, fold.results), generation: row.run.generation, ...fold };
     });
 }
 
-/** `loadResults` through one cache, so the run and study reads derive a run once between them. */
+/** `loadResults` through one cache, so the run and study reads fold a run once between them. */
 export function resultsLoader() {
   const cache = newCache();
   return (tx: Tx, where: SQL | undefined, options: Omit<LoadOptions, "cache"> = {}) =>
@@ -358,7 +354,9 @@ export function pgRunReads(db: PostgresJsDatabase, results: ResultsLoader) {
     list: (reader: ReadScope) =>
       db.transaction(
         async (tx) =>
-          (await results(tx, readableRuns(reader), { skipUnreadable: true })).map(({ run }) => run),
+          (await results(tx, readableRuns(reader), { skipUnreadable: true, stopped: "none" })).map(
+            ({ run }) => run,
+          ),
         { isolationLevel: "repeatable read" },
       ),
 

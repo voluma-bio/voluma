@@ -18,16 +18,16 @@ type Story = StoryObj<typeof meta>;
 export const Neutral: Story = {};
 export const ToCheck: Story = { args: { tone: "check", children: 18 } };
 export const Running: Story = { args: { tone: "running", children: 2 } };
-export const Stopped: Story = { args: { tone: "stopped", children: "2 stopped" } };
+export const Stopped: Story = { args: { tone: "stopped", children: 2 } };
 /** After a title, as in a panel head. */
 export const AfterATitle: Story = {
   render: () => (
     <div className="grid gap-3">
       <h3 className="m-0 flex items-center gap-2 text-base font-semibold">
-        Scans <Count>20</Count>
+        Scans <Count>{20}</Count>
       </h3>
       <h3 className="m-0 flex items-center gap-2 text-base font-semibold">
-        To check <Count tone="check">18</Count>
+        To check <Count tone="check">{18}</Count>
       </h3>
     </div>
   ),
