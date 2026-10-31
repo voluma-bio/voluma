@@ -58,8 +58,10 @@ export interface SuperviseRunOptions {
   signal: AbortSignal;
 }
 
-/** The run's root thread. Ids are minted here and in `run-loop.ts` and read nowhere else. */
-export const rootThreadIdOf = (runId: string) => `${runId}.supervisor`;
+const ROOT_NAME = "supervisor";
+
+/** The run's root thread. Ids are minted here and in `run-loop.ts`; the sites that still parse one are those #312 deferred (ingest `inRun`, ops `run-dump.ts`, `seed-example.ts`, `backfill.ts`). */
+export const rootThreadIdOf = (runId: string) => `${runId}.${ROOT_NAME}`;
 
 export async function superviseRun(options: SuperviseRunOptions): Promise<Folded> {
   const { runId, recorder, signal } = options;
@@ -69,7 +71,7 @@ export async function superviseRun(options: SuperviseRunOptions): Promise<Folded
   const resumed = recorder.events().length > 0;
   // Not a derived id: each invocation of the root is a thread start of its own.
   recorder.emit(rootThreadId, "thread.started", {
-    name: "supervisor",
+    name: ROOT_NAME,
     parentThreadId: null,
     kind: "supervisor",
     workflows: options.workflows,
