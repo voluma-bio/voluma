@@ -343,8 +343,7 @@ try {
         runId: "probe",
         inputPrefix: "inputs/",
         skills: [],
-        agents: { worker: { scratch: "all", outputs: "write" } },
-        grants: { worker: [] },
+        roles: { worker: { scratch: "all", outputs: "write", subagents: [], tools: [] } },
       }).forThread({
         id: "probe.intake.worker",
         name: "intake.worker",

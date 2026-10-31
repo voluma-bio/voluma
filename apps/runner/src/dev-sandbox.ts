@@ -140,8 +140,7 @@ try {
     inputPrefix: inputPrefixOf(run),
     skills: [], // no workflow is loaded here, so no PYTHONPATH
     copiesInputs: () => true,
-    agents: { worker: { scratch: "all", outputs: "write" } },
-    grants: { worker: ["segment_sam"] },
+    roles: { worker: { scratch: "all", outputs: "write", subagents: [], tools: ["segment_sam"] } },
   }).forThread(devThread);
   meter.sandboxUp();
   counted = true;

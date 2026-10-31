@@ -41,7 +41,7 @@ export const REVIEW = "/review";
 export interface ThreadLayout {
   /** What the thread is in the run (main, a task's worker, a task's check). */
   place: "worker" | "check" | "main";
-  /** The role file it runs on: the key of `RunLayoutOptions.agents` and of the definition. */
+  /** The role file it runs on: the key of `RunLayoutOptions.roles` and of the definition. */
   role: string;
   /** Its role checks another's tasks: it reads only what the attempt cites of the other's scratch. */
   reviewer: boolean;
@@ -59,6 +59,8 @@ export interface ThreadLayout {
   copiesInputs: boolean;
   /** The tools its role holds (the role file's, less what the run cannot grant). */
   tools: readonly string[];
+  /** The roles its role may start. */
+  subagents: readonly string[];
   /** The sandbox may reach the gateway (and gets its URL and token): the role holds `segment_sam`. */
   gateway: boolean;
   /** The mounts, as bullet lines for the tool description. */
@@ -111,13 +113,17 @@ export interface RunLayoutOptions {
    * module (module names are unique across skills, a test enforces it).
    */
   skills: readonly Skill[];
-  /** Each role file's scratch and `/outputs` access and checker (`WorkflowDefinition.agents`). */
-  agents: Record<string, Pick<AgentDefinition, "scratch" | "outputs" | "checkedBy">>;
   /**
-   * The tools each role holds. The roles holding `segment_sam` reach the gateway (every sandbox
-   * has `voluma-sam` on its PATH, so one whose role cannot call it gets no network).
+   * Each role file's scratch and `/outputs` access, checker, subagents and the tools it holds. The roles
+   * holding `segment_sam` reach the gateway (every sandbox has `voluma-sam` on its PATH, so one
+   * whose role cannot call it gets no network).
    */
-  grants: Record<string, readonly string[]>;
+  roles: Record<
+    string,
+    Pick<AgentDefinition, "scratch" | "outputs" | "checkedBy" | "subagents"> & {
+      tools: readonly string[];
+    }
+  >;
   /**
    * Says a task's threads get `/inputs` copied to local disk, which the workflow declares
    * (`copyInputs`): reading the DICOM straight from a cold mount is slow (measured on Modal:
@@ -134,11 +140,10 @@ export function runLayout({
   runId,
   inputPrefix,
   skills,
-  agents,
-  grants,
+  roles,
   copiesInputs = () => false,
 }: RunLayoutOptions): RunLayout {
-  const reviewers = new Set(Object.values(agents).map((a) => a.checkedBy));
+  const reviewers = new Set(Object.values(roles).map((a) => a.checkedBy));
   const scratch = scratchPrefix(runId);
   const pythonPath = skills.map((s) => `${s.path}/resources`).join(":");
   const inputs = (copy: boolean): SandboxMount => ({
@@ -224,10 +229,8 @@ export function runLayout({
     forThread({ name, place, role, taskId }, cited = () => false) {
       const copy = taskId !== undefined && copiesInputs(taskId);
       const dir = `${SCRATCH}/${name}`;
-      const facts = agents[role];
-      const held = grants[role];
-      if (!facts || !held)
-        throw new Error(`${name} runs on ${role}, which is not a role of this run`);
+      const facts = roles[role];
+      if (!facts) throw new Error(`${name} runs on ${role}, which is not a role of this run`);
       const access = facts.outputs === "write" ? "read-write" : "read-only";
       const reviewer = reviewers.has(role);
       const parts =
@@ -243,8 +246,9 @@ export function runLayout({
         reviewer,
         name,
         copiesInputs: copy,
-        tools: held,
-        gateway: held.includes("segment_sam"),
+        tools: facts.tools,
+        subagents: facts.subagents,
+        gateway: facts.tools.includes("segment_sam"),
         dir,
         env: { PYTHONPATH: pythonPath, SCRATCH: dir },
         toolOutputPath: (toolCallId) =>

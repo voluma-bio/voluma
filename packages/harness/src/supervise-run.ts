@@ -17,7 +17,7 @@ import type { ClaimEndReason } from "@voluma/contracts/runner";
 import type { WorkflowPin } from "@voluma/contracts/workflow";
 import type { WorkflowDefinition } from "@voluma/workflow/definition";
 import { withImageRefs } from "./adapters/pi/image-refs";
-import { runLayout, type SandboxLayout } from "./layout";
+import { type RunLayoutOptions, runLayout, type SandboxLayout } from "./layout";
 import { keepOutputs } from "./outputs-backup";
 import type { Evidence } from "./ports/evidence";
 import type { Files } from "./ports/files";
@@ -101,24 +101,19 @@ export interface Supervised {
 }
 
 /**
- * The tools each role holds: its file's list, less `segment_sam` where it cannot be used. That
- * needs the gateway and a sandbox that produces results: one with `/outputs` writable. A role
- * that only inspects (its `/outputs` is read-only) never holds it: it does not redo the task.
+ * Each role's layout facts and the tools it holds: its file's list, less `segment_sam` where it
+ * cannot be used. That needs the gateway and a sandbox that produces results: one with `/outputs`
+ * writable. A role that only inspects (its `/outputs` is read-only) never holds it: it does not
+ * redo the task.
  */
-function grantsOf(def: WorkflowDefinition, gateway: boolean): Record<string, readonly string[]> {
+function rolesOf(def: WorkflowDefinition, gateway: boolean): RunLayoutOptions["roles"] {
   return Object.fromEntries(
-    Object.values(def.agents).map(({ name, tools, outputs }) => {
+    Object.values(def.agents).map(({ name, tools, scratch, outputs, checkedBy, subagents }) => {
       const analyses = tools.includes("bash") && outputs === "write";
-      return [name, tools.filter((t) => t !== "segment_sam" || (gateway && analyses))];
+      const held = tools.filter((t) => t !== "segment_sam" || (gateway && analyses));
+      return [name, { scratch, outputs, checkedBy, subagents, tools: held }];
     }),
   );
-}
-
-/** The roles a thread of `role` may start. */
-function subagentsOf(def: WorkflowDefinition, role: string): string[] {
-  const file = def.agents[role];
-  if (!file) throw new Error(`${role} is not a role of this run`);
-  return file.subagents;
 }
 
 const ROOT_NAME = "supervisor";
@@ -131,14 +126,12 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
   const { runId, recorder, definition, signal } = options;
   const rootThreadId = rootThreadOf(runId, recorder.events());
   const main = definition.agents.main;
-  const grants = grantsOf(definition, options.gateway !== undefined);
   const copyInputs = new Set(definition.files.tasks.filter((t) => t.copyInputs).map((t) => t.id));
   const layout = runLayout({
     runId,
     inputPrefix: options.inputPrefix,
     skills: definition.skills,
-    agents: definition.agents,
-    grants,
+    roles: rolesOf(definition, options.gateway !== undefined),
     // From the workflow's task, so a task the main agent adds from it keeps the flag.
     copiesInputs: (id) => copyInputs.has(id),
   });
@@ -256,7 +249,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
             recorder,
             runtime,
             agents,
-            subagents: subagentsOf(definition, thread.role),
+            subagents: thread.subagents,
             workflow: definition.files,
           },
         }),

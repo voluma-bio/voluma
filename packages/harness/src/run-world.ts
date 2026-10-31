@@ -275,6 +275,7 @@ export function world(o: WorldOptions) {
       main: agent(
         "main",
         [
+          "start_agent",
           "start_worker",
           "message",
           "wait",
@@ -286,7 +287,12 @@ export function world(o: WorldOptions) {
           "finish_run",
           ...(o.mainTools ?? []),
         ],
-        { scratch: "own", outputs: "read", checkedBy: "check", subagents: ["worker"] },
+        {
+          scratch: "own",
+          outputs: "read",
+          checkedBy: o.mainTools?.includes("submit_task") ? "check" : undefined,
+          subagents: ["worker"],
+        },
       ),
       worker: agent("worker", ["report_output", "submit_task", ...(o.workerTools ?? [])], {
         scratch: "all",
