@@ -3,10 +3,7 @@
  * to a run, reopening a finished run for it, and recording how a correction ended. The queue
  * (pg-queue.ts) calls these inside its transactions (locks: `apps/api/AGENTS.md`).
  *
- * Lock order, everywhere: the queue lock (where taken), then the run's
- * event lock (`eventLock`), then row locks. A runner's append takes the event lock before it
- * shares the run row (`assertLease`), so a transaction that holds the row and then asks for the
- * event lock can deadlock with it.
+ * Lock order: `lockRun` (`pg-event-log.ts`).
  */
 import { runEventSchema } from "@voluma/contracts/events";
 import { corrections, FOLD_EVENT_TYPES, fold, redoRefusal } from "@voluma/contracts/fold";
@@ -18,7 +15,7 @@ import type { Reader } from "../../domain";
 import type { MessageSent } from "../../ports";
 import { admit, type Limits, refusalMessage, usage } from "./admission";
 import { noLease } from "./lease";
-import { eventLock, insertEvent } from "./pg-event-log";
+import { eventLock, insertEvent, lockRun } from "./pg-event-log";
 import { loadRun, readableRuns, type Tx, toRunEvent } from "./pg-runs";
 import { events, runs, studies } from "./schema";
 
@@ -124,12 +121,14 @@ export async function decideMessage(
   write: boolean,
 ): Promise<MessageSent> {
   const { userId } = caller;
-  if (write) await eventLock(tx, runId);
-  const found = tx
-    .select()
-    .from(runs)
-    .where(and(readableRuns(reader), eq(runs.id, runId)));
-  const [run] = await (write ? found.for("update") : found);
+  const run = write
+    ? await lockRun(tx, runId, readableRuns(reader))
+    : (
+        await tx
+          .select()
+          .from(runs)
+          .where(and(readableRuns(reader), eq(runs.id, runId)))
+      )[0];
   if (!run) throw new HTTPException(404, { message: "not found" });
   if (run.startedBy !== userId) {
     throw new HTTPException(403, {
