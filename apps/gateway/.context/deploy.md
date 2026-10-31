@@ -37,7 +37,7 @@ for this fix. Neon already exposes a TLS endpoint; giving the new host its datab
 and provider/token secrets is an explicit access decision.
 
 The local code accepts `VOLUMA_GATEWAY_IPV4`, one bare IPv4 (no CIDR or list). With it, the
-runner carries the address through `sandboxGateway` and `workerSandboxSpec` to Modal's
+runner carries the address through `sandboxGateway` and `specOf` to Modal's
 `outboundCidrAllowlist: ["<ip>/32"]`, **without a domain allowlist**: Modal combines those
 lists as a union, not an intersection. Invalid addresses fail closed. Without the setting,
 the current SNI policy is unchanged. The local launcher's quick tunnel ignores inherited IP

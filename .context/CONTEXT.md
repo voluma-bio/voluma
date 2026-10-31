@@ -148,7 +148,7 @@ and check threads.
   A thread that throws or is refused before it starts (`ran` false), a fatal provider error (a retryable one resumes its thread once first), or an
   error in a step fails the run: threads aborted, the root ends `failed`. The loop never imports
   Pi; `superviseRun` (`packages/harness/src/supervise-run.ts`) wires it, and a host gives only
-  adapters, each role's model/prompt/tool names (`RoleOf`) and the first messages (`Briefs`).
+  what holds keys and machines (the stored record, a model per thread, `createSandbox`, the gateway's token). The harness writes each role's tools, system prompt and first message from the workflow definition (`prompts.ts`) and each sandbox's spec from its layout.
   The harness builds exactly the tools a role's file names (`tools/registry.ts`).
 - **The runner service** (`apps/runner`, `pnpm --filter @voluma/runner start`). It polls
   `claim` while it has a free slot (`RUNNER_CONCURRENCY`); `run.ts` runs each claim the same
