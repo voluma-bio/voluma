@@ -486,6 +486,13 @@ restart counter of its own.
 
 # Runner: telemetry, and what an uncaught error does
 
+The [responsiveness audit](responsiveness-audit.md) records measured history,
+snapshot, evidence, live-output and provider-response bounds, with a free local
+replay command. Provider normalization must yield through Pi's awaited stream
+hook (`model-retry.ts`): buffered tool arguments otherwise starve heartbeat timers
+even though every iterator step is async. These measurements do not bound unlimited
+stored history; context compaction does not by itself bound the resume response.
+
 `telemetry.ts` starts after startup (a failure before it still kills the process). Every line starts
 with `telemetry`; on Render search the service's logs for these:
 

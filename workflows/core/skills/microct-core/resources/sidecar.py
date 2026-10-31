@@ -1,4 +1,4 @@
-"""Sidecar JSON for arrays: the shared half of the resource contract, and a CLI for arrays you write yourself.
+"""Write an array's grid and provenance sidecar, or share these helpers between resource scripts.
 
 Every `.npy` a resource writes has `<name>.json` beside it:
   grid_id          which voxel grid the array lives on (the scan's, or an oriented stack's own)
@@ -40,8 +40,10 @@ A script that measures or cuts a region for an output takes `--spec protocol.jso
 its values are written under from the entry, so no protocol number or output id is a flag the caller retypes. A script lists the
 keys it needs; `protocol` refuses an entry that lacks one. A core script has no default for a protocol number.
 
-CLI (for an array you made yourself):
-  python sidecar.py --array out.npy --like hu.json [--input a.npy ...] [--param key=value ...]
+Writes: <array>.json beside --array, taking its grid from --like and hashing each --input for provenance
+Prints: one JSON line {sidecar: path}
+Example: python sidecar.py --array out.npy --like hu.json --input hu.npy --param threshold_hu=2500
+Exits 2 with one sentence on bad input, before writing anything; --param takes key=value (a JSON value or plain text).
 """
 import argparse
 import hashlib
@@ -301,11 +303,14 @@ def _value(s):
 
 if __name__ == '__main__':
     ap = parser(__doc__)
-    ap.add_argument('--array', required=True)
-    ap.add_argument('--like', required=True, help='hu.json or another sidecar: the grid this array is on')
-    ap.add_argument('--input', action='append', default=[])
-    ap.add_argument('--param', action='append', default=[], help='key=value')
+    ap.add_argument('--array', type=existing, required=True, help='existing .npy array whose sidecar is written')
+    ap.add_argument('--like', type=existing, required=True, help='hu.json or another sidecar: the grid this array is on')
+    ap.add_argument('--input', type=existing, action='append', default=[], help='input file to hash for provenance (repeatable)')
+    ap.add_argument('--param', action='append', default=[], help='key=value parameter (repeatable); value is JSON or plain text')
     a = ap.parse_args()
-    params = {k: _value(v) for k, v in (p.split('=', 1) for p in a.param)}
+    try:
+        params = {k: _value(v) for k, v in (p.split('=', 1) for p in a.param)}
+    except ValueError:
+        fail('--param must be key=value, e.g. threshold_hu=2500')
     out = write(a.array, like=a.like, inputs=a.input, params=params, script='sidecar.py')
     emit(sidecar=str(out))

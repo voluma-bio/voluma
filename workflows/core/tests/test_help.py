@@ -26,8 +26,8 @@ def env_of(script):
     return {**os.environ, 'PYTHONPATH': os.pathsep.join(map(str, dirs))}
 
 
-# Libraries have no CLI by design; sidecar.py also has one, but its docstring is the library's reference.
-LIBRARIES = {'frame.py', 'viewlib.py', 'envelope.py', 'annotations.py', 'sidecar.py', 'objects.py'}
+# Libraries have no CLI; sidecar.py has one and is checked with the other scripts.
+LIBRARIES = {'frame.py', 'viewlib.py', 'envelope.py', 'annotations.py', 'objects.py'}
 # Every other resources/*.py is a script: a new file is checked without anyone listing it.
 SCRIPTS = sorted(
     p for d in RESOURCES for p in d.glob('*.py') if not p.name.startswith('test_') and p.name not in LIBRARIES
@@ -83,7 +83,11 @@ def first_input(parser, argv=()):
                 found = first_input(sub, (*argv, name))
                 if found:
                     return found
-        elif action.type is sidecar_existing and action.option_strings:
+        # runpy defines sidecar.py's own `existing` again when checking its CLI.
+        elif (action.type is sidecar_existing or (
+            getattr(action.type, '__module__', None) == '__main__'
+            and getattr(action.type, '__name__', None) == 'existing'
+        )) and action.option_strings:
             return argv, action.option_strings[0]
     return None
 
