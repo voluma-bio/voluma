@@ -337,7 +337,7 @@ before each request: bytes and count against the model's
 `inputLimits` (`maxRequestBytes`, `images.maxPerRequest`; when a model declares none, 32 MiB and 100 images, or its provider's documented count: 50 for Meta). Budget:
 min(400k, `contextWindow`), 350k when the window is unknown. Warn: when a tool batch ends with input over budget - 1.5 x reserve
 (reserve = min(64k, model `maxTokens`, budget/3); notice room = reserve / 2; 304k on Meta, 104k on a 200k Claude, 352k on a 32k-output model), or images over 40% of a limit, a runtime
-user message tells the thread (once per compaction) to finish the step and write down what it needs. Compact: when a reply reported input over budget - reserve, the next request is the compaction request
+notice appended to the batch's last tool result tells the thread to record what is done, decided and still open; once per compaction, and read from History, so a restart does not send it again. Compact: when a reply reported input over budget - reserve, the next request is the compaction request
 (336k, 136k, 368k), or images over 70% of a limit; its own model summarizes it on a warm branch (same messages, system message and tools, summary instruction
 appended). A thread already past it when the runner restarts compacts on its next request. Cold summary (`[system, previous summary,
 messages to summarize]`, no kept tail, images left out): when images are over 90% of a limit, and always when the provider refused a request as too large (`recover`, called from
