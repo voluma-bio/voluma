@@ -173,7 +173,8 @@ async function* otherClaims(
 
 // gRPC codes (CANCELLED, UNKNOWN, DEADLINE_EXCEEDED, RESOURCE_EXHAUSTED, INTERNAL, UNAVAILABLE) and
 // socket errors that a later try can clear. Anything else (UNAUTHENTICATED, PERMISSION_DENIED,
-// INVALID_ARGUMENT, NOT_FOUND, ...) is permanent and must fail the claim with its message.
+// INVALID_ARGUMENT, ...) is permanent and must fail the claim with its message. NOT_FOUND on a
+// sandbox is not a failure: it is already gone, which is what the caller wants.
 const TRANSIENT_GRPC = new Set([1, 2, 4, 8, 13, 14]);
 const TRANSIENT_SOCKET = new Set(["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EPIPE", "EAI_AGAIN"]);
 
@@ -181,6 +182,22 @@ function isTransient(e: unknown): boolean {
   const code = (e as { code?: unknown } | null)?.code;
   if (typeof code === "number") return TRANSIENT_GRPC.has(code);
   return typeof code === "string" && TRANSIENT_SOCKET.has(code);
+}
+
+const GRPC_NOT_FOUND = 5;
+
+function isGone(e: unknown): boolean {
+  return (e as { code?: unknown } | null)?.code === GRPC_NOT_FOUND;
+}
+
+/** Modal's exit code for a sandbox, or a non-null stand-in when Modal no longer knows it. */
+async function pollOrGone(sandbox: ModalSandbox): Promise<number | null> {
+  try {
+    return await sandbox.poll();
+  } catch (e) {
+    if (isGone(e)) return 0;
+    throw e;
+  }
 }
 
 const RETRY_MS = { first: 2000, max: 30_000 };
@@ -217,7 +234,9 @@ export async function endOtherClaims(
       if (live.length === 0) return ended.size;
       for (const sandbox of live) {
         if (ended.has(sandbox.sandboxId)) continue;
-        await sandbox.terminate();
+        await sandbox.terminate().catch((e) => {
+          if (!isGone(e)) throw e;
+        });
         ended.add(sandbox.sandboxId);
       }
       // Our own loop, not `terminate({wait: true})`: the SDK's wait cannot be stopped by a signal.
@@ -229,7 +248,7 @@ export async function endOtherClaims(
           nextLog = Date.now() + PROGRESS_LOG_MS;
         }
         await setTimeout(POLL_MS, undefined, { signal });
-        const codes = await Promise.all(pending.map((sandbox) => sandbox.poll()));
+        const codes = await Promise.all(pending.map(pollOrGone));
         pending = pending.filter((_, i) => codes[i] === null);
       }
       delay = RETRY_MS.first;
