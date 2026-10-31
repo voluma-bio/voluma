@@ -3,8 +3,8 @@
  * edge for each dependency no longer path already implies. One component in three sizes:
  * - `study`: left to right; each box sums the study's scans, one cell per scan, then counts.
  * - `summary`: left to right and small; one scan's tasks, each with its state and one line.
- * - `report`: top down, fitted to the scan review's Report panel; the selected, working or redone
- *   task also lists its agents.
+ * - `report`: top down, fitted to the scan review's Report panel: a layer wider than the panel
+ *   wraps onto more rows. The selected, working or redone task also lists its agents.
  * A box either opens somewhere (`taskLink`, a link) or picks a task in place (`onSelect`, a toggle).
  * Boxes are ordinary layout and may grow; the edges are measured from where the boxes are after
  * layout, so the drawing never needs to know a box's size.
@@ -81,7 +81,36 @@ export const taskStateWord = (state: TaskState) =>
  * A box's least width: the longest workflow names ("Proximal tibial metaphysis", "Subchondral
  * bone plate") fit on two lines, breaking only between words.
  */
-const BOX = "9.5rem";
+const BOX_REM = 9.5;
+const BOX = `${BOX_REM}rem`;
+/** The gap between top-down lanes, `gap-2`. */
+const LANE_GAP_REM = 0.5;
+
+/**
+ * How many lanes of `BOX` fit the graph's own width, at most `lanes`: a top-down layer wider than
+ * its panel wraps onto more rows instead of running off the edge. Off (`lanes` as is) for a
+ * left-to-right graph, whose layers are columns.
+ */
+function useFit(lanes: number, on: boolean) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [fit, setFit] = useState(lanes);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || !on) return;
+    const measure = () => {
+      const rem = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
+      const n = Math.floor(
+        (el.clientWidth + LANE_GAP_REM * rem) / ((BOX_REM + LANE_GAP_REM) * rem),
+      );
+      setFit(Math.max(1, Math.min(lanes, n)));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [lanes, on]);
+  return { ref, fit: on ? fit : lanes };
+}
 
 export function TaskGraph(props: TaskGraphProps) {
   const right = props.size !== "report";
@@ -109,18 +138,20 @@ export function TaskGraph(props: TaskGraphProps) {
           />,
         ]),
   );
-  const { layers, edges, lanes } = layout<GraphTask>(props.tasks);
+  const { layers, edges, lanes: all } = layout<GraphTask>(props.tasks);
   const { ref, paths } = useEdges(edges, right);
+  const { ref: outer, fit: lanes } = useFit(all, !right);
   return (
-    // Boxes keep their least width; a narrower parent scrolls sideways.
-    <div className={cx("overflow-x-auto", props.className)}>
+    // Boxes keep their least width; a parent narrower than one box (or a left-to-right graph's
+    // layers) scrolls sideways.
+    <div ref={outer} className={cx("overflow-x-auto", props.className)}>
       <div
         ref={ref}
         className={cx(
           "relative grid",
           right
             ? "auto-cols-[minmax(var(--box),1fr)] grid-flow-col gap-x-6"
-            : "gap-y-4 [&>[data-layer]]:grid [&>[data-layer]]:grid-cols-[repeat(var(--lanes),minmax(var(--box),1fr))] [&>[data-layer]]:items-start [&>[data-layer]]:gap-x-2",
+            : "gap-y-4 [&>[data-layer]]:grid [&>[data-layer]]:grid-cols-[repeat(var(--lanes),minmax(var(--box),1fr))] [&>[data-layer]]:items-start [&>[data-layer]]:gap-2",
         )}
         style={{ "--lanes": lanes, "--box": BOX } as CSSProperties}
       >
@@ -239,8 +270,25 @@ function useEdges(edges: Edge[], right: boolean) {
           x += n.offsetLeft;
           y += n.offsetTop;
         }
-        return { x, y, w: el.offsetWidth, h: el.offsetHeight };
+        // The layer it sits in, for a top-down layer wrapped onto more rows.
+        const layer = el.parentElement as HTMLElement;
+        return {
+          x,
+          y,
+          w: el.offsetWidth,
+          h: el.offsetHeight,
+          top: layer.offsetTop,
+          bottom: layer.offsetTop + layer.offsetHeight,
+        };
       };
+      // A wrapped row's box can't be reached straight down without passing behind the row above
+      // it (or leave straight down past the row below): its edge runs in the gutter beside it, on
+      // its left, or on its right in the first column, and meets its side.
+      const gap =
+        Number.parseFloat(getComputedStyle(document.documentElement).fontSize) * LANE_GAP_REM;
+      const gutter = (b: { x: number; w: number }) =>
+        b.x > gap ? b.x - gap / 2 : b.x + b.w + gap / 2;
+      const side = (b: { x: number; w: number }) => (b.x > gap ? b.x : b.x + b.w);
       setPaths(
         edges.flatMap((e) => {
           const a = box(e.from);
@@ -252,9 +300,18 @@ function useEdges(edges: Edge[], right: boolean) {
             const m = (x1 + x2) / 2;
             d = `M${x1} ${y1} C${m} ${y1} ${m} ${y2} ${x2} ${y2}`;
           } else {
-            const [x1, y1, x2, y2] = [a.x + a.w / 2, a.y + a.h, b.x + b.w / 2, b.y];
+            const fromLast = a.y + a.h >= a.bottom - 1;
+            const toFirst = b.y <= b.top + 1;
+            const [x1, y1] = fromLast ? [a.x + a.w / 2, a.y + a.h] : [gutter(a), a.bottom];
+            const [x2, y2] = toFirst ? [b.x + b.w / 2, b.y] : [gutter(b), b.top];
             const m = (y1 + y2) / 2;
-            d = `M${x1} ${y1} C${x1} ${m} ${x2} ${m} ${x2} ${y2}`;
+            d = [
+              fromLast
+                ? `M${x1} ${y1}`
+                : `M${side(a)} ${a.y + a.h / 2} L${x1} ${a.y + a.h / 2} L${x1} ${y1}`,
+              `C${x1} ${m} ${x2} ${m} ${x2} ${y2}`,
+              toFirst ? "" : `L${x2} ${b.y + b.h / 2} L${side(b)} ${b.y + b.h / 2}`,
+            ].join(" ");
           }
           return [{ ...e, key: `${e.from}>${e.to}`, d }];
         }),
@@ -441,7 +498,7 @@ function scanLine(task: ScanGraphTask, open: number): { text: ReactNode; tone?: 
     case "running":
       return { text: "Running", tone: "text-info" };
     case "checking":
-      return { text: "Second AI check", tone: "text-info" };
+      return { text: "Second check", tone: "text-info" };
     case "failed":
     case "stopped":
       return { text: taskStateWord(task.state), tone: "text-destructive" };

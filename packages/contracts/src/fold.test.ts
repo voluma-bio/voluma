@@ -77,6 +77,7 @@ describe("fold", () => {
       ],
     });
     l.add("thread.started", "w2:started", "w2", {
+      name: "w2",
       parentThreadId: "root",
       kind: "worker",
       task: "c",
@@ -88,17 +89,16 @@ describe("fold", () => {
       ["b", "in-progress", "w:1:open"],
       ["c", "pending", null],
     ]);
-    // Nothing reported and nothing owed yet; the title and ask are the plan's.
+    // Nothing reported and nothing owed yet; the title is the plan's.
     expect(need(f, "a")).toMatchObject({
       title: "Task A",
-      ask: "Do a.",
       resultRevisionId: "root:revision",
       missing: [],
       missingRequired: [],
       satisfied: false,
       threads: { worker: null, check: null },
     });
-    expect(need(f, "b")).toMatchObject({ title: "b", ask: "", missingRequired: ["x"] });
+    expect(need(f, "b")).toMatchObject({ title: "b", missingRequired: ["x"] });
     expect(need(f, "c").threads.worker).toBe("w2");
     expectParses(f);
   });

@@ -154,7 +154,11 @@ function Summary({
   const finished = detail.scans.filter((s) => s.resultRunId !== null).length;
   const items = detail.scans.reduce((n, s) => n + s.toCheck.length, 0);
   const withItems = detail.scans.filter((s) => s.toCheck.length > 0).length;
-  const stopped = detail.scans.filter((s) => scanStatus(s).status === "stopped").length;
+  const outcomes = detail.scans.map(({ runs: [run] }) =>
+    run?.state.status === "ended" ? run.state.outcome : undefined,
+  );
+  const failed = outcomes.filter((o) => o === "failed").length;
+  const stopped = outcomes.filter((o) => o === "cancelled").length;
   const far = [
     ...new Set(
       workflow.headline.flatMap((o) =>
@@ -179,12 +183,16 @@ function Summary({
         {plural(withItems, "scan")}
       </Link>,
     );
-  if (stopped > 0)
-    parts.push(
-      <Link key="stopped" to={`${base}/scans`} className="text-destructive hover:underline">
-        {plural(stopped, "scan")} stopped
-      </Link>,
-    );
+  for (const [key, n] of [
+    ["failed", failed],
+    ["stopped", stopped],
+  ] as const)
+    if (n > 0)
+      parts.push(
+        <Link key={key} to={`${base}/scans`} className="text-destructive hover:underline">
+          {plural(n, "scan")} {key}
+        </Link>,
+      );
   if (far.length > 0)
     parts.push(
       <Link key="far" to={`${base}/results`} className="hover:underline">
@@ -251,12 +259,14 @@ function NeedsYou({
         subtitle: "Paused until you add your API key",
         cell: <StatusMark status="paused" label="Needs your keys" />,
       });
-    else if (scanStatus(scan).status === "stopped") {
-      rows.push({
-        scan,
-        subtitle: stoppedLine(scan, workflow) ?? "Stopped before it finished",
-        cell: <StatusMark status="stopped" />,
-      });
+    else {
+      const { label, status } = scanStatus(scan);
+      if (status === "stopped")
+        rows.push({
+          scan,
+          subtitle: stoppedLine(scan, workflow) ?? label,
+          cell: <StatusMark status={status} label={label} />,
+        });
     }
   }
   return (
@@ -286,7 +296,7 @@ function NeedsYou({
   );
 }
 
-/** Scans with a live run: what each is working on, and which start as these finish. */
+/** Scans whose run is running: what each is working on, then which wait in line. */
 function RunningNow({ detail, workflow }: { detail: StudyDetail; workflow: BundledWorkflow }) {
   const running = detail.scans.filter((s) => s.runs[0]?.state.status === "running");
   const waiting = detail.scans.filter((s) => s.runs[0]?.state.status === "queued");
@@ -303,7 +313,7 @@ function RunningNow({ detail, workflow }: { detail: StudyDetail; workflow: Bundl
       count={running.length > 0 && <Count tone="running">{running.length}</Count>}
       foot={
         waiting.length > 0 &&
-        `${list(waiting.map((s) => s.scan.subject))} ${waiting.length === 1 ? "starts" : "start"} as these finish.`
+        `${list(waiting.map((s) => s.scan.subject))} ${waiting.length === 1 ? "is" : "are"} waiting`
       }
     >
       {running.length > 0 ? (
