@@ -43,7 +43,7 @@
  * history append's own 409 for a taken `idx` has a different body.)
  * The runner also stops itself, as a courtesy that frees its sandboxes sooner:
  * when it has not had a heartbeat acknowledged for `SELF_STOP_SECONDS`
- * (`LEASE_SECONDS - HEARTBEAT_SECONDS`), measured from when it sent the last acknowledged
+ * (less than `LEASE_SECONDS`), measured from when it sent the last acknowledged
  * heartbeat. That is earlier than the server's expiry whatever the network
  * delay, and uses no shared clock. Once it can reach the API again it sends
  * `released` with its reason, so the run is recovered without waiting out the lease.
@@ -97,15 +97,18 @@
 import { z } from "zod";
 import { runSchema, visitorKeysSchema } from "./run";
 
-/** How long a run stays leased after the server's last heartbeat for it. */
-export const LEASE_SECONDS = 60;
+/**
+ * How long a run stays leased after the server's last heartbeat for it. It must stay longer than
+ * SELF_STOP_SECONDS plus a heartbeat gap: a runner stops itself before the database expires its lease.
+ */
+export const LEASE_SECONDS = 135;
 /** How often the runner heartbeats each run it holds. */
 export const HEARTBEAT_SECONDS = 15;
 /**
  * How long the runner rides out an API it cannot reach before it stops the run, counted from the
  * send of the last acknowledged heartbeat. It also bounds the retries of event and history writes, counted from their first failure.
  */
-export const SELF_STOP_SECONDS = LEASE_SECONDS - HEARTBEAT_SECONDS;
+export const SELF_STOP_SECONDS = 45;
 /** How often an idle runner asks for a run. */
 export const CLAIM_POLL_SECONDS = 2;
 
