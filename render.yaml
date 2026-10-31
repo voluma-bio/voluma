@@ -191,13 +191,8 @@ services:
           envVarKey: GATEWAY_TOKEN_SECRET
       - key: RUNNER_CONCURRENCY
         value: "2"
-      # Staging is a test stack until Jimmy says otherwise: every role on Spark contributor.
-      # Contributor mode lets Meta train on what it is sent: only cleared scans. For real
-      # runs delete both (deploy.md).
-      - key: RUNNER_MODEL
-        value: meta/muse-spark-1.3-contributor
-      - key: RUNNER_THINKING
-        value: medium
+      # No RUNNER_MODEL or RUNNER_THINKING: each role takes its role file's model alias and
+      # thinking level (deploy.md).
       - key: VOLUMA_META_API_KEY
         sync: false
       - key: MODAL_TOKEN_ID
