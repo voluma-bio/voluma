@@ -26,7 +26,7 @@ import type { Outputs } from "./ports/outputs";
 import type { CreateSandbox } from "./ports/sandbox";
 import type { Recorder } from "./recorder";
 import { type ReviewAssetsWorker, reviewAssetsWorker } from "./review-assets";
-import { type AgentRole, type LoopConfig, type ModelSetup, runLoop } from "./run-loop";
+import { type LoopConfig, type ModelSetup, runLoop } from "./run-loop";
 import { type SandboxSession, sandboxSession } from "./sandbox-session";
 import { type Gateway, type SandboxSettings, specOf } from "./sandbox-specs";
 import { type PlanTask, taskRuntime } from "./task-runtime";
@@ -63,7 +63,7 @@ export interface SuperviseRunOptions {
    * The model, thinking level and call function of a thread of `role`. `recorded` is the model
    * (`provider/id`) a resumed thread started on, which it must keep.
    */
-  model(role: AgentRole, recorded: string | undefined): ModelSetup;
+  model(role: string, recorded: string | undefined): ModelSetup;
   /** Makes a sandbox; the host meters it and picks the provider. `signal` stops a creation. */
   createSandbox: CreateSandbox;
   /** Size and lifetime of every sandbox. */
@@ -105,13 +105,20 @@ export interface Supervised {
  * needs the gateway and a sandbox that produces results: one with `/outputs` writable. A role
  * that only inspects (its `/outputs` is read-only) never holds it: it does not redo the task.
  */
-function grantsOf(def: WorkflowDefinition, gateway: boolean): Record<AgentRole, readonly string[]> {
+function grantsOf(def: WorkflowDefinition, gateway: boolean): Record<string, readonly string[]> {
   return Object.fromEntries(
-    Object.values(def.agents).map(({ name, tools, sandbox, outputs }) => {
-      const analyses = sandbox !== "none" && outputs === "write";
+    Object.values(def.agents).map(({ name, tools, outputs }) => {
+      const analyses = tools.includes("bash") && outputs === "write";
       return [name, tools.filter((t) => t !== "segment_sam" || (gateway && analyses))];
     }),
   );
+}
+
+/** The roles a thread of `role` may start. */
+function subagentsOf(def: WorkflowDefinition, role: string): string[] {
+  const file = def.agents[role];
+  if (!file) throw new Error(`${role} is not a role of this run`);
+  return file.subagents;
 }
 
 const ROOT_NAME = "supervisor";
@@ -123,6 +130,7 @@ export const rootThreadOf = (runId: string, log: readonly RunEvent[]) =>
 export function superviseRun(options: SuperviseRunOptions): Supervised {
   const { runId, recorder, definition, signal } = options;
   const rootThreadId = rootThreadOf(runId, recorder.events());
+  const main = definition.agents.main;
   const grants = grantsOf(definition, options.gateway !== undefined);
   const copyInputs = new Set(definition.files.tasks.filter((t) => t.copyInputs).map((t) => t.id));
   const layout = runLayout({
@@ -199,7 +207,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       rootThreadId,
       recorder,
       outputs: options.outputs,
-      mainWorks: layout.mainWorks,
+      mainWorks: main.tools.includes("bash") && main.outputs === "write",
       signal,
     });
     const pool = threads(
@@ -237,10 +245,9 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
       selectedOutputs: options.selectedOutputs,
       notes: options.notes,
       model: options.model,
-      grants,
       config: options.config,
-      tools: (thread, names, agents) =>
-        buildTools(names, {
+      tools: (thread, agents) =>
+        buildTools(thread.tools, {
           layout: thread,
           files: options.files,
           runtime,
@@ -249,7 +256,7 @@ export function superviseRun(options: SuperviseRunOptions): Supervised {
             recorder,
             runtime,
             agents,
-            subagents: definition.agents[thread.agent]?.subagents ?? [],
+            subagents: subagentsOf(definition, thread.role),
             workflow: definition.files,
           },
         }),

@@ -20,7 +20,7 @@
 import type { ModelUsage, RunEvent } from "@voluma/contracts/events";
 import { type CacheState, cacheStep } from "@voluma/contracts/spend";
 import type { LiveFrame } from "@voluma/contracts/stream";
-import { threadRole } from "@voluma/contracts/thread-role";
+import { threadPlace } from "@voluma/contracts/thread-place";
 import { catalog } from "@voluma/workflow/bundled";
 import { plural } from "./run-status";
 
@@ -396,10 +396,10 @@ function rowsOf(
   const cache = new Map<string, CacheState>();
   for (const e of events) {
     if (orchestration) {
-      if (e.type === "thread.started" && threadRole(e.payload) === "root") root = e.threadId;
+      if (e.type === "thread.started" && threadPlace(e.payload) === "root") root = e.threadId;
       if (
         e.type === "thread.started" &&
-        ["worker", "check"].includes(threadRole(e.payload)) &&
+        ["worker", "check"].includes(threadPlace(e.payload)) &&
         !seen.has(e.threadId)
       ) {
         seen.add(e.threadId);
@@ -563,7 +563,7 @@ export const threadRows = (
 export function mainRows(events: RunEvent[], live: Live = noLive, halt?: Halt): Row[] {
   const mains = new Set(
     events.flatMap((e) =>
-      e.type === "thread.started" && threadRole(e.payload) === "main" ? [e.threadId] : [],
+      e.type === "thread.started" && threadPlace(e.payload) === "main" ? [e.threadId] : [],
     ),
   );
   return rowsOf(events, mains, live, halt, true);

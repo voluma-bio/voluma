@@ -255,7 +255,7 @@ export function world(o: WorldOptions) {
   const agent = (
     name: string,
     tools: string[],
-    facts: Pick<AgentDefinition, "sandbox" | "outputs" | "checkedBy" | "subagents">,
+    facts: Pick<AgentDefinition, "scratch" | "outputs" | "checkedBy" | "subagents">,
   ): AgentDefinition => ({
     name,
     description: "",
@@ -286,16 +286,16 @@ export function world(o: WorldOptions) {
           "finish_run",
           ...(o.mainTools ?? []),
         ],
-        { sandbox: "none", outputs: "read", checkedBy: "check", subagents: ["worker"] },
+        { scratch: "own", outputs: "read", checkedBy: "check", subagents: ["worker"] },
       ),
       worker: agent("worker", ["report_output", "submit_task", ...(o.workerTools ?? [])], {
-        sandbox: "full",
+        scratch: "all",
         outputs: "write",
         checkedBy: "check",
         subagents: [],
       }),
       check: agent("check", ["checkpoint", "ask"], {
-        sandbox: "confined",
+        scratch: "own",
         outputs: "read",
         subagents: [],
       }),

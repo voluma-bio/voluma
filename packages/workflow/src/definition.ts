@@ -37,12 +37,12 @@ export interface AgentDefinition {
   /** Every tool the role holds, base tools included (names in the harness's tool registry). */
   tools: string[];
   /**
-   * The sandbox the role's threads get: `none` (host-side tools only), `confined` (writes only its own
-   * `/scratch/<name>/`, reads the rest of `/scratch` through the host) or `full` (all of `/scratch` writable).
-   * A role holding `bash` needs one.
+   * Holding `bash` gives the role's threads a sandbox. `scratch` says what it writes: `own` (only
+   * `/scratch/<name>/`; the rest of `/scratch` is read host-side) or `all` (all of `/scratch`).
+   * Unset: `own`.
    */
-  sandbox: "none" | "confined" | "full";
-  /** The access its sandbox has to the run's `/outputs`. */
+  scratch: "own" | "all";
+  /** The access to the run's `/outputs`, for the sandbox and host-side tools. Unset: `read`. */
   outputs: "read" | "write";
   /** The role that checks a task this role submits; each exists. Unset: its submissions are not checked. */
   checkedBy?: string;
@@ -67,13 +67,9 @@ export interface WorkflowDefinition {
   toolIndex: ToolIndexEntry[];
   /**
    * The role files of `workflows/core/agents/`, the same for every workflow. The loader requires
-   * `main`, `worker` and `check`.
+   * `main`, the role the run's first thread runs on.
    */
-  agents: Record<string, AgentDefinition> & {
-    main: AgentDefinition;
-    worker: AgentDefinition;
-    check: AgentDefinition;
-  };
+  agents: Record<string, AgentDefinition> & { main: AgentDefinition };
 }
 
 /** A file that could not be read into a definition; names where. */

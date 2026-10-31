@@ -3,8 +3,8 @@
  * path with its R2 prefix, per thread: the sandbox spec mounts `mounts` (`specOf`), the tool descriptions say
  * `description`, and host-side tools turn paths into keys with `keyOf`.
  *
- * A role's frontmatter picks the shape (`AgentDefinition.sandbox`, `outputs`). `full` mounts the run's
- * `/scratch` read-write and works in `/scratch/<its name>/`. `confined` (and `none`, which only
+ * A role's frontmatter picks the shape (`AgentDefinition.scratch`, `outputs`). `scratch: all` mounts the run's
+ * `/scratch` read-write and works in `/scratch/<its name>/`. `own` (also for a role without `bash`, which only
  * host-side tools use) mounts `/outputs` as the role's `outputs` says and writes only
  * `/scratch/<its name>/`, the R2 prefix `scratch/<its name>/`. Host-side (`keyOf`, so `view_image`) they also read
  * the run's `/scratch`, but a role that checks another (some role's `checkedBy`) only the files the attempt under review cites as
@@ -40,9 +40,9 @@ export const REVIEW = "/review";
 
 export interface ThreadLayout {
   /** What the thread is in the run (main, a task's worker, a task's check). */
-  role: "worker" | "check" | "main";
+  place: "worker" | "check" | "main";
   /** The role file it runs on: the key of `RunLayoutOptions.agents` and of the definition. */
-  agent: string;
+  role: string;
   /** Its role checks another's tasks: it reads only what the attempt cites of the other's scratch. */
   reviewer: boolean;
   /** The thread's name (`ThreadRecord.name`): the sandbox's name, and the folder of its spill and (non-workers) scratch. */
@@ -57,6 +57,8 @@ export interface ThreadLayout {
   env: Record<string, string>;
   /** `/inputs` is copied to local disk in this thread's sandbox; otherwise it is the read-only mount. */
   copiesInputs: boolean;
+  /** The tools its role holds (the role file's, less what the run cannot grant). */
+  tools: readonly string[];
   /** The sandbox may reach the gateway (and gets its URL and token): the role holds `segment_sam`. */
   gateway: boolean;
   /** The mounts, as bullet lines for the tool description. */
@@ -87,8 +89,6 @@ type RoleParts = Pick<ThreadLayout, "mounts" | "scratch" | "description" | "rest
 };
 
 export interface RunLayout {
-  /** A role that starts others holds a writable sandbox with `/outputs` write: it does tasks itself. */
-  mainWorks: boolean;
   /**
    * The review-asset converter's sandbox, outside the threads: reads the evidence and the
    * workflow, writes the review prefix, no network.
@@ -111,8 +111,8 @@ export interface RunLayoutOptions {
    * module (module names are unique across skills, a test enforces it).
    */
   skills: readonly Skill[];
-  /** Each role file's sandbox, `/outputs` access, checker and subagents (`WorkflowDefinition.agents`). */
-  agents: Record<string, Pick<AgentDefinition, "sandbox" | "outputs" | "checkedBy" | "subagents">>;
+  /** Each role file's scratch and `/outputs` access and checker (`WorkflowDefinition.agents`). */
+  agents: Record<string, Pick<AgentDefinition, "scratch" | "outputs" | "checkedBy">>;
   /**
    * The tools each role holds. The roles holding `segment_sam` reach the gateway (every sandbox
    * has `voluma-sam` on its PATH, so one whose role cannot call it gets no network).
@@ -138,11 +138,7 @@ export function runLayout({
   grants,
   copiesInputs = () => false,
 }: RunLayoutOptions): RunLayout {
-  const roles = Object.values(agents);
-  const mainWorks = roles.some(
-    (a) => a.subagents.length > 0 && a.sandbox !== "none" && a.outputs === "write",
-  );
-  const reviewers = new Set(roles.map((a) => a.checkedBy));
+  const reviewers = new Set(Object.values(agents).map((a) => a.checkedBy));
   const scratch = scratchPrefix(runId);
   const pythonPath = skills.map((s) => `${s.path}/resources`).join(":");
   const inputs = (copy: boolean): SandboxMount => ({
@@ -224,29 +220,31 @@ export function runLayout({
   };
 
   return {
-    mainWorks,
     convert,
-    forThread({ name, role, agent, taskId }, cited = () => false) {
+    forThread({ name, place, role, taskId }, cited = () => false) {
       const copy = taskId !== undefined && copiesInputs(taskId);
       const dir = `${SCRATCH}/${name}`;
-      const facts = agents[agent];
-      if (!facts) throw new Error(`${name} runs on ${agent}, which is not a role of this run`);
+      const facts = agents[role];
+      const held = grants[role];
+      if (!facts || !held)
+        throw new Error(`${name} runs on ${role}, which is not a role of this run`);
       const access = facts.outputs === "write" ? "read-write" : "read-only";
-      const reviewer = reviewers.has(agent);
+      const reviewer = reviewers.has(role);
       const parts =
-        facts.sandbox === "full" ? full(dir, copy, access) : confined(name, dir, access, copy);
+        facts.scratch === "all" ? full(dir, copy, access) : confined(name, dir, access, copy);
       const { hostOnly, ...rest } = parts;
       const table = [...parts.mounts, ...hostOnly];
       const resolve = (path: string) =>
         path.startsWith("/") ? path : `${dir}/${path.replace(/^(\.\/)+/, "")}`;
       return {
         ...rest,
+        place,
         role,
-        agent,
         reviewer,
         name,
         copiesInputs: copy,
-        gateway: (grants[agent] ?? []).includes("segment_sam"),
+        tools: held,
+        gateway: held.includes("segment_sam"),
         dir,
         env: { PYTHONPATH: pythonPath, SCRATCH: dir },
         toolOutputPath: (toolCallId) =>

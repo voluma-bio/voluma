@@ -64,7 +64,7 @@ import { storeEvidence } from "./store-evidence.ts";
 import { storeFiles } from "./store-files.ts";
 import { heartbeatRoundTrip, inRunScope, type RunScope } from "./telemetry.ts";
 import { assertThinking } from "./thinking.ts";
-import { type ModelRole, usageMeter } from "./usage.ts";
+import { usageMeter } from "./usage.ts";
 
 /** The repo checkout this runner was deployed from: `workflows/` is read from it. */
 const REPO_ROOT = resolve(import.meta.dirname, "../../..");
@@ -228,28 +228,32 @@ async function claimBody(
     // A role's model is its file's alias. A visitor's key and scan go to Standard-mode Meta
     // models only: the main thread keeps its configured model when that is one, else the
     // visitor model.
-    const roleModel = (role: ModelRole) => {
-      const alias = (definition.agents[role] as AgentDefinition).model;
+    const roleModel = ({ name, model: alias }: AgentDefinition) => {
       const model = ctx.aliases[alias];
-      if (!model) throw new Error(roleModelUnset(role, alias));
-      return !visitor || (role === "main" && isVisitorSafe(model)) ? model : ctx.visitorModel;
+      if (!model) throw new Error(roleModelUnset(name, alias));
+      return !visitor || (name === "main" && isVisitorSafe(model)) ? model : ctx.visitorModel;
     };
     // A role's file may set its thinking level; else the runner's; else none is sent ("off").
-    const roleThinking = (role: ModelRole, model: Model<Api>) => {
+    const roleThinking = ({ name, thinking }: AgentDefinition, model: Model<Api>) => {
       if (visitor) return "off";
-      const level = config.modelForced
-        ? config.thinking
-        : ((definition.agents[role] as AgentDefinition).thinking ?? config.thinking);
-      assertThinking(level, [model], `the ${role} role's`);
+      const level = config.modelForced ? config.thinking : (thinking ?? config.thinking);
+      assertThinking(level, [model], `the ${name} role's`);
       return level ?? "off";
     };
-    const roles = Object.keys(definition.agents);
-    const primary = Object.fromEntries(roles.map((r) => [r, roleModel(r)]));
-    const thinking: Record<string, ReturnType<typeof roleThinking>> = Object.fromEntries(
-      roles.map((r) => [r, roleThinking(r, primary[r] as Model<Api>)]),
+    const roles = Object.values(definition.agents);
+    const setups = new Map(
+      roles.map((r) => {
+        const model = roleModel(r);
+        return [r.name, { model, thinkingLevel: roleThinking(r, model) }] as const;
+      }),
     );
-    log(`models: ${roles.map((r) => `${r} ${primary[r]?.id}`).join(", ")}`);
-    log(`thinking: ${roles.map((r) => `${r} ${thinking[r]}`).join(", ")}`);
+    const setupOf = (name: string) => {
+      const setup = setups.get(name);
+      if (!setup) throw new Error(`${name} is not a role of this run`);
+      return setup;
+    };
+    log(`models: ${roles.map((r) => `${r.name} ${setupOf(r.name).model.id}`).join(", ")}`);
+    log(`thinking: ${roles.map((r) => `${r.name} ${setupOf(r.name).thinkingLevel}`).join(", ")}`);
     // The tasks that produce the selected outputs and what they need. The main thread may adapt
     // them to the run's notes when the run starts (`superviseRun`).
     const computed = computePlan(definition.files, run.selectedOutputs);
@@ -319,7 +323,7 @@ async function claimBody(
       },
     };
     // A thread keeps the model it started on (the log records it).
-    const threadModel = (primary: Model<Api>, recorded: string | undefined) => {
+    const threadModel = (fallback: Model<Api>, recorded: string | undefined) => {
       if (recorded) {
         // Only a model this run may use: a visitor's scan goes to Standard-mode Meta only. Any other
         // thread (a run made on another model, reopened for a correction) gets the role's model:
@@ -328,12 +332,12 @@ async function claimBody(
         const [provider = "", ...id] = recorded.split("/");
         const allowed = visitor
           ? isVisitorSafe({ provider, id: id.join("/") })
-          : Object.values(primary).some((m) => `${m.provider}/${m.id}` === recorded);
-        return (allowed && models.getModel(provider, id.join("/"))) || primary;
+          : [...setups.values()].some(({ model: m }) => `${m.provider}/${m.id}` === recorded);
+        return (allowed && models.getModel(provider, id.join("/"))) || fallback;
       }
-      return primary;
+      return fallback;
     };
-    const callModel = (role: ModelRole) =>
+    const callModel = (role: string) =>
       retryTransient(
         (m, context, options) =>
           models.streamSimple(m, context, {
@@ -353,7 +357,7 @@ async function claimBody(
         },
       );
     const streamFor =
-      (role: ModelRole): ModelSetup["streamFn"] =>
+      (role: string): ModelSetup["streamFn"] =>
       (m, context, options) => {
         const stream = callModel(role)(m, context, options);
         // `sessionId` is the thread's id, for a turn and for a compaction summary.
@@ -380,8 +384,8 @@ async function claimBody(
       files: storeFiles(objects),
       outputs: r2Outputs(config.r2),
       model: (role, recorded) => ({
-        model: threadModel(primary[role] as Model<Api>, recorded),
-        thinkingLevel: thinking[role] ?? "off",
+        model: threadModel(setupOf(role).model, recorded),
+        thinkingLevel: setupOf(role).thinkingLevel,
         streamFn: streamFor(role),
       }),
       createSandbox,

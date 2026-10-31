@@ -5,8 +5,6 @@ description: >
   what is fixed, accepted or skipped, and ends it with a summary for the researcher.
 model: wonder
 thinking: medium
-sandbox: none
-outputs: read
 tools: [view_image, read_file, start_agent, message, wait, stop_worker, answer, accept, change_plan, reply, finish_run]
 subagents: [worker]
 ---

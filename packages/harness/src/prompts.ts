@@ -54,9 +54,9 @@ function toolIndex(def: WorkflowDefinition, role: AgentDefinition, shell: boolea
 
 /** The role file's body, then the generated environment text, skill list and tool index. */
 export function systemPrompt(def: WorkflowDefinition, thread: ThreadLayout): string {
-  const role = def.agents[thread.agent];
-  if (!role) throw new Error(`${thread.name} runs on ${thread.agent}, which is not a role file`);
-  const shell = role.sandbox !== "none";
+  const role = def.agents[thread.role];
+  if (!role) throw new Error(`${thread.name} runs on ${thread.role}, which is not a role file`);
+  const shell = role.tools.includes("bash");
   const skills = `${skillList(def, role, shell)}\n\n${toolIndex(def, role, shell)}`;
   if (!shell) return `${role.body}\n\n${skills}`;
   return `${role.body}\n\n${common(thread)}\n\n${skills}`;

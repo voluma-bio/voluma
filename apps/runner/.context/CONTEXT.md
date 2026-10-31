@@ -354,7 +354,7 @@ from its provider: <message>", or "<task title>: the AI stopped on an error from
 outlasted the 60 s, resumes that thread once ("The model provider failed during your last reply;
 continue.") before the run fails; the resumed call has its own 60 s. A context overflow (400/413
 "prompt is too long", `context_length_exceeded`, `request_too_large`; Pi's `isContextOverflow`)
-is not a provider error (only with status 400/413 or none; a 5xx body never counts): it fails that thread only. A failed main is never resumed: `main()` starts a fresh `main.<n>` with the restart brief, once per failed main, and a fresh main that fails too fails the run with its error. A failed worker keeps its history; main replaces it with `stop_worker` then `start_worker`. Nothing
+is not a provider error (only with status 400/413 or none; a 5xx body never counts): it fails that thread only. A failed main is never resumed: `main()` starts a fresh `main.<n>` with the restart brief, once per failed main, and a fresh main that fails too fails the run with its error. A failed worker keeps its history; main replaces it with `stop_worker` then `start_agent`. Nothing
 releases the run to wait or redoes the thread. `provider-error.ts` holds the classification: it
 reads the status in the text (Pi's `<provider> API error (<status>)`, or the Anthropic SDK's
 `<status> {...}`, `<status> <html>` or `<status> status code (no body)`) and, for an Anthropic error sent mid-stream

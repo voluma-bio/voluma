@@ -54,7 +54,7 @@ export interface Agents {
    */
   startAgent(o: {
     /** The role file the agent runs on. */
-    agent: string;
+    role: string;
     taskId: string;
     brief: string;
     mainThreadId: string;
@@ -116,9 +116,9 @@ export function mainTools(deps: MainDeps) {
 
   const workerOf = (d: ThreadLog, ref: string) => {
     const r = threadByRef(d.threads, ref);
-    if (r?.role !== "worker") {
+    if (r?.place !== "worker") {
       throw new Refusal(
-        r?.role === "check"
+        r?.place === "check"
           ? `${ref} is a checker: answer its question with \`answer\`.`
           : `${ref} is not a worker of this run.`,
       );
@@ -126,9 +126,9 @@ export function mainTools(deps: MainDeps) {
     return r;
   };
 
-  /** Starts `agent` on a task: the checks both start tools share. `tool` names the effect, so a replay finds it. */
+  /** Starts `role` on a task: the checks both start tools share. `tool` names the effect, so a replay finds it. */
   async function startTask(
-    agent: string,
+    role: string,
     tool: "start_worker" | "start_agent",
     { taskId, brief }: { taskId: string; brief: string },
     ctx: ToolContext,
@@ -159,7 +159,7 @@ export function mainTools(deps: MainDeps) {
       throw new Refusal(`${taskId} has used its fix rounds; it stays as it is for the researcher.`);
     }
     const threadId = await agents.startAgent({
-      agent,
+      role,
       taskId,
       brief,
       mainThreadId: ctx.threadId,
@@ -334,9 +334,9 @@ export function mainTools(deps: MainDeps) {
           const named = (x: ThreadRecord, a: { id: string }) =>
             a.id === input.askId || askRef(x.name, x.id, a.id) === input.askId;
           const r = [...d.threads.values()].find(
-            (x) => x.role === "check" && x.asks.some((a) => named(x, a)),
+            (x) => x.place === "check" && x.asks.some((a) => named(x, a)),
           );
-          if (r?.role !== "check") throw new Refusal(`No checker asked ${input.askId}.`);
+          if (r?.place !== "check") throw new Refusal(`No checker asked ${input.askId}.`);
           const ask = r.asks.find((a) => named(r, a));
           if (!ask) throw new Refusal(`No checker asked ${input.askId}.`);
           if (ask.answer) {
@@ -520,8 +520,8 @@ export function mainTools(deps: MainDeps) {
       );
       const d = log();
       for (const taskId of skipped) {
-        for (const role of ["worker", "check"] as const) {
-          for (const r of startedFor(d, taskId, role)) {
+        for (const place of ["worker", "check"] as const) {
+          for (const r of startedFor(d, taskId, place)) {
             const s = agents.state(d, r.id);
             if (s === "running" || s === "cut-off")
               await runtime.stop(r.id, `${eventId}:skip:${r.id}`);
@@ -563,13 +563,13 @@ export function mainTools(deps: MainDeps) {
           const view = runtime.view();
           const d = log();
           const running = [...d.threads.values()].filter(
-            (r) => r.role !== "main" && agents.state(d, r.id) === "running",
+            (r) => r.place !== "main" && agents.state(d, r.id) === "running",
           );
           const problems = [
             ...(d.undelivered.some((n) => n.kind === "person") ? [UNDELIVERED] : []),
             ...(d.unanswered ? [UNANSWERED] : []),
             ...(d.go && !d.go.redone ? [goNotActedOn(d.go.taskId)] : []),
-            ...running.map((r) => `${r.name} (${r.role}, ${r.taskId}) is still running.`),
+            ...running.map((r) => `${r.name} (${r.place}, ${r.taskId}) is still running.`),
             ...unfinished(view).map((t) =>
               t.status === "pending"
                 ? `${t.id} has not run: start a worker on it, or skip it with a reason.`

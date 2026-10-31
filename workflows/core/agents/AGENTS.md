@@ -12,8 +12,7 @@ task read) and its examples of work done right.
 | `worker.md` | Does one task in its sandbox and leaves the files, views and numbers it is judged by |
 | `check.md` | Inspects one submitted task from its files, blind to the worker's reasoning, and gives one verdict |
 
-Every `.md` here except `AGENTS.md` is parsed as a role file; `main.md`, `worker.md` and `check.md`
-are required. A stray `README.md`, or a draft without frontmatter, fails every run's load. A run
+Every `.md` here except `AGENTS.md` is parsed as a role file; `main.md` is required. A stray `README.md`, or a draft without frontmatter, fails every run's load. A run
 snapshots the files with its workflow (`packages/workflow/src/load.ts`) and reads them from the
 snapshot, so a resumed thread gets the text it began with; a changed file reaches only runs started
 after it. A snapshot that has `checker.md` and no `check.md` (a run from before the rename) is refused at load: that run can't be resumed.
@@ -36,11 +35,11 @@ after it. A snapshot that has `checker.md` and no `check.md` (a run from before 
   listed is not granted: that, not prose, is how the checker holds no `segment_sam` (its role still
   has to say it does not redo the task, since bash can run the classic segmentation).
   `segment_sam` is granted only when the runner has a gateway, and only to a role with a sandbox.
-- `sandbox`: `none` (host-side tools only), `confined` (the sandbox writes only its own
-  `/scratch/<name>/`; the rest of `/scratch` is read host-side) or `full` (all of `/scratch` is writable).
-  A role holding `bash` or `segment_sam` needs one. Code reads this, never the role's name.
-- `outputs`: `read` or `write`, the access the role's sandbox has to `/outputs`. `segment_sam` is
-  granted only to a role with a sandbox and `outputs: write`.
+- Holding `bash` is what gives a role a sandbox; code reads that, never the role's name.
+- `scratch`: optional, `own` (default: the sandbox writes only its own `/scratch/<name>/`; the rest of
+  `/scratch` is read host-side) or `all` (all of `/scratch` is writable). Needs `bash`.
+- `outputs`: optional, `read` (default) or `write`: the access to `/outputs`. `write` and
+  `segment_sam` need `bash`; `segment_sam` is granted only with `outputs: write`.
 - `checkedBy`: the role that checks a task this role submits (`worker`: `check`). A role holding
   `submit_task` must name one. A role that is some role's `checkedBy` is a reviewer: its prompt says
   so, and it opens only the scratch files the attempt under review cites.
@@ -51,16 +50,16 @@ after it. A snapshot that has `checker.md` and no `check.md` (a run from before 
 - `skills`: optional; the skills named in the role's prompt. Default: the workflow's whole skill list,
   the workflow's own skill first.
 
-A snapshot from before `sandbox`, `outputs` and `checkedBy` existed has none of them; the loader fills
-them for `main`, `worker` and `check` with what the code did then (`BEFORE_FRONTMATTER` in
-`packages/workflow/src/load.ts`, to delete when no such run is live). A new role must declare them.
+A snapshot from before `scratch`, `outputs` and `checkedBy` existed has none of them; for `worker` the
+loader fills what the code did then (`WORKER_BEFORE_FRONTMATTER` in `packages/workflow/src/load.ts`,
+to delete when no such run is live); `main` and `check` match the defaults.
 
 Any other key fails the load.
 
 Each thread records the role file it runs on as `kind` on its `thread.started` (the role file's name).
 What it may do is read from that file in the run's snapshot, which never changes, so nothing else is
 recorded. Limit: whether a thread is a worker or a checker still comes from the fields of its start
-(task, attempt: `threadRole`), so `start_agent` starts roles that do a task as a worker does, and a
+(task, attempt: `threadPlace`), so `start_agent` starts roles that do a task as a worker does, and a
 `checkedBy` role is a checker; other thread shapes need a change there.
 
 ## What stays in the harness

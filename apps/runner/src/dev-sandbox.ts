@@ -131,8 +131,8 @@ try {
   const devThread = {
     id: `${run.id}.dev.worker`,
     name: "dev.worker",
+    place: "worker",
     role: "worker",
-    agent: "worker",
     taskId: "dev",
   } as const;
   const thread = runLayout({
@@ -140,7 +140,7 @@ try {
     inputPrefix: inputPrefixOf(run),
     skills: [], // no workflow is loaded here, so no PYTHONPATH
     copiesInputs: () => true,
-    agents: { worker: { sandbox: "full", outputs: "write", subagents: [] } },
+    agents: { worker: { scratch: "all", outputs: "write" } },
     grants: { worker: ["segment_sam"] },
   }).forThread(devThread);
   meter.sandboxUp();

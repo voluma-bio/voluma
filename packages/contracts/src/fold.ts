@@ -90,7 +90,7 @@ import type {
   Volume,
 } from "./review";
 import { toWorld } from "./ruler";
-import { threadRole } from "./thread-role";
+import { threadPlace } from "./thread-place";
 import type { DeclaredOutput, PlanTask, WorkflowPlan } from "./workflow";
 
 type OutputEvent = Extract<RunEvent, { type: "output" }>;
@@ -339,7 +339,7 @@ export function corrections(events: readonly RunEvent[]): {
         if (span) span.replied = true;
         break;
       case "thread.started":
-        if (threadRole(e.payload) === "root") root = e.threadId;
+        if (threadPlace(e.payload) === "root") root = e.threadId;
         break;
       case "thread.ended":
         if (span?.closed === "open" && e.threadId === root && e.payload.status === "completed")
@@ -837,7 +837,7 @@ export function fold(events: readonly RunEvent[], holdOpenCorrection = false): F
     switch (e.type) {
       case "thread.started": {
         if (!roles.has(e.threadId)) {
-          const role = threadRole(e.payload);
+          const role = threadPlace(e.payload);
           roles.add(e.threadId);
           if (role === "check") checkThreads.add(e.threadId);
           else if (role === "worker" && e.payload.task) workerOf.set(e.payload.task, e.threadId);
