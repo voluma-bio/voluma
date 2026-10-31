@@ -1,16 +1,18 @@
 /**
  * The scan review (`/scans/:runId`): one scan's run, live or finished, in the dark shell. The main
  * area is the task in view on its grid; the left side holds To check, Report and Agents, the right
- * side View and The AI. One selection drives them all, kept in the URL: `task` (the task in view),
+ * side View, Marks and The AI. One selection drives them all, kept in the URL: `task` (the task in view),
  * `item` (the To check item open) and `agent` (the agent whose steps show; none follows the one
  * working now). Everything is derived from the run's stream (`runView`), the run (`getRun`,
  * polled while it goes, for what isn't an event) and its review data (`getReviewRun`, for the
- * views, values, files and human decisions).
+ * views, values, files and human decisions). Your marks are page state, until a message to the
+ * AI carries them.
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@voluma/api-client";
 import { reviewRunQuery, runQuery, studyQuery, useAcceptCheck } from "@voluma/api-client/query";
 import type { Me } from "@voluma/contracts/auth";
+import { MAX_MARKS } from "@voluma/contracts/messages";
 import type { ReviewRun, Revision } from "@voluma/contracts/review";
 import type { Run } from "@voluma/contracts/run";
 import {
@@ -33,8 +35,22 @@ import {
   ShellPanel,
   useOpenPanel,
 } from "@voluma/ui";
-import type { StructureDisplay } from "@voluma/viewer/grid";
-import { CircleAlert, Layers, LayoutDashboard, MessagesSquare, Network, Users } from "lucide-react";
+import type {
+  GridMark,
+  GridViewerHandle,
+  MarkTool,
+  StructureDisplay,
+  Zyx,
+} from "@voluma/viewer/grid";
+import {
+  CircleAlert,
+  Layers,
+  LayoutDashboard,
+  ListChecks,
+  MessagesSquare,
+  Network,
+  Users,
+} from "lucide-react";
 import {
   lazy,
   Suspense,
@@ -48,6 +64,7 @@ import {
 import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from "react-router";
 import { AgentsPanel } from "./agents-panel";
 import { AiPanel } from "./ai-panel";
+import { MarksPanel, middleOf, nextTag, type YourMark } from "./marks-panel";
 import { ReportPanel } from "./report-panel";
 import { RunAlert, ScanHeading, scanTitle } from "./scan-header";
 import { ToCheckPanel } from "./to-check-panel";
@@ -334,6 +351,8 @@ function ScanReview({
   // It holds until the reader moves to another task or the message is sent.
   useEffect(() => setAbout(undefined), [taskId]);
 
+  const marking = useMarking();
+
   const open = items.filter((n) => !n.accepted).length;
   const { title } = scanTitle(run, study.data);
   const studyId = study.data?.study.id;
@@ -383,6 +402,13 @@ function ScanReview({
           assets={review.data.assets}
           display={display}
           focus={focus}
+          tool={marking.tool}
+          onTool={marking.setTool}
+          marks={marking.marks}
+          selected={marking.selected}
+          jump={marking.jump}
+          onMark={marking.add}
+          viewer={marking.viewer}
         />
       </Suspense>
     );
@@ -465,6 +491,21 @@ function ScanReview({
           <ViewPanel revision={latest} task={reviewTask} display={display} onDisplay={setDisplay} />
         </ShellPanel>
         <ShellPanel
+          id="scan-marks"
+          side="right"
+          label="Marks"
+          icon={<ListChecks />}
+          count={marking.marks.length || undefined}
+          shortcut="m"
+        >
+          <MarksPanel
+            marks={marking.marks}
+            selected={marking.selected}
+            onSelect={marking.select}
+            onDelete={marking.remove}
+          />
+        </ShellPanel>
+        <ShellPanel
           id="scan-ai"
           side="right"
           label="The AI"
@@ -479,8 +520,11 @@ function ScanReview({
             tasks={tasks}
             task={task}
             about={about}
+            marks={marking.marks}
+            snapshot={latest && reviewTask ? marking.snapshot : undefined}
             onSent={() => {
               setAbout(undefined);
+              marking.clear();
               setReopened((n) => n + 1);
               refetchRun();
             }}
@@ -493,6 +537,79 @@ function ScanReview({
       </ThreadNavigationProvider>
     </DisclosureProvider>
   );
+}
+
+/**
+ * Your marks and the tool that makes them. P, B, L and O pick a tool and Esc puts it away, as
+ * the shell's panel keys do: never while typing, never with a modifier.
+ */
+function useMarking() {
+  const [tool, setTool] = useState<MarkTool | null>(null);
+  const [marks, setMarks] = useState<YourMark[]>([]);
+  const [selected, setSelected] = useState<string>();
+  const [jump, setJump] = useState<{ at: Zyx; volumeId: string }>();
+  const viewer = useRef<GridViewerHandle>(null);
+  useEffect(() => {
+    const keys: Record<string, MarkTool | null> = {
+      p: "point",
+      b: "box",
+      l: "line",
+      o: "outline",
+      escape: null,
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.repeat || event.metaKey || event.ctrlKey || event.altKey)
+        return;
+      const target = event.target as HTMLElement;
+      if (
+        target.isContentEditable ||
+        target.closest("input, textarea, select, dialog, [role='dialog'], [role='menu']")
+      )
+        return;
+      const key = event.key.toLowerCase();
+      if (!(key in keys)) return;
+      setTool(keys[key]!);
+      if (key !== "escape") event.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  return {
+    tool,
+    setTool,
+    marks,
+    selected,
+    jump,
+    viewer,
+    add: useCallback((mark: GridMark, volumeId: string) => {
+      setMarks((had) =>
+        had.length >= MAX_MARKS
+          ? had
+          : [
+              ...had,
+              { id: crypto.randomUUID(), tag: nextTag(had, mark), mark: { volumeId, ...mark } },
+            ],
+      );
+    }, []),
+    select: useCallback(
+      (id: string) => {
+        setSelected(id);
+        const mark = marks.find((m) => m.id === id)?.mark;
+        if (mark) setJump({ at: middleOf(mark), volumeId: mark.volumeId });
+      },
+      [marks],
+    ),
+    remove: useCallback((id: string) => setMarks((had) => had.filter((m) => m.id !== id)), []),
+    clear: useCallback(() => {
+      setMarks([]);
+      setSelected(undefined);
+    }, []),
+    snapshot: useCallback(
+      // Undefined until the lazy viewer mounts: nothing to picture yet.
+      (maxBytes: number) => viewer.current?.snapshot(maxBytes) ?? Promise.resolve(undefined),
+      [],
+    ),
+  };
 }
 
 function Centered({ children }: { children: React.ReactNode }) {

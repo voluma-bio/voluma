@@ -1,12 +1,13 @@
 /**
- * Two or three modes of one view (Status / Values, Comfortable / Compact). Radix toggle group
- * underneath: one option is always on, and arrow keys move between options.
+ * A few modes of one view (Status / Values, Comfortable / Compact, the marking tools). Radix
+ * toggle group underneath: one option is always on, and arrow keys move between options.
  */
 import { ToggleGroup } from "radix-ui";
 import { cx } from "./cx";
 
 export type SegmentedControlProps<V extends string> = {
-  options: { value: V; label: string }[];
+  /** `keys`: the keyboard shortcut that picks the option, shown on hover. */
+  options: { value: V; label: string; keys?: string }[];
   value: V;
   onValueChange: (value: V) => void;
   /** Accessible name, e.g. "Density". */
@@ -37,6 +38,8 @@ export function SegmentedControl<V extends string>({
         <ToggleGroup.Item
           key={option.value}
           value={option.value}
+          title={option.keys && `${option.label} (${option.keys})`}
+          aria-keyshortcuts={option.keys}
           className={cx(
             "h-[22px] cursor-pointer rounded-sm px-2.5 text-sm whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground",
             "data-[state=on]:bg-card data-[state=on]:text-foreground data-[state=on]:inset-ring data-[state=on]:inset-ring-line-strong",
