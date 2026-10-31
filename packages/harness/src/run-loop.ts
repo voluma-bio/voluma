@@ -42,11 +42,13 @@ import {
   checkReason,
   cutOffText,
   deliveryText,
+  fatalText,
   feedbackText,
   finishedRunText,
   fixLimitReason,
   interruptedResult,
   livenessNudge,
+  STUCK_IN_CORRECTION,
   STUCK_PLAN_REASON,
   STUCK_SKIP_REASON,
   stateBlock,
@@ -138,12 +140,6 @@ const MAIN_GRACE_MS = 15_000;
 const rule = (r: Extract<By, { kind: "rule" }>["rule"]): By => ({ kind: "rule", rule: r });
 const RUNTIME: UserSender = { kind: "runtime" };
 
-/** A run's error when a thread fails on a provider error; the researcher reads it after "The run failed: ". */
-const fatalText = (r: ThreadRecord, error: string, taskName: (id: string) => string) =>
-  r.role === "main"
-    ? `the AI stopped on an error from its provider: ${error}`
-    : `${taskName(r.taskId)}: the AI stopped on an error from its provider: ${error}`;
-
 /** What a step found: something done, nothing to do until the log changes, or the run is over. */
 type Step = "acted" | "idle" | "done";
 
@@ -182,7 +178,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
     threadState(r, threads.running(r?.id ?? ""));
 
   /** The task's plain title for the researcher; the id when the plan has none. */
-  const taskName = (id: string) => runtime.taskName(id);
+  const { taskName } = runtime;
 
   const planTask = (view: Folded, taskId: string): PlanTask => {
     const found = view.plan.tasks.find((t) => t.id === taskId);
@@ -377,7 +373,8 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
   /** Threads this process was refused as unresumable: the main agent starts over, a check is made again, a worker is stopped. */
   async function unresumable(d: ThreadLog): Promise<boolean> {
     for (const r of d.threads.values()) {
-      if (!threads.stale(r.id) || dealtWith.has(r.id)) continue;
+      const why = threads.stale(r.id);
+      if (!why || dealtWith.has(r.id)) continue;
       dealtWith.add(r.id);
       if (r.role === "main") {
         if (d.main === r.id) {
@@ -385,11 +382,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
           return true;
         }
       } else {
-        await runtime.stop(
-          r.id,
-          `${r.id}:unresumable`,
-          unresumableReason(r.role, r.taskId, threads.stale(r.id) ?? ""),
-        );
+        await runtime.stop(r.id, `${r.id}:unresumable`, unresumableReason(r.role, r.taskId, why));
         if (r.role === "check" && runtime.taskOf(r.taskId)?.threads.check === r.id) {
           await startCheck(derive(), r.taskId);
         }
@@ -597,7 +590,7 @@ export async function runLoop(o: RunLoopOptions): Promise<Folded> {
    * server records the failed correction and leaves the earlier results as they were.
    */
   async function endStuckRun(d: ThreadLog, view: Folded) {
-    if (d.correcting) throw new Error("the main agent stopped moving in a correction");
+    if (d.correcting) throw new Error(STUCK_IN_CORRECTION);
     const left = unfinished(view);
     if (left.length > 0) {
       await recorder.append(

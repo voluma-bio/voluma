@@ -119,6 +119,25 @@ export const stuckSummary = (left: readonly string[]) =>
     ? `The run stopped before every task was done: ${left.join(", ")} ${left.length === 1 ? "was" : "were"} skipped.`
     : "The run stopped with every task finished.";
 
+/** A run's error when a thread fails on a provider error; the researcher reads it after "The run failed: ". */
+export const fatalText = (
+  r: Pick<ThreadRecord, "role" | "taskId">,
+  error: string,
+  taskName: (id: string) => string,
+) => {
+  const stopped = `stopped on an error from its provider: ${error}`;
+  if (r.role === "main" || !r.taskId) return `the AI ${stopped}`;
+  return `${taskName(r.taskId)}: ${r.role === "check" ? "the second AI check" : "the AI"} ${stopped}`;
+};
+
+/** A correction cannot end as a stuck run; its claim fails with this. */
+export const STUCK_IN_CORRECTION = "The AI stopped before the correction was done.";
+
+/** Setup failures that end a run before it starts; the researcher reads them as the run's error. */
+export const NO_WORKFLOW_DIR = "The run names no workflow to start.";
+export const roleModelUnset = (role: string, alias: string) =>
+  `The ${role} role needs the model "${alias}", which RUNNER_MODEL_${alias.toUpperCase()} does not set.`;
+
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}…` : text);
 
 export function noticeLine(n: Notice): string {

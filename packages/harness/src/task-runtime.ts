@@ -407,9 +407,7 @@ export function taskRuntime(options: TaskRuntimeOptions) {
           await stop(
             h.id,
             `${prefix}:stale:${dep}:end:${h.id}`,
-            mark
-              ? undefined
-              : `${taskName(taskId)} was corrected, so it may have read files that changed.`,
+            mark ? undefined : `${taskId} was corrected, so it may have read files that changed.`,
           );
         }
       }
