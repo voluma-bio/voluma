@@ -129,7 +129,8 @@ export type PaneHandle = {
   show(view: PaneView): void;
   /**
    * Draws the pane now and returns its canvases, bottom first (the picture, then the marks), to be
-   * copied in the same task: WebGL clears its buffer once the browser composites it.
+   * copied in the same task: WebGL clears its buffer once the browser composites it. Empty while
+   * loading, refining or failed. The marks exclude the unfinished gesture and hover cursor.
    */
   layers(): HTMLCanvasElement[];
 };
